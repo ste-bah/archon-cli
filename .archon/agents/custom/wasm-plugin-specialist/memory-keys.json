@@ -1,0 +1,5 @@
+{
+  "recall_queries": ["wasm plugin", "component model", "WIT interface", "wasmtime", "WASI", "host-guest boundary", "wasm sandbox"],
+  "leann_queries": ["*.wit", "*.wasm", "wasmtime", "wasmer", "wasm-bindgen", "component model"],
+  "tags": ["agent-definition", "wasm", "plugin-system", "component-model"]
+}

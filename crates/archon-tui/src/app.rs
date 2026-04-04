@@ -52,6 +52,10 @@ pub enum TuiEvent {
     SetAccentColor(ratatui::style::Color),
     /// Replace the entire theme by name (used by /theme).
     SetTheme(String),
+    /// Show MCP server manager overlay.
+    ShowMcpManager(Vec<McpServerEntry>),
+    /// Update MCP server manager with fresh state (after reconnect/disable).
+    UpdateMcpManager(Vec<McpServerEntry>),
     Done,
 }
 
@@ -92,6 +96,8 @@ pub struct App {
     pub session_name: Option<String>,
     /// Active session picker modal (shown by /resume).
     pub session_picker: Option<SessionPicker>,
+    /// Active MCP server manager modal (shown by /mcp).
+    pub mcp_manager: Option<McpManager>,
 }
 
 impl Default for App {
@@ -116,6 +122,7 @@ impl Default for App {
             permission_prompt: None,
             session_name: None,
             session_picker: None,
+            mcp_manager: None,
         }
     }
 }
@@ -310,6 +317,30 @@ pub struct SessionPickerEntry {
 pub struct SessionPicker {
     pub sessions: Vec<SessionPickerEntry>,
     pub selected: usize,
+}
+
+/// An MCP server entry shown in the MCP manager overlay.
+#[derive(Debug, Clone)]
+pub struct McpServerEntry {
+    pub name: String,
+    /// One of: "ready", "crashed", "starting", "stopped", "disabled".
+    pub state: String,
+    pub tool_count: usize,
+    pub disabled: bool,
+}
+
+/// Which sub-view is active inside the MCP manager overlay.
+#[derive(Debug, Clone)]
+pub enum McpManagerView {
+    ServerList { selected: usize },
+    ServerMenu { server_idx: usize, action_idx: usize },
+}
+
+/// Interactive MCP server manager state (shown as modal overlay on /mcp).
+#[derive(Debug, Clone)]
+pub struct McpManager {
+    pub servers: Vec<McpServerEntry>,
+    pub view: McpManagerView,
 }
 
 /// Configuration for the splash screen passed in from main.
@@ -663,6 +694,117 @@ pub async fn run_tui(
                     );
                 frame.render_widget(list, overlay_area);
             }
+
+            // MCP manager overlay
+            if let Some(ref mcp_mgr) = app.mcp_manager {
+                let area = frame.area();
+                let overlay_width = (area.width * 3 / 4).max(60).min(area.width - 2);
+                let x = (area.width.saturating_sub(overlay_width)) / 2;
+
+                match &mcp_mgr.view {
+                    McpManagerView::ServerList { selected } => {
+                        let overlay_height = (mcp_mgr.servers.len() as u16 + 3)
+                            .max(5)
+                            .min(area.height.saturating_sub(4));
+                        let y = (area.height.saturating_sub(overlay_height)) / 2;
+                        let overlay_area = ratatui::layout::Rect::new(x, y, overlay_width, overlay_height);
+                        frame.render_widget(ratatui::widgets::Clear, overlay_area);
+
+                        let items: Vec<ListItem<'_>> = mcp_mgr.servers.iter().enumerate()
+                            .map(|(i, s)| {
+                                let icon = match s.state.as_str() {
+                                    "ready" => "✓",
+                                    "crashed" => "✗",
+                                    "starting" | "restarting" => "⋯",
+                                    "disabled" => "⊘",
+                                    _ => "○",
+                                };
+                                let icon_style = match s.state.as_str() {
+                                    "ready" => Style::default().fg(t.accent),
+                                    "crashed" => Style::default().fg(Color::Red),
+                                    "starting" | "restarting" => Style::default().fg(Color::Yellow),
+                                    _ => Style::default().fg(t.muted),
+                                };
+                                let row_style = if i == *selected {
+                                    Style::default().fg(Color::Black).bg(t.accent).add_modifier(Modifier::BOLD)
+                                } else {
+                                    Style::default().fg(t.fg)
+                                };
+                                let tool_str = if s.tool_count > 0 {
+                                    format!(" ({} tools)", s.tool_count)
+                                } else {
+                                    String::new()
+                                };
+                                let line = Line::from(vec![
+                                    Span::styled(format!(" {} ", icon), icon_style),
+                                    Span::styled(format!("{}{}", s.name, tool_str), row_style),
+                                    Span::styled(format!("  [{}]", s.state), Style::default().fg(t.muted)),
+                                ]);
+                                ListItem::new(line)
+                            })
+                            .collect();
+
+                        let list = List::new(items)
+                            .block(
+                                Block::default()
+                                    .borders(Borders::ALL)
+                                    .title(" MCP Servers (↑↓ navigate, Enter select, Esc close) ")
+                                    .border_style(Style::default().fg(t.accent))
+                            );
+                        frame.render_widget(list, overlay_area);
+                    }
+                    McpManagerView::ServerMenu { server_idx, action_idx } => {
+                        if let Some(server) = mcp_mgr.servers.get(*server_idx) {
+                            let actions = mcp_actions_for(server);
+                            let overlay_height = (actions.len() as u16 + 4)
+                                .max(6)
+                                .min(area.height.saturating_sub(4));
+                            let y = (area.height.saturating_sub(overlay_height)) / 2;
+                            let overlay_area = ratatui::layout::Rect::new(x, y, overlay_width, overlay_height);
+                            frame.render_widget(ratatui::widgets::Clear, overlay_area);
+
+                            let status_line = Line::from(vec![
+                                Span::styled("  State: ", Style::default().fg(t.muted)),
+                                Span::styled(server.state.clone(), Style::default().fg(t.fg)),
+                            ]);
+
+                            let action_items: Vec<ListItem<'_>> = actions.iter().enumerate()
+                                .map(|(i, act)| {
+                                    let label = match *act {
+                                        "reconnect" => "  Reconnect",
+                                        "disable" => "  Disable",
+                                        "enable" => "  Enable",
+                                        "tools" => "  View Tools",
+                                        "back" => "  Back",
+                                        _ => act,
+                                    };
+                                    let style = if i == *action_idx {
+                                        Style::default().fg(Color::Black).bg(t.accent).add_modifier(Modifier::BOLD)
+                                    } else {
+                                        Style::default().fg(t.fg)
+                                    };
+                                    ListItem::new(Line::from(Span::styled(label, style)))
+                                })
+                                .collect();
+
+                            let mut all_items = vec![
+                                ListItem::new(status_line),
+                                ListItem::new(Line::from("")),
+                            ];
+                            all_items.extend(action_items);
+
+                            let list = List::new(all_items)
+                                .block(
+                                    Block::default()
+                                        .borders(Borders::ALL)
+                                        .title(format!(" {} ", server.name))
+                                        .border_style(Style::default().fg(t.accent))
+                                );
+                            frame.render_widget(list, overlay_area);
+                        }
+                    }
+                }
+            }
         })?;
 
         // Handle events: use shorter poll when animation is active
@@ -734,6 +876,17 @@ pub async fn run_tui(
                         app.theme = t;
                     }
                 }
+                TuiEvent::ShowMcpManager(servers) => {
+                    app.mcp_manager = Some(McpManager {
+                        servers,
+                        view: McpManagerView::ServerList { selected: 0 },
+                    });
+                }
+                TuiEvent::UpdateMcpManager(servers) => {
+                    if let Some(ref mut mgr) = app.mcp_manager {
+                        mgr.servers = servers;
+                    }
+                }
                 TuiEvent::Done => {
                     app.should_quit = true;
                 }
@@ -795,6 +948,103 @@ pub async fn run_tui(
                             continue;
                         }
                         _ => continue, // swallow other keys
+                    }
+                }
+                // Handle MCP manager overlay — Up/Down/Enter/Esc
+                if app.mcp_manager.is_some() {
+                    match key.code {
+                        KeyCode::Up => {
+                            if let Some(ref mut mgr) = app.mcp_manager {
+                                match &mut mgr.view {
+                                    McpManagerView::ServerList { selected } => {
+                                        if *selected > 0 {
+                                            *selected -= 1;
+                                        } else {
+                                            *selected = mgr.servers.len().saturating_sub(1);
+                                        }
+                                    }
+                                    McpManagerView::ServerMenu { action_idx, .. } => {
+                                        if *action_idx > 0 {
+                                            *action_idx -= 1;
+                                        } else {
+                                            *action_idx = 3; // max 4 items (0..=3)
+                                        }
+                                    }
+                                }
+                            }
+                            continue;
+                        }
+                        KeyCode::Down => {
+                            if let Some(ref mut mgr) = app.mcp_manager {
+                                match &mut mgr.view {
+                                    McpManagerView::ServerList { selected } => {
+                                        if *selected + 1 < mgr.servers.len() {
+                                            *selected += 1;
+                                        } else {
+                                            *selected = 0;
+                                        }
+                                    }
+                                    McpManagerView::ServerMenu { action_idx, server_idx } => {
+                                        let server = mgr.servers.get(*server_idx);
+                                        let action_count = mcp_action_count(server);
+                                        if *action_idx + 1 < action_count {
+                                            *action_idx += 1;
+                                        } else {
+                                            *action_idx = 0;
+                                        }
+                                    }
+                                }
+                            }
+                            continue;
+                        }
+                        KeyCode::Enter => {
+                            if let Some(ref mut mgr) = app.mcp_manager {
+                                match mgr.view.clone() {
+                                    McpManagerView::ServerList { selected } => {
+                                        if !mgr.servers.is_empty() {
+                                            mgr.view = McpManagerView::ServerMenu {
+                                                server_idx: selected,
+                                                action_idx: 0,
+                                            };
+                                        }
+                                    }
+                                    McpManagerView::ServerMenu { server_idx, action_idx } => {
+                                        if let Some(server) = mgr.servers.get(server_idx) {
+                                            let actions = mcp_actions_for(server);
+                                            if let Some(action) = actions.get(action_idx) {
+                                                if *action == "back" {
+                                                    mgr.view = McpManagerView::ServerList {
+                                                        selected: server_idx,
+                                                    };
+                                                } else {
+                                                    let cmd = format!(
+                                                        "__mcp_action__ {} {}",
+                                                        server.name, action
+                                                    );
+                                                    let _ = input_tx.send(cmd).await;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            continue;
+                        }
+                        KeyCode::Esc => {
+                            if let Some(ref mut mgr) = app.mcp_manager {
+                                match &mgr.view {
+                                    McpManagerView::ServerMenu { server_idx, .. } => {
+                                        let idx = *server_idx;
+                                        mgr.view = McpManagerView::ServerList { selected: idx };
+                                    }
+                                    McpManagerView::ServerList { .. } => {
+                                        app.mcp_manager = None;
+                                    }
+                                }
+                            }
+                            continue;
+                        }
+                        _ => continue, // swallow other keys while overlay is up
                     }
                 }
                 // Handle permission prompt — y/n/Enter/Esc
@@ -1033,6 +1283,34 @@ pub async fn run_tui(
     io::stdout().execute(LeaveAlternateScreen)?;
 
     Ok(())
+}
+
+/// Return the action strings available for a given server entry.
+///
+/// The order is significant — it's the display order in the menu.
+pub fn mcp_actions_for(server: &McpServerEntry) -> Vec<&'static str> {
+    let mut actions: Vec<&'static str> = Vec::new();
+    if server.disabled {
+        actions.push("enable");
+    } else {
+        if matches!(server.state.as_str(), "crashed" | "stopped") {
+            actions.push("reconnect");
+        }
+        if server.state == "ready" {
+            actions.push("tools");
+        }
+        actions.push("disable");
+    }
+    actions.push("back");
+    actions
+}
+
+/// Return the number of actions for a server (used for Down key wrap).
+pub fn mcp_action_count(server: Option<&McpServerEntry>) -> usize {
+    match server {
+        Some(s) => mcp_actions_for(s).len(),
+        None => 1, // just "back"
+    }
 }
 
 #[cfg(test)]

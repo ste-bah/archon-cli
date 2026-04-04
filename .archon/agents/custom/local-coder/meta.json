@@ -1,0 +1,18 @@
+{
+  "created": "2026-04-01T10:00:00Z",
+  "last_used": null,
+  "version": 1,
+  "generation": 0,
+  "author": "user",
+  "invocation_count": 0,
+  "quality": {
+    "total_selections": 0,
+    "total_completions": 0,
+    "total_fallbacks": 0,
+    "applied_rate": 0.0,
+    "completion_rate": 0.0,
+    "effective_rate": 0.0,
+    "fallback_rate": 0.0
+  },
+  "evolution_history_last_10": []
+}

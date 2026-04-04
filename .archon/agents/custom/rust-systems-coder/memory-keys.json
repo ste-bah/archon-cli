@@ -1,0 +1,5 @@
+{
+  "recall_queries": ["rust patterns", "unsafe audit", "FFI bindings", "async runtime", "performance optimization rust"],
+  "leann_queries": ["*.rs", "Cargo.toml", "build.rs", "unsafe fn", "extern \"C\""],
+  "tags": ["agent-definition", "rust", "systems-programming"]
+}

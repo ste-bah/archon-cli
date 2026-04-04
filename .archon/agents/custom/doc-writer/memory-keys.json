@@ -1,0 +1,5 @@
+{
+  "recall_queries": ["project structure", "project overview"],
+  "leann_queries": ["project structure", "main entry point"],
+  "tags": ["agent-definition", "doc-writer", "documentation"]
+}

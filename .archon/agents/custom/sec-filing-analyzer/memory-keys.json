@@ -1,0 +1,5 @@
+{
+  "recall_queries": ["project/api/edgar", "SEC filing patterns"],
+  "leann_queries": ["edgar client", "SEC filing parser"],
+  "tags": ["agent-definition", "sec-filing-analyzer", "financial-analysis"]
+}

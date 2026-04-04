@@ -4,7 +4,7 @@
 //! startup, health tracking, automatic restarts with exponential backoff,
 //! graceful shutdown, and tool aggregation.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -35,17 +35,52 @@ struct ManagedServer {
     restart_count: u32,
 }
 
+/// Path to the file where disabled server names are persisted.
+fn disabled_names_path() -> std::path::PathBuf {
+    dirs::config_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("archon")
+        .join("mcp_disabled.json")
+}
+
+/// Load disabled server names from disk. Returns empty set on any error.
+fn load_disabled_names() -> HashSet<String> {
+    let path = disabled_names_path();
+    match std::fs::read_to_string(&path) {
+        Ok(content) => serde_json::from_str::<Vec<String>>(&content)
+            .unwrap_or_default()
+            .into_iter()
+            .collect(),
+        Err(_) => HashSet::new(),
+    }
+}
+
+/// Persist the disabled server names set to disk.
+fn save_disabled_names(names: &HashSet<String>) {
+    let path = disabled_names_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let list: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
+    if let Ok(json) = serde_json::to_string(&list) {
+        let _ = std::fs::write(&path, json);
+    }
+}
+
 /// Manages the lifecycle of multiple MCP server processes.
 #[derive(Clone)]
 pub struct McpServerManager {
     servers: Arc<RwLock<HashMap<String, ManagedServer>>>,
+    /// Names of servers that have been explicitly disabled (persisted to disk).
+    disabled_names: Arc<RwLock<HashSet<String>>>,
 }
 
 impl McpServerManager {
-    /// Create a new empty manager.
+    /// Create a new empty manager. Loads disabled names from disk.
     pub fn new() -> Self {
         Self {
             servers: Arc::new(RwLock::new(HashMap::new())),
+            disabled_names: Arc::new(RwLock::new(load_disabled_names())),
         }
     }
 
@@ -158,6 +193,84 @@ impl McpServerManager {
                 Err(e)
             }
         }
+    }
+
+    /// Disable a server: stop it and persist disabled=true to disk.
+    /// The server will not auto-reconnect until `enable_server` is called.
+    pub async fn disable_server(&self, name: &str) -> Result<(), McpError> {
+        // Mark the server state as Stopped and drop the client reference.
+        {
+            let mut servers = self.servers.write().await;
+            if let Some(entry) = servers.get_mut(name) {
+                entry.state = ServerState::Stopped;
+                // Drop the client Arc so the underlying connection is freed.
+                entry.client = None;
+            }
+            // If the server is not in the map we still track the disabled name.
+        }
+
+        // Add to disabled set and persist.
+        {
+            let mut disabled = self.disabled_names.write().await;
+            disabled.insert(name.to_string());
+            save_disabled_names(&disabled);
+        }
+
+        tracing::info!(server = %name, "MCP server disabled");
+        Ok(())
+    }
+
+    /// Enable a server: remove from the disabled set and attempt to start it.
+    pub async fn enable_server(&self, name: &str) -> Result<(), McpError> {
+        // Retrieve the config before we drop the lock.
+        let cfg_opt = {
+            let servers = self.servers.read().await;
+            servers.get(name).map(|e| e.config.clone())
+        };
+
+        // Remove from disabled set and persist.
+        {
+            let mut disabled = self.disabled_names.write().await;
+            disabled.remove(name);
+            save_disabled_names(&disabled);
+        }
+
+        // Restart if we have a config for this server.
+        if let Some(cfg) = cfg_opt {
+            tracing::info!(server = %name, "MCP server enabled — restarting");
+            self.start_server(cfg).await?;
+        } else {
+            tracing::info!(server = %name, "MCP server enabled (no config to restart)");
+        }
+
+        Ok(())
+    }
+
+    /// Return (server_name, ServerState, is_disabled) for all known servers.
+    ///
+    /// Servers that are only in the disabled set (never started) also appear
+    /// with `ServerState::Stopped`.
+    pub async fn get_server_info(&self) -> Vec<(String, ServerState, bool)> {
+        let servers = self.servers.read().await;
+        let disabled = self.disabled_names.read().await;
+
+        // Start with all servers in the map.
+        let mut result: Vec<(String, ServerState, bool)> = servers
+            .iter()
+            .map(|(name, entry)| {
+                let is_disabled = disabled.contains(name.as_str());
+                (name.clone(), entry.state, is_disabled)
+            })
+            .collect();
+
+        // Also include any disabled names not yet in the servers map.
+        for dname in disabled.iter() {
+            if !servers.contains_key(dname.as_str()) {
+                result.push((dname.clone(), ServerState::Stopped, true));
+            }
+        }
+
+        result
     }
 
     /// Return the current state of each managed server.
@@ -448,6 +561,79 @@ mod tests {
         let mgr = McpServerManager::new();
         let tools = mgr.build_mcp_tools().await;
         assert!(tools.is_empty(), "expected no tools from empty manager");
+    }
+
+    /// test_disable_enable_server — disable adds to set, enable removes it.
+    #[tokio::test]
+    async fn test_disable_enable_server() {
+        let mgr = McpServerManager::new();
+
+        // Disable a server that doesn't exist in the servers map yet — disabled_names
+        // tracks names independently so this should still work.
+        mgr.disable_server("my-server").await.expect("disable should succeed");
+
+        // Check it's marked disabled
+        let info = mgr.get_server_info().await;
+        let entry = info.iter().find(|(n, _, _)| n == "my-server");
+        assert!(entry.is_some(), "disabled server should appear in get_server_info");
+        let (_, _, disabled) = entry.unwrap();
+        assert!(*disabled, "server should be marked disabled after disable_server()");
+
+        // Enable it
+        mgr.enable_server("my-server").await.expect("enable should succeed");
+
+        // Now it should not be in the disabled set
+        let info2 = mgr.get_server_info().await;
+        let entry2 = info2.iter().find(|(n, _, _)| n == "my-server");
+        // After enable, if it wasn't in servers map it may not appear, but it must
+        // not be disabled. If it does appear, disabled must be false.
+        if let Some((_, _, d)) = entry2 {
+            assert!(!d, "server should not be disabled after enable_server()");
+        }
+    }
+
+    /// test_get_server_info_includes_disabled_flag — get_server_info returns
+    /// the correct disabled flag after disabling a known (crashed) server.
+    #[tokio::test]
+    async fn test_get_server_info_includes_disabled_flag() {
+        let mgr = McpServerManager::new();
+
+        // Start a server so it appears in the servers map (it will crash)
+        let config = ServerConfig {
+            name: "info-test-server".into(),
+            command: "/nonexistent/binary".into(),
+            args: vec![],
+            env: HashMap::new(),
+            disabled: false,
+            transport: "stdio".into(),
+            url: None,
+            headers: None,
+        };
+        let _ = mgr.start_all(vec![config]).await;
+
+        // Verify it's in the map (crashed)
+        let states = mgr.get_server_states().await;
+        assert_eq!(states.get("info-test-server"), Some(&ServerState::Crashed));
+
+        // Disable it
+        mgr.disable_server("info-test-server").await.expect("disable should succeed");
+
+        // get_server_info should show disabled=true
+        let info = mgr.get_server_info().await;
+        let entry = info.iter().find(|(n, _, _)| n == "info-test-server");
+        assert!(entry.is_some(), "server should appear in get_server_info");
+        let (_, _, disabled) = entry.unwrap();
+        assert!(*disabled, "get_server_info should return disabled=true after disable_server()");
+
+        // Enable — ignore the transport error (nonexistent binary), the disabled flag is
+        // cleared regardless of whether the restart succeeds.
+        let _ = mgr.enable_server("info-test-server").await;
+        // disabled flag should now be false even if restart fails
+        let info3 = mgr.get_server_info().await;
+        let entry3 = info3.iter().find(|(n, _, _)| n == "info-test-server");
+        assert!(entry3.is_some(), "server should still appear after enable");
+        let (_, _, d3) = entry3.unwrap();
+        assert!(!d3, "disabled flag should be false after enable_server()");
     }
 
     /// build_mcp_tools skips servers that are not in Ready state.

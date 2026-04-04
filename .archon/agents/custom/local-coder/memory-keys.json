@@ -1,0 +1,5 @@
+{
+  "recall_queries": ["local coder delegation", "llama.cpp local model tasks"],
+  "leann_queries": ["local-coder script", "llama endpoint coding"],
+  "tags": ["agent-definition", "local-coder", "llama-cpp", "cost-saving"]
+}

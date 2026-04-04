@@ -1407,6 +1407,53 @@ async fn run_interactive_session(
                 continue;
             }
 
+            // ── MCP manager actions from the overlay ─────────────
+            if let Some(rest) = input.strip_prefix("__mcp_action__ ") {
+                let parts: Vec<&str> = rest.trim().splitn(2, ' ').collect();
+                if parts.len() == 2 {
+                    let (server_name, action) = (parts[0], parts[1]);
+                    match action {
+                        "reconnect" => {
+                            let _ = cmd_ctx.mcp_manager.restart_server(server_name).await;
+                        }
+                        "disable" => {
+                            let _ = cmd_ctx.mcp_manager.disable_server(server_name).await;
+                        }
+                        "enable" => {
+                            let _ = cmd_ctx.mcp_manager.enable_server(server_name).await;
+                        }
+                        _ => {}
+                    }
+                    // Send updated state back to TUI overlay.
+                    let info = cmd_ctx.mcp_manager.get_server_info().await;
+                    let updated: Vec<archon_tui::app::McpServerEntry> = info
+                        .into_iter()
+                        .map(|(name, state, disabled)| {
+                            let state_str = if disabled {
+                                "disabled"
+                            } else {
+                                match state {
+                                    archon_mcp::types::ServerState::Ready => "ready",
+                                    archon_mcp::types::ServerState::Starting
+                                    | archon_mcp::types::ServerState::Restarting => "starting",
+                                    archon_mcp::types::ServerState::Crashed => "crashed",
+                                    archon_mcp::types::ServerState::Stopped => "stopped",
+                                }
+                            };
+                            archon_tui::app::McpServerEntry {
+                                name: name.clone(),
+                                state: state_str.to_string(),
+                                tool_count: 0,
+                                disabled,
+                            }
+                        })
+                        .collect();
+                    let _ = input_tui_tx.send(TuiEvent::UpdateMcpManager(updated)).await;
+                }
+                let _ = input_tui_tx.send(TuiEvent::SlashCommandComplete).await;
+                continue;
+            }
+
             // ── Phase 2: Slash command dispatch (CLI-110) ────────
             if !slash_commands_disabled && input.starts_with('/') {
                 // GAP 1: /compact needs direct access to agent.compact()
@@ -2489,6 +2536,34 @@ async fn handle_slash_command(
                     let _ = tui_tx.send(TuiEvent::Error(format!("Session store error: {e}"))).await;
                 }
             }
+            true
+        }
+        // ── /mcp (MCP server manager overlay) ─────────────────
+        "/mcp" => {
+            let info = ctx.mcp_manager.get_server_info().await;
+            let entries: Vec<archon_tui::app::McpServerEntry> = info
+                .into_iter()
+                .map(|(name, state, disabled)| {
+                    let state_str = if disabled {
+                        "disabled"
+                    } else {
+                        match state {
+                            archon_mcp::types::ServerState::Ready => "ready",
+                            archon_mcp::types::ServerState::Starting
+                            | archon_mcp::types::ServerState::Restarting => "starting",
+                            archon_mcp::types::ServerState::Crashed => "crashed",
+                            archon_mcp::types::ServerState::Stopped => "stopped",
+                        }
+                    };
+                    archon_tui::app::McpServerEntry {
+                        name: name.clone(),
+                        state: state_str.to_string(),
+                        tool_count: 0,
+                        disabled,
+                    }
+                })
+                .collect();
+            let _ = tui_tx.send(TuiEvent::ShowMcpManager(entries)).await;
             true
         }
         // ── /fork (branch conversation) ────────────────────────

@@ -1,0 +1,14 @@
+{
+  "recall_queries": [
+    "project/api/example-endpoint",
+    "project/database/example-schema"
+  ],
+  "leann_queries": [
+    "cache manager pattern",
+    "route handler pattern"
+  ],
+  "tags": [
+    "example-project",
+    "backend"
+  ]
+}

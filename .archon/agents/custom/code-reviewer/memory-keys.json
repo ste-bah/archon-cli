@@ -1,0 +1,5 @@
+{
+  "recall_queries": ["code review patterns", "security vulnerability patterns"],
+  "leann_queries": ["security vulnerability pattern", "error handling pattern"],
+  "tags": ["agent-definition", "code-reviewer", "security"]
+}
