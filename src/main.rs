@@ -763,40 +763,34 @@ async fn run_interactive_session(
         })
     };
 
-    // Start MCP servers in background (CLI-102) — don't block TUI startup
+    // Start MCP servers synchronously so tools are available before building AgentConfig.
+    // A 15-second timeout ensures a slow or absent MCP server never hangs startup.
     let mcp_manager = archon_mcp::lifecycle::McpServerManager::new();
-    if !mcp_configs.is_empty() {
-        let mcp_mgr = mcp_manager.clone();
-        let configs = mcp_configs.clone();
-        tokio::spawn(async move {
-            let errors = mcp_mgr.start_all(configs).await;
-            for e in &errors {
-                tracing::warn!("MCP server start error: {e}");
-            }
-            if errors.is_empty() {
-                tracing::info!("all MCP servers started");
-            }
-
-            // GAP 9: After servers connect, list available MCP tools for logging.
-            // Dynamic registration into the agent's tool dispatch requires Phase 3
-            // (shared registry). For now, enumerate and log what's available.
-            match mcp_mgr.list_all_tools().await {
-                Ok(tools) => {
-                    tracing::info!("MCP tools available: {}", tools.len());
-                    for tool in &tools {
-                        tracing::debug!(
-                            "MCP tool: mcp__{}__{}",
-                            tool.server_name,
-                            tool.name,
-                        );
-                    }
+    let mcp_tools: Vec<archon_mcp::tool_bridge::McpTool> = if !mcp_configs.is_empty() {
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(15),
+            mcp_manager.start_all(mcp_configs),
+        )
+        .await
+        {
+            Ok(errors) => {
+                for e in &errors {
+                    tracing::warn!("MCP server start error: {e}");
                 }
-                Err(e) => {
-                    tracing::warn!("failed to enumerate MCP tools: {e}");
+                if errors.is_empty() {
+                    tracing::info!("all MCP servers started");
                 }
             }
-        });
-    }
+            Err(_) => {
+                tracing::warn!(
+                    "MCP server startup timed out after 15s — continuing without MCP tools"
+                );
+            }
+        }
+        mcp_manager.build_mcp_tools().await
+    } else {
+        Vec::new()
+    };
 
     // ── Resolve authentication ──────────────────────────────────
     let auth = match resolve_auth_with_keys(
@@ -940,10 +934,15 @@ async fn run_interactive_session(
     registry.register(Box::new(archon_tools::memory::MemoryStoreTool::new(Arc::clone(&memory_graph))));
     registry.register(Box::new(archon_tools::memory::MemoryRecallTool::new(Arc::clone(&memory_graph))));
 
-    // GAP 9: Register MCP tools synchronously if servers are already up,
-    // otherwise they'll be logged as available when the background task completes.
-    // For dynamic registration, we attempt to list tools from servers that started
-    // quickly. Full dynamic registration (adding tools mid-session) is Phase 3.
+    // Register MCP tools into the agent registry so the LLM sees them in tool_defs.
+    let mcp_tool_count = mcp_tools.len();
+    for tool in mcp_tools {
+        registry.register(Box::new(tool));
+    }
+    if mcp_tool_count > 0 {
+        tracing::info!("registered {mcp_tool_count} MCP tools into agent registry");
+    }
+
     let tool_defs = registry.tool_definitions();
 
     // ── Phase 2: Assemble system prompt with consciousness (CLI-108) ──

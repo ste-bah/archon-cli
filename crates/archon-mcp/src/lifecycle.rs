@@ -31,7 +31,7 @@ const MAX_BACKOFF: Duration = Duration::from_secs(60);
 struct ManagedServer {
     config: ServerConfig,
     state: ServerState,
-    client: Option<McpClient>,
+    client: Option<Arc<McpClient>>,
     restart_count: u32,
 }
 
@@ -90,7 +90,7 @@ impl McpServerManager {
                 let mut servers = self.servers.write().await;
                 if let Some(entry) = servers.get_mut(&name) {
                     entry.state = ServerState::Ready;
-                    entry.client = Some(client);
+                    entry.client = Some(Arc::new(client));
                 }
                 tracing::info!(server = %name, "MCP server ready");
                 Ok(())
@@ -143,7 +143,7 @@ impl McpServerManager {
                 let mut servers = self.servers.write().await;
                 if let Some(entry) = servers.get_mut(name) {
                     entry.state = ServerState::Ready;
-                    entry.client = Some(client);
+                    entry.client = Some(Arc::new(client));
                     entry.restart_count = 0;
                 }
                 tracing::info!(server = %name, "MCP server restarted successfully");
@@ -195,6 +195,40 @@ impl McpServerManager {
         Ok(all_tools)
     }
 
+    /// Build [`crate::tool_bridge::McpTool`] instances for all tools on all
+    /// Ready servers. Returns a `Vec` ready to be boxed and registered into a
+    /// `ToolRegistry`.
+    pub async fn build_mcp_tools(&self) -> Vec<crate::tool_bridge::McpTool> {
+        let servers = self.servers.read().await;
+        let mut tools = Vec::new();
+        for (server_name, entry) in servers.iter() {
+            if entry.state != ServerState::Ready {
+                continue;
+            }
+            if let Some(ref client) = entry.client {
+                match client.list_tools().await {
+                    Ok(tool_defs) => {
+                        for tool_def in tool_defs {
+                            tools.push(crate::tool_bridge::McpTool::new(
+                                server_name,
+                                tool_def,
+                                Arc::clone(client),
+                            ));
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            server = %server_name,
+                            error = %e,
+                            "failed to list tools for registry"
+                        );
+                    }
+                }
+            }
+        }
+        tools
+    }
+
     /// Call a tool on a specific server.
     pub async fn call_tool(
         &self,
@@ -236,11 +270,24 @@ impl McpServerManager {
         let names: Vec<String> = servers.keys().cloned().collect();
         for name in names {
             if let Some(mut entry) = servers.remove(&name) {
-                if let Some(client) = entry.client.take() {
+                if let Some(arc_client) = entry.client.take() {
                     tracing::info!(server = %name, "shutting down MCP server");
-                    if let Err(e) = client.shutdown().await {
-                        tracing::error!(server = %name, error = %e, "shutdown error");
-                        errors.push(e);
+                    // McpClient::shutdown() takes self, so we unwrap the Arc.
+                    // If other clones exist (e.g. McpTool still holds one),
+                    // we skip the graceful shutdown to avoid blocking.
+                    match Arc::try_unwrap(arc_client) {
+                        Ok(client) => {
+                            if let Err(e) = client.shutdown().await {
+                                tracing::error!(server = %name, error = %e, "shutdown error");
+                                errors.push(e);
+                            }
+                        }
+                        Err(_arc) => {
+                            tracing::warn!(
+                                server = %name,
+                                "McpClient Arc has other owners; skipping graceful shutdown"
+                            );
+                        }
                     }
                 }
                 entry.state = ServerState::Stopped;
@@ -393,5 +440,43 @@ mod tests {
         let mgr = McpServerManager::default();
         let states = mgr.get_server_states().await;
         assert!(states.is_empty());
+    }
+
+    /// build_mcp_tools on an empty manager returns an empty Vec.
+    #[tokio::test]
+    async fn build_mcp_tools_empty_manager_returns_empty() {
+        let mgr = McpServerManager::new();
+        let tools = mgr.build_mcp_tools().await;
+        assert!(tools.is_empty(), "expected no tools from empty manager");
+    }
+
+    /// build_mcp_tools skips servers that are not in Ready state.
+    #[tokio::test]
+    async fn build_mcp_tools_crashed_server_skipped() {
+        let mgr = McpServerManager::new();
+        // Start a server that will crash (nonexistent binary)
+        let config = ServerConfig {
+            name: "crashed-server".into(),
+            command: "/nonexistent/binary".into(),
+            args: vec![],
+            env: HashMap::new(),
+            disabled: false,
+            transport: "stdio".into(),
+            url: None,
+            headers: None,
+        };
+        let _ = mgr.start_all(vec![config]).await;
+
+        // Verify it's in Crashed state
+        let states = mgr.get_server_states().await;
+        assert_eq!(states.get("crashed-server"), Some(&ServerState::Crashed));
+
+        // build_mcp_tools should return empty since no servers are Ready
+        let tools = mgr.build_mcp_tools().await;
+        assert!(
+            tools.is_empty(),
+            "crashed server should be skipped; got {} tools",
+            tools.len()
+        );
     }
 }
