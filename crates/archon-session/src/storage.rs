@@ -465,6 +465,7 @@ impl SessionStore {
 
     /// Get a session by ID.
     pub fn get_session(&self, session_id: &str) -> Result<SessionMetadata, SessionError> {
+        // Exact match first (full UUID path).
         let mut params = BTreeMap::new();
         params.insert("sid".to_string(), DataValue::from(session_id));
 
@@ -481,9 +482,52 @@ impl SessionStore {
             )
             .map_err(db_err)?;
 
+        // If no exact match and the caller gave a short prefix, scan for a unique prefix match.
+        let result = if result.rows.is_empty() && session_id.len() < 36 {
+            let prefix = session_id.to_string();
+            let all = self
+                .db
+                .run_script(
+                    "?[id, created_at, last_active, working_directory, git_branch,
+                      model, message_count, total_tokens, total_cost, schema_version] :=
+                        *sessions{id, created_at, last_active, working_directory, git_branch,
+                                  model, message_count, total_tokens, total_cost, schema_version}",
+                    BTreeMap::new(),
+                    ScriptMutability::Immutable,
+                )
+                .map_err(db_err)?;
+
+            let matches: Vec<_> = all
+                .rows
+                .into_iter()
+                .filter(|row| extract_str(&row[0]).starts_with(&prefix))
+                .collect();
+
+            match matches.len() {
+                0 => {
+                    return Err(SessionError::NotFound(format!(
+                        "session '{session_id}' not found"
+                    )));
+                }
+                1 => {
+                    let mut nr = cozo::NamedRows::default();
+                    nr.rows = matches;
+                    nr.headers = all.headers;
+                    nr
+                }
+                n => {
+                    return Err(SessionError::NotFound(format!(
+                        "ambiguous session prefix '{session_id}' matches {n} sessions — use more characters"
+                    )));
+                }
+            }
+        } else {
+            result
+        };
+
         if result.rows.is_empty() {
             return Err(SessionError::NotFound(format!(
-                "session {session_id} not found"
+                "session '{session_id}' not found"
             )));
         }
 
