@@ -308,6 +308,21 @@ impl McpServerManager {
         Ok(all_tools)
     }
 
+    /// List tool names for a single Ready server, as qualified `mcp__server__tool` strings.
+    /// Returns an empty vec if the server is not Ready or not found.
+    pub async fn list_tools_for(&self, server_name: &str) -> Vec<String> {
+        let servers = self.servers.read().await;
+        let Some(entry) = servers.get(server_name) else { return Vec::new() };
+        if entry.state != ServerState::Ready { return Vec::new(); }
+        let Some(ref client) = entry.client else { return Vec::new() };
+        match client.list_tools().await {
+            Ok(tools) => tools.iter()
+                .map(|t| format!("mcp__{}_{}", server_name, t.name))
+                .collect(),
+            Err(_) => Vec::new(),
+        }
+    }
+
     /// Build [`crate::tool_bridge::McpTool`] instances for all tools on all
     /// Ready servers. Returns a `Vec` ready to be boxed and registered into a
     /// `ToolRegistry`.

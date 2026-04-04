@@ -327,6 +327,8 @@ pub struct McpServerEntry {
     pub state: String,
     pub tool_count: usize,
     pub disabled: bool,
+    /// Fully-qualified tool names (mcp__server__tool) for View Tools.
+    pub tools: Vec<String>,
 }
 
 /// Which sub-view is active inside the MCP manager overlay.
@@ -334,6 +336,8 @@ pub struct McpServerEntry {
 pub enum McpManagerView {
     ServerList { selected: usize },
     ServerMenu { server_idx: usize, action_idx: usize },
+    /// Scrollable list of tool names for a specific server.
+    ToolList { server_name: String, tools: Vec<String>, scroll: usize },
 }
 
 /// Interactive MCP server manager state (shown as modal overlay on /mcp).
@@ -803,6 +807,34 @@ pub async fn run_tui(
                             frame.render_widget(list, overlay_area);
                         }
                     }
+                    McpManagerView::ToolList { server_name, tools, scroll } => {
+                            let visible = (area.height.saturating_sub(6)) as usize;
+                            let overlay_height = (visible as u16 + 4).min(area.height.saturating_sub(4)).max(6);
+                            let y = (area.height.saturating_sub(overlay_height)) / 2;
+                            let overlay_area = ratatui::layout::Rect::new(x, y, overlay_width, overlay_height);
+                            frame.render_widget(ratatui::widgets::Clear, overlay_area);
+
+                            let items: Vec<ListItem<'_>> = if tools.is_empty() {
+                                vec![ListItem::new(Line::from(Span::styled(
+                                    "  (no tools)", Style::default().fg(t.muted)
+                                )))]
+                            } else {
+                                tools.iter().skip(*scroll).take(visible)
+                                    .map(|name| ListItem::new(Line::from(vec![
+                                        Span::styled("  • ", Style::default().fg(t.accent)),
+                                        Span::styled(name.clone(), Style::default().fg(t.fg)),
+                                    ])))
+                                    .collect()
+                            };
+
+                            let title = format!(" {} — tools (↑↓ scroll, Esc back) ", server_name);
+                            let list = List::new(items)
+                                .block(Block::default()
+                                    .borders(Borders::ALL)
+                                    .title(title)
+                                    .border_style(Style::default().fg(t.accent)));
+                            frame.render_widget(list, overlay_area);
+                    }
                 }
             }
         })?;
@@ -963,12 +995,16 @@ pub async fn run_tui(
                                             *selected = mgr.servers.len().saturating_sub(1);
                                         }
                                     }
-                                    McpManagerView::ServerMenu { action_idx, .. } => {
+                                    McpManagerView::ServerMenu { action_idx, server_idx } => {
+                                        let count = mcp_action_count(mgr.servers.get(*server_idx));
                                         if *action_idx > 0 {
                                             *action_idx -= 1;
                                         } else {
-                                            *action_idx = 3; // max 4 items (0..=3)
+                                            *action_idx = count.saturating_sub(1);
                                         }
+                                    }
+                                    McpManagerView::ToolList { scroll, .. } => {
+                                        *scroll = scroll.saturating_sub(1);
                                     }
                                 }
                             }
@@ -985,12 +1021,16 @@ pub async fn run_tui(
                                         }
                                     }
                                     McpManagerView::ServerMenu { action_idx, server_idx } => {
-                                        let server = mgr.servers.get(*server_idx);
-                                        let action_count = mcp_action_count(server);
+                                        let action_count = mcp_action_count(mgr.servers.get(*server_idx));
                                         if *action_idx + 1 < action_count {
                                             *action_idx += 1;
                                         } else {
                                             *action_idx = 0;
+                                        }
+                                    }
+                                    McpManagerView::ToolList { scroll, tools, .. } => {
+                                        if *scroll + 1 < tools.len() {
+                                            *scroll += 1;
                                         }
                                     }
                                 }
@@ -1012,19 +1052,32 @@ pub async fn run_tui(
                                         if let Some(server) = mgr.servers.get(server_idx) {
                                             let actions = mcp_actions_for(server);
                                             if let Some(action) = actions.get(action_idx) {
-                                                if *action == "back" {
-                                                    mgr.view = McpManagerView::ServerList {
-                                                        selected: server_idx,
-                                                    };
-                                                } else {
-                                                    let cmd = format!(
-                                                        "__mcp_action__ {} {}",
-                                                        server.name, action
-                                                    );
-                                                    let _ = input_tx.send(cmd).await;
+                                                match *action {
+                                                    "back" => {
+                                                        mgr.view = McpManagerView::ServerList {
+                                                            selected: server_idx,
+                                                        };
+                                                    }
+                                                    "tools" => {
+                                                        mgr.view = McpManagerView::ToolList {
+                                                            server_name: server.name.clone(),
+                                                            tools: server.tools.clone(),
+                                                            scroll: 0,
+                                                        };
+                                                    }
+                                                    _ => {
+                                                        let cmd = format!(
+                                                            "__mcp_action__ {} {}",
+                                                            server.name, action
+                                                        );
+                                                        let _ = input_tx.send(cmd).await;
+                                                    }
                                                 }
                                             }
                                         }
+                                    }
+                                    McpManagerView::ToolList { .. } => {
+                                        // Enter/Esc handled below — nothing to do on Enter
                                     }
                                 }
                             }
@@ -1033,6 +1086,11 @@ pub async fn run_tui(
                         KeyCode::Esc => {
                             if let Some(ref mut mgr) = app.mcp_manager {
                                 match &mgr.view {
+                                    McpManagerView::ToolList { server_name, .. } => {
+                                        // Find the server index to return to its menu
+                                        let idx = mgr.servers.iter().position(|s| s.name == *server_name).unwrap_or(0);
+                                        mgr.view = McpManagerView::ServerMenu { server_idx: idx, action_idx: 0 };
+                                    }
                                     McpManagerView::ServerMenu { server_idx, .. } => {
                                         let idx = *server_idx;
                                         mgr.view = McpManagerView::ServerList { selected: idx };

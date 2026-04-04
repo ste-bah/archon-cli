@@ -1426,28 +1426,32 @@ async fn run_interactive_session(
                     }
                     // Send updated state back to TUI overlay.
                     let info = cmd_ctx.mcp_manager.get_server_info().await;
-                    let updated: Vec<archon_tui::app::McpServerEntry> = info
-                        .into_iter()
-                        .map(|(name, state, disabled)| {
-                            let state_str = if disabled {
-                                "disabled"
-                            } else {
-                                match state {
-                                    archon_mcp::types::ServerState::Ready => "ready",
-                                    archon_mcp::types::ServerState::Starting
-                                    | archon_mcp::types::ServerState::Restarting => "starting",
-                                    archon_mcp::types::ServerState::Crashed => "crashed",
-                                    archon_mcp::types::ServerState::Stopped => "stopped",
-                                }
-                            };
-                            archon_tui::app::McpServerEntry {
-                                name: name.clone(),
-                                state: state_str.to_string(),
-                                tool_count: 0,
-                                disabled,
+                    let mut updated: Vec<archon_tui::app::McpServerEntry> = Vec::new();
+                    for (name, state, disabled) in info {
+                        let state_str = if disabled {
+                            "disabled"
+                        } else {
+                            match state {
+                                archon_mcp::types::ServerState::Ready => "ready",
+                                archon_mcp::types::ServerState::Starting
+                                | archon_mcp::types::ServerState::Restarting => "starting",
+                                archon_mcp::types::ServerState::Crashed => "crashed",
+                                archon_mcp::types::ServerState::Stopped => "stopped",
                             }
-                        })
-                        .collect();
+                        };
+                        let tools = if state_str == "ready" {
+                            cmd_ctx.mcp_manager.list_tools_for(&name).await
+                        } else {
+                            Vec::new()
+                        };
+                        updated.push(archon_tui::app::McpServerEntry {
+                            name: name.clone(),
+                            state: state_str.to_string(),
+                            tool_count: tools.len(),
+                            disabled,
+                            tools,
+                        });
+                    }
                     let _ = input_tui_tx.send(TuiEvent::UpdateMcpManager(updated)).await;
                 }
                 let _ = input_tui_tx.send(TuiEvent::SlashCommandComplete).await;
@@ -2541,28 +2545,32 @@ async fn handle_slash_command(
         // ── /mcp (MCP server manager overlay) ─────────────────
         "/mcp" => {
             let info = ctx.mcp_manager.get_server_info().await;
-            let entries: Vec<archon_tui::app::McpServerEntry> = info
-                .into_iter()
-                .map(|(name, state, disabled)| {
-                    let state_str = if disabled {
-                        "disabled"
-                    } else {
-                        match state {
-                            archon_mcp::types::ServerState::Ready => "ready",
-                            archon_mcp::types::ServerState::Starting
-                            | archon_mcp::types::ServerState::Restarting => "starting",
-                            archon_mcp::types::ServerState::Crashed => "crashed",
-                            archon_mcp::types::ServerState::Stopped => "stopped",
-                        }
-                    };
-                    archon_tui::app::McpServerEntry {
-                        name: name.clone(),
-                        state: state_str.to_string(),
-                        tool_count: 0,
-                        disabled,
+            let mut entries: Vec<archon_tui::app::McpServerEntry> = Vec::new();
+            for (name, state, disabled) in info {
+                let state_str = if disabled {
+                    "disabled"
+                } else {
+                    match state {
+                        archon_mcp::types::ServerState::Ready => "ready",
+                        archon_mcp::types::ServerState::Starting
+                        | archon_mcp::types::ServerState::Restarting => "starting",
+                        archon_mcp::types::ServerState::Crashed => "crashed",
+                        archon_mcp::types::ServerState::Stopped => "stopped",
                     }
-                })
-                .collect();
+                };
+                let tools = if state_str == "ready" {
+                    ctx.mcp_manager.list_tools_for(&name).await
+                } else {
+                    Vec::new()
+                };
+                entries.push(archon_tui::app::McpServerEntry {
+                    name: name.clone(),
+                    state: state_str.to_string(),
+                    tool_count: tools.len(),
+                    disabled,
+                    tools,
+                });
+            }
             let _ = tui_tx.send(TuiEvent::ShowMcpManager(entries)).await;
             true
         }
