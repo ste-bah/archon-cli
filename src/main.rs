@@ -1855,6 +1855,11 @@ async fn run_interactive_session(
         });
     }
 
+    // Apply vim mode from config before blocking on TUI
+    if config.tui.vim_mode {
+        let _ = tui_event_tx.send(TuiEvent::SetVimMode(true)).await;
+    }
+
     // Run the TUI (blocks until user quits)
     run_tui(tui_event_rx, user_input_tx, splash_opt, Some(btw_tx), Some(perm_prompt_tx)).await?;
 
@@ -2307,12 +2312,10 @@ async fn handle_slash_command(
         }
         // ── /vim ───────────────────────────────────────────────
         "/vim" => {
-            // Toggle vim mode in the TUI config
-            // Note: this changes the runtime state but doesn't persist to config file
+            let _ = tui_tx.send(TuiEvent::VimToggle).await;
             let _ = tui_tx
                 .send(TuiEvent::TextDelta(
-                    "\nVim mode toggled. Restart session for full effect.\n\
-                     To persist: set [tui] vim_mode = true in config.toml\n".into(),
+                    "\nVim mode toggled. To persist: set vim_mode = true under [tui] in config.toml\n".into(),
                 ))
                 .await;
             true

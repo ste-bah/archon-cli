@@ -231,6 +231,11 @@ impl VimState {
     // -- mode handlers ------------------------------------------------------
 
     fn handle_normal(&mut self, key: KeyEvent) -> VimAction {
+        // Enter in normal mode = submit the buffer (send message).
+        if key.code == KeyCode::Enter && key.modifiers == KeyModifiers::NONE {
+            return VimAction::Submit;
+        }
+
         // Ctrl+R for redo — check before the main match to avoid
         // the plain 'r' arm swallowing it.
         if key.code == KeyCode::Char('r') && key.modifiers.contains(KeyModifiers::CONTROL) {

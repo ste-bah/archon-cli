@@ -35,6 +35,8 @@ max_concurrency = 4
 mode = "ask"
 allow_paths = []
 deny_paths = []
+[tui]
+vim_mode = true
 
 [context]
 compact_threshold = 0.800000011920929

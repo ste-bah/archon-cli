@@ -17,6 +17,7 @@ use crate::splash::{self, ActivityEntry};
 use crate::status::StatusBar;
 use crate::theme::{Theme, intj_theme};
 use crate::ultrathink;
+use crate::vim::{VimAction, VimState};
 
 /// Message from the agent loop to the TUI.
 #[derive(Debug, Clone)]
@@ -56,6 +57,10 @@ pub enum TuiEvent {
     ShowMcpManager(Vec<McpServerEntry>),
     /// Update MCP server manager with fresh state (after reconnect/disable).
     UpdateMcpManager(Vec<McpServerEntry>),
+    /// Enable or disable vim keybindings (from config at startup).
+    SetVimMode(bool),
+    /// Toggle vim keybindings on/off (used by /vim slash command).
+    VimToggle,
     Done,
 }
 
@@ -98,6 +103,8 @@ pub struct App {
     pub session_picker: Option<SessionPicker>,
     /// Active MCP server manager modal (shown by /mcp).
     pub mcp_manager: Option<McpManager>,
+    /// Vim keybinding state — Some when vim mode is active, None otherwise.
+    pub vim_state: Option<VimState>,
 }
 
 impl Default for App {
@@ -123,6 +130,7 @@ impl Default for App {
             session_name: None,
             session_picker: None,
             mcp_manager: None,
+            vim_state: None,
         }
     }
 }
@@ -489,6 +497,14 @@ pub async fn run_tui(
                         Style::default().fg(Color::Yellow)
                     ))
                     .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
+            } else if let Some(ref vim) = app.vim_state {
+                let mode_indicator = vim.mode_display();
+                let vim_text = vim.text();
+                // Show current line only (last line, where cursor is)
+                let display_line = vim_text.lines().last().unwrap_or("").to_string();
+                Paragraph::new(format!("{mode_indicator} {display_line}"))
+                    .block(Block::default().borders(Borders::TOP).border_style(input_border_style))
+                    .style(Style::default().fg(t.accent))
             } else {
                 let prefix = if app.is_generating {
                     match &app.active_tool {
@@ -919,6 +935,20 @@ pub async fn run_tui(
                         mgr.servers = servers;
                     }
                 }
+                TuiEvent::SetVimMode(enabled) => {
+                    if enabled {
+                        app.vim_state = Some(VimState::new());
+                    } else {
+                        app.vim_state = None;
+                    }
+                }
+                TuiEvent::VimToggle => {
+                    if app.vim_state.is_some() {
+                        app.vim_state = None;
+                    } else {
+                        app.vim_state = Some(VimState::new());
+                    }
+                }
                 TuiEvent::Done => {
                     app.should_quit = true;
                 }
@@ -1135,6 +1165,33 @@ pub async fn run_tui(
                             continue;
                         }
                         _ => continue, // swallow all other keys while overlay is up
+                    }
+                }
+                // Vim mode key routing — Ctrl+D / Ctrl+C fall through to normal handling
+                let is_ctrl_quit = key.modifiers == KeyModifiers::CONTROL
+                    && matches!(key.code, KeyCode::Char('d') | KeyCode::Char('c'));
+                if !is_ctrl_quit {
+                    if let Some(ref mut vim) = app.vim_state {
+                        let action = vim.handle_key(key);
+                        match action {
+                            VimAction::Submit => {
+                                let text = vim.text();
+                                *vim = VimState::new();
+                                if !text.trim().is_empty() {
+                                    if app.is_generating {
+                                        app.pending_input.push(text);
+                                        app.output.append_line("[queued — will send after current turn]");
+                                    } else {
+                                        let _ = input_tx.send(text).await;
+                                    }
+                                }
+                            }
+                            VimAction::Quit => {
+                                app.vim_state = None;
+                            }
+                            _ => {}
+                        }
+                        continue;
                     }
                 }
                 match key {
