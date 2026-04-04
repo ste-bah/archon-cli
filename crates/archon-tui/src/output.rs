@@ -186,11 +186,11 @@ impl OutputBuffer {
     /// Compute the actual scroll position for the `Paragraph::scroll()` call.
     ///
     /// `scroll_offset` = lines scrolled UP from the bottom.
-    /// `Paragraph::scroll((y, 0))` expects lines from the TOP, counting
-    /// **wrapped** (physical) rows, not logical lines.
+    /// `Paragraph::scroll((y, 0))` expects physical rows from the TOP.
+    /// NOTE: ratatui does NOT clamp — passing a value past content shows blank.
     ///
     /// When not scroll-locked: auto-scroll to bottom (return max_scroll).
-    /// When locked: return max_scroll - scroll_offset (clamped).
+    /// When locked: return max_scroll - scroll_offset (clamped to zero).
     pub fn effective_scroll(&self, total_wrapped_rows: u16, visible_height: u16) -> u16 {
         let max_scroll = total_wrapped_rows.saturating_sub(visible_height);
         if !self.scroll_locked {
@@ -200,24 +200,69 @@ impl OutputBuffer {
         }
     }
 
-    /// Count total wrapped rows given a terminal width. Each logical line
-    /// occupies ceil(len / width) rows, minimum 1 row per line.
+    /// Count total wrapped rows given a terminal width using word-wrap simulation.
+    ///
+    /// Matches ratatui's `Wrap { trim: false }` behaviour: words are kept together
+    /// where possible; only overlong single words are char-split. Simple
+    /// `ceil(len/width)` underestimates when words don't align to line boundaries,
+    /// causing the scroll position to fall short of the actual bottom.
     pub fn count_wrapped_rows(lines: &[&str], width: u16) -> u16 {
         if width == 0 {
             return lines.len() as u16;
         }
         let w = width as usize;
-        let mut rows: u32 = 0;
-        for line in lines {
-            let char_count = line.chars().count();
-            if char_count == 0 {
-                rows += 1; // empty line still takes 1 row
-            } else {
-                rows += ((char_count + w - 1) / w) as u32;
+        let mut total: u32 = 0;
+
+        for &line in lines {
+            if line.is_empty() {
+                total += 1;
+                continue;
             }
+
+            // Fast path: whole line fits on one row
+            let char_count = line.chars().count();
+            if char_count <= w {
+                total += 1;
+                continue;
+            }
+
+            // Word-wrap: split_inclusive keeps the space attached to the
+            // preceding word ("hello ", "world"), mirroring ratatui's greedy fit.
+            let mut row_width: usize = 0;
+            let mut rows: u32 = 1;
+
+            for token in line.split_inclusive(' ') {
+                let token_w = token.chars().count();
+
+                if row_width == 0 {
+                    // Start of a new row
+                    if token_w >= w {
+                        // Single token wider than the row — char-wrap it
+                        let extra = (token_w - 1) / w;
+                        rows += extra as u32;
+                        row_width = token_w - extra * w;
+                    } else {
+                        row_width = token_w;
+                    }
+                } else if row_width + token_w <= w {
+                    row_width += token_w;
+                } else {
+                    // Token doesn't fit — start a new row
+                    rows += 1;
+                    if token_w >= w {
+                        let extra = (token_w - 1) / w;
+                        rows += extra as u32;
+                        row_width = token_w - extra * w;
+                    } else {
+                        row_width = token_w;
+                    }
+                }
+            }
+
+            total += rows;
         }
-        // Clamp to u16 range
-        rows.min(u16::MAX as u32) as u16
+
+        total.min(u16::MAX as u32) as u16
     }
 }
 
@@ -299,6 +344,29 @@ mod tests {
         let buf = OutputBuffer::new();
         // Not locked => auto-scroll to bottom => max_scroll = 30 - 10 = 20
         assert_eq!(buf.effective_scroll(30, 10), 20);
+    }
+
+    #[test]
+    fn count_wrapped_rows_word_wrap_differs_from_char_wrap() {
+        // "hi hello world" = 14 chars, width 7
+        // Simple ceil(14/7) = 2 — WRONG for word-wrap
+        // Word-wrap: "hi " (3) fits row1, "hello " (6) overflows → row2,
+        //            "world" (5) overflows row2(6+5=11>7) → row3 = 3 rows
+        let lines = ["hi hello world"];
+        assert_eq!(OutputBuffer::count_wrapped_rows(&lines, 7), 3);
+    }
+
+    #[test]
+    fn count_wrapped_rows_long_word_char_splits() {
+        // "abcdefghijklmnop" = 17 chars, width 5 → ceil(17/5) = 4 rows
+        let lines = ["abcdefghijklmnop"];
+        assert_eq!(OutputBuffer::count_wrapped_rows(&lines, 5), 4);
+    }
+
+    #[test]
+    fn count_wrapped_rows_fits_on_one_row() {
+        let lines = ["hello world"];
+        assert_eq!(OutputBuffer::count_wrapped_rows(&lines, 20), 1);
     }
 
     #[test]

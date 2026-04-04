@@ -907,6 +907,10 @@ async fn run_interactive_session(
     // Apply tool filtering from resolved flags (CLI-220)
     apply_tool_filters(&mut registry, resolved_flags);
 
+    // Register memory tools backed by the CozoDB graph
+    registry.register(Box::new(archon_tools::memory::MemoryStoreTool::new(Arc::clone(&memory_graph))));
+    registry.register(Box::new(archon_tools::memory::MemoryRecallTool::new(Arc::clone(&memory_graph))));
+
     // GAP 9: Register MCP tools synchronously if servers are already up,
     // otherwise they'll be logged as available when the background task completes.
     // For dynamic registration, we attempt to list tools from servers that started
@@ -972,7 +976,14 @@ async fn run_interactive_session(
         },
         inner_voice: None, // Populated on subsequent turns by InnerVoice::to_prompt_block()
         dynamic: Some(format!(
-            "Date: {}\nSession: {}",
+            "Date: {}\nSession: {}\n\n\
+            ## Memory System\n\
+            You have a persistent memory graph backed by CozoDB. Use it proactively:\n\
+            - `memory_store`: Save facts, decisions, preferences, and behavioral rules for future recall. \
+            Always store things the user asks you to remember.\n\
+            - `memory_recall`: Search past memories by keyword. Use this when the user asks what you \
+            remember, or when context from past sessions would be useful.\n\
+            Memories persist across sessions. Store important decisions and preferences immediately.",
             chrono::Utc::now().format("%Y-%m-%d"),
             session_id
         )),

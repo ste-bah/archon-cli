@@ -35,6 +35,7 @@ pub mod worktree;
 pub mod worktree_manager;
 
 pub mod mcp_resources;
+pub mod memory;
 
 // Stubs for tools implemented in later tasks
 pub mod agent {}
