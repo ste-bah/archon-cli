@@ -1,0 +1,85 @@
+[package]
+name = "archon-cli-workspace"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[workspace]
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+
+[workspace.dependencies]
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+async-trait = "0.1"
+base64 = "0.22"
+anyhow = "1"
+thiserror = "2"
+tracing = "0.1"
+tracing-appender = "0.2"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+clap = { version = "4", features = ["derive"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
+uuid = { version = "1", features = ["v4"] }
+sha2 = "0.10"
+hex = "0.4"
+oauth2 = "5"
+fd-lock = "4"
+open = "5"
+tiny_http = "0.12"
+cozo = { package = "cozo-ce", version = "0.7.13-alpha.3", default-features = false, features = ["storage-sqlite", "storage-sqlite-src", "rayon"] }
+ratatui = "0.29"
+crossterm = "0.28"
+toml = "0.8"
+glob = "0.3"
+grep-regex = "0.1"
+regex = "1"
+jsonschema = "0.28"
+chrono = { version = "0.4", features = ["serde"] }
+dirs = "6"
+fastembed = { version = "4", default-features = false, features = ["ort-download-binaries", "hf-hub-rustls-tls"] }
+getrandom = { version = "0.3", features = ["std"] }
+urlencoding = "2"
+which = "7"
+tempfile = "3"
+notify = "7"
+pulldown-cmark = "0.12"
+tree-sitter = "0.24"
+tree-sitter-highlight = "0.24"
+libloading = "0.8"
+git2 = "0.19"
+
+[[bin]]
+name = "archon"
+path = "src/main.rs"
+
+[dependencies]
+archon-core = { path = "crates/archon-core" }
+archon-consciousness = { path = "crates/archon-consciousness" }
+archon-llm = { path = "crates/archon-llm" }
+archon-mcp = { path = "crates/archon-mcp" }
+archon-memory = { path = "crates/archon-memory" }
+archon-permissions = { path = "crates/archon-permissions" }
+archon-session = { path = "crates/archon-session" }
+archon-tools = { path = "crates/archon-tools" }
+archon-tui = { path = "crates/archon-tui" }
+reqwest.workspace = true
+chrono.workspace = true
+clap.workspace = true
+dirs.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+anyhow.workspace = true
+uuid.workspace = true
+
+[profile.release]
+lto = true
+strip = true
+opt-level = "z"
+codegen-units = 1

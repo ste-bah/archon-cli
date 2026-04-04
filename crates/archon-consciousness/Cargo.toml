@@ -1,0 +1,16 @@
+[package]
+name = "archon-consciousness"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+archon-memory = { path = "../archon-memory" }
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+
+[dev-dependencies]

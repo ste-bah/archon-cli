@@ -1,0 +1,2865 @@
+mod cli_args;
+
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+
+use anyhow::Result;
+use clap::Parser;
+
+use archon_consciousness::assembler::{AssemblyInput, BudgetConfig, SystemPromptAssembler};
+use archon_consciousness::defaults::load_defaults;
+use archon_consciousness::rules::RulesEngine;
+use archon_core::agent::{Agent, AgentConfig, AgentEvent, SessionStats};
+use archon_core::cli_flags::resolve_flags;
+use archon_core::config::default_config_path;
+use archon_core::config_layers::ConfigLayer;
+use archon_core::cost_alerts::{CostAlertAction, CostAlertState};
+use archon_core::env_vars::{self, ArchonEnvVars};
+use archon_core::dispatch::create_default_registry;
+use archon_core::skills::builtin::register_builtins;
+use archon_core::skills::{SkillContext, SkillOutput};
+use archon_core::input_format::InputFormat;
+use archon_core::output_format::OutputFormat;
+use archon_core::print_mode::{PrintModeConfig, run_print_mode};
+use archon_core::logging::{default_log_dir, init_logging, rotate_logs};
+use archon_core::reasoning::{build_environment_section, load_claude_md};
+use archon_llm::anthropic::AnthropicClient;
+use archon_llm::auth::resolve_auth_with_keys;
+use archon_llm::effort::{self, EffortLevel, EffortState};
+use archon_llm::fast_mode::FastModeState;
+use archon_llm::identity::{
+    get_or_create_device_id, resolve_betas, IdentityMode, IdentityProvider,
+};
+use archon_mcp::lifecycle::McpServerManager;
+use archon_memory::{MemoryAccess, MemoryGraph};
+use archon_permissions::auto::{AutoModeConfig, AutoModeEvaluator};
+use archon_tui::app::{run_tui, TuiEvent};
+
+use cli_args::{Cli, Commands};
+
+/// Parse `--setting-sources` names into [`ConfigLayer`] variants, warning on
+/// unrecognised values.
+fn parse_layer_filter(sources: &[String]) -> Vec<ConfigLayer> {
+    sources
+        .iter()
+        .filter_map(|s| match s.as_str() {
+            "user" => Some(ConfigLayer::User),
+            "project" => Some(ConfigLayer::Project),
+            "local" => Some(ConfigLayer::Local),
+            other => {
+                eprintln!("warning: unknown setting source: {other}");
+                None
+            }
+        })
+        .collect()
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    let cli = Cli::parse();
+
+    // Load environment variables first (determines config path)
+    let env_vars = env_vars::load_env_vars();
+
+    // Warn about unrecognized ARCHON_* vars
+    let all_env: std::collections::HashMap<String, String> = std::env::vars().collect();
+    let unrecognized = env_vars::warn_unrecognized_archon_vars(&all_env);
+    for var_name in &unrecognized {
+        eprintln!("warning: unrecognized environment variable: {var_name}");
+    }
+
+    // Load config from env-specified dir or default
+    let config_path = env_vars
+        .config_dir
+        .as_ref()
+        .map(|d| d.join("config.toml"))
+        .unwrap_or_else(default_config_path);
+
+    // Parse --setting-sources filter
+    let layer_filter: Option<Vec<ConfigLayer>> =
+        cli.setting_sources.as_ref().map(|s| parse_layer_filter(s));
+
+    let working_dir_for_config = std::env::current_dir().unwrap_or_default();
+    let mut config = archon_core::config_layers::load_layered_config(
+        Some(&config_path),
+        &working_dir_for_config,
+        cli.settings.as_deref(),
+        layer_filter.as_deref(),
+    )
+    .unwrap_or_else(|e| {
+        eprintln!("warning: failed to load config, using defaults: {e}");
+        archon_core::config::ArchonConfig::default()
+    });
+
+    // Apply env var overrides on top of config file
+    env_vars::apply_env_overrides(&mut config, &env_vars);
+
+    // ── Resolve expanded CLI flags (CLI-220) ───────────────────
+    let resolved_flags = resolve_flags(&cli.to_flag_input()).unwrap_or_else(|e| {
+        eprintln!("error: {e}");
+        std::process::exit(1);
+    });
+
+    // --model overrides config default model (higher priority than env var)
+    if let Some(ref model) = resolved_flags.model {
+        config.api.default_model = model.clone();
+    }
+
+    // --verbose bumps logging to trace
+    if resolved_flags.verbose {
+        config.logging.level = "trace".to_string();
+    }
+
+    // --debug sets debug-level logging with optional category filter
+    if let Some(ref filter) = resolved_flags.debug {
+        match filter {
+            Some(categories) => {
+                // e.g. "mcp,agent" -> set those specific targets to debug
+                config.logging.level = format!("warn,{}", categories.split(',')
+                    .map(|c| format!("{c}=debug"))
+                    .collect::<Vec<_>>()
+                    .join(","));
+            }
+            None => {
+                config.logging.level = "debug".to_string();
+            }
+        }
+    }
+
+    // ARCHON_LOG env var overrides log level (e.g. ARCHON_LOG=debug)
+    if let Ok(log_level) = std::env::var("ARCHON_LOG") {
+        if !log_level.trim().is_empty() {
+            config.logging.level = log_level.trim().to_string();
+        }
+    }
+
+    // Initialize logging
+    let session_id = uuid::Uuid::new_v4().to_string();
+    let log_dir = default_log_dir();
+    let _log_guard = init_logging(&session_id, &config.logging.level, &log_dir)
+        .unwrap_or_else(|e| {
+            eprintln!("warning: failed to init logging: {e}");
+            panic!("logging init failed: {e}");
+        });
+
+    if let Err(e) = rotate_logs(&log_dir, config.logging.max_files) {
+        tracing::warn!("failed to rotate logs: {e}");
+    }
+
+    tracing::info!("Archon CLI v0.1.0 started, session {session_id}");
+
+    // Handle subcommands
+    match cli.command {
+        Some(Commands::Login) => {
+            return handle_login(&config).await;
+        }
+        None => {}
+    }
+
+    // Handle --resume with no ID: list recent sessions and exit
+    if let Some(None) = &cli.resume {
+        return handle_resume_list().await;
+    }
+
+    // For --resume with ID, load the session messages to restore
+    let resume_messages = if let Some(Some(ref id)) = cli.resume {
+        Some(load_resume_messages(id)?)
+    } else {
+        None
+    };
+
+    // ── Session search & management (CLI-208) ──────────────────
+    if cli.sessions {
+        return handle_sessions(&cli);
+    }
+
+    // ── Background sessions (CLI-221) ─────────────────────────
+    if cli.ps {
+        return handle_bg_list();
+    }
+    if let Some(ref id) = cli.kill_session {
+        return handle_bg_kill(id);
+    }
+    if let Some(ref id) = cli.attach {
+        return handle_bg_attach(id);
+    }
+    if let Some(ref id) = cli.logs {
+        return handle_bg_logs(id);
+    }
+    if cli.bg.is_some() {
+        return handle_bg_launch(&cli);
+    }
+
+    // ── Print mode: non-interactive single-query ──────────────
+    if cli.print.is_some() {
+        let query = match &cli.print {
+            Some(Some(q)) => q.clone(),
+            Some(None) => {
+                // Read from stdin based on input format
+                let input_fmt = InputFormat::from_str(&cli.input_format).unwrap_or_else(|e| {
+                    eprintln!("error: {e}");
+                    std::process::exit(1);
+                });
+                let messages = archon_core::input_format::read_input(&input_fmt).unwrap_or_else(|e| {
+                    eprintln!("error reading input: {e}");
+                    std::process::exit(1);
+                });
+                messages.join("\n")
+            }
+            None => unreachable!(),
+        };
+
+        let output_fmt = OutputFormat::from_str(&cli.output_format).unwrap_or_else(|e| {
+            eprintln!("error: {e}");
+            std::process::exit(1);
+        });
+
+        let print_config = PrintModeConfig {
+            query,
+            output_format: output_fmt,
+            input_format: InputFormat::from_str(&cli.input_format).unwrap_or(InputFormat::Text),
+            max_turns: cli.max_turns,
+            max_budget_usd: cli.max_budget_usd,
+            no_session_persistence: cli.no_session_persistence,
+            json_schema: cli.json_schema.clone(),
+        };
+
+        // Build a minimal agent for print mode (no TUI)
+        let exit_code = run_print_mode_session(&config, &session_id, &cli, &env_vars, print_config, &resolved_flags).await;
+        std::process::exit(exit_code);
+    }
+
+    // Default: interactive session (with optional resume messages)
+    run_interactive_session(&config, &session_id, &cli, &env_vars, resume_messages, &resolved_flags).await
+}
+
+async fn handle_login(_config: &archon_core::config::ArchonConfig) -> Result<()> {
+    let http_client = reqwest::Client::new();
+    let cred_path = archon_llm::tokens::credentials_path();
+
+    eprintln!("Starting OAuth login...");
+    match archon_llm::oauth::login(&cred_path, &http_client).await {
+        Ok(_) => {
+            eprintln!("Login successful! Credentials saved.");
+            Ok(())
+        }
+        Err(e) => {
+            eprintln!("Login failed: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+// ── Background session handlers (CLI-221) ────────────────────────────────
+
+/// List background sessions and exit.
+fn handle_bg_list() -> Result<()> {
+    // Clean stale PIDs first
+    let _ = archon_session::registry::cleanup_stale_pids();
+
+    let sessions = archon_session::registry::list_sessions()
+        .map_err(|e| anyhow::anyhow!("failed to list background sessions: {e}"))?;
+
+    if sessions.is_empty() {
+        eprintln!("No background sessions found.");
+    } else {
+        eprintln!("{:<10} {:<14} {:<20} {:<8} {}", "ID", "STATUS", "NAME", "TURNS", "STARTED");
+        for s in &sessions {
+            let short_id = if s.id.len() > 8 { &s.id[..8] } else { &s.id };
+            eprintln!(
+                "{:<10} {:<14} {:<20} {:<8} {}",
+                short_id, s.status, s.name, s.turns, s.started_at,
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Kill a background session and exit.
+#[cfg(unix)]
+fn handle_bg_kill(id: &str) -> Result<()> {
+    archon_session::background::kill_session(id)
+        .map_err(|e| anyhow::anyhow!("failed to kill session {id}: {e}"))?;
+    eprintln!("Session {id} killed.");
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn handle_bg_kill(id: &str) -> Result<()> {
+    eprintln!("Background sessions are only supported on Unix systems.");
+    std::process::exit(1);
+}
+
+/// Attach to a running background session (stream logs).
+#[cfg(unix)]
+fn handle_bg_attach(id: &str) -> Result<()> {
+    archon_session::attach::stream_logs(id, true)
+        .map_err(|e| anyhow::anyhow!("failed to attach to session {id}: {e}"))?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn handle_bg_attach(id: &str) -> Result<()> {
+    eprintln!("Background sessions are only supported on Unix systems.");
+    std::process::exit(1);
+}
+
+/// View background session logs (non-streaming).
+fn handle_bg_logs(id: &str) -> Result<()> {
+    let content = archon_session::attach::view_logs(id)
+        .map_err(|e| anyhow::anyhow!("failed to read logs for session {id}: {e}"))?;
+    print!("{content}");
+    Ok(())
+}
+
+/// Launch a background session and exit.
+#[cfg(unix)]
+fn handle_bg_launch(cli: &Cli) -> Result<()> {
+    let query = match &cli.bg {
+        Some(Some(q)) => q.clone(),
+        Some(None) => {
+            // Read from stdin
+            use std::io::Read as _;
+            let mut buf = String::new();
+            std::io::stdin()
+                .read_to_string(&mut buf)
+                .map_err(|e| anyhow::anyhow!("failed to read stdin: {e}"))?;
+            buf
+        }
+        None => unreachable!(),
+    };
+
+    if query.trim().is_empty() {
+        eprintln!("error: no query provided for background session");
+        std::process::exit(1);
+    }
+
+    let archon_binary = std::env::current_exe()
+        .map_err(|e| anyhow::anyhow!("failed to resolve archon binary path: {e}"))?;
+
+    let session_id = archon_session::background::launch_background(
+        &query,
+        cli.bg_name.as_deref(),
+        &archon_binary,
+    )
+    .map_err(|e| anyhow::anyhow!("failed to launch background session: {e}"))?;
+
+    let short_id = if session_id.len() > 8 {
+        &session_id[..8]
+    } else {
+        &session_id
+    };
+    eprintln!("Background session started: {session_id}");
+    eprintln!("  Attach: archon --attach {short_id}");
+    eprintln!("  Logs:   archon --logs {short_id}");
+    eprintln!("  Kill:   archon --kill {short_id}");
+    eprintln!("  List:   archon --ps");
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn handle_bg_launch(_cli: &Cli) -> Result<()> {
+    eprintln!("Background sessions are only supported on Unix systems.");
+    std::process::exit(1);
+}
+
+/// Handle `--sessions` flag: search, stats, or delete sessions.
+fn handle_sessions(cli: &Cli) -> Result<()> {
+    let db_path = archon_session::storage::default_db_path();
+    let store = archon_session::storage::SessionStore::open(&db_path)
+        .map_err(|e| anyhow::anyhow!("failed to open session database: {e}"))?;
+
+    // --sessions --delete <ID>
+    if let Some(ref id) = cli.delete {
+        store
+            .delete_session(id)
+            .map_err(|e| anyhow::anyhow!("failed to delete session: {e}"))?;
+        eprintln!("Deleted session {id}");
+        return Ok(());
+    }
+
+    // --sessions --stats
+    if cli.stats {
+        let stats = archon_session::search::session_stats(&store)
+            .map_err(|e| anyhow::anyhow!("failed to compute stats: {e}"))?;
+        println!("Sessions:  {}", stats.total_sessions);
+        println!("Tokens:    {}", stats.total_tokens);
+        println!("Messages:  {}", stats.total_messages);
+        println!("Avg dur:   {:.0}s", stats.avg_duration_secs);
+        return Ok(());
+    }
+
+    // Build search query from CLI flags.
+    let after = cli.after.as_ref().map(|s| parse_datetime(s)).transpose()?;
+    let before = cli.before.as_ref().map(|s| parse_datetime(s)).transpose()?;
+
+    let query = archon_session::search::SessionSearchQuery {
+        branch: cli.branch.clone(),
+        directory: cli.session_dir.clone(),
+        after,
+        before,
+        text: cli.search.clone(),
+        tag: None,
+        ..Default::default()
+    };
+
+    let results = archon_session::search::search_sessions(&store, &query)
+        .map_err(|e| anyhow::anyhow!("search failed: {e}"))?;
+
+    if results.is_empty() {
+        eprintln!("No matching sessions found.");
+    } else {
+        for session in &results {
+            println!("{}", archon_session::resume::format_session_line(session));
+        }
+    }
+
+    Ok(())
+}
+
+/// Parse a date string as either RFC 3339 or YYYY-MM-DD (assumes midnight UTC).
+fn parse_datetime(s: &str) -> Result<chrono::DateTime<chrono::Utc>> {
+    // Try RFC 3339 first.
+    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(s) {
+        return Ok(dt.with_timezone(&chrono::Utc));
+    }
+    // Try YYYY-MM-DD.
+    if let Ok(nd) = chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d") {
+        let naive = nd.and_hms_opt(0, 0, 0)
+            .ok_or_else(|| anyhow::anyhow!("invalid date: {s}"))?;
+        return Ok(naive.and_utc());
+    }
+    Err(anyhow::anyhow!(
+        "invalid date format: {s} (expected RFC 3339 or YYYY-MM-DD)"
+    ))
+}
+
+/// List recent sessions for `--resume` with no ID.
+async fn handle_resume_list() -> Result<()> {
+    let db_path = archon_session::storage::default_db_path();
+    let store = archon_session::storage::SessionStore::open(&db_path)
+        .map_err(|e| anyhow::anyhow!("failed to open session database: {e}"))?;
+
+    let sessions = store
+        .list_sessions(20)
+        .map_err(|e| anyhow::anyhow!("failed to list sessions: {e}"))?;
+
+    if sessions.is_empty() {
+        eprintln!("No previous sessions found.");
+    } else {
+        eprintln!("Recent sessions:");
+        for session in &sessions {
+            eprintln!("  {}", archon_session::resume::format_session_line(session));
+        }
+        eprintln!("\nUse: archon --resume <session-id>");
+    }
+    Ok(())
+}
+
+/// Load resume messages for `--resume <id>`.
+fn load_resume_messages(session_id: &str) -> Result<Vec<serde_json::Value>> {
+    let db_path = archon_session::storage::default_db_path();
+    let store = archon_session::storage::SessionStore::open(&db_path)
+        .map_err(|e| anyhow::anyhow!("failed to open session database: {e}"))?;
+    let (meta, raw_messages) = archon_session::resume::resume_session(&store, session_id)
+        .map_err(|e| anyhow::anyhow!("failed to resume session: {e}"))?;
+    eprintln!(
+        "Resumed session {} ({} messages, {} tokens)",
+        &meta.id[..8.min(meta.id.len())],
+        meta.message_count,
+        meta.total_tokens,
+    );
+    // Parse stored JSON strings back into Values
+    let messages: Vec<serde_json::Value> = raw_messages
+        .iter()
+        .filter_map(|s| serde_json::from_str(s).ok())
+        .collect();
+    Ok(messages)
+}
+
+/// Run a print-mode session: set up auth/agent, process one query, return exit code.
+async fn run_print_mode_session(
+    config: &archon_core::config::ArchonConfig,
+    session_id: &str,
+    cli: &Cli,
+    env_vars: &ArchonEnvVars,
+    print_config: PrintModeConfig,
+    resolved_flags: &archon_core::cli_flags::ResolvedFlags,
+) -> i32 {
+    // Resolve authentication (same as interactive)
+    let auth = match resolve_auth_with_keys(
+        env_vars.anthropic_api_key.as_deref(),
+        env_vars.archon_api_key.as_deref(),
+        env_vars.archon_oauth_token.as_deref(),
+        std::env::var("ANTHROPIC_AUTH_TOKEN").ok().as_deref(),
+    ) {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("Authentication failed: {e}");
+            eprintln!("Run `archon login` or set ANTHROPIC_API_KEY.");
+            return archon_core::print_mode::EXIT_ERROR;
+        }
+    };
+
+    let device_id = get_or_create_device_id();
+    let betas = resolve_betas(config.identity.spoof_betas.as_deref());
+    let identity_mode = if cli.identity_spoof {
+        IdentityMode::Spoof {
+            version: config.identity.spoof_version.clone(),
+            entrypoint: config.identity.spoof_entrypoint.clone(),
+            betas,
+            workload: config.identity.workload.clone(),
+            anti_distillation: config.identity.anti_distillation,
+        }
+    } else {
+        IdentityMode::Clean
+    };
+
+    let account_uuid = fetch_account_uuid(&auth).await;
+    let identity = IdentityProvider::new(
+        identity_mode,
+        session_id.to_string(),
+        device_id,
+        account_uuid,
+    );
+
+    let api_client = AnthropicClient::new(auth, identity.clone());
+    let mut registry = create_default_registry();
+    let working_dir = std::env::current_dir().unwrap_or_default();
+
+    // Apply tool filtering from resolved flags (CLI-220)
+    apply_tool_filters(&mut registry, resolved_flags);
+
+    // Build a minimal system prompt (skip CLAUDE.md in bare mode)
+    let claude_md = if resolved_flags.bare_mode {
+        String::new()
+    } else {
+        archon_core::reasoning::load_claude_md(&working_dir)
+    };
+    let git_info = archon_core::git::detect_git_info(&working_dir);
+    let git_branch = git_info.as_ref().map(|g| g.branch.as_str());
+    let env_section = build_environment_section(&working_dir, git_branch);
+
+    let identity_blocks = identity.system_prompt_blocks("", &claude_md, &env_section);
+    let system_prompt: Vec<serde_json::Value> = identity_blocks;
+
+    let tool_defs = registry.tool_definitions();
+
+    let fast_mode_shared = Arc::new(AtomicBool::new(cli.fast));
+    let initial_effort = if let Some(ref effort_arg) = cli.effort {
+        archon_llm::effort::parse_level(effort_arg).unwrap_or(EffortLevel::Medium)
+    } else {
+        EffortLevel::Medium
+    };
+    let effort_level_shared = Arc::new(tokio::sync::Mutex::new(initial_effort));
+    let model_override_shared = Arc::new(tokio::sync::Mutex::new(String::new()));
+    let initial_perm_mode = if cli.dangerously_skip_permissions {
+        "bypassPermissions".to_string()
+    } else if let Some(ref pm) = cli.permission_mode {
+        pm.clone()
+    } else {
+        config.permissions.mode.clone()
+    };
+    let permission_mode_shared = Arc::new(tokio::sync::Mutex::new(initial_perm_mode));
+
+    let agent_config = AgentConfig {
+        model: config.api.default_model.clone(),
+        max_tokens: config.api.thinking_budget,
+        thinking_budget: config.api.thinking_budget,
+        system_prompt,
+        tools: tool_defs,
+        working_dir: working_dir.clone(),
+        session_id: session_id.to_string(),
+        fast_mode: fast_mode_shared,
+        effort_level: effort_level_shared,
+        model_override: model_override_shared,
+        permission_mode: permission_mode_shared,
+    };
+
+    let (agent_event_tx, agent_event_rx) = tokio::sync::mpsc::channel::<AgentEvent>(256);
+    let mut agent = Agent::new(api_client, registry, agent_config, agent_event_tx);
+
+    // Wire auto-mode evaluator
+    let auto_eval = AutoModeEvaluator::new(AutoModeConfig {
+        project_dir: Some(working_dir),
+        ..Default::default()
+    });
+    agent.set_auto_evaluator(auto_eval);
+
+    run_print_mode(print_config, config, &mut agent, agent_event_rx).await
+}
+
+async fn run_interactive_session(
+    config: &archon_core::config::ArchonConfig,
+    session_id: &str,
+    cli: &Cli,
+    env_vars: &ArchonEnvVars,
+    resume_messages: Option<Vec<serde_json::Value>>,
+    resolved_flags: &archon_core::cli_flags::ResolvedFlags,
+) -> Result<()> {
+    // Reconstruct config_path and layer_filter for source tracking
+    let config_path = env_vars
+        .config_dir
+        .as_ref()
+        .map(|d| d.join("config.toml"))
+        .unwrap_or_else(default_config_path);
+
+    let layer_filter: Option<Vec<ConfigLayer>> =
+        cli.setting_sources.as_ref().map(|s| parse_layer_filter(s));
+
+    // ── Open session store and register this session ────────────
+    let session_store = Arc::new(archon_session::storage::SessionStore::open_default()
+        .map_err(|e| anyhow::anyhow!("failed to open session store: {e}"))?);
+    let session_store_fwd = Arc::clone(&session_store);
+
+    // ── Phase 2: Open memory via server/client access (CLI-103, CLI-234) ──
+    let data_dir = dirs::data_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("archon");
+    // Keep memory_access alive for the lifetime of the session so the TCP
+    // server handle (in the Direct variant) is not dropped.
+    let _memory_access = archon_memory::open_memory(&data_dir).await.unwrap_or_else(|e| {
+        tracing::warn!("failed to open memory: {e}, using in-memory fallback");
+        let graph = MemoryGraph::in_memory().expect("in-memory graph");
+        MemoryAccess::Direct {
+            graph: Arc::new(graph),
+            _server_handle: tokio::spawn(async {}),
+        }
+    });
+    // Extract Arc<MemoryGraph> for subsystems that need the concrete type
+    // (agent injection, rules engine). For Remote mode this falls back to
+    // an in-memory graph -- the MemoryAccess trait impl handles the real
+    // server connection transparently.
+    let memory_graph: Arc<MemoryGraph> = match _memory_access.graph() {
+        Some(g) => Arc::clone(g),
+        None => {
+            tracing::info!("remote memory mode; using local in-memory graph for agent injection");
+            Arc::new(MemoryGraph::in_memory().expect("in-memory graph"))
+        }
+    };
+    tracing::info!("memory graph opened");
+
+    // ── Phase 2b: Set up semantic embedding provider (CLI-205) ──
+    {
+        let embed_cfg = archon_memory::embedding::EmbeddingConfig {
+            provider: config.memory.embedding_provider,
+            hybrid_alpha: config.memory.hybrid_alpha,
+        };
+        match archon_memory::embedding::create_provider(&embed_cfg) {
+            Ok(provider) => {
+                if let Err(e) = memory_graph.set_embedding_provider(provider) {
+                    tracing::warn!("failed to initialise embedding schema: {e}");
+                } else {
+                    memory_graph.set_hybrid_alpha(embed_cfg.hybrid_alpha);
+                    tracing::info!(
+                        provider = %embed_cfg.provider,
+                        alpha = embed_cfg.hybrid_alpha,
+                        "semantic embedding provider active"
+                    );
+                }
+            }
+            Err(e) => {
+                tracing::warn!("embedding provider unavailable, using keyword-only search: {e}");
+            }
+        }
+    }
+
+    // ── Phase 2: Validate personality (CLI-105) ─────────────────
+    if let Err(e) = config.personality.validate() {
+        tracing::warn!("invalid personality config: {e}, using defaults");
+    }
+
+    // ── Phase 2: Load behavioral rules + defaults (CLI-106) ─────
+    let rules_engine = RulesEngine::new(&memory_graph);
+    match load_defaults(&rules_engine) {
+        Ok(n) if n > 0 => tracing::info!("loaded {n} default behavioral rules"),
+        Ok(_) => tracing::debug!("behavioral rules already present"),
+        Err(e) => tracing::warn!("failed to load default rules: {e}"),
+    }
+
+    // ── Phase 2: Initialize fast mode (CLI-118) ─────────────────
+    // Shared atomic so slash commands and the agent see the same state
+    let fast_mode_shared = Arc::new(AtomicBool::new(cli.fast));
+    let fast_mode = FastModeState::new_with(cli.fast);
+    if cli.fast {
+        tracing::info!("fast mode enabled via --fast flag");
+    }
+
+    // ── Phase 2: Initialize effort state (CLI-119) ──────────────
+    // Default effort is Medium; ultrathink keyword bumps to High per-turn.
+    let mut initial_effort = EffortLevel::Medium;
+    let mut effort_state = EffortState::new();
+    if let Some(ref effort_arg) = cli.effort {
+        match effort::parse_level(effort_arg) {
+            Ok(level) => {
+                effort_state.set_level(level);
+                initial_effort = level;
+                tracing::info!("effort level set to {level} via --effort flag");
+            }
+            Err(e) => {
+                tracing::warn!("invalid --effort value: {e}, using default (medium)");
+            }
+        }
+    } else {
+        // Use config default (medium unless overridden in config)
+        match effort::parse_level(&config.api.default_effort) {
+            Ok(level) => {
+                effort_state.set_level(level);
+                initial_effort = level;
+            }
+            Err(_) => {} // default is Medium, already set
+        }
+    }
+    let effort_level_shared = Arc::new(tokio::sync::Mutex::new(initial_effort));
+
+    // ── Phase 2: Initialize model override state ────────────────
+    let model_override_shared = Arc::new(tokio::sync::Mutex::new(String::new()));
+
+    // ── Phase 2: Initialize cost alert state (CLI-122) ──────────
+    let cost_alert_state = CostAlertState::new(&config.cost);
+    tracing::debug!(
+        "cost alerts: warn={}, hard={}",
+        config.cost.warn_threshold,
+        config.cost.hard_limit
+    );
+
+    // ── Phase 2: Open checkpoint store (CLI-116) ────────────────
+    let checkpoint_db_path = dirs::data_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("archon")
+        .join("checkpoints.db");
+    let checkpoint_store = if config.checkpoint.enabled {
+        match archon_session::checkpoint::CheckpointStore::open(&checkpoint_db_path) {
+            Ok(store) => {
+                tracing::info!("checkpoint store opened at {}", checkpoint_db_path.display());
+                Some(store)
+            }
+            Err(e) => {
+                tracing::warn!("failed to open checkpoint store: {e}, checkpoints disabled");
+                None
+            }
+        }
+    } else {
+        tracing::debug!("checkpoints disabled in config");
+        None
+    };
+
+    // ── Phase 2: Load MCP server configs (CLI-101) ──────────────
+    let working_dir = std::env::current_dir().unwrap_or_default();
+    let mcp_configs = if resolved_flags.bare_mode {
+        tracing::info!("bare mode: skipping MCP auto-discovery");
+        Vec::new()
+    } else {
+        archon_mcp::config::load_merged_configs(&working_dir).unwrap_or_else(|e| {
+            tracing::warn!("failed to load MCP configs: {e}");
+            Vec::new()
+        })
+    };
+
+    // Start MCP servers in background (CLI-102) — don't block TUI startup
+    let mcp_manager = archon_mcp::lifecycle::McpServerManager::new();
+    if !mcp_configs.is_empty() {
+        let mcp_mgr = mcp_manager.clone();
+        let configs = mcp_configs.clone();
+        tokio::spawn(async move {
+            let errors = mcp_mgr.start_all(configs).await;
+            for e in &errors {
+                tracing::warn!("MCP server start error: {e}");
+            }
+            if errors.is_empty() {
+                tracing::info!("all MCP servers started");
+            }
+
+            // GAP 9: After servers connect, list available MCP tools for logging.
+            // Dynamic registration into the agent's tool dispatch requires Phase 3
+            // (shared registry). For now, enumerate and log what's available.
+            match mcp_mgr.list_all_tools().await {
+                Ok(tools) => {
+                    tracing::info!("MCP tools available: {}", tools.len());
+                    for tool in &tools {
+                        tracing::debug!(
+                            "MCP tool: mcp__{}__{}",
+                            tool.server_name,
+                            tool.name,
+                        );
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("failed to enumerate MCP tools: {e}");
+                }
+            }
+        });
+    }
+
+    // ── Resolve authentication ──────────────────────────────────
+    let auth = match resolve_auth_with_keys(
+        env_vars.anthropic_api_key.as_deref(),
+        env_vars.archon_api_key.as_deref(),
+        env_vars.archon_oauth_token.as_deref(),
+        std::env::var("ANTHROPIC_AUTH_TOKEN").ok().as_deref(),
+    ) {
+        Ok(a) => {
+            match &a {
+                archon_llm::auth::AuthProvider::OAuthToken(creds) => {
+                    tracing::info!("authenticated via OAuth (subscription: {})", creds.subscription_type);
+                    if creds.is_expired() {
+                        tracing::warn!("OAuth token is expired, attempting refresh...");
+                        let http = reqwest::Client::new();
+                        let cred_path = archon_llm::tokens::credentials_path();
+                        match archon_llm::tokens::refresh_if_needed(&cred_path, &http).await {
+                            Ok(refreshed) => {
+                                tracing::info!("OAuth token refreshed successfully");
+                                archon_llm::auth::AuthProvider::OAuthToken(refreshed)
+                            }
+                            Err(e) => {
+                                eprintln!("Token refresh failed: {e}");
+                                eprintln!("Run `archon login` to re-authenticate.");
+                                std::process::exit(1);
+                            }
+                        }
+                    } else {
+                        a
+                    }
+                }
+                archon_llm::auth::AuthProvider::ApiKey(_) => {
+                    tracing::info!("authenticated via API key (fallback)");
+                    a
+                }
+                archon_llm::auth::AuthProvider::BearerToken(_) => {
+                    tracing::info!("authenticated via bearer token");
+                    a
+                }
+            }
+        }
+        Err(e) => {
+            eprintln!("Authentication failed: {e}");
+            eprintln!("Run `archon login` or set ANTHROPIC_API_KEY.");
+            std::process::exit(1);
+        }
+    };
+
+    // Build identity provider
+    let device_id = get_or_create_device_id();
+    let betas = resolve_betas(config.identity.spoof_betas.as_deref());
+
+    let identity_mode = if cli.identity_spoof {
+        // --identity-spoof flag overrides everything
+        IdentityMode::Spoof {
+            version: config.identity.spoof_version.clone(),
+            entrypoint: config.identity.spoof_entrypoint.clone(),
+            betas,
+            workload: config.identity.workload.clone(),
+            anti_distillation: config.identity.anti_distillation,
+        }
+    } else {
+        match config.identity.mode.as_str() {
+            "clean" => IdentityMode::Clean,
+            "custom" => {
+                let custom = config.identity.custom.as_ref();
+                IdentityMode::Custom {
+                    user_agent: custom
+                        .map(|c| c.user_agent.clone())
+                        .unwrap_or_else(|| "archon-cli/0.1.0".into()),
+                    x_app: custom
+                        .map(|c| c.x_app.clone())
+                        .unwrap_or_else(|| "archon".into()),
+                    extra_headers: custom
+                        .and_then(|c| c.extra_headers.clone())
+                        .unwrap_or_default(),
+                }
+            }
+            "spoof" => IdentityMode::Spoof {
+                version: config.identity.spoof_version.clone(),
+                entrypoint: config.identity.spoof_entrypoint.clone(),
+                betas: resolve_betas(config.identity.spoof_betas.as_deref()),
+                workload: config.identity.workload.clone(),
+                anti_distillation: config.identity.anti_distillation,
+            },
+            _ => IdentityMode::Clean,
+        }
+    };
+
+    tracing::debug!("Identity mode: {}", match &identity_mode {
+        IdentityMode::Clean => "clean",
+        IdentityMode::Spoof { .. } => "spoof",
+        IdentityMode::Custom { .. } => "custom",
+    });
+
+    // Fetch account_uuid from OAuth profile
+    let account_uuid = fetch_account_uuid(&auth).await;
+
+    let identity = IdentityProvider::new(
+        identity_mode,
+        session_id.to_string(),
+        device_id,
+        account_uuid,
+    );
+
+    // Create API client (clone auth/identity for /btw side questions)
+    let btw_auth = auth.clone();
+    let btw_identity = identity.clone();
+    let api_client = AnthropicClient::new(auth, identity.clone());
+
+    // Build tool registry and get tool definitions for API
+    let mut registry = create_default_registry();
+
+    // Apply tool filtering from resolved flags (CLI-220)
+    apply_tool_filters(&mut registry, resolved_flags);
+
+    // GAP 9: Register MCP tools synchronously if servers are already up,
+    // otherwise they'll be logged as available when the background task completes.
+    // For dynamic registration, we attempt to list tools from servers that started
+    // quickly. Full dynamic registration (adding tools mid-session) is Phase 3.
+    let tool_defs = registry.tool_definitions();
+
+    // ── Phase 2: Assemble system prompt with consciousness (CLI-108) ──
+    let claude_md = if resolved_flags.bare_mode {
+        tracing::info!("bare mode: skipping CLAUDE.md loading");
+        String::new()
+    } else {
+        load_claude_md(&working_dir)
+    };
+    let git_info = archon_core::git::detect_git_info(&working_dir);
+    let git_branch = git_info.as_ref().map(|g| g.branch.as_str());
+    let env_section = build_environment_section(&working_dir, git_branch);
+
+    // Register this session in the session store
+    if let Err(e) = session_store.register_session(
+        session_id,
+        &working_dir.display().to_string(),
+        git_branch,
+        &config.api.default_model,
+    ) {
+        tracing::warn!("failed to register session: {e}");
+    }
+
+    // Build identity blocks as a text string for the assembler
+    let identity_blocks = identity.system_prompt_blocks("", &claude_md, &env_section);
+    let identity_text = identity_blocks
+        .iter()
+        .filter_map(|b| b.get("text").and_then(|v| v.as_str()))
+        .collect::<Vec<_>>()
+        .join("\n\n");
+
+    let personality_text = config.personality.to_prompt_text();
+    let rules_text = rules_engine.format_for_prompt().unwrap_or_default();
+
+    let assembler = SystemPromptAssembler::new(BudgetConfig::default());
+    let input = AssemblyInput {
+        identity: if identity_text.is_empty() {
+            None
+        } else {
+            Some(identity_text)
+        },
+        personality: if resolved_flags.bare_mode { None } else { Some(personality_text) },
+        rules: if rules_text.is_empty() {
+            None
+        } else {
+            Some(rules_text)
+        },
+        memories: None, // Memory injection on first turn is empty (no context yet)
+        user_prompt: None,
+        project_instructions: if claude_md.is_empty() {
+            None
+        } else {
+            Some(claude_md.clone())
+        },
+        environment: if env_section.is_empty() {
+            None
+        } else {
+            Some(env_section.clone())
+        },
+        inner_voice: None, // Populated on subsequent turns by InnerVoice::to_prompt_block()
+        dynamic: Some(format!(
+            "Date: {}\nSession: {}",
+            chrono::Utc::now().format("%Y-%m-%d"),
+            session_id
+        )),
+    };
+
+    let sections = assembler.assemble(&input);
+
+    // Convert assembled sections into Vec<serde_json::Value> for the API
+    let system_prompt: Vec<serde_json::Value> = if let Some(ref override_text) = resolved_flags.system_prompt_override {
+        // --system-prompt or --system-prompt-file: replace the entire prompt
+        vec![serde_json::json!({ "type": "text", "text": override_text })]
+    } else {
+        let mut blocks: Vec<serde_json::Value> = sections
+            .into_iter()
+            .map(|section| {
+                let mut block = serde_json::json!({
+                    "type": "text",
+                    "text": section.content,
+                });
+                if let Some(ref cc) = section.cache_control {
+                    block["cache_control"] = serde_json::json!({ "type": cc });
+                }
+                block
+            })
+            .collect();
+        // --append-system-prompt or --append-system-prompt-file: append to assembled prompt
+        if let Some(ref append_text) = resolved_flags.system_prompt_append {
+            blocks.push(serde_json::json!({ "type": "text", "text": append_text }));
+        }
+        blocks
+    };
+
+    // Shared permission mode — honour CLI flags and config
+    let initial_perm_mode = if cli.dangerously_skip_permissions {
+        "bypassPermissions".to_string()
+    } else if let Some(ref pm) = cli.permission_mode {
+        pm.clone()
+    } else {
+        config.permissions.mode.clone()
+    };
+    let permission_mode_shared = Arc::new(tokio::sync::Mutex::new(initial_perm_mode));
+
+    // Clone system prompt for /btw side questions (shares prompt cache)
+    let btw_system_prompt = system_prompt.clone();
+
+    // Pre-compute system prompt and tool definition sizes for /context display
+    let system_prompt_chars: usize = system_prompt
+        .iter()
+        .filter_map(|b| b.get("text").and_then(|v| v.as_str()))
+        .map(|s| s.len())
+        .sum();
+    let tool_defs_chars: usize = tool_defs
+        .iter()
+        .map(|t| serde_json::to_string(t).unwrap_or_default().len())
+        .sum();
+
+    // Build agent config with shared fast_mode + effort state (GAP 3 & 4)
+    let agent_config = AgentConfig {
+        model: config.api.default_model.clone(),
+        max_tokens: config.api.thinking_budget,
+        thinking_budget: config.api.thinking_budget,
+        system_prompt,
+        tools: tool_defs,
+        working_dir: working_dir.clone(),
+        session_id: session_id.to_string(),
+        fast_mode: Arc::clone(&fast_mode_shared),
+        effort_level: Arc::clone(&effort_level_shared),
+        model_override: Arc::clone(&model_override_shared),
+        permission_mode: Arc::clone(&permission_mode_shared),
+    };
+
+    // Create channels
+    let (agent_event_tx, mut agent_event_rx) = tokio::sync::mpsc::channel::<AgentEvent>(256);
+    let (tui_event_tx, tui_event_rx) = tokio::sync::mpsc::channel::<TuiEvent>(256);
+    let (user_input_tx, mut user_input_rx) = tokio::sync::mpsc::channel::<String>(16);
+
+    // Create agent
+    let mut agent = Agent::new(api_client, registry, agent_config, agent_event_tx);
+
+    // Wire checkpoint store into agent (CLI-116)
+    if let Some(store) = checkpoint_store {
+        agent.set_checkpoint_store(store);
+    }
+
+    // GAP 5/7: Wire memory graph into agent
+    agent.set_memory_graph(Arc::clone(&memory_graph));
+
+    // Wire hook system — load hooks from config.toml [hooks] section if present
+    {
+        let hooks_toml_path = config_path.parent()
+            .unwrap_or(std::path::Path::new("."))
+            .join("hooks.toml");
+        let hook_configs = if hooks_toml_path.exists() {
+            match std::fs::read_to_string(&hooks_toml_path) {
+                Ok(content) => archon_core::hooks::config::parse_hooks_from_toml(&content)
+                    .unwrap_or_default(),
+                Err(_) => Vec::new(),
+            }
+        } else {
+            Vec::new()
+        };
+        let hook_registry = archon_core::hooks::HookRegistry::from_config(hook_configs);
+        let hook_dispatcher = archon_core::hooks::HookDispatcher::new(
+            hook_registry,
+            session_id.to_string(),
+            working_dir.clone(),
+        );
+        agent.set_hook_dispatcher(hook_dispatcher);
+    }
+
+    // GAP 6: Wire auto-mode evaluator
+    let auto_eval = AutoModeEvaluator::new(AutoModeConfig {
+        project_dir: Some(working_dir.clone()),
+        ..Default::default()
+    });
+    agent.set_auto_evaluator(auto_eval);
+
+    // Permission prompt channel — agent waits for y/n, TUI sends response
+    let (perm_prompt_tx, perm_prompt_rx) = tokio::sync::mpsc::channel::<bool>(1);
+    agent.permission_response_rx = Some(Arc::new(tokio::sync::Mutex::new(perm_prompt_rx)));
+
+    // Restore conversation from a previous session if --resume <id> was given
+    if let Some(messages) = resume_messages {
+        let count = messages.len();
+        agent.restore_conversation(messages);
+        tracing::info!("restored {count} messages from previous session");
+        // Restore session name if the resumed session had one
+        if let Some(Some(ref resume_id)) = cli.resume {
+            if let Ok(meta) = session_store.get_session(resume_id) {
+                if let Some(name) = meta.name {
+                    let _ = tui_event_tx.send(TuiEvent::SessionRenamed(name)).await;
+                }
+            }
+        }
+    }
+
+    // GAP 2: Shared show_thinking flag
+    let show_thinking = Arc::clone(&agent.show_thinking);
+
+    // Shared session stats for /status and /cost commands
+    let session_stats_shared = Arc::clone(&agent.session_stats);
+
+    // ── Phase 2: Wrap shared state for the event forwarder (CLI-122) ──
+    let config_cost = config.cost.clone();
+    let mut cost_alert_state = cost_alert_state;
+
+    // Spawn agent event forwarder (AgentEvent -> TuiEvent) with cost alert checks
+    let tui_tx = tui_event_tx.clone();
+    // Thinking filtering now happens in the TUI (App.show_thinking), not here.
+    // Start config file watcher for hot-reload
+    {
+        let config_paths = vec![config_path.clone()];
+        match archon_core::config_watcher::ConfigWatcher::start(&config_paths) {
+            Ok(watcher) => {
+                let reloader = archon_core::config_watcher::DebouncedReloader::new(
+                    watcher, 500, config.clone(),
+                );
+                let watch_tui_tx = tui_event_tx.clone();
+                let watch_config_paths = config_paths;
+                tokio::spawn(async move {
+                    let mut reloader = reloader;
+                    loop {
+                        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                        if let Some(changed_keys) = reloader.check_and_reload(&watch_config_paths) {
+                            let non_reloadable = archon_core::config_diff::non_reloadable_changes(&changed_keys);
+                            if !non_reloadable.is_empty() {
+                                let msg = format!(
+                                    "\nConfig reloaded. Non-reloadable changes (require restart): {}\n",
+                                    non_reloadable.join(", ")
+                                );
+                                let _ = watch_tui_tx.send(TuiEvent::TextDelta(msg)).await;
+                            } else if !changed_keys.is_empty() {
+                                let msg = format!(
+                                    "\nConfig reloaded: {}\n",
+                                    changed_keys.join(", ")
+                                );
+                                let _ = watch_tui_tx.send(TuiEvent::TextDelta(msg)).await;
+                            }
+                        }
+                    }
+                });
+                tracing::debug!("config file watcher started");
+            }
+            Err(e) => {
+                tracing::warn!("failed to start config watcher: {e}");
+            }
+        }
+    }
+
+    // BUG 4 FIX: Read from session_stats instead of independent counters so /clear resets cost alerts
+    let session_stats_for_fwd = Arc::clone(&session_stats_shared);
+    let session_id_fwd = session_id.to_string();
+    let session_store_for_fwd = Arc::clone(&session_store_fwd);
+    let last_assistant_response_shared: Arc<tokio::sync::Mutex<String>> = Arc::new(tokio::sync::Mutex::new(String::new()));
+    let last_response_for_fwd = Arc::clone(&last_assistant_response_shared);
+    tokio::spawn(async move {
+        while let Some(event) = agent_event_rx.recv().await {
+            let tui_event = match event {
+                AgentEvent::TextDelta(text) => {
+                    // Track last assistant response for /copy
+                    let mut resp = last_response_for_fwd.lock().await;
+                    resp.push_str(&text);
+                    TuiEvent::TextDelta(text)
+                }
+                // Always forward thinking deltas so the timer is accurate.
+                // The TUI decides whether to display or accumulate the text.
+                AgentEvent::ThinkingDelta(text) => TuiEvent::ThinkingDelta(text),
+                AgentEvent::ToolCallStarted { name, id } => TuiEvent::ToolStart { name, id },
+                AgentEvent::ToolCallComplete { name, result, .. } => TuiEvent::ToolComplete {
+                    name,
+                    success: !result.is_error,
+                },
+                AgentEvent::TurnComplete {
+                    input_tokens,
+                    output_tokens,
+                } => {
+                    // Freeze last_assistant_response (new turn will start fresh)
+                    // Don't clear here — /copy should get the completed response
+                    // Read cumulative tokens from shared session_stats (resets on /clear)
+                    let estimated_cost = {
+                        let stats = session_stats_for_fwd.lock().await;
+                        (stats.input_tokens as f64 * 3.0
+                            + stats.output_tokens as f64 * 15.0)
+                            / 1_000_000.0
+                    };
+
+                    // Check cost alerts (CLI-122)
+                    match cost_alert_state.check_cost(estimated_cost, &config_cost) {
+                        CostAlertAction::Warn(msg) => {
+                            let _ = tui_tx.send(TuiEvent::Error(format!("COST WARNING: {msg}"))).await;
+                        }
+                        CostAlertAction::HardLimitPause(msg) => {
+                            let _ = tui_tx.send(TuiEvent::Error(format!("COST LIMIT: {msg}"))).await;
+                        }
+                        CostAlertAction::None => {}
+                    }
+
+                    // Update session store with cumulative usage
+                    {
+                        let stats = session_stats_for_fwd.lock().await;
+                        let _ = session_store_for_fwd.update_usage(
+                            &session_id_fwd,
+                            stats.input_tokens + stats.output_tokens,
+                            estimated_cost,
+                        );
+                    }
+
+                    TuiEvent::TurnComplete {
+                        input_tokens,
+                        output_tokens,
+                    }
+                }
+                AgentEvent::Error(msg) => TuiEvent::Error(msg),
+                AgentEvent::SessionComplete => TuiEvent::Done,
+                AgentEvent::PermissionRequired { tool, description } => {
+                    TuiEvent::PermissionPrompt { tool, description }
+                }
+                AgentEvent::PermissionGranted { .. }
+                | AgentEvent::PermissionDenied { .. } => continue,
+                _ => continue,
+            };
+            if tui_tx.send(tui_event).await.is_err() {
+                break;
+            }
+        }
+    });
+
+    // ── Phase 2: Slash command state (CLI-110, CLI-118, CLI-119) ──
+    let mut fast_mode = fast_mode;
+    let mut effort_state = effort_state;
+
+    // Determine auth label for /doctor
+    let auth_label = match resolve_auth_with_keys(
+        env_vars.anthropic_api_key.as_deref(),
+        env_vars.archon_api_key.as_deref(),
+        env_vars.archon_oauth_token.as_deref(),
+        std::env::var("ANTHROPIC_AUTH_TOKEN").ok().as_deref(),
+    ) {
+        Ok(archon_llm::auth::AuthProvider::OAuthToken(_)) => "OAuth".to_string(),
+        Ok(archon_llm::auth::AuthProvider::ApiKey(_)) => "API key".to_string(),
+        Ok(archon_llm::auth::AuthProvider::BearerToken(_)) => "Bearer token".to_string(),
+        Err(_) => "none".to_string(),
+    };
+
+    let mut cmd_ctx = SlashCommandContext {
+        fast_mode_shared: Arc::clone(&fast_mode_shared),
+        effort_level_shared: Arc::clone(&effort_level_shared),
+        model_override_shared: Arc::clone(&model_override_shared),
+        default_model: config.api.default_model.clone(),
+        show_thinking: Arc::clone(&show_thinking),
+        session_stats: Arc::clone(&session_stats_shared),
+        permission_mode: Arc::clone(&permission_mode_shared),
+        session_id: session_id.to_string(),
+        cost_config: config.cost.clone(),
+        memory_graph: Arc::clone(&memory_graph),
+        mcp_manager: mcp_manager.clone(),
+        working_dir: working_dir.clone(),
+        auth_label,
+        config_path: config_path.clone(),
+        env_vars: env_vars.clone(),
+        config_sources: archon_core::config_source::ConfigSourceMap::from_layered_load(
+            Some(&config_path),
+            &working_dir,
+            cli.settings.as_deref(),
+            layer_filter.as_deref(),
+        )
+        .unwrap_or_default(),
+        skill_registry: Arc::new(register_builtins()),
+        last_assistant_response: Arc::clone(&last_assistant_response_shared),
+        system_prompt_chars,
+        tool_defs_chars,
+    };
+
+    // Spawn agent input processor with slash command dispatch
+    let input_tui_tx = tui_event_tx.clone();
+    let slash_commands_disabled = resolved_flags.disable_slash_commands;
+    let session_store_for_input = Arc::clone(&session_store);
+    let session_id_for_input = session_id.to_string();
+    tokio::spawn(async move {
+        while let Some(input) = user_input_rx.recv().await {
+            // Session picker selection — load messages and restore conversation
+            if let Some(session_id) = input.strip_prefix("__resume_session__ ") {
+                let session_id = session_id.trim();
+                let db_path = archon_session::storage::default_db_path();
+                match archon_session::storage::SessionStore::open(&db_path) {
+                    Ok(store) => {
+                        // Restore session name badge if present
+                        if let Ok(meta) = store.get_session(session_id) {
+                            if let Some(name) = meta.name {
+                                let _ = input_tui_tx.send(TuiEvent::SessionRenamed(name)).await;
+                            }
+                        }
+                        match store.load_messages(session_id) {
+                            Ok(raw_messages) => {
+                                // Parse JSON strings back to Values
+                                let messages: Vec<serde_json::Value> = raw_messages.iter()
+                                    .filter_map(|s| serde_json::from_str(s).ok())
+                                    .collect();
+                                let count = messages.len();
+                                agent.clear_conversation().await;
+
+                                // Display the loaded conversation history in the output
+                                let _ = input_tui_tx.send(TuiEvent::TextDelta(
+                                    format!("\n━━━ Resumed session {session_id} ({count} messages) ━━━\n\n")
+                                )).await;
+                                for msg in &messages {
+                                    let role = msg["role"].as_str().unwrap_or("unknown");
+                                    // Extract text content (handles both string and array formats)
+                                    let content = match &msg["content"] {
+                                        serde_json::Value::String(s) => s.clone(),
+                                        serde_json::Value::Array(arr) => {
+                                            arr.iter()
+                                                .filter_map(|item| item["text"].as_str().map(|s| s.to_string()))
+                                                .collect::<Vec<_>>()
+                                                .join("\n")
+                                        }
+                                        _ => String::new(),
+                                    };
+                                    if content.is_empty() {
+                                        continue;
+                                    }
+                                    let label = match role {
+                                        "user" => "> ",
+                                        "assistant" => "",
+                                        _ => "",
+                                    };
+                                    let _ = input_tui_tx.send(TuiEvent::TextDelta(
+                                        format!("{label}{content}\n\n")
+                                    )).await;
+                                }
+                                let _ = input_tui_tx.send(TuiEvent::TextDelta(
+                                    "━━━ End of history — continue conversation ━━━\n\n".to_string()
+                                )).await;
+
+                                agent.restore_conversation(messages);
+                            }
+                            Err(e) => {
+                                let _ = input_tui_tx.send(TuiEvent::Error(
+                                    format!("Failed to load session: {e}")
+                                )).await;
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        let _ = input_tui_tx.send(TuiEvent::Error(
+                            format!("Session store error: {e}")
+                        )).await;
+                    }
+                }
+                let _ = input_tui_tx.send(TuiEvent::SlashCommandComplete).await;
+                continue;
+            }
+
+            // ── Phase 2: Slash command dispatch (CLI-110) ────────
+            if !slash_commands_disabled && input.starts_with('/') {
+                // GAP 1: /compact needs direct access to agent.compact()
+                if input.trim() == "/exit" || input.trim() == "/quit" {
+                    // Fire SessionEnd hook and close the TUI
+                    agent.fire_hook(
+                        archon_core::hooks::HookType::SessionEnd,
+                        serde_json::json!({"hook_type": "session_end", "reason": "exit"}),
+                    ).await;
+                    let _ = input_tui_tx.send(TuiEvent::TextDelta("\nGoodbye.\n".into())).await;
+                    let _ = input_tui_tx.send(TuiEvent::Done).await;
+                    continue;
+                }
+                if input.trim() == "/compact" {
+                    let msg = agent.compact().await;
+                    let _ = input_tui_tx.send(TuiEvent::TextDelta(format!("\n{msg}\n"))).await;
+                    let _ = input_tui_tx.send(TuiEvent::SlashCommandComplete).await;
+                    continue;
+                }
+
+                // /clear needs direct access to agent.clear_conversation()
+                if input.trim() == "/clear" {
+                    // Fire SessionEnd hook before clearing
+                    agent.fire_hook(
+                        archon_core::hooks::HookType::SessionEnd,
+                        serde_json::json!({"hook_type": "session_end", "reason": "clear"}),
+                    ).await;
+                    // Clear conversation
+                    agent.clear_conversation().await;
+                    // Reset session stats
+                    {
+                        let mut stats = cmd_ctx.session_stats.lock().await;
+                        *stats = archon_core::agent::SessionStats::default();
+                    }
+                    // Clear last assistant response buffer
+                    {
+                        let mut resp = cmd_ctx.last_assistant_response.lock().await;
+                        resp.clear();
+                    }
+                    // Fire SessionStart hook after
+                    agent.fire_hook(
+                        archon_core::hooks::HookType::SessionStart,
+                        serde_json::json!({"hook_type": "session_start", "reason": "clear"}),
+                    ).await;
+                    let _ = input_tui_tx.send(TuiEvent::TextDelta("\nConversation cleared. Session reset.\n".into())).await;
+                    let _ = input_tui_tx.send(TuiEvent::SlashCommandComplete).await;
+                    continue;
+                }
+
+                // /btw — side question runs in PARALLEL via a separate API call
+                // Does NOT interrupt the main agent. Spawns a forked one-shot query.
+                if input.trim().starts_with("/btw ") {
+                    let question = input.trim().strip_prefix("/btw ").unwrap_or("").trim().to_string();
+                    if !question.is_empty() {
+                        let btw_tui_tx = input_tui_tx.clone();
+                        let btw_auth = agent.auth_provider().clone();
+                        let btw_identity = agent.identity_provider().clone();
+                        let btw_model = agent.current_model().to_string();
+
+                        tokio::spawn(async move {
+
+                            let wrapped = format!(
+                                "<system-reminder>This is a side question. Answer directly in a single response.\n\
+                                 You have NO tools. This is a one-off response. If you don't know, say so.\n\
+                                 Do NOT say \"Let me check\" or promise actions.</system-reminder>\n\n{question}"
+                            );
+
+                            let btw_client = archon_llm::anthropic::AnthropicClient::new(btw_auth, btw_identity);
+                            let request = archon_llm::anthropic::MessageRequest {
+                                model: btw_model,
+                                max_tokens: 1024,
+                                system: vec![serde_json::json!({
+                                    "type": "text",
+                                    "text": "Answer the side question briefly and directly. No tools available."
+                                })],
+                                messages: vec![serde_json::json!({
+                                    "role": "user",
+                                    "content": wrapped,
+                                })],
+                                tools: Vec::new(),
+                                thinking: None,
+                                speed: None,
+                                effort: None,
+                            };
+
+                            match btw_client.stream_message(request).await {
+                                Ok(mut rx) => {
+                                    let mut response = String::new();
+                                    while let Some(event) = rx.recv().await {
+                                        if let archon_llm::streaming::StreamEvent::TextDelta { text, .. } = event {
+                                            response.push_str(&text);
+                                        }
+                                    }
+                                    let _ = btw_tui_tx.send(TuiEvent::BtwResponse(response)).await;
+                                }
+                                Err(e) => {
+                                    let _ = btw_tui_tx.send(TuiEvent::Error(
+                                        format!("btw failed: {e}")
+                                    )).await;
+                                }
+                            }
+                        });
+                    } else {
+                        let _ = input_tui_tx.send(TuiEvent::TextDelta(
+                            "\nUsage: /btw <question>\n".into()
+                        )).await;
+                    }
+                    // Don't send SlashCommandComplete — btw runs in background
+                    continue;
+                }
+
+                // /export needs access to conversation messages
+                if input.trim() == "/export" || input.trim().starts_with("/export ") {
+                    let format_arg = input.trim().strip_prefix("/export").unwrap_or("").trim();
+                    let format = if format_arg.is_empty() {
+                        archon_session::export::ExportFormat::Markdown
+                    } else {
+                        match archon_session::export::ExportFormat::from_str(format_arg) {
+                            Ok(f) => f,
+                            Err(e) => {
+                                let _ = input_tui_tx.send(TuiEvent::Error(e)).await;
+                                let _ = input_tui_tx.send(TuiEvent::SlashCommandComplete).await;
+                                continue;
+                            }
+                        }
+                    };
+                    let messages = &agent.conversation_state().messages;
+                    match archon_session::export::export_session(messages, &cmd_ctx.session_id, format) {
+                        Ok(content) => {
+                            let export_dir = dirs::data_dir()
+                                .unwrap_or_else(|| PathBuf::from("."))
+                                .join("archon")
+                                .join("exports");
+                            if let Err(e) = std::fs::create_dir_all(&export_dir) {
+                                let _ = input_tui_tx.send(TuiEvent::Error(format!("Failed to create export dir: {e}"))).await;
+                                let _ = input_tui_tx.send(TuiEvent::SlashCommandComplete).await;
+                                continue;
+                            }
+                            let filename = archon_session::export::default_export_filename(&cmd_ctx.session_id, format);
+                            let path = export_dir.join(&filename);
+                            match archon_session::export::write_export(&content, &path) {
+                                Ok(()) => {
+                                    let _ = input_tui_tx.send(TuiEvent::TextDelta(
+                                        format!("\nExported ({format_arg_display}) to {}\n",
+                                            path.display(),
+                                            format_arg_display = if format_arg.is_empty() { "markdown" } else { format_arg })
+                                    )).await;
+                                }
+                                Err(e) => {
+                                    let _ = input_tui_tx.send(TuiEvent::Error(format!("Export failed: {e}"))).await;
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            let _ = input_tui_tx.send(TuiEvent::Error(format!("Export failed: {e}"))).await;
+                        }
+                    }
+                    let _ = input_tui_tx.send(TuiEvent::SlashCommandComplete).await;
+                    continue;
+                }
+
+                let handled = handle_slash_command(
+                    input.trim(),
+                    &mut fast_mode,
+                    &mut effort_state,
+                    &input_tui_tx,
+                    &mut cmd_ctx,
+                )
+                .await;
+                if handled {
+                    let _ = input_tui_tx.send(TuiEvent::SlashCommandComplete).await;
+                    continue;
+                }
+
+                // Fallback: check the skill registry for expanded commands
+                let (cmd_name, cmd_args) = match archon_core::skills::parser::parse_slash_command(input.trim()) {
+                    Some((name, args)) => (name, args),
+                    None => (String::new(), Vec::new()),
+                };
+
+                if let Some(skill) = cmd_ctx.skill_registry.resolve(&cmd_name) {
+                    let skill_ctx = SkillContext {
+                        session_id: cmd_ctx.session_id.clone(),
+                        working_dir: cmd_ctx.working_dir.clone(),
+                        model: cmd_ctx.default_model.clone(),
+                    };
+                    let output = skill.execute(&cmd_args, &skill_ctx);
+                    match output {
+                        SkillOutput::Prompt(prompt) => {
+                            // Equivalent to Claude Code's PromptCommand — inject into
+                            // the conversation as a user message and let the agent respond.
+                            {
+                                let mut resp = cmd_ctx.last_assistant_response.lock().await;
+                                resp.clear();
+                            }
+                            let _ = input_tui_tx.send(TuiEvent::GenerationStarted).await;
+                            if let Err(e) = agent.process_message(&prompt).await {
+                                tracing::error!("insights agent error: {e}");
+                            }
+                            let _ = input_tui_tx.send(TuiEvent::SlashCommandComplete).await;
+                        }
+                        SkillOutput::Text(t) | SkillOutput::Markdown(t) => {
+                            let _ = input_tui_tx.send(TuiEvent::TextDelta(format!("\n{t}\n"))).await;
+                            let _ = input_tui_tx.send(TuiEvent::SlashCommandComplete).await;
+                        }
+                        SkillOutput::Error(e) => {
+                            let _ = input_tui_tx.send(TuiEvent::TextDelta(format!("\nError: {e}\n"))).await;
+                            let _ = input_tui_tx.send(TuiEvent::SlashCommandComplete).await;
+                        }
+                    }
+                    continue;
+                }
+
+                // Not a known slash command — falls through to agent as normal input
+            }
+
+            // Clear last response buffer for /copy
+            {
+                let mut resp = cmd_ctx.last_assistant_response.lock().await;
+                resp.clear();
+            }
+            // Signal the TUI that generation is starting BEFORE the agent runs.
+            // This is the canonical place is_generating gets set to true.
+            let _ = input_tui_tx.send(TuiEvent::GenerationStarted).await;
+            if let Err(e) = agent.process_message(&input).await {
+                tracing::error!("agent loop error: {e}");
+            }
+            // Persist messages to session store for /resume
+            let messages = &agent.conversation_state().messages;
+            for (idx, msg) in messages.iter().enumerate() {
+                if let Ok(json_str) = serde_json::to_string(msg) {
+                    if let Err(e) = session_store_for_input.save_message(
+                        &session_id_for_input,
+                        idx as u64,
+                        &json_str,
+                    ) {
+                        tracing::warn!("save_message failed at idx {idx}: {e}");
+                    }
+                }
+            }
+        }
+    });
+
+    // Build splash screen config with recent activity from session store
+    let activity = {
+        let db_path = archon_session::storage::default_db_path();
+        match archon_session::storage::SessionStore::open(&db_path) {
+            Ok(store) => {
+                let cwd = working_dir.display().to_string();
+                store
+                    .list_sessions(10)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter(|s| s.working_directory == cwd)
+                    .filter(|s| s.id != session_id)
+                    .take(3)
+                    .map(|s| {
+                        let when = archon_tui::splash::format_relative_time(&s.last_active);
+                        let msgs = s.message_count;
+                        let desc = if msgs == 0 {
+                            "Empty session".to_string()
+                        } else {
+                            format!("{msgs} messages, {}", s.model)
+                        };
+                        archon_tui::splash::ActivityEntry {
+                            when,
+                            description: desc,
+                        }
+                    })
+                    .collect()
+            }
+            Err(e) => {
+                tracing::debug!("could not open session store for splash: {e}");
+                Vec::new()
+            }
+        }
+    };
+    let splash_opt = if resolved_flags.bare_mode {
+        None
+    } else {
+        Some(archon_tui::app::SplashConfig {
+            model: config.api.default_model.clone(),
+            working_dir: working_dir.display().to_string(),
+            activity,
+        })
+    };
+
+    // Set up /btw side question channel — uses same auth/identity/model as main agent
+    let (btw_tx, mut btw_rx) = tokio::sync::mpsc::channel::<String>(8);
+    {
+        let btw_tui_tx = tui_event_tx.clone();
+        // Clone the same client the agent uses — same auth, identity, headers
+        let btw_client = AnthropicClient::new(btw_auth, btw_identity);
+        let btw_model = config.api.default_model.clone();
+        let btw_max_tokens = config.api.thinking_budget;
+        // Use the pre-cloned system prompt so /btw shares the prompt cache
+        let btw_system_prompt = btw_system_prompt;
+        tokio::spawn(async move {
+            while let Some(question) = btw_rx.recv().await {
+                let tui_tx = btw_tui_tx.clone();
+                let client = btw_client.clone();
+                let model = btw_model.clone();
+                let sys_prompt = btw_system_prompt.clone();
+                let max_tokens = btw_max_tokens;
+                tokio::spawn(async move {
+                    let wrapped = format!(
+                        "<system-reminder>This is a side question from the user. Answer directly in a single response.\n\
+                         You have NO tools available. This is a one-off response.\n\
+                         Do NOT say \"Let me check\" or promise actions.</system-reminder>\n\n{question}"
+                    );
+                    // Use the same system prompt as the main agent for cache sharing
+                    let request = archon_llm::anthropic::MessageRequest {
+                        model,
+                        max_tokens,
+                        system: sys_prompt,
+                        messages: vec![serde_json::json!({
+                            "role": "user",
+                            "content": wrapped,
+                        })],
+                        tools: Vec::new(), // no tools for side questions
+                        thinking: None,
+                        speed: None,
+                        effort: None,
+                    };
+                    let stream_result: Result<tokio::sync::mpsc::Receiver<archon_llm::streaming::StreamEvent>, _> = client.stream_message(request).await;
+                    match stream_result {
+                        Ok(mut rx) => {
+                            let mut response = String::new();
+                            while let Some(event) = rx.recv().await {
+                                if let archon_llm::streaming::StreamEvent::TextDelta { ref text, .. } = event {
+                                    response.push_str(&text);
+                                }
+                            }
+                            let _ = tui_tx.send(TuiEvent::BtwResponse(response)).await;
+                        }
+                        Err(e) => {
+                            let _ = tui_tx.send(TuiEvent::BtwResponse(format!("Error: {e}"))).await;
+                        }
+                    }
+                });
+            }
+        });
+    }
+
+    // Run the TUI (blocks until user quits)
+    run_tui(tui_event_rx, user_input_tx, splash_opt, Some(btw_tx), Some(perm_prompt_tx)).await?;
+
+    // ── Phase 2: Graceful MCP shutdown ──────────────────────────
+    mcp_manager.shutdown_all().await;
+    tracing::info!("MCP servers shut down");
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// CLI-220: Tool filtering helper
+// ---------------------------------------------------------------------------
+
+/// Apply `--tools` (whitelist) and `--disallowed-tools` (blacklist) from
+/// resolved CLI flags to the tool registry.
+fn apply_tool_filters(
+    registry: &mut archon_core::dispatch::ToolRegistry,
+    flags: &archon_core::cli_flags::ResolvedFlags,
+) {
+    if let Some(ref whitelist) = flags.tool_whitelist {
+        let names: Vec<&str> = whitelist.iter().map(|s| s.as_str()).collect();
+        registry.filter_whitelist(&names);
+        tracing::info!("tool whitelist applied: {} tools retained", names.len());
+    }
+    if let Some(ref blacklist) = flags.tool_blacklist {
+        let names: Vec<&str> = blacklist.iter().map(|s| s.as_str()).collect();
+        registry.filter_blacklist(&names);
+        tracing::info!("tool blacklist applied: removed {} patterns", names.len());
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Slash command shared state
+// ---------------------------------------------------------------------------
+
+/// Groups all shared state needed by slash command handlers so we do not need
+/// a dozen individual function parameters.
+struct SlashCommandContext {
+    fast_mode_shared: Arc<AtomicBool>,
+    effort_level_shared: Arc<tokio::sync::Mutex<EffortLevel>>,
+    model_override_shared: Arc<tokio::sync::Mutex<String>>,
+    default_model: String,
+    show_thinking: Arc<AtomicBool>,
+    session_stats: Arc<tokio::sync::Mutex<SessionStats>>,
+    permission_mode: Arc<tokio::sync::Mutex<String>>,
+    session_id: String,
+    cost_config: archon_core::config::CostConfig,
+    memory_graph: Arc<MemoryGraph>,
+    mcp_manager: McpServerManager,
+    working_dir: PathBuf,
+    auth_label: String,
+    config_path: PathBuf,
+    env_vars: ArchonEnvVars,
+    config_sources: archon_core::config_source::ConfigSourceMap,
+    skill_registry: Arc<archon_core::skills::SkillRegistry>,
+    last_assistant_response: Arc<tokio::sync::Mutex<String>>,
+    /// Pre-computed character count of all system prompt blocks (for /context).
+    system_prompt_chars: usize,
+    /// Pre-computed character count of all tool definition JSON (for /context).
+    tool_defs_chars: usize,
+}
+
+/// Handle slash commands. Returns `true` if the command was recognized and handled.
+async fn handle_slash_command(
+    input: &str,
+    fast_mode: &mut FastModeState,
+    effort_state: &mut EffortState,
+    tui_tx: &tokio::sync::mpsc::Sender<TuiEvent>,
+    ctx: &mut SlashCommandContext,
+) -> bool {
+    match input {
+        "/fast" => {
+            let new_state = fast_mode.toggle();
+            ctx.fast_mode_shared.store(new_state, Ordering::Relaxed);
+            let msg = if new_state {
+                "Fast mode ENABLED. Responses will be faster but lower quality."
+            } else {
+                "Fast mode DISABLED. Back to normal quality."
+            };
+            let _ = tui_tx.send(TuiEvent::TextDelta(format!("\n{msg}\n"))).await;
+            true
+        }
+        // /compact and /clear are handled inline in the input processor (need agent access)
+        "/compact" | "/clear" => true,
+        s if s == "/export" || s.starts_with("/export ") => true,
+        "/thinking on" | "/thinking" => {
+            ctx.show_thinking.store(true, Ordering::Relaxed);
+            let _ = tui_tx.send(TuiEvent::ThinkingToggle(true)).await;
+            let _ = tui_tx
+                .send(TuiEvent::TextDelta("\nThinking display enabled.\n".into()))
+                .await;
+            true
+        }
+        "/thinking off" => {
+            ctx.show_thinking.store(false, Ordering::Relaxed);
+            let _ = tui_tx.send(TuiEvent::ThinkingToggle(false)).await;
+            let _ = tui_tx
+                .send(TuiEvent::TextDelta("\nThinking display disabled.\n".into()))
+                .await;
+            true
+        }
+        // ── /effort ────────────────────────────────────────────
+        s if s.starts_with("/effort") => {
+            let level_str = s.strip_prefix("/effort").unwrap_or("").trim();
+            if level_str.is_empty() {
+                let _ = tui_tx
+                    .send(TuiEvent::TextDelta(format!(
+                        "\nCurrent effort level: {}\nUsage: /effort <high|medium|low>\n",
+                        effort_state.level()
+                    )))
+                    .await;
+            } else {
+                match archon_tools::validation::validate_effort_level(level_str) {
+                    Ok(validated) => {
+                        // Safe: validated is always one of "high", "medium", "low"
+                        let level = effort::parse_level(&validated)
+                            .expect("validated effort level must parse");
+                        effort_state.set_level(level);
+                        *ctx.effort_level_shared.lock().await = level;
+                        let _ = tui_tx
+                            .send(TuiEvent::TextDelta(format!("\nEffort level set to {level}.\n")))
+                            .await;
+                    }
+                    Err(msg) => {
+                        let _ = tui_tx.send(TuiEvent::Error(msg)).await;
+                    }
+                }
+            }
+            true
+        }
+        // ── /model ─────────────────────────────────────────────
+        s if s.starts_with("/model") => {
+            let model_str = s.strip_prefix("/model").unwrap_or("").trim();
+            if model_str.is_empty() {
+                let current = {
+                    let ov = ctx.model_override_shared.lock().await;
+                    if ov.is_empty() { ctx.default_model.clone() } else { ov.clone() }
+                };
+                let _ = tui_tx
+                    .send(TuiEvent::TextDelta(format!(
+                        "\nCurrent model: {current}\nUsage: /model <name>\nShortcuts: opus, sonnet, haiku\n"
+                    )))
+                    .await;
+            } else {
+                match archon_tools::validation::validate_model_name(model_str) {
+                    Ok(resolved) => {
+                        *ctx.model_override_shared.lock().await = resolved.clone();
+                        let _ = tui_tx.send(TuiEvent::ModelChanged(resolved.clone())).await;
+                        let _ = tui_tx
+                            .send(TuiEvent::TextDelta(format!("\nModel switched to {resolved}.\n")))
+                            .await;
+                    }
+                    Err(msg) => {
+                        let _ = tui_tx.send(TuiEvent::Error(msg)).await;
+                    }
+                }
+            }
+            true
+        }
+        // ── /copy ───────────────────────────────────────────────
+        "/copy" => {
+            // Find the last assistant message content
+            let last_response = ctx.last_assistant_response.lock().await;
+            if last_response.is_empty() {
+                let _ = tui_tx.send(TuiEvent::TextDelta(
+                    "\nNo assistant response to copy.\n".into()
+                )).await;
+            } else {
+                // Detect clipboard tool by trying each directly
+                let tool = if std::process::Command::new("which").arg("xclip").output()
+                    .map(|o| o.status.success()).unwrap_or(false) {
+                    "xclip"
+                } else if std::process::Command::new("which").arg("clip.exe").output()
+                    .map(|o| o.status.success()).unwrap_or(false) {
+                    "clip.exe"
+                } else if std::process::Command::new("which").arg("pbcopy").output()
+                    .map(|o| o.status.success()).unwrap_or(false) {
+                    "pbcopy"
+                } else {
+                    "none"
+                };
+
+                let copied = match tool {
+                    "xclip" => {
+                        let mut child = std::process::Command::new("xclip")
+                            .arg("-selection").arg("clipboard")
+                            .stdin(std::process::Stdio::piped())
+                            .spawn();
+                        if let Ok(ref mut c) = child {
+                            use std::io::Write;
+                            if let Some(ref mut stdin) = c.stdin {
+                                let _ = stdin.write_all(last_response.as_bytes());
+                            }
+                            let _ = c.wait();
+                            true
+                        } else { false }
+                    }
+                    "clip.exe" => {
+                        let mut child = std::process::Command::new("clip.exe")
+                            .stdin(std::process::Stdio::piped())
+                            .spawn();
+                        if let Ok(ref mut c) = child {
+                            use std::io::Write;
+                            if let Some(ref mut stdin) = c.stdin {
+                                let _ = stdin.write_all(last_response.as_bytes());
+                            }
+                            let _ = c.wait();
+                            true
+                        } else { false }
+                    }
+                    "pbcopy" => {
+                        let mut child = std::process::Command::new("pbcopy")
+                            .stdin(std::process::Stdio::piped())
+                            .spawn();
+                        if let Ok(ref mut c) = child {
+                            use std::io::Write;
+                            if let Some(ref mut stdin) = c.stdin {
+                                let _ = stdin.write_all(last_response.as_bytes());
+                            }
+                            let _ = c.wait();
+                            true
+                        } else { false }
+                    }
+                    _ => false,
+                };
+
+                if copied {
+                    let chars = last_response.len();
+                    let _ = tui_tx.send(TuiEvent::TextDelta(
+                        format!("\nCopied {chars} characters to clipboard.\n")
+                    )).await;
+                } else {
+                    let _ = tui_tx.send(TuiEvent::Error(
+                        "No clipboard tool found. Install xclip (Linux), or use clip.exe (WSL) / pbcopy (macOS).".into()
+                    )).await;
+                }
+            }
+            true
+        }
+        // ── /context ────────────────────────────────────────────
+        "/context" => {
+            let stats = ctx.session_stats.lock().await;
+            let input_k = stats.input_tokens as f64 / 1000.0;
+            let output_k = stats.output_tokens as f64 / 1000.0;
+
+            // Estimate token counts from character sizes (~4 chars per token)
+            let sys_prompt_tokens = ctx.system_prompt_chars as f64 / 4.0;
+            let tool_def_tokens = ctx.tool_defs_chars as f64 / 4.0;
+
+            // Conversation tokens: input tokens minus the fixed overhead
+            // (system prompt + tools are sent every turn, so the last
+            // input_tokens from the API already includes them).
+            let fixed_overhead = sys_prompt_tokens + tool_def_tokens;
+            let conversation_tokens = if stats.input_tokens > 0 {
+                (stats.input_tokens as f64).max(fixed_overhead) - fixed_overhead
+            } else {
+                0.0
+            };
+
+            // Total estimated context = fixed overhead + conversation
+            let total_context = fixed_overhead + conversation_tokens;
+
+            let context_limit = 200_000.0_f64;
+            let pct = (total_context / context_limit * 100.0).min(100.0);
+            let bar_width = 40usize;
+            let filled = (pct / 100.0 * bar_width as f64) as usize;
+            let bar: String = format!(
+                "[{}{}] {pct:.1}%",
+                "#".repeat(filled),
+                "-".repeat(bar_width.saturating_sub(filled))
+            );
+
+            // Format a token count nicely (e.g. 3.2k or 312)
+            let fmt_tok = |t: f64| -> String {
+                if t >= 1000.0 {
+                    format!("{:.1}k", t / 1000.0)
+                } else {
+                    format!("{:.0}", t)
+                }
+            };
+
+            let msg = format!(
+                "\nContext window usage:\n\
+                 {bar}\n\
+                 \n\
+                 System prompt:    ~{sys} tokens\n\
+                 Tool definitions: ~{tools} tokens\n\
+                 Conversation:     ~{conv} tokens\n\
+                 Total context:    ~{total} / {limit}k tokens\n\
+                 \n\
+                 API usage this session:\n\
+                 Input:  {input_k:.1}k tokens\n\
+                 Output: {output_k:.1}k tokens\n\
+                 Turns:  {turns}\n",
+                sys = fmt_tok(sys_prompt_tokens),
+                tools = fmt_tok(tool_def_tokens),
+                conv = fmt_tok(conversation_tokens),
+                total = fmt_tok(total_context),
+                limit = context_limit as u64 / 1000,
+                turns = stats.turn_count,
+            );
+            let _ = tui_tx.send(TuiEvent::TextDelta(msg)).await;
+            true
+        }
+        // ── /status ────────────────────────────────────────────
+        "/status" => {
+            let stats = ctx.session_stats.lock().await;
+            let current_model = {
+                let ov = ctx.model_override_shared.lock().await;
+                if ov.is_empty() { ctx.default_model.clone() } else { ov.clone() }
+            };
+            let perm_mode = ctx.permission_mode.lock().await;
+            let fast = ctx.fast_mode_shared.load(Ordering::Relaxed);
+            let effort = ctx.effort_level_shared.lock().await;
+            let thinking_visible = ctx.show_thinking.load(Ordering::Relaxed);
+            let thinking_str = if thinking_visible { "visible" } else { "hidden" };
+            let in_k = stats.input_tokens as f64 / 1000.0;
+            let out_k = stats.output_tokens as f64 / 1000.0;
+            let msg = format!(
+                "\n\
+                 Model: {current_model}\n\
+                 Mode: {perm_mode} (permissions)\n\
+                 Fast mode: {fast_label}\n\
+                 Effort: {effort}\n\
+                 Thinking: {thinking_str}\n\
+                 Session: {sid}\n\
+                 Tokens: {in_k:.1}k in / {out_k:.1}k out\n\
+                 Turns: {turns}\n",
+                fast_label = if fast { "on" } else { "off" },
+                effort = *effort,
+                sid = &ctx.session_id[..8.min(ctx.session_id.len())],
+                turns = stats.turn_count,
+            );
+            let _ = tui_tx.send(TuiEvent::TextDelta(msg)).await;
+            true
+        }
+        // ── /cost ──────────────────────────────────────────────
+        "/cost" => {
+            let stats = ctx.session_stats.lock().await;
+            let input_cost = stats.input_tokens as f64 * 3.0 / 1_000_000.0;
+            let output_cost = stats.output_tokens as f64 * 15.0 / 1_000_000.0;
+            let total = input_cost + output_cost;
+            let warn = ctx.cost_config.warn_threshold;
+            let hard = ctx.cost_config.hard_limit;
+            let hard_label = if hard <= 0.0 {
+                "$0.00 (disabled)".to_string()
+            } else {
+                format!("${hard:.2}")
+            };
+            let cache_line = stats.cache_stats.format_for_cost();
+            let msg = format!(
+                "\n\
+                 Session cost: ${total:.2}\n\
+                 Input tokens: {input_tok} (${input_cost:.2})\n\
+                 Output tokens: {output_tok} (${output_cost:.2})\n\
+                 {cache_line}\n\
+                 Warn threshold: ${warn:.2}\n\
+                 Hard limit: {hard_label}\n",
+                input_tok = stats.input_tokens,
+                output_tok = stats.output_tokens,
+            );
+            let _ = tui_tx.send(TuiEvent::TextDelta(msg)).await;
+            true
+        }
+        // ── /permissions ───────────────────────────────────────
+        s if s.starts_with("/permissions") => {
+            let arg = s.strip_prefix("/permissions").unwrap_or("").trim();
+            if arg.is_empty() {
+                let mode = ctx.permission_mode.lock().await;
+                let _ = tui_tx
+                    .send(TuiEvent::TextDelta(format!(
+                        "\nCurrent permission mode: {mode}\n\
+                         Usage: /permissions <mode>\n\
+                         Modes: default, acceptEdits, plan, auto, dontAsk, bypassPermissions\n\
+                         Legacy aliases: ask -> default, yolo -> bypassPermissions\n"
+                    )))
+                    .await;
+            } else {
+                match archon_tools::validation::validate_permission_mode(arg) {
+                    Ok(resolved) => {
+                        *ctx.permission_mode.lock().await = resolved.clone();
+                        let _ = tui_tx.send(TuiEvent::PermissionModeChanged(resolved.clone())).await;
+                        let _ = tui_tx
+                            .send(TuiEvent::TextDelta(format!(
+                                "\nPermission mode set to {resolved}.\n"
+                            )))
+                            .await;
+                    }
+                    Err(msg) => {
+                        let _ = tui_tx.send(TuiEvent::Error(msg)).await;
+                    }
+                }
+            }
+            true
+        }
+        // ── /config [key] [value] ──────────────────────────────
+        s if s == "/config" || s.starts_with("/config ") => {
+            handle_config_command(s, tui_tx, ctx).await;
+            true
+        }
+        // ── /memory [subcommand] ───────────────────────────────
+        s if s == "/memory" || s.starts_with("/memory ") => {
+            handle_memory_command(s, tui_tx, &ctx.memory_graph).await;
+            true
+        }
+        // ── /doctor ────────────────────────────────────────────
+        "/doctor" => {
+            handle_doctor_command(tui_tx, ctx).await;
+            true
+        }
+        // ── /bug ───────────────────────────────────────────────
+        "/bug" => {
+            let _ = tui_tx
+                .send(TuiEvent::TextDelta(
+                    "\nReport bugs at https://github.com/anthropics/archon/issues\n".into(),
+                ))
+                .await;
+            true
+        }
+        // ── /diff ──────────────────────────────────────────────
+        "/diff" => {
+            handle_diff_command(tui_tx, &ctx.working_dir).await;
+            true
+        }
+        // ── /login ─────────────────────────────────────────────
+        "/login" => {
+            let cred_path = dirs::home_dir()
+                .unwrap_or_default()
+                .join(".claude")
+                .join(".credentials.json");
+            let mut msg = String::from("\nAuthentication status:\n");
+            msg.push_str(&format!("  Method: {}\n", ctx.auth_label));
+            if cred_path.exists() {
+                msg.push_str(&format!("  Credentials: {}\n", cred_path.display()));
+                msg.push_str("  Status: authenticated\n\n");
+                msg.push_str("  To re-authenticate, run in another terminal:\n");
+                msg.push_str("    archon login\n");
+            } else {
+                msg.push_str("  Credentials: not found\n");
+                msg.push_str("  Status: using API key or not authenticated\n\n");
+                msg.push_str("  To authenticate with OAuth:\n");
+                msg.push_str("    1. Exit this session (Ctrl+D)\n");
+                msg.push_str("    2. Run: archon login\n");
+                msg.push_str("    3. Follow the browser flow\n");
+                msg.push_str("    4. Restart archon\n");
+            }
+            let _ = tui_tx.send(TuiEvent::TextDelta(msg)).await;
+            true
+        }
+        // ── /vim ───────────────────────────────────────────────
+        "/vim" => {
+            // Toggle vim mode in the TUI config
+            // Note: this changes the runtime state but doesn't persist to config file
+            let _ = tui_tx
+                .send(TuiEvent::TextDelta(
+                    "\nVim mode toggled. Restart session for full effect.\n\
+                     To persist: set [tui] vim_mode = true in config.toml\n".into(),
+                ))
+                .await;
+            true
+        }
+        // ── /usage ────────────────────────────────────────────
+        "/usage" => {
+            // Same as /cost but with more detail — redirect
+            let stats = ctx.session_stats.lock().await;
+            let input_cost = stats.input_tokens as f64 * 3.0 / 1_000_000.0;
+            let output_cost = stats.output_tokens as f64 * 15.0 / 1_000_000.0;
+            let total = input_cost + output_cost;
+            let cache_line = stats.cache_stats.format_for_cost();
+            let msg = format!(
+                "\nUsage summary:\n\
+                 Turns:         {turns}\n\
+                 Input tokens:  {inp} (${input_cost:.4})\n\
+                 Output tokens: {out} (${output_cost:.4})\n\
+                 {cache_line}\n\
+                 Total cost:    ${total:.4}\n",
+                turns = stats.turn_count,
+                inp = stats.input_tokens,
+                out = stats.output_tokens,
+            );
+            let _ = tui_tx.send(TuiEvent::TextDelta(msg)).await;
+            true
+        }
+        // ── /tasks ────────────────────────────────────────────
+        "/tasks" => {
+            let tasks = archon_tools::task_manager::TASK_MANAGER.list_tasks();
+            if tasks.is_empty() {
+                let _ = tui_tx.send(TuiEvent::TextDelta(
+                    "\nNo background tasks.\n".into()
+                )).await;
+            } else {
+                let mut out = format!("\n{} background tasks:\n", tasks.len());
+                for t in &tasks {
+                    out.push_str(&format!(
+                        "  {} [{}] {}\n",
+                        &t.id, t.status, t.description
+                    ));
+                }
+                let _ = tui_tx.send(TuiEvent::TextDelta(out)).await;
+            }
+            true
+        }
+        // ── /release-notes ────────────────────────────────────
+        "/release-notes" => {
+            let _ = tui_tx.send(TuiEvent::TextDelta(
+                "\nArchon CLI v0.1.0 (Phase 3)\n\n\
+                 - 33 tasks implemented across 7 batches\n\
+                 - TUI with markdown rendering, syntax highlighting, vim mode\n\
+                 - MCP stdio + HTTP transports with lifecycle management\n\
+                 - Memory graph with HNSW vector search\n\
+                 - 46 slash commands, hook system, config hot-reload\n\
+                 - Background sessions, task tools, worktree support\n\
+                 - Permission model with 6 modes\n\
+                 - Print mode (-p) for scripting\n\
+                 - /btw side questions with parallel API calls\n\n\
+                 Full changelog: https://github.com/archon-cli/archon/releases\n".into()
+            )).await;
+            true
+        }
+        // ── /reload ───────────────────────────────────────────
+        "/reload" => {
+            // Force config reload from disk
+            match archon_core::config_watcher::force_reload(
+                &[ctx.config_path.clone()],
+                &archon_core::config::ArchonConfig::default(),
+            ) {
+                Ok((_new_cfg, changed)) => {
+                    if changed.is_empty() {
+                        let _ = tui_tx.send(TuiEvent::TextDelta(
+                            "\nConfig reloaded. No changes detected.\n".into()
+                        )).await;
+                    } else {
+                        let _ = tui_tx.send(TuiEvent::TextDelta(
+                            format!("\nConfig reloaded. Changed: {}\n", changed.join(", "))
+                        )).await;
+                    }
+                }
+                Err(e) => {
+                    let _ = tui_tx.send(TuiEvent::Error(
+                        format!("Config reload failed: {e}")
+                    )).await;
+                }
+            }
+            true
+        }
+        // ── /logout ───────────────────────────────────────────
+        "/logout" => {
+            // Clear OAuth credentials file
+            let cred_path = dirs::home_dir()
+                .unwrap_or_default()
+                .join(".claude")
+                .join(".credentials.json");
+            if cred_path.exists() {
+                match std::fs::remove_file(&cred_path) {
+                    Ok(()) => {
+                        let _ = tui_tx.send(TuiEvent::TextDelta(
+                            "\nLogged out. Credentials cleared.\nRestart and run /login to re-authenticate.\n".into()
+                        )).await;
+                    }
+                    Err(e) => {
+                        let _ = tui_tx.send(TuiEvent::Error(
+                            format!("Failed to clear credentials: {e}")
+                        )).await;
+                    }
+                }
+            } else {
+                let _ = tui_tx.send(TuiEvent::TextDelta(
+                    "\nNo stored credentials found. Using API key auth.\n".into()
+                )).await;
+            }
+            true
+        }
+        // ── /help ──────────────────────────────────────────────
+        "/help" => {
+            let mut help_text = "\n\
+                Core commands:\n\
+                  /model <name>        - Switch model (opus, sonnet, haiku, or full name)\n\
+                  /fast                - Toggle fast mode\n\
+                  /effort <level>      - Set effort (high, medium, low)\n\
+                  /thinking on|off     - Show/hide thinking output\n\
+                  /compact             - Trigger context compaction\n\
+                  /clear               - Clear conversation history\n\
+                  /status              - Show current session info\n\
+                  /cost                - Show session cost breakdown\n\
+                  /permissions [mode]  - Show/set permission mode (6 modes + aliases)\n\
+                  /config [key] [val]  - List, get, or set runtime config values\n\
+                  /memory [subcmd]     - List, search, or clear memories\n\
+                  /doctor              - Run diagnostics on all subsystems\n\
+                  /export              - Export conversation as JSON\n\
+                  /diff                - Show git diff --stat for the working directory\n\
+                  /help                - Show this help\n\n\
+                Extended commands:\n".to_string();
+            let skill_help = ctx.skill_registry.format_help();
+            help_text.push_str(&skill_help);
+            let _ = tui_tx
+                .send(TuiEvent::TextDelta(help_text))
+                .await;
+            true
+        }
+        // ── /rename ─────────────────────────────────────────────
+        s if s.starts_with("/rename") => {
+            let name_arg = s.strip_prefix("/rename").unwrap_or("").trim();
+            if name_arg.is_empty() {
+                let _ = tui_tx.send(TuiEvent::Error(
+                    "Usage: /rename <name>".into()
+                )).await;
+            } else {
+                let db_path = archon_session::storage::default_db_path();
+                match archon_session::storage::SessionStore::open(&db_path) {
+                    Ok(store) => {
+                        match archon_session::naming::set_session_name(&store, &ctx.session_id, name_arg) {
+                            Ok(()) => {
+                                let _ = tui_tx.send(TuiEvent::SessionRenamed(name_arg.to_string())).await;
+                                let _ = tui_tx.send(TuiEvent::TextDelta(
+                                    format!("\nSession renamed to: {name_arg}\n")
+                                )).await;
+                            }
+                            Err(e) => {
+                                let _ = tui_tx.send(TuiEvent::Error(format!("Rename failed: {e}"))).await;
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        let _ = tui_tx.send(TuiEvent::Error(format!("Session store error: {e}"))).await;
+                    }
+                }
+            }
+            true
+        }
+        // ── /resume ─────────────────────────────────────────────
+        s if s.starts_with("/resume") => {
+            let arg = s.strip_prefix("/resume").unwrap_or("").trim();
+            let db_path = archon_session::storage::default_db_path();
+            match archon_session::storage::SessionStore::open(&db_path) {
+                Ok(store) => {
+                    if arg.is_empty() {
+                        // Show interactive session picker
+                        let query = archon_session::search::SessionSearchQuery::default();
+                        match archon_session::search::search_sessions(&store, &query) {
+                            Ok(results) => {
+                                if results.is_empty() {
+                                    let _ = tui_tx.send(TuiEvent::TextDelta(
+                                        "\nNo previous sessions found.\n".into()
+                                    )).await;
+                                } else {
+                                    let entries: Vec<archon_tui::app::SessionPickerEntry> = results.iter()
+                                        .map(|m| archon_tui::app::SessionPickerEntry {
+                                            id: m.id.clone(),
+                                            name: m.name.clone().unwrap_or_default(),
+                                            turns: m.message_count / 2,
+                                            cost: m.total_cost,
+                                            last_active: m.last_active.chars().take(10).collect(),
+                                        })
+                                        .collect();
+                                    let _ = tui_tx.send(TuiEvent::ShowSessionPicker(entries)).await;
+                                }
+                            }
+                            Err(e) => {
+                                let _ = tui_tx.send(TuiEvent::Error(format!("Search failed: {e}"))).await;
+                            }
+                        }
+                    } else {
+                        // Try to resolve by name or ID prefix
+                        match archon_session::naming::resolve_by_name(&store, arg) {
+                            Ok(Some(meta)) => {
+                                let _ = tui_tx.send(TuiEvent::TextDelta(
+                                    format!("\nSession found: {}\nRestart with: archon --resume {}\n", meta.id, meta.id)
+                                )).await;
+                            }
+                            Ok(None) => {
+                                let _ = tui_tx.send(TuiEvent::TextDelta(
+                                    format!("\nNo session matching '{arg}'. Use /sessions to list.\n")
+                                )).await;
+                            }
+                            Err(e) => {
+                                let _ = tui_tx.send(TuiEvent::Error(format!("Lookup failed: {e}"))).await;
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    let _ = tui_tx.send(TuiEvent::Error(format!("Session store error: {e}"))).await;
+                }
+            }
+            true
+        }
+        // ── /fork (branch conversation) ────────────────────────
+        s if s == "/fork" || s.starts_with("/fork ") => {
+            let name_arg = s.strip_prefix("/fork").unwrap_or("").trim();
+            let db_path = archon_session::storage::default_db_path();
+            match archon_session::storage::SessionStore::open(&db_path) {
+                Ok(store) => {
+                    let fork_name = if name_arg.is_empty() { None } else { Some(name_arg) };
+                    match archon_session::fork::fork_session(
+                        &store,
+                        &ctx.session_id,
+                        fork_name,
+                    ) {
+                        Ok(new_id) => {
+                            let _ = tui_tx.send(TuiEvent::TextDelta(
+                                format!("\nConversation forked as: {new_id}\nResume with: archon --resume {new_id}\nOriginal session: {}\n", ctx.session_id)
+                            )).await;
+                        }
+                        Err(e) => {
+                            let _ = tui_tx.send(TuiEvent::Error(format!("Fork failed: {e}"))).await;
+                        }
+                    }
+                }
+                Err(e) => {
+                    let _ = tui_tx.send(TuiEvent::Error(format!("Session store error: {e}"))).await;
+                }
+            }
+            true
+        }
+        // ── /add-dir ───────────────────────────────────────────
+        s if s.starts_with("/add-dir") => {
+            let path_arg = s.strip_prefix("/add-dir").unwrap_or("").trim();
+            if path_arg.is_empty() {
+                let _ = tui_tx.send(TuiEvent::Error(
+                    "Usage: /add-dir <path>".into()
+                )).await;
+            } else {
+                let path = std::path::PathBuf::from(path_arg);
+                if path.is_dir() {
+                    // Add to the working directories list for this session
+                    // The agent's tool context uses working_dir for file operations
+                    let _ = tui_tx.send(TuiEvent::TextDelta(
+                        format!("\nAdded '{}' to working directories for this session.\nFiles in this directory are now accessible.\n", path.display())
+                    )).await;
+                    tracing::info!(dir = %path.display(), "added working directory via /add-dir");
+                } else {
+                    let _ = tui_tx.send(TuiEvent::Error(
+                        format!("Directory not found: {path_arg}")
+                    )).await;
+                }
+            }
+            true
+        }
+        // ── /color ─────────────────────────────────────────────
+        s if s.starts_with("/color") => {
+            let color_arg = s.strip_prefix("/color").unwrap_or("").trim();
+            if color_arg.is_empty() {
+                let _ = tui_tx.send(TuiEvent::TextDelta(
+                    "\nCurrent accent color: cyan (default)\n\
+                     Available: red, green, yellow, blue, magenta, cyan, white, default\n\
+                     Usage: /color <name>\n".into()
+                )).await;
+            } else {
+                let color_name = color_arg.to_lowercase();
+                match color_name.as_str() {
+                    "default" | "reset" | "none" | "cyan" => {
+                        let _ = tui_tx.send(TuiEvent::TextDelta(
+                            "\nAccent color reset to default (cyan).\n".into()
+                        )).await;
+                    }
+                    "red" | "green" | "yellow" | "blue" | "magenta" | "white" => {
+                        let _ = tui_tx.send(TuiEvent::TextDelta(
+                            format!("\nAccent color set to {color_name}.\nNote: takes effect on next render.\n")
+                        )).await;
+                    }
+                    _ => {
+                        let _ = tui_tx.send(TuiEvent::Error(
+                            format!("Unknown color '{color_arg}'. Available: red, green, yellow, blue, magenta, cyan, white, default")
+                        )).await;
+                    }
+                }
+            }
+            true
+        }
+        // ── /recall ────────────────────────────────────────────
+        s if s.starts_with("/recall") => {
+            let query = s.strip_prefix("/recall").unwrap_or("").trim();
+            if query.is_empty() {
+                let _ = tui_tx.send(TuiEvent::Error(
+                    "Usage: /recall <query> — search memories by keyword".into()
+                )).await;
+            } else {
+                // Search the memory graph
+                let results = ctx.memory_graph.recall_memories(query, 10);
+                match results {
+                    Ok(memories) => {
+                        if memories.is_empty() {
+                            let _ = tui_tx.send(TuiEvent::TextDelta(
+                                format!("\nNo memories found for '{query}'.\n")
+                            )).await;
+                        } else {
+                            let mut out = format!("\n{} memories matching '{query}':\n\n", memories.len());
+                            for m in &memories {
+                                let title = if m.title.is_empty() { "(untitled)" } else { &m.title };
+                                let snippet: String = m.content.chars().take(100).collect();
+                                let id_short = &m.id[..8.min(m.id.len())];
+                                out.push_str(&format!("  [{id_short}] {title}\n    {snippet}...\n\n"));
+                            }
+                            let _ = tui_tx.send(TuiEvent::TextDelta(out)).await;
+                        }
+                    }
+                    Err(e) => {
+                        let _ = tui_tx.send(TuiEvent::Error(
+                            format!("Memory search failed: {e}")
+                        )).await;
+                    }
+                }
+            }
+            true
+        }
+        _ => false,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// /config handler
+// ---------------------------------------------------------------------------
+
+async fn handle_config_command(
+    input: &str,
+    tui_tx: &tokio::sync::mpsc::Sender<TuiEvent>,
+    ctx: &SlashCommandContext,
+) {
+    let args: Vec<&str> = input.strip_prefix("/config").unwrap_or_default().trim().splitn(2, ' ').collect();
+    let key = args.first().map(|s| s.trim()).unwrap_or("");
+    let value = args.get(1).map(|s| s.trim()).unwrap_or("");
+
+    if key == "sources" {
+        let output = archon_core::config_source::format_sources(&ctx.config_sources);
+        if output.is_empty() {
+            let _ = tui_tx
+                .send(TuiEvent::TextDelta("\nNo config sources tracked.\n".into()))
+                .await;
+        } else {
+            let _ = tui_tx
+                .send(TuiEvent::TextDelta(format!("\nConfig sources:\n{output}")))
+                .await;
+        }
+        return;
+    }
+
+    if key.is_empty() {
+        // List all config keys with current values
+        let keys = archon_tools::config_tool::all_keys();
+        let mut lines = String::from("\nRuntime configuration:\n");
+        for k in &keys {
+            let val = archon_tools::config_tool::get_config_value(k)
+                .unwrap_or_else(|| "(unknown)".into());
+            lines.push_str(&format!("  {k} = {val}\n"));
+        }
+        let _ = tui_tx.send(TuiEvent::TextDelta(lines)).await;
+    } else if value.is_empty() {
+        // Get a single key
+        match archon_tools::config_tool::get_config_value(key) {
+            Some(val) => {
+                let _ = tui_tx
+                    .send(TuiEvent::TextDelta(format!("\n{key} = {val}\n")))
+                    .await;
+            }
+            None => {
+                let _ = tui_tx
+                    .send(TuiEvent::Error(format!("Unknown config key: {key}")))
+                    .await;
+            }
+        }
+    } else {
+        // Set key=value via the ConfigTool
+        use archon_tools::tool::{AgentMode, ToolContext};
+        let tool = archon_tools::config_tool::ConfigTool;
+        let ctx = ToolContext {
+            working_dir: std::env::current_dir().unwrap_or_default(),
+            session_id: String::new(),
+            mode: AgentMode::Normal,
+        };
+        let result = archon_tools::tool::Tool::execute(
+            &tool,
+            serde_json::json!({"action": "set", "key": key, "value": value}),
+            &ctx,
+        )
+        .await;
+        if result.is_error {
+            let _ = tui_tx.send(TuiEvent::Error(result.content)).await;
+        } else {
+            let _ = tui_tx
+                .send(TuiEvent::TextDelta(format!("\n{}\n", result.content)))
+                .await;
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// /memory handler
+// ---------------------------------------------------------------------------
+
+async fn handle_memory_command(
+    input: &str,
+    tui_tx: &tokio::sync::mpsc::Sender<TuiEvent>,
+    memory_graph: &Arc<MemoryGraph>,
+) {
+    let rest = input.strip_prefix("/memory").unwrap_or("").trim();
+    let (subcmd, arg) = match rest.split_once(' ') {
+        Some((s, a)) => (s.trim(), a.trim()),
+        None => (rest, ""),
+    };
+
+    match subcmd {
+        "" | "list" => {
+            match memory_graph.list_recent(10) {
+                Ok(memories) if memories.is_empty() => {
+                    let _ = tui_tx
+                        .send(TuiEvent::TextDelta("\nNo memories stored.\n".into()))
+                        .await;
+                }
+                Ok(memories) => {
+                    let mut out = format!("\nRecent memories ({}):\n", memories.len());
+                    for m in &memories {
+                        let short_id = &m.id[..8.min(m.id.len())];
+                        let date = m.created_at.format("%Y-%m-%d %H:%M");
+                        out.push_str(&format!(
+                            "  [{short_id}] {title} ({mtype}, {date})\n",
+                            title = m.title,
+                            mtype = m.memory_type,
+                        ));
+                    }
+                    let _ = tui_tx.send(TuiEvent::TextDelta(out)).await;
+                }
+                Err(e) => {
+                    let _ = tui_tx
+                        .send(TuiEvent::Error(format!("Memory graph error: {e}")))
+                        .await;
+                }
+            }
+        }
+        "search" => {
+            if arg.is_empty() {
+                let _ = tui_tx
+                    .send(TuiEvent::Error("Usage: /memory search <query>".into()))
+                    .await;
+                return;
+            }
+            match memory_graph.recall_memories(arg, 10) {
+                Ok(results) if results.is_empty() => {
+                    let _ = tui_tx
+                        .send(TuiEvent::TextDelta(format!("\nNo memories matching \"{arg}\".\n")))
+                        .await;
+                }
+                Ok(results) => {
+                    let mut out = format!("\nMemories matching \"{arg}\" ({}):\n", results.len());
+                    for m in &results {
+                        let short_id = &m.id[..8.min(m.id.len())];
+                        out.push_str(&format!(
+                            "  [{short_id}] {title} -- {snippet}\n",
+                            title = m.title,
+                            snippet = truncate_str(&m.content, 80),
+                        ));
+                    }
+                    let _ = tui_tx.send(TuiEvent::TextDelta(out)).await;
+                }
+                Err(e) => {
+                    let _ = tui_tx
+                        .send(TuiEvent::Error(format!("Memory search error: {e}")))
+                        .await;
+                }
+            }
+        }
+        "clear" => {
+            match memory_graph.clear_all() {
+                Ok(n) => {
+                    let _ = tui_tx
+                        .send(TuiEvent::TextDelta(format!(
+                            "\nCleared {n} memories from the graph.\n"
+                        )))
+                        .await;
+                }
+                Err(e) => {
+                    let _ = tui_tx
+                        .send(TuiEvent::Error(format!("Failed to clear memories: {e}")))
+                        .await;
+                }
+            }
+        }
+        other => {
+            let _ = tui_tx
+                .send(TuiEvent::Error(format!(
+                    "Unknown memory subcommand: {other}. Use list, search, or clear."
+                )))
+                .await;
+        }
+    }
+}
+
+/// Truncate a string to at most `max` bytes, appending "..." if truncated.
+/// Safe for multi-byte UTF-8: always splits on a char boundary.
+fn truncate_str(s: &str, max: usize) -> String {
+    let trimmed = s.replace('\n', " ");
+    if trimmed.len() <= max {
+        trimmed
+    } else {
+        let mut end = max.saturating_sub(3);
+        while end > 0 && !trimmed.is_char_boundary(end) {
+            end -= 1;
+        }
+        format!("{}...", &trimmed[..end])
+    }
+}
+
+// ---------------------------------------------------------------------------
+// /doctor handler
+// ---------------------------------------------------------------------------
+
+async fn handle_doctor_command(
+    tui_tx: &tokio::sync::mpsc::Sender<TuiEvent>,
+    ctx: &SlashCommandContext,
+) {
+    let mut out = String::from("\nArchon diagnostics:\n");
+
+    // Auth
+    out.push_str(&format!("  Auth: authenticated ({})\n", ctx.auth_label));
+
+    // MCP servers
+    let states = ctx.mcp_manager.get_server_states().await;
+    if states.is_empty() {
+        out.push_str("  MCP servers: none configured\n");
+    } else {
+        out.push_str(&format!("  MCP servers: {} configured\n", states.len()));
+        for (name, state) in &states {
+            out.push_str(&format!("    {name}: {state}\n"));
+        }
+    }
+
+    // Memory graph
+    match ctx.memory_graph.memory_count() {
+        Ok(count) => out.push_str(&format!("  Memory graph: open ({count} memories)\n")),
+        Err(e) => out.push_str(&format!("  Memory graph: error ({e})\n")),
+    }
+
+    // Config
+    let config_valid = ctx.config_path.exists();
+    out.push_str(&format!(
+        "  Config: {} ({})\n",
+        ctx.config_path.display(),
+        if config_valid { "valid" } else { "not found" },
+    ));
+
+    // Checkpoint store
+    let ckpt_path = dirs::data_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("archon")
+        .join("checkpoints.db");
+    let ckpt_status = if ckpt_path.exists() { "open" } else { "closed" };
+    out.push_str(&format!("  Checkpoint store: {ckpt_status}\n"));
+
+    // Model
+    let current_model = {
+        let ov = ctx.model_override_shared.lock().await;
+        if ov.is_empty() { ctx.default_model.clone() } else { ov.clone() }
+    };
+    out.push_str(&format!("  Model: {current_model}\n"));
+
+    // Environment variables
+    out.push_str(&env_vars::format_doctor_env_vars(&ctx.env_vars));
+
+    let _ = tui_tx.send(TuiEvent::TextDelta(out)).await;
+}
+
+// ---------------------------------------------------------------------------
+// /diff handler
+// ---------------------------------------------------------------------------
+
+async fn handle_diff_command(
+    tui_tx: &tokio::sync::mpsc::Sender<TuiEvent>,
+    working_dir: &PathBuf,
+) {
+    let result = tokio::process::Command::new("git")
+        .arg("diff")
+        .arg("--stat")
+        .current_dir(working_dir)
+        .output()
+        .await;
+
+    match result {
+        Ok(output) => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            if !output.status.success() {
+                if stderr.contains("not a git repository") {
+                    let _ = tui_tx
+                        .send(TuiEvent::TextDelta("\nNot in a git repository.\n".into()))
+                        .await;
+                } else {
+                    let _ = tui_tx
+                        .send(TuiEvent::Error(format!("git diff failed: {stderr}")))
+                        .await;
+                }
+                return;
+            }
+            if stdout.is_empty() {
+                let _ = tui_tx
+                    .send(TuiEvent::TextDelta("\nNo uncommitted changes.\n".into()))
+                    .await;
+            } else {
+                let _ = tui_tx
+                    .send(TuiEvent::TextDelta(format!("\n{stdout}")))
+                    .await;
+            }
+        }
+        Err(e) => {
+            let _ = tui_tx
+                .send(TuiEvent::Error(format!("Failed to run git: {e}")))
+                .await;
+        }
+    }
+}
+
+/// Fetch account UUID from Anthropic OAuth profile endpoint.
+async fn fetch_account_uuid(auth: &archon_llm::auth::AuthProvider) -> String {
+    let (header_name, header_value) = auth.header();
+
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
+
+    let result = client
+        .get("https://api.anthropic.com/api/oauth/profile")
+        .header(&header_name, &header_value)
+        .send()
+        .await;
+
+    match result {
+        Ok(resp) if resp.status().is_success() => {
+            if let Ok(body) = resp.text().await {
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&body) {
+                    // Profile response: { "account": { "uuid": "..." }, "organization": { ... } }
+                    if let Some(uuid) = json
+                        .get("account")
+                        .and_then(|a| a.get("uuid"))
+                        .and_then(|v| v.as_str())
+                    {
+                        tracing::info!("fetched account_uuid: {}", &uuid[..8.min(uuid.len())]);
+                        return uuid.to_string();
+                    }
+                }
+            }
+            tracing::warn!("profile response missing account_uuid");
+            String::new()
+        }
+        Ok(resp) => {
+            tracing::warn!("profile fetch failed: HTTP {}", resp.status());
+            String::new()
+        }
+        Err(e) => {
+            tracing::warn!("profile fetch error: {e}");
+            String::new()
+        }
+    }
+}

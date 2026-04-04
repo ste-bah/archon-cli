@@ -1,0 +1,37 @@
+[package]
+name = "archon-core"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+# Internal dependencies
+archon-llm = { path = "../archon-llm" }
+archon-tools = { path = "../archon-tools" }
+archon-permissions = { path = "../archon-permissions" }
+archon-context = { path = "../archon-context" }
+archon-session = { path = "../archon-session" }
+archon-consciousness = { path = "../archon-consciousness" }
+archon-memory = { path = "../archon-memory" }
+archon-mcp = { path = "../archon-mcp" }
+
+# Workspace dependencies
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+toml.workspace = true
+tracing-appender.workspace = true
+tracing-subscriber.workspace = true
+dirs.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+notify.workspace = true
+
+jsonschema.workspace = true
+
+[dev-dependencies]
+uuid.workspace = true
+tempfile.workspace = true

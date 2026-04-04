@@ -1,0 +1,9 @@
+[package]
+name = "archon-plugin"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+serde.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true

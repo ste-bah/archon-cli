@@ -1,0 +1,44 @@
+[api]
+default_model = "claude-sonnet-4-6"
+thinking_budget = 16384
+default_effort = "high"
+max_retries = 3
+
+[identity]
+mode = "spoof"
+spoof_version = "2.1.89"
+spoof_entrypoint = "cli"
+anti_distillation = false
+
+[tools]
+bash_timeout = 120
+bash_max_output = 102400
+max_concurrency = 4
+
+[permissions]
+mode = "ask"
+allow_paths = []
+deny_paths = []
+
+[context]
+compact_threshold = 0.800000011920929
+preserve_recent_turns = 3
+
+[memory]
+enabled = true
+
+[cost]
+warn_threshold = 30.0
+hard_limit = 0.0
+
+[logging]
+level = "info"
+max_files = 50
+max_file_size_mb = 10
+
+[session]
+auto_resume = true
+
+[checkpoint]
+enabled = true
+max_checkpoints = 10

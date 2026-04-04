@@ -1,0 +1,11 @@
+[package]
+name = "archon-sdk"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+archon-core = { path = "../archon-core" }
+serde.workspace = true
+tokio.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true

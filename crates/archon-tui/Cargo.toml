@@ -1,0 +1,19 @@
+[package]
+name = "archon-tui"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+ratatui.workspace = true
+crossterm.workspace = true
+serde.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+chrono.workspace = true
+pulldown-cmark.workspace = true
+tree-sitter.workspace = true
+tree-sitter-highlight.workspace = true
+libloading.workspace = true
+dirs.workspace = true

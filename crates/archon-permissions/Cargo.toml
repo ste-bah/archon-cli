@@ -1,0 +1,13 @@
+[package]
+name = "archon-permissions"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+tracing.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+glob.workspace = true

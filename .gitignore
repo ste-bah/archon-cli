@@ -1,0 +1,40 @@
+# Rust build output
+/target/
+**/*.rs.bk
+
+# Editor / IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local config overrides (never commit secrets or machine-local config)
+config.local.toml
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+logs/
+
+# Packaging artifacts
+dist/
+archon-*.tar.gz
+archon-*.zip
+
+# Coverage / profiling
+lcov.info
+*.profraw
+*.profdata
+
+# Dev-flow gate artifacts (local task tracking state)
+.gates/
+
+# Scratch / test files
+hello.txt

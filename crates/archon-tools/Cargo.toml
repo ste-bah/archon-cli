@@ -1,0 +1,24 @@
+[package]
+name = "archon-tools"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+archon-permissions = { path = "../archon-permissions" }
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+glob.workspace = true
+regex.workspace = true
+reqwest.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+git2.workspace = true
+dirs.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
