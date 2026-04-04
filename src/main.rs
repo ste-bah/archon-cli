@@ -29,7 +29,8 @@ use archon_llm::auth::resolve_auth_with_keys;
 use archon_llm::effort::{self, EffortLevel, EffortState};
 use archon_llm::fast_mode::FastModeState;
 use archon_llm::identity::{
-    get_or_create_device_id, resolve_betas, IdentityMode, IdentityProvider,
+    get_or_create_device_id, resolve_and_validate_betas, resolve_betas, IdentityMode,
+    IdentityProvider,
 };
 use archon_mcp::lifecycle::McpServerManager;
 use archon_memory::{MemoryAccess, MemoryGraph};
@@ -524,7 +525,12 @@ async fn run_print_mode_session(
         account_uuid,
     );
 
-    let api_client = AnthropicClient::new(auth, identity.clone());
+    // Resolve API base URL: env var > config > hardcoded default (inside AnthropicClient::new)
+    let api_url = std::env::var("ANTHROPIC_BASE_URL")
+        .ok()
+        .or_else(|| config.api.base_url.clone());
+
+    let api_client = AnthropicClient::new(auth, identity.clone(), api_url);
     let mut registry = create_default_registry();
     let working_dir = std::env::current_dir().unwrap_or_default();
 
@@ -896,10 +902,33 @@ async fn run_interactive_session(
         account_uuid,
     );
 
+    // Resolve API base URL: env var > config > hardcoded default (inside AnthropicClient::new)
+    let api_url = std::env::var("ANTHROPIC_BASE_URL")
+        .ok()
+        .or_else(|| config.api.base_url.clone());
+
     // Create API client (clone auth/identity for /btw side questions)
     let btw_auth = auth.clone();
     let btw_identity = identity.clone();
-    let api_client = AnthropicClient::new(auth, identity.clone());
+    let api_client = AnthropicClient::new(auth, identity.clone(), api_url.clone());
+
+    // In spoof mode without explicit betas: background-discover and validate betas for next startup.
+    // We spawn this AFTER building the client so the probe uses the same auth.
+    // The current session uses the betas already resolved above; the validated cache will be
+    // used on the NEXT startup, ensuring the probe never blocks interactive startup.
+    if matches!(identity.mode, IdentityMode::Spoof { .. })
+        && config.identity.spoof_betas.is_none()
+    {
+        let client_for_discovery = api_client.clone();
+        tokio::spawn(async move {
+            let validated =
+                resolve_and_validate_betas(&client_for_discovery, None).await;
+            tracing::info!(
+                "Background beta discovery complete: {} betas validated",
+                validated.len()
+            );
+        });
+    }
 
     // Build tool registry and get tool definitions for API
     let mut registry = create_default_registry();
@@ -1302,6 +1331,8 @@ async fn run_interactive_session(
     let slash_commands_disabled = resolved_flags.disable_slash_commands;
     let session_store_for_input = Arc::clone(&session_store);
     let session_id_for_input = session_id.to_string();
+    // Clone api_url for the btw_tx background task (line ~1683); the spawn below consumes it.
+    let api_url_for_btw = api_url.clone();
     tokio::spawn(async move {
         while let Some(input) = user_input_rx.recv().await {
             // Session picker selection — load messages and restore conversation
@@ -1426,6 +1457,58 @@ async fn run_interactive_session(
                     continue;
                 }
 
+                // /refresh-identity — clears beta caches and re-runs discovery in background
+                if input.trim() == "/refresh-identity" {
+                    // Clear the validated beta cache
+                    let validated_cache = dirs::config_dir()
+                        .unwrap_or_default()
+                        .join("archon")
+                        .join("validated_betas.json");
+                    let _ = std::fs::remove_file(&validated_cache);
+                    // Clear the raw discovered cache
+                    let raw_cache = dirs::config_dir()
+                        .unwrap_or_default()
+                        .join("archon")
+                        .join("discovered_betas.json");
+                    let _ = std::fs::remove_file(&raw_cache);
+
+                    // Spawn background re-discovery using a temporary client
+                    let refresh_auth = agent.auth_provider().clone();
+                    let refresh_identity = agent.identity_provider().clone();
+                    let refresh_api_url = api_url.clone();
+                    let refresh_tui_tx = input_tui_tx.clone();
+                    tokio::spawn(async move {
+                        let refresh_client = archon_llm::anthropic::AnthropicClient::new(
+                            refresh_auth,
+                            refresh_identity,
+                            refresh_api_url,
+                        );
+                        let validated =
+                            archon_llm::identity::resolve_and_validate_betas(&refresh_client, None)
+                                .await;
+                        tracing::info!(
+                            "Identity refresh complete: {} betas validated",
+                            validated.len()
+                        );
+                        let _ = refresh_tui_tx
+                            .send(TuiEvent::TextDelta(format!(
+                                "\nIdentity refresh complete: {} betas validated and cached.\n\
+                                 Restart archon to apply the updated beta headers.\n",
+                                validated.len()
+                            )))
+                            .await;
+                    });
+
+                    let _ = input_tui_tx
+                        .send(TuiEvent::TextDelta(
+                            "\nIdentity cache cleared. Re-discovering beta headers in background...\n"
+                                .into(),
+                        ))
+                        .await;
+                    let _ = input_tui_tx.send(TuiEvent::SlashCommandComplete).await;
+                    continue;
+                }
+
                 // /btw — side question runs in PARALLEL via a separate API call
                 // Does NOT interrupt the main agent. Spawns a forked one-shot query.
                 if input.trim().starts_with("/btw ") {
@@ -1435,6 +1518,7 @@ async fn run_interactive_session(
                         let btw_auth = agent.auth_provider().clone();
                         let btw_identity = agent.identity_provider().clone();
                         let btw_model = agent.current_model().to_string();
+                        let btw_api_url = api_url.clone();
 
                         tokio::spawn(async move {
 
@@ -1444,7 +1528,7 @@ async fn run_interactive_session(
                                  Do NOT say \"Let me check\" or promise actions.</system-reminder>\n\n{question}"
                             );
 
-                            let btw_client = archon_llm::anthropic::AnthropicClient::new(btw_auth, btw_identity);
+                            let btw_client = archon_llm::anthropic::AnthropicClient::new(btw_auth, btw_identity, btw_api_url);
                             let request = archon_llm::anthropic::MessageRequest {
                                 model: btw_model,
                                 max_tokens: 1024,
@@ -1669,7 +1753,7 @@ async fn run_interactive_session(
     {
         let btw_tui_tx = tui_event_tx.clone();
         // Clone the same client the agent uses — same auth, identity, headers
-        let btw_client = AnthropicClient::new(btw_auth, btw_identity);
+        let btw_client = AnthropicClient::new(btw_auth, btw_identity, api_url_for_btw);
         let btw_model = config.api.default_model.clone();
         let btw_max_tokens = config.api.thinking_budget;
         // Use the pre-cloned system prompt so /btw shares the prompt cache

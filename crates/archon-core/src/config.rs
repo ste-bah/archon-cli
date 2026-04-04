@@ -73,6 +73,13 @@ pub struct ApiConfig {
     pub thinking_budget: u32,
     pub default_effort: String,
     pub max_retries: u32,
+    /// Override the Anthropic API base URL. Useful for pointing at LiteLLM,
+    /// Ollama, or any other OpenAI-compatible / Anthropic-compatible proxy.
+    /// Resolution priority:
+    ///   1. `ANTHROPIC_BASE_URL` env var (always wins)
+    ///   2. This field in config.toml
+    ///   3. Hardcoded default: `https://api.anthropic.com/v1/messages`
+    pub base_url: Option<String>,
 }
 
 impl Default for ApiConfig {
@@ -82,6 +89,7 @@ impl Default for ApiConfig {
             thinking_budget: 16384,
             default_effort: "medium".into(),
             max_retries: 3,
+            base_url: None,
         }
     }
 }
@@ -439,6 +447,9 @@ thinking_budget = 16384
 # effort: low, medium, high
 default_effort = "medium"
 max_retries = 3
+# Override the API endpoint. Useful for LiteLLM, Ollama, or other proxies.
+# Resolution order: ANTHROPIC_BASE_URL env var > this field > built-in default.
+# base_url = "http://localhost:11434/v1/messages"
 
 [identity]
 # mode: "clean" (no spoofing) | "spoof" (mimic Claude Code headers) | "custom"

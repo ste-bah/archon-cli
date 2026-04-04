@@ -452,6 +452,203 @@ fn beta_cache_path() -> PathBuf {
         .join("discovered_betas.json")
 }
 
+// ---------------------------------------------------------------------------
+// Validated beta cache (separate from raw discovered betas)
+// ---------------------------------------------------------------------------
+
+/// Load the previously validated+cached beta list, or None if missing/stale.
+pub fn load_cached_validated_betas() -> Option<Vec<String>> {
+    let path = validated_beta_cache_path();
+    let content = fs::read_to_string(&path).ok()?;
+
+    #[derive(serde::Deserialize)]
+    struct BetaCache {
+        betas: Vec<String>,
+        timestamp: i64,
+    }
+
+    let cache: BetaCache = serde_json::from_str(&content).ok()?;
+
+    let age = chrono::Utc::now().timestamp() - cache.timestamp;
+    if age > 86400 {
+        return None; // stale
+    }
+
+    Some(cache.betas)
+}
+
+/// Save the validated beta list to cache.
+pub fn save_validated_betas_cache(betas: &[String]) {
+    let cache = serde_json::json!({
+        "betas": betas,
+        "timestamp": chrono::Utc::now().timestamp(),
+    });
+
+    let path = validated_beta_cache_path();
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let _ = fs::write(&path, serde_json::to_string_pretty(&cache).unwrap_or_default());
+}
+
+fn validated_beta_cache_path() -> PathBuf {
+    dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from(".config"))
+        .join("archon")
+        .join("validated_betas.json")
+}
+
+/// Discover betas from the installed Claude Code binary, validate them
+/// against the API, save the validated set to cache, and return it.
+///
+/// Falls back gracefully at each step:
+/// - No Claude Code installed → use hardcoded defaults
+/// - Probe fails → return unvalidated discovered betas (better than nothing)
+/// - All betas invalid → return hardcoded defaults
+pub async fn resolve_and_validate_betas(
+    client: &crate::anthropic::AnthropicClient,
+    config_betas: Option<&[String]>,
+) -> Vec<String> {
+    // Priority 1: explicit config override — user knows best, no validation needed
+    if let Some(betas) = config_betas {
+        if !betas.is_empty() {
+            return betas.to_vec();
+        }
+    }
+
+    // Priority 2: valid validated cache
+    if let Some(cached) = load_cached_validated_betas() {
+        if !cached.is_empty() {
+            tracing::debug!("Using {} validated betas from cache", cached.len());
+            return cached;
+        }
+    }
+
+    // Priority 3: discover from Claude Code binary
+    let discovered = discover_betas_from_claude();
+
+    // Build candidate list: always start with DEFAULT_BETAS, then merge discovered
+    let mut candidates: Vec<String> = DEFAULT_BETAS.iter().map(|s| s.to_string()).collect();
+    for b in &discovered {
+        if !candidates.contains(b) {
+            candidates.push(b.clone());
+        }
+    }
+
+    if candidates.is_empty() {
+        return DEFAULT_BETAS.iter().map(|s| s.to_string()).collect();
+    }
+
+    // Validate against the API
+    let validated = client.validate_betas(candidates).await;
+
+    let result = if validated.is_empty() {
+        tracing::warn!("Beta validation removed all betas; falling back to defaults");
+        DEFAULT_BETAS.iter().map(|s| s.to_string()).collect()
+    } else {
+        validated
+    };
+
+    // Cache the validated result
+    save_validated_betas_cache(&result);
+    tracing::info!("Beta validation complete: {} betas validated and cached", result.len());
+
+    result
+}
+
+// ---------------------------------------------------------------------------
+// Tests for new beta validation cache functions
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod beta_validation_cache_tests {
+    use super::*;
+
+    #[test]
+    fn test_load_cached_validated_betas_returns_none_when_missing() {
+        // When the cache file doesn't exist, should return None gracefully.
+        // We test this by checking a path that won't exist (temp path).
+        // The function uses dirs::config_dir() + archon/validated_betas.json
+        // We can't easily change the path, but we can verify None is returned
+        // when the content is absent (or expired). We'll do a round-trip instead.
+        // First, just ensure it returns None or Some without panicking.
+        let result = load_cached_validated_betas();
+        // Result is either None (no cache) or Some (cache exists) — both are valid.
+        // The test exercises that the function runs without panicking.
+        let _ = result;
+    }
+
+    #[test]
+    fn test_save_and_load_validated_betas_round_trip() {
+        let betas = vec![
+            "claude-code-20250219".to_string(),
+            "oauth-2025-04-20".to_string(),
+            "test-beta-2025-01-01".to_string(),
+        ];
+
+        save_validated_betas_cache(&betas);
+        let loaded = load_cached_validated_betas();
+
+        assert!(loaded.is_some(), "cache should be present after saving");
+        let loaded_betas = loaded.unwrap();
+        assert_eq!(loaded_betas.len(), betas.len());
+        for b in &betas {
+            assert!(loaded_betas.contains(b), "loaded cache should contain {b}");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_resolve_and_validate_betas_uses_config_betas_if_provided() {
+        use crate::anthropic::AnthropicClient;
+        use crate::auth::AuthProvider;
+        use crate::identity::{IdentityMode, IdentityProvider};
+
+        let auth = AuthProvider::ApiKey(crate::types::Secret::new("test-key".to_string()));
+        let identity = IdentityProvider::new(
+            IdentityMode::Clean,
+            "test-session".to_string(),
+            "test-device".to_string(),
+            String::new(),
+        );
+        let client = AnthropicClient::new(auth, identity, None);
+
+        let config_betas = vec!["explicit-beta-2025-01-01".to_string()];
+        let result = resolve_and_validate_betas(&client, Some(&config_betas)).await;
+
+        // When config_betas is non-empty, it should be returned as-is without validation
+        assert_eq!(result, config_betas);
+    }
+
+    #[tokio::test]
+    async fn test_resolve_and_validate_betas_falls_back_to_defaults_when_no_discovery() {
+        use crate::anthropic::AnthropicClient;
+        use crate::auth::AuthProvider;
+        use crate::identity::{IdentityMode, IdentityProvider};
+
+        // Clear any existing validated cache to force a fresh discovery attempt
+        let cache_path = dirs::config_dir()
+            .unwrap_or_default()
+            .join("archon")
+            .join("validated_betas.json");
+        let _ = std::fs::remove_file(&cache_path);
+
+        let auth = AuthProvider::ApiKey(crate::types::Secret::new("test-key".to_string()));
+        let identity = IdentityProvider::new(
+            IdentityMode::Clean,
+            "test-session".to_string(),
+            "test-device".to_string(),
+            String::new(),
+        );
+        let client = AnthropicClient::new(auth, identity, None);
+
+        // Pass None so it attempts discovery; if Claude Code is not installed,
+        // should return DEFAULT_BETAS (possibly after a failed API probe).
+        // We just verify the result is non-empty (graceful fallback).
+        let result = resolve_and_validate_betas(&client, None).await;
+        assert!(!result.is_empty(), "should always return at least some betas");
+    }
+}
+
 /// Resolve beta list: config override > discovered/cached > hardcoded defaults.
 pub fn resolve_betas(config_betas: Option<&[String]>) -> Vec<String> {
     // Priority 1: explicit config override

@@ -21,10 +21,20 @@ pub struct AnthropicClient {
     http: reqwest::Client,
     auth: AuthProvider,
     identity: IdentityProvider,
+    api_url: String,
 }
 
 impl AnthropicClient {
-    pub fn new(auth: AuthProvider, identity: IdentityProvider) -> Self {
+    /// Create a new client.
+    ///
+    /// `api_url` sets the endpoint URL. Pass `None` to use the default
+    /// Anthropic endpoint (`https://api.anthropic.com/v1/messages`).
+    /// Pass `Some(url)` to point at a proxy (LiteLLM, Ollama, etc.).
+    /// The caller is responsible for resolving the priority:
+    ///   1. `ANTHROPIC_BASE_URL` env var
+    ///   2. `api.base_url` in config.toml
+    ///   3. `None` → hardcoded default
+    pub fn new(auth: AuthProvider, identity: IdentityProvider, api_url: Option<String>) -> Self {
         let http = reqwest::Client::builder()
             .timeout(Duration::from_secs(300))
             .no_proxy()
@@ -35,6 +45,7 @@ impl AnthropicClient {
             http,
             auth,
             identity,
+            api_url: api_url.unwrap_or_else(|| API_URL.to_string()),
         }
     }
 
@@ -79,7 +90,7 @@ impl AnthropicClient {
 
             let (auth_header_name, auth_header_value) = self.auth.header();
 
-            let mut req = self.http.post(API_URL);
+            let mut req = self.http.post(&self.api_url);
             req = req.header(&auth_header_name, &auth_header_value);
             for (name, value) in &headers {
                 req = req.header(name, value);
@@ -211,6 +222,96 @@ impl AnthropicClient {
         Ok(rx)
     }
 
+    /// Validate a list of beta strings against the API.
+    ///
+    /// Sends a minimal probe request (cheapest model, max_tokens=1, content=".")
+    /// with all candidate betas. If the API returns 400 "Unknown beta flag: X",
+    /// removes X and retries. Repeats until 200 or the list is empty.
+    ///
+    /// Returns the validated subset of betas.
+    pub async fn validate_betas(&self, mut candidates: Vec<String>) -> Vec<String> {
+        if candidates.is_empty() {
+            return candidates;
+        }
+
+        let probe_body = serde_json::json!({
+            "model": "claude-haiku-4-5-20251001",
+            "max_tokens": 1,
+            "messages": [{"role": "user", "content": "."}],
+            "stream": false,
+        });
+        let body_str = match serde_json::to_string(&probe_body) {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!("Beta validation probe: failed to serialize body: {e}");
+                return candidates;
+            }
+        };
+
+        loop {
+            if candidates.is_empty() {
+                break;
+            }
+
+            let beta_header = candidates.join(",");
+            let request_id = uuid::Uuid::new_v4().to_string();
+
+            let (auth_header_name, auth_header_value) = self.auth.header();
+
+            let response = self
+                .http
+                .post(&self.api_url)
+                .header(&auth_header_name, &auth_header_value)
+                .header("anthropic-version", "2023-06-01")
+                .header("content-type", "application/json")
+                .header("anthropic-beta", &beta_header)
+                .header("x-client-request-id", &request_id)
+                .body(body_str.clone())
+                .send()
+                .await;
+
+            let response = match response {
+                Ok(r) => r,
+                Err(e) => {
+                    tracing::warn!("Beta validation probe: HTTP error: {e}, using candidates as-is");
+                    break;
+                }
+            };
+
+            let status = response.status().as_u16();
+            if status == 200 || (200..300).contains(&status) {
+                tracing::debug!("Beta validation probe succeeded with {} betas", candidates.len());
+                break;
+            }
+
+            let response_body = response.text().await.unwrap_or_default();
+
+            if status == 400 {
+                if let Some(bad_beta) = extract_unknown_beta(&response_body) {
+                    let before = candidates.len();
+                    candidates.retain(|b| b != &bad_beta);
+                    if candidates.len() < before {
+                        // Successfully removed the bad beta — continue probing
+                        tracing::warn!("Stripping unknown beta: {bad_beta}");
+                        continue;
+                    }
+                    // The API reported a beta we didn't send — abort to avoid infinite loop
+                    tracing::warn!(
+                        "Beta validation: API reported unknown beta '{bad_beta}' not in our candidate list; aborting probe"
+                    );
+                }
+            }
+
+            // Any other error (or unrecognised 400): abort probe, return what we have
+            tracing::warn!(
+                "Beta validation probe failed with status {status}, using candidates as-is"
+            );
+            break;
+        }
+
+        candidates
+    }
+
     fn build_request_body(&self, request: &MessageRequest) -> Result<String, ApiError> {
         let mut body = serde_json::json!({
             "model": request.model,
@@ -308,9 +409,31 @@ pub enum ApiError {
     SerializeError(String),
 }
 
+/// Extract the unknown beta name from a 400 error body.
+///
+/// Looks for the pattern `"Unknown beta flag: <name>"` and returns `<name>`.
+fn extract_unknown_beta(body: &str) -> Option<String> {
+    const MARKER: &str = "Unknown beta flag: ";
+    let start = body.find(MARKER)? + MARKER.len();
+    let rest = &body[start..];
+    // Beta name ends at a `"` or end of string
+    let end = rest.find('"').unwrap_or(rest.len());
+    let name = rest[..end].trim().to_string();
+    if name.is_empty() {
+        None
+    } else {
+        Some(name)
+    }
+}
+
 fn classify_error(status: u16, body: &str, retry_after_header: Option<&str>) -> ApiError {
     match status {
         401 => ApiError::AuthError(format!("authentication failed: {body}")),
+        403 => ApiError::AuthError(format!(
+            "authentication/identity rejected (403). If using spoof mode, check \
+             identity.spoof_version matches the current Claude Code version, or \
+             run /refresh-identity to rediscover beta headers. Body: {body}"
+        )),
         429 => ApiError::RateLimited {
             retry_after_secs: retry_after_header
                 .and_then(|s| s.parse().ok())
@@ -332,4 +455,127 @@ fn extract_retry_after(body: &str) -> u64 {
         }
     }
     30
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod beta_validation_tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_unknown_beta_parses_correctly() {
+        let body = r#"{"type":"error","error":{"type":"invalid_request_error","message":"Unknown beta flag: xyz-2025-01-01"}}"#;
+        let result = extract_unknown_beta(body);
+        assert_eq!(result, Some("xyz-2025-01-01".to_string()));
+    }
+
+    #[test]
+    fn test_extract_unknown_beta_returns_none_for_unrelated_error() {
+        let body = r#"{"type":"error","error":{"type":"authentication_error","message":"Invalid API key"}}"#;
+        let result = extract_unknown_beta(body);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_extract_unknown_beta_returns_none_for_empty_body() {
+        let result = extract_unknown_beta("");
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_extract_unknown_beta_handles_beta_with_hyphens() {
+        let body = r#"{"type":"error","error":{"message":"Unknown beta flag: my-feature-flag-2025-12-31"}}"#;
+        let result = extract_unknown_beta(body);
+        assert_eq!(result, Some("my-feature-flag-2025-12-31".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_validate_betas_with_empty_candidates_returns_empty() {
+        use crate::auth::AuthProvider;
+        use crate::identity::{IdentityMode, IdentityProvider};
+        use crate::types::Secret;
+
+        let auth = AuthProvider::ApiKey(Secret::new("test-key".to_string()));
+        let identity = IdentityProvider::new(
+            IdentityMode::Clean,
+            "test-session".to_string(),
+            "test-device".to_string(),
+            String::new(),
+        );
+        let client = AnthropicClient::new(auth, identity, None);
+        let result = client.validate_betas(vec![]).await;
+        assert!(result.is_empty(), "empty candidates should return empty immediately without any API call");
+    }
+
+    #[test]
+    fn test_probe_body_structure() {
+        // Verify that the probe body construction generates the expected shape.
+        let body = serde_json::json!({
+            "model": "claude-haiku-4-5-20251001",
+            "max_tokens": 1,
+            "messages": [{"role": "user", "content": "."}],
+            "stream": false,
+        });
+        assert_eq!(body["model"], "claude-haiku-4-5-20251001");
+        assert_eq!(body["max_tokens"], 1);
+        assert_eq!(body["stream"], false);
+        assert!(body["messages"].is_array());
+        let msgs = body["messages"].as_array().unwrap();
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0]["role"], "user");
+        assert_eq!(msgs[0]["content"], ".");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::auth::AuthProvider;
+    use crate::identity::IdentityProvider;
+    use crate::types::Secret;
+
+    fn make_auth() -> AuthProvider {
+        AuthProvider::ApiKey(Secret::new("test-key".to_string()))
+    }
+
+    fn make_identity() -> IdentityProvider {
+        IdentityProvider::new(
+            crate::identity::IdentityMode::Clean,
+            "test-session".to_string(),
+            "test-device".to_string(),
+            String::new(),
+        )
+    }
+
+    #[test]
+    fn test_custom_api_url_stored() {
+        let client = AnthropicClient::new(
+            make_auth(),
+            make_identity(),
+            Some("http://localhost:11434/v1/messages".to_string()),
+        );
+        assert_eq!(client.api_url, "http://localhost:11434/v1/messages");
+    }
+
+    #[test]
+    fn test_default_api_url_when_none() {
+        let client = AnthropicClient::new(make_auth(), make_identity(), None);
+        assert_eq!(client.api_url, API_URL);
+    }
+
+    #[test]
+    fn test_custom_api_url_used_not_constant() {
+        let custom_url = "https://my-proxy.example.com/v1/messages";
+        let client = AnthropicClient::new(
+            make_auth(),
+            make_identity(),
+            Some(custom_url.to_string()),
+        );
+        // Confirm it is NOT using the hardcoded constant
+        assert_ne!(client.api_url, API_URL);
+        assert_eq!(client.api_url, custom_url);
+    }
 }
