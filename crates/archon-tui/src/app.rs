@@ -48,6 +48,10 @@ pub enum TuiEvent {
     PermissionModeChanged(String),
     /// Show interactive session picker for /resume.
     ShowSessionPicker(Vec<SessionPickerEntry>),
+    /// Set the accent color on the active theme (used by /color).
+    SetAccentColor(ratatui::style::Color),
+    /// Replace the entire theme by name (used by /theme).
+    SetTheme(String),
     Done,
 }
 
@@ -718,6 +722,17 @@ pub async fn run_tui(
                         sessions,
                         selected: 0,
                     });
+                }
+                TuiEvent::SetAccentColor(color) => {
+                    app.theme.accent = color;
+                    app.theme.header = color;
+                    app.theme.border_active = color;
+                    app.theme.thinking_dot = color;
+                }
+                TuiEvent::SetTheme(name) => {
+                    if let Some(t) = crate::theme::theme_by_name(&name) {
+                        app.theme = t;
+                    }
                 }
                 TuiEvent::Done => {
                     app.should_quit = true;

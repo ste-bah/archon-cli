@@ -2465,29 +2465,39 @@ async fn handle_slash_command(
             let color_arg = s.strip_prefix("/color").unwrap_or("").trim();
             if color_arg.is_empty() {
                 let _ = tui_tx.send(TuiEvent::TextDelta(
-                    "\nCurrent accent color: cyan (default)\n\
-                     Available: red, green, yellow, blue, magenta, cyan, white, default\n\
+                    "\nAvailable accent colors: red, green, yellow, blue, magenta, cyan, white, default\n\
                      Usage: /color <name>\n".into()
                 )).await;
+            } else if let Some(color) = archon_tui::theme::parse_color(color_arg) {
+                let _ = tui_tx.send(TuiEvent::SetAccentColor(color)).await;
+                let _ = tui_tx.send(TuiEvent::TextDelta(
+                    format!("\nAccent color set to '{color_arg}'.\n")
+                )).await;
             } else {
-                let color_name = color_arg.to_lowercase();
-                match color_name.as_str() {
-                    "default" | "reset" | "none" | "cyan" => {
-                        let _ = tui_tx.send(TuiEvent::TextDelta(
-                            "\nAccent color reset to default (cyan).\n".into()
-                        )).await;
-                    }
-                    "red" | "green" | "yellow" | "blue" | "magenta" | "white" => {
-                        let _ = tui_tx.send(TuiEvent::TextDelta(
-                            format!("\nAccent color set to {color_name}.\nNote: takes effect on next render.\n")
-                        )).await;
-                    }
-                    _ => {
-                        let _ = tui_tx.send(TuiEvent::Error(
-                            format!("Unknown color '{color_arg}'. Available: red, green, yellow, blue, magenta, cyan, white, default")
-                        )).await;
-                    }
-                }
+                let _ = tui_tx.send(TuiEvent::Error(
+                    format!("Unknown color '{color_arg}'. Available: red, green, yellow, blue, magenta, cyan, white, default")
+                )).await;
+            }
+            true
+        }
+        // ── /theme ─────────────────────────────────────────────
+        s if s.starts_with("/theme") => {
+            let theme_arg = s.strip_prefix("/theme").unwrap_or("").trim();
+            if theme_arg.is_empty() {
+                let names = archon_tui::theme::available_themes().join(", ");
+                let _ = tui_tx.send(TuiEvent::TextDelta(
+                    format!("\nAvailable themes: {names}\nUsage: /theme <name>\n")
+                )).await;
+            } else if archon_tui::theme::theme_by_name(theme_arg).is_some() {
+                let _ = tui_tx.send(TuiEvent::SetTheme(theme_arg.to_string())).await;
+                let _ = tui_tx.send(TuiEvent::TextDelta(
+                    format!("\nTheme set to '{theme_arg}'.\n")
+                )).await;
+            } else {
+                let names = archon_tui::theme::available_themes().join(", ");
+                let _ = tui_tx.send(TuiEvent::Error(
+                    format!("Unknown theme '{theme_arg}'. Available: {names}")
+                )).await;
             }
             true
         }
