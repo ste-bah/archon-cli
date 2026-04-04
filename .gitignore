@@ -18,6 +18,7 @@ config.local.toml
 .env
 .env.*
 !.env.example
+.mcp.json
 
 # Logs
 *.log
