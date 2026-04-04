@@ -8,7 +8,7 @@ use anyhow::Result;
 use clap::Parser;
 
 use archon_consciousness::assembler::{AssemblyInput, BudgetConfig, SystemPromptAssembler};
-use archon_consciousness::defaults::load_defaults;
+use archon_consciousness::defaults::load_configured_defaults;
 use archon_consciousness::rules::RulesEngine;
 use archon_core::agent::{Agent, AgentConfig, AgentEvent, SessionStats};
 use archon_core::cli_flags::resolve_flags;
@@ -672,7 +672,7 @@ async fn run_interactive_session(
 
     // ── Phase 2: Load behavioral rules + defaults (CLI-106) ─────
     let rules_engine = RulesEngine::new(&memory_graph);
-    match load_defaults(&rules_engine) {
+    match load_configured_defaults(&rules_engine, &config.consciousness.initial_rules) {
         Ok(n) if n > 0 => tracing::info!("loaded {n} default behavioral rules"),
         Ok(_) => tracing::debug!("behavioral rules already present"),
         Err(e) => tracing::warn!("failed to load default rules: {e}"),

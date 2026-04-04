@@ -305,6 +305,11 @@ pub struct ConsciousnessConfig {
     pub inner_voice: bool,
     /// Energy decay rate applied each turn (multiplied by current energy).
     pub energy_decay_rate: f32,
+    /// Behavioral rules to seed into the memory graph on startup.
+    /// If non-empty, these replace the built-in defaults.
+    /// Idempotent: rules already present are not duplicated.
+    /// Maximum 50 rules. Each must be a non-empty string.
+    pub initial_rules: Vec<String>,
 }
 
 impl Default for ConsciousnessConfig {
@@ -312,6 +317,7 @@ impl Default for ConsciousnessConfig {
         Self {
             inner_voice: true,
             energy_decay_rate: 0.98,
+            initial_rules: Vec::new(),
         }
     }
 }
@@ -395,6 +401,21 @@ pub fn validate(config: &ArchonConfig) -> Result<(), ConfigError> {
         )));
     }
 
+    // consciousness.initial_rules
+    if config.consciousness.initial_rules.len() > 50 {
+        return Err(ConfigError::ValidationError(format!(
+            "consciousness.initial_rules: too many rules ({}), maximum is 50",
+            config.consciousness.initial_rules.len()
+        )));
+    }
+    for (i, rule) in config.consciousness.initial_rules.iter().enumerate() {
+        if rule.trim().is_empty() {
+            return Err(ConfigError::ValidationError(format!(
+                "consciousness.initial_rules[{i}]: rule must not be empty or whitespace-only"
+            )));
+        }
+    }
+
     // personality profile
     config
         .personality
@@ -402,6 +423,106 @@ pub fn validate(config: &ArchonConfig) -> Result<(), ConfigError> {
         .map_err(|e| ConfigError::ValidationError(e.to_string()))?;
 
     Ok(())
+}
+
+/// Write a human-readable example config with comments for all options.
+/// Used when creating a new config file on first run.
+pub fn write_example_config() -> String {
+    r#"# Archon CLI Configuration
+# Generated on first run. Edit to customise your agent.
+# Full path: ~/.config/archon/config.toml
+
+[api]
+# Model to use. Options: claude-sonnet-4-6, claude-opus-4-6, claude-haiku-4-5
+default_model = "claude-sonnet-4-6"
+thinking_budget = 16384
+# effort: low, medium, high
+default_effort = "medium"
+max_retries = 3
+
+[identity]
+# mode: "clean" (no spoofing) | "spoof" (mimic Claude Code headers) | "custom"
+mode = "clean"
+spoof_version = "2.1.89"
+spoof_entrypoint = "cli"
+anti_distillation = false
+
+[personality]
+# Your agent's name — used in the system prompt
+name = "Archon"
+# MBTI type — must be one of the 16 valid types:
+#   INTJ INTP ENTJ ENTP INFJ INFP ENFJ ENFP
+#   ISTJ ISFJ ESTJ ESFJ ISTP ISFP ESTP ESFP
+type = "INTJ"
+# Enneagram — format: [1-9]w[1-9]  (e.g. 4w5, 9w1, 7w8)
+enneagram = "4w5"
+# Traits that shape behaviour (free-form strings)
+traits = ["strategic", "direct", "self-critical", "truth-over-comfort"]
+# Communication style description (free-form)
+communication_style = "terse"
+
+[consciousness]
+# Enable the inner voice subsystem
+inner_voice = true
+# Score decay rate applied each turn (0.98 = 2% decay per turn)
+energy_decay_rate = 0.98
+# Core behavioral rules seeded into the memory graph on startup.
+# If non-empty, these replace the built-in defaults.
+# Idempotent: rules already in the DB are never duplicated; new rules
+# added here are picked up on the next startup automatically.
+# Maximum 50 rules. Each must be a non-empty string.
+initial_rules = [
+    "Always ask before modifying files",
+    "Explain reasoning before acting",
+    "Never create files unless explicitly requested",
+]
+
+[tools]
+# Maximum seconds a bash command may run before being killed
+bash_timeout = 120
+# Maximum bytes of bash output to capture
+bash_max_output = 102400
+# Maximum concurrent tool calls
+max_concurrency = 4
+
+[permissions]
+# mode: default | acceptEdits | plan | auto | dontAsk | bypassPermissions
+mode = "default"
+allow_paths = []
+deny_paths = []
+
+[context]
+# Compact conversation when context reaches this fraction of the limit (0.0–1.0)
+compact_threshold = 0.80
+preserve_recent_turns = 3
+prompt_cache = true
+
+[memory]
+enabled = true
+
+[cost]
+# Warn when session cost exceeds this many USD (0.0 = disabled)
+warn_threshold = 5.0
+# Hard stop when session cost exceeds this many USD (0.0 = disabled)
+hard_limit = 0.0
+
+[logging]
+level = "info"
+max_files = 50
+max_file_size_mb = 10
+
+[session]
+auto_resume = true
+
+[checkpoint]
+enabled = true
+max_checkpoints = 10
+
+[tui]
+# Enable vim-style keybindings in the input field
+vim_mode = false
+"#
+    .to_string()
 }
 
 /// Load configuration from the default path. If the file does not exist,
@@ -417,15 +538,101 @@ pub fn load_config_from(path: PathBuf) -> Result<ArchonConfig, ConfigError> {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
-        let defaults = ArchonConfig::default();
-        let toml_str = toml::to_string_pretty(&defaults)
-            .map_err(|e| ConfigError::ValidationError(format!("failed to serialize defaults: {e}")))?;
-        fs::write(&path, toml_str)?;
-        return Ok(defaults);
+        fs::write(&path, write_example_config())?;
+        return Ok(ArchonConfig::default());
     }
 
     let content = fs::read_to_string(&path)?;
     let config: ArchonConfig = toml::from_str(&content)?;
     validate(&config)?;
     Ok(config)
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn initial_rules_default_is_empty() {
+        assert!(ConsciousnessConfig::default().initial_rules.is_empty());
+    }
+
+    #[test]
+    fn initial_rules_deserialized_from_toml() {
+        let toml_str = r#"
+            [consciousness]
+            initial_rules = ["rule a", "rule b"]
+        "#;
+        let cfg: ArchonConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(cfg.consciousness.initial_rules.len(), 2);
+        assert_eq!(cfg.consciousness.initial_rules[0], "rule a");
+    }
+
+    #[test]
+    fn initial_rules_empty_string_rejected() {
+        let mut cfg = ArchonConfig::default();
+        cfg.consciousness.initial_rules = vec!["".to_string()];
+        assert!(validate(&cfg).is_err());
+    }
+
+    #[test]
+    fn initial_rules_whitespace_only_rejected() {
+        let mut cfg = ArchonConfig::default();
+        cfg.consciousness.initial_rules = vec!["   ".to_string()];
+        let err = validate(&cfg).unwrap_err();
+        assert!(err.to_string().contains("whitespace"));
+    }
+
+    #[test]
+    fn initial_rules_max_50_enforced() {
+        let mut cfg = ArchonConfig::default();
+        cfg.consciousness.initial_rules = (0..51).map(|i| format!("rule {i}")).collect();
+        assert!(validate(&cfg).is_err());
+
+        cfg.consciousness.initial_rules = (0..50).map(|i| format!("rule {i}")).collect();
+        assert!(validate(&cfg).is_ok());
+    }
+
+    #[test]
+    fn write_example_config_is_valid_toml() {
+        let s = write_example_config();
+        let cfg: ArchonConfig = toml::from_str(&s).expect("should parse as ArchonConfig");
+        validate(&cfg).expect("should validate");
+    }
+
+    #[test]
+    fn write_example_config_contains_personality_section() {
+        assert!(write_example_config().contains("[personality]"));
+    }
+
+    #[test]
+    fn write_example_config_contains_consciousness_section() {
+        assert!(write_example_config().contains("[consciousness]"));
+    }
+
+    #[test]
+    fn write_example_config_contains_initial_rules() {
+        assert!(write_example_config().contains("initial_rules"));
+    }
+
+    #[test]
+    fn write_example_config_personality_fields_round_trip() {
+        let s = write_example_config();
+        let cfg: ArchonConfig = toml::from_str(&s).unwrap();
+        assert_eq!(cfg.personality.name, "Archon");
+        assert_eq!(cfg.personality.mbti_type, "INTJ");
+        assert_eq!(cfg.personality.enneagram, "4w5");
+        assert!(!cfg.personality.traits.is_empty());
+    }
+
+    #[test]
+    fn write_example_config_initial_rules_non_empty() {
+        let s = write_example_config();
+        let cfg: ArchonConfig = toml::from_str(&s).unwrap();
+        assert!(!cfg.consciousness.initial_rules.is_empty());
+    }
 }

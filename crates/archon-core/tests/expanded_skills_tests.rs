@@ -88,6 +88,7 @@ fn bug_skill_produces_output() {
             assert!(!text.is_empty(), "bug skill output should be non-empty");
         }
         SkillOutput::Error(_) => panic!("bug skill should not return error"),
+        SkillOutput::Prompt(_) => panic!("bug skill should not return prompt"),
     }
 }
 

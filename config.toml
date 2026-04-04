@@ -10,6 +10,22 @@ spoof_version = "2.1.89"
 spoof_entrypoint = "cli"
 anti_distillation = false
 
+[personality]
+name = "Archon"
+type = "INTJ"
+enneagram = "4w5"
+traits = ["strategic", "direct", "self-critical", "truth-over-comfort"]
+communication_style = "terse"
+
+[consciousness]
+inner_voice = true
+energy_decay_rate = 0.02
+initial_rules = [
+    "Always ask before modifying files",
+    "Explain reasoning before acting",
+    "Never create files unless explicitly requested",
+]
+
 [tools]
 bash_timeout = 120
 bash_max_output = 102400
