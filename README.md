@@ -200,6 +200,7 @@ default_model = "claude-sonnet-4-6"   # Model to use for the main agent
 thinking_budget = 16384               # Max thinking tokens (extended thinking)
 default_effort = "high"               # "low" | "medium" | "high"
 max_retries = 3
+# base_url = "http://localhost:4000/v1/messages"  # Override API endpoint (local LLM / proxy)
 
 [identity]
 mode = "spoof"                        # "spoof" | "native"
@@ -258,10 +259,48 @@ hard_limit = 0.0                     # 0.0 = no hard limit
 
 | Variable | Description |
 |----------|-------------|
-| `ANTHROPIC_API_KEY` | **Required.** Your Claude API key |
+| `ANTHROPIC_API_KEY` | **Required** (unless using OAuth). Your Claude API key |
+| `ANTHROPIC_BASE_URL` | Override the API endpoint — use for local LLMs and proxies (takes priority over `api.base_url` in config) |
+| `ARCHON_API_KEY` | Alias for `ANTHROPIC_API_KEY` |
+| `ARCHON_OAUTH_TOKEN` | Pre-set OAuth bearer token (skips login flow) |
+| `ANTHROPIC_AUTH_TOKEN` | Legacy bearer token alias |
 | `ARCHON_CONFIG` | Override config file path |
 | `ARCHON_LOG` | Override log level |
 | `RUST_LOG` | Tracing subscriber filter |
+
+---
+
+## Local LLMs and Proxies
+
+Archon can point at any Anthropic-compatible endpoint via `ANTHROPIC_BASE_URL` or `api.base_url` in config. This works with LiteLLM, Ollama (with an Anthropic-compatible adapter), and other proxy gateways.
+
+### LiteLLM (recommended proxy)
+
+LiteLLM translates Anthropic API calls to other backends (Ollama, OpenAI, Bedrock, etc.):
+
+```bash
+# Install
+pip install litellm
+
+# Start a proxy in front of Ollama (llama3)
+litellm --model ollama/llama3 --port 4000
+
+# Point Archon at it
+ANTHROPIC_BASE_URL=http://localhost:4000/v1/messages archon
+```
+
+Or set it permanently in config:
+
+```toml
+[api]
+base_url = "http://localhost:4000/v1/messages"
+```
+
+### Beta header validation
+
+When using a local proxy, Archon automatically validates which `anthropic-beta` headers the endpoint accepts. On first startup it sends a cheap probe request (Haiku, 1 token) and strips any headers the endpoint rejects — so you don't need to manually configure which betas your proxy supports.
+
+If the endpoint changes or starts rejecting identity headers, run `/refresh-identity` in the TUI to clear the cache and re-probe.
 
 ---
 
@@ -282,6 +321,7 @@ Commands entered in the TUI input box.
 | `/model <name>` | Switch model mid-session |
 | `/checkpoint` | Save a session checkpoint |
 | `/resume` | Show resumable sessions |
+| `/refresh-identity` | Clear the beta header cache and rediscover from the installed Claude Code binary |
 
 ---
 
