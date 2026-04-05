@@ -7,21 +7,43 @@ A privacy-first, self-aware AI coding assistant written in Rust. Archon replaces
 ## Table of Contents
 
 - [Overview](#overview)
+- [Quick Start](#quick-start)
 - [Architecture](#architecture)
 - [Setup](#setup)
   - [macOS](#macos)
   - [Linux](#linux)
   - [Windows](#windows)
+- [Authentication](#authentication)
 - [Configuration](#configuration)
+- [Local LLMs and Proxies](#local-llms-and-proxies)
+- [CLI Reference](#cli-reference)
 - [Slash Commands](#slash-commands)
+- [Tools Reference](#tools-reference)
 - [Themes](#themes)
 - [Memory System](#memory-system)
 - [Consciousness System](#consciousness-system)
 - [Agent Loop](#agent-loop)
 - [Subagent Spawning](#subagent-spawning)
+- [Multi-Agent Teams](#multi-agent-teams)
+- [Skills System](#skills-system)
+- [Hooks System](#hooks-system)
+- [Plugins](#plugins)
+- [MCP Integration](#mcp-integration)
+- [LSP Integration](#lsp-integration)
+- [Checkpointing & File Snapshots](#checkpointing--file-snapshots)
+- [Cron & Scheduling](#cron--scheduling)
+- [Permission System](#permission-system)
+- [Identity & Spoofing](#identity--spoofing)
 - [Session Management](#session-management)
+- [Remote Control & Headless Mode](#remote-control--headless-mode)
+- [IDE Extensions](#ide-extensions)
+- [Web UI](#web-ui)
+- [Vim Mode](#vim-mode)
+- [Cost, Effort & Fast Mode](#cost-effort--fast-mode)
+- [Context Compaction](#context-compaction)
 - [Crate Architecture](#crate-architecture)
 - [Phase Roadmap](#phase-roadmap)
+- [License](#license)
 
 ---
 
@@ -37,6 +59,32 @@ A privacy-first, self-aware AI coding assistant written in Rust. Archon replaces
 | Session resume | ID only | ID prefix, name, or name prefix |
 | Tool execution | Node.js | Native Rust async |
 | Binary size | ~200 MB | ~55 MB (release, stripped) |
+| MCP transports | stdio | stdio, WebSocket, streamable-HTTP |
+| Plugins | No | Dynamic .so/.dll/.dylib, trait-based ABI |
+| Multi-agent teams | Single agent | Sequential, Parallel, Pipeline, DAG modes |
+| LSP integration | No | goToDefinition, findReferences, hover, callHierarchy, etc. |
+| Remote control | No | `archon serve` + `archon remote ws/ssh` |
+
+---
+
+## Quick Start
+
+```bash
+# Build (requires Rust 1.85+)
+git clone https://github.com/ste-bah/archon-cli
+cd archon-cli
+cargo build --release
+
+# Authenticate (either API key or OAuth)
+export ANTHROPIC_API_KEY="sk-ant-..."
+# or: ./target/release/archon login
+
+# Run interactive TUI
+./target/release/archon
+
+# Non-interactive print mode
+./target/release/archon -p "summarize src/main.rs" --output-format json
+```
 
 ---
 
@@ -56,6 +104,17 @@ A privacy-first, self-aware AI coding assistant written in Rust. Archon replaces
 │  ┌──────────────┐  ┌────┴──────────┐  ┌────────────────────┐ │
 │  │archon-session│  │ archon-memory │  │    archon-llm      │ │
 │  │ (CozoDB)     │  │ (CozoDB graph)│  │ (Claude API proxy) │ │
+│  └──────────────┘  └───────────────┘  └────────────────────┘ │
+│                                                              │
+│  ┌──────────────┐  ┌───────────────┐  ┌────────────────────┐ │
+│  │ archon-mcp   │  │archon-permis- │  │ archon-tools       │ │
+│  │ (stdio/ws/   │  │sions          │  │ (40+ tools)        │ │
+│  │  http-stream)│  │               │  │                    │ │
+│  └──────────────┘  └───────────────┘  └────────────────────┘ │
+│                                                              │
+│  ┌──────────────┐  ┌───────────────┐  ┌────────────────────┐ │
+│  │archon-plugin │  │ archon-sdk    │  │   archon-context   │ │
+│  │(dyn loading) │  │ (embedding)   │  │   (compaction)     │ │
 │  └──────────────┘  └───────────────┘  └────────────────────┘ │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -83,7 +142,7 @@ source "$HOME/.cargo/env"
 xcode-select --install
 
 # 3. Clone and build
-git clone https://github.com/your-org/archon-cli
+git clone https://github.com/ste-bah/archon-cli
 cd archon-cli
 cargo build --release
 
@@ -100,7 +159,7 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 archon
 ```
 
-**Optional — brew dependencies** (only needed if build fails due to OpenSSL):
+**Optional — brew dependencies** (only if build fails due to OpenSSL):
 ```bash
 brew install pkg-config openssl
 export PKG_CONFIG_PATH="$(brew --prefix openssl)/lib/pkgconfig"
@@ -113,25 +172,13 @@ export PKG_CONFIG_PATH="$(brew --prefix openssl)/lib/pkgconfig"
 #### Ubuntu / Debian
 
 ```bash
-# 1. Install Rust
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 source "$HOME/.cargo/env"
-
-# 2. Install build dependencies
-sudo apt update
-sudo apt install -y build-essential pkg-config libssl-dev
-
-# 3. Clone and build
-git clone https://github.com/your-org/archon-cli
+sudo apt update && sudo apt install -y build-essential pkg-config libssl-dev
+git clone https://github.com/ste-bah/archon-cli
 cd archon-cli
 cargo build --release
-
-# 4. Install to PATH
 sudo cp target/release/archon /usr/local/bin/archon
-# or
-cargo install --path .
-
-# 5. Set API key
 export ANTHROPIC_API_KEY="sk-ant-..."
 echo 'export ANTHROPIC_API_KEY="sk-ant-..."' >> ~/.bashrc
 ```
@@ -140,14 +187,14 @@ echo 'export ANTHROPIC_API_KEY="sk-ant-..."' >> ~/.bashrc
 
 ```bash
 sudo dnf install -y gcc pkg-config openssl-devel
-# Then follow steps 1, 3–5 above
+# Then build as above
 ```
 
 #### Arch Linux
 
 ```bash
 sudo pacman -S base-devel openssl pkg-config
-# Then follow steps 1, 3–5 above
+# Then build as above
 ```
 
 ---
@@ -157,36 +204,55 @@ sudo pacman -S base-devel openssl pkg-config
 #### Option A: Native (Windows 10/11)
 
 ```powershell
-# 1. Install Rust via winget
 winget install Rustlang.Rustup
-
-# 2. Install Visual Studio C++ build tools (required)
 winget install Microsoft.VisualStudio.2022.BuildTools
 # Select "Desktop development with C++" during install
 
-# 3. Open a new terminal and clone
-git clone https://github.com/your-org/archon-cli
+git clone https://github.com/ste-bah/archon-cli
 cd archon-cli
 cargo build --release
 
-# 4. Add to PATH (PowerShell profile or System Environment Variables)
 $env:PATH += ";$PWD\target\release"
 $env:ANTHROPIC_API_KEY = "sk-ant-..."
-
-# 5. Run
 .\target\release\archon.exe
 ```
 
 #### Option B: WSL2 (Recommended for Windows)
 
-WSL2 gives you a full Linux environment. Install Ubuntu from the Microsoft Store, then follow the [Linux instructions](#linux) above.
-
 ```powershell
-# Enable WSL2
 wsl --install -d Ubuntu
-# Then inside the Ubuntu terminal:
-# Follow Linux/Ubuntu setup above
+# Then follow Linux/Ubuntu setup above inside WSL
 ```
+
+---
+
+## Authentication
+
+Archon supports three authentication methods, tried in this order:
+
+### 1. OAuth (recommended for Claude subscribers)
+
+```bash
+archon login
+```
+
+This opens a PKCE OAuth flow in your browser, exchanges the authorization code for tokens, and stores them at `~/.config/archon/oauth.json`. Tokens are refreshed automatically with file locking to prevent race conditions across concurrent sessions. Re-run `archon login` to re-authenticate; `archon logout` (or `/logout` in the TUI) signs out.
+
+### 2. API key
+
+```bash
+export ANTHROPIC_API_KEY="sk-ant-..."
+# or ARCHON_API_KEY (alias)
+```
+
+### 3. Pre-set bearer token
+
+```bash
+export ARCHON_OAUTH_TOKEN="..."
+# or ANTHROPIC_AUTH_TOKEN (legacy alias)
+```
+
+The OAuth flow is designed to match the original Claude Code client (`redirect_uri = http://localhost:{port}/callback`), so existing Claude Code tokens on the same machine work transparently.
 
 ---
 
@@ -196,73 +262,97 @@ Archon generates a commented config file on first run at `~/.config/archon/confi
 
 ```toml
 [api]
-default_model = "claude-sonnet-4-6"   # Model to use for the main agent
+default_model = "claude-sonnet-4-6"   # Model used for the main agent
 thinking_budget = 16384               # Max thinking tokens (extended thinking)
 default_effort = "high"               # "low" | "medium" | "high"
 max_retries = 3
-# base_url = "http://localhost:4000/v1/messages"  # Override API endpoint (local LLM / proxy)
+# base_url = "http://localhost:4000/v1/messages"  # Override (LiteLLM/proxy)
 
 [identity]
 mode = "spoof"                        # "spoof" | "native"
-spoof_version = "2.1.89"             # Reported as Claude Code version to the API
-anti_distillation = false
+spoof_version = "2.1.89"              # Version reported to the API
+anti_distillation = false             # Inject anti-distillation field in spoof mode
 
 [personality]
-name = "Archon"                       # The assistant's name (shown in TUI header)
-type = "INTJ"                         # MBTI type — auto-selects matching theme
+name = "Archon"                       # Shown in TUI header
+type = "INTJ"                         # MBTI type — auto-selects theme
 enneagram = "4w5"
 traits = ["strategic", "direct", "truth-over-comfort"]
 communication_style = "terse"         # Injected into system prompt
 
 [consciousness]
-inner_voice = true                    # Enables background monologue before responses
+inner_voice = true                    # Background monologue before responses
 energy_decay_rate = 0.02
 initial_rules = [
-    # These rules are seeded into the CozoDB rules graph on first run.
-    # Adding a new rule to this list will add it on next startup (idempotent).
     "Always ask before modifying files",
     "Explain reasoning before acting",
     "Never create files unless explicitly requested",
 ]
 
 [tools]
-bash_timeout = 120                    # Seconds before bash tool times out
-bash_max_output = 102400              # Max bytes captured from bash
-max_concurrency = 4                   # Max parallel tool executions
+bash_timeout = 120
+bash_max_output = 102400
+max_concurrency = 4
 
 [permissions]
-mode = "ask"                          # "ask" | "auto" | "deny"
-allow_paths = []                      # Always-allowed paths (bypass ask)
-deny_paths = []                       # Always-denied paths
+mode = "ask"                          # ask | auto | deny | plan | acceptEdits
+                                      #  | dontAsk | bypassPermissions
+allow_paths = []
+deny_paths = []
+sandbox = false                       # Read-only enforcement
 
 [memory]
-enabled = true                        # Enable CozoDB memory graph
+enabled = true                        # CozoDB memory graph
 
 [context]
 compact_threshold = 0.8               # Context fill % that triggers compaction
 preserve_recent_turns = 3
+prompt_cache = true                   # Anthropic prompt cache on static blocks
 
 [session]
 auto_resume = true                    # Resume last session on startup
 
 [logging]
-level = "info"                        # "trace" | "debug" | "info" | "warn" | "error"
+level = "info"                        # trace | debug | info | warn | error
 max_files = 50
 max_file_size_mb = 10
 
 [cost]
-warn_threshold = 100.0               # Warn when session cost exceeds $N
-hard_limit = 0.0                     # 0.0 = no hard limit
+warn_threshold = 100.0                # Warn when session cost exceeds $N
+hard_limit = 0.0                      # 0.0 = no hard limit
+
+[ws_remote]
+port = 8420                           # archon serve listener port
+# tls_cert = "/path/to/cert.pem"
+# tls_key = "/path/to/key.pem"
+
+[web]
+port = 8421
+bind_address = "127.0.0.1"
+open_browser = true
+
+[tui]
+vim_mode = false                      # Enable vim keybindings
+
+[orchestrator]
+max_concurrent = 4                    # Max parallel team agents
+timeout_secs = 300
+max_retries = 2
+
+[voice]                               # Voice input (optional)
+provider = "whisper-local"
+hotkey = "F9"
+vad_threshold = 0.5
 ```
 
 ### Environment Variables
 
 | Variable | Description |
 |----------|-------------|
-| `ANTHROPIC_API_KEY` | **Required** (unless using OAuth). Your Claude API key |
-| `ANTHROPIC_BASE_URL` | Override the API endpoint — use for local LLMs and proxies (takes priority over `api.base_url` in config) |
+| `ANTHROPIC_API_KEY` | Claude API key (unless using OAuth) |
+| `ANTHROPIC_BASE_URL` | Override API endpoint (LiteLLM, Ollama, etc.) |
 | `ARCHON_API_KEY` | Alias for `ANTHROPIC_API_KEY` |
-| `ARCHON_OAUTH_TOKEN` | Pre-set OAuth bearer token (skips login flow) |
+| `ARCHON_OAUTH_TOKEN` | Pre-set OAuth bearer token (skips login) |
 | `ANTHROPIC_AUTH_TOKEN` | Legacy bearer token alias |
 | `ARCHON_CONFIG` | Override config file path |
 | `ARCHON_LOG` | Override log level |
@@ -272,24 +362,18 @@ hard_limit = 0.0                     # 0.0 = no hard limit
 
 ## Local LLMs and Proxies
 
-Archon can point at any Anthropic-compatible endpoint via `ANTHROPIC_BASE_URL` or `api.base_url` in config. This works with LiteLLM, Ollama (with an Anthropic-compatible adapter), and other proxy gateways.
+Archon points at any Anthropic-compatible endpoint via `ANTHROPIC_BASE_URL` or `api.base_url`. Works with LiteLLM, Ollama (with Anthropic adapter), and other proxy gateways.
 
 ### LiteLLM (recommended proxy)
 
-LiteLLM translates Anthropic API calls to other backends (Ollama, OpenAI, Bedrock, etc.):
-
 ```bash
-# Install
 pip install litellm
-
-# Start a proxy in front of Ollama (llama3)
 litellm --model ollama/llama3 --port 4000
 
-# Point Archon at it
 ANTHROPIC_BASE_URL=http://localhost:4000/v1/messages archon
 ```
 
-Or set it permanently in config:
+Or set permanently:
 
 ```toml
 [api]
@@ -298,38 +382,265 @@ base_url = "http://localhost:4000/v1/messages"
 
 ### Beta header validation
 
-When using a local proxy, Archon automatically validates which `anthropic-beta` headers the endpoint accepts. On first startup it sends a cheap probe request (Haiku, 1 token) and strips any headers the endpoint rejects — so you don't need to manually configure which betas your proxy supports.
+On first startup, Archon sends a cheap probe request (Haiku, 1 token) to validate which `anthropic-beta` headers the endpoint accepts, then strips any it rejects — no manual configuration required. Run `/refresh-identity` in the TUI to clear the cache and re-probe.
 
-If the endpoint changes or starts rejecting identity headers, run `/refresh-identity` in the TUI to clear the cache and re-probe.
+---
+
+## CLI Reference
+
+### Subcommands
+
+| Subcommand | Description |
+|------------|-------------|
+| `archon` | Start interactive TUI (default) |
+| `archon login` | OAuth PKCE login flow |
+| `archon logout` | Sign out |
+| `archon serve [--port N] [--token-path P]` | Start WebSocket server for remote access |
+| `archon remote ws <url> [--token T]` | Connect to remote agent via WebSocket |
+| `archon remote ssh <target>` | Connect to remote agent via SSH |
+| `archon web [--port N] [--bind-address A] [--no-open]` | Start web UI server |
+| `archon team run --team NAME <goal>` | Execute a multi-agent team |
+| `archon team list` | List configured teams |
+| `archon plugin list` | List loaded plugins |
+| `archon plugin info <name>` | Show plugin details |
+| `archon update [--check] [--force]` | Check for / apply updates |
+| `archon --list-sessions` | List all resumable sessions |
+| `archon --list-themes` | List all TUI themes |
+| `archon --list-output-styles` | List output styles |
+
+### Top-level flags
+
+| Flag | Purpose |
+|------|---------|
+| `-p, --print [QUERY]` | Non-interactive mode (JSON-lines output) |
+| `--input-format <fmt>` | `text` / `json` / `stream-json` |
+| `--output-format <fmt>` | `text` / `json` / `stream-json` |
+| `--json-schema <schema>` | Validate final output against JSON schema |
+| `--max-turns <N>` | Hard cap on agent turns |
+| `--max-budget-usd <AMT>` | Hard cost limit |
+| `--resume <ID|NAME>` | Resume session by ID/name/prefix |
+| `--session-name <NAME>` | Assign name to new session |
+| `--continue-session` | Continue last session |
+| `--fork-session` | Fork from existing session |
+| `--model <MODEL>` | Override model |
+| `--fast` | Fast mode (reduced latency) |
+| `--effort <level>` | `high` / `medium` / `low` |
+| `--agent <NAME>` | Use named agent definition |
+| `--theme <NAME>` | Startup theme |
+| `--output-style <NAME>` | `Explanatory` / `Learning` / `Formal` / `Concise` |
+| `--system-prompt <TEXT>` | Replace system prompt |
+| `--append-system-prompt <TEXT>` | Append to system prompt |
+| `--permission-mode <MODE>` | Override permission enforcement |
+| `--dangerously-skip-permissions` | Skip all permission checks |
+| `--sandbox` | Enforce read-only mode |
+| `--bare` | Minimal mode (no hooks, CLAUDE.md, MCP auto-start) |
+| `--init` | Run init hooks then start interactive |
+| `--headless` | No TUI, JSON-lines stdio (for backend integration) |
+| `--mcp-config <FILES>` | MCP config files (repeatable) |
+| `--strict-mcp-config` | Ignore auto-discovered MCP configs |
+| `--tools <PATTERNS>` | Tool allowlist |
+| `--allowed-tools <PATTERNS>` | Tools that skip permission checks |
+| `--disallowed-tools <PATTERNS>` | Tools that are always denied |
+| `--bg [QUERY]` | Spawn background session |
+| `--ps` | List background sessions |
+| `--attach <ID>` | Attach to background session |
+| `--kill <ID>` | Kill background session |
+| `--logs <ID>` | Tail logs of background session |
+| `--verbose` | Verbose logging |
+| `--debug [CATEGORIES]` | Debug logging for categories |
+| `--debug-file <PATH>` | Write debug logs to file |
 
 ---
 
 ## Slash Commands
 
-Commands entered in the TUI input box.
+All slash commands work in the interactive TUI. Type `/help` to see them in-app.
+
+### Core / Meta
 
 | Command | Description |
 |---------|-------------|
 | `/help` | Show available commands |
-| `/clear` | Clear the chat history |
+| `/clear` | Clear conversation history |
 | `/exit` | Exit Archon |
-| `/theme <name>` | Switch UI theme (see [Themes](#themes)) |
-| `/color <name>` | Change accent color only |
-| `/compact` | Trigger context compaction now |
-| `/cost` | Show session cost breakdown |
+| `/context` | Show context window usage stats |
+| `/status` | Show session status |
+| `/doctor` | Run diagnostics |
+| `/cost` | Session cost breakdown |
+| `/usage` | Token usage, cost, turn count |
+| `/effort <level>` | Set reasoning effort (high/medium/low) |
+| `/fast` | Toggle fast mode |
+| `/thinking` | Toggle extended thinking display |
+| `/plan` | Show / update current plan |
+
+### Git Integration
+
+| Command | Description |
+|---------|-------------|
+| `/git-status` / `/gs` | Show repo status |
+| `/diff [--staged]` | Show git diff |
+| `/branch [--create N\|--switch N]` | Manage branches |
+| `/commit [-m MSG]` | Stage & commit (auto-generates message if `-m` omitted) |
+| `/pr "Title" [--body "desc"]` | Create PR via `gh` CLI |
+
+### Session Management
+
+| Command | Description |
+|---------|-------------|
+| `/resume [ID\|NAME]` | Resume previous session |
+| `/sessions [QUERY]` | Search & list previous sessions |
+| `/tag <tag>` | Tag current session |
+| `/rename <name>` | Rename current session |
+| `/fork [NAME]` | Fork conversation at current point |
+| `/rewind` | Rewind to previous checkpoint |
+| `/checkpoint` | Save session checkpoint |
+
+### File / Project
+
+| Command | Description |
+|---------|-------------|
+| `/restore <FILE> [CHECKPOINT]` | Restore file from checkpoint |
+| `/undo` | Undo last file modification |
+| `/init` | Initialize project with CLAUDE.md template |
+| `/add-dir <PATH>` | Add working directory for file access |
+| `/agents` | List agent definitions from `.archon/agents/` |
+| `/recall <QUERY>` | Search memories by keyword |
+| `/tasks` | List and manage background tasks |
+
+### Configuration
+
+| Command | Description |
+|---------|-------------|
+| `/theme <NAME>` | Change UI theme |
+| `/color <NAME>` | Change prompt bar accent color |
+| `/model <MODEL>` | Switch model mid-session |
 | `/permissions` | Show current permission mode |
-| `/model <name>` | Switch model mid-session |
-| `/checkpoint` | Save a session checkpoint |
-| `/resume` | Show resumable sessions |
-| `/refresh-identity` | Clear the beta header cache and rediscover from the installed Claude Code binary |
+| `/sandbox` | Show sandbox mode info |
+| `/keybindings` | Show keybinding reference |
+| `/statusline` | Configure status line content |
+| `/reload` | Force configuration reload |
+| `/refresh-identity` | Clear beta header cache & reprobe |
+| `/settings` | Show / modify settings |
+
+### Analysis & Insights
+
+| Command | Description |
+|---------|-------------|
+| `/insights` | Session patterns, tool usage, error rates |
+| `/stats` | Daily usage, session history, model preferences |
+| `/security-review` | Analyze pending changes for vulnerabilities |
+| `/copy` | Copy last assistant response to clipboard |
+| `/btw` | Aside marker (tangent, don't change focus) |
+
+### Utility
+
+| Command | Description |
+|---------|-------------|
+| `/feedback <MSG>` | Submit feedback |
+| `/bug` | Report bug (links to GitHub issues) |
+| `/login` / `/logout` | Re-authenticate / sign out |
+| `/release-notes` | Show version changelog |
+| `/schedule` | Create scheduled task (delegates to `CronCreate`) |
+| `/remote-control` | Show remote control mode info |
+| `/compact [micro\|snip N-M\|auto]` | Trigger context compaction |
+
+---
+
+## Tools Reference
+
+Tools are callable by the LLM during agent turns. 40+ built-in tools across 10 categories.
+
+### File & Code
+
+| Tool | Purpose |
+|------|---------|
+| `Bash` | Execute shell commands (timeout + output limits) |
+| `Read` | Read files (pagination, image/PDF, Jupyter notebooks) |
+| `Write` | Write files (with permission checks) |
+| `Edit` | String-replace edits to existing files |
+| `Glob` | Fast file pattern matching |
+| `Grep` | Ripgrep-backed search (regex, context, BM25) |
+
+### Web & Fetch
+
+| Tool | Purpose |
+|------|---------|
+| `WebFetch` | Fetch & parse web pages (HTML → markdown) |
+
+### Agent Orchestration
+
+| Tool | Purpose |
+|------|---------|
+| `Agent` | Spawn child agents (parallel or delegated work) |
+| `SendMessage` | Continue a prior subagent by ID or name |
+| `AskUserQuestion` | Blocking user confirmation (structured choices) |
+| `EnterPlanMode` / `ExitPlanMode` | Enter/exit structured planning mode |
+| `EnterWorktree` / `ExitWorktree` | Create/exit isolated git worktrees |
+
+### Task Management
+
+| Tool | Purpose |
+|------|---------|
+| `TodoWrite` | Manage session todo list |
+| `TaskCreate` | Create structured background task |
+| `TaskGet` | Retrieve task by ID |
+| `TaskUpdate` | Mark in_progress/completed, set deps |
+| `TaskList` | List all tasks with status |
+| `TaskStop` | Cancel running task |
+| `TaskOutput` | Read task output stream |
+
+### Memory
+
+| Tool | Purpose |
+|------|---------|
+| `memory_store` | Explicit memory persistence (Fact/Decision/Rule/...) |
+| `memory_recall` | Semantic search over memory graph (BM25 + vector) |
+
+### Cron / Scheduling
+
+| Tool | Purpose |
+|------|---------|
+| `CronCreate` | Schedule recurring task with cron expression |
+| `CronList` | List scheduled tasks |
+| `CronDelete` | Remove scheduled task |
+
+### LSP (Language Server Protocol)
+
+| Tool | Purpose |
+|------|---------|
+| `LSP` | Single tool dispatching: `goToDefinition`, `findReferences`, `hover`, `documentSymbol`, `workspaceSymbol`, `goToImplementation`, `prepareCallHierarchy`, `incomingCalls`, `outgoingCalls` |
+
+### Team (Multi-Agent)
+
+| Tool | Purpose |
+|------|---------|
+| `TeamCreate` | Instantiate multi-agent team |
+| `SendMessageTeam` | Send message to team member |
+| `ReadTeamMessages` | Read team member responses |
+
+### MCP
+
+| Tool | Purpose |
+|------|---------|
+| `ListMcpResources` | List resources from connected MCP servers |
+| `ReadMcpResource` | Read MCP resource content |
+
+### Runtime Control
+
+| Tool | Purpose |
+|------|---------|
+| `ConfigTool` | Read/update config at runtime |
+| `ToolSearch` | Discover available tools dynamically |
+| `Sleep` | Async-safe delay |
+| `RemoteTrigger` | Call remote agent API |
 
 ---
 
 ## Themes
 
-Switch with `/theme <name>`. All 22 themes:
+22 themes total. Switch with `/theme <name>` or `--theme <name>`.
 
-### MBTI Themes
+### MBTI Themes (16)
 
 | Command | Type | Palette |
 |---------|------|---------|
@@ -350,7 +661,7 @@ Switch with `/theme <name>`. All 22 themes:
 | `/theme estp` | Entrepreneur | Bold red, vivid yellow |
 | `/theme esfp` | Entertainer | Coral, energetic yellow |
 
-### Utility Themes
+### Utility Themes (6)
 
 | Command | Description |
 |---------|-------------|
@@ -365,7 +676,7 @@ Switch with `/theme <name>`. All 22 themes:
 
 ## Memory System
 
-The memory system is the backbone of Archon. Unlike Claude Code which discards context between sessions, Archon persists facts, decisions, corrections, and patterns in a local CozoDB graph database.
+Unlike Claude Code which discards context between sessions, Archon persists facts, decisions, corrections, and patterns in a local CozoDB graph database.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -404,12 +715,12 @@ The memory system is the backbone of Archon. Unlike Claude Code which discards c
 
 | Type | When Used |
 |------|-----------|
-| `Fact` | Objective information learned about the codebase or user |
+| `Fact` | Objective info learned about the codebase or user |
 | `Decision` | Architecture/design choices made |
 | `Preference` | User preferences about style, tools, workflow |
-| `Rule` | Behavioral constraints (e.g., "always ask before deleting") |
-| `Correction` | Things the assistant got wrong and should not repeat |
-| `Pattern` | Recurring code patterns observed in the project |
+| `Rule` | Behavioral constraints |
+| `Correction` | Things the assistant got wrong and shouldn't repeat |
+| `Pattern` | Recurring code patterns observed |
 
 ### Storage
 
@@ -422,7 +733,7 @@ The memory system is the backbone of Archon. Unlike Claude Code which discards c
 
 ## Consciousness System
 
-The consciousness system shapes how the assistant presents itself and reasons through problems. It assembles the system prompt from multiple sources before each API call.
+Assembles the system prompt from multiple sources before each API call.
 
 ```
 ┌────────────────────────────────────────────────────────────────┐
@@ -443,7 +754,6 @@ The consciousness system shapes how the assistant presents itself and reasons th
 │  CozoDB memory graph             │                            │
 │  ┌────────────────────┐          │                            │
 │  │ MemoryInjector     │──► <memories> block (per-turn recall) │
-│  │ (per-turn recall)  │          │                            │
 │  └────────────────────┘          │                            │
 │                                  ▼                            │
 │  InnerVoice (if enabled)         │                            │
@@ -461,59 +771,31 @@ The consciousness system shapes how the assistant presents itself and reasons th
 
 ### Configuring Rules
 
-Rules in `config.toml` under `[consciousness].initial_rules` are seeded into CozoDB on startup — idempotently. Adding a new rule to the list will inject it on next run without duplicating existing rules.
-
-The LLM can also create rules dynamically using the `memory_store` tool with `memory_type = "Rule"`.
+Rules in `config.toml` under `[consciousness].initial_rules` are seeded into CozoDB on startup — idempotently. Adding a new rule injects it on next run without duplicating. The LLM can also create rules dynamically using `memory_store` with `memory_type = "Rule"`.
 
 ---
 
 ## Agent Loop
 
-The main interactive loop that drives every conversation turn.
-
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                      Agent Loop                                 │
 │                                                                  │
-│   ┌──────────────────────────────────────────────────────────┐  │
-│   │  1. User Input (TUI or stdin)                            │  │
-│   └──────────────────────┬───────────────────────────────────┘  │
-│                           │                                       │
-│                           ▼                                       │
-│   ┌──────────────────────────────────────────────────────────┐  │
-│   │  2. Context Assembly                                     │  │
-│   │     - inject behavioral_rules from RulesEngine           │  │
-│   │     - inject memories from MemoryInjector                │  │
-│   │     - attach conversation history                        │  │
-│   └──────────────────────┬───────────────────────────────────┘  │
-│                           │                                       │
-│                           ▼                                       │
-│   ┌──────────────────────────────────────────────────────────┐  │
-│   │  3. Claude API Call (streaming SSE)                      │  │
-│   │     - extended thinking if effort = "high"               │  │
-│   │     - renders thinking dots in TUI while streaming       │  │
-│   └──────────────────────┬───────────────────────────────────┘  │
-│                           │                                       │
-│            ┌──────────────┴──────────────┐                       │
-│            │                             │                        │
-│            ▼                             ▼                        │
-│   ┌─────────────────┐        ┌─────────────────────────────┐    │
-│   │  text response  │        │  tool_use block             │    │
-│   │  → render TUI   │        │  → dispatch to tool handler │    │
-│   └─────────────────┘        └──────────────┬──────────────┘    │
-│                                              │                    │
-│                                              ▼                    │
-│                               ┌─────────────────────────────┐   │
-│                               │  Tool Execution              │   │
-│                               │  (Bash/Read/Write/Agent/...) │   │
-│                               └──────────────┬──────────────┘   │
-│                                              │                    │
-│                                              ▼                    │
-│                               ┌─────────────────────────────┐   │
-│                               │  tool_result → append to    │   │
-│                               │  conversation → loop back   │   │
-│                               │  to step 3                  │   │
-│                               └─────────────────────────────┘   │
+│   1. User Input (TUI or stdin)                                   │
+│   2. Context Assembly                                            │
+│      - inject behavioral_rules from RulesEngine                  │
+│      - inject memories from MemoryInjector                       │
+│      - attach conversation history                               │
+│   3. Claude API Call (streaming SSE)                             │
+│      - extended thinking if effort = "high"                      │
+│      - renders thinking dots in TUI while streaming              │
+│   4. Response dispatch:                                          │
+│      - text response  → render TUI                               │
+│      - tool_use block → dispatch to tool handler                 │
+│         ↓                                                         │
+│      Tool Execution (Bash/Read/Write/Agent/...)                  │
+│         ↓                                                         │
+│      tool_result → append → loop to step 3                       │
 │                                                                   │
 │   After N turns: trigger_memory_extraction (background task)     │
 └───────────────────────────────────────────────────────────────────┘
@@ -523,13 +805,13 @@ The main interactive loop that drives every conversation turn.
 
 ## Subagent Spawning
 
-The `Agent` tool enables the main agent to spawn child agents for parallel or delegated work. Each subagent is a fully isolated `archon-core` agent instance with its own conversation context.
+The `Agent` tool enables the main agent to spawn child agents for parallel or delegated work. Each subagent is a fully isolated `archon-core` instance with its own conversation context.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                    Subagent Spawning                            │
 │                                                                  │
-│  Parent Agent (main loop)                                        │
+│  Parent Agent                                                    │
 │  ┌──────────────────────────────────────────────────────────┐   │
 │  │  LLM emits: tool_use { name: "Agent", input: { ... } }  │   │
 │  └──────────────────────────┬─────────────────────────────┘    │
@@ -549,49 +831,530 @@ The `Agent` tool enables the main agent to spawn child agents for parallel or de
 │  └──────┬──────┘ └────┬─────┘ └────┬─────┘                      │
 │         │              │             │                             │
 │         └──────────────┴─────────────┘                           │
-│                         │                                         │
 │                         ▼                                         │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │  Results gathered → tool_result appended to parent ctx   │   │
-│  │  Parent continues its agent loop with results in hand    │   │
-│  └──────────────────────────────────────────────────────────┘   │
+│  Results gathered → tool_result appended to parent ctx           │
+│  Parent continues its agent loop with results in hand            │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-Subagents have access to the same tool set as the parent (Bash, Read, Write, Glob, Grep, etc.) but run in isolated task contexts managed by `archon-tools/src/task_manager.rs`.
+Subagents have access to the same tool set as the parent but run in isolated task contexts managed by `archon-tools/src/task_manager.rs`. Use `SendMessage` to continue a subagent with follow-up instructions (its context is preserved).
+
+### Background subagents
+
+Spawn with `run_in_background: true` to return immediately:
+
+- `TaskList` — view running tasks
+- `TaskGet` / `TaskOutput` — inspect output
+- `TaskStop` — cancel
+
+---
+
+## Multi-Agent Teams
+
+Teams orchestrate groups of specialized subagents under a coordinator, with explicit execution topology.
+
+### Team definition — `.archon/teams.toml`
+
+```toml
+[backend-squad]
+coordinator = "system-architect"
+agents = ["backend-dev", "tester", "reviewer"]
+mode = "pipeline"   # sequential | parallel | pipeline | dag
+timeout_secs = 600
+
+[analysis-swarm]
+coordinator = "code-analyzer"
+agents = ["perf-analyzer", "security-tester", "reviewer"]
+mode = "parallel"
+```
+
+### Execution modes
+
+| Mode | Behaviour |
+|------|-----------|
+| `sequential` | Agents run one after another; each sees prior output |
+| `parallel` | All agents run concurrently with the same goal |
+| `pipeline` | Output of agent N feeds agent N+1 (filter chain) |
+| `dag` | Arbitrary dependency graph (defined per-team) |
+
+### Running teams
+
+```bash
+archon team run --team backend-squad "implement JWT refresh"
+archon team list
+```
+
+---
+
+## Skills System
+
+Skills are slash commands backed by Rust code. Two types:
+
+- **Builtin skills** — compiled into `archon-core` (43 skills in `crates/archon-core/src/skills/builtin.rs` + `expanded.rs`)
+- **User skills** — markdown + frontmatter in `.archon/skills/` or `~/.config/archon/skills/`
+
+### User skill definition
+
+```markdown
+---
+name: review-pr
+description: Review a pull request by number
+args: "<pr_number>"
+---
+
+You are reviewing PR #{{args}}. Fetch it with `gh pr view {{args}} --json ...`,
+analyze the diff, and report security issues, style violations, and test gaps.
+```
+
+Once dropped into `.archon/skills/`, invoke with `/review-pr 42` in the TUI.
+
+---
+
+## Hooks System
+
+Shell commands that execute in response to lifecycle events. Defined in `config.toml` or `.claude/settings.json` for Claude Code compatibility.
+
+### Hook events
+
+`Setup`, `SessionStart`, `SessionEnd`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `PreCompact`, `PostCompact`, `ConfigChange`, `CwdChanged`, `FileChanged`, `InstructionsLoaded`, `UserPromptSubmit`, `Stop`, `SubagentStart`, `SubagentStop`, `TaskCreated`, `TaskCompleted`, `PermissionDenied`, `PermissionRequest`, `Notification`.
+
+### Example — TOML
+
+```toml
+[[hooks.pre_tool_use]]
+command = "scripts/check-dangerous-patterns.sh"
+timeout = 30
+blocking = true   # exit code 2 cancels the tool call
+
+[[hooks.session_start]]
+command = "git status --short"
+timeout = 5
+```
+
+### Example — `.claude/settings.json` (structured matchers)
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": { "tool_name": "Bash" },
+        "hooks": [{ "type": "command", "command": "scripts/audit-bash.sh" }]
+      }
+    ]
+  }
+}
+```
+
+Hooks receive event data via JSON on stdin and can short-circuit operations via exit code 2.
+
+---
+
+## Plugins
+
+Plugins are dynamically loaded Rust libraries (`.so`/`.dll`/`.dylib`) implementing the `archon_plugin::api` trait. They can register new tools, hooks, skills, and slash commands.
+
+### Plugin layout
+
+```
+.archon/plugins/
+├── my-plugin/
+│   ├── plugin.toml     # manifest (name, version, capabilities)
+│   └── libmy_plugin.so # compiled plugin
+```
+
+### Manifest — `plugin.toml`
+
+```toml
+name = "my-plugin"
+version = "0.1.0"
+capabilities = ["tools", "skills", "hooks"]
+```
+
+### CLI
+
+```bash
+archon plugin list
+archon plugin info my-plugin
+```
+
+Plugin host bridges tool calls and hook invocations via JSON-RPC over stdio, so plugins run out-of-process with crash isolation.
+
+---
+
+## MCP Integration
+
+Model Context Protocol servers extend Archon with external tools and resources.
+
+### Supported transports
+
+| Transport | Use Case |
+|-----------|----------|
+| `stdio` | Local processes (default) |
+| `websocket` (`ws://`, `wss://`) | Remote/network MCP servers |
+| `http_streamable` | HTTP streaming (beta) |
+
+### `.mcp.json` schema
+
+```json
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
+      "transport": "stdio"
+    },
+    "github": {
+      "command": "mcp-server-github",
+      "env": { "GITHUB_TOKEN": "${GITHUB_TOKEN}" },
+      "disabled": false
+    },
+    "remote-memory": {
+      "transport": "websocket",
+      "url": "wss://mcp.example.com/memory",
+      "headers": { "Authorization": "Bearer ${MCP_TOKEN}" }
+    }
+  }
+}
+```
+
+### Config loading
+
+- Global: `~/.config/archon/.mcp.json`
+- Project-local: `.mcp.json` in working directory (overrides global per-server)
+- CLI: `--mcp-config FILES...` (repeatable), `--strict-mcp-config` to ignore auto-discovery
+
+Environment variables are expanded inline (`${VAR}`). Servers with `"disabled": true` are skipped.
+
+### Reconnection
+
+WebSocket transport uses exponential backoff with ±12.5% jitter, capped at 30s. Permanent close codes (1002, 4001, 4003) halt reconnection. A 10-minute retry budget and 60s sleep-gap detection prevent runaway reconnect loops after laptop suspend.
+
+---
+
+## LSP Integration
+
+Archon speaks Language Server Protocol over stdio to any LSP server (rust-analyzer, pyright, typescript-language-server, gopls, clangd, etc.).
+
+### Supported operations
+
+All dispatched through the single `LSP` tool:
+
+- `goToDefinition`
+- `findReferences`
+- `hover`
+- `documentSymbol`
+- `workspaceSymbol`
+- `goToImplementation`
+- `prepareCallHierarchy` / `incomingCalls` / `outgoingCalls`
+
+### Server auto-discovery
+
+Archon detects the project language from file extensions and launches the appropriate LSP server. Override via config or `.archon/lsp.toml`:
+
+```toml
+[servers.rust]
+command = "rust-analyzer"
+args = []
+init_timeout_ms = 30000
+request_timeout_ms = 10000
+
+[servers.python]
+command = "pyright-langserver"
+args = ["--stdio"]
+```
+
+Diagnostics are pushed in real time and surfaced via the `/insights` skill.
+
+---
+
+## Checkpointing & File Snapshots
+
+Archon snapshots every file the agent modifies, keyed by turn number. Use checkpoints to undo individual file changes or restore earlier states.
+
+### Storage
+
+- **Database**: `~/.local/share/archon/checkpoints.db` (CozoDB)
+- **Metadata**: `file_path`, `turn_number`, `tool_name`, `timestamp`, `file_hash`
+- **Diff engine**: `checkpoint_diff` module computes line-level diffs between versions
+
+### Commands
+
+| Command | Action |
+|---------|--------|
+| `/checkpoint` | Save a named checkpoint |
+| `/rewind` | Jump back to previous checkpoint |
+| `/restore <FILE> [CHECKPOINT]` | Restore individual file |
+| `/undo` | Undo last file modification |
+
+---
+
+## Cron & Scheduling
+
+Recurring background tasks defined with standard 5-field cron expressions.
+
+### Tools
+
+| Tool | Purpose |
+|------|---------|
+| `CronCreate` | Schedule task with cron expression + description |
+| `CronList` | Show all scheduled tasks |
+| `CronDelete` | Remove scheduled task by ID |
+
+### Example
+
+```
+/schedule "every morning at 9am, run the test suite and summarize failures"
+```
+
+The `/schedule` skill delegates to `CronCreate`, which parses natural language into cron (e.g., `0 9 * * *`) and stores the task for the background scheduler.
+
+---
+
+## Permission System
+
+Enforced on every tool call that touches the filesystem, shell, or network.
+
+### Modes
+
+| Mode | Behaviour |
+|------|-----------|
+| `ask` (default) | Prompt user for risky operations |
+| `auto` | Auto-approve all tool calls |
+| `deny` | Deny all unsafe operations (read-only) |
+| `plan` | Plan-only mode — no writes, no shell |
+| `acceptEdits` | Auto-accept file edits, ask for shell |
+| `dontAsk` | Never prompt (silent auto-approve) |
+| `bypassPermissions` | Skip all permission checks |
+
+### Rule lists
+
+```toml
+[permissions]
+mode = "ask"
+always_allow = ["Read:*", "Glob:*", "Grep:*"]
+always_deny = ["Bash:rm -rf*", "Write:/etc/*"]
+always_ask = ["Bash:git push*"]
+allow_paths = ["/home/user/project"]
+deny_paths = ["/etc", "/.ssh"]
+sandbox = false
+```
+
+### CLI overrides
+
+- `--permission-mode <MODE>` — runtime override
+- `--dangerously-skip-permissions` — equivalent to `bypassPermissions`
+- `--sandbox` — enforce `deny` for writes
+
+---
+
+## Identity & Spoofing
+
+Archon can identify itself as Claude Code (`spoof`) or as itself (`native`).
+
+### Spoof layers (when `identity.mode = "spoof"`)
+
+1. `x-app: cli` header
+2. `User-Agent: claude-cli/{version} (external, cli)`
+3. `x-entrypoint: cli` header
+4. Dynamically-discovered `anthropic-beta` headers
+5. `metadata.user_id` field matching Claude Code format
+6. `metadata.user_email` (when available from auth)
+7. Tool schemas matching Claude Code tool set
+8. System prompt prelude matching Claude Code default
+9. `anti_distillation` field (when `anti_distillation = true`)
+
+### Managing identity
+
+- `identity.spoof_version = "2.1.89"` — version reported to API
+- `/refresh-identity` — clear beta header cache and reprobe
+- `identity.mode = "native"` — disable all spoofing
 
 ---
 
 ## Session Management
 
-Sessions are stored in CozoDB under `~/.local/share/archon/sessions.db`. Each session captures:
+Sessions store full message history, git branch, working directory, token usage, cost, and a name in CozoDB at `~/.local/share/archon/sessions.db`.
 
-- Full message history
-- Git branch at session start
-- Working directory
-- Token usage and cost
-- Session name (auto-generated or user-provided)
-
-### Resuming Sessions
+### Resuming
 
 ```bash
-# Resume by full UUID
+# Full UUID
 archon --resume 8383f1ea-1234-5678-abcd-000000000000
 
-# Resume by UUID prefix (unique match required)
+# UUID prefix
 archon --resume 8383f1ea
 
-# Resume by exact session name
+# Exact session name
 archon --resume "fix-auth-bug"
 
-# Resume by session name prefix (unique match required)
+# Name prefix
 archon --resume "fix-auth"
 
-# List all sessions (from TUI: /resume)
+# List resumable sessions
 archon --list-sessions
 ```
 
-Resolution order: exact UUID → UUID prefix → exact name → name prefix. Ambiguous prefix matches return an error listing the candidates.
+Resolution order: exact UUID → UUID prefix → exact name → name prefix. Ambiguous matches return candidates.
+
+### Forking
+
+```bash
+archon --fork-session --resume "fix-auth-bug"
+```
+
+Creates a new session whose history is a copy of the source at the current turn — useful for exploring alternative paths without corrupting the original.
+
+---
+
+## Remote Control & Headless Mode
+
+Run Archon as a server for remote access, or as a JSON-stdio backend for custom frontends.
+
+### WebSocket server
+
+```bash
+archon serve --port 8420 --token-path ~/.config/archon/remote.token
+```
+
+Clients authenticate with `Authorization: Bearer <token>`. Events stream as JSON-lines over WebSocket (assistant messages, tool calls, tool results, cost updates).
+
+### Remote client
+
+```bash
+archon remote ws ws://host:8420/ws --token $(cat remote.token)
+archon remote ssh user@host --port 22 --key ~/.ssh/id_rsa
+```
+
+### Headless mode
+
+```bash
+archon --headless -p "list all TODO comments"
+```
+
+No TUI; emits JSON-lines on stdout, one event per line. Used by the VSCode extension and Web UI to embed Archon.
+
+---
+
+## IDE Extensions
+
+### VS Code
+
+Full extension at `extensions/vscode/`. Features:
+- Chat panel with streaming responses
+- Inline diff view for file edits
+- Terminal integration
+- Permission approval UI
+
+Install: `cd extensions/vscode && npm install && vsce package`, then install the generated `.vsix`.
+
+### JetBrains
+
+Plugin skeleton at `extensions/jetbrains/` (IntelliJ / PyCharm / WebStorm). Kotlin-based, uses the Archon Kotlin SDK.
+
+---
+
+## Web UI
+
+Browser interface backed by the WebSocket server.
+
+```bash
+archon web --port 8421
+# Open http://127.0.0.1:8421
+```
+
+Config:
+
+```toml
+[web]
+port = 8421
+bind_address = "127.0.0.1"
+open_browser = true
+```
+
+Frontend built from `web/src/` (TypeScript SPA); run `web/build.sh` to rebuild `web/dist/`.
+
+---
+
+## Vim Mode
+
+Enable vim keybindings in the TUI input box:
+
+```toml
+[tui]
+vim_mode = true
+```
+
+### Bindings
+
+| Keys | Action |
+|------|--------|
+| `i` / `a` / `I` / `A` | Insert modes |
+| `Esc` | Normal mode |
+| `dd` / `yy` / `p` | Delete / yank / paste line |
+| `gg` / `G` | Top / bottom of buffer |
+| `v` | Visual mode |
+| `:w` | Submit message |
+| `:q` | Quit Archon |
+
+Full reference: `/keybindings`.
+
+---
+
+## Cost, Effort & Fast Mode
+
+### Cost tracking
+
+Per-turn token costs are accumulated per session and surfaced via `/cost` and `/usage`. Alerts:
+
+```toml
+[cost]
+warn_threshold = 100.0   # Warn when session cost exceeds $N
+hard_limit = 0.0         # 0.0 = no hard cap
+```
+
+### Effort levels
+
+Affects `thinking_budget`, temperature, and context window allocation:
+
+- `high` — full thinking budget, maximum context
+- `medium` — reduced thinking, balanced
+- `low` — minimal thinking, fastest responses
+
+Switch at runtime: `/effort high`, `--effort low`, or `[api].default_effort`.
+
+### Fast mode
+
+```bash
+archon --fast
+# or /fast in TUI
+```
+
+Disables extended thinking, uses aggressive token limits, and skips some memory injection. Same model, lower quality, lower latency — good for quick questions.
+
+---
+
+## Context Compaction
+
+Automatic compaction prevents hitting the context window limit.
+
+```toml
+[context]
+compact_threshold = 0.8       # Fill % that triggers compaction
+preserve_recent_turns = 3     # Always keep last N turns verbatim
+prompt_cache = true           # Enable Anthropic prompt cache
+```
+
+### Manual compaction
+
+| Command | Action |
+|---------|--------|
+| `/compact` | Auto-compact (LLM summarizes older turns) |
+| `/compact micro` | Minimal compaction (preserve more detail) |
+| `/compact snip N-M` | Remove turns N through M |
+| `/compact auto` | Adaptive compression |
+
+`PreCompact` / `PostCompact` hooks fire around compaction.
 
 ---
 
@@ -601,34 +1364,70 @@ Resolution order: exact UUID → UUID prefix → exact name → name prefix. Amb
 archon (binary)
 │
 ├── archon-core          Agent loop, config, skills, hooks, CLI parsing
-│   ├── archon-llm       Claude API client (streaming SSE, retries)
-│   ├── archon-tools     All tool implementations (Bash, Read, Write, Agent, ...)
-│   │   └── memory.rs    MemoryStoreTool + MemoryRecallTool
-│   ├── archon-permissions  Permission mode enforcement
-│   └── archon-mcp       MCP server/client bridge
+│   ├── orchestrator/    Multi-agent team execution (seq/parallel/pipeline/dag)
+│   ├── skills/          Builtin + expanded slash commands
+│   ├── hooks/           Lifecycle hook executor
+│   └── team/            Team backend state
 │
-├── archon-consciousness  System prompt assembly
-│   ├── personality.rs   PersonalityProfile → system prompt fragment
-│   ├── rules.rs         RulesEngine (CozoDB-backed)
-│   ├── defaults.rs      load_configured_defaults() — idempotent rule seeding
-│   └── inner_voice.rs   Background monologue generator
+├── archon-llm           Claude API client (streaming SSE, retries, OAuth)
+│   ├── anthropic.rs     Messages API client
+│   ├── identity.rs      9-layer spoofing
+│   ├── oauth.rs         PKCE flow + token refresh (file-locked)
+│   ├── effort.rs        Effort level → API param mapping
+│   └── fast_mode.rs     Fast mode overrides
 │
-├── archon-memory         CozoDB memory graph
-│   ├── graph.rs          store_memory / recall_memories / search
-│   ├── injection.rs      MemoryInjector — per-turn recall → <memories> block
-│   ├── extraction.rs     Auto-extraction pipeline (background tokio task)
-│   ├── embedding/        fastembed local embeddings
-│   └── hybrid_search.rs  BM25 + vector cosine hybrid search
+├── archon-tools         40+ tools
+│   ├── bash/read/write/edit/glob/grep    File & shell
+│   ├── agent_tool.rs                     Subagent spawn
+│   ├── lsp_client.rs + lsp_tool.rs       LSP bridge
+│   ├── webfetch.rs                       HTTP fetch + HTML parse
+│   ├── task_*.rs                         Background task tools
+│   ├── cron_*.rs                         Scheduling
+│   ├── team_*.rs                         Team coordination
+│   ├── mcp_resources.rs                  MCP bridge tools
+│   ├── checkpoint.rs                     File snapshots
+│   └── toolsearch.rs                     Dynamic tool discovery
 │
-├── archon-session        Session persistence (CozoDB)
-│   ├── storage.rs        SessionStore — save/load/list/prefix-match sessions
-│   └── resume.rs         resume_session() — 4-step ID+name resolution
+├── archon-permissions   Permission mode enforcement + rule engine
 │
-├── archon-tui            ratatui TUI
-│   ├── app.rs            App state, TuiEvent enum, event loop
-│   └── theme.rs          Theme struct, 22 themes, parse_color/theme_by_name
+├── archon-mcp           MCP transport (stdio/ws/http-streamable)
+│   ├── transport_ws.rs  WebSocket with backoff + sleep detection
+│   └── config.rs        .mcp.json parsing + env expansion
 │
-└── archon-context        Context compaction
+├── archon-consciousness System prompt assembly
+│   ├── personality.rs   MBTI/Enneagram → prompt fragment
+│   ├── rules.rs         RulesEngine (CozoDB)
+│   ├── defaults.rs      Idempotent rule seeding
+│   └── inner_voice.rs   Background monologue
+│
+├── archon-memory        CozoDB memory graph
+│   ├── graph.rs         store / recall / search
+│   ├── injection.rs     Per-turn <memories> block
+│   ├── extraction.rs    Auto-extraction pipeline
+│   ├── embedding/       fastembed local embeddings
+│   └── hybrid_search.rs BM25 + vector cosine
+│
+├── archon-session       Session + checkpoint persistence
+│   ├── storage.rs       Session save/load/list/prefix-match
+│   ├── resume.rs        4-step ID+name resolution
+│   └── checkpoint.rs    File snapshot store
+│
+├── archon-tui           ratatui TUI
+│   ├── app.rs           State, events, input box
+│   ├── theme.rs         22 themes
+│   └── vim.rs           Vim mode keybindings
+│
+├── archon-context       Context compaction engine
+│
+├── archon-plugin        Dynamic plugin loader
+│   ├── loader.rs        .so/.dll/.dylib loading
+│   ├── host.rs          JSON-RPC plugin host
+│   └── adapter_*.rs     Tool/hook/skill/command adapters
+│
+└── archon-sdk           Embedding SDK + Web/IDE bridges
+    ├── builder.rs       AgentBuilder for embedding
+    ├── web/             WebSocket server + HTTP
+    └── ide/             IDE protocol handlers
 ```
 
 ### Key Dependencies
@@ -637,14 +1436,17 @@ archon (binary)
 |-------|---------|---------|
 | `ratatui` | 0.29 | Terminal UI rendering |
 | `crossterm` | 0.28 | Cross-platform terminal backend |
-| `cozo-ce` | 0.7.13 | CozoDB — memory graph + session store |
+| `cozo-ce` | 0.7.13 | CozoDB — memory/session/checkpoint store |
 | `fastembed` | 4 | Local vector embeddings (no API) |
 | `tokio` | 1 | Async runtime |
-| `reqwest` | 0.12 | HTTP client for Claude API (rustls, no OpenSSL dep) |
+| `reqwest` | 0.12 | HTTP client (rustls) |
 | `clap` | 4 | CLI argument parsing |
 | `serde` / `toml` | — | Config serialization |
-| `git2` | 0.19 | Git branch detection for sessions |
-| `tree-sitter` | 0.24 | Code syntax highlighting in TUI |
+| `git2` | 0.19 | Git branch detection |
+| `tree-sitter` | 0.24 | Syntax highlighting |
+| `async-lsp` | — | LSP protocol client |
+| `tungstenite` | — | WebSocket transport |
+| `tower-http` | 0.6 | HTTP middleware (web UI) |
 
 ---
 
@@ -653,10 +1455,10 @@ archon (binary)
 | Phase | Status | Description |
 |-------|--------|-------------|
 | **Phase 1** — Core Engine | ✅ Complete | Agent loop, streaming API, tool execution, permission system, config, TUI, session management |
-| **Phase 2** — Consciousness | ✅ Complete | Memory graph (CozoDB), auto-extraction, per-turn injection, rules engine, personality config, inner voice, configurable initial rules |
-| **Phase 3** — UX & Ergonomics | ✅ Complete | 22 themes, MBTI themes, resume by name/prefix, `/color` and `/theme` commands, memory + recall tools wired to LLM |
+| **Phase 2** — Consciousness | ✅ Complete | Memory graph (CozoDB), auto-extraction, per-turn injection, rules engine, personality config, inner voice |
+| **Phase 3** — UX & Ergonomics | ✅ Complete | 22 themes, MBTI themes, resume by name/prefix, `/color` and `/theme` commands, memory tools wired |
 | **Phase 4** — Plugins & Skills | ✅ Complete | Plugin system (`archon-plugin`), user-defined slash commands, skill system, hook extensibility |
-| **Phase 5** — Multi-Agent | ✅ Complete | Subagent orchestration, MCP transport, LSP client, WebSocket remote, cross-session memory |
+| **Phase 5** — Multi-Agent | ✅ Complete | Subagent orchestration, team execution modes, MCP transport, LSP client, WebSocket remote, cross-session memory |
 
 ---
 
