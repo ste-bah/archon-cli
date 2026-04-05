@@ -47,10 +47,10 @@ impl MemoryInjector {
         budget_tokens: usize,
     ) -> Result<String, MemoryError> {
         let ctx_hash = hash_context(context);
-        if let Some(ref entry) = self.cache {
-            if entry.context_hash == ctx_hash {
-                return Ok(entry.output.clone());
-            }
+        if let Some(ref entry) = self.cache
+            && entry.context_hash == ctx_hash
+        {
+            return Ok(entry.output.clone());
         }
 
         let keywords = extract_keywords(context);
@@ -123,10 +123,11 @@ fn extract_keywords(context: &[String]) -> Vec<String> {
                 .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
                 .collect::<String>()
                 .to_lowercase();
-            if cleaned.len() >= 2 && !stop_words.contains(&cleaned.as_str()) {
-                if !words.contains(&cleaned) {
-                    words.push(cleaned);
-                }
+            if cleaned.len() >= 2
+                && !stop_words.contains(&cleaned.as_str())
+                && !words.contains(&cleaned)
+            {
+                words.push(cleaned);
             }
         }
     }

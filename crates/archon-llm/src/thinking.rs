@@ -68,7 +68,7 @@ pub fn thinking_betas(mode: &ThinkingMode) -> Vec<String> {
 // ---------------------------------------------------------------------------
 
 /// Accumulated thinking display state for the TUI.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ThinkingDisplay {
     /// Whether the thinking panel is visible (toggled by `/thinking`).
     pub visible: bool,
@@ -78,17 +78,6 @@ pub struct ThinkingDisplay {
     pub thinking_tokens: u32,
     /// Wall-clock thinking duration in milliseconds.
     pub thinking_duration_ms: u64,
-}
-
-impl Default for ThinkingDisplay {
-    fn default() -> Self {
-        Self {
-            visible: false,
-            current_thinking_text: String::new(),
-            thinking_tokens: 0,
-            thinking_duration_ms: 0,
-        }
-    }
 }
 
 impl ThinkingDisplay {

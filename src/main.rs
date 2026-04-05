@@ -133,10 +133,10 @@ async fn main() -> Result<()> {
     }
 
     // ARCHON_LOG env var overrides log level (e.g. ARCHON_LOG=debug)
-    if let Ok(log_level) = std::env::var("ARCHON_LOG") {
-        if !log_level.trim().is_empty() {
-            config.logging.level = log_level.trim().to_string();
-        }
+    if let Ok(log_level) = std::env::var("ARCHON_LOG")
+        && !log_level.trim().is_empty()
+    {
+        config.logging.level = log_level.trim().to_string();
     }
 
     // Initialize logging
@@ -549,7 +549,7 @@ fn handle_plugin_command(action: cli_args::PluginAction) -> Result<()> {
 
     match action {
         cli_args::PluginAction::List => {
-            println!("{:<30} {:<12} {}", "NAME", "VERSION", "STATUS");
+            println!("{:<30} {:<12} STATUS", "NAME", "VERSION");
             println!("{}", "-".repeat(56));
             for plugin in &result.enabled {
                 println!(
@@ -639,8 +639,8 @@ fn handle_bg_list() -> Result<()> {
         eprintln!("No background sessions found.");
     } else {
         eprintln!(
-            "{:<10} {:<14} {:<20} {:<8} {}",
-            "ID", "STATUS", "NAME", "TURNS", "STARTED"
+            "{:<10} {:<14} {:<20} {:<8} STARTED",
+            "ID", "STATUS", "NAME", "TURNS"
         );
         for s in &sessions {
             let short_id = if s.id.len() > 8 { &s.id[..8] } else { &s.id };
@@ -1635,12 +1635,11 @@ async fn run_interactive_session(
         agent.restore_conversation(messages);
         tracing::info!("restored {count} messages from previous session");
         // Restore session name if the resumed session had one
-        if let Some(Some(ref resume_id)) = cli.resume {
-            if let Ok(meta) = session_store.get_session(resume_id) {
-                if let Some(name) = meta.name {
-                    let _ = tui_event_tx.send(TuiEvent::SessionRenamed(name)).await;
-                }
-            }
+        if let Some(Some(ref resume_id)) = cli.resume
+            && let Ok(meta) = session_store.get_session(resume_id)
+            && let Some(name) = meta.name
+        {
+            let _ = tui_event_tx.send(TuiEvent::SessionRenamed(name)).await;
         }
     }
 
@@ -1843,10 +1842,10 @@ async fn run_interactive_session(
                 match archon_session::storage::SessionStore::open(&db_path) {
                     Ok(store) => {
                         // Restore session name badge if present
-                        if let Ok(meta) = store.get_session(session_id) {
-                            if let Some(name) = meta.name {
-                                let _ = input_tui_tx.send(TuiEvent::SessionRenamed(name)).await;
-                            }
+                        if let Ok(meta) = store.get_session(session_id)
+                            && let Some(name) = meta.name
+                        {
+                            let _ = input_tui_tx.send(TuiEvent::SessionRenamed(name)).await;
                         }
                         match store.load_messages(session_id) {
                             Ok(raw_messages) => {
@@ -2236,14 +2235,14 @@ async fn run_interactive_session(
             // Persist messages to session store for /resume
             let messages = &agent.conversation_state().messages;
             for (idx, msg) in messages.iter().enumerate() {
-                if let Ok(json_str) = serde_json::to_string(msg) {
-                    if let Err(e) = session_store_for_input.save_message(
+                if let Ok(json_str) = serde_json::to_string(msg)
+                    && let Err(e) = session_store_for_input.save_message(
                         &session_id_for_input,
                         idx as u64,
                         &json_str,
-                    ) {
-                        tracing::warn!("save_message failed at idx {idx}: {e}");
-                    }
+                    )
+                {
+                    tracing::warn!("save_message failed at idx {idx}: {e}");
                 }
             }
         }
@@ -2343,7 +2342,7 @@ async fn run_interactive_session(
                                     ..
                                 } = event
                                 {
-                                    response.push_str(&text);
+                                    response.push_str(text);
                                 }
                             }
                             let _ = tui_tx.send(TuiEvent::BtwResponse(response)).await;
@@ -2934,7 +2933,7 @@ async fn handle_slash_command(
         "/reload" => {
             // Force config reload from disk
             match archon_core::config_watcher::force_reload(
-                &[ctx.config_path.clone()],
+                std::slice::from_ref(&ctx.config_path),
                 &archon_core::config::ArchonConfig::default(),
             ) {
                 Ok((_new_cfg, changed)) => {
@@ -3638,17 +3637,17 @@ async fn fetch_account_uuid(auth: &archon_llm::auth::AuthProvider) -> String {
 
     match result {
         Ok(resp) if resp.status().is_success() => {
-            if let Ok(body) = resp.text().await {
-                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&body) {
-                    // Profile response: { "account": { "uuid": "..." }, "organization": { ... } }
-                    if let Some(uuid) = json
-                        .get("account")
-                        .and_then(|a| a.get("uuid"))
-                        .and_then(|v| v.as_str())
-                    {
-                        tracing::info!("fetched account_uuid: {}", &uuid[..8.min(uuid.len())]);
-                        return uuid.to_string();
-                    }
+            if let Ok(body) = resp.text().await
+                && let Ok(json) = serde_json::from_str::<serde_json::Value>(&body)
+            {
+                // Profile response: { "account": { "uuid": "..." }, "organization": { ... } }
+                if let Some(uuid) = json
+                    .get("account")
+                    .and_then(|a| a.get("uuid"))
+                    .and_then(|v| v.as_str())
+                {
+                    tracing::info!("fetched account_uuid: {}", &uuid[..8.min(uuid.len())]);
+                    return uuid.to_string();
                 }
             }
             tracing::warn!("profile response missing account_uuid");

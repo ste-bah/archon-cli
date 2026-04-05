@@ -232,7 +232,7 @@ fn split_below_minimum_size_refused() {
         for r in &rects {
             // rects may be adjusted to enforce minimum
             assert!(
-                r.height >= PANE_MIN_ROWS as u16 || r.height == 0,
+                r.height >= PANE_MIN_ROWS || r.height == 0,
                 "pane height must be >= minimum: {}",
                 r.height
             );

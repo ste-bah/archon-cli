@@ -135,7 +135,7 @@ fn watcher_detects_file_change() {
     )
     .expect("write initial config");
 
-    let watcher = ConfigWatcher::start(&[config_path.clone()]).expect("start watcher");
+    let watcher = ConfigWatcher::start(std::slice::from_ref(&config_path)).expect("start watcher");
 
     // Wait briefly for watcher to attach
     thread::sleep(Duration::from_millis(200));
@@ -171,7 +171,7 @@ fn debounced_reloader_waits() {
     let toml_str = toml::to_string_pretty(&initial).expect("serialize default config");
     fs::write(&config_path, &toml_str).expect("write initial config");
 
-    let watcher = ConfigWatcher::start(&[config_path.clone()]).expect("start watcher");
+    let watcher = ConfigWatcher::start(std::slice::from_ref(&config_path)).expect("start watcher");
     let mut reloader = DebouncedReloader::new(watcher, 300, initial.clone());
 
     // Wait for watcher to attach
@@ -187,13 +187,13 @@ fn debounced_reloader_waits() {
     }
 
     // Immediately after rapid writes, debounce should still be waiting
-    let _result = reloader.check_and_reload(&[config_path.clone()]);
+    let _result = reloader.check_and_reload(std::slice::from_ref(&config_path));
     // Debounce may or may not have elapsed depending on timing, but no panic
 
     // Wait past debounce period
     thread::sleep(Duration::from_millis(500));
 
-    let result = reloader.check_and_reload(&[config_path.clone()]);
+    let result = reloader.check_and_reload(std::slice::from_ref(&config_path));
     // After debounce, we should get a reload with changed keys (or empty if already consumed)
     // The important thing is this doesn't panic and returns a valid result
     assert!(

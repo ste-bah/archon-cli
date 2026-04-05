@@ -51,10 +51,8 @@ impl BedrockProvider {
             .collect();
 
         // Messages: convert Archon format to Bedrock Converse format.
-        let bedrock_messages: Vec<serde_json::Value> = messages
-            .iter()
-            .map(|msg| convert_message_to_bedrock(msg))
-            .collect();
+        let bedrock_messages: Vec<serde_json::Value> =
+            messages.iter().map(convert_message_to_bedrock).collect();
 
         let mut body = serde_json::json!({
             "inferenceConfig": {
@@ -217,7 +215,7 @@ fn convert_message_to_bedrock(msg: &serde_json::Value) -> serde_json::Value {
     if let Some(content_arr) = msg.get("content").and_then(|c| c.as_array()) {
         let bedrock_content: Vec<serde_json::Value> = content_arr
             .iter()
-            .filter_map(|block| convert_content_block(block))
+            .filter_map(convert_content_block)
             .collect();
 
         serde_json::json!({
@@ -455,26 +453,26 @@ pub fn parse_bedrock_event(event: &serde_json::Value) -> Vec<StreamEvent> {
         events.push(StreamEvent::MessageStop);
     }
 
-    if let Some(metadata) = event.get("metadata") {
-        if let Some(usage) = metadata.get("usage") {
-            let input_tokens = usage
-                .get("inputTokens")
-                .and_then(|t| t.as_u64())
-                .unwrap_or(0);
-            let output_tokens = usage
-                .get("outputTokens")
-                .and_then(|t| t.as_u64())
-                .unwrap_or(0);
-            events.push(StreamEvent::MessageDelta {
-                stop_reason: None,
-                usage: Some(Usage {
-                    input_tokens,
-                    output_tokens,
-                    cache_creation_input_tokens: 0,
-                    cache_read_input_tokens: 0,
-                }),
-            });
-        }
+    if let Some(metadata) = event.get("metadata")
+        && let Some(usage) = metadata.get("usage")
+    {
+        let input_tokens = usage
+            .get("inputTokens")
+            .and_then(|t| t.as_u64())
+            .unwrap_or(0);
+        let output_tokens = usage
+            .get("outputTokens")
+            .and_then(|t| t.as_u64())
+            .unwrap_or(0);
+        events.push(StreamEvent::MessageDelta {
+            stop_reason: None,
+            usage: Some(Usage {
+                input_tokens,
+                output_tokens,
+                cache_creation_input_tokens: 0,
+                cache_read_input_tokens: 0,
+            }),
+        });
     }
 
     events

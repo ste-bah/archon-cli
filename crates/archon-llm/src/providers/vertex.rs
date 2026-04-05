@@ -71,10 +71,10 @@ impl VertexProvider {
         let mut cache = self.token_cache.lock().await;
 
         // Check if cached token is still valid (with 60s buffer).
-        if let Some(ref token) = *cache {
-            if token.expires_at > std::time::Instant::now() {
-                return Ok(token.access_token.clone());
-            }
+        if let Some(ref token) = *cache
+            && token.expires_at > std::time::Instant::now()
+        {
+            return Ok(token.access_token.clone());
         }
 
         // Fetch fresh token.
@@ -226,12 +226,12 @@ impl VertexProvider {
                         if let Some(event_type) = line.strip_prefix("event: ") {
                             let _ = event_type; // stored separately
                         }
-                        if let Some(data) = line.strip_prefix("data: ") {
-                            if let Ok(val) = serde_json::from_str::<serde_json::Value>(data) {
-                                for event in parse_anthropic_vertex_event(&val) {
-                                    if tx.send(event).await.is_err() {
-                                        return;
-                                    }
+                        if let Some(data) = line.strip_prefix("data: ")
+                            && let Ok(val) = serde_json::from_str::<serde_json::Value>(data)
+                        {
+                            for event in parse_anthropic_vertex_event(&val) {
+                                if tx.send(event).await.is_err() {
+                                    return;
                                 }
                             }
                         }
@@ -374,24 +374,24 @@ fn parse_gemini_vertex_event(val: &serde_json::Value) -> Vec<StreamEvent> {
 
     if let Some(candidates) = val.get("candidates").and_then(|c| c.as_array()) {
         for candidate in candidates {
-            if let Some(content) = candidate.get("content") {
-                if let Some(parts) = content.get("parts").and_then(|p| p.as_array()) {
-                    for (i, part) in parts.iter().enumerate() {
-                        if let Some(text) = part.get("text").and_then(|t| t.as_str()) {
-                            if !text.is_empty() {
-                                events.push(StreamEvent::ContentBlockStart {
-                                    index: i as u32,
-                                    block_type: ContentBlockType::Text,
-                                    tool_use_id: None,
-                                    tool_name: None,
-                                });
-                                events.push(StreamEvent::TextDelta {
-                                    index: i as u32,
-                                    text: text.to_string(),
-                                });
-                                events.push(StreamEvent::ContentBlockStop { index: i as u32 });
-                            }
-                        }
+            if let Some(content) = candidate.get("content")
+                && let Some(parts) = content.get("parts").and_then(|p| p.as_array())
+            {
+                for (i, part) in parts.iter().enumerate() {
+                    if let Some(text) = part.get("text").and_then(|t| t.as_str())
+                        && !text.is_empty()
+                    {
+                        events.push(StreamEvent::ContentBlockStart {
+                            index: i as u32,
+                            block_type: ContentBlockType::Text,
+                            tool_use_id: None,
+                            tool_name: None,
+                        });
+                        events.push(StreamEvent::TextDelta {
+                            index: i as u32,
+                            text: text.to_string(),
+                        });
+                        events.push(StreamEvent::ContentBlockStop { index: i as u32 });
                     }
                 }
             }

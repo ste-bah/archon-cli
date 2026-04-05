@@ -46,17 +46,17 @@ pub fn extract_json(text: &str) -> Option<String> {
     }
 
     // Strategy 2: Extract from ```json ... ``` block
-    if let Some(extracted) = extract_from_fenced_block(trimmed, "```json") {
-        if serde_json::from_str::<serde_json::Value>(&extracted).is_ok() {
-            return Some(extracted);
-        }
+    if let Some(extracted) = extract_from_fenced_block(trimmed, "```json")
+        && serde_json::from_str::<serde_json::Value>(&extracted).is_ok()
+    {
+        return Some(extracted);
     }
 
     // Strategy 3: Extract from ``` ... ``` block (no language tag)
-    if let Some(extracted) = extract_from_fenced_block(trimmed, "```") {
-        if serde_json::from_str::<serde_json::Value>(&extracted).is_ok() {
-            return Some(extracted);
-        }
+    if let Some(extracted) = extract_from_fenced_block(trimmed, "```")
+        && serde_json::from_str::<serde_json::Value>(&extracted).is_ok()
+    {
+        return Some(extracted);
     }
 
     None

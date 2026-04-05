@@ -214,10 +214,10 @@ pub fn resolve_credentials(credentials_file: Option<&str>) -> Result<ServiceAcco
     }
 
     // 2. Try GOOGLE_APPLICATION_CREDENTIALS env var.
-    if let Ok(path) = std::env::var("GOOGLE_APPLICATION_CREDENTIALS") {
-        if !path.is_empty() {
-            return load_credentials_from_path(&path);
-        }
+    if let Ok(path) = std::env::var("GOOGLE_APPLICATION_CREDENTIALS")
+        && !path.is_empty()
+    {
+        return load_credentials_from_path(&path);
     }
 
     // 3. Try ADC file.

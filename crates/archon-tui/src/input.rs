@@ -216,7 +216,7 @@ impl InputHandler {
     /// Navigate history down (newer).
     pub fn history_down(&mut self) {
         match self.history_index {
-            None => return,
+            None => (),
             Some(i) => {
                 if i + 1 < self.history.len() {
                     self.history_index = Some(i + 1);

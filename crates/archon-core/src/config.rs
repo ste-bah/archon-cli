@@ -26,6 +26,7 @@ pub enum ConfigError {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
+#[derive(Default)]
 pub struct ArchonConfig {
     pub api: ApiConfig,
     pub llm: LlmConfig,
@@ -62,34 +63,6 @@ pub struct ArchonConfig {
     /// Web UI configuration.
     #[serde(default)]
     pub web: WebConfig,
-}
-
-impl Default for ArchonConfig {
-    fn default() -> Self {
-        Self {
-            api: ApiConfig::default(),
-            llm: LlmConfig::default(),
-            identity: IdentityConfig::default(),
-            tools: ToolsConfig::default(),
-            permissions: PermissionsConfig::default(),
-            context: ContextConfig::default(),
-            memory: MemoryConfig::default(),
-            cost: CostConfig::default(),
-            logging: LoggingConfig::default(),
-            session: SessionConfig::default(),
-            checkpoint: CheckpointConfig::default(),
-            personality: archon_consciousness::personality::PersonalityProfile::default(),
-            consciousness: ConsciousnessConfig::default(),
-            tui: TuiConfig::default(),
-            output_style: None,
-            update: crate::update::UpdateConfig::default(),
-            remote: SshRemoteConfig::default(),
-            ws_remote: WsRemoteConfig::default(),
-            orchestrator: crate::orchestrator::config::OrchestratorConfig::default(),
-            voice: VoiceConfig::default(),
-            web: WebConfig::default(),
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------

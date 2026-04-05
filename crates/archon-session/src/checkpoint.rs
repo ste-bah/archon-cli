@@ -213,13 +213,13 @@ impl CheckpointStore {
 
         let target = Path::new(file_path);
         if existed {
-            if let Some(data) = content {
-                if !data.is_empty() {
-                    if let Some(parent) = target.parent() {
-                        fs::create_dir_all(parent)?;
-                    }
-                    fs::write(target, data)?;
+            if let Some(data) = content
+                && !data.is_empty()
+            {
+                if let Some(parent) = target.parent() {
+                    fs::create_dir_all(parent)?;
                 }
+                fs::write(target, data)?;
             }
         } else {
             if target.exists() {

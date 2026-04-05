@@ -91,7 +91,7 @@ fn cron_store_write_and_read() {
     let store = CronStore::new(path);
 
     let task = make_task("t1", "* * * * *", "hello", None);
-    store.save(&[task.clone()]).unwrap();
+    store.save(std::slice::from_ref(&task)).unwrap();
 
     let loaded = store.load().unwrap();
     assert_eq!(loaded.len(), 1);

@@ -121,10 +121,10 @@ async fn ws_handler(
 }
 
 fn extract_bearer_token(headers: &HeaderMap, query_token: &Option<String>) -> Option<String> {
-    if let Some(t) = query_token {
-        if !t.is_empty() {
-            return Some(t.clone());
-        }
+    if let Some(t) = query_token
+        && !t.is_empty()
+    {
+        return Some(t.clone());
     }
     headers
         .get(axum::http::header::AUTHORIZATION)

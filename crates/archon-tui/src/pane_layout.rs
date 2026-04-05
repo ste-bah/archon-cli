@@ -10,9 +10,10 @@ use ratatui::layout::{Constraint, Layout, Rect};
 // ---------------------------------------------------------------------------
 
 /// Layout mode for the split pane system.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum PaneLayout {
     /// Single pane (default, backward-compatible).
+    #[default]
     Single,
     /// Two panes stacked top/bottom. Ratio = top pane percentage (0–100).
     HorizontalSplit(u16),
@@ -20,12 +21,6 @@ pub enum PaneLayout {
     VerticalSplit(u16),
     /// Grid of rows×cols panes.
     Grid(u16, u16),
-}
-
-impl Default for PaneLayout {
-    fn default() -> Self {
-        Self::Single
-    }
 }
 
 impl PaneLayout {

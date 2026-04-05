@@ -122,7 +122,7 @@ fn truncation_removes_global_first() {
 fn non_utf8_skipped() {
     let tmp = create_temp_dir();
     // Write binary content
-    fs::write(tmp.path().join("CLAUDE.md"), &[0xFF, 0xFE, 0x00, 0x01]).unwrap();
+    fs::write(tmp.path().join("CLAUDE.md"), [0xFF, 0xFE, 0x00, 0x01]).unwrap();
 
     // Should not panic, should return empty or skip gracefully
     let result = load_hierarchical_claude_md(tmp.path());

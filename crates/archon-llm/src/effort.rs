@@ -140,7 +140,7 @@ mod tests {
     fn parse_invalid_returns_error() {
         let result = parse_level("turbo");
         assert!(result.is_err());
-        assert!(result.as_ref().err().map_or(false, |e| e.contains("turbo")));
+        assert!(result.as_ref().err().is_some_and(|e| e.contains("turbo")));
     }
 
     #[test]

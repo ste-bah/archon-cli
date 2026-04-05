@@ -150,25 +150,25 @@ fn snip_removes_exact_range() {
     assert!(result.iter().any(|m| {
         m.content
             .as_str()
-            .map_or(false, |s| s.contains("turn 1 user"))
+            .is_some_and(|s| s.contains("turn 1 user"))
     }));
     // Turn 4 present
     assert!(result.iter().any(|m| {
         m.content
             .as_str()
-            .map_or(false, |s| s.contains("turn 4 user"))
+            .is_some_and(|s| s.contains("turn 4 user"))
     }));
     // Turn 2 absent
     assert!(!result.iter().any(|m| {
         m.content
             .as_str()
-            .map_or(false, |s| s.contains("turn 2 user"))
+            .is_some_and(|s| s.contains("turn 2 user"))
     }));
     // Turn 3 absent
     assert!(!result.iter().any(|m| {
         m.content
             .as_str()
-            .map_or(false, |s| s.contains("turn 3 user"))
+            .is_some_and(|s| s.contains("turn 3 user"))
     }));
 }
 
@@ -210,18 +210,18 @@ fn snip_preserves_surrounding() {
     assert!(result.iter().any(|m| {
         m.content
             .as_str()
-            .map_or(false, |s| s.contains("before user"))
+            .is_some_and(|s| s.contains("before user"))
     }));
-    assert!(result.iter().any(|m| {
-        m.content
-            .as_str()
-            .map_or(false, |s| s.contains("after user"))
-    }));
+    assert!(
+        result
+            .iter()
+            .any(|m| { m.content.as_str().is_some_and(|s| s.contains("after user")) })
+    );
     // Middle removed
     assert!(!result.iter().any(|m| {
         m.content
             .as_str()
-            .map_or(false, |s| s.contains("middle user"))
+            .is_some_and(|s| s.contains("middle user"))
     }));
 }
 
@@ -252,18 +252,18 @@ fn snip_removes_complete_turns() {
     assert!(result.iter().any(|m| {
         m.content
             .as_str()
-            .map_or(false, |s| s.contains("turn 1 user"))
+            .is_some_and(|s| s.contains("turn 1 user"))
     }));
     assert!(result.iter().any(|m| {
         m.content
             .as_str()
-            .map_or(false, |s| s.contains("turn 3 assistant"))
+            .is_some_and(|s| s.contains("turn 3 assistant"))
     }));
     // Turn 2 removed entirely (including tool chain)
     assert!(
         !result
             .iter()
-            .any(|m| m.content.as_str().map_or(false, |s| s.contains("turn 2")))
+            .any(|m| m.content.as_str().is_some_and(|s| s.contains("turn 2")))
     );
 }
 

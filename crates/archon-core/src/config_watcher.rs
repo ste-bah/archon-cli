@@ -124,21 +124,21 @@ impl DebouncedReloader {
             return None;
         }
 
-        if let Some(last) = self.last_change {
-            if last.elapsed() >= Duration::from_millis(self.debounce_ms) {
-                self.pending = false;
-                self.last_change = None;
-                // Attempt to load a fresh config from the first path that exists
-                if let Some(path) = config_paths.iter().find(|p| p.exists()) {
-                    match crate::config::load_config_from(path.clone()) {
-                        Ok(new_cfg) => {
-                            let keys = diff_configs(&self.current_config, &new_cfg);
-                            self.current_config = new_cfg;
-                            return Some(keys);
-                        }
-                        Err(e) => {
-                            tracing::warn!("debounced reload failed: {e}");
-                        }
+        if let Some(last) = self.last_change
+            && last.elapsed() >= Duration::from_millis(self.debounce_ms)
+        {
+            self.pending = false;
+            self.last_change = None;
+            // Attempt to load a fresh config from the first path that exists
+            if let Some(path) = config_paths.iter().find(|p| p.exists()) {
+                match crate::config::load_config_from(path.clone()) {
+                    Ok(new_cfg) => {
+                        let keys = diff_configs(&self.current_config, &new_cfg);
+                        self.current_config = new_cfg;
+                        return Some(keys);
+                    }
+                    Err(e) => {
+                        tracing::warn!("debounced reload failed: {e}");
                     }
                 }
             }

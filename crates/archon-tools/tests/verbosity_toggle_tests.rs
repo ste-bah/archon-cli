@@ -3,7 +3,7 @@
 //! Covers: tool name (NOT BriefTool), toggle/set/status actions,
 //! state transitions, schema validity, permission level.
 
-use archon_tools::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
+use archon_tools::tool::{PermissionLevel, Tool, ToolContext};
 use archon_tools::verbosity_toggle::{VerbosityState, VerbosityToggleTool};
 use serde_json::json;
 use std::path::PathBuf;

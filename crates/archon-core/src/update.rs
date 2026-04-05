@@ -229,9 +229,9 @@ pub fn compute_sha256(data: &[u8]) -> String {
 
 pub fn replace_binary(new_binary: Vec<u8>) -> Result<PathBuf, UpdateError> {
     let current_exe = std::env::current_exe()?;
-    let parent = current_exe.parent().ok_or_else(|| {
-        std::io::Error::new(std::io::ErrorKind::Other, "cannot determine binary dir")
-    })?;
+    let parent = current_exe
+        .parent()
+        .ok_or_else(|| std::io::Error::other("cannot determine binary dir"))?;
 
     let temp_path = parent.join(format!("archon.tmp.{}", std::process::id()));
 

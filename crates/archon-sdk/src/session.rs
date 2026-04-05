@@ -83,9 +83,7 @@ impl ArchonSession {
             ..Default::default()
         };
 
-        let stream =
-            crate::query::query_internal(prompt.clone(), sdk_opts, Some((id, sessions_dir)));
-        stream
+        (crate::query::query_internal(prompt.clone(), sdk_opts, Some((id, sessions_dir)))) as _
     }
 }
 

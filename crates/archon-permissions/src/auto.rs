@@ -23,7 +23,7 @@ pub enum AutoDecision {
 // ---------------------------------------------------------------------------
 
 /// Configuration for auto-mode permission evaluation.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct AutoModeConfig {
     /// Additional commands the user considers safe.
     pub safe_commands: Vec<String>,
@@ -37,19 +37,6 @@ pub struct AutoModeConfig {
     pub deny_paths: Vec<String>,
     /// The project root directory. Writes inside this directory are allowed.
     pub project_dir: Option<PathBuf>,
-}
-
-impl Default for AutoModeConfig {
-    fn default() -> Self {
-        Self {
-            safe_commands: Vec::new(),
-            risky_commands: Vec::new(),
-            dangerous_commands: Vec::new(),
-            allow_paths: Vec::new(),
-            deny_paths: Vec::new(),
-            project_dir: None,
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------

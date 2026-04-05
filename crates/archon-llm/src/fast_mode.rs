@@ -11,15 +11,9 @@ const FAST_MODE_BETA: &str = "fast-mode-2026-02-01";
 // ---------------------------------------------------------------------------
 
 /// Tracks whether fast mode is active for API requests.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct FastModeState {
     enabled: bool,
-}
-
-impl Default for FastModeState {
-    fn default() -> Self {
-        Self { enabled: false }
-    }
 }
 
 impl FastModeState {

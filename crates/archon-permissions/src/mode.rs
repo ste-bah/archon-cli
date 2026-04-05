@@ -4,9 +4,10 @@ use std::str::FromStr;
 use serde::{Deserialize, Serialize};
 
 /// Permission mode controlling how tool executions are gated.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum PermissionMode {
     /// Prompt for risky/dangerous operations (legacy: Ask).
+    #[default]
     Default,
     /// Auto-allow file edits (Read/Write/Edit/Glob/Grep), prompt for Bash.
     AcceptEdits,
@@ -50,12 +51,6 @@ impl PermissionMode {
             Self::DontAsk => "dontAsk",
             Self::BypassPermissions => "bypassPermissions",
         }
-    }
-}
-
-impl Default for PermissionMode {
-    fn default() -> Self {
-        Self::Default
     }
 }
 

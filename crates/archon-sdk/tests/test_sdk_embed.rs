@@ -136,7 +136,7 @@ fn sdk_error_all_variants_compile() {
         SdkError::Tool("bad tool".into()),
         SdkError::Config("bad config".into()),
         SdkError::Session("no session".into()),
-        SdkError::Io(std::io::Error::new(std::io::ErrorKind::Other, "io")),
+        SdkError::Io(std::io::Error::other("io")),
         SdkError::Serde(serde_json::from_str::<()>("!").unwrap_err()),
     ];
 }

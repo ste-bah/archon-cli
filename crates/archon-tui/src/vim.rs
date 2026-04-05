@@ -14,15 +14,10 @@ use serde::{Deserialize, Serialize};
 /// TUI-specific configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
+#[derive(Default)]
 pub struct TuiConfig {
     /// Enable vim-style keybindings in the input area. Default: `false`.
     pub vim_mode: bool,
-}
-
-impl Default for TuiConfig {
-    fn default() -> Self {
-        Self { vim_mode: false }
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -247,47 +242,47 @@ impl VimState {
         let count = self.take_count();
 
         // Handle pending operator (e.g. 'd' waiting for 'd', 'r' waiting for replacement char)
-        if let Some(op) = self.pending_operator.take() {
-            if let KeyCode::Char(c) = key.code {
-                match op {
-                    'r' => {
-                        // 'r' + <char> replaces the character under cursor
-                        self.save_undo();
-                        self.redo_stack.clear();
-                        self.replace_char(c);
-                        return VimAction::Redraw;
+        if let Some(op) = self.pending_operator.take()
+            && let KeyCode::Char(c) = key.code
+        {
+            match op {
+                'r' => {
+                    // 'r' + <char> replaces the character under cursor
+                    self.save_undo();
+                    self.redo_stack.clear();
+                    self.replace_char(c);
+                    return VimAction::Redraw;
+                }
+                'g' => {
+                    if c == 'g' {
+                        // gg — move to first line
+                        self.cursor_row = 0;
+                        self.clamp_col();
+                        return VimAction::None;
                     }
-                    'g' => {
-                        if c == 'g' {
-                            // gg — move to first line
-                            self.cursor_row = 0;
-                            self.clamp_col();
+                    // Unknown g-command — drop and fall through
+                }
+                _ if c == op => {
+                    // dd, yy — line-wise operations
+                    match op {
+                        'd' => {
+                            self.save_undo();
+                            self.redo_stack.clear();
+                            self.delete_line(count);
+                            return VimAction::Redraw;
+                        }
+                        'y' => {
+                            self.yank_line(count);
                             return VimAction::None;
                         }
-                        // Unknown g-command — drop and fall through
+                        _ => {}
                     }
-                    _ if c == op => {
-                        // dd, yy — line-wise operations
-                        match op {
-                            'd' => {
-                                self.save_undo();
-                                self.redo_stack.clear();
-                                self.delete_line(count);
-                                return VimAction::Redraw;
-                            }
-                            'y' => {
-                                self.yank_line(count);
-                                return VimAction::None;
-                            }
-                            _ => {}
-                        }
-                    }
-                    _ => {}
                 }
+                _ => {}
             }
-            // If the second key didn't match, drop the pending operator
-            // and fall through to normal handling below.
         }
+        // If the second key didn't match, drop the pending operator
+        // and fall through to normal handling below.
 
         match key.code {
             // Count prefix digits (1-9 start, 0 only extends)

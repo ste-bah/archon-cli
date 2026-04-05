@@ -208,10 +208,10 @@ impl AgentBuilder {
         let auth = self.auth.ok_or(SdkError::MissingApiKey)?;
 
         // Reject empty API key
-        if let SdkAuth::ApiKey(ref key) = auth {
-            if key.is_empty() {
-                return Err(SdkError::MissingApiKey);
-            }
+        if let SdkAuth::ApiKey(ref key) = auth
+            && key.is_empty()
+        {
+            return Err(SdkError::MissingApiKey);
         }
 
         let model = self
@@ -337,10 +337,10 @@ impl SessionBuilder {
     /// - [`SdkError::MissingApiKey`] — no auth was provided
     pub fn build(self) -> Result<SessionHandle, SdkError> {
         let auth = self.auth.ok_or(SdkError::MissingApiKey)?;
-        if let SdkAuth::ApiKey(ref key) = auth {
-            if key.is_empty() {
-                return Err(SdkError::MissingApiKey);
-            }
+        if let SdkAuth::ApiKey(ref key) = auth
+            && key.is_empty()
+        {
+            return Err(SdkError::MissingApiKey);
         }
         Ok(SessionHandle {
             model: self

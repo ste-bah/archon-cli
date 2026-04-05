@@ -131,10 +131,10 @@ fn format_log_line(line: &str) -> String {
             if let Some(text) = value.get("text").and_then(|t| t.as_str()) {
                 return text.to_string();
             }
-            if let Some(delta) = value.get("delta") {
-                if let Some(text) = delta.get("text").and_then(|t| t.as_str()) {
-                    return text.to_string();
-                }
+            if let Some(delta) = value.get("delta")
+                && let Some(text) = delta.get("text").and_then(|t| t.as_str())
+            {
+                return text.to_string();
             }
             line.to_string()
         }

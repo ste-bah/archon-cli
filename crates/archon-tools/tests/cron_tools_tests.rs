@@ -5,7 +5,6 @@ use archon_tools::cron_delete::CronDeleteTool;
 use archon_tools::cron_list::CronListTool;
 use archon_tools::tool::{AgentMode, PermissionLevel, Tool, ToolContext};
 use serde_json::json;
-use std::path::PathBuf;
 use tempfile::TempDir;
 
 fn ctx_in(dir: &TempDir) -> ToolContext {

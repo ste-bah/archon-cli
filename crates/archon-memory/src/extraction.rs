@@ -37,21 +37,12 @@ impl Default for ExtractionConfig {
 
 /// Tracks where we are in the conversation so we know when to
 /// trigger the next extraction.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ExtractionState {
     /// Number of turns since the last successful extraction.
     pub turns_since_last_extraction: usize,
     /// The turn number at which the last extraction happened.
     pub last_extraction_turn: usize,
-}
-
-impl Default for ExtractionState {
-    fn default() -> Self {
-        Self {
-            turns_since_last_extraction: 0,
-            last_extraction_turn: 0,
-        }
-    }
 }
 
 impl ExtractionState {

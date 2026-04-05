@@ -189,7 +189,7 @@ impl EmbeddingProvider for OpenAIEmbedding {
         // Chunk into batches to respect API limits
         let mut all_embeddings: Vec<Vec<f32>> = Vec::with_capacity(texts.len());
         for chunk in texts.chunks(MAX_BATCH_SIZE) {
-            let batch = self.request_batch(&chunk.to_vec())?;
+            let batch = self.request_batch(chunk)?;
             all_embeddings.extend(batch);
         }
 

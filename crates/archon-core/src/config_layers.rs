@@ -102,13 +102,13 @@ pub fn discover_config_paths(
     let mut layers = Vec::new();
 
     // User layer
-    if let Some(path) = user_config {
-        if path.exists() {
-            layers.push(LayerInfo {
-                layer: ConfigLayer::User,
-                path: path.to_path_buf(),
-            });
-        }
+    if let Some(path) = user_config
+        && path.exists()
+    {
+        layers.push(LayerInfo {
+            layer: ConfigLayer::User,
+            path: path.to_path_buf(),
+        });
     }
 
     // Project layer: {work_dir}/.archon/config.toml
@@ -194,18 +194,18 @@ pub fn load_layered_config(
     }
 
     // Settings overlay (highest priority)
-    if let Some(path) = settings_path {
-        if path.exists() {
-            match read_and_parse_toml(path) {
-                Ok(value) => {
-                    merged = deep_merge_toml(merged, value);
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        path = %path.display(),
-                        "skipping settings overlay due to parse error: {e}"
-                    );
-                }
+    if let Some(path) = settings_path
+        && path.exists()
+    {
+        match read_and_parse_toml(path) {
+            Ok(value) => {
+                merged = deep_merge_toml(merged, value);
+            }
+            Err(e) => {
+                tracing::warn!(
+                    path = %path.display(),
+                    "skipping settings overlay due to parse error: {e}"
+                );
             }
         }
     }

@@ -86,12 +86,12 @@ pub fn launch_background_in_dir(
         error: None,
     };
     let status_json = serde_json::to_string_pretty(&status)
-        .map_err(|e| SessionError::IoError(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+        .map_err(|e| SessionError::IoError(std::io::Error::other(e)))?;
     std::fs::write(&status_path, &status_json)?;
 
     // Create log file and spawn
     let log_file = std::fs::File::create(&log_path)?;
-    let log_stderr = log_file.try_clone().map_err(|e| SessionError::IoError(e))?;
+    let log_stderr = log_file.try_clone().map_err(SessionError::IoError)?;
 
     let child = Command::new(archon_binary)
         .arg("-p")
@@ -117,7 +117,7 @@ pub fn launch_background_in_dir(
         ..status
     };
     let updated_json = serde_json::to_string_pretty(&updated_status)
-        .map_err(|e| SessionError::IoError(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+        .map_err(|e| SessionError::IoError(std::io::Error::other(e)))?;
     std::fs::write(&status_path, &updated_json)?;
 
     Ok(session_id)
@@ -157,9 +157,8 @@ pub fn kill_session_in_dir(dir: &Path, session_id: &str) -> Result<(), SessionEr
         let raw = std::fs::read_to_string(&status_path)?;
         if let Ok(mut info) = serde_json::from_str::<BackgroundSessionInfo>(&raw) {
             info.status = "killed".to_string();
-            let json = serde_json::to_string_pretty(&info).map_err(|e| {
-                SessionError::IoError(std::io::Error::new(std::io::ErrorKind::Other, e))
-            })?;
+            let json = serde_json::to_string_pretty(&info)
+                .map_err(|e| SessionError::IoError(std::io::Error::other(e)))?;
             std::fs::write(&status_path, json)?;
         }
     }

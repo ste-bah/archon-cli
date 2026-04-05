@@ -398,7 +398,7 @@ fn extract_strings_from_binary(path: &PathBuf) -> Result<String, std::io::Error>
     let mut current = String::new();
 
     for &byte in &content {
-        if byte >= 0x20 && byte < 0x7f {
+        if (0x20..0x7f).contains(&byte) {
             current.push(byte as char);
         } else {
             if current.len() >= 8 {
@@ -526,18 +526,18 @@ pub async fn resolve_and_validate_betas(
     config_betas: Option<&[String]>,
 ) -> Vec<String> {
     // Priority 1: explicit config override — user knows best, no validation needed
-    if let Some(betas) = config_betas {
-        if !betas.is_empty() {
-            return betas.to_vec();
-        }
+    if let Some(betas) = config_betas
+        && !betas.is_empty()
+    {
+        return betas.to_vec();
     }
 
     // Priority 2: valid validated cache
-    if let Some(cached) = load_cached_validated_betas() {
-        if !cached.is_empty() {
-            tracing::debug!("Using {} validated betas from cache", cached.len());
-            return cached;
-        }
+    if let Some(cached) = load_cached_validated_betas()
+        && !cached.is_empty()
+    {
+        tracing::debug!("Using {} validated betas from cache", cached.len());
+        return cached;
     }
 
     // Priority 3: discover from Claude Code binary
@@ -573,6 +573,26 @@ pub async fn resolve_and_validate_betas(
     );
 
     result
+}
+
+/// Resolve beta list: config override > discovered/cached > hardcoded defaults.
+pub fn resolve_betas(config_betas: Option<&[String]>) -> Vec<String> {
+    // Priority 1: explicit config override
+    if let Some(betas) = config_betas
+        && !betas.is_empty()
+    {
+        return betas.to_vec();
+    }
+
+    // Priority 2: cached discovery
+    if let Some(cached) = load_cached_betas()
+        && !cached.is_empty()
+    {
+        return cached;
+    }
+
+    // Priority 3: hardcoded defaults
+    DEFAULT_BETAS.iter().map(|s| s.to_string()).collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -669,24 +689,4 @@ mod beta_validation_cache_tests {
             "should always return at least some betas"
         );
     }
-}
-
-/// Resolve beta list: config override > discovered/cached > hardcoded defaults.
-pub fn resolve_betas(config_betas: Option<&[String]>) -> Vec<String> {
-    // Priority 1: explicit config override
-    if let Some(betas) = config_betas {
-        if !betas.is_empty() {
-            return betas.to_vec();
-        }
-    }
-
-    // Priority 2: cached discovery
-    if let Some(cached) = load_cached_betas() {
-        if !cached.is_empty() {
-            return cached;
-        }
-    }
-
-    // Priority 3: hardcoded defaults
-    DEFAULT_BETAS.iter().map(|s| s.to_string()).collect()
 }

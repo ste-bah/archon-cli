@@ -110,15 +110,15 @@ pub fn classify_blocks(input: &SectionInput) -> Vec<CacheBlock> {
     ];
 
     for (field,) in static_fields {
-        if let Some(text) = field {
-            if !text.is_empty() {
-                blocks.push(CacheBlock {
-                    content_hash: hash_content(text),
-                    content: text.clone(),
-                    block_type: BlockType::Static,
-                    cache_control: None,
-                });
-            }
+        if let Some(text) = field
+            && !text.is_empty()
+        {
+            blocks.push(CacheBlock {
+                content_hash: hash_content(text),
+                content: text.clone(),
+                block_type: BlockType::Static,
+                cache_control: None,
+            });
         }
     }
 
@@ -131,15 +131,15 @@ pub fn classify_blocks(input: &SectionInput) -> Vec<CacheBlock> {
     ];
 
     for (field,) in dynamic_fields {
-        if let Some(text) = field {
-            if !text.is_empty() {
-                blocks.push(CacheBlock {
-                    content_hash: hash_content(text),
-                    content: text.clone(),
-                    block_type: BlockType::Dynamic,
-                    cache_control: None,
-                });
-            }
+        if let Some(text) = field
+            && !text.is_empty()
+        {
+            blocks.push(CacheBlock {
+                content_hash: hash_content(text),
+                content: text.clone(),
+                block_type: BlockType::Dynamic,
+                cache_control: None,
+            });
         }
     }
 
@@ -167,10 +167,8 @@ pub fn optimize_block_order(blocks: Vec<CacheBlock>, cache_enabled: bool) -> Vec
         .collect();
 
     // Apply cache_control to the last static block when caching is on.
-    if cache_enabled {
-        if let Some(last_static) = statics.last_mut() {
-            last_static.cache_control = Some(serde_json::json!({"type": "ephemeral"}));
-        }
+    if cache_enabled && let Some(last_static) = statics.last_mut() {
+        last_static.cache_control = Some(serde_json::json!({"type": "ephemeral"}));
     }
 
     statics.extend(dynamics);

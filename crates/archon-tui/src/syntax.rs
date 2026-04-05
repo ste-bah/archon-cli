@@ -237,10 +237,10 @@ pub fn highlight_code(code: &str, language: &str) -> Option<Vec<Line<'static>>> 
                 let style = style_stack.last().copied().unwrap_or_default();
                 // Split on newlines to create separate Line objects
                 let mut parts = text.split('\n');
-                if let Some(first) = parts.next() {
-                    if !first.is_empty() {
-                        current_spans.push(Span::styled(first.to_string(), style));
-                    }
+                if let Some(first) = parts.next()
+                    && !first.is_empty()
+                {
+                    current_spans.push(Span::styled(first.to_string(), style));
                 }
                 for part in parts {
                     lines.push(Line::from(std::mem::take(&mut current_spans)));

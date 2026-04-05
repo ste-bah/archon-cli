@@ -12,10 +12,10 @@ use crate::mode::PermissionDecision;
 pub fn path_matches_any(path: &Path, patterns: &[String]) -> bool {
     let path_str = path.to_string_lossy();
     for pattern in patterns {
-        if let Ok(glob_pattern) = glob::Pattern::new(pattern) {
-            if glob_pattern.matches(&path_str) {
-                return true;
-            }
+        if let Ok(glob_pattern) = glob::Pattern::new(pattern)
+            && glob_pattern.matches(&path_str)
+        {
+            return true;
         }
     }
     false

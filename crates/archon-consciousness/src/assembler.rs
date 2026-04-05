@@ -79,93 +79,93 @@ impl SystemPromptAssembler {
         let mut sections = Vec::new();
 
         // 1. Identity
-        if let Some(ref text) = input.identity {
-            if !text.is_empty() {
-                sections.push(PromptSection {
-                    content: text.clone(),
-                    cache_control: None,
-                });
-            }
+        if let Some(ref text) = input.identity
+            && !text.is_empty()
+        {
+            sections.push(PromptSection {
+                content: text.clone(),
+                cache_control: None,
+            });
         }
 
         // 2. Personality — truncated to ~200 tokens
-        if let Some(ref text) = input.personality {
-            if !text.is_empty() {
-                sections.push(PromptSection {
-                    content: truncate_to_tokens(text, 200),
-                    cache_control: None,
-                });
-            }
+        if let Some(ref text) = input.personality
+            && !text.is_empty()
+        {
+            sections.push(PromptSection {
+                content: truncate_to_tokens(text, 200),
+                cache_control: None,
+            });
         }
 
         // 3. Rules — truncated to budget
-        if let Some(ref text) = input.rules {
-            if !text.is_empty() {
-                sections.push(PromptSection {
-                    content: truncate_to_tokens(text, self.budget.rules_tokens),
-                    cache_control: None,
-                });
-            }
+        if let Some(ref text) = input.rules
+            && !text.is_empty()
+        {
+            sections.push(PromptSection {
+                content: truncate_to_tokens(text, self.budget.rules_tokens),
+                cache_control: None,
+            });
         }
 
         // 4. Memories — truncated to budget
-        if let Some(ref text) = input.memories {
-            if !text.is_empty() {
-                sections.push(PromptSection {
-                    content: truncate_to_tokens(text, self.budget.memories_tokens),
-                    cache_control: None,
-                });
-            }
+        if let Some(ref text) = input.memories
+            && !text.is_empty()
+        {
+            sections.push(PromptSection {
+                content: truncate_to_tokens(text, self.budget.memories_tokens),
+                cache_control: None,
+            });
         }
 
         // 5. User prompt
-        if let Some(ref text) = input.user_prompt {
-            if !text.is_empty() {
-                sections.push(PromptSection {
-                    content: text.clone(),
-                    cache_control: None,
-                });
-            }
+        if let Some(ref text) = input.user_prompt
+            && !text.is_empty()
+        {
+            sections.push(PromptSection {
+                content: text.clone(),
+                cache_control: None,
+            });
         }
 
         // 6. Project instructions (CLAUDE.md)
-        if let Some(ref text) = input.project_instructions {
-            if !text.is_empty() {
-                sections.push(PromptSection {
-                    content: text.clone(),
-                    cache_control: None,
-                });
-            }
+        if let Some(ref text) = input.project_instructions
+            && !text.is_empty()
+        {
+            sections.push(PromptSection {
+                content: text.clone(),
+                cache_control: None,
+            });
         }
 
         // 7. Environment
-        if let Some(ref text) = input.environment {
-            if !text.is_empty() {
-                sections.push(PromptSection {
-                    content: text.clone(),
-                    cache_control: None,
-                });
-            }
+        if let Some(ref text) = input.environment
+            && !text.is_empty()
+        {
+            sections.push(PromptSection {
+                content: text.clone(),
+                cache_control: None,
+            });
         }
 
         // 8. Inner voice (ephemeral — changes every turn)
-        if let Some(ref text) = input.inner_voice {
-            if !text.is_empty() {
-                sections.push(PromptSection {
-                    content: text.clone(),
-                    cache_control: Some("ephemeral".to_string()),
-                });
-            }
+        if let Some(ref text) = input.inner_voice
+            && !text.is_empty()
+        {
+            sections.push(PromptSection {
+                content: text.clone(),
+                cache_control: Some("ephemeral".to_string()),
+            });
         }
 
         // 9. Dynamic (ephemeral — not cacheable)
-        if let Some(ref text) = input.dynamic {
-            if !text.is_empty() {
-                sections.push(PromptSection {
-                    content: text.clone(),
-                    cache_control: Some("ephemeral".to_string()),
-                });
-            }
+        if let Some(ref text) = input.dynamic
+            && !text.is_empty()
+        {
+            sections.push(PromptSection {
+                content: text.clone(),
+                cache_control: Some("ephemeral".to_string()),
+            });
         }
 
         sections

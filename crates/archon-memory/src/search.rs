@@ -103,10 +103,10 @@ pub(crate) fn search(db: &DbInstance, filter: &SearchFilter) -> Result<Vec<Memor
         };
 
         // Filter by memory_type
-        if let Some(mt) = filter.memory_type {
-            if mem.memory_type != mt {
-                continue;
-            }
+        if let Some(mt) = filter.memory_type
+            && mem.memory_type != mt
+        {
+            continue;
         }
 
         // Filter by text (case-insensitive substring in content or title)
@@ -120,17 +120,17 @@ pub(crate) fn search(db: &DbInstance, filter: &SearchFilter) -> Result<Vec<Memor
         }
 
         // Filter by date_from
-        if let Some(ref from) = filter.date_from {
-            if mem.created_at < *from {
-                continue;
-            }
+        if let Some(ref from) = filter.date_from
+            && mem.created_at < *from
+        {
+            continue;
         }
 
         // Filter by date_to
-        if let Some(ref to) = filter.date_to {
-            if mem.created_at > *to {
-                continue;
-            }
+        if let Some(ref to) = filter.date_to
+            && mem.created_at > *to
+        {
+            continue;
         }
 
         // Filter by tags

@@ -1025,12 +1025,11 @@ pub async fn run_tui(
                                 continue;
                             }
                             KeyCode::Enter => {
-                                if let Some(picker) = app.session_picker.take() {
-                                    if let Some(s) = picker.sessions.get(picker.selected) {
-                                        let _ = input_tx
-                                            .send(format!("__resume_session__ {}", s.id))
-                                            .await;
-                                    }
+                                if let Some(picker) = app.session_picker.take()
+                                    && let Some(s) = picker.sessions.get(picker.selected)
+                                {
+                                    let _ =
+                                        input_tx.send(format!("__resume_session__ {}", s.id)).await;
                                 }
                                 continue;
                             }
@@ -1217,31 +1216,28 @@ pub async fn run_tui(
                     // Vim mode key routing — Ctrl+D / Ctrl+C fall through to normal handling
                     let is_ctrl_quit = key.modifiers == KeyModifiers::CONTROL
                         && matches!(key.code, KeyCode::Char('d') | KeyCode::Char('c'));
-                    if !is_ctrl_quit {
-                        if let Some(ref mut vim) = app.vim_state {
-                            let action = vim.handle_key(key);
-                            match action {
-                                VimAction::Submit => {
-                                    let text = vim.text();
-                                    *vim = VimState::new();
-                                    if !text.trim().is_empty() {
-                                        if app.is_generating {
-                                            app.pending_input.push(text);
-                                            app.output.append_line(
-                                                "[queued — will send after current turn]",
-                                            );
-                                        } else {
-                                            let _ = input_tx.send(text).await;
-                                        }
+                    if !is_ctrl_quit && let Some(ref mut vim) = app.vim_state {
+                        let action = vim.handle_key(key);
+                        match action {
+                            VimAction::Submit => {
+                                let text = vim.text();
+                                *vim = VimState::new();
+                                if !text.trim().is_empty() {
+                                    if app.is_generating {
+                                        app.pending_input.push(text);
+                                        app.output
+                                            .append_line("[queued — will send after current turn]");
+                                    } else {
+                                        let _ = input_tx.send(text).await;
                                     }
                                 }
-                                VimAction::Quit => {
-                                    app.vim_state = None;
-                                }
-                                _ => {}
                             }
-                            continue;
+                            VimAction::Quit => {
+                                app.vim_state = None;
+                            }
+                            _ => {}
                         }
+                        continue;
                     }
                     match key {
                         // Ctrl+D = quit
@@ -1311,14 +1307,14 @@ pub async fn run_tui(
                             if app.is_generating {
                                 // Double-Esc within 500ms cancels generation
                                 let now = std::time::Instant::now();
-                                if let Some(last) = app.last_esc {
-                                    if now.duration_since(last).as_millis() < 500 {
-                                        app.is_generating = false;
-                                        app.active_tool = None;
-                                        app.output.append_line("[interrupted]");
-                                        app.last_esc = None;
-                                        continue;
-                                    }
+                                if let Some(last) = app.last_esc
+                                    && now.duration_since(last).as_millis() < 500
+                                {
+                                    app.is_generating = false;
+                                    app.active_tool = None;
+                                    app.output.append_line("[interrupted]");
+                                    app.last_esc = None;
+                                    continue;
                                 }
                                 app.last_esc = Some(now);
                             } else {

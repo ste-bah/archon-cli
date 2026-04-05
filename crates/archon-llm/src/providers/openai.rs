@@ -298,19 +298,19 @@ pub(crate) fn parse_openai_sse_chunk(chunk: &str) -> Vec<StreamEvent> {
     let mut events = Vec::new();
 
     // Text content delta.
-    if let Some(content) = delta.get("content").and_then(|c| c.as_str()) {
-        if !content.is_empty() {
-            events.push(StreamEvent::ContentBlockStart {
-                index: 0,
-                block_type: ContentBlockType::Text,
-                tool_use_id: None,
-                tool_name: None,
-            });
-            events.push(StreamEvent::TextDelta {
-                index: 0,
-                text: content.to_string(),
-            });
-        }
+    if let Some(content) = delta.get("content").and_then(|c| c.as_str())
+        && !content.is_empty()
+    {
+        events.push(StreamEvent::ContentBlockStart {
+            index: 0,
+            block_type: ContentBlockType::Text,
+            tool_use_id: None,
+            tool_name: None,
+        });
+        events.push(StreamEvent::TextDelta {
+            index: 0,
+            text: content.to_string(),
+        });
     }
 
     // Tool call deltas.
@@ -340,13 +340,13 @@ pub(crate) fn parse_openai_sse_chunk(chunk: &str) -> Vec<StreamEvent> {
             }
 
             // Argument chunk.
-            if let Some(args) = func_args {
-                if !args.is_empty() {
-                    events.push(StreamEvent::InputJsonDelta {
-                        index: tc_index,
-                        partial_json: args,
-                    });
-                }
+            if let Some(args) = func_args
+                && !args.is_empty()
+            {
+                events.push(StreamEvent::InputJsonDelta {
+                    index: tc_index,
+                    partial_json: args,
+                });
             }
         }
     }

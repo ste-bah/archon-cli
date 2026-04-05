@@ -32,20 +32,16 @@ pub trait EmbeddingProvider: Send + Sync {
 /// Which embedding backend to use.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum EmbeddingProviderKind {
     /// Automatically select: OpenAI if API key is present, else local.
+    #[default]
     Auto,
     /// fastembed BGE-base-en-v1.5 quantized (768-dim, CPU-only).
     Local,
     /// OpenAI text-embedding-3-small (1536-dim, requires API key).
     #[serde(rename = "openai")]
     OpenAI,
-}
-
-impl Default for EmbeddingProviderKind {
-    fn default() -> Self {
-        Self::Auto
-    }
 }
 
 impl std::fmt::Display for EmbeddingProviderKind {

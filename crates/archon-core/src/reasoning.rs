@@ -4,10 +4,7 @@ use std::path::Path;
 /// Load CLAUDE.md from the given directory, or empty string if not found.
 pub fn load_claude_md(project_dir: &Path) -> String {
     let path = project_dir.join("CLAUDE.md");
-    match fs::read_to_string(&path) {
-        Ok(content) => content,
-        Err(_) => String::new(),
-    }
+    fs::read_to_string(&path).unwrap_or_default()
 }
 
 /// Build the environment section for the system prompt.

@@ -3,7 +3,6 @@ use std::path::PathBuf;
 
 use archon_llm::auth::parse_credentials_json;
 use archon_llm::tokens::{credentials_path, read_credentials_locked, write_credentials_atomic};
-use archon_llm::types::Secret;
 
 fn temp_dir() -> PathBuf {
     let dir = std::env::temp_dir()

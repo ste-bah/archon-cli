@@ -198,7 +198,7 @@ impl ActiveWsConnection {
                 let messages: Result<Vec<_>, _> = text
                     .lines()
                     .filter(|l| !l.trim().is_empty())
-                    .map(|line| serde_json::from_str::<serde_json::Value>(line))
+                    .map(serde_json::from_str::<serde_json::Value>)
                     .collect();
                 messages.map(Some).map_err(McpError::Json)
             }

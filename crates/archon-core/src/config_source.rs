@@ -18,17 +18,9 @@ use crate::config_layers::{ConfigLayer, discover_config_paths};
 
 /// Maps dotted config key paths (e.g. `api.default_model`) to the
 /// [`ConfigLayer`] that last set them.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct ConfigSourceMap {
     sources: HashMap<String, ConfigLayer>,
-}
-
-impl Default for ConfigSourceMap {
-    fn default() -> Self {
-        Self {
-            sources: HashMap::new(),
-        }
-    }
 }
 
 impl ConfigSourceMap {
@@ -68,14 +60,12 @@ impl ConfigSourceMap {
         }
 
         // Settings overlay
-        if let Some(path) = settings {
-            if path.exists() {
-                if let Ok(content) = fs::read_to_string(path) {
-                    if let Ok(value) = content.parse::<Value>() {
-                        walk_keys(&value, "", &ConfigLayer::Settings, &mut sources);
-                    }
-                }
-            }
+        if let Some(path) = settings
+            && path.exists()
+            && let Ok(content) = fs::read_to_string(path)
+            && let Ok(value) = content.parse::<Value>()
+        {
+            walk_keys(&value, "", &ConfigLayer::Settings, &mut sources);
         }
 
         Ok(Self { sources })

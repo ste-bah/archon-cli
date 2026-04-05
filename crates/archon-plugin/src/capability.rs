@@ -54,10 +54,10 @@ impl CapabilityChecker {
     /// Check if the plugin may read a file at `path`.
     pub fn can_read_fs(&self, path: &Path) -> bool {
         for cap in &self.capabilities {
-            if let PluginCapability::ReadFs(allowed) = cap {
-                if allowed.iter().any(|p| path.starts_with(p)) {
-                    return true;
-                }
+            if let PluginCapability::ReadFs(allowed) = cap
+                && allowed.iter().any(|p| path.starts_with(p))
+            {
+                return true;
             }
         }
         false
@@ -66,10 +66,10 @@ impl CapabilityChecker {
     /// Check if the plugin may write a file at `path`.
     pub fn can_write_fs(&self, path: &Path) -> bool {
         for cap in &self.capabilities {
-            if let PluginCapability::WriteFs(allowed) = cap {
-                if allowed.iter().any(|p| path.starts_with(p)) {
-                    return true;
-                }
+            if let PluginCapability::WriteFs(allowed) = cap
+                && allowed.iter().any(|p| path.starts_with(p))
+            {
+                return true;
             }
         }
         false
@@ -78,10 +78,10 @@ impl CapabilityChecker {
     /// Check if the plugin may make outbound network calls to `hostname`.
     pub fn can_use_network(&self, hostname: &str) -> bool {
         for cap in &self.capabilities {
-            if let PluginCapability::Network(hosts) = cap {
-                if hosts.iter().any(|h| h == hostname || h == "*") {
-                    return true;
-                }
+            if let PluginCapability::Network(hosts) = cap
+                && hosts.iter().any(|h| h == hostname || h == "*")
+            {
+                return true;
             }
         }
         false

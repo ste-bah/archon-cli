@@ -120,7 +120,7 @@ pub fn read_credentials_locked(path: &Path) -> Result<(OAuthCredentials, SystemT
         let mut buf = String::new();
         (&*guard)
             .read_to_string(&mut buf)
-            .map_err(|e| AuthError::IoError(e))?;
+            .map_err(AuthError::IoError)?;
         buf
     };
 

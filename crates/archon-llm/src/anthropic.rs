@@ -293,20 +293,20 @@ impl AnthropicClient {
 
             let response_body = response.text().await.unwrap_or_default();
 
-            if status == 400 {
-                if let Some(bad_beta) = extract_unknown_beta(&response_body) {
-                    let before = candidates.len();
-                    candidates.retain(|b| b != &bad_beta);
-                    if candidates.len() < before {
-                        // Successfully removed the bad beta — continue probing
-                        tracing::warn!("Stripping unknown beta: {bad_beta}");
-                        continue;
-                    }
-                    // The API reported a beta we didn't send — abort to avoid infinite loop
-                    tracing::warn!(
-                        "Beta validation: API reported unknown beta '{bad_beta}' not in our candidate list; aborting probe"
-                    );
+            if status == 400
+                && let Some(bad_beta) = extract_unknown_beta(&response_body)
+            {
+                let before = candidates.len();
+                candidates.retain(|b| b != &bad_beta);
+                if candidates.len() < before {
+                    // Successfully removed the bad beta — continue probing
+                    tracing::warn!("Stripping unknown beta: {bad_beta}");
+                    continue;
                 }
+                // The API reported a beta we didn't send — abort to avoid infinite loop
+                tracing::warn!(
+                    "Beta validation: API reported unknown beta '{bad_beta}' not in our candidate list; aborting probe"
+                );
             }
 
             // Any other error (or unrecognised 400): abort probe, return what we have
@@ -456,10 +456,10 @@ fn classify_error(status: u16, body: &str, retry_after_header: Option<&str>) -> 
 }
 
 fn extract_retry_after(body: &str) -> u64 {
-    if let Ok(v) = serde_json::from_str::<serde_json::Value>(body) {
-        if let Some(secs) = v.get("retry_after").and_then(|v| v.as_u64()) {
-            return secs;
-        }
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(body)
+        && let Some(secs) = v.get("retry_after").and_then(|v| v.as_u64())
+    {
+        return secs;
     }
     30
 }

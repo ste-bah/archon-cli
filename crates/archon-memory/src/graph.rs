@@ -469,10 +469,8 @@ impl MemoryGraph {
             .read()
             .map(|g| g.is_some())
             .unwrap_or(false);
-        if has_provider {
-            if let Err(e) = crate::vector_search::delete_embedding(&self.db, id) {
-                tracing::warn!(id, "failed to delete embedding: {e}");
-            }
+        if has_provider && let Err(e) = crate::vector_search::delete_embedding(&self.db, id) {
+            tracing::warn!(id, "failed to delete embedding: {e}");
         }
 
         let mut params = BTreeMap::new();

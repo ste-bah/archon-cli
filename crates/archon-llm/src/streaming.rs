@@ -271,11 +271,11 @@ pub fn split_sse_lines(raw: &str) -> Vec<(&str, &str)> {
     for line in raw.lines() {
         if let Some(event) = line.strip_prefix("event: ") {
             current_event = event.trim();
-        } else if let Some(data) = line.strip_prefix("data: ") {
-            if !current_event.is_empty() {
-                pairs.push((current_event, data.trim()));
-                current_event = "";
-            }
+        } else if let Some(data) = line.strip_prefix("data: ")
+            && !current_event.is_empty()
+        {
+            pairs.push((current_event, data.trim()));
+            current_event = "";
         }
     }
 

@@ -131,7 +131,7 @@ fn in_memory_backend_read_clears_inbox() {
 
 #[test]
 fn in_memory_backend_send_to_all() {
-    let mut backend = InMemoryBackend::new();
+    let backend = InMemoryBackend::new();
     let roles = ["coder", "tester", "reviewer"];
     for role in roles {
         backend.register(role);

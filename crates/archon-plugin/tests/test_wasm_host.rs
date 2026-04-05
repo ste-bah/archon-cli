@@ -123,7 +123,7 @@ fn plugin_error_timeout() {
     let e = PluginError::Timeout {
         fuel_exhausted: true,
     };
-    assert!(e.to_string().len() > 0);
+    assert!(!e.to_string().is_empty());
 }
 
 #[test]
@@ -132,7 +132,7 @@ fn plugin_error_memory_violation() {
         requested: 128 * 1024 * 1024,
         limit: 64 * 1024 * 1024,
     };
-    assert!(e.to_string().len() > 0);
+    assert!(!e.to_string().is_empty());
 }
 
 #[test]
@@ -150,7 +150,7 @@ fn plugin_error_manifest_validation() {
         path: PathBuf::from("/tmp/plugin.json"),
         fields: vec!["name".into(), "version".into()],
     };
-    assert!(e.to_string().len() > 0);
+    assert!(!e.to_string().is_empty());
 }
 
 #[test]

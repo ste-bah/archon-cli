@@ -72,7 +72,7 @@ fn reconnect_delay_attempt_0_is_1s() {
     // Base 1000ms with ±12.5% symmetric jitter → actual range [875, 1125).
     // Widen to ±25% to tolerate future jitter adjustments.
     assert!(
-        delay >= 750 && delay <= 1_250,
+        (750..=1_250).contains(&delay),
         "attempt 0 base delay should be ~1s ±jitter, got {delay}"
     );
 }
@@ -81,7 +81,7 @@ fn reconnect_delay_attempt_0_is_1s() {
 fn reconnect_delay_attempt_1_is_2s() {
     let delay = reconnect_delay_ms(1, 0);
     assert!(
-        delay >= 1_000 && delay <= 4_000,
+        (1_000..=4_000).contains(&delay),
         "attempt 1 base delay should be ~2s with jitter, got {delay}"
     );
 }
@@ -106,7 +106,7 @@ fn reconnect_delay_has_jitter() {
     let max = delays.iter().max().copied().unwrap();
     // With ±25% jitter on 1s base, min should be ~750ms, max should be ~1250ms
     assert!(
-        max > min || max == min, // tolerate zero-variation in rare cases
+        max >= min, // tolerate zero-variation in rare cases
         "jitter should vary delay values"
     );
 }

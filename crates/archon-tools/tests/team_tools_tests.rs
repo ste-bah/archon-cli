@@ -5,7 +5,6 @@ use archon_tools::send_message_team::SendMessageTeamTool;
 use archon_tools::team_create::TeamCreateTool;
 use archon_tools::team_delete::TeamDeleteTool;
 use archon_tools::tool::{AgentMode, Tool, ToolContext};
-use std::path::PathBuf;
 
 fn ctx(project_dir: &std::path::Path) -> ToolContext {
     ToolContext {

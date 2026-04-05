@@ -192,9 +192,8 @@ pub fn cleanup_stale_pids_in_dir(dir: &Path) -> Result<usize, SessionError> {
 
         if !alive {
             info.status = "stale".to_string();
-            let json = serde_json::to_string_pretty(&info).map_err(|e| {
-                SessionError::IoError(std::io::Error::new(std::io::ErrorKind::Other, e))
-            })?;
+            let json = serde_json::to_string_pretty(&info)
+                .map_err(|e| SessionError::IoError(std::io::Error::other(e)))?;
             std::fs::write(&path, json)?;
             // Remove the stale PID file
             let _ = std::fs::remove_file(dir.join(format!("{}.pid", info.id)));

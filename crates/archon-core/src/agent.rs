@@ -178,10 +178,10 @@ impl ConversationState {
 
     pub fn first_user_message(&self) -> &str {
         for msg in &self.messages {
-            if msg["role"].as_str() == Some("user") {
-                if let Some(content) = msg["content"].as_str() {
-                    return content;
-                }
+            if msg["role"].as_str() == Some("user")
+                && let Some(content) = msg["content"].as_str()
+            {
+                return content;
             }
         }
         ""
@@ -693,22 +693,18 @@ impl Agent {
                     }
 
                     // Phase 2 (CLI-116): Checkpoint file before Write/Edit
-                    if matches!(tool.name.as_str(), "Write" | "Edit") {
-                        if let Some(ref store) = self.checkpoint_store {
-                            if let Some(file_path) = input.get("file_path").and_then(|v| v.as_str())
-                            {
-                                let store = store.lock().await;
-                                if let Err(e) = store.snapshot(
-                                    &self.config.session_id,
-                                    file_path,
-                                    self.turn_number as i64,
-                                    &tool.name,
-                                ) {
-                                    tracing::warn!(
-                                        "checkpoint snapshot failed for {file_path}: {e}"
-                                    );
-                                }
-                            }
+                    if matches!(tool.name.as_str(), "Write" | "Edit")
+                        && let Some(ref store) = self.checkpoint_store
+                        && let Some(file_path) = input.get("file_path").and_then(|v| v.as_str())
+                    {
+                        let store = store.lock().await;
+                        if let Err(e) = store.snapshot(
+                            &self.config.session_id,
+                            file_path,
+                            self.turn_number as i64,
+                            &tool.name,
+                        ) {
+                            tracing::warn!("checkpoint snapshot failed for {file_path}: {e}");
                         }
                     }
 

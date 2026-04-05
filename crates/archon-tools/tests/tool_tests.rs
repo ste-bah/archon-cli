@@ -1,5 +1,4 @@
 use std::fs;
-use std::path::PathBuf;
 
 use serde_json::json;
 
@@ -8,7 +7,7 @@ use archon_tools::file_read::ReadTool;
 use archon_tools::file_write::WriteTool;
 use archon_tools::glob_tool::GlobTool;
 use archon_tools::grep::GrepTool;
-use archon_tools::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
+use archon_tools::tool::{PermissionLevel, Tool, ToolContext};
 
 fn test_ctx() -> ToolContext {
     let dir = std::env::temp_dir()
