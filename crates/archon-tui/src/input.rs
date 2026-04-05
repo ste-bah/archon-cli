@@ -234,6 +234,14 @@ impl InputHandler {
         self.history_index = None;
         self.ultrathink.scan_input(&self.current);
     }
+
+    /// Inject `text` at the current cursor position (voice input integration).
+    pub fn inject_text(&mut self, text: &str) {
+        self.current.insert_str(self.cursor_pos, text);
+        self.cursor_pos += text.len();
+        self.refresh_suggestions();
+        self.ultrathink.scan_input(&self.current);
+    }
 }
 
 #[cfg(test)]

@@ -6,6 +6,10 @@ pub struct StatusBar {
     pub permission_mode: String,
     pub cost: f64,
     pub git_branch: Option<String>,
+    /// Current verbosity mode. `true` = verbose (default), `false` = brief.
+    pub verbose: bool,
+    /// Current voice input state for display in the status bar.
+    pub voice_state: Option<crate::voice::VoiceState>,
 }
 
 impl Default for StatusBar {
@@ -16,6 +20,8 @@ impl Default for StatusBar {
             permission_mode: "ask".into(),
             cost: 0.0,
             git_branch: None,
+            verbose: true,
+            voice_state: None,
         }
     }
 }
@@ -32,6 +38,20 @@ impl StatusBar {
 
         if let Some(ref branch) = self.git_branch {
             parts.push(branch.clone());
+        }
+
+        // Show [brief] indicator when not in verbose mode (CLI-314)
+        if !self.verbose {
+            parts.push("[brief]".to_owned());
+        }
+
+        // Show voice state indicator when active
+        match &self.voice_state {
+            Some(crate::voice::VoiceState::Listening) => parts.push("[listening]".to_owned()),
+            Some(crate::voice::VoiceState::Transcribing) => {
+                parts.push("[transcribing]".to_owned())
+            }
+            _ => {}
         }
 
         parts.join(" | ")

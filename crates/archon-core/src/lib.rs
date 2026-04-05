@@ -16,6 +16,8 @@ pub mod hooks;
 pub mod input_format;
 pub mod logging;
 pub mod output_format;
+pub mod output_style;
+pub mod output_style_loader;
 pub mod plan_explore;
 pub mod plan_v2;
 pub mod print_mode;
@@ -23,6 +25,11 @@ pub mod reasoning;
 pub mod schema_validation;
 pub mod skills;
 pub mod subagent;
+pub mod headless;
+pub mod remote;
+pub mod orchestrator;
+pub mod team;
+pub mod update;
 
 /// Re-export from archon-tools so downstream crates can use `archon_core::task_manager`.
 pub use archon_tools::task_manager;

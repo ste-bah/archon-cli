@@ -1,0 +1,33 @@
+<idea-plugin>
+  <id>dev.archon.jetbrains</id>
+  <name>Archon</name>
+  <version>0.1.0</version>
+  <vendor email="dev@archon.dev" url="https://archon.dev">Archon</vendor>
+  <description>Archon AI agent integration for JetBrains IDEs</description>
+  <idea-version since-build="241" until-build="251.*"/>
+  <depends>com.intellij.modules.platform</depends>
+  <extensions defaultExtensionNs="com.intellij">
+    <toolWindow id="Archon" anchor="right" factoryClass="dev.archon.jetbrains.toolwindow.ChatToolWindow"/>
+    <applicationService serviceImplementation="dev.archon.jetbrains.settings.ArchonSettings"/>
+  </extensions>
+  <actions>
+    <action id="dev.archon.AskArchon"
+            class="dev.archon.jetbrains.actions.AskArchonAction"
+            text="Ask Archon About This"
+            description="Send selected code to Archon">
+      <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+    </action>
+    <action id="dev.archon.FixWithArchon"
+            class="dev.archon.jetbrains.actions.FixWithArchonAction"
+            text="Fix with Archon"
+            description="Send inspection warning and code to Archon">
+      <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+    </action>
+    <action id="dev.archon.GenerateTests"
+            class="dev.archon.jetbrains.actions.GenerateTestsAction"
+            text="Generate Tests with Archon"
+            description="Generate tests for selected code">
+      <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+    </action>
+  </actions>
+</idea-plugin>

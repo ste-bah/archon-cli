@@ -48,9 +48,7 @@ fn builtin_tool_names_match_claude_code_conventions() {
         Box::new(archon_tools::sleep::SleepTool),
         Box::new(archon_tools::plan_mode::EnterPlanModeTool),
         Box::new(archon_tools::plan_mode::ExitPlanModeTool),
-        Box::new(archon_tools::toolsearch::ToolSearchTool::new(
-            archon_tools::registry::ToolRegistry::new(),
-        )),
+        Box::new(archon_tools::toolsearch::ToolSearchTool::new(vec![])),
         Box::new(archon_tools::config_tool::ConfigTool),
         Box::new(archon_tools::powershell::PowerShellTool::default()),
     ];

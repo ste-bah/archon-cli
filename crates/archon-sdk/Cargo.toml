@@ -3,9 +3,35 @@ name = "archon-sdk"
 version.workspace = true
 edition.workspace = true
 
+[features]
+default = []
+# MCP transport for in-process tool registration
+sdk-mcp = []
+# Memory system integration
+sdk-memory = []
+# Minimal build: agent + tools only, no MCP/memory
+sdk-minimal = []
+
 [dependencies]
 archon-core = { path = "../archon-core" }
+archon-llm = { path = "../archon-llm" }
+archon-tools = { path = "../archon-tools" }
+
 serde.workspace = true
+serde_json.workspace = true
 tokio.workspace = true
+tokio-stream.workspace = true
+futures-util.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
+uuid.workspace = true
+dirs.workspace = true
+tracing.workspace = true
+axum.workspace = true
+tower-http.workspace = true
+open.workspace = true
+rust-embed = "8"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full"] }
+uuid = { workspace = true }

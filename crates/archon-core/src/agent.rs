@@ -2,8 +2,8 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use archon_llm::anthropic::{AnthropicClient, MessageRequest};
 use archon_llm::effort::EffortLevel;
+use archon_llm::provider::{LlmProvider, LlmRequest};
 use archon_llm::streaming::StreamEvent;
 use archon_memory::extraction::{
     should_extract, store_extracted, build_extraction_prompt, parse_extraction_response,
@@ -185,7 +185,7 @@ struct PendingToolCall {
 // ---------------------------------------------------------------------------
 
 pub struct Agent {
-    client: AnthropicClient,
+    client: Arc<dyn LlmProvider>,
     registry: ToolRegistry,
     config: AgentConfig,
     state: ConversationState,
@@ -205,8 +205,8 @@ pub struct Agent {
     pub show_thinking: Arc<AtomicBool>,
     /// Shared session statistics for /status and /cost slash commands.
     pub session_stats: Arc<Mutex<SessionStats>>,
-    /// Hook system dispatcher for pre/post tool execution hooks.
-    hook_dispatcher: Option<crate::hooks::HookDispatcher>,
+    /// Hook registry for pre/post tool execution hooks.
+    hook_registry: Option<Arc<crate::hooks::HookRegistry>>,
     /// Channel for permission prompt responses from the TUI.
     /// Agent sends PermissionRequired event, then waits on this for y/n.
     pub permission_response_rx: Option<Arc<tokio::sync::Mutex<tokio::sync::mpsc::Receiver<bool>>>>,
@@ -214,7 +214,7 @@ pub struct Agent {
 
 impl Agent {
     pub fn new(
-        client: AnthropicClient,
+        client: Arc<dyn LlmProvider>,
         registry: ToolRegistry,
         config: AgentConfig,
         event_tx: tokio::sync::mpsc::Sender<AgentEvent>,
@@ -235,7 +235,7 @@ impl Agent {
             subagent_manager: SubagentManager::default(),
             show_thinking: Arc::new(AtomicBool::new(true)),
             session_stats: Arc::new(Mutex::new(SessionStats::default())),
-            hook_dispatcher: None,
+            hook_registry: None,
             permission_response_rx: None,
         }
     }
@@ -249,15 +249,17 @@ impl Agent {
         // The old sender is dropped, closing the channel
     }
 
-    /// Set the hook dispatcher for pre/post tool execution hooks.
-    pub fn set_hook_dispatcher(&mut self, dispatcher: crate::hooks::HookDispatcher) {
-        self.hook_dispatcher = Some(dispatcher);
+    /// Set the hook registry for pre/post tool execution hooks.
+    pub fn set_hook_registry(&mut self, registry: Arc<crate::hooks::HookRegistry>) {
+        self.hook_registry = Some(registry);
     }
 
-    /// Fire a hook by type with a JSON payload. No-op if no dispatcher is set.
-    pub async fn fire_hook(&self, hook_type: crate::hooks::HookType, payload: serde_json::Value) {
-        if let Some(ref dispatcher) = self.hook_dispatcher {
-            dispatcher.fire(hook_type, payload).await;
+    /// Fire a hook by event with a JSON payload. No-op if no registry is set.
+    pub async fn fire_hook(&self, event: crate::hooks::HookEvent, payload: serde_json::Value) {
+        if let Some(ref registry) = self.hook_registry {
+            registry
+                .execute_hooks(event, payload, &self.config.working_dir, &self.config.session_id)
+                .await;
         }
     }
 
@@ -325,7 +327,7 @@ impl Agent {
             };
 
             // Build the API request
-            let request = MessageRequest {
+            let request = LlmRequest {
                 model: active_model.clone(),
                 max_tokens: self.config.max_tokens,
                 system: system_with_memories,
@@ -340,6 +342,7 @@ impl Agent {
                 },
                 speed,
                 effort,
+                extra: serde_json::Value::Null,
             };
 
             self.send_event(AgentEvent::ApiCallStarted {
@@ -350,7 +353,7 @@ impl Agent {
             // Send request and get streaming events
             let mut rx = self
                 .client
-                .stream_message(request)
+                .stream(request)
                 .await
                 .map_err(|e| AgentLoopError::ApiError(format!("{e}")))?;
 
@@ -674,19 +677,30 @@ impl Agent {
                     }
 
                     // Pre-tool-use hook: check if any hook blocks this tool
-                    if let Some(ref dispatcher) = self.hook_dispatcher {
-                        if let Some(hook_result) = dispatcher.fire_pre_tool_use(&tool.name, &input).await {
-                            if hook_result.allow == Some(false) {
-                                let reason = hook_result.reason.unwrap_or_else(|| "blocked by pre_tool_use hook".into());
-                                let result = ToolResult::error(format!("Hook blocked: {reason}"));
-                                self.send_event(AgentEvent::ToolCallComplete {
-                                    name: tool.name.clone(),
-                                    id: tool.id.clone(),
-                                    result: result.clone(),
-                                }).await;
-                                self.state.add_tool_result(&tool.id, &result.content, result.is_error);
-                                continue;
-                            }
+                    if let Some(ref registry) = self.hook_registry {
+                        let hook_input = serde_json::json!({
+                            "hook_event": "PreToolUse",
+                            "tool_name": tool.name,
+                            "tool_input": input,
+                        });
+                        let hook_result = registry
+                            .execute_hooks(
+                                crate::hooks::HookEvent::PreToolUse,
+                                hook_input,
+                                &self.config.working_dir,
+                                &self.config.session_id,
+                            )
+                            .await;
+                        if let crate::hooks::HookResult::Block { reason } = hook_result {
+                            let result = ToolResult::error(format!("Hook blocked: {reason}"));
+                            self.send_event(AgentEvent::ToolCallComplete {
+                                name: tool.name.clone(),
+                                id: tool.id.clone(),
+                                result: result.clone(),
+                            })
+                            .await;
+                            self.state.add_tool_result(&tool.id, &result.content, result.is_error);
+                            continue;
                         }
                     }
 
@@ -758,13 +772,17 @@ impl Agent {
     }
 
     /// Get the auth provider for spawning parallel API calls (e.g. /btw).
-    pub fn auth_provider(&self) -> &archon_llm::auth::AuthProvider {
-        self.client.auth()
+    ///
+    /// Returns `None` if the active provider is not Anthropic.
+    pub fn auth_provider(&self) -> Option<&archon_llm::auth::AuthProvider> {
+        self.client.as_anthropic().map(|c| c.auth())
     }
 
     /// Get the identity provider for spawning parallel API calls.
-    pub fn identity_provider(&self) -> &archon_llm::identity::IdentityProvider {
-        self.client.identity()
+    ///
+    /// Returns `None` if the active provider is not Anthropic.
+    pub fn identity_provider(&self) -> Option<&archon_llm::identity::IdentityProvider> {
+        self.client.as_anthropic().map(|c| c.identity())
     }
 
     /// Get the current effective model name.
@@ -798,7 +816,6 @@ impl Agent {
     pub async fn compact(&mut self) -> String {
         use archon_context::messages::ContextMessage;
         use crate::commands::handle_compact;
-        use crate::hooks::HookType;
 
         // Convert JSON messages to ContextMessages
         let context_msgs: Vec<ContextMessage> = self.state.messages.iter().map(|m| {
@@ -826,13 +843,20 @@ impl Agent {
         let before_tokens: u64 = context_msgs.iter().map(|m| m.estimated_tokens).sum();
 
         // Fire PreCompact hook
-        if let Some(ref dispatcher) = self.hook_dispatcher {
+        if let Some(ref registry) = self.hook_registry {
             let payload = serde_json::json!({
-                "hook_type": "pre_compact",
+                "hook_event": "PreCompact",
                 "message_count": message_count,
                 "token_count": before_tokens,
             });
-            dispatcher.fire(HookType::PreCompact, payload).await;
+            registry
+                .execute_hooks(
+                    crate::hooks::HookEvent::PreCompact,
+                    payload,
+                    &self.config.working_dir,
+                    &self.config.session_id,
+                )
+                .await;
         }
 
         // Build a summary from the conversation for compaction
@@ -871,14 +895,21 @@ impl Agent {
         };
 
         // Fire PostCompact hook
-        if let Some(ref dispatcher) = self.hook_dispatcher {
+        if let Some(ref registry) = self.hook_registry {
             let payload = serde_json::json!({
-                "hook_type": "post_compact",
+                "hook_event": "PostCompact",
                 "strategy": strategy,
                 "tokens_removed": tokens_removed,
                 "tokens_remaining": after_tokens,
             });
-            dispatcher.fire(HookType::PostCompact, payload).await;
+            registry
+                .execute_hooks(
+                    crate::hooks::HookEvent::PostCompact,
+                    payload,
+                    &self.config.working_dir,
+                    &self.config.session_id,
+                )
+                .await;
         }
 
         // Return detailed summary
@@ -956,7 +987,7 @@ impl Agent {
 
         let session_id = self.config.session_id.clone();
         let turn = self.turn_number as usize;
-        let client = self.client.clone();
+        let client = Arc::clone(&self.client);
         let model = self.config.model.clone();
 
         // Record extraction so we don't fire again immediately
@@ -966,7 +997,7 @@ impl Agent {
         tokio::spawn(async move {
             let prompt = build_extraction_prompt(&messages);
 
-            let request = MessageRequest {
+            let request = LlmRequest {
                 model,
                 max_tokens: 1024,
                 system: vec![serde_json::json!({
@@ -981,9 +1012,10 @@ impl Agent {
                 thinking: None,
                 speed: Some("fast".to_string()),
                 effort: Some("low".to_string()),
+                extra: serde_json::Value::Null,
             };
 
-            match client.stream_message(request).await {
+            match client.stream(request).await {
                 Ok(mut rx) => {
                     let mut response_text = String::new();
                     while let Some(event) = rx.recv().await {
@@ -1047,7 +1079,7 @@ impl Agent {
 
         // One-shot subagent: make a single API call with the subagent's prompt
         let model = request.model.as_deref().unwrap_or(&self.config.model);
-        let sub_request = MessageRequest {
+        let sub_request = LlmRequest {
             model: model.to_string(),
             max_tokens: self.config.max_tokens,
             system: vec![serde_json::json!({
@@ -1058,13 +1090,14 @@ impl Agent {
                 "role": "user",
                 "content": request.prompt,
             })],
-            tools: Vec::new(), // subagent has no tools for one-shot
+            tools: Vec::new(),
             thinking: None,
             speed: None,
             effort: None,
+            extra: serde_json::Value::Null,
         };
 
-        match self.client.stream_message(sub_request).await {
+        match self.client.stream(sub_request).await {
             Ok(mut rx) => {
                 let mut response_text = String::new();
                 while let Some(event) = rx.recv().await {

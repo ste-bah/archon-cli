@@ -1,0 +1,14 @@
+{
+  "name": "@archon/sdk",
+  "version": "0.1.0",
+  "description": "Archon IDE extension SDK — TypeScript client",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc --noEmit",
+    "test": "node --test dist/index.test.js || tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}

@@ -4,6 +4,8 @@ pub mod effort;
 pub mod fast_mode;
 pub mod identity;
 pub mod oauth;
+pub mod provider;
+pub mod providers;
 pub mod streaming;
 pub mod thinking;
 pub mod tokens;

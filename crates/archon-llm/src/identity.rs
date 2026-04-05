@@ -147,6 +147,19 @@ impl IdentityProvider {
         }
     }
 
+    /// Returns the `anti_distillation` field value for the API request body.
+    ///
+    /// Only set when running in Spoof mode with `anti_distillation: true` (Layer 9).
+    pub fn anti_distillation_value(&self) -> Option<serde_json::Value> {
+        match &self.mode {
+            IdentityMode::Spoof {
+                anti_distillation: true,
+                ..
+            } => Some(serde_json::json!(["fake_tools"])),
+            _ => None,
+        }
+    }
+
     /// Generate the billing header for the system prompt (Layer 6).
     pub fn billing_header(&self, first_user_message: &str) -> Option<String> {
         match &self.mode {
@@ -378,8 +391,8 @@ fn find_claude_binary() -> Option<PathBuf> {
 fn extract_strings_from_binary(path: &PathBuf) -> Result<String, std::io::Error> {
     let content = fs::read(path)?;
 
-    // If it's text (JS/shell script), return as-is
-    if content.iter().take(1024).all(|&b| b != 0 || b == b'\n' || b == b'\r') {
+    // If it's text (no null bytes in first 1024 bytes), return as-is
+    if !content.iter().take(1024).any(|&b| b == 0) {
         return Ok(String::from_utf8_lossy(&content).to_string());
     }
 

@@ -482,10 +482,10 @@ expanded_skill!(
 expanded_skill!(
     SandboxSkill,
     "sandbox",
-    "Toggle sandbox mode (available in Phase 4)",
+    "Toggle sandbox mode",
     |_args, _ctx| {
         SkillOutput::Text(
-            "Sandbox mode is not yet available. Coming in Phase 4.".to_string(),
+            "Sandbox mode: use `--sandbox` flag at startup, or set `permissions.sandbox = true` in config.toml.".to_string(),
         )
     }
 );
@@ -646,10 +646,10 @@ expanded_skill!(
 expanded_skill!(
     ScheduleSkill,
     "schedule",
-    "Create scheduled task (available in Phase 4)",
+    "Create scheduled task",
     |_args, _ctx| {
         SkillOutput::Text(
-            "Task scheduling is not yet available. Coming in Phase 4.".to_string(),
+            "Use the CronCreate tool to schedule recurring tasks. Ask the agent to create a scheduled task with a cron expression.".to_string(),
         )
     }
 );
@@ -657,10 +657,10 @@ expanded_skill!(
 expanded_skill!(
     RemoteControlSkill,
     "remote-control",
-    "Remote control mode (available in Phase 5)",
+    "Remote control mode",
     |_args, _ctx| {
         SkillOutput::Text(
-            "Remote control is not yet available. Coming in Phase 5.".to_string(),
+            "Remote control is available via `archon remote ws` to connect as client, or `archon serve` to run as server.".to_string(),
         )
     }
 );

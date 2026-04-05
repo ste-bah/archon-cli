@@ -28,6 +28,7 @@ pub enum ConfigError {
 #[serde(default)]
 pub struct ArchonConfig {
     pub api: ApiConfig,
+    pub llm: LlmConfig,
     pub identity: IdentityConfig,
     pub tools: ToolsConfig,
     pub permissions: PermissionsConfig,
@@ -40,12 +41,34 @@ pub struct ArchonConfig {
     pub personality: archon_consciousness::personality::PersonalityProfile,
     pub consciousness: ConsciousnessConfig,
     pub tui: TuiConfig,
+    /// Active output style name.  Resolved at startup against the
+    /// `OutputStyleRegistry`.  Unknown values fall back to `"default"` with a
+    /// warning.  Can be overridden by `--output-style` CLI flag.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_style: Option<String>,
+    /// Self-update configuration.
+    pub update: crate::update::UpdateConfig,
+    /// Remote agent / SSH configuration.
+    pub remote: SshRemoteConfig,
+    /// WebSocket server configuration.
+    #[serde(default)]
+    pub ws_remote: WsRemoteConfig,
+    /// Multi-agent orchestration configuration.
+    #[serde(default)]
+    pub orchestrator: crate::orchestrator::config::OrchestratorConfig,
+    /// Voice input configuration.
+    #[serde(default)]
+    pub voice: VoiceConfig,
+    /// Web UI configuration.
+    #[serde(default)]
+    pub web: WebConfig,
 }
 
 impl Default for ArchonConfig {
     fn default() -> Self {
         Self {
             api: ApiConfig::default(),
+            llm: LlmConfig::default(),
             identity: IdentityConfig::default(),
             tools: ToolsConfig::default(),
             permissions: PermissionsConfig::default(),
@@ -58,6 +81,139 @@ impl Default for ArchonConfig {
             personality: archon_consciousness::personality::PersonalityProfile::default(),
             consciousness: ConsciousnessConfig::default(),
             tui: TuiConfig::default(),
+            output_style: None,
+            update: crate::update::UpdateConfig::default(),
+            remote: SshRemoteConfig::default(),
+            ws_remote: WsRemoteConfig::default(),
+            orchestrator: crate::orchestrator::config::OrchestratorConfig::default(),
+            voice: VoiceConfig::default(),
+            web: WebConfig::default(),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Voice config
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct VoiceConfig {
+    pub enabled: bool,
+    pub device: String,
+    pub vad_threshold: f32,
+    pub stt_provider: String,
+    pub stt_api_key: String,
+    pub stt_url: String,
+    pub hotkey: String,
+    pub toggle_mode: bool,
+}
+
+impl Default for VoiceConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            device: "default".into(),
+            vad_threshold: 0.02,
+            stt_provider: "openai".into(),
+            stt_api_key: String::new(),
+            stt_url: "https://api.openai.com".into(),
+            hotkey: "ctrl+shift+v".into(),
+            toggle_mode: false,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Web UI config
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WebConfig {
+    /// Port to listen on.
+    pub port: u16,
+    /// Address to bind. `"127.0.0.1"` = localhost only (default).
+    pub bind_address: String,
+    /// Open default browser automatically after server starts.
+    pub open_browser: bool,
+}
+
+impl Default for WebConfig {
+    fn default() -> Self {
+        Self {
+            port: 8421,
+            bind_address: "127.0.0.1".to_string(),
+            open_browser: true,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Remote / SSH config
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SshConfig {
+    pub host: String,
+    pub port: u16,
+    pub user: String,
+    pub key_file: Option<String>,
+    pub agent_forwarding: bool,
+}
+
+impl Default for SshConfig {
+    fn default() -> Self {
+        Self {
+            host: String::new(),
+            port: 22,
+            user: String::new(),
+            key_file: None,
+            agent_forwarding: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SshRemoteConfig {
+    pub sync_mode: String,
+    pub ssh: SshConfig,
+}
+
+/// WebSocket remote server configuration stored in `config.toml`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WsRemoteConfig {
+    /// Port the WebSocket server listens on.
+    #[serde(default = "default_ws_port")]
+    pub port: u16,
+    /// Path to a TLS certificate file (PEM).  `None` = no TLS.
+    pub tls_cert: Option<String>,
+    /// Path to a TLS private key file (PEM).  Required when `tls_cert` is set.
+    pub tls_key: Option<String>,
+}
+
+fn default_ws_port() -> u16 {
+    8420
+}
+
+impl Default for WsRemoteConfig {
+    fn default() -> Self {
+        Self {
+            port: 8420,
+            tls_cert: None,
+            tls_key: None,
+        }
+    }
+}
+
+impl Default for SshRemoteConfig {
+    fn default() -> Self {
+        Self {
+            sync_mode: "manual".to_string(),
+            ssh: SshConfig::default(),
         }
     }
 }
@@ -90,6 +246,128 @@ impl Default for ApiConfig {
             default_effort: "medium".into(),
             max_retries: 3,
             base_url: None,
+        }
+    }
+}
+
+/// LLM provider configuration.
+///
+/// Controls which backend provider is active and allows provider-specific
+/// settings to be set in the `[llm]` section of `config.toml`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LlmConfig {
+    /// The active provider name (e.g. `"anthropic"`, `"openai"`, `"bedrock"`, `"vertex"`, `"local"`).
+    pub provider: String,
+    /// OpenAI provider settings.
+    pub openai: LlmOpenAiConfig,
+    /// AWS Bedrock provider settings.
+    pub bedrock: LlmBedrockConfig,
+    /// Google Vertex AI provider settings.
+    pub vertex: LlmVertexConfig,
+    /// Local / Ollama provider settings.
+    pub local: LlmLocalConfig,
+}
+
+impl Default for LlmConfig {
+    fn default() -> Self {
+        Self {
+            provider: "anthropic".into(),
+            openai: LlmOpenAiConfig::default(),
+            bedrock: LlmBedrockConfig::default(),
+            vertex: LlmVertexConfig::default(),
+            local: LlmLocalConfig::default(),
+        }
+    }
+}
+
+/// OpenAI provider settings.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LlmOpenAiConfig {
+    /// API key. If `None`, resolved from `OPENAI_API_KEY` env var.
+    pub api_key: Option<String>,
+    /// Override the OpenAI base URL (e.g. for Azure OpenAI or a proxy).
+    pub base_url: Option<String>,
+    /// Default model to use.
+    pub model: String,
+}
+
+impl Default for LlmOpenAiConfig {
+    fn default() -> Self {
+        Self {
+            api_key: None,
+            base_url: None,
+            model: "gpt-4o".to_string(),
+        }
+    }
+}
+
+/// AWS Bedrock provider settings.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LlmBedrockConfig {
+    /// AWS region (e.g. `"us-east-1"`).
+    pub region: String,
+    /// Bedrock model ID (e.g. `"anthropic.claude-sonnet-4-20250514-v1:0"`).
+    pub model_id: String,
+}
+
+impl Default for LlmBedrockConfig {
+    fn default() -> Self {
+        Self {
+            region: "us-east-1".to_string(),
+            model_id: "anthropic.claude-sonnet-4-20250514-v1:0".to_string(),
+        }
+    }
+}
+
+/// Google Vertex AI provider settings.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LlmVertexConfig {
+    /// GCP project ID. If `None`, resolved from ADC or env var.
+    pub project_id: Option<String>,
+    /// GCP region (e.g. `"us-central1"`).
+    pub region: String,
+    /// Model name (e.g. `"claude-sonnet-4-20250514@20250514"`).
+    pub model: String,
+    /// Path to service account credentials JSON file.
+    pub credentials_file: Option<String>,
+}
+
+impl Default for LlmVertexConfig {
+    fn default() -> Self {
+        Self {
+            project_id: None,
+            region: "us-central1".to_string(),
+            model: "claude-sonnet-4-20250514@20250514".to_string(),
+            credentials_file: None,
+        }
+    }
+}
+
+/// Local / Ollama provider settings.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LlmLocalConfig {
+    /// Base URL for the OpenAI-compatible local server.
+    pub base_url: String,
+    /// Default model name.
+    pub model: String,
+    /// Request timeout in seconds.
+    pub timeout_secs: u64,
+    /// Whether to pull the model if not present (Ollama-specific).
+    pub pull_if_missing: bool,
+}
+
+impl Default for LlmLocalConfig {
+    fn default() -> Self {
+        Self {
+            base_url: "http://localhost:11434/v1".to_string(),
+            model: "llama3:8b".to_string(),
+            timeout_secs: 300,
+            pull_if_missing: true,
         }
     }
 }
@@ -336,11 +614,22 @@ impl Default for ConsciousnessConfig {
 pub struct TuiConfig {
     /// Enable vim-style keybindings in the input area. Default: `false`.
     pub vim_mode: bool,
+    /// Default verbosity mode.  `true` = verbose (show everything), `false` = brief.
+    /// Can be overridden per-session via the VerbosityToggle tool or `Ctrl+V`.
+    pub verbose: bool,
+    /// Named color theme.  Built-ins: intj, intp, ..., dark, light, ocean, fire,
+    /// forest, mono, daltonized, auto.  Unknown names fall back to `"dark"`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub theme: Option<String>,
 }
 
 impl Default for TuiConfig {
     fn default() -> Self {
-        Self { vim_mode: false }
+        Self {
+            vim_mode: false,
+            verbose: true,
+            theme: None,
+        }
     }
 }
 

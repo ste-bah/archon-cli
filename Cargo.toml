@@ -49,10 +49,38 @@ which = "7"
 tempfile = "3"
 notify = "7"
 pulldown-cmark = "0.12"
-tree-sitter = "0.24"
-tree-sitter-highlight = "0.24"
+tree-sitter = "0.25"
+tree-sitter-highlight = "0.25"
+tree-sitter-rust = "0.24"
+tree-sitter-python = "0.25"
+tree-sitter-typescript = "0.23"
+tree-sitter-go = "0.25"
+petgraph = "0.8"
 libloading = "0.8"
 git2 = "0.19"
+cron = "0.12"
+rand = "0.9"
+tokio-tungstenite = { version = "0.26", features = ["rustls-tls-native-roots"] }
+futures-util = "0.3"
+url = "2"
+async-lsp = { version = "0.2", features = ["omni-trait"] }
+lsp-types = "0.95"
+tokio-util = { version = "0.7", features = ["compat", "io"] }
+tokio-stream = "0.1"
+tower = "0.5"
+wasmtime = "28"
+wat = "1"
+aws-sigv4 = { version = "1", features = ["sign-http"] }
+aws-credential-types = "1"
+jsonwebtoken = "9"
+hmac = "0.12"
+semver = "1"
+russh = "0.60"
+axum = { version = "0.8", features = ["ws"] }
+tower-http = { version = "0.6", features = ["cors"] }
+cpal = "0.15"
+hound = "3"
+rust-embed = "8"
 
 [[bin]]
 name = "archon"
@@ -65,6 +93,8 @@ archon-llm = { path = "crates/archon-llm" }
 archon-mcp = { path = "crates/archon-mcp" }
 archon-memory = { path = "crates/archon-memory" }
 archon-permissions = { path = "crates/archon-permissions" }
+archon-plugin = { path = "crates/archon-plugin" }
+archon-sdk = { path = "crates/archon-sdk" }
 archon-session = { path = "crates/archon-session" }
 archon-tools = { path = "crates/archon-tools" }
 archon-tui = { path = "crates/archon-tui" }

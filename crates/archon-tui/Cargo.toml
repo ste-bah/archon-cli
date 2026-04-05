@@ -17,3 +17,14 @@ tree-sitter.workspace = true
 tree-sitter-highlight.workspace = true
 libloading.workspace = true
 dirs.workspace = true
+hound = { workspace = true }
+async-trait.workspace = true
+reqwest = { workspace = true, features = ["multipart"] }
+serde_json.workspace = true
+archon-core = { path = "../archon-core" }
+cpal = { workspace = true, optional = true }
+
+[features]
+default = []
+terminal-panel = []
+audio-capture = ["cpal"]

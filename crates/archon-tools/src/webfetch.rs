@@ -1,9 +1,15 @@
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use regex::Regex;
 use serde_json::json;
 
 use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
+
+static RE_SCRIPT: OnceLock<Regex> = OnceLock::new();
+static RE_STYLE: OnceLock<Regex> = OnceLock::new();
+static RE_TAGS: OnceLock<Regex> = OnceLock::new();
+static RE_WS: OnceLock<Regex> = OnceLock::new();
 
 /// Maximum response body size in bytes (1 MB).
 const MAX_BODY_BYTES: usize = 1_024 * 1_024;
@@ -22,15 +28,15 @@ pub struct WebFetchTool;
 /// Strip HTML to plain text: remove script/style blocks, tags, then collapse whitespace.
 fn extract_text(html: &str) -> String {
     // Remove <script>...</script> blocks (case-insensitive, dotall)
-    let re_script = Regex::new(r"(?is)<script[\s>].*?</script>").unwrap_or_else(|_| Regex::new("$^").unwrap());
+    let re_script = RE_SCRIPT.get_or_init(|| Regex::new(r"(?is)<script[\s>].*?</script>").expect("valid regex"));
     let text = re_script.replace_all(html, " ");
 
     // Remove <style>...</style> blocks
-    let re_style = Regex::new(r"(?is)<style[\s>].*?</style>").unwrap_or_else(|_| Regex::new("$^").unwrap());
+    let re_style = RE_STYLE.get_or_init(|| Regex::new(r"(?is)<style[\s>].*?</style>").expect("valid regex"));
     let text = re_style.replace_all(&text, " ");
 
     // Strip remaining HTML tags
-    let re_tags = Regex::new(r"<[^>]*>").unwrap_or_else(|_| Regex::new("$^").unwrap());
+    let re_tags = RE_TAGS.get_or_init(|| Regex::new(r"<[^>]*>").expect("valid regex"));
     let text = re_tags.replace_all(&text, " ");
 
     // Decode common HTML entities
@@ -43,7 +49,7 @@ fn extract_text(html: &str) -> String {
         .replace("&nbsp;", " ");
 
     // Collapse whitespace
-    let re_ws = Regex::new(r"\s+").unwrap_or_else(|_| Regex::new("$^").unwrap());
+    let re_ws = RE_WS.get_or_init(|| Regex::new(r"\s+").expect("valid regex"));
     re_ws.replace_all(&text, " ").trim().to_string()
 }
 

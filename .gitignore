@@ -2,6 +2,12 @@
 /target/
 **/*.rs.bk
 
+# Node / Gradle / Swift build artifacts (SDK clients)
+**/node_modules/
+**/.gradle/
+**/build/
+**/.build/
+
 # Editor / IDE
 .idea/
 .vscode/

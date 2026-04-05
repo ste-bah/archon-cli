@@ -36,7 +36,7 @@ A privacy-first, self-aware AI coding assistant written in Rust. Archon replaces
 | TUI | Basic | Full ratatui TUI with 22 themes |
 | Session resume | ID only | ID prefix, name, or name prefix |
 | Tool execution | Node.js | Native Rust async |
-| Binary size | ~200 MB | ~15 MB (release, stripped) |
+| Binary size | ~200 MB | ~55 MB (release, stripped) |
 
 ---
 
@@ -654,9 +654,9 @@ archon (binary)
 |-------|--------|-------------|
 | **Phase 1** — Core Engine | ✅ Complete | Agent loop, streaming API, tool execution, permission system, config, TUI, session management |
 | **Phase 2** — Consciousness | ✅ Complete | Memory graph (CozoDB), auto-extraction, per-turn injection, rules engine, personality config, inner voice, configurable initial rules |
-| **Phase 3** — UX & Ergonomics | 🔄 In Progress | 22 themes, MBTI themes, resume by name/prefix, `/color` and `/theme` commands, memory + recall tools wired to LLM |
-| **Phase 4** — Plugins & Skills | 🔜 Planned | Plugin system (`archon-plugin`), user-defined slash commands, skill marketplace, hook system extensibility |
-| **Phase 5** — Multi-Agent | 🔜 Planned | Persistent subagent pool, cross-session memory sharing, agent specialization profiles, orchestration UI |
+| **Phase 3** — UX & Ergonomics | ✅ Complete | 22 themes, MBTI themes, resume by name/prefix, `/color` and `/theme` commands, memory + recall tools wired to LLM |
+| **Phase 4** — Plugins & Skills | ✅ Complete | Plugin system (`archon-plugin`), user-defined slash commands, skill system, hook extensibility |
+| **Phase 5** — Multi-Agent | ✅ Complete | Subagent orchestration, MCP transport, LSP client, WebSocket remote, cross-session memory |
 
 ---
 

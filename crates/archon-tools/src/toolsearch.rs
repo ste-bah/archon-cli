@@ -2,7 +2,6 @@
 
 use serde_json::json;
 
-use crate::registry::ToolRegistry;
 use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
 
 const DEFAULT_MAX_RESULTS: usize = 5;
@@ -13,12 +12,12 @@ const DEFAULT_MAX_RESULTS: usize = 5;
 /// - `"select:Tool1,Tool2"` — exact name match
 /// - `"keyword terms"` — fuzzy substring search across names and descriptions
 pub struct ToolSearchTool {
-    registry: ToolRegistry,
+    tool_defs: Vec<serde_json::Value>,
 }
 
 impl ToolSearchTool {
-    pub fn new(registry: ToolRegistry) -> Self {
-        Self { registry }
+    pub fn new(tool_defs: Vec<serde_json::Value>) -> Self {
+        Self { tool_defs }
     }
 }
 
@@ -69,7 +68,7 @@ impl Tool for ToolSearchTool {
             .map(|v| v as usize)
             .unwrap_or(DEFAULT_MAX_RESULTS);
 
-        let all_defs = self.registry.tool_definitions().await;
+        let all_defs = self.tool_defs.clone();
 
         let matched: Vec<serde_json::Value> = if let Some(names_csv) = query.strip_prefix("select:") {
             // Exact name match mode
@@ -131,7 +130,6 @@ impl Tool for ToolSearchTool {
 mod tests {
     use super::*;
     use crate::tool::{AgentMode, ToolContext};
-    use std::sync::Arc;
 
     fn test_ctx() -> ToolContext {
         ToolContext {
@@ -141,55 +139,20 @@ mod tests {
         }
     }
 
-    /// Minimal tool for populating the registry in tests.
-    struct StubTool {
-        tool_name: String,
-        tool_desc: String,
-    }
-
-    impl StubTool {
-        fn new(name: &str, desc: &str) -> Self {
-            Self {
-                tool_name: name.to_string(),
-                tool_desc: desc.to_string(),
-            }
-        }
-    }
-
-    #[async_trait::async_trait]
-    impl Tool for StubTool {
-        fn name(&self) -> &str {
-            &self.tool_name
-        }
-        fn description(&self) -> &str {
-            &self.tool_desc
-        }
-        fn input_schema(&self) -> serde_json::Value {
-            json!({"type": "object", "properties": {"x": {"type": "string"}}})
-        }
-        async fn execute(&self, _input: serde_json::Value, _ctx: &ToolContext) -> ToolResult {
-            ToolResult::success("ok")
-        }
-        fn permission_level(&self, _input: &serde_json::Value) -> PermissionLevel {
-            PermissionLevel::Safe
-        }
-    }
-
-    async fn populated_registry() -> ToolRegistry {
-        let reg = ToolRegistry::new();
-        reg.register(Arc::new(StubTool::new("Read", "Reads a file from the filesystem"))).await;
-        reg.register(Arc::new(StubTool::new("Write", "Writes a file to the filesystem"))).await;
-        reg.register(Arc::new(StubTool::new("Grep", "Search file contents with regex"))).await;
-        reg.register(Arc::new(StubTool::new("Bash", "Execute a bash command"))).await;
-        reg.register(Arc::new(StubTool::new("WebFetch", "Fetch a web page"))).await;
-        reg.register(Arc::new(StubTool::new("NotebookEdit", "Edit Jupyter notebooks"))).await;
-        reg
+    fn populated_tool_defs() -> Vec<serde_json::Value> {
+        vec![
+            serde_json::json!({"name": "Read", "description": "Reads a file from the filesystem", "input_schema": {"type": "object"}}),
+            serde_json::json!({"name": "Write", "description": "Writes a file to the filesystem", "input_schema": {"type": "object"}}),
+            serde_json::json!({"name": "Grep", "description": "Search file contents with regex", "input_schema": {"type": "object"}}),
+            serde_json::json!({"name": "Bash", "description": "Execute a bash command", "input_schema": {"type": "object"}}),
+            serde_json::json!({"name": "WebFetch", "description": "Fetch a web page", "input_schema": {"type": "object"}}),
+            serde_json::json!({"name": "NotebookEdit", "description": "Edit Jupyter notebooks", "input_schema": {"type": "object"}}),
+        ]
     }
 
     #[test]
     fn metadata() {
-        let reg = ToolRegistry::new();
-        let tool = ToolSearchTool::new(reg);
+        let tool = ToolSearchTool::new(vec![]);
         assert_eq!(tool.name(), "ToolSearch");
         assert!(!tool.description().is_empty());
         let schema = tool.input_schema();
@@ -198,15 +161,13 @@ mod tests {
 
     #[test]
     fn permission_is_safe() {
-        let reg = ToolRegistry::new();
-        let tool = ToolSearchTool::new(reg);
+        let tool = ToolSearchTool::new(vec![]);
         assert_eq!(tool.permission_level(&json!({})), PermissionLevel::Safe);
     }
 
     #[tokio::test]
     async fn select_exact_names() {
-        let reg = populated_registry().await;
-        let tool = ToolSearchTool::new(reg);
+        let tool = ToolSearchTool::new(populated_tool_defs());
         let result = tool.execute(json!({"query": "select:Read,Grep"}), &test_ctx()).await;
         assert!(!result.is_error);
         let parsed: Vec<serde_json::Value> = serde_json::from_str(&result.content).expect("valid json");
@@ -218,8 +179,7 @@ mod tests {
 
     #[tokio::test]
     async fn select_missing_tool_returns_empty() {
-        let reg = populated_registry().await;
-        let tool = ToolSearchTool::new(reg);
+        let tool = ToolSearchTool::new(populated_tool_defs());
         let result = tool.execute(json!({"query": "select:NonExistent"}), &test_ctx()).await;
         assert!(!result.is_error);
         assert!(result.content.contains("No matching tools found"));
@@ -227,8 +187,7 @@ mod tests {
 
     #[tokio::test]
     async fn keyword_search_matches() {
-        let reg = populated_registry().await;
-        let tool = ToolSearchTool::new(reg);
+        let tool = ToolSearchTool::new(populated_tool_defs());
         let result = tool.execute(json!({"query": "file"}), &test_ctx()).await;
         assert!(!result.is_error);
         let parsed: Vec<serde_json::Value> = serde_json::from_str(&result.content).expect("valid json");
@@ -240,8 +199,7 @@ mod tests {
 
     #[tokio::test]
     async fn keyword_search_respects_max_results() {
-        let reg = populated_registry().await;
-        let tool = ToolSearchTool::new(reg);
+        let tool = ToolSearchTool::new(populated_tool_defs());
         let result = tool.execute(json!({"query": "a", "max_results": 2}), &test_ctx()).await;
         assert!(!result.is_error);
         // "a" is very common — should match many, but cap at 2
@@ -251,8 +209,7 @@ mod tests {
 
     #[tokio::test]
     async fn missing_query_is_error() {
-        let reg = ToolRegistry::new();
-        let tool = ToolSearchTool::new(reg);
+        let tool = ToolSearchTool::new(vec![]);
         let result = tool.execute(json!({}), &test_ctx()).await;
         assert!(result.is_error);
         assert!(result.content.contains("query is required"));
@@ -260,8 +217,7 @@ mod tests {
 
     #[tokio::test]
     async fn empty_keyword_is_error() {
-        let reg = ToolRegistry::new();
-        let tool = ToolSearchTool::new(reg);
+        let tool = ToolSearchTool::new(vec![]);
         let result = tool.execute(json!({"query": "   "}), &test_ctx()).await;
         assert!(result.is_error);
         assert!(result.content.contains("must not be empty"));

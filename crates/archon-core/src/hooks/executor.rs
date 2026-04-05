@@ -4,197 +4,191 @@ use std::process::Stdio;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 
-use super::types::{HookConfig, HookError, HookResult};
+use super::types::{HookConfig, HookResult};
 
 // ---------------------------------------------------------------------------
-// HookExecutor — spawns child processes for hooks
+// Internal result from running a shell command
 // ---------------------------------------------------------------------------
 
-pub struct HookExecutor;
+struct CommandOutput {
+    exit_code: i32,
+    stderr: String,
+}
 
-impl HookExecutor {
-    /// Execute a hook command.
-    ///
-    /// - Spawns the command via `sh -c` with environment variables set.
-    /// - Writes the JSON payload to the child's stdin.
-    /// - For **blocking** hooks: waits (with timeout), reads stdout as JSON.
-    /// - For **non-blocking** hooks: spawns a background tokio task and returns `Ok(None)`.
-    /// - On timeout: kills the child process (SIGKILL).
-    pub async fn execute(
-        config: &HookConfig,
-        payload: &serde_json::Value,
-        session_id: &str,
-        cwd: &Path,
-    ) -> Result<Option<HookResult>, HookError> {
-        let payload_bytes = serde_json::to_vec(payload)
-            .map_err(|e| HookError::ParseError(format!("failed to serialize payload: {e}")))?;
+// ---------------------------------------------------------------------------
+// Internal error (never propagated — hooks always return HookResult)
+// ---------------------------------------------------------------------------
 
-        if config.blocking {
-            Self::execute_blocking(config, &payload_bytes, session_id, cwd).await
-        } else {
-            Self::execute_non_blocking(config, payload_bytes, session_id, cwd);
-            Ok(None)
+#[derive(Debug)]
+enum RunError {
+    Spawn(String),
+    Io(String),
+    Timeout,
+}
+
+impl std::fmt::Display for RunError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Spawn(s) => write!(f, "spawn error: {s}"),
+            Self::Io(s) => write!(f, "I/O error: {s}"),
+            Self::Timeout => write!(f, "timed out"),
         }
     }
+}
 
-    async fn execute_blocking(
-        config: &HookConfig,
-        payload_bytes: &[u8],
-        session_id: &str,
-        cwd: &Path,
-    ) -> Result<Option<HookResult>, HookError> {
-        let mut child = Command::new("sh")
-            .arg("-c")
-            .arg(&config.command)
-            .current_dir(cwd)
-            .env("ARCHON_SESSION_ID", session_id)
-            .env("ARCHON_CWD", cwd.to_string_lossy().as_ref())
-            .env("ARCHON_HOOK_TYPE", config.hook_type.to_string())
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .kill_on_drop(true)
-            .spawn()
-            .map_err(|e| HookError::SpawnError(format!("{}: {e}", config.command)))?;
+// ---------------------------------------------------------------------------
+// Public hook executor
+// ---------------------------------------------------------------------------
 
-        // Write payload to stdin
-        if let Some(mut stdin) = child.stdin.take() {
-            // Ignore write errors — command may not read stdin
-            let _ = stdin.write_all(payload_bytes).await;
-            drop(stdin);
+/// Execute a single `HookConfig` command.
+///
+/// **Exit code semantics:**
+/// - `0` → `HookResult::Allow`
+/// - `2` → `HookResult::Block { reason }` where `reason` is the hook's stderr
+/// - Any other code or error (timeout, spawn failure) → `HookResult::Allow` (logged)
+///
+/// If `config.async == Some(true)`, the command is spawned in the background
+/// and `HookResult::Allow` is returned immediately without waiting.
+pub(crate) async fn execute_hook(
+    config: &HookConfig,
+    input: &serde_json::Value,
+    cwd: &Path,
+    session_id: &str,
+    event_name: &str,
+) -> HookResult {
+    // Async: fire-and-forget, return Allow immediately.
+    if config.r#async == Some(true) {
+        spawn_background(
+            config.command.clone(),
+            input.clone(),
+            cwd.to_path_buf(),
+            session_id.to_owned(),
+            event_name.to_owned(),
+            config.timeout.unwrap_or(60),
+        );
+        return HookResult::Allow;
+    }
+
+    let payload_bytes = match serde_json::to_vec(input) {
+        Ok(b) => b,
+        Err(e) => {
+            tracing::warn!(error = %e, "hook: failed to serialize input payload");
+            return HookResult::Allow;
         }
+    };
 
-        // Wait with timeout. We use a separate async block to capture
-        // ownership of `child` while still being able to kill on timeout.
-        if config.timeout_ms > 0 {
-            let timeout = std::time::Duration::from_millis(config.timeout_ms);
+    let timeout_secs = config.timeout.unwrap_or(60);
 
-            // Take stdout/stderr handles before we move child into the
-            // wait future, so we can still kill on timeout.
-            let stdout_handle = child.stdout.take();
-            let stderr_handle = child.stderr.take();
+    match run_command(
+        &config.command,
+        &payload_bytes,
+        cwd,
+        session_id,
+        event_name,
+        timeout_secs,
+    )
+    .await
+    {
+        Ok(output) => interpret_exit_code(&config.command, output),
+        Err(e) => {
+            tracing::warn!(
+                hook = %config.command,
+                error = %e,
+                "hook execution failed (non-blocking, returning Allow)"
+            );
+            HookResult::Allow
+        }
+    }
+}
 
-            let wait_fut = async {
-                let status = child.wait().await?;
+// ---------------------------------------------------------------------------
+// Exit code interpretation
+// ---------------------------------------------------------------------------
 
-                let mut stdout_bytes = Vec::new();
-                if let Some(mut out) = stdout_handle {
-                    tokio::io::AsyncReadExt::read_to_end(&mut out, &mut stdout_bytes).await?;
-                }
-                let mut stderr_bytes = Vec::new();
-                if let Some(mut err) = stderr_handle {
-                    tokio::io::AsyncReadExt::read_to_end(&mut err, &mut stderr_bytes).await?;
-                }
-
-                Ok::<std::process::Output, std::io::Error>(std::process::Output {
-                    status,
-                    stdout: stdout_bytes,
-                    stderr: stderr_bytes,
-                })
+fn interpret_exit_code(command: &str, output: CommandOutput) -> HookResult {
+    match output.exit_code {
+        0 => HookResult::Allow,
+        2 => {
+            let reason = if output.stderr.trim().is_empty() {
+                format!("hook '{command}' blocked tool execution (exit 2)")
+            } else {
+                output.stderr.trim().to_owned()
             };
-
-            tokio::pin!(wait_fut);
-
-            match tokio::time::timeout(timeout, &mut wait_fut).await {
-                Ok(Ok(output)) => Self::process_output(config, &output),
-                Ok(Err(e)) => Err(HookError::IoError(e)),
-                Err(_) => {
-                    // Timeout — the child is dropped here which triggers
-                    // kill_on_drop (SIGKILL for hang protection).
-                    Err(HookError::Timeout {
-                        command: config.command.clone(),
-                        timeout_ms: config.timeout_ms,
-                    })
-                }
-            }
-        } else {
-            // No timeout — wait indefinitely (blocking with timeout_ms=0)
-            let output = child.wait_with_output().await?;
-            Self::process_output(config, &output)
+            HookResult::Block { reason }
+        }
+        code => {
+            tracing::warn!(
+                hook = %command,
+                exit_code = code,
+                stderr = %output.stderr.trim(),
+                "hook exited with non-zero code (non-blocking failure, returning Allow)"
+            );
+            HookResult::Allow
         }
     }
+}
 
-    fn process_output(
-        config: &HookConfig,
-        output: &std::process::Output,
-    ) -> Result<Option<HookResult>, HookError> {
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-            return Err(HookError::NonZeroExit {
-                code: output.status.code().unwrap_or(-1),
-                stderr,
-            });
-        }
+// ---------------------------------------------------------------------------
+// Shell command runner
+// ---------------------------------------------------------------------------
 
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let trimmed = stdout.trim();
+async fn run_command(
+    command: &str,
+    payload_bytes: &[u8],
+    cwd: &Path,
+    session_id: &str,
+    event_name: &str,
+    timeout_secs: u32,
+) -> Result<CommandOutput, RunError> {
+    let mut child = Command::new("sh")
+        .arg("-c")
+        .arg(command)
+        .current_dir(cwd)
+        .env("ARCHON_SESSION_ID", session_id)
+        .env("ARCHON_CWD", cwd.to_string_lossy().as_ref())
+        .env("ARCHON_HOOK_EVENT", event_name)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|e| RunError::Spawn(format!("{command}: {e}")))?;
 
-        if trimmed.is_empty() {
-            return Ok(None);
-        }
-
-        // Try to parse as HookResult JSON
-        match serde_json::from_str::<HookResult>(trimmed) {
-            Ok(result) => Ok(Some(result)),
-            Err(_) => {
-                // Non-JSON stdout is not an error — hook just didn't return structured data
-                tracing::debug!(
-                    hook = %config.command,
-                    "hook stdout was not valid HookResult JSON, ignoring"
-                );
-                Ok(None)
-            }
-        }
+    // Write payload to stdin then drop so the child gets EOF.
+    if let Some(mut stdin) = child.stdin.take() {
+        let _ = stdin.write_all(payload_bytes).await;
     }
 
-    fn execute_non_blocking(
-        config: &HookConfig,
-        payload_bytes: Vec<u8>,
-        session_id: &str,
-        cwd: &Path,
-    ) {
-        let command = config.command.clone();
-        let hook_type = config.hook_type.to_string();
-        let session = session_id.to_string();
-        let working_dir = cwd.to_path_buf();
+    let timeout = std::time::Duration::from_secs(u64::from(timeout_secs));
 
-        tokio::spawn(async move {
-            let result = async {
-                let mut child = Command::new("sh")
-                    .arg("-c")
-                    .arg(&command)
-                    .current_dir(&working_dir)
-                    .env("ARCHON_SESSION_ID", &session)
-                    .env("ARCHON_CWD", working_dir.to_string_lossy().as_ref())
-                    .env("ARCHON_HOOK_TYPE", &hook_type)
-                    .stdin(Stdio::piped())
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::null())
-                    .kill_on_drop(true)
-                    .spawn()?;
-
-                if let Some(mut stdin) = child.stdin.take() {
-                    let _ = stdin.write_all(&payload_bytes).await;
-                    drop(stdin);
-                }
-
-                child.wait().await
-            }
-            .await;
-
-            match result {
-                Ok(status) if !status.success() => {
-                    tracing::warn!(
-                        hook = %command,
-                        code = status.code().unwrap_or(-1),
-                        "non-blocking hook exited with error"
-                    );
-                }
-                Err(e) => {
-                    tracing::warn!(hook = %command, error = %e, "non-blocking hook failed");
-                }
-                _ => {}
-            }
-        });
+    match tokio::time::timeout(timeout, child.wait_with_output()).await {
+        Ok(Ok(output)) => {
+            let exit_code = output.status.code().unwrap_or(-1);
+            let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+            Ok(CommandOutput { exit_code, stderr })
+        }
+        Ok(Err(e)) => Err(RunError::Io(e.to_string())),
+        Err(_) => Err(RunError::Timeout),
     }
+}
+
+// ---------------------------------------------------------------------------
+// Background (async: true) execution
+// ---------------------------------------------------------------------------
+
+fn spawn_background(
+    command: String,
+    input: serde_json::Value,
+    cwd: std::path::PathBuf,
+    session_id: String,
+    event_name: String,
+    timeout_secs: u32,
+) {
+    tokio::spawn(async move {
+        let payload_bytes = match serde_json::to_vec(&input) {
+            Ok(b) => b,
+            Err(_) => return,
+        };
+        let _ = run_command(&command, &payload_bytes, &cwd, &session_id, &event_name, timeout_secs).await;
+    });
 }

@@ -58,7 +58,12 @@ fn auth_url_contains_all_parameters() {
     assert!(url.starts_with("https://claude.com/cai/oauth/authorize?"), "wrong base URL");
     assert!(url.contains("response_type=code"), "missing response_type");
     assert!(url.contains("client_id=9d1c250a"), "missing client_id");
-    assert!(url.contains("redirect_uri=http%3A%2F%2F127.0.0.1%3A8765%2Fcallback")
+    // Production code uses `http://localhost:{port}/callback` to match the
+    // original Claude Code OAuth flow (project-zero/services/oauth/client.ts).
+    // Accept either `localhost` or `127.0.0.1` (URL-encoded or plain).
+    assert!(url.contains("redirect_uri=http%3A%2F%2Flocalhost%3A8765%2Fcallback")
+        || url.contains("redirect_uri=http://localhost:8765/callback")
+        || url.contains("redirect_uri=http%3A%2F%2F127.0.0.1%3A8765%2Fcallback")
         || url.contains("redirect_uri=http://127.0.0.1:8765/callback"),
         "missing or wrong redirect_uri in: {url}");
     assert!(url.contains("state=test-state-value"), "missing state");

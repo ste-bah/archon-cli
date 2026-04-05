@@ -61,6 +61,8 @@ pub enum TuiEvent {
     SetVimMode(bool),
     /// Toggle vim keybindings on/off (used by /vim slash command).
     VimToggle,
+    /// Transcribed voice text — inject into the input buffer.
+    VoiceText(String),
     Done,
 }
 
@@ -105,6 +107,8 @@ pub struct App {
     pub mcp_manager: Option<McpManager>,
     /// Vim keybinding state — Some when vim mode is active, None otherwise.
     pub vim_state: Option<VimState>,
+    /// Voice input manager — None until voice is configured and enabled.
+    pub voice: Option<crate::voice::VoiceManager>,
 }
 
 impl Default for App {
@@ -131,6 +135,7 @@ impl Default for App {
             session_picker: None,
             mcp_manager: None,
             vim_state: None,
+            voice: None,
         }
     }
 }
@@ -948,6 +953,9 @@ pub async fn run_tui(
                     } else {
                         app.vim_state = Some(VimState::new());
                     }
+                }
+                TuiEvent::VoiceText(text) => {
+                    app.input.inject_text(&text);
                 }
                 TuiEvent::Done => {
                     app.should_quit = true;

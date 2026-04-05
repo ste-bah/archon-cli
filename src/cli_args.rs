@@ -10,7 +10,7 @@ use clap::{Parser, Subcommand};
 /// Archon CLI -- Rust-native AI agent runtime
 #[derive(Parser, Debug)]
 #[command(name = "archon")]
-#[command(version = "0.1.0")]
+#[command(version = concat!(env!("CARGO_PKG_VERSION"), " (", env!("ARCHON_GIT_HASH"), ")"))]
 #[command(about = "Archon CLI -- Rust-native AI agent runtime", long_about = None)]
 pub struct Cli {
     #[command(subcommand)]
@@ -237,6 +237,36 @@ pub struct Cli {
     #[arg(long, value_name = "PATTERNS", value_delimiter = ',')]
     pub disallowed_tools: Option<Vec<String>>,
 
+    // ── Theme (CLI-315) ───────────────────────────────────────
+
+    /// Select a named TUI color theme (e.g. intj, ocean, auto, daltonized)
+    #[arg(long, value_name = "NAME")]
+    pub theme: Option<String>,
+
+    /// List available themes and exit
+    #[arg(long)]
+    pub list_themes: bool,
+
+    // ── Output style (CLI-310) ─────────────────────────────────
+
+    /// Select a named output style (e.g. Explanatory, Learning, Formal, Concise)
+    #[arg(long, value_name = "NAME")]
+    pub output_style: Option<String>,
+
+    /// List available output styles and exit
+    #[arg(long)]
+    pub list_output_styles: bool,
+
+    // ── Remote / headless ─────────────────────────────────────
+
+    /// Run in headless mode (no TUI; JSON-lines on stdin/stdout for remote backend)
+    #[arg(long)]
+    pub headless: bool,
+
+    /// Session ID for headless/remote mode (auto-generated if not provided)
+    #[arg(long, value_name = "ID")]
+    pub session_id: Option<String>,
+
     // ── NEW: Output ────────────────────────────────────────────
 
     /// Verbose logging with full turn-by-turn output
@@ -258,6 +288,102 @@ pub struct Cli {
 pub enum Commands {
     /// Authenticate with Anthropic via OAuth PKCE flow
     Login,
+    /// Manage plugins
+    Plugin {
+        #[command(subcommand)]
+        action: PluginAction,
+    },
+    /// Check for and install updates
+    Update {
+        /// Check for updates without downloading
+        #[arg(long)]
+        check: bool,
+        /// Install even if already at latest version
+        #[arg(long)]
+        force: bool,
+    },
+    /// Remote agent mode
+    Remote {
+        #[command(subcommand)]
+        action: RemoteAction,
+    },
+    /// Start a WebSocket server for remote agent access
+    Serve {
+        /// Port to listen on
+        #[arg(long, default_value = "8420")]
+        port: u16,
+        /// Path to load or store the access token
+        #[arg(long)]
+        token_path: Option<std::path::PathBuf>,
+    },
+    /// Manage and run multi-agent teams
+    Team {
+        #[command(subcommand)]
+        action: TeamAction,
+    },
+    /// Start the browser-based web UI on localhost
+    Web {
+        /// Port to listen on (default from config: 8421)
+        #[arg(long)]
+        port: Option<u16>,
+        /// Address to bind to (default from config: 127.0.0.1)
+        #[arg(long)]
+        bind_address: Option<String>,
+        /// Do not open browser automatically
+        #[arg(long)]
+        no_open: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum TeamAction {
+    /// Run a named team on a goal
+    Run {
+        /// Team name defined in config
+        #[arg(long)]
+        team: String,
+        /// Goal for the team to accomplish
+        goal: String,
+    },
+    /// List configured teams
+    List,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum RemoteAction {
+    /// Connect to a remote agent via SSH
+    Ssh {
+        /// Target in user@host format (defaults to root@host if no @ present)
+        target: String,
+        /// One-shot command to run on the remote agent
+        #[arg(long)]
+        command: Option<String>,
+        /// SSH port
+        #[arg(long, default_value = "22")]
+        port: u16,
+        /// Path to SSH private key file
+        #[arg(long)]
+        key: Option<std::path::PathBuf>,
+    },
+    /// Connect to a remote agent via WebSocket
+    Ws {
+        /// WebSocket URL (e.g. ws://host:8420/ws)
+        url: String,
+        /// Bearer token for authentication
+        #[arg(long)]
+        token: Option<String>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum PluginAction {
+    /// List all discovered plugins with name, version, and status
+    List,
+    /// Show detailed information about a plugin
+    Info {
+        /// Plugin name
+        name: String,
+    },
 }
 
 impl Cli {

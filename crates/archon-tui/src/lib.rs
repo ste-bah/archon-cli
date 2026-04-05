@@ -9,11 +9,20 @@ pub mod status;
 pub mod theme;
 pub mod ultrathink;
 pub mod vim;
+pub mod voice;
 
 pub mod syntax;
 
 pub mod diff_view;
 pub mod virtual_scroll;
+pub mod verbosity;
+pub mod theme_registry;
+pub mod pane;
+pub mod pane_layout;
+pub mod pane_manager;
+
+#[cfg(feature = "terminal-panel")]
+pub mod terminal_panel;
 
 // Stubs for later phases
 pub mod scroll {}

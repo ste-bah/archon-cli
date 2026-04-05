@@ -5,5 +5,18 @@ edition.workspace = true
 
 [dependencies]
 serde.workspace = true
+serde_json.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
+tracing.workspace = true
+wasmtime.workspace = true
+dirs.workspace = true
+archon-core = { path = "../archon-core" }
+archon-tools = { path = "../archon-tools" }
+async-trait.workspace = true
+tokio = { workspace = true, features = ["rt"] }
+
+[dev-dependencies]
+wat.workspace = true
+archon-core = { path = "../archon-core" }
+archon-tools = { path = "../archon-tools" }

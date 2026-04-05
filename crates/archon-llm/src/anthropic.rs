@@ -347,6 +347,10 @@ impl AnthropicClient {
             body["metadata"] = metadata;
         }
 
+        if let Some(anti_dist) = self.identity.anti_distillation_value() {
+            body["anti_distillation"] = anti_dist;
+        }
+
         serde_json::to_string(&body).map_err(|e| ApiError::SerializeError(format!("{e}")))
     }
 }

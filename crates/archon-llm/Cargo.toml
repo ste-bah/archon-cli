@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+async-trait.workspace = true
 base64.workspace = true
 getrandom.workspace = true
 reqwest.workspace = true
@@ -25,7 +26,13 @@ chrono.workspace = true
 dirs.workspace = true
 regex.workspace = true
 which.workspace = true
+futures-util.workspace = true
+aws-sigv4 = { version = "1", features = ["sign-http"] }
+aws-credential-types.workspace = true
+jsonwebtoken.workspace = true
+hmac.workspace = true
 
 [dev-dependencies]
+async-trait.workspace = true
 uuid.workspace = true
 reqwest = { workspace = true, features = ["blocking"] }

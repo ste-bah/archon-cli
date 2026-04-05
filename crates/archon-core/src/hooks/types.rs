@@ -1,102 +1,126 @@
+use std::collections::HashMap;
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
-// HookType — 21 event variants
+// HookEvent — 27 variants, PascalCase serialization (serde default)
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum HookType {
-    Setup,
-    SessionStart,
-    SessionEnd,
+pub enum HookEvent {
     PreToolUse,
     PostToolUse,
     PostToolUseFailure,
-    PreCompact,
-    PostCompact,
-    ConfigChange,
-    CwdChanged,
-    FileChanged,
-    InstructionsLoaded,
+    Notification,
     UserPromptSubmit,
+    SessionStart,
+    SessionEnd,
     Stop,
+    StopFailure,
     SubagentStart,
     SubagentStop,
+    PreCompact,
+    PostCompact,
+    PermissionRequest,
+    PermissionDenied,
+    Setup,
+    TeammateIdle,
     TaskCreated,
     TaskCompleted,
-    PermissionDenied,
-    PermissionRequest,
-    Notification,
+    Elicitation,
+    ElicitationResult,
+    ConfigChange,
+    WorktreeCreate,
+    WorktreeRemove,
+    InstructionsLoaded,
+    CwdChanged,
+    FileChanged,
 }
 
-impl fmt::Display for HookType {
+/// Backward-compat alias — `HookType` and `HookEvent` are the same type.
+pub type HookType = HookEvent;
+
+impl fmt::Display for HookEvent {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Setup => write!(f, "setup"),
-            Self::SessionStart => write!(f, "session_start"),
-            Self::SessionEnd => write!(f, "session_end"),
-            Self::PreToolUse => write!(f, "pre_tool_use"),
-            Self::PostToolUse => write!(f, "post_tool_use"),
-            Self::PostToolUseFailure => write!(f, "post_tool_use_failure"),
-            Self::PreCompact => write!(f, "pre_compact"),
-            Self::PostCompact => write!(f, "post_compact"),
-            Self::ConfigChange => write!(f, "config_change"),
-            Self::CwdChanged => write!(f, "cwd_changed"),
-            Self::FileChanged => write!(f, "file_changed"),
-            Self::InstructionsLoaded => write!(f, "instructions_loaded"),
-            Self::UserPromptSubmit => write!(f, "user_prompt_submit"),
-            Self::Stop => write!(f, "stop"),
-            Self::SubagentStart => write!(f, "subagent_start"),
-            Self::SubagentStop => write!(f, "subagent_stop"),
-            Self::TaskCreated => write!(f, "task_created"),
-            Self::TaskCompleted => write!(f, "task_completed"),
-            Self::PermissionDenied => write!(f, "permission_denied"),
-            Self::PermissionRequest => write!(f, "permission_request"),
-            Self::Notification => write!(f, "notification"),
-        }
+        // Variant names are PascalCase — Debug gives exactly that.
+        fmt::Debug::fmt(self, f)
     }
 }
 
 // ---------------------------------------------------------------------------
-// HookConfig — describes a single registered hook
+// HookCommandType — 4 variants, lowercase serialization
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum HookCommandType {
+    Command,
+    Prompt,
+    Agent,
+    Http,
+}
+
+// ---------------------------------------------------------------------------
+// HookConfig — new field structure: exit-code semantics, no blocking, no priority
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HookConfig {
-    pub hook_type: HookType,
+    /// The hook executor variant (command / prompt / agent / http).
+    #[serde(rename = "type")]
+    pub hook_type: HookCommandType,
+    /// Shell command or URL depending on hook_type.
     pub command: String,
-    /// Optional tool filter for pre_tool_use / post_tool_use hooks.
-    pub tool: Option<String>,
-    /// If true, the dispatcher waits for this hook to complete before proceeding.
-    #[serde(default)]
-    pub blocking: bool,
-    /// Timeout in milliseconds. Default 10000 for blocking, 0 for non-blocking.
-    #[serde(default = "default_timeout")]
-    pub timeout_ms: u64,
-}
-
-fn default_timeout() -> u64 {
-    10000
+    /// Optional condition expression, e.g. `"Bash(git *)"`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub if_condition: Option<String>,
+    /// Timeout in seconds. Default 60.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout: Option<u32>,
+    /// If true, the hook fires at most once per session and is then removed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub once: Option<bool>,
+    /// If true, hook is spawned in background and Allow is returned immediately.
+    #[serde(rename = "async", default, skip_serializing_if = "Option::is_none")]
+    pub r#async: Option<bool>,
+    /// If true together with async, re-wake the agent after background hook completes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub async_rewake: Option<bool>,
+    /// Human-readable status message shown while hook runs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status_message: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
-// HookResult — JSON response from a blocking hook's stdout
+// HookMatcher — groups hooks with an optional tool-name filter
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct HookResult {
-    /// For pre_tool_use: if false, block the tool execution.
-    #[serde(default)]
-    pub allow: Option<bool>,
-    /// For user_prompt_submit: rewrite the prompt.
-    #[serde(default)]
-    pub modified_prompt: Option<String>,
-    /// Human-readable reason (e.g., denial explanation).
-    #[serde(default)]
-    pub reason: Option<String>,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HookMatcher {
+    /// Optional tool-name pattern to filter which tools trigger these hooks.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub matcher: Option<String>,
+    /// The hooks to run when the matcher applies.
+    pub hooks: Vec<HookConfig>,
+}
+
+// ---------------------------------------------------------------------------
+// HooksSettings — the `"hooks"` field in `.claude/settings.json`
+// ---------------------------------------------------------------------------
+
+pub type HooksSettings = HashMap<HookEvent, Vec<HookMatcher>>;
+
+// ---------------------------------------------------------------------------
+// HookResult — exit-code semantics: 0=Allow, 2=Block, other=Allow(logged)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub enum HookResult {
+    /// Tool execution is allowed to proceed.
+    Allow,
+    /// Tool execution is blocked; `reason` is the hook's stderr output.
+    Block { reason: String },
 }
 
 // ---------------------------------------------------------------------------
@@ -108,18 +132,15 @@ pub enum HookError {
     #[error("hook spawn failed: {0}")]
     SpawnError(String),
 
-    #[error("hook timed out after {timeout_ms}ms: {command}")]
-    Timeout { command: String, timeout_ms: u64 },
-
-    #[error("hook exited with status {code}: {stderr}")]
-    NonZeroExit { code: i32, stderr: String },
+    #[error("hook timed out after {timeout_secs}s: {command}")]
+    Timeout { command: String, timeout_secs: u32 },
 
     #[error("hook I/O error: {0}")]
     IoError(#[from] std::io::Error),
 
-    #[error("hook output parse error: {0}")]
-    ParseError(String),
-
     #[error("hook config error: {0}")]
     ConfigError(String),
+
+    #[error("hook JSON parse error: {0}")]
+    JsonError(String),
 }

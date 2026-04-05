@@ -272,7 +272,7 @@ use archon_core::dispatch::create_default_registry;
 
 #[test]
 fn filter_whitelist_retains_only_named_tools() {
-    let mut registry = create_default_registry();
+    let mut registry = create_default_registry(std::env::temp_dir());
     registry.filter_whitelist(&["Read", "Write"]);
     let names = registry.tool_names();
     assert!(names.contains(&"Read"));
@@ -284,7 +284,7 @@ fn filter_whitelist_retains_only_named_tools() {
 
 #[test]
 fn filter_blacklist_removes_named_tools() {
-    let mut registry = create_default_registry();
+    let mut registry = create_default_registry(std::env::temp_dir());
     let original_count = registry.tool_names().len();
     registry.filter_blacklist(&["Bash", "PowerShell"]);
     let names = registry.tool_names();
@@ -296,14 +296,14 @@ fn filter_blacklist_removes_named_tools() {
 
 #[test]
 fn filter_whitelist_empty_list_removes_all() {
-    let mut registry = create_default_registry();
+    let mut registry = create_default_registry(std::env::temp_dir());
     registry.filter_whitelist(&[]);
     assert!(registry.tool_names().is_empty());
 }
 
 #[test]
 fn filter_blacklist_unknown_tool_is_noop() {
-    let mut registry = create_default_registry();
+    let mut registry = create_default_registry(std::env::temp_dir());
     let original_count = registry.tool_names().len();
     registry.filter_blacklist(&["NonexistentTool"]);
     assert_eq!(registry.tool_names().len(), original_count);

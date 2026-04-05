@@ -7,6 +7,8 @@ pub mod types;
 pub mod config;
 pub mod transport;
 pub mod http_transport;
+pub mod ws_config;
+pub mod transport_ws;
 pub mod client;
 pub mod lifecycle;
 pub mod tool_bridge;

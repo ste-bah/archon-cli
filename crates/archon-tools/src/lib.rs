@@ -36,6 +36,31 @@ pub mod worktree_manager;
 
 pub mod mcp_resources;
 pub mod memory;
+pub mod verbosity_toggle;
+pub mod cron_task;
+pub mod cron_scheduler;
+pub mod cron_create;
+pub mod cron_list;
+pub mod cron_delete;
+
+pub mod remote_trigger;
+
+pub mod lsp_types;
+pub mod lsp_diagnostics;
+pub mod lsp_formatters;
+pub mod lsp_client;
+pub mod lsp_manager;
+pub mod lsp_tool;
+
+pub mod team_config;
+pub mod team_message;
+pub mod team_backend;
+pub mod team_create;
+pub mod team_delete;
+pub mod send_message_team;
+pub mod read_team_messages;
+
+pub mod cartographer;
 
 // Stubs for tools implemented in later tasks
 pub mod agent {}

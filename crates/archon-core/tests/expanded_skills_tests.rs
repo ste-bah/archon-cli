@@ -165,38 +165,38 @@ fn theme_skill_rejects_invalid() {
 }
 
 #[test]
-fn sandbox_shows_phase_4_message() {
+fn sandbox_shows_usage_message() {
     let reg = register_builtins();
     let skill = reg.resolve("sandbox").expect("sandbox");
     let ctx = make_ctx();
     let output = skill.execute(&[], &ctx);
     match output {
-        SkillOutput::Text(t) => assert!(t.contains("Phase 4")),
-        _ => panic!("expected phase 4 message"),
+        SkillOutput::Text(t) => assert!(t.contains("--sandbox") && t.contains("config.toml")),
+        _ => panic!("expected sandbox usage message"),
     }
 }
 
 #[test]
-fn schedule_shows_phase_4_message() {
+fn schedule_shows_usage_message() {
     let reg = register_builtins();
     let skill = reg.resolve("schedule").expect("schedule");
     let ctx = make_ctx();
     let output = skill.execute(&[], &ctx);
     match output {
-        SkillOutput::Text(t) => assert!(t.contains("Phase 4")),
-        _ => panic!("expected phase 4 message"),
+        SkillOutput::Text(t) => assert!(t.contains("CronCreate")),
+        _ => panic!("expected schedule usage message"),
     }
 }
 
 #[test]
-fn remote_control_shows_phase_5_message() {
+fn remote_control_shows_usage_message() {
     let reg = register_builtins();
     let skill = reg.resolve("remote-control").expect("remote-control");
     let ctx = make_ctx();
     let output = skill.execute(&[], &ctx);
     match output {
-        SkillOutput::Text(t) => assert!(t.contains("Phase 5")),
-        _ => panic!("expected phase 5 message"),
+        SkillOutput::Text(t) => assert!(t.contains("archon remote") || t.contains("archon serve")),
+        _ => panic!("expected remote control usage message"),
     }
 }
 

@@ -1,33 +1,41 @@
+/// Legacy TOML hooks config loader.
+///
+/// Parses the old `hooks.toml` format and converts entries to the new
+/// `HookRegistry` representation.  New code should load from
+/// `.claude/settings.json` via `HookRegistry::load_from_settings_json`.
 use serde::Deserialize;
 
-use super::types::{HookConfig, HookError, HookType};
+use super::registry::HookRegistry;
+use super::types::{HookCommandType, HookConfig, HookError, HookEvent, HookMatcher};
 
 // ---------------------------------------------------------------------------
-// TOML entry config (per-hook entry in the hooks section)
+// TOML entry (per-hook)
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct HookEntryConfig {
+struct HookEntryConfig {
     pub command: String,
-    #[serde(default)]
-    pub tool: Option<String>,
+    /// Ignored — exit code 2 now determines blocking behaviour.
+    #[allow(dead_code)]
     #[serde(default)]
     pub blocking: bool,
-    #[serde(default = "default_hook_timeout")]
-    pub timeout: u64,
+    /// Timeout in seconds (TOML used milliseconds historically; we reinterpret
+    /// as seconds to match the new HookConfig.timeout field).
+    #[serde(default = "default_timeout_secs")]
+    pub timeout: u32,
 }
 
-fn default_hook_timeout() -> u64 {
-    10000
+fn default_timeout_secs() -> u32 {
+    60
 }
 
 // ---------------------------------------------------------------------------
-// Hooks TOML section — one field per hook type
+// TOML section — one field per event type
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(default)]
-pub struct HooksTomlConfig {
+struct HooksTomlConfig {
     pub setup: Vec<HookEntryConfig>,
     pub session_start: Vec<HookEntryConfig>,
     pub session_end: Vec<HookEntryConfig>,
@@ -51,70 +59,74 @@ pub struct HooksTomlConfig {
     pub notification: Vec<HookEntryConfig>,
 }
 
-impl HooksTomlConfig {
-    /// Convert all entries into a flat list of `HookConfig`.
-    fn into_hook_configs(self) -> Vec<HookConfig> {
-        let mut out = Vec::new();
+// ---------------------------------------------------------------------------
+// Conversion helpers
+// ---------------------------------------------------------------------------
 
-        let pairs: Vec<(HookType, Vec<HookEntryConfig>)> = vec![
-            (HookType::Setup, self.setup),
-            (HookType::SessionStart, self.session_start),
-            (HookType::SessionEnd, self.session_end),
-            (HookType::PreToolUse, self.pre_tool_use),
-            (HookType::PostToolUse, self.post_tool_use),
-            (HookType::PostToolUseFailure, self.post_tool_use_failure),
-            (HookType::PreCompact, self.pre_compact),
-            (HookType::PostCompact, self.post_compact),
-            (HookType::ConfigChange, self.config_change),
-            (HookType::CwdChanged, self.cwd_changed),
-            (HookType::FileChanged, self.file_changed),
-            (HookType::InstructionsLoaded, self.instructions_loaded),
-            (HookType::UserPromptSubmit, self.user_prompt_submit),
-            (HookType::Stop, self.stop),
-            (HookType::SubagentStart, self.subagent_start),
-            (HookType::SubagentStop, self.subagent_stop),
-            (HookType::TaskCreated, self.task_created),
-            (HookType::TaskCompleted, self.task_completed),
-            (HookType::PermissionDenied, self.permission_denied),
-            (HookType::PermissionRequest, self.permission_request),
-            (HookType::Notification, self.notification),
-        ];
-
-        for (hook_type, entries) in pairs {
-            for entry in entries {
-                out.push(HookConfig {
-                    hook_type: hook_type.clone(),
-                    command: entry.command,
-                    tool: entry.tool,
-                    blocking: entry.blocking,
-                    timeout_ms: entry.timeout,
-                });
-            }
-        }
-
-        out
-    }
+fn to_matchers(entries: Vec<HookEntryConfig>) -> Vec<HookMatcher> {
+    entries
+        .into_iter()
+        .map(|e| HookMatcher {
+            matcher: None,
+            hooks: vec![HookConfig {
+                hook_type: HookCommandType::Command,
+                command: e.command,
+                if_condition: None,
+                timeout: Some(e.timeout),
+                once: None,
+                r#async: None,
+                async_rewake: None,
+                status_message: None,
+            }],
+        })
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
-// Public parsing functions
+// Public API
 // ---------------------------------------------------------------------------
 
-/// Parse hook configs from a TOML string representing the `[hooks]` section.
-///
-/// The TOML should contain arrays of tables keyed by hook type name, e.g.:
-/// ```toml
-/// [[session_start]]
-/// command = "echo hello"
-/// blocking = true
-/// ```
-pub fn parse_hooks_from_toml(toml_str: &str) -> Result<Vec<HookConfig>, HookError> {
+/// Parse hook configs from a TOML string (old `hooks.toml` format) and
+/// return a populated `HookRegistry`.
+pub fn parse_hooks_from_toml(toml_str: &str) -> Result<HookRegistry, HookError> {
     if toml_str.trim().is_empty() {
-        return Ok(Vec::new());
+        return Ok(HookRegistry::new());
     }
 
-    let config: HooksTomlConfig = toml::from_str(toml_str)
+    let cfg: HooksTomlConfig = toml::from_str(toml_str)
         .map_err(|e| HookError::ConfigError(format!("failed to parse hooks TOML: {e}")))?;
 
-    Ok(config.into_hook_configs())
+    let mut registry = HookRegistry::new();
+
+    let pairs: Vec<(HookEvent, Vec<HookEntryConfig>)> = vec![
+        (HookEvent::Setup, cfg.setup),
+        (HookEvent::SessionStart, cfg.session_start),
+        (HookEvent::SessionEnd, cfg.session_end),
+        (HookEvent::PreToolUse, cfg.pre_tool_use),
+        (HookEvent::PostToolUse, cfg.post_tool_use),
+        (HookEvent::PostToolUseFailure, cfg.post_tool_use_failure),
+        (HookEvent::PreCompact, cfg.pre_compact),
+        (HookEvent::PostCompact, cfg.post_compact),
+        (HookEvent::ConfigChange, cfg.config_change),
+        (HookEvent::CwdChanged, cfg.cwd_changed),
+        (HookEvent::FileChanged, cfg.file_changed),
+        (HookEvent::InstructionsLoaded, cfg.instructions_loaded),
+        (HookEvent::UserPromptSubmit, cfg.user_prompt_submit),
+        (HookEvent::Stop, cfg.stop),
+        (HookEvent::SubagentStart, cfg.subagent_start),
+        (HookEvent::SubagentStop, cfg.subagent_stop),
+        (HookEvent::TaskCreated, cfg.task_created),
+        (HookEvent::TaskCompleted, cfg.task_completed),
+        (HookEvent::PermissionDenied, cfg.permission_denied),
+        (HookEvent::PermissionRequest, cfg.permission_request),
+        (HookEvent::Notification, cfg.notification),
+    ];
+
+    for (event, entries) in pairs {
+        if !entries.is_empty() {
+            registry.register_matchers(event, to_matchers(entries), None);
+        }
+    }
+
+    Ok(registry)
 }

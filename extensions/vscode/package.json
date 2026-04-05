@@ -1,0 +1,91 @@
+{
+  "name": "archon-vscode",
+  "displayName": "Archon",
+  "description": "Archon AI agent integration for VS Code",
+  "version": "0.1.0",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "publisher": "archon",
+  "extensionKind": ["workspace"],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "archon.openChat",
+        "title": "Archon: Open Chat"
+      },
+      {
+        "command": "archon.askArchon",
+        "title": "Ask Archon"
+      },
+      {
+        "command": "archon.explainCode",
+        "title": "Archon: Explain Code"
+      },
+      {
+        "command": "archon.fixError",
+        "title": "Archon: Fix This Error"
+      },
+      {
+        "command": "archon.generateTests",
+        "title": "Archon: Generate Tests"
+      },
+      {
+        "command": "archon.reconnect",
+        "title": "Archon: Reconnect"
+      }
+    ],
+    "configuration": {
+      "title": "Archon",
+      "properties": {
+        "archon.connectionMode": {
+          "type": "string",
+          "default": "stdio",
+          "enum": ["stdio", "websocket"],
+          "description": "Transport used to connect to the Archon backend."
+        },
+        "archon.binaryPath": {
+          "type": "string",
+          "default": "archon",
+          "description": "Path to the Archon binary (used in stdio mode)."
+        },
+        "archon.websocketUrl": {
+          "type": "string",
+          "default": "ws://localhost:8420/ws/ide",
+          "description": "WebSocket endpoint URL (used in websocket mode)."
+        }
+      }
+    },
+    "menus": {
+      "editor/context": [
+        {
+          "command": "archon.askArchon",
+          "when": "editorHasSelection",
+          "group": "archon@1"
+        },
+        {
+          "command": "archon.explainCode",
+          "when": "editorHasSelection",
+          "group": "archon@2"
+        },
+        {
+          "command": "archon.generateTests",
+          "when": "editorHasSelection",
+          "group": "archon@3"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "build": "tsc --noEmit",
+    "test": "tsc --noEmit && node tests/run_tests.js"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0"
+  }
+}

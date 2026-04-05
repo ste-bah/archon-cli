@@ -32,7 +32,8 @@ pub fn parse_color(name: &str) -> Option<Color> {
 
 /// Parse a theme name and return a full `Theme`.
 ///
-/// Accepts all 16 MBTI types plus utility themes: dark, light, ocean, fire, forest, mono.
+/// Accepts all 16 MBTI types plus utility themes: dark, light, ocean, fire,
+/// forest, mono, daltonized.  `"auto"` is handled by `ThemeRegistry::resolve`.
 /// Returns `None` for unknown names.
 pub fn theme_by_name(name: &str) -> Option<Theme> {
     match name.to_lowercase().as_str() {
@@ -54,17 +55,18 @@ pub fn theme_by_name(name: &str) -> Option<Theme> {
         "estp"  => Some(estp_theme()),
         "esfp"  => Some(esfp_theme()),
         // Utility themes
-        "dark"   => Some(dark_theme()),
-        "light"  => Some(light_theme()),
-        "ocean"  => Some(ocean_theme()),
-        "fire"   => Some(fire_theme()),
-        "forest" => Some(forest_theme()),
-        "mono"   => Some(mono_theme()),
+        "dark"       => Some(dark_theme()),
+        "light"      => Some(light_theme()),
+        "ocean"      => Some(ocean_theme()),
+        "fire"       => Some(fire_theme()),
+        "forest"     => Some(forest_theme()),
+        "mono"       => Some(mono_theme()),
+        "daltonized" => Some(daltonized_theme()),
         _ => None,
     }
 }
 
-/// List all available theme names.
+/// List all 22 built-in named themes (excludes `auto` which is dynamic).
 pub fn available_themes() -> &'static [&'static str] {
     &[
         // MBTI
@@ -106,6 +108,22 @@ pub struct Theme {
     pub thinking_dot: Color,
     /// Thinking-dot bright color (animated highlight).
     pub thinking_dot_bright: Color,
+}
+
+impl Theme {
+    /// Parse a `"#RRGGBB"` or `"RRGGBB"` hex string into a `ratatui::Color::Rgb`.
+    ///
+    /// Returns `None` for invalid input (wrong length, non-hex characters).
+    pub fn from_hex(hex: &str) -> Option<Color> {
+        let s = hex.trim_start_matches('#');
+        if s.len() != 6 {
+            return None;
+        }
+        let r = u8::from_str_radix(&s[0..2], 16).ok()?;
+        let g = u8::from_str_radix(&s[2..4], 16).ok()?;
+        let b = u8::from_str_radix(&s[4..6], 16).ok()?;
+        Some(Color::Rgb(r, g, b))
+    }
 }
 
 /// Return the default INTJ theme.
@@ -508,6 +526,34 @@ pub fn forest_theme() -> Theme {
         border_active: Color::Rgb(40, 160, 80),
         thinking_dot: Color::Rgb(40, 180, 80),
         thinking_dot_bright: Color::Rgb(100, 255, 120),
+    }
+}
+
+/// Daltonized theme — colorblind-friendly palette.
+///
+/// Avoids red/green-only distinctions.  Uses blue, orange, and contrasting
+/// greys so all three common dichromacy types (protanopia, deuteranopia,
+/// tritanopia) can distinguish the semantic colors.
+pub fn daltonized_theme() -> Theme {
+    Theme {
+        bg: Color::Rgb(10, 12, 18),
+        fg: Color::Rgb(210, 215, 225),
+        // Accent: vivid blue (safe for all types)
+        accent: Color::Rgb(0, 120, 210),
+        // Secondary accent: orange (distinguishable from blue)
+        accent_secondary: Color::Rgb(220, 130, 0),
+        header: Color::Rgb(80, 180, 255),
+        muted: Color::Rgb(90, 100, 115),
+        // Error: orange-red with brightness bump (not pure red)
+        error: Color::Rgb(220, 100, 0),
+        // Success: blue (not green — safe for deuteranopia)
+        success: Color::Rgb(0, 160, 240),
+        // Warning: yellow with high luminance
+        warning: Color::Rgb(240, 210, 0),
+        border: Color::Rgb(40, 50, 70),
+        border_active: Color::Rgb(0, 120, 210),
+        thinking_dot: Color::Rgb(0, 120, 210),
+        thinking_dot_bright: Color::Rgb(80, 180, 255),
     }
 }
 

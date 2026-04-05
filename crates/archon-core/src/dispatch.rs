@@ -1,4 +1,6 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::Arc;
 
 use archon_tools::plan_mode::is_tool_allowed_in_mode;
 use archon_tools::tool::{Tool, ToolContext, ToolResult};
@@ -94,7 +96,10 @@ impl Default for ToolRegistry {
 }
 
 /// Create a registry with all built-in tools.
-pub fn create_default_registry() -> ToolRegistry {
+///
+/// `working_dir` is passed to tools that operate on the current project
+/// (cron scheduler store, LSP manager, team config, etc.).
+pub fn create_default_registry(working_dir: PathBuf) -> ToolRegistry {
     let mut registry = ToolRegistry::new();
 
     registry.register(Box::new(archon_tools::file_read::ReadTool));
@@ -125,9 +130,39 @@ pub fn create_default_registry() -> ToolRegistry {
     registry.register(Box::new(archon_tools::mcp_resources::ListMcpResourcesTool::default()));
     registry.register(Box::new(archon_tools::mcp_resources::ReadMcpResourceTool::default()));
 
-    // ToolSearch needs the async ToolRegistry — register a placeholder here.
-    // The actual ToolSearchTool is wired in at the session level where the
-    // async ToolRegistry is available. See archon_tools::toolsearch.
+    // ── Fix 3: 7 tools built but never registered (TASK-CLI-500) ─────────────
+    registry.register(Box::new(archon_tools::cron_create::CronCreateTool::new(
+        working_dir.clone(),
+    )));
+    registry.register(Box::new(archon_tools::cron_list::CronListTool::new(
+        working_dir.clone(),
+    )));
+    registry.register(Box::new(archon_tools::cron_delete::CronDeleteTool::new(
+        working_dir.clone(),
+    )));
+    registry.register(Box::new(archon_tools::team_create::TeamCreateTool::new(
+        working_dir.clone(),
+    )));
+    registry.register(Box::new(archon_tools::team_delete::TeamDeleteTool::new(
+        working_dir.clone(),
+    )));
+    {
+        let lsp_manager = Arc::new(tokio::sync::Mutex::new(
+            archon_tools::lsp_manager::LspServerManager::new(working_dir.clone(), None),
+        ));
+        registry.register(Box::new(archon_tools::lsp_tool::LspTool::new(lsp_manager)));
+    }
+    registry.register(Box::new(archon_tools::remote_trigger::RemoteTriggerTool::new(
+        archon_tools::remote_trigger::RemoteTriggerConfig::default(),
+    )));
+
+    // Code Cartographer — symbol indexing and codebase navigation.
+    registry.register(Box::new(archon_tools::cartographer::CartographerTool));
+
+    // Register ToolSearch with a snapshot of all tool definitions captured at this point.
+    // Must be registered LAST so the snapshot includes all other tools.
+    let tool_defs_snapshot = registry.tool_definitions();
+    registry.register(Box::new(archon_tools::toolsearch::ToolSearchTool::new(tool_defs_snapshot)));
 
     registry
 }
@@ -139,9 +174,11 @@ mod tests {
 
     #[test]
     fn default_registry_has_all_tools() {
-        let registry = create_default_registry();
+        let working_dir = std::env::temp_dir();
+        let registry = create_default_registry(working_dir);
         let names = registry.tool_names();
 
+        // Core tools
         assert!(names.contains(&"Read"), "missing Read tool");
         assert!(names.contains(&"Write"), "missing Write tool");
         assert!(names.contains(&"Edit"), "missing Edit tool");
@@ -168,11 +205,24 @@ mod tests {
         assert!(names.contains(&"ExitWorktree"), "missing ExitWorktree tool");
         assert!(names.contains(&"ListMcpResources"), "missing ListMcpResources tool");
         assert!(names.contains(&"ReadMcpResource"), "missing ReadMcpResource tool");
+
+        // TASK-CLI-500 Fix 3: previously missing tools now registered
+        assert!(names.contains(&"CronCreate"), "missing CronCreate tool (Fix 3)");
+        assert!(names.contains(&"CronList"), "missing CronList tool (Fix 3)");
+        assert!(names.contains(&"CronDelete"), "missing CronDelete tool (Fix 3)");
+        assert!(names.contains(&"TeamCreate"), "missing TeamCreate tool (Fix 3)");
+        assert!(names.contains(&"TeamDelete"), "missing TeamDelete tool (Fix 3)");
+        assert!(names.contains(&"lsp"), "missing LSP tool (Fix 3)");
+        assert!(names.contains(&"RemoteTrigger"), "missing RemoteTrigger tool (Fix 3)");
+
+        // TASK-CLI-410: Code Cartographer
+        assert!(names.contains(&"CartographerScan"), "missing CartographerScan tool (TASK-CLI-410)");
+        assert!(names.contains(&"ToolSearch"), "missing ToolSearch tool");
     }
 
     #[test]
     fn tool_definitions_valid_json() {
-        let registry = create_default_registry();
+        let registry = create_default_registry(std::env::temp_dir());
         let defs = registry.tool_definitions();
 
         for def in &defs {
@@ -184,7 +234,7 @@ mod tests {
 
     #[tokio::test]
     async fn dispatch_unknown_tool_returns_error() {
-        let registry = create_default_registry();
+        let registry = create_default_registry(std::env::temp_dir());
         let ctx = ToolContext {
             working_dir: std::env::temp_dir(),
             session_id: "test".into(),
@@ -201,7 +251,7 @@ mod tests {
 
     #[tokio::test]
     async fn dispatch_blocked_in_plan_mode() {
-        let registry = create_default_registry();
+        let registry = create_default_registry(std::env::temp_dir());
         let ctx = ToolContext {
             working_dir: std::env::temp_dir(),
             session_id: "test".into(),

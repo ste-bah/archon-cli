@@ -140,8 +140,8 @@ async fn main() -> Result<()> {
     let log_dir = default_log_dir();
     let _log_guard = init_logging(&session_id, &config.logging.level, &log_dir)
         .unwrap_or_else(|e| {
-            eprintln!("warning: failed to init logging: {e}");
-            panic!("logging init failed: {e}");
+            eprintln!("fatal: logging init failed: {e}");
+            std::process::exit(1);
         });
 
     if let Err(e) = rotate_logs(&log_dir, config.logging.max_files) {
@@ -155,7 +155,233 @@ async fn main() -> Result<()> {
         Some(Commands::Login) => {
             return handle_login(&config).await;
         }
+        Some(Commands::Plugin { action }) => {
+            return handle_plugin_command(action);
+        }
+        Some(Commands::Update { check, force }) => {
+            if check {
+                match archon_core::update::check_update(&config.update).await {
+                    Ok(msg) => println!("{msg}"),
+                    Err(e) => eprintln!("update check failed: {e}"),
+                }
+            } else {
+                match archon_core::update::perform_update(&config.update, force).await {
+                    Ok(msg) => println!("{msg}"),
+                    Err(archon_core::update::UpdateError::UpToDate(msg)) => println!("{msg}"),
+                    Err(e) => eprintln!("update failed: {e}"),
+                }
+            }
+            return Ok(());
+        }
+        Some(Commands::Remote { action }) => {
+            use cli_args::RemoteAction;
+            match action {
+                RemoteAction::Ssh { target, command, port, key } => {
+                    let (user, host) = target.split_once('@').unwrap_or(("root", target.as_str()));
+                    let remote_session_id = cli.session_id.clone()
+                        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+                    tracing::info!(
+                        "remote ssh: user={user} host={host} port={port} session_id={remote_session_id}"
+                    );
+                    println!("Remote SSH: connecting to {user}@{host}:{port} (session {remote_session_id})");
+                    if let Some(ref cmd) = command {
+                        println!("  command: {cmd}");
+                    }
+                    if let Some(ref k) = key {
+                        println!("  key: {}", k.display());
+                    }
+                }
+                RemoteAction::Ws { url, token } => {
+                    use archon_core::remote::websocket::{WsConnectionConfig, WsTransport};
+                    let remote_session_id = cli.session_id.clone()
+                        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+                    let cfg = WsConnectionConfig {
+                        url: url.clone(),
+                        token: token.unwrap_or_default(),
+                        reconnect: false,
+                        max_reconnect_attempts: 0,
+                        session_id: remote_session_id.clone(),
+                    };
+                    tracing::info!("remote ws: connecting to {url} session_id={remote_session_id}");
+                    println!("Remote WebSocket: connecting to {url} (session {remote_session_id})");
+                    match WsTransport.connect_ws(&cfg).await {
+                        Ok(session) => println!("Connected. Session: {}", session.session_id),
+                        Err(e) => {
+                            eprintln!("WebSocket connection failed: {e}");
+                            std::process::exit(1);
+                        }
+                    }
+                }
+            }
+            return Ok(());
+        }
+        Some(Commands::Serve { port, token_path: _ }) => {
+            use archon_core::remote::{server::WebSocketServer, websocket::{IdeHandlerFn, WsServerConfig}};
+            use archon_sdk::ide::handler::IdeProtocolHandler;
+            use std::sync::Arc;
+            use tokio::sync::Mutex;
+            let mut srv_cfg = WsServerConfig::default();
+            srv_cfg.port = port;
+            // Wire the real IdeProtocolHandler — archon-core cannot depend on archon-sdk,
+            // so we inject it here via a boxed FnMut closure.
+            let ide_proto = IdeProtocolHandler::new(env!("CARGO_PKG_VERSION"));
+            let ide_handler: IdeHandlerFn = Arc::new(Mutex::new(Box::new({
+                let mut h = ide_proto;
+                move |req: &str| h.handle(req)
+            })));
+            srv_cfg.ide_handler = Some(ide_handler);
+            match WebSocketServer::new(srv_cfg).await {
+                Ok(server) => {
+                    if let Err(e) = server.run().await {
+                        eprintln!("server error: {e}");
+                        std::process::exit(1);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("failed to start server: {e}");
+                    std::process::exit(1);
+                }
+            }
+            return Ok(());
+        }
+        Some(Commands::Team { action }) => {
+            use cli_args::TeamAction;
+            use archon_core::orchestrator::{Orchestrator, LoggingExecutor};
+            use std::sync::Arc;
+            match action {
+                TeamAction::Run { team, goal } => {
+                    let orch = Orchestrator::new(config.orchestrator.clone());
+                    let (tx, mut rx) = tokio::sync::mpsc::channel(64);
+                    let executor = Arc::new(LoggingExecutor);
+                    let team_cfg = archon_core::orchestrator::config::TeamConfig {
+                        name: team.clone(),
+                        ..Default::default()
+                    };
+                    tokio::spawn(async move {
+                        while let Some(event) = rx.recv().await {
+                            use archon_core::orchestrator::events::OrchestratorEvent;
+                            match event {
+                                OrchestratorEvent::TaskDecomposed { subtasks } => {
+                                    println!("  Plan: {} subtasks", subtasks.len());
+                                }
+                                OrchestratorEvent::AgentSpawned { agent_type, subtask_id, .. } => {
+                                    println!("  [spawn] {agent_type} → subtask {subtask_id}");
+                                }
+                                OrchestratorEvent::AgentComplete { subtask_id, .. } => {
+                                    println!("  [done] subtask {subtask_id}");
+                                }
+                                OrchestratorEvent::TeamComplete { result } => {
+                                    println!("Team complete:\n{result}");
+                                }
+                                _ => {}
+                            }
+                        }
+                    });
+                    match orch.run_team(team_cfg, goal, executor, tx).await {
+                        Ok(result) => println!("Result: {result}"),
+                        Err(e) => {
+                            eprintln!("Team run failed: {e}");
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                TeamAction::List => {
+                    println!("Teams: (configure in archon.toml [[orchestrator.teams]])");
+                }
+            }
+            return Ok(());
+        }
+        Some(Commands::Web { port, bind_address, no_open }) => {
+            use archon_sdk::web::{WebConfig, WebServer};
+
+            // CLI args override config-file values; config.web provides defaults.
+            let effective_port = port.unwrap_or(config.web.port);
+            let effective_bind = bind_address.unwrap_or_else(|| config.web.bind_address.clone());
+            let effective_open = if no_open { false } else { config.web.open_browser };
+
+            // Bearer token: required for non-localhost to prevent unauthenticated access.
+            let is_local = matches!(
+                effective_bind.as_str(),
+                "127.0.0.1" | "::1" | "localhost"
+            );
+            let token = if is_local {
+                None
+            } else {
+                Some(archon_core::remote::auth::load_or_create_token()
+                    .unwrap_or_else(|_| String::new()))
+            };
+
+            let web_cfg = WebConfig {
+                port: effective_port,
+                bind_address: effective_bind,
+                open_browser: effective_open,
+            };
+
+            let server = WebServer::new(web_cfg, token);
+            if let Err(e) = server.run().await {
+                eprintln!("web server error: {e}");
+                std::process::exit(1);
+            }
+            return Ok(());
+        }
         None => {}
+    }
+
+    // ── Headless mode (--headless) ───────────────────────────────
+    if cli.headless {
+        let headless_session_id = cli.session_id.clone()
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        tracing::info!("headless mode: session_id={headless_session_id}");
+        archon_core::headless::HeadlessRuntime::new(headless_session_id).run().await?;
+        return Ok(());
+    }
+
+    // ── Output style: --list-output-styles (CLI-310) ─────────────
+    if cli.list_output_styles {
+        use archon_core::output_style::OutputStyleRegistry;
+        use archon_core::output_style_loader::load_styles_from_dir;
+
+        let mut reg = OutputStyleRegistry::new();
+
+        // Load user styles from ~/.claude/output-styles/
+        if let Some(home) = dirs::home_dir() {
+            let user_styles_dir = home.join(".claude").join("output-styles");
+            for style in load_styles_from_dir(&user_styles_dir) {
+                reg.register(style);
+            }
+        }
+
+        println!("Available output styles:");
+        for name in reg.list() {
+            let style = reg.get(&name).unwrap();
+            let has_prompt = if style.prompt.is_some() { "injects prompt" } else { "no injection" };
+            println!("  {:20} {} [{}]", style.name, style.description, has_prompt);
+        }
+        return Ok(());
+    }
+
+    // ── Theme: --list-themes (CLI-315) ───────────────────────────
+    if cli.list_themes {
+        use archon_tui::theme::available_themes;
+        use archon_tui::theme_registry::detect_system_theme;
+
+        println!("Available themes:");
+        for name in available_themes() {
+            println!("  {name}");
+        }
+        println!("  daltonized  (colorblind-friendly)");
+        println!("  auto        (system dark/light detection → {:?})", {
+            let detected = detect_system_theme();
+            let dark_bg = archon_tui::theme::dark_theme().bg;
+            if detected.bg == dark_bg { "dark" } else { "light" }
+        });
+
+        if let Some(theme_name) = cli.theme.as_deref().or(config.tui.theme.as_deref()) {
+            let resolved = archon_tui::theme_registry::ThemeRegistry::new().resolve(theme_name);
+            println!("\nActive theme: {theme_name}  (bg={:?}, fg={:?})", resolved.bg, resolved.fg);
+        }
+
+        return Ok(());
     }
 
     // Handle --resume with no ID: list recent sessions and exit
@@ -233,6 +459,80 @@ async fn main() -> Result<()> {
 
     // Default: interactive session (with optional resume messages)
     run_interactive_session(&config, &session_id, &cli, &env_vars, resume_messages, &resolved_flags).await
+}
+
+fn handle_plugin_command(action: cli_args::PluginAction) -> Result<()> {
+    use archon_plugin::loader::PluginLoader;
+
+    let plugins_dir = dirs::data_local_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("archon")
+        .join("plugins");
+
+    // Check ARCHON_PLUGIN_SEED_DIR env var
+    let seed_dirs: Vec<std::path::PathBuf> = std::env::var("ARCHON_PLUGIN_SEED_DIR")
+        .unwrap_or_default()
+        .split(':')
+        .filter(|s| !s.is_empty())
+        .map(std::path::PathBuf::from)
+        .collect();
+
+    let mut loader = PluginLoader::new(plugins_dir);
+    if !seed_dirs.is_empty() {
+        loader = loader.with_seed_dirs(seed_dirs);
+    }
+    let result = loader.load_all();
+
+    match action {
+        cli_args::PluginAction::List => {
+            println!("{:<30} {:<12} {}", "NAME", "VERSION", "STATUS");
+            println!("{}", "-".repeat(56));
+            for plugin in &result.enabled {
+                println!("{:<30} {:<12} enabled", plugin.manifest.name, plugin.manifest.version);
+            }
+            for plugin in &result.disabled {
+                println!("{:<30} {:<12} disabled", plugin.manifest.name, plugin.manifest.version);
+            }
+            for (id, err) in &result.errors {
+                println!("{:<30} {:<12} error: {err}", id, "?");
+            }
+            if result.enabled.is_empty() && result.disabled.is_empty() && result.errors.is_empty() {
+                println!("No plugins found.");
+            }
+        }
+        cli_args::PluginAction::Info { name } => {
+            let plugin = result.enabled.iter().chain(result.disabled.iter())
+                .find(|p| p.manifest.name == name);
+            match plugin {
+                Some(p) => {
+                    let status = if result.disabled.iter().any(|d| d.manifest.name == name) {
+                        "disabled"
+                    } else {
+                        "enabled"
+                    };
+                    println!("Name:        {}", p.manifest.name);
+                    println!("Version:     {}", p.manifest.version);
+                    println!("Status:      {status}");
+                    if let Some(desc) = &p.manifest.description {
+                        println!("Description: {desc}");
+                    }
+                    if !p.manifest.capabilities.is_empty() {
+                        println!("Capabilities: {}", p.manifest.capabilities.join(", "));
+                    }
+                    println!("Data dir:    {}", p.data_dir.display());
+                }
+                None => {
+                    // Check errors
+                    if let Some((_, err)) = result.errors.iter().find(|(id, _)| id == &name) {
+                        eprintln!("Plugin '{name}' failed to load: {err}");
+                    } else {
+                        eprintln!("Plugin '{name}' not found.");
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 async fn handle_login(_config: &archon_core::config::ArchonConfig) -> Result<()> {
@@ -531,8 +831,8 @@ async fn run_print_mode_session(
         .or_else(|| config.api.base_url.clone());
 
     let api_client = AnthropicClient::new(auth, identity.clone(), api_url);
-    let mut registry = create_default_registry();
     let working_dir = std::env::current_dir().unwrap_or_default();
+    let mut registry = create_default_registry(working_dir.clone());
 
     // Apply tool filtering from resolved flags (CLI-220)
     apply_tool_filters(&mut registry, resolved_flags);
@@ -548,7 +848,31 @@ async fn run_print_mode_session(
     let env_section = build_environment_section(&working_dir, git_branch);
 
     let identity_blocks = identity.system_prompt_blocks("", &claude_md, &env_section);
-    let system_prompt: Vec<serde_json::Value> = identity_blocks;
+    let mut system_prompt: Vec<serde_json::Value> = identity_blocks;
+
+    // ── Output style injection for print mode (CLI-310) ──────────
+    {
+        use archon_core::output_style::OutputStyleRegistry;
+        use archon_core::output_style_loader::load_styles_from_dir;
+
+        let style_name = cli
+            .output_style
+            .as_deref()
+            .or(config.output_style.as_deref());
+
+        if let Some(name) = style_name {
+            let mut reg = OutputStyleRegistry::new();
+            if let Some(home) = dirs::home_dir() {
+                for style in load_styles_from_dir(&home.join(".claude").join("output-styles")) {
+                    reg.register(style);
+                }
+            }
+            let style = reg.get_or_default(name);
+            if let Some(ref injection) = style.prompt {
+                system_prompt.push(serde_json::json!({ "type": "text", "text": injection }));
+            }
+        }
+    }
 
     let tool_defs = registry.tool_definitions();
 
@@ -584,7 +908,9 @@ async fn run_print_mode_session(
     };
 
     let (agent_event_tx, agent_event_rx) = tokio::sync::mpsc::channel::<AgentEvent>(256);
-    let mut agent = Agent::new(api_client, registry, agent_config, agent_event_tx);
+    let provider: Arc<dyn archon_llm::provider::LlmProvider> =
+        Arc::new(archon_llm::providers::AnthropicProvider::new(api_client));
+    let mut agent = Agent::new(provider, registry, agent_config, agent_event_tx);
 
     // Wire auto-mode evaluator
     let auto_eval = AutoModeEvaluator::new(AutoModeConfig {
@@ -925,14 +1251,58 @@ async fn run_interactive_session(
     }
 
     // Build tool registry and get tool definitions for API
-    let mut registry = create_default_registry();
+    let mut registry = create_default_registry(working_dir.clone());
 
     // Apply tool filtering from resolved flags (CLI-220)
     apply_tool_filters(&mut registry, resolved_flags);
 
+    // ── Fix 2: Load and instantiate WASM plugins, inject their tools ──────────
+    {
+        use archon_plugin::{api::tools_from_plugin_instance, loader::instantiate_wasm_plugins};
+        let plugins_dir = dirs::data_local_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("archon")
+            .join("plugins");
+        let plugin_result = archon_plugin::loader::PluginLoader::new(plugins_dir).load_all();
+        let wasm_instances = instantiate_wasm_plugins(&plugin_result);
+        for (plugin_id, (instance, host)) in wasm_instances {
+            let tools = tools_from_plugin_instance(&plugin_id, &instance, host);
+            let count = tools.len();
+            for tool in tools {
+                registry.register(tool);
+            }
+            if count > 0 {
+                tracing::info!(plugin = %plugin_id, count, "registered WASM plugin tools");
+            }
+        }
+    }
+
+    // ── Fix 4: Spawn cron scheduler background task ───────────────────────────
+    let _cron_cancel = {
+        let cron_store_path = dirs::data_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("archon")
+            .join("scheduled_tasks.json");
+        let cancel = Arc::new(AtomicBool::new(false));
+        tokio::spawn(archon_tools::cron_scheduler::run_scheduler_loop(
+            cron_store_path,
+            Arc::clone(&cancel),
+        ));
+        cancel
+    };
+
     // Register memory tools backed by the CozoDB graph
     registry.register(Box::new(archon_tools::memory::MemoryStoreTool::new(Arc::clone(&memory_graph))));
     registry.register(Box::new(archon_tools::memory::MemoryRecallTool::new(Arc::clone(&memory_graph))));
+
+    // ── VerbosityToggle (CLI-314) ──────────────────────────────
+    // Initial verbosity comes from config (default: true = verbose).
+    let verbosity_state = std::sync::Arc::new(std::sync::Mutex::new(
+        archon_tools::verbosity_toggle::VerbosityState::new(config.tui.verbose),
+    ));
+    registry.register(Box::new(
+        archon_tools::verbosity_toggle::VerbosityToggleTool::new(Arc::clone(&verbosity_state)),
+    ));
 
     // Register MCP tools into the agent registry so the LLM sees them in tool_defs.
     let mcp_tool_count = mcp_tools.len();
@@ -1041,6 +1411,33 @@ async fn run_interactive_session(
         if let Some(ref append_text) = resolved_flags.system_prompt_append {
             blocks.push(serde_json::json!({ "type": "text", "text": append_text }));
         }
+
+        // ── Output style injection (CLI-310) ─────────────────────
+        // CLI flag takes priority over config.toml value.
+        {
+            use archon_core::output_style::OutputStyleRegistry;
+            use archon_core::output_style_loader::load_styles_from_dir;
+
+            let style_name: Option<&str> = cli
+                .output_style
+                .as_deref()
+                .or(config.output_style.as_deref());
+
+            if let Some(name) = style_name {
+                let mut reg = OutputStyleRegistry::new();
+                if let Some(home) = dirs::home_dir() {
+                    for style in load_styles_from_dir(&home.join(".claude").join("output-styles")) {
+                        reg.register(style);
+                    }
+                }
+                let style = reg.get_or_default(name);
+                if let Some(ref injection) = style.prompt {
+                    tracing::info!(output_style = name, "injecting output style into system prompt");
+                    blocks.push(serde_json::json!({ "type": "text", "text": injection }));
+                }
+            }
+        }
+
         blocks
     };
 
@@ -1089,7 +1486,9 @@ async fn run_interactive_session(
     let (user_input_tx, mut user_input_rx) = tokio::sync::mpsc::channel::<String>(16);
 
     // Create agent
-    let mut agent = Agent::new(api_client, registry, agent_config, agent_event_tx);
+    let provider: Arc<dyn archon_llm::provider::LlmProvider> =
+        Arc::new(archon_llm::providers::AnthropicProvider::new(api_client));
+    let mut agent = Agent::new(provider, registry, agent_config, agent_event_tx);
 
     // Wire checkpoint store into agent (CLI-116)
     if let Some(store) = checkpoint_store {
@@ -1099,27 +1498,28 @@ async fn run_interactive_session(
     // GAP 5/7: Wire memory graph into agent
     agent.set_memory_graph(Arc::clone(&memory_graph));
 
-    // Wire hook system — load hooks from config.toml [hooks] section if present
+    // Wire hook system — load hooks from .claude/settings.json if present
     {
-        let hooks_toml_path = config_path.parent()
-            .unwrap_or(std::path::Path::new("."))
-            .join("hooks.toml");
-        let hook_configs = if hooks_toml_path.exists() {
-            match std::fs::read_to_string(&hooks_toml_path) {
-                Ok(content) => archon_core::hooks::config::parse_hooks_from_toml(&content)
-                    .unwrap_or_default(),
-                Err(_) => Vec::new(),
-            }
-        } else {
-            Vec::new()
-        };
-        let hook_registry = archon_core::hooks::HookRegistry::from_config(hook_configs);
-        let hook_dispatcher = archon_core::hooks::HookDispatcher::new(
-            hook_registry,
-            session_id.to_string(),
-            working_dir.clone(),
-        );
-        agent.set_hook_dispatcher(hook_dispatcher);
+        let settings_json_path = working_dir.join(".claude").join("settings.json");
+        let hook_registry =
+            if settings_json_path.exists() {
+                match std::fs::read_to_string(&settings_json_path) {
+                    Ok(content) => {
+                        archon_core::hooks::HookRegistry::load_from_settings_json(&content)
+                            .unwrap_or_else(|e| {
+                                tracing::warn!("hooks: failed to load settings.json: {e}");
+                                archon_core::hooks::HookRegistry::new()
+                            })
+                    }
+                    Err(e) => {
+                        tracing::warn!("hooks: could not read settings.json: {e}");
+                        archon_core::hooks::HookRegistry::new()
+                    }
+                }
+            } else {
+                archon_core::hooks::HookRegistry::new()
+            };
+        agent.set_hook_registry(std::sync::Arc::new(hook_registry));
     }
 
     // GAP 6: Wire auto-mode evaluator
@@ -1523,8 +1923,15 @@ async fn run_interactive_session(
                     let _ = std::fs::remove_file(&raw_cache);
 
                     // Spawn background re-discovery using a temporary client
-                    let refresh_auth = agent.auth_provider().clone();
-                    let refresh_identity = agent.identity_provider().clone();
+                    let (refresh_auth, refresh_identity) = match (agent.auth_provider(), agent.identity_provider()) {
+                        (Some(a), Some(i)) => (a.clone(), i.clone()),
+                        _ => {
+                            let _ = input_tui_tx.send(TuiEvent::TextDelta(
+                                "\nIdentity refresh not supported for this provider.\n".into(),
+                            )).await;
+                            continue;
+                        }
+                    };
                     let refresh_api_url = api_url.clone();
                     let refresh_tui_tx = input_tui_tx.clone();
                     tokio::spawn(async move {
@@ -1556,69 +1963,6 @@ async fn run_interactive_session(
                         ))
                         .await;
                     let _ = input_tui_tx.send(TuiEvent::SlashCommandComplete).await;
-                    continue;
-                }
-
-                // /btw — side question runs in PARALLEL via a separate API call
-                // Does NOT interrupt the main agent. Spawns a forked one-shot query.
-                if input.trim().starts_with("/btw ") {
-                    let question = input.trim().strip_prefix("/btw ").unwrap_or("").trim().to_string();
-                    if !question.is_empty() {
-                        let btw_tui_tx = input_tui_tx.clone();
-                        let btw_auth = agent.auth_provider().clone();
-                        let btw_identity = agent.identity_provider().clone();
-                        let btw_model = agent.current_model().to_string();
-                        let btw_api_url = api_url.clone();
-
-                        tokio::spawn(async move {
-
-                            let wrapped = format!(
-                                "<system-reminder>This is a side question. Answer directly in a single response.\n\
-                                 You have NO tools. This is a one-off response. If you don't know, say so.\n\
-                                 Do NOT say \"Let me check\" or promise actions.</system-reminder>\n\n{question}"
-                            );
-
-                            let btw_client = archon_llm::anthropic::AnthropicClient::new(btw_auth, btw_identity, btw_api_url);
-                            let request = archon_llm::anthropic::MessageRequest {
-                                model: btw_model,
-                                max_tokens: 1024,
-                                system: vec![serde_json::json!({
-                                    "type": "text",
-                                    "text": "Answer the side question briefly and directly. No tools available."
-                                })],
-                                messages: vec![serde_json::json!({
-                                    "role": "user",
-                                    "content": wrapped,
-                                })],
-                                tools: Vec::new(),
-                                thinking: None,
-                                speed: None,
-                                effort: None,
-                            };
-
-                            match btw_client.stream_message(request).await {
-                                Ok(mut rx) => {
-                                    let mut response = String::new();
-                                    while let Some(event) = rx.recv().await {
-                                        if let archon_llm::streaming::StreamEvent::TextDelta { text, .. } = event {
-                                            response.push_str(&text);
-                                        }
-                                    }
-                                    let _ = btw_tui_tx.send(TuiEvent::BtwResponse(response)).await;
-                                }
-                                Err(e) => {
-                                    let _ = btw_tui_tx.send(TuiEvent::Error(
-                                        format!("btw failed: {e}")
-                                    )).await;
-                                }
-                            }
-                        });
-                    } else {
-                        let _ = input_tui_tx.send(TuiEvent::TextDelta(
-                            "\nUsage: /btw <question>\n".into()
-                        )).await;
-                    }
-                    // Don't send SlashCommandComplete — btw runs in background
                     continue;
                 }
 
