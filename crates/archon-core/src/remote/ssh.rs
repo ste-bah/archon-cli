@@ -271,14 +271,18 @@ async fn authenticate(
 
     // No key file — try SSH agent if available (respects agent_forwarding config
     // and SSH_AUTH_SOCK environment variable).
-    let agent_available = config.agent_forwarding || std::env::var("SSH_AUTH_SOCK").is_ok();
+    // russh's AgentClient::connect_env() is Unix-only (uses unix sockets).
+    #[cfg(unix)]
+    {
+        let agent_available = config.agent_forwarding || std::env::var("SSH_AUTH_SOCK").is_ok();
 
-    if agent_available {
-        tracing::info!("ssh: attempting authentication via SSH agent");
-        match try_agent_auth(session, &config.user).await {
-            Ok(true) => return Ok(()),
-            Ok(false) => tracing::info!("ssh: no agent identities accepted; falling back"),
-            Err(e) => tracing::warn!("ssh: SSH agent error: {e}; falling back"),
+        if agent_available {
+            tracing::info!("ssh: attempting authentication via SSH agent");
+            match try_agent_auth(session, &config.user).await {
+                Ok(true) => return Ok(()),
+                Ok(false) => tracing::info!("ssh: no agent identities accepted; falling back"),
+                Err(e) => tracing::warn!("ssh: SSH agent error: {e}; falling back"),
+            }
         }
     }
 
@@ -301,6 +305,7 @@ async fn authenticate(
 
 /// Try each identity offered by the SSH agent in turn.
 /// Returns `Ok(true)` if any identity was accepted.
+#[cfg(unix)]
 async fn try_agent_auth(
     session: &mut russh::client::Handle<SshClientHandler>,
     user: &str,

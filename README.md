@@ -1,6 +1,6 @@
 # Archon CLI
 
-A privacy-first, self-aware AI coding assistant written in Rust. Archon replaces cloud-dependent AI CLIs with a fully local consciousness layer — persistent memory, configurable personality, behavioral rules, and an interactive TUI — while proxying Claude's API directly with zero telemetry.
+A privacy-first, self-aware AI coding assistant written in Rust. Archon replaces cloud-dependent AI CLIs with a fully local consciousness layer, persistent memory, configurable personality, behavioral rules, and an interactive TUI, while proxying Claude's API directly with zero telemetry.
 
 ---
 
@@ -159,7 +159,7 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 archon
 ```
 
-**Optional — brew dependencies** (only if build fails due to OpenSSL):
+**Optional, brew dependencies** (only if build fails due to OpenSSL):
 ```bash
 brew install pkg-config openssl
 export PKG_CONFIG_PATH="$(brew --prefix openssl)/lib/pkgconfig"
@@ -275,7 +275,7 @@ anti_distillation = false             # Inject anti-distillation field in spoof 
 
 [personality]
 name = "Archon"                       # Shown in TUI header
-type = "INTJ"                         # MBTI type — auto-selects theme
+type = "INTJ"                         # MBTI type, auto-selects theme
 enneagram = "4w5"
 traits = ["strategic", "direct", "truth-over-comfort"]
 communication_style = "terse"         # Injected into system prompt
@@ -382,7 +382,7 @@ base_url = "http://localhost:4000/v1/messages"
 
 ### Beta header validation
 
-On first startup, Archon sends a cheap probe request (Haiku, 1 token) to validate which `anthropic-beta` headers the endpoint accepts, then strips any it rejects — no manual configuration required. Run `/refresh-identity` in the TUI to clear the cache and re-probe.
+On first startup, Archon sends a cheap probe request (Haiku, 1 token) to validate which `anthropic-beta` headers the endpoint accepts, then strips any it rejects, no manual configuration required. Run `/refresh-identity` in the TUI to clear the cache and re-probe.
 
 ---
 
@@ -727,7 +727,7 @@ Unlike Claude Code which discards context between sessions, Archon persists fact
 - **Database**: CozoDB (Datalog, SQLite WAL backend)
 - **Path**: `~/.local/share/archon/memory.db` (Linux/macOS) or `%APPDATA%\archon\memory.db` (Windows)
 - **Embeddings**: fastembed (local, no network calls)
-- **Search**: Hybrid — keyword BM25 + vector cosine similarity
+- **Search**: Hybrid, keyword BM25 + vector cosine similarity
 
 ---
 
@@ -771,7 +771,7 @@ Assembles the system prompt from multiple sources before each API call.
 
 ### Configuring Rules
 
-Rules in `config.toml` under `[consciousness].initial_rules` are seeded into CozoDB on startup — idempotently. Adding a new rule injects it on next run without duplicating. The LLM can also create rules dynamically using `memory_store` with `memory_type = "Rule"`.
+Rules in `config.toml` under `[consciousness].initial_rules` are seeded into CozoDB on startup, idempotently. Adding a new rule injects it on next run without duplicating. The LLM can also create rules dynamically using `memory_store` with `memory_type = "Rule"`.
 
 ---
 
@@ -843,9 +843,9 @@ Subagents have access to the same tool set as the parent but run in isolated tas
 
 Spawn with `run_in_background: true` to return immediately:
 
-- `TaskList` — view running tasks
-- `TaskGet` / `TaskOutput` — inspect output
-- `TaskStop` — cancel
+- `TaskList`, view running tasks
+- `TaskGet` / `TaskOutput`, inspect output
+- `TaskStop`, cancel
 
 ---
 
@@ -853,7 +853,7 @@ Spawn with `run_in_background: true` to return immediately:
 
 Teams orchestrate groups of specialized subagents under a coordinator, with explicit execution topology.
 
-### Team definition — `.archon/teams.toml`
+### Team definition, `.archon/teams.toml`
 
 ```toml
 [backend-squad]
@@ -890,8 +890,8 @@ archon team list
 
 Skills are slash commands backed by Rust code. Two types:
 
-- **Builtin skills** — compiled into `archon-core` (43 skills in `crates/archon-core/src/skills/builtin.rs` + `expanded.rs`)
-- **User skills** — markdown + frontmatter in `.archon/skills/` or `~/.config/archon/skills/`
+- **Builtin skills**, compiled into `archon-core` (43 skills in `crates/archon-core/src/skills/builtin.rs` + `expanded.rs`)
+- **User skills**, markdown + frontmatter in `.archon/skills/` or `~/.config/archon/skills/`
 
 ### User skill definition
 
@@ -918,7 +918,7 @@ Shell commands that execute in response to lifecycle events. Defined in `config.
 
 `Setup`, `SessionStart`, `SessionEnd`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `PreCompact`, `PostCompact`, `ConfigChange`, `CwdChanged`, `FileChanged`, `InstructionsLoaded`, `UserPromptSubmit`, `Stop`, `SubagentStart`, `SubagentStop`, `TaskCreated`, `TaskCompleted`, `PermissionDenied`, `PermissionRequest`, `Notification`.
 
-### Example — TOML
+### Example, TOML
 
 ```toml
 [[hooks.pre_tool_use]]
@@ -931,7 +931,7 @@ command = "git status --short"
 timeout = 5
 ```
 
-### Example — `.claude/settings.json` (structured matchers)
+### Example, `.claude/settings.json` (structured matchers)
 
 ```json
 {
@@ -963,7 +963,7 @@ Plugins are dynamically loaded Rust libraries (`.so`/`.dll`/`.dylib`) implementi
 │   └── libmy_plugin.so # compiled plugin
 ```
 
-### Manifest — `plugin.toml`
+### Manifest, `plugin.toml`
 
 ```toml
 name = "my-plugin"
@@ -1122,7 +1122,7 @@ Enforced on every tool call that touches the filesystem, shell, or network.
 | `ask` (default) | Prompt user for risky operations |
 | `auto` | Auto-approve all tool calls |
 | `deny` | Deny all unsafe operations (read-only) |
-| `plan` | Plan-only mode — no writes, no shell |
+| `plan` | Plan-only mode, no writes, no shell |
 | `acceptEdits` | Auto-accept file edits, ask for shell |
 | `dontAsk` | Never prompt (silent auto-approve) |
 | `bypassPermissions` | Skip all permission checks |
@@ -1142,9 +1142,9 @@ sandbox = false
 
 ### CLI overrides
 
-- `--permission-mode <MODE>` — runtime override
-- `--dangerously-skip-permissions` — equivalent to `bypassPermissions`
-- `--sandbox` — enforce `deny` for writes
+- `--permission-mode <MODE>`, runtime override
+- `--dangerously-skip-permissions`, equivalent to `bypassPermissions`
+- `--sandbox`, enforce `deny` for writes
 
 ---
 
@@ -1166,9 +1166,9 @@ Archon can identify itself as Claude Code (`spoof`) or as itself (`native`).
 
 ### Managing identity
 
-- `identity.spoof_version = "2.1.89"` — version reported to API
-- `/refresh-identity` — clear beta header cache and reprobe
-- `identity.mode = "native"` — disable all spoofing
+- `identity.spoof_version = "2.1.89"`, version reported to API
+- `/refresh-identity`, clear beta header cache and reprobe
+- `identity.mode = "native"`, disable all spoofing
 
 ---
 
@@ -1203,7 +1203,7 @@ Resolution order: exact UUID → UUID prefix → exact name → name prefix. Amb
 archon --fork-session --resume "fix-auth-bug"
 ```
 
-Creates a new session whose history is a copy of the source at the current turn — useful for exploring alternative paths without corrupting the original.
+Creates a new session whose history is a copy of the source at the current turn, useful for exploring alternative paths without corrupting the original.
 
 ---
 
@@ -1317,9 +1317,9 @@ hard_limit = 0.0         # 0.0 = no hard cap
 
 Affects `thinking_budget`, temperature, and context window allocation:
 
-- `high` — full thinking budget, maximum context
-- `medium` — reduced thinking, balanced
-- `low` — minimal thinking, fastest responses
+- `high`, full thinking budget, maximum context
+- `medium`, reduced thinking, balanced
+- `low`, minimal thinking, fastest responses
 
 Switch at runtime: `/effort high`, `--effort low`, or `[api].default_effort`.
 
@@ -1330,7 +1330,7 @@ archon --fast
 # or /fast in TUI
 ```
 
-Disables extended thinking, uses aggressive token limits, and skips some memory injection. Same model, lower quality, lower latency — good for quick questions.
+Disables extended thinking, uses aggressive token limits, and skips some memory injection. Same model, lower quality, lower latency, good for quick questions.
 
 ---
 
@@ -1436,16 +1436,16 @@ archon (binary)
 |-------|---------|---------|
 | `ratatui` | 0.29 | Terminal UI rendering |
 | `crossterm` | 0.28 | Cross-platform terminal backend |
-| `cozo-ce` | 0.7.13 | CozoDB — memory/session/checkpoint store |
+| `cozo-ce` | 0.7.13 | CozoDB, memory/session/checkpoint store |
 | `fastembed` | 4 | Local vector embeddings (no API) |
 | `tokio` | 1 | Async runtime |
 | `reqwest` | 0.12 | HTTP client (rustls) |
 | `clap` | 4 | CLI argument parsing |
-| `serde` / `toml` | — | Config serialization |
+| `serde` / `toml` |, | Config serialization |
 | `git2` | 0.19 | Git branch detection |
 | `tree-sitter` | 0.24 | Syntax highlighting |
-| `async-lsp` | — | LSP protocol client |
-| `tungstenite` | — | WebSocket transport |
+| `async-lsp` |, | LSP protocol client |
+| `tungstenite` |, | WebSocket transport |
 | `tower-http` | 0.6 | HTTP middleware (web UI) |
 
 ---
@@ -1454,11 +1454,11 @@ archon (binary)
 
 | Phase | Status | Description |
 |-------|--------|-------------|
-| **Phase 1** — Core Engine | ✅ Complete | Agent loop, streaming API, tool execution, permission system, config, TUI, session management |
-| **Phase 2** — Consciousness | ✅ Complete | Memory graph (CozoDB), auto-extraction, per-turn injection, rules engine, personality config, inner voice |
-| **Phase 3** — UX & Ergonomics | ✅ Complete | 22 themes, MBTI themes, resume by name/prefix, `/color` and `/theme` commands, memory tools wired |
-| **Phase 4** — Plugins & Skills | ✅ Complete | Plugin system (`archon-plugin`), user-defined slash commands, skill system, hook extensibility |
-| **Phase 5** — Multi-Agent | ✅ Complete | Subagent orchestration, team execution modes, MCP transport, LSP client, WebSocket remote, cross-session memory |
+| **Phase 1**, Core Engine | ✅ Complete | Agent loop, streaming API, tool execution, permission system, config, TUI, session management |
+| **Phase 2**, Consciousness | ✅ Complete | Memory graph (CozoDB), auto-extraction, per-turn injection, rules engine, personality config, inner voice |
+| **Phase 3**, UX & Ergonomics | ✅ Complete | 22 themes, MBTI themes, resume by name/prefix, `/color` and `/theme` commands, memory tools wired |
+| **Phase 4**, Plugins & Skills | ✅ Complete | Plugin system (`archon-plugin`), user-defined slash commands, skill system, hook extensibility |
+| **Phase 5**, Multi-Agent | ✅ Complete | Subagent orchestration, team execution modes, MCP transport, LSP client, WebSocket remote, cross-session memory |
 
 ---
 
