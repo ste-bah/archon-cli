@@ -95,10 +95,7 @@ fn closed_port() -> u16 {
     port
 }
 
-fn wait_output(
-    mut child: std::process::Child,
-    timeout: Duration,
-) -> (String, String, i32) {
+fn wait_output(mut child: std::process::Child, timeout: Duration) -> (String, String, i32) {
     let start = Instant::now();
     let mut stdout_buf = String::new();
     let mut stderr_buf = String::new();
@@ -169,7 +166,10 @@ fn remote_ssh_closed_port_reports_real_connection_failure() {
     let (stdout, stderr, code) = run_ssh("testuser@127.0.0.1", port);
 
     // Must have exited non-zero (real stub would've printed and exited 0)
-    assert_ne!(code, 0, "expected non-zero exit on connection failure; stdout={stdout}\nstderr={stderr}");
+    assert_ne!(
+        code, 0,
+        "expected non-zero exit on connection failure; stdout={stdout}\nstderr={stderr}"
+    );
 
     // Must contain the error message emitted by SshTransport::connect
     let combined = format!("{stdout}\n{stderr}");
@@ -195,7 +195,10 @@ fn remote_ssh_parses_target_without_user_as_root() {
     // No @ in target -> defaults to root@host
     let (stdout, stderr, code) = run_ssh("127.0.0.1", port);
 
-    assert_ne!(code, 0, "expected non-zero exit; stdout={stdout}\nstderr={stderr}");
+    assert_ne!(
+        code, 0,
+        "expected non-zero exit; stdout={stdout}\nstderr={stderr}"
+    );
     let combined = format!("{stdout}\n{stderr}");
     // Handler should print the resolved target before/during the connect attempt.
     assert!(

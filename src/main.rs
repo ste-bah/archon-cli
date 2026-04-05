@@ -59,10 +59,7 @@ fn parse_layer_filter(sources: &[String]) -> Vec<ConfigLayer> {
 /// Strip `cache_control` keys from system prompt blocks when prompt caching
 /// is disabled via `config.context.prompt_cache = false` (TASK-WIRE-003).
 /// A no-op when `prompt_cache_enabled` is true.
-fn strip_cache_control_if_disabled(
-    blocks: &mut [serde_json::Value],
-    prompt_cache_enabled: bool,
-) {
+fn strip_cache_control_if_disabled(blocks: &mut [serde_json::Value], prompt_cache_enabled: bool) {
     if prompt_cache_enabled {
         return;
     }
@@ -269,8 +266,8 @@ async fn main() -> Result<()> {
                     key,
                 } => {
                     use archon_core::remote::{
-                        RemoteTransport, SshConnectionConfig, SyncMode,
-                        protocol::AgentMessage, ssh::SshTransport,
+                        RemoteTransport, SshConnectionConfig, SyncMode, protocol::AgentMessage,
+                        ssh::SshTransport,
                     };
                     let (user, host) = target
                         .split_once('@')
@@ -444,7 +441,8 @@ async fn main() -> Result<()> {
                 }
                 TeamAction::List => {
                     use archon_core::team::TeamManager;
-                    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+                    let cwd =
+                        std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
                     let manager = TeamManager::new(cwd.clone());
                     match manager.list_teams() {
                         Ok(ids) if ids.is_empty() => {
@@ -3894,7 +3892,6 @@ async fn fetch_account_uuid(auth: &archon_llm::auth::AuthProvider) -> String {
         }
     }
 }
-
 
 #[cfg(test)]
 mod wire_tests {

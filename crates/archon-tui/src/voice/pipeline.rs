@@ -180,11 +180,7 @@ pub struct VoicePipeline {
 }
 
 impl VoicePipeline {
-    pub fn new(
-        audio: Arc<dyn AudioSource>,
-        stt: Arc<dyn SttProvider>,
-        vad_threshold: f32,
-    ) -> Self {
+    pub fn new(audio: Arc<dyn AudioSource>, stt: Arc<dyn SttProvider>, vad_threshold: f32) -> Self {
         Self {
             audio,
             stt,

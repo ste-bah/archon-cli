@@ -19,8 +19,5 @@ fn toggle_mode_false_returns_push_to_talk_action() {
 
 #[test]
 fn toggle_and_push_to_talk_are_distinct() {
-    assert_ne!(
-        hotkey_action_for_mode(true),
-        hotkey_action_for_mode(false)
-    );
+    assert_ne!(hotkey_action_for_mode(true), hotkey_action_for_mode(false));
 }

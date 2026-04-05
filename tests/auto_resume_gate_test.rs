@@ -105,11 +105,8 @@ fn run(auto_resume: bool, extra_args: &[&str]) -> String {
     let tmp = tempfile::tempdir().expect("create tempdir");
     let config_dir = tmp.path().join("archon");
     std::fs::create_dir_all(&config_dir).expect("create archon config dir");
-    std::fs::write(
-        config_dir.join("config.toml"),
-        minimal_config(auto_resume),
-    )
-    .expect("write config.toml");
+    std::fs::write(config_dir.join("config.toml"), minimal_config(auto_resume))
+        .expect("write config.toml");
     let log_dir = tmp.path().join("data").join("archon").join("logs");
     let work_dir = tmp.path().join("work");
     std::fs::create_dir_all(&work_dir).expect("create work dir");

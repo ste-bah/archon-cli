@@ -99,7 +99,11 @@ fn run_and_scrape(voice_enabled: bool) -> String {
     let tmp = tempfile::tempdir().expect("tempdir");
     let config_dir = tmp.path().join("archon");
     std::fs::create_dir_all(&config_dir).unwrap();
-    std::fs::write(config_dir.join("config.toml"), minimal_config(voice_enabled)).unwrap();
+    std::fs::write(
+        config_dir.join("config.toml"),
+        minimal_config(voice_enabled),
+    )
+    .unwrap();
     let log_dir = tmp.path().join("data").join("archon").join("logs");
     let work_dir = tmp.path().join("work");
     std::fs::create_dir_all(&work_dir).unwrap();

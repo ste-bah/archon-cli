@@ -112,9 +112,7 @@ fn run_team_list(work_dir: &std::path::Path, tmp: &std::path::Path) -> (String, 
 fn write_team(work_dir: &std::path::Path, id: &str, name: &str) {
     let team_dir = work_dir.join("teams").join(id);
     std::fs::create_dir_all(&team_dir).expect("create team dir");
-    let team_json = format!(
-        r#"{{"id":"{id}","name":"{name}","members":[]}}"#
-    );
+    let team_json = format!(r#"{{"id":"{id}","name":"{name}","members":[]}}"#);
     std::fs::write(team_dir.join("team.json"), team_json).expect("write team.json");
 }
 

@@ -309,10 +309,25 @@ X-Team = "backend"
 #[test]
 fn default_config_path_uses_config_dir() {
     let path = default_config_path();
-    let path_str = path.to_string_lossy();
-    // Should end with archon/config.toml
-    assert!(
-        path_str.ends_with("archon/config.toml"),
-        "expected path ending with archon/config.toml, got: {path_str}"
+    // Check path components rather than raw string so the assertion is
+    // platform-agnostic (Windows uses backslashes, Unix uses forward slashes).
+    let components: Vec<_> = path
+        .components()
+        .filter_map(|c| match c {
+            std::path::Component::Normal(s) => Some(s.to_string_lossy().into_owned()),
+            _ => None,
+        })
+        .collect();
+    let tail: Vec<&str> = components
+        .iter()
+        .rev()
+        .take(2)
+        .map(|s| s.as_str())
+        .collect();
+    assert_eq!(
+        tail,
+        vec!["config.toml", "archon"],
+        "expected path ending with archon/config.toml, got: {}",
+        path.display()
     );
 }

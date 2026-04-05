@@ -287,4 +287,3 @@ fn memory_enabled_registers_tools_and_injects_graph() {
          --- captured stderr ---\n{stderr}\n--- end stderr ---"
     );
 }
-
