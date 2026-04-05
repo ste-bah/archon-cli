@@ -135,6 +135,7 @@ fn run_archon_capture_stderr(memory_enabled: bool) -> String {
         .current_dir(&work_dir)
         .env("ARCHON_CONFIG_DIR", &config_dir)
         .env("ANTHROPIC_API_KEY", "sk-fake-test-key-not-real")
+        .env("ARCHON_LOG_DIR", &log_dir)
         // Isolate from the user's real archon data/cache dirs.
         .env("XDG_DATA_HOME", tmp.path().join("data"))
         .env("XDG_CACHE_HOME", tmp.path().join("cache"))

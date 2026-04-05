@@ -155,7 +155,12 @@ async fn main() -> Result<()> {
 
     // Initialize logging
     let session_id = uuid::Uuid::new_v4().to_string();
-    let log_dir = default_log_dir();
+    // ARCHON_LOG_DIR env override lets tests and hermetic environments redirect
+    // log output to a known directory (dirs::data_dir() is platform-specific
+    // and does NOT honor XDG_DATA_HOME on macOS/Windows).
+    let log_dir = std::env::var_os("ARCHON_LOG_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(default_log_dir);
     let _log_guard =
         init_logging(&session_id, &config.logging.level, &log_dir).unwrap_or_else(|e| {
             eprintln!("fatal: logging init failed: {e}");

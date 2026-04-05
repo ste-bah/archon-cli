@@ -91,6 +91,7 @@ fn run_and_scrape(toggle_mode: bool) -> String {
         .current_dir(&work_dir)
         .env("ARCHON_CONFIG_DIR", &config_dir)
         .env("ANTHROPIC_API_KEY", "sk-fake-test-key-not-real")
+        .env("ARCHON_LOG_DIR", &log_dir)
         .env("XDG_DATA_HOME", tmp.path().join("data"))
         .env("XDG_CACHE_HOME", tmp.path().join("cache"))
         .env("XDG_CONFIG_HOME", tmp.path())

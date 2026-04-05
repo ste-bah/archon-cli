@@ -118,3 +118,13 @@ lto = true
 strip = true
 opt-level = "z"
 codegen-units = 1
+
+# Reduce debuginfo in the test profile to keep linker memory + disk usage
+# bounded on CI. The workspace has a massive native dep tree (tree-sitter,
+# ort, russh, libgit2, aws-lc-sys, …) and debuginfo=2 has caused rust-lld
+# to SIGBUS on Ubuntu CI during the update_tests link.
+[profile.test]
+debug = "line-tables-only"
+
+[profile.dev]
+debug = "line-tables-only"
