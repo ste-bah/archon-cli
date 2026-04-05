@@ -184,6 +184,7 @@ fn stale_pid_detection() {
 // Test: kill_session_updates_status
 // ─────────────────────────────────────────────────────────────────────────────
 
+#[cfg(unix)]
 #[test]
 fn kill_session_updates_status() {
     let dir = temp_sessions_dir();

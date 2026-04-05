@@ -2,6 +2,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use archon_consciousness::inner_voice::InnerVoice;
 use archon_llm::effort::EffortLevel;
 use archon_llm::provider::{LlmProvider, LlmRequest};
 use archon_llm::streaming::StreamEvent;
@@ -229,6 +230,9 @@ pub struct Agent {
     /// Channel for permission prompt responses from the TUI.
     /// Agent sends PermissionRequired event, then waits on this for y/n.
     pub permission_response_rx: Option<Arc<tokio::sync::Mutex<tokio::sync::mpsc::Receiver<bool>>>>,
+    /// Inner voice state injected into the system prompt each turn when enabled.
+    /// Tracks confidence, energy, focus, struggles, successes, and turn count.
+    inner_voice: Option<Arc<Mutex<InnerVoice>>>,
 }
 
 impl Agent {
@@ -256,7 +260,20 @@ impl Agent {
             session_stats: Arc::new(Mutex::new(SessionStats::default())),
             hook_registry: None,
             permission_response_rx: None,
+            inner_voice: None,
         }
+    }
+
+    /// Enable the inner voice feature. The supplied state is shared so that
+    /// external components (slash commands, compaction handlers) can inspect
+    /// or snapshot it.
+    pub fn set_inner_voice(&mut self, iv: Arc<Mutex<InnerVoice>>) {
+        self.inner_voice = Some(iv);
+    }
+
+    /// Access the inner voice handle, if enabled.
+    pub fn inner_voice(&self) -> Option<&Arc<Mutex<InnerVoice>>> {
+        self.inner_voice.as_ref()
     }
 
     /// Close the event channel so receivers know the agent is done.
@@ -316,7 +333,9 @@ impl Agent {
 
         loop {
             // GAP 7: Inject recalled memories into system prompt
-            let system_with_memories = self.inject_memories();
+            let mut system_with_memories = self.inject_memories();
+            // Append inner voice block (consciousness state) if enabled
+            self.inject_inner_voice(&mut system_with_memories).await;
 
             // GAP 3: Read fast_mode from shared atomic
             let speed = if self.config.fast_mode.load(Ordering::Relaxed) {
@@ -758,6 +777,16 @@ impl Agent {
                     })
                     .await;
 
+                    // Update inner voice state from tool outcome.
+                    if let Some(iv) = &self.inner_voice {
+                        let mut iv = iv.lock().await;
+                        if result.is_error {
+                            iv.on_tool_failure(&tool.name);
+                        } else {
+                            iv.on_tool_success(&tool.name);
+                        }
+                    }
+
                     self.state
                         .add_tool_result(&tool.id, &result.content, result.is_error);
                 }
@@ -781,6 +810,11 @@ impl Agent {
                 stats
                     .cache_stats
                     .update(turn_cache_creation, turn_cache_read, turn_input_tokens);
+            }
+
+            // Apply turn completion to inner voice (energy decay, turn counter).
+            if let Some(iv) = &self.inner_voice {
+                iv.lock().await.on_turn_complete();
             }
 
             self.send_event(AgentEvent::TurnComplete {
@@ -975,6 +1009,20 @@ impl Agent {
         } else {
             output.message
         }
+    }
+
+    /// Append the inner voice `<inner_voice>` block to the system prompt
+    /// for this turn, if the feature is enabled.
+    async fn inject_inner_voice(&self, system: &mut Vec<serde_json::Value>) {
+        let iv = match &self.inner_voice {
+            Some(iv) => iv,
+            None => return,
+        };
+        let block = iv.lock().await.to_prompt_block();
+        system.push(serde_json::json!({
+            "type": "text",
+            "text": block,
+        }));
     }
 
     /// GAP 7: Inject recalled memories into the system prompt for this turn.

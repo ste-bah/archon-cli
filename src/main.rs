@@ -1597,6 +1597,15 @@ async fn run_interactive_session(
     // GAP 5/7: Wire memory graph into agent
     agent.set_memory_graph(Arc::clone(&memory_graph));
 
+    // Wire inner voice if enabled in config. The state is injected into
+    // the system prompt before every turn and updated from tool outcomes.
+    if config.consciousness.inner_voice {
+        let iv = Arc::new(tokio::sync::Mutex::new(
+            archon_consciousness::inner_voice::InnerVoice::new(),
+        ));
+        agent.set_inner_voice(iv);
+    }
+
     // Wire hook system — load hooks from .claude/settings.json if present
     {
         let settings_json_path = working_dir.join(".claude").join("settings.json");
