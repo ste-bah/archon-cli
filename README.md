@@ -340,9 +340,17 @@ timeout_secs = 300
 max_retries = 2
 
 [voice]                               # Voice input (optional)
-provider = "whisper-local"
-hotkey = "F9"
-vad_threshold = 0.5
+enabled = false                       # Spawn voice capture → STT loop
+device = "default"                    # Audio input device
+vad_threshold = 0.02                  # VAD RMS suppression floor
+stt_provider = "mock"                 # mock | openai | local
+stt_api_key = ""                      # Required for stt_provider = "openai"
+stt_url = "http://localhost:9000"     # For local whisper.cpp / server
+hotkey = "ctrl+v"                     # TUI push-to-record hotkey
+toggle_mode = true                    # true = toggle, false = push-to-talk (2s window)
+
+[remote.ssh]
+agent_forwarding = false              # Try SSH agent even without SSH_AUTH_SOCK
 ```
 
 ### Environment Variables
