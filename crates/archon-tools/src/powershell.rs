@@ -56,18 +56,18 @@ impl Tool for PowerShellTool {
         // Build sanitized environment (same as BashTool)
         let env_vars = crate::bash::sanitized_env();
 
-        let mut child = match Command::new(shell)
-            .arg("-Command")
+        let mut cmd = Command::new(shell);
+        cmd.arg("-Command")
             .arg(command)
             .current_dir(&ctx.working_dir)
             .env_clear()
             .envs(env_vars)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .stdin(Stdio::null())
-            .process_group(0)
-            .spawn()
-        {
+            .stdin(Stdio::null());
+        #[cfg(unix)]
+        cmd.process_group(0);
+        let mut child = match cmd.spawn() {
             Ok(c) => c,
             Err(e) => return ToolResult::error(format!("PowerShell not available ({shell}): {e}")),
         };

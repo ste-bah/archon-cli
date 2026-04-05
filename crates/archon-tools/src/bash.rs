@@ -93,18 +93,18 @@ impl Tool for BashTool {
         // Build sanitized environment
         let env_vars = sanitized_env();
 
-        let mut child = match Command::new("/bin/bash")
-            .arg("-c")
+        let mut cmd = Command::new("/bin/bash");
+        cmd.arg("-c")
             .arg(command)
             .current_dir(&ctx.working_dir)
             .env_clear()
             .envs(env_vars)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .stdin(Stdio::null())
-            .process_group(0) // new process group for clean kill
-            .spawn()
-        {
+            .stdin(Stdio::null());
+        #[cfg(unix)]
+        cmd.process_group(0); // new process group for clean kill
+        let mut child = match cmd.spawn() {
             Ok(c) => c,
             Err(e) => return ToolResult::error(format!("Failed to spawn bash: {e}")),
         };
