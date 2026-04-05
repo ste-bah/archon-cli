@@ -172,7 +172,7 @@ async fn cron_create_stores_name_in_metadata() {
 
     // Name must appear in archon_metadata
     assert!(
-        json["archon_metadata"].as_object().map_or(false, |m| {
+        json["archon_metadata"].as_object().is_some_and(|m| {
             m.values().any(|v| v["name"] == "My Named Task")
         }),
         "name must be in archon_metadata"

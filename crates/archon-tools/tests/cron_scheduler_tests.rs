@@ -70,7 +70,6 @@ fn jitter_config_default_values() {
     assert!(cfg.recurring_frac > 0.0 && cfg.recurring_frac <= 1.0);
     assert!(cfg.recurring_cap_ms > 0);
     assert!(cfg.one_shot_max_ms > 0);
-    assert!(cfg.one_shot_floor_ms >= 0);
     assert!(cfg.one_shot_floor_ms < cfg.one_shot_max_ms);
 }
 
