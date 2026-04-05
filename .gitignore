@@ -32,6 +32,7 @@ logs/
 
 # Packaging artifacts
 dist/
+!web/dist/
 archon-*.tar.gz
 archon-*.zip
 

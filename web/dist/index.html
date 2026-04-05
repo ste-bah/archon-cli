@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Archon</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- Sidebar: session list -->
+    <aside id="sidebar">
+      <header>
+        <h1>Archon</h1>
+        <button id="new-session-btn" title="New session">+</button>
+      </header>
+      <ul id="session-list"></ul>
+    </aside>
+
+    <!-- Main area -->
+    <main id="main">
+      <!-- Status bar -->
+      <div id="status-bar">
+        <span id="status-model">—</span>
+        <span id="status-tokens">0 tokens</span>
+        <span id="status-cost">$0.00</span>
+        <span id="status-conn" class="conn-disconnected">Disconnected</span>
+      </div>
+
+      <!-- Message list -->
+      <div id="messages" aria-live="polite" aria-label="Chat messages"></div>
+
+      <!-- Input area -->
+      <form id="chat-form">
+        <textarea
+          id="chat-input"
+          placeholder="Ask Archon anything… (Ctrl+Enter to send)"
+          rows="3"
+          aria-label="Message input"
+        ></textarea>
+        <div id="input-actions">
+          <label id="file-upload-label" title="Attach file">
+            📎
+            <input type="file" id="file-upload" multiple hidden />
+          </label>
+          <button type="submit" id="send-btn">Send</button>
+        </div>
+      </form>
+    </main>
+
+    <!-- Settings panel (hidden by default) -->
+    <div id="settings-panel" hidden>
+      <h2>Settings</h2>
+      <label>
+        Model
+        <input type="text" id="settings-model" value="claude-opus-4-5-20251101" />
+      </label>
+      <label>
+        Provider
+        <select id="settings-provider">
+          <option value="anthropic">Anthropic</option>
+        </select>
+      </label>
+      <label>
+        Effort
+        <select id="settings-effort">
+          <option value="high">High</option>
+          <option value="medium">Medium</option>
+          <option value="low">Low</option>
+        </select>
+      </label>
+      <button id="settings-save-btn">Save</button>
+      <button id="settings-close-btn">Close</button>
+    </div>
+
+    <!-- Toolbar -->
+    <nav id="toolbar">
+      <button id="settings-open-btn" title="Settings">⚙</button>
+    </nav>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
