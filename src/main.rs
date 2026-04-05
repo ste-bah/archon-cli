@@ -183,14 +183,20 @@ async fn main() -> Result<()> {
     if config.voice.enabled {
         use archon_tui::app::TuiEvent as VTuiEvent;
         use archon_tui::voice::pipeline::{
-            AudioSource, MockAudioSource, VoicePipeline, VoiceTrigger, install_trigger_sender,
-            voice_loop,
+            AudioSource, MockAudioSource, VoicePipeline, VoiceTrigger, hotkey_action_for_mode,
+            install_toggle_mode, install_trigger_sender, voice_loop,
         };
         use archon_tui::voice::stt::{LocalStt, MockStt, OpenAiStt, SttProvider};
         use std::sync::Arc as StdArc;
 
         let (trig_tx, trig_rx) = tokio::sync::mpsc::channel::<VoiceTrigger>(16);
         install_trigger_sender(trig_tx);
+        install_toggle_mode(config.voice.toggle_mode);
+        tracing::info!(
+            "voice: toggle_mode={} (hotkey action={:?})",
+            config.voice.toggle_mode,
+            hotkey_action_for_mode(config.voice.toggle_mode)
+        );
         // Standalone event channel: voice_loop always has a receiver; the TUI
         // clones and forwards VoiceText via its own channel when the TUI is
         // active. In print/non-TUI modes, events are consumed by the drain task.
@@ -280,12 +286,16 @@ async fn main() -> Result<()> {
                     println!(
                         "Remote SSH: connecting to {user}@{host}:{port} (session {remote_session_id})"
                     );
+                    tracing::info!(
+                        "remote ssh: agent_forwarding={} (from config.remote.ssh.agent_forwarding)",
+                        config.remote.ssh.agent_forwarding
+                    );
                     let ssh_cfg = SshConnectionConfig {
                         host: host.clone(),
                         port,
                         user: user.clone(),
                         key_file: key.clone(),
-                        agent_forwarding: false,
+                        agent_forwarding: config.remote.ssh.agent_forwarding,
                         session_id: remote_session_id.clone(),
                         sync_mode: SyncMode::Manual,
                     };

@@ -1269,15 +1269,14 @@ pub async fn run_tui(
                         } => {
                             app.thinking.toggle_expand();
                         }
-                        // Ctrl+V = toggle voice recording (TASK-WIRE-007)
+                        // Ctrl+V = voice hotkey; dispatch respects
+                        // config.voice.toggle_mode (TASK-WIRE-007/009).
                         KeyEvent {
                             code: KeyCode::Char('v'),
                             modifiers: KeyModifiers::CONTROL,
                             ..
                         } => {
-                            crate::voice::pipeline::fire_trigger(
-                                crate::voice::pipeline::VoiceTrigger::Toggle,
-                            );
+                            crate::voice::pipeline::fire_trigger_for_hotkey();
                         }
                         // Page Up = scroll up
                         KeyEvent {

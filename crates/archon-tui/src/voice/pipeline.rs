@@ -51,6 +51,60 @@ pub enum VoiceTrigger {
     Cancel,
 }
 
+/// Hotkey dispatch action selected by `config.voice.toggle_mode`.
+///
+/// - `Toggle` (toggle_mode=true): each Ctrl+V press toggles recording
+///   state — press to start, press again to stop+transcribe.
+/// - `PushToTalk` (toggle_mode=false): each Ctrl+V press starts a
+///   push-to-talk capture that auto-finalizes after a short window.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HotkeyAction {
+    Toggle,
+    PushToTalk,
+}
+
+/// Pure selection function — maps `config.voice.toggle_mode` to the
+/// concrete hotkey behavior. Called by the binary at startup to log
+/// the chosen mode AND by the TUI key handler to dispatch correctly.
+pub fn hotkey_action_for_mode(toggle_mode: bool) -> HotkeyAction {
+    if toggle_mode {
+        HotkeyAction::Toggle
+    } else {
+        HotkeyAction::PushToTalk
+    }
+}
+
+/// Duration of a push-to-talk capture window before auto-stop fires.
+pub const PUSH_TO_TALK_WINDOW: std::time::Duration = std::time::Duration::from_millis(2000);
+
+// Toggle-mode OnceLock — read by fire_trigger_for_hotkey.
+static VOICE_TOGGLE_MODE: OnceLock<bool> = OnceLock::new();
+
+/// Install the configured toggle_mode value. First call wins.
+pub fn install_toggle_mode(toggle_mode: bool) {
+    let _ = VOICE_TOGGLE_MODE.set(toggle_mode);
+}
+
+/// Fire a hotkey press using the installed toggle_mode. When
+/// `toggle_mode=true` a single Toggle is sent. When `false`, a Toggle
+/// is sent immediately (start) and a second Toggle is scheduled on a
+/// spawned task after [`PUSH_TO_TALK_WINDOW`] (auto-stop).
+pub fn fire_trigger_for_hotkey() {
+    let mode = VOICE_TOGGLE_MODE.get().copied().unwrap_or(true);
+    match hotkey_action_for_mode(mode) {
+        HotkeyAction::Toggle => {
+            fire_trigger(VoiceTrigger::Toggle);
+        }
+        HotkeyAction::PushToTalk => {
+            fire_trigger(VoiceTrigger::Toggle);
+            tokio::spawn(async {
+                tokio::time::sleep(PUSH_TO_TALK_WINDOW).await;
+                fire_trigger(VoiceTrigger::Toggle);
+            });
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // AudioSource trait
 // ---------------------------------------------------------------------------
