@@ -1269,6 +1269,16 @@ pub async fn run_tui(
                         } => {
                             app.thinking.toggle_expand();
                         }
+                        // Ctrl+V = toggle voice recording (TASK-WIRE-007)
+                        KeyEvent {
+                            code: KeyCode::Char('v'),
+                            modifiers: KeyModifiers::CONTROL,
+                            ..
+                        } => {
+                            crate::voice::pipeline::fire_trigger(
+                                crate::voice::pipeline::VoiceTrigger::Toggle,
+                            );
+                        }
                         // Page Up = scroll up
                         KeyEvent {
                             code: KeyCode::PageUp,

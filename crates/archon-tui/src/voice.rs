@@ -1,5 +1,6 @@
 pub mod capture;
 pub mod hotkey;
+pub mod pipeline;
 pub mod stt;
 
 use archon_core::config::VoiceConfig;

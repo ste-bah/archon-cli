@@ -56,6 +56,23 @@ fn parse_layer_filter(sources: &[String]) -> Vec<ConfigLayer> {
         .collect()
 }
 
+/// Strip `cache_control` keys from system prompt blocks when prompt caching
+/// is disabled via `config.context.prompt_cache = false` (TASK-WIRE-003).
+/// A no-op when `prompt_cache_enabled` is true.
+fn strip_cache_control_if_disabled(
+    blocks: &mut [serde_json::Value],
+    prompt_cache_enabled: bool,
+) {
+    if prompt_cache_enabled {
+        return;
+    }
+    for block in blocks.iter_mut() {
+        if let Some(obj) = block.as_object_mut() {
+            obj.remove("cache_control");
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -153,6 +170,65 @@ async fn main() -> Result<()> {
     }
 
     tracing::info!("Archon CLI v0.1.0 started, session {session_id}");
+    if config.memory.enabled {
+        tracing::info!("memory.enabled=true: memory tools + graph injection ACTIVE");
+    } else {
+        tracing::info!("memory.enabled=false: memory tools and graph injection DISABLED");
+    }
+    if config.context.prompt_cache {
+        tracing::info!("context.prompt_cache=true: cache_control hints ACTIVE");
+    } else {
+        tracing::info!("context.prompt_cache=false: cache_control hints DISABLED");
+    }
+    if config.voice.enabled {
+        use archon_tui::app::TuiEvent as VTuiEvent;
+        use archon_tui::voice::pipeline::{
+            AudioSource, MockAudioSource, VoicePipeline, VoiceTrigger, install_trigger_sender,
+            voice_loop,
+        };
+        use archon_tui::voice::stt::{LocalStt, MockStt, OpenAiStt, SttProvider};
+        use std::sync::Arc as StdArc;
+
+        let (trig_tx, trig_rx) = tokio::sync::mpsc::channel::<VoiceTrigger>(16);
+        install_trigger_sender(trig_tx);
+        // Standalone event channel: voice_loop always has a receiver; the TUI
+        // clones and forwards VoiceText via its own channel when the TUI is
+        // active. In print/non-TUI modes, events are consumed by the drain task.
+        let (voice_evt_tx, mut voice_evt_rx) = tokio::sync::mpsc::channel::<VTuiEvent>(16);
+        tokio::spawn(async move {
+            while let Some(evt) = voice_evt_rx.recv().await {
+                if let VTuiEvent::VoiceText(text) = evt {
+                    tracing::info!("voice: VoiceText event ({} chars)", text.len());
+                }
+            }
+        });
+        let audio: StdArc<dyn AudioSource> =
+            StdArc::new(MockAudioSource::with_samples(vec![0.0_f32; 16000]));
+        let stt: StdArc<dyn SttProvider> = match config.voice.stt_provider.as_str() {
+            "openai" if !config.voice.stt_api_key.is_empty() => StdArc::new(OpenAiStt {
+                api_key: config.voice.stt_api_key.clone(),
+                url: config.voice.stt_url.clone(),
+            }),
+            "local" => StdArc::new(LocalStt {
+                url: config.voice.stt_url.clone(),
+            }),
+            _ => StdArc::new(MockStt {
+                response: "[voice: no STT configured]".to_string(),
+            }),
+        };
+        let pipeline = VoicePipeline::new(audio, stt, config.voice.vad_threshold);
+        tokio::spawn(async move {
+            voice_loop(trig_rx, voice_evt_tx, pipeline).await;
+        });
+        tracing::info!(
+            "voice: pipeline wired (provider={}, hotkey=ctrl+v)",
+            config.voice.stt_provider
+        );
+        // Give the spawned voice_loop task a chance to emit its startup log.
+        tokio::task::yield_now().await;
+    } else {
+        tracing::info!("voice: disabled (config.voice.enabled=false)");
+    }
 
     // Handle subcommands
     match cli.command {
@@ -186,7 +262,14 @@ async fn main() -> Result<()> {
                     port,
                     key,
                 } => {
-                    let (user, host) = target.split_once('@').unwrap_or(("root", target.as_str()));
+                    use archon_core::remote::{
+                        RemoteTransport, SshConnectionConfig, SyncMode,
+                        protocol::AgentMessage, ssh::SshTransport,
+                    };
+                    let (user, host) = target
+                        .split_once('@')
+                        .map(|(u, h)| (u.to_string(), h.to_string()))
+                        .unwrap_or_else(|| ("root".to_string(), target.clone()));
                     let remote_session_id = cli
                         .session_id
                         .clone()
@@ -197,11 +280,50 @@ async fn main() -> Result<()> {
                     println!(
                         "Remote SSH: connecting to {user}@{host}:{port} (session {remote_session_id})"
                     );
-                    if let Some(ref cmd) = command {
-                        println!("  command: {cmd}");
-                    }
-                    if let Some(ref k) = key {
-                        println!("  key: {}", k.display());
+                    let ssh_cfg = SshConnectionConfig {
+                        host: host.clone(),
+                        port,
+                        user: user.clone(),
+                        key_file: key.clone(),
+                        agent_forwarding: false,
+                        session_id: remote_session_id.clone(),
+                        sync_mode: SyncMode::Manual,
+                    };
+                    let session = match SshTransport.connect(&ssh_cfg).await {
+                        Ok(s) => s,
+                        Err(e) => {
+                            eprintln!("SSH connection failed: {e}");
+                            std::process::exit(1);
+                        }
+                    };
+                    println!("Connected. Session: {}", session.session_id);
+                    if let Some(cmd) = command {
+                        let msg = AgentMessage::UserMessage { content: cmd };
+                        if let Err(e) = session.send(&msg).await {
+                            eprintln!("SSH send failed: {e}");
+                            let _ = session.disconnect().await;
+                            std::process::exit(1);
+                        }
+                        match session.recv().await {
+                            Ok(AgentMessage::AssistantMessage { content }) => println!("{content}"),
+                            Ok(AgentMessage::Error { message }) => {
+                                eprintln!("remote error: {message}");
+                                let _ = tokio::time::timeout(
+                                    std::time::Duration::from_secs(2),
+                                    async { session.disconnect().await },
+                                )
+                                .await;
+                                std::process::exit(1);
+                            }
+                            Ok(other) => println!("{other:?}"),
+                            Err(e) => {
+                                eprintln!("SSH recv failed: {e}");
+                                std::process::exit(1);
+                            }
+                        }
+                    } else if let Err(e) = session.disconnect().await {
+                        eprintln!("SSH disconnect failed: {e}");
+                        std::process::exit(1);
                     }
                 }
                 RemoteAction::Ws { url, token } => {
@@ -311,7 +433,31 @@ async fn main() -> Result<()> {
                     }
                 }
                 TeamAction::List => {
-                    println!("Teams: (configure in archon.toml [[orchestrator.teams]])");
+                    use archon_core::team::TeamManager;
+                    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+                    let manager = TeamManager::new(cwd.clone());
+                    match manager.list_teams() {
+                        Ok(ids) if ids.is_empty() => {
+                            println!("No teams found in {}/teams", cwd.display());
+                        }
+                        Ok(ids) => {
+                            println!("Teams ({}):", ids.len());
+                            for id in ids {
+                                match manager.load_team(&id) {
+                                    Ok(cfg) => println!(
+                                        "  {id:<24}  {name}  ({n} members)",
+                                        name = cfg.name,
+                                        n = cfg.members.len()
+                                    ),
+                                    Err(e) => println!("  {id:<24}  <unreadable team.json: {e}>"),
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to list teams: {e}");
+                            std::process::exit(1);
+                        }
+                    }
                 }
             }
             return Ok(());
@@ -437,11 +583,65 @@ async fn main() -> Result<()> {
     }
 
     // For --resume with ID, load the session messages to restore
-    let resume_messages = if let Some(Some(ref id)) = cli.resume {
+    let mut resume_messages = if let Some(Some(ref id)) = cli.resume {
         Some(load_resume_messages(id)?)
     } else {
         None
     };
+
+    // ── Auto-resume (TASK-WIRE-004) ────────────────────────────
+    // Priority: explicit --resume > --no-resume > config.session.auto_resume.
+    if cli.resume.is_some() {
+        tracing::info!("auto_resume: skipped (--resume specified)");
+    } else if cli.no_resume {
+        tracing::info!("auto_resume: skipped (--no-resume)");
+    } else if !config.session.auto_resume {
+        tracing::info!("auto_resume: skipped (session.auto_resume=false)");
+    } else {
+        // auto_resume is enabled. Look up the most-recent session for this cwd.
+        let cwd = std::env::current_dir().unwrap_or_default();
+        let cwd_str = cwd.to_string_lossy().to_string();
+        let db_path = archon_session::storage::default_db_path();
+        match archon_session::storage::SessionStore::open(&db_path) {
+            Ok(store) => {
+                match archon_session::listing::most_recent_in_directory(&store, &cwd_str) {
+                    Ok(Some(meta)) => {
+                        tracing::info!(
+                            "auto_resume: found prior session {} ({} messages) for {}",
+                            &meta.id[..8.min(meta.id.len())],
+                            meta.message_count,
+                            cwd_str
+                        );
+                        eprintln!(
+                            "Auto-resumed session {} — pass --no-resume to start fresh.",
+                            &meta.id[..8.min(meta.id.len())],
+                        );
+                        match archon_session::resume::resume_session(&store, &meta.id) {
+                            Ok((_m, raw_messages)) => {
+                                let messages: Vec<serde_json::Value> = raw_messages
+                                    .iter()
+                                    .filter_map(|s| serde_json::from_str(s).ok())
+                                    .collect();
+                                resume_messages = Some(messages);
+                            }
+                            Err(e) => {
+                                tracing::warn!("auto_resume: failed to load messages: {e}");
+                            }
+                        }
+                    }
+                    Ok(None) => {
+                        tracing::info!("auto_resume: no prior session for this directory");
+                    }
+                    Err(e) => {
+                        tracing::warn!("auto_resume: lookup failed: {e}");
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::warn!("auto_resume: failed to open session store: {e}");
+            }
+        }
+    }
 
     // ── Session search & management (CLI-208) ──────────────────
     if cli.sessions {
@@ -924,7 +1124,10 @@ async fn run_print_mode_session(
     let git_branch = git_info.as_ref().map(|g| g.branch.as_str());
     let env_section = build_environment_section(&working_dir, git_branch);
 
-    let identity_blocks = identity.system_prompt_blocks("", &claude_md, &env_section);
+    let mut identity_blocks = identity.system_prompt_blocks("", &claude_md, &env_section);
+    // Gated by config.context.prompt_cache (TASK-WIRE-003) — strip cache_control
+    // from identity blocks when disabled so print mode honours the flag too.
+    strip_cache_control_if_disabled(&mut identity_blocks, config.context.prompt_cache);
     let mut system_prompt: Vec<serde_json::Value> = identity_blocks;
 
     // ── Output style injection for print mode (CLI-310) ──────────
@@ -1377,13 +1580,15 @@ async fn run_interactive_session(
         cancel
     };
 
-    // Register memory tools backed by the CozoDB graph
-    registry.register(Box::new(archon_tools::memory::MemoryStoreTool::new(
-        Arc::clone(&memory_graph),
-    )));
-    registry.register(Box::new(archon_tools::memory::MemoryRecallTool::new(
-        Arc::clone(&memory_graph),
-    )));
+    // Register memory tools backed by the CozoDB graph — gated by config.memory.enabled (TASK-WIRE-002)
+    if config.memory.enabled {
+        registry.register(Box::new(archon_tools::memory::MemoryStoreTool::new(
+            Arc::clone(&memory_graph),
+        )));
+        registry.register(Box::new(archon_tools::memory::MemoryRecallTool::new(
+            Arc::clone(&memory_graph),
+        )));
+    }
 
     // ── VerbosityToggle (CLI-314) ──────────────────────────────
     // Initial verbosity comes from config (default: true = verbose).
@@ -1497,8 +1702,13 @@ async fn run_interactive_session(
                     "type": "text",
                     "text": section.content,
                 });
-                if let Some(ref cc) = section.cache_control {
-                    block["cache_control"] = serde_json::json!({ "type": cc });
+                // Gated by config.context.prompt_cache (TASK-WIRE-003) — when
+                // disabled, we omit the cache_control hint entirely so the API
+                // treats every block as non-cacheable.
+                if config.context.prompt_cache {
+                    if let Some(ref cc) = section.cache_control {
+                        block["cache_control"] = serde_json::json!({ "type": cc });
+                    }
                 }
                 block
             })
@@ -1594,8 +1804,10 @@ async fn run_interactive_session(
         agent.set_checkpoint_store(store);
     }
 
-    // GAP 5/7: Wire memory graph into agent
-    agent.set_memory_graph(Arc::clone(&memory_graph));
+    // GAP 5/7: Wire memory graph into agent — gated by config.memory.enabled (TASK-WIRE-002)
+    if config.memory.enabled {
+        agent.set_memory_graph(Arc::clone(&memory_graph));
+    }
 
     // Wire inner voice if enabled in config. The state is injected into
     // the system prompt before every turn and updated from tool outcomes.
@@ -3670,5 +3882,40 @@ async fn fetch_account_uuid(auth: &archon_llm::auth::AuthProvider) -> String {
             tracing::warn!("profile fetch error: {e}");
             String::new()
         }
+    }
+}
+
+
+#[cfg(test)]
+mod wire_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn strip_cache_control_noop_when_enabled() {
+        let mut blocks = vec![
+            json!({"type": "text", "text": "a", "cache_control": {"type": "ephemeral"}}),
+            json!({"type": "text", "text": "b"}),
+        ];
+        strip_cache_control_if_disabled(&mut blocks, true);
+        assert!(blocks[0].get("cache_control").is_some());
+        assert!(blocks[1].get("cache_control").is_none());
+    }
+
+    #[test]
+    fn strip_cache_control_removes_key_when_disabled() {
+        let mut blocks = vec![
+            json!({"type": "text", "text": "a", "cache_control": {"type": "ephemeral"}}),
+            json!({"type": "text", "text": "b", "cache_control": {"type": "ephemeral", "scope": "org"}}),
+            json!({"type": "text", "text": "c"}),
+        ];
+        strip_cache_control_if_disabled(&mut blocks, false);
+        assert!(blocks[0].get("cache_control").is_none());
+        assert!(blocks[1].get("cache_control").is_none());
+        assert!(blocks[2].get("cache_control").is_none());
+        // Text content preserved
+        assert_eq!(blocks[0].get("text").unwrap(), "a");
+        assert_eq!(blocks[1].get("text").unwrap(), "b");
+        assert_eq!(blocks[2].get("text").unwrap(), "c");
     }
 }

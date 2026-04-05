@@ -21,6 +21,10 @@ pub struct Cli {
     #[arg(long)]
     pub resume: Option<Option<String>>,
 
+    /// Disable auto-resume for this invocation (overrides session.auto_resume=true)
+    #[arg(long)]
+    pub no_resume: bool,
+
     /// Enable fast mode (reduced latency, lower quality)
     #[arg(long)]
     pub fast: bool,

@@ -110,6 +110,9 @@ tracing.workspace = true
 anyhow.workspace = true
 uuid.workspace = true
 
+[dev-dependencies]
+tempfile.workspace = true
+
 [profile.release]
 lto = true
 strip = true

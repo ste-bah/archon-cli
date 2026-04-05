@@ -46,6 +46,23 @@ impl std::fmt::Debug for RemoteSession {
     }
 }
 
+impl RemoteSession {
+    /// Send a message to the remote peer.
+    pub async fn send(&self, message: &protocol::AgentMessage) -> anyhow::Result<()> {
+        self.inner.send(message).await
+    }
+
+    /// Receive the next message from the remote peer.
+    pub async fn recv(&self) -> anyhow::Result<protocol::AgentMessage> {
+        self.inner.recv().await
+    }
+
+    /// Close the remote session cleanly.
+    pub async fn disconnect(self) -> anyhow::Result<()> {
+        self.inner.disconnect().await
+    }
+}
+
 #[async_trait]
 #[allow(dead_code)]
 pub(crate) trait RemoteSessionInner {

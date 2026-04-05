@@ -543,8 +543,6 @@ impl Default for SessionConfig {
 pub struct CheckpointConfig {
     pub enabled: bool,
     pub max_checkpoints: u32,
-    /// Whether to snapshot files on first read (default false to avoid storage bloat).
-    pub snapshot_on_read: bool,
 }
 
 impl Default for CheckpointConfig {
@@ -552,7 +550,6 @@ impl Default for CheckpointConfig {
         Self {
             enabled: true,
             max_checkpoints: 10,
-            snapshot_on_read: false,
         }
     }
 }
