@@ -119,12 +119,20 @@ strip = true
 opt-level = "z"
 codegen-units = 1
 
-# Reduce debuginfo in the test profile to keep linker memory + disk usage
-# bounded on CI. The workspace has a massive native dep tree (tree-sitter,
-# ort, russh, libgit2, aws-lc-sys, …) and debuginfo=2 has caused rust-lld
-# to SIGBUS on Ubuntu CI during the update_tests link.
+# Keep linker memory + disk usage bounded on CI. The workspace has a
+# massive native dep tree (tree-sitter, ort, russh, libgit2, aws-lc-sys,
+# onnxruntime, wasmtime, …) and rust-lld SIGBUSes on Ubuntu CI when
+# parallelFor'ing DWARF from every rlib, even at line-tables-only. The
+# fix: strip debuginfo from ALL third-party deps. Our own crates keep
+# line-tables-only so backtraces still resolve to archon-* source.
 [profile.test]
 debug = "line-tables-only"
 
+[profile.test.package."*"]
+debug = 0
+
 [profile.dev]
 debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = 0
