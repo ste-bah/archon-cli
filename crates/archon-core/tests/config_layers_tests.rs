@@ -9,7 +9,9 @@ use std::path::PathBuf;
 
 use toml::Value;
 
-use archon_core::config_layers::{deep_merge_toml, discover_config_paths, load_layered_config, ConfigLayer};
+use archon_core::config_layers::{
+    ConfigLayer, deep_merge_toml, discover_config_paths, load_layered_config,
+};
 use archon_core::config_source::{ConfigSourceMap, format_sources};
 
 // ---------------------------------------------------------------------------
@@ -61,7 +63,10 @@ fn merge_array_overlay_replaces() {
     let base = parse_table("arr = [1, 2, 3]");
     let overlay = parse_table("arr = [4, 5]");
     let result = deep_merge_toml(base, overlay);
-    let arr = result.get("arr").and_then(Value::as_array).expect("arr should exist");
+    let arr = result
+        .get("arr")
+        .and_then(Value::as_array)
+        .expect("arr should exist");
     let ints: Vec<i64> = arr.iter().filter_map(Value::as_integer).collect();
     assert_eq!(ints, vec![4, 5]);
 }
@@ -82,7 +87,10 @@ model = "opus"
 "#,
     );
     let result = deep_merge_toml(base, overlay);
-    let api = result.get("api").and_then(Value::as_table).expect("api table");
+    let api = result
+        .get("api")
+        .and_then(Value::as_table)
+        .expect("api table");
     assert_eq!(api.get("model").and_then(Value::as_str), Some("opus"));
     assert_eq!(api.get("retries").and_then(Value::as_integer), Some(3));
 }
@@ -140,7 +148,12 @@ mode = "auto"
     );
     let result = deep_merge_toml(base, overlay);
     assert!(result.get("api").and_then(Value::as_table).is_some());
-    assert!(result.get("permissions").and_then(Value::as_table).is_some());
+    assert!(
+        result
+            .get("permissions")
+            .and_then(Value::as_table)
+            .is_some()
+    );
     let perm = result.get("permissions").and_then(Value::as_table).unwrap();
     assert_eq!(perm.get("mode").and_then(Value::as_str), Some("auto"));
 }
@@ -241,10 +254,18 @@ fn discover_all_three_layers() {
     let work = tmp.join("work");
     let archon_dir = work.join(".archon");
     fs::create_dir_all(&archon_dir).unwrap();
-    fs::write(archon_dir.join("config.toml"), "[api]\ndefault_model = \"opus\"\n").unwrap();
+    fs::write(
+        archon_dir.join("config.toml"),
+        "[api]\ndefault_model = \"opus\"\n",
+    )
+    .unwrap();
 
     // local config
-    fs::write(archon_dir.join("config.local.toml"), "[api]\ndefault_model = \"haiku\"\n").unwrap();
+    fs::write(
+        archon_dir.join("config.local.toml"),
+        "[api]\ndefault_model = \"haiku\"\n",
+    )
+    .unwrap();
 
     let layers = discover_config_paths(Some(&user_cfg), &work, None);
     assert_eq!(layers.len(), 3, "expected 3 layers, got: {layers:?}");
@@ -277,8 +298,8 @@ default_model = "claude-opus-4-6"
     let work = tmp.join("work");
     fs::create_dir_all(&work).unwrap();
 
-    let config = load_layered_config(Some(&user_cfg), &work, None, None)
-        .expect("load should succeed");
+    let config =
+        load_layered_config(Some(&user_cfg), &work, None, None).expect("load should succeed");
     assert_eq!(config.api.default_model, "claude-opus-4-6");
     cleanup_temp_dir(&tmp);
 }
@@ -299,8 +320,8 @@ fn load_project_overrides_user() {
     )
     .unwrap();
 
-    let config = load_layered_config(Some(&user_cfg), &work, None, None)
-        .expect("load should succeed");
+    let config =
+        load_layered_config(Some(&user_cfg), &work, None, None).expect("load should succeed");
     assert_eq!(config.api.default_model, "claude-opus-4-6");
     cleanup_temp_dir(&tmp);
 }
@@ -326,8 +347,8 @@ fn load_local_overrides_project() {
     )
     .unwrap();
 
-    let config = load_layered_config(Some(&user_cfg), &work, None, None)
-        .expect("load should succeed");
+    let config =
+        load_layered_config(Some(&user_cfg), &work, None, None).expect("load should succeed");
     assert_eq!(config.api.default_model, "claude-haiku-3-6");
     cleanup_temp_dir(&tmp);
 }
@@ -356,10 +377,13 @@ max_retries = 5
     )
     .unwrap();
 
-    let config = load_layered_config(Some(&user_cfg), &work, None, None)
-        .expect("load should succeed");
+    let config =
+        load_layered_config(Some(&user_cfg), &work, None, None).expect("load should succeed");
     assert_eq!(config.api.default_model, "claude-opus-4-6");
-    assert_eq!(config.api.max_retries, 5, "max_retries should inherit from user layer");
+    assert_eq!(
+        config.api.max_retries, 5,
+        "max_retries should inherit from user layer"
+    );
     cleanup_temp_dir(&tmp);
 }
 
@@ -389,8 +413,8 @@ allow_paths = ["/c"]
     )
     .unwrap();
 
-    let config = load_layered_config(Some(&user_cfg), &work, None, None)
-        .expect("load should succeed");
+    let config =
+        load_layered_config(Some(&user_cfg), &work, None, None).expect("load should succeed");
     assert_eq!(
         config.permissions.allow_paths,
         vec!["/c".to_string()],
@@ -407,7 +431,11 @@ fn load_settings_overlay() {
     fs::write(&user_cfg, "[api]\ndefault_model = \"claude-sonnet-4-6\"\n").unwrap();
 
     let settings_file = tmp.join("override.toml");
-    fs::write(&settings_file, "[api]\ndefault_model = \"claude-opus-4-6\"\n").unwrap();
+    fs::write(
+        &settings_file,
+        "[api]\ndefault_model = \"claude-opus-4-6\"\n",
+    )
+    .unwrap();
 
     let work = tmp.join("work");
     fs::create_dir_all(&work).unwrap();
@@ -446,7 +474,11 @@ fn load_invalid_layer_warns_and_skips() {
     let archon_dir = work.join(".archon");
     fs::create_dir_all(&archon_dir).unwrap();
     // Write intentionally broken TOML
-    fs::write(archon_dir.join("config.toml"), "this is [[[not valid toml!!!").unwrap();
+    fs::write(
+        archon_dir.join("config.toml"),
+        "this is [[[not valid toml!!!",
+    )
+    .unwrap();
 
     let config = load_layered_config(Some(&user_cfg), &work, None, None)
         .expect("invalid layer should be skipped, not crash");
@@ -582,7 +614,10 @@ max_retries = 5
         .expect("source tracking should succeed");
     let output = format_sources(&sources);
 
-    assert!(!output.is_empty(), "format_sources should produce non-empty output");
+    assert!(
+        !output.is_empty(),
+        "format_sources should produce non-empty output"
+    );
     // Should contain layer names and dotted key paths
     assert!(
         output.contains("user") || output.contains("User"),

@@ -286,9 +286,7 @@ async fn glob_tool_finds_files() {
     fs::write(ctx.working_dir.join("b.rs"), "").expect("write");
     fs::write(ctx.working_dir.join("c.txt"), "").expect("write");
 
-    let result = GlobTool
-        .execute(json!({ "pattern": "*.rs" }), &ctx)
-        .await;
+    let result = GlobTool.execute(json!({ "pattern": "*.rs" }), &ctx).await;
 
     assert!(!result.is_error);
     assert!(result.content.contains("a.rs"));
@@ -317,7 +315,11 @@ async fn glob_tool_no_matches() {
 #[tokio::test]
 async fn grep_tool_finds_matches() {
     let ctx = test_ctx();
-    fs::write(ctx.working_dir.join("src.rs"), "fn main() {}\nfn helper() {}\n").expect("write");
+    fs::write(
+        ctx.working_dir.join("src.rs"),
+        "fn main() {}\nfn helper() {}\n",
+    )
+    .expect("write");
 
     let result = GrepTool
         .execute(
@@ -420,7 +422,11 @@ fn schemas_are_valid_json_objects() {
     ];
     for tool in &tools {
         let schema = tool.input_schema();
-        assert!(schema.get("type").is_some(), "{} schema missing 'type'", tool.name());
+        assert!(
+            schema.get("type").is_some(),
+            "{} schema missing 'type'",
+            tool.name()
+        );
         assert!(
             schema.get("properties").is_some(),
             "{} schema missing 'properties'",

@@ -23,15 +23,11 @@ impl SendMessageTeamTool {
     }
 
     fn team_dir(&self, team_id: &str) -> PathBuf {
-        self.project_dir
-            .join(".claude")
-            .join("teams")
-            .join(team_id)
+        self.project_dir.join(".claude").join("teams").join(team_id)
     }
 
     fn inbox_path(&self, team_id: &str, role: &str) -> PathBuf {
-        self.team_dir(team_id)
-            .join(format!("inbox-{role}.jsonl"))
+        self.team_dir(team_id).join(format!("inbox-{role}.jsonl"))
     }
 
     fn load_config(&self, team_id: &str) -> Result<TeamConfig, String> {

@@ -1,4 +1,4 @@
-use archon_core::cli_flags::{resolve_flags, FlagInput};
+use archon_core::cli_flags::{FlagInput, resolve_flags};
 use std::path::PathBuf;
 
 /// Helper to create a default FlagInput with all None/false values.
@@ -152,10 +152,7 @@ fn resolve_tool_blacklist() {
     let mut input = empty_input();
     input.disallowed_tools = Some(vec!["Bash".to_string()]);
     let resolved = resolve_flags(&input).expect("should resolve");
-    assert_eq!(
-        resolved.tool_blacklist,
-        Some(vec!["Bash".to_string()])
-    );
+    assert_eq!(resolved.tool_blacklist, Some(vec!["Bash".to_string()]));
 }
 
 #[test]

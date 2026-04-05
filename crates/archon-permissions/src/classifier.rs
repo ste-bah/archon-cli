@@ -10,39 +10,96 @@ pub enum CommandClass {
 
 /// Default safe commands (auto-approve in auto mode).
 const DEFAULT_SAFE: &[&str] = &[
-    "ls", "cat", "head", "tail", "grep", "rg", "find", "wc",
-    "git status", "git log", "git diff", "git branch",
-    "npm test", "cargo test", "cargo check", "cargo clippy",
-    "python -c", "echo", "pwd", "which", "env", "date", "whoami",
-    "tree", "file", "stat", "du", "df",
+    "ls",
+    "cat",
+    "head",
+    "tail",
+    "grep",
+    "rg",
+    "find",
+    "wc",
+    "git status",
+    "git log",
+    "git diff",
+    "git branch",
+    "npm test",
+    "cargo test",
+    "cargo check",
+    "cargo clippy",
+    "python -c",
+    "echo",
+    "pwd",
+    "which",
+    "env",
+    "date",
+    "whoami",
+    "tree",
+    "file",
+    "stat",
+    "du",
+    "df",
 ];
 
 /// Default risky commands (prompt in auto mode).
 const DEFAULT_RISKY: &[&str] = &[
-    "git commit", "git checkout", "git merge", "git rebase",
-    "npm install", "pip install", "cargo build", "cargo run",
-    "mkdir", "cp", "mv", "touch", "ln",
+    "git commit",
+    "git checkout",
+    "git merge",
+    "git rebase",
+    "npm install",
+    "pip install",
+    "cargo build",
+    "cargo run",
+    "mkdir",
+    "cp",
+    "mv",
+    "touch",
+    "ln",
 ];
 
 /// Default dangerous commands (always prompt).
 const DEFAULT_DANGEROUS: &[&str] = &[
-    "rm -rf", "rm -r", "rm -fr",
-    "git push", "git push --force", "git reset --hard", "git clean",
-    "sudo", "chmod", "chown", "chgrp",
-    "kill", "pkill", "killall",
-    "dd", "mkfs", "fdisk", "mount", "umount",
-    "shutdown", "reboot", "halt",
-    "curl | sh", "wget | sh",
+    "rm -rf",
+    "rm -r",
+    "rm -fr",
+    "git push",
+    "git push --force",
+    "git reset --hard",
+    "git clean",
+    "sudo",
+    "chmod",
+    "chown",
+    "chgrp",
+    "kill",
+    "pkill",
+    "killall",
+    "dd",
+    "mkfs",
+    "fdisk",
+    "mount",
+    "umount",
+    "shutdown",
+    "reboot",
+    "halt",
+    "curl | sh",
+    "wget | sh",
 ];
 
 /// Dangerous substrings that always trigger dangerous classification.
 const DANGEROUS_SUBSTRINGS: &[&str] = &[
-    "rm -rf", "rm -r", "rm -fr",
-    "sudo ", "| sudo", "|sudo",
-    "| rm", "|rm",
-    "git push", "git reset --hard",
-    "> /dev/", ">> /dev/",
-    ":(){ :|:& };:",  // fork bomb
+    "rm -rf",
+    "rm -r",
+    "rm -fr",
+    "sudo ",
+    "| sudo",
+    "|sudo",
+    "| rm",
+    "|rm",
+    "git push",
+    "git reset --hard",
+    "> /dev/",
+    ">> /dev/",
+    ":(){ :|:& };:", // fork bomb
 ];
 
 /// Classify a shell command string.
@@ -70,21 +127,15 @@ pub fn classify_command(
         let segments: Vec<&str> = trimmed.split('|').collect();
         let mut worst = CommandClass::Safe;
         for segment in &segments {
-            let class = classify_single_command(
-                segment.trim(),
-                user_safe,
-                user_risky,
-                user_dangerous,
-            );
+            let class =
+                classify_single_command(segment.trim(), user_safe, user_risky, user_dangerous);
             worst = worse(worst, class);
         }
         return worst;
     }
 
     // Check quoted arguments in bash -c / sh -c
-    if (trimmed.starts_with("bash -c") || trimmed.starts_with("sh -c"))
-        && trimmed.len() > 8
-    {
+    if (trimmed.starts_with("bash -c") || trimmed.starts_with("sh -c")) && trimmed.len() > 8 {
         // Extract the quoted command and classify it
         let inner = extract_quoted_command(trimmed);
         if !inner.is_empty() {

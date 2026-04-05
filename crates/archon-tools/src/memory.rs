@@ -69,10 +69,10 @@ impl Tool for MemoryStoreTool {
         };
         let title = input["title"].as_str().unwrap_or("");
         let memory_type = match input["memory_type"].as_str().unwrap_or("fact") {
-            "decision"   => MemoryType::Decision,
+            "decision" => MemoryType::Decision,
             "preference" => MemoryType::Preference,
-            "rule"       => MemoryType::Rule,
-            _            => MemoryType::Fact,
+            "rule" => MemoryType::Rule,
+            _ => MemoryType::Fact,
         };
         let tags: Vec<String> = input["tags"]
             .as_array()
@@ -83,7 +83,10 @@ impl Tool for MemoryStoreTool {
             })
             .unwrap_or_default();
 
-        match self.graph.store_memory(content, title, memory_type, 0.8, &tags, "agent", "") {
+        match self
+            .graph
+            .store_memory(content, title, memory_type, 0.8, &tags, "agent", "")
+        {
             Ok(id) => {
                 let short_id = &id[..8.min(id.len())];
                 ToolResult::success(format!("Memory stored [{short_id}]: {title}"))
@@ -159,13 +162,19 @@ impl Tool for MemoryRecallTool {
             Ok(memories) => {
                 let mut out = format!("{} memories found for '{query}':\n\n", memories.len());
                 for m in &memories {
-                    let title = if m.title.is_empty() { "(untitled)" } else { &m.title };
+                    let title = if m.title.is_empty() {
+                        "(untitled)"
+                    } else {
+                        &m.title
+                    };
                     let short_id = &m.id[..8.min(m.id.len())];
                     let snippet: String = m.content.chars().take(300).collect();
-                    let ellipsis = if m.content.chars().count() > 300 { "..." } else { "" };
-                    out.push_str(&format!(
-                        "[{short_id}] {title}\n{snippet}{ellipsis}\n\n"
-                    ));
+                    let ellipsis = if m.content.chars().count() > 300 {
+                        "..."
+                    } else {
+                        ""
+                    };
+                    out.push_str(&format!("[{short_id}] {title}\n{snippet}{ellipsis}\n\n"));
                 }
                 ToolResult::success(out)
             }
@@ -203,18 +212,31 @@ mod tests {
         let recall = MemoryRecallTool::new(Arc::clone(&graph));
         let ctx = test_ctx();
 
-        let result = store.execute(serde_json::json!({
-            "content": "Rust async uses tokio runtime",
-            "title": "async runtime note",
-            "memory_type": "fact"
-        }), &ctx).await;
+        let result = store
+            .execute(
+                serde_json::json!({
+                    "content": "Rust async uses tokio runtime",
+                    "title": "async runtime note",
+                    "memory_type": "fact"
+                }),
+                &ctx,
+            )
+            .await;
         assert!(!result.is_error, "store failed: {}", result.content);
 
-        let result = recall.execute(serde_json::json!({
-            "query": "tokio"
-        }), &ctx).await;
+        let result = recall
+            .execute(
+                serde_json::json!({
+                    "query": "tokio"
+                }),
+                &ctx,
+            )
+            .await;
         assert!(!result.is_error);
-        assert!(result.content.contains("tokio"), "recall missed stored content");
+        assert!(
+            result.content.contains("tokio"),
+            "recall missed stored content"
+        );
     }
 
     #[tokio::test]
@@ -233,9 +255,14 @@ mod tests {
         let recall = MemoryRecallTool::new(Arc::clone(&graph));
         let ctx = test_ctx();
 
-        let result = recall.execute(serde_json::json!({
-            "query": "xyzzy_nonexistent_term_12345"
-        }), &ctx).await;
+        let result = recall
+            .execute(
+                serde_json::json!({
+                    "query": "xyzzy_nonexistent_term_12345"
+                }),
+                &ctx,
+            )
+            .await;
         assert!(!result.is_error);
         assert!(result.content.contains("No memories found"));
     }

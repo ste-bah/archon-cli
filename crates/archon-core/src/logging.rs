@@ -1,10 +1,10 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use tracing_subscriber::EnvFilter;
 use tracing_subscriber::fmt::writer::MakeWriterExt;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
-use tracing_subscriber::EnvFilter;
 
 // ---------------------------------------------------------------------------
 // Error type
@@ -67,11 +67,9 @@ pub fn init_logging(
 
     // Build the env filter: ARCHON_LOG env var takes precedence over config.
     // Always suppress noisy third-party crate logs regardless of base level.
-    let base_filter = EnvFilter::try_from_env("ARCHON_LOG")
-        .unwrap_or_else(|_| {
-            EnvFilter::try_new(config_level)
-                .unwrap_or_else(|_| EnvFilter::new("info"))
-        });
+    let base_filter = EnvFilter::try_from_env("ARCHON_LOG").unwrap_or_else(|_| {
+        EnvFilter::try_new(config_level).unwrap_or_else(|_| EnvFilter::new("info"))
+    });
     let filter = base_filter
         .add_directive("cozo_ce=warn".parse().expect("valid directive"))
         .add_directive("cozo=warn".parse().expect("valid directive"))

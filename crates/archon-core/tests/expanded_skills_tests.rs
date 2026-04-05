@@ -1,6 +1,6 @@
-use archon_core::skills::builtin::register_builtins;
 use archon_core::skills::SkillContext;
 use archon_core::skills::SkillOutput;
+use archon_core::skills::builtin::register_builtins;
 
 fn make_ctx() -> SkillContext {
     SkillContext {
@@ -105,14 +105,19 @@ fn resume_skill_exists() {
 #[test]
 fn fork_skill_exists() {
     let reg = register_builtins();
-    assert!(reg.resolve("fork").is_some(), "fork (conversation branch) skill should be registered");
+    assert!(
+        reg.resolve("fork").is_some(),
+        "fork (conversation branch) skill should be registered"
+    );
 }
 
 #[test]
 fn git_branch_skill_not_overwritten() {
     let reg = register_builtins();
     // git branch from builtin.rs should still exist and not be overwritten
-    let skill = reg.resolve("branch").expect("git branch skill must survive");
+    let skill = reg
+        .resolve("branch")
+        .expect("git branch skill must survive");
     // Git branch skill returns branch listing, not conversation fork
     let ctx = make_ctx();
     let output = skill.execute(&[], &ctx);

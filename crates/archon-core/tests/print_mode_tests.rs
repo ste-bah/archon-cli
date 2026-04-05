@@ -1,11 +1,11 @@
-use archon_core::output_format::{
-    format_agent_event, format_json_result, format_stream_event, OutputFormat,
-};
-use archon_core::input_format::InputFormat;
-use archon_core::print_mode::{
-    PrintModeConfig, EXIT_BUDGET_EXCEEDED, EXIT_ERROR, EXIT_MAX_TURNS, EXIT_SUCCESS,
-};
 use archon_core::agent::AgentEvent;
+use archon_core::input_format::InputFormat;
+use archon_core::output_format::{
+    OutputFormat, format_agent_event, format_json_result, format_stream_event,
+};
+use archon_core::print_mode::{
+    EXIT_BUDGET_EXCEEDED, EXIT_ERROR, EXIT_MAX_TURNS, EXIT_SUCCESS, PrintModeConfig,
+};
 use archon_tools::tool::ToolResult;
 
 // ---------------------------------------------------------------------------
@@ -99,8 +99,7 @@ fn format_stream_event_text() {
     let line = format_stream_event("text", &payload);
     assert!(line.ends_with('\n'), "NDJSON line must end with newline");
 
-    let parsed: serde_json::Value =
-        serde_json::from_str(line.trim_end()).expect("valid JSON");
+    let parsed: serde_json::Value = serde_json::from_str(line.trim_end()).expect("valid JSON");
     assert_eq!(parsed["type"], "text");
     assert_eq!(parsed["content"]["text"], "hello");
 }
@@ -109,8 +108,7 @@ fn format_stream_event_text() {
 fn format_stream_event_tool_use() {
     let payload = serde_json::json!({"name": "Bash", "id": "abc123"});
     let line = format_stream_event("tool_use", &payload);
-    let parsed: serde_json::Value =
-        serde_json::from_str(line.trim_end()).expect("valid JSON");
+    let parsed: serde_json::Value = serde_json::from_str(line.trim_end()).expect("valid JSON");
     assert_eq!(parsed["type"], "tool_use");
     assert_eq!(parsed["content"]["name"], "Bash");
 }
@@ -119,8 +117,7 @@ fn format_stream_event_tool_use() {
 fn format_stream_event_error() {
     let payload = serde_json::json!({"message": "something broke"});
     let line = format_stream_event("error", &payload);
-    let parsed: serde_json::Value =
-        serde_json::from_str(line.trim_end()).expect("valid JSON");
+    let parsed: serde_json::Value = serde_json::from_str(line.trim_end()).expect("valid JSON");
     assert_eq!(parsed["type"], "error");
     assert_eq!(parsed["content"]["message"], "something broke");
 }
@@ -203,8 +200,7 @@ fn format_agent_event_text_delta_stream_json_mode() {
     let result = format_agent_event(&event, &OutputFormat::StreamJson);
     assert!(result.is_some());
     let line = result.unwrap();
-    let parsed: serde_json::Value =
-        serde_json::from_str(line.trim_end()).expect("valid JSON");
+    let parsed: serde_json::Value = serde_json::from_str(line.trim_end()).expect("valid JSON");
     assert_eq!(parsed["type"], "text");
 }
 
@@ -214,8 +210,7 @@ fn format_agent_event_error() {
     let result = format_agent_event(&event, &OutputFormat::StreamJson);
     assert!(result.is_some());
     let line = result.unwrap();
-    let parsed: serde_json::Value =
-        serde_json::from_str(line.trim_end()).expect("valid JSON");
+    let parsed: serde_json::Value = serde_json::from_str(line.trim_end()).expect("valid JSON");
     assert_eq!(parsed["type"], "error");
 }
 
@@ -228,8 +223,7 @@ fn format_agent_event_tool_call_started_stream_json() {
     let result = format_agent_event(&event, &OutputFormat::StreamJson);
     assert!(result.is_some());
     let line = result.unwrap();
-    let parsed: serde_json::Value =
-        serde_json::from_str(line.trim_end()).expect("valid JSON");
+    let parsed: serde_json::Value = serde_json::from_str(line.trim_end()).expect("valid JSON");
     assert_eq!(parsed["type"], "tool_use_start");
 }
 
@@ -243,8 +237,7 @@ fn format_agent_event_tool_call_complete_stream_json() {
     let result = format_agent_event(&event, &OutputFormat::StreamJson);
     assert!(result.is_some());
     let line = result.unwrap();
-    let parsed: serde_json::Value =
-        serde_json::from_str(line.trim_end()).expect("valid JSON");
+    let parsed: serde_json::Value = serde_json::from_str(line.trim_end()).expect("valid JSON");
     assert_eq!(parsed["type"], "tool_result");
 }
 
@@ -264,8 +257,7 @@ fn format_agent_event_turn_complete_stream_json() {
     let result = format_agent_event(&event, &OutputFormat::StreamJson);
     assert!(result.is_some());
     let line = result.unwrap();
-    let parsed: serde_json::Value =
-        serde_json::from_str(line.trim_end()).expect("valid JSON");
+    let parsed: serde_json::Value = serde_json::from_str(line.trim_end()).expect("valid JSON");
     assert_eq!(parsed["type"], "turn_complete");
 }
 
@@ -287,10 +279,10 @@ fn read_text_input_from_reader() {
 fn read_stream_json_input_from_reader() {
     use archon_core::input_format::read_input_from_reader;
 
-    let input = b"{\"role\":\"user\",\"content\":\"Hello\"}\n{\"role\":\"user\",\"content\":\"World\"}\n"
-        as &[u8];
-    let messages =
-        read_input_from_reader(&InputFormat::StreamJson, input).expect("should parse");
+    let input =
+        b"{\"role\":\"user\",\"content\":\"Hello\"}\n{\"role\":\"user\",\"content\":\"World\"}\n"
+            as &[u8];
+    let messages = read_input_from_reader(&InputFormat::StreamJson, input).expect("should parse");
     assert_eq!(messages.len(), 2);
     assert_eq!(messages[0], "Hello");
     assert_eq!(messages[1], "World");
@@ -303,8 +295,7 @@ fn read_stream_json_input_skips_non_user() {
     let input =
         b"{\"role\":\"system\",\"content\":\"ignore\"}\n{\"role\":\"user\",\"content\":\"keep\"}\n"
             as &[u8];
-    let messages =
-        read_input_from_reader(&InputFormat::StreamJson, input).expect("should parse");
+    let messages = read_input_from_reader(&InputFormat::StreamJson, input).expect("should parse");
     assert_eq!(messages.len(), 1);
     assert_eq!(messages[0], "keep");
 }

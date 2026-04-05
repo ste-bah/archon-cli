@@ -1,9 +1,9 @@
 //! Tests for TASK-CLI-312: Agent Teams.
 
-use archon_core::team::backend::{InboxBackend, InMemoryBackend};
+use archon_core::team::TeamManager;
+use archon_core::team::backend::{InMemoryBackend, InboxBackend};
 use archon_core::team::message::{MessageType, TeamMessage};
 use archon_core::team::team_config::{MemberConfig, TeamConfig};
-use archon_core::team::TeamManager;
 
 // ---------------------------------------------------------------------------
 // TeamConfig serialization
@@ -111,10 +111,18 @@ fn in_memory_backend_send_and_receive() {
 #[test]
 fn in_memory_backend_read_clears_inbox() {
     let mut backend = InMemoryBackend::new();
-    backend.send("r1", TeamMessage {
-        from: "s".to_string(), to: "r1".to_string(), content: "msg".to_string(),
-        timestamp: 0, message_type: MessageType::Chat,
-    }).unwrap();
+    backend
+        .send(
+            "r1",
+            TeamMessage {
+                from: "s".to_string(),
+                to: "r1".to_string(),
+                content: "msg".to_string(),
+                timestamp: 0,
+                message_type: MessageType::Chat,
+            },
+        )
+        .unwrap();
     let first = backend.read_and_clear("r1").unwrap();
     assert_eq!(first.len(), 1);
     let second = backend.read_and_clear("r1").unwrap();
@@ -128,7 +136,9 @@ fn in_memory_backend_send_to_all() {
     for role in roles {
         backend.register(role);
     }
-    backend.send_to_all("coordinator", "kickoff", MessageType::TaskAssignment).unwrap();
+    backend
+        .send_to_all("coordinator", "kickoff", MessageType::TaskAssignment)
+        .unwrap();
     for role in roles {
         let msgs = backend.read_and_clear(role).unwrap();
         assert_eq!(msgs.len(), 1, "each member should have received 1 message");
@@ -173,10 +183,18 @@ fn file_based_backend_send_and_receive() {
 fn file_based_backend_read_clears_file() {
     let tmp = tempfile::tempdir().unwrap();
     let mut backend = archon_core::team::backend::FileBasedBackend::new(tmp.path().to_path_buf());
-    backend.send("target", TeamMessage {
-        from: "src".to_string(), to: "target".to_string(), content: "x".to_string(),
-        timestamp: 0, message_type: MessageType::Chat,
-    }).unwrap();
+    backend
+        .send(
+            "target",
+            TeamMessage {
+                from: "src".to_string(),
+                to: "target".to_string(),
+                content: "x".to_string(),
+                timestamp: 0,
+                message_type: MessageType::Chat,
+            },
+        )
+        .unwrap();
     backend.read_and_clear("target").unwrap();
     let second = backend.read_and_clear("target").unwrap();
     assert!(second.is_empty(), "file must be cleared after read");
@@ -186,11 +204,20 @@ fn file_based_backend_read_clears_file() {
 fn file_based_backend_persists_across_instances() {
     let tmp = tempfile::tempdir().unwrap();
     {
-        let mut backend = archon_core::team::backend::FileBasedBackend::new(tmp.path().to_path_buf());
-        backend.send("member", TeamMessage {
-            from: "other".to_string(), to: "member".to_string(), content: "persisted".to_string(),
-            timestamp: 99, message_type: MessageType::Completion,
-        }).unwrap();
+        let mut backend =
+            archon_core::team::backend::FileBasedBackend::new(tmp.path().to_path_buf());
+        backend
+            .send(
+                "member",
+                TeamMessage {
+                    from: "other".to_string(),
+                    to: "member".to_string(),
+                    content: "persisted".to_string(),
+                    timestamp: 99,
+                    message_type: MessageType::Completion,
+                },
+            )
+            .unwrap();
     }
     // New instance reads the file
     let backend2 = archon_core::team::backend::FileBasedBackend::new(tmp.path().to_path_buf());
@@ -212,8 +239,18 @@ fn team_manager_create_and_load() {
         id: "team-test".to_string(),
         name: "test".to_string(),
         members: vec![
-            MemberConfig { role: "a".to_string(), system_prompt: "prompt a".to_string(), model: None, tools: vec![] },
-            MemberConfig { role: "b".to_string(), system_prompt: "prompt b".to_string(), model: None, tools: vec![] },
+            MemberConfig {
+                role: "a".to_string(),
+                system_prompt: "prompt a".to_string(),
+                model: None,
+                tools: vec![],
+            },
+            MemberConfig {
+                role: "b".to_string(),
+                system_prompt: "prompt b".to_string(),
+                model: None,
+                tools: vec![],
+            },
         ],
     };
     manager.create_team(config.clone()).unwrap();
@@ -221,8 +258,14 @@ fn team_manager_create_and_load() {
     let team_dir = tmp.path().join("teams").join("team-test");
     assert!(team_dir.exists(), "team directory must be created");
     assert!(team_dir.join("team.json").exists(), "team.json must exist");
-    assert!(team_dir.join("inbox-a.jsonl").exists(), "inbox for 'a' must exist");
-    assert!(team_dir.join("inbox-b.jsonl").exists(), "inbox for 'b' must exist");
+    assert!(
+        team_dir.join("inbox-a.jsonl").exists(),
+        "inbox for 'a' must exist"
+    );
+    assert!(
+        team_dir.join("inbox-b.jsonl").exists(),
+        "inbox for 'b' must exist"
+    );
 }
 
 #[test]
@@ -233,7 +276,12 @@ fn team_manager_delete_removes_directory() {
     let config = TeamConfig {
         id: "delete-me".to_string(),
         name: "ephemeral".to_string(),
-        members: vec![MemberConfig { role: "x".to_string(), system_prompt: "".to_string(), model: None, tools: vec![] }],
+        members: vec![MemberConfig {
+            role: "x".to_string(),
+            system_prompt: "".to_string(),
+            model: None,
+            tools: vec![],
+        }],
     };
     manager.create_team(config).unwrap();
     let team_dir = tmp.path().join("teams").join("delete-me");
@@ -251,11 +299,22 @@ fn team_manager_create_does_not_spawn_agents() {
     let tmp = tempfile::tempdir().unwrap();
     let mut manager = TeamManager::new(tmp.path().to_path_buf());
     let before = std::time::Instant::now();
-    manager.create_team(TeamConfig {
-        id: "no-spawn".to_string(), name: "x".to_string(),
-        members: vec![MemberConfig { role: "m".to_string(), system_prompt: "".to_string(), model: None, tools: vec![] }],
-    }).unwrap();
+    manager
+        .create_team(TeamConfig {
+            id: "no-spawn".to_string(),
+            name: "x".to_string(),
+            members: vec![MemberConfig {
+                role: "m".to_string(),
+                system_prompt: "".to_string(),
+                model: None,
+                tools: vec![],
+            }],
+        })
+        .unwrap();
     // If a process were spawned, it would take longer
     let elapsed = before.elapsed();
-    assert!(elapsed.as_secs() < 2, "create_team should complete instantly (no process spawning)");
+    assert!(
+        elapsed.as_secs() < 2,
+        "create_team should complete instantly (no process spawning)"
+    );
 }

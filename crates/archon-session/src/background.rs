@@ -91,9 +91,7 @@ pub fn launch_background_in_dir(
 
     // Create log file and spawn
     let log_file = std::fs::File::create(&log_path)?;
-    let log_stderr = log_file
-        .try_clone()
-        .map_err(|e| SessionError::IoError(e))?;
+    let log_stderr = log_file.try_clone().map_err(|e| SessionError::IoError(e))?;
 
     let child = Command::new(archon_binary)
         .arg("-p")

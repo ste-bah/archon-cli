@@ -71,8 +71,7 @@ fn create_worktree_creates_directory() {
     let (_dir, repo) = init_repo_with_commit();
     let session_id = unique_session_id("crdir");
 
-    let info = WorktreeManager::create_worktree(&repo, &session_id)
-        .expect("create worktree");
+    let info = WorktreeManager::create_worktree(&repo, &session_id).expect("create worktree");
 
     assert!(
         info.worktree_path.exists(),
@@ -89,8 +88,7 @@ fn create_worktree_creates_branch() {
     let (_dir, repo) = init_repo_with_commit();
     let session_id = unique_session_id("crbr");
 
-    let info = WorktreeManager::create_worktree(&repo, &session_id)
-        .expect("create worktree");
+    let info = WorktreeManager::create_worktree(&repo, &session_id).expect("create worktree");
 
     // Verify the branch exists in the repo
     let branch = repo.find_branch(&info.branch_name, git2::BranchType::Local);
@@ -109,8 +107,7 @@ fn create_worktree_branch_name() {
     let (_dir, repo) = init_repo_with_commit();
     let session_id = unique_session_id("brname");
 
-    let info = WorktreeManager::create_worktree(&repo, &session_id)
-        .expect("create worktree");
+    let info = WorktreeManager::create_worktree(&repo, &session_id).expect("create worktree");
 
     // Branch should start with "archon/" and contain a shortened session id
     assert!(
@@ -136,8 +133,7 @@ fn exit_keep_preserves_worktree() {
     let (_dir, repo) = init_repo_with_commit();
     let session_id = unique_session_id("keep");
 
-    let info = WorktreeManager::create_worktree(&repo, &session_id)
-        .expect("create worktree");
+    let info = WorktreeManager::create_worktree(&repo, &session_id).expect("create worktree");
 
     let wt_path = info.worktree_path.clone();
 
@@ -158,8 +154,7 @@ fn exit_discard_removes_worktree() {
     let (_dir, repo) = init_repo_with_commit();
     let session_id = unique_session_id("discard");
 
-    let info = WorktreeManager::create_worktree(&repo, &session_id)
-        .expect("create worktree");
+    let info = WorktreeManager::create_worktree(&repo, &session_id).expect("create worktree");
 
     let wt_path = info.worktree_path.clone();
 
@@ -177,8 +172,7 @@ fn exit_merge_integrates_changes() {
     let (_dir, repo) = init_repo_with_commit();
     let session_id = unique_session_id("merge");
 
-    let info = WorktreeManager::create_worktree(&repo, &session_id)
-        .expect("create worktree");
+    let info = WorktreeManager::create_worktree(&repo, &session_id).expect("create worktree");
 
     // Create a file in the worktree and commit it
     let new_file = info.worktree_path.join("merge_test.txt");
@@ -230,8 +224,7 @@ fn list_worktrees_finds_created() {
     let (_dir, repo) = init_repo_with_commit();
     let session_id = unique_session_id("list");
 
-    let info = WorktreeManager::create_worktree(&repo, &session_id)
-        .expect("create worktree");
+    let info = WorktreeManager::create_worktree(&repo, &session_id).expect("create worktree");
 
     let list = WorktreeManager::list_worktrees();
     assert!(
@@ -250,8 +243,7 @@ fn cleanup_removes_clean_worktree() {
     let (_dir, repo) = init_repo_with_commit();
     let session_id = unique_session_id("cleanup");
 
-    let info = WorktreeManager::create_worktree(&repo, &session_id)
-        .expect("create worktree");
+    let info = WorktreeManager::create_worktree(&repo, &session_id).expect("create worktree");
 
     let wt_path = info.worktree_path.clone();
 

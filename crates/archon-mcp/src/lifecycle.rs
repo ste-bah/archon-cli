@@ -312,11 +312,18 @@ impl McpServerManager {
     /// Returns an empty vec if the server is not Ready or not found.
     pub async fn list_tools_for(&self, server_name: &str) -> Vec<String> {
         let servers = self.servers.read().await;
-        let Some(entry) = servers.get(server_name) else { return Vec::new() };
-        if entry.state != ServerState::Ready { return Vec::new(); }
-        let Some(ref client) = entry.client else { return Vec::new() };
+        let Some(entry) = servers.get(server_name) else {
+            return Vec::new();
+        };
+        if entry.state != ServerState::Ready {
+            return Vec::new();
+        }
+        let Some(ref client) = entry.client else {
+            return Vec::new();
+        };
         match client.list_tools().await {
-            Ok(tools) => tools.iter()
+            Ok(tools) => tools
+                .iter()
                 .map(|t| format!("mcp__{}_{}", server_name, t.name))
                 .collect(),
             Err(_) => Vec::new(),
@@ -370,19 +377,13 @@ impl McpServerManager {
             .ok_or_else(|| McpError::ServerNotFound(server_name.into()))?;
 
         if entry.state != ServerState::Ready {
-            return Err(McpError::ServerNotReady(
-                server_name.into(),
-                entry.state,
-            ));
+            return Err(McpError::ServerNotReady(server_name.into(), entry.state));
         }
 
         let client = entry
             .client
             .as_ref()
-            .ok_or_else(|| McpError::ServerNotReady(
-                server_name.into(),
-                entry.state,
-            ))?;
+            .ok_or_else(|| McpError::ServerNotReady(server_name.into(), entry.state))?;
 
         client.call_tool(tool_name, arguments).await
     }
@@ -444,11 +445,8 @@ async fn connect_server(config: &ServerConfig) -> Result<McpClient, McpError> {
                     config.name
                 ))
             })?;
-            let transport = create_http_transport(
-                url,
-                config.headers.as_ref(),
-                HTTP_CONNECT_TIMEOUT,
-            )?;
+            let transport =
+                create_http_transport(url, config.headers.as_ref(), HTTP_CONNECT_TIMEOUT)?;
             McpClient::initialize(config, transport).await
         }
         "stdio" | "" => {
@@ -585,17 +583,27 @@ mod tests {
 
         // Disable a server that doesn't exist in the servers map yet — disabled_names
         // tracks names independently so this should still work.
-        mgr.disable_server("my-server").await.expect("disable should succeed");
+        mgr.disable_server("my-server")
+            .await
+            .expect("disable should succeed");
 
         // Check it's marked disabled
         let info = mgr.get_server_info().await;
         let entry = info.iter().find(|(n, _, _)| n == "my-server");
-        assert!(entry.is_some(), "disabled server should appear in get_server_info");
+        assert!(
+            entry.is_some(),
+            "disabled server should appear in get_server_info"
+        );
         let (_, _, disabled) = entry.unwrap();
-        assert!(*disabled, "server should be marked disabled after disable_server()");
+        assert!(
+            *disabled,
+            "server should be marked disabled after disable_server()"
+        );
 
         // Enable it
-        mgr.enable_server("my-server").await.expect("enable should succeed");
+        mgr.enable_server("my-server")
+            .await
+            .expect("enable should succeed");
 
         // Now it should not be in the disabled set
         let info2 = mgr.get_server_info().await;
@@ -631,14 +639,19 @@ mod tests {
         assert_eq!(states.get("info-test-server"), Some(&ServerState::Crashed));
 
         // Disable it
-        mgr.disable_server("info-test-server").await.expect("disable should succeed");
+        mgr.disable_server("info-test-server")
+            .await
+            .expect("disable should succeed");
 
         // get_server_info should show disabled=true
         let info = mgr.get_server_info().await;
         let entry = info.iter().find(|(n, _, _)| n == "info-test-server");
         assert!(entry.is_some(), "server should appear in get_server_info");
         let (_, _, disabled) = entry.unwrap();
-        assert!(*disabled, "get_server_info should return disabled=true after disable_server()");
+        assert!(
+            *disabled,
+            "get_server_info should return disabled=true after disable_server()"
+        );
 
         // Enable — ignore the transport error (nonexistent binary), the disabled flag is
         // cleared regardless of whether the restart succeeds.

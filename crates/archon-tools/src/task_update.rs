@@ -68,7 +68,7 @@ impl Tool for TaskUpdateTool {
                 other => {
                     return ToolResult::error(format!(
                         "invalid status: '{other}'. Must be Pending, Running, Completed, Failed, or Stopped"
-                    ))
+                    ));
                 }
             };
             mgr.set_status(task_id, status);

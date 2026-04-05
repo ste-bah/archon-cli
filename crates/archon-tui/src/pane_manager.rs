@@ -3,7 +3,7 @@
 use ratatui::layout::Rect;
 
 use crate::pane::{Pane, PaneContent};
-use crate::pane_layout::{compute_pane_rects, PaneLayout};
+use crate::pane_layout::{PaneLayout, compute_pane_rects};
 
 // ---------------------------------------------------------------------------
 // Constants

@@ -303,21 +303,60 @@ impl VimState {
             }
 
             // Movement
-            KeyCode::Char('h') => { self.move_left(count); VimAction::None }
-            KeyCode::Char('j') => { self.move_down(count); VimAction::None }
-            KeyCode::Char('k') => { self.move_up(count); VimAction::None }
-            KeyCode::Char('l') => { self.move_right(count); VimAction::None }
-            KeyCode::Char('w') => { self.move_word_forward(count); VimAction::None }
-            KeyCode::Char('b') => { self.move_word_backward(count); VimAction::None }
-            KeyCode::Char('e') => { self.move_word_end(count); VimAction::None }
-            KeyCode::Char('0') => { self.move_line_start(); VimAction::None }
-            KeyCode::Char('$') => { self.move_line_end(); VimAction::None }
+            KeyCode::Char('h') => {
+                self.move_left(count);
+                VimAction::None
+            }
+            KeyCode::Char('j') => {
+                self.move_down(count);
+                VimAction::None
+            }
+            KeyCode::Char('k') => {
+                self.move_up(count);
+                VimAction::None
+            }
+            KeyCode::Char('l') => {
+                self.move_right(count);
+                VimAction::None
+            }
+            KeyCode::Char('w') => {
+                self.move_word_forward(count);
+                VimAction::None
+            }
+            KeyCode::Char('b') => {
+                self.move_word_backward(count);
+                VimAction::None
+            }
+            KeyCode::Char('e') => {
+                self.move_word_end(count);
+                VimAction::None
+            }
+            KeyCode::Char('0') => {
+                self.move_line_start();
+                VimAction::None
+            }
+            KeyCode::Char('$') => {
+                self.move_line_end();
+                VimAction::None
+            }
 
             // Insert mode entries
-            KeyCode::Char('i') => { self.enter_insert(InsertPosition::AtCursor); VimAction::None }
-            KeyCode::Char('a') => { self.enter_insert(InsertPosition::AfterCursor); VimAction::None }
-            KeyCode::Char('I') => { self.enter_insert(InsertPosition::LineStart); VimAction::None }
-            KeyCode::Char('A') => { self.enter_insert(InsertPosition::LineEnd); VimAction::None }
+            KeyCode::Char('i') => {
+                self.enter_insert(InsertPosition::AtCursor);
+                VimAction::None
+            }
+            KeyCode::Char('a') => {
+                self.enter_insert(InsertPosition::AfterCursor);
+                VimAction::None
+            }
+            KeyCode::Char('I') => {
+                self.enter_insert(InsertPosition::LineStart);
+                VimAction::None
+            }
+            KeyCode::Char('A') => {
+                self.enter_insert(InsertPosition::LineEnd);
+                VimAction::None
+            }
             KeyCode::Char('o') => {
                 self.save_undo();
                 self.insert_undo_saved = true;
@@ -344,10 +383,16 @@ impl VimState {
             }
 
             // Visual mode
-            KeyCode::Char('v') => { self.enter_visual(); VimAction::None }
+            KeyCode::Char('v') => {
+                self.enter_visual();
+                VimAction::None
+            }
 
             // Command mode
-            KeyCode::Char(':') => { self.enter_command(); VimAction::None }
+            KeyCode::Char(':') => {
+                self.enter_command();
+                VimAction::None
+            }
 
             // Operators that need a second key
             KeyCode::Char('d') => {
@@ -391,7 +436,10 @@ impl VimState {
             }
 
             // Undo
-            KeyCode::Char('u') => { self.undo(); VimAction::Redraw }
+            KeyCode::Char('u') => {
+                self.undo();
+                VimAction::Redraw
+            }
 
             _ => VimAction::None,
         }
@@ -427,15 +475,42 @@ impl VimState {
                 VimAction::None
             }
             // Basic movement in visual mode
-            KeyCode::Char('h') => { self.move_left(1); VimAction::None }
-            KeyCode::Char('j') => { self.move_down(1); VimAction::None }
-            KeyCode::Char('k') => { self.move_up(1); VimAction::None }
-            KeyCode::Char('l') => { self.move_right(1); VimAction::None }
-            KeyCode::Char('w') => { self.move_word_forward(1); VimAction::None }
-            KeyCode::Char('b') => { self.move_word_backward(1); VimAction::None }
-            KeyCode::Char('e') => { self.move_word_end(1); VimAction::None }
-            KeyCode::Char('$') => { self.move_line_end(); VimAction::None }
-            KeyCode::Char('0') => { self.move_line_start(); VimAction::None }
+            KeyCode::Char('h') => {
+                self.move_left(1);
+                VimAction::None
+            }
+            KeyCode::Char('j') => {
+                self.move_down(1);
+                VimAction::None
+            }
+            KeyCode::Char('k') => {
+                self.move_up(1);
+                VimAction::None
+            }
+            KeyCode::Char('l') => {
+                self.move_right(1);
+                VimAction::None
+            }
+            KeyCode::Char('w') => {
+                self.move_word_forward(1);
+                VimAction::None
+            }
+            KeyCode::Char('b') => {
+                self.move_word_backward(1);
+                VimAction::None
+            }
+            KeyCode::Char('e') => {
+                self.move_word_end(1);
+                VimAction::None
+            }
+            KeyCode::Char('$') => {
+                self.move_line_end();
+                VimAction::None
+            }
+            KeyCode::Char('0') => {
+                self.move_line_start();
+                VimAction::None
+            }
             // Yank selection
             KeyCode::Char('y') => {
                 self.visual_yank();
@@ -546,9 +621,7 @@ impl VimState {
                 self.cursor_col = 0;
                 // Skip leading whitespace on new line
                 let next_line = &self.lines[self.cursor_row];
-                let first_non_ws = next_line
-                    .find(|c: char| !c.is_whitespace())
-                    .unwrap_or(0);
+                let first_non_ws = next_line.find(|c: char| !c.is_whitespace()).unwrap_or(0);
                 self.cursor_col = first_non_ws;
             }
             return;
@@ -571,9 +644,7 @@ impl VimState {
             if self.cursor_row + 1 < self.lines.len() {
                 self.cursor_row += 1;
                 let next_line = &self.lines[self.cursor_row];
-                self.cursor_col = next_line
-                    .find(|c: char| !c.is_whitespace())
-                    .unwrap_or(0);
+                self.cursor_col = next_line.find(|c: char| !c.is_whitespace()).unwrap_or(0);
             } else {
                 self.cursor_col = len.saturating_sub(1);
             }
@@ -694,7 +765,10 @@ impl VimState {
 
     fn delete_line(&mut self, count: usize) {
         let count = count.min(self.lines.len() - self.cursor_row);
-        let deleted: Vec<String> = self.lines.drain(self.cursor_row..self.cursor_row + count).collect();
+        let deleted: Vec<String> = self
+            .lines
+            .drain(self.cursor_row..self.cursor_row + count)
+            .collect();
         self.yank_buffer = deleted.join("\n");
         self.yank_is_linewise = true;
 
@@ -782,7 +856,9 @@ impl VimState {
     /// Compute the (start, end) byte range for the current visual selection.
     /// Returns `(start_row, start_col, end_row, end_col)` where start <= end.
     fn visual_range(&self) -> (usize, usize, usize, usize) {
-        let (sr, sc) = self.visual_start.unwrap_or((self.cursor_row, self.cursor_col));
+        let (sr, sc) = self
+            .visual_start
+            .unwrap_or((self.cursor_row, self.cursor_col));
         let (er, ec) = (self.cursor_row, self.cursor_col);
         if (sr, sc) <= (er, ec) {
             (sr, sc, er, ec)
@@ -891,7 +967,11 @@ impl VimState {
         match self.mode {
             VimMode::Insert => len,
             _ => {
-                if len > 0 { len - 1 } else { 0 }
+                if len > 0 {
+                    len - 1
+                } else {
+                    0
+                }
             }
         }
     }

@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use tokio::sync::mpsc::Receiver;
 
 use crate::provider::{LlmError, LlmProvider, LlmRequest, LlmResponse, ModelInfo, ProviderFeature};
-use crate::providers::gcp_auth::{get_access_token, resolve_credentials, GcpAccessToken};
+use crate::providers::gcp_auth::{GcpAccessToken, get_access_token, resolve_credentials};
 use crate::streaming::StreamEvent;
 use crate::types::{ContentBlockType, Usage};
 
@@ -90,7 +90,11 @@ impl VertexProvider {
         let system_text: String = request
             .system
             .iter()
-            .filter_map(|b| b.get("text").and_then(|t| t.as_str()).map(|s| s.to_string()))
+            .filter_map(|b| {
+                b.get("text")
+                    .and_then(|t| t.as_str())
+                    .map(|s| s.to_string())
+            })
             .collect::<Vec<_>>()
             .join("\n");
 
@@ -123,13 +127,15 @@ impl VertexProvider {
                 // Map Anthropic role "assistant" → "model" for Gemini.
                 let gemini_role = if role == "assistant" { "model" } else { "user" };
 
-                let parts = if let Some(content_arr) = msg.get("content").and_then(|c| c.as_array()) {
+                let parts = if let Some(content_arr) = msg.get("content").and_then(|c| c.as_array())
+                {
                     content_arr
                         .iter()
                         .filter_map(|block| {
-                            block.get("text").and_then(|t| t.as_str()).map(|text| {
-                                serde_json::json!({"text": text})
-                            })
+                            block
+                                .get("text")
+                                .and_then(|t| t.as_str())
+                                .map(|text| serde_json::json!({"text": text}))
                         })
                         .collect::<Vec<_>>()
                 } else if let Some(text) = msg.get("content").and_then(|c| c.as_str()) {
@@ -326,7 +332,10 @@ fn parse_anthropic_vertex_event(val: &serde_json::Value) -> Vec<StreamEvent> {
                         .and_then(|j| j.as_str())
                         .unwrap_or("")
                         .to_string();
-                    events.push(StreamEvent::InputJsonDelta { index, partial_json });
+                    events.push(StreamEvent::InputJsonDelta {
+                        index,
+                        partial_json,
+                    });
                 }
                 _ => {}
             }
@@ -413,14 +422,8 @@ fn parse_gemini_vertex_event(val: &serde_json::Value) -> Vec<StreamEvent> {
 fn parse_usage(usage_val: Option<&serde_json::Value>) -> Usage {
     match usage_val {
         Some(u) => Usage {
-            input_tokens: u
-                .get("input_tokens")
-                .and_then(|t| t.as_u64())
-                .unwrap_or(0),
-            output_tokens: u
-                .get("output_tokens")
-                .and_then(|t| t.as_u64())
-                .unwrap_or(0),
+            input_tokens: u.get("input_tokens").and_then(|t| t.as_u64()).unwrap_or(0),
+            output_tokens: u.get("output_tokens").and_then(|t| t.as_u64()).unwrap_or(0),
             cache_creation_input_tokens: u
                 .get("cache_creation_input_tokens")
                 .and_then(|t| t.as_u64())
@@ -441,9 +444,14 @@ fn parse_usage(usage_val: Option<&serde_json::Value>) -> Usage {
 fn map_http_error(status: u16, body: String) -> LlmError {
     match status {
         401 | 403 => LlmError::Auth(body),
-        429 => LlmError::RateLimited { retry_after_secs: 60 },
+        429 => LlmError::RateLimited {
+            retry_after_secs: 60,
+        },
         500 | 503 => LlmError::Overloaded,
-        _ => LlmError::Server { status, message: body },
+        _ => LlmError::Server {
+            status,
+            message: body,
+        },
     }
 }
 
@@ -496,9 +504,7 @@ impl LlmProvider for VertexProvider {
                 } => {
                     stop_reason = sr;
                 }
-                StreamEvent::MessageDelta {
-                    usage: Some(u), ..
-                } => {
+                StreamEvent::MessageDelta { usage: Some(u), .. } => {
                     usage.merge(&u);
                 }
                 _ => {}

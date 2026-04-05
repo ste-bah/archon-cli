@@ -12,8 +12,8 @@ const FINGERPRINT_SALT: &str = "59cf53e54c78";
 
 /// Beta strings always sent (primary identity + unconditionally required).
 pub const DEFAULT_BETAS: &[&str] = &[
-    "claude-code-20250219",           // primary identity marker -- MUST always be present
-    "oauth-2025-04-20",               // required for OAuth auth
+    "claude-code-20250219", // primary identity marker -- MUST always be present
+    "oauth-2025-04-20",     // required for OAuth auth
     "interleaved-thinking-2025-05-14", // required for thinking blocks
     "prompt-caching-scope-2026-01-05", // required for 1P cache scopes
 ];
@@ -96,10 +96,7 @@ impl IdentityProvider {
                     "User-Agent".into(),
                     format!("claude-cli/{version} (external, cli)"),
                 );
-                headers.insert(
-                    "X-Claude-Code-Session-Id".into(),
-                    self.session_id.clone(),
-                );
+                headers.insert("X-Claude-Code-Session-Id".into(), self.session_id.clone());
                 headers.insert("x-client-request-id".into(), request_id.into());
                 headers.insert("anthropic-beta".into(), betas.join(","));
             }
@@ -352,7 +349,10 @@ pub fn discover_betas_from_claude() -> Vec<String> {
     betas.sort();
     betas.dedup();
 
-    tracing::debug!("Auto-discovered {} beta headers from Claude Code", betas.len());
+    tracing::debug!(
+        "Auto-discovered {} beta headers from Claude Code",
+        betas.len()
+    );
     betas
 }
 
@@ -364,10 +364,7 @@ fn find_claude_binary() -> Option<PathBuf> {
     }
 
     // Common locations
-    let candidates = [
-        "/usr/local/bin/claude",
-        "/usr/bin/claude",
-    ];
+    let candidates = ["/usr/local/bin/claude", "/usr/bin/claude"];
 
     for candidate in &candidates {
         let p = PathBuf::from(candidate);
@@ -455,7 +452,10 @@ pub fn save_betas_cache(betas: &[String]) {
     if let Some(parent) = path.parent() {
         let _ = fs::create_dir_all(parent);
     }
-    let _ = fs::write(&path, serde_json::to_string_pretty(&cache).unwrap_or_default());
+    let _ = fs::write(
+        &path,
+        serde_json::to_string_pretty(&cache).unwrap_or_default(),
+    );
 }
 
 fn beta_cache_path() -> PathBuf {
@@ -501,7 +501,10 @@ pub fn save_validated_betas_cache(betas: &[String]) {
     if let Some(parent) = path.parent() {
         let _ = fs::create_dir_all(parent);
     }
-    let _ = fs::write(&path, serde_json::to_string_pretty(&cache).unwrap_or_default());
+    let _ = fs::write(
+        &path,
+        serde_json::to_string_pretty(&cache).unwrap_or_default(),
+    );
 }
 
 fn validated_beta_cache_path() -> PathBuf {
@@ -564,7 +567,10 @@ pub async fn resolve_and_validate_betas(
 
     // Cache the validated result
     save_validated_betas_cache(&result);
-    tracing::info!("Beta validation complete: {} betas validated and cached", result.len());
+    tracing::info!(
+        "Beta validation complete: {} betas validated and cached",
+        result.len()
+    );
 
     result
 }
@@ -658,7 +664,10 @@ mod beta_validation_cache_tests {
         // should return DEFAULT_BETAS (possibly after a failed API probe).
         // We just verify the result is non-empty (graceful fallback).
         let result = resolve_and_validate_betas(&client, None).await;
-        assert!(!result.is_empty(), "should always return at least some betas");
+        assert!(
+            !result.is_empty(),
+            "should always return at least some betas"
+        );
     }
 }
 

@@ -9,13 +9,15 @@ use serde::{Deserialize, Serialize};
 
 /// A valid MBTI personality type (16 types).
 const VALID_MBTI: &[&str] = &[
-    "INTJ", "INTP", "ENTJ", "ENTP", "INFJ", "INFP", "ENFJ", "ENFP", "ISTJ", "ISFJ", "ESTJ",
-    "ESFJ", "ISTP", "ISFP", "ESTP", "ESFP",
+    "INTJ", "INTP", "ENTJ", "ENTP", "INFJ", "INFP", "ENFJ", "ENFP", "ISTJ", "ISFJ", "ESTJ", "ESFJ",
+    "ISTP", "ISFP", "ESTP", "ESFP",
 ];
 
 #[derive(Debug, thiserror::Error)]
 pub enum PersonalityError {
-    #[error("invalid MBTI type: \"{0}\". Valid types: INTJ, INTP, ENTJ, ENTP, INFJ, INFP, ENFJ, ENFP, ISTJ, ISFJ, ESTJ, ESFJ, ISTP, ISFP, ESTP, ESFP")]
+    #[error(
+        "invalid MBTI type: \"{0}\". Valid types: INTJ, INTP, ENTJ, ENTP, INFJ, INFP, ENFJ, ENFP, ISTJ, ISFJ, ESTJ, ESFJ, ISTP, ISFP, ESTP, ESFP"
+    )]
     InvalidMbti(String),
 
     #[error("invalid enneagram: \"{0}\". Must match pattern [1-9]w[1-9] (e.g., 4w5)")]
@@ -127,7 +129,10 @@ mod tests {
                 mbti_type: mbti.to_string(),
                 ..Default::default()
             };
-            assert!(profile.validate().is_ok(), "MBTI type {mbti} should be valid");
+            assert!(
+                profile.validate().is_ok(),
+                "MBTI type {mbti} should be valid"
+            );
         }
     }
 

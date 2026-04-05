@@ -1,14 +1,20 @@
 use std::io;
 
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers, MouseEventKind, EnableMouseCapture, DisableMouseCapture};
-use crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen};
 use crossterm::ExecutableCommand;
+use crossterm::event::{
+    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers,
+    MouseEventKind,
+};
+use crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen};
+use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap};
-use ratatui::Terminal;
+use ratatui::widgets::{
+    Block, Borders, List, ListItem, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
+    Wrap,
+};
 
 use crate::input::InputHandler;
 use crate::markdown::render_markdown_line;
@@ -24,9 +30,18 @@ use crate::vim::{VimAction, VimState};
 pub enum TuiEvent {
     TextDelta(String),
     ThinkingDelta(String),
-    ToolStart { name: String, id: String },
-    ToolComplete { name: String, success: bool },
-    TurnComplete { input_tokens: u64, output_tokens: u64 },
+    ToolStart {
+        name: String,
+        id: String,
+    },
+    ToolComplete {
+        name: String,
+        success: bool,
+    },
+    TurnComplete {
+        input_tokens: u64,
+        output_tokens: u64,
+    },
     Error(String),
     /// Sent by main.rs right before agent.process_message(). This is the ONLY
     /// place is_generating should be set to true — at the point generation
@@ -42,7 +57,10 @@ pub enum TuiEvent {
     /// /btw side question response — show as overlay.
     BtwResponse(String),
     /// Permission prompt — agent wants to use a risky tool, needs y/n.
-    PermissionPrompt { tool: String, description: String },
+    PermissionPrompt {
+        tool: String,
+        description: String,
+    },
     /// Session was renamed — show name badge on input line.
     SessionRenamed(String),
     /// Permission mode changed — update status bar and permission indicator.
@@ -241,16 +259,12 @@ impl App {
                 // Expanded: show full text in dim italic
                 let mut lines = vec![Line::from(Span::styled(
                     "- Thinking:",
-                    Style::default()
-                        .fg(t.muted)
-                        .add_modifier(Modifier::ITALIC),
+                    Style::default().fg(t.muted).add_modifier(Modifier::ITALIC),
                 ))];
                 for text_line in self.thinking.accumulated.lines() {
                     lines.push(Line::from(Span::styled(
                         format!("  {text_line}"),
-                        Style::default()
-                            .fg(t.muted)
-                            .add_modifier(Modifier::ITALIC),
+                        Style::default().fg(t.muted).add_modifier(Modifier::ITALIC),
                     )));
                 }
                 lines
@@ -296,16 +310,12 @@ impl App {
             // Completed but user expanded
             let mut lines = vec![Line::from(Span::styled(
                 "- Thinking (complete):",
-                Style::default()
-                    .fg(t.muted)
-                    .add_modifier(Modifier::ITALIC),
+                Style::default().fg(t.muted).add_modifier(Modifier::ITALIC),
             ))];
             for text_line in self.thinking.accumulated.lines() {
                 lines.push(Line::from(Span::styled(
                     format!("  {text_line}"),
-                    Style::default()
-                        .fg(t.muted)
-                        .add_modifier(Modifier::ITALIC),
+                    Style::default().fg(t.muted).add_modifier(Modifier::ITALIC),
                 )));
             }
             lines
@@ -347,10 +357,19 @@ pub struct McpServerEntry {
 /// Which sub-view is active inside the MCP manager overlay.
 #[derive(Debug, Clone)]
 pub enum McpManagerView {
-    ServerList { selected: usize },
-    ServerMenu { server_idx: usize, action_idx: usize },
+    ServerList {
+        selected: usize,
+    },
+    ServerMenu {
+        server_idx: usize,
+        action_idx: usize,
+    },
     /// Scrollable list of tool names for a specific server.
-    ToolList { server_name: String, tools: Vec<String>, scroll: usize },
+    ToolList {
+        server_name: String,
+        tools: Vec<String>,
+        scroll: usize,
+    },
 }
 
 /// Interactive MCP server manager state (shown as modal overlay on /mcp).
@@ -882,9 +901,8 @@ pub async fn run_tui(
                 } => {
                     app.on_turn_complete();
                     // Anthropic pricing: $3/MTok input, $15/MTok output
-                    app.status.cost += (input_tokens as f64 * 3.0
-                        + output_tokens as f64 * 15.0)
-                        / 1_000_000.0;
+                    app.status.cost +=
+                        (input_tokens as f64 * 3.0 + output_tokens as f64 * 15.0) / 1_000_000.0;
                     // Drain any input queued during generation
                     let queued: Vec<String> = app.pending_input.drain(..).collect();
                     for text in queued {
@@ -903,7 +921,10 @@ pub async fn run_tui(
                 TuiEvent::BtwResponse(response) => {
                     app.btw_overlay = Some(response);
                 }
-                TuiEvent::PermissionPrompt { tool, description: _ } => {
+                TuiEvent::PermissionPrompt {
+                    tool,
+                    description: _,
+                } => {
                     app.permission_prompt = Some(tool);
                 }
                 TuiEvent::SessionRenamed(name) => {
@@ -970,8 +991,7 @@ pub async fn run_tui(
         // Check for keyboard input; tick animations on timeout
         if event::poll(timeout)? {
             match event::read()? {
-            Event::Mouse(mouse) => {
-                match mouse.kind {
+                Event::Mouse(mouse) => match mouse.kind {
                     MouseEventKind::ScrollUp => {
                         app.output.scroll_up(3);
                     }
@@ -979,419 +999,455 @@ pub async fn run_tui(
                         app.output.scroll_down(3);
                     }
                     _ => {}
-                }
-            }
-            Event::Key(key) => {
-                // Handle session picker — Up/Down/Enter/Esc
-                if app.session_picker.is_some() {
-                    match key.code {
-                        KeyCode::Up => {
-                            if let Some(ref mut picker) = app.session_picker {
-                                if picker.selected > 0 {
-                                    picker.selected -= 1;
-                                } else {
-                                    picker.selected = picker.sessions.len().saturating_sub(1);
+                },
+                Event::Key(key) => {
+                    // Handle session picker — Up/Down/Enter/Esc
+                    if app.session_picker.is_some() {
+                        match key.code {
+                            KeyCode::Up => {
+                                if let Some(ref mut picker) = app.session_picker {
+                                    if picker.selected > 0 {
+                                        picker.selected -= 1;
+                                    } else {
+                                        picker.selected = picker.sessions.len().saturating_sub(1);
+                                    }
                                 }
+                                continue;
                             }
-                            continue;
-                        }
-                        KeyCode::Down => {
-                            if let Some(ref mut picker) = app.session_picker {
-                                if picker.selected + 1 < picker.sessions.len() {
-                                    picker.selected += 1;
-                                } else {
-                                    picker.selected = 0;
+                            KeyCode::Down => {
+                                if let Some(ref mut picker) = app.session_picker {
+                                    if picker.selected + 1 < picker.sessions.len() {
+                                        picker.selected += 1;
+                                    } else {
+                                        picker.selected = 0;
+                                    }
                                 }
+                                continue;
                             }
-                            continue;
-                        }
-                        KeyCode::Enter => {
-                            if let Some(picker) = app.session_picker.take() {
-                                if let Some(s) = picker.sessions.get(picker.selected) {
-                                    let _ = input_tx.send(format!("__resume_session__ {}", s.id)).await;
+                            KeyCode::Enter => {
+                                if let Some(picker) = app.session_picker.take() {
+                                    if let Some(s) = picker.sessions.get(picker.selected) {
+                                        let _ = input_tx
+                                            .send(format!("__resume_session__ {}", s.id))
+                                            .await;
+                                    }
                                 }
+                                continue;
                             }
-                            continue;
+                            KeyCode::Esc => {
+                                app.session_picker = None;
+                                continue;
+                            }
+                            _ => continue, // swallow other keys
                         }
-                        KeyCode::Esc => {
-                            app.session_picker = None;
-                            continue;
-                        }
-                        _ => continue, // swallow other keys
                     }
-                }
-                // Handle MCP manager overlay — Up/Down/Enter/Esc
-                if app.mcp_manager.is_some() {
-                    match key.code {
-                        KeyCode::Up => {
-                            if let Some(ref mut mgr) = app.mcp_manager {
-                                match &mut mgr.view {
-                                    McpManagerView::ServerList { selected } => {
-                                        if *selected > 0 {
-                                            *selected -= 1;
-                                        } else {
-                                            *selected = mgr.servers.len().saturating_sub(1);
+                    // Handle MCP manager overlay — Up/Down/Enter/Esc
+                    if app.mcp_manager.is_some() {
+                        match key.code {
+                            KeyCode::Up => {
+                                if let Some(ref mut mgr) = app.mcp_manager {
+                                    match &mut mgr.view {
+                                        McpManagerView::ServerList { selected } => {
+                                            if *selected > 0 {
+                                                *selected -= 1;
+                                            } else {
+                                                *selected = mgr.servers.len().saturating_sub(1);
+                                            }
                                         }
-                                    }
-                                    McpManagerView::ServerMenu { action_idx, server_idx } => {
-                                        let count = mcp_action_count(mgr.servers.get(*server_idx));
-                                        if *action_idx > 0 {
-                                            *action_idx -= 1;
-                                        } else {
-                                            *action_idx = count.saturating_sub(1);
+                                        McpManagerView::ServerMenu {
+                                            action_idx,
+                                            server_idx,
+                                        } => {
+                                            let count =
+                                                mcp_action_count(mgr.servers.get(*server_idx));
+                                            if *action_idx > 0 {
+                                                *action_idx -= 1;
+                                            } else {
+                                                *action_idx = count.saturating_sub(1);
+                                            }
                                         }
-                                    }
-                                    McpManagerView::ToolList { scroll, .. } => {
-                                        *scroll = scroll.saturating_sub(1);
-                                    }
-                                }
-                            }
-                            continue;
-                        }
-                        KeyCode::Down => {
-                            if let Some(ref mut mgr) = app.mcp_manager {
-                                match &mut mgr.view {
-                                    McpManagerView::ServerList { selected } => {
-                                        if *selected + 1 < mgr.servers.len() {
-                                            *selected += 1;
-                                        } else {
-                                            *selected = 0;
-                                        }
-                                    }
-                                    McpManagerView::ServerMenu { action_idx, server_idx } => {
-                                        let action_count = mcp_action_count(mgr.servers.get(*server_idx));
-                                        if *action_idx + 1 < action_count {
-                                            *action_idx += 1;
-                                        } else {
-                                            *action_idx = 0;
-                                        }
-                                    }
-                                    McpManagerView::ToolList { scroll, tools, .. } => {
-                                        if *scroll + 1 < tools.len() {
-                                            *scroll += 1;
+                                        McpManagerView::ToolList { scroll, .. } => {
+                                            *scroll = scroll.saturating_sub(1);
                                         }
                                     }
                                 }
+                                continue;
                             }
-                            continue;
-                        }
-                        KeyCode::Enter => {
-                            if let Some(ref mut mgr) = app.mcp_manager {
-                                match mgr.view.clone() {
-                                    McpManagerView::ServerList { selected } => {
-                                        if !mgr.servers.is_empty() {
-                                            mgr.view = McpManagerView::ServerMenu {
-                                                server_idx: selected,
-                                                action_idx: 0,
-                                            };
+                            KeyCode::Down => {
+                                if let Some(ref mut mgr) = app.mcp_manager {
+                                    match &mut mgr.view {
+                                        McpManagerView::ServerList { selected } => {
+                                            if *selected + 1 < mgr.servers.len() {
+                                                *selected += 1;
+                                            } else {
+                                                *selected = 0;
+                                            }
+                                        }
+                                        McpManagerView::ServerMenu {
+                                            action_idx,
+                                            server_idx,
+                                        } => {
+                                            let action_count =
+                                                mcp_action_count(mgr.servers.get(*server_idx));
+                                            if *action_idx + 1 < action_count {
+                                                *action_idx += 1;
+                                            } else {
+                                                *action_idx = 0;
+                                            }
+                                        }
+                                        McpManagerView::ToolList { scroll, tools, .. } => {
+                                            if *scroll + 1 < tools.len() {
+                                                *scroll += 1;
+                                            }
                                         }
                                     }
-                                    McpManagerView::ServerMenu { server_idx, action_idx } => {
-                                        if let Some(server) = mgr.servers.get(server_idx) {
-                                            let actions = mcp_actions_for(server);
-                                            if let Some(action) = actions.get(action_idx) {
-                                                match *action {
-                                                    "back" => {
-                                                        mgr.view = McpManagerView::ServerList {
-                                                            selected: server_idx,
-                                                        };
-                                                    }
-                                                    "tools" => {
-                                                        mgr.view = McpManagerView::ToolList {
-                                                            server_name: server.name.clone(),
-                                                            tools: server.tools.clone(),
-                                                            scroll: 0,
-                                                        };
-                                                    }
-                                                    _ => {
-                                                        let cmd = format!(
-                                                            "__mcp_action__ {} {}",
-                                                            server.name, action
-                                                        );
-                                                        let _ = input_tx.send(cmd).await;
+                                }
+                                continue;
+                            }
+                            KeyCode::Enter => {
+                                if let Some(ref mut mgr) = app.mcp_manager {
+                                    match mgr.view.clone() {
+                                        McpManagerView::ServerList { selected } => {
+                                            if !mgr.servers.is_empty() {
+                                                mgr.view = McpManagerView::ServerMenu {
+                                                    server_idx: selected,
+                                                    action_idx: 0,
+                                                };
+                                            }
+                                        }
+                                        McpManagerView::ServerMenu {
+                                            server_idx,
+                                            action_idx,
+                                        } => {
+                                            if let Some(server) = mgr.servers.get(server_idx) {
+                                                let actions = mcp_actions_for(server);
+                                                if let Some(action) = actions.get(action_idx) {
+                                                    match *action {
+                                                        "back" => {
+                                                            mgr.view = McpManagerView::ServerList {
+                                                                selected: server_idx,
+                                                            };
+                                                        }
+                                                        "tools" => {
+                                                            mgr.view = McpManagerView::ToolList {
+                                                                server_name: server.name.clone(),
+                                                                tools: server.tools.clone(),
+                                                                scroll: 0,
+                                                            };
+                                                        }
+                                                        _ => {
+                                                            let cmd = format!(
+                                                                "__mcp_action__ {} {}",
+                                                                server.name, action
+                                                            );
+                                                            let _ = input_tx.send(cmd).await;
+                                                        }
                                                     }
                                                 }
                                             }
                                         }
-                                    }
-                                    McpManagerView::ToolList { .. } => {
-                                        // Enter/Esc handled below — nothing to do on Enter
-                                    }
-                                }
-                            }
-                            continue;
-                        }
-                        KeyCode::Esc => {
-                            if let Some(ref mut mgr) = app.mcp_manager {
-                                match &mgr.view {
-                                    McpManagerView::ToolList { server_name, .. } => {
-                                        // Find the server index to return to its menu
-                                        let idx = mgr.servers.iter().position(|s| s.name == *server_name).unwrap_or(0);
-                                        mgr.view = McpManagerView::ServerMenu { server_idx: idx, action_idx: 0 };
-                                    }
-                                    McpManagerView::ServerMenu { server_idx, .. } => {
-                                        let idx = *server_idx;
-                                        mgr.view = McpManagerView::ServerList { selected: idx };
-                                    }
-                                    McpManagerView::ServerList { .. } => {
-                                        app.mcp_manager = None;
+                                        McpManagerView::ToolList { .. } => {
+                                            // Enter/Esc handled below — nothing to do on Enter
+                                        }
                                     }
                                 }
+                                continue;
                             }
-                            continue;
-                        }
-                        _ => continue, // swallow other keys while overlay is up
-                    }
-                }
-                // Handle permission prompt — y/n/Enter/Esc
-                if app.permission_prompt.is_some() {
-                    match key.code {
-                        KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
-                            let tool = app.permission_prompt.take().unwrap_or_default();
-                            if let Some(ref tx) = permission_tx {
-                                let _ = tx.send(true).await;
-                            }
-                            app.output.append_line(&format!("[{tool}: approved]"));
-                            continue;
-                        }
-                        KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
-                            let tool = app.permission_prompt.take().unwrap_or_default();
-                            if let Some(ref tx) = permission_tx {
-                                let _ = tx.send(false).await;
-                            }
-                            app.output.append_line(&format!("[{tool}: denied]"));
-                            continue;
-                        }
-                        _ => continue, // swallow other keys during permission prompt
-                    }
-                }
-                // Dismiss /btw overlay on any of Esc/Enter/Space
-                if app.btw_overlay.is_some() {
-                    match key.code {
-                        KeyCode::Esc | KeyCode::Enter | KeyCode::Char(' ') => {
-                            app.btw_overlay = None;
-                            continue;
-                        }
-                        _ => continue, // swallow all other keys while overlay is up
-                    }
-                }
-                // Vim mode key routing — Ctrl+D / Ctrl+C fall through to normal handling
-                let is_ctrl_quit = key.modifiers == KeyModifiers::CONTROL
-                    && matches!(key.code, KeyCode::Char('d') | KeyCode::Char('c'));
-                if !is_ctrl_quit {
-                    if let Some(ref mut vim) = app.vim_state {
-                        let action = vim.handle_key(key);
-                        match action {
-                            VimAction::Submit => {
-                                let text = vim.text();
-                                *vim = VimState::new();
-                                if !text.trim().is_empty() {
-                                    if app.is_generating {
-                                        app.pending_input.push(text);
-                                        app.output.append_line("[queued — will send after current turn]");
-                                    } else {
-                                        let _ = input_tx.send(text).await;
+                            KeyCode::Esc => {
+                                if let Some(ref mut mgr) = app.mcp_manager {
+                                    match &mgr.view {
+                                        McpManagerView::ToolList { server_name, .. } => {
+                                            // Find the server index to return to its menu
+                                            let idx = mgr
+                                                .servers
+                                                .iter()
+                                                .position(|s| s.name == *server_name)
+                                                .unwrap_or(0);
+                                            mgr.view = McpManagerView::ServerMenu {
+                                                server_idx: idx,
+                                                action_idx: 0,
+                                            };
+                                        }
+                                        McpManagerView::ServerMenu { server_idx, .. } => {
+                                            let idx = *server_idx;
+                                            mgr.view = McpManagerView::ServerList { selected: idx };
+                                        }
+                                        McpManagerView::ServerList { .. } => {
+                                            app.mcp_manager = None;
+                                        }
                                     }
                                 }
+                                continue;
                             }
-                            VimAction::Quit => {
-                                app.vim_state = None;
-                            }
-                            _ => {}
+                            _ => continue, // swallow other keys while overlay is up
                         }
-                        continue;
                     }
-                }
-                match key {
-                    // Ctrl+D = quit
-                    KeyEvent {
-                        code: KeyCode::Char('d'),
-                        modifiers: KeyModifiers::CONTROL,
-                        ..
-                    } => {
-                        app.should_quit = true;
+                    // Handle permission prompt — y/n/Enter/Esc
+                    if app.permission_prompt.is_some() {
+                        match key.code {
+                            KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
+                                let tool = app.permission_prompt.take().unwrap_or_default();
+                                if let Some(ref tx) = permission_tx {
+                                    let _ = tx.send(true).await;
+                                }
+                                app.output.append_line(&format!("[{tool}: approved]"));
+                                continue;
+                            }
+                            KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                                let tool = app.permission_prompt.take().unwrap_or_default();
+                                if let Some(ref tx) = permission_tx {
+                                    let _ = tx.send(false).await;
+                                }
+                                app.output.append_line(&format!("[{tool}: denied]"));
+                                continue;
+                            }
+                            _ => continue, // swallow other keys during permission prompt
+                        }
                     }
-                    // Ctrl+C = interrupt generation or quit
-                    KeyEvent {
-                        code: KeyCode::Char('c'),
-                        modifiers: KeyModifiers::CONTROL,
-                        ..
-                    } => {
-                        if app.is_generating {
-                            app.is_generating = false;
-                            app.output.append_line("[interrupted]");
-                        } else {
+                    // Dismiss /btw overlay on any of Esc/Enter/Space
+                    if app.btw_overlay.is_some() {
+                        match key.code {
+                            KeyCode::Esc | KeyCode::Enter | KeyCode::Char(' ') => {
+                                app.btw_overlay = None;
+                                continue;
+                            }
+                            _ => continue, // swallow all other keys while overlay is up
+                        }
+                    }
+                    // Vim mode key routing — Ctrl+D / Ctrl+C fall through to normal handling
+                    let is_ctrl_quit = key.modifiers == KeyModifiers::CONTROL
+                        && matches!(key.code, KeyCode::Char('d') | KeyCode::Char('c'));
+                    if !is_ctrl_quit {
+                        if let Some(ref mut vim) = app.vim_state {
+                            let action = vim.handle_key(key);
+                            match action {
+                                VimAction::Submit => {
+                                    let text = vim.text();
+                                    *vim = VimState::new();
+                                    if !text.trim().is_empty() {
+                                        if app.is_generating {
+                                            app.pending_input.push(text);
+                                            app.output.append_line(
+                                                "[queued — will send after current turn]",
+                                            );
+                                        } else {
+                                            let _ = input_tx.send(text).await;
+                                        }
+                                    }
+                                }
+                                VimAction::Quit => {
+                                    app.vim_state = None;
+                                }
+                                _ => {}
+                            }
+                            continue;
+                        }
+                    }
+                    match key {
+                        // Ctrl+D = quit
+                        KeyEvent {
+                            code: KeyCode::Char('d'),
+                            modifiers: KeyModifiers::CONTROL,
+                            ..
+                        } => {
                             app.should_quit = true;
                         }
-                    }
-                    // Ctrl+T = toggle thinking expand
-                    KeyEvent {
-                        code: KeyCode::Char('t'),
-                        modifiers: KeyModifiers::CONTROL,
-                        ..
-                    } => {
-                        app.thinking.toggle_expand();
-                    }
-                    // Page Up = scroll up
-                    KeyEvent {
-                        code: KeyCode::PageUp,
-                        ..
-                    } => {
-                        app.output.scroll_up(10);
-                    }
-                    // Page Down = scroll down
-                    KeyEvent {
-                        code: KeyCode::PageDown,
-                        ..
-                    } => {
-                        app.output.scroll_down(10);
-                    }
-                    // Home = scroll to top
-                    KeyEvent {
-                        code: KeyCode::Home,
-                        modifiers: KeyModifiers::CONTROL,
-                        ..
-                    } => {
-                        app.output.scroll_offset = u16::MAX; // will be clamped by effective_scroll
-                        app.output.scroll_locked = true;
-                    }
-                    // End = scroll to bottom
-                    KeyEvent {
-                        code: KeyCode::End,
-                        modifiers: KeyModifiers::CONTROL,
-                        ..
-                    } => {
-                        app.output.scroll_to_bottom();
-                    }
-                    // Esc = dismiss suggestions, or double-Esc to cancel generation
-                    KeyEvent {
-                        code: KeyCode::Esc, ..
-                    } => {
-                        if app.is_generating {
-                            // Double-Esc within 500ms cancels generation
-                            let now = std::time::Instant::now();
-                            if let Some(last) = app.last_esc {
-                                if now.duration_since(last).as_millis() < 500 {
-                                    app.is_generating = false;
-                                    app.active_tool = None;
-                                    app.output.append_line("[interrupted]");
-                                    app.last_esc = None;
+                        // Ctrl+C = interrupt generation or quit
+                        KeyEvent {
+                            code: KeyCode::Char('c'),
+                            modifiers: KeyModifiers::CONTROL,
+                            ..
+                        } => {
+                            if app.is_generating {
+                                app.is_generating = false;
+                                app.output.append_line("[interrupted]");
+                            } else {
+                                app.should_quit = true;
+                            }
+                        }
+                        // Ctrl+T = toggle thinking expand
+                        KeyEvent {
+                            code: KeyCode::Char('t'),
+                            modifiers: KeyModifiers::CONTROL,
+                            ..
+                        } => {
+                            app.thinking.toggle_expand();
+                        }
+                        // Page Up = scroll up
+                        KeyEvent {
+                            code: KeyCode::PageUp,
+                            ..
+                        } => {
+                            app.output.scroll_up(10);
+                        }
+                        // Page Down = scroll down
+                        KeyEvent {
+                            code: KeyCode::PageDown,
+                            ..
+                        } => {
+                            app.output.scroll_down(10);
+                        }
+                        // Home = scroll to top
+                        KeyEvent {
+                            code: KeyCode::Home,
+                            modifiers: KeyModifiers::CONTROL,
+                            ..
+                        } => {
+                            app.output.scroll_offset = u16::MAX; // will be clamped by effective_scroll
+                            app.output.scroll_locked = true;
+                        }
+                        // End = scroll to bottom
+                        KeyEvent {
+                            code: KeyCode::End,
+                            modifiers: KeyModifiers::CONTROL,
+                            ..
+                        } => {
+                            app.output.scroll_to_bottom();
+                        }
+                        // Esc = dismiss suggestions, or double-Esc to cancel generation
+                        KeyEvent {
+                            code: KeyCode::Esc, ..
+                        } => {
+                            if app.is_generating {
+                                // Double-Esc within 500ms cancels generation
+                                let now = std::time::Instant::now();
+                                if let Some(last) = app.last_esc {
+                                    if now.duration_since(last).as_millis() < 500 {
+                                        app.is_generating = false;
+                                        app.active_tool = None;
+                                        app.output.append_line("[interrupted]");
+                                        app.last_esc = None;
+                                        continue;
+                                    }
+                                }
+                                app.last_esc = Some(now);
+                            } else {
+                                app.input.dismiss_suggestions();
+                            }
+                        }
+                        // Shift+Tab = cycle permission mode
+                        KeyEvent {
+                            code: KeyCode::BackTab,
+                            ..
+                        } => {
+                            let current = &app.status.permission_mode;
+                            let modes = [
+                                "default",
+                                "acceptEdits",
+                                "plan",
+                                "auto",
+                                "dontAsk",
+                                "bypassPermissions",
+                            ];
+                            let idx = modes.iter().position(|m| m == current).unwrap_or(0);
+                            let next = modes[(idx + 1) % modes.len()];
+                            app.status.permission_mode = next.to_string();
+                            let _ = input_tx.send(format!("/permissions {next}")).await;
+                        }
+                        // Tab = accept selected suggestion
+                        KeyEvent {
+                            code: KeyCode::Tab,
+                            modifiers: KeyModifiers::NONE,
+                            ..
+                        } => {
+                            app.input.accept_suggestion();
+                        }
+                        // Enter = submit input (queue if generating)
+                        KeyEvent {
+                            code: KeyCode::Enter,
+                            modifiers: KeyModifiers::NONE,
+                            ..
+                        } => {
+                            if app.input.suggestions.active {
+                                let is_exact_match = app
+                                    .input
+                                    .suggestions
+                                    .suggestions
+                                    .iter()
+                                    .any(|cmd| cmd.name == app.input.text());
+                                if is_exact_match {
+                                    app.input.dismiss_suggestions();
+                                } else {
+                                    app.input.accept_suggestion();
                                     continue;
                                 }
                             }
-                            app.last_esc = Some(now);
-                        } else {
-                            app.input.dismiss_suggestions();
-                        }
-                    }
-                    // Shift+Tab = cycle permission mode
-                    KeyEvent {
-                        code: KeyCode::BackTab,
-                        ..
-                    } => {
-                        let current = &app.status.permission_mode;
-                        let modes = ["default", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions"];
-                        let idx = modes.iter().position(|m| m == current).unwrap_or(0);
-                        let next = modes[(idx + 1) % modes.len()];
-                        app.status.permission_mode = next.to_string();
-                        let _ = input_tx.send(format!("/permissions {next}")).await;
-                    }
-                    // Tab = accept selected suggestion
-                    KeyEvent {
-                        code: KeyCode::Tab,
-                        modifiers: KeyModifiers::NONE,
-                        ..
-                    } => {
-                        app.input.accept_suggestion();
-                    }
-                    // Enter = submit input (queue if generating)
-                    KeyEvent {
-                        code: KeyCode::Enter,
-                        modifiers: KeyModifiers::NONE,
-                        ..
-                    } => {
-                        if app.input.suggestions.active {
-                            let is_exact_match = app.input.suggestions.suggestions
-                                .iter()
-                                .any(|cmd| cmd.name == app.input.text());
-                            if is_exact_match {
-                                app.input.dismiss_suggestions();
-                            } else {
-                                app.input.accept_suggestion();
-                                continue;
-                            }
-                        }
-                        let text = app.submit_input();
-                        if !text.is_empty() {
-                            // /btw is ALWAYS immediate — never queued
-                            if text.starts_with("/btw ") {
-                                if let Some(ref btw) = btw_tx {
-                                    let question = text.strip_prefix("/btw ").unwrap_or("").trim().to_string();
-                                    if !question.is_empty() {
-                                        let _ = btw.send(question).await;
+                            let text = app.submit_input();
+                            if !text.is_empty() {
+                                // /btw is ALWAYS immediate — never queued
+                                if text.starts_with("/btw ") {
+                                    if let Some(ref btw) = btw_tx {
+                                        let question = text
+                                            .strip_prefix("/btw ")
+                                            .unwrap_or("")
+                                            .trim()
+                                            .to_string();
+                                        if !question.is_empty() {
+                                            let _ = btw.send(question).await;
+                                        }
+                                    } else {
+                                        let _ = input_tx.send(text).await;
                                     }
+                                } else if app.is_generating {
+                                    // Queue non-btw input to send after current turn completes
+                                    app.pending_input.push(text);
+                                    app.output
+                                        .append_line("[queued — will send after current turn]");
                                 } else {
                                     let _ = input_tx.send(text).await;
                                 }
-                            } else if app.is_generating {
-                                // Queue non-btw input to send after current turn completes
-                                app.pending_input.push(text);
-                                app.output.append_line("[queued — will send after current turn]");
-                            } else {
-                                let _ = input_tx.send(text).await;
                             }
                         }
-                    }
-                    // Backspace
-                    KeyEvent {
-                        code: KeyCode::Backspace,
-                        ..
-                    } => {
-                        app.input.backspace();
-                    }
-                    // Up arrow = navigate suggestions or history
-                    KeyEvent {
-                        code: KeyCode::Up, ..
-                    } => {
-                        if app.input.suggestions.active {
-                            app.input.suggestions.select_prev();
-                        } else {
-                            app.input.history_up();
+                        // Backspace
+                        KeyEvent {
+                            code: KeyCode::Backspace,
+                            ..
+                        } => {
+                            app.input.backspace();
                         }
-                    }
-                    // Down arrow = navigate suggestions or history
-                    KeyEvent {
-                        code: KeyCode::Down,
-                        ..
-                    } => {
-                        if app.input.suggestions.active {
-                            app.input.suggestions.select_next();
-                        } else {
-                            app.input.history_down();
+                        // Up arrow = navigate suggestions or history
+                        KeyEvent {
+                            code: KeyCode::Up, ..
+                        } => {
+                            if app.input.suggestions.active {
+                                app.input.suggestions.select_prev();
+                            } else {
+                                app.input.history_up();
+                            }
                         }
+                        // Down arrow = navigate suggestions or history
+                        KeyEvent {
+                            code: KeyCode::Down,
+                            ..
+                        } => {
+                            if app.input.suggestions.active {
+                                app.input.suggestions.select_next();
+                            } else {
+                                app.input.history_down();
+                            }
+                        }
+                        // Left arrow
+                        KeyEvent {
+                            code: KeyCode::Left,
+                            ..
+                        } => app.input.move_left(),
+                        // Right arrow
+                        KeyEvent {
+                            code: KeyCode::Right,
+                            ..
+                        } => app.input.move_right(),
+                        // Regular character input
+                        KeyEvent {
+                            code: KeyCode::Char(c),
+                            modifiers: KeyModifiers::NONE | KeyModifiers::SHIFT,
+                            ..
+                        } => {
+                            app.input.insert(c);
+                        }
+                        _ => {}
                     }
-                    // Left arrow
-                    KeyEvent {
-                        code: KeyCode::Left,
-                        ..
-                    } => app.input.move_left(),
-                    // Right arrow
-                    KeyEvent {
-                        code: KeyCode::Right,
-                        ..
-                    } => app.input.move_right(),
-                    // Regular character input
-                    KeyEvent {
-                        code: KeyCode::Char(c),
-                        modifiers: KeyModifiers::NONE | KeyModifiers::SHIFT,
-                        ..
-                    } => {
-                        app.input.insert(c);
-                    }
-                    _ => {}
                 }
-            }
-            _ => {} // Resize and other events
+                _ => {} // Resize and other events
             }
         } else {
             // No key event — tick animations
@@ -1482,7 +1538,12 @@ mod tests {
         app.on_tool_start("Bash", "tool-456");
         app.on_tool_complete("Bash", false);
         // Failed tool calls DO show in output
-        assert!(app.output.all_lines().iter().any(|l| l.contains("Bash") && l.contains("failed")));
+        assert!(
+            app.output
+                .all_lines()
+                .iter()
+                .any(|l| l.contains("Bash") && l.contains("failed"))
+        );
     }
 
     #[test]
@@ -1537,8 +1598,16 @@ mod tests {
     fn submit_input_never_sets_is_generating() {
         // No input — slash or normal — should set is_generating in submit_input.
         // The flag is controlled exclusively by GenerationStarted/TurnComplete events.
-        let cases = vec!["hello world", "/model opus", "/fast", "/gibberish", "/", "/ help",
-                         "/usr/bin/foo", "/etc/hosts"];
+        let cases = vec![
+            "hello world",
+            "/model opus",
+            "/fast",
+            "/gibberish",
+            "/",
+            "/ help",
+            "/usr/bin/foo",
+            "/etc/hosts",
+        ];
         for input in cases {
             let mut app = App::new();
             for c in input.chars() {
@@ -1546,7 +1615,10 @@ mod tests {
             }
             let text = app.submit_input();
             assert_eq!(text, input);
-            assert!(!app.is_generating, "submit_input set is_generating for '{input}'");
+            assert!(
+                !app.is_generating,
+                "submit_input set is_generating for '{input}'"
+            );
         }
     }
 
@@ -1569,7 +1641,9 @@ mod tests {
     fn full_agent_turn_lifecycle() {
         // Simulates: user submits -> GenerationStarted -> TextDelta -> TurnComplete
         let mut app = App::new();
-        for c in "hello".chars() { app.input.insert(c); }
+        for c in "hello".chars() {
+            app.input.insert(c);
+        }
         app.submit_input();
         assert!(!app.is_generating); // submit_input does NOT set it
 
@@ -1587,7 +1661,9 @@ mod tests {
     fn slash_command_lifecycle() {
         // Simulates: user submits /model -> SlashCommandComplete
         let mut app = App::new();
-        for c in "/model opus".chars() { app.input.insert(c); }
+        for c in "/model opus".chars() {
+            app.input.insert(c);
+        }
         app.submit_input();
         assert!(!app.is_generating); // never set for slash commands
 
@@ -1601,7 +1677,9 @@ mod tests {
     fn unrecognized_slash_command_fallthrough() {
         // Simulates: user types /gibberish -> not handled -> falls through to agent
         let mut app = App::new();
-        for c in "/gibberish".chars() { app.input.insert(c); }
+        for c in "/gibberish".chars() {
+            app.input.insert(c);
+        }
         app.submit_input();
         assert!(!app.is_generating); // submit_input does NOT set it
 

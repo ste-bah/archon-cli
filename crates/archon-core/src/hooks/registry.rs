@@ -130,7 +130,10 @@ impl HookRegistry {
         for entry in entries {
             // Apply HookMatcher.matcher filter against tool_name in input.
             if let Some(ref matcher_str) = entry.matcher.matcher {
-                let tool_name = input.get("tool_name").and_then(|v| v.as_str()).unwrap_or("");
+                let tool_name = input
+                    .get("tool_name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
                 if !matcher_matches(matcher_str, tool_name) {
                     continue;
                 }
@@ -198,8 +201,5 @@ fn matcher_matches(matcher: &str, tool_name: &str) -> bool {
 }
 
 fn make_once_key(event_name: &str, source: &Option<String>, command: &str) -> String {
-    format!(
-        "{event_name}:{}:{command}",
-        source.as_deref().unwrap_or("")
-    )
+    format!("{event_name}:{}:{command}", source.as_deref().unwrap_or(""))
 }

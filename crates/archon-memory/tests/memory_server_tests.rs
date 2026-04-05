@@ -7,12 +7,12 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use archon_memory::access::{open_memory, MemoryAccess, MemoryTrait};
+use archon_memory::MemoryGraph;
+use archon_memory::access::{MemoryAccess, MemoryTrait, open_memory};
 use archon_memory::client::MemoryClient;
-use archon_memory::protocol::{make_request, parse_response, Request, Response};
+use archon_memory::protocol::{Request, Response, make_request, parse_response};
 use archon_memory::server::MemoryServer;
 use archon_memory::types::{MemoryType, RelType, SearchFilter};
-use archon_memory::MemoryGraph;
 
 // ── helpers ────────────────────────────────────────────────────
 
@@ -20,9 +20,7 @@ use archon_memory::MemoryGraph;
 async fn start_test_server(
     port_file: PathBuf,
 ) -> (u16, Arc<MemoryGraph>, tokio::task::JoinHandle<()>) {
-    let graph = Arc::new(
-        MemoryGraph::in_memory().expect("in-memory graph"),
-    );
+    let graph = Arc::new(MemoryGraph::in_memory().expect("in-memory graph"));
     let (port, handle) = MemoryServer::start(Arc::clone(&graph), port_file)
         .await
         .expect("server start");
@@ -93,9 +91,7 @@ async fn server_ping_responds_pong() {
     let (port, _graph, handle) = start_test_server(port_file).await;
 
     let addr: SocketAddr = format!("127.0.0.1:{port}").parse().expect("addr");
-    let mut stream = tokio::net::TcpStream::connect(addr)
-        .await
-        .expect("connect");
+    let mut stream = tokio::net::TcpStream::connect(addr).await.expect("connect");
 
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     let req = make_request(1, "ping", serde_json::json!({}));
@@ -118,9 +114,7 @@ async fn server_store_and_recall() {
     let (port, _graph, handle) = start_test_server(port_file).await;
 
     let addr: SocketAddr = format!("127.0.0.1:{port}").parse().expect("addr");
-    let mut stream = tokio::net::TcpStream::connect(addr)
-        .await
-        .expect("connect");
+    let mut stream = tokio::net::TcpStream::connect(addr).await.expect("connect");
 
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     let (reader, mut writer) = stream.split();
@@ -164,10 +158,12 @@ async fn server_store_and_recall() {
     let results = resp2.result.expect("has results");
     let arr = results.as_array().expect("array");
     assert!(!arr.is_empty(), "should find at least one memory");
-    assert!(arr[0]["content"]
-        .as_str()
-        .expect("content str")
-        .contains("Rust"));
+    assert!(
+        arr[0]["content"]
+            .as_str()
+            .expect("content str")
+            .contains("Rust")
+    );
 
     // Verify stored_id is a string (UUID)
     assert!(stored_id.is_string(), "stored id should be a string UUID");
@@ -181,9 +177,7 @@ async fn server_all_methods_dispatch() {
     let (port, _graph, handle) = start_test_server(port_file).await;
 
     let addr: SocketAddr = format!("127.0.0.1:{port}").parse().expect("addr");
-    let mut stream = tokio::net::TcpStream::connect(addr)
-        .await
-        .expect("connect");
+    let mut stream = tokio::net::TcpStream::connect(addr).await.expect("connect");
 
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     let (reader, mut writer) = stream.split();
@@ -221,7 +215,11 @@ async fn server_all_methods_dispatch() {
         }),
     )
     .await;
-    assert!(resp.error.is_none(), "store_memory failed: {:?}", resp.error);
+    assert!(
+        resp.error.is_none(),
+        "store_memory failed: {:?}",
+        resp.error
+    );
     let id_a = resp.result.expect("id").as_str().expect("str").to_string();
 
     // 2. get_memory
@@ -246,7 +244,11 @@ async fn server_all_methods_dispatch() {
         serde_json::json!({"id": id_a, "content": "updated content", "tags": ["b"]}),
     )
     .await;
-    assert!(resp.error.is_none(), "update_memory failed: {:?}", resp.error);
+    assert!(
+        resp.error.is_none(),
+        "update_memory failed: {:?}",
+        resp.error
+    );
 
     // Verify update
     let resp = send_recv(
@@ -520,7 +522,8 @@ fn direct_memory_trait() {
     let mem = mt.get_memory(&id).expect("get");
     assert_eq!(mem.content, "trait test");
 
-    mt.update_memory(&id, Some("updated"), None).expect("update");
+    mt.update_memory(&id, Some("updated"), None)
+        .expect("update");
     let mem2 = mt.get_memory(&id).expect("get2");
     assert_eq!(mem2.content, "updated");
 
@@ -545,7 +548,15 @@ fn direct_memory_trait() {
 
     // Store second for relationship
     let id2 = mt
-        .store_memory("second", "s", MemoryType::Decision, 0.5, &[], "test", "/tmp")
+        .store_memory(
+            "second",
+            "s",
+            MemoryType::Decision,
+            0.5,
+            &[],
+            "test",
+            "/tmp",
+        )
         .expect("store2");
 
     mt.create_relationship(&id, &id2, RelType::RelatedTo, Some("test"), 0.8)
@@ -653,7 +664,15 @@ async fn open_memory_first_session_becomes_server() {
     // Should function as a memory store
     let mt: &dyn MemoryTrait = &access;
     let id = mt
-        .store_memory("factory test", "ft", MemoryType::Fact, 0.5, &[], "t", "/tmp")
+        .store_memory(
+            "factory test",
+            "ft",
+            MemoryType::Fact,
+            0.5,
+            &[],
+            "t",
+            "/tmp",
+        )
         .expect("store");
     let mem = mt.get_memory(&id).expect("get");
     assert_eq!(mem.content, "factory test");

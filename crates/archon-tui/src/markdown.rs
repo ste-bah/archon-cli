@@ -171,11 +171,7 @@ impl MarkdownRenderer {
                 self.code_block_lang = match kind {
                     CodeBlockKind::Fenced(lang) => {
                         let lang = lang.trim().to_string();
-                        if lang.is_empty() {
-                            None
-                        } else {
-                            Some(lang)
-                        }
+                        if lang.is_empty() { None } else { Some(lang) }
                     }
                     CodeBlockKind::Indented => None,
                 };

@@ -74,7 +74,11 @@ impl Tool for TaskCreateTool {
         let mut response = json!({ "task_id": task_id });
 
         // If prompt is provided, build a SubagentRequest and include it
-        if let Some(prompt) = input.get("prompt").and_then(|v| v.as_str()).filter(|s| !s.trim().is_empty()) {
+        if let Some(prompt) = input
+            .get("prompt")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.trim().is_empty())
+        {
             let model = input
                 .get("model")
                 .and_then(|v| v.as_str())
@@ -104,8 +108,8 @@ impl Tool for TaskCreateTool {
                 timeout_secs: SubagentRequest::DEFAULT_TIMEOUT_SECS,
             };
 
-            response["subagent_request"] = serde_json::to_value(&request)
-                .unwrap_or_else(|_| json!(null));
+            response["subagent_request"] =
+                serde_json::to_value(&request).unwrap_or_else(|_| json!(null));
         }
 
         match serde_json::to_string_pretty(&response) {
@@ -116,7 +120,11 @@ impl Tool for TaskCreateTool {
 
     fn permission_level(&self, input: &serde_json::Value) -> PermissionLevel {
         // If a prompt is provided, this spawns a subagent — that's risky
-        if input.get("prompt").and_then(|v| v.as_str()).is_some_and(|s| !s.trim().is_empty()) {
+        if input
+            .get("prompt")
+            .and_then(|v| v.as_str())
+            .is_some_and(|s| !s.trim().is_empty())
+        {
             PermissionLevel::Risky
         } else {
             PermissionLevel::Safe

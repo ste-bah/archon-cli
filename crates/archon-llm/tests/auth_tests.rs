@@ -1,6 +1,4 @@
-use archon_llm::auth::{
-    parse_credentials_json, resolve_auth, AuthError, AuthProvider,
-};
+use archon_llm::auth::{AuthError, AuthProvider, parse_credentials_json, resolve_auth};
 use archon_llm::types::Secret;
 
 // -----------------------------------------------------------------------
@@ -55,7 +53,10 @@ fn parse_valid_credentials_json() {
     assert_eq!(creds.refresh_token.expose(), "refresh-456");
     assert_eq!(creds.scopes.len(), 2);
     assert_eq!(creds.subscription_type, "pro");
-    assert!(!creds.is_expired(), "token expiring in 2099 should not be expired");
+    assert!(
+        !creds.is_expired(),
+        "token expiring in 2099 should not be expired"
+    );
 }
 
 #[test]
@@ -73,7 +74,10 @@ fn parse_credentials_epoch_ms_integer() {
 
     let creds = parse_credentials_json(json).expect("should parse epoch-ms integer");
     assert_eq!(creds.access_token.expose(), "access-epoch");
-    assert!(!creds.is_expired(), "far-future epoch should not be expired");
+    assert!(
+        !creds.is_expired(),
+        "far-future epoch should not be expired"
+    );
 }
 
 #[test]
@@ -192,11 +196,7 @@ fn resolve_auth_api_key_wins() {
 
 #[test]
 fn resolve_auth_bearer_token_second() {
-    let result = resolve_auth(
-        None,
-        Some("bearer-tok"),
-        None,
-    );
+    let result = resolve_auth(None, Some("bearer-tok"), None);
     let provider = result.expect("should resolve");
     assert!(
         matches!(provider, AuthProvider::BearerToken(_)),
@@ -206,11 +206,7 @@ fn resolve_auth_bearer_token_second() {
 
 #[test]
 fn resolve_auth_api_key_over_bearer() {
-    let result = resolve_auth(
-        Some("sk-ant-key"),
-        Some("bearer-tok"),
-        None,
-    );
+    let result = resolve_auth(Some("sk-ant-key"), Some("bearer-tok"), None);
     let provider = result.expect("should resolve");
     assert!(
         matches!(provider, AuthProvider::ApiKey(_)),

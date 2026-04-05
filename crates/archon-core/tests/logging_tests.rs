@@ -29,20 +29,23 @@ fn init_logging_creates_file_and_directories() {
     assert!(!dir.exists(), "dir should not exist before init");
 
     let session_id = "test-session-001";
-    let guard = init_logging(session_id, "info", &dir)
-        .expect("init_logging should succeed");
+    let guard = init_logging(session_id, "info", &dir).expect("init_logging should succeed");
 
     // Directory was created
-    assert!(dir.exists(), "log directory should be created by init_logging");
+    assert!(
+        dir.exists(),
+        "log directory should be created by init_logging"
+    );
 
     // Log file was created
     let log_file = dir.join(format!("{session_id}.log"));
-    assert!(log_file.exists(), "log file should be created at {log_file:?}");
+    assert!(
+        log_file.exists(),
+        "log file should be created at {log_file:?}"
+    );
 
     drop(guard);
-    let _ = fs::remove_dir_all(
-        dir.parent().and_then(|p| p.parent()).expect("grandparent"),
-    );
+    let _ = fs::remove_dir_all(dir.parent().and_then(|p| p.parent()).expect("grandparent"));
 }
 
 #[test]
@@ -52,8 +55,7 @@ fn rotate_logs_keeps_max_files() {
     // Create 10 log files with staggered mtimes
     for i in 0..10 {
         let path = dir.join(format!("session-{i:03}.log"));
-        fs::write(&path, format!("log content {i}"))
-            .expect("should write test log file");
+        fs::write(&path, format!("log content {i}")).expect("should write test log file");
         // Small sleep to ensure different mtimes
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
@@ -77,7 +79,10 @@ fn rotate_logs_keeps_max_files() {
     // The 5 newest files (session-005 through session-009) should survive
     for i in 5..10 {
         let path = dir.join(format!("session-{i:03}.log"));
-        assert!(path.exists(), "newest file {path:?} should survive rotation");
+        assert!(
+            path.exists(),
+            "newest file {path:?} should survive rotation"
+        );
     }
 
     cleanup(&dir);

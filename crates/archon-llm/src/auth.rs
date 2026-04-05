@@ -56,15 +56,15 @@ impl AuthProvider {
     /// Returns the HTTP header `(name, value)` for this auth method.
     pub fn header(&self) -> (String, String) {
         match self {
-            AuthProvider::ApiKey(key) => {
-                ("x-api-key".to_string(), key.expose().clone())
-            }
-            AuthProvider::OAuthToken(creds) => {
-                ("Authorization".to_string(), format!("Bearer {}", creds.access_token.expose()))
-            }
-            AuthProvider::BearerToken(token) => {
-                ("Authorization".to_string(), format!("Bearer {}", token.expose()))
-            }
+            AuthProvider::ApiKey(key) => ("x-api-key".to_string(), key.expose().clone()),
+            AuthProvider::OAuthToken(creds) => (
+                "Authorization".to_string(),
+                format!("Bearer {}", creds.access_token.expose()),
+            ),
+            AuthProvider::BearerToken(token) => (
+                "Authorization".to_string(),
+                format!("Bearer {}", token.expose()),
+            ),
         }
     }
 }

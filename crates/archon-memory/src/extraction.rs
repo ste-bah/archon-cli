@@ -195,12 +195,12 @@ pub fn store_extracted(
 
         graph.store_memory(
             &mem.content,
-            "",                // title
+            "", // title
             mem.memory_type,
-            0.5,               // default importance
+            0.5, // default importance
             &tags,
             "auto-extract",
-            "",                // project_path
+            "", // project_path
         )?;
         stored += 1;
     }

@@ -1,9 +1,9 @@
 use std::path::Path;
 
 use archon_permissions::checker::PermissionChecker;
-use archon_permissions::classifier::{classify_command, CommandClass};
+use archon_permissions::classifier::{CommandClass, classify_command};
 use archon_permissions::mode::{PermissionDecision, PermissionMode};
-use archon_permissions::rules::{check_write_path, PathDecision, RuleSet};
+use archon_permissions::rules::{PathDecision, RuleSet, check_write_path};
 
 fn no_overrides() -> (Vec<String>, Vec<String>, Vec<String>) {
     (vec![], vec![], vec![])
@@ -17,37 +17,55 @@ fn no_overrides() -> (Vec<String>, Vec<String>, Vec<String>) {
 fn ls_is_safe() {
     let (s, r, d) = no_overrides();
     assert_eq!(classify_command("ls", &s, &r, &d), CommandClass::Safe);
-    assert_eq!(classify_command("ls -la /tmp", &s, &r, &d), CommandClass::Safe);
+    assert_eq!(
+        classify_command("ls -la /tmp", &s, &r, &d),
+        CommandClass::Safe
+    );
 }
 
 #[test]
 fn git_status_is_safe() {
     let (s, r, d) = no_overrides();
-    assert_eq!(classify_command("git status", &s, &r, &d), CommandClass::Safe);
+    assert_eq!(
+        classify_command("git status", &s, &r, &d),
+        CommandClass::Safe
+    );
 }
 
 #[test]
 fn git_log_is_safe() {
     let (s, r, d) = no_overrides();
-    assert_eq!(classify_command("git log --oneline", &s, &r, &d), CommandClass::Safe);
+    assert_eq!(
+        classify_command("git log --oneline", &s, &r, &d),
+        CommandClass::Safe
+    );
 }
 
 #[test]
 fn cargo_test_is_safe() {
     let (s, r, d) = no_overrides();
-    assert_eq!(classify_command("cargo test", &s, &r, &d), CommandClass::Safe);
+    assert_eq!(
+        classify_command("cargo test", &s, &r, &d),
+        CommandClass::Safe
+    );
 }
 
 #[test]
 fn echo_is_safe() {
     let (s, r, d) = no_overrides();
-    assert_eq!(classify_command("echo hello", &s, &r, &d), CommandClass::Safe);
+    assert_eq!(
+        classify_command("echo hello", &s, &r, &d),
+        CommandClass::Safe
+    );
 }
 
 #[test]
 fn grep_is_safe() {
     let (s, r, d) = no_overrides();
-    assert_eq!(classify_command("grep -r pattern .", &s, &r, &d), CommandClass::Safe);
+    assert_eq!(
+        classify_command("grep -r pattern .", &s, &r, &d),
+        CommandClass::Safe
+    );
 }
 
 // -----------------------------------------------------------------------
@@ -57,25 +75,37 @@ fn grep_is_safe() {
 #[test]
 fn git_commit_is_risky() {
     let (s, r, d) = no_overrides();
-    assert_eq!(classify_command("git commit -m 'msg'", &s, &r, &d), CommandClass::Risky);
+    assert_eq!(
+        classify_command("git commit -m 'msg'", &s, &r, &d),
+        CommandClass::Risky
+    );
 }
 
 #[test]
 fn npm_install_is_risky() {
     let (s, r, d) = no_overrides();
-    assert_eq!(classify_command("npm install express", &s, &r, &d), CommandClass::Risky);
+    assert_eq!(
+        classify_command("npm install express", &s, &r, &d),
+        CommandClass::Risky
+    );
 }
 
 #[test]
 fn cargo_build_is_risky() {
     let (s, r, d) = no_overrides();
-    assert_eq!(classify_command("cargo build --release", &s, &r, &d), CommandClass::Risky);
+    assert_eq!(
+        classify_command("cargo build --release", &s, &r, &d),
+        CommandClass::Risky
+    );
 }
 
 #[test]
 fn unknown_command_is_risky() {
     let (s, r, d) = no_overrides();
-    assert_eq!(classify_command("mycustomtool --flag", &s, &r, &d), CommandClass::Risky);
+    assert_eq!(
+        classify_command("mycustomtool --flag", &s, &r, &d),
+        CommandClass::Risky
+    );
 }
 
 // -----------------------------------------------------------------------
@@ -85,25 +115,37 @@ fn unknown_command_is_risky() {
 #[test]
 fn rm_rf_is_dangerous() {
     let (s, r, d) = no_overrides();
-    assert_eq!(classify_command("rm -rf /", &s, &r, &d), CommandClass::Dangerous);
+    assert_eq!(
+        classify_command("rm -rf /", &s, &r, &d),
+        CommandClass::Dangerous
+    );
 }
 
 #[test]
 fn rm_r_is_dangerous() {
     let (s, r, d) = no_overrides();
-    assert_eq!(classify_command("rm -r /tmp/stuff", &s, &r, &d), CommandClass::Dangerous);
+    assert_eq!(
+        classify_command("rm -r /tmp/stuff", &s, &r, &d),
+        CommandClass::Dangerous
+    );
 }
 
 #[test]
 fn sudo_is_dangerous() {
     let (s, r, d) = no_overrides();
-    assert_eq!(classify_command("sudo apt install pkg", &s, &r, &d), CommandClass::Dangerous);
+    assert_eq!(
+        classify_command("sudo apt install pkg", &s, &r, &d),
+        CommandClass::Dangerous
+    );
 }
 
 #[test]
 fn git_push_is_dangerous() {
     let (s, r, d) = no_overrides();
-    assert_eq!(classify_command("git push origin main", &s, &r, &d), CommandClass::Dangerous);
+    assert_eq!(
+        classify_command("git push origin main", &s, &r, &d),
+        CommandClass::Dangerous
+    );
 }
 
 #[test]

@@ -75,9 +75,16 @@ pub fn is_tool_allowed_in_mode(tool_name: &str, mode: AgentMode) -> bool {
         AgentMode::Plan => {
             matches!(
                 tool_name,
-                "Read" | "Glob" | "Grep" | "AskUserQuestion"
-                    | "EnterPlanMode" | "ExitPlanMode"
-                    | "TaskCreate" | "TaskUpdate" | "TaskGet" | "TaskList"
+                "Read"
+                    | "Glob"
+                    | "Grep"
+                    | "AskUserQuestion"
+                    | "EnterPlanMode"
+                    | "ExitPlanMode"
+                    | "TaskCreate"
+                    | "TaskUpdate"
+                    | "TaskGet"
+                    | "TaskList"
             )
         }
     }

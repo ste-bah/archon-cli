@@ -56,7 +56,11 @@ fn validate_empty_schema() {
     let json = r#"{"anything":"goes"}"#;
     let schema = r#"{}"#;
     let result = validate_json_schema(json, schema);
-    assert!(result.is_ok(), "empty schema should accept any JSON: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "empty schema should accept any JSON: {:?}",
+        result.err()
+    );
 }
 
 #[test]

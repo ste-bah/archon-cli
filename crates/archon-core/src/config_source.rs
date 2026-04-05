@@ -10,7 +10,7 @@ use std::path::Path;
 use toml::Value;
 
 use crate::config::ConfigError;
-use crate::config_layers::{discover_config_paths, ConfigLayer};
+use crate::config_layers::{ConfigLayer, discover_config_paths};
 
 // ---------------------------------------------------------------------------
 // ConfigSourceMap

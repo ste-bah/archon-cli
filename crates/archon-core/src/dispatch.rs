@@ -127,8 +127,12 @@ pub fn create_default_registry(working_dir: PathBuf) -> ToolRegistry {
     registry.register(Box::new(archon_tools::task_output::TaskOutputTool));
     registry.register(Box::new(archon_tools::worktree::EnterWorktreeTool));
     registry.register(Box::new(archon_tools::worktree::ExitWorktreeTool));
-    registry.register(Box::new(archon_tools::mcp_resources::ListMcpResourcesTool::default()));
-    registry.register(Box::new(archon_tools::mcp_resources::ReadMcpResourceTool::default()));
+    registry.register(Box::new(
+        archon_tools::mcp_resources::ListMcpResourcesTool::default(),
+    ));
+    registry.register(Box::new(
+        archon_tools::mcp_resources::ReadMcpResourceTool::default(),
+    ));
 
     // ── Fix 3: 7 tools built but never registered (TASK-CLI-500) ─────────────
     registry.register(Box::new(archon_tools::cron_create::CronCreateTool::new(
@@ -152,9 +156,11 @@ pub fn create_default_registry(working_dir: PathBuf) -> ToolRegistry {
         ));
         registry.register(Box::new(archon_tools::lsp_tool::LspTool::new(lsp_manager)));
     }
-    registry.register(Box::new(archon_tools::remote_trigger::RemoteTriggerTool::new(
-        archon_tools::remote_trigger::RemoteTriggerConfig::default(),
-    )));
+    registry.register(Box::new(
+        archon_tools::remote_trigger::RemoteTriggerTool::new(
+            archon_tools::remote_trigger::RemoteTriggerConfig::default(),
+        ),
+    ));
 
     // Code Cartographer — symbol indexing and codebase navigation.
     registry.register(Box::new(archon_tools::cartographer::CartographerTool));
@@ -162,7 +168,9 @@ pub fn create_default_registry(working_dir: PathBuf) -> ToolRegistry {
     // Register ToolSearch with a snapshot of all tool definitions captured at this point.
     // Must be registered LAST so the snapshot includes all other tools.
     let tool_defs_snapshot = registry.tool_definitions();
-    registry.register(Box::new(archon_tools::toolsearch::ToolSearchTool::new(tool_defs_snapshot)));
+    registry.register(Box::new(archon_tools::toolsearch::ToolSearchTool::new(
+        tool_defs_snapshot,
+    )));
 
     registry
 }
@@ -187,7 +195,10 @@ mod tests {
         assert!(names.contains(&"Bash"), "missing Bash tool");
         assert!(names.contains(&"Sleep"), "missing Sleep tool");
         assert!(names.contains(&"TodoWrite"), "missing TodoWrite tool");
-        assert!(names.contains(&"AskUserQuestion"), "missing AskUserQuestion");
+        assert!(
+            names.contains(&"AskUserQuestion"),
+            "missing AskUserQuestion"
+        );
         assert!(names.contains(&"EnterPlanMode"), "missing EnterPlanMode");
         assert!(names.contains(&"ExitPlanMode"), "missing ExitPlanMode");
         assert!(names.contains(&"WebFetch"), "missing WebFetch tool");
@@ -201,22 +212,49 @@ mod tests {
         assert!(names.contains(&"TaskList"), "missing TaskList tool");
         assert!(names.contains(&"TaskStop"), "missing TaskStop tool");
         assert!(names.contains(&"TaskOutput"), "missing TaskOutput tool");
-        assert!(names.contains(&"EnterWorktree"), "missing EnterWorktree tool");
+        assert!(
+            names.contains(&"EnterWorktree"),
+            "missing EnterWorktree tool"
+        );
         assert!(names.contains(&"ExitWorktree"), "missing ExitWorktree tool");
-        assert!(names.contains(&"ListMcpResources"), "missing ListMcpResources tool");
-        assert!(names.contains(&"ReadMcpResource"), "missing ReadMcpResource tool");
+        assert!(
+            names.contains(&"ListMcpResources"),
+            "missing ListMcpResources tool"
+        );
+        assert!(
+            names.contains(&"ReadMcpResource"),
+            "missing ReadMcpResource tool"
+        );
 
         // TASK-CLI-500 Fix 3: previously missing tools now registered
-        assert!(names.contains(&"CronCreate"), "missing CronCreate tool (Fix 3)");
+        assert!(
+            names.contains(&"CronCreate"),
+            "missing CronCreate tool (Fix 3)"
+        );
         assert!(names.contains(&"CronList"), "missing CronList tool (Fix 3)");
-        assert!(names.contains(&"CronDelete"), "missing CronDelete tool (Fix 3)");
-        assert!(names.contains(&"TeamCreate"), "missing TeamCreate tool (Fix 3)");
-        assert!(names.contains(&"TeamDelete"), "missing TeamDelete tool (Fix 3)");
+        assert!(
+            names.contains(&"CronDelete"),
+            "missing CronDelete tool (Fix 3)"
+        );
+        assert!(
+            names.contains(&"TeamCreate"),
+            "missing TeamCreate tool (Fix 3)"
+        );
+        assert!(
+            names.contains(&"TeamDelete"),
+            "missing TeamDelete tool (Fix 3)"
+        );
         assert!(names.contains(&"lsp"), "missing LSP tool (Fix 3)");
-        assert!(names.contains(&"RemoteTrigger"), "missing RemoteTrigger tool (Fix 3)");
+        assert!(
+            names.contains(&"RemoteTrigger"),
+            "missing RemoteTrigger tool (Fix 3)"
+        );
 
         // TASK-CLI-410: Code Cartographer
-        assert!(names.contains(&"CartographerScan"), "missing CartographerScan tool (TASK-CLI-410)");
+        assert!(
+            names.contains(&"CartographerScan"),
+            "missing CartographerScan tool (TASK-CLI-410)"
+        );
         assert!(names.contains(&"ToolSearch"), "missing ToolSearch tool");
     }
 
@@ -227,7 +265,10 @@ mod tests {
 
         for def in &defs {
             assert!(def["name"].is_string(), "tool def missing name");
-            assert!(def["description"].is_string(), "tool def missing description");
+            assert!(
+                def["description"].is_string(),
+                "tool def missing description"
+            );
             assert!(def["input_schema"].is_object(), "tool def missing schema");
         }
     }

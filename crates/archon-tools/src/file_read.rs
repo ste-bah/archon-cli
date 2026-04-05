@@ -65,18 +65,11 @@ impl Tool for ReadTool {
 
         let text = match String::from_utf8(content) {
             Ok(s) => s,
-            Err(_) => {
-                return ToolResult::error(format!(
-                    "File is not valid UTF-8: {file_path}"
-                ))
-            }
+            Err(_) => return ToolResult::error(format!("File is not valid UTF-8: {file_path}")),
         };
 
         let lines: Vec<&str> = text.lines().collect();
-        let offset = input
-            .get("offset")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0) as usize;
+        let offset = input.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
         let limit = input
             .get("limit")
             .and_then(|v| v.as_u64())

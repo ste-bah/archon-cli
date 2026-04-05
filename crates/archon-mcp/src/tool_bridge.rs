@@ -102,10 +102,9 @@ impl Tool for McpTool {
                     ToolResult::success(text)
                 }
             }
-            Err(e) => ToolResult::error(format!(
-                "MCP call to '{}' failed: {e}",
-                self.qualified_name
-            )),
+            Err(e) => {
+                ToolResult::error(format!("MCP call to '{}' failed: {e}", self.qualified_name))
+            }
         }
     }
 
@@ -167,7 +166,10 @@ mod tests {
                 text: Some("resource text".into()),
             },
         ];
-        assert_eq!(flatten_content(&content), "hello\n[image content]\nresource text");
+        assert_eq!(
+            flatten_content(&content),
+            "hello\n[image content]\nresource text"
+        );
     }
 
     #[test]

@@ -4,8 +4,8 @@
 //! caused the mistake, and reinforces rule scores proportional to the
 //! correction severity.
 
-use archon_memory::types::{MemoryType, RelType, SearchFilter};
 use archon_memory::MemoryGraph;
+use archon_memory::types::{MemoryType, RelType, SearchFilter};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -128,10 +128,7 @@ impl<'g> CorrectionTracker<'g> {
     ) -> Result<Correction, CorrectionError> {
         let severity = correction_type.severity_multiplier();
 
-        let tags = vec![
-            correction_type.as_tag(),
-            format!("severity:{severity}"),
-        ];
+        let tags = vec![correction_type.as_tag(), format!("severity:{severity}")];
 
         let importance = severity * 10.0; // 15..50 range
         let mem_id = self.graph.store_memory(
@@ -160,7 +157,9 @@ impl<'g> CorrectionTracker<'g> {
             None => {
                 // Auto-create a rule from the correction.
                 let rule_text = format!("Avoid: {content}");
-                let rule = self.rules.add_rule(&rule_text, RuleSource::CorrectionDerived)?;
+                let rule = self
+                    .rules
+                    .add_rule(&rule_text, RuleSource::CorrectionDerived)?;
                 self.graph.create_relationship(
                     &mem_id,
                     &rule.id,
@@ -221,9 +220,7 @@ impl<'g> CorrectionTracker<'g> {
 // ── helpers ──────────────────────────────────────────────────
 
 /// Convert a [`Memory`] into a [`Correction`].
-fn memory_to_correction(
-    m: archon_memory::Memory,
-) -> Result<Correction, CorrectionError> {
+fn memory_to_correction(m: archon_memory::Memory) -> Result<Correction, CorrectionError> {
     let correction_type = m
         .tags
         .iter()
@@ -260,8 +257,7 @@ mod tests {
     use super::*;
 
     fn make_tracker() -> (MemoryGraph, ()) {
-        let graph = MemoryGraph::in_memory()
-            .expect("in-memory graph should succeed");
+        let graph = MemoryGraph::in_memory().expect("in-memory graph should succeed");
         (graph, ())
     }
 
@@ -306,7 +302,10 @@ mod tests {
             )
             .expect("record_correction");
 
-        assert_eq!(correction.correction_type, CorrectionType::ActedWithoutPermission);
+        assert_eq!(
+            correction.correction_type,
+            CorrectionType::ActedWithoutPermission
+        );
         assert!((correction.severity - 5.0).abs() < f64::EPSILON);
         assert_eq!(correction.rule_id.as_deref(), Some(rule.id.as_str()));
 
@@ -373,9 +372,7 @@ mod tests {
             )
             .expect("record");
 
-        let results = tracker
-            .recall_corrections("README", 10)
-            .expect("recall");
+        let results = tracker.recall_corrections("README", 10).expect("recall");
 
         assert!(
             !results.is_empty(),
@@ -431,9 +428,7 @@ mod tests {
             .expect("add");
 
         // Set score close to max.
-        graph
-            .update_importance(&rule.id, 98.0)
-            .expect("set score");
+        graph.update_importance(&rule.id, 98.0).expect("set score");
 
         // DidForbiddenAction => 4.0 * 5.0 = 20.0 boost, should clamp.
         tracker

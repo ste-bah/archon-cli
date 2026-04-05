@@ -106,10 +106,7 @@ impl Tool for ExitWorktreeTool {
 
         // Find the worktree info for this session
         let worktrees = WorktreeManager::list_worktrees();
-        let info = match worktrees
-            .iter()
-            .find(|w| w.session_id == ctx.session_id)
-        {
+        let info = match worktrees.iter().find(|w| w.session_id == ctx.session_id) {
             Some(i) => i,
             None => {
                 return ToolResult::error(format!(

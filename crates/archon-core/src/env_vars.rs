@@ -316,14 +316,20 @@ pub fn format_doctor_env_vars(vars: &ArchonEnvVars) -> String {
     // Model & behavior
     out.push_str(&show_string("ARCHON_MODEL", &vars.model));
     out.push_str(&show_string("ARCHON_EFFORT", &vars.effort));
-    out.push_str(&show_string("ARCHON_PERMISSION_MODE", &vars.permission_mode));
+    out.push_str(&show_string(
+        "ARCHON_PERMISSION_MODE",
+        &vars.permission_mode,
+    ));
     out.push_str(&show_string("ARCHON_IDENTITY_MODE", &vars.identity_mode));
 
     // Feature control
     out.push_str(&show_bool("ARCHON_SIMPLE", vars.simple));
     out.push_str(&show_bool("ARCHON_DISABLE_HOOKS", vars.disable_hooks));
     out.push_str(&show_bool("ARCHON_DISABLE_MEMORY", vars.disable_memory));
-    out.push_str(&show_bool("ARCHON_DISABLE_PERSONALITY", vars.disable_personality));
+    out.push_str(&show_bool(
+        "ARCHON_DISABLE_PERSONALITY",
+        vars.disable_personality,
+    ));
 
     // Debugging
     out.push_str(&show_bool("ARCHON_DEBUG", vars.debug));

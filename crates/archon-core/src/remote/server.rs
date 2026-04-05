@@ -3,13 +3,12 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use axum::{
-    Router,
-    extract::{Path, Query, State, WebSocketUpgrade},
+    Json, Router,
     extract::ws::{Message, WebSocket},
+    extract::{Path, Query, State, WebSocketUpgrade},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::{delete, get},
-    Json,
 };
 use serde::Serialize;
 use tokio::sync::Mutex;
@@ -99,7 +98,10 @@ impl WebSocketServer {
 
 async fn health_handler(State(state): State<ServerState>) -> Json<HealthResponse> {
     let sessions = state.sessions.lock().await.len();
-    Json(HealthResponse { status: "ok", sessions })
+    Json(HealthResponse {
+        status: "ok",
+        sessions,
+    })
 }
 
 async fn ws_handler(
@@ -240,21 +242,15 @@ fn ide_dispatch(request_json: &str) -> String {
             r#"{{"jsonrpc":"2.0","id":{id},"result":{{"sessionId":"pending","serverVersion":"{ver}","capabilities":{{"inlineCompletion":false,"toolExecution":false,"diff":false,"terminal":false}}}}}}"#,
             ver = env!("CARGO_PKG_VERSION")
         ),
-        "archon/prompt" => format!(
-            r#"{{"jsonrpc":"2.0","id":{id},"result":{{"queued":true}}}}"#
-        ),
-        "archon/cancel" => format!(
-            r#"{{"jsonrpc":"2.0","id":{id},"result":{{"cancelled":false}}}}"#
-        ),
-        "archon/toolResult" => format!(
-            r#"{{"jsonrpc":"2.0","id":{id},"result":{{"ok":true}}}}"#
-        ),
+        "archon/prompt" => format!(r#"{{"jsonrpc":"2.0","id":{id},"result":{{"queued":true}}}}"#),
+        "archon/cancel" => {
+            format!(r#"{{"jsonrpc":"2.0","id":{id},"result":{{"cancelled":false}}}}"#)
+        }
+        "archon/toolResult" => format!(r#"{{"jsonrpc":"2.0","id":{id},"result":{{"ok":true}}}}"#),
         "archon/status" => format!(
             r#"{{"jsonrpc":"2.0","id":{id},"result":{{"model":"","inputTokens":0,"outputTokens":0,"cost":0.0}}}}"#
         ),
-        "archon/config" => format!(
-            r#"{{"jsonrpc":"2.0","id":{id},"result":{{"value":null}}}}"#
-        ),
+        "archon/config" => format!(r#"{{"jsonrpc":"2.0","id":{id},"result":{{"value":null}}}}"#),
         other => format!(
             r#"{{"jsonrpc":"2.0","id":{id},"error":{{"code":-32601,"message":"method not found: {other}"}}}}"#
         ),

@@ -75,7 +75,10 @@ fn config_http_with_auth_headers() {
     assert_eq!(configs.len(), 1);
     let cfg = &configs[0];
     let headers = cfg.headers.as_ref().expect("headers present");
-    assert_eq!(headers.get("Authorization").unwrap(), "Bearer tok_secret123");
+    assert_eq!(
+        headers.get("Authorization").unwrap(),
+        "Bearer tok_secret123"
+    );
     assert_eq!(headers.get("X-Custom").unwrap(), "value");
 }
 
@@ -114,11 +117,7 @@ fn config_mixed_stdio_and_http() {
 /// Creating an HTTP transport with an obviously bad URL returns an error.
 #[tokio::test]
 async fn http_transport_creation_with_bad_url() {
-    let result = create_http_transport(
-        "not-a-valid-url",
-        None,
-        Duration::from_secs(5),
-    );
+    let result = create_http_transport("not-a-valid-url", None, Duration::from_secs(5));
     // The transport itself is created lazily, so we just verify it
     // can be constructed (the error happens on connect, not build).
     // If the implementation validates eagerly, it should error here.
@@ -131,11 +130,7 @@ async fn http_transport_creation_with_bad_url() {
 #[tokio::test]
 async fn http_transport_timeout() {
     // 192.0.2.1 is TEST-NET-1 (RFC 5737) — guaranteed unreachable.
-    let result = create_http_transport(
-        "http://192.0.2.1:1/mcp",
-        None,
-        Duration::from_millis(500),
-    );
+    let result = create_http_transport("http://192.0.2.1:1/mcp", None, Duration::from_millis(500));
     // The transport is created but actual connection happens during
     // serve_client. Verify the transport was at least constructed.
     assert!(result.is_ok(), "transport construction should succeed");
@@ -153,5 +148,8 @@ async fn http_transport_with_custom_headers() {
         Some(&headers),
         Duration::from_secs(5),
     );
-    assert!(result.is_ok(), "transport construction with headers should succeed");
+    assert!(
+        result.is_ok(),
+        "transport construction with headers should succeed"
+    );
 }

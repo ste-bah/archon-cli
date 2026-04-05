@@ -126,7 +126,11 @@ mod tests {
     fn full_diff_rendering() {
         let diff = "--- a/main.rs\n+++ b/main.rs\n@@ -1,3 +1,4 @@\n fn main() {\n-    println!(\"old\");\n+    println!(\"new\");\n+    println!(\"extra\");\n }";
         let lines = render_diff(diff);
-        assert!(lines.len() >= 7, "expected at least 7 lines, got {}", lines.len());
+        assert!(
+            lines.len() >= 7,
+            "expected at least 7 lines, got {}",
+            lines.len()
+        );
         // File headers (blue)
         assert_eq!(lines[0].spans[0].style.fg, Some(Color::Blue));
         assert_eq!(lines[1].spans[0].style.fg, Some(Color::Blue));

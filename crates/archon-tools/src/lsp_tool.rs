@@ -119,9 +119,13 @@ impl Tool for LspTool {
 
         let output = match lsp_input.operation {
             LspOperation::GoToDefinition => {
-                match client.go_to_definition(&file_path, lsp_input.line, lsp_input.character).await {
+                match client
+                    .go_to_definition(&file_path, lsp_input.line, lsp_input.character)
+                    .await
+                {
                     Ok(Some(resp)) => {
-                        let (result, result_count, file_count) = lsp_formatters::format_go_to_definition(&resp);
+                        let (result, result_count, file_count) =
+                            lsp_formatters::format_go_to_definition(&resp);
                         LspOutput {
                             operation: "goToDefinition".into(),
                             result,
@@ -135,9 +139,13 @@ impl Tool for LspTool {
                 }
             }
             LspOperation::FindReferences => {
-                match client.find_references(&file_path, lsp_input.line, lsp_input.character).await {
+                match client
+                    .find_references(&file_path, lsp_input.line, lsp_input.character)
+                    .await
+                {
                     Ok(Some(locs)) => {
-                        let (result, result_count, file_count) = lsp_formatters::format_find_references(&locs);
+                        let (result, result_count, file_count) =
+                            lsp_formatters::format_find_references(&locs);
                         LspOutput {
                             operation: "findReferences".into(),
                             result,
@@ -151,7 +159,10 @@ impl Tool for LspTool {
                 }
             }
             LspOperation::Hover => {
-                match client.hover(&file_path, lsp_input.line, lsp_input.character).await {
+                match client
+                    .hover(&file_path, lsp_input.line, lsp_input.character)
+                    .await
+                {
                     Ok(Some(hover)) => {
                         let result = lsp_formatters::format_hover(&hover);
                         LspOutput {
@@ -166,31 +177,32 @@ impl Tool for LspTool {
                     Err(e) => return ToolResult::error(e.to_string()),
                 }
             }
-            LspOperation::DocumentSymbol => {
-                match client.document_symbol(&file_path).await {
-                    Ok(Some(resp)) => {
-                        let (result, result_count) = match resp {
-                            lsp_types::DocumentSymbolResponse::Flat(syms) => {
-                                let count = syms.len();
-                                (lsp_formatters::format_document_symbols_flat(&syms), count)
-                            }
-                            lsp_types::DocumentSymbolResponse::Nested(syms) => {
-                                let count = syms.len();
-                                (lsp_formatters::format_document_symbols_nested(&syms, 0), count)
-                            }
-                        };
-                        LspOutput {
-                            operation: "documentSymbol".into(),
-                            result,
-                            file_path: lsp_input.file_path,
-                            result_count,
-                            file_count: 1,
+            LspOperation::DocumentSymbol => match client.document_symbol(&file_path).await {
+                Ok(Some(resp)) => {
+                    let (result, result_count) = match resp {
+                        lsp_types::DocumentSymbolResponse::Flat(syms) => {
+                            let count = syms.len();
+                            (lsp_formatters::format_document_symbols_flat(&syms), count)
                         }
+                        lsp_types::DocumentSymbolResponse::Nested(syms) => {
+                            let count = syms.len();
+                            (
+                                lsp_formatters::format_document_symbols_nested(&syms, 0),
+                                count,
+                            )
+                        }
+                    };
+                    LspOutput {
+                        operation: "documentSymbol".into(),
+                        result,
+                        file_path: lsp_input.file_path,
+                        result_count,
+                        file_count: 1,
                     }
-                    Ok(None) => no_result("documentSymbol", &lsp_input.file_path),
-                    Err(e) => return ToolResult::error(e.to_string()),
                 }
-            }
+                Ok(None) => no_result("documentSymbol", &lsp_input.file_path),
+                Err(e) => return ToolResult::error(e.to_string()),
+            },
             LspOperation::WorkspaceSymbol => {
                 // Use file_path as the query string for workspace symbol search
                 let query = &lsp_input.file_path;
@@ -200,7 +212,8 @@ impl Tool for LspTool {
                             lsp_types::WorkspaceSymbolResponse::Flat(s) => s,
                             lsp_types::WorkspaceSymbolResponse::Nested(_) => vec![],
                         };
-                        let (result, result_count, file_count) = lsp_formatters::format_workspace_symbols(&syms);
+                        let (result, result_count, file_count) =
+                            lsp_formatters::format_workspace_symbols(&syms);
                         LspOutput {
                             operation: "workspaceSymbol".into(),
                             result,
@@ -214,17 +227,24 @@ impl Tool for LspTool {
                 }
             }
             LspOperation::GoToImplementation => {
-                match client.go_to_implementation(&file_path, lsp_input.line, lsp_input.character).await {
+                match client
+                    .go_to_implementation(&file_path, lsp_input.line, lsp_input.character)
+                    .await
+                {
                     Ok(Some(resp)) => {
                         let locations: Vec<lsp_types::Location> = match resp {
                             lsp_types::GotoDefinitionResponse::Scalar(loc) => vec![loc],
                             lsp_types::GotoDefinitionResponse::Array(locs) => locs,
                             lsp_types::GotoDefinitionResponse::Link(links) => links
                                 .into_iter()
-                                .map(|l| lsp_types::Location { uri: l.target_uri, range: l.target_range })
+                                .map(|l| lsp_types::Location {
+                                    uri: l.target_uri,
+                                    range: l.target_range,
+                                })
                                 .collect(),
                         };
-                        let (result, result_count, file_count) = lsp_formatters::format_go_to_implementation(&locations);
+                        let (result, result_count, file_count) =
+                            lsp_formatters::format_go_to_implementation(&locations);
                         LspOutput {
                             operation: "goToImplementation".into(),
                             result,
@@ -238,7 +258,10 @@ impl Tool for LspTool {
                 }
             }
             LspOperation::PrepareCallHierarchy => {
-                match client.prepare_call_hierarchy(&file_path, lsp_input.line, lsp_input.character).await {
+                match client
+                    .prepare_call_hierarchy(&file_path, lsp_input.line, lsp_input.character)
+                    .await
+                {
                     Ok(Some(items)) => {
                         let result = lsp_formatters::format_prepare_call_hierarchy(&items);
                         let count = items.len();
@@ -256,11 +279,18 @@ impl Tool for LspTool {
             }
             LspOperation::IncomingCalls => {
                 // For incomingCalls/outgoingCalls, we first need to prepareCallHierarchy
-                match client.prepare_call_hierarchy(&file_path, lsp_input.line, lsp_input.character).await {
+                match client
+                    .prepare_call_hierarchy(&file_path, lsp_input.line, lsp_input.character)
+                    .await
+                {
                     Ok(Some(items)) if !items.is_empty() => {
-                        match client.incoming_calls(items.into_iter().next().unwrap()).await {
+                        match client
+                            .incoming_calls(items.into_iter().next().unwrap())
+                            .await
+                        {
                             Ok(Some(calls)) => {
-                                let (result, result_count, file_count) = lsp_formatters::format_incoming_calls(&calls);
+                                let (result, result_count, file_count) =
+                                    lsp_formatters::format_incoming_calls(&calls);
                                 LspOutput {
                                     operation: "incomingCalls".into(),
                                     result,
@@ -277,11 +307,18 @@ impl Tool for LspTool {
                 }
             }
             LspOperation::OutgoingCalls => {
-                match client.prepare_call_hierarchy(&file_path, lsp_input.line, lsp_input.character).await {
+                match client
+                    .prepare_call_hierarchy(&file_path, lsp_input.line, lsp_input.character)
+                    .await
+                {
                     Ok(Some(items)) if !items.is_empty() => {
-                        match client.outgoing_calls(items.into_iter().next().unwrap()).await {
+                        match client
+                            .outgoing_calls(items.into_iter().next().unwrap())
+                            .await
+                        {
                             Ok(Some(calls)) => {
-                                let (result, result_count, file_count) = lsp_formatters::format_outgoing_calls(&calls);
+                                let (result, result_count, file_count) =
+                                    lsp_formatters::format_outgoing_calls(&calls);
                                 LspOutput {
                                     operation: "outgoingCalls".into(),
                                     result,

@@ -288,8 +288,8 @@ pub struct IdeError {
 ///
 /// Returns an error if the JSON is malformed, or if required fields are absent.
 pub fn parse_request(json: &str) -> anyhow::Result<(u64, String, serde_json::Value)> {
-    let v: serde_json::Value = serde_json::from_str(json)
-        .map_err(|e| anyhow::anyhow!("parse error: {e}"))?;
+    let v: serde_json::Value =
+        serde_json::from_str(json).map_err(|e| anyhow::anyhow!("parse error: {e}"))?;
 
     let id = v
         .get("id")
@@ -336,7 +336,6 @@ pub fn success_response(id: u64, result: serde_json::Value) -> String {
         result: Some(result),
         error: None,
     };
-    serde_json::to_string(&resp).unwrap_or_else(|_| {
-        format!(r#"{{"jsonrpc":"2.0","id":{id},"result":null}}"#)
-    })
+    serde_json::to_string(&resp)
+        .unwrap_or_else(|_| format!(r#"{{"jsonrpc":"2.0","id":{id},"result":null}}"#))
 }

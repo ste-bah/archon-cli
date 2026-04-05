@@ -89,10 +89,7 @@ impl RemoteTriggerTool {
             return None;
         };
         // Strip path and query
-        let host_and_port = without_scheme
-            .split('/')
-            .next()
-            .unwrap_or(without_scheme);
+        let host_and_port = without_scheme.split('/').next().unwrap_or(without_scheme);
         // Strip port
         let host = if let Some(colon) = host_and_port.rfind(':') {
             // Only strip port if it's numeric (avoid stripping IPv6 addresses)
@@ -212,20 +209,23 @@ impl Tool for RemoteTriggerTool {
 
     async fn execute(&self, input: serde_json::Value, _ctx: &ToolContext) -> ToolResult {
         // Resolve URL: preset > explicit url
-        let (url, auth_override) = if let Some(preset_name) = input.get("preset").and_then(|v| v.as_str()) {
-            match self.resolve_preset(preset_name) {
-                Some((u, a)) => (u, a),
-                None => return ToolResult::error(format!(
-                    "RemoteTrigger: unknown preset '{preset_name}'"
-                )),
-            }
-        } else {
-            let url = match input.get("url").and_then(|v| v.as_str()) {
-                Some(u) if !u.is_empty() => u.to_owned(),
-                _ => return ToolResult::error("RemoteTrigger: 'url' is required"),
+        let (url, auth_override) =
+            if let Some(preset_name) = input.get("preset").and_then(|v| v.as_str()) {
+                match self.resolve_preset(preset_name) {
+                    Some((u, a)) => (u, a),
+                    None => {
+                        return ToolResult::error(format!(
+                            "RemoteTrigger: unknown preset '{preset_name}'"
+                        ));
+                    }
+                }
+            } else {
+                let url = match input.get("url").and_then(|v| v.as_str()) {
+                    Some(u) if !u.is_empty() => u.to_owned(),
+                    _ => return ToolResult::error("RemoteTrigger: 'url' is required"),
+                };
+                (url, None)
             };
-            (url, None)
-        };
 
         // Validate URL structure
         if !url.contains("://") {
@@ -260,7 +260,11 @@ impl Tool for RemoteTriggerTool {
             .build()
         {
             Ok(c) => c,
-            Err(e) => return ToolResult::error(format!("RemoteTrigger: failed to build HTTP client: {e}")),
+            Err(e) => {
+                return ToolResult::error(format!(
+                    "RemoteTrigger: failed to build HTTP client: {e}"
+                ));
+            }
         };
 
         let mut req = client.post(&url).json(&payload);
@@ -279,12 +283,19 @@ impl Tool for RemoteTriggerTool {
         let status = response.status();
         let body = match response.text().await {
             Ok(b) => b,
-            Err(e) => return ToolResult::error(format!("RemoteTrigger: failed to read response body: {e}")),
+            Err(e) => {
+                return ToolResult::error(format!(
+                    "RemoteTrigger: failed to read response body: {e}"
+                ));
+            }
         };
 
         let truncated = Self::truncate_response(&body, self.config.max_response_bytes);
         let truncated_note = if body.len() > self.config.max_response_bytes {
-            format!(" [truncated at {}KB]", self.config.max_response_bytes / 1024)
+            format!(
+                " [truncated at {}KB]",
+                self.config.max_response_bytes / 1024
+            )
         } else {
             String::new()
         };

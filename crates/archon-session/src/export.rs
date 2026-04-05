@@ -71,7 +71,13 @@ pub fn export_session(
     session_id: &str,
     format: ExportFormat,
 ) -> Result<String, String> {
-    export_session_with_options(messages, session_id, format, &ExportOptions::default(), &ExportMetadata::default())
+    export_session_with_options(
+        messages,
+        session_id,
+        format,
+        &ExportOptions::default(),
+        &ExportMetadata::default(),
+    )
 }
 
 /// Export with full options and metadata.
@@ -102,16 +108,11 @@ pub fn default_export_filename(session_id: &str, format: ExportFormat) -> String
 }
 
 /// Write export to a file, returning the path.
-pub fn write_export(
-    content: &str,
-    output_path: &std::path::Path,
-) -> Result<(), String> {
+pub fn write_export(content: &str, output_path: &std::path::Path) -> Result<(), String> {
     if let Some(parent) = output_path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| format!("failed to create directory: {e}"))?;
+        std::fs::create_dir_all(parent).map_err(|e| format!("failed to create directory: {e}"))?;
     }
-    std::fs::write(output_path, content)
-        .map_err(|e| format!("failed to write export file: {e}"))
+    std::fs::write(output_path, content).map_err(|e| format!("failed to write export file: {e}"))
 }
 
 // ---------------------------------------------------------------------------
@@ -149,10 +150,7 @@ fn export_markdown(
             .and_then(|v| v.as_str())
             .unwrap_or("unknown");
         let content = extract_content(msg);
-        let timestamp = msg
-            .get("timestamp")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let timestamp = msg.get("timestamp").and_then(|v| v.as_str()).unwrap_or("");
         let tool_summary = extract_tool_summary(msg);
 
         let label = role_label(role);
@@ -191,8 +189,7 @@ fn export_json(
         "messages": messages,
     });
 
-    serde_json::to_string_pretty(&doc)
-        .map_err(|e| format!("JSON serialization failed: {e}"))
+    serde_json::to_string_pretty(&doc).map_err(|e| format!("JSON serialization failed: {e}"))
 }
 
 // ---------------------------------------------------------------------------
@@ -220,10 +217,7 @@ fn export_text(
             .and_then(|v| v.as_str())
             .unwrap_or("unknown");
         let content = extract_content(msg);
-        let timestamp = msg
-            .get("timestamp")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let timestamp = msg.get("timestamp").and_then(|v| v.as_str()).unwrap_or("");
         let label = role_label(role);
         if !timestamp.is_empty() {
             out.push_str(&format!("[{timestamp}] "));
@@ -260,11 +254,17 @@ fn extract_tool_summary(msg: &serde_json::Value) -> String {
     let mut summaries = Vec::new();
     for item in content {
         if item.get("type").and_then(|v| v.as_str()) == Some("tool_use") {
-            let name = item.get("name").and_then(|v| v.as_str()).unwrap_or("unknown");
+            let name = item
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
             summaries.push(format!("> Tool: {name}"));
         }
         if item.get("type").and_then(|v| v.as_str()) == Some("tool_result") {
-            let is_error = item.get("is_error").and_then(|v| v.as_bool()).unwrap_or(false);
+            let is_error = item
+                .get("is_error")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
             let status = if is_error { "error" } else { "ok" };
             summaries.push(format!("> Result: {status}"));
         }
@@ -298,15 +298,30 @@ mod tests {
 
     #[test]
     fn format_roundtrip() {
-        assert!(matches!(ExportFormat::from_str("markdown"), Ok(ExportFormat::Markdown)));
-        assert!(matches!(ExportFormat::from_str("json"), Ok(ExportFormat::Json)));
-        assert!(matches!(ExportFormat::from_str("text"), Ok(ExportFormat::Text)));
+        assert!(matches!(
+            ExportFormat::from_str("markdown"),
+            Ok(ExportFormat::Markdown)
+        ));
+        assert!(matches!(
+            ExportFormat::from_str("json"),
+            Ok(ExportFormat::Json)
+        ));
+        assert!(matches!(
+            ExportFormat::from_str("text"),
+            Ok(ExportFormat::Text)
+        ));
     }
 
     #[test]
     fn format_aliases() {
-        assert!(matches!(ExportFormat::from_str("md"), Ok(ExportFormat::Markdown)));
-        assert!(matches!(ExportFormat::from_str("txt"), Ok(ExportFormat::Text)));
+        assert!(matches!(
+            ExportFormat::from_str("md"),
+            Ok(ExportFormat::Markdown)
+        ));
+        assert!(matches!(
+            ExportFormat::from_str("txt"),
+            Ok(ExportFormat::Text)
+        ));
     }
 
     #[test]

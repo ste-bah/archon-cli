@@ -3,8 +3,8 @@ use std::path::PathBuf;
 
 use archon_core::config::ArchonConfig;
 use archon_core::env_vars::{
-    apply_env_overrides, format_doctor_env_vars, load_env_vars_from, mask_secret,
-    parse_bool_env, warn_unrecognized_archon_vars, KNOWN_ARCHON_VARS,
+    KNOWN_ARCHON_VARS, apply_env_overrides, format_doctor_env_vars, load_env_vars_from,
+    mask_secret, parse_bool_env, warn_unrecognized_archon_vars,
 };
 
 // ---------------------------------------------------------------------------
@@ -426,10 +426,7 @@ fn doctor_masks_oauth_token() {
 
 #[test]
 fn doctor_shows_non_secret_values() {
-    let map = env_map(&[
-        ("ARCHON_MODEL", "claude-opus-4-6"),
-        ("ARCHON_DEBUG", "1"),
-    ]);
+    let map = env_map(&[("ARCHON_MODEL", "claude-opus-4-6"), ("ARCHON_DEBUG", "1")]);
     let vars = load_env_vars_from(&map);
     let output = format_doctor_env_vars(&vars);
 
@@ -519,10 +516,7 @@ fn empty_string_values_treated_as_unset_for_optionals() {
 
 #[test]
 fn whitespace_only_values_treated_as_unset() {
-    let map = env_map(&[
-        ("ARCHON_MODEL", "  "),
-        ("ARCHON_EFFORT", "\t"),
-    ]);
+    let map = env_map(&[("ARCHON_MODEL", "  "), ("ARCHON_EFFORT", "\t")]);
     let vars = load_env_vars_from(&map);
 
     assert!(vars.model.is_none());

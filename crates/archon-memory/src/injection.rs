@@ -105,18 +105,14 @@ fn extract_keywords(context: &[String]) -> Vec<String> {
     };
 
     let stop_words: &[&str] = &[
-        "the", "a", "an", "is", "are", "was", "were", "be", "been",
-        "being", "have", "has", "had", "do", "does", "did", "will",
-        "would", "could", "should", "may", "might", "shall", "can",
-        "to", "of", "in", "for", "on", "with", "at", "by", "from",
-        "as", "into", "through", "during", "before", "after", "and",
-        "but", "or", "nor", "not", "so", "yet", "both", "either",
-        "neither", "each", "every", "all", "any", "few", "more",
-        "most", "other", "some", "such", "no", "only", "same", "than",
-        "too", "very", "just", "about", "it", "its", "this", "that",
-        "these", "those", "i", "me", "my", "we", "our", "you", "your",
-        "he", "she", "they", "them", "what", "which", "who", "how",
-        "when", "where", "why", "if", "then", "else",
+        "the", "a", "an", "is", "are", "was", "were", "be", "been", "being", "have", "has", "had",
+        "do", "does", "did", "will", "would", "could", "should", "may", "might", "shall", "can",
+        "to", "of", "in", "for", "on", "with", "at", "by", "from", "as", "into", "through",
+        "during", "before", "after", "and", "but", "or", "nor", "not", "so", "yet", "both",
+        "either", "neither", "each", "every", "all", "any", "few", "more", "most", "other", "some",
+        "such", "no", "only", "same", "than", "too", "very", "just", "about", "it", "its", "this",
+        "that", "these", "those", "i", "me", "my", "we", "our", "you", "your", "he", "she", "they",
+        "them", "what", "which", "who", "how", "when", "where", "why", "if", "then", "else",
     ];
 
     let mut words: Vec<String> = Vec::new();
@@ -357,10 +353,7 @@ mod tests {
             }
             // Fact memories should have tags.
             if result.contains("[fact]") {
-                assert!(
-                    result.contains("tags:"),
-                    "facts should include tags"
-                );
+                assert!(result.contains("tags:"), "facts should include tags");
             }
             // Should be wrapped in <memories> tags.
             assert!(result.starts_with("<memories>"));

@@ -9,25 +9,24 @@ use std::sync::Arc;
 use futures_util::StreamExt;
 
 use archon_sdk::{
-    create_sdk_mcp_server, fork_session, get_session_info, list_sessions, rename_session,
-    tag_session, unstable_v2_create_session, unstable_v2_resume_session, query,
-    SdkAuth, SdkError, SdkMessage, SdkOptions, SdkResultMessage, SdkTool, SdkUsage,
-    SessionOptions,
+    SdkAuth, SdkError, SdkMessage, SdkOptions, SdkResultMessage, SdkTool, SdkUsage, SessionOptions,
+    create_sdk_mcp_server, fork_session, get_session_info, list_sessions, query, rename_session,
+    tag_session, unstable_v2_create_session, unstable_v2_resume_session,
 };
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 /// A simple echo handler for tests.
 fn echo_handler() -> Arc<
-    dyn Fn(serde_json::Value) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<String, SdkError>> + Send + 'static>,
-    > + Send
-    + Sync,
+    dyn Fn(
+            serde_json::Value,
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = Result<String, SdkError>> + Send + 'static>,
+        > + Send
+        + Sync,
 > {
     Arc::new(|input: serde_json::Value| {
-        Box::pin(async move {
-            Ok(input["text"].as_str().unwrap_or("(none)").to_string())
-        })
+        Box::pin(async move { Ok(input["text"].as_str().unwrap_or("(none)").to_string()) })
     })
 }
 
@@ -50,7 +49,9 @@ fn tmp_opts() -> SessionOptions {
 
 #[test]
 fn sdk_message_assistant_serializes() {
-    let msg = SdkMessage::AssistantMessage { content: "hello world".into() };
+    let msg = SdkMessage::AssistantMessage {
+        content: "hello world".into(),
+    };
     let json = serde_json::to_string(&msg).unwrap();
     assert!(json.contains("assistant_message"), "got: {json}");
     assert!(json.contains("hello world"), "got: {json}");
@@ -70,7 +71,10 @@ fn sdk_message_tool_use_serializes() {
 
 #[test]
 fn sdk_message_tool_result_serializes() {
-    let msg = SdkMessage::ToolResult { id: "tu_1".into(), content: "result".into() };
+    let msg = SdkMessage::ToolResult {
+        id: "tu_1".into(),
+        content: "result".into(),
+    };
     let json = serde_json::to_string(&msg).unwrap();
     assert!(json.contains("tool_result"), "got: {json}");
 }
@@ -79,7 +83,10 @@ fn sdk_message_tool_result_serializes() {
 fn sdk_message_result_message_serializes() {
     let msg = SdkMessage::ResultMessage(SdkResultMessage {
         stop_reason: "end_turn".into(),
-        usage: SdkUsage { input_tokens: 5, output_tokens: 10 },
+        usage: SdkUsage {
+            input_tokens: 5,
+            output_tokens: 10,
+        },
     });
     let json = serde_json::to_string(&msg).unwrap();
     assert!(json.contains("result_message"), "got: {json}");
@@ -88,7 +95,9 @@ fn sdk_message_result_message_serializes() {
 
 #[test]
 fn sdk_message_round_trips() {
-    let msg = SdkMessage::AssistantMessage { content: "test".into() };
+    let msg = SdkMessage::AssistantMessage {
+        content: "test".into(),
+    };
     let json = serde_json::to_string(&msg).unwrap();
     let decoded: SdkMessage = serde_json::from_str(&json).unwrap();
     if let SdkMessage::AssistantMessage { content } = decoded {
@@ -108,7 +117,10 @@ fn sdk_error_auth_message() {
 
 #[test]
 fn sdk_error_api_includes_status() {
-    let e = SdkError::Api { status: 401, message: "Unauthorized".into() };
+    let e = SdkError::Api {
+        status: 401,
+        message: "Unauthorized".into(),
+    };
     assert!(e.to_string().contains("401"));
     assert!(e.to_string().contains("Unauthorized"));
 }
@@ -117,7 +129,10 @@ fn sdk_error_api_includes_status() {
 fn sdk_error_all_variants_compile() {
     let _errors: Vec<SdkError> = vec![
         SdkError::Auth("x".into()),
-        SdkError::Api { status: 500, message: "err".into() },
+        SdkError::Api {
+            status: 500,
+            message: "err".into(),
+        },
         SdkError::Tool("bad tool".into()),
         SdkError::Config("bad config".into()),
         SdkError::Session("no session".into()),
@@ -209,7 +224,10 @@ async fn sdk_tool_handler_callable() {
         schema: serde_json::json!({}),
         handler: echo_handler(),
     };
-    let result = tool.call(serde_json::json!({ "text": "ping" })).await.unwrap();
+    let result = tool
+        .call(serde_json::json!({ "text": "ping" }))
+        .await
+        .unwrap();
     assert_eq!(result, "ping");
 }
 
@@ -244,7 +262,9 @@ async fn session_get_info_returns_metadata() {
 async fn session_rename_updates_title() {
     let opts = tmp_opts();
     let session = unstable_v2_create_session(opts.clone()).await.unwrap();
-    rename_session(session.id(), "My Session", Some(opts.clone())).await.unwrap();
+    rename_session(session.id(), "My Session", Some(opts.clone()))
+        .await
+        .unwrap();
     let info = get_session_info(session.id(), Some(opts)).await.unwrap();
     assert_eq!(info.title.as_deref(), Some("My Session"));
 }
@@ -253,7 +273,9 @@ async fn session_rename_updates_title() {
 async fn session_tag_adds_tag() {
     let opts = tmp_opts();
     let session = unstable_v2_create_session(opts.clone()).await.unwrap();
-    tag_session(session.id(), "important", Some(opts.clone())).await.unwrap();
+    tag_session(session.id(), "important", Some(opts.clone()))
+        .await
+        .unwrap();
     let info = get_session_info(session.id(), Some(opts)).await.unwrap();
     assert!(info.tags.contains(&"important".to_string()));
 }
@@ -262,7 +284,9 @@ async fn session_tag_adds_tag() {
 async fn session_fork_creates_new_id() {
     let opts = tmp_opts();
     let session = unstable_v2_create_session(opts.clone()).await.unwrap();
-    let forked = fork_session(session.id(), Some(opts.clone())).await.unwrap();
+    let forked = fork_session(session.id(), Some(opts.clone()))
+        .await
+        .unwrap();
     assert_ne!(forked.id(), session.id());
     let sessions = list_sessions(Some(opts)).await.unwrap();
     assert_eq!(sessions.len(), 2);

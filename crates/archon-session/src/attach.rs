@@ -40,11 +40,7 @@ pub fn stream_logs(session_id: &str, follow: bool) -> Result<(), SessionError> {
 
 /// Stream logs from a specific directory (testable).
 #[cfg(unix)]
-pub fn stream_logs_in_dir(
-    dir: &Path,
-    session_id: &str,
-    follow: bool,
-) -> Result<(), SessionError> {
+pub fn stream_logs_in_dir(dir: &Path, session_id: &str, follow: bool) -> Result<(), SessionError> {
     use std::io::{BufRead, BufReader, Seek, SeekFrom};
 
     let log_path = dir.join(format!("{session_id}.log"));
@@ -74,8 +70,7 @@ pub fn stream_logs_in_dir(
             // Read any remaining content
             loop {
                 let mut line = String::new();
-                let bytes_read =
-                    reader.read_line(&mut line).map_err(SessionError::IoError)?;
+                let bytes_read = reader.read_line(&mut line).map_err(SessionError::IoError)?;
                 if bytes_read == 0 {
                     break;
                 }

@@ -1,7 +1,7 @@
 //! OpenAI embedding provider using text-embedding-3-small (1536-dim).
 
-use crate::types::MemoryError;
 use super::EmbeddingProvider;
+use crate::types::MemoryError;
 
 /// Maximum characters per text input (approximate token limit: 8191 tokens * ~4 chars).
 const MAX_CHARS_PER_TEXT: usize = 32_764;
@@ -28,9 +28,7 @@ impl OpenAIEmbedding {
     /// even when called from within a tokio async runtime.
     pub fn new(api_key: &str) -> Result<Self, MemoryError> {
         if api_key.is_empty() {
-            return Err(MemoryError::Database(
-                "OpenAI API key is empty".into(),
-            ));
+            return Err(MemoryError::Database("OpenAI API key is empty".into()));
         }
         // reqwest::blocking::Client creates its own tokio runtime internally.
         // If we're already inside a tokio runtime, this panics unless we use

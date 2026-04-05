@@ -1,16 +1,16 @@
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use archon_llm::effort::EffortLevel;
 use archon_llm::provider::{LlmProvider, LlmRequest};
 use archon_llm::streaming::StreamEvent;
+use archon_memory::MemoryGraph;
 use archon_memory::extraction::{
-    should_extract, store_extracted, build_extraction_prompt, parse_extraction_response,
-    ExtractionConfig, ExtractionState,
+    ExtractionConfig, ExtractionState, build_extraction_prompt, parse_extraction_response,
+    should_extract, store_extracted,
 };
 use archon_memory::injection::MemoryInjector;
-use archon_memory::MemoryGraph;
 use archon_permissions::auto::{AutoDecision, AutoModeEvaluator};
 use archon_session::checkpoint::CheckpointStore;
 use archon_tools::agent_tool::SubagentRequest;
@@ -52,15 +52,34 @@ impl Default for SessionStats {
 #[derive(Debug, Clone)]
 pub enum AgentEvent {
     UserPromptReady,
-    ApiCallStarted { model: String },
+    ApiCallStarted {
+        model: String,
+    },
     TextDelta(String),
     ThinkingDelta(String),
-    ToolCallStarted { name: String, id: String },
-    ToolCallComplete { name: String, id: String, result: ToolResult },
-    PermissionRequired { tool: String, description: String },
-    PermissionGranted { tool: String },
-    PermissionDenied { tool: String },
-    TurnComplete { input_tokens: u64, output_tokens: u64 },
+    ToolCallStarted {
+        name: String,
+        id: String,
+    },
+    ToolCallComplete {
+        name: String,
+        id: String,
+        result: ToolResult,
+    },
+    PermissionRequired {
+        tool: String,
+        description: String,
+    },
+    PermissionGranted {
+        tool: String,
+    },
+    PermissionDenied {
+        tool: String,
+    },
+    TurnComplete {
+        input_tokens: u64,
+        output_tokens: u64,
+    },
     Error(String),
     CompactionTriggered,
     SessionComplete,
@@ -258,7 +277,12 @@ impl Agent {
     pub async fn fire_hook(&self, event: crate::hooks::HookEvent, payload: serde_json::Value) {
         if let Some(ref registry) = self.hook_registry {
             registry
-                .execute_hooks(event, payload, &self.config.working_dir, &self.config.session_id)
+                .execute_hooks(
+                    event,
+                    payload,
+                    &self.config.working_dir,
+                    &self.config.session_id,
+                )
                 .await;
         }
     }
@@ -410,10 +434,7 @@ impl Agent {
                         self.send_event(AgentEvent::ThinkingDelta(thinking)).await;
                     }
 
-                    StreamEvent::InputJsonDelta {
-                        partial_json,
-                        ..
-                    } => {
+                    StreamEvent::InputJsonDelta { partial_json, .. } => {
                         // Accumulate JSON for the current tool call
                         if let Some(tool) = pending_tools.last_mut() {
                             tool.input_json.push_str(&partial_json);
@@ -444,13 +465,9 @@ impl Agent {
                         error_type,
                         message,
                     } => {
-                        self.send_event(AgentEvent::Error(format!(
-                            "{error_type}: {message}"
-                        )))
-                        .await;
-                        return Err(AgentLoopError::ApiError(format!(
-                            "{error_type}: {message}"
-                        )));
+                        self.send_event(AgentEvent::Error(format!("{error_type}: {message}")))
+                            .await;
+                        return Err(AgentLoopError::ApiError(format!("{error_type}: {message}")));
                     }
                 }
             }
@@ -531,12 +548,17 @@ impl Agent {
                                 _ => {
                                     self.send_event(AgentEvent::PermissionRequired {
                                         tool: tool.name.clone(),
-                                        description: format!("Permission required for {}", tool.name),
-                                    }).await;
+                                        description: format!(
+                                            "Permission required for {}",
+                                            tool.name
+                                        ),
+                                    })
+                                    .await;
                                     // In acceptEdits, deny non-edit tools (Bash, etc.)
                                     self.send_event(AgentEvent::PermissionDenied {
                                         tool: tool.name.clone(),
-                                    }).await;
+                                    })
+                                    .await;
                                     false
                                 }
                             }
@@ -552,8 +574,12 @@ impl Agent {
                                     // Send permission request to TUI and wait for response
                                     self.send_event(AgentEvent::PermissionRequired {
                                         tool: tool.name.clone(),
-                                        description: format!("{} wants to use {}", tool.name, tool.name),
-                                    }).await;
+                                        description: format!(
+                                            "{} wants to use {}",
+                                            tool.name, tool.name
+                                        ),
+                                    })
+                                    .await;
 
                                     // Wait for user response via permission channel
                                     if let Some(ref rx) = self.permission_response_rx {
@@ -561,18 +587,22 @@ impl Agent {
                                         match tokio::time::timeout(
                                             std::time::Duration::from_secs(120),
                                             rx.recv(),
-                                        ).await {
+                                        )
+                                        .await
+                                        {
                                             Ok(Some(true)) => {
                                                 self.send_event(AgentEvent::PermissionGranted {
                                                     tool: tool.name.clone(),
-                                                }).await;
+                                                })
+                                                .await;
                                                 tracing::info!(tool = %tool.name, "default-mode: user approved");
                                                 true
                                             }
                                             _ => {
                                                 self.send_event(AgentEvent::PermissionDenied {
                                                     tool: tool.name.clone(),
-                                                }).await;
+                                                })
+                                                .await;
                                                 tracing::info!(tool = %tool.name, "default-mode: user denied or timeout");
                                                 false
                                             }
@@ -590,23 +620,24 @@ impl Agent {
                             if let Some(ref evaluator) = self.auto_evaluator {
                                 let decision = match tool.name.as_str() {
                                     "Bash" | "PowerShell" => {
-                                        let cmd = input.get("command")
+                                        let cmd = input
+                                            .get("command")
                                             .and_then(|v| v.as_str())
                                             .unwrap_or("");
                                         evaluator.evaluate_command(cmd)
                                     }
                                     "Write" | "Edit" => {
-                                        let path = input.get("file_path")
+                                        let path = input
+                                            .get("file_path")
                                             .and_then(|v| v.as_str())
                                             .unwrap_or("");
                                         evaluator.evaluate_file_write(Path::new(path))
                                     }
                                     "Read" | "Glob" | "Grep" | "ToolSearch" | "AskUserQuestion"
-                                    | "TodoWrite" | "Sleep" => {
-                                        AutoDecision::Allow
-                                    }
+                                    | "TodoWrite" | "Sleep" => AutoDecision::Allow,
                                     "Config" => {
-                                        let action = input.get("action")
+                                        let action = input
+                                            .get("action")
                                             .and_then(|v| v.as_str())
                                             .unwrap_or("");
                                         if action.eq_ignore_ascii_case("get") {
@@ -626,14 +657,16 @@ impl Agent {
                                         tracing::warn!(tool = %tool.name, "auto-mode: risky, denied");
                                         self.send_event(AgentEvent::PermissionDenied {
                                             tool: tool.name.clone(),
-                                        }).await;
+                                        })
+                                        .await;
                                         false
                                     }
                                     AutoDecision::PromptWithWarning(msg) => {
                                         tracing::warn!(tool = %tool.name, warning = %msg, "auto-mode: dangerous, denied");
                                         self.send_event(AgentEvent::PermissionDenied {
                                             tool: tool.name.clone(),
-                                        }).await;
+                                        })
+                                        .await;
                                         false
                                     }
                                 }
@@ -652,15 +685,18 @@ impl Agent {
                             name: tool.name.clone(),
                             id: tool.id.clone(),
                             result: denied_result.clone(),
-                        }).await;
-                        self.state.add_tool_result(&tool.id, &denied_result.content, true);
+                        })
+                        .await;
+                        self.state
+                            .add_tool_result(&tool.id, &denied_result.content, true);
                         continue;
                     }
 
                     // Phase 2 (CLI-116): Checkpoint file before Write/Edit
                     if matches!(tool.name.as_str(), "Write" | "Edit") {
                         if let Some(ref store) = self.checkpoint_store {
-                            if let Some(file_path) = input.get("file_path").and_then(|v| v.as_str()) {
+                            if let Some(file_path) = input.get("file_path").and_then(|v| v.as_str())
+                            {
                                 let store = store.lock().await;
                                 if let Err(e) = store.snapshot(
                                     &self.config.session_id,
@@ -699,7 +735,8 @@ impl Agent {
                                 result: result.clone(),
                             })
                             .await;
-                            self.state.add_tool_result(&tool.id, &result.content, result.is_error);
+                            self.state
+                                .add_tool_result(&tool.id, &result.content, result.is_error);
                             continue;
                         }
                     }
@@ -709,8 +746,11 @@ impl Agent {
                     // GAP 8: Detect SubagentRequest and execute one-shot.
                     // AgentTool returns a bare SubagentRequest as the full content.
                     // TaskCreate returns {"task_id":"...","subagent_request":{...}}.
-                    let result = if !result.is_error && (tool.name == "Agent" || tool.name == "TaskCreate") {
-                        self.handle_subagent_result(&result, tool.name == "TaskCreate").await
+                    let result = if !result.is_error
+                        && (tool.name == "Agent" || tool.name == "TaskCreate")
+                    {
+                        self.handle_subagent_result(&result, tool.name == "TaskCreate")
+                            .await
                     } else {
                         result
                     };
@@ -742,11 +782,9 @@ impl Agent {
                     + stats.output_tokens as f64 * 15.0)
                     / 1_000_000.0;
                 // Update cache statistics from this turn
-                stats.cache_stats.update(
-                    turn_cache_creation,
-                    turn_cache_read,
-                    turn_input_tokens,
-                );
+                stats
+                    .cache_stats
+                    .update(turn_cache_creation, turn_cache_read, turn_input_tokens);
             }
 
             self.send_event(AgentEvent::TurnComplete {
@@ -757,7 +795,11 @@ impl Agent {
 
             // GAP 5: Auto-memory extraction check
             self.extraction_state.record_turn();
-            if should_extract(&self.extraction_config, &self.extraction_state, self.turn_number as usize) {
+            if should_extract(
+                &self.extraction_config,
+                &self.extraction_state,
+                self.turn_number as usize,
+            ) {
                 self.trigger_memory_extraction();
             }
 
@@ -814,26 +856,36 @@ impl Agent {
     /// and replaces the conversation state. Fires PreCompact and PostCompact
     /// hooks around the compaction. Returns a human-readable status message.
     pub async fn compact(&mut self) -> String {
-        use archon_context::messages::ContextMessage;
         use crate::commands::handle_compact;
+        use archon_context::messages::ContextMessage;
 
         // Convert JSON messages to ContextMessages
-        let context_msgs: Vec<ContextMessage> = self.state.messages.iter().map(|m| {
-            let role = m["role"].as_str().unwrap_or("user").to_string();
-            let content = m["content"].clone();
-            let text_len = match &content {
-                serde_json::Value::String(s) => s.len(),
-                serde_json::Value::Array(arr) => arr.iter().map(|v| {
-                    v.get("text").and_then(|t| t.as_str()).map_or(0, |s| s.len())
-                }).sum(),
-                _ => 0,
-            };
-            ContextMessage {
-                role,
-                content,
-                estimated_tokens: (text_len as f64 / 4.0).ceil() as u64,
-            }
-        }).collect();
+        let context_msgs: Vec<ContextMessage> = self
+            .state
+            .messages
+            .iter()
+            .map(|m| {
+                let role = m["role"].as_str().unwrap_or("user").to_string();
+                let content = m["content"].clone();
+                let text_len = match &content {
+                    serde_json::Value::String(s) => s.len(),
+                    serde_json::Value::Array(arr) => arr
+                        .iter()
+                        .map(|v| {
+                            v.get("text")
+                                .and_then(|t| t.as_str())
+                                .map_or(0, |s| s.len())
+                        })
+                        .sum(),
+                    _ => 0,
+                };
+                ContextMessage {
+                    role,
+                    content,
+                    estimated_tokens: (text_len as f64 / 4.0).ceil() as u64,
+                }
+            })
+            .collect();
 
         if context_msgs.len() < 5 {
             return "Nothing to compact (fewer than 5 messages).".into();
@@ -865,12 +917,16 @@ impl Agent {
 
         if output.mutated {
             // Replace the conversation messages with the compacted version
-            self.state.messages = output.messages.iter().map(|cm| {
-                serde_json::json!({
-                    "role": cm.role,
-                    "content": cm.content,
+            self.state.messages = output
+                .messages
+                .iter()
+                .map(|cm| {
+                    serde_json::json!({
+                        "role": cm.role,
+                        "content": cm.content,
+                    })
                 })
-            }).collect();
+                .collect();
             // Invalidate memory cache since context changed
             self.memory_injector.invalidate_cache();
         }
@@ -935,7 +991,10 @@ impl Agent {
         };
 
         // Collect recent user messages as context for recall
-        let context: Vec<String> = self.state.messages.iter()
+        let context: Vec<String> = self
+            .state
+            .messages
+            .iter()
             .rev()
             .filter(|m| m["role"].as_str() == Some("user"))
             .take(3)
@@ -970,13 +1029,18 @@ impl Agent {
         };
 
         // Collect last N messages for extraction
-        let messages: Vec<String> = self.state.messages.iter()
+        let messages: Vec<String> = self
+            .state
+            .messages
+            .iter()
             .rev()
             .take(10)
             .filter_map(|m| {
                 let role = m["role"].as_str().unwrap_or("unknown");
                 let content = m["content"].as_str().unwrap_or("");
-                if content.is_empty() { return None; }
+                if content.is_empty() {
+                    return None;
+                }
                 Some(format!("{role}: {content}"))
             })
             .collect();
@@ -1027,7 +1091,9 @@ impl Agent {
                     let extracted = parse_extraction_response(&response_text).unwrap_or_default();
                     if !extracted.is_empty() {
                         match store_extracted(&graph, &extracted, &session_id) {
-                            Ok(count) => tracing::info!("auto-extracted {count} memories at turn {turn}"),
+                            Ok(count) => {
+                                tracing::info!("auto-extracted {count} memories at turn {turn}")
+                            }
                             Err(e) => tracing::warn!("memory extraction storage failed: {e}"),
                         }
                     } else {
@@ -1046,7 +1112,11 @@ impl Agent {
     /// When `nested` is false (AgentTool), the entire content is a SubagentRequest.
     /// When `nested` is true (TaskCreate), the SubagentRequest is under the
     /// `subagent_request` key in the response JSON.
-    async fn handle_subagent_result(&mut self, tool_result: &ToolResult, nested: bool) -> ToolResult {
+    async fn handle_subagent_result(
+        &mut self,
+        tool_result: &ToolResult,
+        nested: bool,
+    ) -> ToolResult {
         // Parse the SubagentRequest from the tool result
         let request: SubagentRequest = if nested {
             // TaskCreate format: {"task_id":"...","subagent_request":{...}}
@@ -1106,7 +1176,10 @@ impl Agent {
                     }
                 }
 
-                if let Err(e) = self.subagent_manager.complete(&subagent_id, response_text.clone()) {
+                if let Err(e) = self
+                    .subagent_manager
+                    .complete(&subagent_id, response_text.clone())
+                {
                     tracing::warn!("failed to mark subagent complete: {e}");
                 }
 
@@ -1114,7 +1187,9 @@ impl Agent {
             }
             Err(e) => {
                 let reason = format!("Subagent API call failed: {e}");
-                let _ = self.subagent_manager.mark_failed(&subagent_id, reason.clone());
+                let _ = self
+                    .subagent_manager
+                    .mark_failed(&subagent_id, reason.clone());
                 ToolResult::error(reason)
             }
         }
@@ -1215,7 +1290,9 @@ mod tests {
 
         assert_eq!(state.messages.len(), 2);
         let assistant_msg = &state.messages[1];
-        let blocks = assistant_msg["content"].as_array().expect("content is array");
+        let blocks = assistant_msg["content"]
+            .as_array()
+            .expect("content is array");
         assert_eq!(blocks[0]["signature"], "sig123");
     }
 }

@@ -10,7 +10,10 @@ fn create_temp_dir() -> tempfile::TempDir {
 fn empty_dir_returns_empty() {
     let tmp = create_temp_dir();
     let result = load_hierarchical_claude_md(tmp.path());
-    assert!(result.is_empty(), "expected empty string for dir with no CLAUDE.md");
+    assert!(
+        result.is_empty(),
+        "expected empty string for dir with no CLAUDE.md"
+    );
 }
 
 #[test]
@@ -55,7 +58,9 @@ fn hierarchy_order() {
     fs::write(child.join("CLAUDE.md"), "CHILD_CONTENT").unwrap();
 
     let result = load_hierarchical_claude_md(&child);
-    let parent_pos = result.find("PARENT_CONTENT").expect("parent content missing");
+    let parent_pos = result
+        .find("PARENT_CONTENT")
+        .expect("parent content missing");
     let child_pos = result.find("CHILD_CONTENT").expect("child content missing");
     assert!(
         parent_pos < child_pos,
@@ -70,7 +75,10 @@ fn dedup_skips_same_file() {
 
     let result = load_hierarchical_claude_md(tmp.path());
     let count = result.matches("UNIQUE_CONTENT").count();
-    assert_eq!(count, 1, "content should appear exactly once even if paths resolve to same file");
+    assert_eq!(
+        count, 1,
+        "content should appear exactly once even if paths resolve to same file"
+    );
 }
 
 #[test]

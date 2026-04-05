@@ -214,7 +214,9 @@ impl AgentBuilder {
             }
         }
 
-        let model = self.model.unwrap_or_else(|| "claude-sonnet-4-6".to_string());
+        let model = self
+            .model
+            .unwrap_or_else(|| "claude-sonnet-4-6".to_string());
         if model.is_empty() {
             return Err(SdkError::MissingModel);
         }
@@ -341,7 +343,9 @@ impl SessionBuilder {
             }
         }
         Ok(SessionHandle {
-            model: self.model.unwrap_or_else(|| "claude-sonnet-4-6".to_string()),
+            model: self
+                .model
+                .unwrap_or_else(|| "claude-sonnet-4-6".to_string()),
             auth,
             system_prompt: self.system_prompt,
             cwd: self.cwd,

@@ -37,43 +37,83 @@ fn key_registry() -> &'static HashMap<&'static str, KeyMeta> {
         let mut m = HashMap::new();
         m.insert(
             "api.default_model",
-            KeyMeta { ty: KeyType::Str, default: "claude-sonnet-4-6", read_only: false },
+            KeyMeta {
+                ty: KeyType::Str,
+                default: "claude-sonnet-4-6",
+                read_only: false,
+            },
         );
         m.insert(
             "api.thinking_budget",
-            KeyMeta { ty: KeyType::U32, default: "16384", read_only: false },
+            KeyMeta {
+                ty: KeyType::U32,
+                default: "16384",
+                read_only: false,
+            },
         );
         m.insert(
             "api.default_effort",
-            KeyMeta { ty: KeyType::Str, default: "high", read_only: false },
+            KeyMeta {
+                ty: KeyType::Str,
+                default: "high",
+                read_only: false,
+            },
         );
         m.insert(
             "context.compact_threshold",
-            KeyMeta { ty: KeyType::F32, default: "0.80", read_only: false },
+            KeyMeta {
+                ty: KeyType::F32,
+                default: "0.80",
+                read_only: false,
+            },
         );
         m.insert(
             "context.preserve_recent_turns",
-            KeyMeta { ty: KeyType::U32, default: "3", read_only: false },
+            KeyMeta {
+                ty: KeyType::U32,
+                default: "3",
+                read_only: false,
+            },
         );
         m.insert(
             "tools.bash_timeout",
-            KeyMeta { ty: KeyType::U64, default: "120", read_only: false },
+            KeyMeta {
+                ty: KeyType::U64,
+                default: "120",
+                read_only: false,
+            },
         );
         m.insert(
             "tools.max_concurrency",
-            KeyMeta { ty: KeyType::U8, default: "4", read_only: false },
+            KeyMeta {
+                ty: KeyType::U8,
+                default: "4",
+                read_only: false,
+            },
         );
         m.insert(
             "cost.warn_threshold",
-            KeyMeta { ty: KeyType::F64, default: "5.0", read_only: false },
+            KeyMeta {
+                ty: KeyType::F64,
+                default: "5.0",
+                read_only: false,
+            },
         );
         m.insert(
             "cost.hard_limit",
-            KeyMeta { ty: KeyType::F64, default: "0.0", read_only: false },
+            KeyMeta {
+                ty: KeyType::F64,
+                default: "0.0",
+                read_only: false,
+            },
         );
         m.insert(
             "checkpoint.max_checkpoints",
-            KeyMeta { ty: KeyType::U32, default: "10", read_only: false },
+            KeyMeta {
+                ty: KeyType::U32,
+                default: "10",
+                read_only: false,
+            },
         );
         m
     });
@@ -144,7 +184,12 @@ pub fn get_config_value(key: &str) -> Option<String> {
         Ok(g) => g,
         Err(_) => return None,
     };
-    Some(guard.get(key).cloned().unwrap_or_else(|| meta.default.to_string()))
+    Some(
+        guard
+            .get(key)
+            .cloned()
+            .unwrap_or_else(|| meta.default.to_string()),
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -189,7 +234,9 @@ impl Tool for ConfigTool {
     async fn execute(&self, input: serde_json::Value, _ctx: &ToolContext) -> ToolResult {
         let action = match input.get("action").and_then(|v| v.as_str()) {
             Some(a) => a,
-            None => return ToolResult::error("\"action\" is required and must be \"get\" or \"set\""),
+            None => {
+                return ToolResult::error("\"action\" is required and must be \"get\" or \"set\"");
+            }
         };
 
         let key = match input.get("key").and_then(|v| v.as_str()) {
@@ -245,8 +292,15 @@ impl ConfigTool {
             Ok(g) => g,
             Err(_) => return ToolResult::error("Config overlay lock poisoned"),
         };
-        let value = guard.get(key).cloned().unwrap_or_else(|| meta.default.to_string());
-        let source = if guard.contains_key(key) { "overlay" } else { "default" };
+        let value = guard
+            .get(key)
+            .cloned()
+            .unwrap_or_else(|| meta.default.to_string());
+        let source = if guard.contains_key(key) {
+            "overlay"
+        } else {
+            "default"
+        };
         drop(guard);
 
         ToolResult::success(format!("{key} = \"{value}\" (source: {source})"))
@@ -333,7 +387,9 @@ mod tests {
             PermissionLevel::Safe,
         );
         assert_eq!(
-            tool.permission_level(&json!({"action": "set", "key": "api.default_model", "value": "x"})),
+            tool.permission_level(
+                &json!({"action": "set", "key": "api.default_model", "value": "x"})
+            ),
             PermissionLevel::Risky,
         );
     }
@@ -343,7 +399,10 @@ mod tests {
         clear_overlay();
         let tool = ConfigTool;
         let result = tool
-            .execute(json!({"action": "get", "key": "api.default_model"}), &test_ctx())
+            .execute(
+                json!({"action": "get", "key": "api.default_model"}),
+                &test_ctx(),
+            )
             .await;
         assert!(!result.is_error);
         assert!(result.content.contains("claude-sonnet-4-6"));
@@ -414,7 +473,9 @@ mod tests {
     #[tokio::test]
     async fn missing_action_returns_error() {
         let tool = ConfigTool;
-        let result = tool.execute(json!({"key": "api.default_model"}), &test_ctx()).await;
+        let result = tool
+            .execute(json!({"key": "api.default_model"}), &test_ctx())
+            .await;
         assert!(result.is_error);
         assert!(result.content.contains("action"));
     }
@@ -423,7 +484,10 @@ mod tests {
     async fn set_without_value_returns_error() {
         let tool = ConfigTool;
         let result = tool
-            .execute(json!({"action": "set", "key": "api.default_model"}), &test_ctx())
+            .execute(
+                json!({"action": "set", "key": "api.default_model"}),
+                &test_ctx(),
+            )
             .await;
         assert!(result.is_error);
         assert!(result.content.contains("value"));

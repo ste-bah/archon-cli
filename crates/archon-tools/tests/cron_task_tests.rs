@@ -1,6 +1,6 @@
 //! Tests for TASK-CLI-311: CronTask struct and JSON persistence.
 
-use archon_tools::cron_task::{CronTask, CronStore};
+use archon_tools::cron_task::{CronStore, CronTask};
 use tempfile::TempDir;
 
 fn make_task(id: &str, cron: &str, prompt: &str, recurring: Option<bool>) -> CronTask {
@@ -54,8 +54,10 @@ fn none_recurring_serializes_as_null_or_absent() {
     let json = serde_json::to_value(&task).unwrap();
     // None → null or absent (serde skip_serializing_if = Option::is_none)
     let recurring = &json["recurring"];
-    assert!(recurring.is_null() || !json.as_object().unwrap().contains_key("recurring"),
-        "None recurring should serialize as null or absent, got {recurring}");
+    assert!(
+        recurring.is_null() || !json.as_object().unwrap().contains_key("recurring"),
+        "None recurring should serialize as null or absent, got {recurring}"
+    );
 }
 
 #[test]
@@ -173,8 +175,10 @@ fn cron_store_name_in_metadata_not_cron_task() {
 
     // name must NOT be inside the tasks array items
     let task_obj = &json["tasks"][0];
-    assert!(!task_obj.as_object().unwrap().contains_key("name"),
-        "name must not be in CronTask struct");
+    assert!(
+        !task_obj.as_object().unwrap().contains_key("name"),
+        "name must not be in CronTask struct"
+    );
 
     // name must be in archon_metadata
     assert_eq!(json["archon_metadata"]["meta-1"]["name"], "My Task Name");

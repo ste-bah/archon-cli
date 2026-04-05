@@ -88,10 +88,10 @@ fn registry_unknown_provider_returns_none() {
 
 #[test]
 fn anthropic_supports_thinking_and_tool_use() {
-    use archon_llm::providers::anthropic::AnthropicProvider;
     use archon_llm::anthropic::AnthropicClient;
     use archon_llm::auth::AuthProvider;
     use archon_llm::identity::{IdentityMode, IdentityProvider};
+    use archon_llm::providers::anthropic::AnthropicProvider;
     use archon_llm::types::Secret;
 
     let auth = AuthProvider::ApiKey(Secret::new("test-key".into()));
@@ -160,7 +160,10 @@ fn llm_request_from_message_request_round_trip() {
 fn registry_active_unknown_gives_clear_message() {
     let registry = ProviderRegistry::new();
     let result = registry.active("openai");
-    assert!(result.is_err(), "active() should return Err for unknown provider");
+    assert!(
+        result.is_err(),
+        "active() should return Err for unknown provider"
+    );
     let err_msg = result.err().unwrap().to_string();
     assert!(
         err_msg.contains("openai") || err_msg.contains("provider"),

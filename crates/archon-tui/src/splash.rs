@@ -78,8 +78,16 @@ pub fn render_splash<'a>(
     lines.push(two_column(
         &t,
         width,
-        ("   Welcome back!", Style::default().fg(t.header).add_modifier(Modifier::BOLD)),
-        ("Recent Activity", Style::default().fg(t.accent_secondary).add_modifier(Modifier::BOLD)),
+        (
+            "   Welcome back!",
+            Style::default().fg(t.header).add_modifier(Modifier::BOLD),
+        ),
+        (
+            "Recent Activity",
+            Style::default()
+                .fg(t.accent_secondary)
+                .add_modifier(Modifier::BOLD),
+        ),
     ));
 
     // blank
@@ -116,7 +124,12 @@ pub fn render_splash<'a>(
         &t,
         width,
         (&format!("   {model}"), Style::default().fg(t.accent)),
-        ("Tips", Style::default().fg(t.accent_secondary).add_modifier(Modifier::BOLD)),
+        (
+            "Tips",
+            Style::default()
+                .fg(t.accent_secondary)
+                .add_modifier(Modifier::BOLD),
+        ),
     ));
 
     // Working dir + tip lines
@@ -149,10 +162,7 @@ pub fn render_splash<'a>(
     lines.push(bottom_border(&t, width));
 
     // prompt hint
-    lines.push(Line::from(Span::styled(
-        " >",
-        Style::default().fg(t.fg),
-    )));
+    lines.push(Line::from(Span::styled(" >", Style::default().fg(t.fg))));
 
     lines
 }
@@ -181,12 +191,7 @@ fn bordered_blank<'a>(t: &Theme, width: usize) -> Line<'a> {
     ])
 }
 
-fn two_column<'a>(
-    t: &Theme,
-    width: usize,
-    left: (&str, Style),
-    right: (&str, Style),
-) -> Line<'a> {
+fn two_column<'a>(t: &Theme, width: usize, left: (&str, Style), right: (&str, Style)) -> Line<'a> {
     let half = width / 2;
     let left_padded = format!("{:<w$}", left.0, w = half.saturating_sub(1));
     let right_padded = format!("{:<w$}", right.0, w = half.saturating_sub(1));

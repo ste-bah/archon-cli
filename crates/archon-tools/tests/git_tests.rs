@@ -208,10 +208,7 @@ fn commit_creates_commit() {
     archon_tools::git::commit::stage_all(&repo).expect("stage all");
 
     let hash = archon_tools::git::commit::commit(&repo, "Add new.txt").expect("commit");
-    assert!(
-        !hash.is_empty(),
-        "commit should return a non-empty hash"
-    );
+    assert!(!hash.is_empty(), "commit should return a non-empty hash");
     // Verify it's a valid hex string (at least 7 chars)
     assert!(hash.len() >= 7, "hash should be at least 7 chars: {hash}");
     assert!(

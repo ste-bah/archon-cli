@@ -1,5 +1,5 @@
+use archon_core::plan_explore::{ExploreConfig, create_explore_request};
 use archon_core::plan_v2::{Plan, PlanStatus, StepStatus};
-use archon_core::plan_explore::{create_explore_request, ExploreConfig};
 
 // ── Plan CRUD ──────────────────────────────────────────────────────
 
@@ -86,8 +86,14 @@ fn to_display_shows_steps() {
     plan.add_step("Add routes", vec!["routes.rs".into()], "medium");
 
     let display = plan.to_display();
-    assert!(display.contains("Create model"), "display should contain step description");
-    assert!(display.contains("Add routes"), "display should contain step description");
+    assert!(
+        display.contains("Create model"),
+        "display should contain step description"
+    );
+    assert!(
+        display.contains("Add routes"),
+        "display should contain step description"
+    );
 }
 
 #[test]
@@ -103,17 +109,24 @@ fn to_display_shows_status() {
     assert!(display.contains("Pending step"));
     assert!(display.contains("Done step"));
     // Check for status indicators (exact format tested by presence of distinct markers)
-    assert!(display.contains("[ ]") || display.contains("pending") || display.contains("\u{25cb}"),
-            "display should show pending indicator");
-    assert!(display.contains("[x]") || display.contains("complete") || display.contains("\u{2713}"),
-            "display should show complete indicator");
+    assert!(
+        display.contains("[ ]") || display.contains("pending") || display.contains("\u{25cb}"),
+        "display should show pending indicator"
+    );
+    assert!(
+        display.contains("[x]") || display.contains("complete") || display.contains("\u{2713}"),
+        "display should show complete indicator"
+    );
 }
 
 #[test]
 fn to_prompt_block_format() {
     let plan = Plan::new("Auth feature");
     let block = plan.to_prompt_block();
-    assert!(block.contains("Plan:"), "prompt block should contain 'Plan:' header");
+    assert!(
+        block.contains("Plan:"),
+        "prompt block should contain 'Plan:' header"
+    );
 }
 
 // ── Persistence ────────────────────────────────────────────────────
@@ -168,7 +181,11 @@ fn load_nonexistent_returns_none() {
 #[test]
 fn on_file_edited_marks_step() {
     let mut plan = Plan::new("File tracking");
-    plan.add_step("Update auth", vec!["auth.rs".into(), "config.rs".into()], "medium");
+    plan.add_step(
+        "Update auth",
+        vec!["auth.rs".into(), "config.rs".into()],
+        "medium",
+    );
     plan.add_step("Update tests", vec!["test.rs".into()], "low");
 
     plan.on_file_edited("auth.rs");
@@ -209,7 +226,10 @@ fn explore_config_no_write_tools() {
 fn create_explore_request_returns_subagent_request() {
     let request = create_explore_request("Find all auth modules");
     assert!(request.prompt.contains("Find all auth modules"));
-    assert_eq!(request.allowed_tools, ExploreConfig::default().allowed_tools);
+    assert_eq!(
+        request.allowed_tools,
+        ExploreConfig::default().allowed_tools
+    );
     assert_eq!(request.max_turns, ExploreConfig::default().max_turns);
     assert!(request.model.is_none(), "explore should use parent model");
 }
@@ -217,7 +237,11 @@ fn create_explore_request_returns_subagent_request() {
 #[test]
 fn plan_explore_step_returns_subagent_request() {
     let mut plan = Plan::new("Test plan");
-    plan.add_step("Implement auth module", vec!["src/auth.rs".into()], "medium");
+    plan.add_step(
+        "Implement auth module",
+        vec!["src/auth.rs".into()],
+        "medium",
+    );
     plan.add_step("Add tests", vec!["tests/auth_test.rs".into()], "low");
 
     let request = plan.explore_step(1).expect("step 1 should exist");

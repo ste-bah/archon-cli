@@ -1,13 +1,12 @@
 //! IDE Protocol tests for TASK-CLI-411.
 //! Tests JSON-RPC 2.0 framing, all IDE message types, and the stdio transport.
 
-use archon_sdk::ide::protocol::{
-    IdeCapabilities, IdeInitializeParams, IdeClientInfo, IdeInitializeResult,
-    IdePromptParams, IdeTextDelta, IdeTurnComplete,
-    JRpcRequest, JRpcNotification, JRpcErrorCode,
-    parse_request, error_response,
-};
 use archon_sdk::ide::handler::IdeProtocolHandler;
+use archon_sdk::ide::protocol::{
+    IdeCapabilities, IdeClientInfo, IdeInitializeParams, IdeInitializeResult, IdePromptParams,
+    IdeTextDelta, IdeTurnComplete, JRpcErrorCode, JRpcNotification, JRpcRequest, error_response,
+    parse_request,
+};
 use archon_sdk::ide::stdio::StdioTransport;
 use std::io::Cursor;
 
@@ -65,7 +64,10 @@ fn json_rpc_notification_no_id() {
     let v: serde_json::Value = serde_json::from_str(&json).expect("parse");
     assert_eq!(v["jsonrpc"], "2.0");
     assert_eq!(v["method"], "archon/textDelta");
-    assert!(v.get("id").is_none(), "notifications must not have an 'id' field");
+    assert!(
+        v.get("id").is_none(),
+        "notifications must not have an 'id' field"
+    );
 }
 
 // ── 5. IdeInitializeParams roundtrip serde ───────────────────────────────────
@@ -210,7 +212,8 @@ fn error_code_invalid_request() {
     assert_eq!(v["error"]["message"], "bad request");
 
     // parse_request works on well-formed input
-    let req_json = r#"{"jsonrpc":"2.0","id":5,"method":"archon/status","params":{"sessionId":"s"}}"#;
+    let req_json =
+        r#"{"jsonrpc":"2.0","id":5,"method":"archon/status","params":{"sessionId":"s"}}"#;
     let (id, method, _params) = parse_request(req_json).expect("parse");
     assert_eq!(id, 5);
     assert_eq!(method, "archon/status");

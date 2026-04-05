@@ -163,21 +163,24 @@ fn get_or_load_config(lang: &str) -> Option<()> {
         let query_path = grammar_dir().join(lang).join("highlights.scm");
         let query = std::fs::read_to_string(&query_path).ok();
         if let Some(query) = query {
-            let mut config =
-                match tree_sitter_highlight::HighlightConfiguration::new(language, lang, &query, "", "")
-                {
-                    Ok(c) => c,
-                    Err(e) => {
-                        tracing::warn!("failed to create highlight config for {lang}: {e}");
-                        configs.push((lang.to_string(), None));
-                        return None;
-                    }
-                };
+            let mut config = match tree_sitter_highlight::HighlightConfiguration::new(
+                language, lang, &query, "", "",
+            ) {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::warn!("failed to create highlight config for {lang}: {e}");
+                    configs.push((lang.to_string(), None));
+                    return None;
+                }
+            };
             config.configure(CAPTURE_NAMES);
             configs.push((lang.to_string(), Some(CachedConfig { config })));
             Some(())
         } else {
-            tracing::debug!("highlights.scm not found for {lang} at {}", query_path.display());
+            tracing::debug!(
+                "highlights.scm not found for {lang} at {}",
+                query_path.display()
+            );
             configs.push((lang.to_string(), None));
             None
         }
@@ -212,11 +215,7 @@ pub fn highlight_code(code: &str, language: &str) -> Option<Vec<Line<'static>>> 
 
     // Re-acquire the config and run the highlighter.
     let configs = CONFIGS.lock().ok()?;
-    let cached = configs
-        .iter()
-        .find(|(k, _)| k == language)?
-        .1
-        .as_ref()?;
+    let cached = configs.iter().find(|(k, _)| k == language)?.1.as_ref()?;
 
     let mut highlighter = tree_sitter_highlight::Highlighter::new();
     let events = highlighter
@@ -274,9 +273,7 @@ pub fn highlight_code(code: &str, language: &str) -> Option<Vec<Line<'static>>> 
 ///
 /// Used as a fallback when no tree-sitter grammar is available.
 pub fn render_plain_code(code: &str, language: Option<&str>) -> Vec<Line<'static>> {
-    let code_style = Style::default()
-        .fg(Color::White)
-        .bg(Color::Rgb(30, 30, 40));
+    let code_style = Style::default().fg(Color::White).bg(Color::Rgb(30, 30, 40));
 
     let mut lines = Vec::new();
 

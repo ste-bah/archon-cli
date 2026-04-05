@@ -117,7 +117,10 @@ fn op_scan(input: &serde_json::Value, ctx: &ToolContext) -> ToolResult {
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| ctx.working_dir.clone());
 
-    let force = input.get("force").and_then(|v| v.as_bool()).unwrap_or(false);
+    let force = input
+        .get("force")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
 
     let mut extra_excludes: Vec<String> = Vec::new();
     if let Some(arr) = input.get("exclude_dirs").and_then(|v| v.as_array()) {
@@ -133,7 +136,11 @@ fn op_scan(input: &serde_json::Value, ctx: &ToolContext) -> ToolResult {
     exclude.extend_from_slice(&extra_refs);
 
     // Attempt to load cache unless forced.
-    let cached = if !force { cache::load_cache(&scan_path) } else { None };
+    let cached = if !force {
+        cache::load_cache(&scan_path)
+    } else {
+        None
+    };
     let cached_mtimes = cached.as_ref().map(|c| &c.mtimes);
 
     let mut index = CodebaseIndex::new();
@@ -148,41 +155,46 @@ fn op_scan(input: &serde_json::Value, ctx: &ToolContext) -> ToolResult {
     let mut sym_count = 0usize;
     let mut skipped_cached = 0usize;
 
-    scan_directory(&scan_path, &scan_path, &exclude, &mut |rel_path: &str, abs_path: &std::path::Path| {
-        let language = match language_for_file(rel_path) {
-            Some(l) => l,
-            None => return,
-        };
+    scan_directory(
+        &scan_path,
+        &scan_path,
+        &exclude,
+        &mut |rel_path: &str, abs_path: &std::path::Path| {
+            let language = match language_for_file(rel_path) {
+                Some(l) => l,
+                None => return,
+            };
 
-        let current_mtime = file_mtime(abs_path);
+            let current_mtime = file_mtime(abs_path);
 
-        // Skip if mtime unchanged vs cache.
-        if let Some(cached_mtime_map) = cached_mtimes {
-            if let Some(&cached_m) = cached_mtime_map.get(rel_path) {
-                if cached_m == current_mtime {
-                    skipped_cached += 1;
-                    return;
+            // Skip if mtime unchanged vs cache.
+            if let Some(cached_mtime_map) = cached_mtimes {
+                if let Some(&cached_m) = cached_mtime_map.get(rel_path) {
+                    if cached_m == current_mtime {
+                        skipped_cached += 1;
+                        return;
+                    }
                 }
             }
-        }
 
-        let source = match std::fs::read_to_string(abs_path) {
-            Ok(s) => s,
-            Err(e) => {
-                tracing::warn!("Failed to read {}: {}", abs_path.display(), e);
-                return;
-            }
-        };
+            let source = match std::fs::read_to_string(abs_path) {
+                Ok(s) => s,
+                Err(e) => {
+                    tracing::warn!("Failed to read {}: {}", abs_path.display(), e);
+                    return;
+                }
+            };
 
-        let syms = parse_file(rel_path, &source, language);
-        sym_count += syms.len();
-        index.symbols.insert(rel_path.to_string(), syms);
-        index.mtimes.insert(rel_path.to_string(), current_mtime);
-        file_count += 1;
+            let syms = parse_file(rel_path, &source, language);
+            sym_count += syms.len();
+            index.symbols.insert(rel_path.to_string(), syms);
+            index.mtimes.insert(rel_path.to_string(), current_mtime);
+            file_count += 1;
 
-        // Extract simple import dependencies via regex scan.
-        extract_deps(&source, language, rel_path, &mut index);
-    });
+            // Extract simple import dependencies via regex scan.
+            extract_deps(&source, language, rel_path, &mut index);
+        },
+    );
 
     // Persist updated cache.
     let cached_index = cache::CachedIndex {
@@ -232,7 +244,10 @@ fn op_query(input: &serde_json::Value, ctx: &ToolContext) -> ToolResult {
 }
 
 fn op_summary(input: &serde_json::Value, ctx: &ToolContext) -> ToolResult {
-    let max_tokens = input.get("max_tokens").and_then(|v| v.as_u64()).unwrap_or(2000) as usize;
+    let max_tokens = input
+        .get("max_tokens")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(2000) as usize;
 
     let scan_path = input
         .get("path")
@@ -300,12 +315,8 @@ fn load_or_build_index(scan_path: &Path, _working_dir: &Path) -> CodebaseIndex {
 
 /// Recursively walk `dir`, calling `visitor` with (relative_path, absolute_path)
 /// for each file, skipping entries in `exclude`.
-fn scan_directory<F>(
-    root: &Path,
-    dir: &Path,
-    exclude: &[&str],
-    visitor: &mut F,
-) where
+fn scan_directory<F>(root: &Path, dir: &Path, exclude: &[&str], visitor: &mut F)
+where
     F: FnMut(&str, &Path),
 {
     let entries = match std::fs::read_dir(dir) {

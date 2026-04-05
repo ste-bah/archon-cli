@@ -42,8 +42,14 @@ impl Tool for TaskOutputTool {
             _ => return ToolResult::error("missing required field: task_id"),
         };
 
-        let offset = input.get("offset").and_then(|v| v.as_u64()).map(|n| n as usize);
-        let limit = input.get("limit").and_then(|v| v.as_u64()).map(|n| n as usize);
+        let offset = input
+            .get("offset")
+            .and_then(|v| v.as_u64())
+            .map(|n| n as usize);
+        let limit = input
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .map(|n| n as usize);
 
         match crate::task_manager::TASK_MANAGER.get_output(task_id, offset, limit) {
             Ok(output) => ToolResult::success(output),

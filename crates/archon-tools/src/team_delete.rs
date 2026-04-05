@@ -43,11 +43,7 @@ impl Tool for TeamDeleteTool {
             None => return ToolResult::error("missing 'team_id'"),
         };
 
-        let team_dir = self
-            .project_dir
-            .join(".claude")
-            .join("teams")
-            .join(team_id);
+        let team_dir = self.project_dir.join(".claude").join("teams").join(team_id);
 
         if !team_dir.exists() {
             return ToolResult::error(format!("team '{}' not found", team_id));

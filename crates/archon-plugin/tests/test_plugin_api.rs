@@ -76,7 +76,10 @@ fn register_tool_different_plugins_same_tool_name_ok() {
     reg.register_tool("plugin-a", "do_thing", valid_schema(), vec![])
         .unwrap();
     let result = reg.register_tool("plugin-b", "do_thing", valid_schema(), vec![]);
-    assert!(result.is_ok(), "expected Ok for different plugin namespaces");
+    assert!(
+        result.is_ok(),
+        "expected Ok for different plugin namespaces"
+    );
     let names = reg.tool_names();
     assert!(names.contains(&"plugin-a:do_thing"));
     assert!(names.contains(&"plugin-b:do_thing"));
@@ -86,9 +89,11 @@ fn register_tool_different_plugins_same_tool_name_ok() {
 fn tool_count_increments() {
     let mut reg = PluginRegistry::new();
     assert_eq!(reg.tool_count(), 0);
-    reg.register_tool("p", "t1", valid_schema(), vec![]).unwrap();
+    reg.register_tool("p", "t1", valid_schema(), vec![])
+        .unwrap();
     assert_eq!(reg.tool_count(), 1);
-    reg.register_tool("p", "t2", valid_schema(), vec![]).unwrap();
+    reg.register_tool("p", "t2", valid_schema(), vec![])
+        .unwrap();
     assert_eq!(reg.tool_count(), 2);
 }
 
@@ -172,7 +177,8 @@ fn command_count_increments() {
 #[test]
 fn unregister_all_removes_all_registrations() {
     let mut reg = PluginRegistry::new();
-    reg.register_tool("p", "t1", valid_schema(), vec![]).unwrap();
+    reg.register_tool("p", "t1", valid_schema(), vec![])
+        .unwrap();
     reg.register_hook("p", "PreToolUse", "cmd").unwrap();
     reg.register_command("p", "c1").unwrap();
     assert_eq!(reg.tool_count(), 1);
@@ -192,14 +198,22 @@ fn unregister_all_only_removes_target_plugin() {
         .unwrap();
     reg.register_tool("plugin-b", "tool_b", valid_schema(), vec![])
         .unwrap();
-    reg.register_hook("plugin-a", "PreToolUse", "a-cmd").unwrap();
-    reg.register_hook("plugin-b", "PostToolUse", "b-cmd").unwrap();
+    reg.register_hook("plugin-a", "PreToolUse", "a-cmd")
+        .unwrap();
+    reg.register_hook("plugin-b", "PostToolUse", "b-cmd")
+        .unwrap();
 
     reg.unregister_all("plugin-a");
 
     let names = reg.tool_names();
-    assert!(!names.contains(&"plugin-a:tool_a"), "plugin-a tool should be gone");
-    assert!(names.contains(&"plugin-b:tool_b"), "plugin-b tool should remain");
+    assert!(
+        !names.contains(&"plugin-a:tool_a"),
+        "plugin-a tool should be gone"
+    );
+    assert!(
+        names.contains(&"plugin-b:tool_b"),
+        "plugin-b tool should remain"
+    );
     assert_eq!(reg.hook_count(), 1, "plugin-b hook should remain");
 }
 
@@ -210,7 +224,10 @@ fn unregister_all_allows_re_registration() {
     reg.unregister_all("p");
     // Should succeed since the previous registration was cleared
     let result = reg.register_tool("p", "t", valid_schema(), vec![]);
-    assert!(result.is_ok(), "re-registration after unregister_all should succeed");
+    assert!(
+        result.is_ok(),
+        "re-registration after unregister_all should succeed"
+    );
 }
 
 // ── Enable / disable ──────────────────────────────────────────────────────────
@@ -314,8 +331,8 @@ fn plugin_tool_adapter_permission_level_is_risky() {
 
 #[test]
 fn hook_adapter_produces_hook_config() {
-    use archon_plugin::adapter_hook::PluginHookAdapter;
     use archon_core::hooks::HookCommandType;
+    use archon_plugin::adapter_hook::PluginHookAdapter;
     let adapter = PluginHookAdapter::new(
         "my-plugin".to_string(),
         "PreToolUse".to_string(),
@@ -342,8 +359,7 @@ fn hook_adapter_event_name() {
 #[test]
 fn command_adapter_namespaced_name() {
     use archon_plugin::adapter_command::PluginCommandAdapter;
-    let adapter =
-        PluginCommandAdapter::new("my-plugin".to_string(), "my-cmd".to_string());
+    let adapter = PluginCommandAdapter::new("my-plugin".to_string(), "my-cmd".to_string());
     assert_eq!(adapter.namespaced_name(), "my-plugin:my-cmd");
 }
 
@@ -416,11 +432,11 @@ fn dispatch_only_wasm() -> Vec<u8> {
 
 #[test]
 fn tools_from_plugin_instance_empty_for_no_registered_tools() {
-    use std::sync::{Arc, Mutex};
     use archon_plugin::{
         api::tools_from_plugin_instance,
         host::{PluginHostConfig, WasmPluginHost},
     };
+    use std::sync::{Arc, Mutex};
 
     let mut host = WasmPluginHost::new(PluginHostConfig::default()).unwrap();
     let tmp = std::env::temp_dir()
@@ -428,7 +444,9 @@ fn tools_from_plugin_instance_empty_for_no_registered_tools() {
         .join(ts_str());
     std::fs::create_dir_all(&tmp).unwrap();
     // Load a module that registers no tools.
-    let instance = host.load_plugin(dispatch_only_wasm(), vec![], Some("p"), tmp).unwrap();
+    let instance = host
+        .load_plugin(dispatch_only_wasm(), vec![], Some("p"), tmp)
+        .unwrap();
     let host_arc = Arc::new(Mutex::new(host));
 
     let tools = tools_from_plugin_instance("p", &instance, Arc::clone(&host_arc));
@@ -437,13 +455,13 @@ fn tools_from_plugin_instance_empty_for_no_registered_tools() {
 
 #[test]
 fn tools_from_plugin_instance_creates_adapter_per_registered_tool() {
-    use std::sync::{Arc, Mutex};
     use archon_plugin::{
         api::tools_from_plugin_instance,
         capability::PluginCapability,
         host::{PluginHostConfig, WasmPluginHost},
     };
     use archon_tools::tool::Tool;
+    use std::sync::{Arc, Mutex};
 
     let mut host = WasmPluginHost::new(PluginHostConfig::default()).unwrap();
     let tmp = std::env::temp_dir()

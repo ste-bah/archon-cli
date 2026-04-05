@@ -105,7 +105,9 @@ pub fn parse_level(s: &str) -> Result<EffortLevel, String> {
         "high" => Ok(EffortLevel::High),
         "medium" | "med" => Ok(EffortLevel::Medium),
         "low" => Ok(EffortLevel::Low),
-        _ => Err(format!("invalid effort level: '{s}' (expected high, medium, or low)")),
+        _ => Err(format!(
+            "invalid effort level: '{s}' (expected high, medium, or low)"
+        )),
     }
 }
 

@@ -2,7 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
-use crate::auth::{parse_credentials_json, AuthError, OAuthCredentials};
+use crate::auth::{AuthError, OAuthCredentials, parse_credentials_json};
 use crate::types::Secret;
 
 // ---------------------------------------------------------------------------
@@ -73,8 +73,8 @@ fn parse_refresh_response(body: &str) -> Result<OAuthCredentials, AuthError> {
     let resp: TokenResponse = serde_json::from_str(body)
         .map_err(|e| AuthError::ParseError(format!("invalid token response: {e}")))?;
 
-    let expires_at = chrono::Utc::now()
-        + chrono::Duration::seconds(resp.expires_in.unwrap_or(3600) as i64);
+    let expires_at =
+        chrono::Utc::now() + chrono::Duration::seconds(resp.expires_in.unwrap_or(3600) as i64);
 
     let scopes: Vec<String> = resp
         .scope
@@ -108,9 +108,7 @@ pub fn credentials_path() -> PathBuf {
 /// Uses `fd-lock` for cross-process locking. Retries up to MAX_RETRIES
 /// times with random delay if the lock is held.
 pub fn read_credentials_locked(path: &Path) -> Result<(OAuthCredentials, SystemTime), AuthError> {
-    let file = fs::OpenOptions::new()
-        .read(true)
-        .open(path)?;
+    let file = fs::OpenOptions::new().read(true).open(path)?;
 
     let lock = fd_lock::RwLock::new(file);
     let guard = lock
@@ -120,7 +118,8 @@ pub fn read_credentials_locked(path: &Path) -> Result<(OAuthCredentials, SystemT
     let content = {
         use std::io::Read;
         let mut buf = String::new();
-        (&*guard).read_to_string(&mut buf)
+        (&*guard)
+            .read_to_string(&mut buf)
             .map_err(|e| AuthError::IoError(e))?;
         buf
     };
@@ -136,10 +135,7 @@ pub fn read_credentials_locked(path: &Path) -> Result<(OAuthCredentials, SystemT
 /// Write credentials to the file atomically (write to .tmp, then rename).
 ///
 /// Sets file permissions to 0600.
-pub fn write_credentials_atomic(
-    path: &Path,
-    creds: &OAuthCredentials,
-) -> Result<(), AuthError> {
+pub fn write_credentials_atomic(path: &Path, creds: &OAuthCredentials) -> Result<(), AuthError> {
     let tmp_path = path.with_extension("json.tmp");
 
     // Build the credential JSON in Claude Code's format
@@ -194,10 +190,7 @@ pub async fn refresh_if_needed(
 
     // Retry loop for acquiring write lock
     for attempt in 0..MAX_RETRIES {
-        let file = fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(path)?;
+        let file = fs::OpenOptions::new().read(true).write(true).open(path)?;
 
         let mut lock = fd_lock::RwLock::new(file);
 

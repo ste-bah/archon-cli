@@ -9,7 +9,7 @@ use std::path::PathBuf;
 
 use archon_plugin::{
     capability::PluginCapability,
-    loader::{instantiate_wasm_plugins, PluginLoader},
+    loader::{PluginLoader, instantiate_wasm_plugins},
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -25,12 +25,7 @@ fn unique_tmp(prefix: &str) -> PathBuf {
 }
 
 /// Write a minimal valid plugin into `dir/<name>/`.
-fn write_plugin(
-    plugins_dir: &std::path::Path,
-    name: &str,
-    version: &str,
-    capabilities: &[&str],
-) {
+fn write_plugin(plugins_dir: &std::path::Path, name: &str, version: &str, capabilities: &[&str]) {
     let plugin_dir = plugins_dir.join(name);
     let manifest_dir = plugin_dir.join(".claude-plugin");
     std::fs::create_dir_all(&manifest_dir).unwrap();
@@ -53,11 +48,7 @@ fn write_plugin(
 }
 
 /// Write a minimal plugin that depends on another plugin.
-fn write_plugin_with_deps(
-    plugins_dir: &std::path::Path,
-    name: &str,
-    deps: &[&str],
-) {
+fn write_plugin_with_deps(plugins_dir: &std::path::Path, name: &str, deps: &[&str]) {
     let plugin_dir = plugins_dir.join(name);
     let manifest_dir = plugin_dir.join(".claude-plugin");
     std::fs::create_dir_all(&manifest_dir).unwrap();
@@ -109,8 +100,7 @@ fn loader_discovers_plugin_with_manifest() {
     std::fs::create_dir_all(&dir).unwrap();
     write_plugin(&dir, "test-plugin", "1.0.0", &[]);
 
-    let loader = PluginLoader::new(dir.clone())
-        .with_granted_capabilities(vec![]);
+    let loader = PluginLoader::new(dir.clone()).with_granted_capabilities(vec![]);
     let result = loader.load_all();
     assert_eq!(result.enabled.len(), 1, "expected 1 enabled plugin");
     assert_eq!(result.enabled[0].manifest.name, "test-plugin");
@@ -127,7 +117,10 @@ fn loader_skips_dir_without_manifest() {
     let result = loader.load_all();
     // Ghost plugin has no manifest — should be skipped silently
     assert!(result.enabled.is_empty());
-    assert!(result.errors.is_empty(), "missing manifest should be silent skip");
+    assert!(
+        result.errors.is_empty(),
+        "missing manifest should be silent skip"
+    );
 }
 
 #[test]
@@ -176,7 +169,11 @@ fn loader_handles_manifest_name_with_spaces() {
 
     let loader = PluginLoader::new(dir);
     let result = loader.load_all();
-    assert_eq!(result.errors.len(), 1, "name with spaces should produce an error");
+    assert_eq!(
+        result.errors.len(),
+        1,
+        "name with spaces should produce an error"
+    );
 }
 
 // ── Capability grant checking ─────────────────────────────────────────────────
@@ -187,7 +184,8 @@ fn loader_loads_plugin_with_granted_capabilities() {
     std::fs::create_dir_all(&dir).unwrap();
     write_plugin(&dir, "net-plugin", "1.0.0", &["Network"]);
 
-    let loader = PluginLoader::new(dir).with_granted_capabilities(vec![PluginCapability::Network(vec![])]);
+    let loader =
+        PluginLoader::new(dir).with_granted_capabilities(vec![PluginCapability::Network(vec![])]);
     let result = loader.load_all();
     assert_eq!(result.enabled.len(), 1);
     assert!(result.errors.is_empty());
@@ -203,7 +201,11 @@ fn loader_records_error_for_ungranted_capabilities() {
     let loader = PluginLoader::new(dir).with_granted_capabilities(vec![]);
     let result = loader.load_all();
     assert!(result.enabled.is_empty());
-    assert_eq!(result.errors.len(), 1, "ungranted capability should produce error");
+    assert_eq!(
+        result.errors.len(),
+        1,
+        "ungranted capability should produce error"
+    );
 }
 
 #[test]
@@ -290,7 +292,11 @@ fn loader_records_dependency_unsatisfied_error() {
     let loader = PluginLoader::new(dir);
     let result = loader.load_all();
     assert!(result.enabled.is_empty());
-    assert_eq!(result.errors.len(), 1, "unsatisfied dependency should produce error");
+    assert_eq!(
+        result.errors.len(),
+        1,
+        "unsatisfied dependency should produce error"
+    );
 }
 
 // ── Data directory creation ───────────────────────────────────────────────────
@@ -305,7 +311,10 @@ fn loader_creates_data_dir_per_plugin() {
     let result = loader.load_all();
     assert_eq!(result.enabled.len(), 1);
     let data_dir = &result.enabled[0].data_dir;
-    assert!(data_dir.exists(), "data_dir should be created: {data_dir:?}");
+    assert!(
+        data_dir.exists(),
+        "data_dir should be created: {data_dir:?}"
+    );
 }
 
 // ── Seed directory support ────────────────────────────────────────────────────
@@ -339,8 +348,15 @@ fn loader_main_dir_takes_precedence_over_seed() {
 
     let loader = PluginLoader::new(main_dir).with_seed_dirs(vec![seed_dir]);
     let result = loader.load_all();
-    assert_eq!(result.enabled.len(), 1, "only one instance of shared-plugin");
-    assert_eq!(result.enabled[0].manifest.version, "2.0.0", "main dir version wins");
+    assert_eq!(
+        result.enabled.len(),
+        1,
+        "only one instance of shared-plugin"
+    );
+    assert_eq!(
+        result.enabled[0].manifest.version, "2.0.0",
+        "main dir version wins"
+    );
 }
 
 // ── Fail-open loading ─────────────────────────────────────────────────────────
@@ -480,5 +496,8 @@ fn instantiate_wasm_plugins_fail_open_on_invalid_wasm() {
 
     // Must not panic — fail-open means we get an empty map.
     let instances = instantiate_wasm_plugins(&result);
-    assert!(instances.is_empty(), "invalid WASM → no instance, fail-open");
+    assert!(
+        instances.is_empty(),
+        "invalid WASM → no instance, fail-open"
+    );
 }

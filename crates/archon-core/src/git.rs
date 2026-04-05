@@ -50,7 +50,11 @@ fn detect_branch(dir: &Path) -> Option<String> {
             .current_dir(dir)
             .output()
             .ok()?;
-        Some(String::from_utf8_lossy(&hash_output.stdout).trim().to_string())
+        Some(
+            String::from_utf8_lossy(&hash_output.stdout)
+                .trim()
+                .to_string(),
+        )
     } else {
         Some(branch)
     }
@@ -97,7 +101,10 @@ fn detect_dirty(dir: &Path) -> bool {
 /// Format git info for system prompt injection.
 pub fn format_git_context(info: &GitInfo) -> String {
     let dirty = if info.is_dirty { " (dirty)" } else { "" };
-    format!("- Git: repo={}, branch={}{dirty}", info.repo_name, info.branch)
+    format!(
+        "- Git: repo={}, branch={}{dirty}",
+        info.repo_name, info.branch
+    )
 }
 
 #[cfg(test)]

@@ -25,12 +25,8 @@ pub fn spawn_transport(config: &ServerConfig) -> Result<TokioChildProcess, McpEr
         }
     });
 
-    TokioChildProcess::new(cmd).map_err(|e| {
-        McpError::Transport(format!(
-            "failed to spawn '{}': {}",
-            config.command, e
-        ))
-    })
+    TokioChildProcess::new(cmd)
+        .map_err(|e| McpError::Transport(format!("failed to spawn '{}': {}", config.command, e)))
 }
 
 #[cfg(test)]

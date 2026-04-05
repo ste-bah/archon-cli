@@ -16,7 +16,7 @@ use futures_util::{SinkExt, StreamExt};
 use tokio_tungstenite::tungstenite::handshake::client::Request;
 
 use crate::types::McpError;
-use crate::ws_config::{WsConfig, WsReconnectConfig, PERMANENT_CLOSE_CODES};
+use crate::ws_config::{PERMANENT_CLOSE_CODES, WsConfig, WsReconnectConfig};
 
 // ---------------------------------------------------------------------------
 // Public helpers (tested directly)
@@ -80,7 +80,11 @@ impl WebSocketTransport {
             }
         }
 
-        Ok(Self { config, reconnect, url })
+        Ok(Self {
+            config,
+            reconnect,
+            url,
+        })
     }
 
     /// Attempt to connect to the WebSocket server.
@@ -90,9 +94,11 @@ impl WebSocketTransport {
     pub async fn connect(&self) -> Result<ActiveWsConnection, McpError> {
         let request = self.build_request()?;
 
-        let (stream, _response) = tokio_tungstenite::connect_async(request).await.map_err(|e| {
-            McpError::Transport(format!("WebSocket connect to '{}' failed: {}", self.url, e))
-        })?;
+        let (stream, _response) = tokio_tungstenite::connect_async(request)
+            .await
+            .map_err(|e| {
+                McpError::Transport(format!("WebSocket connect to '{}' failed: {}", self.url, e))
+            })?;
 
         Ok(ActiveWsConnection {
             stream,
@@ -127,9 +133,9 @@ impl WebSocketTransport {
             builder = builder.header(k.as_str(), v.as_str());
         }
 
-        builder.body(()).map_err(|e| {
-            McpError::Transport(format!("failed to build WebSocket request: {e}"))
-        })
+        builder
+            .body(())
+            .map_err(|e| McpError::Transport(format!("failed to build WebSocket request: {e}")))
     }
 }
 
@@ -142,7 +148,7 @@ impl WebSocketTransport {
 /// Wraps the raw `tokio-tungstenite` stream and exposes MCP-level operations.
 pub struct ActiveWsConnection {
     stream: tokio_tungstenite::WebSocketStream<
-        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>
+        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
     >,
     pub ping_interval_ms: u64,
     pub keepalive_interval_ms: u64,
@@ -154,25 +160,28 @@ impl ActiveWsConnection {
         use tokio_tungstenite::tungstenite::Message;
 
         let text = serde_json::to_string(msg).map_err(McpError::Json)?;
-        self.stream.send(Message::Text(text.into())).await.map_err(|e| {
-            McpError::Transport(format!("WebSocket send failed: {e}"))
-        })
+        self.stream
+            .send(Message::Text(text.into()))
+            .await
+            .map_err(|e| McpError::Transport(format!("WebSocket send failed: {e}")))
     }
 
     /// Send a WebSocket ping frame.
     pub async fn ping(&mut self) -> Result<(), McpError> {
         use tokio_tungstenite::tungstenite::Message;
 
-        self.stream.send(Message::Ping(vec![].into())).await.map_err(|e| {
-            McpError::Transport(format!("WebSocket ping failed: {e}"))
-        })
+        self.stream
+            .send(Message::Ping(vec![].into()))
+            .await
+            .map_err(|e| McpError::Transport(format!("WebSocket ping failed: {e}")))
     }
 
     /// Send the JSON data keep-alive frame `{"type":"keep_alive"}`.
     ///
     /// Resets proxy idle timers (e.g. Cloudflare 5-minute timeout).
     pub async fn send_keepalive(&mut self) -> Result<(), McpError> {
-        self.send_json(&serde_json::json!({"type": "keep_alive"})).await
+        self.send_json(&serde_json::json!({"type": "keep_alive"}))
+            .await
     }
 
     /// Receive the next message, parsing newline-delimited JSON if needed.
@@ -198,14 +207,18 @@ impl ActiveWsConnection {
                 let text = String::from_utf8_lossy(&data);
                 match serde_json::from_str::<serde_json::Value>(&text) {
                     Ok(v) => Ok(Some(vec![v])),
-                    Err(e) => Err(McpError::Transport(format!("invalid binary JSON frame: {e}"))),
+                    Err(e) => Err(McpError::Transport(format!(
+                        "invalid binary JSON frame: {e}"
+                    ))),
                 }
             }
-            Some(Ok(Message::Ping(_))) => Ok(Some(vec![])),  // pong sent automatically
-            Some(Ok(Message::Pong(_))) => Ok(Some(vec![])),  // keep-alive acknowledged
+            Some(Ok(Message::Ping(_))) => Ok(Some(vec![])), // pong sent automatically
+            Some(Ok(Message::Pong(_))) => Ok(Some(vec![])), // keep-alive acknowledged
             Some(Ok(Message::Close(frame))) => {
                 let code = frame.as_ref().map(|f| f.code.into()).unwrap_or(0u16);
-                Err(McpError::Transport(format!("WebSocket closed by server (code {code})")))
+                Err(McpError::Transport(format!(
+                    "WebSocket closed by server (code {code})"
+                )))
             }
             Some(Ok(Message::Frame(_))) => Ok(Some(vec![])), // raw frame, ignore
         }
@@ -214,16 +227,17 @@ impl ActiveWsConnection {
     /// Send graceful close frame.
     pub async fn close(&mut self) -> Result<(), McpError> {
         use tokio_tungstenite::tungstenite::Message;
-        use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
         use tokio_tungstenite::tungstenite::protocol::CloseFrame;
+        use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 
         let frame = CloseFrame {
             code: CloseCode::Normal,
             reason: "client shutdown".into(),
         };
-        self.stream.send(Message::Close(Some(frame))).await.map_err(|e| {
-            McpError::Transport(format!("WebSocket close failed: {e}"))
-        })
+        self.stream
+            .send(Message::Close(Some(frame)))
+            .await
+            .map_err(|e| McpError::Transport(format!("WebSocket close failed: {e}")))
     }
 }
 

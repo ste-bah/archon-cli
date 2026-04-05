@@ -93,8 +93,7 @@ pub async fn run_print_mode(
                 output_tokens,
             } = &event
             {
-                turn_count_for_events
-                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                turn_count_for_events.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 total_input_for_events
                     .fetch_add(*input_tokens, std::sync::atomic::Ordering::Relaxed);
                 total_output_for_events
@@ -102,30 +101,23 @@ pub async fn run_print_mode(
 
                 // Check turn limit
                 if let Some(max) = max_turns {
-                    let current = turn_count_for_events
-                        .load(std::sync::atomic::Ordering::Relaxed);
+                    let current = turn_count_for_events.load(std::sync::atomic::Ordering::Relaxed);
                     if current >= max {
-                        limit_exit_for_events.store(
-                            EXIT_MAX_TURNS,
-                            std::sync::atomic::Ordering::Relaxed,
-                        );
+                        limit_exit_for_events
+                            .store(EXIT_MAX_TURNS, std::sync::atomic::Ordering::Relaxed);
                     }
                 }
 
                 // Check budget limit
                 if let Some(budget) = max_budget {
-                    let inp = total_input_for_events
-                        .load(std::sync::atomic::Ordering::Relaxed)
-                        as f64;
-                    let out = total_output_for_events
-                        .load(std::sync::atomic::Ordering::Relaxed)
-                        as f64;
+                    let inp =
+                        total_input_for_events.load(std::sync::atomic::Ordering::Relaxed) as f64;
+                    let out =
+                        total_output_for_events.load(std::sync::atomic::Ordering::Relaxed) as f64;
                     let cost = (inp * 3.0 + out * 15.0) / 1_000_000.0;
                     if cost >= budget {
-                        limit_exit_for_events.store(
-                            EXIT_BUDGET_EXCEEDED,
-                            std::sync::atomic::Ordering::Relaxed,
-                        );
+                        limit_exit_for_events
+                            .store(EXIT_BUDGET_EXCEEDED, std::sync::atomic::Ordering::Relaxed);
                     }
                 }
             }
@@ -190,10 +182,8 @@ pub async fn run_print_mode(
         if output_format == OutputFormat::Json {
             let text = accumulated_text.lock().await;
             let usage = archon_llm::types::Usage {
-                input_tokens: total_input_tokens
-                    .load(std::sync::atomic::Ordering::Relaxed),
-                output_tokens: total_output_tokens
-                    .load(std::sync::atomic::Ordering::Relaxed),
+                input_tokens: total_input_tokens.load(std::sync::atomic::Ordering::Relaxed),
+                output_tokens: total_output_tokens.load(std::sync::atomic::Ordering::Relaxed),
                 ..Default::default()
             };
             let inp = usage.input_tokens as f64;
@@ -211,8 +201,7 @@ pub async fn run_print_mode(
         let text = accumulated_text.lock().await;
         let usage = archon_llm::types::Usage {
             input_tokens: total_input_tokens.load(std::sync::atomic::Ordering::Relaxed),
-            output_tokens: total_output_tokens
-                .load(std::sync::atomic::Ordering::Relaxed),
+            output_tokens: total_output_tokens.load(std::sync::atomic::Ordering::Relaxed),
             ..Default::default()
         };
         let inp = usage.input_tokens as f64;

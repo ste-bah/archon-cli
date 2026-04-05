@@ -25,7 +25,11 @@ macro_rules! define_skill {
 }
 
 define_skill!(HelpSkill, "help", "Show all commands");
-define_skill!(CompactSkill, "compact", "Compact context (micro | snip N-M | auto)");
+define_skill!(
+    CompactSkill,
+    "compact",
+    "Compact context (micro | snip N-M | auto)"
+);
 /// Show or update the current plan using `plan_v2` data model.
 pub struct PlanSkill;
 
@@ -48,7 +52,11 @@ impl Skill for PlanSkill {
     }
 }
 define_skill!(FastSkill, "fast", "Toggle fast mode");
-define_skill!(EffortSkill, "effort", "Set effort level (high, medium, low)");
+define_skill!(
+    EffortSkill,
+    "effort",
+    "Set effort level (high, medium, low)"
+);
 define_skill!(CostSkill, "cost", "Show session cost");
 define_skill!(StatusSkill, "status", "Show session status");
 define_skill!(DoctorSkill, "doctor", "Run diagnostics");
@@ -233,8 +241,8 @@ impl Skill for PrSkill {
 
         // If no args, show PR info (branch + diff stats)
         if args.is_empty() {
-            let branch = archon_tools::git::current_branch(&repo)
-                .unwrap_or_else(|_| "unknown".into());
+            let branch =
+                archon_tools::git::current_branch(&repo).unwrap_or_else(|_| "unknown".into());
             let stats = archon_tools::git::diff::git_diff_stats(&repo);
 
             let mut out = format!("PR preparation for branch: {branch}\n");

@@ -1,5 +1,5 @@
 use archon_context::boundary::{CompactBoundary, CompactionStrategy};
-use archon_context::compact::{select_strategy, CompactionStats};
+use archon_context::compact::{CompactionStats, select_strategy};
 use archon_context::messages::ContextMessage;
 use archon_context::microcompact::microcompact_messages;
 use archon_context::snip::{count_turns, snip_messages};
@@ -147,21 +147,29 @@ fn snip_removes_exact_range() {
     assert_eq!(boundary.strategy, CompactionStrategy::Snip);
 
     // Turn 1 present
-    assert!(result
-        .iter()
-        .any(|m| m.content.as_str().map_or(false, |s| s.contains("turn 1 user"))));
+    assert!(result.iter().any(|m| {
+        m.content
+            .as_str()
+            .map_or(false, |s| s.contains("turn 1 user"))
+    }));
     // Turn 4 present
-    assert!(result
-        .iter()
-        .any(|m| m.content.as_str().map_or(false, |s| s.contains("turn 4 user"))));
+    assert!(result.iter().any(|m| {
+        m.content
+            .as_str()
+            .map_or(false, |s| s.contains("turn 4 user"))
+    }));
     // Turn 2 absent
-    assert!(!result
-        .iter()
-        .any(|m| m.content.as_str().map_or(false, |s| s.contains("turn 2 user"))));
+    assert!(!result.iter().any(|m| {
+        m.content
+            .as_str()
+            .map_or(false, |s| s.contains("turn 2 user"))
+    }));
     // Turn 3 absent
-    assert!(!result
-        .iter()
-        .any(|m| m.content.as_str().map_or(false, |s| s.contains("turn 3 user"))));
+    assert!(!result.iter().any(|m| {
+        m.content
+            .as_str()
+            .map_or(false, |s| s.contains("turn 3 user"))
+    }));
 }
 
 #[test]
@@ -179,10 +187,7 @@ fn snip_invalid_range_errors() {
 
 #[test]
 fn snip_out_of_bounds_errors() {
-    let messages = vec![
-        ContextMessage::user("u1"),
-        ContextMessage::assistant("a1"),
-    ];
+    let messages = vec![ContextMessage::user("u1"), ContextMessage::assistant("a1")];
 
     let result = snip_messages(&messages, 1, 5);
     assert!(result.is_err(), "range exceeding turn count should error");
@@ -202,16 +207,22 @@ fn snip_preserves_surrounding() {
     let (result, _) = snip_messages(&messages, 2, 2).unwrap();
 
     // Before and after should be present
-    assert!(result
-        .iter()
-        .any(|m| m.content.as_str().map_or(false, |s| s.contains("before user"))));
-    assert!(result
-        .iter()
-        .any(|m| m.content.as_str().map_or(false, |s| s.contains("after user"))));
+    assert!(result.iter().any(|m| {
+        m.content
+            .as_str()
+            .map_or(false, |s| s.contains("before user"))
+    }));
+    assert!(result.iter().any(|m| {
+        m.content
+            .as_str()
+            .map_or(false, |s| s.contains("after user"))
+    }));
     // Middle removed
-    assert!(!result
-        .iter()
-        .any(|m| m.content.as_str().map_or(false, |s| s.contains("middle user"))));
+    assert!(!result.iter().any(|m| {
+        m.content
+            .as_str()
+            .map_or(false, |s| s.contains("middle user"))
+    }));
 }
 
 #[test]
@@ -238,16 +249,22 @@ fn snip_removes_complete_turns() {
     let (result, _) = snip_messages(&messages, 2, 3).unwrap();
 
     // Turn 1 and turn 4 remain
-    assert!(result
-        .iter()
-        .any(|m| m.content.as_str().map_or(false, |s| s.contains("turn 1 user"))));
-    assert!(result
-        .iter()
-        .any(|m| m.content.as_str().map_or(false, |s| s.contains("turn 3 assistant"))));
+    assert!(result.iter().any(|m| {
+        m.content
+            .as_str()
+            .map_or(false, |s| s.contains("turn 1 user"))
+    }));
+    assert!(result.iter().any(|m| {
+        m.content
+            .as_str()
+            .map_or(false, |s| s.contains("turn 3 assistant"))
+    }));
     // Turn 2 removed entirely (including tool chain)
-    assert!(!result
-        .iter()
-        .any(|m| m.content.as_str().map_or(false, |s| s.contains("turn 2"))));
+    assert!(
+        !result
+            .iter()
+            .any(|m| m.content.as_str().map_or(false, |s| s.contains("turn 2")))
+    );
 }
 
 #[test]

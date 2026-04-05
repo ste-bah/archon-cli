@@ -1,8 +1,7 @@
 /// TASK-CLI-414: Web UI Mode tests.
 ///
 /// Run with:  cargo test -p archon-sdk -- web --test-threads=1
-
-use archon_sdk::web::{WebServer, WebConfig};
+use archon_sdk::web::{WebConfig, WebServer};
 
 // ---------------------------------------------------------------------------
 // WebConfig defaults

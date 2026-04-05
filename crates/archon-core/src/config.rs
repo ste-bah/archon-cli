@@ -659,7 +659,12 @@ pub fn validate(config: &ArchonConfig) -> Result<(), ConfigError> {
     }
 
     // permissions.mode — accepts all 6 canonical modes + legacy aliases
-    if config.permissions.mode.parse::<archon_permissions::mode::PermissionMode>().is_err() {
+    if config
+        .permissions
+        .mode
+        .parse::<archon_permissions::mode::PermissionMode>()
+        .is_err()
+    {
         return Err(ConfigError::ValidationError(format!(
             "permissions.mode must be a valid mode (default, acceptEdits, plan, auto, \
              dontAsk, bypassPermissions) or legacy alias (ask, yolo), got \"{}\"",

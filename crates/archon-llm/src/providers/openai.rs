@@ -27,8 +27,7 @@ impl OpenAiProvider {
     /// `api_key` is the fallback if `OPENAI_API_KEY` env var is not set.
     pub fn new(api_key: String, base_url: Option<String>, _default_model: String) -> Self {
         let resolved_key = Self::resolve_api_key(&api_key);
-        let resolved_url = base_url
-            .unwrap_or_else(|| "https://api.openai.com/v1".to_string());
+        let resolved_url = base_url.unwrap_or_else(|| "https://api.openai.com/v1".to_string());
         Self {
             api_key: resolved_key,
             base_url: resolved_url,
@@ -54,7 +53,10 @@ impl OpenAiProvider {
         let system_text: String = system
             .iter()
             .filter_map(|block| {
-                block.get("text").and_then(|t| t.as_str()).map(|s| s.to_string())
+                block
+                    .get("text")
+                    .and_then(|t| t.as_str())
+                    .map(|s| s.to_string())
             })
             .collect::<Vec<_>>()
             .join("\n");
@@ -75,21 +77,14 @@ impl OpenAiProvider {
                 // Check for tool_result blocks — these need to become separate tool-role messages.
                 let tool_results: Vec<&serde_json::Value> = content_arr
                     .iter()
-                    .filter(|b| {
-                        b.get("type").and_then(|t| t.as_str()) == Some("tool_result")
-                    })
+                    .filter(|b| b.get("type").and_then(|t| t.as_str()) == Some("tool_result"))
                     .collect();
 
                 if !tool_results.is_empty() {
                     for tr in tool_results {
-                        let tool_call_id = tr
-                            .get("tool_use_id")
-                            .and_then(|t| t.as_str())
-                            .unwrap_or("");
-                        let content_str = tr
-                            .get("content")
-                            .and_then(|c| c.as_str())
-                            .unwrap_or("");
+                        let tool_call_id =
+                            tr.get("tool_use_id").and_then(|t| t.as_str()).unwrap_or("");
+                        let content_str = tr.get("content").and_then(|c| c.as_str()).unwrap_or("");
                         result.push(serde_json::json!({
                             "role": "tool",
                             "tool_call_id": tool_call_id,
@@ -180,7 +175,10 @@ impl OpenAiProvider {
 
         let status = resp.status().as_u16();
         if status >= 400 {
-            let msg = resp.text().await.unwrap_or_else(|_| String::from("unknown"));
+            let msg = resp
+                .text()
+                .await
+                .unwrap_or_else(|_| String::from("unknown"));
             return Err(map_http_error(status, msg));
         }
 
@@ -381,9 +379,14 @@ pub(crate) fn parse_openai_sse_chunk(chunk: &str) -> Vec<StreamEvent> {
 fn map_http_error(status: u16, body: String) -> LlmError {
     match status {
         401 => LlmError::Auth(body),
-        429 => LlmError::RateLimited { retry_after_secs: 60 },
+        429 => LlmError::RateLimited {
+            retry_after_secs: 60,
+        },
         500 | 503 => LlmError::Overloaded,
-        _ => LlmError::Server { status, message: body },
+        _ => LlmError::Server {
+            status,
+            message: body,
+        },
     }
 }
 

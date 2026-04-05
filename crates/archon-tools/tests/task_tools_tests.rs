@@ -9,7 +9,7 @@ use archon_tools::task_stop::TaskStopTool;
 use archon_tools::task_update::TaskUpdateTool;
 use archon_tools::tool::{AgentMode, PermissionLevel, Tool, ToolContext};
 
-use archon_tools::task_manager::{TaskManager, TaskStatus, TASK_MANAGER};
+use archon_tools::task_manager::{TASK_MANAGER, TaskManager, TaskStatus};
 
 fn make_ctx() -> ToolContext {
     ToolContext {
@@ -52,7 +52,8 @@ fn task_get_returns_info() {
 fn task_update_description() {
     let mgr = TaskManager::new();
     let id = mgr.create_task("old description");
-    mgr.update_task(&id, Some("new description")).expect("update should work");
+    mgr.update_task(&id, Some("new description"))
+        .expect("update should work");
     let info = mgr.get_task(&id).expect("task should exist");
     assert_eq!(info.description, "new description");
 }
@@ -277,9 +278,8 @@ async fn task_create_subagent_request_roundtrip() {
     assert!(!result.is_error);
 
     let parsed: serde_json::Value = serde_json::from_str(&result.content).unwrap();
-    let req: SubagentRequest = serde_json::from_value(
-        parsed["subagent_request"].clone()
-    ).expect("subagent_request should deserialize to SubagentRequest");
+    let req: SubagentRequest = serde_json::from_value(parsed["subagent_request"].clone())
+        .expect("subagent_request should deserialize to SubagentRequest");
 
     assert_eq!(req.prompt, "Do something useful");
     assert_eq!(req.model.as_deref(), Some("claude-sonnet-4-6"));
@@ -293,21 +293,31 @@ async fn task_create_invalid_max_turns_errors() {
     let tool = TaskCreateTool;
 
     // max_turns: 0
-    let result = tool.execute(serde_json::json!({
-        "subject": "bad turns",
-        "description": "test",
-        "prompt": "do stuff",
-        "max_turns": 0
-    }), &make_ctx()).await;
+    let result = tool
+        .execute(
+            serde_json::json!({
+                "subject": "bad turns",
+                "description": "test",
+                "prompt": "do stuff",
+                "max_turns": 0
+            }),
+            &make_ctx(),
+        )
+        .await;
     assert!(result.is_error, "max_turns=0 should error");
 
     // max_turns: 101
-    let result = tool.execute(serde_json::json!({
-        "subject": "bad turns",
-        "description": "test",
-        "prompt": "do stuff",
-        "max_turns": 101
-    }), &make_ctx()).await;
+    let result = tool
+        .execute(
+            serde_json::json!({
+                "subject": "bad turns",
+                "description": "test",
+                "prompt": "do stuff",
+                "max_turns": 101
+            }),
+            &make_ctx(),
+        )
+        .await;
     assert!(result.is_error, "max_turns=101 should error");
 }
 
@@ -349,7 +359,11 @@ async fn task_get_tool_returns_info_json() {
     let get_result = tool_get
         .execute(serde_json::json!({ "task_id": task_id }), &ctx)
         .await;
-    assert!(!get_result.is_error, "unexpected error: {}", get_result.content);
+    assert!(
+        !get_result.is_error,
+        "unexpected error: {}",
+        get_result.content
+    );
 
     let info: serde_json::Value = serde_json::from_str(&get_result.content).unwrap();
     assert_eq!(info["id"].as_str().unwrap(), task_id);
@@ -392,7 +406,11 @@ async fn task_update_tool_works() {
             &ctx,
         )
         .await;
-    assert!(!update_result.is_error, "unexpected error: {}", update_result.content);
+    assert!(
+        !update_result.is_error,
+        "unexpected error: {}",
+        update_result.content
+    );
 }
 
 #[tokio::test]
@@ -417,7 +435,11 @@ async fn task_stop_tool_works() {
     let stop_result = TaskStopTool
         .execute(serde_json::json!({ "task_id": task_id }), &ctx)
         .await;
-    assert!(!stop_result.is_error, "unexpected error: {}", stop_result.content);
+    assert!(
+        !stop_result.is_error,
+        "unexpected error: {}",
+        stop_result.content
+    );
     assert!(TASK_MANAGER.is_cancelled(&task_id));
 }
 
@@ -442,6 +464,10 @@ async fn task_output_tool_works() {
     let output_result = TaskOutputTool
         .execute(serde_json::json!({ "task_id": task_id }), &ctx)
         .await;
-    assert!(!output_result.is_error, "unexpected error: {}", output_result.content);
+    assert!(
+        !output_result.is_error,
+        "unexpected error: {}",
+        output_result.content
+    );
     assert!(output_result.content.contains("hello output"));
 }

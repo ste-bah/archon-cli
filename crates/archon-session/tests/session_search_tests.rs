@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use archon_session::metadata::{add_tag, get_tags, remove_tag};
 use archon_session::search::{
-    search_sessions, session_stats, SessionSearchQuery, SortField, SortOrder,
+    SessionSearchQuery, SortField, SortOrder, search_sessions, session_stats,
 };
 use archon_session::storage::SessionStore;
 
@@ -187,9 +187,7 @@ fn search_sort_by_tokens() {
     let s1 = store
         .register_session("low-tok", "/tmp", Some("main"), "m1")
         .expect("create");
-    store
-        .update_usage(&s1.id, 100, 0.01)
-        .expect("update usage");
+    store.update_usage(&s1.id, 100, 0.01).expect("update usage");
 
     let s2 = store
         .register_session("high-tok", "/tmp", Some("main"), "m1")

@@ -1,6 +1,6 @@
 use archon_core::config::{SshConfig, SshRemoteConfig};
 use archon_core::headless::HeadlessRuntime;
-use archon_core::remote::{protocol::AgentMessage, SyncMode};
+use archon_core::remote::{SyncMode, protocol::AgentMessage};
 
 // ---------------------------------------------------------------------------
 // Protocol: JSON-line roundtrip
@@ -8,7 +8,9 @@ use archon_core::remote::{protocol::AgentMessage, SyncMode};
 
 #[test]
 fn agent_message_user_message_roundtrip() {
-    let msg = AgentMessage::UserMessage { content: "hello world".to_string() };
+    let msg = AgentMessage::UserMessage {
+        content: "hello world".to_string(),
+    };
     let line = msg.to_json_line().expect("serialize");
     assert!(line.ends_with('\n'), "JSON line must end with newline");
     let parsed = AgentMessage::from_json_line(&line).expect("deserialize");
@@ -20,7 +22,9 @@ fn agent_message_user_message_roundtrip() {
 
 #[test]
 fn agent_message_assistant_message_roundtrip() {
-    let msg = AgentMessage::AssistantMessage { content: "I can help.".to_string() };
+    let msg = AgentMessage::AssistantMessage {
+        content: "I can help.".to_string(),
+    };
     let line = msg.to_json_line().expect("serialize");
     let parsed = AgentMessage::from_json_line(&line).expect("deserialize");
     match parsed {
@@ -74,7 +78,11 @@ fn agent_message_tool_result_roundtrip() {
     let line = msg.to_json_line().expect("serialize");
     let parsed = AgentMessage::from_json_line(&line).expect("deserialize");
     match parsed {
-        AgentMessage::ToolResult { tool_use_id, content, is_error } => {
+        AgentMessage::ToolResult {
+            tool_use_id,
+            content,
+            is_error,
+        } => {
             assert_eq!(tool_use_id, "call_abc123");
             assert_eq!(content, "file1.txt\nfile2.txt");
             assert!(!is_error);
@@ -117,7 +125,9 @@ fn agent_message_event_roundtrip() {
 
 #[test]
 fn agent_message_error_roundtrip() {
-    let msg = AgentMessage::Error { message: "connection refused".to_string() };
+    let msg = AgentMessage::Error {
+        message: "connection refused".to_string(),
+    };
     let line = msg.to_json_line().expect("serialize");
     let parsed = AgentMessage::from_json_line(&line).expect("deserialize");
     match parsed {
@@ -131,12 +141,29 @@ fn agent_message_all_variants_serialize_without_panic() {
     let variants: Vec<AgentMessage> = vec![
         AgentMessage::Ping,
         AgentMessage::Pong,
-        AgentMessage::UserMessage { content: "test".to_string() },
-        AgentMessage::AssistantMessage { content: "response".to_string() },
-        AgentMessage::ToolCall { id: "id1".to_string(), name: "tool".to_string(), input: serde_json::json!({}) },
-        AgentMessage::ToolResult { tool_use_id: "id1".to_string(), content: "result".to_string(), is_error: false },
-        AgentMessage::Event { kind: "tick".to_string(), data: serde_json::json!(null) },
-        AgentMessage::Error { message: "oops".to_string() },
+        AgentMessage::UserMessage {
+            content: "test".to_string(),
+        },
+        AgentMessage::AssistantMessage {
+            content: "response".to_string(),
+        },
+        AgentMessage::ToolCall {
+            id: "id1".to_string(),
+            name: "tool".to_string(),
+            input: serde_json::json!({}),
+        },
+        AgentMessage::ToolResult {
+            tool_use_id: "id1".to_string(),
+            content: "result".to_string(),
+            is_error: false,
+        },
+        AgentMessage::Event {
+            kind: "tick".to_string(),
+            data: serde_json::json!(null),
+        },
+        AgentMessage::Error {
+            message: "oops".to_string(),
+        },
     ];
     for variant in &variants {
         let line = variant.to_json_line().expect("all variants must serialize");
@@ -186,7 +213,10 @@ fn json_line_has_trailing_newline() {
 #[test]
 fn sync_mode_default_is_manual() {
     let mode: SyncMode = Default::default();
-    assert!(matches!(mode, SyncMode::Manual), "SyncMode default must be Manual");
+    assert!(
+        matches!(mode, SyncMode::Manual),
+        "SyncMode default must be Manual"
+    );
 }
 
 #[test]

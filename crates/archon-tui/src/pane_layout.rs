@@ -52,12 +52,8 @@ impl PaneLayout {
     /// Result is clamped to `[10, 90]`.
     pub fn resize(&self, delta: i16) -> Self {
         match self {
-            Self::HorizontalSplit(r) => {
-                Self::HorizontalSplit(clamp_ratio(*r as i16 + delta))
-            }
-            Self::VerticalSplit(r) => {
-                Self::VerticalSplit(clamp_ratio(*r as i16 + delta))
-            }
+            Self::HorizontalSplit(r) => Self::HorizontalSplit(clamp_ratio(*r as i16 + delta)),
+            Self::VerticalSplit(r) => Self::VerticalSplit(clamp_ratio(*r as i16 + delta)),
             other => other.clone(),
         }
     }
@@ -113,10 +109,12 @@ pub fn compute_pane_rects(layout: &PaneLayout, area: Rect) -> Vec<Rect> {
             let c = cols.max(&1);
             let row_pct = 100 / r;
             let col_pct = 100 / c;
-            let row_constraints: Vec<Constraint> =
-                (0..*rows).map(|_| Constraint::Percentage(row_pct)).collect();
-            let col_constraints: Vec<Constraint> =
-                (0..*cols).map(|_| Constraint::Percentage(col_pct)).collect();
+            let row_constraints: Vec<Constraint> = (0..*rows)
+                .map(|_| Constraint::Percentage(row_pct))
+                .collect();
+            let col_constraints: Vec<Constraint> = (0..*cols)
+                .map(|_| Constraint::Percentage(col_pct))
+                .collect();
 
             let row_rects = Layout::vertical(row_constraints).split(area);
             for row_rect in row_rects.iter() {

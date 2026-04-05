@@ -40,9 +40,7 @@ impl ConfigWatcher {
             tx,
             notify::Config::default().with_poll_interval(Duration::from_secs(2)),
         )
-        .map_err(|e| {
-            ConfigError::ValidationError(format!("failed to create file watcher: {e}"))
-        })?;
+        .map_err(|e| ConfigError::ValidationError(format!("failed to create file watcher: {e}")))?;
 
         for path in paths {
             if path.exists() {
@@ -171,9 +169,7 @@ pub fn force_reload(
     let path = config_paths
         .iter()
         .find(|p| p.exists())
-        .ok_or_else(|| {
-            ConfigError::ValidationError("no config file found for reload".into())
-        })?;
+        .ok_or_else(|| ConfigError::ValidationError("no config file found for reload".into()))?;
 
     let new_config = crate::config::load_config_from(path.clone())?;
     let changed = diff_configs(current, &new_config);

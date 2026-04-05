@@ -156,7 +156,10 @@ impl CheckpointStore {
         params.insert("file_path".to_string(), DataValue::from(file_path));
         params.insert("turn_number".to_string(), DataValue::from(turn_number));
         params.insert("original_content".to_string(), DataValue::from(content));
-        params.insert("file_existed".to_string(), DataValue::from(if existed { 1i64 } else { 0i64 }));
+        params.insert(
+            "file_existed".to_string(),
+            DataValue::from(if existed { 1i64 } else { 0i64 }),
+        );
         params.insert("tool_name".to_string(), DataValue::from(tool_name));
         params.insert("timestamp".to_string(), DataValue::from(now.as_str()));
 
@@ -182,11 +185,7 @@ impl CheckpointStore {
     }
 
     /// Restore a file to its most recently snapshotted content.
-    pub fn restore(
-        &self,
-        session_id: &str,
-        file_path: &str,
-    ) -> Result<(), CheckpointError> {
+    pub fn restore(&self, session_id: &str, file_path: &str) -> Result<(), CheckpointError> {
         let mut params = BTreeMap::new();
         params.insert("sid".to_string(), DataValue::from(session_id));
         params.insert("fp".to_string(), DataValue::from(file_path));
@@ -390,13 +389,21 @@ mod tests {
         fs::write(&file_path, b"original content").expect("write failed");
         let fp = file_path.to_str().expect("path to str failed");
 
-        store.snapshot("sess1", fp, 1, "write_file").expect("snapshot failed");
+        store
+            .snapshot("sess1", fp, 1, "write_file")
+            .expect("snapshot failed");
 
         fs::write(&file_path, b"modified content").expect("write failed");
-        assert_eq!(fs::read_to_string(&file_path).expect("read failed"), "modified content");
+        assert_eq!(
+            fs::read_to_string(&file_path).expect("read failed"),
+            "modified content"
+        );
 
         store.restore("sess1", fp).expect("restore failed");
-        assert_eq!(fs::read_to_string(&file_path).expect("read failed"), "original content");
+        assert_eq!(
+            fs::read_to_string(&file_path).expect("read failed"),
+            "original content"
+        );
     }
 
     #[test]
@@ -406,7 +413,9 @@ mod tests {
         let file_path = dir.path().join("new_file.txt");
         let fp = file_path.to_str().expect("path to str failed");
 
-        store.snapshot("sess1", fp, 1, "create_file").expect("snapshot failed");
+        store
+            .snapshot("sess1", fp, 1, "create_file")
+            .expect("snapshot failed");
 
         fs::write(&file_path, b"new content").expect("write failed");
         assert!(file_path.exists());
@@ -441,8 +450,12 @@ mod tests {
         fs::write(&f1, "a").expect("write failed");
         fs::write(&f2, "b").expect("write failed");
 
-        store.snapshot("sess1", f1.to_str().expect("path"), 1, "edit").expect("snapshot failed");
-        store.snapshot("sess1", f2.to_str().expect("path"), 2, "write").expect("snapshot failed");
+        store
+            .snapshot("sess1", f1.to_str().expect("path"), 1, "edit")
+            .expect("snapshot failed");
+        store
+            .snapshot("sess1", f2.to_str().expect("path"), 2, "write")
+            .expect("snapshot failed");
 
         let list = store.list_modified("sess1").expect("list failed");
         assert_eq!(list.len(), 2);
@@ -466,10 +479,14 @@ mod tests {
         fs::write(&fp, "v1").expect("write failed");
         let fp_str = fp.to_str().expect("path");
 
-        store.snapshot("sess_a", fp_str, 1, "write").expect("snapshot failed");
+        store
+            .snapshot("sess_a", fp_str, 1, "write")
+            .expect("snapshot failed");
 
         fs::write(&fp, "v2").expect("write failed");
-        store.snapshot("sess_b", fp_str, 1, "write").expect("snapshot failed");
+        store
+            .snapshot("sess_b", fp_str, 1, "write")
+            .expect("snapshot failed");
 
         store.restore("sess_a", fp_str).expect("restore failed");
         assert_eq!(fs::read_to_string(&fp).expect("read failed"), "v1");
@@ -490,7 +507,9 @@ mod tests {
         }
         let fp_str = fp.to_str().expect("path");
 
-        store.snapshot("sess1", fp_str, 1, "write").expect("snapshot failed");
+        store
+            .snapshot("sess1", fp_str, 1, "write")
+            .expect("snapshot failed");
 
         fs::write(&fp, b"replaced").expect("write failed");
 
@@ -504,7 +523,9 @@ mod tests {
         let fp = dir.path().join("content.txt");
         fs::write(&fp, "snapshot content").expect("write failed");
         let fp_str = fp.to_str().expect("path");
-        store.snapshot("sess1", fp_str, 1, "edit").expect("snapshot");
+        store
+            .snapshot("sess1", fp_str, 1, "edit")
+            .expect("snapshot");
         let content = store.get_content("sess1", fp_str, 1).expect("get_content");
         assert_eq!(content, "snapshot content");
     }
@@ -524,10 +545,14 @@ mod tests {
         let fp = dir.path().join("multi.txt");
         fs::write(&fp, "turn1").expect("write failed");
         let fp_str = fp.to_str().expect("path");
-        store.snapshot("sess1", fp_str, 1, "write").expect("snapshot failed");
+        store
+            .snapshot("sess1", fp_str, 1, "write")
+            .expect("snapshot failed");
 
         fs::write(&fp, "turn2").expect("write failed");
-        store.snapshot("sess1", fp_str, 2, "write").expect("snapshot failed");
+        store
+            .snapshot("sess1", fp_str, 2, "write")
+            .expect("snapshot failed");
 
         fs::write(&fp, "turn3_modified").expect("write failed");
 

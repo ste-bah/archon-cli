@@ -130,14 +130,17 @@ impl Plan {
     pub fn to_display(&self) -> String {
         let mut out = format!("Plan: {}\n", self.title);
         let (done, total) = self.overall_progress();
-        out.push_str(&format!("Status: {:?}  ({done}/{total} complete)\n\n", self.status));
+        out.push_str(&format!(
+            "Status: {:?}  ({done}/{total} complete)\n\n",
+            self.status
+        ));
 
         for step in &self.steps {
             let icon = match step.status {
                 StepStatus::Pending => "\u{25cb}",    // ○
-                StepStatus::InProgress => "\u{25d4}",  // ◔
-                StepStatus::Complete => "\u{2713}",     // ✓
-                StepStatus::Skipped => "\u{2212}",      // −
+                StepStatus::InProgress => "\u{25d4}", // ◔
+                StepStatus::Complete => "\u{2713}",   // ✓
+                StepStatus::Skipped => "\u{2212}",    // −
             };
             let check = match step.status {
                 StepStatus::Complete => "[x]",
@@ -180,9 +183,7 @@ impl Plan {
     pub fn on_file_edited(&mut self, file_path: &str) {
         let mut changed = false;
         for step in &mut self.steps {
-            if step.status == StepStatus::Pending
-                && step.files.iter().any(|f| f == file_path)
-            {
+            if step.status == StepStatus::Pending && step.files.iter().any(|f| f == file_path) {
                 step.status = StepStatus::InProgress;
                 changed = true;
             }
@@ -196,8 +197,14 @@ impl Plan {
     ///
     /// The subagent is restricted to read-only tools and given a prompt
     /// that asks it to investigate the step's requirements.
-    pub fn explore_step(&self, step_index: usize) -> Result<archon_tools::agent_tool::SubagentRequest, String> {
-        let step = self.steps.iter().find(|s| s.index == step_index)
+    pub fn explore_step(
+        &self,
+        step_index: usize,
+    ) -> Result<archon_tools::agent_tool::SubagentRequest, String> {
+        let step = self
+            .steps
+            .iter()
+            .find(|s| s.index == step_index)
             .ok_or_else(|| format!("step index {step_index} not found"))?;
 
         let files_hint = if step.files.is_empty() {

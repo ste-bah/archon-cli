@@ -25,7 +25,11 @@ pub fn parse_file(path: &str, source: &str, language: &str) -> Vec<Symbol> {
     let ts_language = match get_ts_language(language) {
         Some(l) => l,
         None => {
-            tracing::warn!("No tree-sitter grammar for language '{}' (file: {})", language, path);
+            tracing::warn!(
+                "No tree-sitter grammar for language '{}' (file: {})",
+                language,
+                path
+            );
             return Vec::new();
         }
     };
@@ -96,7 +100,13 @@ fn extract_rust_symbol(
 
     let signature = extract_signature(node, source, 120);
 
-    Some(Symbol { name, kind: sym_kind, file: file.to_string(), line, signature })
+    Some(Symbol {
+        name,
+        kind: sym_kind,
+        file: file.to_string(),
+        line,
+        signature,
+    })
 }
 
 fn extract_python_symbol(
@@ -119,7 +129,13 @@ fn extract_python_symbol(
 
     let signature = extract_signature(node, source, 120);
 
-    Some(Symbol { name, kind: sym_kind, file: file.to_string(), line, signature })
+    Some(Symbol {
+        name,
+        kind: sym_kind,
+        file: file.to_string(),
+        line,
+        signature,
+    })
 }
 
 fn extract_ts_symbol(
@@ -145,7 +161,13 @@ fn extract_ts_symbol(
 
     let signature = extract_signature(node, source, 120);
 
-    Some(Symbol { name, kind: sym_kind, file: file.to_string(), line, signature })
+    Some(Symbol {
+        name,
+        kind: sym_kind,
+        file: file.to_string(),
+        line,
+        signature,
+    })
 }
 
 fn extract_go_symbol(
@@ -169,7 +191,13 @@ fn extract_go_symbol(
 
     let signature = extract_signature(node, source, 120);
 
-    Some(Symbol { name, kind: sym_kind, file: file.to_string(), line, signature })
+    Some(Symbol {
+        name,
+        kind: sym_kind,
+        file: file.to_string(),
+        line,
+        signature,
+    })
 }
 
 /// Get the first line of a node's text as its signature, up to `max_chars`.

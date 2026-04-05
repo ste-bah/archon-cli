@@ -83,7 +83,8 @@ impl ArchonSession {
             ..Default::default()
         };
 
-        let stream = crate::query::query_internal(prompt.clone(), sdk_opts, Some((id, sessions_dir)));
+        let stream =
+            crate::query::query_internal(prompt.clone(), sdk_opts, Some((id, sessions_dir)));
         stream
     }
 }
@@ -134,7 +135,8 @@ fn load_session(dir: &Path, id: &str) -> Result<SessionData, SdkError> {
     let path = session_path(dir, id);
     let json = std::fs::read_to_string(&path)
         .map_err(|_| SdkError::Session(format!("session '{id}' not found")))?;
-    serde_json::from_str(&json).map_err(|e| SdkError::Session(format!("corrupt session '{id}': {e}")))
+    serde_json::from_str(&json)
+        .map_err(|e| SdkError::Session(format!("corrupt session '{id}': {e}")))
 }
 
 fn save_session(dir: &Path, data: &SessionData) -> Result<(), SdkError> {
@@ -152,7 +154,9 @@ fn save_session(dir: &Path, data: &SessionData) -> Result<(), SdkError> {
 /// Returns an [`ArchonSession`] whose conversation history is stored on disk.
 /// This function is prefixed `unstable_v2_` to signal that the multi-turn API
 /// is alpha-quality and may change.
-pub async fn unstable_v2_create_session(options: SessionOptions) -> Result<ArchonSession, SdkError> {
+pub async fn unstable_v2_create_session(
+    options: SessionOptions,
+) -> Result<ArchonSession, SdkError> {
     let id = uuid::Uuid::new_v4()
         .to_string()
         .replace('-', "")

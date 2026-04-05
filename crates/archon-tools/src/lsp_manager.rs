@@ -117,9 +117,7 @@ impl LspServerManager {
     ///
     /// Returns an error if no language server is detected or if the server
     /// binary is missing.
-    pub async fn ensure_connected(
-        &mut self,
-    ) -> Result<(), crate::lsp_client::LspError> {
+    pub async fn ensure_connected(&mut self) -> Result<(), crate::lsp_client::LspError> {
         if self.client.is_some() {
             return Ok(());
         }

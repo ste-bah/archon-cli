@@ -50,9 +50,7 @@ impl CostAlertState {
         }
 
         // Warn threshold (fire once).
-        if !self.warn_fired
-            && config.warn_threshold > 0.0
-            && session_cost >= config.warn_threshold
+        if !self.warn_fired && config.warn_threshold > 0.0 && session_cost >= config.warn_threshold
         {
             self.warn_fired = true;
             return CostAlertAction::Warn(format!(

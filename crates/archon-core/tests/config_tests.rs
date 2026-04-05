@@ -1,9 +1,8 @@
-use archon_core::config::{validate, default_config_path, ArchonConfig, ConfigError};
+use archon_core::config::{ArchonConfig, ConfigError, default_config_path, validate};
 
 #[test]
 fn empty_toml_produces_valid_defaults() {
-    let config: ArchonConfig =
-        toml::from_str("").expect("empty TOML should parse to defaults");
+    let config: ArchonConfig = toml::from_str("").expect("empty TOML should parse to defaults");
 
     // ApiConfig defaults
     assert_eq!(config.api.default_model, "claude-sonnet-4-6");
@@ -68,8 +67,7 @@ fn partial_toml_merges_with_defaults() {
 default_model = "claude-opus-4-6"
 max_retries = 5
 "#;
-    let config: ArchonConfig =
-        toml::from_str(toml_str).expect("partial TOML should parse");
+    let config: ArchonConfig = toml::from_str(toml_str).expect("partial TOML should parse");
 
     // Overridden values
     assert_eq!(config.api.default_model, "claude-opus-4-6");
@@ -93,8 +91,7 @@ fn invalid_identity_mode_fails_validation() {
 [identity]
 mode = "foo"
 "#;
-    let config: ArchonConfig =
-        toml::from_str(toml_str).expect("TOML parse should succeed");
+    let config: ArchonConfig = toml::from_str(toml_str).expect("TOML parse should succeed");
     let err = validate(&config).expect_err("invalid identity mode should fail");
     match err {
         ConfigError::ValidationError(msg) => {
@@ -129,13 +126,9 @@ bash_timeout = 0
 #[test]
 fn max_concurrency_out_of_range_fails_validation() {
     for bad_value in [0u8, 17, 255] {
-        let toml_str = format!(
-            "[tools]\nmax_concurrency = {bad_value}"
-        );
-        let config: ArchonConfig =
-            toml::from_str(&toml_str).expect("TOML parse ok");
-        let err = validate(&config)
-            .expect_err(&format!("max_concurrency={bad_value} should fail"));
+        let toml_str = format!("[tools]\nmax_concurrency = {bad_value}");
+        let config: ArchonConfig = toml::from_str(&toml_str).expect("TOML parse ok");
+        let err = validate(&config).expect_err(&format!("max_concurrency={bad_value} should fail"));
         match err {
             ConfigError::ValidationError(msg) => {
                 assert!(
@@ -151,13 +144,10 @@ fn max_concurrency_out_of_range_fails_validation() {
 #[test]
 fn compact_threshold_out_of_range_fails_validation() {
     for bad_value in [-0.1f32, 1.1, 2.0] {
-        let toml_str = format!(
-            "[context]\ncompact_threshold = {bad_value}"
-        );
-        let config: ArchonConfig =
-            toml::from_str(&toml_str).expect("TOML parse ok");
-        let err = validate(&config)
-            .expect_err(&format!("compact_threshold={bad_value} should fail"));
+        let toml_str = format!("[context]\ncompact_threshold = {bad_value}");
+        let config: ArchonConfig = toml::from_str(&toml_str).expect("TOML parse ok");
+        let err =
+            validate(&config).expect_err(&format!("compact_threshold={bad_value} should fail"));
         match err {
             ConfigError::ValidationError(msg) => {
                 assert!(
@@ -201,8 +191,7 @@ another_unknown = 42
 foo = "bar"
 "#;
     // This should NOT error -- forward compatibility
-    let config: ArchonConfig =
-        toml::from_str(toml_str).expect("unknown keys should be ignored");
+    let config: ArchonConfig = toml::from_str(toml_str).expect("unknown keys should be ignored");
     assert_eq!(config.api.default_model, "claude-sonnet-4-6");
     validate(&config).expect("config with unknown keys should validate");
 }
@@ -259,8 +248,7 @@ auto_resume = false
 enabled = false
 max_checkpoints = 5
 "#;
-    let config: ArchonConfig =
-        toml::from_str(toml_str).expect("full valid config should parse");
+    let config: ArchonConfig = toml::from_str(toml_str).expect("full valid config should parse");
 
     assert_eq!(config.api.default_model, "claude-opus-4-6");
     assert_eq!(config.api.thinking_budget, 32768);
@@ -295,8 +283,7 @@ x_app = "my-tool"
 X-Custom-Auth = "token123"
 X-Team = "backend"
 "#;
-    let config: ArchonConfig =
-        toml::from_str(toml_str).expect("custom identity should parse");
+    let config: ArchonConfig = toml::from_str(toml_str).expect("custom identity should parse");
 
     assert_eq!(config.identity.mode, "custom");
     let custom = config
@@ -310,7 +297,10 @@ X-Team = "backend"
         .extra_headers
         .as_ref()
         .expect("extra_headers should be Some");
-    assert_eq!(headers.get("X-Custom-Auth").map(String::as_str), Some("token123"));
+    assert_eq!(
+        headers.get("X-Custom-Auth").map(String::as_str),
+        Some("token123")
+    );
     assert_eq!(headers.get("X-Team").map(String::as_str), Some("backend"));
 
     validate(&config).expect("custom identity config should validate");

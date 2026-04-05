@@ -7,7 +7,7 @@ use russh::ChannelMsg;
 use tokio::sync::Mutex;
 
 use super::{
-    protocol::AgentMessage, RemoteSession, RemoteSessionInner, RemoteTransport, SshConnectionConfig,
+    RemoteSession, RemoteSessionInner, RemoteTransport, SshConnectionConfig, protocol::AgentMessage,
 };
 
 pub struct SshTransport;
@@ -236,10 +236,7 @@ impl RemoteTransport for SshTransport {
             read_buf: Mutex::new(String::new()),
         };
 
-        tracing::info!(
-            "ssh: session established session_id={}",
-            config.session_id
-        );
+        tracing::info!("ssh: session established session_id={}", config.session_id);
 
         Ok(RemoteSession {
             session_id: config.session_id.clone(),
@@ -266,10 +263,7 @@ async fn authenticate(
             .await
             .map_err(|e| anyhow::anyhow!("ssh: public key auth failed: {e}"))?;
         if !result.success() {
-            anyhow::bail!(
-                "ssh: public key auth rejected for user '{}'",
-                config.user
-            );
+            anyhow::bail!("ssh: public key auth rejected for user '{}'", config.user);
         }
         tracing::info!("ssh: authenticated via public key");
         return Ok(());
@@ -277,8 +271,7 @@ async fn authenticate(
 
     // No key file — try SSH agent if available (respects agent_forwarding config
     // and SSH_AUTH_SOCK environment variable).
-    let agent_available =
-        config.agent_forwarding || std::env::var("SSH_AUTH_SOCK").is_ok();
+    let agent_available = config.agent_forwarding || std::env::var("SSH_AUTH_SOCK").is_ok();
 
     if agent_available {
         tracing::info!("ssh: attempting authentication via SSH agent");

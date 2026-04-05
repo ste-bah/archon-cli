@@ -204,10 +204,7 @@ mod tests {
     #[test]
     fn permission_level_is_risky() {
         let tool = SendMessageTool;
-        assert_eq!(
-            tool.permission_level(&json!({})),
-            PermissionLevel::Risky
-        );
+        assert_eq!(tool.permission_level(&json!({})), PermissionLevel::Risky);
     }
 
     #[test]

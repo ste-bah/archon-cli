@@ -195,14 +195,10 @@ mod tests {
 
     #[tokio::test]
     async fn empty_calls_returns_empty() {
-        let results = execute_tools_concurrent(
-            vec![],
-            |_| None,
-            test_ctx(),
-            DEFAULT_MAX_CONCURRENCY,
-        )
-        .await
-        .expect("should succeed");
+        let results =
+            execute_tools_concurrent(vec![], |_| None, test_ctx(), DEFAULT_MAX_CONCURRENCY)
+                .await
+                .expect("should succeed");
         assert!(results.is_empty());
     }
 
@@ -249,14 +245,10 @@ mod tests {
             input: serde_json::json!({}),
         }];
 
-        let results = execute_tools_concurrent(
-            calls,
-            |_| None,
-            test_ctx(),
-            DEFAULT_MAX_CONCURRENCY,
-        )
-        .await
-        .expect("should succeed");
+        let results =
+            execute_tools_concurrent(calls, |_| None, test_ctx(), DEFAULT_MAX_CONCURRENCY)
+                .await
+                .expect("should succeed");
 
         assert_eq!(results.len(), 1);
         assert!(results[0].result.is_error);
@@ -304,22 +296,10 @@ mod tests {
 
     #[tokio::test]
     async fn invalid_concurrency_rejected() {
-        let result = execute_tools_concurrent(
-            vec![],
-            |_| None,
-            test_ctx(),
-            0,
-        )
-        .await;
+        let result = execute_tools_concurrent(vec![], |_| None, test_ctx(), 0).await;
         assert!(result.is_err());
 
-        let result = execute_tools_concurrent(
-            vec![],
-            |_| None,
-            test_ctx(),
-            17,
-        )
-        .await;
+        let result = execute_tools_concurrent(vec![], |_| None, test_ctx(), 17).await;
         assert!(result.is_err());
     }
 }

@@ -171,10 +171,7 @@ mod tests {
 
     #[test]
     fn disabled_when_zero_budget_non_adaptive() {
-        assert_eq!(
-            select_thinking_mode("gpt-4o", 0),
-            ThinkingMode::Disabled,
-        );
+        assert_eq!(select_thinking_mode("gpt-4o", 0), ThinkingMode::Disabled,);
     }
 
     // -- budget clamping ------------------------------------------------------

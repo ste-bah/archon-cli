@@ -35,11 +35,26 @@ fn vertex_endpoint_url_claude_format() {
         None,
     );
     let url = provider.endpoint_url();
-    assert!(url.contains("us-central1-aiplatform.googleapis.com"), "URL should contain region: {url}");
-    assert!(url.contains("my-project"), "URL should contain project: {url}");
-    assert!(url.contains("publishers/anthropic"), "URL should contain publisher: {url}");
-    assert!(url.contains("claude-sonnet-4-20250514"), "URL should contain model: {url}");
-    assert!(url.ends_with(":streamGenerateContent"), "URL should end with :streamGenerateContent: {url}");
+    assert!(
+        url.contains("us-central1-aiplatform.googleapis.com"),
+        "URL should contain region: {url}"
+    );
+    assert!(
+        url.contains("my-project"),
+        "URL should contain project: {url}"
+    );
+    assert!(
+        url.contains("publishers/anthropic"),
+        "URL should contain publisher: {url}"
+    );
+    assert!(
+        url.contains("claude-sonnet-4-20250514"),
+        "URL should contain model: {url}"
+    );
+    assert!(
+        url.ends_with(":streamGenerateContent"),
+        "URL should end with :streamGenerateContent: {url}"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -56,8 +71,14 @@ fn vertex_endpoint_url_gemini_format() {
         None,
     );
     let url = provider.endpoint_url();
-    assert!(url.contains("publishers/google"), "URL should contain google publisher: {url}");
-    assert!(url.contains("gemini-1.5-pro"), "URL should contain model: {url}");
+    assert!(
+        url.contains("publishers/google"),
+        "URL should contain google publisher: {url}"
+    );
+    assert!(
+        url.contains("gemini-1.5-pro"),
+        "URL should contain model: {url}"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -75,7 +96,8 @@ fn gcp_service_account_key_parsed() {
         "token_uri": "https://oauth2.googleapis.com/token"
     });
 
-    let key: ServiceAccountKey = serde_json::from_value(json).expect("should parse service account key");
+    let key: ServiceAccountKey =
+        serde_json::from_value(json).expect("should parse service account key");
     assert_eq!(key.client_email, "my-sa@my-project.iam.gserviceaccount.com");
     assert_eq!(key.token_uri, "https://oauth2.googleapis.com/token");
     assert!(key.private_key.contains("BEGIN RSA PRIVATE KEY"));
@@ -96,7 +118,10 @@ fn gcp_jwt_has_correct_claims_structure() {
 
     assert_eq!(claims["iss"], "my-sa@my-project.iam.gserviceaccount.com");
     assert_eq!(claims["aud"], "https://oauth2.googleapis.com/token");
-    assert_eq!(claims["scope"], "https://www.googleapis.com/auth/cloud-platform");
+    assert_eq!(
+        claims["scope"],
+        "https://www.googleapis.com/auth/cloud-platform"
+    );
     assert!(claims["iat"].is_number(), "iat should be a number");
     assert!(claims["exp"].is_number(), "exp should be a number");
 
@@ -132,7 +157,10 @@ fn vertex_missing_credentials_returns_err() {
 
     // Non-existent path should return Err.
     let result = load_credentials_from_path("/nonexistent/path/to/credentials.json");
-    assert!(result.is_err(), "should return Err for missing credentials file");
+    assert!(
+        result.is_err(),
+        "should return Err for missing credentials file"
+    );
 }
 
 // ---------------------------------------------------------------------------

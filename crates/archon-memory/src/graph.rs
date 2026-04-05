@@ -147,9 +147,10 @@ impl MemoryGraph {
         provider: Arc<dyn EmbeddingProvider>,
     ) -> Result<(), MemoryError> {
         crate::vector_search::init_embedding_schema(&self.db, provider.dimensions())?;
-        let mut guard = self.embedding_provider.write().map_err(|e| {
-            MemoryError::Database(format!("embedding provider lock poisoned: {e}"))
-        })?;
+        let mut guard = self
+            .embedding_provider
+            .write()
+            .map_err(|e| MemoryError::Database(format!("embedding provider lock poisoned: {e}")))?;
         *guard = Some(provider);
         Ok(())
     }
@@ -275,16 +276,19 @@ impl MemoryGraph {
             "tags".to_string(),
             DataValue::from(serde_json::to_string(&mem.tags).map_err(MemoryError::from)?),
         );
-        params.insert("source_type".to_string(), DataValue::from(mem.source_type.as_str()));
-        params.insert("project_path".to_string(), DataValue::from(mem.project_path.as_str()));
+        params.insert(
+            "source_type".to_string(),
+            DataValue::from(mem.source_type.as_str()),
+        );
+        params.insert(
+            "project_path".to_string(),
+            DataValue::from(mem.project_path.as_str()),
+        );
         params.insert(
             "created_at".to_string(),
             DataValue::from(mem.created_at.to_rfc3339()),
         );
-        let updated_str = mem
-            .updated_at
-            .map(|dt| dt.to_rfc3339())
-            .unwrap_or_default();
+        let updated_str = mem.updated_at.map(|dt| dt.to_rfc3339()).unwrap_or_default();
         params.insert("updated_at".to_string(), DataValue::from(updated_str));
         params.insert("new_count".to_string(), DataValue::from(new_count as i64));
         params.insert("now".to_string(), DataValue::from(now.as_str()));
@@ -346,15 +350,27 @@ impl MemoryGraph {
         );
         params.insert("importance".to_string(), DataValue::from(mem.importance));
         params.insert("tags".to_string(), DataValue::from(new_tags));
-        params.insert("source_type".to_string(), DataValue::from(mem.source_type.as_str()));
-        params.insert("project_path".to_string(), DataValue::from(mem.project_path.as_str()));
+        params.insert(
+            "source_type".to_string(),
+            DataValue::from(mem.source_type.as_str()),
+        );
+        params.insert(
+            "project_path".to_string(),
+            DataValue::from(mem.project_path.as_str()),
+        );
         params.insert(
             "created_at".to_string(),
             DataValue::from(mem.created_at.to_rfc3339()),
         );
         params.insert("updated_at".to_string(), DataValue::from(now));
-        params.insert("access_count".to_string(), DataValue::from(mem.access_count as i64));
-        let la = mem.last_accessed.map(|dt| dt.to_rfc3339()).unwrap_or_default();
+        params.insert(
+            "access_count".to_string(),
+            DataValue::from(mem.access_count as i64),
+        );
+        let la = mem
+            .last_accessed
+            .map(|dt| dt.to_rfc3339())
+            .unwrap_or_default();
         params.insert("last_accessed".to_string(), DataValue::from(la));
 
         self.db
@@ -380,11 +396,7 @@ impl MemoryGraph {
     }
 
     /// Update a memory's importance score.
-    pub fn update_importance(
-        &self,
-        id: &str,
-        importance: f64,
-    ) -> Result<(), MemoryError> {
+    pub fn update_importance(&self, id: &str, importance: f64) -> Result<(), MemoryError> {
         let mem = self.read_memory(id)?;
         let now = Utc::now().to_rfc3339();
 
@@ -401,15 +413,27 @@ impl MemoryGraph {
             "tags".to_string(),
             DataValue::from(serde_json::to_string(&mem.tags).map_err(MemoryError::from)?),
         );
-        params.insert("source_type".to_string(), DataValue::from(mem.source_type.as_str()));
-        params.insert("project_path".to_string(), DataValue::from(mem.project_path.as_str()));
+        params.insert(
+            "source_type".to_string(),
+            DataValue::from(mem.source_type.as_str()),
+        );
+        params.insert(
+            "project_path".to_string(),
+            DataValue::from(mem.project_path.as_str()),
+        );
         params.insert(
             "created_at".to_string(),
             DataValue::from(mem.created_at.to_rfc3339()),
         );
         params.insert("updated_at".to_string(), DataValue::from(now));
-        params.insert("access_count".to_string(), DataValue::from(mem.access_count as i64));
-        let la = mem.last_accessed.map(|dt| dt.to_rfc3339()).unwrap_or_default();
+        params.insert(
+            "access_count".to_string(),
+            DataValue::from(mem.access_count as i64),
+        );
+        let la = mem
+            .last_accessed
+            .map(|dt| dt.to_rfc3339())
+            .unwrap_or_default();
         params.insert("last_accessed".to_string(), DataValue::from(la));
 
         self.db
@@ -440,7 +464,11 @@ impl MemoryGraph {
         self.read_memory(id)?;
 
         // Delete the embedding if vector search is initialised
-        let has_provider = self.embedding_provider.read().map(|g| g.is_some()).unwrap_or(false);
+        let has_provider = self
+            .embedding_provider
+            .read()
+            .map(|g| g.is_some())
+            .unwrap_or(false);
         if has_provider {
             if let Err(e) = crate::vector_search::delete_embedding(&self.db, id) {
                 tracing::warn!(id, "failed to delete embedding: {e}");
@@ -534,14 +562,11 @@ impl MemoryGraph {
     ///
     /// When an embedding provider is attached, uses hybrid (keyword + vector)
     /// search. Otherwise falls back to keyword-only search.
-    pub fn recall_memories(
-        &self,
-        query: &str,
-        limit: usize,
-    ) -> Result<Vec<Memory>, MemoryError> {
-        let provider = self.embedding_provider.read().map_err(|e| {
-            MemoryError::Database(format!("embedding provider lock poisoned: {e}"))
-        })?;
+    pub fn recall_memories(&self, query: &str, limit: usize) -> Result<Vec<Memory>, MemoryError> {
+        let provider = self
+            .embedding_provider
+            .read()
+            .map_err(|e| MemoryError::Database(format!("embedding provider lock poisoned: {e}")))?;
         if let Some(ref provider) = *provider {
             crate::hybrid_search::hybrid_search(
                 &self.db,
@@ -556,10 +581,7 @@ impl MemoryGraph {
     }
 
     /// Structured search with filters.
-    pub fn search_memories(
-        &self,
-        filter: &SearchFilter,
-    ) -> Result<Vec<Memory>, MemoryError> {
+    pub fn search_memories(&self, filter: &SearchFilter) -> Result<Vec<Memory>, MemoryError> {
         search::search(&self.db, filter)
     }
 
@@ -632,11 +654,7 @@ impl MemoryGraph {
 
     /// Recursive BFS traversal up to `depth` hops from a starting memory.
     /// Returns all reachable memories (excluding the start node).
-    pub fn get_related_memories(
-        &self,
-        id: &str,
-        depth: u32,
-    ) -> Result<Vec<Memory>, MemoryError> {
+    pub fn get_related_memories(&self, id: &str, depth: u32) -> Result<Vec<Memory>, MemoryError> {
         if depth == 0 {
             return Ok(Vec::new());
         }
@@ -721,10 +739,7 @@ fn extract_i64(val: &DataValue) -> i64 {
 }
 
 /// Read a single memory row by id.
-pub(crate) fn row_to_memory(
-    db: &DbInstance,
-    id: &str,
-) -> Result<Memory, MemoryError> {
+pub(crate) fn row_to_memory(db: &DbInstance, id: &str) -> Result<Memory, MemoryError> {
     let mut params = BTreeMap::new();
     params.insert("id".to_string(), DataValue::from(id));
 

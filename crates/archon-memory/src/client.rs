@@ -26,8 +26,7 @@ impl MemoryClient {
             tokio::net::TcpStream::connect(addr),
         )
         .await
-        .map_err(|_| MemoryError::Database(format!("connection to {addr} timed out")))?
-        ?;
+        .map_err(|_| MemoryError::Database(format!("connection to {addr} timed out")))??;
         let (read_half, write_half) = stream.into_split();
         Ok(Self {
             reader: Mutex::new(BufReader::new(read_half)),
@@ -51,7 +50,9 @@ impl MemoryClient {
         let mut line = String::new();
         let n = reader.read_line(&mut line).await?;
         if n == 0 {
-            return Err(MemoryError::Database("server closed connection".to_string()));
+            return Err(MemoryError::Database(
+                "server closed connection".to_string(),
+            ));
         }
 
         let resp = parse_response(&line)?;

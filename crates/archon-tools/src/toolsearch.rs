@@ -25,7 +25,10 @@ impl ToolSearchTool {
 /// Returns the count of terms that appear as case-insensitive substrings.
 fn score_match(haystack: &str, terms: &[&str]) -> usize {
     let lower = haystack.to_lowercase();
-    terms.iter().filter(|t| lower.contains(&t.to_lowercase())).count()
+    terms
+        .iter()
+        .filter(|t| lower.contains(&t.to_lowercase()))
+        .count()
 }
 
 #[async_trait::async_trait]
@@ -70,7 +73,8 @@ impl Tool for ToolSearchTool {
 
         let all_defs = self.tool_defs.clone();
 
-        let matched: Vec<serde_json::Value> = if let Some(names_csv) = query.strip_prefix("select:") {
+        let matched: Vec<serde_json::Value> = if let Some(names_csv) = query.strip_prefix("select:")
+        {
             // Exact name match mode
             let requested: Vec<&str> = names_csv.split(',').map(|s| s.trim()).collect();
             all_defs
@@ -92,7 +96,10 @@ impl Tool for ToolSearchTool {
                 .into_iter()
                 .filter_map(|def| {
                     let name = def.get("name").and_then(|n| n.as_str()).unwrap_or("");
-                    let desc = def.get("description").and_then(|d| d.as_str()).unwrap_or("");
+                    let desc = def
+                        .get("description")
+                        .and_then(|d| d.as_str())
+                        .unwrap_or("");
                     let combined = format!("{name} {desc}");
                     let s = score_match(&combined, &terms);
                     if s > 0 { Some((s, def)) } else { None }
@@ -108,7 +115,11 @@ impl Tool for ToolSearchTool {
                 })
             });
 
-            scored.into_iter().take(max_results).map(|(_, def)| def).collect()
+            scored
+                .into_iter()
+                .take(max_results)
+                .map(|(_, def)| def)
+                .collect()
         };
 
         if matched.is_empty() {
@@ -168,9 +179,12 @@ mod tests {
     #[tokio::test]
     async fn select_exact_names() {
         let tool = ToolSearchTool::new(populated_tool_defs());
-        let result = tool.execute(json!({"query": "select:Read,Grep"}), &test_ctx()).await;
+        let result = tool
+            .execute(json!({"query": "select:Read,Grep"}), &test_ctx())
+            .await;
         assert!(!result.is_error);
-        let parsed: Vec<serde_json::Value> = serde_json::from_str(&result.content).expect("valid json");
+        let parsed: Vec<serde_json::Value> =
+            serde_json::from_str(&result.content).expect("valid json");
         let names: Vec<&str> = parsed.iter().filter_map(|d| d["name"].as_str()).collect();
         assert!(names.contains(&"Read"));
         assert!(names.contains(&"Grep"));
@@ -180,7 +194,9 @@ mod tests {
     #[tokio::test]
     async fn select_missing_tool_returns_empty() {
         let tool = ToolSearchTool::new(populated_tool_defs());
-        let result = tool.execute(json!({"query": "select:NonExistent"}), &test_ctx()).await;
+        let result = tool
+            .execute(json!({"query": "select:NonExistent"}), &test_ctx())
+            .await;
         assert!(!result.is_error);
         assert!(result.content.contains("No matching tools found"));
     }
@@ -190,7 +206,8 @@ mod tests {
         let tool = ToolSearchTool::new(populated_tool_defs());
         let result = tool.execute(json!({"query": "file"}), &test_ctx()).await;
         assert!(!result.is_error);
-        let parsed: Vec<serde_json::Value> = serde_json::from_str(&result.content).expect("valid json");
+        let parsed: Vec<serde_json::Value> =
+            serde_json::from_str(&result.content).expect("valid json");
         let names: Vec<&str> = parsed.iter().filter_map(|d| d["name"].as_str()).collect();
         // "file" appears in Read and Write descriptions
         assert!(names.contains(&"Read"));
@@ -200,10 +217,13 @@ mod tests {
     #[tokio::test]
     async fn keyword_search_respects_max_results() {
         let tool = ToolSearchTool::new(populated_tool_defs());
-        let result = tool.execute(json!({"query": "a", "max_results": 2}), &test_ctx()).await;
+        let result = tool
+            .execute(json!({"query": "a", "max_results": 2}), &test_ctx())
+            .await;
         assert!(!result.is_error);
         // "a" is very common — should match many, but cap at 2
-        let parsed: Vec<serde_json::Value> = serde_json::from_str(&result.content).expect("valid json");
+        let parsed: Vec<serde_json::Value> =
+            serde_json::from_str(&result.content).expect("valid json");
         assert!(parsed.len() <= 2);
     }
 

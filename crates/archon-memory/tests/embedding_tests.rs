@@ -4,7 +4,7 @@
 //! run without network access or model downloads.
 
 use archon_memory::embedding::{
-    create_provider, EmbeddingConfig, EmbeddingProvider, EmbeddingProviderKind,
+    EmbeddingConfig, EmbeddingProvider, EmbeddingProviderKind, create_provider,
 };
 use archon_memory::graph::MemoryGraph;
 use archon_memory::hybrid_search;
@@ -289,9 +289,8 @@ fn hybrid_search_with_mock_provider() {
         .expect("emb 2");
 
     let provider = MockProvider::new(dim);
-    let results =
-        hybrid_search::hybrid_search(g.db(), "rust programming", &provider, 0.3, 10)
-            .expect("hybrid");
+    let results = hybrid_search::hybrid_search(g.db(), "rust programming", &provider, 0.3, 10)
+        .expect("hybrid");
 
     // Both memories match "programming" keyword; at least one should be returned
     assert!(!results.is_empty());
@@ -303,7 +302,15 @@ fn hybrid_search_alpha_zero_is_pure_vector() {
     let dim = 4;
 
     let id1 = g
-        .store_memory("alpha test content", "Alpha", MemoryType::Fact, 0.5, &[], "t", "")
+        .store_memory(
+            "alpha test content",
+            "Alpha",
+            MemoryType::Fact,
+            0.5,
+            &[],
+            "t",
+            "",
+        )
         .expect("s1");
 
     vector_search::init_embedding_schema(g.db(), dim).expect("schema");
@@ -339,9 +346,8 @@ fn hybrid_search_alpha_one_is_pure_keyword() {
     // We don't even need the vector schema for alpha=1.0
 
     let provider = MockProvider::new(dim);
-    let results =
-        hybrid_search::hybrid_search(g.db(), "keyword searchable", &provider, 1.0, 10)
-            .expect("hybrid");
+    let results = hybrid_search::hybrid_search(g.db(), "keyword searchable", &provider, 1.0, 10)
+        .expect("hybrid");
     assert!(!results.is_empty());
 }
 
@@ -353,7 +359,8 @@ fn hybrid_search_alpha_one_is_pure_keyword() {
 fn graph_with_provider_stores_embeddings_on_store() {
     let g = MemoryGraph::in_memory().expect("graph");
     let provider = std::sync::Arc::new(MockProvider::new(4));
-    g.set_embedding_provider(provider.clone()).expect("set provider");
+    g.set_embedding_provider(provider.clone())
+        .expect("set provider");
 
     let _id = g
         .store_memory(
@@ -375,7 +382,8 @@ fn graph_with_provider_stores_embeddings_on_store() {
 fn graph_skips_embedding_for_short_text() {
     let g = MemoryGraph::in_memory().expect("graph");
     let provider = std::sync::Arc::new(MockProvider::new(4));
-    g.set_embedding_provider(provider.clone()).expect("set provider");
+    g.set_embedding_provider(provider.clone())
+        .expect("set provider");
 
     // Text < 10 chars should be skipped
     let _id = g
@@ -390,7 +398,8 @@ fn graph_skips_embedding_for_short_text() {
 fn graph_recall_uses_hybrid_when_provider_set() {
     let g = MemoryGraph::in_memory().expect("graph");
     let provider = std::sync::Arc::new(MockProvider::new(4));
-    g.set_embedding_provider(provider.clone()).expect("set provider");
+    g.set_embedding_provider(provider.clone())
+        .expect("set provider");
 
     g.store_memory(
         "rust programming language systems",
@@ -430,7 +439,8 @@ fn graph_recall_works_without_provider() {
 fn graph_delete_removes_embedding_too() {
     let g = MemoryGraph::in_memory().expect("graph");
     let provider = std::sync::Arc::new(MockProvider::new(4));
-    g.set_embedding_provider(provider.clone()).expect("set provider");
+    g.set_embedding_provider(provider.clone())
+        .expect("set provider");
 
     let id = g
         .store_memory(

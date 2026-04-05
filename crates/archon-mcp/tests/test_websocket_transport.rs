@@ -4,10 +4,8 @@
 //! permanent close code detection, keep-alive config, jitter bounds.
 //! Network tests verify graceful error handling without network I/O.
 
-use archon_mcp::ws_config::{WsConfig, WsReconnectConfig, PERMANENT_CLOSE_CODES};
-use archon_mcp::transport_ws::{
-    WebSocketTransport, reconnect_delay_ms, is_permanent_close_code,
-};
+use archon_mcp::transport_ws::{WebSocketTransport, is_permanent_close_code, reconnect_delay_ms};
+use archon_mcp::ws_config::{PERMANENT_CLOSE_CODES, WsConfig, WsReconnectConfig};
 
 // ---------------------------------------------------------------------------
 // WsConfig parsing
@@ -73,15 +71,19 @@ fn reconnect_delay_attempt_0_is_1s() {
     let delay = reconnect_delay_ms(0, 0);
     // Base 1000ms with ±12.5% symmetric jitter → actual range [875, 1125).
     // Widen to ±25% to tolerate future jitter adjustments.
-    assert!(delay >= 750 && delay <= 1_250,
-        "attempt 0 base delay should be ~1s ±jitter, got {delay}");
+    assert!(
+        delay >= 750 && delay <= 1_250,
+        "attempt 0 base delay should be ~1s ±jitter, got {delay}"
+    );
 }
 
 #[test]
 fn reconnect_delay_attempt_1_is_2s() {
     let delay = reconnect_delay_ms(1, 0);
-    assert!(delay >= 1_000 && delay <= 4_000,
-        "attempt 1 base delay should be ~2s with jitter, got {delay}");
+    assert!(
+        delay >= 1_000 && delay <= 4_000,
+        "attempt 1 base delay should be ~2s with jitter, got {delay}"
+    );
 }
 
 #[test]
@@ -90,8 +92,10 @@ fn reconnect_delay_capped_at_30s() {
     let delay = reconnect_delay_ms(10, 0);
     let base = 30_000u64; // 30s cap
     let max_with_jitter = base + base / 4; // +25%
-    assert!(delay <= max_with_jitter,
-        "delay must not exceed 30s + 25% jitter: got {delay}");
+    assert!(
+        delay <= max_with_jitter,
+        "delay must not exceed 30s + 25% jitter: got {delay}"
+    );
 }
 
 #[test]
@@ -112,8 +116,10 @@ fn reconnect_delay_grows_with_attempts() {
     // Average delay at attempt 3 should be higher than at attempt 0
     let delay_0: u64 = (0..10).map(|_| reconnect_delay_ms(0, 0)).sum::<u64>() / 10;
     let delay_3: u64 = (0..10).map(|_| reconnect_delay_ms(3, 0)).sum::<u64>() / 10;
-    assert!(delay_3 > delay_0,
-        "later attempts should have longer delays: {delay_3} > {delay_0}");
+    assert!(
+        delay_3 > delay_0,
+        "later attempts should have longer delays: {delay_3} > {delay_0}"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -142,7 +148,10 @@ fn close_1001_not_permanent() {
 
 #[test]
 fn close_1006_not_permanent() {
-    assert!(!is_permanent_close_code(1006), "abnormal closure = reconnectable");
+    assert!(
+        !is_permanent_close_code(1006),
+        "abnormal closure = reconnectable"
+    );
 }
 
 #[test]
@@ -172,13 +181,20 @@ fn reconnect_config_default_ping_interval_10s() {
 #[test]
 fn reconnect_config_default_keepalive_5_minutes() {
     let cfg = WsReconnectConfig::default();
-    assert_eq!(cfg.keepalive_interval_ms, 5 * 60 * 1_000, "data frame every 5min");
+    assert_eq!(
+        cfg.keepalive_interval_ms,
+        5 * 60 * 1_000,
+        "data frame every 5min"
+    );
 }
 
 #[test]
 fn reconnect_config_sleep_gap_threshold_60s() {
     let cfg = WsReconnectConfig::default();
-    assert_eq!(cfg.sleep_gap_threshold_ms, 60_000, "sleep detection at 60s gap");
+    assert_eq!(
+        cfg.sleep_gap_threshold_ms, 60_000,
+        "sleep detection at 60s gap"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -240,5 +256,8 @@ async fn transport_connect_refused_returns_error() {
     };
     let transport = WebSocketTransport::new(cfg, WsReconnectConfig::default()).unwrap();
     let result = transport.connect().await;
-    assert!(result.is_err(), "connection refused must return error, not panic");
+    assert!(
+        result.is_err(),
+        "connection refused must return error, not panic"
+    );
 }

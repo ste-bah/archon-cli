@@ -1,7 +1,7 @@
 use archon_tools::validation::{
-    edit_distance, validate_effort_level, validate_model_name, validate_permission_mode,
     KNOWN_MODEL_IDS, KNOWN_SHORTCUTS, LEGACY_PERMISSION_ALIASES, VALID_EFFORT_LEVELS,
-    VALID_PERMISSION_MODES,
+    VALID_PERMISSION_MODES, edit_distance, validate_effort_level, validate_model_name,
+    validate_permission_mode,
 };
 
 // ---------------------------------------------------------------------------
@@ -94,7 +94,14 @@ fn valid_effort_levels_are_complete() {
 fn valid_permission_modes_are_complete() {
     assert_eq!(
         VALID_PERMISSION_MODES,
-        &["default", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions"]
+        &[
+            "default",
+            "acceptEdits",
+            "plan",
+            "auto",
+            "dontAsk",
+            "bypassPermissions"
+        ]
     );
 }
 
@@ -269,10 +276,7 @@ fn permission_accept_edits() {
 
 #[test]
 fn permission_dont_ask() {
-    assert_eq!(
-        validate_permission_mode("dontAsk"),
-        Ok("dontAsk".into())
-    );
+    assert_eq!(validate_permission_mode("dontAsk"), Ok("dontAsk".into()));
 }
 
 #[test]
@@ -285,10 +289,7 @@ fn permission_bypass_permissions() {
 
 #[test]
 fn permission_legacy_ask() {
-    assert_eq!(
-        validate_permission_mode("ask"),
-        Ok("default".into())
-    );
+    assert_eq!(validate_permission_mode("ask"), Ok("default".into()));
 }
 
 #[test]

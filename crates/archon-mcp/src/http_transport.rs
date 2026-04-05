@@ -41,15 +41,14 @@ pub fn create_http_transport(
             let header_name: HeaderName = name
                 .parse()
                 .map_err(|e| McpError::Transport(format!("invalid header name '{name}': {e}")))?;
-            let header_value: HeaderValue = value
-                .parse()
-                .map_err(|e| McpError::Transport(format!("invalid header value for '{name}': {e}")))?;
+            let header_value: HeaderValue = value.parse().map_err(|e| {
+                McpError::Transport(format!("invalid header value for '{name}': {e}"))
+            })?;
             custom_headers.insert(header_name, header_value);
         }
     }
 
-    let config = StreamableHttpClientTransportConfig::with_uri(url)
-        .custom_headers(custom_headers);
+    let config = StreamableHttpClientTransportConfig::with_uri(url).custom_headers(custom_headers);
 
     let transport = StreamableHttpClientTransport::with_client(reqwest_client, config);
     Ok(transport)
@@ -61,11 +60,8 @@ mod tests {
 
     #[tokio::test]
     async fn create_transport_with_valid_url() {
-        let result = create_http_transport(
-            "http://localhost:8080/mcp",
-            None,
-            Duration::from_secs(5),
-        );
+        let result =
+            create_http_transport("http://localhost:8080/mcp", None, Duration::from_secs(5));
         assert!(result.is_ok());
     }
 

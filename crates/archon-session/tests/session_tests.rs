@@ -21,7 +21,10 @@ fn cleanup(dir: &PathBuf) {
 #[test]
 fn wal_mode_active() {
     let (dir, store) = temp_db();
-    assert!(store.verify_wal_mode().expect("check WAL"), "WAL mode should be active");
+    assert!(
+        store.verify_wal_mode().expect("check WAL"),
+        "WAL mode should be active"
+    );
     cleanup(&dir);
 }
 
@@ -45,9 +48,7 @@ fn create_session() {
 #[test]
 fn save_and_load_messages() {
     let (dir, store) = temp_db();
-    let meta = store
-        .create_session("/tmp", None, "opus")
-        .expect("create");
+    let meta = store.create_session("/tmp", None, "opus").expect("create");
 
     store
         .save_message(&meta.id, 0, r#"{"role":"user","content":"hello"}"#)
@@ -116,7 +117,9 @@ fn update_usage() {
     let (dir, store) = temp_db();
     let meta = store.create_session("/tmp", None, "m").expect("create");
 
-    store.update_usage(&meta.id, 5000, 0.15).expect("update usage");
+    store
+        .update_usage(&meta.id, 5000, 0.15)
+        .expect("update usage");
 
     let updated = store.get_session(&meta.id).expect("get");
     assert_eq!(updated.total_tokens, 5000);
@@ -128,7 +131,9 @@ fn update_usage() {
 #[test]
 fn resume_session_loads_messages() {
     let (dir, store) = temp_db();
-    let meta = store.create_session("/project", Some("dev"), "opus").expect("create");
+    let meta = store
+        .create_session("/project", Some("dev"), "opus")
+        .expect("create");
 
     store.save_message(&meta.id, 0, "msg-0").expect("save 0");
     store.save_message(&meta.id, 1, "msg-1").expect("save 1");
@@ -171,7 +176,9 @@ fn database_persists_across_reopens() {
         let store = SessionStore::open(&path).expect("open 1");
         let meta = store.create_session("/tmp", None, "m").expect("create");
         session_id = meta.id;
-        store.save_message(&session_id, 0, "persisted").expect("save");
+        store
+            .save_message(&session_id, 0, "persisted")
+            .expect("save");
     }
 
     // Reopen

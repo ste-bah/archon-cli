@@ -199,7 +199,10 @@ mod tests {
         assert_eq!(err.to_string(), "server 'foo' not found");
 
         let err = McpError::ServerNotReady("bar".into(), ServerState::Crashed);
-        assert_eq!(err.to_string(), "server 'bar' is not ready (state: crashed)");
+        assert_eq!(
+            err.to_string(),
+            "server 'bar' is not ready (state: crashed)"
+        );
     }
 
     #[test]
@@ -230,7 +233,9 @@ mod tests {
 
     #[test]
     fn tool_content_serde_text() {
-        let content = ToolContent::Text { text: "hello".into() };
+        let content = ToolContent::Text {
+            text: "hello".into(),
+        };
         let json = serde_json::to_string(&content).expect("serialize");
         assert!(json.contains(r#""type":"text"#));
         let parsed: ToolContent = serde_json::from_str(&json).expect("deserialize");

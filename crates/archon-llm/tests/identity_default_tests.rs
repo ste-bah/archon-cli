@@ -45,7 +45,9 @@ fn spoof_provider(workload: Option<String>, anti_distillation: bool) -> Identity
 #[test]
 fn clean_user_agent_is_archon() {
     let headers = clean_provider().request_headers("req-1");
-    let ua = headers.get("User-Agent").expect("User-Agent must be present");
+    let ua = headers
+        .get("User-Agent")
+        .expect("User-Agent must be present");
     assert!(
         ua.starts_with("archon-cli/"),
         "clean UA should start with archon-cli/, got: {ua}"

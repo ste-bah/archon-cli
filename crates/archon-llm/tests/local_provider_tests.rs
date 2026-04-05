@@ -28,7 +28,10 @@ fn local_provider_is_object_safe() {
 fn local_default_base_url_is_ollama() {
     let provider = LocalProvider::default();
     let url = provider.base_url();
-    assert_eq!(url, "http://localhost:11434/v1", "default URL should be Ollama: {url}");
+    assert_eq!(
+        url, "http://localhost:11434/v1",
+        "default URL should be Ollama: {url}"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -77,8 +80,10 @@ fn local_health_check_url() {
         true,
     );
     let url = provider.health_check_url();
-    assert_eq!(url, "http://localhost:11434/v1/models",
-        "health check URL should be <base>/models, got: {url}");
+    assert_eq!(
+        url, "http://localhost:11434/v1/models",
+        "health check URL should be <base>/models, got: {url}"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -91,7 +96,7 @@ fn local_timeout_configurable() {
     let provider = LocalProvider::new(
         "http://localhost:11434/v1".to_string(),
         "llama3:8b".to_string(),
-        5,  // 5 second timeout
+        5, // 5 second timeout
         false,
     );
     // Verify the model is correct.
@@ -110,5 +115,8 @@ fn local_uses_openai_sse_format() {
     let has_text = events.iter().any(|e| {
         matches!(e, archon_llm::streaming::StreamEvent::TextDelta { text, .. } if text == "Hello from Ollama")
     });
-    assert!(has_text, "expected TextDelta with Ollama content, got: {events:?}");
+    assert!(
+        has_text,
+        "expected TextDelta with Ollama content, got: {events:?}"
+    );
 }

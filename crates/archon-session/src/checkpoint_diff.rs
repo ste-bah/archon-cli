@@ -94,10 +94,7 @@ pub fn diff_snapshots(before: &str, after: &str, filename: &str) -> String {
 }
 
 /// List all checkpoints for a given file path.
-pub fn list_file_checkpoints(
-    store: &[CheckpointEntry],
-    file_path: &str,
-) -> Vec<CheckpointEntry> {
+pub fn list_file_checkpoints(store: &[CheckpointEntry], file_path: &str) -> Vec<CheckpointEntry> {
     store
         .iter()
         .filter(|e| e.file_path == file_path)
@@ -131,8 +128,8 @@ pub fn restore_checkpoint(
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum EditOp {
     Keep(usize, usize), // (old_idx, new_idx)
-    Remove(usize),       // old_idx
-    Add(usize),          // new_idx
+    Remove(usize),      // old_idx
+    Add(usize),         // new_idx
 }
 
 /// Compute a minimal edit script using LCS dynamic programming.

@@ -18,7 +18,11 @@ impl CronDeleteTool {
     }
 
     fn store(&self) -> CronStore {
-        CronStore::new(self.project_dir.join(".claude").join("scheduled_tasks.json"))
+        CronStore::new(
+            self.project_dir
+                .join(".claude")
+                .join("scheduled_tasks.json"),
+        )
     }
 }
 

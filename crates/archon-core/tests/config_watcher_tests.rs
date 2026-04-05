@@ -17,7 +17,10 @@ fn diff_identical_configs_empty() {
     let a = ArchonConfig::default();
     let b = ArchonConfig::default();
     let changes = diff_configs(&a, &b);
-    assert!(changes.is_empty(), "identical configs should produce no diffs");
+    assert!(
+        changes.is_empty(),
+        "identical configs should produce no diffs"
+    );
 }
 
 #[test]
@@ -126,11 +129,13 @@ fn watcher_detects_file_change() {
     let config_path = dir.path().join("config.toml");
 
     // Write initial content
-    fs::write(&config_path, "[api]\ndefault_model = \"claude-sonnet-4-6\"\n")
-        .expect("write initial config");
+    fs::write(
+        &config_path,
+        "[api]\ndefault_model = \"claude-sonnet-4-6\"\n",
+    )
+    .expect("write initial config");
 
-    let watcher = ConfigWatcher::start(&[config_path.clone()])
-        .expect("start watcher");
+    let watcher = ConfigWatcher::start(&[config_path.clone()]).expect("start watcher");
 
     // Wait briefly for watcher to attach
     thread::sleep(Duration::from_millis(200));
@@ -143,13 +148,13 @@ fn watcher_detects_file_change() {
     thread::sleep(Duration::from_secs(3));
 
     let changed = watcher.poll_changes();
-    assert!(
-        !changed.is_empty(),
-        "watcher should detect file change"
-    );
+    assert!(!changed.is_empty(), "watcher should detect file change");
     // The changed path should match or contain our config file path
     let matched = changed.iter().any(|p| p.ends_with("config.toml"));
-    assert!(matched, "expected config.toml in changed paths: {changed:?}");
+    assert!(
+        matched,
+        "expected config.toml in changed paths: {changed:?}"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -166,8 +171,7 @@ fn debounced_reloader_waits() {
     let toml_str = toml::to_string_pretty(&initial).expect("serialize default config");
     fs::write(&config_path, &toml_str).expect("write initial config");
 
-    let watcher = ConfigWatcher::start(&[config_path.clone()])
-        .expect("start watcher");
+    let watcher = ConfigWatcher::start(&[config_path.clone()]).expect("start watcher");
     let mut reloader = DebouncedReloader::new(watcher, 300, initial.clone());
 
     // Wait for watcher to attach
@@ -192,7 +196,10 @@ fn debounced_reloader_waits() {
     let result = reloader.check_and_reload(&[config_path.clone()]);
     // After debounce, we should get a reload with changed keys (or empty if already consumed)
     // The important thing is this doesn't panic and returns a valid result
-    assert!(result.is_some() || result.is_none(), "reloader should return a valid Option");
+    assert!(
+        result.is_some() || result.is_none(),
+        "reloader should return a valid Option"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -245,8 +252,7 @@ fn debounced_reloader_stores_current_config() {
     let mut initial = ArchonConfig::default();
     initial.cost.warn_threshold = 99.0;
 
-    let watcher = ConfigWatcher::start(&[config_path])
-        .expect("start watcher");
+    let watcher = ConfigWatcher::start(&[config_path]).expect("start watcher");
     let reloader = DebouncedReloader::new(watcher, 100, initial);
 
     assert!(

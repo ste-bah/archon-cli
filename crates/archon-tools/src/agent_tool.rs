@@ -261,7 +261,9 @@ mod tests {
         let tool = AgentTool;
 
         // Zero
-        let result = tool.execute(json!({"prompt": "x", "max_turns": 0}), &make_ctx()).await;
+        let result = tool
+            .execute(json!({"prompt": "x", "max_turns": 0}), &make_ctx())
+            .await;
         assert!(result.is_error);
 
         // Over 100
@@ -274,10 +276,7 @@ mod tests {
     #[test]
     fn permission_level_is_risky() {
         let tool = AgentTool;
-        assert_eq!(
-            tool.permission_level(&json!({})),
-            PermissionLevel::Risky
-        );
+        assert_eq!(tool.permission_level(&json!({})), PermissionLevel::Risky);
     }
 
     #[test]
@@ -288,6 +287,11 @@ mod tests {
 
         let schema = tool.input_schema();
         assert_eq!(schema["type"], "object");
-        assert!(schema["required"].as_array().unwrap().contains(&json!("prompt")));
+        assert!(
+            schema["required"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("prompt"))
+        );
     }
 }

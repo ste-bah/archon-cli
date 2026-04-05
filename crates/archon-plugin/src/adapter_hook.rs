@@ -17,7 +17,11 @@ pub struct PluginHookAdapter {
 impl PluginHookAdapter {
     /// Create an adapter for a plugin hook registration.
     pub fn new(plugin_id: String, event: String, callback_cmd: String) -> Self {
-        Self { plugin_id, event, callback_cmd }
+        Self {
+            plugin_id,
+            event,
+            callback_cmd,
+        }
     }
 
     /// The hook event name (e.g., `"PreToolUse"`).

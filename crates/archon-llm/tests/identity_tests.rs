@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use archon_llm::identity::{
-    compute_fingerprint, discover_betas_from_claude, resolve_betas, IdentityMode,
-    IdentityProvider, DEFAULT_BETAS,
+    DEFAULT_BETAS, IdentityMode, IdentityProvider, compute_fingerprint, discover_betas_from_claude,
+    resolve_betas,
 };
 
 // -----------------------------------------------------------------------
@@ -41,7 +41,10 @@ fn fingerprint_empty_message() {
 fn fingerprint_different_versions_differ() {
     let fp1 = compute_fingerprint("same message content here!", "2.1.89");
     let fp2 = compute_fingerprint("same message content here!", "3.0.0");
-    assert_ne!(fp1, fp2, "different versions should produce different fingerprints");
+    assert_ne!(
+        fp1, fp2,
+        "different versions should produce different fingerprints"
+    );
 }
 
 #[test]
@@ -147,9 +150,15 @@ fn custom_mode_uses_provided_headers() {
 
     let headers = provider.request_headers("r");
 
-    assert_eq!(headers.get("User-Agent").map(String::as_str), Some("my-agent/1.0"));
+    assert_eq!(
+        headers.get("User-Agent").map(String::as_str),
+        Some("my-agent/1.0")
+    );
     assert_eq!(headers.get("x-app").map(String::as_str), Some("my-app"));
-    assert_eq!(headers.get("X-Custom").map(String::as_str), Some("value123"));
+    assert_eq!(
+        headers.get("X-Custom").map(String::as_str),
+        Some("value123")
+    );
 }
 
 // -----------------------------------------------------------------------
@@ -185,12 +194,7 @@ fn spoof_metadata_contains_user_id_json() {
 
 #[test]
 fn clean_metadata_is_empty() {
-    let provider = IdentityProvider::new(
-        IdentityMode::Clean,
-        "s".into(),
-        "d".into(),
-        "a".into(),
-    );
+    let provider = IdentityProvider::new(IdentityMode::Clean, "s".into(), "d".into(), "a".into());
     let meta = provider.metadata();
     assert!(meta.as_object().map(|o| o.is_empty()).unwrap_or(false));
 }
@@ -237,18 +241,15 @@ fn billing_header_with_workload() {
         "a".into(),
     );
 
-    let header = provider.billing_header("msg").expect("should have billing header");
+    let header = provider
+        .billing_header("msg")
+        .expect("should have billing header");
     assert!(header.contains("cc_workload=cron"));
 }
 
 #[test]
 fn no_billing_header_in_clean_mode() {
-    let provider = IdentityProvider::new(
-        IdentityMode::Clean,
-        "s".into(),
-        "d".into(),
-        "a".into(),
-    );
+    let provider = IdentityProvider::new(IdentityMode::Clean, "s".into(), "d".into(), "a".into());
     assert!(provider.billing_header("msg").is_none());
 }
 
@@ -275,7 +276,10 @@ fn spoof_system_prompt_has_correct_cache_scopes() {
 
     // Block 0: billing (ephemeral, no scope)
     assert!(blocks[0]["cache_control"]["scope"].is_null());
-    assert_eq!(blocks[0]["cache_control"]["type"].as_str(), Some("ephemeral"));
+    assert_eq!(
+        blocks[0]["cache_control"]["type"].as_str(),
+        Some("ephemeral")
+    );
 
     // Block 1: identity prefix (scope = org)
     assert_eq!(blocks[1]["cache_control"]["scope"].as_str(), Some("org"));

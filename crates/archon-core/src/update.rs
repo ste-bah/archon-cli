@@ -134,9 +134,7 @@ pub async fn check_latest(config: &UpdateConfig) -> Result<ReleaseInfo, UpdateEr
         .iter()
         .find(|a| a["name"].as_str() == Some(asset_name))
         .and_then(|a| a["browser_download_url"].as_str())
-        .ok_or_else(|| {
-            UpdateError::Parse(format!("asset '{asset_name}' not found in release"))
-        })?
+        .ok_or_else(|| UpdateError::Parse(format!("asset '{asset_name}' not found in release")))?
         .to_string();
 
     let checksum_url = assets
@@ -338,7 +336,8 @@ pub async fn perform_update(config: &UpdateConfig, force: bool) -> Result<String
         path.display(),
         // Safe truncation at char boundary
         if release.changelog.len() > 500 {
-            let boundary = release.changelog
+            let boundary = release
+                .changelog
                 .char_indices()
                 .take_while(|(i, _)| *i < 500)
                 .last()

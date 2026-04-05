@@ -39,10 +39,7 @@ pub fn load_configured_defaults(
         }
         DEFAULTS.to_vec()
     } else {
-        initial_rules
-            .iter()
-            .map(|s| s.as_str())
-            .collect()
+        initial_rules.iter().map(|s| s.as_str()).collect()
     };
 
     let mut added = 0;
@@ -71,8 +68,8 @@ pub fn load_defaults(engine: &RulesEngine<'_>) -> Result<usize, RulesError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use archon_memory::MemoryGraph;
     use crate::rules::RulesEngine;
+    use archon_memory::MemoryGraph;
 
     // ── load_configured_defaults tests ────────────────────────────────────
 
@@ -151,10 +148,15 @@ mod tests {
         let graph = MemoryGraph::in_memory().expect("graph");
         let engine = RulesEngine::new(&graph);
 
-        engine.add_rule("existing", crate::rules::RuleSource::UserDefined).expect("add");
+        engine
+            .add_rule("existing", crate::rules::RuleSource::UserDefined)
+            .expect("add");
 
         let count = load_configured_defaults(&engine, &[]).expect("load");
-        assert_eq!(count, 0, "should not add defaults when rules exist and config is empty");
+        assert_eq!(
+            count, 0,
+            "should not add defaults when rules exist and config is empty"
+        );
     }
 
     #[test]

@@ -44,9 +44,7 @@ impl WorktreeManager {
     ///
     /// Defaults to `~/.local/share/archon/worktrees/`.
     pub fn worktrees_dir() -> PathBuf {
-        dirs_next()
-            .join("archon")
-            .join("worktrees")
+        dirs_next().join("archon").join("worktrees")
     }
 
     /// Create a new worktree for the given session.
@@ -92,13 +90,12 @@ impl WorktreeManager {
             &branch_name_to_worktree_name(&branch_name),
             &wt_dir,
             Some(
-                git2::WorktreeAddOptions::new()
-                    .reference(Some(
-                        &repo
-                            .find_branch(&branch_name, BranchType::Local)
-                            .map_err(|e| format!("Failed to find branch: {e}"))?
-                            .into_reference(),
-                    )),
+                git2::WorktreeAddOptions::new().reference(Some(
+                    &repo
+                        .find_branch(&branch_name, BranchType::Local)
+                        .map_err(|e| format!("Failed to find branch: {e}"))?
+                        .into_reference(),
+                )),
             ),
         )
         .map_err(|e| format!("Failed to create worktree: {e}"))?;
@@ -133,13 +130,11 @@ impl WorktreeManager {
         action: ExitAction,
     ) -> Result<String, String> {
         match action {
-            ExitAction::Keep => {
-                Ok(format!(
-                    "Worktree kept at {} on branch '{}'",
-                    info.worktree_path.display(),
-                    info.branch_name,
-                ))
-            }
+            ExitAction::Keep => Ok(format!(
+                "Worktree kept at {} on branch '{}'",
+                info.worktree_path.display(),
+                info.branch_name,
+            )),
             ExitAction::Discard => {
                 // Prune the worktree from git's perspective
                 prune_worktree(repo, &info.branch_name)?;
@@ -151,9 +146,7 @@ impl WorktreeManager {
                 }
 
                 // Delete the branch
-                if let Ok(mut branch) =
-                    repo.find_branch(&info.branch_name, BranchType::Local)
-                {
+                if let Ok(mut branch) = repo.find_branch(&info.branch_name, BranchType::Local) {
                     branch
                         .delete()
                         .map_err(|e| format!("Failed to delete branch: {e}"))?;
@@ -175,9 +168,7 @@ impl WorktreeManager {
                         .map_err(|e| format!("Failed to remove worktree directory: {e}"))?;
                 }
 
-                if let Ok(mut branch) =
-                    repo.find_branch(&info.branch_name, BranchType::Local)
-                {
+                if let Ok(mut branch) = repo.find_branch(&info.branch_name, BranchType::Local) {
                     branch
                         .delete()
                         .map_err(|e| format!("Failed to delete branch: {e}"))?;
@@ -210,14 +201,8 @@ impl WorktreeManager {
             if let Ok(contents) = fs::read_to_string(&meta_path) {
                 if let Ok(meta) = serde_json::from_str::<serde_json::Value>(&contents) {
                     let info = WorktreeInfo {
-                        session_id: meta["session_id"]
-                            .as_str()
-                            .unwrap_or_default()
-                            .to_string(),
-                        branch_name: meta["branch_name"]
-                            .as_str()
-                            .unwrap_or_default()
-                            .to_string(),
+                        session_id: meta["session_id"].as_str().unwrap_or_default().to_string(),
+                        branch_name: meta["branch_name"].as_str().unwrap_or_default().to_string(),
                         worktree_path: path.clone(),
                         original_dir: PathBuf::from(
                             meta["original_dir"].as_str().unwrap_or_default(),
@@ -392,8 +377,12 @@ fn merge_worktree_branch(repo: &Repository, info: &WorktreeInfo) -> Result<(), S
     let mut checkout_opts = git2::build::CheckoutBuilder::new();
     checkout_opts.force();
 
-    repo.merge(&[&annotated], Some(&mut merge_opts), Some(&mut checkout_opts))
-        .map_err(|e| format!("Merge failed: {e}"))?;
+    repo.merge(
+        &[&annotated],
+        Some(&mut merge_opts),
+        Some(&mut checkout_opts),
+    )
+    .map_err(|e| format!("Merge failed: {e}"))?;
 
     // Create merge commit
     let mut index = repo
@@ -416,7 +405,10 @@ fn merge_worktree_branch(repo: &Repository, info: &WorktreeInfo) -> Result<(), S
         .or_else(|_| git2::Signature::now("Archon", "archon@localhost"))
         .map_err(|e| format!("Failed to create signature: {e}"))?;
 
-    let msg = format!("archon: merge {} into {}", info.branch_name, info.original_branch);
+    let msg = format!(
+        "archon: merge {} into {}",
+        info.branch_name, info.original_branch
+    );
 
     repo.commit(
         Some("HEAD"),

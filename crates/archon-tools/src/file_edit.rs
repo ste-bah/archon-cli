@@ -75,9 +75,7 @@ impl Tool for EditTool {
         };
 
         if !content.contains(old_string) {
-            return ToolResult::error(format!(
-                "old_string not found in {file_path}"
-            ));
+            return ToolResult::error(format!("old_string not found in {file_path}"));
         }
 
         let match_count = content.matches(old_string).count();
@@ -96,9 +94,7 @@ impl Tool for EditTool {
         };
 
         match fs::write(path, new_content) {
-            Ok(()) => ToolResult::success(format!(
-                "File {file_path} updated successfully."
-            )),
+            Ok(()) => ToolResult::success(format!("File {file_path} updated successfully.")),
             Err(e) => ToolResult::error(format!("Failed to write file: {e}")),
         }
     }

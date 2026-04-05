@@ -119,15 +119,25 @@ impl Tool for VerbosityToggleTool {
             "set" => {
                 let mode = match input.get("mode").and_then(|v| v.as_str()) {
                     Some(m) => m,
-                    None => return ToolResult::error("VerbosityToggle: 'mode' field is required for 'set' action"),
+                    None => {
+                        return ToolResult::error(
+                            "VerbosityToggle: 'mode' field is required for 'set' action",
+                        );
+                    }
                 };
                 match mode {
                     "brief" => {
-                        self.state.lock().unwrap_or_else(|p| p.into_inner()).set_verbose(false);
+                        self.state
+                            .lock()
+                            .unwrap_or_else(|p| p.into_inner())
+                            .set_verbose(false);
                         ToolResult::success("Verbosity mode set to: brief")
                     }
                     "verbose" => {
-                        self.state.lock().unwrap_or_else(|p| p.into_inner()).set_verbose(true);
+                        self.state
+                            .lock()
+                            .unwrap_or_else(|p| p.into_inner())
+                            .set_verbose(true);
                         ToolResult::success("Verbosity mode set to: verbose")
                     }
                     other => ToolResult::error(format!(
@@ -136,7 +146,11 @@ impl Tool for VerbosityToggleTool {
                 }
             }
             "status" => {
-                let mode = self.state.lock().unwrap_or_else(|p| p.into_inner()).mode_str();
+                let mode = self
+                    .state
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .mode_str();
                 ToolResult::success(format!("Current verbosity mode: {mode}"))
             }
             other => ToolResult::error(format!(

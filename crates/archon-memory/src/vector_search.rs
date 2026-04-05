@@ -177,7 +177,9 @@ pub fn search_similar(
             bind_distance: distance
         }";
 
-    let result = db.run_script(query, params, ScriptMutability::Immutable).map_err(db_err)?;
+    let result = db
+        .run_script(query, params, ScriptMutability::Immutable)
+        .map_err(db_err)?;
 
     let mut results = Vec::with_capacity(result.rows.len());
     for row in &result.rows {

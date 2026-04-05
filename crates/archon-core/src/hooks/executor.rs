@@ -189,6 +189,14 @@ fn spawn_background(
             Ok(b) => b,
             Err(_) => return,
         };
-        let _ = run_command(&command, &payload_bytes, &cwd, &session_id, &event_name, timeout_secs).await;
+        let _ = run_command(
+            &command,
+            &payload_bytes,
+            &cwd,
+            &session_id,
+            &event_name,
+            timeout_secs,
+        )
+        .await;
     });
 }

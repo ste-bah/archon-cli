@@ -98,7 +98,10 @@ fn parse_prepare_call_hierarchy_op() {
         "character": 4
     }))
     .unwrap();
-    assert!(matches!(input.operation, LspOperation::PrepareCallHierarchy));
+    assert!(matches!(
+        input.operation,
+        LspOperation::PrepareCallHierarchy
+    ));
 }
 
 #[test]
@@ -207,10 +210,22 @@ fn lsp_tool_input_schema_has_operation_field() {
     let tool = LspTool::new(std::sync::Arc::new(tokio::sync::Mutex::new(manager)));
     let schema = tool.input_schema();
     let props = schema["properties"].as_object().unwrap();
-    assert!(props.contains_key("operation"), "input schema must have 'operation' field");
-    assert!(props.contains_key("file_path"), "input schema must have 'file_path' field");
-    assert!(props.contains_key("line"), "input schema must have 'line' field");
-    assert!(props.contains_key("character"), "input schema must have 'character' field");
+    assert!(
+        props.contains_key("operation"),
+        "input schema must have 'operation' field"
+    );
+    assert!(
+        props.contains_key("file_path"),
+        "input schema must have 'file_path' field"
+    );
+    assert!(
+        props.contains_key("line"),
+        "input schema must have 'line' field"
+    );
+    assert!(
+        props.contains_key("character"),
+        "input schema must have 'character' field"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -221,7 +236,10 @@ fn lsp_tool_input_schema_has_operation_field() {
 fn diagnostic_registry_starts_empty() {
     let registry = LspDiagnosticRegistry::new();
     let diags = registry.get_diagnostics("/src/main.rs");
-    assert!(diags.is_empty(), "fresh registry should have no diagnostics");
+    assert!(
+        diags.is_empty(),
+        "fresh registry should have no diagnostics"
+    );
 }
 
 #[test]
@@ -246,8 +264,9 @@ fn diagnostic_registry_stores_and_retrieves() {
 #[test]
 fn diagnostic_registry_replaces_on_republish() {
     let mut registry = LspDiagnosticRegistry::new();
-    registry.publish("/src/main.rs", vec![
-        archon_tools::lsp_diagnostics::LspDiagnostic {
+    registry.publish(
+        "/src/main.rs",
+        vec![archon_tools::lsp_diagnostics::LspDiagnostic {
             message: "first".to_string(),
             severity: archon_tools::lsp_diagnostics::DiagnosticSeverity::Error,
             range_start_line: 1,
@@ -256,10 +275,11 @@ fn diagnostic_registry_replaces_on_republish() {
             range_end_char: 5,
             code: None,
             source: None,
-        }
-    ]);
-    registry.publish("/src/main.rs", vec![
-        archon_tools::lsp_diagnostics::LspDiagnostic {
+        }],
+    );
+    registry.publish(
+        "/src/main.rs",
+        vec![archon_tools::lsp_diagnostics::LspDiagnostic {
             message: "second".to_string(),
             severity: archon_tools::lsp_diagnostics::DiagnosticSeverity::Warning,
             range_start_line: 2,
@@ -268,8 +288,8 @@ fn diagnostic_registry_replaces_on_republish() {
             range_end_char: 5,
             code: None,
             source: None,
-        }
-    ]);
+        }],
+    );
     let diags = registry.get_diagnostics("/src/main.rs");
     assert_eq!(diags.len(), 1, "publish replaces, not appends");
     assert_eq!(diags[0].message, "second");
@@ -278,14 +298,19 @@ fn diagnostic_registry_replaces_on_republish() {
 #[test]
 fn diagnostic_registry_clear_empties_file() {
     let mut registry = LspDiagnosticRegistry::new();
-    registry.publish("/src/main.rs", vec![
-        archon_tools::lsp_diagnostics::LspDiagnostic {
+    registry.publish(
+        "/src/main.rs",
+        vec![archon_tools::lsp_diagnostics::LspDiagnostic {
             message: "some error".to_string(),
             severity: archon_tools::lsp_diagnostics::DiagnosticSeverity::Error,
-            range_start_line: 0, range_start_char: 0, range_end_line: 0, range_end_char: 1,
-            code: None, source: None,
-        }
-    ]);
+            range_start_line: 0,
+            range_start_char: 0,
+            range_end_line: 0,
+            range_end_char: 1,
+            code: None,
+            source: None,
+        }],
+    );
     registry.clear("/src/main.rs");
     assert!(registry.get_diagnostics("/src/main.rs").is_empty());
 }
@@ -293,14 +318,19 @@ fn diagnostic_registry_clear_empties_file() {
 #[test]
 fn diagnostic_registry_separate_files_independent() {
     let mut registry = LspDiagnosticRegistry::new();
-    registry.publish("/src/a.rs", vec![
-        archon_tools::lsp_diagnostics::LspDiagnostic {
+    registry.publish(
+        "/src/a.rs",
+        vec![archon_tools::lsp_diagnostics::LspDiagnostic {
             message: "error in a".to_string(),
             severity: archon_tools::lsp_diagnostics::DiagnosticSeverity::Error,
-            range_start_line: 0, range_start_char: 0, range_end_line: 0, range_end_char: 1,
-            code: None, source: None,
-        }
-    ]);
+            range_start_line: 0,
+            range_start_char: 0,
+            range_end_line: 0,
+            range_end_char: 1,
+            code: None,
+            source: None,
+        }],
+    );
     // b.rs was not published — must return empty
     assert!(registry.get_diagnostics("/src/b.rs").is_empty());
     // a.rs still has its diagnostics
@@ -321,7 +351,11 @@ fn manager_not_connected_initially() {
 fn manager_detects_rust_analyzer_from_cargo_toml() {
     // Create a temp dir with Cargo.toml
     let tmp = tempfile::tempdir().unwrap();
-    std::fs::write(tmp.path().join("Cargo.toml"), "[package]\nname = \"test\"\nversion = \"0.1.0\"").unwrap();
+    std::fs::write(
+        tmp.path().join("Cargo.toml"),
+        "[package]\nname = \"test\"\nversion = \"0.1.0\"",
+    )
+    .unwrap();
     let manager = LspServerManager::new(tmp.path().to_path_buf(), None);
     let server = manager.detect_language_server();
     assert!(
@@ -339,10 +373,17 @@ fn manager_detects_rust_analyzer_from_cargo_toml() {
 #[test]
 fn manager_detects_typescript_server_from_package_json() {
     let tmp = tempfile::tempdir().unwrap();
-    std::fs::write(tmp.path().join("package.json"), r#"{"name":"test","version":"1.0.0"}"#).unwrap();
+    std::fs::write(
+        tmp.path().join("package.json"),
+        r#"{"name":"test","version":"1.0.0"}"#,
+    )
+    .unwrap();
     let manager = LspServerManager::new(tmp.path().to_path_buf(), None);
     let server = manager.detect_language_server();
-    assert!(server.is_some(), "package.json should detect a TypeScript language server");
+    assert!(
+        server.is_some(),
+        "package.json should detect a TypeScript language server"
+    );
     let (binary, _args) = server.unwrap();
     assert!(
         binary.contains("typescript-language-server") || binary.contains("tsserver"),

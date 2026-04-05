@@ -20,7 +20,7 @@ use tokio::net::TcpListener;
 use tracing::{debug, error, warn};
 
 use crate::graph::MemoryGraph;
-use crate::protocol::{make_response_err, make_response_ok, Request};
+use crate::protocol::{Request, make_response_err, make_response_ok};
 use crate::types::{MemoryError, MemoryType, RelType, SearchFilter};
 
 /// A TCP server wrapping a shared [`MemoryGraph`].
@@ -161,11 +161,7 @@ fn dispatch(graph: &MemoryGraph, method: &str, params: &Value) -> Result<Value, 
             let content = opt_str_param(params, "content");
             let tags = opt_string_array_param(params, "tags");
             graph
-                .update_memory(
-                    &id,
-                    content.as_deref(),
-                    tags.as_deref(),
-                )
+                .update_memory(&id, content.as_deref(), tags.as_deref())
                 .map_err(|e| e.to_string())?;
             Ok(Value::Null)
         }
@@ -192,13 +188,7 @@ fn dispatch(graph: &MemoryGraph, method: &str, params: &Value) -> Result<Value, 
             let context = opt_str_param(params, "context");
             let strength = f64_param(params, "strength")?;
             graph
-                .create_relationship(
-                    &from_id,
-                    &to_id,
-                    rel_type,
-                    context.as_deref(),
-                    strength,
-                )
+                .create_relationship(&from_id, &to_id, rel_type, context.as_deref(), strength)
                 .map_err(|e| e.to_string())?;
             Ok(Value::Null)
         }
@@ -219,9 +209,7 @@ fn dispatch(graph: &MemoryGraph, method: &str, params: &Value) -> Result<Value, 
                 .transpose()
                 .map_err(|e| e.to_string())?
                 .unwrap_or_default();
-            let mems = graph
-                .search_memories(&filter)
-                .map_err(|e| e.to_string())?;
+            let mems = graph.search_memories(&filter).map_err(|e| e.to_string())?;
             serde_json::to_value(mems).map_err(|e| e.to_string())
         }
 

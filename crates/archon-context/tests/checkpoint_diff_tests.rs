@@ -1,4 +1,4 @@
-use archon_context::checkpoint_diff::{diff_snapshots, CheckpointEntry};
+use archon_context::checkpoint_diff::{CheckpointEntry, diff_snapshots};
 
 // ---------------------------------------------------------------------------
 // diff_identical_files

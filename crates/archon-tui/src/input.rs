@@ -123,7 +123,11 @@ impl InputHandler {
     /// Update suggestion state based on current input text.
     fn refresh_suggestions(&mut self) {
         if self.current.starts_with('/') {
-            let prefix = self.current.split_whitespace().next().unwrap_or(&self.current);
+            let prefix = self
+                .current
+                .split_whitespace()
+                .next()
+                .unwrap_or(&self.current);
             // If there's a space after the command name, the user is typing
             // an argument — dismiss suggestions. split_whitespace ignores
             // trailing spaces, so check for space after the prefix directly.
@@ -327,12 +331,19 @@ mod tests {
     fn suggestions_dismiss_when_argument_typed() {
         let mut input = InputHandler::new();
         // Type "/model" — suggestions active
-        for ch in "/model".chars() { input.insert(ch); }
+        for ch in "/model".chars() {
+            input.insert(ch);
+        }
         assert!(input.suggestions.active);
         // Type space + "haiku" — suggestions should dismiss
         input.insert(' ');
-        assert!(!input.suggestions.active, "suggestions stayed active after argument typed");
-        for ch in "haiku".chars() { input.insert(ch); }
+        assert!(
+            !input.suggestions.active,
+            "suggestions stayed active after argument typed"
+        );
+        for ch in "haiku".chars() {
+            input.insert(ch);
+        }
         assert!(!input.suggestions.active);
         assert_eq!(input.text(), "/model haiku");
     }
@@ -340,10 +351,18 @@ mod tests {
     #[test]
     fn suggestions_stay_active_for_partial_prefix() {
         let mut input = InputHandler::new();
-        for ch in "/mo".chars() { input.insert(ch); }
+        for ch in "/mo".chars() {
+            input.insert(ch);
+        }
         assert!(input.suggestions.active);
         // No space yet — still completing
-        assert!(input.suggestions.suggestions.iter().any(|c| c.name == "/model"));
+        assert!(
+            input
+                .suggestions
+                .suggestions
+                .iter()
+                .any(|c| c.name == "/model")
+        );
     }
 
     #[test]

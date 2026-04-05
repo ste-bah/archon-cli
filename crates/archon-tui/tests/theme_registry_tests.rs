@@ -1,8 +1,6 @@
 //! Tests for TASK-CLI-315: ThemeRegistry, auto/daltonized themes, hex parsing, fallback.
 
-use archon_tui::theme::{
-    available_themes, daltonized_theme, theme_by_name, Theme,
-};
+use archon_tui::theme::{Theme, available_themes, daltonized_theme, theme_by_name};
 use archon_tui::theme_registry::ThemeRegistry;
 use ratatui::style::Color;
 
@@ -13,7 +11,11 @@ use ratatui::style::Color;
 #[test]
 fn all_22_builtin_themes_load() {
     let names = available_themes();
-    assert_eq!(names.len(), 22, "should have exactly 22 built-in theme names");
+    assert_eq!(
+        names.len(),
+        22,
+        "should have exactly 22 built-in theme names"
+    );
     for name in names {
         assert!(
             theme_by_name(name).is_some(),
@@ -25,20 +27,24 @@ fn all_22_builtin_themes_load() {
 #[test]
 fn all_mbti_themes_present() {
     let mbti = [
-        "intj", "intp", "entj", "entp",
-        "infj", "infp", "enfj", "enfp",
-        "istj", "istp", "estj", "estp",
-        "isfj", "isfp", "esfj", "esfp",
+        "intj", "intp", "entj", "entp", "infj", "infp", "enfj", "enfp", "istj", "istp", "estj",
+        "estp", "isfj", "isfp", "esfj", "esfp",
     ];
     for name in mbti {
-        assert!(theme_by_name(name).is_some(), "MBTI theme {name} must exist");
+        assert!(
+            theme_by_name(name).is_some(),
+            "MBTI theme {name} must exist"
+        );
     }
 }
 
 #[test]
 fn utility_themes_present() {
     for name in &["dark", "light", "ocean", "fire", "forest", "mono"] {
-        assert!(theme_by_name(name).is_some(), "utility theme {name} must exist");
+        assert!(
+            theme_by_name(name).is_some(),
+            "utility theme {name} must exist"
+        );
     }
 }
 
@@ -108,7 +114,10 @@ fn daltonized_no_pure_red_success() {
 fn daltonized_no_pure_red_error_vs_success_clash() {
     // error and success must be visually distinct in daltonized mode
     let theme = daltonized_theme();
-    assert_ne!(theme.error, theme.success, "error and success must be different colors");
+    assert_ne!(
+        theme.error, theme.success,
+        "error and success must be different colors"
+    );
 }
 
 #[test]
@@ -198,7 +207,9 @@ fn registry_register_custom_theme() {
     let mut reg = ThemeRegistry::new();
     let custom = theme_by_name("mono").unwrap(); // reuse mono as "custom" for test
     reg.register("my_custom", custom.clone());
-    let got = reg.get("my_custom").expect("custom theme must be retrievable");
+    let got = reg
+        .get("my_custom")
+        .expect("custom theme must be retrievable");
     assert_eq!(*got, custom);
 }
 

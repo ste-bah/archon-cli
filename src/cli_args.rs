@@ -17,7 +17,6 @@ pub struct Cli {
     pub command: Option<Commands>,
 
     // ── Existing flags ─────────────────────────────────────────
-
     /// Resume a previous session (list recent or specify ID)
     #[arg(long)]
     pub resume: Option<Option<String>>,
@@ -43,7 +42,6 @@ pub struct Cli {
     pub setting_sources: Option<Vec<String>>,
 
     // ── Print mode (CLI-218) ───────────────────────────────────
-
     /// Non-interactive single-query mode (print and exit).
     /// Use `-p "query"` to supply the query inline, or `-p` to read from stdin.
     #[arg(short = 'p', long = "print")]
@@ -74,7 +72,6 @@ pub struct Cli {
     pub no_session_persistence: bool,
 
     // ── Session naming & forking (CLI-226) ─────────────────────
-
     /// Assign a human-readable name to this session
     #[arg(short = 'n', long, value_name = "NAME")]
     pub session_name: Option<String>,
@@ -88,7 +85,6 @@ pub struct Cli {
     pub fork_session: bool,
 
     // ── Background sessions (CLI-221) ──────────────────────────
-
     /// Start a background session. Use `--bg "query"` to supply inline, or `--bg` to read stdin.
     #[arg(long)]
     pub bg: Option<Option<String>>,
@@ -114,7 +110,6 @@ pub struct Cli {
     pub logs: Option<String>,
 
     // ── Permissions (CLI-219) ──────────────────────────────────
-
     /// Permission mode (default, acceptEdits, plan, auto, dontAsk, bypassPermissions)
     #[arg(long, value_name = "MODE")]
     pub permission_mode: Option<String>,
@@ -128,7 +123,6 @@ pub struct Cli {
     pub allow_dangerously_skip_permissions: bool,
 
     // ── Session search & management (CLI-208) ──────────────────
-
     /// Session search and management
     #[arg(long)]
     pub sessions: bool,
@@ -162,13 +156,11 @@ pub struct Cli {
     pub delete: Option<String>,
 
     // ── NEW: Model ─────────────────────────────────────────────
-
     /// Override the default model for this session
     #[arg(long, value_name = "MODEL")]
     pub model: Option<String>,
 
     // ── NEW: System prompt ─────────────────────────────────────
-
     /// Replace entire system prompt with this text
     #[arg(long, value_name = "TEXT", conflicts_with = "system_prompt_file")]
     pub system_prompt: Option<String>,
@@ -186,13 +178,11 @@ pub struct Cli {
     pub append_system_prompt_file: Option<PathBuf>,
 
     // ── NEW: Agent ─────────────────────────────────────────────
-
     /// Specify agent definition for session
     #[arg(long, value_name = "NAME")]
     pub agent: Option<String>,
 
     // ── NEW: Configuration ─────────────────────────────────────
-
     /// Load MCP servers from JSON files (repeatable)
     #[arg(long, value_name = "FILES")]
     pub mcp_config: Vec<PathBuf>,
@@ -206,7 +196,6 @@ pub struct Cli {
     pub add_dir: Vec<PathBuf>,
 
     // ── NEW: Mode control ──────────────────────────────────────
-
     /// Minimal mode: skip hooks, CLAUDE.md, MCP auto-start
     #[arg(long)]
     pub bare: bool,
@@ -224,7 +213,6 @@ pub struct Cli {
     pub disable_slash_commands: bool,
 
     // ── NEW: Tool control ──────────────────────────────────────
-
     /// Restrict available tools (comma-separated)
     #[arg(long, value_name = "LIST", value_delimiter = ',')]
     pub tools: Option<Vec<String>>,
@@ -238,7 +226,6 @@ pub struct Cli {
     pub disallowed_tools: Option<Vec<String>>,
 
     // ── Theme (CLI-315) ───────────────────────────────────────
-
     /// Select a named TUI color theme (e.g. intj, ocean, auto, daltonized)
     #[arg(long, value_name = "NAME")]
     pub theme: Option<String>,
@@ -248,7 +235,6 @@ pub struct Cli {
     pub list_themes: bool,
 
     // ── Output style (CLI-310) ─────────────────────────────────
-
     /// Select a named output style (e.g. Explanatory, Learning, Formal, Concise)
     #[arg(long, value_name = "NAME")]
     pub output_style: Option<String>,
@@ -258,7 +244,6 @@ pub struct Cli {
     pub list_output_styles: bool,
 
     // ── Remote / headless ─────────────────────────────────────
-
     /// Run in headless mode (no TUI; JSON-lines on stdin/stdout for remote backend)
     #[arg(long)]
     pub headless: bool,
@@ -268,13 +253,11 @@ pub struct Cli {
     pub session_id: Option<String>,
 
     // ── NEW: Output ────────────────────────────────────────────
-
     /// Verbose logging with full turn-by-turn output
     #[arg(long)]
     pub verbose: bool,
 
     // ── NEW: Debugging ─────────────────────────────────────────
-
     /// Enable debug mode with optional category filter
     #[arg(long, value_name = "CATEGORIES")]
     pub debug: Option<Option<String>>,

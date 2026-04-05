@@ -219,7 +219,10 @@ impl SessionStore {
         params.insert("id".to_string(), DataValue::from(id));
         params.insert("created_at".to_string(), DataValue::from(now.as_str()));
         params.insert("last_active".to_string(), DataValue::from(now.as_str()));
-        params.insert("working_directory".to_string(), DataValue::from(working_dir));
+        params.insert(
+            "working_directory".to_string(),
+            DataValue::from(working_dir),
+        );
         params.insert("git_branch".to_string(), DataValue::from(branch));
         params.insert("model".to_string(), DataValue::from(model));
         params.insert("message_count".to_string(), DataValue::from(0i64));
@@ -274,7 +277,10 @@ impl SessionStore {
         params.insert("id".to_string(), DataValue::from(id.as_str()));
         params.insert("created_at".to_string(), DataValue::from(now.as_str()));
         params.insert("last_active".to_string(), DataValue::from(now.as_str()));
-        params.insert("working_directory".to_string(), DataValue::from(working_dir));
+        params.insert(
+            "working_directory".to_string(),
+            DataValue::from(working_dir),
+        );
         params.insert("git_branch".to_string(), DataValue::from(branch));
         params.insert("model".to_string(), DataValue::from(model));
         params.insert("message_count".to_string(), DataValue::from(0i64));
@@ -323,7 +329,10 @@ impl SessionStore {
     ) -> Result<(), SessionError> {
         let mut params = BTreeMap::new();
         params.insert("session_id".to_string(), DataValue::from(session_id));
-        params.insert("message_index".to_string(), DataValue::from(message_index as i64));
+        params.insert(
+            "message_index".to_string(),
+            DataValue::from(message_index as i64),
+        );
         params.insert("content".to_string(), DataValue::from(content));
 
         self.db
@@ -341,15 +350,36 @@ impl SessionStore {
 
         let mut params = BTreeMap::new();
         params.insert("id".to_string(), DataValue::from(session_id));
-        params.insert("created_at".to_string(), DataValue::from(session.created_at));
+        params.insert(
+            "created_at".to_string(),
+            DataValue::from(session.created_at),
+        );
         params.insert("last_active".to_string(), DataValue::from(now.as_str()));
-        params.insert("working_directory".to_string(), DataValue::from(session.working_directory));
-        params.insert("git_branch".to_string(), DataValue::from(session.git_branch.unwrap_or_default()));
+        params.insert(
+            "working_directory".to_string(),
+            DataValue::from(session.working_directory),
+        );
+        params.insert(
+            "git_branch".to_string(),
+            DataValue::from(session.git_branch.unwrap_or_default()),
+        );
         params.insert("model".to_string(), DataValue::from(session.model));
-        params.insert("message_count".to_string(), DataValue::from((message_index + 1) as i64));
-        params.insert("total_tokens".to_string(), DataValue::from(session.total_tokens as i64));
-        params.insert("total_cost".to_string(), DataValue::from(session.total_cost));
-        params.insert("schema_version".to_string(), DataValue::from(session.schema_version as i64));
+        params.insert(
+            "message_count".to_string(),
+            DataValue::from((message_index + 1) as i64),
+        );
+        params.insert(
+            "total_tokens".to_string(),
+            DataValue::from(session.total_tokens as i64),
+        );
+        params.insert(
+            "total_cost".to_string(),
+            DataValue::from(session.total_cost),
+        );
+        params.insert(
+            "schema_version".to_string(),
+            DataValue::from(session.schema_version as i64),
+        );
 
         self.db
             .run_script(
@@ -382,16 +412,34 @@ impl SessionStore {
 
         let mut params = BTreeMap::new();
         params.insert("id".to_string(), DataValue::from(session_id));
-        params.insert("created_at".to_string(), DataValue::from(session.created_at));
+        params.insert(
+            "created_at".to_string(),
+            DataValue::from(session.created_at),
+        );
         params.insert("last_active".to_string(), DataValue::from(now));
-        params.insert("working_directory".to_string(), DataValue::from(session.working_directory));
-        params.insert("git_branch".to_string(), DataValue::from(session.git_branch.unwrap_or_default()));
+        params.insert(
+            "working_directory".to_string(),
+            DataValue::from(session.working_directory),
+        );
+        params.insert(
+            "git_branch".to_string(),
+            DataValue::from(session.git_branch.unwrap_or_default()),
+        );
         params.insert("model".to_string(), DataValue::from(session.model));
         // Increment message count by 1 per turn (user prompt + assistant response = 1 turn)
-        params.insert("message_count".to_string(), DataValue::from((session.message_count + 1) as i64));
-        params.insert("total_tokens".to_string(), DataValue::from(total_tokens as i64));
+        params.insert(
+            "message_count".to_string(),
+            DataValue::from((session.message_count + 1) as i64),
+        );
+        params.insert(
+            "total_tokens".to_string(),
+            DataValue::from(total_tokens as i64),
+        );
         params.insert("total_cost".to_string(), DataValue::from(total_cost));
-        params.insert("schema_version".to_string(), DataValue::from(session.schema_version as i64));
+        params.insert(
+            "schema_version".to_string(),
+            DataValue::from(session.schema_version as i64),
+        );
 
         self.db
             .run_script(
@@ -417,12 +465,14 @@ impl SessionStore {
         let result = self
             .db
             .run_script(
-                &format!("?[id, created_at, last_active, working_directory, git_branch,
+                &format!(
+                    "?[id, created_at, last_active, working_directory, git_branch,
                   model, message_count, total_tokens, total_cost, schema_version] :=
                     *sessions{{id, created_at, last_active, working_directory, git_branch,
                               model, message_count, total_tokens, total_cost, schema_version}}
                 :sort -last_active
-                :limit {limit}"),
+                :limit {limit}"
+                ),
                 Default::default(),
                 ScriptMutability::Immutable,
             )
@@ -664,7 +714,11 @@ impl SessionStore {
             Ok(None)
         } else {
             let name = extract_str(&result.rows[0][0]);
-            if name.is_empty() { Ok(None) } else { Ok(Some(name)) }
+            if name.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(name))
+            }
         }
     }
 
@@ -731,7 +785,11 @@ impl SessionStore {
             Ok(None)
         } else {
             let pid = extract_str(&result.rows[0][0]);
-            if pid.is_empty() { Ok(None) } else { Ok(Some(pid)) }
+            if pid.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(pid))
+            }
         }
     }
 

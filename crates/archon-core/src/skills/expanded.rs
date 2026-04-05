@@ -90,29 +90,22 @@ expanded_skill!(
 // Session
 // ---------------------------------------------------------------------------
 
-expanded_skill!(
-    TagSkill,
-    "tag",
-    "Tag current session",
-    |args, ctx| {
-        if args.is_empty() {
-            return SkillOutput::Error(
-                "Usage: /tag <name> — assigns a tag to the current session".to_string(),
-            );
-        }
-        let tag = args.join(" ");
-        let db_path = archon_session::storage::default_db_path();
-        match archon_session::storage::SessionStore::open(&db_path) {
-            Ok(store) => {
-                match archon_session::metadata::add_tag(&store, &ctx.session_id, &tag) {
-                    Ok(()) => SkillOutput::Text(format!("Session tagged as '{tag}'.")),
-                    Err(e) => SkillOutput::Error(format!("Tag failed: {e}")),
-                }
-            }
-            Err(e) => SkillOutput::Error(format!("Failed to open session store: {e}")),
-        }
+expanded_skill!(TagSkill, "tag", "Tag current session", |args, ctx| {
+    if args.is_empty() {
+        return SkillOutput::Error(
+            "Usage: /tag <name> — assigns a tag to the current session".to_string(),
+        );
     }
-);
+    let tag = args.join(" ");
+    let db_path = archon_session::storage::default_db_path();
+    match archon_session::storage::SessionStore::open(&db_path) {
+        Ok(store) => match archon_session::metadata::add_tag(&store, &ctx.session_id, &tag) {
+            Ok(()) => SkillOutput::Text(format!("Session tagged as '{tag}'.")),
+            Err(e) => SkillOutput::Error(format!("Tag failed: {e}")),
+        },
+        Err(e) => SkillOutput::Error(format!("Failed to open session store: {e}")),
+    }
+});
 
 expanded_skill!(
     RenameSkill,
@@ -149,7 +142,11 @@ expanded_skill!(
             Err(e) => return SkillOutput::Error(format!("Failed to open session store: {e}")),
         };
         let query = archon_session::search::SessionSearchQuery {
-            text: if args.is_empty() { None } else { Some(args.join(" ")) },
+            text: if args.is_empty() {
+                None
+            } else {
+                Some(args.join(" "))
+            },
             ..Default::default()
         };
         match archon_session::search::search_sessions(&store, &query) {
@@ -195,8 +192,7 @@ expanded_skill!(
     "Undo last file modification",
     |_args, _ctx| {
         SkillOutput::Text(
-            "Undoing last file modification. Use /undo to revert the most recent edit."
-                .to_string(),
+            "Undoing last file modification. Use /undo to revert the most recent edit.".to_string(),
         )
     }
 );
@@ -205,11 +201,7 @@ expanded_skill!(
 // Config
 // ---------------------------------------------------------------------------
 
-expanded_skill!(
-    ReloadSkill,
-    "reload",
-    "Force configuration reload"
-);
+expanded_skill!(ReloadSkill, "reload", "Force configuration reload");
 
 // ---------------------------------------------------------------------------
 // Display
@@ -221,37 +213,24 @@ expanded_skill!(
     "Toggle extended thinking display"
 );
 
-expanded_skill!(
-    ClearSkill,
-    "clear",
-    "Clear conversation history"
-);
+expanded_skill!(ClearSkill, "clear", "Clear conversation history");
 
 // ---------------------------------------------------------------------------
 // Meta
 // ---------------------------------------------------------------------------
 
-expanded_skill!(
-    BugSkill,
-    "bug",
-    "Report a bug",
-    |_args, _ctx| {
-        SkillOutput::Text(
-            "To report a bug:\n\n\
+expanded_skill!(BugSkill, "bug", "Report a bug", |_args, _ctx| {
+    SkillOutput::Text(
+        "To report a bug:\n\n\
              1. Visit https://github.com/archon-cli/archon/issues/new\n\
              2. Include your Archon version (`archon --version`)\n\
              3. Describe the issue with steps to reproduce\n\
              4. Attach any relevant logs (`~/.archon/logs/`)"
-                .to_string(),
-        )
-    }
-);
+            .to_string(),
+    )
+});
 
-expanded_skill!(
-    LoginSkill,
-    "login",
-    "Re-authenticate with the API provider"
-);
+expanded_skill!(LoginSkill, "login", "Re-authenticate with the API provider");
 
 // ---------------------------------------------------------------------------
 // Session management (additional)
@@ -297,23 +276,27 @@ expanded_skill!(
             .join("archon")
             .join("checkpoints.db");
         match archon_session::checkpoint::CheckpointStore::open(&cp_path) {
-            Ok(store) => {
-                match store.list_modified(&ctx.session_id) {
-                    Ok(files) => {
-                        if files.is_empty() {
-                            SkillOutput::Text("No checkpoints in this session. Files must be modified first.".to_string())
-                        } else {
-                            let mut out = String::from("Modified files with checkpoints:\n");
-                            for f in &files {
-                                out.push_str(&format!("  {} (turn {}, by {})\n", f.file_path, f.turn_number, f.tool_name));
-                            }
-                            out.push_str("\nUse the Read tool to examine files, then ask me to restore specific ones.");
-                            SkillOutput::Text(out)
+            Ok(store) => match store.list_modified(&ctx.session_id) {
+                Ok(files) => {
+                    if files.is_empty() {
+                        SkillOutput::Text(
+                            "No checkpoints in this session. Files must be modified first."
+                                .to_string(),
+                        )
+                    } else {
+                        let mut out = String::from("Modified files with checkpoints:\n");
+                        for f in &files {
+                            out.push_str(&format!(
+                                "  {} (turn {}, by {})\n",
+                                f.file_path, f.turn_number, f.tool_name
+                            ));
                         }
+                        out.push_str("\nUse the Read tool to examine files, then ask me to restore specific ones.");
+                        SkillOutput::Text(out)
                     }
-                    Err(e) => SkillOutput::Error(format!("Failed to list checkpoints: {e}")),
                 }
-            }
+                Err(e) => SkillOutput::Error(format!("Failed to list checkpoints: {e}")),
+            },
             Err(e) => SkillOutput::Error(format!("Failed to open checkpoint store: {e}")),
         }
     }
@@ -329,11 +312,7 @@ expanded_skill!(
     "Show token usage, cost breakdown, and turn count"
 );
 
-expanded_skill!(
-    TasksSkill,
-    "tasks",
-    "List and manage background tasks"
-);
+expanded_skill!(TasksSkill, "tasks", "List and manage background tasks");
 
 expanded_skill!(
     RecallSkill,
@@ -368,12 +347,20 @@ expanded_skill!(
             for entry in dir.flatten() {
                 let path = entry.path();
                 if path.is_dir() {
-                    let name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+                    let name = path
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .to_string();
                     let agent_md = path.join("agent.md");
                     let desc = if agent_md.exists() {
                         std::fs::read_to_string(&agent_md)
                             .ok()
-                            .and_then(|c| c.lines().next().map(|l| l.trim_start_matches('#').trim().to_string()))
+                            .and_then(|c| {
+                                c.lines()
+                                    .next()
+                                    .map(|l| l.trim_start_matches('#').trim().to_string())
+                            })
                             .unwrap_or_default()
                     } else {
                         String::new()
@@ -409,9 +396,7 @@ expanded_skill!(
         }
         let theme = &args[0];
         match theme.as_str() {
-            "light" | "dark" | "auto" => {
-                SkillOutput::Text(format!("Theme set to '{theme}'."))
-            }
+            "light" | "dark" | "auto" => SkillOutput::Text(format!("Theme set to '{theme}'.")),
             _ => SkillOutput::Error(format!(
                 "Unknown theme '{theme}'. Available: light, dark, auto"
             )),
@@ -454,7 +439,8 @@ expanded_skill!(
              dd/yy/p   — Delete/yank/paste line\n\
              gg/G      — Top/bottom\n\
              v         — Visual mode\n\
-             :w        — Submit, :q — Quit".to_string()
+             :w        — Submit, :q — Quit"
+                .to_string(),
         )
     }
 );
@@ -470,7 +456,8 @@ expanded_skill!(
              The status bar updates automatically based on:\n\
              - /model changes\n\
              - /permissions changes\n\
-             - Session cost accumulation".to_string()
+             - Session cost accumulation"
+                .to_string(),
         )
     }
 );
@@ -555,7 +542,8 @@ expanded_skill!(
              2. Which tools am I using most/least?\n\
              3. What could I do more efficiently?\n\
              4. Any recurring errors or issues?\n\
-             \nBase your analysis on the conversation history above.".to_string()
+             \nBase your analysis on the conversation history above."
+                .to_string(),
         )
     }
 );
@@ -567,22 +555,20 @@ expanded_skill!(
     |_args, _ctx| {
         let db_path = archon_session::storage::default_db_path();
         match archon_session::storage::SessionStore::open(&db_path) {
-            Ok(store) => {
-                match archon_session::search::session_stats(&store) {
-                    Ok(stats) => {
-                        let mut out = String::from("\nSession statistics:\n");
-                        out.push_str(&format!("  Total sessions:  {}\n", stats.total_sessions));
-                        out.push_str(&format!("  Total tokens:    {}\n", stats.total_tokens));
-                        out.push_str(&format!("  Total messages:  {}\n", stats.total_messages));
-                        if stats.total_sessions > 0 {
-                            let avg_dur = stats.avg_duration_secs / 60.0;
-                            out.push_str(&format!("  Avg duration:    {avg_dur:.1} min\n"));
-                        }
-                        SkillOutput::Text(out)
+            Ok(store) => match archon_session::search::session_stats(&store) {
+                Ok(stats) => {
+                    let mut out = String::from("\nSession statistics:\n");
+                    out.push_str(&format!("  Total sessions:  {}\n", stats.total_sessions));
+                    out.push_str(&format!("  Total tokens:    {}\n", stats.total_tokens));
+                    out.push_str(&format!("  Total messages:  {}\n", stats.total_messages));
+                    if stats.total_sessions > 0 {
+                        let avg_dur = stats.avg_duration_secs / 60.0;
+                        out.push_str(&format!("  Avg duration:    {avg_dur:.1} min\n"));
                     }
-                    Err(e) => SkillOutput::Error(format!("Stats error: {e}")),
+                    SkillOutput::Text(out)
                 }
-            }
+                Err(e) => SkillOutput::Error(format!("Stats error: {e}")),
+            },
             Err(e) => SkillOutput::Error(format!("Failed to open session store: {e}")),
         }
     }
@@ -637,11 +623,7 @@ expanded_skill!(
     }
 );
 
-expanded_skill!(
-    ReleaseNotesSkill,
-    "release-notes",
-    "Show version changelog"
-);
+expanded_skill!(ReleaseNotesSkill, "release-notes", "Show version changelog");
 
 expanded_skill!(
     ScheduleSkill,
@@ -675,8 +657,7 @@ expanded_skill!(
     "Sign out from API provider",
     |_args, _ctx| {
         SkillOutput::Text(
-            "Logged out. API key removed from session. Re-authenticate with /login."
-                .to_string(),
+            "Logged out. API key removed from session. Re-authenticate with /login.".to_string(),
         )
     }
 );

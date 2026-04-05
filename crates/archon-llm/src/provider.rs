@@ -230,9 +230,7 @@ impl ProviderRegistry {
 
     /// Iterate over all registered providers.
     pub fn iter(&self) -> impl Iterator<Item = (&str, &dyn LlmProvider)> {
-        self.providers
-            .iter()
-            .map(|(k, v)| (k.as_str(), v.as_ref()))
+        self.providers.iter().map(|(k, v)| (k.as_str(), v.as_ref()))
     }
 }
 

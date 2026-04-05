@@ -29,7 +29,11 @@ pub struct TeamMessage {
 
 impl TeamMessage {
     /// Create a simple chat message with the current timestamp.
-    pub fn chat(from: impl Into<String>, to: impl Into<String>, content: impl Into<String>) -> Self {
+    pub fn chat(
+        from: impl Into<String>,
+        to: impl Into<String>,
+        content: impl Into<String>,
+    ) -> Self {
         Self {
             from: from.into(),
             to: to.into(),

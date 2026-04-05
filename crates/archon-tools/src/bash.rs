@@ -20,9 +20,22 @@ const SENSITIVE_PATTERNS: &[&str] = &[
 
 /// Environment variables to always pass through.
 const PASSTHROUGH_VARS: &[&str] = &[
-    "PATH", "HOME", "USER", "SHELL", "LANG", "LC_ALL", "TERM",
-    "DISPLAY", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS",
-    "SSH_AUTH_SOCK", "EDITOR", "VISUAL", "TMPDIR", "TMP", "TEMP",
+    "PATH",
+    "HOME",
+    "USER",
+    "SHELL",
+    "LANG",
+    "LC_ALL",
+    "TERM",
+    "DISPLAY",
+    "XDG_RUNTIME_DIR",
+    "DBUS_SESSION_BUS_ADDRESS",
+    "SSH_AUTH_SOCK",
+    "EDITOR",
+    "VISUAL",
+    "TMPDIR",
+    "TMP",
+    "TEMP",
 ];
 
 pub struct BashTool {
@@ -116,11 +129,7 @@ impl Tool for BashTool {
 
         match result {
             Ok((stdout_buf, stderr_buf, status)) => {
-                let exit_code = status
-                    .as_ref()
-                    .ok()
-                    .and_then(|s| s.code())
-                    .unwrap_or(-1);
+                let exit_code = status.as_ref().ok().and_then(|s| s.code()).unwrap_or(-1);
 
                 let mut output = String::new();
 
@@ -154,19 +163,13 @@ impl Tool for BashTool {
             Err(_) => {
                 // Timeout -- kill the process group
                 let _ = child.kill().await;
-                ToolResult::error(format!(
-                    "Command timed out after {}ms",
-                    timeout_ms
-                ))
+                ToolResult::error(format!("Command timed out after {}ms", timeout_ms))
             }
         }
     }
 
     fn permission_level(&self, input: &serde_json::Value) -> PermissionLevel {
-        let command = input
-            .get("command")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let command = input.get("command").and_then(|v| v.as_str()).unwrap_or("");
 
         // Use the permission classifier
         match archon_permissions::classifier::classify_command(command, &[], &[], &[]) {

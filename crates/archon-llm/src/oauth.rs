@@ -58,11 +58,7 @@ fn rand_bytes<const N: usize>() -> [u8; N] {
 // ---------------------------------------------------------------------------
 
 /// Build the authorization URL for the OAuth PKCE flow.
-pub fn build_auth_url(
-    code_challenge: &str,
-    state: &str,
-    redirect_port: u16,
-) -> String {
+pub fn build_auth_url(code_challenge: &str, state: &str, redirect_port: u16) -> String {
     let redirect_uri = format!("http://localhost:{redirect_port}/callback");
     format!(
         "{AUTH_URL}?response_type=code\
@@ -135,8 +131,8 @@ fn parse_exchange_response(body: &str) -> Result<OAuthCredentials, AuthError> {
     let resp: ExchangeResponse = serde_json::from_str(body)
         .map_err(|e| AuthError::ParseError(format!("invalid exchange response: {e}")))?;
 
-    let expires_at = chrono::Utc::now()
-        + chrono::Duration::seconds(resp.expires_in.unwrap_or(3600) as i64);
+    let expires_at =
+        chrono::Utc::now() + chrono::Duration::seconds(resp.expires_in.unwrap_or(3600) as i64);
 
     let scopes: Vec<String> = resp
         .scope
@@ -183,10 +179,7 @@ pub fn start_callback_server(
     Ok((port, rx))
 }
 
-fn handle_callback(
-    server: &tiny_http::Server,
-    expected_state: &str,
-) -> Result<String, AuthError> {
+fn handle_callback(server: &tiny_http::Server, expected_state: &str) -> Result<String, AuthError> {
     let timeout = std::time::Duration::from_secs(LOGIN_TIMEOUT_SECS);
 
     let request = server

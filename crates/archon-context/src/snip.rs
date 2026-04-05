@@ -1,5 +1,5 @@
 use crate::boundary::{CompactBoundary, CompactionStrategy};
-use crate::messages::{total_estimated_tokens, ContextMessage};
+use crate::messages::{ContextMessage, total_estimated_tokens};
 
 /// Count total turns in the message list.
 ///
@@ -73,8 +73,7 @@ pub fn snip_messages(
     let removed_tokens = total_estimated_tokens(removed);
     let kept_before = &messages[..remove_start];
     let kept_after = &messages[remove_end..];
-    let remaining_tokens =
-        total_estimated_tokens(kept_before) + total_estimated_tokens(kept_after);
+    let remaining_tokens = total_estimated_tokens(kept_before) + total_estimated_tokens(kept_after);
 
     let boundary = CompactBoundary {
         summary: format!(

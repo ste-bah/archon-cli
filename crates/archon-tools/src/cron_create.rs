@@ -23,7 +23,11 @@ impl CronCreateTool {
     }
 
     fn store(&self) -> CronStore {
-        CronStore::new(self.project_dir.join(".claude").join("scheduled_tasks.json"))
+        CronStore::new(
+            self.project_dir
+                .join(".claude")
+                .join("scheduled_tasks.json"),
+        )
     }
 }
 
@@ -83,7 +87,10 @@ impl Tool for CronCreateTool {
         };
 
         // Parse optional fields
-        let name = input.get("name").and_then(|v| v.as_str()).map(|s| s.to_owned());
+        let name = input
+            .get("name")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_owned());
         let recurring = input.get("recurring").and_then(|v| v.as_bool());
 
         // Build task
@@ -107,13 +114,16 @@ impl Tool for CronCreateTool {
             .map(|t: chrono::DateTime<chrono::Utc>| t.format("%Y-%m-%d %H:%M:%S UTC").to_string())
             .unwrap_or_else(|| "unknown".to_string());
 
-        ToolResult::success(json!({
-            "id": id,
-            "cron": cron,
-            "name": name,
-            "recurring": recurring.unwrap_or(true),
-            "next_fire": next
-        }).to_string())
+        ToolResult::success(
+            json!({
+                "id": id,
+                "cron": cron,
+                "name": name,
+                "recurring": recurring.unwrap_or(true),
+                "next_fire": next
+            })
+            .to_string(),
+        )
     }
 
     fn permission_level(&self, _input: &serde_json::Value) -> PermissionLevel {

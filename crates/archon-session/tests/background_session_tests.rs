@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::PathBuf;
 
-use archon_session::background::{sessions_dir, BackgroundSessionInfo};
+use archon_session::background::{BackgroundSessionInfo, sessions_dir};
 use archon_session::registry;
 
 /// Helper: create a temp directory to use as a fake sessions dir.
@@ -77,7 +77,11 @@ fn status_file_has_correct_fields() {
 fn list_empty_when_no_sessions() {
     let dir = temp_sessions_dir();
     let list = registry::list_sessions_in_dir(&dir).expect("list");
-    assert!(list.is_empty(), "expected empty list, got {} items", list.len());
+    assert!(
+        list.is_empty(),
+        "expected empty list, got {} items",
+        list.len()
+    );
     cleanup(&dir);
 }
 
@@ -111,13 +115,7 @@ fn cleanup_removes_old() {
 
     // Create an old session (8 days ago)
     let old_time = chrono::Utc::now() - chrono::Duration::days(8);
-    write_status(
-        &dir,
-        "old-sess",
-        "old",
-        "completed",
-        &old_time.to_rfc3339(),
-    );
+    write_status(&dir, "old-sess", "old", "completed", &old_time.to_rfc3339());
     // Also create the log and pid files that should be cleaned up
     fs::write(dir.join("old-sess.log"), "log data").expect("write log");
     fs::write(dir.join("old-sess.pid"), "12345").expect("write pid");
@@ -163,7 +161,13 @@ fn stale_pid_detection() {
 
     // Use a PID that almost certainly doesn't exist (max PID)
     let stale_pid = 4_194_300u32;
-    write_status(&dir, "stale-sess", "stale", "running", "2026-04-03T12:00:00Z");
+    write_status(
+        &dir,
+        "stale-sess",
+        "stale",
+        "running",
+        "2026-04-03T12:00:00Z",
+    );
     fs::write(dir.join("stale-sess.pid"), stale_pid.to_string()).expect("write pid");
 
     let cleaned = registry::cleanup_stale_pids_in_dir(&dir).expect("cleanup stale");
@@ -208,8 +212,7 @@ fn view_logs_reads_file() {
     let log_content = "line 1\nline 2\nline 3\n";
     fs::write(dir.join("log-sess.log"), log_content).expect("write log");
 
-    let content =
-        archon_session::attach::view_logs_in_dir(&dir, "log-sess").expect("view logs");
+    let content = archon_session::attach::view_logs_in_dir(&dir, "log-sess").expect("view logs");
     assert_eq!(content, log_content);
 
     cleanup(&dir);
@@ -247,8 +250,7 @@ fn background_session_info_serializes() {
     };
 
     let json = serde_json::to_string(&info).expect("serialize");
-    let deserialized: BackgroundSessionInfo =
-        serde_json::from_str(&json).expect("deserialize");
+    let deserialized: BackgroundSessionInfo = serde_json::from_str(&json).expect("deserialize");
 
     assert_eq!(deserialized.id, info.id);
     assert_eq!(deserialized.name, info.name);
@@ -327,6 +329,7 @@ fn cfg_unix_guards_compile() {
     #[cfg(unix)]
     {
         // These functions exist on Unix
-        let _ = archon_session::background::is_session_alive_in_dir as fn(&std::path::Path, &str) -> bool;
+        let _ = archon_session::background::is_session_alive_in_dir
+            as fn(&std::path::Path, &str) -> bool;
     }
 }

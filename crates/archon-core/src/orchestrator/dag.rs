@@ -1,7 +1,7 @@
-use std::collections::HashMap;
+use super::events::Subtask;
 use petgraph::algo::toposort;
 use petgraph::graph::{DiGraph, NodeIndex};
-use super::events::Subtask;
+use std::collections::HashMap;
 
 /// Build execution waves from a list of subtasks with dependencies.
 /// Returns a Vec of waves; tasks in the same wave can execute concurrently.
@@ -19,11 +19,7 @@ pub fn build_dag_waves(subtasks: &[Subtask]) -> anyhow::Result<Vec<Vec<String>>>
         let to = id_to_node[&task.id];
         for dep in &task.dependencies {
             let from = id_to_node.get(dep).ok_or_else(|| {
-                anyhow::anyhow!(
-                    "subtask '{}' depends on unknown subtask '{}'",
-                    task.id,
-                    dep
-                )
+                anyhow::anyhow!("subtask '{}' depends on unknown subtask '{}'", task.id, dep)
             })?;
             graph.add_edge(*from, to, ());
         }

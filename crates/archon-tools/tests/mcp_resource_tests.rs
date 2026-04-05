@@ -186,7 +186,10 @@ async fn read_existing_resource() {
     let provider = mock_provider();
     let tool = ReadMcpResourceTool::new(provider);
     let result = tool
-        .execute(serde_json::json!({"uri": "file:///config.toml"}), &make_ctx())
+        .execute(
+            serde_json::json!({"uri": "file:///config.toml"}),
+            &make_ctx(),
+        )
         .await;
     assert!(!result.is_error, "unexpected error: {}", result.content);
     assert!(result.content.contains("Content of file:///config.toml"));
@@ -316,7 +319,10 @@ async fn read_large_utf8_no_panic() {
     let result = tool
         .execute(serde_json::json!({"uri": "large-utf8"}), &make_ctx())
         .await;
-    assert!(!result.is_error, "should not panic on multi-byte truncation");
+    assert!(
+        !result.is_error,
+        "should not panic on multi-byte truncation"
+    );
     assert!(result.content.contains("[Content truncated at 100KB]"));
 }
 

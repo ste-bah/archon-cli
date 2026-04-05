@@ -130,9 +130,7 @@ impl OutputStyleRegistry {
     pub fn forced_plugin_style(&self) -> Option<&OutputStyleConfig> {
         let mut found: Option<&OutputStyleConfig> = None;
         for style in self.styles.values() {
-            if style.source == OutputStyleSource::Plugin
-                && style.force_for_plugin == Some(true)
-            {
+            if style.source == OutputStyleSource::Plugin && style.force_for_plugin == Some(true) {
                 if found.is_some() {
                     tracing::warn!(
                         style = style.name.as_str(),

@@ -8,8 +8,8 @@ use std::path::PathBuf;
 use wasmtime::{Caller, Config, Engine, Extern, Instance, Linker, Module, Store};
 
 use crate::abi::{
-    read_guest_str, write_guest_i32, write_guest_memory, DEFAULT_FUEL_BUDGET,
-    DEFAULT_MAX_MEMORY_BYTES, HOST_API_VERSION, MIN_SUPPORTED_GUEST_VERSION, VALID_HOOK_EVENTS,
+    DEFAULT_FUEL_BUDGET, DEFAULT_MAX_MEMORY_BYTES, HOST_API_VERSION, MIN_SUPPORTED_GUEST_VERSION,
+    VALID_HOOK_EVENTS, read_guest_str, write_guest_i32, write_guest_memory,
 };
 use crate::capability::PluginCapability;
 use crate::error::PluginError;
@@ -149,7 +149,9 @@ impl WasmPluginHost {
             registered_tools: Vec::new(),
             registered_hooks: Vec::new(),
             registered_commands: Vec::new(),
-            limiter: MemoryLimiter { max_bytes: self.config.max_memory_bytes },
+            limiter: MemoryLimiter {
+                max_bytes: self.config.max_memory_bytes,
+            },
         };
         let mut store = Store::new(&self.engine, data);
         store.limiter(|d| &mut d.limiter as &mut dyn wasmtime::ResourceLimiter);
@@ -167,12 +169,12 @@ impl WasmPluginHost {
         })?;
 
         // 5. Instantiate (runs start function if present — plugins register tools here)
-        let instance = linker
-            .instantiate(&mut store, &module)
-            .map_err(|e| PluginError::ComponentLoadFailed {
+        let instance = linker.instantiate(&mut store, &module).map_err(|e| {
+            PluginError::ComponentLoadFailed {
                 path: data_dir.clone(),
                 reason: format!("instantiate: {e}"),
-            })?;
+            }
+        })?;
 
         // 6. Verify required exports exist
         verify_required_exports(&instance, &mut store, &data_dir)?;
@@ -416,7 +418,10 @@ fn call_guest_api_version(
 ) -> Result<u32, PluginError> {
     let func = instance
         .get_typed_func::<(), i32>(&mut *store, "archon_guest_api_version")
-        .map_err(|_| PluginError::AbiMismatch { expected: HOST_API_VERSION, got: 0 })?;
+        .map_err(|_| PluginError::AbiMismatch {
+            expected: HOST_API_VERSION,
+            got: 0,
+        })?;
     let version = func
         .call(store, ())
         .map_err(|e| PluginError::LoadFailed(format!("archon_guest_api_version: {e}")))?;
@@ -570,9 +575,11 @@ fn register_host_functions(linker: &mut Linker<PluginData>) -> anyhow::Result<()
     )?;
 
     // archon_api_version() -> i32
-    linker.func_wrap("archon", "archon_api_version", |_: Caller<PluginData>| -> i32 {
-        HOST_API_VERSION as i32
-    })?;
+    linker.func_wrap(
+        "archon",
+        "archon_api_version",
+        |_: Caller<PluginData>| -> i32 { HOST_API_VERSION as i32 },
+    )?;
 
     Ok(())
 }

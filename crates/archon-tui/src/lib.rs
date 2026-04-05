@@ -14,12 +14,12 @@ pub mod voice;
 pub mod syntax;
 
 pub mod diff_view;
-pub mod virtual_scroll;
-pub mod verbosity;
-pub mod theme_registry;
 pub mod pane;
 pub mod pane_layout;
 pub mod pane_manager;
+pub mod theme_registry;
+pub mod verbosity;
+pub mod virtual_scroll;
 
 #[cfg(feature = "terminal-panel")]
 pub mod terminal_panel;

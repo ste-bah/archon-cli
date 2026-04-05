@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 
 use toml::Value;
 
-use crate::config::{validate, ArchonConfig, ConfigError};
+use crate::config::{ArchonConfig, ConfigError, validate};
 
 // ---------------------------------------------------------------------------
 // ConfigLayer enum

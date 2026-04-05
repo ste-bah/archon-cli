@@ -56,12 +56,7 @@ fn bedrock_sigv4_header_format_valid() {
 #[test]
 fn bedrock_request_maps_system_prompt() {
     let system = vec![serde_json::json!({"type": "text", "text": "You are helpful."})];
-    let body = BedrockProvider::build_converse_body(
-        &system,
-        &[],
-        &[],
-        8192,
-    );
+    let body = BedrockProvider::build_converse_body(&system, &[], &[], 8192);
     let sys_arr = body["system"].as_array().expect("system should be array");
     assert!(!sys_arr.is_empty(), "system array should not be empty");
     assert_eq!(sys_arr[0]["text"], "You are helpful.");
@@ -83,14 +78,11 @@ fn bedrock_request_maps_tools() {
             }
         }
     })];
-    let body = BedrockProvider::build_converse_body(
-        &[],
-        &[],
-        &tools,
-        8192,
-    );
+    let body = BedrockProvider::build_converse_body(&[], &[], &tools, 8192);
     let tool_config = body.get("toolConfig").expect("toolConfig must be present");
-    let tools_arr = tool_config["tools"].as_array().expect("tools must be array");
+    let tools_arr = tool_config["tools"]
+        .as_array()
+        .expect("tools must be array");
     assert_eq!(tools_arr.len(), 1);
     let spec = &tools_arr[0]["toolSpec"];
     assert_eq!(spec["name"], "Bash");
@@ -202,7 +194,10 @@ impl EnvGuard {
             std::env::remove_var("AWS_ACCESS_KEY_ID");
             std::env::remove_var("AWS_SECRET_ACCESS_KEY");
         }
-        Self { old_key, old_secret }
+        Self {
+            old_key,
+            old_secret,
+        }
     }
 }
 

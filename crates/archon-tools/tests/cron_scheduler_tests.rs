@@ -20,17 +20,32 @@ fn make_recurring_task(id: &str) -> CronTask {
 
 #[test]
 fn valid_cron_expressions_pass() {
-    assert!(validate_cron_expression("* * * * *").is_ok(), "every minute");
+    assert!(
+        validate_cron_expression("* * * * *").is_ok(),
+        "every minute"
+    );
     assert!(validate_cron_expression("0 9 * * 1").is_ok(), "9am Monday");
-    assert!(validate_cron_expression("*/5 * * * *").is_ok(), "every 5 minutes");
-    assert!(validate_cron_expression("0 0 1 * *").is_ok(), "first of month");
-    assert!(validate_cron_expression("30 14 * * 5").is_ok(), "Friday 2:30pm");
+    assert!(
+        validate_cron_expression("*/5 * * * *").is_ok(),
+        "every 5 minutes"
+    );
+    assert!(
+        validate_cron_expression("0 0 1 * *").is_ok(),
+        "first of month"
+    );
+    assert!(
+        validate_cron_expression("30 14 * * 5").is_ok(),
+        "Friday 2:30pm"
+    );
 }
 
 #[test]
 fn invalid_cron_expressions_fail() {
     assert!(validate_cron_expression("").is_err(), "empty string");
-    assert!(validate_cron_expression("* * * *").is_err(), "only 4 fields");
+    assert!(
+        validate_cron_expression("* * * *").is_err(),
+        "only 4 fields"
+    );
     assert!(validate_cron_expression("60 * * * *").is_err(), "minute 60");
     assert!(validate_cron_expression("* 25 * * *").is_err(), "hour 25");
     assert!(validate_cron_expression("not-a-cron").is_err(), "text");
@@ -39,7 +54,10 @@ fn invalid_cron_expressions_fail() {
 #[test]
 fn six_field_cron_rejected() {
     // 5 fields only — 6-field (with seconds) should fail
-    assert!(validate_cron_expression("0 * * * * *").is_err(), "6 fields should fail");
+    assert!(
+        validate_cron_expression("0 * * * * *").is_err(),
+        "6 fields should fail"
+    );
 }
 
 // ---------------------------------------------------------------------------

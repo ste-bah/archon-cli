@@ -138,8 +138,7 @@ fn sha256_hex(data: &[u8]) -> String {
 
 /// Compute HMAC-SHA256.
 fn hmac_sha256(key: &[u8], data: &[u8]) -> Vec<u8> {
-    let mut mac =
-        Hmac::<Sha256>::new_from_slice(key).expect("HMAC accepts any key length");
+    let mut mac = Hmac::<Sha256>::new_from_slice(key).expect("HMAC accepts any key length");
     mac.update(data);
     mac.finalize().into_bytes().to_vec()
 }
@@ -170,7 +169,8 @@ pub fn build_authorization_header(
 
     // 1. Canonical request
     let payload_hash = sha256_hex(body);
-    let canonical_headers = format!("content-type:application/json\nhost:{host}\nx-amz-date:{datetime_str}\n");
+    let canonical_headers =
+        format!("content-type:application/json\nhost:{host}\nx-amz-date:{datetime_str}\n");
     let signed_headers = "content-type;host;x-amz-date";
     let canonical_uri = path;
     let canonical_query_string = "";

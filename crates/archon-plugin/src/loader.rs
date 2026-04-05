@@ -3,8 +3,8 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use crate::capability::PluginCapability;
 use crate::cache::WasmCache;
+use crate::capability::PluginCapability;
 use crate::error::PluginError;
 use crate::manifest::load_manifest;
 use crate::result::{LoadedPlugin, PluginLoadResult};
@@ -164,7 +164,9 @@ impl PluginLoader {
         candidates: &mut HashMap<String, PathBuf>,
         overwrite: bool,
     ) {
-        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
@@ -306,7 +308,13 @@ fn capability_matches(granted: &PluginCapability, requested: &str) -> bool {
 /// Plugins without a `wasm_path` are silently skipped.
 pub fn instantiate_wasm_plugins(
     result: &crate::result::PluginLoadResult,
-) -> HashMap<String, (crate::instance::PluginInstance, std::sync::Arc<std::sync::Mutex<crate::host::WasmPluginHost>>)> {
+) -> HashMap<
+    String,
+    (
+        crate::instance::PluginInstance,
+        std::sync::Arc<std::sync::Mutex<crate::host::WasmPluginHost>>,
+    ),
+> {
     use crate::host::{PluginHostConfig, WasmPluginHost};
     use std::sync::{Arc, Mutex};
 

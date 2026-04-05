@@ -1,7 +1,7 @@
 use serde_json::json;
 
 use archon_tools::ask_user::AskUserTool;
-use archon_tools::plan_mode::{is_tool_allowed_in_mode, EnterPlanModeTool, ExitPlanModeTool};
+use archon_tools::plan_mode::{EnterPlanModeTool, ExitPlanModeTool, is_tool_allowed_in_mode};
 use archon_tools::tool::{AgentMode, Tool, ToolContext};
 
 fn ctx(mode: AgentMode) -> ToolContext {
@@ -53,7 +53,15 @@ fn bash_blocked_in_plan_mode() {
 
 #[test]
 fn all_tools_allowed_in_normal_mode() {
-    for tool in &["Read", "Write", "Edit", "Bash", "Glob", "Grep", "AskUserQuestion"] {
+    for tool in &[
+        "Read",
+        "Write",
+        "Edit",
+        "Bash",
+        "Glob",
+        "Grep",
+        "AskUserQuestion",
+    ] {
         assert!(
             is_tool_allowed_in_mode(tool, AgentMode::Normal),
             "{tool} should be allowed in normal mode"

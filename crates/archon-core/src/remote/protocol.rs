@@ -5,12 +5,29 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AgentMessage {
-    UserMessage { content: String },
-    AssistantMessage { content: String },
-    ToolCall { id: String, name: String, input: serde_json::Value },
-    ToolResult { tool_use_id: String, content: String, is_error: bool },
-    Event { kind: String, data: serde_json::Value },
-    Error { message: String },
+    UserMessage {
+        content: String,
+    },
+    AssistantMessage {
+        content: String,
+    },
+    ToolCall {
+        id: String,
+        name: String,
+        input: serde_json::Value,
+    },
+    ToolResult {
+        tool_use_id: String,
+        content: String,
+        is_error: bool,
+    },
+    Event {
+        kind: String,
+        data: serde_json::Value,
+    },
+    Error {
+        message: String,
+    },
     Ping,
     Pong,
 }

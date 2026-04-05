@@ -1,7 +1,7 @@
 //! Tests for the self-update module (`archon_core::update`).
 
 use archon_core::update::{
-    compute_sha256, is_newer, platform_asset_name, should_auto_check, UpdateConfig,
+    UpdateConfig, compute_sha256, is_newer, platform_asset_name, should_auto_check,
 };
 
 // ---------------------------------------------------------------------------
@@ -48,7 +48,10 @@ fn platform_asset_name_format() {
     );
     // Must contain a known OS
     let has_os = name.contains("linux") || name.contains("darwin");
-    assert!(has_os, "asset name must contain 'linux' or 'darwin', got: {name}");
+    assert!(
+        has_os,
+        "asset name must contain 'linux' or 'darwin', got: {name}"
+    );
     // Must contain a known arch
     let has_arch = name.contains("x86_64") || name.contains("aarch64");
     assert!(has_arch, "asset name must contain arch, got: {name}");

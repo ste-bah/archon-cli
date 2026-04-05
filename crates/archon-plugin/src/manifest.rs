@@ -66,10 +66,7 @@ pub fn validate_manifest(
     } else if manifest.name.contains(' ') {
         return Err(PluginError::ManifestValidationError {
             path: plugin_dir.join(MANIFEST_RELATIVE_PATH),
-            fields: vec![format!(
-                "name '{}' must not contain spaces",
-                manifest.name
-            )],
+            fields: vec![format!("name '{}' must not contain spaces", manifest.name)],
         });
     }
 

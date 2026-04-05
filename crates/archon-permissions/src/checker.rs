@@ -12,13 +12,7 @@ const PLAN_MODE_WHITELIST: &[&str] = &[
 ];
 
 /// Tools auto-allowed in AcceptEdits mode (file operations + search).
-const ACCEPT_EDITS_WHITELIST: &[&str] = &[
-    "Read",
-    "Write",
-    "Edit",
-    "Glob",
-    "Grep",
-];
+const ACCEPT_EDITS_WHITELIST: &[&str] = &["Read", "Write", "Edit", "Glob", "Grep"];
 
 /// Tools that are safe (read-only) and auto-allowed in Default mode.
 const DEFAULT_SAFE_TOOLS: &[&str] = &[

@@ -5,7 +5,7 @@ pub mod planner;
 pub mod pool;
 
 use std::sync::Arc;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{Mutex, mpsc};
 
 use config::{ExecutionMode, OrchestratorConfig, TeamConfig};
 use events::{OrchestratorEvent, Subtask, SubtaskStatus};
@@ -97,9 +97,7 @@ impl Orchestrator {
             ExecutionMode::Sequential | ExecutionMode::Pipeline => {
                 self.run_sequential(subtasks, executor, &event_tx).await?
             }
-            ExecutionMode::Parallel => {
-                self.run_parallel(subtasks, executor, &event_tx).await?
-            }
+            ExecutionMode::Parallel => self.run_parallel(subtasks, executor, &event_tx).await?,
             ExecutionMode::Dag => {
                 let waves = dag::build_dag_waves(&subtasks)?;
                 self.run_dag_waves(subtasks, waves, executor, &event_tx)

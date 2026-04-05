@@ -240,11 +240,7 @@ impl TaskManager {
 
     /// Get the cancellation token for a task (for passing to async workers).
     pub fn cancellation_token(&self, id: &str) -> Option<Arc<AtomicBool>> {
-        self.cancellation_tokens
-            .lock()
-            .ok()?
-            .get(id)
-            .cloned()
+        self.cancellation_tokens.lock().ok()?.get(id).cloned()
     }
 }
 

@@ -58,8 +58,12 @@ fn validate_field(field: &str, min: u32, max: u32, name: &str) -> anyhow::Result
             // range like 1-5
             let bounds: Vec<&str> = part.split('-').collect();
             if bounds.len() == 2 {
-                let lo: u32 = bounds[0].parse().map_err(|_| anyhow::anyhow!("invalid {name} field"))?;
-                let hi: u32 = bounds[1].parse().map_err(|_| anyhow::anyhow!("invalid {name} field"))?;
+                let lo: u32 = bounds[0]
+                    .parse()
+                    .map_err(|_| anyhow::anyhow!("invalid {name} field"))?;
+                let hi: u32 = bounds[1]
+                    .parse()
+                    .map_err(|_| anyhow::anyhow!("invalid {name} field"))?;
                 if lo < min || hi > max || lo > hi {
                     anyhow::bail!("{name} range {lo}-{hi} out of {min}-{max}");
                 }
@@ -154,7 +158,7 @@ pub struct CronJitterConfig {
 impl Default for CronJitterConfig {
     fn default() -> Self {
         Self {
-            recurring_frac: 0.05,   // 5% of interval
+            recurring_frac: 0.05,    // 5% of interval
             recurring_cap_ms: 5_000, // max 5 seconds
             one_shot_max_ms: 10_000, // max 10 seconds
             one_shot_floor_ms: 0,
@@ -233,10 +237,7 @@ impl CronScheduler {
 
     /// Find tasks that are due at `now` based on their cron schedules and `created_at`.
     pub fn due_tasks<'a>(&self, tasks: &'a [CronTask], now: DateTime<Utc>) -> Vec<&'a CronTask> {
-        tasks
-            .iter()
-            .filter(|t| self.is_task_due(t, now))
-            .collect()
+        tasks.iter().filter(|t| self.is_task_due(t, now)).collect()
     }
 
     fn is_task_due(&self, task: &CronTask, now: DateTime<Utc>) -> bool {
@@ -335,17 +336,23 @@ pub async fn run_scheduler_loop(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
 
     #[tokio::test]
     async fn scheduler_loop_exits_immediately_on_cancel() {
         let cancel = Arc::new(AtomicBool::new(false));
         let store_path = std::env::temp_dir()
             .join("archon-cron-test-cancel")
-            .join(format!("{:x}", std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .subsec_nanos()));
+            .join(format!(
+                "{:x}",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .subsec_nanos()
+            ));
 
         // Set cancel before spawning — loop should exit in first iteration.
         cancel.store(true, Ordering::Relaxed);
@@ -364,10 +371,13 @@ mod tests {
         let cancel = Arc::new(AtomicBool::new(false));
         let store_path = std::env::temp_dir()
             .join("archon-cron-test-empty")
-            .join(format!("{:x}", std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .subsec_nanos()));
+            .join(format!(
+                "{:x}",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .subsec_nanos()
+            ));
 
         let cancel_clone = Arc::clone(&cancel);
         // Cancel after 1.5 seconds — enough for one tick with no tasks.

@@ -152,7 +152,10 @@ async fn run_query(
     let mut receiver = client
         .stream_message(request)
         .await
-        .map_err(|e| SdkError::Api { status: 0, message: e.to_string() })?;
+        .map_err(|e| SdkError::Api {
+            status: 0,
+            message: e.to_string(),
+        })?;
 
     let mut text_buf = String::new();
     let mut usage = SdkUsage::default();
@@ -185,7 +188,10 @@ async fn run_query(
                         .await;
                 }
             }
-            StreamEvent::MessageDelta { stop_reason: sr, usage: u } => {
+            StreamEvent::MessageDelta {
+                stop_reason: sr,
+                usage: u,
+            } => {
                 if let Some(sr) = sr {
                     stop_reason = sr;
                 }
@@ -202,7 +208,10 @@ async fn run_query(
     }
 
     let _ = tx
-        .send(Ok(SdkMessage::ResultMessage(SdkResultMessage { stop_reason, usage })))
+        .send(Ok(SdkMessage::ResultMessage(SdkResultMessage {
+            stop_reason,
+            usage,
+        })))
         .await;
 
     Ok(())
@@ -229,8 +238,6 @@ fn build_auth_provider(auth: &SdkAuth) -> Result<archon_llm::auth::AuthProvider,
             }
             Ok(AuthProvider::ApiKey(Secret::new(key.clone())))
         }
-        SdkAuth::BearerToken(token) => {
-            Ok(AuthProvider::BearerToken(Secret::new(token.clone())))
-        }
+        SdkAuth::BearerToken(token) => Ok(AuthProvider::BearerToken(Secret::new(token.clone()))),
     }
 }

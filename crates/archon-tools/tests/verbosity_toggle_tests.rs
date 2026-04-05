@@ -3,11 +3,11 @@
 //! Covers: tool name (NOT BriefTool), toggle/set/status actions,
 //! state transitions, schema validity, permission level.
 
-use archon_tools::verbosity_toggle::{VerbosityState, VerbosityToggleTool};
 use archon_tools::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
+use archon_tools::verbosity_toggle::{VerbosityState, VerbosityToggleTool};
+use serde_json::json;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use serde_json::json;
 
 fn ctx() -> ToolContext {
     ToolContext {
@@ -44,8 +44,13 @@ fn tool_description_is_non_empty() {
 fn tool_input_schema_has_action_field() {
     let (tool, _) = make_tool();
     let schema = tool.input_schema();
-    let props = schema["properties"].as_object().expect("schema must have properties");
-    assert!(props.contains_key("action"), "schema must have 'action' property");
+    let props = schema["properties"]
+        .as_object()
+        .expect("schema must have properties");
+    assert!(
+        props.contains_key("action"),
+        "schema must have 'action' property"
+    );
 }
 
 #[test]
@@ -116,7 +121,10 @@ async fn execute_toggle_from_verbose_goes_brief() {
     let result = tool.execute(json!({"action": "toggle"}), &ctx()).await;
     assert!(!result.is_error);
     assert!(!state.lock().unwrap().is_verbose());
-    assert!(result.content.contains("brief"), "result should mention new mode");
+    assert!(
+        result.content.contains("brief"),
+        "result should mention new mode"
+    );
 }
 
 #[tokio::test]
@@ -126,7 +134,10 @@ async fn execute_toggle_from_brief_goes_verbose() {
     let result = tool.execute(json!({"action": "toggle"}), &ctx()).await;
     assert!(!result.is_error);
     assert!(state.lock().unwrap().is_verbose());
-    assert!(result.content.contains("verbose"), "result should mention new mode");
+    assert!(
+        result.content.contains("verbose"),
+        "result should mention new mode"
+    );
 }
 
 #[tokio::test]
@@ -144,7 +155,9 @@ async fn execute_toggle_twice_returns_to_original() {
 #[tokio::test]
 async fn execute_set_brief() {
     let (tool, state) = make_tool();
-    let result = tool.execute(json!({"action": "set", "mode": "brief"}), &ctx()).await;
+    let result = tool
+        .execute(json!({"action": "set", "mode": "brief"}), &ctx())
+        .await;
     assert!(!result.is_error);
     assert!(!state.lock().unwrap().is_verbose());
 }
@@ -153,7 +166,9 @@ async fn execute_set_brief() {
 async fn execute_set_verbose() {
     let state = Arc::new(Mutex::new(VerbosityState::new(false)));
     let tool = VerbosityToggleTool::new(Arc::clone(&state));
-    let result = tool.execute(json!({"action": "set", "mode": "verbose"}), &ctx()).await;
+    let result = tool
+        .execute(json!({"action": "set", "mode": "verbose"}), &ctx())
+        .await;
     assert!(!result.is_error);
     assert!(state.lock().unwrap().is_verbose());
 }
@@ -161,7 +176,9 @@ async fn execute_set_verbose() {
 #[tokio::test]
 async fn execute_set_invalid_mode_returns_error() {
     let (tool, _) = make_tool();
-    let result = tool.execute(json!({"action": "set", "mode": "blah"}), &ctx()).await;
+    let result = tool
+        .execute(json!({"action": "set", "mode": "blah"}), &ctx())
+        .await;
     assert!(result.is_error, "invalid mode should return error");
 }
 

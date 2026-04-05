@@ -3,8 +3,9 @@
 use std::sync::Arc;
 
 use archon_sdk::{
+    SdkError, SdkTool,
     builder::{AgentBuilder, AgentOptions, PermissionMode, SessionBuilder, ThinkingConfig},
-    create_sdk_mcp_server, SdkError, SdkTool,
+    create_sdk_mcp_server,
 };
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -74,19 +75,26 @@ fn agent_builder_set_system_prompt() {
         .system_prompt("You are helpful.")
         .build()
         .unwrap();
-    assert_eq!(query.options().system_prompt.as_deref(), Some("You are helpful."));
+    assert_eq!(
+        query.options().system_prompt.as_deref(),
+        Some("You are helpful.")
+    );
 }
 
 #[test]
 fn agent_builder_set_thinking_enabled() {
     let query = AgentBuilder::new()
         .api_key("sk-test")
-        .thinking(ThinkingConfig::Enabled { budget_tokens: 8192 })
+        .thinking(ThinkingConfig::Enabled {
+            budget_tokens: 8192,
+        })
         .build()
         .unwrap();
     assert_eq!(
         query.options().thinking,
-        ThinkingConfig::Enabled { budget_tokens: 8192 }
+        ThinkingConfig::Enabled {
+            budget_tokens: 8192
+        }
     );
 }
 
@@ -211,8 +219,12 @@ fn thinking_config_all_variants() {
     let _: Vec<ThinkingConfig> = vec![
         ThinkingConfig::Disabled,
         ThinkingConfig::Auto,
-        ThinkingConfig::Enabled { budget_tokens: 1024 },
-        ThinkingConfig::Enabled { budget_tokens: 16384 },
+        ThinkingConfig::Enabled {
+            budget_tokens: 1024,
+        },
+        ThinkingConfig::Enabled {
+            budget_tokens: 16384,
+        },
     ];
 }
 
@@ -227,7 +239,9 @@ fn spec_example_compiles() {
         .system_prompt("You are a helpful assistant.")
         .tool(create_sdk_mcp_server("my-tools", vec![my_tool]))
         .max_tokens(4096)
-        .thinking(ThinkingConfig::Enabled { budget_tokens: 8192 })
+        .thinking(ThinkingConfig::Enabled {
+            budget_tokens: 8192,
+        })
         .permission_mode(PermissionMode::Auto)
         .build()
         .unwrap();

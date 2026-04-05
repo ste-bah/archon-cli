@@ -33,7 +33,10 @@ pub fn evaluate(condition: &str, input: &serde_json::Value) -> bool {
         let rest = &condition[paren_pos + 1..];
         let pattern = rest.trim_end_matches(')');
 
-        let actual_tool = input.get("tool_name").and_then(|v| v.as_str()).unwrap_or("");
+        let actual_tool = input
+            .get("tool_name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
         if actual_tool != tool_name_pat {
             return false;
         }
@@ -48,7 +51,10 @@ pub fn evaluate(condition: &str, input: &serde_json::Value) -> bool {
         glob_match(pattern, command_str)
     } else {
         // Format: just ToolName — exact match against tool_name
-        let actual_tool = input.get("tool_name").and_then(|v| v.as_str()).unwrap_or("");
+        let actual_tool = input
+            .get("tool_name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
         actual_tool == condition
     }
 }

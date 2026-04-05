@@ -31,10 +31,8 @@ pub const VALID_PERMISSION_MODES: &[&str] = &[
 ];
 
 /// Legacy permission mode aliases that resolve to a canonical mode.
-pub const LEGACY_PERMISSION_ALIASES: &[(&str, &str)] = &[
-    ("ask", "default"),
-    ("yolo", "bypassPermissions"),
-];
+pub const LEGACY_PERMISSION_ALIASES: &[(&str, &str)] =
+    &[("ask", "default"), ("yolo", "bypassPermissions")];
 
 // ---------------------------------------------------------------------------
 // Edit distance
@@ -58,9 +56,7 @@ pub fn edit_distance(a: &str, b: &str) -> usize {
         curr[0] = i;
         for j in 1..=n {
             let cost = if a[i - 1] == b[j - 1] { 0 } else { 1 };
-            curr[j] = (prev[j] + 1)
-                .min(curr[j - 1] + 1)
-                .min(prev[j - 1] + cost);
+            curr[j] = (prev[j] + 1).min(curr[j - 1] + 1).min(prev[j - 1] + cost);
         }
         std::mem::swap(&mut prev, &mut curr);
     }
@@ -77,7 +73,11 @@ pub fn edit_distance(a: &str, b: &str) -> usize {
 /// Returns `Some((candidate, distance))` for the best match, or `None` if no
 /// candidate is within the threshold. Ties are broken by smallest distance first,
 /// then by list order (first candidate wins).
-fn closest_match<'a>(input: &str, candidates: &[&'a str], max_distance: usize) -> Option<(&'a str, usize)> {
+fn closest_match<'a>(
+    input: &str,
+    candidates: &[&'a str],
+    max_distance: usize,
+) -> Option<(&'a str, usize)> {
     let mut best: Option<(&str, usize)> = None;
 
     for &candidate in candidates {

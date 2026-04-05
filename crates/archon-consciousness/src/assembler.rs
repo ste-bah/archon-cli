@@ -342,10 +342,7 @@ mod tests {
 
         let sections = assembler().assemble(&input);
         assert_eq!(sections.len(), 1);
-        assert_eq!(
-            sections[0].cache_control,
-            Some("ephemeral".to_string())
-        );
+        assert_eq!(sections[0].cache_control, Some("ephemeral".to_string()));
     }
 
     #[test]

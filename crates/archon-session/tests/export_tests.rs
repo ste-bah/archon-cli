@@ -57,9 +57,8 @@ fn sample_messages() -> Vec<serde_json::Value> {
 
 #[test]
 fn export_markdown_has_headers() {
-    let output =
-        export_session(&sample_messages(), "sess-abc", ExportFormat::Markdown)
-            .expect("export should succeed");
+    let output = export_session(&sample_messages(), "sess-abc", ExportFormat::Markdown)
+        .expect("export should succeed");
     assert!(
         output.contains("# Session"),
         "markdown should contain '# Session' header"
@@ -68,9 +67,8 @@ fn export_markdown_has_headers() {
 
 #[test]
 fn export_markdown_has_turns() {
-    let output =
-        export_session(&sample_messages(), "sess-abc", ExportFormat::Markdown)
-            .expect("export should succeed");
+    let output = export_session(&sample_messages(), "sess-abc", ExportFormat::Markdown)
+        .expect("export should succeed");
     assert!(
         output.contains("## Turn"),
         "markdown should contain '## Turn' headers"
@@ -83,9 +81,8 @@ fn export_markdown_has_turns() {
 
 #[test]
 fn export_json_valid() {
-    let output =
-        export_session(&sample_messages(), "sess-abc", ExportFormat::Json)
-            .expect("export should succeed");
+    let output = export_session(&sample_messages(), "sess-abc", ExportFormat::Json)
+        .expect("export should succeed");
     let parsed: serde_json::Value =
         serde_json::from_str(&output).expect("output should be valid JSON");
     assert!(parsed.is_object(), "top level should be an object");
@@ -93,9 +90,8 @@ fn export_json_valid() {
 
 #[test]
 fn export_json_has_messages() {
-    let output =
-        export_session(&sample_messages(), "sess-abc", ExportFormat::Json)
-            .expect("export should succeed");
+    let output = export_session(&sample_messages(), "sess-abc", ExportFormat::Json)
+        .expect("export should succeed");
     let parsed: serde_json::Value =
         serde_json::from_str(&output).expect("output should be valid JSON");
     let messages = parsed
@@ -111,9 +107,8 @@ fn export_json_has_messages() {
 
 #[test]
 fn export_text_has_roles() {
-    let output =
-        export_session(&sample_messages(), "sess-abc", ExportFormat::Text)
-            .expect("export should succeed");
+    let output = export_session(&sample_messages(), "sess-abc", ExportFormat::Text)
+        .expect("export should succeed");
     assert!(output.contains("User:"), "text should contain 'User:'");
     assert!(
         output.contains("Assistant:"),

@@ -28,11 +28,13 @@ pub struct WebFetchTool;
 /// Strip HTML to plain text: remove script/style blocks, tags, then collapse whitespace.
 fn extract_text(html: &str) -> String {
     // Remove <script>...</script> blocks (case-insensitive, dotall)
-    let re_script = RE_SCRIPT.get_or_init(|| Regex::new(r"(?is)<script[\s>].*?</script>").expect("valid regex"));
+    let re_script = RE_SCRIPT
+        .get_or_init(|| Regex::new(r"(?is)<script[\s>].*?</script>").expect("valid regex"));
     let text = re_script.replace_all(html, " ");
 
     // Remove <style>...</style> blocks
-    let re_style = RE_STYLE.get_or_init(|| Regex::new(r"(?is)<style[\s>].*?</style>").expect("valid regex"));
+    let re_style =
+        RE_STYLE.get_or_init(|| Regex::new(r"(?is)<style[\s>].*?</style>").expect("valid regex"));
     let text = re_style.replace_all(&text, " ");
 
     // Strip remaining HTML tags
@@ -107,7 +109,10 @@ impl Tool for WebFetchTool {
             Ok(r) => r,
             Err(e) => {
                 if e.is_timeout() {
-                    return ToolResult::error(format!("Request timed out after {}s", TIMEOUT.as_secs()));
+                    return ToolResult::error(format!(
+                        "Request timed out after {}s",
+                        TIMEOUT.as_secs()
+                    ));
                 }
                 if e.is_connect() {
                     return ToolResult::error(format!("Connection failed: {e}"));
@@ -140,11 +145,7 @@ impl Tool for WebFetchTool {
 
         let body = String::from_utf8_lossy(body_bytes).into_owned();
 
-        let mut result = if extract {
-            extract_text(&body)
-        } else {
-            body
-        };
+        let mut result = if extract { extract_text(&body) } else { body };
 
         if truncated {
             result.push_str("\n\n[WARNING: Response truncated at 1 MB]");
@@ -231,9 +232,7 @@ mod tests {
     #[tokio::test]
     async fn invalid_url_is_error() {
         let tool = WebFetchTool;
-        let result = tool
-            .execute(json!({"url": "not-a-url"}), &test_ctx())
-            .await;
+        let result = tool.execute(json!({"url": "not-a-url"}), &test_ctx()).await;
         assert!(result.is_error);
     }
 }

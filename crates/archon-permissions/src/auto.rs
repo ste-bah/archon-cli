@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
-use crate::classifier::{classify_command, CommandClass};
-use crate::rules::{check_write_path, PathDecision};
+use crate::classifier::{CommandClass, classify_command};
+use crate::rules::{PathDecision, check_write_path};
 
 // ---------------------------------------------------------------------------
 // Decision type
@@ -81,9 +81,9 @@ impl AutoModeEvaluator {
         match class {
             CommandClass::Safe => AutoDecision::Allow,
             CommandClass::Risky => AutoDecision::Prompt,
-            CommandClass::Dangerous => AutoDecision::PromptWithWarning(format!(
-                "Dangerous command detected: {command}"
-            )),
+            CommandClass::Dangerous => {
+                AutoDecision::PromptWithWarning(format!("Dangerous command detected: {command}"))
+            }
         }
     }
 
@@ -114,10 +114,9 @@ impl AutoModeEvaluator {
         match decision {
             PathDecision::Allow => AutoDecision::Allow,
             PathDecision::NeedsPermission => AutoDecision::Prompt,
-            PathDecision::Deny => AutoDecision::PromptWithWarning(format!(
-                "Write to denied path: {}",
-                path.display()
-            )),
+            PathDecision::Deny => {
+                AutoDecision::PromptWithWarning(format!("Write to denied path: {}", path.display()))
+            }
         }
     }
 }
@@ -159,7 +158,10 @@ mod tests {
     #[test]
     fn unknown_command_is_risky() {
         let eval = default_evaluator();
-        assert_eq!(eval.evaluate_command("some_unknown_tool"), AutoDecision::Prompt);
+        assert_eq!(
+            eval.evaluate_command("some_unknown_tool"),
+            AutoDecision::Prompt
+        );
     }
 
     #[test]
@@ -220,7 +222,10 @@ mod tests {
             project_dir: Some(PathBuf::from("/project")),
             ..Default::default()
         });
-        assert_eq!(eval.evaluate_command("docker build -t myapp ."), AutoDecision::Allow);
+        assert_eq!(
+            eval.evaluate_command("docker build -t myapp ."),
+            AutoDecision::Allow
+        );
     }
 
     #[test]

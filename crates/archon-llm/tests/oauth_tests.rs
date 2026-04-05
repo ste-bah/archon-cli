@@ -7,12 +7,22 @@ use archon_llm::oauth::{
 fn code_verifier_is_43_chars_base64url() {
     let verifier = generate_code_verifier();
     // 32 bytes -> 43 base64url chars (no padding)
-    assert_eq!(verifier.len(), 43, "verifier length should be 43, got {}", verifier.len());
+    assert_eq!(
+        verifier.len(),
+        43,
+        "verifier length should be 43, got {}",
+        verifier.len()
+    );
     // No padding characters
-    assert!(!verifier.contains('='), "verifier should not contain padding");
+    assert!(
+        !verifier.contains('='),
+        "verifier should not contain padding"
+    );
     // Only base64url characters
     assert!(
-        verifier.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'),
+        verifier
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'),
         "verifier should only contain base64url chars"
     );
 }
@@ -55,22 +65,36 @@ fn auth_url_contains_all_parameters() {
 
     let url = build_auth_url(challenge, state, port);
 
-    assert!(url.starts_with("https://claude.com/cai/oauth/authorize?"), "wrong base URL");
+    assert!(
+        url.starts_with("https://claude.com/cai/oauth/authorize?"),
+        "wrong base URL"
+    );
     assert!(url.contains("response_type=code"), "missing response_type");
     assert!(url.contains("client_id=9d1c250a"), "missing client_id");
     // Production code uses `http://localhost:{port}/callback` to match the
     // original Claude Code OAuth flow (project-zero/services/oauth/client.ts).
     // Accept either `localhost` or `127.0.0.1` (URL-encoded or plain).
-    assert!(url.contains("redirect_uri=http%3A%2F%2Flocalhost%3A8765%2Fcallback")
-        || url.contains("redirect_uri=http://localhost:8765/callback")
-        || url.contains("redirect_uri=http%3A%2F%2F127.0.0.1%3A8765%2Fcallback")
-        || url.contains("redirect_uri=http://127.0.0.1:8765/callback"),
-        "missing or wrong redirect_uri in: {url}");
+    assert!(
+        url.contains("redirect_uri=http%3A%2F%2Flocalhost%3A8765%2Fcallback")
+            || url.contains("redirect_uri=http://localhost:8765/callback")
+            || url.contains("redirect_uri=http%3A%2F%2F127.0.0.1%3A8765%2Fcallback")
+            || url.contains("redirect_uri=http://127.0.0.1:8765/callback"),
+        "missing or wrong redirect_uri in: {url}"
+    );
     assert!(url.contains("state=test-state-value"), "missing state");
-    assert!(url.contains("code_challenge=test-challenge-value"), "missing challenge");
-    assert!(url.contains("code_challenge_method=S256"), "missing S256 method");
+    assert!(
+        url.contains("code_challenge=test-challenge-value"),
+        "missing challenge"
+    );
+    assert!(
+        url.contains("code_challenge_method=S256"),
+        "missing S256 method"
+    );
     assert!(url.contains("scope="), "missing scope");
-    assert!(url.contains("user%3Aprofile") || url.contains("user:profile"), "missing profile scope");
+    assert!(
+        url.contains("user%3Aprofile") || url.contains("user:profile"),
+        "missing profile scope"
+    );
 }
 
 #[test]
@@ -91,12 +115,16 @@ fn callback_server_state_mismatch_rejected() {
         let _ = reqwest::blocking::get(&url);
     });
 
-    let result = rx.recv_timeout(std::time::Duration::from_secs(5))
+    let result = rx
+        .recv_timeout(std::time::Duration::from_secs(5))
         .expect("should receive response");
 
     assert!(result.is_err(), "mismatched state should be rejected");
     let err_msg = format!("{}", result.unwrap_err());
-    assert!(err_msg.contains("state") || err_msg.contains("mismatch"), "error should mention state: {err_msg}");
+    assert!(
+        err_msg.contains("state") || err_msg.contains("mismatch"),
+        "error should mention state: {err_msg}"
+    );
 }
 
 #[test]
@@ -110,12 +138,16 @@ fn callback_server_error_param_handled() {
         let _ = reqwest::blocking::get(&url);
     });
 
-    let result = rx.recv_timeout(std::time::Duration::from_secs(5))
+    let result = rx
+        .recv_timeout(std::time::Duration::from_secs(5))
         .expect("should receive response");
 
     assert!(result.is_err(), "error param should produce error");
     let err_msg = format!("{}", result.unwrap_err());
-    assert!(err_msg.contains("access_denied"), "error should contain error code: {err_msg}");
+    assert!(
+        err_msg.contains("access_denied"),
+        "error should contain error code: {err_msg}"
+    );
 }
 
 #[test]
@@ -123,13 +155,12 @@ fn callback_server_extracts_code() {
     let (port, rx) = start_callback_server("valid-state").expect("server start");
 
     std::thread::spawn(move || {
-        let url = format!(
-            "http://127.0.0.1:{port}/callback?code=auth-code-xyz&state=valid-state"
-        );
+        let url = format!("http://127.0.0.1:{port}/callback?code=auth-code-xyz&state=valid-state");
         let _ = reqwest::blocking::get(&url);
     });
 
-    let result = rx.recv_timeout(std::time::Duration::from_secs(5))
+    let result = rx
+        .recv_timeout(std::time::Duration::from_secs(5))
         .expect("should receive response");
 
     let code = result.expect("should succeed with valid state");

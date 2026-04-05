@@ -36,11 +36,7 @@ impl OutputFormat {
 // ---------------------------------------------------------------------------
 
 /// Format a final result as a JSON string containing content, usage, and cost.
-pub fn format_json_result(
-    content: &str,
-    usage: &archon_llm::types::Usage,
-    cost: f64,
-) -> String {
+pub fn format_json_result(content: &str, usage: &archon_llm::types::Usage, cost: f64) -> String {
     let result = serde_json::json!({
         "content": content,
         "usage": {
@@ -135,10 +131,9 @@ fn format_agent_event_stream_json(event: &AgentEvent) -> Option<String> {
             &serde_json::json!({"model": model}),
         )),
 
-        AgentEvent::CompactionTriggered => Some(format_stream_event(
-            "compaction",
-            &serde_json::json!({}),
-        )),
+        AgentEvent::CompactionTriggered => {
+            Some(format_stream_event("compaction", &serde_json::json!({})))
+        }
 
         // Events that don't produce stream output
         AgentEvent::UserPromptReady

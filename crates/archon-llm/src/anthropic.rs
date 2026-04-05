@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use crate::auth::AuthProvider;
 use crate::identity::IdentityProvider;
-use crate::streaming::{parse_sse_event, split_sse_lines, StreamError, StreamEvent};
+use crate::streaming::{StreamError, StreamEvent, parse_sse_event, split_sse_lines};
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -132,7 +132,11 @@ impl AnthropicClient {
                 &response_body[..response_body.len().min(500)]
             );
 
-            let err = classify_error(status.as_u16(), &response_body, retry_after_header.as_deref());
+            let err = classify_error(
+                status.as_u16(),
+                &response_body,
+                retry_after_header.as_deref(),
+            );
 
             match &err {
                 // 429: wait for retry-after then retry
@@ -185,9 +189,7 @@ impl AnthropicClient {
             }
         }
 
-        Err(ApiError::HttpError(
-            "max retries exceeded".into(),
-        ))
+        Err(ApiError::HttpError("max retries exceeded".into()))
     }
 
     async fn spawn_stream_reader(
@@ -273,14 +275,19 @@ impl AnthropicClient {
             let response = match response {
                 Ok(r) => r,
                 Err(e) => {
-                    tracing::warn!("Beta validation probe: HTTP error: {e}, using candidates as-is");
+                    tracing::warn!(
+                        "Beta validation probe: HTTP error: {e}, using candidates as-is"
+                    );
                     break;
                 }
             };
 
             let status = response.status().as_u16();
             if status == 200 || (200..300).contains(&status) {
-                tracing::debug!("Beta validation probe succeeded with {} betas", candidates.len());
+                tracing::debug!(
+                    "Beta validation probe succeeded with {} betas",
+                    candidates.len()
+                );
                 break;
             }
 
@@ -423,11 +430,7 @@ fn extract_unknown_beta(body: &str) -> Option<String> {
     // Beta name ends at a `"` or end of string
     let end = rest.find('"').unwrap_or(rest.len());
     let name = rest[..end].trim().to_string();
-    if name.is_empty() {
-        None
-    } else {
-        Some(name)
-    }
+    if name.is_empty() { None } else { Some(name) }
 }
 
 fn classify_error(status: u16, body: &str, retry_after_header: Option<&str>) -> ApiError {
@@ -511,7 +514,10 @@ mod beta_validation_tests {
         );
         let client = AnthropicClient::new(auth, identity, None);
         let result = client.validate_betas(vec![]).await;
-        assert!(result.is_empty(), "empty candidates should return empty immediately without any API call");
+        assert!(
+            result.is_empty(),
+            "empty candidates should return empty immediately without any API call"
+        );
     }
 
     #[test]
@@ -573,11 +579,8 @@ mod tests {
     #[test]
     fn test_custom_api_url_used_not_constant() {
         let custom_url = "https://my-proxy.example.com/v1/messages";
-        let client = AnthropicClient::new(
-            make_auth(),
-            make_identity(),
-            Some(custom_url.to_string()),
-        );
+        let client =
+            AnthropicClient::new(make_auth(), make_identity(), Some(custom_url.to_string()));
         // Confirm it is NOT using the hardcoded constant
         assert_ne!(client.api_url, API_URL);
         assert_eq!(client.api_url, custom_url);

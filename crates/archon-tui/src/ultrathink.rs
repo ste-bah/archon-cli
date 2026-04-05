@@ -10,12 +10,12 @@ use ratatui::style::Color;
 /// Normal rainbow palette for the 10 characters of "ultrathink".
 const RAINBOW: &[Color] = &[
     Color::Red,
-    Color::Rgb(255, 165, 0),  // orange
+    Color::Rgb(255, 165, 0), // orange
     Color::Yellow,
     Color::Green,
     Color::Blue,
-    Color::Rgb(75, 0, 130),   // indigo
-    Color::Rgb(148, 0, 211),  // violet
+    Color::Rgb(75, 0, 130),  // indigo
+    Color::Rgb(148, 0, 211), // violet
 ];
 
 /// Brighter shimmer variants (the "hot" char in the sweep).
@@ -188,8 +188,7 @@ mod tests {
 
     #[test]
     fn find_positions_multiple() {
-        let positions =
-            find_ultrathink_positions("ultrathink and ultrathink");
+        let positions = find_ultrathink_positions("ultrathink and ultrathink");
         assert_eq!(positions, vec![(0, 10), (15, 25)]);
     }
 

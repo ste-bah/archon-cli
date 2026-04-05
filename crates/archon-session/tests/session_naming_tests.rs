@@ -35,7 +35,10 @@ fn resolve_by_exact_name() {
 
     let found = resolve_by_name(&store, "my-session").expect("resolve");
     assert!(found.is_some(), "exact name should resolve");
-    assert_eq!(found.as_ref().map(|m| m.id.as_str()), Some(meta.id.as_str()));
+    assert_eq!(
+        found.as_ref().map(|m| m.id.as_str()),
+        Some(meta.id.as_str())
+    );
 
     cleanup(&dir);
 }
@@ -51,7 +54,10 @@ fn resolve_by_prefix() {
 
     let found = resolve_by_name(&store, "unique-ses").expect("resolve prefix");
     assert!(found.is_some(), "unique prefix should resolve");
-    assert_eq!(found.as_ref().map(|m| m.id.as_str()), Some(meta.id.as_str()));
+    assert_eq!(
+        found.as_ref().map(|m| m.id.as_str()),
+        Some(meta.id.as_str())
+    );
 
     cleanup(&dir);
 }
@@ -80,9 +86,7 @@ fn resolve_ambiguous_prefix() {
 #[test]
 fn validate_name_unique() {
     let (dir, store) = temp_db();
-    let meta = store
-        .create_session("/tmp", None, "opus")
-        .expect("create");
+    let meta = store.create_session("/tmp", None, "opus").expect("create");
 
     set_session_name(&store, &meta.id, "taken-name").expect("set name");
 
@@ -96,9 +100,7 @@ fn validate_name_unique() {
 #[test]
 fn validate_name_duplicate() {
     let (dir, store) = temp_db();
-    let meta = store
-        .create_session("/tmp", None, "opus")
-        .expect("create");
+    let meta = store.create_session("/tmp", None, "opus").expect("create");
 
     set_session_name(&store, &meta.id, "taken-name").expect("set name");
 
@@ -206,16 +208,12 @@ fn test_most_recent_in_directory() {
         .create_session("/home/alice/proj-b", None, "opus")
         .expect("s3");
 
-    let recent = most_recent_in_directory(&store, "/home/alice/proj-b")
-        .expect("most recent");
+    let recent = most_recent_in_directory(&store, "/home/alice/proj-b").expect("most recent");
     assert!(recent.is_some(), "should find a session");
     assert_eq!(recent.as_ref().map(|m| m.id.as_str()), Some(s3.id.as_str()));
 
     // Ensure s2 is not returned (s3 is newer)
-    assert_ne!(
-        recent.as_ref().map(|m| m.id.as_str()),
-        Some(s2.id.as_str())
-    );
+    assert_ne!(recent.as_ref().map(|m| m.id.as_str()), Some(s2.id.as_str()));
 
     cleanup(&dir);
 }
@@ -248,9 +246,7 @@ fn ephemeral_flag() {
     // When no_session_persistence is set, saving should be a no-op.
     // We test this by using the EphemeralStore wrapper.
     let (dir, store) = temp_db();
-    let meta = store
-        .create_session("/tmp", None, "opus")
-        .expect("create");
+    let meta = store.create_session("/tmp", None, "opus").expect("create");
 
     // Simulate ephemeral: saving a message on a session that should be
     // transient. The session store itself doesn't enforce ephemerality --

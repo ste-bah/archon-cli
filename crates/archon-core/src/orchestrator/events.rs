@@ -43,19 +43,45 @@ pub enum SubtaskStatus {
     #[default]
     Pending,
     Running,
-    Complete { result: String },
-    Failed { error: String },
+    Complete {
+        result: String,
+    },
+    Failed {
+        error: String,
+    },
     Cancelled,
 }
 
 #[derive(Debug, Clone)]
 pub enum OrchestratorEvent {
-    TaskDecomposed { subtasks: Vec<Subtask> },
-    AgentSpawned { agent_id: String, agent_type: String, subtask_id: String },
-    AgentProgress { agent_id: String, message: String },
-    AgentComplete { agent_id: String, subtask_id: String, result: String },
-    AgentFailed { agent_id: String, subtask_id: String, error: String, will_retry: bool },
-    TeamComplete { result: String },
+    TaskDecomposed {
+        subtasks: Vec<Subtask>,
+    },
+    AgentSpawned {
+        agent_id: String,
+        agent_type: String,
+        subtask_id: String,
+    },
+    AgentProgress {
+        agent_id: String,
+        message: String,
+    },
+    AgentComplete {
+        agent_id: String,
+        subtask_id: String,
+        result: String,
+    },
+    AgentFailed {
+        agent_id: String,
+        subtask_id: String,
+        error: String,
+        will_retry: bool,
+    },
+    TeamComplete {
+        result: String,
+    },
     TeamCancelled,
-    TeamFailed { error: String },
+    TeamFailed {
+        error: String,
+    },
 }

@@ -6,7 +6,7 @@
 use std::time::Duration;
 
 use rmcp::model::{CallToolRequestParams, CallToolResult, Content, RawContent, ResourceContents};
-use rmcp::service::{RunningService, RoleClient, serve_client};
+use rmcp::service::{RoleClient, RunningService, serve_client};
 use rmcp::transport::IntoTransport;
 
 use crate::types::{McpError, McpToolDef, McpToolResult, ServerConfig, ToolContent};
@@ -29,10 +29,7 @@ impl McpClient {
     /// Accepts any transport that implements `IntoTransport` (stdio, HTTP, etc.).
     /// Returns an error if the transport fails or the handshake does not
     /// complete within [`INIT_TIMEOUT`].
-    pub async fn initialize<T, E, A>(
-        config: &ServerConfig,
-        transport: T,
-    ) -> Result<Self, McpError>
+    pub async fn initialize<T, E, A>(config: &ServerConfig, transport: T) -> Result<Self, McpError>
     where
         T: IntoTransport<RoleClient, E, A>,
         E: std::error::Error + Send + Sync + 'static,
@@ -61,10 +58,12 @@ impl McpClient {
             .service
             .list_tools(Default::default())
             .await
-            .map_err(|e| McpError::ToolCallFailed(format!(
-                "tools/list failed on '{}': {}",
-                self.server_name, e
-            )))?;
+            .map_err(|e| {
+                McpError::ToolCallFailed(format!(
+                    "tools/list failed on '{}': {}",
+                    self.server_name, e
+                ))
+            })?;
 
         let tools = result
             .tools
@@ -95,16 +94,16 @@ impl McpClient {
         params.name = name.to_string().into();
         params.arguments = arguments;
 
-        let result: CallToolResult = tokio::time::timeout(
-            CALL_TIMEOUT,
-            self.service.call_tool(params),
-        )
-        .await
-        .map_err(|_| McpError::Timeout(CALL_TIMEOUT))?
-        .map_err(|e| McpError::ToolCallFailed(format!(
-            "tools/call '{}' failed on '{}': {}",
-            name, self.server_name, e
-        )))?;
+        let result: CallToolResult =
+            tokio::time::timeout(CALL_TIMEOUT, self.service.call_tool(params))
+                .await
+                .map_err(|_| McpError::Timeout(CALL_TIMEOUT))?
+                .map_err(|e| {
+                    McpError::ToolCallFailed(format!(
+                        "tools/call '{}' failed on '{}': {}",
+                        name, self.server_name, e
+                    ))
+                })?;
 
         Ok(convert_tool_result(&result))
     }
@@ -112,10 +111,7 @@ impl McpClient {
     /// Gracefully shut down the connection to the MCP server.
     pub async fn shutdown(self) -> Result<(), McpError> {
         self.service.cancel().await.map_err(|e| {
-            McpError::Shutdown(format!(
-                "shutdown failed for '{}': {}",
-                self.server_name, e
-            ))
+            McpError::Shutdown(format!("shutdown failed for '{}': {}", self.server_name, e))
         })?;
         Ok(())
     }
@@ -128,11 +124,7 @@ impl McpClient {
 
 /// Convert rmcp's `CallToolResult` into our `McpToolResult`.
 fn convert_tool_result(result: &CallToolResult) -> McpToolResult {
-    let content = result
-        .content
-        .iter()
-        .map(convert_content)
-        .collect();
+    let content = result.content.iter().map(convert_content).collect();
 
     McpToolResult {
         content,
@@ -158,9 +150,7 @@ fn convert_content(content: &Content) -> ToolContent {
                 ResourceContents::TextResourceContents { uri, text, .. } => {
                     (uri.clone(), Some(text.clone()))
                 }
-                ResourceContents::BlobResourceContents { uri, .. } => {
-                    (uri.clone(), None)
-                }
+                ResourceContents::BlobResourceContents { uri, .. } => (uri.clone(), None),
             };
             ToolContent::Resource { uri, text }
         }
@@ -245,8 +235,8 @@ mod tests {
             headers: None,
         };
         // echo exits immediately, so initialization should fail
-        let transport = crate::transport::spawn_transport(&config)
-            .expect("spawn should work for echo");
+        let transport =
+            crate::transport::spawn_transport(&config).expect("spawn should work for echo");
         let result = McpClient::initialize(&config, transport).await;
         assert!(result.is_err());
     }

@@ -25,8 +25,8 @@
 pub mod builder;
 pub mod error;
 pub mod ide;
-pub mod messages;
 pub mod mcp_server;
+pub mod messages;
 pub mod query;
 pub mod session;
 pub mod web;
@@ -35,13 +35,12 @@ pub mod web;
 
 pub use builder::{AgentBuilder, AgentOptions, PermissionMode, SessionBuilder, ThinkingConfig};
 pub use error::SdkError;
+pub use mcp_server::{SdkMcpServer, SdkTool, create_sdk_mcp_server};
 pub use messages::{SdkMessage, SdkResultMessage, SdkUsage};
-pub use mcp_server::{create_sdk_mcp_server, SdkMcpServer, SdkTool};
-pub use query::{query, SdkOptions};
+pub use query::{SdkOptions, query};
 pub use session::{
-    fork_session, get_session_info, list_sessions, rename_session, tag_session,
-    unstable_v2_create_session, unstable_v2_resume_session, ArchonSession, SdkSessionInfo,
-    SessionOptions,
+    ArchonSession, SdkSessionInfo, SessionOptions, fork_session, get_session_info, list_sessions,
+    rename_session, tag_session, unstable_v2_create_session, unstable_v2_resume_session,
 };
 
 /// Authentication method for SDK operations.

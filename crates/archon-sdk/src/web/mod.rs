@@ -3,11 +3,11 @@
 ///
 /// The server binds to `127.0.0.1:8421` by default. Binding to a non-loopback
 /// address requires explicit configuration and activates bearer-token auth.
-
 pub mod assets;
 
 use std::net::SocketAddr;
 
+use axum::http::HeaderValue;
 use axum::{
     Router,
     extract::{Path, State},
@@ -15,7 +15,6 @@ use axum::{
     response::{Html, IntoResponse, Response},
     routing::get,
 };
-use axum::http::HeaderValue;
 use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 
 // ---------------------------------------------------------------------------
@@ -149,10 +148,7 @@ impl WebServer {
 // Handlers
 // ---------------------------------------------------------------------------
 
-async fn index_handler(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-) -> Response {
+async fn index_handler(State(state): State<AppState>, headers: HeaderMap) -> Response {
     if let Err(resp) = check_auth(&state, &headers) {
         return resp;
     }

@@ -1,4 +1,4 @@
-use archon_tui::syntax::{grammar_dir, highlight_code, render_plain_code, CAPTURE_COLORS};
+use archon_tui::syntax::{CAPTURE_COLORS, grammar_dir, highlight_code, render_plain_code};
 
 /// Helper: flatten all spans from lines.
 fn flat_spans(lines: &[ratatui::text::Line<'static>]) -> Vec<(String, ratatui::style::Style)> {

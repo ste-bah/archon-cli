@@ -72,20 +72,14 @@ pub(crate) fn recall(
         scored.push((score, mem));
     }
 
-    scored.sort_by(|a, b| {
-        b.0.partial_cmp(&a.0)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
+    scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
     scored.truncate(limit);
 
     Ok(scored.into_iter().map(|(_, m)| m).collect())
 }
 
 /// Structured search with filters (type, tags, text, date range).
-pub(crate) fn search(
-    db: &DbInstance,
-    filter: &SearchFilter,
-) -> Result<Vec<Memory>, MemoryError> {
+pub(crate) fn search(db: &DbInstance, filter: &SearchFilter) -> Result<Vec<Memory>, MemoryError> {
     // If no filters are set, return empty (same behavior as original).
     let has_any_filter = filter.memory_type.is_some()
         || filter.text.is_some()

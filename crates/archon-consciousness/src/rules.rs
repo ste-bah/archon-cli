@@ -4,8 +4,8 @@
 //! [`MemoryType::Rule`]. The attention score lives in the `importance`
 //! field and source/trend metadata are encoded as tags.
 
-use archon_memory::types::{MemoryType, SearchFilter};
 use archon_memory::MemoryGraph;
+use archon_memory::types::{MemoryType, SearchFilter};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -114,21 +114,14 @@ impl<'g> RulesEngine<'g> {
     }
 
     /// Add a new rule and return the populated struct.
-    pub fn add_rule(
-        &self,
-        text: &str,
-        source: RuleSource,
-    ) -> Result<BehavioralRule, RulesError> {
+    pub fn add_rule(&self, text: &str, source: RuleSource) -> Result<BehavioralRule, RulesError> {
         let score: f64 = 50.0;
         let trend = Trend::Stable;
-        let tags = vec![
-            source.as_tag(),
-            trend.as_tag(),
-        ];
+        let tags = vec![source.as_tag(), trend.as_tag()];
 
         let id = self.graph.store_memory(
             text,
-            "",            // title
+            "", // title
             MemoryType::Rule,
             score,
             &tags,
@@ -173,7 +166,9 @@ impl<'g> RulesEngine<'g> {
     /// Increment a rule's score by 5.0 (clamped to 100.0) and update
     /// its `last_triggered` timestamp.
     pub fn reinforce_rule(&self, id: &str) -> Result<BehavioralRule, RulesError> {
-        let mem = self.graph.get_memory(id)
+        let mem = self
+            .graph
+            .get_memory(id)
             .map_err(|_| RulesError::NotFound(id.to_string()))?;
         let new_score = (mem.importance + 5.0).min(100.0);
         self.graph.update_importance(id, new_score)?;
@@ -258,9 +253,7 @@ impl<'g> RulesEngine<'g> {
 // ── helpers ──────────────────────────────────────────────────
 
 /// Convert a [`Memory`] into a [`BehavioralRule`].
-fn memory_to_rule(
-    m: archon_memory::Memory,
-) -> Result<BehavioralRule, RulesError> {
+fn memory_to_rule(m: archon_memory::Memory) -> Result<BehavioralRule, RulesError> {
     let source = m
         .tags
         .iter()
@@ -273,14 +266,11 @@ fn memory_to_rule(
         .find_map(|t| Trend::from_tag(t))
         .unwrap_or(Trend::Stable);
 
-    let last_triggered = m
-        .tags
-        .iter()
-        .find_map(|t| {
-            t.strip_prefix("last_triggered:")
-                .and_then(|v| DateTime::parse_from_rfc3339(v).ok())
-                .map(|dt| dt.with_timezone(&Utc))
-        });
+    let last_triggered = m.tags.iter().find_map(|t| {
+        t.strip_prefix("last_triggered:")
+            .and_then(|v| DateTime::parse_from_rfc3339(v).ok())
+            .map(|dt| dt.with_timezone(&Utc))
+    });
 
     Ok(BehavioralRule {
         id: m.id,
@@ -301,8 +291,7 @@ mod tests {
     use uuid::Uuid;
 
     fn make_engine() -> (MemoryGraph, ()) {
-        let graph = MemoryGraph::in_memory()
-            .expect("in-memory graph should succeed");
+        let graph = MemoryGraph::in_memory().expect("in-memory graph should succeed");
         (graph, ())
     }
 
@@ -312,7 +301,10 @@ mod tests {
         let engine = RulesEngine::new(&graph);
 
         let rule = engine
-            .add_rule("Do not modify files without asking", RuleSource::UserDefined)
+            .add_rule(
+                "Do not modify files without asking",
+                RuleSource::UserDefined,
+            )
             .expect("add_rule should succeed");
 
         assert_eq!(rule.text, "Do not modify files without asking");
@@ -371,9 +363,7 @@ mod tests {
             .expect("add");
 
         // Set score close to max.
-        graph
-            .update_importance(&rule.id, 98.0)
-            .expect("set score");
+        graph.update_importance(&rule.id, 98.0).expect("set score");
 
         let reinforced = engine.reinforce_rule(&rule.id).expect("reinforce");
         assert!((reinforced.score - 100.0).abs() < f64::EPSILON);

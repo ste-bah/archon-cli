@@ -187,8 +187,7 @@ impl LspClient {
             .map_err(|_| LspError::Protocol(format!("invalid file path: {}", file_path)))?;
 
         if !self.open_files.contains(&uri) {
-            let text = std::fs::read_to_string(file_path)
-                .map_err(|e| LspError::Io(e))?;
+            let text = std::fs::read_to_string(file_path).map_err(|e| LspError::Io(e))?;
 
             let language_id = detect_language_id(file_path);
 
@@ -242,12 +241,16 @@ impl LspClient {
         let params = lsp_types::GotoDefinitionParams {
             text_document_position_params: lsp_types::TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri },
-                position: lsp_types::Position::new(line.saturating_sub(1), character.saturating_sub(1)),
+                position: lsp_types::Position::new(
+                    line.saturating_sub(1),
+                    character.saturating_sub(1),
+                ),
             },
             work_done_progress_params: Default::default(),
             partial_result_params: Default::default(),
         };
-        self.request_with_timeout(self.server.clone().definition(params)).await
+        self.request_with_timeout(self.server.clone().definition(params))
+            .await
     }
 
     // ── findReferences ──────────────────────────────────────────────────────
@@ -262,7 +265,10 @@ impl LspClient {
         let params = lsp_types::ReferenceParams {
             text_document_position: lsp_types::TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri },
-                position: lsp_types::Position::new(line.saturating_sub(1), character.saturating_sub(1)),
+                position: lsp_types::Position::new(
+                    line.saturating_sub(1),
+                    character.saturating_sub(1),
+                ),
             },
             work_done_progress_params: Default::default(),
             partial_result_params: Default::default(),
@@ -270,7 +276,8 @@ impl LspClient {
                 include_declaration: true,
             },
         };
-        self.request_with_timeout(self.server.clone().references(params)).await
+        self.request_with_timeout(self.server.clone().references(params))
+            .await
     }
 
     // ── hover ───────────────────────────────────────────────────────────────
@@ -285,11 +292,15 @@ impl LspClient {
         let params = lsp_types::HoverParams {
             text_document_position_params: lsp_types::TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri },
-                position: lsp_types::Position::new(line.saturating_sub(1), character.saturating_sub(1)),
+                position: lsp_types::Position::new(
+                    line.saturating_sub(1),
+                    character.saturating_sub(1),
+                ),
             },
             work_done_progress_params: Default::default(),
         };
-        self.request_with_timeout(self.server.clone().hover(params)).await
+        self.request_with_timeout(self.server.clone().hover(params))
+            .await
     }
 
     // ── documentSymbol ──────────────────────────────────────────────────────
@@ -304,7 +315,8 @@ impl LspClient {
             work_done_progress_params: Default::default(),
             partial_result_params: Default::default(),
         };
-        self.request_with_timeout(self.server.clone().document_symbol(params)).await
+        self.request_with_timeout(self.server.clone().document_symbol(params))
+            .await
     }
 
     // ── workspaceSymbol ─────────────────────────────────────────────────────
@@ -318,7 +330,8 @@ impl LspClient {
             work_done_progress_params: Default::default(),
             partial_result_params: Default::default(),
         };
-        self.request_with_timeout(self.server.clone().symbol(params)).await
+        self.request_with_timeout(self.server.clone().symbol(params))
+            .await
     }
 
     // ── goToImplementation ──────────────────────────────────────────────────
@@ -333,12 +346,16 @@ impl LspClient {
         let params = GotoImplementationParams {
             text_document_position_params: lsp_types::TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri },
-                position: lsp_types::Position::new(line.saturating_sub(1), character.saturating_sub(1)),
+                position: lsp_types::Position::new(
+                    line.saturating_sub(1),
+                    character.saturating_sub(1),
+                ),
             },
             work_done_progress_params: Default::default(),
             partial_result_params: Default::default(),
         };
-        self.request_with_timeout(self.server.clone().implementation(params)).await
+        self.request_with_timeout(self.server.clone().implementation(params))
+            .await
     }
 
     // ── prepareCallHierarchy ────────────────────────────────────────────────
@@ -353,11 +370,15 @@ impl LspClient {
         let params = lsp_types::CallHierarchyPrepareParams {
             text_document_position_params: lsp_types::TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri },
-                position: lsp_types::Position::new(line.saturating_sub(1), character.saturating_sub(1)),
+                position: lsp_types::Position::new(
+                    line.saturating_sub(1),
+                    character.saturating_sub(1),
+                ),
             },
             work_done_progress_params: Default::default(),
         };
-        self.request_with_timeout(self.server.clone().prepare_call_hierarchy(params)).await
+        self.request_with_timeout(self.server.clone().prepare_call_hierarchy(params))
+            .await
     }
 
     // ── incomingCalls ───────────────────────────────────────────────────────
@@ -371,7 +392,8 @@ impl LspClient {
             work_done_progress_params: Default::default(),
             partial_result_params: Default::default(),
         };
-        self.request_with_timeout(self.server.clone().incoming_calls(params)).await
+        self.request_with_timeout(self.server.clone().incoming_calls(params))
+            .await
     }
 
     // ── outgoingCalls ───────────────────────────────────────────────────────
@@ -385,18 +407,15 @@ impl LspClient {
             work_done_progress_params: Default::default(),
             partial_result_params: Default::default(),
         };
-        self.request_with_timeout(self.server.clone().outgoing_calls(params)).await
+        self.request_with_timeout(self.server.clone().outgoing_calls(params))
+            .await
     }
 
     // ── Lifecycle ───────────────────────────────────────────────────────────
 
     /// Shut down the LSP server gracefully.
     pub async fn shutdown(mut self) -> Result<(), LspError> {
-        let _ = timeout(
-            Duration::from_secs(5),
-            self.server.shutdown(()),
-        )
-        .await;
+        let _ = timeout(Duration::from_secs(5), self.server.shutdown(())).await;
         let _ = self.server.exit(());
         let _ = self.server.emit(Stop);
         Ok(())

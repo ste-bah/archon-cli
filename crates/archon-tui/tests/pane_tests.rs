@@ -2,7 +2,7 @@
 
 use archon_tui::pane::{Pane, PaneContent};
 use archon_tui::pane_layout::{PaneLayout, split_rect_horizontal, split_rect_vertical};
-use archon_tui::pane_manager::{PaneManager, PANE_MIN_COLS, PANE_MIN_ROWS};
+use archon_tui::pane_manager::{PANE_MIN_COLS, PANE_MIN_ROWS, PaneManager};
 use ratatui::layout::Rect;
 
 // ---------------------------------------------------------------------------
@@ -79,8 +79,16 @@ fn horizontal_split_at_30_percent() {
     let area = Rect::new(0, 0, 100, 100);
     let (top, bottom) = split_rect_horizontal(area, 30);
     // 30% of 100 = 30 rows
-    assert!(top.height >= 29 && top.height <= 31, "top height ~30, got {}", top.height);
-    assert!(bottom.height >= 69 && bottom.height <= 71, "bottom height ~70, got {}", bottom.height);
+    assert!(
+        top.height >= 29 && top.height <= 31,
+        "top height ~30, got {}",
+        top.height
+    );
+    assert!(
+        bottom.height >= 69 && bottom.height <= 71,
+        "bottom height ~70, got {}",
+        bottom.height
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -177,7 +185,11 @@ fn ctrl_backslash_not_registered() {
         // Check for Ctrl+\ in any form
         key.contains("ctrl+\\") || key.contains("ctrl+backslash") || key.contains("ctrl-\\")
     });
-    assert!(ctrl_backslash.is_none(), "Ctrl+\\ must NOT be registered: found {:?}", ctrl_backslash);
+    assert!(
+        ctrl_backslash.is_none(),
+        "Ctrl+\\ must NOT be registered: found {:?}",
+        ctrl_backslash
+    );
 }
 
 #[test]
@@ -219,8 +231,11 @@ fn split_below_minimum_size_refused() {
         let rects = small.compute_rects();
         for r in &rects {
             // rects may be adjusted to enforce minimum
-            assert!(r.height >= PANE_MIN_ROWS as u16 || r.height == 0,
-                "pane height must be >= minimum: {}", r.height);
+            assert!(
+                r.height >= PANE_MIN_ROWS as u16 || r.height == 0,
+                "pane height must be >= minimum: {}",
+                r.height
+            );
         }
     }
 }

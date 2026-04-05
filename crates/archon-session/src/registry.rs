@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use crate::background::{sessions_dir, BackgroundSessionInfo};
+use crate::background::{BackgroundSessionInfo, sessions_dir};
 use crate::storage::SessionError;
 
 // ---------------------------------------------------------------------------
@@ -80,9 +80,8 @@ pub fn get_session_in_dir(dir: &Path, id: &str) -> Result<BackgroundSessionInfo,
         )));
     }
     let raw = std::fs::read_to_string(&status_path)?;
-    let info: BackgroundSessionInfo = serde_json::from_str(&raw).map_err(|e| {
-        SessionError::DbError(format!("failed to parse status file for {id}: {e}"))
-    })?;
+    let info: BackgroundSessionInfo = serde_json::from_str(&raw)
+        .map_err(|e| SessionError::DbError(format!("failed to parse status file for {id}: {e}")))?;
     Ok(info)
 }
 
@@ -96,10 +95,7 @@ pub fn cleanup_old_sessions(max_age_days: u64) -> Result<usize, SessionError> {
 }
 
 /// Clean up old completed sessions in a specific directory (testable).
-pub fn cleanup_old_sessions_in_dir(
-    dir: &Path,
-    max_age_days: u64,
-) -> Result<usize, SessionError> {
+pub fn cleanup_old_sessions_in_dir(dir: &Path, max_age_days: u64) -> Result<usize, SessionError> {
     if !dir.exists() {
         return Ok(0);
     }

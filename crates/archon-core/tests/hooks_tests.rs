@@ -182,7 +182,10 @@ fn hook_config_no_blocking_field() {
         status_message: None,
     })
     .unwrap();
-    assert!(!json.contains("\"blocking\""), "blocking field must not exist in HookConfig");
+    assert!(
+        !json.contains("\"blocking\""),
+        "blocking field must not exist in HookConfig"
+    );
 }
 
 #[test]
@@ -198,7 +201,10 @@ fn hook_config_no_priority_field() {
         status_message: None,
     })
     .unwrap();
-    assert!(!json.contains("\"priority\""), "priority field must not exist in HookConfig");
+    assert!(
+        !json.contains("\"priority\""),
+        "priority field must not exist in HookConfig"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -310,15 +316,12 @@ fn hook_result_no_modified_variant() {
     // HookResult must have exactly 2 variants: Allow and Block.
     // If a Modified variant existed, this match would be non-exhaustive.
     // This test passes by compilation: the match below must be exhaustive.
-    let results: Vec<HookResult> = vec![
-        HookResult::Allow,
-        HookResult::Block { reason: "r".into() },
-    ];
+    let results: Vec<HookResult> =
+        vec![HookResult::Allow, HookResult::Block { reason: "r".into() }];
     for r in results {
         match r {
             HookResult::Allow => {}
-            HookResult::Block { .. } => {}
-            // No other variants — if Modified existed, this would not compile
+            HookResult::Block { .. } => {} // No other variants — if Modified existed, this would not compile
         }
     }
 }
@@ -361,15 +364,25 @@ fn condition_tool_name_with_arg_pattern() {
         "tool_input": {"path": "git.rs"}
     });
 
-    assert!(evaluate("Bash(git *)", &git_input), "should match Bash with git command");
-    assert!(!evaluate("Bash(git *)", &rm_input), "should not match Bash with rm command");
-    assert!(!evaluate("Bash(git *)", &read_input), "should not match non-Bash tool");
+    assert!(
+        evaluate("Bash(git *)", &git_input),
+        "should match Bash with git command"
+    );
+    assert!(
+        !evaluate("Bash(git *)", &rm_input),
+        "should not match Bash with rm command"
+    );
+    assert!(
+        !evaluate("Bash(git *)", &read_input),
+        "should not match non-Bash tool"
+    );
 }
 
 #[test]
 fn condition_wildcard_pattern() {
     use archon_core::hooks::condition::evaluate;
-    let input = serde_json::json!({"tool_name": "Bash", "tool_input": {"command": "anything here"}});
+    let input =
+        serde_json::json!({"tool_name": "Bash", "tool_input": {"command": "anything here"}});
     assert!(evaluate("Bash(*)", &input));
     assert!(evaluate("Bash(any*)", &input));
     assert!(!evaluate("Bash(nothing*)", &input));
@@ -381,15 +394,13 @@ fn condition_wildcard_pattern() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn exit_0_returns_allow() {
-    let registry = make_registry_with_command(
-        HookEvent::PreToolUse,
-        "exit 0",
-        None,
-        None,
-    );
+    let registry = make_registry_with_command(HookEvent::PreToolUse, "exit 0", None, None);
     let input = pre_tool_input("Bash", "echo hello");
     let result = fire_pre_tool_use(&registry, input).await;
-    assert!(matches!(result, HookResult::Allow), "exit 0 must return Allow");
+    assert!(
+        matches!(result, HookResult::Allow),
+        "exit 0 must return Allow"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -415,12 +426,7 @@ async fn exit_2_returns_block_with_stderr() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn exit_1_non_blocking_failure_returns_allow() {
-    let registry = make_registry_with_command(
-        HookEvent::PreToolUse,
-        "exit 1",
-        None,
-        None,
-    );
+    let registry = make_registry_with_command(HookEvent::PreToolUse, "exit 1", None, None);
     let input = pre_tool_input("Bash", "echo hello");
     let result = fire_pre_tool_use(&registry, input).await;
     assert!(

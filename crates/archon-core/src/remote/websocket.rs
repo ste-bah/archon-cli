@@ -102,7 +102,9 @@ impl WsTransport {
             let header_value = format!("Bearer {}", config.token)
                 .parse()
                 .map_err(|e| anyhow::anyhow!("invalid token for Authorization header: {e}"))?;
-            request.headers_mut().insert(header::AUTHORIZATION, header_value);
+            request
+                .headers_mut()
+                .insert(header::AUTHORIZATION, header_value);
         }
 
         let (ws_stream, _response) = tokio_tungstenite::connect_async(request)
@@ -115,7 +117,11 @@ impl WsTransport {
             config.session_id.clone()
         };
 
-        tracing::info!("ws: connected to '{}' session_id={}", config.url, session_id);
+        tracing::info!(
+            "ws: connected to '{}' session_id={}",
+            config.url,
+            session_id
+        );
 
         let inner = WsSessionInner {
             stream: Mutex::new(ws_stream),
@@ -128,9 +134,8 @@ impl WsTransport {
     }
 }
 
-type WsStream = tokio_tungstenite::WebSocketStream<
-    tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
->;
+type WsStream =
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 
 // The stream field is accessed via the Mutex inside trait method impls.
 #[allow(dead_code)]
@@ -169,10 +174,7 @@ impl RemoteSessionInner for WsSessionInner {
                     anyhow::bail!("ws: connection closed");
                 }
                 Some(Ok(
-                    Message::Ping(_)
-                    | Message::Pong(_)
-                    | Message::Binary(_)
-                    | Message::Frame(_),
+                    Message::Ping(_) | Message::Pong(_) | Message::Binary(_) | Message::Frame(_),
                 )) => {
                     // Ignore control frames and binary messages.
                 }

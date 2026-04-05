@@ -65,11 +65,7 @@ pub trait MemoryTrait: Send + Sync {
 
     fn clear_all(&self) -> Result<usize, MemoryError>;
 
-    fn get_related_memories(
-        &self,
-        id: &str,
-        depth: u32,
-    ) -> Result<Vec<Memory>, MemoryError>;
+    fn get_related_memories(&self, id: &str, depth: u32) -> Result<Vec<Memory>, MemoryError>;
 }
 
 // ── MemoryGraph impl ───────────────────────────────────────────
@@ -85,7 +81,16 @@ impl MemoryTrait for MemoryGraph {
         source_type: &str,
         project_path: &str,
     ) -> Result<String, MemoryError> {
-        MemoryGraph::store_memory(self, content, title, memory_type, importance, tags, source_type, project_path)
+        MemoryGraph::store_memory(
+            self,
+            content,
+            title,
+            memory_type,
+            importance,
+            tags,
+            source_type,
+            project_path,
+        )
     }
 
     fn get_memory(&self, id: &str) -> Result<Memory, MemoryError> {
@@ -140,11 +145,7 @@ impl MemoryTrait for MemoryGraph {
         MemoryGraph::clear_all(self)
     }
 
-    fn get_related_memories(
-        &self,
-        id: &str,
-        depth: u32,
-    ) -> Result<Vec<Memory>, MemoryError> {
+    fn get_related_memories(&self, id: &str, depth: u32) -> Result<Vec<Memory>, MemoryError> {
         MemoryGraph::get_related_memories(self, id, depth)
     }
 }
@@ -162,9 +163,7 @@ impl MemoryTrait for MemoryGraph {
 /// no current `Handle`, or the runtime is single-threaded and
 /// `block_in_place` is unsupported).
 fn block_on_async<F: std::future::Future>(f: F) -> F::Output {
-    tokio::task::block_in_place(|| {
-        tokio::runtime::Handle::current().block_on(f)
-    })
+    tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(f))
 }
 
 /// [`MemoryTrait`] implementation that bridges async [`MemoryClient`] calls
@@ -205,10 +204,7 @@ impl MemoryTrait for MemoryClient {
     }
 
     fn get_memory(&self, id: &str) -> Result<Memory, MemoryError> {
-        let result = block_on_async(self.call(
-            "get_memory",
-            serde_json::json!({"id": id}),
-        ))?;
+        let result = block_on_async(self.call("get_memory", serde_json::json!({"id": id})))?;
         serde_json::from_value(result).map_err(MemoryError::from)
     }
 
@@ -238,10 +234,7 @@ impl MemoryTrait for MemoryClient {
     }
 
     fn delete_memory(&self, id: &str) -> Result<(), MemoryError> {
-        block_on_async(self.call(
-            "delete_memory",
-            serde_json::json!({"id": id}),
-        ))?;
+        block_on_async(self.call("delete_memory", serde_json::json!({"id": id})))?;
         Ok(())
     }
 
@@ -276,26 +269,19 @@ impl MemoryTrait for MemoryClient {
 
     fn search_memories(&self, filter: &SearchFilter) -> Result<Vec<Memory>, MemoryError> {
         let filter_val = serde_json::to_value(filter)?;
-        let result = block_on_async(self.call(
-            "search_memories",
-            serde_json::json!({"filter": filter_val}),
-        ))?;
+        let result = block_on_async(
+            self.call("search_memories", serde_json::json!({"filter": filter_val})),
+        )?;
         serde_json::from_value(result).map_err(MemoryError::from)
     }
 
     fn list_recent(&self, limit: usize) -> Result<Vec<Memory>, MemoryError> {
-        let result = block_on_async(self.call(
-            "list_recent",
-            serde_json::json!({"limit": limit}),
-        ))?;
+        let result = block_on_async(self.call("list_recent", serde_json::json!({"limit": limit})))?;
         serde_json::from_value(result).map_err(MemoryError::from)
     }
 
     fn memory_count(&self) -> Result<usize, MemoryError> {
-        let result = block_on_async(self.call(
-            "memory_count",
-            serde_json::json!({}),
-        ))?;
+        let result = block_on_async(self.call("memory_count", serde_json::json!({})))?;
         result
             .as_u64()
             .map(|v| v as usize)
@@ -303,21 +289,14 @@ impl MemoryTrait for MemoryClient {
     }
 
     fn clear_all(&self) -> Result<usize, MemoryError> {
-        let result = block_on_async(self.call(
-            "clear_all",
-            serde_json::json!({}),
-        ))?;
+        let result = block_on_async(self.call("clear_all", serde_json::json!({})))?;
         result
             .as_u64()
             .map(|v| v as usize)
             .ok_or_else(|| MemoryError::Database("expected integer count".to_string()))
     }
 
-    fn get_related_memories(
-        &self,
-        id: &str,
-        depth: u32,
-    ) -> Result<Vec<Memory>, MemoryError> {
+    fn get_related_memories(&self, id: &str, depth: u32) -> Result<Vec<Memory>, MemoryError> {
         let result = block_on_async(self.call(
             "get_related_memories",
             serde_json::json!({"id": id, "depth": depth}),
@@ -365,12 +344,24 @@ impl MemoryTrait for MemoryAccess {
         project_path: &str,
     ) -> Result<String, MemoryError> {
         match self {
-            Self::Direct { graph, .. } => {
-                graph.store_memory(content, title, memory_type, importance, tags, source_type, project_path)
-            }
-            Self::Remote(client) => {
-                client.store_memory(content, title, memory_type, importance, tags, source_type, project_path)
-            }
+            Self::Direct { graph, .. } => graph.store_memory(
+                content,
+                title,
+                memory_type,
+                importance,
+                tags,
+                source_type,
+                project_path,
+            ),
+            Self::Remote(client) => client.store_memory(
+                content,
+                title,
+                memory_type,
+                importance,
+                tags,
+                source_type,
+                project_path,
+            ),
         }
     }
 
@@ -460,11 +451,7 @@ impl MemoryTrait for MemoryAccess {
         }
     }
 
-    fn get_related_memories(
-        &self,
-        id: &str,
-        depth: u32,
-    ) -> Result<Vec<Memory>, MemoryError> {
+    fn get_related_memories(&self, id: &str, depth: u32) -> Result<Vec<Memory>, MemoryError> {
         match self {
             Self::Direct { graph, .. } => graph.get_related_memories(id, depth),
             Self::Remote(client) => client.get_related_memories(id, depth),
@@ -542,19 +529,17 @@ async fn try_connect_existing(port_file: &Path) -> Option<MemoryAccess> {
     let addr: SocketAddr = format!("127.0.0.1:{port}").parse().ok()?;
 
     match MemoryClient::connect(addr).await {
-        Ok(client) => {
-            match client.ping().await {
-                Ok(()) => {
-                    debug!(port, "connected to existing memory server");
-                    Some(MemoryAccess::Remote(client))
-                }
-                Err(e) => {
-                    warn!(port, error = %e, "server ping failed, cleaning stale port file");
-                    let _ = std::fs::remove_file(port_file);
-                    None
-                }
+        Ok(client) => match client.ping().await {
+            Ok(()) => {
+                debug!(port, "connected to existing memory server");
+                Some(MemoryAccess::Remote(client))
             }
-        }
+            Err(e) => {
+                warn!(port, error = %e, "server ping failed, cleaning stale port file");
+                let _ = std::fs::remove_file(port_file);
+                None
+            }
+        },
         Err(e) => {
             debug!(port, error = %e, "cannot connect to memory server, cleaning stale port file");
             let _ = std::fs::remove_file(port_file);

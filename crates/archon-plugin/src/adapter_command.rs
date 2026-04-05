@@ -13,7 +13,10 @@ pub struct PluginCommandAdapter {
 impl PluginCommandAdapter {
     /// Create an adapter for a plugin command registration.
     pub fn new(plugin_id: String, command_name: String) -> Self {
-        Self { plugin_id, command_name }
+        Self {
+            plugin_id,
+            command_name,
+        }
     }
 
     /// The plugin that registered this command.

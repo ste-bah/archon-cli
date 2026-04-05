@@ -37,9 +37,18 @@ mod tests {
 
     #[test]
     fn parse_responses() {
-        assert_eq!(parse_permission_response("y"), Some(PermissionResponse::Allow));
-        assert_eq!(parse_permission_response("n"), Some(PermissionResponse::Deny));
-        assert_eq!(parse_permission_response("always"), Some(PermissionResponse::AlwaysAllow));
+        assert_eq!(
+            parse_permission_response("y"),
+            Some(PermissionResponse::Allow)
+        );
+        assert_eq!(
+            parse_permission_response("n"),
+            Some(PermissionResponse::Deny)
+        );
+        assert_eq!(
+            parse_permission_response("always"),
+            Some(PermissionResponse::AlwaysAllow)
+        );
         assert_eq!(parse_permission_response("maybe"), None);
     }
 }

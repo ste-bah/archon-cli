@@ -1,5 +1,5 @@
 use crate::boundary::{CompactBoundary, CompactionStrategy};
-use crate::messages::{total_estimated_tokens, ContextMessage};
+use crate::messages::{ContextMessage, total_estimated_tokens};
 
 /// Microcompact: summarize the oldest 30 % of messages, keep recent verbatim.
 ///

@@ -48,9 +48,14 @@ async fn insert_code_cell_at_beginning() {
         )
         .await;
 
-    assert!(!result.is_error, "insert should succeed: {}", result.content);
+    assert!(
+        !result.is_error,
+        "insert should succeed: {}",
+        result.content
+    );
 
-    let nb: serde_json::Value = serde_json::from_str(&fs::read_to_string(&nb_path).unwrap()).unwrap();
+    let nb: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&nb_path).unwrap()).unwrap();
     let cells = nb["cells"].as_array().unwrap();
     assert_eq!(cells.len(), 3);
     assert_eq!(cells[0]["source"][0].as_str().unwrap(), "x = 42");
@@ -75,9 +80,14 @@ async fn insert_markdown_cell_at_end() {
         )
         .await;
 
-    assert!(!result.is_error, "insert at end should succeed: {}", result.content);
+    assert!(
+        !result.is_error,
+        "insert at end should succeed: {}",
+        result.content
+    );
 
-    let nb: serde_json::Value = serde_json::from_str(&fs::read_to_string(&nb_path).unwrap()).unwrap();
+    let nb: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&nb_path).unwrap()).unwrap();
     let cells = nb["cells"].as_array().unwrap();
     assert_eq!(cells.len(), 3);
     assert_eq!(cells[2]["cell_type"].as_str().unwrap(), "markdown");
@@ -102,9 +112,14 @@ async fn replace_cell_content() {
         )
         .await;
 
-    assert!(!result.is_error, "replace should succeed: {}", result.content);
+    assert!(
+        !result.is_error,
+        "replace should succeed: {}",
+        result.content
+    );
 
-    let nb: serde_json::Value = serde_json::from_str(&fs::read_to_string(&nb_path).unwrap()).unwrap();
+    let nb: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&nb_path).unwrap()).unwrap();
     let cells = nb["cells"].as_array().unwrap();
     assert_eq!(cells.len(), 2);
     assert_eq!(cells[0]["source"][0].as_str().unwrap(), "print('world')");
@@ -127,9 +142,14 @@ async fn delete_cell() {
         )
         .await;
 
-    assert!(!result.is_error, "delete should succeed: {}", result.content);
+    assert!(
+        !result.is_error,
+        "delete should succeed: {}",
+        result.content
+    );
 
-    let nb: serde_json::Value = serde_json::from_str(&fs::read_to_string(&nb_path).unwrap()).unwrap();
+    let nb: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&nb_path).unwrap()).unwrap();
     let cells = nb["cells"].as_array().unwrap();
     assert_eq!(cells.len(), 1);
     assert_eq!(cells[0]["cell_type"].as_str().unwrap(), "code");
@@ -155,7 +175,8 @@ async fn move_cell() {
 
     assert!(!result.is_error, "move should succeed: {}", result.content);
 
-    let nb: serde_json::Value = serde_json::from_str(&fs::read_to_string(&nb_path).unwrap()).unwrap();
+    let nb: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&nb_path).unwrap()).unwrap();
     let cells = nb["cells"].as_array().unwrap();
     assert_eq!(cells.len(), 2);
     // After moving cell 0 to index 1, the markdown cell should be first
@@ -181,7 +202,8 @@ async fn preserve_metadata_on_edit() {
     )
     .await;
 
-    let nb: serde_json::Value = serde_json::from_str(&fs::read_to_string(&nb_path).unwrap()).unwrap();
+    let nb: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&nb_path).unwrap()).unwrap();
     let cells = nb["cells"].as_array().unwrap();
     assert_eq!(cells[1]["cell_type"].as_str().unwrap(), "markdown");
     assert_eq!(cells[1]["source"][0].as_str().unwrap(), "# Title");
@@ -205,7 +227,8 @@ async fn preserve_outputs() {
     )
     .await;
 
-    let nb: serde_json::Value = serde_json::from_str(&fs::read_to_string(&nb_path).unwrap()).unwrap();
+    let nb: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&nb_path).unwrap()).unwrap();
     let cells = nb["cells"].as_array().unwrap();
     let outputs = cells[0]["outputs"].as_array().unwrap();
     assert_eq!(outputs.len(), 1);

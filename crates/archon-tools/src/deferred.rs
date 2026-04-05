@@ -192,7 +192,10 @@ mod tests {
         let mgr = DeferredToolManager::new(sample_defs());
         let mut deferred = mgr.deferred_tool_names();
         deferred.sort();
-        assert_eq!(deferred, vec!["WebFetch", "mcp__memory__store", "mcp__serena__find_symbol"]);
+        assert_eq!(
+            deferred,
+            vec!["WebFetch", "mcp__memory__store", "mcp__serena__find_symbol"]
+        );
     }
 
     #[test]

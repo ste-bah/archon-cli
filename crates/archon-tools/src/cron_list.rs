@@ -18,7 +18,11 @@ impl CronListTool {
     }
 
     fn store(&self) -> CronStore {
-        CronStore::new(self.project_dir.join(".claude").join("scheduled_tasks.json"))
+        CronStore::new(
+            self.project_dir
+                .join(".claude")
+                .join("scheduled_tasks.json"),
+        )
     }
 }
 
@@ -53,7 +57,9 @@ impl Tool for CronListTool {
 
         for t in &tasks {
             let next = crate::cron_scheduler::next_fire_time(&t.cron, now)
-                .map(|dt: chrono::DateTime<chrono::Utc>| dt.format("%Y-%m-%d %H:%M:%S UTC").to_string())
+                .map(|dt: chrono::DateTime<chrono::Utc>| {
+                    dt.format("%Y-%m-%d %H:%M:%S UTC").to_string()
+                })
                 .unwrap_or_else(|| "unknown".to_string());
 
             let recurring_label = match t.recurring {
@@ -61,7 +67,8 @@ impl Tool for CronListTool {
                 _ => "recurring",
             };
 
-            let name = store.get_name(&t.id)
+            let name = store
+                .get_name(&t.id)
                 .map(|n| format!(" ({n})"))
                 .unwrap_or_default();
 

@@ -45,9 +45,7 @@ pub fn diff_configs(old: &ArchonConfig, new: &ArchonConfig) -> Vec<String> {
 ///
 /// NOT reloadable (require restart): `api.*`, `identity.*`, `logging.*`.
 pub fn is_reloadable(key: &str) -> bool {
-    !key.starts_with("api.")
-        && !key.starts_with("identity.")
-        && !key.starts_with("logging.")
+    !key.starts_with("api.") && !key.starts_with("identity.") && !key.starts_with("logging.")
 }
 
 /// Filter a list of changed keys to only those that are NOT hot-reloadable

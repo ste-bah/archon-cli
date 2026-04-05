@@ -138,7 +138,7 @@ fn parse_content_block_start(data: &str) -> Result<StreamEvent, StreamError> {
         other => {
             return Err(StreamError::ParseError(format!(
                 "unknown content block type: {other}"
-            )))
+            )));
         }
     };
 
@@ -205,9 +205,7 @@ fn parse_content_block_stop(data: &str) -> Result<StreamEvent, StreamError> {
     let outer: Outer = serde_json::from_str(data)
         .map_err(|e| StreamError::ParseError(format!("content_block_stop: {e}")))?;
 
-    Ok(StreamEvent::ContentBlockStop {
-        index: outer.index,
-    })
+    Ok(StreamEvent::ContentBlockStop { index: outer.index })
 }
 
 fn parse_message_delta(data: &str) -> Result<StreamEvent, StreamError> {

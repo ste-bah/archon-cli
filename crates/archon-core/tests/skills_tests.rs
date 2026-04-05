@@ -1,6 +1,6 @@
-use archon_core::skills::parser::parse_slash_command;
 use archon_core::skills::builtin::register_builtins;
 use archon_core::skills::discovery::discover_user_skills;
+use archon_core::skills::parser::parse_slash_command;
 use archon_core::skills::{Skill, SkillContext, SkillOutput, SkillRegistry};
 use tempfile::TempDir;
 

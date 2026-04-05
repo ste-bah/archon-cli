@@ -89,19 +89,15 @@ impl LocalProvider {
     /// Returns `Err` if the server is not reachable.
     pub async fn health_check(&self) -> Result<(), LlmError> {
         let url = self.health_check_url();
-        self.http
-            .get(&url)
-            .send()
-            .await
-            .map_err(|e| {
-                if e.is_connect() {
-                    LlmError::Http(format!(
-                        "Ollama not running? Could not connect to {url}: {e}"
-                    ))
-                } else {
-                    LlmError::Http(e.to_string())
-                }
-            })?;
+        self.http.get(&url).send().await.map_err(|e| {
+            if e.is_connect() {
+                LlmError::Http(format!(
+                    "Ollama not running? Could not connect to {url}: {e}"
+                ))
+            } else {
+                LlmError::Http(e.to_string())
+            }
+        })?;
         Ok(())
     }
 
@@ -116,12 +112,7 @@ impl LocalProvider {
         let body = serde_json::json!({"name": self.model, "stream": false});
 
         // Best-effort — if pull fails, the request will fail naturally.
-        let _ = self
-            .http
-            .post(&pull_url)
-            .json(&body)
-            .send()
-            .await;
+        let _ = self.http.post(&pull_url).json(&body).send().await;
 
         Ok(())
     }
@@ -131,9 +122,7 @@ impl LocalProvider {
         self.maybe_pull_model().await?;
 
         // Use the configured model, not the one in request.model (which may be from Anthropic defaults).
-        let effective_model = if request.model == "claude-sonnet-4-6"
-            || request.model.is_empty()
-        {
+        let effective_model = if request.model == "claude-sonnet-4-6" || request.model.is_empty() {
             self.model.clone()
         } else {
             request.model.clone()
@@ -149,27 +138,24 @@ impl LocalProvider {
         );
 
         let url = format!("{}/chat/completions", self.base_url);
-        let resp = self
-            .http
-            .post(&url)
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| {
-                if e.is_connect() {
-                    LlmError::Http(format!(
-                        "Ollama not running? Could not connect to {}: {e}",
-                        self.base_url
-                    ))
-                } else {
-                    LlmError::Http(e.to_string())
-                }
-            })?;
+        let resp = self.http.post(&url).json(&body).send().await.map_err(|e| {
+            if e.is_connect() {
+                LlmError::Http(format!(
+                    "Ollama not running? Could not connect to {}: {e}",
+                    self.base_url
+                ))
+            } else {
+                LlmError::Http(e.to_string())
+            }
+        })?;
 
         let status = resp.status().as_u16();
         if status >= 400 {
             let msg = resp.text().await.unwrap_or_else(|_| "unknown".to_string());
-            return Err(LlmError::Server { status, message: msg });
+            return Err(LlmError::Server {
+                status,
+                message: msg,
+            });
         }
 
         let (tx, rx) = tokio::sync::mpsc::channel::<StreamEvent>(256);
@@ -299,9 +285,9 @@ impl LlmProvider for LocalProvider {
             ProviderFeature::Streaming => true,
             ProviderFeature::Thinking | ProviderFeature::PromptCaching => false,
             // ToolUse/Vision/SystemPrompt: depends on model — return true optimistically.
-            ProviderFeature::ToolUse
-            | ProviderFeature::Vision
-            | ProviderFeature::SystemPrompt => true,
+            ProviderFeature::ToolUse | ProviderFeature::Vision | ProviderFeature::SystemPrompt => {
+                true
+            }
         }
     }
 }

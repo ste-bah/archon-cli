@@ -65,10 +65,7 @@ pub fn load_merged_configs(project_root: &Path) -> Result<Vec<ServerConfig>, Mcp
     }
 
     // Filter out disabled servers
-    let configs: Vec<ServerConfig> = merged
-        .into_values()
-        .filter(|c| !c.disabled)
-        .collect();
+    let configs: Vec<ServerConfig> = merged.into_values().filter(|c| !c.disabled).collect();
 
     Ok(configs)
 }
@@ -88,9 +85,8 @@ pub fn load_config_file(path: &Path) -> Result<Vec<ServerConfig>, McpError> {
 
 /// Parse the contents of a `.mcp.json` string into server configs.
 fn parse_mcp_json(content: &str, source: &Path) -> Result<Vec<ServerConfig>, McpError> {
-    let raw: RawMcpConfig = serde_json::from_str(content).map_err(|e| {
-        McpError::ConfigParse(format!("{}: {}", source.display(), e))
-    })?;
+    let raw: RawMcpConfig = serde_json::from_str(content)
+        .map_err(|e| McpError::ConfigParse(format!("{}: {}", source.display(), e)))?;
 
     let configs = raw
         .mcp_servers
@@ -225,7 +221,8 @@ mod tests {
 
     #[test]
     fn load_missing_file_returns_empty() {
-        let configs = load_config_file(Path::new("/nonexistent/.mcp.json")).expect("should succeed");
+        let configs =
+            load_config_file(Path::new("/nonexistent/.mcp.json")).expect("should succeed");
         assert!(configs.is_empty());
     }
 

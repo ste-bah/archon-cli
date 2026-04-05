@@ -1,10 +1,8 @@
 use std::fs;
 use std::path::PathBuf;
 
-use archon_llm::tokens::{
-    credentials_path, read_credentials_locked, write_credentials_atomic,
-};
 use archon_llm::auth::parse_credentials_json;
+use archon_llm::tokens::{credentials_path, read_credentials_locked, write_credentials_atomic};
 use archon_llm::types::Secret;
 
 fn temp_dir() -> PathBuf {
@@ -29,8 +27,11 @@ fn write_test_credentials(path: &std::path::Path, expires_ms: i64) {
             "subscriptionType": "pro"
         }
     });
-    fs::write(path, serde_json::to_string_pretty(&json).expect("serialize"))
-        .expect("write test credentials");
+    fs::write(
+        path,
+        serde_json::to_string_pretty(&json).expect("serialize"),
+    )
+    .expect("write test credentials");
 }
 
 #[test]
@@ -51,8 +52,7 @@ fn read_credentials_locked_reads_valid_file() {
     // Far future: 2099
     write_test_credentials(&cred_file, 4102444799000);
 
-    let (creds, _mtime) =
-        read_credentials_locked(&cred_file).expect("should read locked");
+    let (creds, _mtime) = read_credentials_locked(&cred_file).expect("should read locked");
 
     assert_eq!(creds.access_token.expose(), "test-access-token");
     assert_eq!(creds.refresh_token.expose(), "test-refresh-token");

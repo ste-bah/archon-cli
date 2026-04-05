@@ -96,11 +96,11 @@ pub struct WsReconnectConfig {
 impl Default for WsReconnectConfig {
     fn default() -> Self {
         Self {
-            budget_ms: 10 * 60 * 1_000,   // 10 minutes
-            ping_interval_ms: 10_000,       // 10 seconds
+            budget_ms: 10 * 60 * 1_000,            // 10 minutes
+            ping_interval_ms: 10_000,              // 10 seconds
             keepalive_interval_ms: 5 * 60 * 1_000, // 5 minutes
-            sleep_gap_threshold_ms: 60_000, // 60 seconds
-            shutdown_wait_ms: 5_000,        // 5 seconds
+            sleep_gap_threshold_ms: 60_000,        // 60 seconds
+            shutdown_wait_ms: 5_000,               // 5 seconds
         }
     }
 }

@@ -51,12 +51,7 @@ impl TokenCounter {
     }
 
     /// Check if the current usage exceeds the compaction threshold.
-    pub fn should_compact(
-        &self,
-        current_tokens: u64,
-        model_limit: u64,
-        threshold: f32,
-    ) -> bool {
+    pub fn should_compact(&self, current_tokens: u64, model_limit: u64, threshold: f32) -> bool {
         let limit = (model_limit as f64 * threshold as f64) as u64;
         current_tokens >= limit
     }

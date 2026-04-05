@@ -72,10 +72,7 @@ pub fn read_input_from_reader<R: Read>(
                 }
                 let parsed: serde_json::Value = serde_json::from_str(&trimmed)
                     .map_err(|e| format!("invalid JSON on input line: {e}"))?;
-                let role = parsed
-                    .get("role")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
+                let role = parsed.get("role").and_then(|v| v.as_str()).unwrap_or("");
                 if role != "user" {
                     continue;
                 }

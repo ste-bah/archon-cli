@@ -33,7 +33,10 @@ pub fn format_session_list(sessions: &[SessionMetadata]) -> String {
         };
         // Truncate directory
         let dir = if s.working_directory.len() > 28 {
-            format!("...{}", &s.working_directory[s.working_directory.len() - 25..])
+            format!(
+                "...{}",
+                &s.working_directory[s.working_directory.len() - 25..]
+            )
         } else {
             s.working_directory.clone()
         };

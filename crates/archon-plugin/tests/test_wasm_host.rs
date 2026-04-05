@@ -104,7 +104,10 @@ fn plugin_error_load_failed() {
 
 #[test]
 fn plugin_error_abi_mismatch() {
-    let e = PluginError::AbiMismatch { expected: 1, got: 99 };
+    let e = PluginError::AbiMismatch {
+        expected: 1,
+        got: 99,
+    };
     assert!(e.to_string().contains("1"));
     assert!(e.to_string().contains("99"));
 }
@@ -117,13 +120,18 @@ fn plugin_error_capability_denied() {
 
 #[test]
 fn plugin_error_timeout() {
-    let e = PluginError::Timeout { fuel_exhausted: true };
+    let e = PluginError::Timeout {
+        fuel_exhausted: true,
+    };
     assert!(e.to_string().len() > 0);
 }
 
 #[test]
 fn plugin_error_memory_violation() {
-    let e = PluginError::MemoryViolation { requested: 128 * 1024 * 1024, limit: 64 * 1024 * 1024 };
+    let e = PluginError::MemoryViolation {
+        requested: 128 * 1024 * 1024,
+        limit: 64 * 1024 * 1024,
+    };
     assert!(e.to_string().len() > 0);
 }
 
@@ -191,17 +199,16 @@ fn checker_denies_fs_read_when_not_granted() {
 
 #[test]
 fn checker_allows_fs_read_when_granted_matching_path() {
-    let checker = CapabilityChecker::new(vec![PluginCapability::ReadFs(vec![
-        PathBuf::from("/tmp"),
-    ])]);
+    let checker =
+        CapabilityChecker::new(vec![PluginCapability::ReadFs(vec![PathBuf::from("/tmp")])]);
     assert!(checker.can_read_fs(&PathBuf::from("/tmp/file.txt")));
 }
 
 #[test]
 fn checker_denies_fs_read_for_non_matching_path() {
-    let checker = CapabilityChecker::new(vec![PluginCapability::ReadFs(vec![
-        PathBuf::from("/allowed"),
-    ])]);
+    let checker = CapabilityChecker::new(vec![PluginCapability::ReadFs(vec![PathBuf::from(
+        "/allowed",
+    )])]);
     assert!(!checker.can_read_fs(&PathBuf::from("/forbidden/file.txt")));
 }
 
@@ -333,10 +340,16 @@ fn host_rejects_module_with_no_exports() {
 fn host_loads_minimal_valid_wasm() {
     let config = PluginHostConfig::default();
     let mut host = WasmPluginHost::new(config).unwrap();
-    let tmp = std::env::temp_dir().join("archon-plugin-test").join(uuid_str());
+    let tmp = std::env::temp_dir()
+        .join("archon-plugin-test")
+        .join(uuid_str());
     std::fs::create_dir_all(&tmp).unwrap();
     let result = host.load_plugin(minimal_wasm(), vec![], None, tmp);
-    assert!(result.is_ok(), "should load minimal WASM: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "should load minimal WASM: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -361,7 +374,10 @@ fn host_rejects_version_mismatch_too_new() {
     std::fs::create_dir_all(&tmp).unwrap();
     let result = host.load_plugin(version_mismatch_wasm(), vec![], None, tmp);
     assert!(result.is_err());
-    assert!(matches!(result.unwrap_err(), PluginError::AbiMismatch { .. }));
+    assert!(matches!(
+        result.unwrap_err(),
+        PluginError::AbiMismatch { .. }
+    ));
 }
 
 #[test]
@@ -372,7 +388,10 @@ fn host_rejects_version_mismatch_too_old() {
     std::fs::create_dir_all(&tmp).unwrap();
     let result = host.load_plugin(old_version_wasm(), vec![], None, tmp);
     assert!(result.is_err());
-    assert!(matches!(result.unwrap_err(), PluginError::AbiMismatch { .. }));
+    assert!(matches!(
+        result.unwrap_err(),
+        PluginError::AbiMismatch { .. }
+    ));
 }
 
 // ── WASM dispatch tests (TASK-CLI-500 Fix 1) ──────────────────────────────────
@@ -384,30 +403,42 @@ fn dispatch_tool_without_runtime_returns_error_json() {
     let result = host.dispatch_tool("some_tool", "{}");
     let parsed: serde_json::Value = serde_json::from_str(&result)
         .expect("dispatch_tool must return valid JSON even without runtime");
-    assert!(parsed.get("error").is_some(), "expected 'error' key: {result}");
+    assert!(
+        parsed.get("error").is_some(),
+        "expected 'error' key: {result}"
+    );
 }
 
 #[test]
 fn dispatch_tool_without_archon_call_tool_export_returns_error_json() {
     // minimal_wasm has no archon_call_tool → error JSON, no panic.
     let mut host = WasmPluginHost::new(PluginHostConfig::default()).unwrap();
-    let tmp = std::env::temp_dir().join("archon-dispatch-test").join(uuid_str());
+    let tmp = std::env::temp_dir()
+        .join("archon-dispatch-test")
+        .join(uuid_str());
     std::fs::create_dir_all(&tmp).unwrap();
-    host.load_plugin(minimal_wasm(), vec![], Some("test-plugin"), tmp).unwrap();
+    host.load_plugin(minimal_wasm(), vec![], Some("test-plugin"), tmp)
+        .unwrap();
 
     let result = host.dispatch_tool("my_tool", r#"{"arg":"value"}"#);
     let parsed: serde_json::Value = serde_json::from_str(&result)
         .expect("dispatch_tool must return valid JSON when export missing");
-    assert!(parsed.get("error").is_some(), "expected 'error' key: {result}");
+    assert!(
+        parsed.get("error").is_some(),
+        "expected 'error' key: {result}"
+    );
 }
 
 #[test]
 fn dispatch_tool_with_archon_call_tool_returns_json() {
     // dispatch_wasm exports archon_call_tool and writes "{}" as result.
     let mut host = WasmPluginHost::new(PluginHostConfig::default()).unwrap();
-    let tmp = std::env::temp_dir().join("archon-dispatch-ok").join(uuid_str());
+    let tmp = std::env::temp_dir()
+        .join("archon-dispatch-ok")
+        .join(uuid_str());
     std::fs::create_dir_all(&tmp).unwrap();
-    host.load_plugin(dispatch_wasm(), vec![], Some("dispatch-plugin"), tmp).unwrap();
+    host.load_plugin(dispatch_wasm(), vec![], Some("dispatch-plugin"), tmp)
+        .unwrap();
 
     let result = host.dispatch_tool("my_tool", r#"{"input":"test"}"#);
     // The guest writes "{}" — verify we get valid JSON back.
@@ -420,9 +451,12 @@ fn dispatch_tool_with_archon_call_tool_returns_json() {
 #[test]
 fn dispatch_tool_does_not_panic_on_empty_args() {
     let mut host = WasmPluginHost::new(PluginHostConfig::default()).unwrap();
-    let tmp = std::env::temp_dir().join("archon-dispatch-empty").join(uuid_str());
+    let tmp = std::env::temp_dir()
+        .join("archon-dispatch-empty")
+        .join(uuid_str());
     std::fs::create_dir_all(&tmp).unwrap();
-    host.load_plugin(dispatch_wasm(), vec![], Some("p"), tmp).unwrap();
+    host.load_plugin(dispatch_wasm(), vec![], Some("p"), tmp)
+        .unwrap();
     // Must not panic regardless of empty args.
     let _ = host.dispatch_tool("tool", "");
 }
@@ -434,8 +468,8 @@ fn dispatch_tool_returns_string_on_load_failure() {
     let _ = host.load_plugin(garbage_bytes(), vec![], None, std::env::temp_dir());
     // load failed, runtime is None → should return error JSON.
     let result = host.dispatch_tool("tool", "{}");
-    let parsed: serde_json::Value = serde_json::from_str(&result)
-        .expect("error path must produce valid JSON");
+    let parsed: serde_json::Value =
+        serde_json::from_str(&result).expect("error path must produce valid JSON");
     assert!(parsed.get("error").is_some());
 }
 

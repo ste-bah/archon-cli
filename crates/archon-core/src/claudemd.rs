@@ -66,11 +66,7 @@ fn collect_claude_md_sections(working_dir: &Path, max_chars: Option<usize>) -> S
 }
 
 /// Try to load CLAUDE.md from a directory, preferring `.claude/CLAUDE.md`.
-fn try_load_dir(
-    dir: &Path,
-    sections: &mut Vec<String>,
-    seen: &mut HashSet<std::path::PathBuf>,
-) {
+fn try_load_dir(dir: &Path, sections: &mut Vec<String>, seen: &mut HashSet<std::path::PathBuf>) {
     let dot_claude = dir.join(".claude").join("CLAUDE.md");
     let plain = dir.join("CLAUDE.md");
 
@@ -83,11 +79,7 @@ fn try_load_dir(
 }
 
 /// Try to load a single CLAUDE.md file, deduplicating by canonical path.
-fn try_load(
-    path: &Path,
-    sections: &mut Vec<String>,
-    seen: &mut HashSet<std::path::PathBuf>,
-) {
+fn try_load(path: &Path, sections: &mut Vec<String>, seen: &mut HashSet<std::path::PathBuf>) {
     let canon = match path.canonicalize() {
         Ok(p) => p,
         Err(_) => return,

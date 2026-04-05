@@ -107,7 +107,10 @@ impl PluginRegistry {
 
     /// All namespaced tool names registered across all plugins.
     pub fn tool_names(&self) -> Vec<&str> {
-        self.tools.iter().map(|e| e.namespaced_name.as_str()).collect()
+        self.tools
+            .iter()
+            .map(|e| e.namespaced_name.as_str())
+            .collect()
     }
 
     /// Number of registered tools.
@@ -171,7 +174,11 @@ impl PluginRegistry {
         name: &str,
     ) -> Result<(), PluginRegistryError> {
         let namespaced = format!("{plugin_id}:{name}");
-        if self.commands.iter().any(|e| e.namespaced_name == namespaced) {
+        if self
+            .commands
+            .iter()
+            .any(|e| e.namespaced_name == namespaced)
+        {
             return Err(PluginRegistryError::DuplicateCommand(namespaced));
         }
         self.commands.push(CommandEntry {

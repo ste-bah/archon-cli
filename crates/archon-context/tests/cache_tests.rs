@@ -1,6 +1,6 @@
 use archon_context::cache::{
-    classify_blocks, optimize_block_order, to_api_blocks, BlockType, CacheBlock, CacheStats,
-    SectionInput,
+    BlockType, CacheBlock, CacheStats, SectionInput, classify_blocks, optimize_block_order,
+    to_api_blocks,
 };
 
 // ---------------------------------------------------------------------------

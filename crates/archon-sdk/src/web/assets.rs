@@ -3,7 +3,6 @@
 /// The `web/dist/` directory (relative to the workspace root) is compiled
 /// into the binary at build time. At runtime, assets are served directly
 /// from memory without touching the filesystem.
-
 use rust_embed::{EmbeddedFile, RustEmbed};
 
 /// Embedded static files from `web/dist/`.
@@ -33,7 +32,9 @@ pub fn get_asset(path: &str) -> Option<Asset> {
 
 /// Return all embedded asset file paths.
 pub fn list_assets() -> Vec<String> {
-    <WebAssets as RustEmbed>::iter().map(|s| s.into_owned()).collect()
+    <WebAssets as RustEmbed>::iter()
+        .map(|s| s.into_owned())
+        .collect()
 }
 
 /// Resolve the MIME type for a file path by extension.

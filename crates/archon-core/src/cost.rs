@@ -32,15 +32,33 @@ impl CostTracker {
         let mut pricing = HashMap::new();
 
         // Default Anthropic pricing (per million tokens)
-        pricing.insert("claude-sonnet-4-6".into(), ModelPricing {
-            input: 3.0, output: 15.0, cache_read: 0.30, cache_write: 3.75,
-        });
-        pricing.insert("claude-opus-4-6".into(), ModelPricing {
-            input: 15.0, output: 75.0, cache_read: 1.50, cache_write: 18.75,
-        });
-        pricing.insert("claude-haiku-4-5".into(), ModelPricing {
-            input: 0.80, output: 4.0, cache_read: 0.08, cache_write: 1.0,
-        });
+        pricing.insert(
+            "claude-sonnet-4-6".into(),
+            ModelPricing {
+                input: 3.0,
+                output: 15.0,
+                cache_read: 0.30,
+                cache_write: 3.75,
+            },
+        );
+        pricing.insert(
+            "claude-opus-4-6".into(),
+            ModelPricing {
+                input: 15.0,
+                output: 75.0,
+                cache_read: 1.50,
+                cache_write: 18.75,
+            },
+        );
+        pricing.insert(
+            "claude-haiku-4-5".into(),
+            ModelPricing {
+                input: 0.80,
+                output: 4.0,
+                cache_read: 0.08,
+                cache_write: 1.0,
+            },
+        );
 
         Self {
             pricing,
@@ -162,10 +180,7 @@ mod tests {
     #[test]
     fn cost_calculation_with_cache() {
         let tracker = CostTracker::new();
-        let cost = tracker.calculate_cost(
-            "claude-sonnet-4-6",
-            1000, 500, 2000, 1000,
-        );
+        let cost = tracker.calculate_cost("claude-sonnet-4-6", 1000, 500, 2000, 1000);
         // input: 0.003, output: 0.0075, cache_read: 0.0006, cache_write: 0.00375
         let expected = 0.003 + 0.0075 + 0.0006 + 0.00375;
         assert!((cost - expected).abs() < 0.0001);

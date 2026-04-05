@@ -60,7 +60,7 @@ pub fn build_jwt_claims(client_email: &str, token_uri: &str) -> serde_json::Valu
 ///
 /// Returns the signed JWT string suitable for sending to the token endpoint.
 pub fn sign_jwt(key: &ServiceAccountKey) -> Result<String, LlmError> {
-    use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
+    use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 
     #[derive(Serialize)]
     struct Claims {
@@ -138,8 +138,8 @@ pub async fn get_access_token(
         .map_err(|e| LlmError::Serialize(format!("failed to parse GCP token response: {e}")))?;
 
     let expires_secs = token_resp.expires_in.unwrap_or(3600);
-    let expires_at = std::time::Instant::now()
-        + std::time::Duration::from_secs(expires_secs.saturating_sub(60));
+    let expires_at =
+        std::time::Instant::now() + std::time::Duration::from_secs(expires_secs.saturating_sub(60));
 
     Ok(GcpAccessToken {
         access_token: token_resp.access_token,
@@ -153,8 +153,7 @@ pub async fn get_access_token(
 
 /// Return the path to the ADC file as a string.
 pub fn adc_file_path() -> String {
-    let base = dirs::config_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from(".config"));
+    let base = dirs::config_dir().unwrap_or_else(|| std::path::PathBuf::from(".config"));
     base.join("gcloud")
         .join("application_default_credentials.json")
         .to_string_lossy()
@@ -262,7 +261,13 @@ mod tests {
 
     #[test]
     fn jwt_claims_have_correct_scope() {
-        let claims = build_jwt_claims("sa@project.iam.gserviceaccount.com", "https://oauth2.googleapis.com/token");
-        assert_eq!(claims["scope"], "https://www.googleapis.com/auth/cloud-platform");
+        let claims = build_jwt_claims(
+            "sa@project.iam.gserviceaccount.com",
+            "https://oauth2.googleapis.com/token",
+        );
+        assert_eq!(
+            claims["scope"],
+            "https://www.googleapis.com/auth/cloud-platform"
+        );
     }
 }

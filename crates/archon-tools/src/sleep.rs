@@ -35,7 +35,9 @@ impl Tool for SleepTool {
     async fn execute(&self, input: serde_json::Value, _ctx: &ToolContext) -> ToolResult {
         let seconds = match input.get("seconds").and_then(|v| v.as_u64()) {
             Some(s) => s,
-            None => return ToolResult::error("seconds is required and must be a non-negative integer"),
+            None => {
+                return ToolResult::error("seconds is required and must be a non-negative integer");
+            }
         };
 
         if seconds > MAX_SLEEP_SECS {

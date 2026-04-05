@@ -28,8 +28,7 @@ pub fn resume_session(
                 }
                 1 => store.get_session(&matches[0].0)?,
                 n => {
-                    let names: Vec<String> =
-                        matches.iter().map(|(_, name)| name.clone()).collect();
+                    let names: Vec<String> = matches.iter().map(|(_, name)| name.clone()).collect();
                     return Err(SessionError::NotFound(format!(
                         "ambiguous name '{query}' matches {n} sessions: {}",
                         names.join(", ")
@@ -52,10 +51,7 @@ pub fn format_session_line(session: &SessionMetadata) -> String {
         &session.id
     };
 
-    let branch = session
-        .git_branch
-        .as_deref()
-        .unwrap_or("no branch");
+    let branch = session.git_branch.as_deref().unwrap_or("no branch");
 
     format!(
         "{id_short}  {dir}  ({branch})  {msgs} msgs  {tokens} tokens",

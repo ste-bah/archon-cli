@@ -111,10 +111,7 @@ impl CronStore {
         let id = task.id.clone();
         file.tasks.push(task);
         if let Some(n) = name {
-            file.archon_metadata
-                .entry(id)
-                .or_default()
-                .name = Some(n.to_string());
+            file.archon_metadata.entry(id).or_default().name = Some(n.to_string());
         }
         self.write_file(&file)
     }

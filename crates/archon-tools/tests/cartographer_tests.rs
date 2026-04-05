@@ -1,9 +1,8 @@
+use archon_tools::cartographer::CartographerTool;
 use archon_tools::cartographer::index::{CodebaseIndex, Symbol, SymbolKind};
 use archon_tools::cartographer::parser::{language_for_file, parse_file};
 use archon_tools::cartographer::summary::generate_summary;
-use archon_tools::cartographer::CartographerTool;
 use archon_tools::tool::Tool;
-
 
 // ---------------------------------------------------------------------------
 // Language detection
@@ -53,7 +52,8 @@ fn rust_struct_extracted() {
     let src = "pub struct MyStruct { pub field: u32 }";
     let syms = parse_file("test.rs", src, "rust");
     assert!(
-        syms.iter().any(|s| s.name == "MyStruct" && s.kind == SymbolKind::Struct),
+        syms.iter()
+            .any(|s| s.name == "MyStruct" && s.kind == SymbolKind::Struct),
         "Expected MyStruct Struct, got: {syms:?}"
     );
 }
@@ -63,7 +63,8 @@ fn rust_function_extracted() {
     let src = "pub fn my_func(x: i32) -> bool { true }";
     let syms = parse_file("test.rs", src, "rust");
     assert!(
-        syms.iter().any(|s| s.name == "my_func" && s.kind == SymbolKind::Function),
+        syms.iter()
+            .any(|s| s.name == "my_func" && s.kind == SymbolKind::Function),
         "Expected my_func Function, got: {syms:?}"
     );
 }
@@ -73,7 +74,8 @@ fn rust_enum_extracted() {
     let src = "pub enum MyEnum { VariantA, VariantB }";
     let syms = parse_file("test.rs", src, "rust");
     assert!(
-        syms.iter().any(|s| s.name == "MyEnum" && s.kind == SymbolKind::Enum),
+        syms.iter()
+            .any(|s| s.name == "MyEnum" && s.kind == SymbolKind::Enum),
         "Expected MyEnum Enum, got: {syms:?}"
     );
 }
@@ -87,7 +89,8 @@ fn python_class_extracted() {
     let src = "class MyClass:\n    def method(self): pass";
     let syms = parse_file("test.py", src, "python");
     assert!(
-        syms.iter().any(|s| s.name == "MyClass" && s.kind == SymbolKind::Class),
+        syms.iter()
+            .any(|s| s.name == "MyClass" && s.kind == SymbolKind::Class),
         "Expected MyClass Class, got: {syms:?}"
     );
 }
@@ -97,7 +100,8 @@ fn python_function_extracted() {
     let src = "def my_function(x, y):\n    return x + y";
     let syms = parse_file("test.py", src, "python");
     assert!(
-        syms.iter().any(|s| s.name == "my_function" && s.kind == SymbolKind::Function),
+        syms.iter()
+            .any(|s| s.name == "my_function" && s.kind == SymbolKind::Function),
         "Expected my_function Function, got: {syms:?}"
     );
 }
@@ -111,7 +115,8 @@ fn typescript_class_extracted() {
     let src = "class MyComponent { render() { return null; } }";
     let syms = parse_file("test.ts", src, "typescript");
     assert!(
-        syms.iter().any(|s| s.name == "MyComponent" && s.kind == SymbolKind::Class),
+        syms.iter()
+            .any(|s| s.name == "MyComponent" && s.kind == SymbolKind::Class),
         "Expected MyComponent Class, got: {syms:?}"
     );
 }
@@ -121,7 +126,8 @@ fn typescript_function_extracted() {
     let src = "function myFunc(a: string): void { console.log(a); }";
     let syms = parse_file("test.ts", src, "typescript");
     assert!(
-        syms.iter().any(|s| s.name == "myFunc" && s.kind == SymbolKind::Function),
+        syms.iter()
+            .any(|s| s.name == "myFunc" && s.kind == SymbolKind::Function),
         "Expected myFunc Function, got: {syms:?}"
     );
 }
@@ -135,7 +141,8 @@ fn go_function_extracted() {
     let src = "package main\nfunc MyGoFunc(x int) int { return x }";
     let syms = parse_file("test.go", src, "go");
     assert!(
-        syms.iter().any(|s| s.name == "MyGoFunc" && s.kind == SymbolKind::Function),
+        syms.iter()
+            .any(|s| s.name == "MyGoFunc" && s.kind == SymbolKind::Function),
         "Expected MyGoFunc Function, got: {syms:?}"
     );
 }

@@ -43,9 +43,10 @@ impl BedrockProvider {
         let system_arr: Vec<serde_json::Value> = system
             .iter()
             .filter_map(|block| {
-                block.get("text").and_then(|t| t.as_str()).map(|text| {
-                    serde_json::json!({"text": text})
-                })
+                block
+                    .get("text")
+                    .and_then(|t| t.as_str())
+                    .map(|text| serde_json::json!({"text": text}))
             })
             .collect();
 
@@ -120,12 +121,12 @@ impl BedrockProvider {
             request.max_tokens,
         );
 
-        let body_bytes = serde_json::to_vec(&body)
-            .map_err(|e| LlmError::Serialize(e.to_string()))?;
+        let body_bytes =
+            serde_json::to_vec(&body).map_err(|e| LlmError::Serialize(e.to_string()))?;
 
         let url = self.endpoint_url();
-        let url_parsed = Url::parse(&url)
-            .map_err(|e| LlmError::Http(format!("invalid URL: {e}")))?;
+        let url_parsed =
+            Url::parse(&url).map_err(|e| LlmError::Http(format!("invalid URL: {e}")))?;
         let host = url_parsed.host_str().unwrap_or("").to_string();
         let path = url_parsed.path().to_string();
 
@@ -263,10 +264,7 @@ fn convert_content_block(block: &serde_json::Value) -> Option<serde_json::Value>
                 .get("tool_use_id")
                 .and_then(|t| t.as_str())
                 .unwrap_or("");
-            let content = block
-                .get("content")
-                .and_then(|c| c.as_str())
-                .unwrap_or("");
+            let content = block.get("content").and_then(|c| c.as_str()).unwrap_or("");
             Some(serde_json::json!({
                 "toolResult": {
                     "toolUseId": tool_use_id,
@@ -292,7 +290,9 @@ fn extract_bedrock_events(text: &str) -> (Vec<serde_json::Value>, usize) {
 
     while pos < bytes.len() {
         // Skip whitespace and newlines.
-        while pos < bytes.len() && (bytes[pos] == b'\r' || bytes[pos] == b'\n' || bytes[pos] == b' ') {
+        while pos < bytes.len()
+            && (bytes[pos] == b'\r' || bytes[pos] == b'\n' || bytes[pos] == b' ')
+        {
             pos += 1;
         }
 
@@ -374,9 +374,7 @@ pub fn parse_bedrock_event(event: &serde_json::Value) -> Vec<StreamEvent> {
             .and_then(|i| i.as_u64())
             .unwrap_or(0) as u32;
         let block = start.get("contentBlock");
-        let has_tool_use = block
-            .and_then(|b| b.get("toolUse"))
-            .is_some();
+        let has_tool_use = block.and_then(|b| b.get("toolUse")).is_some();
 
         if has_tool_use {
             let tool_use = block.and_then(|b| b.get("toolUse"));
@@ -493,9 +491,14 @@ fn map_http_error(status: u16, body: String) -> LlmError {
             message: format!("Bad request: {body}"),
         },
         401 | 403 => LlmError::Auth(body),
-        429 => LlmError::RateLimited { retry_after_secs: 60 },
+        429 => LlmError::RateLimited {
+            retry_after_secs: 60,
+        },
         500 | 503 => LlmError::Overloaded,
-        _ => LlmError::Server { status, message: body },
+        _ => LlmError::Server {
+            status,
+            message: body,
+        },
     }
 }
 
@@ -549,9 +552,7 @@ impl LlmProvider for BedrockProvider {
                 } => {
                     stop_reason = sr;
                 }
-                StreamEvent::MessageDelta {
-                    usage: Some(u), ..
-                } => {
+                StreamEvent::MessageDelta { usage: Some(u), .. } => {
                     usage.merge(&u);
                 }
                 _ => {}

@@ -204,9 +204,7 @@ impl TerminalPanel {
             if !session_exists {
                 // Create new detached tmux session
                 let new_args = self.config.tmux_new_session_args(shell);
-                let status = Command::new("tmux")
-                    .args(&new_args[..])
-                    .status()?;
+                let status = Command::new("tmux").args(&new_args[..]).status()?;
 
                 if !status.success() {
                     return Err(std::io::Error::new(

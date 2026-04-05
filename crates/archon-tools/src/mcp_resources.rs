@@ -46,7 +46,10 @@ pub struct McpResourceContent {
 #[async_trait::async_trait]
 pub trait ResourceProvider: Send + Sync {
     /// List resources from all connected servers, optionally filtered by server name.
-    async fn list_resources(&self, server_filter: Option<&str>) -> Result<Vec<McpResourceEntry>, String>;
+    async fn list_resources(
+        &self,
+        server_filter: Option<&str>,
+    ) -> Result<Vec<McpResourceEntry>, String>;
 
     /// Read a resource by URI, routing to the correct MCP server.
     async fn read_resource(&self, uri: &str) -> Result<McpResourceContent, String>;
@@ -57,12 +60,17 @@ pub struct NoopResourceProvider;
 
 #[async_trait::async_trait]
 impl ResourceProvider for NoopResourceProvider {
-    async fn list_resources(&self, _server_filter: Option<&str>) -> Result<Vec<McpResourceEntry>, String> {
+    async fn list_resources(
+        &self,
+        _server_filter: Option<&str>,
+    ) -> Result<Vec<McpResourceEntry>, String> {
         Ok(Vec::new())
     }
 
     async fn read_resource(&self, uri: &str) -> Result<McpResourceContent, String> {
-        Err(format!("resource not found: no connected MCP server exposes '{uri}'"))
+        Err(format!(
+            "resource not found: no connected MCP server exposes '{uri}'"
+        ))
     }
 }
 
@@ -113,9 +121,7 @@ impl Tool for ListMcpResourcesTool {
     }
 
     async fn execute(&self, input: serde_json::Value, _ctx: &ToolContext) -> ToolResult {
-        let server_filter = input
-            .get("server")
-            .and_then(|v| v.as_str());
+        let server_filter = input.get("server").and_then(|v| v.as_str());
 
         match self.provider.list_resources(server_filter).await {
             Ok(resources) => {

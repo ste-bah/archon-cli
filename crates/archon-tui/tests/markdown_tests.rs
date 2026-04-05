@@ -11,10 +11,7 @@ fn flat_spans(lines: &[ratatui::text::Line<'static>]) -> Vec<(String, ratatui::s
 }
 
 /// Helper: check if any span contains the given modifier.
-fn any_span_has_modifier(
-    lines: &[ratatui::text::Line<'static>],
-    modifier: Modifier,
-) -> bool {
+fn any_span_has_modifier(lines: &[ratatui::text::Line<'static>], modifier: Modifier) -> bool {
     lines
         .iter()
         .flat_map(|line| line.spans.iter())

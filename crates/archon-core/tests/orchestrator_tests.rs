@@ -1,9 +1,9 @@
 use archon_core::orchestrator::{
     config::{ExecutionMode, OrchestratorConfig, TeamConfig},
+    dag::build_dag_waves,
     events::{OrchestratorEvent, Subtask, SubtaskStatus},
     planner::parse_plan,
     pool::AgentPool,
-    dag::build_dag_waves,
 };
 
 // 1. OrchestratorConfig::default() has max_concurrent=4, timeout_secs=300
@@ -43,8 +43,7 @@ fn execution_mode_serde_snake_case() {
     for (mode, expected_json) in modes {
         let serialized = serde_json::to_string(&mode).expect("serialize");
         assert_eq!(serialized, expected_json);
-        let deserialized: ExecutionMode =
-            serde_json::from_str(&serialized).expect("deserialize");
+        let deserialized: ExecutionMode = serde_json::from_str(&serialized).expect("deserialize");
         assert_eq!(deserialized, mode);
     }
 }
@@ -68,7 +67,9 @@ fn subtask_status_transition_to_running() {
 #[test]
 fn subtask_status_transition_to_complete() {
     let mut t = Subtask::new("id-3".into(), "desc".into(), "coder".into());
-    t.status = SubtaskStatus::Complete { result: "done".into() };
+    t.status = SubtaskStatus::Complete {
+        result: "done".into(),
+    };
     assert!(matches!(t.status, SubtaskStatus::Complete { .. }));
 }
 
@@ -76,7 +77,9 @@ fn subtask_status_transition_to_complete() {
 #[test]
 fn subtask_status_transition_to_failed() {
     let mut t = Subtask::new("id-4".into(), "desc".into(), "coder".into());
-    t.status = SubtaskStatus::Failed { error: "oops".into() };
+    t.status = SubtaskStatus::Failed {
+        error: "oops".into(),
+    };
     assert!(matches!(t.status, SubtaskStatus::Failed { .. }));
 }
 
@@ -87,7 +90,9 @@ fn orchestrator_event_task_decomposed_created() {
         Subtask::new("t1".into(), "first task".into(), "coder".into()),
         Subtask::new("t2".into(), "second task".into(), "reviewer".into()),
     ];
-    let event = OrchestratorEvent::TaskDecomposed { subtasks: subtasks.clone() };
+    let event = OrchestratorEvent::TaskDecomposed {
+        subtasks: subtasks.clone(),
+    };
     match event {
         OrchestratorEvent::TaskDecomposed { subtasks: ref s } => {
             assert_eq!(s.len(), 2);
@@ -101,7 +106,9 @@ fn orchestrator_event_task_decomposed_created() {
 // 9. OrchestratorEvent::TeamComplete can be created
 #[test]
 fn orchestrator_event_team_complete_created() {
-    let event = OrchestratorEvent::TeamComplete { result: "all done".into() };
+    let event = OrchestratorEvent::TeamComplete {
+        result: "all done".into(),
+    };
     match event {
         OrchestratorEvent::TeamComplete { result } => {
             assert_eq!(result, "all done");
@@ -191,7 +198,10 @@ async fn agent_pool_capacity_enforced() {
     );
 
     pool.release("a1").await;
-    assert!(pool.can_spawn().await, "should have capacity again after release");
+    assert!(
+        pool.can_spawn().await,
+        "should have capacity again after release"
+    );
 }
 
 // 14. parse_plan: parses valid coordinator JSON into subtasks

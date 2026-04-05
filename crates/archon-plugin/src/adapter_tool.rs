@@ -99,13 +99,10 @@ impl Tool for PluginToolAdapter {
         let tool_name = self.raw_tool_name.clone();
         let args_json = input.to_string();
 
-        let result = tokio::task::spawn_blocking(move || {
-            match host.lock() {
-                Ok(mut guard) => guard.dispatch_tool(&tool_name, &args_json),
-                Err(e) => {
-                    serde_json::json!({"error": format!("WASM host lock poisoned: {e}")})
-                        .to_string()
-                }
+        let result = tokio::task::spawn_blocking(move || match host.lock() {
+            Ok(mut guard) => guard.dispatch_tool(&tool_name, &args_json),
+            Err(e) => {
+                serde_json::json!({"error": format!("WASM host lock poisoned: {e}")}).to_string()
             }
         })
         .await

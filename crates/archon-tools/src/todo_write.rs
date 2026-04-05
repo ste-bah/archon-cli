@@ -154,7 +154,11 @@ impl Tool for TodoWriteTool {
             return ToolResult::success("Todo list cleared (0 items)");
         }
 
-        let mut output = format!("Todo list updated ({} item{}):\n", store.len(), if store.len() == 1 { "" } else { "s" });
+        let mut output = format!(
+            "Todo list updated ({} item{}):\n",
+            store.len(),
+            if store.len() == 1 { "" } else { "s" }
+        );
         for item in store.iter() {
             output.push_str(&format!("  {item}\n"));
         }
@@ -210,10 +214,7 @@ mod tests {
     #[test]
     fn permission_is_safe() {
         let tool = TodoWriteTool;
-        assert_eq!(
-            tool.permission_level(&json!({})),
-            PermissionLevel::Safe
-        );
+        assert_eq!(tool.permission_level(&json!({})), PermissionLevel::Safe);
     }
 
     #[tokio::test]
@@ -245,9 +246,14 @@ mod tests {
         let tool = TodoWriteTool;
 
         // Write something first
-        let write_result = tool.execute(json!({
-            "todos": [{ "id": "1", "content": "task", "status": "pending" }]
-        }), &test_ctx()).await;
+        let write_result = tool
+            .execute(
+                json!({
+                    "todos": [{ "id": "1", "content": "task", "status": "pending" }]
+                }),
+                &test_ctx(),
+            )
+            .await;
         assert!(!write_result.is_error);
 
         // Now clear
@@ -261,9 +267,14 @@ mod tests {
     async fn rejects_invalid_status() {
         clear_store();
         let tool = TodoWriteTool;
-        let result = tool.execute(json!({
-            "todos": [{ "id": "1", "content": "task", "status": "invalid" }]
-        }), &test_ctx()).await;
+        let result = tool
+            .execute(
+                json!({
+                    "todos": [{ "id": "1", "content": "task", "status": "invalid" }]
+                }),
+                &test_ctx(),
+            )
+            .await;
 
         assert!(result.is_error);
         assert!(result.content.contains("invalid status"));
@@ -298,23 +309,38 @@ mod tests {
         let tool = TodoWriteTool;
 
         // Missing id
-        let result = tool.execute(json!({
-            "todos": [{ "content": "task", "status": "pending" }]
-        }), &test_ctx()).await;
+        let result = tool
+            .execute(
+                json!({
+                    "todos": [{ "content": "task", "status": "pending" }]
+                }),
+                &test_ctx(),
+            )
+            .await;
         assert!(result.is_error);
         assert!(result.content.contains("'id' is required"));
 
         // Missing content
-        let result = tool.execute(json!({
-            "todos": [{ "id": "1", "status": "pending" }]
-        }), &test_ctx()).await;
+        let result = tool
+            .execute(
+                json!({
+                    "todos": [{ "id": "1", "status": "pending" }]
+                }),
+                &test_ctx(),
+            )
+            .await;
         assert!(result.is_error);
         assert!(result.content.contains("'content' is required"));
 
         // Missing status
-        let result = tool.execute(json!({
-            "todos": [{ "id": "1", "content": "task" }]
-        }), &test_ctx()).await;
+        let result = tool
+            .execute(
+                json!({
+                    "todos": [{ "id": "1", "content": "task" }]
+                }),
+                &test_ctx(),
+            )
+            .await;
         assert!(result.is_error);
         assert!(result.content.contains("'status' is required"));
     }
@@ -325,18 +351,28 @@ mod tests {
         let tool = TodoWriteTool;
 
         // Write initial list
-        let _ = tool.execute(json!({
-            "todos": [
-                { "id": "a", "content": "old task", "status": "pending" }
-            ]
-        }), &test_ctx()).await;
+        let _ = tool
+            .execute(
+                json!({
+                    "todos": [
+                        { "id": "a", "content": "old task", "status": "pending" }
+                    ]
+                }),
+                &test_ctx(),
+            )
+            .await;
 
         // Overwrite with new list
-        let result = tool.execute(json!({
-            "todos": [
-                { "id": "b", "content": "new task", "status": "in_progress" }
-            ]
-        }), &test_ctx()).await;
+        let result = tool
+            .execute(
+                json!({
+                    "todos": [
+                        { "id": "b", "content": "new task", "status": "in_progress" }
+                    ]
+                }),
+                &test_ctx(),
+            )
+            .await;
 
         assert!(!result.is_error);
         let items = read_todos();
@@ -349,9 +385,14 @@ mod tests {
     async fn in_progress_status_accepted() {
         clear_store();
         let tool = TodoWriteTool;
-        let result = tool.execute(json!({
-            "todos": [{ "id": "1", "content": "wip", "status": "in_progress" }]
-        }), &test_ctx()).await;
+        let result = tool
+            .execute(
+                json!({
+                    "todos": [{ "id": "1", "content": "wip", "status": "in_progress" }]
+                }),
+                &test_ctx(),
+            )
+            .await;
 
         assert!(!result.is_error);
         assert!(result.content.contains("[~]"));

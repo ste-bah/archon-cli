@@ -123,7 +123,9 @@ impl VirtualScroll {
             return (0, 0);
         }
         let start = self.scroll_offset;
-        let end = (start + self.viewport_height).saturating_sub(1).min(self.total_lines.saturating_sub(1));
+        let end = (start + self.viewport_height)
+            .saturating_sub(1)
+            .min(self.total_lines.saturating_sub(1));
         (start, end)
     }
 

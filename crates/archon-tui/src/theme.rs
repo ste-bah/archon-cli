@@ -14,13 +14,13 @@ use ratatui::style::Color;
 /// Returns `None` for unknown names.
 pub fn parse_color(name: &str) -> Option<Color> {
     match name.to_lowercase().as_str() {
-        "red"     => Some(Color::Red),
-        "green"   => Some(Color::Green),
-        "yellow"  => Some(Color::Yellow),
-        "blue"    => Some(Color::Blue),
+        "red" => Some(Color::Red),
+        "green" => Some(Color::Green),
+        "yellow" => Some(Color::Yellow),
+        "blue" => Some(Color::Blue),
         "magenta" | "purple" => Some(Color::Magenta),
-        "cyan"    => Some(Color::Cyan),
-        "white"   => Some(Color::White),
+        "cyan" => Some(Color::Cyan),
+        "white" => Some(Color::White),
         "default" | "reset" | "none" => Some(Color::Rgb(0, 180, 180)), // revert to INTJ teal
         _ => None,
     }
@@ -39,28 +39,28 @@ pub fn theme_by_name(name: &str) -> Option<Theme> {
     match name.to_lowercase().as_str() {
         // MBTI themes
         "intj" | "default" => Some(intj_theme()),
-        "intp"  => Some(intp_theme()),
-        "entj"  => Some(entj_theme()),
-        "entp"  => Some(entp_theme()),
-        "infj"  => Some(infj_theme()),
-        "infp"  => Some(infp_theme()),
-        "enfj"  => Some(enfj_theme()),
-        "enfp"  => Some(enfp_theme()),
-        "istj"  => Some(istj_theme()),
-        "isfj"  => Some(isfj_theme()),
-        "estj"  => Some(estj_theme()),
-        "esfj"  => Some(esfj_theme()),
-        "istp"  => Some(istp_theme()),
-        "isfp"  => Some(isfp_theme()),
-        "estp"  => Some(estp_theme()),
-        "esfp"  => Some(esfp_theme()),
+        "intp" => Some(intp_theme()),
+        "entj" => Some(entj_theme()),
+        "entp" => Some(entp_theme()),
+        "infj" => Some(infj_theme()),
+        "infp" => Some(infp_theme()),
+        "enfj" => Some(enfj_theme()),
+        "enfp" => Some(enfp_theme()),
+        "istj" => Some(istj_theme()),
+        "isfj" => Some(isfj_theme()),
+        "estj" => Some(estj_theme()),
+        "esfj" => Some(esfj_theme()),
+        "istp" => Some(istp_theme()),
+        "isfp" => Some(isfp_theme()),
+        "estp" => Some(estp_theme()),
+        "esfp" => Some(esfp_theme()),
         // Utility themes
-        "dark"       => Some(dark_theme()),
-        "light"      => Some(light_theme()),
-        "ocean"      => Some(ocean_theme()),
-        "fire"       => Some(fire_theme()),
-        "forest"     => Some(forest_theme()),
-        "mono"       => Some(mono_theme()),
+        "dark" => Some(dark_theme()),
+        "light" => Some(light_theme()),
+        "ocean" => Some(ocean_theme()),
+        "fire" => Some(fire_theme()),
+        "forest" => Some(forest_theme()),
+        "mono" => Some(mono_theme()),
         "daltonized" => Some(daltonized_theme()),
         _ => None,
     }
@@ -70,11 +70,8 @@ pub fn theme_by_name(name: &str) -> Option<Theme> {
 pub fn available_themes() -> &'static [&'static str] {
     &[
         // MBTI
-        "intj", "intp", "entj", "entp",
-        "infj", "infp", "enfj", "enfp",
-        "istj", "isfj", "estj", "esfj",
-        "istp", "isfp", "estp", "esfp",
-        // Utility
+        "intj", "intp", "entj", "entp", "infj", "infp", "enfj", "enfp", "istj", "isfj", "estj",
+        "esfj", "istp", "isfp", "estp", "esfp", // Utility
         "dark", "light", "ocean", "fire", "forest", "mono",
     ]
 }

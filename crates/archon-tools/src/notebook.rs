@@ -77,7 +77,11 @@ impl Tool for NotebookEditTool {
 
         let cell_index = match input.get("cell_index").and_then(|v| v.as_u64()) {
             Some(i) => i as usize,
-            None => return ToolResult::error("cell_index is required and must be a non-negative integer"),
+            None => {
+                return ToolResult::error(
+                    "cell_index is required and must be a non-negative integer",
+                );
+            }
         };
 
         // Read and parse notebook
@@ -101,7 +105,9 @@ impl Tool for NotebookEditTool {
             "replace" => execute_replace(cells, cell_index, &input),
             "delete" => execute_delete(cells, cell_index),
             "move" => execute_move(cells, cell_index, &input),
-            other => Err(format!("Unknown command: '{other}'. Use insert, replace, delete, or move.")),
+            other => Err(format!(
+                "Unknown command: '{other}'. Use insert, replace, delete, or move."
+            )),
         };
 
         let msg = match result_msg {
@@ -196,10 +202,7 @@ fn execute_replace(
     Ok(format!("Replaced content of cell at index {index}"))
 }
 
-fn execute_delete(
-    cells: &mut Vec<serde_json::Value>,
-    index: usize,
-) -> Result<String, String> {
+fn execute_delete(cells: &mut Vec<serde_json::Value>, index: usize) -> Result<String, String> {
     if index >= cells.len() {
         return Err(format!(
             "cell_index {index} is out of range (notebook has {} cells)",

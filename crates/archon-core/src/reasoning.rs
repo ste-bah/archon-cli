@@ -11,10 +11,7 @@ pub fn load_claude_md(project_dir: &Path) -> String {
 }
 
 /// Build the environment section for the system prompt.
-pub fn build_environment_section(
-    working_dir: &Path,
-    git_branch: Option<&str>,
-) -> String {
+pub fn build_environment_section(working_dir: &Path, git_branch: Option<&str>) -> String {
     let os = std::env::consts::OS;
     let arch = std::env::consts::ARCH;
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "unknown".into());

@@ -81,7 +81,11 @@ impl Tool for TeamCreateTool {
             let model = m["model"].as_str().map(String::from);
             let tools: Vec<String> = m["tools"]
                 .as_array()
-                .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
                 .unwrap_or_default();
             members.push(MemberConfig {
                 role,

@@ -48,9 +48,7 @@ impl StatusBar {
         // Show voice state indicator when active
         match &self.voice_state {
             Some(crate::voice::VoiceState::Listening) => parts.push("[listening]".to_owned()),
-            Some(crate::voice::VoiceState::Transcribing) => {
-                parts.push("[transcribing]".to_owned())
-            }
+            Some(crate::voice::VoiceState::Transcribing) => parts.push("[transcribing]".to_owned()),
             _ => {}
         }
 

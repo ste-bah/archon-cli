@@ -96,7 +96,10 @@ fn openai_sse_text_delta_parsed() {
     let has_text_delta = events.iter().any(|e| {
         matches!(e, archon_llm::streaming::StreamEvent::TextDelta { text, .. } if text == "Hello")
     });
-    assert!(has_text_delta, "expected TextDelta with 'Hello', got: {events:?}");
+    assert!(
+        has_text_delta,
+        "expected TextDelta with 'Hello', got: {events:?}"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -115,7 +118,10 @@ fn openai_sse_tool_call_parsed() {
             ..
         } if id == "call_abc123" && name == "Read")
     });
-    assert!(has_start, "expected ContentBlockStart for tool call, got: {events:?}");
+    assert!(
+        has_start,
+        "expected ContentBlockStart for tool call, got: {events:?}"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -130,5 +136,8 @@ fn openai_sse_done_produces_message_stop() {
     let has_delta = events
         .iter()
         .any(|e| matches!(e, archon_llm::streaming::StreamEvent::MessageDelta { .. }));
-    assert!(has_delta, "expected MessageDelta for finish_reason:stop, got: {events:?}");
+    assert!(
+        has_delta,
+        "expected MessageDelta for finish_reason:stop, got: {events:?}"
+    );
 }

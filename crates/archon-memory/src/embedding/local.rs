@@ -34,10 +34,13 @@ impl LocalEmbedding {
     }
 
     /// Ensure the model is loaded, returning a reference guard.
-    fn ensure_model(&self) -> Result<std::sync::MutexGuard<'_, Option<fastembed::TextEmbedding>>, MemoryError> {
-        let mut guard = self.model.lock().map_err(|e| {
-            MemoryError::Database(format!("embedding model lock poisoned: {e}"))
-        })?;
+    fn ensure_model(
+        &self,
+    ) -> Result<std::sync::MutexGuard<'_, Option<fastembed::TextEmbedding>>, MemoryError> {
+        let mut guard = self
+            .model
+            .lock()
+            .map_err(|e| MemoryError::Database(format!("embedding model lock poisoned: {e}")))?;
         if guard.is_none() {
             tracing::info!(
                 cache_dir = %self.cache_dir.display(),
@@ -61,12 +64,12 @@ impl EmbeddingProvider for LocalEmbedding {
             return Ok(Vec::new());
         }
         let guard = self.ensure_model()?;
-        let model = guard.as_ref().ok_or_else(|| {
-            MemoryError::Database("embedding model not loaded after init".into())
-        })?;
-        let results = model.embed(texts.to_vec(), None).map_err(|e| {
-            MemoryError::Database(format!("fastembed embed failed: {e}"))
-        })?;
+        let model = guard
+            .as_ref()
+            .ok_or_else(|| MemoryError::Database("embedding model not loaded after init".into()))?;
+        let results = model
+            .embed(texts.to_vec(), None)
+            .map_err(|e| MemoryError::Database(format!("fastembed embed failed: {e}")))?;
         Ok(results)
     }
 

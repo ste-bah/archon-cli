@@ -84,7 +84,8 @@ pub fn extract_mentioned_paths(messages: &[ContextMessage]) -> Vec<String> {
         for word in text.split_whitespace() {
             // Heuristic: looks like a file path if it contains a slash and a dot,
             // or starts with ./ or /
-            let trimmed = word.trim_matches(|c: char| c == '`' || c == '"' || c == '\'' || c == ',');
+            let trimmed =
+                word.trim_matches(|c: char| c == '`' || c == '"' || c == '\'' || c == ',');
             let looks_like_path = (trimmed.contains('/') && trimmed.contains('.'))
                 || trimmed.starts_with("./")
                 || trimmed.starts_with('/');
@@ -182,16 +183,18 @@ mod tests {
 
         // Should have: 1 summary + 6 recent (3 pairs)
         assert_eq!(compacted.len(), 7);
-        let first_content = compacted[0]
-            .content
-            .as_str()
-            .expect("string content");
+        let first_content = compacted[0].content.as_str().expect("string content");
         assert!(first_content.contains("[Context Summary]"));
         assert!(first_content.contains("Summary of earlier conversation"));
 
         // Last message should be the original last message
         let last = compacted.last().expect("last");
-        assert!(last.content.as_str().map(|s| s.contains("msg 9")).unwrap_or(false));
+        assert!(
+            last.content
+                .as_str()
+                .map(|s| s.contains("msg 9"))
+                .unwrap_or(false)
+        );
     }
 
     #[test]
@@ -263,18 +266,13 @@ mod tests {
         // No duplicates
         assert_eq!(
             paths.len(),
-            paths
-                .iter()
-                .collect::<std::collections::HashSet<_>>()
-                .len()
+            paths.iter().collect::<std::collections::HashSet<_>>().len()
         );
     }
 
     #[test]
     fn extract_paths_deduplicates() {
-        let messages = vec![
-            ContextMessage::user("src/lib.rs src/lib.rs src/lib.rs"),
-        ];
+        let messages = vec![ContextMessage::user("src/lib.rs src/lib.rs src/lib.rs")];
         let paths = extract_mentioned_paths(&messages);
         assert_eq!(paths.len(), 1);
     }

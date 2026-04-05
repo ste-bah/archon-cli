@@ -3,7 +3,7 @@
 //! The two "default is clean" tests are expected to FAIL against the current
 //! codebase (TDD red phase) because the current default is "spoof".
 
-use archon_core::config::{validate, ArchonConfig};
+use archon_core::config::{ArchonConfig, validate};
 
 // =========================================================================
 // Default is clean (WILL FAIL until implementation flips the default)
@@ -21,8 +21,7 @@ fn default_identity_mode_is_clean() {
 
 #[test]
 fn empty_toml_identity_mode_is_clean() {
-    let config: ArchonConfig =
-        toml::from_str("").expect("empty TOML should parse to defaults");
+    let config: ArchonConfig = toml::from_str("").expect("empty TOML should parse to defaults");
     assert_eq!(
         config.identity.mode, "clean",
         "empty TOML identity.mode must default to 'clean', got '{}'",
@@ -40,8 +39,7 @@ fn explicit_spoof_mode_parses() {
 [identity]
 mode = "spoof"
 "#;
-    let config: ArchonConfig =
-        toml::from_str(toml_str).expect("explicit spoof TOML should parse");
+    let config: ArchonConfig = toml::from_str(toml_str).expect("explicit spoof TOML should parse");
     assert_eq!(config.identity.mode, "spoof");
     validate(&config).expect("explicit spoof mode should pass validation");
 }
@@ -52,8 +50,7 @@ fn explicit_clean_mode_parses() {
 [identity]
 mode = "clean"
 "#;
-    let config: ArchonConfig =
-        toml::from_str(toml_str).expect("explicit clean TOML should parse");
+    let config: ArchonConfig = toml::from_str(toml_str).expect("explicit clean TOML should parse");
     assert_eq!(config.identity.mode, "clean");
     validate(&config).expect("explicit clean mode should pass validation");
 }
@@ -68,8 +65,7 @@ mode = "custom"
 user_agent = "test-agent/1.0"
 x_app = "test-app"
 "#;
-    let config: ArchonConfig =
-        toml::from_str(toml_str).expect("explicit custom TOML should parse");
+    let config: ArchonConfig = toml::from_str(toml_str).expect("explicit custom TOML should parse");
     assert_eq!(config.identity.mode, "custom");
     validate(&config).expect("explicit custom mode should pass validation");
 }

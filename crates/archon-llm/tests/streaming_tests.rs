@@ -1,4 +1,4 @@
-use archon_llm::streaming::{parse_sse_event, split_sse_lines, StreamEvent};
+use archon_llm::streaming::{StreamEvent, parse_sse_event, split_sse_lines};
 use archon_llm::types::ContentBlockType;
 
 #[test]
@@ -18,10 +18,13 @@ fn parse_message_start() {
 
 #[test]
 fn parse_content_block_start_text() {
-    let data = r#"{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}"#;
+    let data =
+        r#"{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}"#;
 
     match parse_sse_event("content_block_start", data).expect("parse") {
-        StreamEvent::ContentBlockStart { index, block_type, .. } => {
+        StreamEvent::ContentBlockStart {
+            index, block_type, ..
+        } => {
             assert_eq!(index, 0);
             assert_eq!(block_type, ContentBlockType::Text);
         }
@@ -91,7 +94,10 @@ fn parse_input_json_delta() {
     let data = r#"{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"file_path\":"}}"#;
 
     match parse_sse_event("content_block_delta", data).expect("parse") {
-        StreamEvent::InputJsonDelta { index, partial_json } => {
+        StreamEvent::InputJsonDelta {
+            index,
+            partial_json,
+        } => {
             assert_eq!(index, 1);
             assert!(partial_json.contains("file_path"));
         }
@@ -157,7 +163,10 @@ fn parse_error_event() {
     let data = r#"{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}"#;
 
     match parse_sse_event("error", data).expect("parse") {
-        StreamEvent::Error { error_type, message } => {
+        StreamEvent::Error {
+            error_type,
+            message,
+        } => {
             assert_eq!(error_type, "overloaded_error");
             assert_eq!(message, "Overloaded");
         }

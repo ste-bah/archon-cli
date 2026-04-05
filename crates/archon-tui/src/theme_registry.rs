@@ -5,7 +5,9 @@
 
 use std::collections::BTreeMap;
 
-use crate::theme::{available_themes, daltonized_theme, dark_theme, light_theme, theme_by_name, Theme};
+use crate::theme::{
+    Theme, available_themes, daltonized_theme, dark_theme, light_theme, theme_by_name,
+};
 
 // ---------------------------------------------------------------------------
 // ThemeRegistry

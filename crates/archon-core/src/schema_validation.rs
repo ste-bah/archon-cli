@@ -8,17 +8,14 @@
 /// Returns `Ok(())` when the JSON conforms to the schema, or `Err` with a list
 /// of human-readable validation error messages.
 pub fn validate_json_schema(json_str: &str, schema_str: &str) -> Result<(), Vec<String>> {
-    let schema_value: serde_json::Value = serde_json::from_str(schema_str).map_err(|e| {
-        vec![format!("Failed to parse JSON schema: {e}")]
-    })?;
+    let schema_value: serde_json::Value = serde_json::from_str(schema_str)
+        .map_err(|e| vec![format!("Failed to parse JSON schema: {e}")])?;
 
-    let instance: serde_json::Value = serde_json::from_str(json_str).map_err(|e| {
-        vec![format!("Failed to parse JSON input: {e}")]
-    })?;
+    let instance: serde_json::Value = serde_json::from_str(json_str)
+        .map_err(|e| vec![format!("Failed to parse JSON input: {e}")])?;
 
-    let validator = jsonschema::validator_for(&schema_value).map_err(|e| {
-        vec![format!("Invalid JSON schema: {e}")]
-    })?;
+    let validator = jsonschema::validator_for(&schema_value)
+        .map_err(|e| vec![format!("Invalid JSON schema: {e}")])?;
 
     let errors: Vec<String> = validator
         .iter_errors(&instance)

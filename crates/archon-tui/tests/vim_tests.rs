@@ -263,7 +263,11 @@ fn replace_char_works() {
     state.handle_key(char_key('r'));
     state.handle_key(char_key('X'));
     assert_eq!(state.text(), "Xello", "r should replace char under cursor");
-    assert_eq!(state.mode(), archon_tui::vim::VimMode::Normal, "should stay in normal mode after r");
+    assert_eq!(
+        state.mode(),
+        archon_tui::vim::VimMode::Normal,
+        "should stay in normal mode after r"
+    );
 }
 
 #[test]
@@ -303,7 +307,10 @@ fn visual_yank_works() {
     // Paste after should produce the yanked text
     state.handle_key(char_key('$')); // go to end
     state.handle_key(char_key('p'));
-    assert!(state.text().contains("hello"), "visual yank+paste should work");
+    assert!(
+        state.text().contains("hello"),
+        "visual yank+paste should work"
+    );
 }
 
 #[test]
@@ -316,7 +323,11 @@ fn visual_delete_works() {
     }
     state.handle_key(char_key('d'));
     assert_eq!(state.mode(), archon_tui::vim::VimMode::Normal);
-    assert_eq!(state.text(), " world", "visual delete should remove selected text");
+    assert_eq!(
+        state.text(),
+        " world",
+        "visual delete should remove selected text"
+    );
 }
 
 #[test]

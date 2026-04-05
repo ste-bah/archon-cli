@@ -94,24 +94,18 @@ pub fn search_sessions(
     // Full-text search on messages (expensive — done after metadata filters).
     if let Some(ref text) = query.text {
         let needle = text.to_lowercase();
-        results.retain(|s| {
-            match store.load_messages(&s.id) {
-                Ok(msgs) => msgs
-                    .iter()
-                    .any(|m| m.to_lowercase().contains(&needle)),
-                Err(_) => false,
-            }
+        results.retain(|s| match store.load_messages(&s.id) {
+            Ok(msgs) => msgs.iter().any(|m| m.to_lowercase().contains(&needle)),
+            Err(_) => false,
         });
     }
 
     // Tag filter.
     if let Some(ref tag) = query.tag {
         let tag_lower = tag.to_lowercase();
-        results.retain(|s| {
-            match crate::metadata::get_tags(store, &s.id) {
-                Ok(tags) => tags.iter().any(|t| t.to_lowercase() == tag_lower),
-                Err(_) => false,
-            }
+        results.retain(|s| match crate::metadata::get_tags(store, &s.id) {
+            Ok(tags) => tags.iter().any(|t| t.to_lowercase() == tag_lower),
+            Err(_) => false,
         });
     }
 
@@ -176,22 +170,18 @@ fn filter_directory(s: &SessionMetadata, dir: &Option<String>) -> bool {
 
 fn filter_after(s: &SessionMetadata, after: &Option<DateTime<Utc>>) -> bool {
     match after {
-        Some(cutoff) => {
-            chrono::DateTime::parse_from_rfc3339(&s.created_at)
-                .map(|dt| dt >= *cutoff)
-                .unwrap_or(false)
-        }
+        Some(cutoff) => chrono::DateTime::parse_from_rfc3339(&s.created_at)
+            .map(|dt| dt >= *cutoff)
+            .unwrap_or(false),
         None => true,
     }
 }
 
 fn filter_before(s: &SessionMetadata, before: &Option<DateTime<Utc>>) -> bool {
     match before {
-        Some(cutoff) => {
-            chrono::DateTime::parse_from_rfc3339(&s.created_at)
-                .map(|dt| dt <= *cutoff)
-                .unwrap_or(false)
-        }
+        Some(cutoff) => chrono::DateTime::parse_from_rfc3339(&s.created_at)
+            .map(|dt| dt <= *cutoff)
+            .unwrap_or(false),
         None => true,
     }
 }
@@ -204,9 +194,9 @@ fn sort_sessions(sessions: &mut [SessionMetadata], field: SortField, order: Sort
     sessions.sort_by(|a, b| {
         let cmp = match field {
             SortField::Date => a.last_active.cmp(&b.last_active),
-            SortField::Duration => {
-                duration_secs(a).partial_cmp(&duration_secs(b)).unwrap_or(std::cmp::Ordering::Equal)
-            }
+            SortField::Duration => duration_secs(a)
+                .partial_cmp(&duration_secs(b))
+                .unwrap_or(std::cmp::Ordering::Equal),
             SortField::Tokens => a.total_tokens.cmp(&b.total_tokens),
             SortField::Messages => a.message_count.cmp(&b.message_count),
         };

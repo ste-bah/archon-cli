@@ -3,9 +3,7 @@
 //! Tests cover OutputStyleConfig, OutputStyleSource, OutputStyleRegistry,
 //! built-in styles, file-based user styles, and injection logic.
 
-use archon_core::output_style::{
-    OutputStyleConfig, OutputStyleRegistry, OutputStyleSource,
-};
+use archon_core::output_style::{OutputStyleConfig, OutputStyleRegistry, OutputStyleSource};
 use archon_core::output_style_loader::load_styles_from_dir;
 use std::fs;
 use tempfile::TempDir;

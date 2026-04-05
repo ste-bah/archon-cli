@@ -69,11 +69,7 @@ impl Tool for PowerShellTool {
             .spawn()
         {
             Ok(c) => c,
-            Err(e) => {
-                return ToolResult::error(format!(
-                    "PowerShell not available ({shell}): {e}"
-                ))
-            }
+            Err(e) => return ToolResult::error(format!("PowerShell not available ({shell}): {e}")),
         };
 
         let timeout = Duration::from_secs(self.timeout_secs);

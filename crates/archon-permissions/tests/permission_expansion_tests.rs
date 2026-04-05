@@ -116,17 +116,35 @@ fn plan_mode_denies_mcp_tool() {
 #[test]
 fn dont_ask_allows_all() {
     let checker = PermissionChecker::new(PermissionMode::DontAsk, RuleSet::empty());
-    assert_eq!(checker.check("Bash", "run rm -rf", "rm -rf /"), PermissionDecision::Allow);
-    assert_eq!(checker.check("Write", "write file", "/etc/passwd"), PermissionDecision::Allow);
-    assert_eq!(checker.check("Read", "read file", "/tmp/x"), PermissionDecision::Allow);
+    assert_eq!(
+        checker.check("Bash", "run rm -rf", "rm -rf /"),
+        PermissionDecision::Allow
+    );
+    assert_eq!(
+        checker.check("Write", "write file", "/etc/passwd"),
+        PermissionDecision::Allow
+    );
+    assert_eq!(
+        checker.check("Read", "read file", "/tmp/x"),
+        PermissionDecision::Allow
+    );
 }
 
 #[test]
 fn bypass_allows_all() {
     let checker = PermissionChecker::new(PermissionMode::BypassPermissions, RuleSet::empty());
-    assert_eq!(checker.check("Bash", "run rm -rf", "rm -rf /"), PermissionDecision::Allow);
-    assert_eq!(checker.check("Write", "write file", "/etc/passwd"), PermissionDecision::Allow);
-    assert_eq!(checker.check("Read", "read file", "/tmp/x"), PermissionDecision::Allow);
+    assert_eq!(
+        checker.check("Bash", "run rm -rf", "rm -rf /"),
+        PermissionDecision::Allow
+    );
+    assert_eq!(
+        checker.check("Write", "write file", "/etc/passwd"),
+        PermissionDecision::Allow
+    );
+    assert_eq!(
+        checker.check("Read", "read file", "/tmp/x"),
+        PermissionDecision::Allow
+    );
 }
 
 // -----------------------------------------------------------------------
@@ -340,11 +358,26 @@ fn plan_mode_allows_tool_search() {
 
 #[test]
 fn parse_all_canonical_names() {
-    assert_eq!("default".parse::<PermissionMode>().unwrap(), PermissionMode::Default);
-    assert_eq!("acceptEdits".parse::<PermissionMode>().unwrap(), PermissionMode::AcceptEdits);
-    assert_eq!("plan".parse::<PermissionMode>().unwrap(), PermissionMode::Plan);
-    assert_eq!("auto".parse::<PermissionMode>().unwrap(), PermissionMode::Auto);
-    assert_eq!("dontAsk".parse::<PermissionMode>().unwrap(), PermissionMode::DontAsk);
+    assert_eq!(
+        "default".parse::<PermissionMode>().unwrap(),
+        PermissionMode::Default
+    );
+    assert_eq!(
+        "acceptEdits".parse::<PermissionMode>().unwrap(),
+        PermissionMode::AcceptEdits
+    );
+    assert_eq!(
+        "plan".parse::<PermissionMode>().unwrap(),
+        PermissionMode::Plan
+    );
+    assert_eq!(
+        "auto".parse::<PermissionMode>().unwrap(),
+        PermissionMode::Auto
+    );
+    assert_eq!(
+        "dontAsk".parse::<PermissionMode>().unwrap(),
+        PermissionMode::DontAsk
+    );
     assert_eq!(
         "bypassPermissions".parse::<PermissionMode>().unwrap(),
         PermissionMode::BypassPermissions
@@ -365,25 +398,37 @@ fn parse_invalid_mode_fails() {
 #[test]
 fn accept_edits_allows_read() {
     let checker = PermissionChecker::new(PermissionMode::AcceptEdits, RuleSet::empty());
-    assert_eq!(checker.check("Read", "read file", "/tmp/x"), PermissionDecision::Allow);
+    assert_eq!(
+        checker.check("Read", "read file", "/tmp/x"),
+        PermissionDecision::Allow
+    );
 }
 
 #[test]
 fn accept_edits_allows_edit() {
     let checker = PermissionChecker::new(PermissionMode::AcceptEdits, RuleSet::empty());
-    assert_eq!(checker.check("Edit", "edit file", "/tmp/x"), PermissionDecision::Allow);
+    assert_eq!(
+        checker.check("Edit", "edit file", "/tmp/x"),
+        PermissionDecision::Allow
+    );
 }
 
 #[test]
 fn accept_edits_allows_glob() {
     let checker = PermissionChecker::new(PermissionMode::AcceptEdits, RuleSet::empty());
-    assert_eq!(checker.check("Glob", "glob search", "**/*.rs"), PermissionDecision::Allow);
+    assert_eq!(
+        checker.check("Glob", "glob search", "**/*.rs"),
+        PermissionDecision::Allow
+    );
 }
 
 #[test]
 fn accept_edits_allows_grep() {
     let checker = PermissionChecker::new(PermissionMode::AcceptEdits, RuleSet::empty());
-    assert_eq!(checker.check("Grep", "grep search", "pattern"), PermissionDecision::Allow);
+    assert_eq!(
+        checker.check("Grep", "grep search", "pattern"),
+        PermissionDecision::Allow
+    );
 }
 
 // -----------------------------------------------------------------------
