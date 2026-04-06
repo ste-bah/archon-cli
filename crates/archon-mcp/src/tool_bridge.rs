@@ -38,7 +38,6 @@ impl McpTool {
             client,
         }
     }
-
 }
 
 /// Flatten MCP tool content into a single text string.

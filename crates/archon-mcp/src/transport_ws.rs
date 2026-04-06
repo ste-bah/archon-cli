@@ -230,9 +230,8 @@ impl ActiveWsConnection {
     /// requires a `Sink + Stream` transport (e.g. via rmcp's `IntoTransport`).
     pub fn into_stream(
         self,
-    ) -> tokio_tungstenite::WebSocketStream<
-        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
-    > {
+    ) -> tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>
+    {
         self.stream
     }
 

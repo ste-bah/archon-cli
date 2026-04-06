@@ -17,8 +17,8 @@ use archon_memory::injection::MemoryInjector;
 use archon_permissions::auto::{AutoDecision, AutoModeEvaluator};
 use archon_session::checkpoint::CheckpointStore;
 use archon_tools::agent_tool::SubagentRequest;
-use archon_tools::send_message::SendMessageRequest;
 use archon_tools::plan_mode::is_tool_allowed_in_mode;
+use archon_tools::send_message::SendMessageRequest;
 use archon_tools::tool::{AgentMode, ToolContext, ToolResult};
 use tokio::sync::Mutex;
 use tokio::sync::Semaphore;
@@ -621,114 +621,107 @@ impl Agent {
                             tracing::debug!(tool = %tool.name, "bypass-mode: allowed");
                             true
                         }
-                        "acceptEdits" => {
-                            match tool.name.as_str() {
-                                "Read" | "Glob" | "Grep" | "ToolSearch" | "AskUserQuestion"
-                                | "TodoWrite" | "Sleep" | "Write" | "Edit" | "Config"
-                                | "EnterPlanMode" | "ExitPlanMode" | "NotebookEdit" => true,
-                                _ => {
-                                    self.fire_hook(
-                                        crate::hooks::HookEvent::PermissionRequest,
-                                        serde_json::json!({
-                                            "hook_event": "PermissionRequest",
-                                            "tool_name": tool.name,
-                                            "mode": "acceptEdits",
-                                        }),
-                                    )
-                                    .await;
-                                    self.send_event(AgentEvent::PermissionRequired {
-                                        tool: tool.name.clone(),
-                                        description: format!(
-                                            "Permission required for {}",
-                                            tool.name
-                                        ),
-                                    })
-                                    .await;
-                                    self.fire_hook(
-                                        crate::hooks::HookEvent::PermissionDenied,
-                                        serde_json::json!({
-                                            "hook_event": "PermissionDenied",
-                                            "tool_name": tool.name,
-                                            "mode": "acceptEdits",
-                                        }),
-                                    )
-                                    .await;
-                                    self.send_event(AgentEvent::PermissionDenied {
-                                        tool: tool.name.clone(),
-                                    })
-                                    .await;
-                                    false
-                                }
+                        "acceptEdits" => match tool.name.as_str() {
+                            "Read" | "Glob" | "Grep" | "ToolSearch" | "AskUserQuestion"
+                            | "TodoWrite" | "Sleep" | "Write" | "Edit" | "Config"
+                            | "EnterPlanMode" | "ExitPlanMode" | "NotebookEdit" => true,
+                            _ => {
+                                self.fire_hook(
+                                    crate::hooks::HookEvent::PermissionRequest,
+                                    serde_json::json!({
+                                        "hook_event": "PermissionRequest",
+                                        "tool_name": tool.name,
+                                        "mode": "acceptEdits",
+                                    }),
+                                )
+                                .await;
+                                self.send_event(AgentEvent::PermissionRequired {
+                                    tool: tool.name.clone(),
+                                    description: format!("Permission required for {}", tool.name),
+                                })
+                                .await;
+                                self.fire_hook(
+                                    crate::hooks::HookEvent::PermissionDenied,
+                                    serde_json::json!({
+                                        "hook_event": "PermissionDenied",
+                                        "tool_name": tool.name,
+                                        "mode": "acceptEdits",
+                                    }),
+                                )
+                                .await;
+                                self.send_event(AgentEvent::PermissionDenied {
+                                    tool: tool.name.clone(),
+                                })
+                                .await;
+                                false
                             }
-                        }
-                        "default" | "ask" => {
-                            match tool.name.as_str() {
-                                "Read" | "Glob" | "Grep" | "ToolSearch" | "AskUserQuestion"
-                                | "TodoWrite" | "Sleep" | "EnterPlanMode" | "ExitPlanMode" => {
-                                    tracing::debug!(tool = %tool.name, "default-mode: safe, allowed");
+                        },
+                        "default" | "ask" => match tool.name.as_str() {
+                            "Read" | "Glob" | "Grep" | "ToolSearch" | "AskUserQuestion"
+                            | "TodoWrite" | "Sleep" | "EnterPlanMode" | "ExitPlanMode" => {
+                                tracing::debug!(tool = %tool.name, "default-mode: safe, allowed");
+                                true
+                            }
+                            _ => {
+                                self.fire_hook(
+                                    crate::hooks::HookEvent::PermissionRequest,
+                                    serde_json::json!({
+                                        "hook_event": "PermissionRequest",
+                                        "tool_name": tool.name,
+                                        "mode": "ask",
+                                    }),
+                                )
+                                .await;
+                                self.send_event(AgentEvent::PermissionRequired {
+                                    tool: tool.name.clone(),
+                                    description: format!(
+                                        "{} wants to use {}",
+                                        tool.name, tool.name
+                                    ),
+                                })
+                                .await;
+
+                                if let Some(ref rx) = self.permission_response_rx {
+                                    let mut rx = rx.lock().await;
+                                    match tokio::time::timeout(
+                                        std::time::Duration::from_secs(120),
+                                        rx.recv(),
+                                    )
+                                    .await
+                                    {
+                                        Ok(Some(true)) => {
+                                            self.send_event(AgentEvent::PermissionGranted {
+                                                tool: tool.name.clone(),
+                                            })
+                                            .await;
+                                            tracing::info!(tool = %tool.name, "default-mode: user approved");
+                                            true
+                                        }
+                                        _ => {
+                                            self.fire_hook(
+                                                crate::hooks::HookEvent::PermissionDenied,
+                                                serde_json::json!({
+                                                    "hook_event": "PermissionDenied",
+                                                    "tool_name": tool.name,
+                                                    "mode": "ask",
+                                                    "reason": "user_denied_or_timeout",
+                                                }),
+                                            )
+                                            .await;
+                                            self.send_event(AgentEvent::PermissionDenied {
+                                                tool: tool.name.clone(),
+                                            })
+                                            .await;
+                                            tracing::info!(tool = %tool.name, "default-mode: user denied or timeout");
+                                            false
+                                        }
+                                    }
+                                } else {
+                                    tracing::info!(tool = %tool.name, "default-mode: no permission channel, auto-approved");
                                     true
                                 }
-                                _ => {
-                                    self.fire_hook(
-                                        crate::hooks::HookEvent::PermissionRequest,
-                                        serde_json::json!({
-                                            "hook_event": "PermissionRequest",
-                                            "tool_name": tool.name,
-                                            "mode": "ask",
-                                        }),
-                                    )
-                                    .await;
-                                    self.send_event(AgentEvent::PermissionRequired {
-                                        tool: tool.name.clone(),
-                                        description: format!(
-                                            "{} wants to use {}",
-                                            tool.name, tool.name
-                                        ),
-                                    })
-                                    .await;
-
-                                    if let Some(ref rx) = self.permission_response_rx {
-                                        let mut rx = rx.lock().await;
-                                        match tokio::time::timeout(
-                                            std::time::Duration::from_secs(120),
-                                            rx.recv(),
-                                        )
-                                        .await
-                                        {
-                                            Ok(Some(true)) => {
-                                                self.send_event(AgentEvent::PermissionGranted {
-                                                    tool: tool.name.clone(),
-                                                })
-                                                .await;
-                                                tracing::info!(tool = %tool.name, "default-mode: user approved");
-                                                true
-                                            }
-                                            _ => {
-                                                self.fire_hook(
-                                                    crate::hooks::HookEvent::PermissionDenied,
-                                                    serde_json::json!({
-                                                        "hook_event": "PermissionDenied",
-                                                        "tool_name": tool.name,
-                                                        "mode": "ask",
-                                                        "reason": "user_denied_or_timeout",
-                                                    }),
-                                                )
-                                                .await;
-                                                self.send_event(AgentEvent::PermissionDenied {
-                                                    tool: tool.name.clone(),
-                                                })
-                                                .await;
-                                                tracing::info!(tool = %tool.name, "default-mode: user denied or timeout");
-                                                false
-                                            }
-                                        }
-                                    } else {
-                                        tracing::info!(tool = %tool.name, "default-mode: no permission channel, auto-approved");
-                                        true
-                                    }
-                                }
                             }
-                        }
+                        },
                         _ => {
                             // "auto" mode -- use AutoModeEvaluator
                             if let Some(ref evaluator) = self.auto_evaluator {
@@ -913,11 +906,15 @@ impl Agent {
                     };
 
                     // --- Capture file_path for post-processing ---
-                    let file_path = if matches!(tool.name.as_str(), "Write" | "Edit" | "NotebookEdit") {
-                        input.get("file_path").and_then(|v| v.as_str()).map(String::from)
-                    } else {
-                        None
-                    };
+                    let file_path =
+                        if matches!(tool.name.as_str(), "Write" | "Edit" | "NotebookEdit") {
+                            input
+                                .get("file_path")
+                                .and_then(|v| v.as_str())
+                                .map(String::from)
+                        } else {
+                            None
+                        };
 
                     allowed.push(PreflightResult {
                         tool_name: tool.name.clone(),
@@ -965,7 +962,8 @@ impl Agent {
                             Ok(pair) => indexed.push(pair),
                             Err(e) => {
                                 tracing::error!("tool task panicked: {e}");
-                                panicked.push(ToolResult::error(format!("tool task panicked: {e}")));
+                                panicked
+                                    .push(ToolResult::error(format!("tool task panicked: {e}")));
                             }
                         }
                     }
@@ -973,9 +971,8 @@ impl Agent {
                     if !panicked.is_empty() {
                         let seen: std::collections::HashSet<usize> =
                             indexed.iter().map(|(idx, _)| *idx).collect();
-                        let mut missing: Vec<usize> = (0..allowed.len())
-                            .filter(|i| !seen.contains(i))
-                            .collect();
+                        let mut missing: Vec<usize> =
+                            (0..allowed.len()).filter(|i| !seen.contains(i)).collect();
                         for result in panicked {
                             let idx = missing.pop().unwrap_or(0);
                             indexed.push((idx, result));
@@ -1051,36 +1048,35 @@ impl Agent {
                     };
 
                     // CRIT-09: Intercept AskUserQuestion sentinel.
-                    let result = if !result.is_error
-                        && result.content.starts_with("[PENDING_USER_INPUT]")
-                    {
-                        let question = result
-                            .content
-                            .strip_prefix("[PENDING_USER_INPUT]")
-                            .unwrap_or(&result.content)
-                            .to_string();
+                    let result =
+                        if !result.is_error && result.content.starts_with("[PENDING_USER_INPUT]") {
+                            let question = result
+                                .content
+                                .strip_prefix("[PENDING_USER_INPUT]")
+                                .unwrap_or(&result.content)
+                                .to_string();
 
-                        self.send_event(AgentEvent::AskUser {
-                            question: question.clone(),
-                        })
-                        .await;
+                            self.send_event(AgentEvent::AskUser {
+                                question: question.clone(),
+                            })
+                            .await;
 
-                        if let Some(rx) = &self.ask_user_response_rx {
-                            match rx.lock().await.recv().await {
-                                Some(answer) => ToolResult::success(answer),
-                                None => ToolResult::error(
-                                    "User input channel closed unexpectedly.".to_string(),
-                                ),
+                            if let Some(rx) = &self.ask_user_response_rx {
+                                match rx.lock().await.recv().await {
+                                    Some(answer) => ToolResult::success(answer),
+                                    None => ToolResult::error(
+                                        "User input channel closed unexpectedly.".to_string(),
+                                    ),
+                                }
+                            } else {
+                                ToolResult::error(
+                                    "User input requested but no input channel is configured."
+                                        .to_string(),
+                                )
                             }
                         } else {
-                            ToolResult::error(
-                                "User input requested but no input channel is configured."
-                                    .to_string(),
-                            )
-                        }
-                    } else {
-                        result
-                    };
+                            result
+                        };
 
                     // CRIT-06: Fire PostToolUse / PostToolUseFailure hooks
                     if result.is_error {
@@ -1307,7 +1303,9 @@ impl Agent {
                 select_strategy(usage_ratio)
             }
             Some(other) => {
-                return format!("Unknown /compact subcommand: '{other}'. Use auto, micro, or snip.");
+                return format!(
+                    "Unknown /compact subcommand: '{other}'. Use auto, micro, or snip."
+                );
             }
         };
 
@@ -1371,10 +1369,8 @@ impl Agent {
                         let (msgs, boundary) =
                             microcompact_messages(&context_msgs, &summary_text, preserve);
                         let label = "micro";
-                        let status = format!(
-                            "Microcompacted: {} tokens removed",
-                            boundary.tokens_removed
-                        );
+                        let status =
+                            format!("Microcompacted: {} tokens removed", boundary.tokens_removed);
                         (msgs, label, status)
                     }
                     _ => {
@@ -1408,8 +1404,12 @@ impl Agent {
         // CRIT-15 (ITEM 5): Snapshot inner voice state on compaction and persist to memory graph.
         if let Some(ref iv) = self.inner_voice {
             let snapshot = iv.lock().await.on_compaction();
-            tracing::debug!("inner voice snapshot on compaction: confidence={:.2}, energy={:.2}, turns={}",
-                snapshot.confidence, snapshot.energy, snapshot.turn_count);
+            tracing::debug!(
+                "inner voice snapshot on compaction: confidence={:.2}, energy={:.2}, turns={}",
+                snapshot.confidence,
+                snapshot.energy,
+                snapshot.turn_count
+            );
             // Persist snapshot so it can be restored via InnerVoice::from_snapshot on resume.
             if let Some(ref graph) = self.memory {
                 if let Ok(json) = serde_json::to_string(&snapshot) {
@@ -1505,14 +1505,18 @@ impl Agent {
                     }
                 }
                 if response_text.is_empty() {
-                    tracing::warn!("LLM returned empty summary; falling back to first user message");
+                    tracing::warn!(
+                        "LLM returned empty summary; falling back to first user message"
+                    );
                     self.state.first_user_message().to_string()
                 } else {
                     response_text
                 }
             }
             Err(e) => {
-                tracing::warn!("compaction summary LLM call failed: {e}; falling back to first user message");
+                tracing::warn!(
+                    "compaction summary LLM call failed: {e}; falling back to first user message"
+                );
                 self.state.first_user_message().to_string()
             }
         }
@@ -1578,7 +1582,11 @@ impl Agent {
                     "<past_corrections>\nPrevious user corrections relevant to this context:\n",
                 );
                 for c in &corrections {
-                    block.push_str(&format!("- [{}] {}\n", c.correction_type.severity_multiplier(), c.content));
+                    block.push_str(&format!(
+                        "- [{}] {}\n",
+                        c.correction_type.severity_multiplier(),
+                        c.content
+                    ));
                 }
                 block.push_str("</past_corrections>");
                 system.push(serde_json::json!({
@@ -1901,10 +1909,7 @@ impl Agent {
                 ToolResult::error(reason)
             }
             Err(_elapsed) => {
-                let reason = format!(
-                    "Subagent timed out after {}s",
-                    request.timeout_secs
-                );
+                let reason = format!("Subagent timed out after {}s", request.timeout_secs);
                 let _ = self.subagent_manager.mark_timed_out(&subagent_id);
 
                 self.fire_hook(

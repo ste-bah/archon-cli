@@ -31,4 +31,3 @@ impl ContextMessage {
 pub fn total_estimated_tokens(messages: &[ContextMessage]) -> u64 {
     messages.iter().map(|m| m.estimated_tokens).sum()
 }
-

@@ -151,5 +151,4 @@ mod tests {
             "should not add defaults when rules exist and config is empty"
         );
     }
-
 }

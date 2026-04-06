@@ -114,7 +114,6 @@ fn list_all_returns_registered() {
     assert_eq!(reg.list_all().len(), 3);
 }
 
-
 #[test]
 fn unknown_command_returns_none() {
     let reg = SkillRegistry::new();

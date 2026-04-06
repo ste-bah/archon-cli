@@ -449,15 +449,15 @@ fn create_ws_json_rpc_transport(
     >,
 ) -> (
     impl futures_util::Sink<
-            rmcp::service::TxJsonRpcMessage<rmcp::service::RoleClient>,
-            Error = tokio_tungstenite::tungstenite::Error,
-        > + Send
-        + Unpin
-        + 'static,
+        rmcp::service::TxJsonRpcMessage<rmcp::service::RoleClient>,
+        Error = tokio_tungstenite::tungstenite::Error,
+    > + Send
+    + Unpin
+    + 'static,
     impl futures_util::Stream<Item = rmcp::service::RxJsonRpcMessage<rmcp::service::RoleClient>>
-        + Send
-        + Unpin
-        + 'static,
+    + Send
+    + Unpin
+    + 'static,
 ) {
     use futures_util::{SinkExt, StreamExt};
     use tokio_tungstenite::tungstenite::Message;
@@ -466,17 +466,19 @@ fn create_ws_json_rpc_transport(
 
     // Map the sink: JsonRpcMessage -> serialize -> Message::Text
     // Uses `with_flat_map` with a sync closure to keep Unpin.
-    let mapped_sink = sink.with(|msg: rmcp::service::TxJsonRpcMessage<rmcp::service::RoleClient>| {
-        let result = serde_json::to_string(&msg)
-            .map(|json| Message::Text(json.into()))
-            .map_err(|e| {
-                tokio_tungstenite::tungstenite::Error::Io(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!("ws json serialize: {e}"),
-                ))
-            });
-        futures_util::future::ready(result)
-    });
+    let mapped_sink = sink.with(
+        |msg: rmcp::service::TxJsonRpcMessage<rmcp::service::RoleClient>| {
+            let result = serde_json::to_string(&msg)
+                .map(|json| Message::Text(json.into()))
+                .map_err(|e| {
+                    tokio_tungstenite::tungstenite::Error::Io(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("ws json serialize: {e}"),
+                    ))
+                });
+            futures_util::future::ready(result)
+        },
+    );
 
     // Map the stream: Message -> extract text -> deserialize -> JsonRpcMessage
     let mapped_stream = stream.filter_map(|result| {

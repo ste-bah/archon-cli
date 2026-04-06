@@ -20,7 +20,7 @@ fn make_ctx() -> ToolContext {
         working_dir: std::env::temp_dir(),
         session_id: "test-notebook".into(),
         mode: AgentMode::Normal,
-            extra_dirs: vec![],
+        extra_dirs: vec![],
     }
 }
 

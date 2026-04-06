@@ -3,8 +3,8 @@ pub mod dag;
 pub mod events;
 pub mod pool;
 
-use std::sync::Arc;
 use std::path::PathBuf;
+use std::sync::Arc;
 use tokio::sync::{Mutex, mpsc};
 
 use config::{ExecutionMode, OrchestratorConfig, TeamConfig};

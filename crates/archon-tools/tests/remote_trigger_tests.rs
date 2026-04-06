@@ -18,7 +18,7 @@ fn ctx() -> ToolContext {
         working_dir: PathBuf::from("/tmp"),
         session_id: "test-session".into(),
         mode: AgentMode::Normal,
-            extra_dirs: vec![],
+        extra_dirs: vec![],
     }
 }
 

@@ -202,4 +202,3 @@ async fn agent_pool_capacity_enforced() {
         "should have capacity again after release"
     );
 }
-

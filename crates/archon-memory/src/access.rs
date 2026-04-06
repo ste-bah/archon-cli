@@ -575,7 +575,9 @@ mod tests {
             )
             .expect("store_memory via trait object");
 
-        let recalled = mem.recall_memories("tokio", 5).expect("recall via trait object");
+        let recalled = mem
+            .recall_memories("tokio", 5)
+            .expect("recall via trait object");
         assert!(!recalled.is_empty(), "should recall at least one memory");
         assert_eq!(recalled[0].id, id);
     }
@@ -586,14 +588,20 @@ mod tests {
         let graph = MemoryGraph::in_memory().expect("in-memory graph");
         let access = MemoryAccess::Direct {
             graph: Arc::new(graph),
-            _server_handle: tokio::runtime::Runtime::new()
-                .unwrap()
-                .spawn(async {}),
+            _server_handle: tokio::runtime::Runtime::new().unwrap().spawn(async {}),
         };
         let mem: Arc<dyn MemoryTrait> = Arc::new(access);
 
         let _id = mem
-            .store_memory("test content", "title", MemoryType::Fact, 0.5, &[], "test", "")
+            .store_memory(
+                "test content",
+                "title",
+                MemoryType::Fact,
+                0.5,
+                &[],
+                "test",
+                "",
+            )
             .expect("store via MemoryAccess trait object");
 
         assert_eq!(mem.memory_count().expect("count"), 1);

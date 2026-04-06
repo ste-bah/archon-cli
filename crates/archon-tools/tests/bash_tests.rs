@@ -8,10 +8,11 @@ fn test_ctx() -> ToolContext {
         working_dir: std::env::temp_dir(),
         session_id: "test-bash".into(),
         mode: archon_tools::tool::AgentMode::Normal,
-            extra_dirs: vec![],
+        extra_dirs: vec![],
     }
 }
 
+#[cfg(not(target_os = "windows"))]
 #[tokio::test]
 async fn bash_echo_hello() {
     let tool = BashTool::default();
@@ -22,6 +23,7 @@ async fn bash_echo_hello() {
     assert!(result.content.trim().contains("hello"));
 }
 
+#[cfg(not(target_os = "windows"))]
 #[tokio::test]
 async fn bash_exit_code_nonzero() {
     let tool = BashTool::default();
@@ -32,6 +34,7 @@ async fn bash_exit_code_nonzero() {
     assert!(result.content.contains("Exit code 1"));
 }
 
+#[cfg(not(target_os = "windows"))]
 #[tokio::test]
 async fn bash_timeout() {
     let tool = BashTool {
@@ -52,6 +55,7 @@ async fn bash_timeout() {
     );
 }
 
+#[cfg(not(target_os = "windows"))]
 #[tokio::test]
 async fn bash_output_truncation() {
     let tool = BashTool {
@@ -72,6 +76,7 @@ async fn bash_output_truncation() {
     );
 }
 
+#[cfg(not(target_os = "windows"))]
 #[tokio::test]
 async fn bash_sensitive_env_stripped() {
     let tool = BashTool::default();
@@ -90,6 +95,7 @@ async fn bash_sensitive_env_stripped() {
     );
 }
 
+#[cfg(not(target_os = "windows"))]
 #[tokio::test]
 async fn bash_working_directory() {
     // Canonicalize to resolve symlinks (e.g. macOS /var -> /private/var),
@@ -99,7 +105,7 @@ async fn bash_working_directory() {
         working_dir: dir.clone(),
         session_id: "test".into(),
         mode: archon_tools::tool::AgentMode::Normal,
-            extra_dirs: vec![],
+        extra_dirs: vec![],
     };
     let tool = BashTool::default();
     let result = tool.execute(json!({ "command": "pwd" }), &ctx).await;

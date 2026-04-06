@@ -240,4 +240,3 @@ fn recall_skill_requires_query() {
         _ => panic!("expected error when no query"),
     }
 }
-

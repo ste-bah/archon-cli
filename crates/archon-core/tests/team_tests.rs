@@ -224,4 +224,3 @@ fn file_based_backend_persists_across_instances() {
     assert_eq!(msgs.len(), 1);
     assert_eq!(msgs[0].content, "persisted");
 }
-

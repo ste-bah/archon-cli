@@ -12,6 +12,7 @@ use archon_consciousness::defaults::load_configured_defaults;
 use archon_consciousness::rules::RulesEngine;
 use archon_core::agent::{Agent, AgentConfig, AgentEvent, SessionStats};
 use archon_core::cli_flags::resolve_flags;
+use archon_core::config::LlmConfig;
 use archon_core::config::default_config_path;
 use archon_core::config_layers::ConfigLayer;
 use archon_core::cost_alerts::{CostAlertAction, CostAlertState};
@@ -25,16 +26,15 @@ use archon_core::reasoning::build_environment_section;
 use archon_core::skills::builtin::register_builtins;
 use archon_core::skills::discovery::discover_user_skills;
 use archon_core::skills::{SkillContext, SkillOutput};
-use archon_core::config::LlmConfig;
 use archon_llm::anthropic::AnthropicClient;
 use archon_llm::auth::resolve_auth_with_keys;
 use archon_llm::effort::{self, EffortLevel, EffortState};
 use archon_llm::fast_mode::FastModeState;
-use archon_llm::provider::LlmProvider;
 use archon_llm::identity::{
     IdentityMode, IdentityProvider, get_or_create_device_id, resolve_and_validate_betas,
     resolve_betas,
 };
+use archon_llm::provider::LlmProvider;
 use archon_mcp::lifecycle::McpServerManager;
 use archon_memory::{MemoryAccess, MemoryGraph, MemoryTrait};
 use archon_permissions::auto::{AutoModeConfig, AutoModeEvaluator};
@@ -225,7 +225,8 @@ async fn main() -> Result<()> {
             // TODO: Wire CpalAudioSource when AudioCapture implements AudioSource
             StdArc::new(MockAudioSource::with_samples(vec![
                 0.0_f32;
-                audio_capture.sample_rate as usize
+                audio_capture.sample_rate
+                    as usize
             ]))
         } else {
             tracing::warn!("voice: no audio device available, using mock audio source");
@@ -388,10 +389,7 @@ async fn main() -> Result<()> {
             }
             return Ok(());
         }
-        Some(Commands::Serve {
-            port,
-            token_path,
-        }) => {
+        Some(Commands::Serve { port, token_path }) => {
             use archon_core::remote::{
                 server::WebSocketServer,
                 websocket::{IdeHandlerFn, WsServerConfig},
@@ -881,8 +879,8 @@ fn handle_plugin_command(action: cli_args::PluginAction) -> Result<()> {
         .unwrap_or_else(|| std::path::PathBuf::from(".cache"))
         .join("archon")
         .join("wasm");
-    let mut loader = PluginLoader::new(plugins_dir)
-        .with_cache(archon_plugin::cache::WasmCache::new(cache_dir));
+    let mut loader =
+        PluginLoader::new(plugins_dir).with_cache(archon_plugin::cache::WasmCache::new(cache_dir));
     if !seed_dirs.is_empty() {
         loader = loader.with_seed_dirs(seed_dirs);
     }
@@ -1519,7 +1517,10 @@ async fn run_interactive_session(
         .join("archon")
         .join("checkpoints.db");
     let checkpoint_store = if config.checkpoint.enabled {
-        match archon_session::checkpoint::CheckpointStore::open_with_limit(&checkpoint_db_path, config.checkpoint.max_checkpoints) {
+        match archon_session::checkpoint::CheckpointStore::open_with_limit(
+            &checkpoint_db_path,
+            config.checkpoint.max_checkpoints,
+        ) {
             Ok(store) => {
                 tracing::info!(
                     "checkpoint store opened at {}",
@@ -1885,69 +1886,68 @@ async fn run_interactive_session(
     let sections = assembler.assemble(&input);
 
     // Convert assembled sections into Vec<serde_json::Value> for the API
-    let system_prompt: Vec<serde_json::Value> = if let Some(ref override_text) =
-        resolved_flags.system_prompt_override
-    {
-        // --system-prompt or --system-prompt-file: replace the entire prompt
-        vec![serde_json::json!({ "type": "text", "text": override_text })]
-    } else {
-        let mut blocks: Vec<serde_json::Value> = sections
-            .into_iter()
-            .map(|section| {
-                let mut block = serde_json::json!({
-                    "type": "text",
-                    "text": section.content,
-                });
-                // Gated by config.context.prompt_cache (TASK-WIRE-003) — when
-                // disabled, we omit the cache_control hint entirely so the API
-                // treats every block as non-cacheable.
-                if config.context.prompt_cache {
-                    if let Some(ref cc) = section.cache_control {
-                        block["cache_control"] = serde_json::json!({ "type": cc });
+    let system_prompt: Vec<serde_json::Value> =
+        if let Some(ref override_text) = resolved_flags.system_prompt_override {
+            // --system-prompt or --system-prompt-file: replace the entire prompt
+            vec![serde_json::json!({ "type": "text", "text": override_text })]
+        } else {
+            let mut blocks: Vec<serde_json::Value> = sections
+                .into_iter()
+                .map(|section| {
+                    let mut block = serde_json::json!({
+                        "type": "text",
+                        "text": section.content,
+                    });
+                    // Gated by config.context.prompt_cache (TASK-WIRE-003) — when
+                    // disabled, we omit the cache_control hint entirely so the API
+                    // treats every block as non-cacheable.
+                    if config.context.prompt_cache {
+                        if let Some(ref cc) = section.cache_control {
+                            block["cache_control"] = serde_json::json!({ "type": cc });
+                        }
+                    }
+                    block
+                })
+                .collect();
+            // --append-system-prompt or --append-system-prompt-file: append to assembled prompt
+            if let Some(ref append_text) = resolved_flags.system_prompt_append {
+                blocks.push(serde_json::json!({ "type": "text", "text": append_text }));
+            }
+
+            // ── Output style injection (CLI-310) ─────────────────────
+            // CLI flag takes priority over config.toml value.
+            // If neither is set, a plugin-forced style is used as fallback.
+            {
+                use archon_core::output_style::OutputStyleRegistry;
+                use archon_core::output_style_loader::load_styles_from_dir;
+
+                let mut reg = OutputStyleRegistry::new();
+                if let Some(home) = dirs::home_dir() {
+                    for style in load_styles_from_dir(&home.join(".claude").join("output-styles")) {
+                        reg.register(style);
                     }
                 }
-                block
-            })
-            .collect();
-        // --append-system-prompt or --append-system-prompt-file: append to assembled prompt
-        if let Some(ref append_text) = resolved_flags.system_prompt_append {
-            blocks.push(serde_json::json!({ "type": "text", "text": append_text }));
-        }
 
-        // ── Output style injection (CLI-310) ─────────────────────
-        // CLI flag takes priority over config.toml value.
-        // If neither is set, a plugin-forced style is used as fallback.
-        {
-            use archon_core::output_style::OutputStyleRegistry;
-            use archon_core::output_style_loader::load_styles_from_dir;
+                let style_name: Option<&str> = cli
+                    .output_style
+                    .as_deref()
+                    .or(config.output_style.as_deref());
 
-            let mut reg = OutputStyleRegistry::new();
-            if let Some(home) = dirs::home_dir() {
-                for style in load_styles_from_dir(&home.join(".claude").join("output-styles")) {
-                    reg.register(style);
+                let injection = if let Some(name) = style_name {
+                    let style = reg.get_or_default(name);
+                    style.prompt.clone()
+                } else {
+                    reg.forced_plugin_style().and_then(|s| s.prompt.clone())
+                };
+
+                if let Some(ref text) = injection {
+                    tracing::info!("injecting output style into system prompt");
+                    blocks.push(serde_json::json!({ "type": "text", "text": text }));
                 }
             }
 
-            let style_name: Option<&str> = cli
-                .output_style
-                .as_deref()
-                .or(config.output_style.as_deref());
-
-            let injection = if let Some(name) = style_name {
-                let style = reg.get_or_default(name);
-                style.prompt.clone()
-            } else {
-                reg.forced_plugin_style().and_then(|s| s.prompt.clone())
-            };
-
-            if let Some(ref text) = injection {
-                tracing::info!("injecting output style into system prompt");
-                blocks.push(serde_json::json!({ "type": "text", "text": text }));
-            }
-        }
-
-        blocks
-    };
+            blocks
+        };
 
     // Shared permission mode — honour CLI flags and config
     let initial_perm_mode = if cli.dangerously_skip_permissions {
@@ -2080,10 +2080,15 @@ async fn run_interactive_session(
             let _ = tui_event_tx.send(TuiEvent::SessionRenamed(name)).await;
         }
         // CRIT-15 (ITEM 5): Restore inner voice from snapshot on session resume.
-        if archon_consciousness::inner_voice::InnerVoice::is_enabled(config.consciousness.inner_voice) {
+        if archon_consciousness::inner_voice::InnerVoice::is_enabled(
+            config.consciousness.inner_voice,
+        ) {
             if let Ok(memories) = memory.recall_memories("inner_voice_snapshot", 1) {
                 if let Some(m) = memories.first() {
-                    if let Ok(snapshot) = serde_json::from_str::<archon_consciousness::inner_voice::InnerVoiceSnapshot>(&m.content) {
+                    if let Ok(snapshot) = serde_json::from_str::<
+                        archon_consciousness::inner_voice::InnerVoiceSnapshot,
+                    >(&m.content)
+                    {
                         let iv = Arc::new(tokio::sync::Mutex::new(
                             archon_consciousness::inner_voice::InnerVoice::from_snapshot(snapshot),
                         ));
@@ -2318,7 +2323,8 @@ async fn run_interactive_session(
         last_assistant_response: Arc::clone(&last_assistant_response_shared),
         system_prompt_chars,
         tool_defs_chars,
-        allow_bypass_permissions: cli.allow_dangerously_skip_permissions || cli.dangerously_skip_permissions,
+        allow_bypass_permissions: cli.allow_dangerously_skip_permissions
+            || cli.dangerously_skip_permissions,
         denial_log: Arc::clone(&agent.denial_log),
     };
 
@@ -2933,10 +2939,7 @@ async fn run_interactive_session(
 /// Matches on `llm_cfg.provider` to construct the appropriate provider.
 /// Falls back to Anthropic when the selected provider is missing required
 /// credentials or is unrecognised.
-fn build_llm_provider(
-    llm_cfg: &LlmConfig,
-    api_client: AnthropicClient,
-) -> Arc<dyn LlmProvider> {
+fn build_llm_provider(llm_cfg: &LlmConfig, api_client: AnthropicClient) -> Arc<dyn LlmProvider> {
     use archon_llm::providers::{
         AnthropicProvider, BedrockProvider, LocalProvider, OpenAiProvider, VertexProvider,
     };
@@ -2957,7 +2960,9 @@ fn build_llm_provider(
         }
         "bedrock" => {
             if llm_cfg.bedrock.region.is_empty() || llm_cfg.bedrock.model_id.is_empty() {
-                tracing::warn!("Bedrock selected but region/model_id missing; falling back to Anthropic");
+                tracing::warn!(
+                    "Bedrock selected but region/model_id missing; falling back to Anthropic"
+                );
                 return Arc::new(AnthropicProvider::new(api_client));
             }
             Arc::new(BedrockProvider::new(
@@ -3414,7 +3419,9 @@ async fn handle_slash_command(
                     .await;
             } else {
                 match archon_tools::validation::validate_permission_mode(arg) {
-                    Ok(resolved) if resolved == "bypassPermissions" && !ctx.allow_bypass_permissions => {
+                    Ok(resolved)
+                        if resolved == "bypassPermissions" && !ctx.allow_bypass_permissions =>
+                    {
                         let _ = tui_tx
                             .send(TuiEvent::Error(
                                 "bypassPermissions requires --allow-dangerously-skip-permissions flag".into(),
@@ -3472,7 +3479,9 @@ async fn handle_slash_command(
         "/denials" => {
             let log = ctx.denial_log.lock().await;
             let text = log.format_display(20);
-            let _ = tui_tx.send(TuiEvent::TextDelta(format!("\n{text}\n"))).await;
+            let _ = tui_tx
+                .send(TuiEvent::TextDelta(format!("\n{text}\n")))
+                .await;
             true
         }
         // ── /login ─────────────────────────────────────────────
@@ -3659,7 +3668,9 @@ async fn handle_slash_command(
                 // Strip leading '/' from the argument if present
                 let name = arg.strip_prefix('/').unwrap_or(arg);
                 if let Some(detail) = ctx.skill_registry.format_skill_help(name) {
-                    let _ = tui_tx.send(TuiEvent::TextDelta(format!("\n{detail}\n"))).await;
+                    let _ = tui_tx
+                        .send(TuiEvent::TextDelta(format!("\n{detail}\n")))
+                        .await;
                 } else {
                     let _ = tui_tx
                         .send(TuiEvent::Error(format!("Unknown command: /{name}")))
@@ -3857,7 +3868,9 @@ async fn handle_slash_command(
                     Ok(store) => match store.list_modified(&ctx.session_id) {
                         Ok(snapshots) if snapshots.is_empty() => {
                             let _ = tui_tx
-                                .send(TuiEvent::TextDelta("\nNo checkpoints for this session.\n".into()))
+                                .send(TuiEvent::TextDelta(
+                                    "\nNo checkpoints for this session.\n".into(),
+                                ))
                                 .await;
                         }
                         Ok(snapshots) => {
@@ -3871,17 +3884,23 @@ async fn handle_slash_command(
                             let _ = tui_tx.send(TuiEvent::TextDelta(out)).await;
                         }
                         Err(e) => {
-                            let _ = tui_tx.send(TuiEvent::Error(format!("Checkpoint list error: {e}"))).await;
+                            let _ = tui_tx
+                                .send(TuiEvent::Error(format!("Checkpoint list error: {e}")))
+                                .await;
                         }
                     },
                     Err(e) => {
-                        let _ = tui_tx.send(TuiEvent::Error(format!("Checkpoint store error: {e}"))).await;
+                        let _ = tui_tx
+                            .send(TuiEvent::Error(format!("Checkpoint store error: {e}")))
+                            .await;
                     }
                 }
             } else if let Some(file_path) = arg.strip_prefix("restore").map(|s| s.trim()) {
                 if file_path.is_empty() {
                     let _ = tui_tx
-                        .send(TuiEvent::Error("Usage: /checkpoint restore <file_path>".into()))
+                        .send(TuiEvent::Error(
+                            "Usage: /checkpoint restore <file_path>".into(),
+                        ))
                         .await;
                 } else {
                     match archon_session::checkpoint::CheckpointStore::open(&ckpt_path) {
@@ -3892,11 +3911,15 @@ async fn handle_slash_command(
                                     .await;
                             }
                             Err(e) => {
-                                let _ = tui_tx.send(TuiEvent::Error(format!("Restore failed: {e}"))).await;
+                                let _ = tui_tx
+                                    .send(TuiEvent::Error(format!("Restore failed: {e}")))
+                                    .await;
                             }
                         },
                         Err(e) => {
-                            let _ = tui_tx.send(TuiEvent::Error(format!("Checkpoint store error: {e}"))).await;
+                            let _ = tui_tx
+                                .send(TuiEvent::Error(format!("Checkpoint store error: {e}")))
+                                .await;
                         }
                     }
                 }
@@ -4036,25 +4059,34 @@ async fn handle_slash_command(
             if args_str.is_empty() || args_str == "list" {
                 match engine.get_rules_sorted() {
                     Ok(rules) if rules.is_empty() => {
-                        let _ = tui_tx.send(TuiEvent::TextDelta("\nNo behavioral rules.\n".into())).await;
+                        let _ = tui_tx
+                            .send(TuiEvent::TextDelta("\nNo behavioral rules.\n".into()))
+                            .await;
                     }
                     Ok(rules) => {
                         let mut out = format!("\n{} behavioral rules:\n\n", rules.len());
                         for r in &rules {
                             let id_short = &r.id[..8.min(r.id.len())];
-                            out.push_str(&format!("  [{id_short}] (score: {:.1}) {}\n", r.score, r.text));
+                            out.push_str(&format!(
+                                "  [{id_short}] (score: {:.1}) {}\n",
+                                r.score, r.text
+                            ));
                         }
                         let _ = tui_tx.send(TuiEvent::TextDelta(out)).await;
                     }
                     Err(e) => {
-                        let _ = tui_tx.send(TuiEvent::Error(format!("rules list failed: {e}"))).await;
+                        let _ = tui_tx
+                            .send(TuiEvent::Error(format!("rules list failed: {e}")))
+                            .await;
                     }
                 }
             } else if let Some(rest) = args_str.strip_prefix("edit ") {
                 // /rules edit <id> <new text>
                 let parts: Vec<&str> = rest.splitn(2, ' ').collect();
                 if parts.len() < 2 {
-                    let _ = tui_tx.send(TuiEvent::Error("Usage: /rules edit <id> <new text>".into())).await;
+                    let _ = tui_tx
+                        .send(TuiEvent::Error("Usage: /rules edit <id> <new text>".into()))
+                        .await;
                 } else {
                     let id_prefix = parts[0];
                     let new_text = parts[1];
@@ -4064,18 +4096,32 @@ async fn handle_slash_command(
                             if let Some(rule) = rules.iter().find(|r| r.id.starts_with(id_prefix)) {
                                 match engine.update_rule(&rule.id, new_text) {
                                     Ok(()) => {
-                                        let _ = tui_tx.send(TuiEvent::TextDelta(format!("\nRule updated: {new_text}\n"))).await;
+                                        let _ = tui_tx
+                                            .send(TuiEvent::TextDelta(format!(
+                                                "\nRule updated: {new_text}\n"
+                                            )))
+                                            .await;
                                     }
                                     Err(e) => {
-                                        let _ = tui_tx.send(TuiEvent::Error(format!("update_rule failed: {e}"))).await;
+                                        let _ = tui_tx
+                                            .send(TuiEvent::Error(format!(
+                                                "update_rule failed: {e}"
+                                            )))
+                                            .await;
                                     }
                                 }
                             } else {
-                                let _ = tui_tx.send(TuiEvent::Error(format!("No rule matching ID prefix '{id_prefix}'"))).await;
+                                let _ = tui_tx
+                                    .send(TuiEvent::Error(format!(
+                                        "No rule matching ID prefix '{id_prefix}'"
+                                    )))
+                                    .await;
                             }
                         }
                         Err(e) => {
-                            let _ = tui_tx.send(TuiEvent::Error(format!("rules lookup failed: {e}"))).await;
+                            let _ = tui_tx
+                                .send(TuiEvent::Error(format!("rules lookup failed: {e}")))
+                                .await;
                         }
                     }
                 }
@@ -4086,24 +4132,39 @@ async fn handle_slash_command(
                         if let Some(rule) = rules.iter().find(|r| r.id.starts_with(id_prefix)) {
                             match engine.remove_rule(&rule.id) {
                                 Ok(()) => {
-                                    let _ = tui_tx.send(TuiEvent::TextDelta(format!("\nRule removed: {}\n", rule.text))).await;
+                                    let _ = tui_tx
+                                        .send(TuiEvent::TextDelta(format!(
+                                            "\nRule removed: {}\n",
+                                            rule.text
+                                        )))
+                                        .await;
                                 }
                                 Err(e) => {
-                                    let _ = tui_tx.send(TuiEvent::Error(format!("remove_rule failed: {e}"))).await;
+                                    let _ = tui_tx
+                                        .send(TuiEvent::Error(format!("remove_rule failed: {e}")))
+                                        .await;
                                 }
                             }
                         } else {
-                            let _ = tui_tx.send(TuiEvent::Error(format!("No rule matching ID prefix '{id_prefix}'"))).await;
+                            let _ = tui_tx
+                                .send(TuiEvent::Error(format!(
+                                    "No rule matching ID prefix '{id_prefix}'"
+                                )))
+                                .await;
                         }
                     }
                     Err(e) => {
-                        let _ = tui_tx.send(TuiEvent::Error(format!("rules lookup failed: {e}"))).await;
+                        let _ = tui_tx
+                            .send(TuiEvent::Error(format!("rules lookup failed: {e}")))
+                            .await;
                     }
                 }
             } else {
-                let _ = tui_tx.send(TuiEvent::Error(
-                    "Usage: /rules [list | edit <id> <text> | remove <id>]".into(),
-                )).await;
+                let _ = tui_tx
+                    .send(TuiEvent::Error(
+                        "Usage: /rules [list | edit <id> <text> | remove <id>]".into(),
+                    ))
+                    .await;
             }
             true
         }

@@ -26,4 +26,3 @@ pub struct TeamMessage {
     /// Message type for routing.
     pub message_type: MessageType,
 }
-

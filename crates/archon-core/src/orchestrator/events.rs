@@ -31,7 +31,6 @@ impl Subtask {
             max_retries: 2,
         }
     }
-
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]

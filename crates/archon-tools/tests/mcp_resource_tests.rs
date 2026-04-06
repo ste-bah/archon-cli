@@ -11,7 +11,7 @@ fn make_ctx() -> ToolContext {
         working_dir: std::env::temp_dir(),
         session_id: "test-session".into(),
         mode: AgentMode::Normal,
-            extra_dirs: vec![],
+        extra_dirs: vec![],
     }
 }
 
@@ -352,4 +352,3 @@ async fn read_empty_resource() {
     assert!(!result.is_error);
     assert!(result.content.contains("[empty resource]"));
 }
-

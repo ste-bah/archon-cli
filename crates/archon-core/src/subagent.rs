@@ -148,7 +148,6 @@ impl SubagentManager {
         info.status = SubagentStatus::Failed(reason);
         Ok(())
     }
-
 }
 
 impl Default for SubagentManager {

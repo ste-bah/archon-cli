@@ -149,4 +149,3 @@ impl InboxBackend for FileBasedBackend {
         Ok(messages)
     }
 }
-

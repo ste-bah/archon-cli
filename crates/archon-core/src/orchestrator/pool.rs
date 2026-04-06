@@ -55,5 +55,4 @@ impl AgentPool {
     pub async fn release(&self, agent_id: &str) {
         self.active.lock().await.remove(agent_id);
     }
-
 }
