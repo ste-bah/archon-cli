@@ -40,6 +40,11 @@ define_skill!(
 define_skill!(CostSkill, "cost", "Show session cost");
 define_skill!(StatusSkill, "status", "Show session status");
 define_skill!(DoctorSkill, "doctor", "Run diagnostics");
+define_skill!(
+    GardenSkill,
+    "garden",
+    "Run memory consolidation (/garden) or show stats (/garden stats)"
+);
 
 // ---------------------------------------------------------------------------
 // Git skills
@@ -270,6 +275,7 @@ pub fn register_builtins() -> SkillRegistry {
     registry.register(Box::new(CostSkill));
     registry.register(Box::new(StatusSkill));
     registry.register(Box::new(DoctorSkill));
+    registry.register(Box::new(GardenSkill));
 
     // Git skills
     registry.register(Box::new(GitStatusSkill));

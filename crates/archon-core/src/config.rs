@@ -473,6 +473,8 @@ pub struct MemoryConfig {
     pub embedding_provider: archon_memory::embedding::EmbeddingProviderKind,
     /// Keyword/vector blend factor for hybrid search (0.0 = pure vector, 1.0 = pure keyword).
     pub hybrid_alpha: f32,
+    /// Memory garden consolidation settings.
+    pub garden: archon_memory::garden::GardenConfig,
 }
 
 impl Default for MemoryConfig {
@@ -482,6 +484,7 @@ impl Default for MemoryConfig {
             db_path: None,
             embedding_provider: archon_memory::embedding::EmbeddingProviderKind::Auto,
             hybrid_alpha: 0.3,
+            garden: archon_memory::garden::GardenConfig::default(),
         }
     }
 }
@@ -564,6 +567,10 @@ pub struct ConsciousnessConfig {
     /// Idempotent: rules already present are not duplicated.
     /// Maximum 50 rules. Each must be a non-empty string.
     pub initial_rules: Vec<String>,
+    /// Whether to persist personality state (InnerVoice + rule scores) across sessions.
+    pub persist_personality: bool,
+    /// Maximum number of personality snapshots to retain (oldest pruned first).
+    pub personality_history_limit: u32,
 }
 
 impl Default for ConsciousnessConfig {
@@ -572,6 +579,8 @@ impl Default for ConsciousnessConfig {
             inner_voice: true,
             energy_decay_rate: 0.98,
             initial_rules: Vec::new(),
+            persist_personality: true,
+            personality_history_limit: 50,
         }
     }
 }

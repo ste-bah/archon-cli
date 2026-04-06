@@ -2,6 +2,7 @@ pub mod access;
 pub mod client;
 pub mod embedding;
 pub mod extraction;
+pub mod garden;
 pub mod graph;
 pub mod hybrid_search;
 pub mod injection;

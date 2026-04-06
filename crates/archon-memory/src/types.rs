@@ -28,6 +28,7 @@ pub enum MemoryType {
     Pattern,
     Preference,
     Rule,
+    PersonalitySnapshot,
 }
 
 impl fmt::Display for MemoryType {
@@ -39,6 +40,7 @@ impl fmt::Display for MemoryType {
             Self::Pattern => "pattern",
             Self::Preference => "preference",
             Self::Rule => "rule",
+            Self::PersonalitySnapshot => "personality_snapshot",
         };
         f.write_str(s)
     }
@@ -54,8 +56,18 @@ impl MemoryType {
             "pattern" => Some(Self::Pattern),
             "preference" => Some(Self::Preference),
             "rule" => Some(Self::Rule),
+            "personality_snapshot" => Some(Self::PersonalitySnapshot),
             _ => None,
         }
+    }
+}
+
+impl Memory {
+    /// Returns the number of days since this memory was last accessed.
+    /// Returns None if last_accessed is not set.
+    pub fn days_since_access(&self) -> Option<i64> {
+        self.last_accessed
+            .map(|la| (chrono::Utc::now() - la).num_days())
     }
 }
 
@@ -157,6 +169,7 @@ mod tests {
             MemoryType::Pattern,
             MemoryType::Preference,
             MemoryType::Rule,
+            MemoryType::PersonalitySnapshot,
         ] {
             let s = mt.to_string();
             let parsed = MemoryType::from_str_opt(&s).expect("should parse");
@@ -202,5 +215,43 @@ mod tests {
         assert!(e.to_string().contains("abc"));
         let e = MemoryError::InvalidType("xyz".into());
         assert!(e.to_string().contains("xyz"));
+    }
+
+    // ── days_since_access tests (TASK-CLI-417) ──────────────────
+
+    fn make_test_memory(last_accessed: Option<DateTime<Utc>>) -> Memory {
+        Memory {
+            id: "test".into(),
+            content: "test".into(),
+            title: "test".into(),
+            memory_type: MemoryType::Fact,
+            importance: 0.5,
+            tags: vec![],
+            source_type: "test".into(),
+            project_path: "".into(),
+            created_at: Utc::now(),
+            updated_at: None,
+            access_count: 0,
+            last_accessed,
+        }
+    }
+
+    #[test]
+    fn days_since_access_returns_none_when_not_set() {
+        let mem = make_test_memory(None);
+        assert_eq!(mem.days_since_access(), None);
+    }
+
+    #[test]
+    fn days_since_access_returns_zero_for_now() {
+        let mem = make_test_memory(Some(Utc::now()));
+        assert_eq!(mem.days_since_access(), Some(0));
+    }
+
+    #[test]
+    fn days_since_access_returns_positive_for_past() {
+        let five_days_ago = Utc::now() - chrono::Duration::days(5);
+        let mem = make_test_memory(Some(five_days_ago));
+        assert_eq!(mem.days_since_access(), Some(5));
     }
 }

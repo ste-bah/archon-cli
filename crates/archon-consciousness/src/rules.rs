@@ -226,6 +226,46 @@ impl<'g> RulesEngine<'g> {
         }
     }
 
+    /// Export current rule scores as a list of [`RuleScoreEntry`](crate::persistence::RuleScoreEntry).
+    pub fn export_scores(&self) -> Result<Vec<crate::persistence::RuleScoreEntry>, RulesError> {
+        let rules = self.get_rules_sorted()?;
+        Ok(rules
+            .into_iter()
+            .map(|r| crate::persistence::RuleScoreEntry {
+                rule_id: r.id,
+                rule_text: r.text,
+                score: r.score,
+            })
+            .collect())
+    }
+
+    /// Import rule scores from a previous session.
+    ///
+    /// For each entry, if a rule with matching text exists, its score is
+    /// updated. Rules that no longer exist are silently skipped.
+    pub fn import_scores(
+        &self,
+        scores: &[crate::persistence::RuleScoreEntry],
+    ) -> Result<usize, RulesError> {
+        let current_rules = self.get_rules_sorted()?;
+        let mut imported = 0;
+
+        for entry in scores {
+            // Match by rule_id first, fall back to text match.
+            let target = current_rules
+                .iter()
+                .find(|r| r.id == entry.rule_id)
+                .or_else(|| current_rules.iter().find(|r| r.text == entry.rule_text));
+
+            if let Some(rule) = target {
+                self.graph.update_importance(&rule.id, entry.score)?;
+                imported += 1;
+            }
+        }
+
+        Ok(imported)
+    }
+
     /// Render all rules into a block suitable for system-prompt
     /// injection.
     pub fn format_for_prompt(&self) -> Result<String, RulesError> {

@@ -1869,6 +1869,8 @@ async fn run_interactive_session(
             Some(env_section.clone())
         },
         inner_voice: None, // Populated on subsequent turns by InnerVoice::to_prompt_block()
+        personality_briefing: None, // Injected on first turn via agent field
+        memory_briefing: None, // Injected on first turn via agent field
         dynamic: Some(format!(
             "Date: {}\nSession: {}\n\n\
             ## Memory System\n\
@@ -2039,6 +2041,97 @@ async fn run_interactive_session(
             ),
         ));
         agent.set_inner_voice(iv);
+    }
+
+    // CLI-416: Restore personality state from last session's PersonalitySnapshot.
+    if config.consciousness.persist_personality {
+        match archon_consciousness::persistence::load_latest_snapshot(memory.as_ref()) {
+            Ok(Some(snap)) => {
+                // Restore inner voice state from the snapshot.
+                if let Some(iv_arc) = agent.inner_voice() {
+                    let restored = archon_consciousness::inner_voice::InnerVoice::from_snapshot(
+                        snap.inner_voice.clone(),
+                    );
+                    *iv_arc.blocking_lock() = restored;
+                    tracing::info!(
+                        confidence = snap.inner_voice.confidence,
+                        energy = snap.inner_voice.energy,
+                        "personality: restored inner voice from previous session"
+                    );
+                }
+                // Restore rule scores from the snapshot.
+                let engine = archon_consciousness::rules::RulesEngine::new(memory.as_ref());
+                match engine.import_scores(&snap.rule_scores) {
+                    Ok(n) => tracing::info!(imported = n, "personality: restored rule scores"),
+                    Err(e) => tracing::warn!("personality: failed to restore rule scores: {e}"),
+                }
+            }
+            Ok(None) => {
+                tracing::debug!("personality: no previous snapshot found (first run)");
+            }
+            Err(e) => {
+                tracing::warn!("personality: failed to load snapshot: {e}");
+            }
+        }
+
+        // Generate personality briefing for first turn.
+        if let Ok(trends) = archon_consciousness::persistence::compute_trends(memory.as_ref(), 10) {
+            if let Ok(Some(last)) =
+                archon_consciousness::persistence::load_latest_snapshot(memory.as_ref())
+            {
+                if trends.total_sessions > 0 {
+                    let briefing =
+                        archon_consciousness::persistence::generate_briefing(&trends, &last);
+                    agent.set_personality_briefing(briefing);
+                    tracing::info!(
+                        sessions = trends.total_sessions,
+                        "personality: briefing generated for first turn"
+                    );
+                }
+            }
+        }
+    }
+
+    // CLI-417: Memory garden — auto-consolidation and briefing on session start.
+    if config.memory.enabled && config.memory.garden.auto_consolidate {
+        match archon_memory::garden::should_auto_consolidate(
+            memory.as_ref(),
+            config.memory.garden.min_hours_between_runs,
+        ) {
+            Ok(true) => {
+                tracing::info!("garden: starting auto-consolidation");
+                match archon_memory::garden::consolidate(memory.as_ref(), &config.memory.garden) {
+                    Ok(report) => {
+                        tracing::info!(
+                            decayed = report.importance_decayed,
+                            pruned = report.stale_pruned,
+                            deduped = report.duplicates_merged,
+                            merged = report.fragments_merged,
+                            overflow = report.overflow_pruned,
+                            before = report.total_memories_before,
+                            after = report.total_memories_after,
+                            ms = report.duration_ms,
+                            "garden: consolidation complete"
+                        );
+                    }
+                    Err(e) => tracing::warn!("garden: consolidation failed: {e}"),
+                }
+            }
+            Ok(false) => tracing::debug!("garden: skipping — last run too recent"),
+            Err(e) => tracing::warn!("garden: failed to check last run: {e}"),
+        }
+        // Generate memory briefing for first turn.
+        match archon_memory::garden::generate_briefing(
+            memory.as_ref(),
+            config.memory.garden.briefing_limit,
+        ) {
+            Ok(briefing) if !briefing.is_empty() => {
+                agent.set_memory_briefing(briefing);
+                tracing::info!("garden: memory briefing generated for first turn");
+            }
+            Ok(_) => {}
+            Err(e) => tracing::warn!("garden: failed to generate briefing: {e}"),
+        }
     }
 
     // Wire hook system — load hooks from .claude/settings.json if present
@@ -2306,6 +2399,7 @@ async fn run_interactive_session(
         session_id: session_id.to_string(),
         cost_config: config.cost.clone(),
         memory: Arc::clone(&memory),
+        garden_config: config.memory.garden.clone(),
         mcp_manager: mcp_manager.clone(),
         working_dir: working_dir.clone(),
         extra_dirs: Arc::clone(&extra_dirs_shared),
@@ -2343,6 +2437,15 @@ async fn run_interactive_session(
     let slash_commands_disabled = resolved_flags.disable_slash_commands;
     let session_store_for_input = Arc::clone(&session_store);
     let session_id_for_input = session_id.to_string();
+    // CLI-416: Capture personality persistence config for session-end save.
+    let persist_personality = config.consciousness.persist_personality;
+    let personality_history_limit = config.consciousness.personality_history_limit;
+    let session_start_instant = std::time::Instant::now();
+    let session_start_confidence = if let Some(iv_arc) = agent.inner_voice() {
+        iv_arc.blocking_lock().confidence
+    } else {
+        0.7
+    };
     // Clone api_url for the btw_tx background task (line ~1683); the spawn below consumes it.
     let api_url_for_btw = api_url.clone();
     tokio::spawn(async move {
@@ -2501,6 +2604,42 @@ async fn run_interactive_session(
             if !slash_commands_disabled && input.starts_with('/') {
                 // GAP 1: /compact needs direct access to agent.compact()
                 if input.trim() == "/exit" || input.trim() == "/quit" {
+                    // CLI-416: Save personality snapshot before session ends.
+                    if persist_personality {
+                        if let Some(iv_arc) = agent.inner_voice() {
+                            let iv = iv_arc.lock().await;
+                            let stats = iv.to_session_stats(
+                                session_start_confidence,
+                                session_start_instant.elapsed().as_secs(),
+                            );
+                            let snapshot_iv = iv.on_compaction();
+                            drop(iv);
+                            let engine = archon_consciousness::rules::RulesEngine::new(
+                                cmd_ctx.memory.as_ref(),
+                            );
+                            let rule_scores = engine.export_scores().unwrap_or_default();
+                            let snap = archon_consciousness::persistence::PersonalitySnapshot {
+                                session_id: cmd_ctx.session_id.clone(),
+                                timestamp: chrono::Utc::now(),
+                                inner_voice: snapshot_iv,
+                                rule_scores,
+                                stats,
+                            };
+                            if let Err(e) = archon_consciousness::persistence::save_snapshot(
+                                cmd_ctx.memory.as_ref(),
+                                &snap,
+                            ) {
+                                tracing::warn!("personality: failed to save snapshot: {e}");
+                            }
+                            if let Err(e) = archon_consciousness::persistence::prune_snapshots(
+                                cmd_ctx.memory.as_ref(),
+                                personality_history_limit,
+                            ) {
+                                tracing::warn!("personality: failed to prune snapshots: {e}");
+                            }
+                        }
+                    }
+
                     // Fire SessionEnd hook and close the TUI
                     agent
                         .fire_hook(
@@ -2531,6 +2670,42 @@ async fn run_interactive_session(
 
                 // /clear needs direct access to agent.clear_conversation()
                 if input.trim() == "/clear" {
+                    // CLI-416: Save personality snapshot before clearing session.
+                    if persist_personality {
+                        if let Some(iv_arc) = agent.inner_voice() {
+                            let iv = iv_arc.lock().await;
+                            let stats = iv.to_session_stats(
+                                session_start_confidence,
+                                session_start_instant.elapsed().as_secs(),
+                            );
+                            let snapshot_iv = iv.on_compaction();
+                            drop(iv);
+                            let engine = archon_consciousness::rules::RulesEngine::new(
+                                cmd_ctx.memory.as_ref(),
+                            );
+                            let rule_scores = engine.export_scores().unwrap_or_default();
+                            let snap = archon_consciousness::persistence::PersonalitySnapshot {
+                                session_id: cmd_ctx.session_id.clone(),
+                                timestamp: chrono::Utc::now(),
+                                inner_voice: snapshot_iv,
+                                rule_scores,
+                                stats,
+                            };
+                            if let Err(e) = archon_consciousness::persistence::save_snapshot(
+                                cmd_ctx.memory.as_ref(),
+                                &snap,
+                            ) {
+                                tracing::warn!("personality: failed to save snapshot: {e}");
+                            }
+                            if let Err(e) = archon_consciousness::persistence::prune_snapshots(
+                                cmd_ctx.memory.as_ref(),
+                                personality_history_limit,
+                            ) {
+                                tracing::warn!("personality: failed to prune snapshots: {e}");
+                            }
+                        }
+                    }
+
                     // Fire SessionEnd hook before clearing
                     agent
                         .fire_hook(
@@ -3053,6 +3228,7 @@ struct SlashCommandContext {
     session_id: String,
     cost_config: archon_core::config::CostConfig,
     memory: Arc<dyn MemoryTrait>,
+    garden_config: archon_memory::garden::GardenConfig,
     mcp_manager: McpServerManager,
     working_dir: PathBuf,
     /// Additional working directories added via `/add-dir`.
@@ -3138,6 +3314,39 @@ async fn handle_slash_command(
                     }
                     Err(msg) => {
                         let _ = tui_tx.send(TuiEvent::Error(msg)).await;
+                    }
+                }
+            }
+            true
+        }
+        // ── /garden ────────────────────────────────────────────
+        s if s == "/garden" || s.starts_with("/garden ") => {
+            let sub = s.strip_prefix("/garden").unwrap_or("").trim();
+            if sub == "stats" {
+                match archon_memory::garden::format_garden_stats(ctx.memory.as_ref(), 10) {
+                    Ok(stats) => {
+                        let _ = tui_tx
+                            .send(TuiEvent::TextDelta(format!("\n{stats}\n")))
+                            .await;
+                    }
+                    Err(e) => {
+                        let _ = tui_tx
+                            .send(TuiEvent::Error(format!("Garden stats failed: {e}")))
+                            .await;
+                    }
+                }
+            } else {
+                match archon_memory::garden::consolidate(ctx.memory.as_ref(), &ctx.garden_config) {
+                    Ok(report) => {
+                        let formatted = report.format();
+                        let _ = tui_tx
+                            .send(TuiEvent::TextDelta(format!("\n{formatted}\n")))
+                            .await;
+                    }
+                    Err(e) => {
+                        let _ = tui_tx
+                            .send(TuiEvent::Error(format!("Garden consolidation failed: {e}")))
+                            .await;
                     }
                 }
             }

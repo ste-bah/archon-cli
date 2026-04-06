@@ -44,6 +44,10 @@ pub struct AssemblyInput {
     pub environment: Option<String>,
     /// Inner voice / consciousness state block.
     pub inner_voice: Option<String>,
+    /// Personality briefing from cross-session persistence (first turn only).
+    pub personality_briefing: Option<String>,
+    /// Memory garden briefing (first turn only).
+    pub memory_briefing: Option<String>,
     /// Dynamic/ephemeral content such as current date and session info.
     pub dynamic: Option<String>,
 }
@@ -114,6 +118,26 @@ impl SystemPromptAssembler {
         {
             sections.push(PromptSection {
                 content: truncate_to_tokens(text, self.budget.memories_tokens),
+                cache_control: None,
+            });
+        }
+
+        // 4b. Personality briefing (first turn only)
+        if let Some(ref text) = input.personality_briefing
+            && !text.is_empty()
+        {
+            sections.push(PromptSection {
+                content: text.clone(),
+                cache_control: None,
+            });
+        }
+
+        // 4c. Memory briefing (first turn only)
+        if let Some(ref text) = input.memory_briefing
+            && !text.is_empty()
+        {
+            sections.push(PromptSection {
+                content: text.clone(),
                 cache_control: None,
             });
         }
@@ -217,11 +241,13 @@ mod tests {
             project_instructions: Some("See CLAUDE.md".into()),
             environment: Some("Linux x86_64".into()),
             inner_voice: Some("<inner_voice>state</inner_voice>".into()),
+            personality_briefing: Some("<personality_briefing>data</personality_briefing>".into()),
+            memory_briefing: Some("<memory_briefing>data</memory_briefing>".into()),
             dynamic: Some("Date: 2026-04-02".into()),
         };
 
         let sections = assembler().assemble(&input);
-        assert_eq!(sections.len(), 9);
+        assert_eq!(sections.len(), 11);
     }
 
     #[test]
@@ -235,6 +261,8 @@ mod tests {
             project_instructions: Some("project".into()),
             environment: Some("env".into()),
             inner_voice: Some("voice".into()),
+            personality_briefing: Some("pbriefing".into()),
+            memory_briefing: Some("mbriefing".into()),
             dynamic: Some("dynamic".into()),
         };
 
@@ -243,11 +271,13 @@ mod tests {
         assert_eq!(sections[1].content, "personality");
         assert_eq!(sections[2].content, "rules");
         assert_eq!(sections[3].content, "memories");
-        assert_eq!(sections[4].content, "user");
-        assert_eq!(sections[5].content, "project");
-        assert_eq!(sections[6].content, "env");
-        assert_eq!(sections[7].content, "voice");
-        assert_eq!(sections[8].content, "dynamic");
+        assert_eq!(sections[4].content, "pbriefing");
+        assert_eq!(sections[5].content, "mbriefing");
+        assert_eq!(sections[6].content, "user");
+        assert_eq!(sections[7].content, "project");
+        assert_eq!(sections[8].content, "env");
+        assert_eq!(sections[9].content, "voice");
+        assert_eq!(sections[10].content, "dynamic");
     }
 
     #[test]

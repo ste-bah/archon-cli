@@ -263,6 +263,10 @@ pub struct Agent {
     previous_permission_mode: Option<String>,
     /// Append-only log of permission denials for audit / `/denials` display.
     pub denial_log: Arc<Mutex<archon_permissions::denial_log::DenialLog>>,
+    /// CLI-416: Personality briefing injected into system prompt on first turn only.
+    personality_briefing: Option<String>,
+    /// CLI-417: Memory garden briefing injected into system prompt on first turn only.
+    pub memory_briefing: Option<String>,
 }
 
 impl Agent {
@@ -295,12 +299,24 @@ impl Agent {
             ask_user_response_rx: None,
             previous_permission_mode: None,
             denial_log: Arc::new(Mutex::new(archon_permissions::denial_log::DenialLog::new())),
+            personality_briefing: None,
+            memory_briefing: None,
         }
     }
 
     /// Enable the inner voice feature. The supplied state is shared so that
     /// external components (slash commands, compaction handlers) can inspect
     /// or snapshot it.
+    /// Set the personality briefing text (injected on first turn only).
+    pub fn set_personality_briefing(&mut self, text: String) {
+        self.personality_briefing = Some(text);
+    }
+
+    /// Set the memory garden briefing text (injected on first turn only).
+    pub fn set_memory_briefing(&mut self, text: String) {
+        self.memory_briefing = Some(text);
+    }
+
     pub fn set_inner_voice(&mut self, iv: Arc<Mutex<InnerVoice>>) {
         self.inner_voice = Some(iv);
     }
@@ -1682,6 +1698,20 @@ impl Agent {
             Err(e) => {
                 tracing::warn!("correction recall failed: {e}");
             }
+        }
+
+        // CLI-416/417: Inject personality and memory briefings on first turn only.
+        if let Some(briefing) = self.personality_briefing.take() {
+            system.push(serde_json::json!({
+                "type": "text",
+                "text": briefing,
+            }));
+        }
+        if let Some(briefing) = self.memory_briefing.take() {
+            system.push(serde_json::json!({
+                "type": "text",
+                "text": briefing,
+            }));
         }
 
         system

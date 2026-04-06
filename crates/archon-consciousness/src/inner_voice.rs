@@ -200,6 +200,34 @@ impl InnerVoice {
         )
     }
 
+    /// Produce a [`SessionStats`](crate::persistence::SessionStats) summary
+    /// of the current session state.
+    ///
+    /// `start_confidence` is the confidence level at session start (before any
+    /// turns). `duration_secs` is the wall-clock session duration.
+    pub fn to_session_stats(
+        &self,
+        start_confidence: f32,
+        duration_secs: u64,
+    ) -> crate::persistence::SessionStats {
+        let total_tool_calls: u32 = self.tool_failure_counts.values().map(|&v| v).sum::<u32>()
+            + self.successes.len() as u32;
+        let total_tool_failures: u32 = self.tool_failure_counts.values().sum();
+
+        crate::persistence::SessionStats {
+            total_turns: self.turn_count,
+            total_corrections: self.corrections_received,
+            total_tool_calls,
+            total_tool_failures,
+            confidence_start: start_confidence,
+            confidence_end: self.confidence,
+            energy_end: self.energy,
+            top_struggles: self.struggles.clone(),
+            top_successes: self.successes.clone(),
+            duration_secs,
+        }
+    }
+
     /// Check whether the inner voice feature is enabled via config.
     pub fn is_enabled(config_enabled: bool) -> bool {
         config_enabled

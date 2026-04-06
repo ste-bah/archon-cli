@@ -143,6 +143,7 @@ fn format_one(mem: &Memory) -> String {
         MemoryType::Pattern => "[pattern]",
         MemoryType::Preference => "[preference]",
         MemoryType::Rule => "[rule]",
+        MemoryType::PersonalitySnapshot => "[snapshot]",
     };
 
     let suffix = match mem.memory_type {
