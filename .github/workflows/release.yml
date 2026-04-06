@@ -35,7 +35,7 @@ jobs:
         id: version
         shell: bash
         run: |
-          VERSION=$(grep -m1 '^version' Cargo.toml | grep -oP '\d+\.\d+\.\d+')
+          VERSION=$(sed -n '/\[workspace\.package\]/,/^\[/{s/^version *= *"\(.*\)"/\1/p;}' Cargo.toml)
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "tag=v${VERSION}" >> "$GITHUB_OUTPUT"
           echo "Detected version: ${VERSION} (tag: v${VERSION})"
