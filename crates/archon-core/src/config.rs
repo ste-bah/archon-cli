@@ -917,4 +917,40 @@ mod tests {
         let cfg: ArchonConfig = toml::from_str(&s).unwrap();
         assert!(!cfg.consciousness.initial_rules.is_empty());
     }
+
+    #[test]
+    fn ssh_agent_forwarding_defaults_to_false() {
+        let cfg = ArchonConfig::default();
+        assert!(!cfg.remote.ssh.agent_forwarding);
+    }
+
+    #[test]
+    fn ssh_agent_forwarding_true_deserialized() {
+        let toml_str = r#"
+            [remote.ssh]
+            agent_forwarding = true
+        "#;
+        let cfg: ArchonConfig = toml::from_str(toml_str).unwrap();
+        assert!(cfg.remote.ssh.agent_forwarding);
+    }
+
+    #[test]
+    fn ssh_agent_forwarding_false_deserialized() {
+        let toml_str = r#"
+            [remote.ssh]
+            agent_forwarding = false
+        "#;
+        let cfg: ArchonConfig = toml::from_str(toml_str).unwrap();
+        assert!(!cfg.remote.ssh.agent_forwarding);
+    }
+
+    #[test]
+    fn ssh_agent_forwarding_absent_defaults_false() {
+        let toml_str = r#"
+            [remote.ssh]
+            port = 2222
+        "#;
+        let cfg: ArchonConfig = toml::from_str(toml_str).unwrap();
+        assert!(!cfg.remote.ssh.agent_forwarding);
+    }
 }
