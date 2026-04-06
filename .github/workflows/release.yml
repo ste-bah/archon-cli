@@ -1,15 +1,13 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - 'v*.*.*'
+  # Auto-trigger after CI succeeds on main
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+  # Manual trigger as fallback
   workflow_dispatch:
-    inputs:
-      tag:
-        description: 'Release tag (e.g. v0.1.0)'
-        required: true
-        type: string
 
 env:
   CARGO_TERM_COLOR: always
@@ -19,8 +17,46 @@ permissions:
   contents: write
 
 jobs:
+  # ── Gate: only proceed if CI passed + version is unreleased ──
+  check:
+    name: check version
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      should_release: ${{ steps.check_tag.outputs.should_release }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract version from Cargo.toml
+        id: version
+        shell: bash
+        run: |
+          VERSION=$(grep -m1 '^version' Cargo.toml | grep -oP '\d+\.\d+\.\d+')
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Detected version: ${VERSION} (tag: v${VERSION})"
+
+      - name: Check if tag already released
+        id: check_tag
+        shell: bash
+        run: |
+          if git ls-remote --tags origin "refs/tags/v${{ steps.version.outputs.version }}" | grep -q .; then
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Tag v${{ steps.version.outputs.version }} already exists — skipping."
+          else
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Tag v${{ steps.version.outputs.version }} is new — building release."
+          fi
+
+  # ── Build release binaries for all platforms ─────────────────
   build:
     name: build ${{ matrix.target }}
+    needs: [check]
+    if: needs.check.outputs.should_release == 'true'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -45,16 +81,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-
-      - name: Resolve release tag
-        id: tag
-        shell: bash
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
-          fi
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -88,22 +114,21 @@ jobs:
         if: matrix.archive == 'tar.gz'
         shell: bash
         run: |
-          VERSION=${{ steps.tag.outputs.tag }}
-          NAME="archon-${VERSION}-${{ matrix.target }}"
+          TAG="${{ needs.check.outputs.tag }}"
+          NAME="archon-${TAG}-${{ matrix.target }}"
           mkdir -p "dist/${NAME}"
           cp target/${{ matrix.target }}/release/archon "dist/${NAME}/"
           cp README.md LICENSE "dist/${NAME}/"
           cd dist
           tar -czf "${NAME}.tar.gz" "${NAME}"
           sha256sum "${NAME}.tar.gz" > "${NAME}.tar.gz.sha256"
-          ls -la
 
       - name: Package (zip)
         if: matrix.archive == 'zip'
         shell: pwsh
         run: |
-          $VERSION = "${{ steps.tag.outputs.tag }}"
-          $NAME = "archon-$VERSION-${{ matrix.target }}"
+          $TAG = "${{ needs.check.outputs.tag }}"
+          $NAME = "archon-$TAG-${{ matrix.target }}"
           New-Item -ItemType Directory -Force -Path "dist/$NAME" | Out-Null
           Copy-Item "target/${{ matrix.target }}/release/archon.exe" "dist/$NAME/"
           Copy-Item README.md "dist/$NAME/"
@@ -123,22 +148,18 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  release:
-    name: publish release
-    needs: [build]
+  # ── Create draft release: you review + click Publish ─────────
+  draft-release:
+    name: draft release ${{ needs.check.outputs.tag }}
+    needs: [check, build]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Resolve release tag
-        id: tag
-        shell: bash
+      - name: Create git tag
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
-          fi
+          git tag "${{ needs.check.outputs.tag }}"
+          git push origin "${{ needs.check.outputs.tag }}"
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -149,12 +170,12 @@ jobs:
       - name: List artifacts
         run: ls -la dist/
 
-      - name: Create GitHub Release
+      - name: Create draft GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.tag.outputs.tag }}
-          name: Archon ${{ steps.tag.outputs.tag }}
-          draft: false
+          tag_name: ${{ needs.check.outputs.tag }}
+          name: Archon ${{ needs.check.outputs.tag }}
+          draft: true
           prerelease: false
           generate_release_notes: true
           files: |
@@ -162,3 +183,19 @@ jobs:
             dist/*.tar.gz.sha256
             dist/*.zip
             dist/*.zip.sha256
+          body: |
+            ## Archon CLI ${{ needs.check.outputs.tag }}
+
+            ### Packages
+            | Platform | Architecture | File |
+            |----------|-------------|------|
+            | Linux | x86_64 | `archon-${{ needs.check.outputs.tag }}-x86_64-unknown-linux-gnu.tar.gz` |
+            | Linux | aarch64 | `archon-${{ needs.check.outputs.tag }}-aarch64-unknown-linux-gnu.tar.gz` |
+            | macOS | x86_64 | `archon-${{ needs.check.outputs.tag }}-x86_64-apple-darwin.tar.gz` |
+            | macOS | aarch64 (Apple Silicon) | `archon-${{ needs.check.outputs.tag }}-aarch64-apple-darwin.tar.gz` |
+            | Windows | x86_64 | `archon-${{ needs.check.outputs.tag }}-x86_64-pc-windows-msvc.zip` |
+
+            SHA256 checksums included alongside each archive.
+
+            ---
+            *This is a draft release. Review the artifacts and click **Publish** when ready.*
