@@ -145,8 +145,12 @@ fn run_and_scrape(agent_forwarding: bool) -> String {
         }
         std::thread::sleep(Duration::from_millis(200));
     }
-    let _ = child.wait();
+    let output = child.wait_with_output().expect("wait_with_output");
 
+    // Brief pause to let the OS flush file buffers to disk (macOS APFS can lag).
+    std::thread::sleep(Duration::from_millis(100));
+
+    // Collect log files from disk.
     let mut collected = String::new();
     if let Ok(entries) = std::fs::read_dir(&log_dir) {
         for entry in entries.flatten() {
@@ -155,6 +159,10 @@ fn run_and_scrape(agent_forwarding: bool) -> String {
             }
         }
     }
+    // Also include stderr — on some platforms the tracing subscriber may
+    // write there before/instead of the log file (e.g. if the binary exits
+    // before the file logger flushes).
+    collected.push_str(&String::from_utf8_lossy(&output.stderr));
     collected
 }
 
