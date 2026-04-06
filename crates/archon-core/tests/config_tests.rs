@@ -15,7 +15,6 @@ fn empty_toml_produces_valid_defaults() {
     assert_eq!(config.identity.spoof_version, "2.1.89");
     assert_eq!(config.identity.spoof_entrypoint, "cli");
     assert!(config.identity.spoof_betas.is_none());
-    assert!(config.identity.attestation_hook.is_none());
     assert!(!config.identity.anti_distillation);
     assert!(config.identity.workload.is_none());
     assert!(config.identity.custom.is_none());

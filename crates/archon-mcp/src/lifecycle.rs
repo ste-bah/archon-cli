@@ -13,7 +13,9 @@ use tokio::sync::RwLock;
 use crate::client::McpClient;
 use crate::http_transport::create_http_transport;
 use crate::transport::spawn_transport;
-use crate::types::{McpError, McpToolDef, ServerConfig, ServerState};
+use crate::transport_ws::WebSocketTransport;
+use crate::types::{McpError, ServerConfig, ServerState};
+use crate::ws_config::{WsConfig, WsReconnectConfig};
 
 /// Default connect timeout for HTTP transports.
 const HTTP_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
@@ -282,32 +284,6 @@ impl McpServerManager {
             .collect()
     }
 
-    /// Aggregate tools from all servers in the `Ready` state.
-    pub async fn list_all_tools(&self) -> Result<Vec<McpToolDef>, McpError> {
-        let servers = self.servers.read().await;
-        let mut all_tools = Vec::new();
-
-        for (name, entry) in servers.iter() {
-            if entry.state != ServerState::Ready {
-                continue;
-            }
-            if let Some(ref client) = entry.client {
-                match client.list_tools().await {
-                    Ok(tools) => all_tools.extend(tools),
-                    Err(e) => {
-                        tracing::warn!(
-                            server = %name,
-                            error = %e,
-                            "failed to list tools"
-                        );
-                    }
-                }
-            }
-        }
-
-        Ok(all_tools)
-    }
-
     /// List tool names for a single Ready server, as qualified `mcp__server__tool` strings.
     /// Returns an empty vec if the server is not Ready or not found.
     pub async fn list_tools_for(&self, server_name: &str) -> Vec<String> {
@@ -362,30 +338,6 @@ impl McpServerManager {
             }
         }
         tools
-    }
-
-    /// Call a tool on a specific server.
-    pub async fn call_tool(
-        &self,
-        server_name: &str,
-        tool_name: &str,
-        arguments: Option<serde_json::Map<String, serde_json::Value>>,
-    ) -> Result<crate::types::McpToolResult, McpError> {
-        let servers = self.servers.read().await;
-        let entry = servers
-            .get(server_name)
-            .ok_or_else(|| McpError::ServerNotFound(server_name.into()))?;
-
-        if entry.state != ServerState::Ready {
-            return Err(McpError::ServerNotReady(server_name.into(), entry.state));
-        }
-
-        let client = entry
-            .client
-            .as_ref()
-            .ok_or_else(|| McpError::ServerNotReady(server_name.into(), entry.state))?;
-
-        client.call_tool(tool_name, arguments).await
     }
 
     /// Gracefully shut down all managed servers.
@@ -453,6 +405,24 @@ async fn connect_server(config: &ServerConfig) -> Result<McpClient, McpError> {
             let transport = spawn_transport(config)?;
             McpClient::initialize(config, transport).await
         }
+        "ws" | "websocket" => {
+            let url = config.url.as_deref().ok_or_else(|| {
+                McpError::Transport(format!(
+                    "server '{}' has transport=ws but no url configured",
+                    config.name
+                ))
+            })?;
+            let ws_config = WsConfig {
+                url: url.to_string(),
+                headers: config.headers.clone().unwrap_or_default(),
+                headers_helper: None,
+            };
+            let ws_transport = WebSocketTransport::new(ws_config, WsReconnectConfig::default())?;
+            let active = ws_transport.connect().await?;
+            let ws_stream = active.into_stream();
+            let transport = create_ws_json_rpc_transport(ws_stream);
+            McpClient::initialize(config, transport).await
+        }
         other => {
             tracing::warn!(
                 server = %config.name,
@@ -465,6 +435,73 @@ async fn connect_server(config: &ServerConfig) -> Result<McpClient, McpError> {
             )))
         }
     }
+}
+
+/// Wrap a raw `WebSocketStream` into a `(Sink, Stream)` pair that speaks
+/// `JsonRpcMessage`, suitable for passing to `McpClient::initialize()`.
+///
+/// - **Outgoing**: serializes `JsonRpcMessage` to JSON and sends as a text frame.
+/// - **Incoming**: deserializes text frames into `JsonRpcMessage`, ignoring
+///   non-text frames (ping/pong/binary/close).
+fn create_ws_json_rpc_transport(
+    ws: tokio_tungstenite::WebSocketStream<
+        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+    >,
+) -> (
+    impl futures_util::Sink<
+            rmcp::service::TxJsonRpcMessage<rmcp::service::RoleClient>,
+            Error = tokio_tungstenite::tungstenite::Error,
+        > + Send
+        + Unpin
+        + 'static,
+    impl futures_util::Stream<Item = rmcp::service::RxJsonRpcMessage<rmcp::service::RoleClient>>
+        + Send
+        + Unpin
+        + 'static,
+) {
+    use futures_util::{SinkExt, StreamExt};
+    use tokio_tungstenite::tungstenite::Message;
+
+    let (sink, stream) = ws.split();
+
+    // Map the sink: JsonRpcMessage -> serialize -> Message::Text
+    // Uses `with_flat_map` with a sync closure to keep Unpin.
+    let mapped_sink = sink.with(|msg: rmcp::service::TxJsonRpcMessage<rmcp::service::RoleClient>| {
+        let result = serde_json::to_string(&msg)
+            .map(|json| Message::Text(json.into()))
+            .map_err(|e| {
+                tokio_tungstenite::tungstenite::Error::Io(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("ws json serialize: {e}"),
+                ))
+            });
+        futures_util::future::ready(result)
+    });
+
+    // Map the stream: Message -> extract text -> deserialize -> JsonRpcMessage
+    let mapped_stream = stream.filter_map(|result| {
+        futures_util::future::ready(match result {
+            Ok(Message::Text(text)) => {
+                match serde_json::from_str::<
+                    rmcp::service::RxJsonRpcMessage<rmcp::service::RoleClient>,
+                >(&text)
+                {
+                    Ok(msg) => Some(msg),
+                    Err(e) => {
+                        tracing::warn!("ws: failed to parse JSON-RPC message: {e}");
+                        None
+                    }
+                }
+            }
+            Ok(_) => None, // ignore ping/pong/binary/close
+            Err(e) => {
+                tracing::warn!("ws: stream error: {e}");
+                None
+            }
+        })
+    });
+
+    (mapped_sink, mapped_stream)
 }
 
 /// Calculate exponential backoff delay capped at [`MAX_BACKOFF`].
@@ -530,24 +567,6 @@ mod tests {
         let mgr = McpServerManager::new();
         let errors = mgr.shutdown_all().await;
         assert!(errors.is_empty());
-    }
-
-    #[tokio::test]
-    async fn manager_call_tool_server_not_found() {
-        let mgr = McpServerManager::new();
-        let result = mgr.call_tool("nonexistent", "tool", None).await;
-        assert!(result.is_err());
-        match result.unwrap_err() {
-            McpError::ServerNotFound(name) => assert_eq!(name, "nonexistent"),
-            other => panic!("expected ServerNotFound, got {other:?}"),
-        }
-    }
-
-    #[tokio::test]
-    async fn manager_list_all_tools_empty() {
-        let mgr = McpServerManager::new();
-        let tools = mgr.list_all_tools().await.expect("should succeed");
-        assert!(tools.is_empty());
     }
 
     #[tokio::test]

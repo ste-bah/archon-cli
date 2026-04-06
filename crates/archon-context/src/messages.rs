@@ -32,12 +32,3 @@ pub fn total_estimated_tokens(messages: &[ContextMessage]) -> u64 {
     messages.iter().map(|m| m.estimated_tokens).sum()
 }
 
-/// Format token usage for display.
-pub fn format_usage(input: u64, output: u64, cache: u64) -> String {
-    format!(
-        "in:{}k out:{}k cache:{}k",
-        input / 1000,
-        output / 1000,
-        cache / 1000,
-    )
-}

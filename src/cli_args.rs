@@ -308,6 +308,8 @@ pub enum Commands {
         #[command(subcommand)]
         action: TeamAction,
     },
+    /// Run in IDE stdio mode (JSON-RPC over stdin/stdout)
+    IdeStdio,
     /// Start the browser-based web UI on localhost
     Web {
         /// Port to listen on (default from config: 8421)

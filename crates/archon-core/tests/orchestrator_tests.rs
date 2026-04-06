@@ -2,7 +2,6 @@ use archon_core::orchestrator::{
     config::{ExecutionMode, OrchestratorConfig, TeamConfig},
     dag::build_dag_waves,
     events::{OrchestratorEvent, Subtask, SubtaskStatus},
-    planner::parse_plan,
     pool::AgentPool,
 };
 
@@ -204,22 +203,3 @@ async fn agent_pool_capacity_enforced() {
     );
 }
 
-// 14. parse_plan: parses valid coordinator JSON into subtasks
-#[test]
-fn parse_plan_valid_json() {
-    let coordinator_output = r#"
-Here is the plan I have prepared:
-{
-  "subtasks": [
-    {"id": "1", "description": "write tests", "agent_type": "tester", "dependencies": []},
-    {"id": "2", "description": "implement feature", "agent_type": "coder", "dependencies": ["1"]}
-  ]
-}
-"#;
-    let subtasks = parse_plan(coordinator_output).expect("should parse plan");
-    assert_eq!(subtasks.len(), 2);
-    assert_eq!(subtasks[0].id, "1");
-    assert_eq!(subtasks[0].agent_type, "tester");
-    assert_eq!(subtasks[1].id, "2");
-    assert_eq!(subtasks[1].dependencies, vec!["1"]);
-}

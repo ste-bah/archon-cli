@@ -147,10 +147,6 @@ impl DebouncedReloader {
         None
     }
 
-    /// Get a reference to the current config held by the reloader.
-    pub fn current_config(&self) -> &ArchonConfig {
-        &self.current_config
-    }
 }
 
 // ---------------------------------------------------------------------------

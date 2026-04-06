@@ -39,15 +39,6 @@ impl McpTool {
         }
     }
 
-    /// The original (unqualified) tool name as advertised by the MCP server.
-    pub fn original_name(&self) -> &str {
-        &self.tool_def.name
-    }
-
-    /// The MCP server that provides this tool.
-    pub fn server_name(&self) -> &str {
-        &self.tool_def.server_name
-    }
 }
 
 /// Flatten MCP tool content into a single text string.

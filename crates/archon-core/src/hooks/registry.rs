@@ -70,14 +70,6 @@ impl HookRegistry {
         Ok(registry)
     }
 
-    /// Returns `true` if there is at least one non-empty hook list registered
-    /// for the given event.
-    pub fn has_hooks_for(&self, event: &HookEvent) -> bool {
-        self.entries
-            .get(event)
-            .is_some_and(|entries| entries.iter().any(|e| !e.matcher.hooks.is_empty()))
-    }
-
     /// Register a batch of `HookMatcher` entries for `event`, tagging them
     /// with an optional `source` identifier (e.g. a plugin name).
     ///
@@ -94,15 +86,6 @@ impl HookRegistry {
                 source: source.map(str::to_owned),
                 matcher,
             });
-        }
-    }
-
-    /// Remove all hook entries whose source matches `source`.
-    ///
-    /// Used by plugins to clean up their hooks on unload.
-    pub fn clear_hooks(&mut self, source: &str) {
-        for entries in self.entries.values_mut() {
-            entries.retain(|e| e.source.as_deref() != Some(source));
         }
     }
 

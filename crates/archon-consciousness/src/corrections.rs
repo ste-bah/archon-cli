@@ -4,7 +4,7 @@
 //! caused the mistake, and reinforces rule scores proportional to the
 //! correction severity.
 
-use archon_memory::MemoryGraph;
+use archon_memory::MemoryTrait;
 use archon_memory::types::{MemoryType, RelType, SearchFilter};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -98,13 +98,13 @@ pub enum CorrectionError {
 /// Records corrections in the memory graph, links them to rules, and
 /// adjusts rule scores proportional to severity.
 pub struct CorrectionTracker<'g> {
-    graph: &'g MemoryGraph,
+    graph: &'g dyn MemoryTrait,
     rules: RulesEngine<'g>,
 }
 
 impl<'g> CorrectionTracker<'g> {
     /// Create a new tracker backed by the given graph.
-    pub fn new(graph: &'g MemoryGraph) -> Self {
+    pub fn new(graph: &'g dyn MemoryTrait) -> Self {
         Self {
             graph,
             rules: RulesEngine::new(graph),
@@ -255,6 +255,7 @@ fn memory_to_correction(m: archon_memory::Memory) -> Result<Correction, Correcti
 #[cfg(test)]
 mod tests {
     use super::*;
+    use archon_memory::MemoryGraph;
 
     fn make_tracker() -> (MemoryGraph, ()) {
         let graph = MemoryGraph::in_memory().expect("in-memory graph should succeed");

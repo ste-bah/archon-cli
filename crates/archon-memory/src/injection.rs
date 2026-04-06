@@ -7,7 +7,7 @@
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
-use crate::graph::MemoryGraph;
+use crate::access::MemoryTrait;
 use crate::types::{Memory, MemoryError, MemoryType};
 
 /// Builds a system-prompt section from recalled memories.
@@ -42,7 +42,7 @@ impl MemoryInjector {
     /// Returns an empty string when no relevant memories are found.
     pub fn inject(
         &mut self,
-        graph: &MemoryGraph,
+        graph: &dyn MemoryTrait,
         context: &[String],
         budget_tokens: usize,
     ) -> Result<String, MemoryError> {
@@ -210,6 +210,7 @@ fn hash_context(context: &[String]) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::graph::MemoryGraph;
     use crate::types::MemoryType;
 
     fn make_graph() -> MemoryGraph {

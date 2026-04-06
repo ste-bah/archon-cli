@@ -1,9 +1,8 @@
 //! Inbox backend trait and implementations for TASK-CLI-312.
 //!
-//! Three backends:
+//! Two backends:
 //! - `InMemoryBackend` — in-process channels; used in tests
 //! - `FileBasedBackend` — JSONL files; default for production cross-process communication
-//! - `RemoteBackend` — future placeholder stub
 
 use std::collections::HashMap;
 use std::io::Write;
@@ -151,26 +150,3 @@ impl InboxBackend for FileBasedBackend {
     }
 }
 
-// ---------------------------------------------------------------------------
-// RemoteBackend — stub for future extension
-// ---------------------------------------------------------------------------
-
-/// Placeholder for a future remote backend (e.g., Redis, HTTP).
-#[derive(Debug, Default)]
-pub struct RemoteBackend;
-
-impl InboxBackend for RemoteBackend {
-    fn send(&mut self, _role: &str, _message: TeamMessage) -> Result<(), BackendError> {
-        Err(BackendError::Io(std::io::Error::new(
-            std::io::ErrorKind::Unsupported,
-            "RemoteBackend is not yet implemented",
-        )))
-    }
-
-    fn read_and_clear(&self, _role: &str) -> Result<Vec<TeamMessage>, BackendError> {
-        Err(BackendError::Io(std::io::Error::new(
-            std::io::ErrorKind::Unsupported,
-            "RemoteBackend is not yet implemented",
-        )))
-    }
-}

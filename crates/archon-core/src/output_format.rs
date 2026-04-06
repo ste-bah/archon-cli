@@ -135,6 +135,19 @@ fn format_agent_event_stream_json(event: &AgentEvent) -> Option<String> {
             Some(format_stream_event("compaction", &serde_json::json!({})))
         }
 
+        AgentEvent::AskUser { question } => Some(format_stream_event(
+            "ask_user",
+            &serde_json::json!({"question": question}),
+        )),
+
+        AgentEvent::MessageSent {
+            target_agent_id,
+            message,
+        } => Some(format_stream_event(
+            "message_sent",
+            &serde_json::json!({"target_agent_id": target_agent_id, "message": message}),
+        )),
+
         // Events that don't produce stream output
         AgentEvent::UserPromptReady
         | AgentEvent::PermissionRequired { .. }

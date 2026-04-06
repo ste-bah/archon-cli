@@ -32,9 +32,6 @@ impl Subtask {
         }
     }
 
-    pub fn can_retry(&self) -> bool {
-        self.retries < self.max_retries
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]

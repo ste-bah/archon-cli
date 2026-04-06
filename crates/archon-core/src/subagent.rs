@@ -149,10 +149,6 @@ impl SubagentManager {
         Ok(())
     }
 
-    /// Total number of tracked subagents (all statuses).
-    pub fn total_count(&self) -> usize {
-        self.agents.len()
-    }
 }
 
 impl Default for SubagentManager {
@@ -274,22 +270,6 @@ mod tests {
             mgr.get_status(&id).unwrap().status,
             SubagentStatus::Failed("something went wrong".into())
         );
-    }
-
-    #[test]
-    fn total_count_tracks_all() {
-        let mut mgr = SubagentManager::default();
-        assert_eq!(mgr.total_count(), 0);
-
-        let id = mgr.register(sample_request()).unwrap();
-        assert_eq!(mgr.total_count(), 1);
-
-        mgr.complete(&id, "done".into()).unwrap();
-        // completed agents still tracked
-        assert_eq!(mgr.total_count(), 1);
-
-        mgr.register(sample_request()).unwrap();
-        assert_eq!(mgr.total_count(), 2);
     }
 
     #[test]

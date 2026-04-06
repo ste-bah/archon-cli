@@ -115,6 +115,7 @@ mod tests {
             working_dir: std::env::temp_dir(),
             session_id: "test-session".into(),
             mode: crate::tool::AgentMode::Normal,
+            extra_dirs: vec![],
         }
     }
 

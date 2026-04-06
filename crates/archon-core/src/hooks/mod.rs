@@ -5,10 +5,7 @@
 //! - `condition`— condition expression evaluator (`"Bash(git *)"` syntax)
 //! - `executor` — shell command runner with exit-code semantics
 //! - `registry` — `HookRegistry`: loads from settings.json, fires hooks per event
-//! - `config`   — legacy TOML config loader (kept for backward compat)
-
 pub mod condition;
-pub mod config;
 mod executor;
 mod registry;
 mod types;

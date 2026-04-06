@@ -1,15 +1,19 @@
 pub mod config;
 pub mod dag;
 pub mod events;
-pub mod planner;
 pub mod pool;
 
 use std::sync::Arc;
+use std::path::PathBuf;
 use tokio::sync::{Mutex, mpsc};
 
 use config::{ExecutionMode, OrchestratorConfig, TeamConfig};
 use events::{OrchestratorEvent, Subtask, SubtaskStatus};
 use pool::AgentPool;
+
+use crate::agent::{Agent, AgentConfig, AgentEvent};
+use crate::dispatch::create_default_registry;
+use archon_llm::provider::LlmProvider;
 
 /// Trait for executing a single subtask. Tests supply mocks; production wires the agent loop.
 #[async_trait::async_trait]
@@ -37,6 +41,92 @@ impl SubtaskExecutor for LoggingExecutor {
     }
 }
 
+/// Production executor that spawns a real Agent per subtask.
+///
+/// Each subtask gets its own Agent instance with a fresh conversation.
+/// The agent runs one turn with the subtask description as the prompt,
+/// and the accumulated text output is returned.
+pub struct RealSubtaskExecutor {
+    provider: Arc<dyn LlmProvider>,
+    working_dir: PathBuf,
+    model: String,
+}
+
+impl RealSubtaskExecutor {
+    pub fn new(provider: Arc<dyn LlmProvider>, working_dir: PathBuf, model: String) -> Self {
+        Self {
+            provider,
+            working_dir,
+            model,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl SubtaskExecutor for RealSubtaskExecutor {
+    async fn execute(&self, subtask: &Subtask, context: &str) -> anyhow::Result<String> {
+        let prompt = if context.is_empty() {
+            subtask.description.clone()
+        } else {
+            format!(
+                "{}\n\nContext from previous tasks:\n{}",
+                subtask.description, context
+            )
+        };
+
+        let registry = create_default_registry(self.working_dir.clone());
+        let tool_defs = registry.tool_definitions();
+        let (event_tx, mut event_rx) = tokio::sync::mpsc::channel::<AgentEvent>(256);
+
+        let config = AgentConfig {
+            model: self.model.clone(),
+            system_prompt: vec![serde_json::json!({
+                "type": "text",
+                "text": format!(
+                    "You are a {} agent. Complete the assigned task concisely and return the result.",
+                    subtask.agent_type
+                ),
+            })],
+            tools: tool_defs,
+            working_dir: self.working_dir.clone(),
+            permission_mode: Arc::new(Mutex::new("bypassPermissions".to_string())),
+            ..AgentConfig::default()
+        };
+
+        let mut agent = Agent::new(self.provider.clone(), registry, config, event_tx);
+
+        // Collect text output in a background task
+        let output = Arc::new(Mutex::new(String::new()));
+        let output_collector = Arc::clone(&output);
+        let collector_handle = tokio::spawn(async move {
+            while let Some(event) = event_rx.recv().await {
+                if let AgentEvent::TextDelta(text) = event {
+                    output_collector.lock().await.push_str(&text);
+                }
+            }
+        });
+
+        agent
+            .process_message(&prompt)
+            .await
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+
+        // Drop the agent (and its event_tx) so the collector finishes
+        drop(agent);
+        let _ = collector_handle.await;
+
+        let result = output.lock().await.clone();
+        if result.is_empty() {
+            Ok(format!(
+                "[{}: completed with no text output]",
+                subtask.agent_type
+            ))
+        } else {
+            Ok(result)
+        }
+    }
+}
+
 pub struct Orchestrator {
     config: OrchestratorConfig,
     cancelled: Arc<Mutex<bool>>,
@@ -48,10 +138,6 @@ impl Orchestrator {
             config,
             cancelled: Arc::new(Mutex::new(false)),
         }
-    }
-
-    pub async fn cancel(&self) {
-        *self.cancelled.lock().await = true;
     }
 
     pub async fn run_team(

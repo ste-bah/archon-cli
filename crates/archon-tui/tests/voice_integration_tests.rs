@@ -1,7 +1,4 @@
-use archon_core::config::VoiceConfig;
 use archon_tui::voice::capture::{AudioCapture, VoiceActivityDetector};
-use archon_tui::voice::hotkey::HotkeyState;
-use archon_tui::voice::{VoiceManager, VoiceState};
 
 #[test]
 fn vad_silence_below_threshold() {
@@ -40,45 +37,6 @@ fn wav_encode_empty_input() {
     let bytes = cap.encode_to_wav(&[]);
     assert!(bytes.starts_with(b"RIFF"));
     assert!(bytes.len() >= 44);
-}
-
-#[test]
-fn voice_state_transitions() {
-    let mut mgr = VoiceManager::new(VoiceConfig {
-        enabled: true,
-        ..Default::default()
-    });
-    mgr.set_state(VoiceState::Listening);
-    assert!(matches!(mgr.state(), VoiceState::Listening));
-    mgr.set_state(VoiceState::Transcribing);
-    assert!(matches!(mgr.state(), VoiceState::Transcribing));
-    mgr.set_state(VoiceState::Idle);
-    assert!(matches!(mgr.state(), VoiceState::Idle));
-}
-
-#[test]
-fn voice_manager_disabled_by_default() {
-    assert!(!VoiceManager::new(VoiceConfig::default()).is_enabled());
-}
-
-#[test]
-fn voice_manager_inject_text() {
-    let mut mgr = VoiceManager::new(VoiceConfig::default());
-    assert!(mgr.inject_text("hello world").is_ok());
-}
-
-#[test]
-fn hotkey_push_to_talk() {
-    let mut h = HotkeyState::new();
-    assert!(h.press());
-    assert!(!h.release());
-}
-
-#[test]
-fn hotkey_toggle() {
-    let mut h = HotkeyState::new();
-    assert!(h.toggle());
-    assert!(!h.toggle());
 }
 
 #[tokio::test]

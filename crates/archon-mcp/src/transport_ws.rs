@@ -224,6 +224,18 @@ impl ActiveWsConnection {
         }
     }
 
+    /// Consume the connection and return the underlying `WebSocketStream`.
+    ///
+    /// This is useful for handing the raw stream to an MCP client that
+    /// requires a `Sink + Stream` transport (e.g. via rmcp's `IntoTransport`).
+    pub fn into_stream(
+        self,
+    ) -> tokio_tungstenite::WebSocketStream<
+        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+    > {
+        self.stream
+    }
+
     /// Send graceful close frame.
     pub async fn close(&mut self) -> Result<(), McpError> {
         use tokio_tungstenite::tungstenite::Message;

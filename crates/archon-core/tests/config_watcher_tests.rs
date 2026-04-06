@@ -242,24 +242,6 @@ fn reload_diffs_against_current_not_default() {
     );
 }
 
-/// Verify DebouncedReloader stores and exposes current_config correctly
-#[test]
-fn debounced_reloader_stores_current_config() {
-    let dir = tempfile::tempdir().expect("create temp dir");
-    let config_path = dir.path().join("config.toml");
-    fs::write(&config_path, "").expect("write empty config");
-
-    let mut initial = ArchonConfig::default();
-    initial.cost.warn_threshold = 99.0;
-
-    let watcher = ConfigWatcher::start(&[config_path]).expect("start watcher");
-    let reloader = DebouncedReloader::new(watcher, 100, initial);
-
-    assert!(
-        (reloader.current_config().cost.warn_threshold - 99.0).abs() < f64::EPSILON,
-        "reloader should store the provided current config"
-    );
-}
 
 // ---------------------------------------------------------------------------
 // force_reload tests

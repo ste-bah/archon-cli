@@ -56,7 +56,4 @@ impl AgentPool {
         self.active.lock().await.remove(agent_id);
     }
 
-    pub async fn active_count(&self) -> usize {
-        self.active.lock().await.len()
-    }
 }

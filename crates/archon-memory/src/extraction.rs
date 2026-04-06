@@ -6,7 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::graph::MemoryGraph;
+use crate::access::MemoryTrait;
 use crate::types::{MemoryError, MemoryType, SearchFilter};
 
 // ── configuration ────────────────────────────────────────────
@@ -158,7 +158,7 @@ pub fn parse_extraction_response(json_str: &str) -> Result<Vec<ExtractedMemory>,
 ///
 /// Returns the number of memories that were actually stored.
 pub fn store_extracted(
-    graph: &MemoryGraph,
+    graph: &dyn MemoryTrait,
     memories: &[ExtractedMemory],
     session_id: &str,
 ) -> Result<usize, MemoryError> {
@@ -215,6 +215,7 @@ struct RawExtracted {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::graph::MemoryGraph;
 
     // -- should_extract -------------------------------------------------
 

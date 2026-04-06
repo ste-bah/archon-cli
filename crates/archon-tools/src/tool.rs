@@ -40,6 +40,8 @@ pub struct ToolContext {
     pub working_dir: PathBuf,
     pub session_id: String,
     pub mode: AgentMode,
+    /// Additional directories added at runtime via `/add-dir`.
+    pub extra_dirs: Vec<PathBuf>,
 }
 
 // ---------------------------------------------------------------------------

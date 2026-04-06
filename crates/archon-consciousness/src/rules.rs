@@ -4,7 +4,7 @@
 //! [`MemoryType::Rule`]. The attention score lives in the `importance`
 //! field and source/trend metadata are encoded as tags.
 
-use archon_memory::MemoryGraph;
+use archon_memory::MemoryTrait;
 use archon_memory::types::{MemoryType, SearchFilter};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -104,12 +104,12 @@ pub enum RulesError {
 
 /// Manages behavioral rules stored in the memory graph.
 pub struct RulesEngine<'g> {
-    graph: &'g MemoryGraph,
+    graph: &'g dyn MemoryTrait,
 }
 
 impl<'g> RulesEngine<'g> {
     /// Create a new engine backed by the given graph.
-    pub fn new(graph: &'g MemoryGraph) -> Self {
+    pub fn new(graph: &'g dyn MemoryTrait) -> Self {
         Self { graph }
     }
 
@@ -288,6 +288,7 @@ fn memory_to_rule(m: archon_memory::Memory) -> Result<BehavioralRule, RulesError
 #[cfg(test)]
 mod tests {
     use super::*;
+    use archon_memory::MemoryGraph;
     use uuid::Uuid;
 
     fn make_engine() -> (MemoryGraph, ()) {

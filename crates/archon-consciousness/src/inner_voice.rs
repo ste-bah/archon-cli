@@ -47,6 +47,8 @@ pub struct InnerVoice {
     pub corrections_received: u32,
     /// Per-tool failure counts (private; not serialized to prompt).
     tool_failure_counts: HashMap<String, u32>,
+    /// Energy decay multiplier applied each turn (default 0.98).
+    energy_decay_rate: f32,
 }
 
 impl InnerVoice {
@@ -61,7 +63,15 @@ impl InnerVoice {
             turn_count: 0,
             corrections_received: 0,
             tool_failure_counts: HashMap::new(),
+            energy_decay_rate: 0.98,
         }
+    }
+
+    /// Create a new `InnerVoice` with a custom energy decay rate.
+    pub fn with_decay_rate(decay_rate: f32) -> Self {
+        let mut iv = Self::new();
+        iv.energy_decay_rate = decay_rate;
+        iv
     }
 
     /// Record a successful tool invocation.
@@ -118,7 +128,7 @@ impl InnerVoice {
     /// clamped to 0.0–1.0).
     pub fn on_turn_complete(&mut self) {
         self.turn_count += 1;
-        self.energy = (self.energy * 0.98).clamp(0.0, 1.0);
+        self.energy = (self.energy * self.energy_decay_rate).clamp(0.0, 1.0);
     }
 
     /// Produce a serializable snapshot for compaction persistence.
@@ -145,6 +155,7 @@ impl InnerVoice {
             turn_count: snapshot.turn_count,
             corrections_received: snapshot.corrections_received,
             tool_failure_counts: HashMap::new(),
+            energy_decay_rate: 0.98,
         }
     }
 

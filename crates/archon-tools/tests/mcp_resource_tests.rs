@@ -4,7 +4,6 @@ use archon_tools::mcp_resources::{
     ListMcpResourcesTool, McpResourceContent, McpResourceEntry, ReadMcpResourceTool,
     ResourceProvider,
 };
-use archon_tools::registry::ToolRegistry;
 use archon_tools::tool::{AgentMode, Tool, ToolContext};
 
 fn make_ctx() -> ToolContext {
@@ -12,6 +11,7 @@ fn make_ctx() -> ToolContext {
         working_dir: std::env::temp_dir(),
         session_id: "test-session".into(),
         mode: AgentMode::Normal,
+            extra_dirs: vec![],
     }
 }
 
@@ -353,21 +353,3 @@ async fn read_empty_resource() {
     assert!(result.content.contains("[empty resource]"));
 }
 
-// ---------------------------------------------------------------------------
-// Registry integration
-// ---------------------------------------------------------------------------
-
-#[tokio::test]
-async fn tools_registered() {
-    let registry = ToolRegistry::new();
-    registry
-        .register(Arc::new(ListMcpResourcesTool::default()))
-        .await;
-    registry
-        .register(Arc::new(ReadMcpResourceTool::default()))
-        .await;
-
-    let names = registry.list().await;
-    assert!(names.contains(&"ListMcpResources".to_string()));
-    assert!(names.contains(&"ReadMcpResource".to_string()));
-}

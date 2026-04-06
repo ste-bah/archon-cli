@@ -1,7 +1,6 @@
 pub mod attach;
 pub mod background;
 pub mod checkpoint;
-pub mod checkpoint_diff;
 pub mod export;
 pub mod fork;
 pub mod history {}

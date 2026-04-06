@@ -169,6 +169,7 @@ mod tests {
             working_dir: std::env::temp_dir(),
             session_id: "test".into(),
             mode: AgentMode::Normal,
+            extra_dirs: vec![],
         }
     }
 

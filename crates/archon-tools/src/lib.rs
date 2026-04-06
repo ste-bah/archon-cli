@@ -14,7 +14,6 @@ pub mod sleep;
 pub mod todo_write;
 pub mod tool;
 
-pub mod deferred;
 pub mod toolsearch;
 pub mod webfetch;
 
@@ -52,8 +51,6 @@ pub mod lsp_manager;
 pub mod lsp_tool;
 pub mod lsp_types;
 
-pub mod read_team_messages;
-pub mod send_message_team;
 pub mod team_backend;
 pub mod team_config;
 pub mod team_create;

@@ -411,6 +411,7 @@ On first startup, Archon sends a cheap probe request (Haiku, 1 token) to validat
 | `archon team list` | List configured teams |
 | `archon plugin list` | List loaded plugins |
 | `archon plugin info <name>` | Show plugin details |
+| `archon ide-stdio` | Run in IDE stdio mode (JSON-RPC over stdin/stdout) |
 | `archon update [--check] [--force]` | Check for / apply updates |
 | `archon --list-sessions` | List all resumable sessions |
 | `archon --list-themes` | List all TUI themes |
@@ -1245,6 +1246,20 @@ No TUI; emits JSON-lines on stdout, one event per line. Used by the VSCode exten
 ---
 
 ## IDE Extensions
+
+### Protocol
+
+IDE extensions communicate with Archon via JSON-RPC 2.0 over stdin/stdout. Start the transport with:
+
+```bash
+archon ide-stdio
+```
+
+**Requests** (IDE -> Archon): `archon/initialize`, `archon/prompt`, `archon/cancel`, `archon/toolResult`, `archon/status`, `archon/config`.
+
+**Notifications** (Archon -> IDE): `archon/textDelta`, `archon/thinkingDelta`, `archon/toolCall`, `archon/permissionRequest`, `archon/turnComplete`, `archon/error`.
+
+Each message is one JSON-lines frame (newline-delimited). See `crates/archon-sdk/src/ide/protocol.rs` for full type definitions.
 
 ### VS Code
 

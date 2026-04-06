@@ -134,25 +134,6 @@ pub fn delete_embedding(db: &DbInstance, memory_id: &str) -> Result<(), MemoryEr
     Ok(())
 }
 
-/// Count the number of stored embeddings.
-pub fn embedding_count(db: &DbInstance) -> Result<usize, MemoryError> {
-    let result = db
-        .run_script(
-            "?[count(memory_id)] := *memory_embeddings{memory_id}",
-            Default::default(),
-            ScriptMutability::Immutable,
-        )
-        .map_err(db_err)?;
-
-    let count = result
-        .rows
-        .first()
-        .and_then(|row| row[0].get_int())
-        .unwrap_or(0);
-
-    Ok(count as usize)
-}
-
 /// Search for the `top_k` most similar embeddings to `query_vec`.
 ///
 /// Returns `(memory_id, cosine_distance)` pairs sorted by distance ascending
@@ -193,39 +174,3 @@ pub fn search_similar(
     Ok(results)
 }
 
-/// Drop the embeddings relation and its HNSW index.
-///
-/// Useful when switching providers (different dimension).
-pub fn drop_embeddings(db: &DbInstance) -> Result<(), MemoryError> {
-    // Drop index first
-    db.run_script(
-        "::hnsw drop memory_embeddings:embedding_idx",
-        Default::default(),
-        ScriptMutability::Mutable,
-    )
-    .or_else(|e| {
-        let msg = e.to_string();
-        if msg.contains("not found") || msg.contains("does not exist") {
-            Ok(empty_rows())
-        } else {
-            Err(db_err(e))
-        }
-    })?;
-
-    // Drop relation
-    db.run_script(
-        "::remove memory_embeddings",
-        Default::default(),
-        ScriptMutability::Mutable,
-    )
-    .or_else(|e| {
-        let msg = e.to_string();
-        if msg.contains("not found") || msg.contains("does not exist") {
-            Ok(empty_rows())
-        } else {
-            Err(db_err(e))
-        }
-    })?;
-
-    Ok(())
-}

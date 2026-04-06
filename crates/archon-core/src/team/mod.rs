@@ -10,7 +10,6 @@ pub use archon_tools::team_message as message;
 
 use std::path::PathBuf;
 
-use archon_tools::team_backend::FileBasedBackend;
 use archon_tools::team_config::TeamConfig;
 
 // ---------------------------------------------------------------------------
@@ -35,43 +34,12 @@ impl TeamManager {
         }
     }
 
-    /// Create a new team: write `team.json` and per-member inbox files.
-    ///
-    /// Does NOT spawn agent processes — creates config files only.
-    pub fn create_team(&mut self, config: TeamConfig) -> Result<(), TeamError> {
-        let team_dir = self.teams_root.join(&config.id);
-        std::fs::create_dir_all(&team_dir)?;
-
-        // Write team.json
-        let json = serde_json::to_string_pretty(&config).map_err(TeamError::Serde)?;
-        std::fs::write(team_dir.join("team.json"), json)?;
-
-        // Create empty inbox files for each member
-        for member in &config.members {
-            let inbox_path = team_dir.join(format!("inbox-{}.jsonl", member.role));
-            if !inbox_path.exists() {
-                std::fs::write(&inbox_path, "")?;
-            }
-        }
-
-        Ok(())
-    }
-
     /// Load a team configuration from disk.
     pub fn load_team(&self, team_id: &str) -> Result<TeamConfig, TeamError> {
         let config_path = self.teams_root.join(team_id).join("team.json");
         let json = std::fs::read_to_string(&config_path)?;
         let config: TeamConfig = serde_json::from_str(&json).map_err(TeamError::Serde)?;
         Ok(config)
-    }
-
-    /// Delete a team and all associated files.
-    pub fn delete_team(&mut self, team_id: &str) -> Result<(), TeamError> {
-        let team_dir = self.teams_root.join(team_id);
-        if team_dir.exists() {
-            std::fs::remove_dir_all(&team_dir)?;
-        }
-        Ok(())
     }
 
     /// List all team IDs currently on disk.
@@ -92,10 +60,6 @@ impl TeamManager {
         Ok(ids)
     }
 
-    /// Get a `FileBasedBackend` for a specific team.
-    pub fn file_backend(&self, team_id: &str) -> FileBasedBackend {
-        FileBasedBackend::new(self.teams_root.join(team_id))
-    }
 }
 
 // ---------------------------------------------------------------------------

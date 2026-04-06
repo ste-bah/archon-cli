@@ -125,8 +125,6 @@ pub struct App {
     pub mcp_manager: Option<McpManager>,
     /// Vim keybinding state — Some when vim mode is active, None otherwise.
     pub vim_state: Option<VimState>,
-    /// Voice input manager — None until voice is configured and enabled.
-    pub voice: Option<crate::voice::VoiceManager>,
 }
 
 impl Default for App {
@@ -153,7 +151,6 @@ impl Default for App {
             session_picker: None,
             mcp_manager: None,
             vim_state: None,
-            voice: None,
         }
     }
 }

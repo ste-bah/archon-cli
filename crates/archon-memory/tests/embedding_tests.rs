@@ -135,11 +135,11 @@ fn init_embedding_schema_idempotent() {
 }
 
 // ---------------------------------------------------------------------------
-// vector_search: store + count
+// vector_search: store + delete
 // ---------------------------------------------------------------------------
 
 #[test]
-fn store_and_count_embeddings() {
+fn store_and_delete_embeddings() {
     let g = MemoryGraph::in_memory().expect("graph");
     vector_search::init_embedding_schema(g.db(), 4).expect("schema");
 
@@ -148,25 +148,15 @@ fn store_and_count_embeddings() {
     vector_search::store_embedding(g.db(), "mem-2", &synthetic_embedding(4, 1), "mock", 4)
         .expect("store 2");
 
-    let count = vector_search::embedding_count(g.db()).expect("count");
-    assert_eq!(count, 2);
-}
+    // Verify stored via search_similar (should find them)
+    let results = vector_search::search_similar(g.db(), &emb, 10).expect("search");
+    assert_eq!(results.len(), 2);
 
-// ---------------------------------------------------------------------------
-// vector_search: delete
-// ---------------------------------------------------------------------------
-
-#[test]
-fn delete_embedding_removes_row() {
-    let g = MemoryGraph::in_memory().expect("graph");
-    vector_search::init_embedding_schema(g.db(), 4).expect("schema");
-
-    vector_search::store_embedding(g.db(), "mem-del", &synthetic_embedding(4, 0), "mock", 4)
-        .expect("store");
-    assert_eq!(vector_search::embedding_count(g.db()).expect("c"), 1);
-
-    vector_search::delete_embedding(g.db(), "mem-del").expect("delete");
-    assert_eq!(vector_search::embedding_count(g.db()).expect("c"), 0);
+    // Delete one and verify via search
+    vector_search::delete_embedding(g.db(), "mem-1").expect("delete");
+    let results = vector_search::search_similar(g.db(), &emb, 10).expect("search");
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].0, "mem-2");
 }
 
 #[test]
@@ -228,24 +218,6 @@ fn search_similar_empty_db_returns_empty() {
     let query = synthetic_embedding(dim, 0);
     let results = vector_search::search_similar(g.db(), &query, 5).expect("search");
     assert!(results.is_empty());
-}
-
-// ---------------------------------------------------------------------------
-// vector_search: drop_embeddings
-// ---------------------------------------------------------------------------
-
-#[test]
-fn drop_embeddings_clears_everything() {
-    let g = MemoryGraph::in_memory().expect("graph");
-    let dim = 4;
-    vector_search::init_embedding_schema(g.db(), dim).expect("schema");
-    vector_search::store_embedding(g.db(), "x", &synthetic_embedding(dim, 0), "mock", dim)
-        .expect("store");
-
-    vector_search::drop_embeddings(g.db()).expect("drop");
-    // After drop, re-init should work and count should be 0
-    vector_search::init_embedding_schema(g.db(), dim).expect("re-init");
-    assert_eq!(vector_search::embedding_count(g.db()).expect("c"), 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -374,8 +346,10 @@ fn graph_with_provider_stores_embeddings_on_store() {
         )
         .expect("store");
 
-    let count = vector_search::embedding_count(g.db()).expect("count");
-    assert_eq!(count, 1);
+    // Verify embedding was stored via search_similar
+    let query = synthetic_embedding(4, 0);
+    let results = vector_search::search_similar(g.db(), &query, 10).expect("search");
+    assert_eq!(results.len(), 1);
 }
 
 #[test]
@@ -390,8 +364,10 @@ fn graph_skips_embedding_for_short_text() {
         .store_memory("short", "S", MemoryType::Fact, 0.5, &[], "test", "")
         .expect("store");
 
-    let count = vector_search::embedding_count(g.db()).expect("count");
-    assert_eq!(count, 0, "short text should not be embedded");
+    // Verify no embedding was stored via search_similar returning empty
+    let query = synthetic_embedding(4, 0);
+    let results = vector_search::search_similar(g.db(), &query, 10).expect("search");
+    assert!(results.is_empty(), "short text should not be embedded");
 }
 
 #[test]
@@ -454,9 +430,16 @@ fn graph_delete_removes_embedding_too() {
         )
         .expect("store");
 
-    assert_eq!(vector_search::embedding_count(g.db()).expect("c"), 1);
+    // Verify embedding exists
+    let query = synthetic_embedding(4, 0);
+    let before = vector_search::search_similar(g.db(), &query, 10).expect("search");
+    assert_eq!(before.len(), 1);
+
     g.delete_memory(&id).expect("delete");
-    assert_eq!(vector_search::embedding_count(g.db()).expect("c"), 0);
+
+    // Verify embedding was removed
+    let after = vector_search::search_similar(g.db(), &query, 10).expect("search");
+    assert!(after.is_empty());
 }
 
 // ---------------------------------------------------------------------------

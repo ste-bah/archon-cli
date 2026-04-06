@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use archon_memory::graph::MemoryGraph;
+use archon_memory::MemoryTrait;
 use archon_memory::types::MemoryType;
 
 use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
@@ -13,11 +13,11 @@ use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
 ///
 /// Mirrors `mcp__memorygraph__store_memory` in the Claude Code host.
 pub struct MemoryStoreTool {
-    graph: Arc<MemoryGraph>,
+    graph: Arc<dyn MemoryTrait>,
 }
 
 impl MemoryStoreTool {
-    pub fn new(graph: Arc<MemoryGraph>) -> Self {
+    pub fn new(graph: Arc<dyn MemoryTrait>) -> Self {
         Self { graph }
     }
 }
@@ -108,11 +108,11 @@ impl Tool for MemoryStoreTool {
 ///
 /// Mirrors `mcp__memorygraph__recall_memories` in the Claude Code host.
 pub struct MemoryRecallTool {
-    graph: Arc<MemoryGraph>,
+    graph: Arc<dyn MemoryTrait>,
 }
 
 impl MemoryRecallTool {
-    pub fn new(graph: Arc<MemoryGraph>) -> Self {
+    pub fn new(graph: Arc<dyn MemoryTrait>) -> Self {
         Self { graph }
     }
 }
@@ -202,12 +202,13 @@ mod tests {
             working_dir: PathBuf::from("/tmp"),
             session_id: "test-session".to_string(),
             mode: crate::tool::AgentMode::Normal,
+            extra_dirs: vec![],
         }
     }
 
     #[tokio::test]
     async fn store_and_recall_roundtrip() {
-        let graph = Arc::new(MemoryGraph::in_memory().expect("graph"));
+        let graph: Arc<dyn MemoryTrait> = Arc::new(MemoryGraph::in_memory().expect("graph"));
         let store = MemoryStoreTool::new(Arc::clone(&graph));
         let recall = MemoryRecallTool::new(Arc::clone(&graph));
         let ctx = test_ctx();
@@ -241,7 +242,7 @@ mod tests {
 
     #[tokio::test]
     async fn store_requires_content() {
-        let graph = Arc::new(MemoryGraph::in_memory().expect("graph"));
+        let graph: Arc<dyn MemoryTrait> = Arc::new(MemoryGraph::in_memory().expect("graph"));
         let store = MemoryStoreTool::new(Arc::clone(&graph));
         let ctx = test_ctx();
 
@@ -251,7 +252,7 @@ mod tests {
 
     #[tokio::test]
     async fn recall_no_results() {
-        let graph = Arc::new(MemoryGraph::in_memory().expect("graph"));
+        let graph: Arc<dyn MemoryTrait> = Arc::new(MemoryGraph::in_memory().expect("graph"));
         let recall = MemoryRecallTool::new(Arc::clone(&graph));
         let ctx = test_ctx();
 

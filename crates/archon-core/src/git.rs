@@ -98,15 +98,6 @@ fn detect_dirty(dir: &Path) -> bool {
         .unwrap_or(false)
 }
 
-/// Format git info for system prompt injection.
-pub fn format_git_context(info: &GitInfo) -> String {
-    let dirty = if info.is_dirty { " (dirty)" } else { "" };
-    format!(
-        "- Git: repo={}, branch={}{dirty}",
-        info.repo_name, info.branch
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -124,29 +115,5 @@ mod tests {
         let info = detect_git_info(Path::new("/tmp"));
         // /tmp is not a git repo
         assert!(info.is_none());
-    }
-
-    #[test]
-    fn format_git_context_clean() {
-        let info = GitInfo {
-            repo_name: "archon".into(),
-            branch: "main".into(),
-            is_dirty: false,
-        };
-        let formatted = format_git_context(&info);
-        assert!(formatted.contains("archon"));
-        assert!(formatted.contains("main"));
-        assert!(!formatted.contains("dirty"));
-    }
-
-    #[test]
-    fn format_git_context_dirty() {
-        let info = GitInfo {
-            repo_name: "archon".into(),
-            branch: "dev".into(),
-            is_dirty: true,
-        };
-        let formatted = format_git_context(&info);
-        assert!(formatted.contains("dirty"));
     }
 }

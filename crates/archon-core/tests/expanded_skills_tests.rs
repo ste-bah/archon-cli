@@ -241,18 +241,3 @@ fn recall_skill_requires_query() {
     }
 }
 
-#[test]
-fn completions_include_expanded() {
-    let reg = register_builtins();
-    let completions = reg.completions("co");
-    assert!(
-        completions.contains(&"context".to_string()),
-        "completions for 'co' should include 'context', got: {:?}",
-        completions
-    );
-    assert!(
-        completions.contains(&"copy".to_string()),
-        "completions for 'co' should include 'copy', got: {:?}",
-        completions
-    );
-}

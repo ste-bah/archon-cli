@@ -99,19 +99,6 @@ impl SkillRegistry {
         list
     }
 
-    /// Return skill names that start with the given prefix.
-    pub fn completions(&self, prefix: &str) -> Vec<String> {
-        let lower = prefix.to_ascii_lowercase();
-        let mut results: Vec<String> = self
-            .skills
-            .keys()
-            .filter(|name| name.to_ascii_lowercase().starts_with(&lower))
-            .cloned()
-            .collect();
-        results.sort();
-        results
-    }
-
     /// Format a help summary listing all registered skills.
     pub fn format_help(&self) -> String {
         let entries = self.list_all();

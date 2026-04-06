@@ -1,8 +1,9 @@
-//! Slash-command registry and handlers for the Archon CLI.
+//! Slash-command handlers for the Archon CLI.
 //!
 //! Slash commands are user-typed directives (e.g. `/compact`) that are
-//! intercepted *before* being sent to the LLM.  Each command implements
-//! [`SlashCommandHandler`] and is registered in a [`SlashCommandRegistry`].
+//! intercepted *before* being sent to the LLM.  Skill-based commands are
+//! handled by the `SkillRegistry`; this module provides standalone handlers
+//! for built-in commands like `/compact`.
 
 use archon_context::compact::{build_summary_request, compact_messages_default};
 use archon_context::messages::{ContextMessage, total_estimated_tokens};
@@ -73,86 +74,6 @@ pub fn build_compact_summary_request(messages: &[ContextMessage]) -> Vec<Context
     )
 }
 
-// ---------------------------------------------------------------------------
-// Slash-command registry
-// ---------------------------------------------------------------------------
-
-/// Known slash commands.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum SlashCommand {
-    Compact,
-    Reload,
-}
-
-impl SlashCommand {
-    /// Try to parse a raw user input string into a slash command.
-    ///
-    /// Returns `None` if the input is not a recognised command.
-    pub fn parse(input: &str) -> Option<Self> {
-        let trimmed = input.trim();
-        match trimmed {
-            "/compact" => Some(Self::Compact),
-            "/reload" => Some(Self::Reload),
-            _ => None,
-        }
-    }
-
-    /// The canonical name (with leading `/`).
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::Compact => "/compact",
-            Self::Reload => "/reload",
-        }
-    }
-
-    /// Short help text.
-    pub fn description(self) -> &'static str {
-        match self {
-            Self::Compact => "Compact the conversation to reduce token usage",
-            Self::Reload => "Hot-reload configuration from disk",
-        }
-    }
-}
-
-/// Registry that holds all known slash commands.
-#[derive(Debug, Clone)]
-pub struct SlashCommandRegistry {
-    commands: Vec<SlashCommand>,
-}
-
-impl SlashCommandRegistry {
-    /// Create a registry with the default set of commands.
-    pub fn new() -> Self {
-        Self {
-            commands: vec![SlashCommand::Compact, SlashCommand::Reload],
-        }
-    }
-
-    /// All registered commands.
-    pub fn commands(&self) -> &[SlashCommand] {
-        &self.commands
-    }
-
-    /// Look up a command by its `/name`.
-    pub fn find(&self, input: &str) -> Option<SlashCommand> {
-        SlashCommand::parse(input)
-    }
-
-    /// Return help text listing every registered command.
-    pub fn help_text(&self) -> String {
-        let mut out = String::from("Available commands:\n");
-        for cmd in &self.commands {
-            out.push_str(&format!("  {:12} — {}\n", cmd.name(), cmd.description()));
-        }
-        out
-    }
-}
-
-impl Default for SlashCommandRegistry {
-    fn default() -> Self {
-        Self::new()
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -162,26 +83,6 @@ impl Default for SlashCommandRegistry {
 mod tests {
     use super::*;
     use archon_context::messages::ContextMessage;
-
-    #[test]
-    fn parse_compact_command() {
-        assert_eq!(SlashCommand::parse("/compact"), Some(SlashCommand::Compact));
-        assert_eq!(
-            SlashCommand::parse("  /compact  "),
-            Some(SlashCommand::Compact)
-        );
-        assert_eq!(SlashCommand::parse("/unknown"), None);
-        assert_eq!(SlashCommand::parse("hello"), None);
-        assert_eq!(SlashCommand::parse(""), None);
-    }
-
-    #[test]
-    fn registry_contains_compact() {
-        let reg = SlashCommandRegistry::new();
-        assert!(reg.find("/compact").is_some());
-        assert!(reg.find("/nope").is_none());
-        assert!(reg.commands().contains(&SlashCommand::Compact));
-    }
 
     #[test]
     fn compact_noop_on_short_conversation() {
@@ -260,20 +161,6 @@ mod tests {
             after < before,
             "compacted tokens ({after}) should be less than original ({before})"
         );
-    }
-
-    #[test]
-    fn registry_help_text_lists_commands() {
-        let reg = SlashCommandRegistry::new();
-        let help = reg.help_text();
-        assert!(help.contains("/compact"));
-        assert!(help.contains("Compact the conversation"));
-    }
-
-    #[test]
-    fn command_name_and_description() {
-        assert_eq!(SlashCommand::Compact.name(), "/compact");
-        assert!(!SlashCommand::Compact.description().is_empty());
     }
 
     #[test]

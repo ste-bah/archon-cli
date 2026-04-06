@@ -21,19 +21,22 @@ use archon_core::input_format::InputFormat;
 use archon_core::logging::{default_log_dir, init_logging, rotate_logs};
 use archon_core::output_format::OutputFormat;
 use archon_core::print_mode::{PrintModeConfig, run_print_mode};
-use archon_core::reasoning::{build_environment_section, load_claude_md};
+use archon_core::reasoning::build_environment_section;
 use archon_core::skills::builtin::register_builtins;
+use archon_core::skills::discovery::discover_user_skills;
 use archon_core::skills::{SkillContext, SkillOutput};
+use archon_core::config::LlmConfig;
 use archon_llm::anthropic::AnthropicClient;
 use archon_llm::auth::resolve_auth_with_keys;
 use archon_llm::effort::{self, EffortLevel, EffortState};
 use archon_llm::fast_mode::FastModeState;
+use archon_llm::provider::LlmProvider;
 use archon_llm::identity::{
     IdentityMode, IdentityProvider, get_or_create_device_id, resolve_and_validate_betas,
     resolve_betas,
 };
 use archon_mcp::lifecycle::McpServerManager;
-use archon_memory::{MemoryAccess, MemoryGraph};
+use archon_memory::{MemoryAccess, MemoryGraph, MemoryTrait};
 use archon_permissions::auto::{AutoModeConfig, AutoModeEvaluator};
 use archon_tui::app::{TuiEvent, run_tui};
 
@@ -170,6 +173,11 @@ async fn main() -> Result<()> {
     if let Err(e) = rotate_logs(&log_dir, config.logging.max_files) {
         tracing::warn!("failed to rotate logs: {e}");
     }
+    tracing::debug!(
+        "logging: max_files={}, max_file_size_mb={}",
+        config.logging.max_files,
+        config.logging.max_file_size_mb,
+    );
 
     tracing::info!("Archon CLI v0.1.0 started, session {session_id}");
     if config.memory.enabled {
@@ -182,6 +190,12 @@ async fn main() -> Result<()> {
     } else {
         tracing::info!("context.prompt_cache=false: cache_control hints DISABLED");
     }
+    tracing::debug!(
+        "context: compact_threshold={}, max_tokens={:?}",
+        config.context.compact_threshold,
+        config.context.max_tokens,
+    );
+    let mut voice_event_rx: Option<tokio::sync::mpsc::Receiver<archon_tui::app::TuiEvent>> = None;
     if config.voice.enabled {
         use archon_tui::app::TuiEvent as VTuiEvent;
         use archon_tui::voice::pipeline::{
@@ -199,19 +213,24 @@ async fn main() -> Result<()> {
             config.voice.toggle_mode,
             hotkey_action_for_mode(config.voice.toggle_mode)
         );
-        // Standalone event channel: voice_loop always has a receiver; the TUI
-        // clones and forwards VoiceText via its own channel when the TUI is
-        // active. In print/non-TUI modes, events are consumed by the drain task.
-        let (voice_evt_tx, mut voice_evt_rx) = tokio::sync::mpsc::channel::<VTuiEvent>(16);
-        tokio::spawn(async move {
-            while let Some(evt) = voice_evt_rx.recv().await {
-                if let VTuiEvent::VoiceText(text) = evt {
-                    tracing::info!("voice: VoiceText event ({} chars)", text.len());
-                }
-            }
-        });
-        let audio: StdArc<dyn AudioSource> =
-            StdArc::new(MockAudioSource::with_samples(vec![0.0_f32; 16000]));
+        let (voice_evt_tx, voice_evt_rx_inner) = tokio::sync::mpsc::channel::<VTuiEvent>(16);
+        voice_event_rx = Some(voice_evt_rx_inner);
+        let audio_capture = archon_tui::voice::capture::AudioCapture::new();
+        let audio: StdArc<dyn AudioSource> = if audio_capture.is_supported() {
+            tracing::info!(
+                "voice: real audio device detected (sample_rate={}, channels={})",
+                audio_capture.sample_rate,
+                audio_capture.channels
+            );
+            // TODO: Wire CpalAudioSource when AudioCapture implements AudioSource
+            StdArc::new(MockAudioSource::with_samples(vec![
+                0.0_f32;
+                audio_capture.sample_rate as usize
+            ]))
+        } else {
+            tracing::warn!("voice: no audio device available, using mock audio source");
+            StdArc::new(MockAudioSource::with_samples(vec![0.0_f32; 16000]))
+        };
         let stt: StdArc<dyn SttProvider> = match config.voice.stt_provider.as_str() {
             "openai" if !config.voice.stt_api_key.is_empty() => StdArc::new(OpenAiStt {
                 api_key: config.voice.stt_api_key.clone(),
@@ -229,8 +248,10 @@ async fn main() -> Result<()> {
             voice_loop(trig_rx, voice_evt_tx, pipeline).await;
         });
         tracing::info!(
-            "voice: pipeline wired (provider={}, hotkey=ctrl+v)",
-            config.voice.stt_provider
+            "voice: pipeline wired (provider={}, device={}, hotkey={})",
+            config.voice.stt_provider,
+            config.voice.device,
+            config.voice.hotkey,
         );
         // Give the spawned voice_loop task a chance to emit its startup log.
         tokio::task::yield_now().await;
@@ -299,7 +320,10 @@ async fn main() -> Result<()> {
                         key_file: key.clone(),
                         agent_forwarding: config.remote.ssh.agent_forwarding,
                         session_id: remote_session_id.clone(),
-                        sync_mode: SyncMode::Manual,
+                        sync_mode: match config.remote.sync_mode.as_str() {
+                            "auto" => SyncMode::Auto,
+                            _ => SyncMode::Manual,
+                        },
                     };
                     let session = match SshTransport.connect(&ssh_cfg).await {
                         Ok(s) => s,
@@ -366,7 +390,7 @@ async fn main() -> Result<()> {
         }
         Some(Commands::Serve {
             port,
-            token_path: _,
+            token_path,
         }) => {
             use archon_core::remote::{
                 server::WebSocketServer,
@@ -376,7 +400,17 @@ async fn main() -> Result<()> {
             use std::sync::Arc;
             use tokio::sync::Mutex;
             let mut srv_cfg = WsServerConfig::default();
+            // CLI --port overrides config; config overrides default
             srv_cfg.port = port;
+            // Wire TLS from config (CLI has no TLS flags; config.toml is the source)
+            srv_cfg.tls_cert = config.ws_remote.tls_cert.as_ref().map(PathBuf::from);
+            srv_cfg.tls_key = config.ws_remote.tls_key.as_ref().map(PathBuf::from);
+            // Wire --token-path: load or create token from the specified file
+            if let Some(ref tp) = token_path {
+                if let Ok(tok) = std::fs::read_to_string(tp) {
+                    srv_cfg.token = Some(tok.trim().to_string());
+                }
+            }
             // Wire the real IdeProtocolHandler — archon-core cannot depend on archon-sdk,
             // so we inject it here via a boxed FnMut closure.
             let ide_proto = IdeProtocolHandler::new(env!("CARGO_PKG_VERSION"));
@@ -400,14 +434,48 @@ async fn main() -> Result<()> {
             return Ok(());
         }
         Some(Commands::Team { action }) => {
-            use archon_core::orchestrator::{LoggingExecutor, Orchestrator};
+            use archon_core::orchestrator::{Orchestrator, RealSubtaskExecutor};
             use cli_args::TeamAction;
             use std::sync::Arc;
             match action {
                 TeamAction::Run { team, goal } => {
                     let orch = Orchestrator::new(config.orchestrator.clone());
                     let (tx, mut rx) = tokio::sync::mpsc::channel(64);
-                    let executor = Arc::new(LoggingExecutor);
+                    // Build LLM provider for team execution
+                    let team_auth = match archon_llm::auth::resolve_auth_with_keys(
+                        env_vars.anthropic_api_key.as_deref(),
+                        env_vars.archon_api_key.as_deref(),
+                        env_vars.archon_oauth_token.as_deref(),
+                        std::env::var("ANTHROPIC_AUTH_TOKEN").ok().as_deref(),
+                    ) {
+                        Ok(a) => a,
+                        Err(e) => {
+                            eprintln!("Authentication failed for team execution: {e}");
+                            eprintln!("Run `archon login` or set ANTHROPIC_API_KEY.");
+                            std::process::exit(1);
+                        }
+                    };
+                    let team_identity = archon_llm::identity::IdentityProvider::new(
+                        archon_llm::identity::IdentityMode::Clean,
+                        uuid::Uuid::new_v4().to_string(),
+                        "team-device".to_string(),
+                        String::new(),
+                    );
+                    let team_api_url = std::env::var("ANTHROPIC_BASE_URL")
+                        .ok()
+                        .or_else(|| config.api.base_url.clone());
+                    let team_client = archon_llm::anthropic::AnthropicClient::new(
+                        team_auth,
+                        team_identity,
+                        team_api_url,
+                    );
+                    let team_provider = build_llm_provider(&config.llm, team_client);
+                    let cwd = std::env::current_dir().unwrap_or_default();
+                    let executor = Arc::new(RealSubtaskExecutor::new(
+                        team_provider,
+                        cwd,
+                        config.api.default_model.clone(),
+                    ));
                     let team_cfg = archon_core::orchestrator::config::TeamConfig {
                         name: team.clone(),
                         ..Default::default()
@@ -472,6 +540,25 @@ async fn main() -> Result<()> {
                         }
                     }
                 }
+            }
+            return Ok(());
+        }
+        Some(Commands::IdeStdio) => {
+            use archon_sdk::ide::handler::IdeProtocolHandler;
+            use archon_sdk::ide::stdio::StdioTransport;
+
+            let handler = IdeProtocolHandler::new(env!("CARGO_PKG_VERSION"));
+            let mut transport = StdioTransport::new(handler);
+            // In IDE mode, the agent event channel will be wired by the IDE
+            // handler's prompt method once sessions are fully connected (Phase 6).
+            // For now, create a placeholder channel so the transport compiles.
+            let (_event_tx, event_rx) =
+                tokio::sync::mpsc::channel::<archon_core::agent::AgentEvent>(256);
+            let session_id = uuid::Uuid::new_v4().to_string();
+            tracing::info!("IDE stdio mode: session={session_id}");
+            if let Err(e) = transport.run_with_events(event_rx, &session_id).await {
+                tracing::error!("IDE stdio error: {e}");
+                return Err(e);
             }
             return Ok(());
         }
@@ -602,9 +689,44 @@ async fn main() -> Result<()> {
         None
     };
 
+    // ── --continue: resume most recent session in this directory ──
+    if cli.continue_session && resume_messages.is_none() {
+        let cwd = std::env::current_dir().unwrap_or_default();
+        let cwd_str = cwd.to_string_lossy().to_string();
+        let db_path = archon_session::storage::default_db_path();
+        if let Ok(store) = archon_session::storage::SessionStore::open(&db_path) {
+            match archon_session::listing::most_recent_in_directory(&store, &cwd_str) {
+                Ok(Some(meta)) => {
+                    eprintln!(
+                        "Continuing session {} ...",
+                        &meta.id[..8.min(meta.id.len())],
+                    );
+                    match archon_session::resume::resume_session(&store, &meta.id) {
+                        Ok((_m, raw_messages)) => {
+                            let messages: Vec<serde_json::Value> = raw_messages
+                                .iter()
+                                .filter_map(|s| serde_json::from_str(s).ok())
+                                .collect();
+                            resume_messages = Some(messages);
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to continue session: {e}");
+                        }
+                    }
+                }
+                Ok(None) => {
+                    eprintln!("No previous session found in this directory.");
+                }
+                Err(e) => {
+                    eprintln!("Session lookup failed: {e}");
+                }
+            }
+        }
+    }
+
     // ── Auto-resume (TASK-WIRE-004) ────────────────────────────
-    // Priority: explicit --resume > --no-resume > config.session.auto_resume.
-    if cli.resume.is_some() {
+    // Priority: explicit --resume > --continue > --no-resume > config.session.auto_resume.
+    if cli.resume.is_some() || cli.continue_session {
         tracing::info!("auto_resume: skipped (--resume specified)");
     } else if cli.no_resume {
         tracing::info!("auto_resume: skipped (--no-resume)");
@@ -734,6 +856,7 @@ async fn main() -> Result<()> {
         &env_vars,
         resume_messages,
         &resolved_flags,
+        voice_event_rx,
     )
     .await
 }
@@ -754,7 +877,12 @@ fn handle_plugin_command(action: cli_args::PluginAction) -> Result<()> {
         .map(std::path::PathBuf::from)
         .collect();
 
-    let mut loader = PluginLoader::new(plugins_dir);
+    let cache_dir = dirs::cache_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from(".cache"))
+        .join("archon")
+        .join("wasm");
+    let mut loader = PluginLoader::new(plugins_dir)
+        .with_cache(archon_plugin::cache::WasmCache::new(cache_dir));
     if !seed_dirs.is_empty() {
         loader = loader.with_seed_dirs(seed_dirs);
     }
@@ -1123,6 +1251,11 @@ async fn run_print_mode_session(
     let api_client = AnthropicClient::new(auth, identity.clone(), api_url);
     let working_dir = std::env::current_dir().unwrap_or_default();
     let mut registry = create_default_registry(working_dir.clone());
+    // Wire config-driven bash tool limits
+    registry.register(Box::new(archon_tools::bash::BashTool {
+        timeout_secs: config.tools.bash_timeout,
+        max_output_bytes: config.tools.bash_max_output,
+    }));
 
     // Apply tool filtering from resolved flags (CLI-220)
     apply_tool_filters(&mut registry, resolved_flags);
@@ -1131,7 +1264,10 @@ async fn run_print_mode_session(
     let claude_md = if resolved_flags.bare_mode {
         String::new()
     } else {
-        archon_core::reasoning::load_claude_md(&working_dir)
+        archon_core::claudemd::load_hierarchical_claude_md_with_limit(
+            &working_dir,
+            config.context.claudemd_max_tokens as usize,
+        )
     };
     let git_info = archon_core::git::detect_git_info(&working_dir);
     let git_branch = git_info.as_ref().map(|g| g.branch.as_str());
@@ -1148,22 +1284,26 @@ async fn run_print_mode_session(
         use archon_core::output_style::OutputStyleRegistry;
         use archon_core::output_style_loader::load_styles_from_dir;
 
+        let mut reg = OutputStyleRegistry::new();
+        if let Some(home) = dirs::home_dir() {
+            for style in load_styles_from_dir(&home.join(".claude").join("output-styles")) {
+                reg.register(style);
+            }
+        }
+
         let style_name = cli
             .output_style
             .as_deref()
             .or(config.output_style.as_deref());
 
-        if let Some(name) = style_name {
-            let mut reg = OutputStyleRegistry::new();
-            if let Some(home) = dirs::home_dir() {
-                for style in load_styles_from_dir(&home.join(".claude").join("output-styles")) {
-                    reg.register(style);
-                }
-            }
-            let style = reg.get_or_default(name);
-            if let Some(ref injection) = style.prompt {
-                system_prompt.push(serde_json::json!({ "type": "text", "text": injection }));
-            }
+        let injection = if let Some(name) = style_name {
+            reg.get_or_default(name).prompt.clone()
+        } else {
+            reg.forced_plugin_style().and_then(|s| s.prompt.clone())
+        };
+
+        if let Some(ref text) = injection {
+            system_prompt.push(serde_json::json!({ "type": "text", "text": text }));
         }
     }
 
@@ -1198,11 +1338,13 @@ async fn run_print_mode_session(
         effort_level: effort_level_shared,
         model_override: model_override_shared,
         permission_mode: permission_mode_shared,
+        extra_dirs: Arc::new(tokio::sync::Mutex::new(Vec::new())),
+        max_tool_concurrency: config.tools.max_concurrency as usize,
     };
 
     let (agent_event_tx, agent_event_rx) = tokio::sync::mpsc::channel::<AgentEvent>(256);
-    let provider: Arc<dyn archon_llm::provider::LlmProvider> =
-        Arc::new(archon_llm::providers::AnthropicProvider::new(api_client));
+    let provider = build_llm_provider(&config.llm, api_client);
+    tracing::info!("LLM provider: {}", provider.name());
     let mut agent = Agent::new(provider, registry, agent_config, agent_event_tx);
 
     // Wire auto-mode evaluator
@@ -1222,6 +1364,7 @@ async fn run_interactive_session(
     env_vars: &ArchonEnvVars,
     resume_messages: Option<Vec<serde_json::Value>>,
     resolved_flags: &archon_core::cli_flags::ResolvedFlags,
+    voice_event_rx: Option<tokio::sync::mpsc::Receiver<archon_tui::app::TuiEvent>>,
 ) -> Result<()> {
     // Reconstruct config_path and layer_filter for source tracking
     let config_path = env_vars
@@ -1234,16 +1377,29 @@ async fn run_interactive_session(
         cli.setting_sources.as_ref().map(|s| parse_layer_filter(s));
 
     // ── Open session store and register this session ────────────
+    let session_db = config
+        .session
+        .db_path
+        .as_ref()
+        .map(PathBuf::from)
+        .unwrap_or_else(archon_session::storage::default_db_path);
     let session_store = Arc::new(
-        archon_session::storage::SessionStore::open_default()
+        archon_session::storage::SessionStore::open(&session_db)
             .map_err(|e| anyhow::anyhow!("failed to open session store: {e}"))?,
     );
     let session_store_fwd = Arc::clone(&session_store);
 
     // ── Phase 2: Open memory via server/client access (CLI-103, CLI-234) ──
-    let data_dir = dirs::data_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join("archon");
+    let data_dir = config
+        .memory
+        .db_path
+        .as_ref()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            dirs::data_dir()
+                .unwrap_or_else(|| std::path::PathBuf::from("."))
+                .join("archon")
+        });
     // Keep memory_access alive for the lifetime of the session so the TCP
     // server handle (in the Direct variant) is not dropped.
     let _memory_access = archon_memory::open_memory(&data_dir)
@@ -1256,31 +1412,19 @@ async fn run_interactive_session(
                 _server_handle: tokio::spawn(async {}),
             }
         });
-    // Extract Arc<MemoryGraph> for subsystems that need the concrete type
-    // (agent injection, rules engine). For Remote mode this falls back to
-    // an in-memory graph -- the MemoryAccess trait impl handles the real
-    // server connection transparently.
-    let memory_graph: Arc<MemoryGraph> = match _memory_access.graph() {
-        Some(g) => Arc::clone(g),
-        None => {
-            tracing::info!("remote memory mode; using local in-memory graph for agent injection");
-            Arc::new(MemoryGraph::in_memory().expect("in-memory graph"))
-        }
-    };
-    tracing::info!("memory graph opened");
-
     // ── Phase 2b: Set up semantic embedding provider (CLI-205) ──
-    {
+    // Embedding setup needs the concrete MemoryGraph (Direct mode only).
+    if let Some(graph) = _memory_access.graph() {
         let embed_cfg = archon_memory::embedding::EmbeddingConfig {
             provider: config.memory.embedding_provider,
             hybrid_alpha: config.memory.hybrid_alpha,
         };
         match archon_memory::embedding::create_provider(&embed_cfg) {
             Ok(provider) => {
-                if let Err(e) = memory_graph.set_embedding_provider(provider) {
+                if let Err(e) = graph.set_embedding_provider(provider) {
                     tracing::warn!("failed to initialise embedding schema: {e}");
                 } else {
-                    memory_graph.set_hybrid_alpha(embed_cfg.hybrid_alpha);
+                    graph.set_hybrid_alpha(embed_cfg.hybrid_alpha);
                     tracing::info!(
                         provider = %embed_cfg.provider,
                         alpha = embed_cfg.hybrid_alpha,
@@ -1293,6 +1437,10 @@ async fn run_interactive_session(
             }
         }
     }
+    // Wrap MemoryAccess as Arc<dyn MemoryTrait> — works for both Direct and
+    // Remote variants, no more falling back to an in-memory graph for Remote.
+    let memory: Arc<dyn MemoryTrait> = Arc::new(_memory_access);
+    tracing::info!("memory system opened");
 
     // ── Phase 2: Validate personality (CLI-105) ─────────────────
     if let Err(e) = config.personality.validate() {
@@ -1300,11 +1448,23 @@ async fn run_interactive_session(
     }
 
     // ── Phase 2: Load behavioral rules + defaults (CLI-106) ─────
-    let rules_engine = RulesEngine::new(&memory_graph);
+    let rules_engine = RulesEngine::new(memory.as_ref());
     match load_configured_defaults(&rules_engine, &config.consciousness.initial_rules) {
         Ok(n) if n > 0 => tracing::info!("loaded {n} default behavioral rules"),
         Ok(_) => tracing::debug!("behavioral rules already present"),
         Err(e) => tracing::warn!("failed to load default rules: {e}"),
+    }
+
+    // ── CRIT-15: Auto-update check at startup ─────────────────────
+    if archon_core::update::should_auto_check(&config.update) {
+        let update_config = config.update.clone();
+        tokio::spawn(async move {
+            match archon_core::update::check_update(&update_config).await {
+                Ok(msg) => tracing::info!("auto-update check: {msg}"),
+                Err(e) => tracing::debug!("auto-update check: {e}"),
+            }
+            archon_core::update::record_check_time();
+        });
     }
 
     // ── Phase 2: Initialize fast mode (CLI-118) ─────────────────
@@ -1359,7 +1519,7 @@ async fn run_interactive_session(
         .join("archon")
         .join("checkpoints.db");
     let checkpoint_store = if config.checkpoint.enabled {
-        match archon_session::checkpoint::CheckpointStore::open(&checkpoint_db_path) {
+        match archon_session::checkpoint::CheckpointStore::open_with_limit(&checkpoint_db_path, config.checkpoint.max_checkpoints) {
             Ok(store) => {
                 tracing::info!(
                     "checkpoint store opened at {}",
@@ -1554,6 +1714,11 @@ async fn run_interactive_session(
 
     // Build tool registry and get tool definitions for API
     let mut registry = create_default_registry(working_dir.clone());
+    // Wire config-driven bash tool limits
+    registry.register(Box::new(archon_tools::bash::BashTool {
+        timeout_secs: config.tools.bash_timeout,
+        max_output_bytes: config.tools.bash_max_output,
+    }));
 
     // Apply tool filtering from resolved flags (CLI-220)
     apply_tool_filters(&mut registry, resolved_flags);
@@ -1565,7 +1730,13 @@ async fn run_interactive_session(
             .unwrap_or_else(|| PathBuf::from("."))
             .join("archon")
             .join("plugins");
-        let plugin_result = archon_plugin::loader::PluginLoader::new(plugins_dir).load_all();
+        let cache_dir = dirs::cache_dir()
+            .unwrap_or_else(|| PathBuf::from(".cache"))
+            .join("archon")
+            .join("wasm");
+        let plugin_result = archon_plugin::loader::PluginLoader::new(plugins_dir)
+            .with_cache(archon_plugin::cache::WasmCache::new(cache_dir))
+            .load_all();
         let wasm_instances = instantiate_wasm_plugins(&plugin_result);
         for (plugin_id, (instance, host)) in wasm_instances {
             let tools = tools_from_plugin_instance(&plugin_id, &instance, host);
@@ -1596,10 +1767,10 @@ async fn run_interactive_session(
     // Register memory tools backed by the CozoDB graph — gated by config.memory.enabled (TASK-WIRE-002)
     if config.memory.enabled {
         registry.register(Box::new(archon_tools::memory::MemoryStoreTool::new(
-            Arc::clone(&memory_graph),
+            Arc::clone(&memory),
         )));
         registry.register(Box::new(archon_tools::memory::MemoryRecallTool::new(
-            Arc::clone(&memory_graph),
+            Arc::clone(&memory),
         )));
     }
 
@@ -1628,7 +1799,10 @@ async fn run_interactive_session(
         tracing::info!("bare mode: skipping CLAUDE.md loading");
         String::new()
     } else {
-        load_claude_md(&working_dir)
+        archon_core::claudemd::load_hierarchical_claude_md_with_limit(
+            &working_dir,
+            config.context.claudemd_max_tokens as usize,
+        )
     };
     let git_info = archon_core::git::detect_git_info(&working_dir);
     let git_branch = git_info.as_ref().map(|g| g.branch.as_str());
@@ -1642,6 +1816,15 @@ async fn run_interactive_session(
         &config.api.default_model,
     ) {
         tracing::warn!("failed to register session: {e}");
+    }
+
+    // Wire --session-name: assign a human-readable name at startup
+    if let Some(ref name) = cli.session_name {
+        if let Err(e) = archon_session::naming::set_session_name(&session_store, session_id, name) {
+            tracing::warn!("failed to set session name: {e}");
+        } else {
+            tracing::info!("session named: {name}");
+        }
     }
 
     // Build identity blocks as a text string for the assembler
@@ -1733,30 +1916,33 @@ async fn run_interactive_session(
 
         // ── Output style injection (CLI-310) ─────────────────────
         // CLI flag takes priority over config.toml value.
+        // If neither is set, a plugin-forced style is used as fallback.
         {
             use archon_core::output_style::OutputStyleRegistry;
             use archon_core::output_style_loader::load_styles_from_dir;
+
+            let mut reg = OutputStyleRegistry::new();
+            if let Some(home) = dirs::home_dir() {
+                for style in load_styles_from_dir(&home.join(".claude").join("output-styles")) {
+                    reg.register(style);
+                }
+            }
 
             let style_name: Option<&str> = cli
                 .output_style
                 .as_deref()
                 .or(config.output_style.as_deref());
 
-            if let Some(name) = style_name {
-                let mut reg = OutputStyleRegistry::new();
-                if let Some(home) = dirs::home_dir() {
-                    for style in load_styles_from_dir(&home.join(".claude").join("output-styles")) {
-                        reg.register(style);
-                    }
-                }
+            let injection = if let Some(name) = style_name {
                 let style = reg.get_or_default(name);
-                if let Some(ref injection) = style.prompt {
-                    tracing::info!(
-                        output_style = name,
-                        "injecting output style into system prompt"
-                    );
-                    blocks.push(serde_json::json!({ "type": "text", "text": injection }));
-                }
+                style.prompt.clone()
+            } else {
+                reg.forced_plugin_style().and_then(|s| s.prompt.clone())
+            };
+
+            if let Some(ref text) = injection {
+                tracing::info!("injecting output style into system prompt");
+                blocks.push(serde_json::json!({ "type": "text", "text": text }));
             }
         }
 
@@ -1800,16 +1986,30 @@ async fn run_interactive_session(
         effort_level: Arc::clone(&effort_level_shared),
         model_override: Arc::clone(&model_override_shared),
         permission_mode: Arc::clone(&permission_mode_shared),
+        extra_dirs: Arc::new(tokio::sync::Mutex::new(Vec::new())),
+        max_tool_concurrency: config.tools.max_concurrency as usize,
     };
+    let extra_dirs_shared = Arc::clone(&agent_config.extra_dirs);
 
     // Create channels
     let (agent_event_tx, mut agent_event_rx) = tokio::sync::mpsc::channel::<AgentEvent>(256);
     let (tui_event_tx, tui_event_rx) = tokio::sync::mpsc::channel::<TuiEvent>(256);
+    // CRIT-13: Forward voice pipeline events to TUI event channel
+    if let Some(mut voice_rx) = voice_event_rx {
+        let voice_fwd_tx = tui_event_tx.clone();
+        tokio::spawn(async move {
+            while let Some(evt) = voice_rx.recv().await {
+                if voice_fwd_tx.send(evt).await.is_err() {
+                    break;
+                }
+            }
+        });
+    }
     let (user_input_tx, mut user_input_rx) = tokio::sync::mpsc::channel::<String>(16);
 
     // Create agent
-    let provider: Arc<dyn archon_llm::provider::LlmProvider> =
-        Arc::new(archon_llm::providers::AnthropicProvider::new(api_client));
+    let provider = build_llm_provider(&config.llm, api_client);
+    tracing::info!("LLM provider: {}", provider.name());
     let mut agent = Agent::new(provider, registry, agent_config, agent_event_tx);
 
     // Wire checkpoint store into agent (CLI-116)
@@ -1819,20 +2019,22 @@ async fn run_interactive_session(
 
     // GAP 5/7: Wire memory graph into agent — gated by config.memory.enabled (TASK-WIRE-002)
     if config.memory.enabled {
-        agent.set_memory_graph(Arc::clone(&memory_graph));
+        agent.set_memory(Arc::clone(&memory));
     }
 
     // Wire inner voice if enabled in config. The state is injected into
     // the system prompt before every turn and updated from tool outcomes.
-    if config.consciousness.inner_voice {
+    if archon_consciousness::inner_voice::InnerVoice::is_enabled(config.consciousness.inner_voice) {
         let iv = Arc::new(tokio::sync::Mutex::new(
-            archon_consciousness::inner_voice::InnerVoice::new(),
+            archon_consciousness::inner_voice::InnerVoice::with_decay_rate(
+                config.consciousness.energy_decay_rate,
+            ),
         ));
         agent.set_inner_voice(iv);
     }
 
     // Wire hook system — load hooks from .claude/settings.json if present
-    {
+    let hook_registry_arc = {
         let settings_json_path = working_dir.join(".claude").join("settings.json");
         let hook_registry = if settings_json_path.exists() {
             match std::fs::read_to_string(&settings_json_path) {
@@ -1849,8 +2051,10 @@ async fn run_interactive_session(
         } else {
             archon_core::hooks::HookRegistry::new()
         };
-        agent.set_hook_registry(std::sync::Arc::new(hook_registry));
-    }
+        let arc = std::sync::Arc::new(hook_registry);
+        agent.set_hook_registry(Arc::clone(&arc));
+        arc
+    };
 
     // GAP 6: Wire auto-mode evaluator
     let auto_eval = AutoModeEvaluator::new(AutoModeConfig {
@@ -1874,6 +2078,33 @@ async fn run_interactive_session(
             && let Some(name) = meta.name
         {
             let _ = tui_event_tx.send(TuiEvent::SessionRenamed(name)).await;
+        }
+        // CRIT-15 (ITEM 5): Restore inner voice from snapshot on session resume.
+        if archon_consciousness::inner_voice::InnerVoice::is_enabled(config.consciousness.inner_voice) {
+            if let Ok(memories) = memory.recall_memories("inner_voice_snapshot", 1) {
+                if let Some(m) = memories.first() {
+                    if let Ok(snapshot) = serde_json::from_str::<archon_consciousness::inner_voice::InnerVoiceSnapshot>(&m.content) {
+                        let iv = Arc::new(tokio::sync::Mutex::new(
+                            archon_consciousness::inner_voice::InnerVoice::from_snapshot(snapshot),
+                        ));
+                        agent.set_inner_voice(iv);
+                        tracing::info!("inner voice state restored from snapshot");
+                    }
+                }
+            }
+        }
+    }
+
+    // Wire --fork-session: fork the resumed session so new messages go to a fresh session
+    if cli.fork_session && cli.resume.is_some() {
+        let fork_name = cli.session_name.as_deref();
+        match archon_session::fork::fork_session(&session_store, session_id, fork_name) {
+            Ok(new_id) => {
+                eprintln!("Forked session as: {}", &new_id[..8.min(new_id.len())]);
+            }
+            Err(e) => {
+                tracing::warn!("fork-session failed: {e}");
+            }
         }
     }
 
@@ -1902,11 +2133,29 @@ async fn run_interactive_session(
                 );
                 let watch_tui_tx = tui_event_tx.clone();
                 let watch_config_paths = config_paths;
+                let watch_hook_registry = Arc::clone(&hook_registry_arc);
+                let watch_working_dir = working_dir.clone();
+                let watch_session_id = session_id.to_string();
                 tokio::spawn(async move {
                     let mut reloader = reloader;
                     loop {
                         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                         if let Some(changed_keys) = reloader.check_and_reload(&watch_config_paths) {
+                            // CRIT-06: Fire ConfigChange hook
+                            if !changed_keys.is_empty() {
+                                watch_hook_registry
+                                    .execute_hooks(
+                                        archon_core::hooks::HookEvent::ConfigChange,
+                                        serde_json::json!({
+                                            "hook_event": "ConfigChange",
+                                            "changed_keys": changed_keys,
+                                        }),
+                                        &watch_working_dir,
+                                        &watch_session_id,
+                                    )
+                                    .await;
+                            }
+
                             let non_reloadable =
                                 archon_core::config_diff::non_reloadable_changes(&changed_keys);
                             if !non_reloadable.is_empty() {
@@ -2041,9 +2290,10 @@ async fn run_interactive_session(
         permission_mode: Arc::clone(&permission_mode_shared),
         session_id: session_id.to_string(),
         cost_config: config.cost.clone(),
-        memory_graph: Arc::clone(&memory_graph),
+        memory: Arc::clone(&memory),
         mcp_manager: mcp_manager.clone(),
         working_dir: working_dir.clone(),
+        extra_dirs: Arc::clone(&extra_dirs_shared),
         auth_label,
         config_path: config_path.clone(),
         env_vars: env_vars.clone(),
@@ -2054,10 +2304,22 @@ async fn run_interactive_session(
             layer_filter.as_deref(),
         )
         .unwrap_or_default(),
-        skill_registry: Arc::new(register_builtins()),
+        skill_registry: Arc::new({
+            let mut reg = register_builtins();
+            for skill in discover_user_skills(&working_dir) {
+                tracing::debug!("discovered user skill: {}", skill.name);
+                reg.register(Box::new(skill));
+            }
+            // Common aliases for built-in skills
+            reg.register_alias("?", "help");
+            reg.register_alias("q", "exit");
+            reg
+        }),
         last_assistant_response: Arc::clone(&last_assistant_response_shared),
         system_prompt_chars,
         tool_defs_chars,
+        allow_bypass_permissions: cli.allow_dangerously_skip_permissions || cli.dangerously_skip_permissions,
+        denial_log: Arc::clone(&agent.denial_log),
     };
 
     // Spawn agent input processor with slash command dispatch
@@ -2068,6 +2330,27 @@ async fn run_interactive_session(
     // Clone api_url for the btw_tx background task (line ~1683); the spawn below consumes it.
     let api_url_for_btw = api_url.clone();
     tokio::spawn(async move {
+        // CRIT-06: Fire Setup hook once agent is fully configured
+        agent
+            .fire_hook(
+                archon_core::hooks::HookType::Setup,
+                serde_json::json!({
+                    "hook_event": "Setup",
+                }),
+            )
+            .await;
+
+        // CRIT-06: Fire SessionStart hook at the beginning of the session
+        agent
+            .fire_hook(
+                archon_core::hooks::HookType::SessionStart,
+                serde_json::json!({
+                    "hook_event": "SessionStart",
+                    "reason": "new_session",
+                }),
+            )
+            .await;
+
         while let Some(input) = user_input_rx.recv().await {
             // Session picker selection — load messages and restore conversation
             if let Some(session_id) = input.strip_prefix("__resume_session__ ") {
@@ -2215,8 +2498,14 @@ async fn run_interactive_session(
                     let _ = input_tui_tx.send(TuiEvent::Done).await;
                     continue;
                 }
-                if input.trim() == "/compact" {
-                    let msg = agent.compact().await;
+                if input.trim() == "/compact" || input.trim().starts_with("/compact ") {
+                    let subcommand = input.trim().strip_prefix("/compact").unwrap().trim();
+                    let subcommand = if subcommand.is_empty() {
+                        None
+                    } else {
+                        Some(subcommand)
+                    };
+                    let msg = agent.compact(subcommand).await;
                     let _ = input_tui_tx
                         .send(TuiEvent::TextDelta(format!("\n{msg}\n")))
                         .await;
@@ -2460,6 +2749,16 @@ async fn run_interactive_session(
                 let mut resp = cmd_ctx.last_assistant_response.lock().await;
                 resp.clear();
             }
+            // CRIT-06: Fire UserPromptSubmit hook before processing
+            agent
+                .fire_hook(
+                    archon_core::hooks::HookType::UserPromptSubmit,
+                    serde_json::json!({
+                        "hook_event": "UserPromptSubmit",
+                        "prompt_length": input.len(),
+                    }),
+                )
+                .await;
             // Signal the TUI that generation is starting BEFORE the agent runs.
             // This is the canonical place is_generating gets set to true.
             let _ = input_tui_tx.send(TuiEvent::GenerationStarted).await;
@@ -2480,6 +2779,17 @@ async fn run_interactive_session(
                 }
             }
         }
+
+        // CRIT-06: Fire Stop hook when the input channel closes (session ending)
+        agent
+            .fire_hook(
+                archon_core::hooks::HookType::Stop,
+                serde_json::json!({
+                    "hook_event": "Stop",
+                    "reason": "session_end",
+                }),
+            )
+            .await;
     });
 
     // Build splash screen config with recent activity from session store
@@ -2618,6 +2928,81 @@ async fn run_interactive_session(
 // CLI-220: Tool filtering helper
 // ---------------------------------------------------------------------------
 
+/// Build the active LLM provider from the `[llm]` config section.
+///
+/// Matches on `llm_cfg.provider` to construct the appropriate provider.
+/// Falls back to Anthropic when the selected provider is missing required
+/// credentials or is unrecognised.
+fn build_llm_provider(
+    llm_cfg: &LlmConfig,
+    api_client: AnthropicClient,
+) -> Arc<dyn LlmProvider> {
+    use archon_llm::providers::{
+        AnthropicProvider, BedrockProvider, LocalProvider, OpenAiProvider, VertexProvider,
+    };
+
+    match llm_cfg.provider.as_str() {
+        "openai" => {
+            let key = llm_cfg.openai.api_key.clone().unwrap_or_default();
+            let resolved = OpenAiProvider::resolve_api_key(&key);
+            if resolved.is_empty() {
+                tracing::warn!("OpenAI selected but no API key found; falling back to Anthropic");
+                return Arc::new(AnthropicProvider::new(api_client));
+            }
+            Arc::new(OpenAiProvider::new(
+                key,
+                llm_cfg.openai.base_url.clone(),
+                llm_cfg.openai.model.clone(),
+            ))
+        }
+        "bedrock" => {
+            if llm_cfg.bedrock.region.is_empty() || llm_cfg.bedrock.model_id.is_empty() {
+                tracing::warn!("Bedrock selected but region/model_id missing; falling back to Anthropic");
+                return Arc::new(AnthropicProvider::new(api_client));
+            }
+            Arc::new(BedrockProvider::new(
+                llm_cfg.bedrock.region.clone(),
+                llm_cfg.bedrock.model_id.clone(),
+            ))
+        }
+        "vertex" => {
+            let project_id = llm_cfg.vertex.project_id.as_deref().unwrap_or("");
+            if project_id.is_empty() {
+                tracing::warn!("Vertex selected but project_id missing; falling back to Anthropic");
+                return Arc::new(AnthropicProvider::new(api_client));
+            }
+            let publisher = if llm_cfg.vertex.model.contains("claude") {
+                "anthropic"
+            } else {
+                "google"
+            };
+            Arc::new(VertexProvider::new(
+                project_id.to_string(),
+                llm_cfg.vertex.region.clone(),
+                llm_cfg.vertex.model.clone(),
+                publisher.to_string(),
+                llm_cfg.vertex.credentials_file.clone(),
+            ))
+        }
+        "local" => Arc::new(LocalProvider::new(
+            llm_cfg.local.base_url.clone(),
+            llm_cfg.local.model.clone(),
+            llm_cfg.local.timeout_secs,
+            llm_cfg.local.pull_if_missing,
+        )),
+        _ => {
+            // Default / "anthropic" / unknown → Anthropic
+            if llm_cfg.provider != "anthropic" {
+                tracing::warn!(
+                    "Unknown LLM provider '{}'; falling back to Anthropic",
+                    llm_cfg.provider
+                );
+            }
+            Arc::new(AnthropicProvider::new(api_client))
+        }
+    }
+}
+
 /// Apply `--tools` (whitelist) and `--disallowed-tools` (blacklist) from
 /// resolved CLI flags to the tool registry.
 fn apply_tool_filters(
@@ -2652,9 +3037,11 @@ struct SlashCommandContext {
     permission_mode: Arc<tokio::sync::Mutex<String>>,
     session_id: String,
     cost_config: archon_core::config::CostConfig,
-    memory_graph: Arc<MemoryGraph>,
+    memory: Arc<dyn MemoryTrait>,
     mcp_manager: McpServerManager,
     working_dir: PathBuf,
+    /// Additional working directories added via `/add-dir`.
+    extra_dirs: Arc<tokio::sync::Mutex<Vec<PathBuf>>>,
     auth_label: String,
     config_path: PathBuf,
     env_vars: ArchonEnvVars,
@@ -2665,6 +3052,10 @@ struct SlashCommandContext {
     system_prompt_chars: usize,
     /// Pre-computed character count of all tool definition JSON (for /context).
     tool_defs_chars: usize,
+    /// Whether `--allow-dangerously-skip-permissions` was passed (unlocks bypassPermissions mode).
+    allow_bypass_permissions: bool,
+    /// Shared denial log for `/denials` display.
+    denial_log: Arc<tokio::sync::Mutex<archon_permissions::denial_log::DenialLog>>,
 }
 
 /// Handle slash commands. Returns `true` if the command was recognized and handled.
@@ -3023,6 +3414,13 @@ async fn handle_slash_command(
                     .await;
             } else {
                 match archon_tools::validation::validate_permission_mode(arg) {
+                    Ok(resolved) if resolved == "bypassPermissions" && !ctx.allow_bypass_permissions => {
+                        let _ = tui_tx
+                            .send(TuiEvent::Error(
+                                "bypassPermissions requires --allow-dangerously-skip-permissions flag".into(),
+                            ))
+                            .await;
+                    }
                     Ok(resolved) => {
                         *ctx.permission_mode.lock().await = resolved.clone();
                         let _ = tui_tx
@@ -3048,7 +3446,7 @@ async fn handle_slash_command(
         }
         // ── /memory [subcommand] ───────────────────────────────
         s if s == "/memory" || s.starts_with("/memory ") => {
-            handle_memory_command(s, tui_tx, &ctx.memory_graph).await;
+            handle_memory_command(s, tui_tx, &ctx.memory).await;
             true
         }
         // ── /doctor ────────────────────────────────────────────
@@ -3068,6 +3466,13 @@ async fn handle_slash_command(
         // ── /diff ──────────────────────────────────────────────
         "/diff" => {
             handle_diff_command(tui_tx, &ctx.working_dir).await;
+            true
+        }
+        // ── /denials ──────────────────────────────────────────
+        "/denials" => {
+            let log = ctx.denial_log.lock().await;
+            let text = log.format_display(20);
+            let _ = tui_tx.send(TuiEvent::TextDelta(format!("\n{text}\n"))).await;
             true
         }
         // ── /login ─────────────────────────────────────────────
@@ -3224,29 +3629,43 @@ async fn handle_slash_command(
             true
         }
         // ── /help ──────────────────────────────────────────────
-        "/help" => {
-            let mut help_text = "\n\
-                Core commands:\n\
-                  /model <name>        - Switch model (opus, sonnet, haiku, or full name)\n\
-                  /fast                - Toggle fast mode\n\
-                  /effort <level>      - Set effort (high, medium, low)\n\
-                  /thinking on|off     - Show/hide thinking output\n\
-                  /compact             - Trigger context compaction\n\
-                  /clear               - Clear conversation history\n\
-                  /status              - Show current session info\n\
-                  /cost                - Show session cost breakdown\n\
-                  /permissions [mode]  - Show/set permission mode (6 modes + aliases)\n\
-                  /config [key] [val]  - List, get, or set runtime config values\n\
-                  /memory [subcmd]     - List, search, or clear memories\n\
-                  /doctor              - Run diagnostics on all subsystems\n\
-                  /export              - Export conversation as JSON\n\
-                  /diff                - Show git diff --stat for the working directory\n\
-                  /help                - Show this help\n\n\
-                Extended commands:\n"
-                .to_string();
-            let skill_help = ctx.skill_registry.format_help();
-            help_text.push_str(&skill_help);
-            let _ = tui_tx.send(TuiEvent::TextDelta(help_text)).await;
+        s if s == "/help" || s.starts_with("/help ") => {
+            let arg = s.strip_prefix("/help").unwrap_or("").trim();
+            if arg.is_empty() {
+                let mut help_text = "\n\
+                    Core commands:\n\
+                    /model <name>        - Switch model (opus, sonnet, haiku, or full name)\n\
+                    /fast                - Toggle fast mode\n\
+                    /effort <level>      - Set effort (high, medium, low)\n\
+                    /thinking on|off     - Show/hide thinking output\n\
+                    /compact             - Trigger context compaction\n\
+                    /clear               - Clear conversation history\n\
+                    /status              - Show current session info\n\
+                    /cost                - Show session cost breakdown\n\
+                    /permissions [mode]  - Show/set permission mode (6 modes + aliases)\n\
+                    /config [key] [val]  - List, get, or set runtime config values\n\
+                    /memory [subcmd]     - List, search, or clear memories\n\
+                    /doctor              - Run diagnostics on all subsystems\n\
+                    /export              - Export conversation as JSON\n\
+                    /diff                - Show git diff --stat for the working directory\n\
+                    /help                - Show this help\n\
+                    /help <command>      - Show detailed help for a command\n\n\
+                    Extended commands:\n"
+                    .to_string();
+                let skill_help = ctx.skill_registry.format_help();
+                help_text.push_str(&skill_help);
+                let _ = tui_tx.send(TuiEvent::TextDelta(help_text)).await;
+            } else {
+                // Strip leading '/' from the argument if present
+                let name = arg.strip_prefix('/').unwrap_or(arg);
+                if let Some(detail) = ctx.skill_registry.format_skill_help(name) {
+                    let _ = tui_tx.send(TuiEvent::TextDelta(format!("\n{detail}\n"))).await;
+                } else {
+                    let _ = tui_tx
+                        .send(TuiEvent::Error(format!("Unknown command: /{name}")))
+                        .await;
+                }
+            }
             true
         }
         // ── /rename ─────────────────────────────────────────────
@@ -3426,6 +3845,70 @@ async fn handle_slash_command(
             }
             true
         }
+        // ── /checkpoint list | /checkpoint restore <file> ──────
+        s if s == "/checkpoint" || s.starts_with("/checkpoint ") => {
+            let arg = s.strip_prefix("/checkpoint").unwrap_or("").trim();
+            let ckpt_path = dirs::data_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join("archon")
+                .join("checkpoints.db");
+            if arg == "list" || arg.is_empty() {
+                match archon_session::checkpoint::CheckpointStore::open(&ckpt_path) {
+                    Ok(store) => match store.list_modified(&ctx.session_id) {
+                        Ok(snapshots) if snapshots.is_empty() => {
+                            let _ = tui_tx
+                                .send(TuiEvent::TextDelta("\nNo checkpoints for this session.\n".into()))
+                                .await;
+                        }
+                        Ok(snapshots) => {
+                            let mut out = String::from("\nCheckpoints:\n");
+                            for s in &snapshots {
+                                out.push_str(&format!(
+                                    "  turn {} | {} | {} | {}\n",
+                                    s.turn_number, s.tool_name, s.file_path, s.timestamp
+                                ));
+                            }
+                            let _ = tui_tx.send(TuiEvent::TextDelta(out)).await;
+                        }
+                        Err(e) => {
+                            let _ = tui_tx.send(TuiEvent::Error(format!("Checkpoint list error: {e}"))).await;
+                        }
+                    },
+                    Err(e) => {
+                        let _ = tui_tx.send(TuiEvent::Error(format!("Checkpoint store error: {e}"))).await;
+                    }
+                }
+            } else if let Some(file_path) = arg.strip_prefix("restore").map(|s| s.trim()) {
+                if file_path.is_empty() {
+                    let _ = tui_tx
+                        .send(TuiEvent::Error("Usage: /checkpoint restore <file_path>".into()))
+                        .await;
+                } else {
+                    match archon_session::checkpoint::CheckpointStore::open(&ckpt_path) {
+                        Ok(store) => match store.restore(&ctx.session_id, file_path) {
+                            Ok(()) => {
+                                let _ = tui_tx
+                                    .send(TuiEvent::TextDelta(format!("\nRestored: {file_path}\n")))
+                                    .await;
+                            }
+                            Err(e) => {
+                                let _ = tui_tx.send(TuiEvent::Error(format!("Restore failed: {e}"))).await;
+                            }
+                        },
+                        Err(e) => {
+                            let _ = tui_tx.send(TuiEvent::Error(format!("Checkpoint store error: {e}"))).await;
+                        }
+                    }
+                }
+            } else {
+                let _ = tui_tx
+                    .send(TuiEvent::TextDelta(
+                        "\nUsage: /checkpoint list | /checkpoint restore <file_path>\n".into(),
+                    ))
+                    .await;
+            }
+            true
+        }
         // ── /add-dir ───────────────────────────────────────────
         s if s.starts_with("/add-dir") => {
             let path_arg = s.strip_prefix("/add-dir").unwrap_or("").trim();
@@ -3436,8 +3919,8 @@ async fn handle_slash_command(
             } else {
                 let path = std::path::PathBuf::from(path_arg);
                 if path.is_dir() {
-                    // Add to the working directories list for this session
-                    // The agent's tool context uses working_dir for file operations
+                    // Add to the shared extra directories list (visible to agent tool context)
+                    ctx.extra_dirs.lock().await.push(path.clone());
                     let _ = tui_tx.send(TuiEvent::TextDelta(
                         format!("\nAdded '{}' to working directories for this session.\nFiles in this directory are now accessible.\n", path.display())
                     )).await;
@@ -3510,7 +3993,7 @@ async fn handle_slash_command(
                     .await;
             } else {
                 // Search the memory graph
-                let results = ctx.memory_graph.recall_memories(query, 10);
+                let results = ctx.memory.recall_memories(query, 10);
                 match results {
                     Ok(memories) => {
                         if memories.is_empty() {
@@ -3543,6 +4026,84 @@ async fn handle_slash_command(
                             .await;
                     }
                 }
+            }
+            true
+        }
+        // ── /rules — list, edit, remove behavioral rules (CRIT-14 ITEM 4) ──
+        s if s == "/rules" || s.starts_with("/rules ") => {
+            let args_str = s.strip_prefix("/rules").unwrap_or("").trim();
+            let engine = RulesEngine::new(ctx.memory.as_ref());
+            if args_str.is_empty() || args_str == "list" {
+                match engine.get_rules_sorted() {
+                    Ok(rules) if rules.is_empty() => {
+                        let _ = tui_tx.send(TuiEvent::TextDelta("\nNo behavioral rules.\n".into())).await;
+                    }
+                    Ok(rules) => {
+                        let mut out = format!("\n{} behavioral rules:\n\n", rules.len());
+                        for r in &rules {
+                            let id_short = &r.id[..8.min(r.id.len())];
+                            out.push_str(&format!("  [{id_short}] (score: {:.1}) {}\n", r.score, r.text));
+                        }
+                        let _ = tui_tx.send(TuiEvent::TextDelta(out)).await;
+                    }
+                    Err(e) => {
+                        let _ = tui_tx.send(TuiEvent::Error(format!("rules list failed: {e}"))).await;
+                    }
+                }
+            } else if let Some(rest) = args_str.strip_prefix("edit ") {
+                // /rules edit <id> <new text>
+                let parts: Vec<&str> = rest.splitn(2, ' ').collect();
+                if parts.len() < 2 {
+                    let _ = tui_tx.send(TuiEvent::Error("Usage: /rules edit <id> <new text>".into())).await;
+                } else {
+                    let id_prefix = parts[0];
+                    let new_text = parts[1];
+                    // Resolve full ID from prefix
+                    match engine.get_rules_sorted() {
+                        Ok(rules) => {
+                            if let Some(rule) = rules.iter().find(|r| r.id.starts_with(id_prefix)) {
+                                match engine.update_rule(&rule.id, new_text) {
+                                    Ok(()) => {
+                                        let _ = tui_tx.send(TuiEvent::TextDelta(format!("\nRule updated: {new_text}\n"))).await;
+                                    }
+                                    Err(e) => {
+                                        let _ = tui_tx.send(TuiEvent::Error(format!("update_rule failed: {e}"))).await;
+                                    }
+                                }
+                            } else {
+                                let _ = tui_tx.send(TuiEvent::Error(format!("No rule matching ID prefix '{id_prefix}'"))).await;
+                            }
+                        }
+                        Err(e) => {
+                            let _ = tui_tx.send(TuiEvent::Error(format!("rules lookup failed: {e}"))).await;
+                        }
+                    }
+                }
+            } else if let Some(id_prefix) = args_str.strip_prefix("remove ") {
+                let id_prefix = id_prefix.trim();
+                match engine.get_rules_sorted() {
+                    Ok(rules) => {
+                        if let Some(rule) = rules.iter().find(|r| r.id.starts_with(id_prefix)) {
+                            match engine.remove_rule(&rule.id) {
+                                Ok(()) => {
+                                    let _ = tui_tx.send(TuiEvent::TextDelta(format!("\nRule removed: {}\n", rule.text))).await;
+                                }
+                                Err(e) => {
+                                    let _ = tui_tx.send(TuiEvent::Error(format!("remove_rule failed: {e}"))).await;
+                                }
+                            }
+                        } else {
+                            let _ = tui_tx.send(TuiEvent::Error(format!("No rule matching ID prefix '{id_prefix}'"))).await;
+                        }
+                    }
+                    Err(e) => {
+                        let _ = tui_tx.send(TuiEvent::Error(format!("rules lookup failed: {e}"))).await;
+                    }
+                }
+            } else {
+                let _ = tui_tx.send(TuiEvent::Error(
+                    "Usage: /rules [list | edit <id> <text> | remove <id>]".into(),
+                )).await;
             }
             true
         }
@@ -3614,6 +4175,7 @@ async fn handle_config_command(
             working_dir: std::env::current_dir().unwrap_or_default(),
             session_id: String::new(),
             mode: AgentMode::Normal,
+            extra_dirs: Vec::new(),
         };
         let result = archon_tools::tool::Tool::execute(
             &tool,
@@ -3638,7 +4200,7 @@ async fn handle_config_command(
 async fn handle_memory_command(
     input: &str,
     tui_tx: &tokio::sync::mpsc::Sender<TuiEvent>,
-    memory_graph: &Arc<MemoryGraph>,
+    memory: &Arc<dyn MemoryTrait>,
 ) {
     let rest = input.strip_prefix("/memory").unwrap_or("").trim();
     let (subcmd, arg) = match rest.split_once(' ') {
@@ -3647,7 +4209,7 @@ async fn handle_memory_command(
     };
 
     match subcmd {
-        "" | "list" => match memory_graph.list_recent(10) {
+        "" | "list" => match memory.list_recent(10) {
             Ok(memories) if memories.is_empty() => {
                 let _ = tui_tx
                     .send(TuiEvent::TextDelta("\nNo memories stored.\n".into()))
@@ -3679,7 +4241,7 @@ async fn handle_memory_command(
                     .await;
                 return;
             }
-            match memory_graph.recall_memories(arg, 10) {
+            match memory.recall_memories(arg, 10) {
                 Ok(results) if results.is_empty() => {
                     let _ = tui_tx
                         .send(TuiEvent::TextDelta(format!(
@@ -3706,7 +4268,7 @@ async fn handle_memory_command(
                 }
             }
         }
-        "clear" => match memory_graph.clear_all() {
+        "clear" => match memory.clear_all() {
             Ok(n) => {
                 let _ = tui_tx
                     .send(TuiEvent::TextDelta(format!(
@@ -3770,7 +4332,7 @@ async fn handle_doctor_command(
     }
 
     // Memory graph
-    match ctx.memory_graph.memory_count() {
+    match ctx.memory.memory_count() {
         Ok(count) => out.push_str(&format!("  Memory graph: open ({count} memories)\n")),
         Err(e) => out.push_str(&format!("  Memory graph: error ({e})\n")),
     }

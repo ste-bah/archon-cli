@@ -4,8 +4,6 @@
 //! with capability-based security, host-guest ABI, and resource limits.
 
 pub mod abi;
-pub mod adapter_command;
-pub mod adapter_hook;
 pub mod adapter_tool;
 pub mod api;
 pub mod cache;

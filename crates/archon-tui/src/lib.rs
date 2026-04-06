@@ -14,9 +14,6 @@ pub mod voice;
 pub mod syntax;
 
 pub mod diff_view;
-pub mod pane;
-pub mod pane_layout;
-pub mod pane_manager;
 pub mod theme_registry;
 pub mod verbosity;
 pub mod virtual_scroll;

@@ -27,26 +27,3 @@ pub struct TeamMessage {
     pub message_type: MessageType,
 }
 
-impl TeamMessage {
-    /// Create a simple chat message with the current timestamp.
-    pub fn chat(
-        from: impl Into<String>,
-        to: impl Into<String>,
-        content: impl Into<String>,
-    ) -> Self {
-        Self {
-            from: from.into(),
-            to: to.into(),
-            content: content.into(),
-            timestamp: current_timestamp_ms(),
-            message_type: MessageType::Chat,
-        }
-    }
-}
-
-fn current_timestamp_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
-}

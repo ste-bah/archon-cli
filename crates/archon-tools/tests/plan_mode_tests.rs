@@ -9,6 +9,7 @@ fn ctx(mode: AgentMode) -> ToolContext {
         working_dir: std::env::temp_dir(),
         session_id: "test-plan".into(),
         mode,
+        extra_dirs: vec![],
     }
 }
 

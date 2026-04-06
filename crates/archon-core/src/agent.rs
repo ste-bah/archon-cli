@@ -2,11 +2,13 @@ use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use archon_consciousness::corrections::{CorrectionTracker, CorrectionType};
 use archon_consciousness::inner_voice::InnerVoice;
+use archon_consciousness::rules::RulesEngine;
 use archon_llm::effort::EffortLevel;
 use archon_llm::provider::{LlmProvider, LlmRequest};
 use archon_llm::streaming::StreamEvent;
-use archon_memory::MemoryGraph;
+use archon_memory::MemoryTrait;
 use archon_memory::extraction::{
     ExtractionConfig, ExtractionState, build_extraction_prompt, parse_extraction_response,
     should_extract, store_extracted,
@@ -15,8 +17,12 @@ use archon_memory::injection::MemoryInjector;
 use archon_permissions::auto::{AutoDecision, AutoModeEvaluator};
 use archon_session::checkpoint::CheckpointStore;
 use archon_tools::agent_tool::SubagentRequest;
+use archon_tools::send_message::SendMessageRequest;
+use archon_tools::plan_mode::is_tool_allowed_in_mode;
 use archon_tools::tool::{AgentMode, ToolContext, ToolResult};
 use tokio::sync::Mutex;
+use tokio::sync::Semaphore;
+use tokio::task::JoinSet;
 
 use crate::dispatch::ToolRegistry;
 use crate::subagent::SubagentManager;
@@ -84,6 +90,15 @@ pub enum AgentEvent {
     Error(String),
     CompactionTriggered,
     SessionComplete,
+    /// Emitted when the agent invokes AskUserQuestion and needs real user input.
+    AskUser {
+        question: String,
+    },
+    /// Emitted when SendMessage is invoked to deliver a message to another agent.
+    MessageSent {
+        target_agent_id: String,
+        message: String,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -107,6 +122,10 @@ pub struct AgentConfig {
     pub model_override: Arc<Mutex<String>>,
     /// Shared permission mode (toggled by /permissions slash command: "auto", "ask", "yolo").
     pub permission_mode: Arc<Mutex<String>>,
+    /// Additional working directories added at runtime via `/add-dir`.
+    pub extra_dirs: Arc<Mutex<Vec<std::path::PathBuf>>>,
+    /// Maximum concurrent tool calls (1 = sequential, from config.tools.max_concurrency).
+    pub max_tool_concurrency: usize,
 }
 
 impl Default for AgentConfig {
@@ -123,6 +142,8 @@ impl Default for AgentConfig {
             effort_level: Arc::new(Mutex::new(EffortLevel::Medium)),
             model_override: Arc::new(Mutex::new(String::new())),
             permission_mode: Arc::new(Mutex::new("auto".to_string())),
+            extra_dirs: Arc::new(Mutex::new(Vec::new())),
+            max_tool_concurrency: archon_tools::concurrency::DEFAULT_MAX_CONCURRENCY,
         }
     }
 }
@@ -213,7 +234,7 @@ pub struct Agent {
     checkpoint_store: Option<Arc<Mutex<CheckpointStore>>>,
     turn_number: u64,
     // GAP 5/7: Memory graph + injector for per-turn injection and auto-extraction
-    memory_graph: Option<Arc<MemoryGraph>>,
+    memory: Option<Arc<dyn MemoryTrait>>,
     memory_injector: MemoryInjector,
     extraction_config: ExtractionConfig,
     extraction_state: ExtractionState,
@@ -233,6 +254,13 @@ pub struct Agent {
     /// Inner voice state injected into the system prompt each turn when enabled.
     /// Tracks confidence, energy, focus, struggles, successes, and turn count.
     inner_voice: Option<Arc<Mutex<InnerVoice>>>,
+    /// Channel for receiving user answers when AskUserQuestion is invoked.
+    /// The TUI sends the user's response through the paired sender.
+    pub ask_user_response_rx: Option<Arc<tokio::sync::Mutex<tokio::sync::mpsc::Receiver<String>>>>,
+    /// Saved permission mode before entering plan mode, so ExitPlanMode can restore it.
+    previous_permission_mode: Option<String>,
+    /// Append-only log of permission denials for audit / `/denials` display.
+    pub denial_log: Arc<Mutex<archon_permissions::denial_log::DenialLog>>,
 }
 
 impl Agent {
@@ -250,7 +278,7 @@ impl Agent {
             event_tx,
             checkpoint_store: None,
             turn_number: 0,
-            memory_graph: None,
+            memory: None,
             memory_injector: MemoryInjector::new(),
             extraction_config: ExtractionConfig::default(),
             extraction_state: ExtractionState::default(),
@@ -261,6 +289,9 @@ impl Agent {
             hook_registry: None,
             permission_response_rx: None,
             inner_voice: None,
+            ask_user_response_rx: None,
+            previous_permission_mode: None,
+            denial_log: Arc::new(Mutex::new(archon_permissions::denial_log::DenialLog::new())),
         }
     }
 
@@ -274,6 +305,11 @@ impl Agent {
     /// Access the inner voice handle, if enabled.
     pub fn inner_voice(&self) -> Option<&Arc<Mutex<InnerVoice>>> {
         self.inner_voice.as_ref()
+    }
+
+    /// Access the subagent manager (read-only) for status queries.
+    pub fn subagent_manager(&self) -> &SubagentManager {
+        &self.subagent_manager
     }
 
     /// Close the event channel so receivers know the agent is done.
@@ -310,8 +346,8 @@ impl Agent {
     }
 
     /// Set the memory graph for per-turn injection (GAP 7) and extraction (GAP 5).
-    pub fn set_memory_graph(&mut self, graph: Arc<MemoryGraph>) {
-        self.memory_graph = Some(graph);
+    pub fn set_memory(&mut self, memory: Arc<dyn MemoryTrait>) {
+        self.memory = Some(memory);
     }
 
     /// Restore conversation state from previously saved messages.
@@ -484,6 +520,16 @@ impl Agent {
                         error_type,
                         message,
                     } => {
+                        // CRIT-06: Fire Notification hook on API errors
+                        self.fire_hook(
+                            crate::hooks::HookEvent::Notification,
+                            serde_json::json!({
+                                "hook_event": "Notification",
+                                "level": "error",
+                                "message": format!("{error_type}: {message}"),
+                            }),
+                        )
+                        .await;
                         self.send_event(AgentEvent::Error(format!("{error_type}: {message}")))
                             .await;
                         return Err(AgentLoopError::ApiError(format!("{error_type}: {message}")));
@@ -537,18 +583,35 @@ impl Agent {
                         AgentMode::Normal
                     }
                 };
+                let extra = self.config.extra_dirs.lock().await.clone();
                 let ctx = ToolContext {
                     working_dir: self.config.working_dir.clone(),
                     session_id: self.config.session_id.clone(),
                     mode: effective_mode,
+                    extra_dirs: extra,
                 };
+
+                // -------------------------------------------------------
+                // PHASE 1: Pre-flight (sequential)
+                // Check permissions, run pre-hooks, snapshot checkpoints.
+                // Denied/blocked tools get results recorded immediately.
+                // Allowed tools are collected for dispatch.
+                // -------------------------------------------------------
+                struct PreflightResult {
+                    tool_name: String,
+                    tool_id: String,
+                    input: serde_json::Value,
+                    tool_arc: Arc<dyn archon_tools::tool::Tool>,
+                    file_path: Option<String>,
+                }
+
+                let mut allowed: Vec<PreflightResult> = Vec::new();
 
                 for tool in &pending_tools {
                     let input: serde_json::Value =
                         serde_json::from_str(&tool.input_json).unwrap_or(serde_json::json!({}));
 
-                    // GAP 6: Permission classification before tool execution
-                    // Read the shared permission mode to determine behavior
+                    // --- Permission check ---
                     let perm_mode = {
                         let mode = self.config.permission_mode.lock().await;
                         mode.clone()
@@ -559,12 +622,20 @@ impl Agent {
                             true
                         }
                         "acceptEdits" => {
-                            // Allow read-only + Write/Edit, but prompt for Bash/PowerShell
                             match tool.name.as_str() {
                                 "Read" | "Glob" | "Grep" | "ToolSearch" | "AskUserQuestion"
                                 | "TodoWrite" | "Sleep" | "Write" | "Edit" | "Config"
                                 | "EnterPlanMode" | "ExitPlanMode" | "NotebookEdit" => true,
                                 _ => {
+                                    self.fire_hook(
+                                        crate::hooks::HookEvent::PermissionRequest,
+                                        serde_json::json!({
+                                            "hook_event": "PermissionRequest",
+                                            "tool_name": tool.name,
+                                            "mode": "acceptEdits",
+                                        }),
+                                    )
+                                    .await;
                                     self.send_event(AgentEvent::PermissionRequired {
                                         tool: tool.name.clone(),
                                         description: format!(
@@ -573,7 +644,15 @@ impl Agent {
                                         ),
                                     })
                                     .await;
-                                    // In acceptEdits, deny non-edit tools (Bash, etc.)
+                                    self.fire_hook(
+                                        crate::hooks::HookEvent::PermissionDenied,
+                                        serde_json::json!({
+                                            "hook_event": "PermissionDenied",
+                                            "tool_name": tool.name,
+                                            "mode": "acceptEdits",
+                                        }),
+                                    )
+                                    .await;
                                     self.send_event(AgentEvent::PermissionDenied {
                                         tool: tool.name.clone(),
                                     })
@@ -590,7 +669,15 @@ impl Agent {
                                     true
                                 }
                                 _ => {
-                                    // Send permission request to TUI and wait for response
+                                    self.fire_hook(
+                                        crate::hooks::HookEvent::PermissionRequest,
+                                        serde_json::json!({
+                                            "hook_event": "PermissionRequest",
+                                            "tool_name": tool.name,
+                                            "mode": "ask",
+                                        }),
+                                    )
+                                    .await;
                                     self.send_event(AgentEvent::PermissionRequired {
                                         tool: tool.name.clone(),
                                         description: format!(
@@ -600,7 +687,6 @@ impl Agent {
                                     })
                                     .await;
 
-                                    // Wait for user response via permission channel
                                     if let Some(ref rx) = self.permission_response_rx {
                                         let mut rx = rx.lock().await;
                                         match tokio::time::timeout(
@@ -618,6 +704,16 @@ impl Agent {
                                                 true
                                             }
                                             _ => {
+                                                self.fire_hook(
+                                                    crate::hooks::HookEvent::PermissionDenied,
+                                                    serde_json::json!({
+                                                        "hook_event": "PermissionDenied",
+                                                        "tool_name": tool.name,
+                                                        "mode": "ask",
+                                                        "reason": "user_denied_or_timeout",
+                                                    }),
+                                                )
+                                                .await;
                                                 self.send_event(AgentEvent::PermissionDenied {
                                                     tool: tool.name.clone(),
                                                 })
@@ -627,7 +723,6 @@ impl Agent {
                                             }
                                         }
                                     } else {
-                                        // No permission channel — auto-approve
                                         tracing::info!(tool = %tool.name, "default-mode: no permission channel, auto-approved");
                                         true
                                     }
@@ -674,6 +769,16 @@ impl Agent {
                                     }
                                     AutoDecision::Prompt => {
                                         tracing::warn!(tool = %tool.name, "auto-mode: risky, denied");
+                                        self.fire_hook(
+                                            crate::hooks::HookEvent::PermissionDenied,
+                                            serde_json::json!({
+                                                "hook_event": "PermissionDenied",
+                                                "tool_name": tool.name,
+                                                "mode": "auto",
+                                                "reason": "risky_operation",
+                                            }),
+                                        )
+                                        .await;
                                         self.send_event(AgentEvent::PermissionDenied {
                                             tool: tool.name.clone(),
                                         })
@@ -682,6 +787,17 @@ impl Agent {
                                     }
                                     AutoDecision::PromptWithWarning(msg) => {
                                         tracing::warn!(tool = %tool.name, warning = %msg, "auto-mode: dangerous, denied");
+                                        self.fire_hook(
+                                            crate::hooks::HookEvent::PermissionDenied,
+                                            serde_json::json!({
+                                                "hook_event": "PermissionDenied",
+                                                "tool_name": tool.name,
+                                                "mode": "auto",
+                                                "reason": "dangerous_operation",
+                                                "warning": msg,
+                                            }),
+                                        )
+                                        .await;
                                         self.send_event(AgentEvent::PermissionDenied {
                                             tool: tool.name.clone(),
                                         })
@@ -696,6 +812,10 @@ impl Agent {
                     };
 
                     if !tool_allowed {
+                        {
+                            let mut log = self.denial_log.lock().await;
+                            log.record(&tool.name, &format!("mode={perm_mode}"));
+                        }
                         let denied_result = ToolResult::error(format!(
                             "Permission denied for tool '{}'. Current mode: {}. Use /permissions yolo to allow all operations.",
                             tool.name, perm_mode
@@ -711,7 +831,23 @@ impl Agent {
                         continue;
                     }
 
-                    // Phase 2 (CLI-116): Checkpoint file before Write/Edit
+                    // --- Plan mode check ---
+                    if !is_tool_allowed_in_mode(&tool.name, effective_mode) {
+                        let result = ToolResult::error(format!(
+                            "Tool '{}' is not available in plan mode. Only read-only tools are allowed.",
+                            tool.name
+                        ));
+                        self.send_event(AgentEvent::ToolCallComplete {
+                            name: tool.name.clone(),
+                            id: tool.id.clone(),
+                            result: result.clone(),
+                        })
+                        .await;
+                        self.state.add_tool_result(&tool.id, &result.content, true);
+                        continue;
+                    }
+
+                    // --- Checkpoint before Write/Edit ---
                     if matches!(tool.name.as_str(), "Write" | "Edit")
                         && let Some(ref store) = self.checkpoint_store
                         && let Some(file_path) = input.get("file_path").and_then(|v| v.as_str())
@@ -727,7 +863,7 @@ impl Agent {
                         }
                     }
 
-                    // Pre-tool-use hook: check if any hook blocks this tool
+                    // --- Pre-tool-use hook ---
                     if let Some(ref registry) = self.hook_registry {
                         let hook_input = serde_json::json!({
                             "hook_event": "PreToolUse",
@@ -756,39 +892,251 @@ impl Agent {
                         }
                     }
 
-                    let result = self.registry.dispatch(&tool.name, input, &ctx).await;
+                    // --- Resolve tool from registry ---
+                    let tool_arc = match self.registry.lookup(&tool.name) {
+                        Some(t) => t,
+                        None => {
+                            let result = ToolResult::error(format!(
+                                "Unknown tool: '{}'. Available tools: {}",
+                                tool.name,
+                                self.registry.tool_names().join(", ")
+                            ));
+                            self.send_event(AgentEvent::ToolCallComplete {
+                                name: tool.name.clone(),
+                                id: tool.id.clone(),
+                                result: result.clone(),
+                            })
+                            .await;
+                            self.state.add_tool_result(&tool.id, &result.content, true);
+                            continue;
+                        }
+                    };
 
+                    // --- Capture file_path for post-processing ---
+                    let file_path = if matches!(tool.name.as_str(), "Write" | "Edit" | "NotebookEdit") {
+                        input.get("file_path").and_then(|v| v.as_str()).map(String::from)
+                    } else {
+                        None
+                    };
+
+                    allowed.push(PreflightResult {
+                        tool_name: tool.name.clone(),
+                        tool_id: tool.id.clone(),
+                        input,
+                        tool_arc,
+                        file_path,
+                    });
+                }
+
+                // -------------------------------------------------------
+                // PHASE 2: Dispatch (concurrent when possible)
+                // Execute the actual tool calls. Uses JoinSet + Semaphore
+                // when multiple tools are allowed and concurrency > 1.
+                // -------------------------------------------------------
+                let dispatch_results: Vec<ToolResult> = if allowed.len() > 1
+                    && self.config.max_tool_concurrency > 1
+                {
+                    tracing::info!(
+                        tools = allowed.len(),
+                        max_concurrency = self.config.max_tool_concurrency,
+                        "dispatching tools concurrently"
+                    );
+                    let sem = Arc::new(Semaphore::new(self.config.max_tool_concurrency));
+                    let ctx_arc = Arc::new(ctx.clone());
+                    let mut join_set = JoinSet::new();
+
+                    for (idx, pre) in allowed.iter().enumerate() {
+                        let tool = pre.tool_arc.clone();
+                        let input = pre.input.clone();
+                        let ctx_clone = ctx_arc.clone();
+                        let sem_clone = sem.clone();
+
+                        join_set.spawn(async move {
+                            let _permit = sem_clone.acquire().await.expect("semaphore closed");
+                            let result = tool.execute(input, &ctx_clone).await;
+                            (idx, result)
+                        });
+                    }
+
+                    let mut indexed: Vec<(usize, ToolResult)> = Vec::with_capacity(allowed.len());
+                    let mut panicked: Vec<ToolResult> = Vec::new();
+                    while let Some(join_result) = join_set.join_next().await {
+                        match join_result {
+                            Ok(pair) => indexed.push(pair),
+                            Err(e) => {
+                                tracing::error!("tool task panicked: {e}");
+                                panicked.push(ToolResult::error(format!("tool task panicked: {e}")));
+                            }
+                        }
+                    }
+                    // Assign panicked results to the missing indices
+                    if !panicked.is_empty() {
+                        let seen: std::collections::HashSet<usize> =
+                            indexed.iter().map(|(idx, _)| *idx).collect();
+                        let mut missing: Vec<usize> = (0..allowed.len())
+                            .filter(|i| !seen.contains(i))
+                            .collect();
+                        for result in panicked {
+                            let idx = missing.pop().unwrap_or(0);
+                            indexed.push((idx, result));
+                        }
+                    }
+                    indexed.sort_by_key(|(idx, _)| *idx);
+                    indexed.into_iter().map(|(_, r)| r).collect()
+                } else {
+                    // Sequential dispatch (single tool or concurrency disabled)
+                    let mut results = Vec::with_capacity(allowed.len());
+                    for pre in &allowed {
+                        let result = pre.tool_arc.execute(pre.input.clone(), &ctx).await;
+                        results.push(result);
+                    }
+                    results
+                };
+
+                // -------------------------------------------------------
+                // PHASE 3: Post-process (sequential)
+                // Handle interceptions, fire post-hooks, emit events,
+                // update inner voice, record results in conversation state.
+                // -------------------------------------------------------
+                for (pre, result) in allowed.iter().zip(dispatch_results.into_iter()) {
                     // GAP 8: Detect SubagentRequest and execute one-shot.
-                    // AgentTool returns a bare SubagentRequest as the full content.
-                    // TaskCreate returns {"task_id":"...","subagent_request":{...}}.
                     let result = if !result.is_error
-                        && (tool.name == "Agent" || tool.name == "TaskCreate")
+                        && (pre.tool_name == "Agent" || pre.tool_name == "TaskCreate")
                     {
-                        self.handle_subagent_result(&result, tool.name == "TaskCreate")
+                        self.handle_subagent_result(&result, pre.tool_name == "TaskCreate")
                             .await
                     } else {
                         result
                     };
 
+                    // CRIT-07: Intercept SendMessage and route to target agent.
+                    let result = if !result.is_error && pre.tool_name == "SendMessage" {
+                        match serde_json::from_str::<SendMessageRequest>(&result.content) {
+                            Ok(req) => {
+                                self.send_event(AgentEvent::MessageSent {
+                                    target_agent_id: req.agent_id.clone(),
+                                    message: req.message.clone(),
+                                })
+                                .await;
+                                ToolResult::success(format!(
+                                    "Message delivered to agent '{}'.",
+                                    req.agent_id
+                                ))
+                            }
+                            Err(e) => ToolResult::error(format!(
+                                "Failed to parse SendMessage result: {e}"
+                            )),
+                        }
+                    } else {
+                        result
+                    };
+
+                    // CRIT-08: Intercept EnterPlanMode / ExitPlanMode.
+                    let result = if !result.is_error && pre.tool_name == "EnterPlanMode" {
+                        let prev = self.config.permission_mode.lock().await.clone();
+                        self.previous_permission_mode = Some(prev);
+                        *self.config.permission_mode.lock().await = "plan".to_string();
+                        self.state.mode = AgentMode::Plan;
+                        result
+                    } else if !result.is_error && pre.tool_name == "ExitPlanMode" {
+                        let restore = self
+                            .previous_permission_mode
+                            .take()
+                            .unwrap_or_else(|| "auto".to_string());
+                        *self.config.permission_mode.lock().await = restore;
+                        self.state.mode = AgentMode::Normal;
+                        result
+                    } else {
+                        result
+                    };
+
+                    // CRIT-09: Intercept AskUserQuestion sentinel.
+                    let result = if !result.is_error
+                        && result.content.starts_with("[PENDING_USER_INPUT]")
+                    {
+                        let question = result
+                            .content
+                            .strip_prefix("[PENDING_USER_INPUT]")
+                            .unwrap_or(&result.content)
+                            .to_string();
+
+                        self.send_event(AgentEvent::AskUser {
+                            question: question.clone(),
+                        })
+                        .await;
+
+                        if let Some(rx) = &self.ask_user_response_rx {
+                            match rx.lock().await.recv().await {
+                                Some(answer) => ToolResult::success(answer),
+                                None => ToolResult::error(
+                                    "User input channel closed unexpectedly.".to_string(),
+                                ),
+                            }
+                        } else {
+                            ToolResult::error(
+                                "User input requested but no input channel is configured."
+                                    .to_string(),
+                            )
+                        }
+                    } else {
+                        result
+                    };
+
+                    // CRIT-06: Fire PostToolUse / PostToolUseFailure hooks
+                    if result.is_error {
+                        self.fire_hook(
+                            crate::hooks::HookEvent::PostToolUseFailure,
+                            serde_json::json!({
+                                "hook_event": "PostToolUseFailure",
+                                "tool_name": pre.tool_name,
+                                "tool_id": pre.tool_id,
+                                "error": result.content,
+                            }),
+                        )
+                        .await;
+                    } else {
+                        self.fire_hook(
+                            crate::hooks::HookEvent::PostToolUse,
+                            serde_json::json!({
+                                "hook_event": "PostToolUse",
+                                "tool_name": pre.tool_name,
+                                "tool_id": pre.tool_id,
+                                "result": result.content,
+                            }),
+                        )
+                        .await;
+
+                        if let Some(ref fp) = pre.file_path {
+                            self.fire_hook(
+                                crate::hooks::HookEvent::FileChanged,
+                                serde_json::json!({
+                                    "hook_event": "FileChanged",
+                                    "tool_name": pre.tool_name,
+                                    "file_path": fp,
+                                }),
+                            )
+                            .await;
+                        }
+                    }
+
                     self.send_event(AgentEvent::ToolCallComplete {
-                        name: tool.name.clone(),
-                        id: tool.id.clone(),
+                        name: pre.tool_name.clone(),
+                        id: pre.tool_id.clone(),
                         result: result.clone(),
                     })
                     .await;
 
-                    // Update inner voice state from tool outcome.
                     if let Some(iv) = &self.inner_voice {
                         let mut iv = iv.lock().await;
                         if result.is_error {
-                            iv.on_tool_failure(&tool.name);
+                            iv.on_tool_failure(&pre.tool_name);
                         } else {
-                            iv.on_tool_success(&tool.name);
+                            iv.on_tool_success(&pre.tool_name);
                         }
                     }
 
                     self.state
-                        .add_tool_result(&tool.id, &result.content, result.is_error);
+                        .add_tool_result(&pre.tool_id, &result.content, result.is_error);
                 }
 
                 // Loop back to send tool results to the API
@@ -822,6 +1170,21 @@ impl Agent {
                 output_tokens: turn_output_tokens,
             })
             .await;
+
+            // CRIT-14 (ITEM 4): Decay rule scores every 50 turns.
+            if self.turn_number % 50 == 0 {
+                if let Some(ref graph) = self.memory {
+                    let engine = RulesEngine::new(graph.as_ref());
+                    if let Err(e) = engine.decay_scores(1.0) {
+                        tracing::warn!("rules decay_scores failed: {e}");
+                    }
+                }
+            }
+
+            // Detect user corrections and record them in the memory graph.
+            if let Some(ref graph) = self.memory {
+                self.detect_and_record_correction(user_input, graph);
+            }
 
             // GAP 5: Auto-memory extraction check
             self.extraction_state.record_turn();
@@ -885,9 +1248,17 @@ impl Agent {
     /// Converts the agent's messages to ContextMessages, runs compaction,
     /// and replaces the conversation state. Fires PreCompact and PostCompact
     /// hooks around the compaction. Returns a human-readable status message.
-    pub async fn compact(&mut self) -> String {
+    ///
+    /// `subcommand` selects the strategy:
+    /// - `None` or `Some("auto")` — pick strategy automatically via `select_strategy`
+    /// - `Some("micro")` — microcompact (summarize oldest 30 %)
+    /// - `Some("snip")` — snip oldest turns without summarization
+    pub async fn compact(&mut self, subcommand: Option<&str>) -> String {
         use crate::commands::handle_compact;
+        use archon_context::compact::select_strategy;
         use archon_context::messages::ContextMessage;
+        use archon_context::microcompact::microcompact_messages;
+        use archon_context::snip::snip_messages;
 
         // Convert JSON messages to ContextMessages
         let context_msgs: Vec<ContextMessage> = self
@@ -924,12 +1295,37 @@ impl Agent {
         let message_count = context_msgs.len();
         let before_tokens: u64 = context_msgs.iter().map(|m| m.estimated_tokens).sum();
 
+        // Resolve the effective strategy.
+        // "auto" (or no subcommand) uses select_strategy based on context usage ratio.
+        let effective_strategy = match subcommand {
+            Some("micro") => Some(archon_context::boundary::CompactionStrategy::Micro),
+            Some("snip") => Some(archon_context::boundary::CompactionStrategy::Snip),
+            Some("auto") | None => {
+                // Estimate usage ratio against the model context window (default 200k).
+                let context_window = 200_000u64;
+                let usage_ratio = before_tokens as f32 / context_window as f32;
+                select_strategy(usage_ratio)
+            }
+            Some(other) => {
+                return format!("Unknown /compact subcommand: '{other}'. Use auto, micro, or snip.");
+            }
+        };
+
+        // If select_strategy says no compaction needed and user didn't force a strategy
+        let effective_strategy = match effective_strategy {
+            Some(s) => s,
+            None => {
+                return "Context usage is below 60 %; no compaction needed.".into();
+            }
+        };
+
         // Fire PreCompact hook
         if let Some(ref registry) = self.hook_registry {
             let payload = serde_json::json!({
                 "hook_event": "PreCompact",
                 "message_count": message_count,
                 "token_count": before_tokens,
+                "strategy": effective_strategy.to_string(),
             });
             registry
                 .execute_hooks(
@@ -941,50 +1337,104 @@ impl Agent {
                 .await;
         }
 
-        // Build a summary from the conversation for compaction
-        let summary = self.state.first_user_message().to_string();
-        let output = handle_compact(&context_msgs, &summary);
+        // Dispatch based on the resolved strategy.
+        let (result_messages, strategy_label, _status_message) = match effective_strategy {
+            archon_context::boundary::CompactionStrategy::Snip => {
+                // Snip: remove oldest turns without LLM summarization.
+                let total_turns = archon_context::snip::count_turns(&context_msgs);
+                if total_turns < 3 {
+                    return "Too few turns to snip.".into();
+                }
+                // Snip the oldest ~50 % of turns (at least 1).
+                let snip_end = (total_turns / 2).max(1);
+                match snip_messages(&context_msgs, 1, snip_end) {
+                    Ok((msgs, boundary)) => {
+                        let label = "snip";
+                        let status = format!(
+                            "Snipped turns 1–{snip_end} ({} tokens removed)",
+                            boundary.tokens_removed
+                        );
+                        (msgs, label, status)
+                    }
+                    Err(e) => return format!("Snip failed: {e}"),
+                }
+            }
 
-        if output.mutated {
-            // Replace the conversation messages with the compacted version
-            self.state.messages = output
-                .messages
-                .iter()
-                .map(|cm| {
-                    serde_json::json!({
-                        "role": cm.role,
-                        "content": cm.content,
-                    })
+            archon_context::boundary::CompactionStrategy::Micro
+            | archon_context::boundary::CompactionStrategy::Auto => {
+                // Both Micro and Auto need an LLM-generated summary.
+                let summary_text = self.generate_compaction_summary(&context_msgs).await;
+
+                match effective_strategy {
+                    archon_context::boundary::CompactionStrategy::Micro => {
+                        let preserve = archon_context::compact::DEFAULT_PRESERVE_RECENT_TURNS;
+                        let (msgs, boundary) =
+                            microcompact_messages(&context_msgs, &summary_text, preserve);
+                        let label = "micro";
+                        let status = format!(
+                            "Microcompacted: {} tokens removed",
+                            boundary.tokens_removed
+                        );
+                        (msgs, label, status)
+                    }
+                    _ => {
+                        // Auto / default: full compaction via handle_compact
+                        let output = handle_compact(&context_msgs, &summary_text);
+                        let label = "auto";
+                        let status = output.message.clone();
+                        if output.mutated {
+                            (output.messages, label, status)
+                        } else {
+                            return output.message;
+                        }
+                    }
+                }
+            }
+        };
+
+        // Replace the conversation messages with the compacted version
+        self.state.messages = result_messages
+            .iter()
+            .map(|cm| {
+                serde_json::json!({
+                    "role": cm.role,
+                    "content": cm.content,
                 })
-                .collect();
-            // Invalidate memory cache since context changed
-            self.memory_injector.invalidate_cache();
+            })
+            .collect();
+        // Invalidate memory cache since context changed
+        self.memory_injector.invalidate_cache();
+
+        // CRIT-15 (ITEM 5): Snapshot inner voice state on compaction and persist to memory graph.
+        if let Some(ref iv) = self.inner_voice {
+            let snapshot = iv.lock().await.on_compaction();
+            tracing::debug!("inner voice snapshot on compaction: confidence={:.2}, energy={:.2}, turns={}",
+                snapshot.confidence, snapshot.energy, snapshot.turn_count);
+            // Persist snapshot so it can be restored via InnerVoice::from_snapshot on resume.
+            if let Some(ref graph) = self.memory {
+                if let Ok(json) = serde_json::to_string(&snapshot) {
+                    let _ = graph.store_memory(
+                        &json,
+                        "inner_voice_snapshot",
+                        archon_memory::types::MemoryType::Fact,
+                        90.0,
+                        &["inner_voice_snapshot".to_string()],
+                        "agent",
+                        "",
+                    );
+                }
+            }
         }
 
         // Compute post-compaction token count
-        let after_tokens: u64 = if output.mutated {
-            output.messages.iter().map(|m| m.estimated_tokens).sum()
-        } else {
-            before_tokens
-        };
+        let after_tokens: u64 = result_messages.iter().map(|m| m.estimated_tokens).sum();
         let tokens_removed = before_tokens.saturating_sub(after_tokens);
-
-        // Determine strategy label
-        let strategy = if !output.mutated {
-            "none"
-        } else if message_count <= 10 {
-            "micro"
-        } else if before_tokens > 100_000 {
-            "snip"
-        } else {
-            "auto"
-        };
 
         // Fire PostCompact hook
         if let Some(ref registry) = self.hook_registry {
             let payload = serde_json::json!({
                 "hook_event": "PostCompact",
-                "strategy": strategy,
+                "strategy": strategy_label,
                 "tokens_removed": tokens_removed,
                 "tokens_remaining": after_tokens,
             });
@@ -999,15 +1449,72 @@ impl Agent {
         }
 
         // Return detailed summary
-        if output.mutated {
-            let before_k = before_tokens as f64 / 1000.0;
-            let after_k = after_tokens as f64 / 1000.0;
-            let removed_k = tokens_removed as f64 / 1000.0;
-            format!(
-                "Compacted conversation ({strategy}): {before_k:.1}k → {after_k:.1}k tokens ({removed_k:.1}k removed, {message_count} messages)"
-            )
-        } else {
-            output.message
+        let before_k = before_tokens as f64 / 1000.0;
+        let after_k = after_tokens as f64 / 1000.0;
+        let removed_k = tokens_removed as f64 / 1000.0;
+        format!(
+            "Compacted conversation ({strategy_label}): {before_k:.1}k → {after_k:.1}k tokens ({removed_k:.1}k removed, {message_count} messages)"
+        )
+    }
+
+    /// Generate an LLM summary of the conversation for compaction.
+    ///
+    /// Builds the summary request via [`build_compact_summary_request`], sends it
+    /// to the LLM provider, and collects the response text. Falls back to the
+    /// first user message if the LLM call fails.
+    async fn generate_compaction_summary(
+        &self,
+        context_msgs: &[archon_context::messages::ContextMessage],
+    ) -> String {
+        use crate::commands::build_compact_summary_request;
+
+        let summary_request_msgs = build_compact_summary_request(context_msgs);
+
+        // Convert ContextMessages to JSON messages for LlmRequest
+        let json_messages: Vec<serde_json::Value> = summary_request_msgs
+            .iter()
+            .map(|cm| {
+                serde_json::json!({
+                    "role": cm.role,
+                    "content": cm.content,
+                })
+            })
+            .collect();
+
+        let request = LlmRequest {
+            model: self.config.model.clone(),
+            max_tokens: 2048,
+            system: vec![serde_json::json!({
+                "type": "text",
+                "text": archon_context::compact::SUMMARY_PROMPT,
+            })],
+            messages: json_messages,
+            tools: Vec::new(),
+            thinking: None,
+            speed: Some("fast".to_string()),
+            effort: Some("low".to_string()),
+            extra: serde_json::Value::Null,
+        };
+
+        match self.client.stream(request).await {
+            Ok(mut rx) => {
+                let mut response_text = String::new();
+                while let Some(event) = rx.recv().await {
+                    if let StreamEvent::TextDelta { text, .. } = event {
+                        response_text.push_str(&text);
+                    }
+                }
+                if response_text.is_empty() {
+                    tracing::warn!("LLM returned empty summary; falling back to first user message");
+                    self.state.first_user_message().to_string()
+                } else {
+                    response_text
+                }
+            }
+            Err(e) => {
+                tracing::warn!("compaction summary LLM call failed: {e}; falling back to first user message");
+                self.state.first_user_message().to_string()
+            }
         }
     }
 
@@ -1029,7 +1536,7 @@ impl Agent {
     fn inject_memories(&mut self) -> Vec<serde_json::Value> {
         let mut system = self.config.system_prompt.clone();
 
-        let graph = match self.memory_graph {
+        let graph = match self.memory {
             Some(ref g) => g,
             None => return system,
         };
@@ -1062,12 +1569,99 @@ impl Agent {
             }
         }
 
+        // Inject recalled corrections relevant to the current context.
+        let ctx_joined = context.join(" ");
+        let tracker = CorrectionTracker::new(graph.as_ref());
+        match tracker.recall_corrections(&ctx_joined, 5) {
+            Ok(corrections) if !corrections.is_empty() => {
+                let mut block = String::from(
+                    "<past_corrections>\nPrevious user corrections relevant to this context:\n",
+                );
+                for c in &corrections {
+                    block.push_str(&format!("- [{}] {}\n", c.correction_type.severity_multiplier(), c.content));
+                }
+                block.push_str("</past_corrections>");
+                system.push(serde_json::json!({
+                    "type": "text",
+                    "text": block,
+                }));
+            }
+            Ok(_) => {}
+            Err(e) => {
+                tracing::warn!("correction recall failed: {e}");
+            }
+        }
+
         system
+    }
+
+    /// Detect correction patterns in user input and record via CorrectionTracker.
+    fn detect_and_record_correction(&self, user_input: &str, graph: &Arc<dyn MemoryTrait>) {
+        let lower = user_input.to_lowercase();
+        let correction_type = if lower.starts_with("no,")
+            || lower.starts_with("no ")
+            || lower.starts_with("wrong")
+            || lower.starts_with("that's wrong")
+            || lower.starts_with("that is wrong")
+        {
+            CorrectionType::FactualError
+        } else if lower.contains("i said")
+            || lower.contains("i already told you")
+            || lower.contains("i already asked")
+            || lower.contains("as i mentioned")
+        {
+            CorrectionType::RepeatedInstruction
+        } else if lower.starts_with("don't ")
+            || lower.starts_with("do not ")
+            || lower.starts_with("stop ")
+            || lower.contains("never do that")
+        {
+            CorrectionType::DidForbiddenAction
+        } else if lower.contains("didn't ask")
+            || lower.contains("did not ask")
+            || lower.contains("without permission")
+            || lower.contains("without asking")
+        {
+            CorrectionType::ActedWithoutPermission
+        } else if lower.contains("instead,")
+            || lower.contains("should have")
+            || lower.contains("better approach")
+            || lower.contains("use this instead")
+        {
+            CorrectionType::ApproachCorrection
+        } else {
+            return; // No correction pattern detected.
+        };
+
+        let tracker = CorrectionTracker::new(graph.as_ref());
+        let context = format!("turn:{}", self.turn_number);
+        if let Err(e) = tracker.record_correction(correction_type, user_input, &context, None) {
+            tracing::warn!("failed to record correction: {e}");
+        }
+
+        // CRIT-15 (ITEM 5): Notify inner voice of user correction.
+        if let Some(ref iv) = self.inner_voice {
+            if let Ok(mut iv) = iv.try_lock() {
+                iv.on_user_correction();
+            }
+        }
+
+        // CRIT-14 (ITEM 4): Reinforce rules related to the correction.
+        // When the user corrects us, reinforce the top matching rule so it
+        // gains more prominence in future prompts.
+        let engine = RulesEngine::new(graph.as_ref());
+        if let Ok(rules) = engine.get_rules_sorted() {
+            if let Some(top) = rules.first() {
+                if let Err(e) = engine.reinforce_rule(&top.id) {
+                    tracing::debug!("reinforce_rule failed: {e}");
+                }
+            }
+        }
     }
 
     /// GAP 5: Trigger memory extraction in the background.
     fn trigger_memory_extraction(&mut self) {
-        let graph = match self.memory_graph {
+        let graph = match self.memory {
             Some(ref g) => Arc::clone(g),
             None => return,
         };
@@ -1134,7 +1728,7 @@ impl Agent {
 
                     let extracted = parse_extraction_response(&response_text).unwrap_or_default();
                     if !extracted.is_empty() {
-                        match store_extracted(&graph, &extracted, &session_id) {
+                        match store_extracted(graph.as_ref(), &extracted, &session_id) {
                             Ok(count) => {
                                 tracing::info!("auto-extracted {count} memories at turn {turn}")
                             }
@@ -1191,6 +1785,30 @@ impl Agent {
 
         tracing::info!(subagent_id = %subagent_id, prompt_len = request.prompt.len(), "spawning one-shot subagent");
 
+        // CRIT-06: Fire SubagentStart hook
+        self.fire_hook(
+            crate::hooks::HookEvent::SubagentStart,
+            serde_json::json!({
+                "hook_event": "SubagentStart",
+                "subagent_id": subagent_id,
+                "model": request.model,
+                "prompt_length": request.prompt.len(),
+            }),
+        )
+        .await;
+
+        // CRIT-06: Fire TaskCreated hook if this was a TaskCreate request
+        if nested {
+            self.fire_hook(
+                crate::hooks::HookEvent::TaskCreated,
+                serde_json::json!({
+                    "hook_event": "TaskCreated",
+                    "subagent_id": subagent_id,
+                }),
+            )
+            .await;
+        }
+
         // One-shot subagent: make a single API call with the subagent's prompt
         let model = request.model.as_deref().unwrap_or(&self.config.model);
         let sub_request = LlmRequest {
@@ -1211,15 +1829,24 @@ impl Agent {
             extra: serde_json::Value::Null,
         };
 
-        match self.client.stream(sub_request).await {
-            Ok(mut rx) => {
-                let mut response_text = String::new();
-                while let Some(event) = rx.recv().await {
-                    if let StreamEvent::TextDelta { text, .. } = event {
-                        response_text.push_str(&text);
+        let timeout_dur = std::time::Duration::from_secs(request.timeout_secs as u64);
+        let stream_future = async {
+            match self.client.stream(sub_request).await {
+                Ok(mut rx) => {
+                    let mut response_text = String::new();
+                    while let Some(event) = rx.recv().await {
+                        if let StreamEvent::TextDelta { text, .. } = event {
+                            response_text.push_str(&text);
+                        }
                     }
+                    Ok(response_text)
                 }
+                Err(e) => Err(e),
+            }
+        };
 
+        match tokio::time::timeout(timeout_dur, stream_future).await {
+            Ok(Ok(response_text)) => {
                 if let Err(e) = self
                     .subagent_manager
                     .complete(&subagent_id, response_text.clone())
@@ -1227,13 +1854,70 @@ impl Agent {
                     tracing::warn!("failed to mark subagent complete: {e}");
                 }
 
+                // CRIT-06: Fire SubagentStop hook
+                self.fire_hook(
+                    crate::hooks::HookEvent::SubagentStop,
+                    serde_json::json!({
+                        "hook_event": "SubagentStop",
+                        "subagent_id": subagent_id,
+                        "success": true,
+                    }),
+                )
+                .await;
+
+                // CRIT-06: Fire TaskCompleted hook if nested (TaskCreate)
+                if nested {
+                    self.fire_hook(
+                        crate::hooks::HookEvent::TaskCompleted,
+                        serde_json::json!({
+                            "hook_event": "TaskCompleted",
+                            "subagent_id": subagent_id,
+                            "success": true,
+                        }),
+                    )
+                    .await;
+                }
+
                 ToolResult::success(response_text)
             }
-            Err(e) => {
+            Ok(Err(e)) => {
                 let reason = format!("Subagent API call failed: {e}");
                 let _ = self
                     .subagent_manager
                     .mark_failed(&subagent_id, reason.clone());
+
+                // CRIT-06: Fire SubagentStop hook on failure
+                self.fire_hook(
+                    crate::hooks::HookEvent::SubagentStop,
+                    serde_json::json!({
+                        "hook_event": "SubagentStop",
+                        "subagent_id": subagent_id,
+                        "success": false,
+                        "error": reason,
+                    }),
+                )
+                .await;
+
+                ToolResult::error(reason)
+            }
+            Err(_elapsed) => {
+                let reason = format!(
+                    "Subagent timed out after {}s",
+                    request.timeout_secs
+                );
+                let _ = self.subagent_manager.mark_timed_out(&subagent_id);
+
+                self.fire_hook(
+                    crate::hooks::HookEvent::SubagentStop,
+                    serde_json::json!({
+                        "hook_event": "SubagentStop",
+                        "subagent_id": subagent_id,
+                        "success": false,
+                        "error": reason,
+                    }),
+                )
+                .await;
+
                 ToolResult::error(reason)
             }
         }

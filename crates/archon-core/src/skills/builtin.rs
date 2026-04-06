@@ -30,27 +30,7 @@ define_skill!(
     "compact",
     "Compact context (micro | snip N-M | auto)"
 );
-/// Show or update the current plan using `plan_v2` data model.
-pub struct PlanSkill;
-
-impl Skill for PlanSkill {
-    fn name(&self) -> &str {
-        "plan"
-    }
-
-    fn description(&self) -> &str {
-        "Show or update the current plan"
-    }
-
-    fn execute(&self, _args: &[String], _ctx: &SkillContext) -> SkillOutput {
-        // Without an active session store reference we return a stub prompt.
-        // When a session store is available the caller should load the plan
-        // via `plan_v2::load_plan` and render `plan.to_display()` directly.
-        SkillOutput::Text(
-            "/plan: No active plan. Use the plan_v2 API to create or load a plan.".to_string(),
-        )
-    }
-}
+define_skill!(PlanSkill, "plan", "Show or update the current plan");
 define_skill!(FastSkill, "fast", "Toggle fast mode");
 define_skill!(
     EffortSkill,

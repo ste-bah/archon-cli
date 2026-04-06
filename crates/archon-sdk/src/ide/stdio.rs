@@ -9,7 +9,12 @@
 
 use std::io::{BufRead, Write};
 
-use crate::ide::handler::IdeProtocolHandler;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+use tokio::sync::mpsc;
+
+use archon_core::agent::AgentEvent;
+
+use crate::ide::handler::{IdeProtocolHandler, event_to_notification};
 
 /// Stdio transport: reads JSON-RPC requests line-by-line, writes responses.
 pub struct StdioTransport {
@@ -42,6 +47,63 @@ impl StdioTransport {
             writer.write_all(b"\n")?;
             writer.flush()?;
         }
+        Ok(())
+    }
+
+    /// Run an async stdio loop that handles both incoming requests and outgoing
+    /// agent event notifications.
+    ///
+    /// - `event_rx`: receives `AgentEvent`s from the agent loop
+    /// - `session_id`: the active session ID for notification routing
+    ///
+    /// The loop terminates when stdin reaches EOF or the event channel closes.
+    pub async fn run_with_events(
+        &mut self,
+        mut event_rx: mpsc::Receiver<AgentEvent>,
+        session_id: &str,
+    ) -> anyhow::Result<()> {
+        let stdin = tokio::io::stdin();
+        let mut stdout = tokio::io::stdout();
+        let mut reader = tokio::io::BufReader::new(stdin);
+        let mut line_buf = String::new();
+
+        loop {
+            tokio::select! {
+                // Incoming JSON-RPC request from IDE
+                result = reader.read_line(&mut line_buf) => {
+                    match result {
+                        Ok(0) => break, // EOF
+                        Ok(_) => {
+                            let trimmed = line_buf.trim();
+                            if !trimmed.is_empty() {
+                                let response = self.handler.handle(trimmed);
+                                stdout.write_all(response.as_bytes()).await?;
+                                stdout.write_all(b"\n").await?;
+                                stdout.flush().await?;
+                            }
+                            line_buf.clear();
+                        }
+                        Err(e) => return Err(e.into()),
+                    }
+                }
+                // Outgoing agent event → IDE notification
+                event = event_rx.recv() => {
+                    match event {
+                        Some(evt) => {
+                            if let Some(notification) = event_to_notification(session_id, &evt) {
+                                if let Ok(json) = serde_json::to_string(&notification) {
+                                    stdout.write_all(json.as_bytes()).await?;
+                                    stdout.write_all(b"\n").await?;
+                                    stdout.flush().await?;
+                                }
+                            }
+                        }
+                        None => break, // Channel closed
+                    }
+                }
+            }
+        }
+
         Ok(())
     }
 }

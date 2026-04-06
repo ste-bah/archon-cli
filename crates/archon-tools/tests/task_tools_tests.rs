@@ -16,6 +16,7 @@ fn make_ctx() -> ToolContext {
         working_dir: std::env::temp_dir(),
         session_id: "test-session".into(),
         mode: AgentMode::Normal,
+            extra_dirs: vec![],
     }
 }
 

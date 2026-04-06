@@ -114,24 +114,6 @@ fn list_all_returns_registered() {
     assert_eq!(reg.list_all().len(), 3);
 }
 
-#[test]
-fn completions_prefix_match() {
-    let mut reg = SkillRegistry::new();
-    reg.register(Box::new(DummySkill::new("compact", "Compact")));
-    reg.register(Box::new(DummySkill::new("commit", "Commit")));
-    reg.register(Box::new(DummySkill::new("cost", "Cost")));
-    let completions = reg.completions("co");
-    assert_eq!(completions, vec!["commit", "compact", "cost"]);
-}
-
-#[test]
-fn completions_exact_match() {
-    let mut reg = SkillRegistry::new();
-    reg.register(Box::new(DummySkill::new("compact", "Compact")));
-    reg.register(Box::new(DummySkill::new("commit", "Commit")));
-    let completions = reg.completions("compact");
-    assert_eq!(completions, vec!["compact"]);
-}
 
 #[test]
 fn unknown_command_returns_none() {

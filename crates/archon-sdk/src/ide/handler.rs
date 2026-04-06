@@ -9,10 +9,14 @@ use std::collections::HashMap;
 
 use uuid::Uuid;
 
+use archon_core::agent::AgentEvent;
+
 use crate::ide::protocol::{
-    IdeCancelParams, IdeCapabilities, IdeConfigParams, IdeInitializeParams, IdeInitializeResult,
-    IdePromptParams, IdeSession, IdeStatusParams, IdeStatusResult, IdeToolResultParams,
-    JRpcErrorCode, error_response, parse_request, success_response,
+    IdeCancelParams, IdeCapabilities, IdeConfigParams, IdeError, IdeInitializeParams,
+    IdeInitializeResult, IdePermissionRequest, IdePromptParams, IdeSession, IdeStatusParams,
+    IdeStatusResult, IdeTextDelta, IdeThinkingDelta, IdeToolCall, IdeToolResultParams,
+    IdeTurnComplete, JRpcErrorCode, JRpcNotification, error_response, parse_request,
+    success_response,
 };
 
 // ── IdeProtocolHandler ────────────────────────────────────────────────────────
@@ -209,4 +213,78 @@ impl IdeProtocolHandler {
             success_response(id, serde_json::json!({"value": null}))
         }
     }
+}
+
+/// Map an [`AgentEvent`] to an IDE notification, if applicable.
+///
+/// Returns `None` for events that have no IDE notification equivalent
+/// (e.g. `UserPromptReady`, `CompactionTriggered`, `PermissionGranted`/`Denied`).
+pub fn event_to_notification(session_id: &str, event: &AgentEvent) -> Option<JRpcNotification> {
+    let (method, params) = match event {
+        AgentEvent::TextDelta(text) => (
+            "archon/textDelta",
+            serde_json::to_value(IdeTextDelta {
+                session_id: session_id.to_string(),
+                text: text.clone(),
+            })
+            .ok()?,
+        ),
+        AgentEvent::ThinkingDelta(text) => (
+            "archon/thinkingDelta",
+            serde_json::to_value(IdeThinkingDelta {
+                session_id: session_id.to_string(),
+                thinking: text.clone(),
+            })
+            .ok()?,
+        ),
+        AgentEvent::ToolCallStarted { name, id } => (
+            "archon/toolCall",
+            serde_json::to_value(IdeToolCall {
+                session_id: session_id.to_string(),
+                tool_use_id: id.clone(),
+                name: name.clone(),
+                input: serde_json::Value::Null,
+            })
+            .ok()?,
+        ),
+        AgentEvent::PermissionRequired { tool, description } => (
+            "archon/permissionRequest",
+            serde_json::to_value(IdePermissionRequest {
+                session_id: session_id.to_string(),
+                action: tool.clone(),
+                description: description.clone(),
+            })
+            .ok()?,
+        ),
+        AgentEvent::TurnComplete {
+            input_tokens,
+            output_tokens,
+        } => (
+            "archon/turnComplete",
+            serde_json::to_value(IdeTurnComplete {
+                session_id: session_id.to_string(),
+                input_tokens: *input_tokens,
+                output_tokens: *output_tokens,
+                cost: 0.0, // Cost calculation not available at this level
+            })
+            .ok()?,
+        ),
+        AgentEvent::Error(msg) => (
+            "archon/error",
+            serde_json::to_value(IdeError {
+                session_id: Some(session_id.to_string()),
+                message: msg.clone(),
+                code: JRpcErrorCode::INTERNAL_ERROR,
+            })
+            .ok()?,
+        ),
+        // Events without IDE notification equivalents
+        _ => return None,
+    };
+
+    Some(JRpcNotification {
+        jsonrpc: "2.0".to_string(),
+        method: method.to_string(),
+        params,
+    })
 }

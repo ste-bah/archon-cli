@@ -20,8 +20,6 @@ pub mod orchestrator;
 pub mod output_format;
 pub mod output_style;
 pub mod output_style_loader;
-pub mod plan_explore;
-pub mod plan_v2;
 pub mod print_mode;
 pub mod reasoning;
 pub mod remote;

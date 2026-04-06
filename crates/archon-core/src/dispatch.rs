@@ -7,7 +7,7 @@ use archon_tools::tool::{Tool, ToolContext, ToolResult};
 
 /// Registry of available tools.
 pub struct ToolRegistry {
-    tools: HashMap<String, Box<dyn Tool>>,
+    tools: HashMap<String, Arc<dyn Tool>>,
 }
 
 impl ToolRegistry {
@@ -20,12 +20,17 @@ impl ToolRegistry {
     /// Register a tool.
     pub fn register(&mut self, tool: Box<dyn Tool>) {
         let name = tool.name().to_string();
-        self.tools.insert(name, tool);
+        self.tools.insert(name, Arc::from(tool));
     }
 
     /// Get a tool by name.
     pub fn get(&self, name: &str) -> Option<&dyn Tool> {
-        self.tools.get(name).map(|t| t.as_ref())
+        self.tools.get(name).map(|t| &**t)
+    }
+
+    /// Get a cloneable handle to a tool for concurrent dispatch.
+    pub fn lookup(&self, name: &str) -> Option<Arc<dyn Tool>> {
+        self.tools.get(name).cloned()
     }
 
     /// Get all tool names.
@@ -280,6 +285,7 @@ mod tests {
             working_dir: std::env::temp_dir(),
             session_id: "test".into(),
             mode: AgentMode::Normal,
+            extra_dirs: vec![],
         };
 
         let result = registry
@@ -297,6 +303,7 @@ mod tests {
             working_dir: std::env::temp_dir(),
             session_id: "test".into(),
             mode: AgentMode::Plan,
+            extra_dirs: vec![],
         };
 
         let result = registry

@@ -12,6 +12,7 @@ fn ctx_in(dir: &TempDir) -> ToolContext {
         working_dir: dir.path().to_path_buf(),
         session_id: "test-session".into(),
         mode: AgentMode::Normal,
+            extra_dirs: vec![],
     }
 }
 

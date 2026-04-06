@@ -8,6 +8,7 @@ fn test_ctx() -> ToolContext {
         working_dir: std::env::temp_dir(),
         session_id: "test-bash".into(),
         mode: archon_tools::tool::AgentMode::Normal,
+            extra_dirs: vec![],
     }
 }
 
@@ -98,6 +99,7 @@ async fn bash_working_directory() {
         working_dir: dir.clone(),
         session_id: "test".into(),
         mode: archon_tools::tool::AgentMode::Normal,
+            extra_dirs: vec![],
     };
     let tool = BashTool::default();
     let result = tool.execute(json!({ "command": "pwd" }), &ctx).await;

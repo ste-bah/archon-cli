@@ -111,12 +111,6 @@ impl OutputStyleRegistry {
         self.styles.insert(style.name.clone(), style);
     }
 
-    /// Remove all styles registered with the given source, typically used
-    /// when a plugin is unloaded.
-    pub fn clear_by_source(&mut self, source: &OutputStyleSource) {
-        self.styles.retain(|_, v| &v.source != source);
-    }
-
     /// Return a sorted list of all registered style names.
     pub fn list(&self) -> Vec<String> {
         let mut names: Vec<String> = self.styles.keys().cloned().collect();

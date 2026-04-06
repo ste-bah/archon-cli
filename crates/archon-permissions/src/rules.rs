@@ -9,7 +9,7 @@ use crate::mode::PermissionDecision;
 // ---------------------------------------------------------------------------
 
 /// Check if a path matches any of the given glob patterns.
-pub fn path_matches_any(path: &Path, patterns: &[String]) -> bool {
+pub(crate) fn path_matches_any(path: &Path, patterns: &[String]) -> bool {
     let path_str = path.to_string_lossy();
     for pattern in patterns {
         if let Ok(glob_pattern) = glob::Pattern::new(pattern)

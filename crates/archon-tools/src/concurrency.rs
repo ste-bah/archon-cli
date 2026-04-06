@@ -190,6 +190,7 @@ mod tests {
             working_dir: PathBuf::from("/tmp"),
             session_id: "test".into(),
             mode: crate::tool::AgentMode::Normal,
+            extra_dirs: vec![],
         })
     }
 

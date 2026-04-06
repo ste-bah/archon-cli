@@ -58,13 +58,6 @@ pub fn load_configured_defaults(
     Ok(added)
 }
 
-/// Backwards-compatible wrapper — delegates to [`load_configured_defaults`]
-/// with an empty `initial_rules` slice (uses built-in defaults when engine
-/// is empty, no-ops otherwise).
-pub fn load_defaults(engine: &RulesEngine<'_>) -> Result<usize, RulesError> {
-    load_configured_defaults(engine, &[])
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -159,55 +152,4 @@ mod tests {
         );
     }
 
-    #[test]
-    fn backward_compat_load_defaults() {
-        let graph = MemoryGraph::in_memory().expect("graph");
-        let engine = RulesEngine::new(&graph);
-
-        let count = load_defaults(&engine).expect("load");
-        assert_eq!(count, 3);
-    }
-
-    // ── original tests ────────────────────────────────────────────────────
-
-    #[test]
-    fn loads_defaults_when_empty() {
-        let graph = MemoryGraph::in_memory().expect("graph");
-        let engine = RulesEngine::new(&graph);
-
-        let count = load_defaults(&engine).expect("load");
-        assert_eq!(count, 3);
-
-        let rules = engine.get_rules_sorted().expect("list");
-        assert_eq!(rules.len(), 3);
-    }
-
-    #[test]
-    fn does_not_duplicate_on_second_call() {
-        let graph = MemoryGraph::in_memory().expect("graph");
-        let engine = RulesEngine::new(&graph);
-
-        load_defaults(&engine).expect("first load");
-        let count = load_defaults(&engine).expect("second load");
-        assert_eq!(count, 0);
-
-        let rules = engine.get_rules_sorted().expect("list");
-        assert_eq!(rules.len(), 3);
-    }
-
-    #[test]
-    fn skips_when_user_rules_exist() {
-        let graph = MemoryGraph::in_memory().expect("graph");
-        let engine = RulesEngine::new(&graph);
-
-        engine
-            .add_rule("custom rule", crate::rules::RuleSource::UserDefined)
-            .expect("add");
-
-        let count = load_defaults(&engine).expect("load");
-        assert_eq!(count, 0);
-
-        let rules = engine.get_rules_sorted().expect("list");
-        assert_eq!(rules.len(), 1);
-    }
 }

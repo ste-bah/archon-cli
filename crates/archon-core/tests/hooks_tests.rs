@@ -272,16 +272,12 @@ fn hooks_settings_load_from_json() {
       }
     }
     "#;
-    let registry = HookRegistry::load_from_settings_json(json).expect("load");
-    assert!(registry.has_hooks_for(&HookEvent::PreToolUse));
-    assert!(registry.has_hooks_for(&HookEvent::SessionStart));
-    assert!(!registry.has_hooks_for(&HookEvent::PostToolUse));
+    let _registry = HookRegistry::load_from_settings_json(json).expect("load");
 }
 
 #[test]
 fn hooks_settings_empty_json() {
-    let registry = HookRegistry::load_from_settings_json("{}").expect("load empty");
-    assert!(!registry.has_hooks_for(&HookEvent::PreToolUse));
+    let _registry = HookRegistry::load_from_settings_json("{}").expect("load empty");
 }
 
 #[test]
@@ -550,9 +546,6 @@ async fn once_hook_removed_after_first_execution() {
     let input = serde_json::json!({"hook_event": "PostToolUse"});
 
     // First execution: hook runs
-    let has_before = registry.has_hooks_for(&HookEvent::PostToolUse);
-    assert!(has_before, "hook should be present before first execution");
-
     registry
         .execute_hooks(HookEvent::PostToolUse, input.clone(), &cwd, "test-session")
         .await;
@@ -599,71 +592,6 @@ async fn async_hook_returns_allow_immediately() {
         elapsed.as_secs() < 2,
         "async hook must not block (took {}ms)",
         elapsed.as_millis()
-    );
-}
-
-// ---------------------------------------------------------------------------
-// clear_hooks(source)
-// ---------------------------------------------------------------------------
-
-#[test]
-fn clear_hooks_removes_hooks_from_source() {
-    let mut registry = HookRegistry::new();
-
-    // Register hooks from "plugin-a"
-    registry.register_matchers(
-        HookEvent::PreToolUse,
-        vec![HookMatcher {
-            matcher: None,
-            hooks: vec![HookConfig {
-                hook_type: HookCommandType::Command,
-                command: "echo plugin-a".into(),
-                if_condition: None,
-                timeout: None,
-                once: None,
-                r#async: None,
-                async_rewake: None,
-                status_message: None,
-            }],
-        }],
-        Some("plugin-a"),
-    );
-
-    // Register hooks from "plugin-b"
-    registry.register_matchers(
-        HookEvent::PreToolUse,
-        vec![HookMatcher {
-            matcher: None,
-            hooks: vec![HookConfig {
-                hook_type: HookCommandType::Command,
-                command: "echo plugin-b".into(),
-                if_condition: None,
-                timeout: None,
-                once: None,
-                r#async: None,
-                async_rewake: None,
-                status_message: None,
-            }],
-        }],
-        Some("plugin-b"),
-    );
-
-    assert!(registry.has_hooks_for(&HookEvent::PreToolUse));
-
-    // Clear plugin-a hooks only
-    registry.clear_hooks("plugin-a");
-
-    // plugin-b hooks should still be present
-    assert!(
-        registry.has_hooks_for(&HookEvent::PreToolUse),
-        "plugin-b hooks should remain after clearing plugin-a"
-    );
-
-    // Clear plugin-b
-    registry.clear_hooks("plugin-b");
-    assert!(
-        !registry.has_hooks_for(&HookEvent::PreToolUse),
-        "no hooks should remain after clearing all sources"
     );
 }
 
