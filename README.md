@@ -21,7 +21,10 @@ A privacy-first, self-aware AI coding assistant written in Rust. Archon replaces
 - [Tools Reference](#tools-reference)
 - [Themes](#themes)
 - [Memory System](#memory-system)
+- [Memory Garden](#memory-garden)
 - [Consciousness System](#consciousness-system)
+- [Correction Tracking](#correction-tracking)
+- [Personality Persistence](#personality-persistence)
 - [Agent Loop](#agent-loop)
 - [Subagent Spawning](#subagent-spawning)
 - [Multi-Agent Teams](#multi-agent-teams)
@@ -52,9 +55,15 @@ A privacy-first, self-aware AI coding assistant written in Rust. Archon replaces
 | Feature | Claude Code | Archon |
 |---------|-------------|--------|
 | Telemetry | Yes | None |
-| Memory | Cloud | Local CozoDB graph |
+| Memory | Markdown files on disk | Local CozoDB graph with typed relationships |
+| Memory search | Contextual (LLM-based) | Hybrid BM25 keyword + vector cosine (HNSW) |
+| Memory consolidation | Auto-Dream (basic pruning) | 6-phase garden (decay, prune, dedup, merge, overflow, timestamp) |
+| Embeddings | None | fastembed local (768-dim) or OpenAI (1536-dim) |
+| Correction tracking | Saved as preferences | Auto-detected with 5 severity levels, rule reinforcement |
 | Personality | Fixed | Configurable (MBTI, Enneagram, traits) |
-| Behavioral rules | None | User-defined, persisted |
+| Personality persistence | None | Full cross-session snapshot (InnerVoice + rule scores + trends) |
+| Self-reflection | None | InnerVoice (confidence, energy, struggles, successes) |
+| Behavioral rules | CLAUDE.md only | Scored rules (0-100) with decay, reinforcement, trend tracking |
 | TUI | Basic | Full ratatui TUI with 22 themes |
 | Session resume | ID only | ID prefix, name, or name prefix |
 | Tool execution | Node.js | Native Rust async |
@@ -90,33 +99,50 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                        archon (binary)                       │
-│                                                              │
-│  ┌───────────┐  ┌────────────────┐  ┌─────────────────────┐ │
-│  │ archon-tui│  │  archon-core   │  │ archon-consciousness │ │
-│  │  (ratatui)│  │ agent / tools  │  │ rules / personality  │ │
-│  └─────┬─────┘  └───────┬────────┘  └──────────┬──────────┘ │
-│        │                │                        │            │
-│        └────────────────┴────────────────────────┘            │
-│                         │                                      │
-│  ┌──────────────┐  ┌────┴──────────┐  ┌────────────────────┐ │
-│  │archon-session│  │ archon-memory │  │    archon-llm      │ │
-│  │ (CozoDB)     │  │ (CozoDB graph)│  │ (Claude API proxy) │ │
-│  └──────────────┘  └───────────────┘  └────────────────────┘ │
-│                                                              │
-│  ┌──────────────┐  ┌───────────────┐  ┌────────────────────┐ │
-│  │ archon-mcp   │  │archon-permis- │  │ archon-tools       │ │
-│  │ (stdio/ws/   │  │sions          │  │ (40+ tools)        │ │
-│  │  http-stream)│  │               │  │                    │ │
-│  └──────────────┘  └───────────────┘  └────────────────────┘ │
-│                                                              │
-│  ┌──────────────┐  ┌───────────────┐  ┌────────────────────┐ │
-│  │archon-plugin │  │ archon-sdk    │  │   archon-context   │ │
-│  │(dyn loading) │  │ (embedding)   │  │   (compaction)     │ │
-│  └──────────────┘  └───────────────┘  └────────────────────┘ │
-└─────────────────────────────────────────────────────────────┘
+```mermaid
+graph TB
+    subgraph binary["archon (binary)"]
+        direction TB
+        subgraph top["User-Facing Layer"]
+            TUI["archon-tui<br/>(ratatui)"]
+            CORE["archon-core<br/>agent / tools / skills"]
+            CONSC["archon-consciousness<br/>rules / personality / persistence"]
+        end
+        subgraph mid["Data & API Layer"]
+            SESSION["archon-session<br/>(CozoDB)"]
+            MEMORY["archon-memory<br/>(CozoDB graph + embeddings)"]
+            LLM["archon-llm<br/>(Claude API proxy)"]
+        end
+        subgraph bottom["Integration Layer"]
+            MCP["archon-mcp<br/>(stdio / ws / http-stream)"]
+            PERMS["archon-permissions"]
+            TOOLS["archon-tools<br/>(40+ tools)"]
+        end
+        subgraph infra["Infrastructure Layer"]
+            PLUGIN["archon-plugin<br/>(dyn loading)"]
+            SDK["archon-sdk<br/>(embedding / IDE)"]
+            CTX["archon-context<br/>(compaction)"]
+        end
+    end
+
+    TUI --> CORE
+    CORE --> CONSC
+    CORE --> MEMORY
+    CORE --> LLM
+    CORE --> TOOLS
+    CORE --> SESSION
+    CONSC --> MEMORY
+    TOOLS --> MCP
+    TOOLS --> PERMS
+    CORE --> CTX
+    CORE --> PLUGIN
+    SDK --> CORE
+
+    style binary fill:#1a1a2e,stroke:#16213e,color:#e0e0e0
+    style top fill:#0f3460,stroke:#533483,color:#e0e0e0
+    style mid fill:#16213e,stroke:#533483,color:#e0e0e0
+    style bottom fill:#1a1a2e,stroke:#533483,color:#e0e0e0
+    style infra fill:#0a0a1a,stroke:#533483,color:#e0e0e0
 ```
 
 ---
@@ -283,6 +309,8 @@ communication_style = "terse"         # Injected into system prompt
 [consciousness]
 inner_voice = true                    # Background monologue before responses
 energy_decay_rate = 0.02
+persist_personality = true            # Persist InnerVoice + rule scores across sessions
+personality_history_limit = 50        # Max personality snapshots to retain
 initial_rules = [
     "Always ask before modifying files",
     "Explain reasoning before acting",
@@ -303,6 +331,16 @@ sandbox = false                       # Read-only enforcement
 
 [memory]
 enabled = true                        # CozoDB memory graph
+
+[memory.garden]
+auto_consolidate = true               # Run consolidation on session start
+min_hours_between_runs = 24           # Throttle auto-consolidation
+dedup_similarity_threshold = 0.92     # Jaccard threshold for deduplication
+staleness_days = 30                   # Days without access before stale
+staleness_importance_floor = 0.3      # Stale memories below this are pruned
+importance_decay_per_day = 0.01       # Daily importance reduction for unaccessed
+max_memories = 5000                   # Hard cap (lowest importance pruned)
+briefing_limit = 15                   # Top-N memories in session briefing
 
 [context]
 compact_threshold = 0.8               # Context fill % that triggers compaction
@@ -514,6 +552,8 @@ All slash commands work in the interactive TUI. Type `/help` to see them in-app.
 | `/add-dir <PATH>` | Add working directory for file access |
 | `/agents` | List agent definitions from `.archon/agents/` |
 | `/recall <QUERY>` | Search memories by keyword |
+| `/garden` | Run memory consolidation now, print report |
+| `/garden stats` | Show memory distribution by type, staleness, top-N |
 | `/tasks` | List and manage background tasks |
 
 ### Configuration
@@ -686,39 +726,42 @@ Tools are callable by the LLM during agent turns. 40+ built-in tools across 10 c
 
 ## Memory System
 
-Unlike Claude Code which discards context between sessions, Archon persists facts, decisions, corrections, and patterns in a local CozoDB graph database.
+Unlike Claude Code which stores memories as markdown files, Archon persists knowledge in a local CozoDB graph database with typed nodes, relationship edges, vector embeddings, and hybrid search.
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    Memory Lifecycle                             │
-│                                                                  │
-│  TURN N                                                          │
-│  ┌─────────┐    ┌──────────────────┐    ┌──────────────────┐   │
-│  │  User   │───►│  MemoryInjector  │───►│  System Prompt   │   │
-│  │ Message │    │  (per-turn recall│    │  <memories>      │   │
-│  └─────────┘    │   from graph)    │    │  block injected  │   │
-│                 └──────────────────┘    └──────────────────┘   │
-│                                                  │               │
-│                                                  ▼               │
-│                                         ┌────────────────┐      │
-│                                         │  Claude API    │      │
-│                                         │  (response)    │      │
-│                                         └───────┬────────┘      │
-│                                                  │               │
-│  Every N turns  ◄────────────────────────────────┘               │
-│  ┌───────────────────────────────────────────────────────────┐  │
-│  │  Auto-Extraction (background tokio task)                  │  │
-│  │  LLM reads recent turns → extracts Facts/Decisions/       │  │
-│  │  Preferences/Rules/Corrections/Patterns                   │  │
-│  │  → store_memory() → CozoDB                               │  │
-│  └───────────────────────────────────────────────────────────┘  │
-│                                                                   │
-│  AGENT TOOLS (callable by LLM)                                   │
-│  ┌──────────────────┐    ┌───────────────────────────────────┐  │
-│  │  memory_store    │    │  memory_recall                    │  │
-│  │  (explicit save) │    │  (semantic search by keyword)     │  │
-│  └──────────────────┘    └───────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+graph LR
+    subgraph turn["Every Turn"]
+        USER["User Message"] --> INJECT["MemoryInjector<br/>keyword recall from graph"]
+        INJECT --> PROMPT["System Prompt<br/>&lt;memories&gt; block<br/>&lt;past_corrections&gt; block"]
+        PROMPT --> API["Claude API"]
+        API --> RESPONSE["Response"]
+    end
+
+    subgraph extract["Every N Turns (background)"]
+        RESPONSE -.-> EXTRACT["Auto-Extraction<br/>LLM reads recent turns"]
+        EXTRACT --> STORE["store_memory()<br/>CozoDB"]
+    end
+
+    subgraph tools["Agent Tools (callable by LLM)"]
+        MS["memory_store<br/>(explicit save)"]
+        MR["memory_recall<br/>(semantic search)"]
+    end
+
+    MS --> STORE
+    MR --> INJECT
+
+    subgraph garden["Session Start"]
+        CONSOLIDATE["Memory Garden<br/>6-phase consolidation"]
+        BRIEFING["&lt;memory_briefing&gt;<br/>top-N by importance"]
+    end
+
+    CONSOLIDATE --> STORE
+    BRIEFING --> PROMPT
+
+    style turn fill:#0f3460,stroke:#533483,color:#e0e0e0
+    style extract fill:#16213e,stroke:#533483,color:#e0e0e0
+    style tools fill:#1a1a2e,stroke:#533483,color:#e0e0e0
+    style garden fill:#1a1a2e,stroke:#e94560,color:#e0e0e0
 ```
 
 ### Memory Types
@@ -728,16 +771,87 @@ Unlike Claude Code which discards context between sessions, Archon persists fact
 | `Fact` | Objective info learned about the codebase or user |
 | `Decision` | Architecture/design choices made |
 | `Preference` | User preferences about style, tools, workflow |
-| `Rule` | Behavioral constraints |
-| `Correction` | Things the assistant got wrong and shouldn't repeat |
+| `Rule` | Behavioral constraints (scored 0-100, with decay + reinforcement) |
+| `Correction` | Things the assistant got wrong, with severity level |
 | `Pattern` | Recurring code patterns observed |
+| `PersonalitySnapshot` | Cross-session InnerVoice + rule scores + session stats |
+
+### Relationship Types
+
+Memory nodes are connected by typed edges enabling graph traversal:
+
+| RelType | Meaning |
+|---------|---------|
+| `RelatedTo` | Generic association between memories |
+| `CausedBy` | A caused B (corrections causing rule creation) |
+| `Contradicts` | Semantic opposition between memories |
+| `Supersedes` | B replaces A (created during deduplication) |
+| `DerivedFrom` | B was derived from A |
 
 ### Storage
 
 - **Database**: CozoDB (Datalog, SQLite WAL backend)
 - **Path**: `~/.local/share/archon/memory.db` (Linux/macOS) or `%APPDATA%\archon\memory.db` (Windows)
-- **Embeddings**: fastembed (local, no network calls)
-- **Search**: Hybrid, keyword BM25 + vector cosine similarity
+- **Embeddings**: fastembed (local BGE-base-en-v1.5, 768-dim, no network calls) or OpenAI (1536-dim)
+- **Vector index**: HNSW (m=50, ef_construction=200, cosine distance)
+- **Search**: Hybrid keyword BM25 + vector cosine similarity (configurable alpha blend)
+- **Access tracking**: Every `get_memory()` bumps `access_count` and `last_accessed` (used by garden decay/pruning)
+
+---
+
+## Memory Garden
+
+Autonomous memory consolidation that prevents unbounded graph growth. Runs automatically on session start (if >24h since last run) or manually via `/garden`.
+
+```mermaid
+graph TD
+    START["Session Start<br/>(or /garden command)"] --> CHECK{"Last run<br/>> min_hours ago?"}
+    CHECK -- Yes --> P1
+    CHECK -- No --> SKIP["Skip consolidation"]
+
+    P1["Phase 1: Importance Decay<br/>importance -= days_since_access x rate"] --> P2
+    P2["Phase 2: Staleness Prune<br/>delete if last_accessed > 30d AND importance < 0.3"] --> P3
+    P3["Phase 3: Deduplication<br/>Jaccard similarity > 0.92 → merge + Supersedes edge"] --> P4
+    P4["Phase 4: Fragment Merge<br/>Related memories with same type → combine"] --> P5
+    P5["Phase 5: Overflow Prune<br/>if count > max_memories, delete lowest importance"] --> P6
+    P6["Phase 6: Record Timestamp<br/>store garden:last_run tag"] --> REPORT
+
+    REPORT["GardenReport<br/>merged / pruned / decayed counts"]
+    REPORT --> BRIEFING["Generate &lt;memory_briefing&gt;<br/>top-N memories by importance"]
+
+    style P1 fill:#16213e,stroke:#533483,color:#e0e0e0
+    style P2 fill:#16213e,stroke:#e94560,color:#e0e0e0
+    style P3 fill:#16213e,stroke:#533483,color:#e0e0e0
+    style P4 fill:#16213e,stroke:#533483,color:#e0e0e0
+    style P5 fill:#16213e,stroke:#e94560,color:#e0e0e0
+    style P6 fill:#16213e,stroke:#533483,color:#e0e0e0
+```
+
+### Protected Types
+
+`Rule` and `PersonalitySnapshot` memories are **never** decayed, pruned, deduplicated, or overflow-deleted. Only pruneable types (Fact, Decision, Correction, Pattern, Preference) are affected.
+
+### Commands
+
+| Command | Action |
+|---------|--------|
+| `/garden` | Run all 6 consolidation phases now, print report |
+| `/garden stats` | Show memory count by type, staleness distribution, top-N by importance |
+
+### Session Briefing
+
+On first turn, the system prompt receives a `<memory_briefing>` block:
+
+```xml
+<memory_briefing>
+Memory graph: 847 memories (342 facts, 45 decisions, 67 corrections, ...)
+Last consolidated: 2 hours ago (merged 3, pruned 12)
+Key memories:
+- [decision] Use CozoDB for memory, SQLite for sessions (importance: 0.95)
+- [correction] Never skip Sherlock reviews (importance: 0.92, accessed 47 times)
+- [pattern] User prefers bundled PRs for refactors (importance: 0.88)
+</memory_briefing>
+```
 
 ---
 
@@ -745,70 +859,166 @@ Unlike Claude Code which discards context between sessions, Archon persists fact
 
 Assembles the system prompt from multiple sources before each API call.
 
+```mermaid
+graph TD
+    CONFIG["config.toml<br/>[personality] + [consciousness]"] --> |"name, MBTI, traits, style"| ASSEMBLY
+    RULES["RulesEngine<br/>(CozoDB, scored 0-100)"] --> |"&lt;behavioral_rules&gt; block"| ASSEMBLY
+    MEMORY["MemoryInjector<br/>(CozoDB graph)"] --> |"&lt;memories&gt; block<br/>(per-turn recall)"| ASSEMBLY
+    CORRECTIONS["CorrectionTracker<br/>(CozoDB)"] --> |"&lt;past_corrections&gt; block"| ASSEMBLY
+    VOICE["InnerVoice<br/>(confidence, energy, struggles)"] --> |"&lt;inner_voice&gt; block"| ASSEMBLY
+    PBRIEFING["Personality Briefing<br/>(first turn only)"] --> |"&lt;personality_briefing&gt;"| ASSEMBLY
+    MBRIEFING["Memory Briefing<br/>(first turn only)"] --> |"&lt;memory_briefing&gt;"| ASSEMBLY
+
+    ASSEMBLY["System Prompt Assembly"] --> FINAL["Final System Prompt<br/>sent to Claude API"]
+
+    style ASSEMBLY fill:#0f3460,stroke:#e94560,color:#e0e0e0
+    style FINAL fill:#16213e,stroke:#533483,color:#e0e0e0
+    style VOICE fill:#1a1a2e,stroke:#e94560,color:#e0e0e0
+    style CORRECTIONS fill:#1a1a2e,stroke:#e94560,color:#e0e0e0
+    style PBRIEFING fill:#1a1a2e,stroke:#e94560,color:#e0e0e0
+    style MBRIEFING fill:#1a1a2e,stroke:#e94560,color:#e0e0e0
 ```
-┌────────────────────────────────────────────────────────────────┐
-│                  System Prompt Assembly                        │
-│                                                                │
-│  config.toml                                                   │
-│  ┌────────────────────┐                                        │
-│  │ [personality]      │──► name, MBTI, traits, style           │
-│  │ [consciousness]    │──► inner_voice, initial_rules           │
-│  └────────────────────┘          │                            │
-│                                  ▼                            │
-│  CozoDB rules graph              │                            │
-│  ┌────────────────────┐          │                            │
-│  │ RulesEngine        │──► <behavioral_rules> block            │
-│  │ (persisted rules)  │          │                            │
-│  └────────────────────┘          │                            │
-│                                  ▼                            │
-│  CozoDB memory graph             │                            │
-│  ┌────────────────────┐          │                            │
-│  │ MemoryInjector     │──► <memories> block (per-turn recall) │
-│  └────────────────────┘          │                            │
-│                                  ▼                            │
-│  InnerVoice (if enabled)         │                            │
-│  ┌────────────────────┐          │                            │
-│  │ Background monolog │──► prepended to assistant response    │
-│  └────────────────────┘          │                            │
-│                                  ▼                            │
-│                         ┌────────────────┐                    │
-│                         │  Final System  │                    │
-│                         │  Prompt sent   │                    │
-│                         │  to Claude API │                    │
-│                         └────────────────┘                    │
-└────────────────────────────────────────────────────────────────┘
-```
+
+### InnerVoice
+
+When `consciousness.inner_voice = true`, Archon tracks internal state that evolves with each turn:
+
+| Field | Description | Update Trigger |
+|-------|-------------|----------------|
+| `confidence` | 0.0-1.0, starts at 0.7 | +0.02 on tool success, -0.05 on failure, -0.10 on correction |
+| `energy` | 0.0-1.0, starts at 1.0 | Decays by `energy_decay_rate` each turn |
+| `struggles` | Tools with 3+ consecutive failures | Accumulated during session |
+| `successes` | Tools with consistent success | Accumulated during session |
+| `corrections_received` | Count of user corrections | Incremented on detection |
+
+The `<inner_voice>` block is injected into every system prompt, giving the agent self-awareness of its own performance trajectory.
 
 ### Configuring Rules
 
 Rules in `config.toml` under `[consciousness].initial_rules` are seeded into CozoDB on startup, idempotently. Adding a new rule injects it on next run without duplicating. The LLM can also create rules dynamically using `memory_store` with `memory_type = "Rule"`.
 
+Rules are scored 0-100. Scores increase when a user correction triggers reinforcement (+5.0 per correction, scaled by severity). Scores decrease via periodic decay (every 50 turns). High-scoring rules appear first in the `<behavioral_rules>` prompt block.
+
+---
+
+## Correction Tracking
+
+Archon automatically detects user corrections from message patterns and records them as `MemoryType::Correction` nodes with severity-based scoring.
+
+```mermaid
+graph LR
+    USER["User message:<br/>'No, don't do that'"] --> DETECT["CorrectionTracker<br/>pattern matching"]
+    DETECT --> |"Severity classified"| RECORD["Store Correction<br/>(CozoDB)"]
+    RECORD --> RULE["Create/Reinforce<br/>Behavioral Rule"]
+    RULE --> |"+score x multiplier"| RULES["RulesEngine<br/>(score 0-100)"]
+    DETECT --> VOICE["InnerVoice<br/>confidence -= 0.10"]
+
+    style DETECT fill:#0f3460,stroke:#e94560,color:#e0e0e0
+    style RULE fill:#16213e,stroke:#e94560,color:#e0e0e0
+```
+
+### Severity Levels
+
+| Type | Triggers | Multiplier | Example |
+|------|----------|------------|---------|
+| `FactualError` | "no", "wrong", "that's wrong" | 1.5x | "No, the endpoint returns JSON" |
+| `ApproachCorrection` | "instead", "should have", "better approach" | 2.0x | "You should have used async instead" |
+| `RepeatedInstruction` | "i said", "i already told you" | 3.0x | "I already told you not to do that" |
+| `DidForbiddenAction` | "don't", "do not", "stop", "never do that" | 4.0x | "Don't modify files without asking" |
+| `ActedWithoutPermission` | "didn't ask", "without permission" | 5.0x | "You didn't ask before running that" |
+
+Each correction boosts the associated rule's score by `multiplier x 5.0` (clamped at 100). Past corrections relevant to the current context are recalled every turn and injected as a `<past_corrections>` block.
+
+---
+
+## Personality Persistence
+
+Archon persists its consciousness state across sessions, enabling cross-session learning and behavioral evolution.
+
+```mermaid
+graph TD
+    subgraph session_end["Session End (/exit or /clear)"]
+        VOICE_STATE["InnerVoice State<br/>confidence, energy, struggles"] --> SNAPSHOT
+        RULE_SCORES["Rule Scores<br/>export_scores()"] --> SNAPSHOT
+        STATS["Session Stats<br/>turns, corrections, duration"] --> SNAPSHOT
+        SNAPSHOT["PersonalitySnapshot<br/>(serialized to CozoDB)"]
+        SNAPSHOT --> PRUNE["Prune oldest<br/>keep last 50"]
+    end
+
+    subgraph session_start["Next Session Start"]
+        LOAD["Load latest snapshot"] --> RESTORE_VOICE["Restore InnerVoice<br/>from_snapshot()"]
+        LOAD --> RESTORE_RULES["Restore rule scores<br/>import_scores()"]
+        LOAD --> TRENDS["Compute Trends<br/>across last N sessions"]
+        TRENDS --> BRIEFING["&lt;personality_briefing&gt;<br/>injected on first turn"]
+    end
+
+    SNAPSHOT -.-> LOAD
+
+    style session_end fill:#16213e,stroke:#e94560,color:#e0e0e0
+    style session_start fill:#0f3460,stroke:#533483,color:#e0e0e0
+```
+
+### What Persists
+
+| State | Across Sessions | Details |
+|-------|----------------|---------|
+| InnerVoice confidence | Yes | Restored from last session's final value |
+| InnerVoice energy | Yes | Restored from snapshot |
+| Struggles & successes | Yes | Carried forward as starting context |
+| Rule scores | Yes | A rule reinforced to 85 starts at 85 next session |
+| Correction count | Yes | Cumulative across sessions |
+
+### Trend Tracking
+
+Computed from the last N personality snapshots (default: 50):
+
+- **Average confidence** across recent sessions
+- **Correction rate** trend (Rising / Falling / Stable)
+- **Persistent struggles** (areas appearing in 2+ sessions)
+- **Reliable successes** (consistently successful areas)
+
+### Session-Start Briefing
+
+```xml
+<personality_briefing>
+Sessions: 47 total
+Last session: confidence 0.7 -> 0.4 (3 corrections in "shell execution")
+Trend: correction rate falling (improving), confidence rising over last 10 sessions
+Persistent struggles: shell execution (12 sessions), file path handling (8 sessions)
+Reliable strengths: code generation (41 sessions), test writing (38 sessions)
+Top reinforced rules: "Always ask before modifying files" (score: 92)
+</personality_briefing>
+```
+
+Disable with `persist_personality = false` in `[consciousness]` config.
+
 ---
 
 ## Agent Loop
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                      Agent Loop                                 │
-│                                                                  │
-│   1. User Input (TUI or stdin)                                   │
-│   2. Context Assembly                                            │
-│      - inject behavioral_rules from RulesEngine                  │
-│      - inject memories from MemoryInjector                       │
-│      - attach conversation history                               │
-│   3. Claude API Call (streaming SSE)                             │
-│      - extended thinking if effort = "high"                      │
-│      - renders thinking dots in TUI while streaming              │
-│   4. Response dispatch:                                          │
-│      - text response  → render TUI                               │
-│      - tool_use block → dispatch to tool handler                 │
-│         ↓                                                         │
-│      Tool Execution (Bash/Read/Write/Agent/...)                  │
-│         ↓                                                         │
-│      tool_result → append → loop to step 3                       │
-│                                                                   │
-│   After N turns: trigger_memory_extraction (background task)     │
-└───────────────────────────────────────────────────────────────────┘
+```mermaid
+graph TD
+    INPUT["1. User Input<br/>(TUI or stdin)"] --> ASSEMBLY["2. Context Assembly<br/>+ behavioral_rules<br/>+ memories<br/>+ past_corrections<br/>+ inner_voice<br/>+ conversation history"]
+    ASSEMBLY --> API["3. Claude API Call<br/>(streaming SSE)<br/>extended thinking if effort=high"]
+    API --> DISPATCH{"4. Response<br/>dispatch"}
+    DISPATCH --> |"text response"| RENDER["Render in TUI"]
+    DISPATCH --> |"tool_use block"| TOOL["Tool Execution<br/>(Bash/Read/Write/Agent/...)"]
+    TOOL --> RESULT["tool_result → append"]
+    RESULT --> API
+
+    RENDER --> UPDATE["Update InnerVoice<br/>(success/failure tracking)"]
+    UPDATE --> CORRECTION{"Detect user<br/>correction?"}
+    CORRECTION --> |Yes| RECORD["Record correction<br/>+ reinforce rule<br/>+ confidence -= 0.10"]
+    CORRECTION --> |No| EXTRACT{"Every N<br/>turns?"}
+    RECORD --> EXTRACT
+    EXTRACT --> |Yes| EXTRACTION["Auto-Extraction<br/>(background tokio task)"]
+    EXTRACT --> |No| INPUT
+
+    style INPUT fill:#0f3460,stroke:#533483,color:#e0e0e0
+    style ASSEMBLY fill:#16213e,stroke:#533483,color:#e0e0e0
+    style API fill:#16213e,stroke:#e94560,color:#e0e0e0
+    style TOOL fill:#1a1a2e,stroke:#533483,color:#e0e0e0
+    style RECORD fill:#1a1a2e,stroke:#e94560,color:#e0e0e0
 ```
 
 ---
@@ -817,34 +1027,23 @@ Rules in `config.toml` under `[consciousness].initial_rules` are seeded into Coz
 
 The `Agent` tool enables the main agent to spawn child agents for parallel or delegated work. Each subagent is a fully isolated `archon-core` instance with its own conversation context.
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    Subagent Spawning                            │
-│                                                                  │
-│  Parent Agent                                                    │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │  LLM emits: tool_use { name: "Agent", input: { ... } }  │   │
-│  └──────────────────────────┬─────────────────────────────┘    │
-│                              │                                    │
-│                              ▼                                    │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │  agent_tool.rs dispatches spawn                          │   │
-│  │  Reads subagent_type → looks up skill/prompt template    │   │
-│  └──────────────────┬──────────────────────────────────────┘    │
-│                      │                                            │
-│          ┌───────────┼───────────┐                               │
-│          ▼           ▼           ▼                                │
-│  ┌─────────────┐ ┌──────────┐ ┌──────────┐                      │
-│  │  Child 1    │ │ Child 2  │ │ Child 3  │  (parallel if        │
-│  │  archon-core│ │archon-   │ │archon-   │   max_concurrency    │
-│  │  instance   │ │core inst.│ │core inst.│   allows)            │
-│  └──────┬──────┘ └────┬─────┘ └────┬─────┘                      │
-│         │              │             │                             │
-│         └──────────────┴─────────────┘                           │
-│                         ▼                                         │
-│  Results gathered → tool_result appended to parent ctx           │
-│  Parent continues its agent loop with results in hand            │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+graph TD
+    PARENT["Parent Agent<br/>LLM emits: tool_use { name: Agent }"] --> DISPATCH["agent_tool.rs<br/>reads subagent_type → looks up prompt template"]
+    DISPATCH --> C1["Child 1<br/>archon-core instance"]
+    DISPATCH --> C2["Child 2<br/>archon-core instance"]
+    DISPATCH --> C3["Child 3<br/>archon-core instance"]
+
+    C1 --> GATHER["Results gathered"]
+    C2 --> GATHER
+    C3 --> GATHER
+    GATHER --> PARENT_CTX["tool_result appended to parent context<br/>Parent continues agent loop"]
+
+    style PARENT fill:#0f3460,stroke:#533483,color:#e0e0e0
+    style DISPATCH fill:#16213e,stroke:#533483,color:#e0e0e0
+    style C1 fill:#1a1a2e,stroke:#e94560,color:#e0e0e0
+    style C2 fill:#1a1a2e,stroke:#e94560,color:#e0e0e0
+    style C3 fill:#1a1a2e,stroke:#e94560,color:#e0e0e0
 ```
 
 Subagents have access to the same tool set as the parent but run in isolated task contexts managed by `archon-tools/src/task_manager.rs`. Use `SendMessage` to continue a subagent with follow-up instructions (its context is preserved).
@@ -1422,18 +1621,23 @@ archon (binary)
 │   ├── transport_ws.rs  WebSocket with backoff + sleep detection
 │   └── config.rs        .mcp.json parsing + env expansion
 │
-├── archon-consciousness System prompt assembly
+├── archon-consciousness System prompt assembly + cross-session learning
 │   ├── personality.rs   MBTI/Enneagram → prompt fragment
-│   ├── rules.rs         RulesEngine (CozoDB)
+│   ├── rules.rs         RulesEngine (scored rules, decay, reinforcement)
+│   ├── corrections.rs   CorrectionTracker (5 severity levels, auto-detect)
+│   ├── persistence.rs   Cross-session snapshots, trends, briefing
 │   ├── defaults.rs      Idempotent rule seeding
-│   └── inner_voice.rs   Background monologue
+│   ├── inner_voice.rs   Confidence, energy, struggles, successes
+│   └── assembler.rs     System prompt assembly (7 sources)
 │
-├── archon-memory        CozoDB memory graph
-│   ├── graph.rs         store / recall / search
+├── archon-memory        CozoDB memory graph + consolidation
+│   ├── graph.rs         store / recall / search / relationships
 │   ├── injection.rs     Per-turn <memories> block
 │   ├── extraction.rs    Auto-extraction pipeline
-│   ├── embedding/       fastembed local embeddings
-│   └── hybrid_search.rs BM25 + vector cosine
+│   ├── garden.rs        6-phase consolidation, briefing, /garden command
+│   ├── embedding/       fastembed local embeddings (BGE-base-en-v1.5)
+│   ├── vector_search.rs HNSW cosine similarity
+│   └── hybrid_search.rs BM25 + vector cosine (alpha-blended)
 │
 ├── archon-session       Session + checkpoint + plan persistence
 │   ├── storage.rs       Session save/load/list/prefix-match
@@ -1488,7 +1692,7 @@ archon (binary)
 | **Phase 2**, Consciousness | ✅ Complete | Memory graph (CozoDB), auto-extraction, per-turn injection, rules engine, personality config, inner voice |
 | **Phase 3**, UX & Ergonomics | ✅ Complete | 22 themes, MBTI themes, resume by name/prefix, `/color` and `/theme` commands, memory tools wired |
 | **Phase 4**, Plugins & Skills | ✅ Complete | Plugin system (`archon-plugin`), user-defined slash commands, skill system, hook extensibility |
-| **Phase 5**, Multi-Agent | ✅ Complete | Subagent orchestration, team execution modes, MCP transport, LSP client, WebSocket remote, cross-session memory |
+| **Phase 5**, Multi-Agent & Learning | ✅ Complete | Subagent orchestration, team execution, MCP transport, LSP client, WebSocket remote, personality persistence (cross-session InnerVoice + rule scores + trends), memory garden (6-phase consolidation + `/garden` command), correction tracking with severity-based rule reinforcement |
 
 ---
 
