@@ -85,6 +85,7 @@ pub fn is_tool_allowed_in_mode(tool_name: &str, mode: AgentMode) -> bool {
                     | "TaskUpdate"
                     | "TaskGet"
                     | "TaskList"
+                    | "Agent"
             )
         }
     }

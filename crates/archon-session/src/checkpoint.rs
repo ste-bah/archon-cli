@@ -24,6 +24,13 @@ fn db_err(e: impl std::fmt::Display) -> CheckpointError {
     CheckpointError::DbError(e.to_string())
 }
 
+#[cfg(unix)]
+fn secure_file_permissions(path: &std::path::Path) -> Result<(), std::io::Error> {
+    use std::os::unix::fs::PermissionsExt;
+    let perms = std::fs::Permissions::from_mode(0o600);
+    std::fs::set_permissions(path, perms)
+}
+
 fn empty_rows() -> NamedRows {
     NamedRows::new(vec![], vec![])
 }
@@ -85,6 +92,9 @@ impl CheckpointStore {
 
         let path_str = path.to_string_lossy().to_string();
         let db = DbInstance::new("sqlite", &path_str, "").map_err(db_err)?;
+
+        #[cfg(unix)]
+        secure_file_permissions(path)?;
 
         let store = Self { db, max_snapshots };
         store.init_schema()?;
@@ -297,6 +307,75 @@ impl CheckpointStore {
         Ok(String::from_utf8_lossy(&content_bytes).into_owned())
     }
 
+    /// Generate a unified diff between a checkpoint snapshot and the current file content.
+    /// Returns the diff as a string (empty if files are identical).
+    pub fn diff(
+        &self,
+        session_id: &str,
+        file_path: &str,
+        turn_number: i64,
+    ) -> Result<String, CheckpointError> {
+        let snapshot_content = self.get_content(session_id, file_path, turn_number)?;
+        let current_content = fs::read_to_string(file_path).unwrap_or_default();
+        Ok(generate_unified_diff(
+            file_path,
+            &snapshot_content,
+            &current_content,
+        ))
+    }
+
+    /// Restore a file to a specific turn's snapshot (not just the latest).
+    pub fn restore_to_turn(
+        &self,
+        session_id: &str,
+        file_path: &str,
+        turn_number: i64,
+    ) -> Result<(), CheckpointError> {
+        let mut params = BTreeMap::new();
+        params.insert("sid".to_string(), DataValue::from(session_id));
+        params.insert("fp".to_string(), DataValue::from(file_path));
+        params.insert("turn".to_string(), DataValue::from(turn_number));
+
+        let result = self
+            .db
+            .run_script(
+                "?[original_content, file_existed] :=
+                    *checkpoints{session_id, file_path, turn_number, original_content, file_existed},
+                    session_id = $sid, file_path = $fp, turn_number = $turn",
+                params,
+                ScriptMutability::Immutable,
+            )
+            .map_err(db_err)?;
+
+        if result.rows.is_empty() {
+            return Err(CheckpointError::NotFound(format!(
+                "{file_path} at turn {turn_number}"
+            )));
+        }
+
+        let row = &result.rows[0];
+        let content = extract_bytes(&row[0]);
+        let existed = extract_bool_from_int(&row[1]);
+
+        let target = Path::new(file_path);
+        if existed {
+            if let Some(data) = content
+                && !data.is_empty()
+            {
+                if let Some(parent) = target.parent() {
+                    fs::create_dir_all(parent)?;
+                }
+                fs::write(target, data)?;
+            }
+        } else {
+            if target.exists() {
+                fs::remove_file(target)?;
+            }
+        }
+
+        Ok(())
+    }
+
     /// Evict oldest snapshots when the session exceeds `max_snapshots`.
     fn evict(&self, session_id: &str) -> Result<(), CheckpointError> {
         let mut params = BTreeMap::new();
@@ -356,6 +435,92 @@ impl CheckpointStore {
 
         Ok(())
     }
+}
+
+// ---------------------------------------------------------------------------
+// Unified diff helpers (no external crate needed)
+// ---------------------------------------------------------------------------
+
+/// Generate a simple unified diff between two strings.
+fn generate_unified_diff(filename: &str, old: &str, new: &str) -> String {
+    if old == new {
+        return String::new();
+    }
+
+    let old_lines: Vec<&str> = old.lines().collect();
+    let new_lines: Vec<&str> = new.lines().collect();
+
+    let mut output = String::new();
+    output.push_str(&format!("--- a/{filename}\n"));
+    output.push_str(&format!("+++ b/{filename}\n"));
+    output.push_str(&format!(
+        "@@ -1,{} +1,{} @@\n",
+        old_lines.len(),
+        new_lines.len()
+    ));
+
+    let lcs = compute_lcs(&old_lines, &new_lines);
+    let mut oi = 0;
+    let mut ni = 0;
+    let mut li = 0;
+
+    while oi < old_lines.len() || ni < new_lines.len() {
+        if li < lcs.len()
+            && oi < old_lines.len()
+            && ni < new_lines.len()
+            && old_lines[oi] == lcs[li]
+            && new_lines[ni] == lcs[li]
+        {
+            output.push_str(&format!(" {}\n", old_lines[oi]));
+            oi += 1;
+            ni += 1;
+            li += 1;
+        } else {
+            if oi < old_lines.len() && (li >= lcs.len() || old_lines[oi] != lcs[li]) {
+                output.push_str(&format!("-{}\n", old_lines[oi]));
+                oi += 1;
+            }
+            if ni < new_lines.len() && (li >= lcs.len() || new_lines[ni] != lcs[li]) {
+                output.push_str(&format!("+{}\n", new_lines[ni]));
+                ni += 1;
+            }
+        }
+    }
+
+    output
+}
+
+fn compute_lcs<'a>(a: &[&'a str], b: &[&'a str]) -> Vec<&'a str> {
+    let m = a.len();
+    let n = b.len();
+    let mut dp = vec![vec![0usize; n + 1]; m + 1];
+
+    for i in 1..=m {
+        for j in 1..=n {
+            if a[i - 1] == b[j - 1] {
+                dp[i][j] = dp[i - 1][j - 1] + 1;
+            } else {
+                dp[i][j] = dp[i - 1][j].max(dp[i][j - 1]);
+            }
+        }
+    }
+
+    let mut result = Vec::new();
+    let mut i = m;
+    let mut j = n;
+    while i > 0 && j > 0 {
+        if a[i - 1] == b[j - 1] {
+            result.push(a[i - 1]);
+            i -= 1;
+            j -= 1;
+        } else if dp[i - 1][j] > dp[i][j - 1] {
+            i -= 1;
+        } else {
+            j -= 1;
+        }
+    }
+    result.reverse();
+    result
 }
 
 // ---------------------------------------------------------------------------
@@ -558,5 +723,66 @@ mod tests {
 
         store.restore("sess1", fp_str).expect("restore failed");
         assert_eq!(fs::read_to_string(&fp).expect("read failed"), "turn2");
+    }
+
+    #[test]
+    fn diff_shows_changes() {
+        let (dir, store) = temp_db();
+        let fp = dir.path().join("diff_test.txt");
+        fs::write(&fp, "line1\nline2\nline3\n").expect("write");
+        let fp_str = fp.to_str().expect("path");
+
+        store
+            .snapshot("sess1", fp_str, 1, "write")
+            .expect("snapshot");
+        fs::write(&fp, "line1\nmodified\nline3\n").expect("write");
+
+        let diff = store.diff("sess1", fp_str, 1).expect("diff");
+        assert!(diff.contains("-line2"), "diff should contain removed line");
+        assert!(
+            diff.contains("+modified"),
+            "diff should contain added line"
+        );
+    }
+
+    #[test]
+    fn diff_empty_when_unchanged() {
+        let (dir, store) = temp_db();
+        let fp = dir.path().join("same.txt");
+        fs::write(&fp, "same content\n").expect("write");
+        let fp_str = fp.to_str().expect("path");
+
+        store
+            .snapshot("sess1", fp_str, 1, "write")
+            .expect("snapshot");
+        // Don't modify the file
+
+        let diff = store.diff("sess1", fp_str, 1).expect("diff");
+        assert!(diff.is_empty(), "diff should be empty for unchanged file");
+    }
+
+    #[test]
+    fn restore_to_specific_turn() {
+        let (dir, store) = temp_db();
+        let fp = dir.path().join("turns.txt");
+
+        fs::write(&fp, "version1").expect("write");
+        let fp_str = fp.to_str().expect("path");
+        store
+            .snapshot("sess1", fp_str, 1, "write")
+            .expect("snapshot");
+
+        fs::write(&fp, "version2").expect("write");
+        store
+            .snapshot("sess1", fp_str, 2, "write")
+            .expect("snapshot");
+
+        fs::write(&fp, "version3").expect("write");
+
+        // Restore to turn 1 (should get "version1")
+        store
+            .restore_to_turn("sess1", fp_str, 1)
+            .expect("restore");
+        assert_eq!(fs::read_to_string(&fp).expect("read"), "version1");
     }
 }

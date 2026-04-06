@@ -2017,6 +2017,14 @@ async fn run_interactive_session(
         agent.set_checkpoint_store(store);
     }
 
+    // Wire plan store into agent — shares session DB for plan persistence
+    if let Ok(plan_store) = archon_session::plan::PlanStore::new(session_store.db()) {
+        agent.set_plan_store(plan_store);
+        tracing::info!("plan store wired into agent");
+    } else {
+        tracing::warn!("failed to initialize plan store");
+    }
+
     // GAP 5/7: Wire memory graph into agent — gated by config.memory.enabled (TASK-WIRE-002)
     if config.memory.enabled {
         agent.set_memory(Arc::clone(&memory));
@@ -2205,9 +2213,11 @@ async fn run_interactive_session(
                 // The TUI decides whether to display or accumulate the text.
                 AgentEvent::ThinkingDelta(text) => TuiEvent::ThinkingDelta(text),
                 AgentEvent::ToolCallStarted { name, id } => TuiEvent::ToolStart { name, id },
-                AgentEvent::ToolCallComplete { name, result, .. } => TuiEvent::ToolComplete {
+                AgentEvent::ToolCallComplete { name, id, result } => TuiEvent::ToolComplete {
                     name,
+                    id,
                     success: !result.is_error,
+                    output: result.content,
                 },
                 AgentEvent::TurnComplete {
                     input_tokens,

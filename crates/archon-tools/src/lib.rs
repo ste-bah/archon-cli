@@ -62,4 +62,4 @@ pub mod cartographer;
 // Stubs for tools implemented in later tasks
 pub mod agent {}
 pub mod notebook;
-pub mod web_search {}
+pub mod web_search;

@@ -19,6 +19,13 @@ pub enum LoggingError {
     SetupError(String),
 }
 
+#[cfg(unix)]
+fn secure_file_permissions(path: &std::path::Path) -> Result<(), std::io::Error> {
+    use std::os::unix::fs::PermissionsExt;
+    let perms = std::fs::Permissions::from_mode(0o600);
+    std::fs::set_permissions(path, perms)
+}
+
 // ---------------------------------------------------------------------------
 // Guard -- must be held for the lifetime of the application
 // ---------------------------------------------------------------------------
@@ -57,10 +64,14 @@ pub fn init_logging(
     fs::create_dir_all(log_dir)?;
 
     // Open log file for appending
+    let log_path = log_dir.join(format!("{session_id}.log"));
     let log_file = fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(log_dir.join(format!("{session_id}.log")))?;
+        .open(&log_path)?;
+
+    #[cfg(unix)]
+    secure_file_permissions(&log_path)?;
 
     // Non-blocking writer for the file
     let (file_writer, guard) = tracing_appender::non_blocking(log_file);

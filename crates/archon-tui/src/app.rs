@@ -18,11 +18,12 @@ use ratatui::widgets::{
 
 use crate::input::InputHandler;
 use crate::markdown::render_markdown_line;
-use crate::output::{OutputBuffer, ThinkingState};
+use crate::output::{OutputBuffer, ThinkingState, ToolOutputState};
 use crate::splash::{self, ActivityEntry};
 use crate::status::StatusBar;
 use crate::theme::{Theme, intj_theme};
 use crate::ultrathink;
+use crate::split_pane::SplitPaneManager;
 use crate::vim::{VimAction, VimState};
 
 /// Message from the agent loop to the TUI.
@@ -36,7 +37,9 @@ pub enum TuiEvent {
     },
     ToolComplete {
         name: String,
+        id: String,
         success: bool,
+        output: String,
     },
     TurnComplete {
         input_tokens: u64,
@@ -98,6 +101,8 @@ pub struct App {
     pub is_generating: bool,
     /// Currently running tool name (shown in status bar, not output).
     pub active_tool: Option<String>,
+    /// Collapsible tool output blocks for the current turn.
+    pub tool_outputs: Vec<ToolOutputState>,
     /// Whether to display thinking text (toggle with /thinking).
     pub show_thinking: bool,
     /// Timestamp of last Esc press for double-Esc cancel detection.
@@ -125,6 +130,8 @@ pub struct App {
     pub mcp_manager: Option<McpManager>,
     /// Vim keybinding state — Some when vim mode is active, None otherwise.
     pub vim_state: Option<VimState>,
+    /// Split pane layout and state manager.
+    pub panes: SplitPaneManager,
 }
 
 impl Default for App {
@@ -138,6 +145,7 @@ impl Default for App {
             should_quit: false,
             is_generating: false,
             active_tool: None,
+            tool_outputs: Vec::new(),
             show_thinking: false,
             last_esc: None,
             show_splash: true,
@@ -151,6 +159,7 @@ impl Default for App {
             session_picker: None,
             mcp_manager: None,
             vim_state: None,
+            panes: SplitPaneManager::new(),
         }
     }
 }
@@ -180,23 +189,39 @@ impl App {
         }
     }
 
-    pub fn on_tool_start(&mut self, name: &str, _id: &str) {
+    pub fn on_tool_start(&mut self, name: &str, id: &str) {
         if self.thinking.active {
             self.finish_thinking();
         }
         // Track active tool for status bar, but don't clutter the output.
         // is_generating is already set by GenerationStarted — not set here.
         self.active_tool = Some(name.to_string());
+        self.tool_outputs.push(ToolOutputState::new(name, id));
     }
 
-    pub fn on_tool_complete(&mut self, name: &str, success: bool) {
+    pub fn on_tool_complete(&mut self, name: &str, id: &str, success: bool, output: &str) {
         // Only clear active_tool if it matches the completing tool (guards against overlapping calls)
         if self.active_tool.as_deref() == Some(name) {
             self.active_tool = None;
         }
+        // Find the matching tool output and mark complete
+        if let Some(tool_state) = self.tool_outputs.iter_mut().rev().find(|t| t.tool_id == id) {
+            tool_state.complete(output, !success);
+        }
         if !success {
             // Only show tool failures — they're actionable information
             self.output.append_line(&format!("[tool] {name} failed"));
+        }
+    }
+
+    /// Toggle expand/collapse on the last tool output, or a specific one by index.
+    pub fn toggle_tool_output(&mut self, index: Option<usize>) {
+        if let Some(idx) = index {
+            if let Some(tool) = self.tool_outputs.get_mut(idx) {
+                tool.toggle_expand();
+            }
+        } else if let Some(tool) = self.tool_outputs.last_mut() {
+            tool.toggle_expand();
         }
     }
 
@@ -889,8 +914,8 @@ pub async fn run_tui(
                 TuiEvent::TextDelta(text) => app.on_text_delta(&text),
                 TuiEvent::ThinkingDelta(text) => app.on_thinking_delta(&text),
                 TuiEvent::ToolStart { name, id } => app.on_tool_start(&name, &id),
-                TuiEvent::ToolComplete { name, success } => {
-                    app.on_tool_complete(&name, success);
+                TuiEvent::ToolComplete { name, id, success, output } => {
+                    app.on_tool_complete(&name, &id, success, &output);
                 }
                 TuiEvent::TurnComplete {
                     input_tokens,
@@ -1275,6 +1300,22 @@ pub async fn run_tui(
                         } => {
                             crate::voice::pipeline::fire_trigger_for_hotkey();
                         }
+                        // Ctrl+\ = toggle split pane
+                        KeyEvent {
+                            code: KeyCode::Char('\\'),
+                            modifiers: KeyModifiers::CONTROL,
+                            ..
+                        } => {
+                            app.panes.toggle_split();
+                        }
+                        // Ctrl+W = switch pane focus
+                        KeyEvent {
+                            code: KeyCode::Char('w'),
+                            modifiers: KeyModifiers::CONTROL,
+                            ..
+                        } => {
+                            app.panes.switch_focus();
+                        }
                         // Page Up = scroll up
                         KeyEvent {
                             code: KeyCode::PageUp,
@@ -1528,17 +1569,20 @@ mod tests {
         assert!(app.is_generating);
         app.on_tool_start("Read", "tool-123");
         assert_eq!(app.active_tool.as_deref(), Some("Read"));
-        app.on_tool_complete("Read", true);
+        app.on_tool_complete("Read", "tool-123", true, "file contents here");
         assert!(app.active_tool.is_none());
         // Successful tool calls do NOT append to output (no noise)
         assert!(app.output.all_lines().is_empty());
+        // But the tool output state is tracked
+        assert_eq!(app.tool_outputs.len(), 1);
+        assert_eq!(app.tool_outputs[0].tool_name, "Read");
     }
 
     #[test]
     fn app_tool_failure_shows_in_output() {
         let mut app = App::new();
         app.on_tool_start("Bash", "tool-456");
-        app.on_tool_complete("Bash", false);
+        app.on_tool_complete("Bash", "tool-456", false, "command not found");
         // Failed tool calls DO show in output
         assert!(
             app.output

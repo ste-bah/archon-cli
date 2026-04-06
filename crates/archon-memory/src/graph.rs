@@ -16,6 +16,13 @@ fn db_err(e: impl std::fmt::Display) -> MemoryError {
     MemoryError::Database(e.to_string())
 }
 
+#[cfg(unix)]
+fn secure_file_permissions(path: &std::path::Path) -> Result<(), std::io::Error> {
+    use std::os::unix::fs::PermissionsExt;
+    let perms = std::fs::Permissions::from_mode(0o600);
+    std::fs::set_permissions(path, perms)
+}
+
 fn empty_rows() -> NamedRows {
     NamedRows::new(vec![], vec![])
 }
@@ -47,6 +54,10 @@ impl MemoryGraph {
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, MemoryError> {
         let path_str = path.as_ref().to_string_lossy().to_string();
         let db = DbInstance::new("sqlite", &path_str, "").map_err(db_err)?;
+
+        #[cfg(unix)]
+        secure_file_permissions(path.as_ref())?;
+
         let graph = Self {
             db,
             embedding_provider: RwLock::new(None),

@@ -171,18 +171,128 @@ expanded_skill!(
     RestoreSkill,
     "restore",
     "Restore file from checkpoint",
-    |args, _ctx| {
+    |args, ctx| {
+        let cp_path = dirs::data_dir()
+            .unwrap_or_else(|| std::path::PathBuf::from("."))
+            .join("archon")
+            .join("checkpoints.db");
+
+        let store = match archon_session::checkpoint::CheckpointStore::open(&cp_path) {
+            Ok(s) => s,
+            Err(e) => return SkillOutput::Error(format!("Failed to open checkpoint store: {e}")),
+        };
+
         if args.is_empty() {
-            return SkillOutput::Error(
-                "Usage: /restore <file> [checkpoint] — restore a file from a checkpoint"
-                    .to_string(),
-            );
+            // /restore — list modified files
+            match store.list_modified(&ctx.session_id) {
+                Ok(files) => {
+                    if files.is_empty() {
+                        return SkillOutput::Text(
+                            "No modified files in this session.".to_string(),
+                        );
+                    }
+                    let mut out = String::from("Modified files with checkpoints:\n\n");
+                    for f in &files {
+                        out.push_str(&format!(
+                            "  {} (turn {}, by {})\n",
+                            f.file_path, f.turn_number, f.tool_name
+                        ));
+                    }
+                    out.push_str("\nUsage:\n");
+                    out.push_str(
+                        "  /restore <file>         — show diff and restore to latest snapshot\n",
+                    );
+                    out.push_str(
+                        "  /restore <file> <turn>  — restore to specific turn\n",
+                    );
+                    out.push_str(
+                        "  /restore --all          — restore all files\n",
+                    );
+                    SkillOutput::Text(out)
+                }
+                Err(e) => SkillOutput::Error(format!("Failed to list checkpoints: {e}")),
+            }
+        } else if args[0] == "--all" {
+            // /restore --all
+            match store.list_modified(&ctx.session_id) {
+                Ok(files) => {
+                    let mut restored = 0;
+                    let mut errors = Vec::new();
+                    for f in &files {
+                        match store.restore(&ctx.session_id, &f.file_path) {
+                            Ok(()) => restored += 1,
+                            Err(e) => errors.push(format!("{}: {e}", f.file_path)),
+                        }
+                    }
+                    let mut out = format!("Restored {restored} file(s).");
+                    if !errors.is_empty() {
+                        out.push_str(&format!("\nErrors:\n  {}", errors.join("\n  ")));
+                    }
+                    SkillOutput::Text(out)
+                }
+                Err(e) => SkillOutput::Error(format!("Failed to list checkpoints: {e}")),
+            }
+        } else {
+            let file = &args[0];
+            let turn: Option<i64> = args.get(1).and_then(|s| s.parse().ok());
+
+            if let Some(turn_num) = turn {
+                // /restore <file> <turn> — restore to specific turn
+                match store.restore_to_turn(&ctx.session_id, file, turn_num) {
+                    Ok(()) => SkillOutput::Text(format!("Restored '{file}' to turn {turn_num}.")),
+                    Err(e) => SkillOutput::Error(format!("Failed to restore: {e}")),
+                }
+            } else {
+                // /restore <file> — show diff first, then restore
+                match store.list_modified(&ctx.session_id) {
+                    Ok(files) => {
+                        let matching: Vec<_> =
+                            files.iter().filter(|f| f.file_path == *file).collect();
+                        if matching.is_empty() {
+                            return SkillOutput::Error(format!(
+                                "No checkpoint found for '{file}'."
+                            ));
+                        }
+                        let latest = matching.last().unwrap();
+
+                        // Show diff
+                        match store.diff(&ctx.session_id, file, latest.turn_number) {
+                            Ok(diff_text) => {
+                                if diff_text.is_empty() {
+                                    SkillOutput::Text(format!(
+                                        "'{file}' is unchanged from checkpoint."
+                                    ))
+                                } else {
+                                    match store.restore(&ctx.session_id, file) {
+                                        Ok(()) => {
+                                            let out = format!(
+                                                "Diff before restore:\n\n{diff_text}\n\nRestored '{file}' to latest checkpoint."
+                                            );
+                                            SkillOutput::Text(out)
+                                        }
+                                        Err(e) => SkillOutput::Error(format!(
+                                            "Diff ok but restore failed: {e}"
+                                        )),
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                // Diff failed, still try restore
+                                match store.restore(&ctx.session_id, file) {
+                                    Ok(()) => SkillOutput::Text(format!(
+                                        "Restored '{file}' (diff unavailable: {e})."
+                                    )),
+                                    Err(e2) => {
+                                        SkillOutput::Error(format!("Failed to restore: {e2}"))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => SkillOutput::Error(format!("Failed to list checkpoints: {e}")),
+                }
+            }
         }
-        let file = &args[0];
-        let checkpoint = args.get(1).map(|s| s.as_str()).unwrap_or("latest");
-        SkillOutput::Text(format!(
-            "Restoring '{file}' from checkpoint '{checkpoint}'."
-        ))
     }
 );
 

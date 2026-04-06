@@ -575,6 +575,7 @@ Tools are callable by the LLM during agent turns. 40+ built-in tools across 10 c
 | Tool | Purpose |
 |------|---------|
 | `WebFetch` | Fetch & parse web pages (HTML → markdown) |
+| `WebSearch` | DuckDuckGo web search (returns top results) |
 
 ### Agent Orchestration
 
@@ -1093,7 +1094,10 @@ Archon snapshots every file the agent modifies, keyed by turn number. Use checkp
 |---------|--------|
 | `/checkpoint` | Save a named checkpoint |
 | `/rewind` | Jump back to previous checkpoint |
-| `/restore <FILE> [CHECKPOINT]` | Restore individual file |
+| `/restore` | List all modified files with checkpoints |
+| `/restore <FILE>` | Show diff and restore to latest snapshot |
+| `/restore <FILE> <TURN>` | Restore to specific turn number |
+| `/restore --all` | Restore all modified files |
 | `/undo` | Undo last file modification |
 
 ---
@@ -1404,6 +1408,7 @@ archon (binary)
 │   ├── agent_tool.rs                     Subagent spawn
 │   ├── lsp_client.rs + lsp_tool.rs       LSP bridge
 │   ├── webfetch.rs                       HTTP fetch + HTML parse
+│   ├── web_search.rs                     DuckDuckGo web search
 │   ├── task_*.rs                         Background task tools
 │   ├── cron_*.rs                         Scheduling
 │   ├── team_*.rs                         Team coordination
@@ -1430,13 +1435,15 @@ archon (binary)
 │   ├── embedding/       fastembed local embeddings
 │   └── hybrid_search.rs BM25 + vector cosine
 │
-├── archon-session       Session + checkpoint persistence
+├── archon-session       Session + checkpoint + plan persistence
 │   ├── storage.rs       Session save/load/list/prefix-match
 │   ├── resume.rs        4-step ID+name resolution
-│   └── checkpoint.rs    File snapshot store
+│   ├── checkpoint.rs    File snapshot store (diff, restore-to-turn)
+│   └── plan.rs          Plan storage (PlanDocument, PlanStore)
 │
 ├── archon-tui           ratatui TUI
 │   ├── app.rs           State, events, input box
+│   ├── split_pane.rs    Split-pane layout (Ctrl+\)
 │   ├── theme.rs         22 themes
 │   └── vim.rs           Vim mode keybindings
 │

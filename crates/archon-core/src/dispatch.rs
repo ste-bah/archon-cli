@@ -167,6 +167,9 @@ pub fn create_default_registry(working_dir: PathBuf) -> ToolRegistry {
         ),
     ));
 
+    // Web search via DuckDuckGo.
+    registry.register(Box::new(archon_tools::web_search::WebSearchTool));
+
     // Code Cartographer — symbol indexing and codebase navigation.
     registry.register(Box::new(archon_tools::cartographer::CartographerTool));
 

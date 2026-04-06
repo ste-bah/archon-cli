@@ -16,6 +16,7 @@ use archon_memory::extraction::{
 use archon_memory::injection::MemoryInjector;
 use archon_permissions::auto::{AutoDecision, AutoModeEvaluator};
 use archon_session::checkpoint::CheckpointStore;
+use archon_session::plan::PlanStore;
 use archon_tools::agent_tool::SubagentRequest;
 use archon_tools::plan_mode::is_tool_allowed_in_mode;
 use archon_tools::send_message::SendMessageRequest;
@@ -232,6 +233,7 @@ pub struct Agent {
     state: ConversationState,
     event_tx: tokio::sync::mpsc::Sender<AgentEvent>,
     checkpoint_store: Option<Arc<Mutex<CheckpointStore>>>,
+    plan_store: Option<PlanStore>,
     turn_number: u64,
     // GAP 5/7: Memory graph + injector for per-turn injection and auto-extraction
     memory: Option<Arc<dyn MemoryTrait>>,
@@ -277,6 +279,7 @@ impl Agent {
             state: ConversationState::default(),
             event_tx,
             checkpoint_store: None,
+            plan_store: None,
             turn_number: 0,
             memory: None,
             memory_injector: MemoryInjector::new(),
@@ -343,6 +346,11 @@ impl Agent {
     /// Set the checkpoint store for file snapshots before Write/Edit operations.
     pub fn set_checkpoint_store(&mut self, store: CheckpointStore) {
         self.checkpoint_store = Some(Arc::new(Mutex::new(store)));
+    }
+
+    /// Set the plan store for plan persistence.
+    pub fn set_plan_store(&mut self, store: PlanStore) {
+        self.plan_store = Some(store);
     }
 
     /// Set the memory graph for per-turn injection (GAP 7) and extraction (GAP 5).
@@ -1042,6 +1050,41 @@ impl Agent {
                             .unwrap_or_else(|| "auto".to_string());
                         *self.config.permission_mode.lock().await = restore;
                         self.state.mode = AgentMode::Normal;
+
+                        // Wire 2: Parse plan from assistant text and persist.
+                        if let Some(ref plan_store) = self.plan_store {
+                            // Get the last assistant message's text content
+                            let plan_text = self
+                                .state
+                                .messages
+                                .iter()
+                                .rev()
+                                .find(|m| m["role"].as_str() == Some("assistant"))
+                                .and_then(|m| match &m["content"] {
+                                    serde_json::Value::Array(blocks) => blocks
+                                        .iter()
+                                        .find(|b| b["type"].as_str() == Some("text"))
+                                        .and_then(|b| b["text"].as_str())
+                                        .map(|s| s.to_string()),
+                                    serde_json::Value::String(s) => Some(s.clone()),
+                                    _ => None,
+                                })
+                                .unwrap_or_default();
+
+                            if !plan_text.is_empty() {
+                                let plan = parse_plan_from_text(&plan_text);
+                                let sid = self.config.session_id.clone();
+                                match plan_store.save_plan(&sid, &plan) {
+                                    Ok(()) => tracing::info!(
+                                        "plan saved: {} ({} steps)",
+                                        plan.title,
+                                        plan.steps.len()
+                                    ),
+                                    Err(e) => tracing::warn!("failed to save plan: {e}"),
+                                }
+                            }
+                        }
+
                         result
                     } else {
                         result
@@ -1128,6 +1171,35 @@ impl Agent {
                             iv.on_tool_failure(&pre.tool_name);
                         } else {
                             iv.on_tool_success(&pre.tool_name);
+                        }
+                    }
+
+                    // Wire 3: Track plan step progress on Write/Edit completions.
+                    if !result.is_error
+                        && (pre.tool_name == "Write" || pre.tool_name == "Edit")
+                    {
+                        if let Some(ref plan_store) = self.plan_store {
+                            let sid = self.config.session_id.clone();
+                            if let Ok(Some(plan)) = plan_store.load_latest_plan(&sid) {
+                                if plan.status == "active" || plan.status == "draft" {
+                                    if let Some(ref fp) = pre.file_path {
+                                        for step in &plan.steps {
+                                            if step.status == archon_session::plan::PlanStepStatus::Pending
+                                                && step.affected_files.iter().any(|f| fp.ends_with(f) || f.ends_with(fp))
+                                            {
+                                                if let Err(e) = plan_store.update_step_status(
+                                                    &sid,
+                                                    &plan.id,
+                                                    step.number,
+                                                    archon_session::plan::PlanStepStatus::InProgress,
+                                                ) {
+                                                    tracing::debug!("plan step update failed: {e}");
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
 
@@ -1361,7 +1433,17 @@ impl Agent {
             archon_context::boundary::CompactionStrategy::Micro
             | archon_context::boundary::CompactionStrategy::Auto => {
                 // Both Micro and Auto need an LLM-generated summary.
-                let summary_text = self.generate_compaction_summary(&context_msgs).await;
+                let mut summary_text = self.generate_compaction_summary(&context_msgs).await;
+
+                // Wire 4: Inject active plan context into compaction summary.
+                if let Some(ref plan_store) = self.plan_store {
+                    if let Some(plan_ctx) = archon_session::plan::plan_context_for_compaction(
+                        plan_store,
+                        &self.config.session_id,
+                    ) {
+                        summary_text.push_str(&plan_ctx);
+                    }
+                }
 
                 match effective_strategy {
                     archon_context::boundary::CompactionStrategy::Micro => {
@@ -1940,6 +2022,120 @@ pub enum AgentLoopError {
 
     #[error("tool dispatch error: {0}")]
     ToolError(String),
+}
+
+// ---------------------------------------------------------------------------
+// Plan text parser
+// ---------------------------------------------------------------------------
+
+/// Parse a plan from the assistant's text output.
+/// Simple line-by-line state machine: extracts title, steps, risks, questions.
+fn parse_plan_from_text(text: &str) -> archon_session::plan::PlanDocument {
+    use archon_session::plan::{PlanDocument, PlanStep, PlanStepStatus};
+
+    enum Section {
+        None,
+        Steps,
+        Risks,
+        Questions,
+    }
+
+    let mut title = String::from("Untitled Plan");
+    let mut steps = Vec::new();
+    let mut risks = Vec::new();
+    let mut questions = Vec::new();
+    let mut section = Section::None;
+    let mut step_num: u32 = 0;
+
+    for line in text.lines() {
+        let trimmed = line.trim();
+
+        // Detect title from headings
+        if let Some(t) = trimmed
+            .strip_prefix("## Plan:")
+            .or_else(|| trimmed.strip_prefix("# Plan:"))
+        {
+            let t = t.trim();
+            if !t.is_empty() {
+                title = t.to_string();
+            }
+            continue;
+        }
+
+        // Detect section headings
+        if trimmed.starts_with("### Steps") || trimmed.starts_with("## Steps") {
+            section = Section::Steps;
+            continue;
+        }
+        if trimmed.starts_with("### Risks") || trimmed.starts_with("## Risks") {
+            section = Section::Risks;
+            continue;
+        }
+        if trimmed.starts_with("### Questions")
+            || trimmed.starts_with("## Questions")
+            || trimmed.starts_with("### Open Questions")
+            || trimmed.starts_with("## Open Questions")
+        {
+            section = Section::Questions;
+            continue;
+        }
+        // Any other heading resets section
+        if trimmed.starts_with("### ") || trimmed.starts_with("## ") {
+            section = Section::None;
+            continue;
+        }
+
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        match section {
+            Section::Steps => {
+                // Match numbered items like "1. Do something" or "- Do something"
+                let desc = if let Some(rest) = trimmed.strip_prefix(|c: char| c.is_ascii_digit()) {
+                    // Strip remaining digits and the dot
+                    let rest = rest.trim_start_matches(|c: char| c.is_ascii_digit());
+                    rest.strip_prefix('.').or(Some(rest)).map(|s| s.trim())
+                } else {
+                    trimmed.strip_prefix("- ").map(|s| s.trim())
+                };
+                if let Some(desc) = desc {
+                    if !desc.is_empty() {
+                        step_num += 1;
+                        steps.push(PlanStep {
+                            number: step_num,
+                            description: desc.to_string(),
+                            affected_files: Vec::new(),
+                            status: PlanStepStatus::Pending,
+                        });
+                    }
+                }
+            }
+            Section::Risks => {
+                if let Some(r) = trimmed.strip_prefix("- ") {
+                    risks.push(r.trim().to_string());
+                } else {
+                    risks.push(trimmed.to_string());
+                }
+            }
+            Section::Questions => {
+                if let Some(q) = trimmed.strip_prefix("- ") {
+                    questions.push(q.trim().to_string());
+                } else {
+                    questions.push(trimmed.to_string());
+                }
+            }
+            Section::None => {}
+        }
+    }
+
+    let id = format!("plan-{}", chrono::Utc::now().timestamp_millis());
+    let mut doc = PlanDocument::new(&id, &title);
+    doc.steps = steps;
+    doc.risks = risks;
+    doc.questions = questions;
+    doc.status = "active".to_string();
+    doc
 }
 
 // ---------------------------------------------------------------------------

@@ -51,6 +51,13 @@ fn db_err(e: impl std::fmt::Display) -> SessionError {
     SessionError::DbError(e.to_string())
 }
 
+#[cfg(unix)]
+fn secure_file_permissions(path: &std::path::Path) -> Result<(), std::io::Error> {
+    use std::os::unix::fs::PermissionsExt;
+    let perms = std::fs::Permissions::from_mode(0o600);
+    std::fs::set_permissions(path, perms)
+}
+
 fn empty_rows() -> NamedRows {
     NamedRows::new(vec![], vec![])
 }
@@ -85,6 +92,9 @@ impl SessionStore {
         let path_str = path.to_string_lossy().to_string();
         let db = DbInstance::new("sqlite", &path_str, "").map_err(db_err)?;
 
+        #[cfg(unix)]
+        secure_file_permissions(path)?;
+
         let store = Self { db };
         store.init_schema()?;
         Ok(store)
@@ -93,6 +103,11 @@ impl SessionStore {
     /// Open the default session database.
     pub fn open_default() -> Result<Self, SessionError> {
         Self::open(&default_db_path())
+    }
+
+    /// Return a reference to the underlying CozoDB instance.
+    pub fn db(&self) -> &DbInstance {
+        &self.db
     }
 
     fn init_schema(&self) -> Result<(), SessionError> {

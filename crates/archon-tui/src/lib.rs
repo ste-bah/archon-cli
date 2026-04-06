@@ -21,5 +21,7 @@ pub mod virtual_scroll;
 #[cfg(feature = "terminal-panel")]
 pub mod terminal_panel;
 
+pub mod split_pane;
+
 // Stubs for later phases
 pub mod scroll {}
