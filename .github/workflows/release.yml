@@ -90,14 +90,15 @@ jobs:
         if: runner.os == 'Linux' && !matrix.cross
         run: |
           sudo apt-get update
-          sudo apt-get install -y pkg-config libssl-dev
+          sudo apt-get install -y pkg-config perl make
 
       - name: Install cross-compilation deps (aarch64-linux)
         if: matrix.target == 'aarch64-unknown-linux-gnu'
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu pkg-config libssl-dev
+          sudo apt-get install -y gcc-aarch64-linux-gnu pkg-config perl make
           echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+          echo "CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
 
       - uses: Swatinem/rust-cache@v2
         with:

@@ -60,6 +60,7 @@ tree-sitter-go = "0.25"
 petgraph = "0.8"
 libloading = "0.8"
 git2 = "0.19"
+openssl = { version = "0.10", features = ["vendored"] }
 cron = "0.12"
 rand = "0.9"
 tokio-tungstenite = { version = "0.26", features = ["rustls-tls-native-roots"] }
@@ -101,6 +102,7 @@ archon-session = { path = "crates/archon-session" }
 archon-tools = { path = "crates/archon-tools" }
 archon-tui = { path = "crates/archon-tui" }
 reqwest.workspace = true
+openssl.workspace = true
 chrono.workspace = true
 clap.workspace = true
 dirs.workspace = true
