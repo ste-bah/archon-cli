@@ -187,9 +187,7 @@ expanded_skill!(
             match store.list_modified(&ctx.session_id) {
                 Ok(files) => {
                     if files.is_empty() {
-                        return SkillOutput::Text(
-                            "No modified files in this session.".to_string(),
-                        );
+                        return SkillOutput::Text("No modified files in this session.".to_string());
                     }
                     let mut out = String::from("Modified files with checkpoints:\n\n");
                     for f in &files {
@@ -202,12 +200,8 @@ expanded_skill!(
                     out.push_str(
                         "  /restore <file>         — show diff and restore to latest snapshot\n",
                     );
-                    out.push_str(
-                        "  /restore <file> <turn>  — restore to specific turn\n",
-                    );
-                    out.push_str(
-                        "  /restore --all          — restore all files\n",
-                    );
+                    out.push_str("  /restore <file> <turn>  — restore to specific turn\n");
+                    out.push_str("  /restore --all          — restore all files\n");
                     SkillOutput::Text(out)
                 }
                 Err(e) => SkillOutput::Error(format!("Failed to list checkpoints: {e}")),

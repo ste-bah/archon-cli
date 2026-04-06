@@ -80,10 +80,7 @@ impl PaneLayout {
                 let r = (*ratio).clamp(10, 90);
                 let chunks = Layout::default()
                     .direction(Direction::Horizontal)
-                    .constraints([
-                        Constraint::Percentage(r),
-                        Constraint::Percentage(100 - r),
-                    ])
+                    .constraints([Constraint::Percentage(r), Constraint::Percentage(100 - r)])
                     .split(area);
                 (chunks[0], Some(chunks[1]))
             }
@@ -91,10 +88,7 @@ impl PaneLayout {
                 let r = (*ratio).clamp(10, 90);
                 let chunks = Layout::default()
                     .direction(Direction::Vertical)
-                    .constraints([
-                        Constraint::Percentage(r),
-                        Constraint::Percentage(100 - r),
-                    ])
+                    .constraints([Constraint::Percentage(r), Constraint::Percentage(100 - r)])
                     .split(area);
                 (chunks[0], Some(chunks[1]))
             }

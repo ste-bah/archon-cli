@@ -184,7 +184,10 @@ impl ToolOutputState {
         } else {
             format!(" {first_line}")
         };
-        format!("{arrow} Tool: {} -- {}{}", self.tool_name, self.status, preview)
+        format!(
+            "{arrow} Tool: {} -- {}{}",
+            self.tool_name, self.status, preview
+        )
     }
 
     /// Format for expanded display header: "arrow Tool: name -- status"

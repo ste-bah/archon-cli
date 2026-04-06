@@ -20,10 +20,10 @@ use crate::input::InputHandler;
 use crate::markdown::render_markdown_line;
 use crate::output::{OutputBuffer, ThinkingState, ToolOutputState};
 use crate::splash::{self, ActivityEntry};
+use crate::split_pane::SplitPaneManager;
 use crate::status::StatusBar;
 use crate::theme::{Theme, intj_theme};
 use crate::ultrathink;
-use crate::split_pane::SplitPaneManager;
 use crate::vim::{VimAction, VimState};
 
 /// Message from the agent loop to the TUI.
@@ -914,7 +914,12 @@ pub async fn run_tui(
                 TuiEvent::TextDelta(text) => app.on_text_delta(&text),
                 TuiEvent::ThinkingDelta(text) => app.on_thinking_delta(&text),
                 TuiEvent::ToolStart { name, id } => app.on_tool_start(&name, &id),
-                TuiEvent::ToolComplete { name, id, success, output } => {
+                TuiEvent::ToolComplete {
+                    name,
+                    id,
+                    success,
+                    output,
+                } => {
                     app.on_tool_complete(&name, &id, success, &output);
                 }
                 TuiEvent::TurnComplete {

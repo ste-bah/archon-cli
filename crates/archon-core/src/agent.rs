@@ -1175,17 +1175,19 @@ impl Agent {
                     }
 
                     // Wire 3: Track plan step progress on Write/Edit completions.
-                    if !result.is_error
-                        && (pre.tool_name == "Write" || pre.tool_name == "Edit")
-                    {
+                    if !result.is_error && (pre.tool_name == "Write" || pre.tool_name == "Edit") {
                         if let Some(ref plan_store) = self.plan_store {
                             let sid = self.config.session_id.clone();
                             if let Ok(Some(plan)) = plan_store.load_latest_plan(&sid) {
                                 if plan.status == "active" || plan.status == "draft" {
                                     if let Some(ref fp) = pre.file_path {
                                         for step in &plan.steps {
-                                            if step.status == archon_session::plan::PlanStepStatus::Pending
-                                                && step.affected_files.iter().any(|f| fp.ends_with(f) || f.ends_with(fp))
+                                            if step.status
+                                                == archon_session::plan::PlanStepStatus::Pending
+                                                && step
+                                                    .affected_files
+                                                    .iter()
+                                                    .any(|f| fp.ends_with(f) || f.ends_with(fp))
                                             {
                                                 if let Err(e) = plan_store.update_step_status(
                                                     &sid,

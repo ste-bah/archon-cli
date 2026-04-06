@@ -739,10 +739,7 @@ mod tests {
 
         let diff = store.diff("sess1", fp_str, 1).expect("diff");
         assert!(diff.contains("-line2"), "diff should contain removed line");
-        assert!(
-            diff.contains("+modified"),
-            "diff should contain added line"
-        );
+        assert!(diff.contains("+modified"), "diff should contain added line");
     }
 
     #[test]
@@ -780,9 +777,7 @@ mod tests {
         fs::write(&fp, "version3").expect("write");
 
         // Restore to turn 1 (should get "version1")
-        store
-            .restore_to_turn("sess1", fp_str, 1)
-            .expect("restore");
+        store.restore_to_turn("sess1", fp_str, 1).expect("restore");
         assert_eq!(fs::read_to_string(&fp).expect("read"), "version1");
     }
 }

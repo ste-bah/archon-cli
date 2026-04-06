@@ -44,10 +44,7 @@ pub(crate) fn urlencoded_decode(s: &str) -> String {
             let lo = chars.next();
             if let (Some(h), Some(l)) = (hi, lo) {
                 let hex = [h, l];
-                if let Ok(decoded) = u8::from_str_radix(
-                    &String::from_utf8_lossy(&hex),
-                    16,
-                ) {
+                if let Ok(decoded) = u8::from_str_radix(&String::from_utf8_lossy(&hex), 16) {
                     result.push(decoded as char);
                 } else {
                     result.push('%');
@@ -350,10 +347,7 @@ mod tests {
     fn test_strip_tags() {
         assert_eq!(strip_tags("<b>bold</b> text"), "bold text");
         assert_eq!(strip_tags("no tags"), "no tags");
-        assert_eq!(
-            strip_tags("<a href=\"x\">link</a>"),
-            "link"
-        );
+        assert_eq!(strip_tags("<a href=\"x\">link</a>"), "link");
     }
 
     #[test]

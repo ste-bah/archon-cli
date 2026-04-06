@@ -57,9 +57,7 @@ fn binary_size_check() {
     let meta = std::fs::metadata(&bin).expect("failed to stat archon binary");
     let size_mb = meta.len() as f64 / (1024.0 * 1024.0);
 
-    let is_release = bin
-        .to_string_lossy()
-        .contains("target/release");
+    let is_release = bin.to_string_lossy().contains("target/release");
     let limit_mb = if is_release { 100.0 } else { 500.0 };
     let label = if is_release { "release" } else { "debug" };
 

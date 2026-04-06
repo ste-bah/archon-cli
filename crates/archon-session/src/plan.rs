@@ -101,7 +101,10 @@ impl PlanDocument {
                 PlanStepStatus::Skipped => "[-]",
                 PlanStepStatus::Pending => "[ ]",
             };
-            out.push_str(&format!("{} {}. {}\n", marker, step.number, step.description));
+            out.push_str(&format!(
+                "{} {}. {}\n",
+                marker, step.number, step.description
+            ));
             if !step.affected_files.is_empty() {
                 out.push_str(&format!("    Files: {}\n", step.affected_files.join(", ")));
             }
