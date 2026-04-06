@@ -2052,7 +2052,7 @@ async fn run_interactive_session(
                     let restored = archon_consciousness::inner_voice::InnerVoice::from_snapshot(
                         snap.inner_voice.clone(),
                     );
-                    *iv_arc.blocking_lock() = restored;
+                    *iv_arc.lock().await = restored;
                     tracing::info!(
                         confidence = snap.inner_voice.confidence,
                         energy = snap.inner_voice.energy,
@@ -2442,7 +2442,7 @@ async fn run_interactive_session(
     let personality_history_limit = config.consciousness.personality_history_limit;
     let session_start_instant = std::time::Instant::now();
     let session_start_confidence = if let Some(iv_arc) = agent.inner_voice() {
-        iv_arc.blocking_lock().confidence
+        iv_arc.lock().await.confidence
     } else {
         0.7
     };
