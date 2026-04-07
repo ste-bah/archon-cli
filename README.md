@@ -44,6 +44,10 @@ A privacy-first, self-aware AI coding assistant written in Rust. Archon replaces
 - [Vim Mode](#vim-mode)
 - [Cost, Effort & Fast Mode](#cost-effort--fast-mode)
 - [Context Compaction](#context-compaction)
+- [Pipeline Engine](#pipeline-engine)
+- [LEANN Semantic Code Search](#leann-semantic-code-search)
+- [Knowledge Base](#knowledge-base)
+- [Learning Systems](#learning-systems)
 - [Crate Architecture](#crate-architecture)
 - [Phase Roadmap](#phase-roadmap)
 - [License](#license)
@@ -73,6 +77,11 @@ A privacy-first, self-aware AI coding assistant written in Rust. Archon replaces
 | Multi-agent teams | Single agent | Sequential, Parallel, Pipeline, DAG modes |
 | LSP integration | No | goToDefinition, findReferences, hover, callHierarchy, etc. |
 | Remote control | No | `archon serve` + `archon remote ws/ssh` |
+| Coding pipeline | No | 48-agent pipeline (11-layer prompt, 6 phases) |
+| Research pipeline | No | 46-agent PhD research pipeline (5-part prompt) |
+| Semantic code search | No | Native LEANN (tree-sitter chunking, HNSW vectors) |
+| Knowledge base | No | CozoDB document ingest, LLM compilation, Q&A |
+| Learning systems | No | SONA, GNN, CausalMemory, ReasoningBank (12 modes), Reflexion |
 
 ---
 
@@ -118,6 +127,10 @@ graph TB
             PERMS["archon-permissions"]
             TOOLS["archon-tools<br/>(40+ tools)"]
         end
+        subgraph pipeline["Pipeline & Intelligence Layer"]
+            PIPE["archon-pipeline<br/>(48 coding + 46 research agents)"]
+            LEANN["archon-leann<br/>(semantic code search)"]
+        end
         subgraph infra["Infrastructure Layer"]
             PLUGIN["archon-plugin<br/>(dyn loading)"]
             SDK["archon-sdk<br/>(embedding / IDE)"]
@@ -131,6 +144,10 @@ graph TB
     CORE --> LLM
     CORE --> TOOLS
     CORE --> SESSION
+    CORE --> PIPE
+    PIPE --> LLM
+    PIPE --> LEANN
+    PIPE --> MEMORY
     CONSC --> MEMORY
     TOOLS --> MCP
     TOOLS --> PERMS
@@ -142,6 +159,7 @@ graph TB
     style top fill:#0f3460,stroke:#533483,color:#e0e0e0
     style mid fill:#16213e,stroke:#533483,color:#e0e0e0
     style bottom fill:#1a1a2e,stroke:#533483,color:#e0e0e0
+    style pipeline fill:#1a0a2e,stroke:#e94560,color:#e0e0e0
     style infra fill:#0a0a1a,stroke:#533483,color:#e0e0e0
 ```
 
@@ -450,6 +468,13 @@ On first startup, Archon sends a cheap probe request (Haiku, 1 token) to validat
 | `archon plugin list` | List loaded plugins |
 | `archon plugin info <name>` | Show plugin details |
 | `archon ide-stdio` | Run in IDE stdio mode (JSON-RPC over stdin/stdout) |
+| `archon kb ingest <PATH>` | Ingest document into knowledge base |
+| `archon kb query <QUESTION>` | Ask a question against the KB |
+| `archon kb compile [--topic T]` | LLM-compile KB nodes into structured knowledge |
+| `archon kb stats` | Show KB statistics |
+| `archon leann index <PATH>` | Index a repository for semantic code search |
+| `archon leann search <QUERY>` | Search the semantic code index |
+| `archon leann stats` | Show LEANN index statistics |
 | `archon update [--check] [--force]` | Check for / apply updates |
 | `archon --list-sessions` | List all resumable sessions |
 | `archon --list-themes` | List all TUI themes |
@@ -1584,6 +1609,396 @@ prompt_cache = true           # Enable Anthropic prompt cache
 
 ---
 
+## Pipeline Engine
+
+Archon includes two full agent pipelines ported from the TypeScript god-agent SDK to native Rust.
+
+### Coding Pipeline (48 agents)
+
+A 6-phase, 48-agent software development pipeline. Each agent receives an 11-layer composite prompt assembled from task analysis, codebase context, LEANN search results, and prior agent outputs.
+
+```mermaid
+graph LR
+    subgraph P1["Phase 1: Understanding"]
+        TA["task-analyzer"] --> RE["requirement-extractor"]
+        RE --> RP["requirement-prioritizer"]
+    end
+
+    subgraph P2["Phase 2: Exploration"]
+        CA["codebase-analyzer"] --> PE["pattern-explorer"]
+        PE --> FA["feasibility-analyzer"]
+        FA --> TS["technology-scout"]
+        TS --> RP2["research-planner"]
+    end
+
+    subgraph P3["Phase 3: Architecture"]
+        SD["system-designer"] --> SA["security-architect"]
+        SA --> DA["data-architect"]
+        DA --> CD["component-designer"]
+        CD --> ID["interface-designer"]
+        ID --> PA["performance-architect"]
+        PA --> IA["integration-architect"]
+    end
+
+    subgraph P4["Phase 4: Implementation"]
+        TI["type-implementer"] --> UI["unit-implementer"]
+        UI --> SI["service-implementer"]
+        SI --> DL["data-layer-implementer"]
+        DL --> API["api-implementer"]
+        API --> FI["frontend-implementer"]
+        FI --> CI["config-implementer"]
+        CI --> EH["error-handler-implementer"]
+        EH --> LI["logger-implementer"]
+    end
+
+    subgraph P5["Phase 5: Testing"]
+        TG["test-generator"] --> IT["integration-tester"]
+        IT --> ST["security-tester"]
+        ST --> RT["regression-tester"]
+        RT --> COV["coverage-analyzer"]
+    end
+
+    subgraph P6["Phase 6: Optimization"]
+        CQI["code-quality-improver"] --> FR["final-refactorer"]
+        FR --> DM["dependency-manager"]
+        DM --> IC["implementation-coordinator"]
+        IC --> SO["sign-off-approver"]
+    end
+
+    P1 --> P2 --> P3 --> P4 --> P5 --> P6
+
+    style P1 fill:#0f3460,stroke:#533483,color:#e0e0e0
+    style P2 fill:#16213e,stroke:#533483,color:#e0e0e0
+    style P3 fill:#1a1a2e,stroke:#533483,color:#e0e0e0
+    style P4 fill:#0f3460,stroke:#e94560,color:#e0e0e0
+    style P5 fill:#16213e,stroke:#e94560,color:#e0e0e0
+    style P6 fill:#1a1a2e,stroke:#e94560,color:#e0e0e0
+```
+
+**Prompt Assembly (11 layers):**
+
+| Layer | Source |
+|-------|--------|
+| 1 | Agent role and persona |
+| 2 | Task specification |
+| 3 | Codebase context (from prior agents) |
+| 4 | LEANN semantic search results |
+| 5 | Prior agent outputs (chain context) |
+| 6 | Behavioral rules |
+| 7 | Quality gates and L-Score requirements |
+| 8 | Tool access definitions |
+| 9 | Output format schema |
+| 10 | Learning context (SONA, ReasoningBank) |
+| 11 | Reflexion context (failed trajectory injection for retry agents) |
+
+### Research Pipeline (46 agents)
+
+A 46-agent PhD-level research pipeline for systematic literature reviews, theory building, and dissertation writing. Organized across phases from planning through final synthesis.
+
+```mermaid
+graph LR
+    subgraph RP["Research Planning"]
+        SB["step-back-analyzer"] --> SD2["self-ask-decomposer"]
+        SD2 --> AC["ambiguity-clarifier"]
+        AC --> CDef["construct-definer"]
+    end
+
+    subgraph LR2["Literature & Analysis"]
+        LM["literature-mapper"] --> MS["methodology-scanner"]
+        MS --> ST2["source-tier-classifier"]
+        ST2 --> QA["quality-assessor"]
+        QA --> BD["bias-detector"]
+    end
+
+    subgraph TB["Theory Building"]
+        PA2["pattern-analyst"] --> TS2["thematic-synthesizer"]
+        TS2 --> TB2["theory-builder"]
+        TB2 --> HG["hypothesis-generator"]
+        HG --> MA["model-architect"]
+    end
+
+    subgraph VV["Verification"]
+        AR["adversarial-reviewer"] --> VG["validity-guardian"]
+        VG --> CQ["confidence-quantifier"]
+        CQ --> CV["citation-validator"]
+    end
+
+    subgraph WR["Writing"]
+        DA2["dissertation-architect"] --> IW["introduction-writer"]
+        IW --> LRW["literature-review-writer"]
+        LRW --> MW["methodology-writer"]
+        MW --> RW["results-writer"]
+        RW --> DW["discussion-writer"]
+        DW --> CW["conclusion-writer"]
+        CW --> AW["abstract-writer"]
+    end
+
+    RP --> LR2 --> TB --> VV --> WR
+
+    style RP fill:#0f3460,stroke:#533483,color:#e0e0e0
+    style LR2 fill:#16213e,stroke:#533483,color:#e0e0e0
+    style TB fill:#1a1a2e,stroke:#533483,color:#e0e0e0
+    style VV fill:#0f3460,stroke:#e94560,color:#e0e0e0
+    style WR fill:#16213e,stroke:#e94560,color:#e0e0e0
+```
+
+**Prompt Assembly (5 parts):**
+
+| Part | Content |
+|------|---------|
+| 1 | Agent expertise and role definition |
+| 2 | Research topic and scope |
+| 3 | Prior phase outputs (chain context) |
+| 4 | Style guide and citation standards (APA 7th) |
+| 5 | Quality verification requirements |
+
+### Pipeline Execution
+
+Both pipelines share the `PipelineFacade` trait and a common runner loop:
+
+```mermaid
+graph TD
+    INIT["Pipeline Init<br/>task + config"] --> LEANN_IDX["LEANN: Index Repository"]
+    LEANN_IDX --> LOOP{"Next Agent?"}
+    LOOP -- Yes --> PROMPT["Assemble Agent Prompt"]
+    PROMPT --> LEANN_SEARCH["LEANN: Search for Context"]
+    LEANN_SEARCH --> LLM["LLM Call<br/>(streaming)"]
+    LLM --> QUALITY{"Quality Gate<br/>L-Score check"}
+    QUALITY -- Pass --> STORE["Store Output"]
+    QUALITY -- Fail --> RETRY{"Retries left?"}
+    RETRY -- Yes --> REFLEXION["Inject Reflexion<br/>(failed trajectory)"]
+    REFLEXION --> LLM
+    RETRY -- No --> STORE
+    STORE --> LEARN["Learning Feedback<br/>(SONA, AutoCapture)"]
+    LEARN --> INDEX["LEANN: Index Modified Files"]
+    INDEX --> LOOP
+    LOOP -- No --> DONE["Pipeline Complete"]
+
+    style INIT fill:#0f3460,stroke:#533483,color:#e0e0e0
+    style LEANN_IDX fill:#1a1a2e,stroke:#533483,color:#e0e0e0
+    style LLM fill:#16213e,stroke:#e94560,color:#e0e0e0
+    style QUALITY fill:#1a1a2e,stroke:#e94560,color:#e0e0e0
+    style REFLEXION fill:#1a0a2e,stroke:#e94560,color:#e0e0e0
+    style DONE fill:#0f3460,stroke:#533483,color:#e0e0e0
+```
+
+---
+
+## LEANN Semantic Code Search
+
+LEANN (Learning-Enhanced Approximate Nearest Neighbors) is a native semantic code search engine built into Archon. It indexes source code at the chunk level using tree-sitter parsing and vector embeddings, enabling natural-language queries over codebases.
+
+```mermaid
+graph TD
+    subgraph indexing["Indexing Pipeline"]
+        SRC["Source Files"] --> TS["Tree-Sitter<br/>Language Parser"]
+        TS --> CHUNK["Chunker<br/>(function/class boundaries)"]
+        CHUNK --> EMBED["Embedding<br/>(fastembed or OpenAI)"]
+        EMBED --> STORE["CozoDB + HNSW Index"]
+    end
+
+    subgraph search["Search Pipeline"]
+        QUERY["Natural Language Query"] --> QEMBED["Query Embedding"]
+        QEMBED --> HNSW["HNSW Cosine Search"]
+        HNSW --> RANK["Rank + Filter"]
+        RANK --> RESULTS["SearchResult[]<br/>(file, lines, score, content)"]
+    end
+
+    subgraph queue["Background Queue"]
+        WATCH["File Change Events"] --> QUEUE["Queue Processor"]
+        QUEUE --> STORE
+    end
+
+    STORE --> HNSW
+
+    style indexing fill:#0f3460,stroke:#533483,color:#e0e0e0
+    style search fill:#16213e,stroke:#e94560,color:#e0e0e0
+    style queue fill:#1a1a2e,stroke:#533483,color:#e0e0e0
+```
+
+### Features
+
+| Feature | Details |
+|---------|---------|
+| Chunking | Tree-sitter AST-aware boundaries (functions, classes, methods) |
+| Embeddings | fastembed local (768-dim BGE-base) or OpenAI (1536-dim) |
+| Index | HNSW approximate nearest neighbors via CozoDB |
+| Search | Cosine similarity with configurable top-k |
+| Queue | Background indexing queue with add/process/status |
+| Languages | Rust, Python, TypeScript, JavaScript, Go, Java, C, C++ |
+
+### API
+
+```rust
+let index = CodeIndex::new("./index.db", embedding_config)?;
+
+// Index a repository
+index.index_repository(path, &config).await?;
+
+// Search with natural language
+let results = index.search_code("authentication middleware", 10)?;
+
+// Find similar code
+let similar = index.find_similar_code(snippet, 5)?;
+
+// Background queue
+index.add_to_queue(queue_path, &file_paths)?;
+index.process_queue(queue_path).await?;
+```
+
+---
+
+## Knowledge Base
+
+CozoDB-backed document knowledge base with LLM compilation and Q&A.
+
+```mermaid
+graph TD
+    subgraph ingest["Document Ingestion"]
+        DOC["Documents<br/>(markdown, text, code)"] --> PARSE["Parse + Chunk"]
+        PARSE --> EMBED2["Embed Chunks"]
+        EMBED2 --> KB["CozoDB<br/>Knowledge Graph"]
+    end
+
+    subgraph compile["LLM Compilation"]
+        KB --> SELECT["Select Nodes<br/>(by topic/type)"]
+        SELECT --> LLM2["LLM Synthesis"]
+        LLM2 --> COMPILED["Compiled Knowledge<br/>(structured summaries)"]
+        COMPILED --> KB
+    end
+
+    subgraph qa["Q&A Pipeline"]
+        Q["User Question"] --> SEARCH["Vector Search<br/>+ Graph Context"]
+        SEARCH --> SYNTH["LLM Synthesize Answer"]
+        SYNTH --> ANS["Answer<br/>(with citations)"]
+        ANS --> |"file_answer=true"| KB
+    end
+
+    KB --> SEARCH
+
+    style ingest fill:#0f3460,stroke:#533483,color:#e0e0e0
+    style compile fill:#16213e,stroke:#533483,color:#e0e0e0
+    style qa fill:#1a1a2e,stroke:#e94560,color:#e0e0e0
+```
+
+### Q&A Scoring
+
+Answer-type nodes receive a 0.9x relevance penalty to prevent answer recycling (answers to prior questions outranking source material). This is enforced by `EC-PIPE-018`.
+
+### CLI
+
+```bash
+archon kb ingest ./docs/           # Ingest all documents in directory
+archon kb query "How does auth work?"  # Q&A with citations
+archon kb compile --topic security     # LLM-compile nodes by topic
+archon kb stats                        # Index statistics
+```
+
+---
+
+## Learning Systems
+
+Archon's pipeline engine includes 8 interconnected learning systems that provide trajectory optimization, causal reasoning, graph neural enhancement, and contradiction detection.
+
+```mermaid
+graph TD
+    subgraph core["Core Learning"]
+        SONA["SONA Engine<br/>Trajectory-aware optimization"]
+        RB["ReasoningBank<br/>4 core + 8 extended modes"]
+        GNN["GNN Enhancer<br/>3-layer graph attention<br/>1536D → 1024D"]
+    end
+
+    subgraph memory_layer["Memory & Causality"]
+        CM["CausalMemory<br/>Hypergraph with BFS"]
+        PS["ProvenanceStore<br/>L-Scores, citation chains"]
+        DESC["DESC<br/>Episode store"]
+    end
+
+    subgraph validation["Validation & Recovery"]
+        SVS["ShadowVectorSearch<br/>Contradiction detection"]
+        REF["Reflexion<br/>Failed trajectory injection"]
+        AC["AutoCapture<br/>Pattern-based memory extraction"]
+    end
+
+    SONA --> |"trajectory feedback"| RB
+    RB --> |"contextual reasoning"| GNN
+    GNN --> |"enhanced embeddings"| RB
+    RB --> |"causal queries"| CM
+    CM --> |"cause/effect chains"| PS
+    PS --> |"L-Scores"| SONA
+    SVS --> |"contradiction reports"| RB
+    REF --> |"failed trajectories"| SONA
+    AC --> |"captured memories"| DESC
+
+    style core fill:#0f3460,stroke:#e94560,color:#e0e0e0
+    style memory_layer fill:#16213e,stroke:#533483,color:#e0e0e0
+    style validation fill:#1a1a2e,stroke:#e94560,color:#e0e0e0
+```
+
+### System Details
+
+| System | Purpose | Key Feature |
+|--------|---------|-------------|
+| **SONA** | Trajectory-aware optimization | Tracks agent performance across runs, adjusts prompts |
+| **ReasoningBank** | Multi-modal reasoning (12 modes) | Core: deductive, inductive, abductive, analogical. Extended: adversarial, counterfactual, temporal, constraint, decomposition, first-principles, causal, contextual |
+| **GNN Enhancer** | Graph neural network | 3-layer attention (1536->1280->1280->1024), Xavier init, NaN fallback, Adam optimizer, contrastive loss, EWC regularization |
+| **CausalMemory** | Causal relationship tracking | Hypergraph with multi-cause hyperedges, BFS traversal (max 5 hops), cycle detection |
+| **ProvenanceStore** | Source credibility scoring | L-Scores (recency decay, authority, corroboration, domain relevance), citation path traversal |
+| **ShadowVectorSearch** | Contradiction detection | Semantic inversion (negate embedding), find docs similar to shadow vector |
+| **DESC** | Episode store | Stores agent execution episodes for experience replay |
+| **Reflexion** | Retry enhancement | Injects failed trajectory context into retry prompts (attempt > 1 only) |
+
+### Graceful Degradation
+
+All learning systems accept `Option<T>` dependencies. When a system is unavailable (e.g., no GNN weights trained yet), the pipeline continues with reduced capability rather than failing. This satisfies `REQ-LEARN-013`.
+
+### GNN Architecture
+
+```mermaid
+graph LR
+    INPUT["Input<br/>1536-dim"] --> L1["Layer 1<br/>Attention + ReLU<br/>1536 → 1280"]
+    L1 --> L2["Layer 2<br/>Attention + ReLU<br/>1280 → 1280"]
+    L2 --> L3["Layer 3<br/>Attention + Tanh<br/>1280 → 1024"]
+    L3 --> OUTPUT["Output<br/>1024-dim"]
+
+    L1 --> |"cache"| CACHE["LRU Cache<br/>1000 entries, 300s TTL"]
+    L2 --> |"cache"| CACHE
+    L3 --> |"cache"| CACHE
+
+    subgraph training["Training Loop"]
+        LOSS["Contrastive Loss<br/>(triplet mining)"]
+        ADAM["Adam Optimizer<br/>β1=0.9, β2=0.999"]
+        EWC["EWC Regularizer<br/>(Fisher information)"]
+        LOSS --> ADAM --> EWC
+    end
+
+    OUTPUT --> LOSS
+
+    style INPUT fill:#0f3460,stroke:#533483,color:#e0e0e0
+    style OUTPUT fill:#0f3460,stroke:#533483,color:#e0e0e0
+    style L1 fill:#16213e,stroke:#e94560,color:#e0e0e0
+    style L2 fill:#16213e,stroke:#e94560,color:#e0e0e0
+    style L3 fill:#16213e,stroke:#e94560,color:#e0e0e0
+    style training fill:#1a1a2e,stroke:#533483,color:#e0e0e0
+    style CACHE fill:#1a1a2e,stroke:#533483,color:#e0e0e0
+```
+
+### AutoCapture
+
+Regex-based pattern detection that extracts memories from conversation without LLM inference:
+
+| Pattern Type | Examples | Confidence |
+|-------------|----------|------------|
+| Correction | "no", "wrong", "that's incorrect" | 0.8 |
+| Decision | "let's go with", "we decided" | 0.7 |
+| Error | "failed", "crashed", "broken" | 0.75 |
+| Preference | "I prefer", "always use", "never do" | 0.7 |
+| Project State | "deployed", "released", "merged" | 0.65 |
+
+Deduplication uses Jaccard similarity with a 0.8 threshold to prevent redundant captures.
+
+---
+
 ## Crate Architecture
 
 ```
@@ -1651,6 +2066,22 @@ archon (binary)
 │   ├── theme.rs         22 themes
 │   └── vim.rs           Vim mode keybindings
 │
+├── archon-pipeline      48-agent coding + 46-agent research pipelines
+│   ├── coding/          CodingFacade, 48 agent definitions, 11-layer prompt
+│   ├── research/        ResearchFacade, 46 agent definitions, verification
+│   ├── runner.rs        PipelineFacade trait, shared runner loop, LEANN integration
+│   ├── kb/              Knowledge base (ingest, compile, query, Q&A)
+│   ├── learning/        SONA, ReasoningBank, GNN, CausalMemory, Provenance,
+│   │                    ShadowVectorSearch, DESC, Reflexion, extended modes
+│   └── capture.rs       AutoCapture (regex-based memory extraction)
+│
+├── archon-leann         Native semantic code search
+│   ├── indexer.rs       Repository/file indexing with embeddings
+│   ├── chunker.rs       Tree-sitter AST-aware code chunking
+│   ├── search.rs        HNSW cosine similarity search
+│   ├── queue.rs         Background indexing queue processor
+│   └── metadata.rs      CodeChunk, SearchResult, IndexConfig types
+│
 ├── archon-context       Context compaction engine
 │
 ├── archon-plugin        Dynamic plugin loader
@@ -1677,7 +2108,7 @@ archon (binary)
 | `clap` | 4 | CLI argument parsing |
 | `serde` / `toml` |, | Config serialization |
 | `git2` | 0.19 | Git branch detection |
-| `tree-sitter` | 0.24 | Syntax highlighting |
+| `tree-sitter` | 0.24 | Syntax highlighting + LEANN code chunking |
 | `async-lsp` |, | LSP protocol client |
 | `tungstenite` |, | WebSocket transport |
 | `tower-http` | 0.6 | HTTP middleware (web UI) |
@@ -1693,6 +2124,7 @@ archon (binary)
 | **Phase 3**, UX & Ergonomics | ✅ Complete | 22 themes, MBTI themes, resume by name/prefix, `/color` and `/theme` commands, memory tools wired |
 | **Phase 4**, Plugins & Skills | ✅ Complete | Plugin system (`archon-plugin`), user-defined slash commands, skill system, hook extensibility |
 | **Phase 5**, Multi-Agent & Learning | ✅ Complete | Subagent orchestration, team execution, MCP transport, LSP client, WebSocket remote, personality persistence (cross-session InnerVoice + rule scores + trends), memory garden (6-phase consolidation + `/garden` command), correction tracking with severity-based rule reinforcement |
+| **Phase 6**, Pipelines & Intelligence | ✅ Complete | 48-agent coding pipeline (CodingFacade, 11-layer prompt, 6 phases), 46-agent research pipeline (ResearchFacade, 5-part prompt), LEANN semantic code search (tree-sitter + HNSW), Knowledge Base (ingest/compile/Q&A), Learning systems (SONA, ReasoningBank 12 modes, GNN 3-layer attention, CausalMemory hypergraph, ProvenanceStore L-Scores, ShadowVectorSearch contradiction detection, DESC, Reflexion), AutoCapture |
 
 ---
 
