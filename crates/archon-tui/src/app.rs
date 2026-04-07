@@ -2,8 +2,8 @@ use std::io;
 
 use crossterm::ExecutableCommand;
 use crossterm::event::{
-    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers,
-    MouseEventKind,
+    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind,
+    KeyModifiers, MouseEventKind,
 };
 use crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen};
 use ratatui::Terminal;
@@ -415,6 +415,15 @@ pub struct SplashConfig {
 /// Run the TUI event loop.
 ///
 /// - `event_rx`: receives events from the agent loop
+/// Returns `true` when a [`KeyEvent`] should be processed.
+///
+/// On Windows, crossterm emits both `Press` and `Release` events for every
+/// keystroke.  We accept `Press` and `Repeat` (for held keys like backspace
+/// and arrows) but discard `Release` to avoid double input.
+pub fn should_process_key_event(key: &KeyEvent) -> bool {
+    key.kind != KeyEventKind::Release
+}
+
 /// - `input_tx`: sends user input to the agent loop
 /// - `splash`: optional splash-screen configuration
 ///
@@ -1028,6 +1037,11 @@ pub async fn run_tui(
                     _ => {}
                 },
                 Event::Key(key) => {
+                    // Windows emits both Press and Release for each keystroke;
+                    // process only Press and Repeat to avoid double input.
+                    if !should_process_key_event(&key) {
+                        continue;
+                    }
                     // Handle session picker — Up/Down/Enter/Esc
                     if app.session_picker.is_some() {
                         match key.code {

@@ -1,4 +1,5 @@
 pub mod app;
+pub use app::should_process_key_event;
 pub mod commands;
 pub mod input;
 pub mod markdown;
