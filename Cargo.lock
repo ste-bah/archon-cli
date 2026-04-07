@@ -279,7 +279,7 @@ checksum = "c3d036a3c4ab069c7b410a2ce876bd74808d2d0888a82667669f8e783a898bf1"
 
 [[package]]
 name = "archon-cli-workspace"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "archon-consciousness",
@@ -288,6 +288,7 @@ dependencies = [
  "archon-mcp",
  "archon-memory",
  "archon-permissions",
+ "archon-pipeline",
  "archon-plugin",
  "archon-sdk",
  "archon-session",
@@ -307,7 +308,7 @@ dependencies = [
 
 [[package]]
 name = "archon-consciousness"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "archon-memory",
@@ -322,7 +323,7 @@ dependencies = [
 
 [[package]]
 name = "archon-context"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "chrono",
@@ -334,7 +335,7 @@ dependencies = [
 
 [[package]]
 name = "archon-core"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "archon-consciousness",
@@ -376,8 +377,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "archon-leann"
+version = "0.1.2"
+dependencies = [
+ "anyhow",
+ "archon-memory",
+ "async-trait",
+ "chrono",
+ "cozo-ce",
+ "hex",
+ "libloading",
+ "ndarray",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "tree-sitter",
+ "tree-sitter-go",
+ "tree-sitter-python",
+ "tree-sitter-rust",
+ "tree-sitter-typescript",
+ "uuid",
+ "walkdir",
+]
+
+[[package]]
 name = "archon-llm"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -410,7 +439,7 @@ dependencies = [
 
 [[package]]
 name = "archon-mcp"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "archon-tools",
@@ -436,7 +465,7 @@ dependencies = [
 
 [[package]]
 name = "archon-memory"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "chrono",
@@ -457,7 +486,7 @@ dependencies = [
 
 [[package]]
 name = "archon-permissions"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "glob",
@@ -469,8 +498,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "archon-pipeline"
+version = "0.1.2"
+dependencies = [
+ "anyhow",
+ "archon-leann",
+ "archon-llm",
+ "archon-memory",
+ "async-trait",
+ "chrono",
+ "cozo-ce",
+ "hex",
+ "rand 0.9.2",
+ "regex",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "archon-plugin"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "archon-core",
@@ -488,7 +540,7 @@ dependencies = [
 
 [[package]]
 name = "archon-sdk"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "archon-core",
@@ -511,7 +563,7 @@ dependencies = [
 
 [[package]]
 name = "archon-session"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "chrono",
@@ -528,7 +580,7 @@ dependencies = [
 
 [[package]]
 name = "archon-tools"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "archon-memory",
@@ -564,7 +616,7 @@ dependencies = [
 
 [[package]]
 name = "archon-tui"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "archon-core",

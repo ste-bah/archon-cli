@@ -600,6 +600,291 @@ async fn main() -> Result<()> {
             }
             return Ok(());
         }
+        Some(Commands::Pipeline { action }) => {
+            use cli_args::PipelineAction;
+            let cwd =
+                std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+            match action {
+                PipelineAction::Code { task, dry_run } => {
+                    if dry_run {
+                        println!("=== Coding Pipeline Dry Run ===");
+                        println!("Task: {task}");
+                        println!("\nAgent Sequence (48 agents):");
+                        println!("  Phase 1: task-analyzer, requirement-extractor, requirement-prioritizer");
+                        println!("  Phase 2: pattern-explorer, technology-scout, feasibility-analyzer, codebase-analyzer");
+                        println!("  Phase 3: system-designer, component-designer, interface-designer, ...");
+                        println!("  Phase 4: code-generator, unit-implementer, api-implementer, ...");
+                        println!("  Phase 5: test-generator, integration-tester, security-tester, ...");
+                        println!("  Phase 6: final-refactorer, sign-off-approver");
+                        println!("\nEstimated cost: ~$2.50-5.00 (varies by task complexity)");
+                    } else {
+                        // Build LLM client
+                        let pipe_auth = match archon_llm::auth::resolve_auth_with_keys(
+                            env_vars.anthropic_api_key.as_deref(),
+                            env_vars.archon_api_key.as_deref(),
+                            env_vars.archon_oauth_token.as_deref(),
+                            std::env::var("ANTHROPIC_AUTH_TOKEN").ok().as_deref(),
+                        ) {
+                            Ok(a) => a,
+                            Err(e) => {
+                                eprintln!("Authentication failed: {e}");
+                                eprintln!("Run `archon login` or set ANTHROPIC_API_KEY.");
+                                std::process::exit(1);
+                            }
+                        };
+                        let pipe_identity = archon_llm::identity::IdentityProvider::new(
+                            archon_llm::identity::IdentityMode::Clean,
+                            uuid::Uuid::new_v4().to_string(),
+                            "pipeline-device".to_string(),
+                            String::new(),
+                        );
+                        let pipe_api_url = std::env::var("ANTHROPIC_BASE_URL")
+                            .ok()
+                            .or_else(|| config.api.base_url.clone());
+                        let pipe_client = archon_llm::anthropic::AnthropicClient::new(
+                            pipe_auth,
+                            pipe_identity,
+                            pipe_api_url,
+                        );
+                        let adapter = archon_pipeline::llm_adapter::AnthropicLlmAdapter::new(
+                            std::sync::Arc::new(pipe_client),
+                        );
+                        let facade = archon_pipeline::coding::facade::CodingFacade::new();
+                        println!("Starting coding pipeline...");
+                        println!("Task: {task}");
+                        match archon_pipeline::runner::run_pipeline(&facade, &adapter, &task, None).await {
+                            Ok(result) => {
+                                println!("\n=== Pipeline Complete ===");
+                                println!("Session: {}", result.session_id);
+                                println!("Agents run: {}", result.agent_results.len());
+                                println!("Total cost: ${:.4}", result.total_cost_usd);
+                                println!("Duration: {:.1}s", result.duration.as_secs_f64());
+                            }
+                            Err(e) => {
+                                eprintln!("Pipeline failed: {e}");
+                                std::process::exit(1);
+                            }
+                        }
+                    }
+                }
+                PipelineAction::Research { topic, dry_run } => {
+                    if dry_run {
+                        println!("=== Research Pipeline Dry Run ===");
+                        println!("Topic: {topic}");
+                        println!("\nAgent Sequence (46 agents):");
+                        println!("  Phase 1-3: foundation, analysis, methodology");
+                        println!("  Phase 4-7: writing, verification");
+                        println!("  Phase 8: final-stage-orchestrator");
+                        println!("\nEstimated cost: ~$3.00-8.00 (varies by topic complexity)");
+                    } else {
+                        let pipe_auth = match archon_llm::auth::resolve_auth_with_keys(
+                            env_vars.anthropic_api_key.as_deref(),
+                            env_vars.archon_api_key.as_deref(),
+                            env_vars.archon_oauth_token.as_deref(),
+                            std::env::var("ANTHROPIC_AUTH_TOKEN").ok().as_deref(),
+                        ) {
+                            Ok(a) => a,
+                            Err(e) => {
+                                eprintln!("Authentication failed: {e}");
+                                eprintln!("Run `archon login` or set ANTHROPIC_API_KEY.");
+                                std::process::exit(1);
+                            }
+                        };
+                        let pipe_identity = archon_llm::identity::IdentityProvider::new(
+                            archon_llm::identity::IdentityMode::Clean,
+                            uuid::Uuid::new_v4().to_string(),
+                            "pipeline-device".to_string(),
+                            String::new(),
+                        );
+                        let pipe_api_url = std::env::var("ANTHROPIC_BASE_URL")
+                            .ok()
+                            .or_else(|| config.api.base_url.clone());
+                        let pipe_client = archon_llm::anthropic::AnthropicClient::new(
+                            pipe_auth,
+                            pipe_identity,
+                            pipe_api_url,
+                        );
+                        let adapter = archon_pipeline::llm_adapter::AnthropicLlmAdapter::new(
+                            std::sync::Arc::new(pipe_client),
+                        );
+                        let facade = archon_pipeline::research::facade::ResearchFacade::new(None);
+                        println!("Starting research pipeline...");
+                        println!("Topic: {topic}");
+                        match archon_pipeline::runner::run_pipeline(&facade, &adapter, &topic, None).await {
+                            Ok(result) => {
+                                println!("\n=== Pipeline Complete ===");
+                                println!("Session: {}", result.session_id);
+                                println!("Agents run: {}", result.agent_results.len());
+                                println!("Total cost: ${:.4}", result.total_cost_usd);
+                                println!("Duration: {:.1}s", result.duration.as_secs_f64());
+                            }
+                            Err(e) => {
+                                eprintln!("Pipeline failed: {e}");
+                                std::process::exit(1);
+                            }
+                        }
+                    }
+                }
+                PipelineAction::Status { session_id } => {
+                    let cp_path = cwd
+                        .join(".pipeline-state")
+                        .join(&session_id)
+                        .join("checkpoint.json");
+                    match std::fs::read_to_string(&cp_path) {
+                        Ok(data) => {
+                            let session: archon_pipeline::session::PipelineCheckpoint =
+                                serde_json::from_str(&data).unwrap_or_else(|e| {
+                                    eprintln!("Failed to parse checkpoint: {e}");
+                                    std::process::exit(1);
+                                });
+                            println!("Session: {}", session.session_id);
+                            println!("Type: {:?}", session.pipeline_type);
+                            println!("Task: {}", session.task);
+                            println!("Status: {:?}", session.status);
+                            println!("Completed agents: {}", session.completed_agents.len());
+                            println!("Total cost: ${:.4}", session.total_cost_usd);
+                            println!("Started: {}", session.started_at);
+                            println!("Updated: {}", session.updated_at);
+                            for agent in &session.completed_agents {
+                                println!(
+                                    "  {} (quality: {:.2}, cost: ${:.4})",
+                                    agent.agent_key, agent.quality_score, agent.cost_usd
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to load session {session_id}: {e}");
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                PipelineAction::Resume { session_id } => {
+                    match archon_pipeline::session::resume(&session_id, &cwd) {
+                        Ok(session) => {
+                            println!("Resumed session: {}", session.session_id);
+                            println!(
+                                "Completed agents: {}",
+                                session.completed_agents.len()
+                            );
+                            // Build LLM client for resumed pipeline
+                            let pipe_auth = match archon_llm::auth::resolve_auth_with_keys(
+                                env_vars.anthropic_api_key.as_deref(),
+                                env_vars.archon_api_key.as_deref(),
+                                env_vars.archon_oauth_token.as_deref(),
+                                std::env::var("ANTHROPIC_AUTH_TOKEN").ok().as_deref(),
+                            ) {
+                                Ok(a) => a,
+                                Err(e) => {
+                                    eprintln!("Authentication failed: {e}");
+                                    std::process::exit(1);
+                                }
+                            };
+                            let pipe_identity = archon_llm::identity::IdentityProvider::new(
+                                archon_llm::identity::IdentityMode::Clean,
+                                uuid::Uuid::new_v4().to_string(),
+                                "pipeline-device".to_string(),
+                                String::new(),
+                            );
+                            let pipe_api_url = std::env::var("ANTHROPIC_BASE_URL")
+                                .ok()
+                                .or_else(|| config.api.base_url.clone());
+                            let pipe_client = archon_llm::anthropic::AnthropicClient::new(
+                                pipe_auth,
+                                pipe_identity,
+                                pipe_api_url,
+                            );
+                            let adapter = archon_pipeline::llm_adapter::AnthropicLlmAdapter::new(
+                                std::sync::Arc::new(pipe_client),
+                            );
+                            // Determine facade type from session
+                            let facade_type = &session.pipeline_type;
+                            match format!("{:?}", facade_type).as_str() {
+                                "Coding" => {
+                                    let facade = archon_pipeline::coding::facade::CodingFacade::new();
+                                    println!("Resuming coding pipeline...");
+                                    match archon_pipeline::runner::run_pipeline(&facade, &adapter, &session.task, None).await {
+                                        Ok(result) => {
+                                            println!("\n=== Pipeline Complete ===");
+                                            println!("Agents run: {}", result.agent_results.len());
+                                            println!("Total cost: ${:.4}", result.total_cost_usd);
+                                        }
+                                        Err(e) => {
+                                            eprintln!("Pipeline resume failed: {e}");
+                                            std::process::exit(1);
+                                        }
+                                    }
+                                }
+                                "Research" => {
+                                    let facade = archon_pipeline::research::facade::ResearchFacade::new(None);
+                                    println!("Resuming research pipeline...");
+                                    match archon_pipeline::runner::run_pipeline(&facade, &adapter, &session.task, None).await {
+                                        Ok(result) => {
+                                            println!("\n=== Pipeline Complete ===");
+                                            println!("Agents run: {}", result.agent_results.len());
+                                            println!("Total cost: ${:.4}", result.total_cost_usd);
+                                        }
+                                        Err(e) => {
+                                            eprintln!("Pipeline resume failed: {e}");
+                                            std::process::exit(1);
+                                        }
+                                    }
+                                }
+                                other => {
+                                    eprintln!("Unknown pipeline type: {other}");
+                                    std::process::exit(1);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to resume session {session_id}: {e}");
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                PipelineAction::List => {
+                    match archon_pipeline::session::list_sessions(&cwd) {
+                        Ok(sessions) if sessions.is_empty() => {
+                            println!("No pipeline sessions found.");
+                        }
+                        Ok(sessions) => {
+                            println!(
+                                "{:<38} {:<10} {:<10} {:>6} {:>10}  {}",
+                                "SESSION ID", "TYPE", "STATUS", "AGENTS", "COST", "TASK"
+                            );
+                            println!("{}", "-".repeat(100));
+                            for s in &sessions {
+                                println!(
+                                    "{:<38} {:<10} {:<10} {:>6} ${:>9.4}  {}",
+                                    s.session_id,
+                                    format!("{:?}", s.pipeline_type),
+                                    format!("{:?}", s.status),
+                                    s.completed_count,
+                                    s.total_cost_usd,
+                                    {
+                                        let truncated: String = s.task.chars().take(30).collect();
+                                        truncated
+                                    },
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to list sessions: {e}");
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                PipelineAction::Abort { session_id } => {
+                    match archon_pipeline::session::abort(&session_id, &cwd) {
+                        Ok(()) => println!("Session {session_id} aborted."),
+                        Err(e) => {
+                            eprintln!("Failed to abort session {session_id}: {e}");
+                            std::process::exit(1);
+                        }
+                    }
+                }
+            }
+            return Ok(());
+        }
         None => {}
     }
 

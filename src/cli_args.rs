@@ -310,6 +310,11 @@ pub enum Commands {
     },
     /// Run in IDE stdio mode (JSON-RPC over stdin/stdout)
     IdeStdio,
+    /// Run and manage multi-agent pipelines
+    Pipeline {
+        #[command(subcommand)]
+        action: PipelineAction,
+    },
     /// Start the browser-based web UI on localhost
     Web {
         /// Port to listen on (default from config: 8421)
@@ -336,6 +341,43 @@ pub enum TeamAction {
     },
     /// List configured teams
     List,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum PipelineAction {
+    /// Run the coding pipeline on a task
+    Code {
+        /// Task description for the coding pipeline
+        task: String,
+        /// Display agent sequence and estimated cost without executing
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Run the research pipeline on a topic
+    Research {
+        /// Research topic
+        topic: String,
+        /// Display agent sequence and estimated cost without executing
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Show status of a pipeline session
+    Status {
+        /// Session ID
+        session_id: String,
+    },
+    /// Resume an interrupted pipeline session
+    Resume {
+        /// Session ID to resume
+        session_id: String,
+    },
+    /// List all pipeline sessions
+    List,
+    /// Abort a running pipeline session
+    Abort {
+        /// Session ID to abort
+        session_id: String,
+    },
 }
 
 #[derive(Subcommand, Debug)]

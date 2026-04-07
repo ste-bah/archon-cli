@@ -99,6 +99,7 @@ archon-permissions = { path = "crates/archon-permissions" }
 archon-plugin = { path = "crates/archon-plugin" }
 archon-sdk = { path = "crates/archon-sdk" }
 archon-session = { path = "crates/archon-session" }
+archon-pipeline = { path = "crates/archon-pipeline" }
 archon-tools = { path = "crates/archon-tools" }
 archon-tui = { path = "crates/archon-tui" }
 reqwest.workspace = true
