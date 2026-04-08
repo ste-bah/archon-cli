@@ -10,6 +10,7 @@ pub mod layered_context;
 pub mod learning;
 pub mod ledgers;
 pub mod llm_adapter;
+pub mod manifest;
 pub mod memory;
 pub mod prompt_cap;
 pub mod rehydration;
