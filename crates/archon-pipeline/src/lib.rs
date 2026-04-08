@@ -1,5 +1,6 @@
 //! Archon Pipeline — shared pipeline orchestration engine for coding and research pipelines.
 
+pub mod agent_loader;
 pub mod artefacts;
 pub mod capture;
 pub mod coding;
