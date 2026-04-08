@@ -1,0 +1,249 @@
+# Research Pipeline Manifest — 46-agent execution order
+# Source: crates/archon-pipeline/src/research/agents.rs RESEARCH_AGENTS array
+# This file is the SOLE authority on execution order and phase assignment.
+
+[pipeline]
+name = "phdresearch"
+version = "1.0"
+description = "46-agent PhD research pipeline with 7 phases"
+default_model = "claude-sonnet-4-20250514"
+context_window = 200000
+
+[defaults]
+model = "claude-sonnet-4-20250514"
+context_budget = 50000
+
+# ── Phase Definitions ────────────────────────────────────────────────────────
+
+[[phases]]
+id = 1
+name = "Foundation"
+tool_access = "read_only"
+
+[[phases]]
+id = 2
+name = "Discovery"
+tool_access = "read_only"
+
+[[phases]]
+id = 3
+name = "Architecture"
+tool_access = "read_only"
+
+[[phases]]
+id = 4
+name = "Synthesis"
+tool_access = "read_only"
+
+[[phases]]
+id = 5
+name = "Design"
+tool_access = "read_only"
+
+[[phases]]
+id = 6
+name = "Writing"
+tool_access = "full"
+
+[[phases]]
+id = 7
+name = "Validation"
+tool_access = "full"
+
+# ── Phase 1: Foundation (7 agents) ───────────────────────────────────────────
+
+[[agent]]
+key = "step-back-analyzer"
+phase = 1
+
+[[agent]]
+key = "self-ask-decomposer"
+phase = 1
+
+[[agent]]
+key = "ambiguity-clarifier"
+phase = 1
+
+[[agent]]
+key = "research-planner"
+phase = 1
+
+[[agent]]
+key = "construct-definer"
+phase = 1
+
+[[agent]]
+key = "dissertation-architect"
+phase = 1
+
+[[agent]]
+key = "chapter-synthesizer"
+phase = 1
+
+# ── Phase 2: Discovery (4 agents) ───────────────────────────────────────────
+
+[[agent]]
+key = "literature-mapper"
+phase = 2
+
+[[agent]]
+key = "source-tier-classifier"
+phase = 2
+
+[[agent]]
+key = "citation-extractor"
+phase = 2
+
+[[agent]]
+key = "context-tier-manager"
+phase = 2
+
+# ── Phase 3: Architecture (4 agents) ────────────────────────────────────────
+
+[[agent]]
+key = "theoretical-framework-analyst"
+phase = 3
+
+[[agent]]
+key = "contradiction-analyzer"
+phase = 3
+
+[[agent]]
+key = "gap-hunter"
+phase = 3
+
+[[agent]]
+key = "risk-analyst"
+phase = 3
+
+# ── Phase 4: Synthesis (5 agents) ───────────────────────────────────────────
+
+[[agent]]
+key = "evidence-synthesizer"
+phase = 4
+
+[[agent]]
+key = "pattern-analyst"
+phase = 4
+
+[[agent]]
+key = "thematic-synthesizer"
+phase = 4
+
+[[agent]]
+key = "theory-builder"
+phase = 4
+
+[[agent]]
+key = "opportunity-identifier"
+phase = 4
+
+# ── Phase 5: Design (9 agents) ──────────────────────────────────────────────
+
+[[agent]]
+key = "method-designer"
+phase = 5
+
+[[agent]]
+key = "hypothesis-generator"
+phase = 5
+
+[[agent]]
+key = "model-architect"
+phase = 5
+
+[[agent]]
+key = "analysis-planner"
+phase = 5
+
+[[agent]]
+key = "sampling-strategist"
+phase = 5
+
+[[agent]]
+key = "instrument-developer"
+phase = 5
+
+[[agent]]
+key = "validity-guardian"
+phase = 5
+
+[[agent]]
+key = "methodology-scanner"
+phase = 5
+
+[[agent]]
+key = "methodology-writer"
+phase = 5
+
+# ── Phase 6: Writing (6 agents) ─────────────────────────────────────────────
+
+[[agent]]
+key = "introduction-writer"
+phase = 6
+
+[[agent]]
+key = "literature-review-writer"
+phase = 6
+
+[[agent]]
+key = "results-writer"
+phase = 6
+
+[[agent]]
+key = "discussion-writer"
+phase = 6
+
+[[agent]]
+key = "conclusion-writer"
+phase = 6
+
+[[agent]]
+key = "abstract-writer"
+phase = 6
+
+# ── Phase 7: Validation (11 agents) ─────────────────────────────────────────
+
+[[agent]]
+key = "systematic-reviewer"
+phase = 7
+
+[[agent]]
+key = "ethics-reviewer"
+phase = 7
+
+[[agent]]
+key = "adversarial-reviewer"
+phase = 7
+
+[[agent]]
+key = "confidence-quantifier"
+phase = 7
+
+[[agent]]
+key = "citation-validator"
+phase = 7
+
+[[agent]]
+key = "reproducibility-checker"
+phase = 7
+
+[[agent]]
+key = "apa-citation-specialist"
+phase = 7
+
+[[agent]]
+key = "consistency-validator"
+phase = 7
+
+[[agent]]
+key = "quality-assessor"
+phase = 7
+
+[[agent]]
+key = "bias-detector"
+phase = 7
+
+[[agent]]
+key = "file-length-manager"
+phase = 7
