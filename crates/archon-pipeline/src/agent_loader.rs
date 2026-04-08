@@ -581,4 +581,123 @@ tool_list:\n  - WebSearch\n  - Read\n";
         assert!(a.tool_list.is_empty());
         assert!(a.prompt_body.contains("Research things."));
     }
+
+    #[test]
+    fn test_parse_frontmatter_multiple_yaml_docs() {
+        // Body contains `---` which should NOT be treated as a third delimiter.
+        let content = "---\nname: x\ndescription: y\n---\nBody with --- in it\nand more text.\n";
+        let (yaml, body) = parse_frontmatter(content).expect("should parse");
+        assert_eq!(yaml["name"].as_str().unwrap(), "x");
+        assert!(
+            body.contains("---"),
+            "body should preserve the literal --- that appears after the closing delimiter"
+        );
+        assert!(body.contains("and more text."));
+    }
+
+    #[test]
+    fn test_parse_frontmatter_unicode_content() {
+        let content = "---\nname: 测试代理\ndescription: An agent with 🚀 emoji\n---\n你好世界 🌍\nUnicode body here.\n";
+        let (yaml, body) = parse_frontmatter(content).expect("should parse unicode frontmatter");
+        assert_eq!(yaml["name"].as_str().unwrap(), "测试代理");
+        assert!(
+            yaml["description"]
+                .as_str()
+                .unwrap()
+                .contains("🚀"),
+            "emoji in frontmatter preserved"
+        );
+        assert!(body.contains("你好世界"), "Chinese characters in body preserved");
+        assert!(body.contains("🌍"), "emoji in body preserved");
+    }
+
+    #[test]
+    fn test_coding_agent_deserialize_tool_list_comma_string() {
+        let tmp = tempdir().expect("tempdir");
+        let fm = "name: Comma Tools\ndescription: Tools as comma string\ntools: \"Read, Write, Edit\"\n";
+        write_coding_agent_md(tmp.path(), "comma-tools.md", fm, "body\n");
+
+        let agents = load_coding_agents(tmp.path()).expect("should load");
+        assert_eq!(agents.len(), 1);
+        assert_eq!(
+            agents[0].tool_list,
+            vec!["Read", "Write", "Edit"],
+            "comma-separated string should deserialize into 3 elements"
+        );
+    }
+
+    #[test]
+    fn test_coding_agent_deserialize_quality_gates_single_string() {
+        // The custom deserializer accepts a single string (not just a list).
+        // Verify that a scalar string value produces a Vec with one element.
+        let yaml_str = r#"
+name: "Gate String Agent"
+description: "Quality gates as single string"
+qualityGates: "compilation-only"
+"#;
+        let yaml: serde_yml::Value = serde_yml::from_str(yaml_str).expect("parse yaml");
+        let def: CodingAgentDef = serde_yml::from_value(yaml).expect("deserialize agent");
+        assert_eq!(
+            def.quality_gates,
+            vec!["compilation-only"],
+            "single string should produce a Vec with one element"
+        );
+    }
+
+    #[test]
+    fn test_coding_agent_deserialize_quality_gates_map() {
+        // The custom deserializer's visit_map path: directly deserialize from
+        // YAML string (not via Value round-trip) to exercise the map branch.
+        let yaml_str = r#"
+name: "Gate Map Agent"
+description: "Quality gates as map"
+qualityGates:
+  minScore: 0.85
+  maxRetries: 3
+"#;
+        let def: CodingAgentDef = serde_yml::from_str(yaml_str).expect("deserialize agent");
+        let gates = &def.quality_gates;
+        assert_eq!(gates.len(), 2, "map should produce 2 'key: value' entries");
+        assert!(
+            gates.iter().any(|g| g == "minScore: 0.85"),
+            "expected 'minScore: 0.85' in gates, got: {gates:?}"
+        );
+        assert!(
+            gates.iter().any(|g| g == "maxRetries: 3"),
+            "expected 'maxRetries: 3' in gates, got: {gates:?}"
+        );
+    }
+
+    #[test]
+    fn test_research_agent_with_all_fields() {
+        let tmp = tempdir().expect("tempdir");
+        let fm = "\
+name: full-researcher\n\
+display_name: Full Researcher\n\
+description: A fully-populated research agent\n\
+color: \"#abcdef\"\n\
+model: opus\n\
+memory_reads:\n  - context\n  - plan\n\
+memory_writes:\n  - findings\n\
+output_artifacts:\n  - report.md\n  - data.json\n\
+tool_list:\n  - WebSearch\n  - Read\n  - Write\n";
+        let body = "You are a comprehensive research agent.\n\nDo all the research.\n";
+        write_research_agent_md(tmp.path(), "full-researcher.md", fm, body);
+
+        let agents = load_research_agents(tmp.path()).expect("should load");
+        assert_eq!(agents.len(), 1);
+
+        let a = &agents[0];
+        assert_eq!(a.key, "full-researcher");
+        assert_eq!(a.name, "full-researcher");
+        assert_eq!(a.display_name.as_deref(), Some("Full Researcher"));
+        assert_eq!(a.description, "A fully-populated research agent");
+        assert_eq!(a.color.as_deref(), Some("#abcdef"));
+        assert_eq!(a.model.as_deref(), Some("opus"));
+        assert_eq!(a.memory_reads, vec!["context", "plan"]);
+        assert_eq!(a.memory_writes, vec!["findings"]);
+        assert_eq!(a.output_artifacts, vec!["report.md", "data.json"]);
+        assert_eq!(a.tool_list, vec!["WebSearch", "Read", "Write"]);
+        assert!(a.prompt_body.contains("comprehensive research agent"));
+    }
 }

@@ -395,4 +395,125 @@ phase = 2
         assert_eq!(manifest.pipeline.name, "coding");
         assert_eq!(manifest.agents.len(), 3);
     }
+
+    #[test]
+    fn test_manifest_critical_flag_defaults_false() {
+        let toml = r#"
+[pipeline]
+name = "critical-default-test"
+version = "1.0"
+
+[[phases]]
+id = 1
+name = "Phase1"
+
+[[agent]]
+key = "no-critical-field"
+phase = 1
+"#;
+        let manifest = parse_manifest(toml).expect("should parse");
+        assert_eq!(manifest.agents.len(), 1);
+        assert!(
+            !manifest.agents[0].critical,
+            "critical should default to false when omitted"
+        );
+    }
+
+    #[test]
+    fn test_manifest_missing_phases_is_error() {
+        // The `phases` field is required (no `#[serde(default)]`), so omitting
+        // it entirely should produce a parse error.
+        let toml = r#"
+[pipeline]
+name = "no-phases"
+version = "1.0"
+
+[[agent]]
+key = "lonely"
+phase = 1
+"#;
+        let err = parse_manifest(toml).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("missing field") || msg.contains("phases"),
+            "expected missing-field error for phases, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_manifest_single_phase_validates() {
+        // A manifest with exactly one phase (id=1) should pass validation.
+        let toml = r#"
+[pipeline]
+name = "single-phase"
+version = "1.0"
+
+[[phases]]
+id = 1
+name = "OnlyPhase"
+
+[[agent]]
+key = "solo"
+phase = 1
+"#;
+        let manifest = parse_manifest(toml).expect("should parse single-phase manifest");
+        assert_eq!(manifest.phases.len(), 1);
+        assert_eq!(manifest.phases[0].name, "OnlyPhase");
+    }
+
+    #[test]
+    fn test_manifest_agent_optional_fields() {
+        // ManifestAgent only has key/phase/critical, but PipelineMeta and
+        // PhaseDefinition carry the optional fields (model via defaults,
+        // context_budget via context_window, tool_access on phases).
+        // Verify these optional fields are captured when present.
+        let toml = r#"
+[pipeline]
+name = "optional-fields-test"
+version = "2.0"
+description = "Testing optional fields"
+default_model = "opus"
+context_window = 150000
+
+[defaults]
+algorithm = "LATS"
+model = "haiku"
+
+[[phases]]
+id = 1
+name = "Analysis"
+tool_access = "ReadOnly"
+
+[[phases]]
+id = 2
+name = "Implementation"
+tool_access = "Full"
+
+[[agent]]
+key = "analyzer"
+phase = 1
+critical = true
+"#;
+        let manifest = parse_manifest(toml).expect("should parse");
+
+        // Pipeline optional fields
+        assert_eq!(manifest.pipeline.default_model.as_deref(), Some("opus"));
+        assert_eq!(manifest.pipeline.context_window, Some(150_000));
+        assert_eq!(
+            manifest.pipeline.description.as_deref(),
+            Some("Testing optional fields")
+        );
+
+        // Defaults optional fields
+        assert_eq!(manifest.defaults.algorithm.as_deref(), Some("LATS"));
+        assert_eq!(manifest.defaults.model.as_deref(), Some("haiku"));
+
+        // Phase tool_access optional field
+        assert_eq!(manifest.phases[0].tool_access.as_deref(), Some("ReadOnly"));
+        assert_eq!(manifest.phases[1].tool_access.as_deref(), Some("Full"));
+
+        // Agent
+        assert_eq!(manifest.agents[0].key, "analyzer");
+        assert!(manifest.agents[0].critical);
+    }
 }
