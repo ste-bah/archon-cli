@@ -384,7 +384,7 @@ mod tests {
 
     #[test]
     fn test_weight_persistence_roundtrip() {
-        let original_weights = vec![1.0f32, -2.5, 3.14159, 0.0, f32::MIN_POSITIVE];
+        let original_weights = vec![1.0f32, -2.5, std::f32::consts::PI, 0.0, f32::MIN_POSITIVE];
         let dir = std::env::temp_dir();
         let path = dir.join("test_gnn_weights.bin");
 
