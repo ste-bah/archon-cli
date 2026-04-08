@@ -222,3 +222,219 @@ pub fn load_artefact<T: for<'de> Deserialize<'de>>(
     let artefact: T = serde_json::from_str(&data)?;
     Ok(artefact)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::coding::contract::{AcceptanceCriterion, TaskContract};
+
+    // -----------------------------------------------------------------------
+    // Helpers
+    // -----------------------------------------------------------------------
+
+    fn sample_implementation_report() -> ImplementationReport {
+        ImplementationReport {
+            task_id: "TASK-001".into(),
+            changed_files: vec![ChangedFile {
+                path: "src/lib.rs".into(),
+                change_type: ChangeType::Modified,
+                lines_added: 10,
+                lines_removed: 2,
+            }],
+            new_symbols: vec![NewSymbol {
+                name: "foo".into(),
+                kind: "function".into(),
+                file: "src/lib.rs".into(),
+                line: 42,
+                visibility: "pub".into(),
+            }],
+            wiring_status: vec![WiringObligationStatus {
+                obligation_id: "W-1".into(),
+                met: true,
+            }],
+            compiler_output: "Compiling ok".into(),
+            created_at: "2026-04-08T00:00:00Z".into(),
+        }
+    }
+
+    fn sample_validation_report(status: ValidationStatus) -> ValidationReport {
+        ValidationReport {
+            task_id: "TASK-001".into(),
+            gate_results: vec![GateResultEntry {
+                gate_name: "compile".into(),
+                passed: true,
+                evidence: "exit 0".into(),
+            }],
+            overall_status: status,
+            ac_trace: vec![AcceptanceCriterionTrace {
+                ac_id: "AC-1".into(),
+                description: "It works".into(),
+                evidence_source: Some("test_it_works".into()),
+                evidence_type: Some("test_output".into()),
+            }],
+            created_at: "2026-04-08T00:00:00Z".into(),
+        }
+    }
+
+    fn sample_merge_packet() -> MergePacket {
+        MergePacket {
+            task_id: "TASK-001".into(),
+            summary: "Added foo".into(),
+            risk_report: RiskReport {
+                risk_level: "low".into(),
+                risk_factors: vec!["none".into()],
+                mitigations: vec!["tests".into()],
+            },
+            evidence_bundle: vec![EvidenceEntry {
+                gate_name: "compile".into(),
+                evidence: "ok".into(),
+            }],
+            manual_overrides: vec![],
+            sign_off_agent: "approver-v1".into(),
+            created_at: "2026-04-08T00:00:00Z".into(),
+        }
+    }
+
+    fn sample_task_contract(ac_ids: &[&str]) -> TaskContract {
+        TaskContract {
+            task_id: "TASK-001".into(),
+            goal: "do things".into(),
+            non_goals: vec![],
+            acceptance_criteria: ac_ids
+                .iter()
+                .map(|id| AcceptanceCriterion {
+                    id: id.to_string(),
+                    description: format!("criterion {}", id),
+                    verification: "test".into(),
+                })
+                .collect(),
+            affected_files: vec![],
+            required_wiring: vec![],
+            required_tests: vec![],
+            rollback_plan: "revert".into(),
+            definition_of_done: vec!["done".into()],
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Serde roundtrip tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_implementation_report_serde_roundtrip() {
+        let report = sample_implementation_report();
+        let json = serde_json::to_string(&report).unwrap();
+        let deserialized: ImplementationReport = serde_json::from_str(&json).unwrap();
+        assert_eq!(report, deserialized);
+    }
+
+    #[test]
+    fn test_validation_report_serde_roundtrip() {
+        let report = sample_validation_report(ValidationStatus::AllGatesPassed);
+        let json = serde_json::to_string(&report).unwrap();
+        let deserialized: ValidationReport = serde_json::from_str(&json).unwrap();
+        assert_eq!(report, deserialized);
+    }
+
+    #[test]
+    fn test_merge_packet_serde_roundtrip() {
+        let packet = sample_merge_packet();
+        let json = serde_json::to_string(&packet).unwrap();
+        let deserialized: MergePacket = serde_json::from_str(&json).unwrap();
+        assert_eq!(packet, deserialized);
+    }
+
+    #[test]
+    fn test_validation_status_gates_failed() {
+        let report = sample_validation_report(ValidationStatus::GatesFailed {
+            failed_gates: vec!["lint".into(), "clippy".into()],
+        });
+        let json = serde_json::to_string(&report).unwrap();
+        let deserialized: ValidationReport = serde_json::from_str(&json).unwrap();
+        assert_eq!(report, deserialized);
+    }
+
+    // -----------------------------------------------------------------------
+    // Persistence tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_save_and_load_artefact() {
+        let dir = tempfile::tempdir().unwrap();
+        let report = sample_implementation_report();
+        save_artefact(&report, "impl.json", dir.path()).unwrap();
+        let loaded: ImplementationReport = load_artefact("impl.json", dir.path()).unwrap();
+        assert_eq!(report, loaded);
+    }
+
+    #[test]
+    fn test_save_artefact_creates_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let nested = dir.path().join("a").join("b").join("c");
+        let report = sample_implementation_report();
+        save_artefact(&report, "impl.json", &nested).unwrap();
+        assert!(nested.join("impl.json").exists());
+    }
+
+    #[test]
+    fn test_load_artefact_missing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let result: Result<ImplementationReport> = load_artefact("nope.json", dir.path());
+        assert!(result.is_err());
+    }
+
+    // -----------------------------------------------------------------------
+    // AC Traced Gate tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_ac_traced_gate_all_traced() {
+        let contract = sample_task_contract(&["AC-1", "AC-2"]);
+        let report = ValidationReport {
+            task_id: "TASK-001".into(),
+            gate_results: vec![],
+            overall_status: ValidationStatus::AllGatesPassed,
+            ac_trace: vec![
+                AcceptanceCriterionTrace {
+                    ac_id: "AC-1".into(),
+                    description: "criterion AC-1".into(),
+                    evidence_source: Some("test_ac1".into()),
+                    evidence_type: Some("test_output".into()),
+                },
+                AcceptanceCriterionTrace {
+                    ac_id: "AC-2".into(),
+                    description: "criterion AC-2".into(),
+                    evidence_source: Some("test_ac2".into()),
+                    evidence_type: Some("test_output".into()),
+                },
+            ],
+            created_at: "2026-04-08T00:00:00Z".into(),
+        };
+
+        let result = AcceptanceCriteriaTracedGate::check(&contract, &report);
+        assert!(result.passed);
+        assert!(result.errors.is_empty());
+    }
+
+    #[test]
+    fn test_ac_traced_gate_missing_evidence() {
+        let contract = sample_task_contract(&["AC-1", "AC-2"]);
+        let report = ValidationReport {
+            task_id: "TASK-001".into(),
+            gate_results: vec![],
+            overall_status: ValidationStatus::AllGatesPassed,
+            ac_trace: vec![AcceptanceCriterionTrace {
+                ac_id: "AC-1".into(),
+                description: "criterion AC-1".into(),
+                evidence_source: Some("test_ac1".into()),
+                evidence_type: Some("test_output".into()),
+            }],
+            created_at: "2026-04-08T00:00:00Z".into(),
+        };
+
+        let result = AcceptanceCriteriaTracedGate::check(&contract, &report);
+        assert!(!result.passed);
+        assert_eq!(result.errors.len(), 1);
+        assert!(result.errors[0].contains("AC-2"));
+    }
+}
