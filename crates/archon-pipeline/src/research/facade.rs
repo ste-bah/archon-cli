@@ -107,7 +107,7 @@ impl ResearchFacade {
 
     /// Convert a [`ResearchAgent`] to an [`AgentInfo`].
     fn to_agent_info(agent: &ResearchAgent) -> AgentInfo {
-        let tool_access = if agent.phase == 6 {
+        let tool_access = if agent.phase >= 6 {
             ToolAccessLevel::Full
         } else {
             ToolAccessLevel::ReadOnly

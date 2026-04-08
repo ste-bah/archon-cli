@@ -104,15 +104,23 @@ impl ResearchPromptBuilder {
     // -----------------------------------------------------------------------
 
     fn build_agent_instructions(&self, agent: &super::agents::ResearchAgent) -> String {
-        // Try to load from file
+        // Try to load from file, parsing frontmatter to get just the body
         let path = agent.prompt_source_path;
-        match std::fs::read_to_string(path) {
-            Ok(content) if !content.trim().is_empty() => content,
-            _ => format!(
-                "You are the {} agent for the PhD research pipeline.",
-                agent.display_name,
-            ),
+        if let Ok(content) = std::fs::read_to_string(path) {
+            if !content.trim().is_empty() {
+                if let Ok((_frontmatter, body)) = crate::agent_loader::parse_frontmatter(&content) {
+                    if !body.trim().is_empty() {
+                        return body;
+                    }
+                }
+                // Fallback: if frontmatter parsing fails, use raw content
+                return content;
+            }
         }
+        format!(
+            "You are the {} agent for the PhD research pipeline.",
+            agent.display_name,
+        )
     }
 
     fn build_workflow_context(
