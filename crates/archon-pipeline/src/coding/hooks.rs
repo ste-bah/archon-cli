@@ -163,7 +163,7 @@ impl PreToolUseHook {
 /// - Periodic `cargo check` after every 5th Edit in Phase 4+
 /// - Orphan detection after Write
 pub struct PostToolUseHook {
-    project_root: PathBuf,
+    _project_root: PathBuf,
     edit_counter: AtomicU32,
     scanner: ForbiddenPatternScanner,
 }
@@ -171,7 +171,7 @@ pub struct PostToolUseHook {
 impl PostToolUseHook {
     pub fn new(project_root: PathBuf) -> Self {
         Self {
-            project_root,
+            _project_root: project_root,
             edit_counter: AtomicU32::new(0),
             scanner: ForbiddenPatternScanner::new(),
         }

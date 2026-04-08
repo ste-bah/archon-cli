@@ -223,7 +223,8 @@ pub fn truncate_prompt(
         let new_tokens = count_tokens(&new_content);
         truncated_layers.push((layer.name.clone(), count_tokens(&layer.content), new_tokens));
         modified_content.insert(truncate_idx, new_content);
-        current_total = current_total - layer_tokens + new_tokens;
+        // current_total updated for consistency; not read after this block.
+        let _ = current_total - layer_tokens + new_tokens;
     }
 
     // Build the surviving layers list, preserving original order.

@@ -42,12 +42,12 @@ impl LayerWeights {
     /// Create layer weights with Xavier initialization.
     pub fn random(in_dim: usize, out_dim: usize) -> Self {
         use rand::Rng;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let scale = (2.0 / (in_dim + out_dim) as f32).sqrt();
         let w: Vec<Vec<f32>> = (0..out_dim)
             .map(|_| {
                 (0..in_dim)
-                    .map(|_| rng.gen_range(-scale..scale))
+                    .map(|_| rng.random_range(-scale..scale))
                     .collect()
             })
             .collect();

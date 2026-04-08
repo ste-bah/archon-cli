@@ -8,7 +8,7 @@ use std::path::Path;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
-use super::contract::{GateResult, TaskContract, WiringType};
+use super::contract::{GateResult, TaskContract};
 
 // ---------------------------------------------------------------------------
 // Types

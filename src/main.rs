@@ -649,10 +649,35 @@ async fn main() -> Result<()> {
                         let adapter = archon_pipeline::llm_adapter::AnthropicLlmAdapter::new(
                             std::sync::Arc::new(pipe_client),
                         );
-                        let facade = archon_pipeline::coding::facade::CodingFacade::new();
+                        let learning = archon_pipeline::learning::integration::LearningIntegration::new(
+                            None, None, Default::default(),
+                        );
+                        let facade = archon_pipeline::coding::facade::CodingFacade::with_learning(learning);
+                        // Try to create LEANN index for code context
+                        let leann = {
+                            let db_path = cwd.join(".archon").join("leann.db");
+                            if let Some(parent) = db_path.parent() {
+                                let _ = std::fs::create_dir_all(parent);
+                            }
+                            match archon_leann::CodeIndex::new(&db_path, Default::default()) {
+                                Ok(idx) => {
+                                    let li = archon_pipeline::runner::LeannIntegration::new(
+                                        std::sync::Arc::new(idx),
+                                    );
+                                    if let Err(e) = li.init_repository(&cwd).await {
+                                        tracing::warn!(error = %e, "LEANN init failed; continuing without code context");
+                                    }
+                                    Some(li)
+                                }
+                                Err(e) => {
+                                    tracing::warn!(error = %e, "LEANN unavailable; continuing without code context");
+                                    None
+                                }
+                            }
+                        };
                         println!("Starting coding pipeline...");
                         println!("Task: {task}");
-                        match archon_pipeline::runner::run_pipeline(&facade, &adapter, &task, None).await {
+                        match archon_pipeline::runner::run_pipeline(&facade, &adapter, &task, leann.as_ref()).await {
                             Ok(result) => {
                                 println!("\n=== Pipeline Complete ===");
                                 println!("Session: {}", result.session_id);
@@ -707,7 +732,8 @@ async fn main() -> Result<()> {
                         let adapter = archon_pipeline::llm_adapter::AnthropicLlmAdapter::new(
                             std::sync::Arc::new(pipe_client),
                         );
-                        let facade = archon_pipeline::research::facade::ResearchFacade::new(None);
+                        let phd_learning = archon_pipeline::learning::integration::PhDLearningIntegration::new();
+                        let facade = archon_pipeline::research::facade::ResearchFacade::with_learning(None, phd_learning);
                         println!("Starting research pipeline...");
                         println!("Topic: {topic}");
                         match archon_pipeline::runner::run_pipeline(&facade, &adapter, &topic, None).await {
@@ -800,7 +826,10 @@ async fn main() -> Result<()> {
                             let facade_type = &session.pipeline_type;
                             match format!("{:?}", facade_type).as_str() {
                                 "Coding" => {
-                                    let facade = archon_pipeline::coding::facade::CodingFacade::new();
+                                    let learning = archon_pipeline::learning::integration::LearningIntegration::new(
+                                        None, None, Default::default(),
+                                    );
+                                    let facade = archon_pipeline::coding::facade::CodingFacade::with_learning(learning);
                                     println!("Resuming coding pipeline...");
                                     match archon_pipeline::runner::run_pipeline(&facade, &adapter, &session.task, None).await {
                                         Ok(result) => {
@@ -815,7 +844,8 @@ async fn main() -> Result<()> {
                                     }
                                 }
                                 "Research" => {
-                                    let facade = archon_pipeline::research::facade::ResearchFacade::new(None);
+                                    let phd_learning = archon_pipeline::learning::integration::PhDLearningIntegration::new();
+                                    let facade = archon_pipeline::research::facade::ResearchFacade::with_learning(None, phd_learning);
                                     println!("Resuming research pipeline...");
                                     match archon_pipeline::runner::run_pipeline(&facade, &adapter, &session.task, None).await {
                                         Ok(result) => {

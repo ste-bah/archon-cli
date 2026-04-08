@@ -284,6 +284,7 @@ dependencies = [
  "anyhow",
  "archon-consciousness",
  "archon-core",
+ "archon-leann",
  "archon-llm",
  "archon-mcp",
  "archon-memory",

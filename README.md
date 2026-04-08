@@ -418,9 +418,37 @@ agent_forwarding = false              # Try SSH agent even without SSH_AUTH_SOCK
 | `ARCHON_API_KEY` | Alias for `ANTHROPIC_API_KEY` |
 | `ARCHON_OAUTH_TOKEN` | Pre-set OAuth bearer token (skips login) |
 | `ANTHROPIC_AUTH_TOKEN` | Legacy bearer token alias |
+| `OPENAI_API_KEY` | OpenAI API key for embeddings and STT (see [OpenAI API Key](#openai-api-key)) |
+| `ARCHON_MEMORY_OPENAIKEY` | Alias for `OPENAI_API_KEY` (memory embeddings only) |
 | `ARCHON_CONFIG` | Override config file path |
 | `ARCHON_LOG` | Override log level |
 | `RUST_LOG` | Tracing subscriber filter |
+
+### OpenAI API Key
+
+The `OPENAI_API_KEY` is **not required** for core Archon functionality. Archon uses the Anthropic API (Claude) for all chat, coding, and pipeline operations. However, an OpenAI API key enables three optional features:
+
+| Feature | What it does | Config | Without it |
+|---------|-------------|--------|------------|
+| **Memory embeddings** | Higher-quality 1536-dim OpenAI embeddings for semantic memory search | `[memory] embedding_provider = "openai"` | Falls back to local fastembed (768-dim BGE-base-en-v1.5, no network calls) |
+| **LLM provider** | Use OpenAI models (GPT-4o, etc.) as the primary LLM instead of Claude | `[llm] provider = "openai"` | Uses Anthropic (default) |
+| **Voice STT** | OpenAI Whisper for speech-to-text in voice input mode | `[voice] stt_provider = "openai"` | Use `"mock"` or a local whisper.cpp server |
+
+**Key resolution order**: `OPENAI_API_KEY` env var > `ARCHON_MEMORY_OPENAIKEY` env var (memory only) > `llm.openai.api_key` in config.toml.
+
+**Default behavior** (no OpenAI key set): embedding provider is `"auto"`, which detects the missing key and falls back to local fastembed. No external API calls are made for embeddings. Voice STT defaults to `"mock"` (disabled).
+
+```bash
+# Only set if you want OpenAI embeddings or STT
+export OPENAI_API_KEY="sk-..."
+
+# Or set only for memory embeddings
+export ARCHON_MEMORY_OPENAIKEY="sk-..."
+
+# Or configure in ~/.config/archon/config.toml
+# [llm.openai]
+# api_key = "sk-..."
+```
 
 ---
 
