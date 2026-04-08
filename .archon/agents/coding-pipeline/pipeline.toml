@@ -1,0 +1,276 @@
+# Coding Pipeline Manifest — 50-agent execution order
+# Source: crates/archon-pipeline/src/coding/agents.rs AGENTS array
+# This file is the SOLE authority on execution order and phase assignment.
+
+[pipeline]
+name = "coding"
+version = "1.0"
+description = "50-agent coding pipeline with 6 phases and Sherlock gate reviewers"
+default_model = "claude-sonnet-4-20250514"
+context_window = 200000
+
+[defaults]
+algorithm = "ReAct"
+model = "claude-sonnet-4-20250514"
+
+# ── Phase Definitions ────────────────────────────────────────────────────────
+
+[[phases]]
+id = 1
+name = "Understanding"
+tool_access = "ReadOnly"
+
+[[phases]]
+id = 2
+name = "Design"
+tool_access = "ReadOnly"
+
+[[phases]]
+id = 3
+name = "WiringPlan"
+tool_access = "ReadOnly"
+
+[[phases]]
+id = 4
+name = "Implementation"
+tool_access = "Full"
+
+[[phases]]
+id = 5
+name = "Testing"
+tool_access = "Full"
+
+[[phases]]
+id = 6
+name = "Refinement"
+tool_access = "Full"
+
+# ── Agents in Execution Order ────────────────────────────────────────────────
+
+# Phase 1: Understanding
+[[agent]]
+key = "contract-agent"
+phase = 1
+critical = true
+
+[[agent]]
+key = "requirement-extractor"
+phase = 1
+
+[[agent]]
+key = "requirement-prioritizer"
+phase = 1
+
+[[agent]]
+key = "scope-definer"
+phase = 1
+
+[[agent]]
+key = "context-gatherer"
+phase = 1
+
+[[agent]]
+key = "feasibility-analyzer"
+phase = 2
+critical = true
+
+[[agent]]
+key = "pattern-explorer"
+phase = 1
+
+[[agent]]
+key = "technology-scout"
+phase = 1
+
+[[agent]]
+key = "research-planner"
+phase = 2
+
+[[agent]]
+key = "codebase-analyzer"
+phase = 1
+
+# Phase 1/2 Gate Reviewers
+[[agent]]
+key = "phase-1-reviewer"
+phase = 2
+critical = true
+
+[[agent]]
+key = "phase-2-reviewer"
+phase = 2
+critical = true
+
+# Phase 2: Design
+[[agent]]
+key = "system-designer"
+phase = 2
+critical = true
+
+[[agent]]
+key = "component-designer"
+phase = 2
+
+[[agent]]
+key = "interface-designer"
+phase = 2
+critical = true
+
+[[agent]]
+key = "data-architect"
+phase = 2
+
+# Phase 3: WiringPlan
+[[agent]]
+key = "integration-architect"
+phase = 3
+
+[[agent]]
+key = "wiring-obligation-agent"
+phase = 3
+critical = true
+
+[[agent]]
+key = "phase-3-reviewer"
+phase = 3
+critical = true
+
+# Phase 4: Implementation
+[[agent]]
+key = "code-generator"
+phase = 4
+critical = true
+
+[[agent]]
+key = "type-implementer"
+phase = 4
+
+[[agent]]
+key = "unit-implementer"
+phase = 4
+
+[[agent]]
+key = "service-implementer"
+phase = 4
+
+[[agent]]
+key = "data-layer-implementer"
+phase = 4
+
+[[agent]]
+key = "api-implementer"
+phase = 4
+
+[[agent]]
+key = "frontend-implementer"
+phase = 4
+
+[[agent]]
+key = "error-handler-implementer"
+phase = 4
+
+[[agent]]
+key = "config-implementer"
+phase = 4
+
+[[agent]]
+key = "logger-implementer"
+phase = 4
+
+[[agent]]
+key = "integration-verification-agent"
+phase = 4
+critical = true
+
+# Phase 4/5 transition
+[[agent]]
+key = "dependency-manager"
+phase = 6
+
+[[agent]]
+key = "implementation-coordinator"
+phase = 6
+critical = true
+
+[[agent]]
+key = "phase-4-reviewer"
+phase = 5
+critical = true
+
+# Phase 5: Testing
+[[agent]]
+key = "test-generator"
+phase = 5
+
+[[agent]]
+key = "test-runner"
+phase = 5
+critical = true
+
+[[agent]]
+key = "integration-tester"
+phase = 5
+
+[[agent]]
+key = "regression-tester"
+phase = 5
+
+[[agent]]
+key = "security-tester"
+phase = 5
+critical = true
+
+[[agent]]
+key = "coverage-analyzer"
+phase = 5
+
+[[agent]]
+key = "quality-gate"
+phase = 6
+critical = true
+
+[[agent]]
+key = "test-fixer"
+phase = 5
+
+[[agent]]
+key = "phase-5-reviewer"
+phase = 5
+critical = true
+
+# Phase 6: Refinement
+[[agent]]
+key = "performance-optimizer"
+phase = 6
+
+[[agent]]
+key = "performance-architect"
+phase = 2
+
+[[agent]]
+key = "code-quality-improver"
+phase = 6
+
+[[agent]]
+key = "security-architect"
+phase = 2
+critical = true
+
+[[agent]]
+key = "final-refactorer"
+phase = 6
+
+[[agent]]
+key = "sign-off-approver"
+phase = 6
+critical = true
+
+[[agent]]
+key = "phase-6-reviewer"
+phase = 6
+critical = true
+
+[[agent]]
+key = "recovery-agent"
+phase = 6
+critical = true
