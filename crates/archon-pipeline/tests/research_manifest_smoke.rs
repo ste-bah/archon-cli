@@ -13,7 +13,12 @@ fn smoke_research_pipeline_toml_parses() {
 
     assert_eq!(manifest.pipeline.name, "phdresearch");
     assert_eq!(manifest.phases.len(), 7, "expected 7 phases");
-    assert_eq!(manifest.agents.len(), 46, "expected 46 agents, got {}", manifest.agents.len());
+    assert_eq!(
+        manifest.agents.len(),
+        46,
+        "expected 46 agents, got {}",
+        manifest.agents.len()
+    );
 
     // Phase 6 and 7 should have full tool_access
     assert_eq!(manifest.phases[5].tool_access.as_deref(), Some("full"));

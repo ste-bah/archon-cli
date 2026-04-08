@@ -190,7 +190,6 @@ pub struct HookResult {
     pub system_message: Option<String>,
 
     // --- PreToolUse fields ---
-
     /// Modified tool input JSON. Replaces original tool input before dispatch.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub updated_input: Option<serde_json::Value>,
@@ -202,7 +201,6 @@ pub struct HookResult {
     pub permission_decision_reason: Option<String>,
 
     // --- PostToolUse fields ---
-
     /// Modified tool output. Replaces original tool output before LLM sees it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub updated_mcp_tool_output: Option<serde_json::Value>,
@@ -211,7 +209,6 @@ pub struct HookResult {
     pub additional_context: Option<String>,
 
     // --- Flow control ---
-
     /// If true, stop the conversation after this tool call.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prevent_continuation: Option<bool>,
@@ -403,8 +400,7 @@ impl AggregatedHookResult {
 
         // updated_permissions: collect all (REQ-HOOK-016)
         if !result.updated_permissions.is_empty() {
-            self.updated_permissions
-                .extend(result.updated_permissions);
+            self.updated_permissions.extend(result.updated_permissions);
         }
 
         // watch_paths: collect all (REQ-HOOK-017)

@@ -10,10 +10,7 @@
 use std::path::Path;
 use std::time::Instant;
 
-use archon_core::hooks::{
-    HookCommandType, HookConfig, HookEvent, HookMatcher,
-    HookRegistry,
-};
+use archon_core::hooks::{HookCommandType, HookConfig, HookEvent, HookMatcher, HookRegistry};
 
 // Re-export guard functions from the hooks module.
 use archon_core::hooks::{is_in_hook_agent, set_in_hook_agent};
@@ -102,7 +99,12 @@ async fn test_recursion_guard_prevents_nested_hook_fires() {
     // With guard ON: hooks should NOT fire.
     set_in_hook_agent(true);
     let result = registry
-        .execute_hooks(HookEvent::PreToolUse, input.clone(), Path::new("/tmp"), "sess-2")
+        .execute_hooks(
+            HookEvent::PreToolUse,
+            input.clone(),
+            Path::new("/tmp"),
+            "sess-2",
+        )
         .await;
     assert!(
         !result.is_blocked(),
@@ -160,17 +162,11 @@ async fn test_agent_hook_mutex_serialization() {
 
     // Each hook sleeps for 1 second. If serialized, total >= 2s.
     let mut reg1 = HookRegistry::new();
-    let config1 = agent_hook_config(
-        "sleep 1 && echo '{\"outcome\":\"success\"}'",
-        Some(5),
-    );
+    let config1 = agent_hook_config("sleep 1 && echo '{\"outcome\":\"success\"}'", Some(5));
     register_hook(&mut reg1, HookEvent::SessionStart, config1);
 
     let mut reg2 = HookRegistry::new();
-    let config2 = agent_hook_config(
-        "sleep 1 && echo '{\"outcome\":\"success\"}'",
-        Some(5),
-    );
+    let config2 = agent_hook_config("sleep 1 && echo '{\"outcome\":\"success\"}'", Some(5));
     register_hook(&mut reg2, HookEvent::SessionStart, config2);
 
     let reg1 = Arc::new(reg1);

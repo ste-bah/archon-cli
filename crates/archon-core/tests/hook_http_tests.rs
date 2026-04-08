@@ -12,15 +12,13 @@
 /// - interpolate_env_vars: only allowed vars replaced
 /// - interpolate_env_vars: non-allowed vars left as-is
 /// - is_localhost: various URLs classified correctly
-
 use archon_core::hooks::{
-    execute_http_hook, interpolate_env_vars, is_localhost, HookCommandType, HookConfig,
-    HookOutcome,
+    HookCommandType, HookConfig, HookOutcome, execute_http_hook, interpolate_env_vars, is_localhost,
 };
+use axum::Router;
 use axum::body::Body;
 use axum::extract::Request;
 use axum::routing::post;
-use axum::Router;
 use serde_json::json;
 use std::time::Duration;
 use tokio::net::TcpListener;
@@ -75,10 +73,7 @@ async fn test_http_hook_success() {
     let result = execute_http_hook(&config, &context, &client).await;
 
     assert_eq!(result.outcome, HookOutcome::Blocking);
-    assert_eq!(
-        result.reason.as_deref(),
-        Some("policy violation detected")
-    );
+    assert_eq!(result.reason.as_deref(), Some("policy violation detected"));
     assert_eq!(result.system_message.as_deref(), Some("Contact admin"));
     assert_eq!(result.prevent_continuation, Some(true));
 }
@@ -201,8 +196,7 @@ async fn test_http_hook_headers() {
     use std::sync::Arc;
     use tokio::sync::Mutex;
 
-    let captured_headers: Arc<Mutex<Vec<(String, String)>>> =
-        Arc::new(Mutex::new(Vec::new()));
+    let captured_headers: Arc<Mutex<Vec<(String, String)>>> = Arc::new(Mutex::new(Vec::new()));
     let captured = captured_headers.clone();
 
     let url = start_mock_server(move |req: Request<Body>| {
@@ -266,10 +260,7 @@ async fn test_interpolate_env_vars_allowed() {
     unsafe { std::env::set_var("HOOK_OTHER", "other-val") };
 
     let template = "Key: ${HOOK_API_KEY}, Other: ${HOOK_OTHER}";
-    let allowed = vec![
-        "HOOK_API_KEY".to_string(),
-        "HOOK_OTHER".to_string(),
-    ];
+    let allowed = vec!["HOOK_API_KEY".to_string(), "HOOK_OTHER".to_string()];
 
     let result = interpolate_env_vars(template, &allowed);
 
@@ -329,8 +320,7 @@ async fn test_http_hook_posts_context_json() {
     use std::sync::Arc;
     use tokio::sync::Mutex;
 
-    let captured_body: Arc<Mutex<Option<serde_json::Value>>> =
-        Arc::new(Mutex::new(None));
+    let captured_body: Arc<Mutex<Option<serde_json::Value>>> = Arc::new(Mutex::new(None));
     let captured = captured_body.clone();
 
     let url = start_mock_server(move |body: axum::Json<serde_json::Value>| {

@@ -2268,83 +2268,84 @@ async fn run_interactive_session(
     let sections = assembler.assemble(&input);
 
     // Convert assembled sections into Vec<serde_json::Value> for the API
-    let system_prompt: Vec<serde_json::Value> =
-        if let Some(ref override_text) = resolved_flags.system_prompt_override {
-            // --system-prompt or --system-prompt-file: replace the entire prompt
-            vec![serde_json::json!({ "type": "text", "text": override_text })]
-        } else {
-            let mut blocks: Vec<serde_json::Value> = sections
-                .into_iter()
-                .map(|section| {
-                    let mut block = serde_json::json!({
-                        "type": "text",
-                        "text": section.content,
-                    });
-                    // Gated by config.context.prompt_cache (TASK-WIRE-003) — when
-                    // disabled, we omit the cache_control hint entirely so the API
-                    // treats every block as non-cacheable.
-                    if config.context.prompt_cache {
-                        if let Some(ref cc) = section.cache_control {
-                            block["cache_control"] = serde_json::json!({ "type": cc });
-                        }
+    let system_prompt: Vec<serde_json::Value> = if let Some(ref override_text) =
+        resolved_flags.system_prompt_override
+    {
+        // --system-prompt or --system-prompt-file: replace the entire prompt
+        vec![serde_json::json!({ "type": "text", "text": override_text })]
+    } else {
+        let mut blocks: Vec<serde_json::Value> = sections
+            .into_iter()
+            .map(|section| {
+                let mut block = serde_json::json!({
+                    "type": "text",
+                    "text": section.content,
+                });
+                // Gated by config.context.prompt_cache (TASK-WIRE-003) — when
+                // disabled, we omit the cache_control hint entirely so the API
+                // treats every block as non-cacheable.
+                if config.context.prompt_cache {
+                    if let Some(ref cc) = section.cache_control {
+                        block["cache_control"] = serde_json::json!({ "type": cc });
                     }
-                    block
-                })
-                .collect();
-            // --append-system-prompt or --append-system-prompt-file: append to assembled prompt
-            if let Some(ref append_text) = resolved_flags.system_prompt_append {
-                blocks.push(serde_json::json!({ "type": "text", "text": append_text }));
-            }
+                }
+                block
+            })
+            .collect();
+        // --append-system-prompt or --append-system-prompt-file: append to assembled prompt
+        if let Some(ref append_text) = resolved_flags.system_prompt_append {
+            blocks.push(serde_json::json!({ "type": "text", "text": append_text }));
+        }
 
-            // ── Output style injection (CLI-310) ─────────────────────
-            // CLI flag takes priority over config.toml value.
-            // If neither is set, a plugin-forced style is used as fallback.
-            {
-                use archon_core::output_style::OutputStyleRegistry;
-                use archon_core::output_style_loader::load_styles_from_dir;
+        // ── Output style injection (CLI-310) ─────────────────────
+        // CLI flag takes priority over config.toml value.
+        // If neither is set, a plugin-forced style is used as fallback.
+        {
+            use archon_core::output_style::OutputStyleRegistry;
+            use archon_core::output_style_loader::load_styles_from_dir;
 
-                let mut reg = OutputStyleRegistry::new();
-                if let Some(home) = dirs::home_dir() {
-                    let new_dir = home.join(".archon").join("output-styles");
-                    if new_dir.is_dir() {
-                        for style in load_styles_from_dir(&new_dir) {
+            let mut reg = OutputStyleRegistry::new();
+            if let Some(home) = dirs::home_dir() {
+                let new_dir = home.join(".archon").join("output-styles");
+                if new_dir.is_dir() {
+                    for style in load_styles_from_dir(&new_dir) {
+                        reg.register(style);
+                    }
+                } else {
+                    let old_dir = home.join(".claude").join("output-styles");
+                    if old_dir.is_dir() {
+                        tracing::warn!(
+                            "Loading from deprecated path {}. Rename to {} to suppress this warning.",
+                            old_dir.display(),
+                            new_dir.display()
+                        );
+                        for style in load_styles_from_dir(&old_dir) {
                             reg.register(style);
                         }
-                    } else {
-                        let old_dir = home.join(".claude").join("output-styles");
-                        if old_dir.is_dir() {
-                            tracing::warn!(
-                                "Loading from deprecated path {}. Rename to {} to suppress this warning.",
-                                old_dir.display(),
-                                new_dir.display()
-                            );
-                            for style in load_styles_from_dir(&old_dir) {
-                                reg.register(style);
-                            }
-                        }
                     }
-                }
-
-                let style_name: Option<&str> = cli
-                    .output_style
-                    .as_deref()
-                    .or(config.output_style.as_deref());
-
-                let injection = if let Some(name) = style_name {
-                    let style = reg.get_or_default(name);
-                    style.prompt.clone()
-                } else {
-                    reg.forced_plugin_style().and_then(|s| s.prompt.clone())
-                };
-
-                if let Some(ref text) = injection {
-                    tracing::info!("injecting output style into system prompt");
-                    blocks.push(serde_json::json!({ "type": "text", "text": text }));
                 }
             }
 
-            blocks
-        };
+            let style_name: Option<&str> = cli
+                .output_style
+                .as_deref()
+                .or(config.output_style.as_deref());
+
+            let injection = if let Some(name) = style_name {
+                let style = reg.get_or_default(name);
+                style.prompt.clone()
+            } else {
+                reg.forced_plugin_style().and_then(|s| s.prompt.clone())
+            };
+
+            if let Some(ref text) = injection {
+                tracing::info!("injecting output style into system prompt");
+                blocks.push(serde_json::json!({ "type": "text", "text": text }));
+            }
+        }
+
+        blocks
+    };
 
     // Shared permission mode — honour CLI flags and config
     let initial_perm_mode = if cli.dangerously_skip_permissions {

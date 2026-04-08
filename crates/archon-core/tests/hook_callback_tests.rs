@@ -1,7 +1,7 @@
 //! Integration tests for hook callback/plugin registration API.
 
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
 use archon_core::hooks::{
@@ -72,7 +72,8 @@ async fn test_callback_result_merged_into_aggregate() {
         .await;
 
     assert!(
-        agg.additional_contexts.contains(&"extra-info-from-callback".to_string()),
+        agg.additional_contexts
+            .contains(&"extra-info-from-callback".to_string()),
         "additional_context should be merged into aggregate"
     );
 }
@@ -223,7 +224,11 @@ async fn test_multiple_callbacks_all_fire() {
         )
         .await;
 
-    assert_eq!(counter.load(Ordering::SeqCst), 3, "all 3 callbacks should fire");
+    assert_eq!(
+        counter.load(Ordering::SeqCst),
+        3,
+        "all 3 callbacks should fire"
+    );
     assert_eq!(
         agg.additional_contexts.len(),
         3,

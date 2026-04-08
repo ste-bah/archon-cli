@@ -6,9 +6,7 @@
 /// - Exit code 2 → Blocking (stderr as reason)
 /// - Empty/whitespace stdout → no additional_context (None)
 /// - Any other exit code → HookResult::allow() with additional_context from stdout
-use archon_core::hooks::{
-    HookCommandType, HookConfig, HookEvent, HookMatcher, HookRegistry,
-};
+use archon_core::hooks::{HookCommandType, HookConfig, HookEvent, HookMatcher, HookRegistry};
 
 // ---------------------------------------------------------------------------
 // Helper: build a HookRegistry with a single Prompt-type hook
@@ -112,10 +110,7 @@ async fn test_prompt_hook_exit_2_blocks() {
 /// Prompt hook with whitespace-only stdout → no additional_context.
 #[tokio::test(flavor = "multi_thread")]
 async fn test_prompt_hook_whitespace_only_no_context() {
-    let registry = make_prompt_registry(
-        HookEvent::PreToolUse,
-        "printf '   \\n  \\n  '",
-    );
+    let registry = make_prompt_registry(HookEvent::PreToolUse, "printf '   \\n  \\n  '");
     let result = fire_prompt_hook(&registry, HookEvent::PreToolUse).await;
 
     assert!(!result.is_blocked());
@@ -135,7 +130,11 @@ async fn test_prompt_hook_multiline_stdout() {
     let result = fire_prompt_hook(&registry, HookEvent::PreToolUse).await;
 
     assert!(!result.is_blocked());
-    assert_eq!(result.additional_contexts.len(), 1, "should be one context entry");
+    assert_eq!(
+        result.additional_contexts.len(),
+        1,
+        "should be one context entry"
+    );
     let ctx = &result.additional_contexts[0];
     assert!(ctx.contains("line one"), "should contain first line");
     assert!(ctx.contains("line two"), "should contain second line");

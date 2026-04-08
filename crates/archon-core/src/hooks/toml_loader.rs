@@ -68,9 +68,8 @@ pub fn load_hooks_from_toml(path: &Path) -> Result<HooksSettings, HookError> {
             )));
         }
     };
-    parse_hooks_toml(&content).map_err(|e| {
-        HookError::ConfigError(format!("TOML parse error in {}: {e}", path.display()))
-    })
+    parse_hooks_toml(&content)
+        .map_err(|e| HookError::ConfigError(format!("TOML parse error in {}: {e}", path.display())))
 }
 
 // ---------------------------------------------------------------------------

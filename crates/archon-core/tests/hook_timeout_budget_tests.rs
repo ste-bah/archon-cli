@@ -9,8 +9,8 @@
 /// - Budget-exhausted hooks return Success (fail-open)
 /// - HookExecutionConfig serialization round-trip
 use archon_core::hooks::{
-    AggregatedHookResult, HookCommandType, HookConfig, HookEvent, HookExecutionConfig,
-    HookMatcher, HookRegistry,
+    AggregatedHookResult, HookCommandType, HookConfig, HookEvent, HookExecutionConfig, HookMatcher,
+    HookRegistry,
 };
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -185,7 +185,7 @@ async fn test_budget_exhausted_returns_success_failopen() {
         HookEvent::PreToolUse,
         vec![matcher_with_hooks(vec![
             cmd_hook("sleep 0.01", Some(5)), // first hook eats the budget
-            cmd_hook("exit 2", Some(5)),      // this would block, but should be skipped
+            cmd_hook("exit 2", Some(5)),     // this would block, but should be skipped
         ])],
         None,
     );
@@ -214,8 +214,7 @@ fn test_hook_execution_config_serialization() {
     };
 
     let json = serde_json::to_string(&config).expect("serialize");
-    let deserialized: HookExecutionConfig =
-        serde_json::from_str(&json).expect("deserialize");
+    let deserialized: HookExecutionConfig = serde_json::from_str(&json).expect("deserialize");
 
     assert_eq!(deserialized.aggregate_timeout_ms, 15_000);
 }

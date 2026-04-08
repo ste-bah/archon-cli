@@ -9,7 +9,6 @@
 /// - Elicitation hook auto-respond: action=accept bypasses prompt
 /// - Elicitation hook auto-respond: action=decline bypasses prompt
 /// - Elicitation content passed through
-
 use archon_core::hooks::{
     ElicitationAction, HookCommandType, HookConfig, HookEvent, HookMatcher, HookRegistry,
     HookResult,

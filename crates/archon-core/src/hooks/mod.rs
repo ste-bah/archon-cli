@@ -19,15 +19,15 @@ pub mod watch;
 
 pub use callback::{HookCallback, HookCallbackEntry};
 pub use context::{HookContext, HookContextBuilder};
-pub use http::{execute_http_hook, interpolate_env_vars, is_localhost};
-pub use permissions::{apply_permission_updates, PermissionStore, RuntimePermissionStore};
-pub use registry::HookRegistry;
-pub use toml_loader::{load_hooks_from_toml, parse_hooks_toml};
-pub use watch::FileWatchManager;
 pub use executor::{is_in_hook_agent, set_in_hook_agent};
 pub use function::FunctionRegistry;
+pub use http::{execute_http_hook, interpolate_env_vars, is_localhost};
+pub use permissions::{PermissionStore, RuntimePermissionStore, apply_permission_updates};
+pub use registry::HookRegistry;
+pub use toml_loader::{load_hooks_from_toml, parse_hooks_toml};
 pub use types::{
     AggregatedHookResult, ElicitationAction, HookCommandType, HookConfig, HookError, HookEvent,
     HookExecutionConfig, HookMatcher, HookOutcome, HookResult, HookType, HooksSettings,
     PermissionBehavior, PermissionUpdate, PermissionUpdateDestination, SourceAuthority,
 };
+pub use watch::FileWatchManager;

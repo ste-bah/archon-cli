@@ -2,14 +2,13 @@
 
 use std::path::Path;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use archon_core::hooks::{
-    HookCallbackEntry, HookCommandType, HookConfig, HookContext,
-    HookEvent, HookExecutionConfig, HookMatcher, HookOutcome, HookRegistry, HookResult,
-    SourceAuthority, is_in_hook_agent, set_in_hook_agent,
-    FunctionRegistry,
+    FunctionRegistry, HookCallbackEntry, HookCommandType, HookConfig, HookContext, HookEvent,
+    HookExecutionConfig, HookMatcher, HookOutcome, HookRegistry, HookResult, SourceAuthority,
+    is_in_hook_agent, set_in_hook_agent,
 };
 
 // ---------------------------------------------------------------------------
@@ -89,7 +88,12 @@ async fn test_agent_hook_spawns_and_parses_response() {
     set_in_hook_agent(false);
 
     let result = registry
-        .execute_hooks(HookEvent::PreToolUse, empty_input(), tmp_cwd(), "agent-test")
+        .execute_hooks(
+            HookEvent::PreToolUse,
+            empty_input(),
+            tmp_cwd(),
+            "agent-test",
+        )
         .await;
 
     // The agent hook command exits 0 but stdout JSON says blocking.
@@ -99,7 +103,10 @@ async fn test_agent_hook_spawns_and_parses_response() {
         "agent hook should have produced a blocking result"
     );
     assert!(
-        result.blocking_errors.iter().any(|e| e.contains("agent says no")),
+        result
+            .blocking_errors
+            .iter()
+            .any(|e| e.contains("agent says no")),
         "blocking reason should contain 'agent says no', got: {:?}",
         result.blocking_errors
     );
@@ -146,7 +153,10 @@ async fn test_recursion_guard_blocks_nested_fires() {
         0,
         "no hooks should have fired"
     );
-    assert_eq!(result.skipped_count, 0, "skipped_count should be 0 (not even evaluated)");
+    assert_eq!(
+        result.skipped_count, 0,
+        "skipped_count should be 0 (not even evaluated)"
+    );
 
     // Now turn guard OFF and verify hooks fire.
     set_in_hook_agent(false);
@@ -203,7 +213,9 @@ async fn test_callback_registration_fire_and_panic_safety() {
 
     // The good callback's additional_context should be merged.
     assert!(
-        result.additional_contexts.contains(&"callback-context-data".to_string()),
+        result
+            .additional_contexts
+            .contains(&"callback-context-data".to_string()),
         "good callback's additional_context should be present, got: {:?}",
         result.additional_contexts
     );
@@ -366,10 +378,7 @@ async fn test_session_hooks_register_fire_autoclear_isolation() {
     let result_a = registry
         .execute_hooks(HookEvent::PreToolUse, empty_input(), tmp_cwd(), "session-A")
         .await;
-    assert!(
-        !result_a.is_blocked(),
-        "session A hook should succeed"
-    );
+    assert!(!result_a.is_blocked(), "session A hook should succeed");
 
     // Fire SessionEnd for session "A" -> auto-clears session A hooks.
     let _end_result = registry
@@ -410,9 +419,7 @@ async fn test_timeout_budget_exhaustion_and_skip() {
     });
 
     // Register 3 slow hooks that each sleep 1 second.
-    let slow_hooks: Vec<HookConfig> = (0..3)
-        .map(|_| command_hook("sleep 1"))
-        .collect();
+    let slow_hooks: Vec<HookConfig> = (0..3).map(|_| command_hook("sleep 1")).collect();
 
     registry.register_matchers(
         HookEvent::PreToolUse,
@@ -426,7 +433,12 @@ async fn test_timeout_budget_exhaustion_and_skip() {
     set_in_hook_agent(false);
 
     let result = registry
-        .execute_hooks(HookEvent::PreToolUse, empty_input(), tmp_cwd(), "timeout-test")
+        .execute_hooks(
+            HookEvent::PreToolUse,
+            empty_input(),
+            tmp_cwd(),
+            "timeout-test",
+        )
         .await;
 
     // With 100ms budget and 3 hooks that each sleep 1s, most should be skipped.
@@ -491,10 +503,7 @@ async fn test_mixed_scenario_all_hook_types_fire() {
         .await;
 
     // Verify all fired.
-    assert!(
-        !result.is_blocked(),
-        "mixed scenario should not be blocked"
-    );
+    assert!(!result.is_blocked(), "mixed scenario should not be blocked");
 
     // Callback should have fired.
     assert!(
@@ -513,10 +522,7 @@ async fn test_mixed_scenario_all_hook_types_fire() {
     );
 
     // skipped_count should be 0 (no timeout issues with fast hooks).
-    assert_eq!(
-        result.skipped_count, 0,
-        "no hooks should have been skipped"
-    );
+    assert_eq!(result.skipped_count, 0, "no hooks should have been skipped");
 }
 
 // ---------------------------------------------------------------------------
@@ -589,7 +595,12 @@ async fn test_session_hook_timeout_clamped_to_budget() {
 
     let start = std::time::Instant::now();
     let _result = registry
-        .execute_hooks(HookEvent::PreToolUse, empty_input(), tmp_cwd(), "clamp-test")
+        .execute_hooks(
+            HookEvent::PreToolUse,
+            empty_input(),
+            tmp_cwd(),
+            "clamp-test",
+        )
         .await;
     let elapsed = start.elapsed();
 
@@ -638,7 +649,12 @@ async fn test_callbacks_skipped_when_budget_exhausted() {
     registry.register_callback(HookEvent::PreToolUse, cb);
 
     let result = registry
-        .execute_hooks(HookEvent::PreToolUse, empty_input(), tmp_cwd(), "cb-skip-test")
+        .execute_hooks(
+            HookEvent::PreToolUse,
+            empty_input(),
+            tmp_cwd(),
+            "cb-skip-test",
+        )
         .await;
 
     assert!(

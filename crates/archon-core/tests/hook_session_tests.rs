@@ -7,9 +7,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use archon_core::hooks::{
-    HookCommandType, HookConfig, HookEvent, HookMatcher, HookRegistry,
-};
+use archon_core::hooks::{HookCommandType, HookConfig, HookEvent, HookMatcher, HookRegistry};
 
 // ---------------------------------------------------------------------------
 // Helper: build a HookConfig with a command that exits with `exit_code`

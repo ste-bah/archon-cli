@@ -5,12 +5,9 @@
 /// WorktreeCreate, WorktreeRemove, InstructionsLoaded, CwdChanged)
 /// exist in the enum, serialize correctly, can be registered in
 /// HookRegistry, and fire through execute_hooks without blocking.
-
 use std::collections::HashMap;
 
-use archon_core::hooks::{
-    HookCommandType, HookConfig, HookEvent, HookMatcher, HookRegistry,
-};
+use archon_core::hooks::{HookCommandType, HookConfig, HookEvent, HookMatcher, HookRegistry};
 
 // ---------------------------------------------------------------------------
 // Helper: build a HookRegistry with an "echo" command hook for one event
@@ -99,8 +96,7 @@ fn test_new_events_serialize_correctly() {
         );
 
         // Round-trip: deserialize back
-        let back: HookEvent =
-            serde_json::from_str(&json).expect("deserialize");
+        let back: HookEvent = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(back, event, "round-trip failed for {pascal}");
     }
 }
@@ -140,10 +136,7 @@ async fn test_new_events_fire_through_registry() {
             )
             .await;
 
-        assert!(
-            !result.is_blocked(),
-            "event {name} should not be blocked"
-        );
+        assert!(!result.is_blocked(), "event {name} should not be blocked");
     }
 }
 

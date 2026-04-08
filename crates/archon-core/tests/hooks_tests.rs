@@ -733,10 +733,7 @@ async fn hook_timeout_returns_not_blocked() {
     let input = pre_tool_input("Bash", "echo hello");
     let result = fire_pre_tool_use(&registry, input).await;
     // Timeout → non-blocking failure → not blocked
-    assert!(
-        !result.is_blocked(),
-        "timed-out hook must not block"
-    );
+    assert!(!result.is_blocked(), "timed-out hook must not block");
 }
 
 // ---------------------------------------------------------------------------
@@ -848,10 +845,7 @@ async fn async_hook_returns_allow_immediately() {
         .await;
     let elapsed = start.elapsed();
 
-    assert!(
-        !result.is_blocked(),
-        "async hook must not block"
-    );
+    assert!(!result.is_blocked(), "async hook must not block");
     assert!(
         elapsed.as_secs() < 2,
         "async hook must not block (took {}ms)",
@@ -1065,12 +1059,8 @@ async fn stdout_json_parsed_as_hook_result() {
 #[tokio::test(flavor = "multi_thread")]
 async fn stdout_invalid_json_falls_back_to_exit_code() {
     // Hook prints garbage to stdout but exits 0 — should still succeed
-    let registry = make_registry_with_command(
-        HookEvent::PreToolUse,
-        "echo 'not json'; exit 0",
-        None,
-        None,
-    );
+    let registry =
+        make_registry_with_command(HookEvent::PreToolUse, "echo 'not json'; exit 0", None, None);
     let input = pre_tool_input("Bash", "echo hello");
     let result = fire_pre_tool_use(&registry, input).await;
     assert!(

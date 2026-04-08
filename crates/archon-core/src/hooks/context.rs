@@ -219,8 +219,7 @@ mod tests {
             .cwd("/home".into())
             .build();
         let val = ctx.to_json();
-        let restored: HookContext =
-            serde_json::from_value(val).expect("roundtrip");
+        let restored: HookContext = serde_json::from_value(val).expect("roundtrip");
         assert_eq!(restored.session_id, "s2");
     }
 }

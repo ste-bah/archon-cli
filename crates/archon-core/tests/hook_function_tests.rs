@@ -1,8 +1,6 @@
 //! Integration tests for Function hook type (HookCommandType::Function).
 
-use archon_core::hooks::{
-    HookCommandType, HookConfig, HookEvent, HookMatcher, HookRegistry,
-};
+use archon_core::hooks::{HookCommandType, HookConfig, HookEvent, HookMatcher, HookRegistry};
 use std::collections::HashMap;
 
 /// Helper to build a minimal HookConfig with Function type.

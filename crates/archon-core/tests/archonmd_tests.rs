@@ -190,10 +190,7 @@ fn archon_md_root_takes_precedence_over_claude_md_root() {
     fs::write(tmp.path().join("CLAUDE.md"), "OLD_ROOT").unwrap();
 
     let result = load_hierarchical_archon_md(tmp.path());
-    assert!(
-        result.contains("NEW_ROOT"),
-        "ARCHON.md should be loaded"
-    );
+    assert!(result.contains("NEW_ROOT"), "ARCHON.md should be loaded");
     assert!(
         !result.contains("OLD_ROOT"),
         "CLAUDE.md should NOT be loaded when ARCHON.md exists"

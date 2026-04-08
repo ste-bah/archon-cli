@@ -2,8 +2,8 @@
 use std::sync::Mutex;
 
 use archon_core::hooks::{
-    apply_permission_updates, PermissionStore, PermissionUpdate, PermissionUpdateDestination,
-    SourceAuthority,
+    PermissionStore, PermissionUpdate, PermissionUpdateDestination, SourceAuthority,
+    apply_permission_updates,
 };
 
 /// Mock permission store that records all operations

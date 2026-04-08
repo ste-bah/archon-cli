@@ -118,16 +118,13 @@ mod tests {
     #[test]
     fn custom_function_registration() {
         let mut registry = FunctionRegistry::new();
-        registry.register(
-            "custom".to_string(),
-            |_ctx: &HookContext| -> HookResult {
-                HookResult {
-                    outcome: HookOutcome::NonBlockingError,
-                    reason: Some("custom reason".to_string()),
-                    ..Default::default()
-                }
-            },
-        );
+        registry.register("custom".to_string(), |_ctx: &HookContext| -> HookResult {
+            HookResult {
+                outcome: HookOutcome::NonBlockingError,
+                reason: Some("custom reason".to_string()),
+                ..Default::default()
+            }
+        });
         let ctx = test_context();
         let result = registry.execute("custom", &ctx);
         assert_eq!(result.outcome, HookOutcome::NonBlockingError);

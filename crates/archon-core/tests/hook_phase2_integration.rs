@@ -11,7 +11,6 @@
 /// SC-HOOK-012: Elicitation auto-respond: hook returns action -> action collected
 /// SC-HOOK-013: Aggregate merge preserves all Phase 2 fields
 /// SC-HOOK-014: Combined Phase 2 features in single hook flow
-
 use archon_core::hooks::{
     AggregatedHookResult, ElicitationAction, HookCommandType, HookConfig, HookEvent, HookMatcher,
     HookOutcome, HookRegistry, HookResult, PermissionUpdate, PermissionUpdateDestination,
@@ -25,7 +24,11 @@ fn make_registry(event: HookEvent, cmd: &str) -> HookRegistry {
     make_registry_with_type(event, cmd, HookCommandType::Command)
 }
 
-fn make_registry_with_type(event: HookEvent, cmd: &str, hook_type: HookCommandType) -> HookRegistry {
+fn make_registry_with_type(
+    event: HookEvent,
+    cmd: &str,
+    hook_type: HookCommandType,
+) -> HookRegistry {
     let mut registry = HookRegistry::new();
     registry.register_matchers(
         event,
@@ -95,8 +98,8 @@ async fn fire(registry: &HookRegistry, event: HookEvent) -> AggregatedHookResult
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_phase2_http_hook_end_to_end() {
-    use axum::routing::post;
     use axum::Router;
+    use axum::routing::post;
     use serde_json::json;
     use tokio::net::TcpListener;
 
@@ -131,7 +134,8 @@ async fn test_phase2_http_hook_end_to_end() {
         allowed_env_vars: Default::default(),
     };
 
-    let result = archon_core::hooks::execute_http_hook(&config, &json!({"event": "test"}), &client).await;
+    let result =
+        archon_core::hooks::execute_http_hook(&config, &json!({"event": "test"}), &client).await;
     assert_eq!(result.outcome, HookOutcome::Blocking);
     assert_eq!(result.reason.as_deref(), Some("http-policy-violation"));
 }
@@ -272,7 +276,8 @@ async fn test_phase2_permission_update_collected() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_phase2_watch_paths_collected() {
-    let cmd = r#"printf '{"outcome":"success","watch_paths":["/tmp/config.toml","/tmp/rules.yaml"]}'"#;
+    let cmd =
+        r#"printf '{"outcome":"success","watch_paths":["/tmp/config.toml","/tmp/rules.yaml"]}'"#;
     let registry = make_registry(HookEvent::PostToolUse, cmd);
     let result = fire(&registry, HookEvent::PostToolUse).await;
 
@@ -341,9 +346,21 @@ fn test_phase2_aggregate_merge_all_fields() {
 
     // Verify all fields preserved
     assert_eq!(agg.updated_permissions.len(), 1, "permissions collected");
-    assert_eq!(agg.watch_paths, vec!["/tmp/a.txt", "/tmp/b.txt"], "watch_paths collected from both");
-    assert_eq!(agg.elicitation_action, Some(ElicitationAction::Accept), "elicitation action");
-    assert_eq!(agg.elicitation_content, Some(serde_json::json!({"v": 1})), "elicitation content");
+    assert_eq!(
+        agg.watch_paths,
+        vec!["/tmp/a.txt", "/tmp/b.txt"],
+        "watch_paths collected from both"
+    );
+    assert_eq!(
+        agg.elicitation_action,
+        Some(ElicitationAction::Accept),
+        "elicitation action"
+    );
+    assert_eq!(
+        agg.elicitation_content,
+        Some(serde_json::json!({"v": 1})),
+        "elicitation content"
+    );
     assert_eq!(agg.system_messages, vec!["heads up"], "system messages");
 }
 
@@ -381,7 +398,10 @@ async fn test_phase2_mixed_hook_types_same_event() {
             // Prompt hook: adds context
             ("echo 'context-from-prompt'", HookCommandType::Prompt),
             // Command hook: adds system message via JSON
-            (r#"printf '{"outcome":"success","system_message":"from-command"}'"#, HookCommandType::Command),
+            (
+                r#"printf '{"outcome":"success","system_message":"from-command"}'"#,
+                HookCommandType::Command,
+            ),
         ],
     );
     let result = fire(&registry, HookEvent::PreToolUse).await;
@@ -401,8 +421,14 @@ async fn test_phase2_block_wins_over_allows() {
         HookEvent::PreToolUse,
         vec![
             ("exit 0", HookCommandType::Command),
-            (r#"printf '{"outcome":"success","system_message":"info"}'"#, HookCommandType::Command),
-            ("echo 'blocked-reason' >&2; exit 2", HookCommandType::Command),
+            (
+                r#"printf '{"outcome":"success","system_message":"info"}'"#,
+                HookCommandType::Command,
+            ),
+            (
+                "echo 'blocked-reason' >&2; exit 2",
+                HookCommandType::Command,
+            ),
         ],
     );
     let result = fire(&registry, HookEvent::PreToolUse).await;

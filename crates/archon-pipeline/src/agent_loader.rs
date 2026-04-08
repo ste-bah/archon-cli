@@ -194,11 +194,7 @@ pub struct CodingAgentDef {
     #[serde(default)]
     pub fallback_algorithm: Option<String>,
 
-    #[serde(
-        default,
-        deserialize_with = "deserialize_tool_list",
-        alias = "tools"
-    )]
+    #[serde(default, deserialize_with = "deserialize_tool_list", alias = "tools")]
     pub tool_list: Vec<String>,
 
     #[serde(default)]
@@ -213,7 +209,11 @@ pub struct CodingAgentDef {
     #[serde(default)]
     pub memory_writes: Vec<String>,
 
-    #[serde(default, deserialize_with = "deserialize_quality_gates", rename = "qualityGates")]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_quality_gates",
+        rename = "qualityGates"
+    )]
     pub quality_gates: Vec<String>,
 
     /// The markdown body below the frontmatter — the agent's prompt template.
@@ -253,11 +253,7 @@ pub struct ResearchAgentDef {
     #[serde(default)]
     pub output_artifacts: Vec<String>,
 
-    #[serde(
-        default,
-        deserialize_with = "deserialize_tool_list",
-        alias = "tools"
-    )]
+    #[serde(default, deserialize_with = "deserialize_tool_list", alias = "tools")]
     pub tool_list: Vec<String>,
 
     #[serde(skip)]
@@ -379,7 +375,11 @@ mod tests {
         let content = "---\nname: agent-only\ndescription: No body here\n---\n";
         let (yaml, body) = parse_frontmatter(content).expect("should parse frontmatter-only");
         assert_eq!(yaml["name"].as_str().unwrap(), "agent-only");
-        assert!(body.trim().is_empty(), "body should be empty but got: {:?}", body);
+        assert!(
+            body.trim().is_empty(),
+            "body should be empty but got: {:?}",
+            body
+        );
     }
 
     #[test]
@@ -391,7 +391,8 @@ mod tests {
 
     #[test]
     fn test_parse_frontmatter_body_preserves_markdown() {
-        let body_text = "# Heading\n\n- item 1\n- item 2\n\n```rust\nfn main() {}\n```\n\nParagraph here.\n";
+        let body_text =
+            "# Heading\n\n- item 1\n- item 2\n\n```rust\nfn main() {}\n```\n\nParagraph here.\n";
         let content = format!("---\nname: md-test\ndescription: test\n---\n{}", body_text);
         let (_, body) = parse_frontmatter(&content).expect("should parse");
         assert!(body.contains("# Heading"), "heading preserved");
@@ -405,7 +406,10 @@ mod tests {
     fn test_parse_frontmatter_no_yaml_delimiters_in_body() {
         let content = "---\nname: delim-test\ndescription: check\n---\nBody content here.\n";
         let (_, body) = parse_frontmatter(content).expect("should parse");
-        assert!(!body.contains("---"), "body should not contain frontmatter delimiters");
+        assert!(
+            !body.contains("---"),
+            "body should not contain frontmatter delimiters"
+        );
     }
 
     fn write_coding_agent_md(dir: &std::path::Path, filename: &str, frontmatter: &str, body: &str) {
@@ -490,7 +494,9 @@ qualityGates:\n  - compilation\n  - lint\n";
 
     #[test]
     fn test_load_coding_agents_nonexistent_dir() {
-        let result = load_coding_agents(std::path::Path::new("/tmp/does-not-exist-agent-loader-test"));
+        let result = load_coding_agents(std::path::Path::new(
+            "/tmp/does-not-exist-agent-loader-test",
+        ));
         assert!(result.is_err(), "nonexistent dir should return error");
     }
 
@@ -511,17 +517,24 @@ qualityGates:\n  - compilation\n  - lint\n";
         let fm = "name: Real Agent\ndescription: This is real\n";
         write_coding_agent_md(tmp.path(), "real-agent.md", fm, "body\n");
 
-        fs::write(tmp.path().join("config.toml"), "[settings]\nkey = \"value\"\n")
-            .expect("write toml");
-        fs::write(tmp.path().join("notes.txt"), "some notes\n")
-            .expect("write txt");
+        fs::write(
+            tmp.path().join("config.toml"),
+            "[settings]\nkey = \"value\"\n",
+        )
+        .expect("write toml");
+        fs::write(tmp.path().join("notes.txt"), "some notes\n").expect("write txt");
 
         let agents = load_coding_agents(tmp.path()).expect("should load");
         assert_eq!(agents.len(), 1, "should only load .md files");
         assert_eq!(agents[0].key, "real-agent");
     }
 
-    fn write_research_agent_md(dir: &std::path::Path, filename: &str, frontmatter: &str, body: &str) {
+    fn write_research_agent_md(
+        dir: &std::path::Path,
+        filename: &str,
+        frontmatter: &str,
+        body: &str,
+    ) {
         let content = format!("---\n{}---\n{}", frontmatter, body);
         fs::write(dir.join(filename), content).expect("write test file");
     }
@@ -556,7 +569,10 @@ tool_list:\n  - WebSearch\n  - Read\n";
         assert_eq!(a.memory_writes, vec!["literature-map"]);
         assert_eq!(a.output_artifacts, vec!["literature-review.md"]);
         assert_eq!(a.tool_list, vec!["WebSearch", "Read"]);
-        assert!(a.prompt_body.contains("You are a literature mapping agent."));
+        assert!(
+            a.prompt_body
+                .contains("You are a literature mapping agent.")
+        );
     }
 
     #[test]
@@ -601,20 +617,21 @@ tool_list:\n  - WebSearch\n  - Read\n";
         let (yaml, body) = parse_frontmatter(content).expect("should parse unicode frontmatter");
         assert_eq!(yaml["name"].as_str().unwrap(), "测试代理");
         assert!(
-            yaml["description"]
-                .as_str()
-                .unwrap()
-                .contains("🚀"),
+            yaml["description"].as_str().unwrap().contains("🚀"),
             "emoji in frontmatter preserved"
         );
-        assert!(body.contains("你好世界"), "Chinese characters in body preserved");
+        assert!(
+            body.contains("你好世界"),
+            "Chinese characters in body preserved"
+        );
         assert!(body.contains("🌍"), "emoji in body preserved");
     }
 
     #[test]
     fn test_coding_agent_deserialize_tool_list_comma_string() {
         let tmp = tempdir().expect("tempdir");
-        let fm = "name: Comma Tools\ndescription: Tools as comma string\ntools: \"Read, Write, Edit\"\n";
+        let fm =
+            "name: Comma Tools\ndescription: Tools as comma string\ntools: \"Read, Write, Edit\"\n";
         write_coding_agent_md(tmp.path(), "comma-tools.md", fm, "body\n");
 
         let agents = load_coding_agents(tmp.path()).expect("should load");

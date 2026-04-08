@@ -1,7 +1,7 @@
 use std::time::Duration;
 
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::Client;
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use serde_json::Value;
 
 use super::types::{HookConfig, HookResult};
@@ -82,8 +82,7 @@ pub async fn execute_http_hook(
         );
     }
 
-    let body_str =
-        String::from_utf8_lossy(&body_bytes[..body_bytes.len().min(MAX_RESPONSE_BYTES)]);
+    let body_str = String::from_utf8_lossy(&body_bytes[..body_bytes.len().min(MAX_RESPONSE_BYTES)]);
 
     // Parse JSON response as HookResult
     match serde_json::from_str::<HookResult>(&body_str) {

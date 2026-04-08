@@ -8,13 +8,18 @@ const PROJECT_ROOT: &str = "/home/unixdude/Archon-projects/archon/project-work/a
 
 #[test]
 fn smoke_coding_pipeline_toml_parses() {
-    let manifest_path = Path::new(PROJECT_ROOT).join(".archon/agents/coding-pipeline/pipeline.toml");
+    let manifest_path =
+        Path::new(PROJECT_ROOT).join(".archon/agents/coding-pipeline/pipeline.toml");
     let manifest = load_manifest(&manifest_path).expect("should parse coding pipeline.toml");
 
     assert_eq!(manifest.pipeline.name, "coding");
     assert_eq!(manifest.phases.len(), 6, "expected 6 phases");
     println!("Loaded {} agents from manifest", manifest.agents.len());
-    assert!(manifest.agents.len() >= 48, "expected 48+ agents, got {}", manifest.agents.len());
+    assert!(
+        manifest.agents.len() >= 48,
+        "expected 48+ agents, got {}",
+        manifest.agents.len()
+    );
 
     // Verify phase reviewers are critical
     for agent in &manifest.agents {
@@ -26,7 +31,8 @@ fn smoke_coding_pipeline_toml_parses() {
 
 #[test]
 fn smoke_coding_manifest_cross_references_md_files() {
-    let manifest_path = Path::new(PROJECT_ROOT).join(".archon/agents/coding-pipeline/pipeline.toml");
+    let manifest_path =
+        Path::new(PROJECT_ROOT).join(".archon/agents/coding-pipeline/pipeline.toml");
     let manifest = load_manifest(&manifest_path).expect("parse manifest");
 
     let coding_dir = Path::new(PROJECT_ROOT).join(".archon/agents/coding-pipeline");

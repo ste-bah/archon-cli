@@ -118,7 +118,9 @@ command = "Summarize output"
     let settings = parse_hooks_toml(toml_str).expect("valid TOML should parse");
 
     // PreToolUse
-    let pre = settings.get(&HookEvent::PreToolUse).expect("PreToolUse present");
+    let pre = settings
+        .get(&HookEvent::PreToolUse)
+        .expect("PreToolUse present");
     assert_eq!(pre.len(), 1);
     assert_eq!(pre[0].matcher.as_deref(), Some("Bash"));
     assert_eq!(pre[0].hooks.len(), 1);
@@ -127,7 +129,9 @@ command = "Summarize output"
     assert_eq!(pre[0].hooks[0].timeout, Some(10));
 
     // PostToolUse
-    let post = settings.get(&HookEvent::PostToolUse).expect("PostToolUse present");
+    let post = settings
+        .get(&HookEvent::PostToolUse)
+        .expect("PostToolUse present");
     assert_eq!(post.len(), 1);
     assert_eq!(post[0].hooks[0].hook_type, HookCommandType::Prompt);
     assert_eq!(post[0].hooks[0].command, "Summarize output");
@@ -174,8 +178,7 @@ fn test_toml_parsing_empty_string() {
 
 #[test]
 fn test_toml_parsing_no_hooks_section() {
-    let settings =
-        parse_hooks_toml("[other]\nkey = \"value\"").expect("no hooks section");
+    let settings = parse_hooks_toml("[other]\nkey = \"value\"").expect("no hooks section");
     assert!(settings.is_empty());
 }
 
@@ -231,11 +234,7 @@ fn test_multi_source_load_order() {
             }]
         }
     }"#;
-    fs::write(
-        project_root.join(".archon/settings.json"),
-        settings_json,
-    )
-    .unwrap();
+    fs::write(project_root.join(".archon/settings.json"), settings_json).unwrap();
 
     // Source 2: user-global hooks.toml
     fs::write(
@@ -269,8 +268,7 @@ fn test_multi_source_load_order() {
     let mut all_commands: Vec<String> = Vec::new();
 
     // 1. settings.json
-    let json_content =
-        fs::read_to_string(project_root.join(".archon/settings.json")).unwrap();
+    let json_content = fs::read_to_string(project_root.join(".archon/settings.json")).unwrap();
     let _reg = HookRegistry::load_from_settings_json(&json_content).unwrap();
     all_commands.push("from-settings-json".into());
 
@@ -278,13 +276,15 @@ fn test_multi_source_load_order() {
     let toml_sources = [
         (home_dir.join(".archon/hooks.toml"), "from-user-global"),
         (project_root.join(".archon/hooks.toml"), "from-project-toml"),
-        (project_root.join(".archon/hooks.local.toml"), "from-local-toml"),
+        (
+            project_root.join(".archon/hooks.local.toml"),
+            "from-local-toml",
+        ),
         (home_dir.join(".archon/policy/hooks.toml"), "from-policy"),
     ];
 
     for (path, label) in &toml_sources {
-        let settings = load_hooks_from_toml(path)
-            .unwrap_or_else(|e| panic!("load {label}: {e}"));
+        let settings = load_hooks_from_toml(path).unwrap_or_else(|e| panic!("load {label}: {e}"));
         assert!(
             settings.contains_key(&HookEvent::PreToolUse),
             "{label} should have PreToolUse hooks"
@@ -501,8 +501,7 @@ status_message = "Checking policy..."
 Authorization = "Bearer $API_KEY"
 "#;
 
-    let settings =
-        parse_hooks_toml(toml_str).expect("all-fields TOML should parse");
+    let settings = parse_hooks_toml(toml_str).expect("all-fields TOML should parse");
     let matchers = settings.get(&HookEvent::PreToolUse).unwrap();
     let hook = &matchers[0].hooks[0];
 
@@ -513,10 +512,7 @@ Authorization = "Bearer $API_KEY"
     assert_eq!(hook.once, Some(true));
     assert_eq!(hook.r#async, Some(true));
     assert_eq!(hook.async_rewake, Some(false));
-    assert_eq!(
-        hook.status_message.as_deref(),
-        Some("Checking policy...")
-    );
+    assert_eq!(hook.status_message.as_deref(), Some("Checking policy..."));
     assert_eq!(
         hook.headers.get("Authorization").map(String::as_str),
         Some("Bearer $API_KEY")

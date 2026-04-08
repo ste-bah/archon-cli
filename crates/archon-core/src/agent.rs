@@ -681,15 +681,16 @@ impl Agent {
                             | "TodoWrite" | "Sleep" | "Write" | "Edit" | "Config"
                             | "EnterPlanMode" | "ExitPlanMode" | "NotebookEdit" => true,
                             _ => {
-                                let perm_agg = self.fire_hook(
-                                    crate::hooks::HookEvent::PermissionRequest,
-                                    serde_json::json!({
-                                        "hook_event": "PermissionRequest",
-                                        "tool_name": tool.name,
-                                        "mode": "acceptEdits",
-                                    }),
-                                )
-                                .await;
+                                let perm_agg = self
+                                    .fire_hook(
+                                        crate::hooks::HookEvent::PermissionRequest,
+                                        serde_json::json!({
+                                            "hook_event": "PermissionRequest",
+                                            "tool_name": tool.name,
+                                            "mode": "acceptEdits",
+                                        }),
+                                    )
+                                    .await;
                                 // Apply updated_permissions from hooks (REQ-HOOK-016)
                                 if !perm_agg.updated_permissions.is_empty() {
                                     let authority = crate::hooks::SourceAuthority::Project;
@@ -730,15 +731,16 @@ impl Agent {
                                 true
                             }
                             _ => {
-                                let perm_agg = self.fire_hook(
-                                    crate::hooks::HookEvent::PermissionRequest,
-                                    serde_json::json!({
-                                        "hook_event": "PermissionRequest",
-                                        "tool_name": tool.name,
-                                        "mode": "ask",
-                                    }),
-                                )
-                                .await;
+                                let perm_agg = self
+                                    .fire_hook(
+                                        crate::hooks::HookEvent::PermissionRequest,
+                                        serde_json::json!({
+                                            "hook_event": "PermissionRequest",
+                                            "tool_name": tool.name,
+                                            "mode": "ask",
+                                        }),
+                                    )
+                                    .await;
                                 // Apply updated_permissions from hooks (REQ-HOOK-016)
                                 if !perm_agg.updated_permissions.is_empty() {
                                     let authority = crate::hooks::SourceAuthority::Project;
@@ -1235,16 +1237,18 @@ impl Agent {
                     };
 
                     // CRIT-09: Intercept AskUserQuestion sentinel.
-                    let mut result =
-                        if !result.is_error && result.content.starts_with("[PENDING_USER_INPUT]") {
-                            let question = result
-                                .content
-                                .strip_prefix("[PENDING_USER_INPUT]")
-                                .unwrap_or(&result.content)
-                                .to_string();
+                    let mut result = if !result.is_error
+                        && result.content.starts_with("[PENDING_USER_INPUT]")
+                    {
+                        let question = result
+                            .content
+                            .strip_prefix("[PENDING_USER_INPUT]")
+                            .unwrap_or(&result.content)
+                            .to_string();
 
-                            // CRIT-06: Fire Elicitation hook before presenting question to user
-                            let elicitation_agg = self.fire_hook(
+                        // CRIT-06: Fire Elicitation hook before presenting question to user
+                        let elicitation_agg = self
+                            .fire_hook(
                                 crate::hooks::HookEvent::Elicitation,
                                 serde_json::json!({
                                     "hook_event": "Elicitation",
@@ -1253,39 +1257,34 @@ impl Agent {
                             )
                             .await;
 
-                            // REQ-HOOK-019: If hook returns elicitation_action, auto-respond
-                            if let Some(ref action) = elicitation_agg.elicitation_action {
-                                let auto_response = match action {
-                                    crate::hooks::ElicitationAction::Accept => {
-                                        if let Some(ref content) = elicitation_agg.elicitation_content {
-                                            serde_json::to_string(content)
-                                                .unwrap_or_else(|_| "accepted".to_string())
-                                        } else {
-                                            "accepted".to_string()
-                                        }
+                        // REQ-HOOK-019: If hook returns elicitation_action, auto-respond
+                        if let Some(ref action) = elicitation_agg.elicitation_action {
+                            let auto_response = match action {
+                                crate::hooks::ElicitationAction::Accept => {
+                                    if let Some(ref content) = elicitation_agg.elicitation_content {
+                                        serde_json::to_string(content)
+                                            .unwrap_or_else(|_| "accepted".to_string())
+                                    } else {
+                                        "accepted".to_string()
                                     }
-                                    crate::hooks::ElicitationAction::Decline => {
-                                        "declined".to_string()
-                                    }
-                                    crate::hooks::ElicitationAction::Cancel => {
-                                        "cancelled".to_string()
-                                    }
-                                };
+                                }
+                                crate::hooks::ElicitationAction::Decline => "declined".to_string(),
+                                crate::hooks::ElicitationAction::Cancel => "cancelled".to_string(),
+                            };
 
-                                // Fire ElicitationResult with auto-response
-                                self.fire_hook(
-                                    crate::hooks::HookEvent::ElicitationResult,
-                                    serde_json::json!({
-                                        "hook_event": "ElicitationResult",
-                                        "result": &auto_response,
-                                        "auto_responded": true,
-                                    }),
-                                )
-                                .await;
+                            // Fire ElicitationResult with auto-response
+                            self.fire_hook(
+                                crate::hooks::HookEvent::ElicitationResult,
+                                serde_json::json!({
+                                    "hook_event": "ElicitationResult",
+                                    "result": &auto_response,
+                                    "auto_responded": true,
+                                }),
+                            )
+                            .await;
 
-                                ToolResult::success(auto_response)
-                            } else {
-
+                            ToolResult::success(auto_response)
+                        } else {
                             self.send_event(AgentEvent::AskUser {
                                 question: question.clone(),
                             })
@@ -1315,10 +1314,10 @@ impl Agent {
                                         .to_string(),
                                 )
                             }
-                            } // end else (no elicitation_action)
-                        } else {
-                            result
-                        };
+                        } // end else (no elicitation_action)
+                    } else {
+                        result
+                    };
 
                     // CRIT-06: Fire PostToolUse / PostToolUseFailure hooks (REQ-HOOK-005)
                     // Retry loop: max 3 re-executions if PostToolUse hook sets retry=true
@@ -1435,7 +1434,8 @@ impl Agent {
                                 "Hook returned {} watch paths",
                                 file_agg.watch_paths.len()
                             );
-                            self.file_watch_manager.add_watch_paths(file_agg.watch_paths);
+                            self.file_watch_manager
+                                .add_watch_paths(file_agg.watch_paths);
                         }
                     }
 
@@ -1446,14 +1446,15 @@ impl Agent {
                                 || cmd.contains(" && cd ")
                                 || cmd.contains("; cd ")
                             {
-                                let cwd_agg = self.fire_hook(
-                                    crate::hooks::HookEvent::CwdChanged,
-                                    serde_json::json!({
-                                        "hook_event": "CwdChanged",
-                                        "command": cmd,
-                                    }),
-                                )
-                                .await;
+                                let cwd_agg = self
+                                    .fire_hook(
+                                        crate::hooks::HookEvent::CwdChanged,
+                                        serde_json::json!({
+                                            "hook_event": "CwdChanged",
+                                            "command": cmd,
+                                        }),
+                                    )
+                                    .await;
                                 // Consume watch_paths from CwdChanged hooks (REQ-HOOK-017)
                                 if !cwd_agg.watch_paths.is_empty() {
                                     tracing::info!(

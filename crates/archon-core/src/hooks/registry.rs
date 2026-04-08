@@ -97,12 +97,7 @@ impl HookRegistry {
 
     /// Register a session-scoped temporary hook. Uses interior mutability via `RwLock`.
     /// Auto-cleared when `SessionEnd` fires for the `session_id`.
-    pub fn register_session_hook(
-        &self,
-        session_id: &str,
-        event: HookEvent,
-        config: HookConfig,
-    ) {
+    pub fn register_session_hook(&self, session_id: &str, event: HookEvent, config: HookConfig) {
         let mut hooks = self
             .session_hooks
             .write()
@@ -128,11 +123,7 @@ impl HookRegistry {
             .unwrap_or_else(|p| p.into_inner());
         if let Some(removed) = hooks.remove(session_id) {
             let count: usize = removed.values().map(|v| v.len()).sum();
-            tracing::info!(
-                "Cleared {} session hooks for session={}",
-                count,
-                session_id
-            );
+            tracing::info!("Cleared {} session hooks for session={}", count, session_id);
         }
     }
 
@@ -255,10 +246,7 @@ impl HookRegistry {
         // Execute session-scoped hooks for this session_id.
         // Collect under lock, then release before async execution.
         let session_hook_configs: Vec<HookConfig> = {
-            let session_hooks = self
-                .session_hooks
-                .read()
-                .unwrap_or_else(|p| p.into_inner());
+            let session_hooks = self.session_hooks.read().unwrap_or_else(|p| p.into_inner());
             session_hooks
                 .get(session_id)
                 .and_then(|m| m.get(&event))
@@ -290,10 +278,8 @@ impl HookRegistry {
                 config.clone()
             };
 
-            let result = executor::execute_hook(
-                &clamped_config, &input, cwd, session_id, &event_name,
-            )
-            .await;
+            let result =
+                executor::execute_hook(&clamped_config, &input, cwd, session_id, &event_name).await;
 
             // Session hooks have no persistent source tag; strip any
             // self-reported source_authority to prevent privilege escalation.
@@ -309,7 +295,10 @@ impl HookRegistry {
         }
 
         // Execute registered in-process callbacks for this event.
-        let tool_name = input.get("tool_name").and_then(|v| v.as_str()).map(|s| s.to_string());
+        let tool_name = input
+            .get("tool_name")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
         let mut ctx_builder = HookContext::builder(event.clone())
             .session_id(session_id.to_string())
             .cwd(cwd.to_string_lossy().to_string());
@@ -323,7 +312,8 @@ impl HookRegistry {
             ctx_builder = ctx_builder.tool_output(tool_output.clone());
         }
         let ctx = ctx_builder.build();
-        self.execute_callbacks(&event, &ctx, &mut aggregated, budget_start, budget).await;
+        self.execute_callbacks(&event, &ctx, &mut aggregated, budget_start, budget)
+            .await;
 
         aggregated
     }
@@ -358,10 +348,26 @@ impl HookRegistry {
 
         // 2-5. TOML sources (with .claude fallback for backward compat)
         let sources: [(std::path::PathBuf, std::path::PathBuf, &str); 4] = [
-            (home_dir.join(".archon/hooks.toml"), home_dir.join(".claude/hooks.toml"), "user"),
-            (project_root.join(".archon/hooks.toml"), project_root.join(".claude/hooks.toml"), "project"),
-            (project_root.join(".archon/hooks.local.toml"), project_root.join(".claude/hooks.local.toml"), "local"),
-            (home_dir.join(".archon/policy/hooks.toml"), home_dir.join(".claude/policy/hooks.toml"), "policy"),
+            (
+                home_dir.join(".archon/hooks.toml"),
+                home_dir.join(".claude/hooks.toml"),
+                "user",
+            ),
+            (
+                project_root.join(".archon/hooks.toml"),
+                project_root.join(".claude/hooks.toml"),
+                "project",
+            ),
+            (
+                project_root.join(".archon/hooks.local.toml"),
+                project_root.join(".claude/hooks.local.toml"),
+                "local",
+            ),
+            (
+                home_dir.join(".archon/policy/hooks.toml"),
+                home_dir.join(".claude/policy/hooks.toml"),
+                "policy",
+            ),
         ];
 
         for (new_path, old_path, source_tag) in &sources {
@@ -433,19 +439,13 @@ impl HookRegistry {
 
     /// Register an in-process callback for the given event.
     pub fn register_callback(&self, event: HookEvent, entry: HookCallbackEntry) {
-        let mut map = self
-            .callbacks
-            .write()
-            .unwrap_or_else(|p| p.into_inner());
+        let mut map = self.callbacks.write().unwrap_or_else(|p| p.into_inner());
         map.entry(event).or_default().push(entry);
     }
 
     /// Remove a previously registered callback by name.
     pub fn unregister_callback(&self, event: &HookEvent, name: &str) {
-        let mut map = self
-            .callbacks
-            .write()
-            .unwrap_or_else(|p| p.into_inner());
+        let mut map = self.callbacks.write().unwrap_or_else(|p| p.into_inner());
         if let Some(entries) = map.get_mut(event) {
             entries.retain(|e| e.name != name);
         }
@@ -463,10 +463,7 @@ impl HookRegistry {
     ) {
         // Collect callback info under a short read-lock.
         let callback_snapshot: Vec<(String, super::callback::HookCallback, u32)> = {
-            let map = self
-                .callbacks
-                .read()
-                .unwrap_or_else(|p| p.into_inner());
+            let map = self.callbacks.read().unwrap_or_else(|p| p.into_inner());
             match map.get(event) {
                 Some(entries) => entries
                     .iter()

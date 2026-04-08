@@ -13,11 +13,8 @@ use super::types::{PermissionUpdate, PermissionUpdateDestination, SourceAuthorit
 /// Trait for applying permission updates. Implementations persist changes
 /// to the appropriate destination (settings file, in-memory session, etc.).
 pub trait PermissionStore: Send + Sync {
-    fn add_rules(
-        &self,
-        dest: &PermissionUpdateDestination,
-        rules: &[String],
-    ) -> Result<(), String>;
+    fn add_rules(&self, dest: &PermissionUpdateDestination, rules: &[String])
+    -> Result<(), String>;
 
     fn replace_rules(
         &self,
@@ -231,9 +228,7 @@ impl PermissionStore for RuntimePermissionStore {
             Self::modify_settings_file(path, |json| {
                 if let Some(perms) = json.get_mut("permissions") {
                     if let Some(arr) = perms.get_mut("rules").and_then(|v| v.as_array_mut()) {
-                        arr.retain(|v| {
-                            !v.as_str().map(|s| rules_set.contains(s)).unwrap_or(false)
-                        });
+                        arr.retain(|v| !v.as_str().map(|s| rules_set.contains(s)).unwrap_or(false));
                     }
                 }
             })
@@ -247,11 +242,7 @@ impl PermissionStore for RuntimePermissionStore {
         }
     }
 
-    fn set_mode(
-        &self,
-        dest: &PermissionUpdateDestination,
-        mode: &str,
-    ) -> Result<(), String> {
+    fn set_mode(&self, dest: &PermissionUpdateDestination, mode: &str) -> Result<(), String> {
         if let Some(path) = self.resolve_path(dest) {
             let mode = mode.to_string();
             Self::modify_settings_file(path, |json| {
@@ -260,10 +251,10 @@ impl PermissionStore for RuntimePermissionStore {
                     .unwrap()
                     .entry("permissions")
                     .or_insert_with(|| serde_json::json!({}));
-                perms.as_object_mut().unwrap().insert(
-                    "mode".to_string(),
-                    serde_json::Value::String(mode),
-                );
+                perms
+                    .as_object_mut()
+                    .unwrap()
+                    .insert("mode".to_string(), serde_json::Value::String(mode));
             })
         } else {
             let mut session_mode = self.session_mode.write().map_err(|e| e.to_string())?;
@@ -296,8 +287,10 @@ impl PermissionStore for RuntimePermissionStore {
                 }
             })
         } else {
-            let mut session_dirs =
-                self.session_directories.write().map_err(|e| e.to_string())?;
+            let mut session_dirs = self
+                .session_directories
+                .write()
+                .map_err(|e| e.to_string())?;
             session_dirs.extend(dirs.iter().cloned());
             Ok(())
         }
@@ -312,18 +305,16 @@ impl PermissionStore for RuntimePermissionStore {
             let dirs_set: HashSet<&str> = dirs.iter().map(|s| s.as_str()).collect();
             Self::modify_settings_file(path, |json| {
                 if let Some(perms) = json.get_mut("permissions") {
-                    if let Some(arr) =
-                        perms.get_mut("directories").and_then(|v| v.as_array_mut())
-                    {
-                        arr.retain(|v| {
-                            !v.as_str().map(|s| dirs_set.contains(s)).unwrap_or(false)
-                        });
+                    if let Some(arr) = perms.get_mut("directories").and_then(|v| v.as_array_mut()) {
+                        arr.retain(|v| !v.as_str().map(|s| dirs_set.contains(s)).unwrap_or(false));
                     }
                 }
             })
         } else {
-            let mut session_dirs =
-                self.session_directories.write().map_err(|e| e.to_string())?;
+            let mut session_dirs = self
+                .session_directories
+                .write()
+                .map_err(|e| e.to_string())?;
             let dirs_set: HashSet<&str> = dirs.iter().map(|s| s.as_str()).collect();
             session_dirs.retain(|d| !dirs_set.contains(d.as_str()));
             Ok(())
