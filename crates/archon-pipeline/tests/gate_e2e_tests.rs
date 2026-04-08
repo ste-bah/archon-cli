@@ -146,6 +146,7 @@ async fn tests_run_gate_nonexistent_project_fails() {
 // ===========================================================================
 
 #[tokio::test]
+#[cfg(unix)] // Shell script execution — not available on Windows
 async fn e2e_gate_rejects_test_only_evidence_even_on_exit_zero() {
     // Create a temp script that outputs something that looks like test output
     let tmp = TempDir::new().expect("tempdir");
