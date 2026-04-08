@@ -30,6 +30,8 @@ pub enum TruncationPriority {
     SherlockVerdicts,
     /// Priority 7 (L10 Algorithm strategy).
     AlgorithmStrategy,
+    /// Priority 7.5 (agent .md file instructions loaded at runtime).
+    AgentInstructions,
     /// Priority 8 (L4 RLM namespace context).
     RlmContext,
     /// Priority 100 — never removed (L1 base prompt, L2 task context).
@@ -46,7 +48,8 @@ impl TruncationPriority {
             Self::PatternMatcherResults => 5,
             Self::SherlockVerdicts => 6,
             Self::AlgorithmStrategy => 7,
-            Self::RlmContext => 8,
+            Self::AgentInstructions => 8,
+            Self::RlmContext => 9,
             Self::Required => 100,
         }
     }

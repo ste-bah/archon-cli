@@ -178,6 +178,27 @@ impl CodingFacade {
             required: true,
         });
 
+        // L1.5: agent instructions from .md file (optional, can be truncated)
+        if let Some(ca) = coding_agent {
+            let md_path = std::path::Path::new(ca.prompt_source_path);
+            if md_path.exists() {
+                if let Ok(content) = std::fs::read_to_string(md_path) {
+                    if let Ok((_frontmatter, body)) =
+                        crate::agent_loader::parse_frontmatter(&content)
+                    {
+                        if !body.trim().is_empty() {
+                            layers.push(PromptLayer {
+                                name: "agent_instructions".to_string(),
+                                content: body,
+                                priority: TruncationPriority::AgentInstructions,
+                                required: false,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
         // L2 (required)
         layers.push(PromptLayer {
             name: "task_context".to_string(),
