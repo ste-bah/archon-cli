@@ -82,7 +82,7 @@ interface ProhibPreValidation {
 
 2. **Log PROHIB validation results to memory**
    ```bash
-   mcp__memorygraph__store_memory with title "coding/prohib/validation/<agent>/<timestamp>", content '<result>', tags ["coding-pipeline", "prohib"]
+   # (archon-rlm: store) title "coding/prohib/validation/<agent>/<timestamp>", content '<result>', tags ["coding-pipeline", "prohib"]
    ```
 
 3. **Escalate violations via EMERG triggers**
