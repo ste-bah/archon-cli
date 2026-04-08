@@ -154,7 +154,12 @@ struct Subproblem {
 fn estimate_complexity(description: &str) -> f64 {
     let word_count = description.split_whitespace().count();
     let complexity_keywords = [
-        "complex", "difficult", "hard", "critical", "important", "major",
+        "complex",
+        "difficult",
+        "hard",
+        "critical",
+        "important",
+        "major",
     ];
     let keyword_boost: f64 = complexity_keywords
         .iter()

@@ -232,10 +232,7 @@ pub fn initialize_learning_schemas(db: &cozo::DbInstance) -> Result<()> {
                 if msg.contains("already exists") || msg.contains("conflicts") {
                     // Relation already present — idempotent, skip.
                 } else {
-                    return Err(anyhow::anyhow!(
-                        "Learning schema creation failed: {}",
-                        msg
-                    ));
+                    return Err(anyhow::anyhow!("Learning schema creation failed: {}", msg));
                 }
             }
         }
@@ -244,9 +241,7 @@ pub fn initialize_learning_schemas(db: &cozo::DbInstance) -> Result<()> {
 }
 
 /// Check which of the 12 learning relations exist in the database.
-pub fn verify_learning_schemas(
-    db: &cozo::DbInstance,
-) -> Result<SchemaVerificationReport> {
+pub fn verify_learning_schemas(db: &cozo::DbInstance) -> Result<SchemaVerificationReport> {
     let result = db
         .run_script(
             "::relations",
@@ -255,11 +250,7 @@ pub fn verify_learning_schemas(
         )
         .map_err(|e| anyhow::anyhow!("Failed to list relations: {:?}", e))?;
 
-    let name_col = result
-        .headers
-        .iter()
-        .position(|h| h == "name")
-        .unwrap_or(0);
+    let name_col = result.headers.iter().position(|h| h == "name").unwrap_or(0);
 
     let existing: Vec<String> = result
         .rows

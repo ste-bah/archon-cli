@@ -78,7 +78,10 @@ fn test_add_to_queue_creates_file_with_correct_format() {
     let tmp = tempfile::tempdir().unwrap();
     let queue_path = tmp.path().join("queue.json");
 
-    let files = vec![PathBuf::from("/some/file.rs"), PathBuf::from("/other/file.py")];
+    let files = vec![
+        PathBuf::from("/some/file.rs"),
+        PathBuf::from("/other/file.py"),
+    ];
     QueueProcessor::add_to_queue(&queue_path, &files).unwrap();
 
     assert!(queue_path.exists(), "queue file should be created");
@@ -88,11 +91,20 @@ fn test_add_to_queue_creates_file_with_correct_format() {
 
     // Verify camelCase field names
     let first = &entries[0];
-    assert!(first.get("filePath").is_some(), "should have 'filePath' field (camelCase)");
-    assert!(first.get("addedAt").is_some(), "should have 'addedAt' field (camelCase)");
+    assert!(
+        first.get("filePath").is_some(),
+        "should have 'filePath' field (camelCase)"
+    );
+    assert!(
+        first.get("addedAt").is_some(),
+        "should have 'addedAt' field (camelCase)"
+    );
 
     // Verify file_path field is NOT present (should be filePath)
-    assert!(first.get("file_path").is_none(), "should NOT have snake_case 'file_path'");
+    assert!(
+        first.get("file_path").is_none(),
+        "should NOT have snake_case 'file_path'"
+    );
 
     // Verify the paths are correct
     let paths: Vec<String> = entries
@@ -118,7 +130,11 @@ fn test_add_to_queue_appends_without_losing_entries() {
     QueueProcessor::add_to_queue(&queue_path, &batch2).unwrap();
 
     let entries = read_queue_json(&queue_path);
-    assert_eq!(entries.len(), 3, "should have 3 total entries after two appends");
+    assert_eq!(
+        entries.len(),
+        3,
+        "should have 3 total entries after two appends"
+    );
 
     let paths: Vec<String> = entries
         .iter()
@@ -151,7 +167,10 @@ fn test_queue_status_returns_count_without_modifying() {
 
     // File should NOT be modified by queue_status
     let after_mtime = std::fs::metadata(&queue_path).unwrap().modified().unwrap();
-    assert_eq!(before_mtime, after_mtime, "queue_status should not modify the file");
+    assert_eq!(
+        before_mtime, after_mtime,
+        "queue_status should not modify the file"
+    );
 }
 
 /// 5b. queue_status on non-existent file returns zeros.
@@ -174,11 +193,7 @@ async fn test_process_queue_success_and_failure() {
 
     // Create a real source file that CAN be indexed
     let real_file = tmp.path().join("real.rs");
-    std::fs::write(
-        &real_file,
-        "fn processable() -> i32 {\n    42\n}\n",
-    )
-    .unwrap();
+    std::fs::write(&real_file, "fn processable() -> i32 {\n    42\n}\n").unwrap();
 
     // A file that does NOT exist (will fail indexing)
     let missing_file = tmp.path().join("missing_does_not_exist.rs");
@@ -250,8 +265,14 @@ async fn test_dead_letter_after_max_retries() {
 
     // 4th process: dead-lettered files are NOT processed again
     let result = processor.process_queue(&queue_path).await.unwrap();
-    assert_eq!(result.processed, 0, "dead-lettered file should not be retried");
-    assert_eq!(result.failed, 0, "dead-lettered file should not count as new failure");
+    assert_eq!(
+        result.processed, 0,
+        "dead-lettered file should not be retried"
+    );
+    assert_eq!(
+        result.failed, 0,
+        "dead-lettered file should not count as new failure"
+    );
 }
 
 /// 8. JSON format compatibility with `.claude/runtime/leann-index-queue.json`:
@@ -262,7 +283,8 @@ async fn test_json_format_compatibility() {
     let queue_path = tmp.path().join("queue.json");
 
     // Write queue in the exact format used by hooks (no errorCount field)
-    let json_content = r#"[{"filePath": "/nonexistent/hook_added_file.rs", "addedAt": "2024-01-01T00:00:00Z"}]"#;
+    let json_content =
+        r#"[{"filePath": "/nonexistent/hook_added_file.rs", "addedAt": "2024-01-01T00:00:00Z"}]"#;
     std::fs::write(&queue_path, json_content).unwrap();
 
     let indexer = test_indexer();
@@ -274,7 +296,10 @@ async fn test_json_format_compatibility() {
     // File doesn't exist so it will fail, but it should parse and attempt indexing
     // (processed = 0, failed = 1) - proves it was parsed and attempted
     let total_attempts = result.processed + result.failed;
-    assert_eq!(total_attempts, 1, "should attempt to process the 1 entry from hook format");
+    assert_eq!(
+        total_attempts, 1,
+        "should attempt to process the 1 entry from hook format"
+    );
 }
 
 /// 9. add_to_queue uses atomic write (temp file + rename) — no partial writes.
@@ -291,7 +316,10 @@ fn test_add_to_queue_produces_valid_json() {
 
     let content = std::fs::read_to_string(&queue_path).unwrap();
     let parsed: Result<Vec<QueueEntry>, _> = serde_json::from_str(&content);
-    assert!(parsed.is_ok(), "queue file should always be valid JSON after multiple appends");
+    assert!(
+        parsed.is_ok(),
+        "queue file should always be valid JSON after multiple appends"
+    );
     assert_eq!(parsed.unwrap().len(), 10);
 }
 
@@ -321,12 +349,16 @@ async fn test_queue_result_remaining_matches_file() {
 
     assert_eq!(result.processed, 2);
     assert_eq!(result.failed, 2);
-    assert_eq!(result.remaining, 2, "remaining should equal number of failed entries left in queue");
+    assert_eq!(
+        result.remaining, 2,
+        "remaining should equal number of failed entries left in queue"
+    );
 
     // Cross-check with actual file
     let entries = read_queue_json(&queue_path);
     assert_eq!(
-        entries.len(), result.remaining,
+        entries.len(),
+        result.remaining,
         "remaining in result should match actual file entries"
     );
 }

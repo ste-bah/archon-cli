@@ -5,7 +5,7 @@
 //! keeps the assembled prompt within 80 % of the model context window.
 
 use archon_pipeline::prompt_cap::{
-    count_tokens, truncate_prompt, PromptLayer, TruncatedPrompt, TruncationPriority,
+    PromptLayer, TruncatedPrompt, TruncationPriority, count_tokens, truncate_prompt,
 };
 
 // ---------------------------------------------------------------------------
@@ -59,7 +59,12 @@ fn test_no_truncation_when_under_limit() {
         make_layer("base_prompt", 10_000, TruncationPriority::Required, true),
         make_layer("task_context", 10_000, TruncationPriority::Required, true),
         make_layer("rlm_context", 5_000, TruncationPriority::RlmContext, false),
-        make_layer("desc_episodes", 5_000, TruncationPriority::DescEpisodes, false),
+        make_layer(
+            "desc_episodes",
+            5_000,
+            TruncationPriority::DescEpisodes,
+            false,
+        ),
     ];
 
     let result = truncate_prompt(layers, window).expect("truncate_prompt should succeed");
@@ -87,7 +92,12 @@ fn test_truncation_removes_lowest_priority_first() {
         make_layer("base_prompt", 30_000, TruncationPriority::Required, true),
         make_layer("task_context", 30_000, TruncationPriority::Required, true),
         // These two push total to 90 000 — over budget
-        make_layer("leann_context", 15_000, TruncationPriority::LeannSemanticContext, false),
+        make_layer(
+            "leann_context",
+            15_000,
+            TruncationPriority::LeannSemanticContext,
+            false,
+        ),
         make_layer("rlm_context", 15_000, TruncationPriority::RlmContext, false),
     ];
 
@@ -112,7 +122,12 @@ fn test_required_layers_never_removed() {
         make_layer("base_prompt", 50_000, TruncationPriority::Required, true),
         make_layer("task_context", 50_000, TruncationPriority::Required, true),
         make_layer("rlm_context", 50_000, TruncationPriority::RlmContext, false),
-        make_layer("desc_episodes", 50_000, TruncationPriority::DescEpisodes, false),
+        make_layer(
+            "desc_episodes",
+            50_000,
+            TruncationPriority::DescEpisodes,
+            false,
+        ),
     ];
 
     let result = truncate_prompt(layers, window).expect("truncate_prompt should succeed");
@@ -150,8 +165,18 @@ fn test_ec_pipe_003_all_layers_exceed() {
         make_layer("base_prompt", 20_000, TruncationPriority::Required, true),
         make_layer("task_context", 20_000, TruncationPriority::Required, true),
         make_layer("rlm_context", 10_000, TruncationPriority::RlmContext, false),
-        make_layer("desc_episodes", 10_000, TruncationPriority::DescEpisodes, false),
-        make_layer("sona_patterns", 10_000, TruncationPriority::SonaPatterns, false),
+        make_layer(
+            "desc_episodes",
+            10_000,
+            TruncationPriority::DescEpisodes,
+            false,
+        ),
+        make_layer(
+            "sona_patterns",
+            10_000,
+            TruncationPriority::SonaPatterns,
+            false,
+        ),
         make_layer(
             "reflexion_trajectories",
             10_000,
@@ -164,7 +189,12 @@ fn test_ec_pipe_003_all_layers_exceed() {
             TruncationPriority::PatternMatcherResults,
             false,
         ),
-        make_layer("sherlock_verdicts", 10_000, TruncationPriority::SherlockVerdicts, false),
+        make_layer(
+            "sherlock_verdicts",
+            10_000,
+            TruncationPriority::SherlockVerdicts,
+            false,
+        ),
         make_layer(
             "algorithm_strategy",
             10_000,
@@ -177,7 +207,12 @@ fn test_ec_pipe_003_all_layers_exceed() {
             TruncationPriority::LeannSemanticContext,
             false,
         ),
-        make_layer("extra_non_required", 10_000, TruncationPriority::RlmContext, false),
+        make_layer(
+            "extra_non_required",
+            10_000,
+            TruncationPriority::RlmContext,
+            false,
+        ),
     ];
     // Total = 130 000 tokens, budget = 80 000
 
@@ -264,7 +299,9 @@ fn test_partial_truncation_within_priority() {
 
     // leann_semantic should be partially truncated, not fully removed
     assert!(
-        !result.removed_layers.contains(&"leann_semantic".to_string()),
+        !result
+            .removed_layers
+            .contains(&"leann_semantic".to_string()),
         "leann_semantic should NOT be fully removed"
     );
 
@@ -283,7 +320,10 @@ fn test_partial_truncation_within_priority() {
         final_size,
         original
     );
-    assert!(*final_size > 0, "partial truncation should leave some content");
+    assert!(
+        *final_size > 0,
+        "partial truncation should leave some content"
+    );
 
     assert!(result.total_tokens <= (window * 80) / 100);
 }
@@ -299,7 +339,12 @@ fn test_truncated_prompt_reports_removed_and_truncated() {
         make_layer("base_prompt", 35_000, TruncationPriority::Required, true),
         make_layer("task_context", 35_000, TruncationPriority::Required, true),
         // This one will be fully removed (lowest priority = LeannSemanticContext, ordinal 1)
-        make_layer("leann_semantic", 10_000, TruncationPriority::LeannSemanticContext, false),
+        make_layer(
+            "leann_semantic",
+            10_000,
+            TruncationPriority::LeannSemanticContext,
+            false,
+        ),
         // This one should be partially truncated (higher priority = RlmContext, ordinal 8)
         make_layer("rlm_context", 15_000, TruncationPriority::RlmContext, false),
     ];
@@ -308,7 +353,9 @@ fn test_truncated_prompt_reports_removed_and_truncated() {
 
     // leann_semantic (lowest priority, ordinal 1) should be removed
     assert!(
-        result.removed_layers.contains(&"leann_semantic".to_string()),
+        result
+            .removed_layers
+            .contains(&"leann_semantic".to_string()),
         "leann_semantic should be fully removed (lowest priority)"
     );
 
@@ -355,8 +402,18 @@ fn test_prompt_fits_80_percent() {
         make_layer("base_prompt", 20_000, TruncationPriority::Required, true),
         make_layer("task_context", 20_000, TruncationPriority::Required, true),
         make_layer("rlm_context", 20_000, TruncationPriority::RlmContext, false),
-        make_layer("desc_episodes", 20_000, TruncationPriority::DescEpisodes, false),
-        make_layer("sona_patterns", 20_000, TruncationPriority::SonaPatterns, false),
+        make_layer(
+            "desc_episodes",
+            20_000,
+            TruncationPriority::DescEpisodes,
+            false,
+        ),
+        make_layer(
+            "sona_patterns",
+            20_000,
+            TruncationPriority::SonaPatterns,
+            false,
+        ),
     ];
     // Total = 100 000, budget = 80 000
 
@@ -382,9 +439,7 @@ fn test_priority_ordering() {
     assert!(TruncationPriority::LeannSemanticContext < TruncationPriority::DescEpisodes);
     assert!(TruncationPriority::DescEpisodes < TruncationPriority::SonaPatterns);
     assert!(TruncationPriority::SonaPatterns < TruncationPriority::ReflexionTrajectories);
-    assert!(
-        TruncationPriority::ReflexionTrajectories < TruncationPriority::PatternMatcherResults
-    );
+    assert!(TruncationPriority::ReflexionTrajectories < TruncationPriority::PatternMatcherResults);
     assert!(TruncationPriority::PatternMatcherResults < TruncationPriority::SherlockVerdicts);
     assert!(TruncationPriority::SherlockVerdicts < TruncationPriority::AlgorithmStrategy);
     assert!(TruncationPriority::AlgorithmStrategy < TruncationPriority::RlmContext);

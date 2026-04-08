@@ -256,11 +256,7 @@ mod tests {
         ];
         for alg in &variants {
             let snippet = alg.prompt_snippet();
-            assert!(
-                !snippet.is_empty(),
-                "{:?} returned an empty snippet",
-                alg
-            );
+            assert!(!snippet.is_empty(), "{:?} returned an empty snippet", alg);
         }
     }
 
@@ -334,18 +330,9 @@ mod tests {
         assert_eq!("LATS".parse::<Algorithm>(), Ok(Algorithm::LATS));
         assert_eq!("ReAct".parse::<Algorithm>(), Ok(Algorithm::ReAct));
         assert_eq!("ToT".parse::<Algorithm>(), Ok(Algorithm::ToT));
-        assert_eq!(
-            "Self-Debug".parse::<Algorithm>(),
-            Ok(Algorithm::SelfDebug)
-        );
-        assert_eq!(
-            "SelfDebug".parse::<Algorithm>(),
-            Ok(Algorithm::SelfDebug)
-        );
-        assert_eq!(
-            "Reflexion".parse::<Algorithm>(),
-            Ok(Algorithm::Reflexion)
-        );
+        assert_eq!("Self-Debug".parse::<Algorithm>(), Ok(Algorithm::SelfDebug));
+        assert_eq!("SelfDebug".parse::<Algorithm>(), Ok(Algorithm::SelfDebug));
+        assert_eq!("Reflexion".parse::<Algorithm>(), Ok(Algorithm::Reflexion));
         assert_eq!("PoT".parse::<Algorithm>(), Ok(Algorithm::PoT));
     }
 

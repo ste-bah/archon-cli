@@ -126,10 +126,7 @@ impl CausalHypergraph {
 
         // Cycle check.
         if CycleDetector::would_create_cycle(self, &link.source_ids, &link.target_id) {
-            return Err(format!(
-                "Adding link '{}' would create a cycle",
-                link.id
-            ));
+            return Err(format!("Adding link '{}' would create a cycle", link.id));
         }
 
         // Update indices.
@@ -269,18 +266,14 @@ impl CausalTraversal {
             }
 
             let neighbours: Vec<NodeID> = match direction {
-                TraversalDirection::Forward => {
-                    graph
-                        .outgoing_links(&current)
-                        .map(|link| link.target_id.clone())
-                        .collect()
-                }
-                TraversalDirection::Backward => {
-                    graph
-                        .incoming_links(&current)
-                        .flat_map(|link| link.source_ids.clone())
-                        .collect()
-                }
+                TraversalDirection::Forward => graph
+                    .outgoing_links(&current)
+                    .map(|link| link.target_id.clone())
+                    .collect(),
+                TraversalDirection::Backward => graph
+                    .incoming_links(&current)
+                    .flat_map(|link| link.source_ids.clone())
+                    .collect(),
             };
 
             for neighbour in neighbours {
@@ -559,12 +552,7 @@ mod tests {
         // N0 -> N1 -> N2 -> N3 -> N4 -> N5
         for i in 0..5 {
             graph
-                .add_link(make_link(
-                    &format!("l{i}"),
-                    &[&ids[i]],
-                    &ids[i + 1],
-                    0.5,
-                ))
+                .add_link(make_link(&format!("l{i}"), &[&ids[i]], &ids[i + 1], 0.5))
                 .unwrap();
         }
 

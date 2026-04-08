@@ -126,8 +126,11 @@ impl PipelineFacade for StubFacade {
         &self,
         _session: &PipelineSession,
         agent: &AgentInfo,
-    ) -> anyhow::Result<(Vec<serde_json::Value>, Vec<serde_json::Value>, Vec<serde_json::Value>)>
-    {
+    ) -> anyhow::Result<(
+        Vec<serde_json::Value>,
+        Vec<serde_json::Value>,
+        Vec<serde_json::Value>,
+    )> {
         // Return a single user message, empty system, empty tools.
         let messages = vec![serde_json::json!({
             "role": "user",
@@ -161,11 +164,7 @@ impl PipelineFacade for StubFacade {
 
     async fn finalize(&self, session: PipelineSession) -> anyhow::Result<PipelineResult> {
         let duration = session.started_at.elapsed();
-        let total_cost: f64 = session
-            .agent_results
-            .iter()
-            .map(|(_, r)| r.cost_usd)
-            .sum();
+        let total_cost: f64 = session.agent_results.iter().map(|(_, r)| r.cost_usd).sum();
 
         Ok(PipelineResult {
             session_id: session.id.clone(),
@@ -226,8 +225,11 @@ impl PipelineFacade for SkipFacade {
         &self,
         _session: &PipelineSession,
         agent: &AgentInfo,
-    ) -> anyhow::Result<(Vec<serde_json::Value>, Vec<serde_json::Value>, Vec<serde_json::Value>)>
-    {
+    ) -> anyhow::Result<(
+        Vec<serde_json::Value>,
+        Vec<serde_json::Value>,
+        Vec<serde_json::Value>,
+    )> {
         let messages = vec![serde_json::json!({
             "role": "user",
             "content": format!("Do work for {}", agent.key),
@@ -259,11 +261,7 @@ impl PipelineFacade for SkipFacade {
 
     async fn finalize(&self, session: PipelineSession) -> anyhow::Result<PipelineResult> {
         let duration = session.started_at.elapsed();
-        let total_cost: f64 = session
-            .agent_results
-            .iter()
-            .map(|(_, r)| r.cost_usd)
-            .sum();
+        let total_cost: f64 = session.agent_results.iter().map(|(_, r)| r.cost_usd).sum();
         Ok(PipelineResult {
             session_id: session.id.clone(),
             pipeline_type: session.pipeline_type.clone(),
@@ -481,8 +479,11 @@ async fn test_coding_and_research_facades_compile() {
             &self,
             _session: &PipelineSession,
             _agent: &AgentInfo,
-        ) -> anyhow::Result<(Vec<serde_json::Value>, Vec<serde_json::Value>, Vec<serde_json::Value>)>
-        {
+        ) -> anyhow::Result<(
+            Vec<serde_json::Value>,
+            Vec<serde_json::Value>,
+            Vec<serde_json::Value>,
+        )> {
             Ok((vec![], vec![], vec![]))
         }
 
@@ -544,8 +545,11 @@ async fn test_coding_and_research_facades_compile() {
             &self,
             _session: &PipelineSession,
             _agent: &AgentInfo,
-        ) -> anyhow::Result<(Vec<serde_json::Value>, Vec<serde_json::Value>, Vec<serde_json::Value>)>
-        {
+        ) -> anyhow::Result<(
+            Vec<serde_json::Value>,
+            Vec<serde_json::Value>,
+            Vec<serde_json::Value>,
+        )> {
             Ok((vec![], vec![], vec![]))
         }
 

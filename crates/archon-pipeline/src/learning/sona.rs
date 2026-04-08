@@ -177,11 +177,7 @@ pub fn calculate_weight_update(
 }
 
 /// fisher_update = decay * old_importance + (1 - decay) * gradient^2
-pub fn update_fisher_information(
-    old_importance: f64,
-    gradient: f64,
-    decay: f64,
-) -> f64 {
+pub fn update_fisher_information(old_importance: f64, gradient: f64, decay: f64) -> f64 {
     decay * old_importance + (1.0 - decay) * gradient * gradient
 }
 
@@ -272,7 +268,8 @@ impl SonaEngine {
             created_at: now,
             updated_at: now,
         };
-        self.trajectories.insert(traj.trajectory_id.clone(), traj.clone());
+        self.trajectories
+            .insert(traj.trajectory_id.clone(), traj.clone());
         traj
     }
 
@@ -447,9 +444,8 @@ impl SonaEngine {
             )));
         }
 
-        serde_json::from_slice(json_data).map_err(|e| {
-            SonaError::WeightPersistence(format!("deserialization failed: {}", e))
-        })
+        serde_json::from_slice(json_data)
+            .map_err(|e| SonaError::WeightPersistence(format!("deserialization failed: {}", e)))
     }
 }
 
@@ -471,8 +467,7 @@ impl StepCaptureService {
 
     /// Begin capturing steps for a trajectory.
     pub fn begin_capture(&mut self, trajectory_id: &str) {
-        self.buffers
-            .insert(trajectory_id.to_string(), Vec::new());
+        self.buffers.insert(trajectory_id.to_string(), Vec::new());
     }
 
     /// Record a step in the trajectory buffer.
@@ -483,10 +478,7 @@ impl StepCaptureService {
         observation: &str,
         reward: f64,
     ) {
-        let buffer = self
-            .buffers
-            .entry(trajectory_id.to_string())
-            .or_default();
+        let buffer = self.buffers.entry(trajectory_id.to_string()).or_default();
 
         let step_index = buffer.len();
 
@@ -510,9 +502,7 @@ impl StepCaptureService {
 
     /// End capture and return all steps. Clears the buffer.
     pub fn end_capture(&mut self, trajectory_id: &str) -> Vec<TrajectoryStep> {
-        self.buffers
-            .remove(trajectory_id)
-            .unwrap_or_default()
+        self.buffers.remove(trajectory_id).unwrap_or_default()
     }
 }
 

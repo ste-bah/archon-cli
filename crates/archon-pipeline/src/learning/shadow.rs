@@ -379,10 +379,7 @@ mod tests {
             classify_document(0.9, 0.3),
             DocumentClassification::Supporting
         );
-        assert_eq!(
-            classify_document(0.5, 0.5),
-            DocumentClassification::Neutral
-        );
+        assert_eq!(classify_document(0.5, 0.5), DocumentClassification::Neutral);
     }
 
     /// Helper to build a ShadowDocument with a given embedding and credibility.

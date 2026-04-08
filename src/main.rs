@@ -602,19 +602,28 @@ async fn main() -> Result<()> {
         }
         Some(Commands::Pipeline { action }) => {
             use cli_args::PipelineAction;
-            let cwd =
-                std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+            let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
             match action {
                 PipelineAction::Code { task, dry_run } => {
                     if dry_run {
                         println!("=== Coding Pipeline Dry Run ===");
                         println!("Task: {task}");
                         println!("\nAgent Sequence (48 agents):");
-                        println!("  Phase 1: task-analyzer, requirement-extractor, requirement-prioritizer");
-                        println!("  Phase 2: pattern-explorer, technology-scout, feasibility-analyzer, codebase-analyzer");
-                        println!("  Phase 3: system-designer, component-designer, interface-designer, ...");
-                        println!("  Phase 4: code-generator, unit-implementer, api-implementer, ...");
-                        println!("  Phase 5: test-generator, integration-tester, security-tester, ...");
+                        println!(
+                            "  Phase 1: task-analyzer, requirement-extractor, requirement-prioritizer"
+                        );
+                        println!(
+                            "  Phase 2: pattern-explorer, technology-scout, feasibility-analyzer, codebase-analyzer"
+                        );
+                        println!(
+                            "  Phase 3: system-designer, component-designer, interface-designer, ..."
+                        );
+                        println!(
+                            "  Phase 4: code-generator, unit-implementer, api-implementer, ..."
+                        );
+                        println!(
+                            "  Phase 5: test-generator, integration-tester, security-tester, ..."
+                        );
                         println!("  Phase 6: final-refactorer, sign-off-approver");
                         println!("\nEstimated cost: ~$2.50-5.00 (varies by task complexity)");
                     } else {
@@ -649,10 +658,14 @@ async fn main() -> Result<()> {
                         let adapter = archon_pipeline::llm_adapter::AnthropicLlmAdapter::new(
                             std::sync::Arc::new(pipe_client),
                         );
-                        let learning = archon_pipeline::learning::integration::LearningIntegration::new(
-                            None, None, Default::default(),
-                        );
-                        let facade = archon_pipeline::coding::facade::CodingFacade::with_learning(learning);
+                        let learning =
+                            archon_pipeline::learning::integration::LearningIntegration::new(
+                                None,
+                                None,
+                                Default::default(),
+                            );
+                        let facade =
+                            archon_pipeline::coding::facade::CodingFacade::with_learning(learning);
                         // Try to create LEANN index for code context
                         let leann = {
                             let db_path = cwd.join(".archon").join("leann.db");
@@ -677,7 +690,14 @@ async fn main() -> Result<()> {
                         };
                         println!("Starting coding pipeline...");
                         println!("Task: {task}");
-                        match archon_pipeline::runner::run_pipeline(&facade, &adapter, &task, leann.as_ref()).await {
+                        match archon_pipeline::runner::run_pipeline(
+                            &facade,
+                            &adapter,
+                            &task,
+                            leann.as_ref(),
+                        )
+                        .await
+                        {
                             Ok(result) => {
                                 println!("\n=== Pipeline Complete ===");
                                 println!("Session: {}", result.session_id);
@@ -732,11 +752,18 @@ async fn main() -> Result<()> {
                         let adapter = archon_pipeline::llm_adapter::AnthropicLlmAdapter::new(
                             std::sync::Arc::new(pipe_client),
                         );
-                        let phd_learning = archon_pipeline::learning::integration::PhDLearningIntegration::new();
-                        let facade = archon_pipeline::research::facade::ResearchFacade::with_learning(None, phd_learning);
+                        let phd_learning =
+                            archon_pipeline::learning::integration::PhDLearningIntegration::new();
+                        let facade =
+                            archon_pipeline::research::facade::ResearchFacade::with_learning(
+                                None,
+                                phd_learning,
+                            );
                         println!("Starting research pipeline...");
                         println!("Topic: {topic}");
-                        match archon_pipeline::runner::run_pipeline(&facade, &adapter, &topic, None).await {
+                        match archon_pipeline::runner::run_pipeline(&facade, &adapter, &topic, None)
+                            .await
+                        {
                             Ok(result) => {
                                 println!("\n=== Pipeline Complete ===");
                                 println!("Session: {}", result.session_id);
@@ -788,10 +815,7 @@ async fn main() -> Result<()> {
                     match archon_pipeline::session::resume(&session_id, &cwd) {
                         Ok(session) => {
                             println!("Resumed session: {}", session.session_id);
-                            println!(
-                                "Completed agents: {}",
-                                session.completed_agents.len()
-                            );
+                            println!("Completed agents: {}", session.completed_agents.len());
                             // Build LLM client for resumed pipeline
                             let pipe_auth = match archon_llm::auth::resolve_auth_with_keys(
                                 env_vars.anthropic_api_key.as_deref(),
@@ -831,7 +855,14 @@ async fn main() -> Result<()> {
                                     );
                                     let facade = archon_pipeline::coding::facade::CodingFacade::with_learning(learning);
                                     println!("Resuming coding pipeline...");
-                                    match archon_pipeline::runner::run_pipeline(&facade, &adapter, &session.task, None).await {
+                                    match archon_pipeline::runner::run_pipeline(
+                                        &facade,
+                                        &adapter,
+                                        &session.task,
+                                        None,
+                                    )
+                                    .await
+                                    {
                                         Ok(result) => {
                                             println!("\n=== Pipeline Complete ===");
                                             println!("Agents run: {}", result.agent_results.len());
@@ -847,7 +878,14 @@ async fn main() -> Result<()> {
                                     let phd_learning = archon_pipeline::learning::integration::PhDLearningIntegration::new();
                                     let facade = archon_pipeline::research::facade::ResearchFacade::with_learning(None, phd_learning);
                                     println!("Resuming research pipeline...");
-                                    match archon_pipeline::runner::run_pipeline(&facade, &adapter, &session.task, None).await {
+                                    match archon_pipeline::runner::run_pipeline(
+                                        &facade,
+                                        &adapter,
+                                        &session.task,
+                                        None,
+                                    )
+                                    .await
+                                    {
                                         Ok(result) => {
                                             println!("\n=== Pipeline Complete ===");
                                             println!("Agents run: {}", result.agent_results.len());
@@ -871,38 +909,36 @@ async fn main() -> Result<()> {
                         }
                     }
                 }
-                PipelineAction::List => {
-                    match archon_pipeline::session::list_sessions(&cwd) {
-                        Ok(sessions) if sessions.is_empty() => {
-                            println!("No pipeline sessions found.");
-                        }
-                        Ok(sessions) => {
+                PipelineAction::List => match archon_pipeline::session::list_sessions(&cwd) {
+                    Ok(sessions) if sessions.is_empty() => {
+                        println!("No pipeline sessions found.");
+                    }
+                    Ok(sessions) => {
+                        println!(
+                            "{:<38} {:<10} {:<10} {:>6} {:>10}  {}",
+                            "SESSION ID", "TYPE", "STATUS", "AGENTS", "COST", "TASK"
+                        );
+                        println!("{}", "-".repeat(100));
+                        for s in &sessions {
                             println!(
-                                "{:<38} {:<10} {:<10} {:>6} {:>10}  {}",
-                                "SESSION ID", "TYPE", "STATUS", "AGENTS", "COST", "TASK"
+                                "{:<38} {:<10} {:<10} {:>6} ${:>9.4}  {}",
+                                s.session_id,
+                                format!("{:?}", s.pipeline_type),
+                                format!("{:?}", s.status),
+                                s.completed_count,
+                                s.total_cost_usd,
+                                {
+                                    let truncated: String = s.task.chars().take(30).collect();
+                                    truncated
+                                },
                             );
-                            println!("{}", "-".repeat(100));
-                            for s in &sessions {
-                                println!(
-                                    "{:<38} {:<10} {:<10} {:>6} ${:>9.4}  {}",
-                                    s.session_id,
-                                    format!("{:?}", s.pipeline_type),
-                                    format!("{:?}", s.status),
-                                    s.completed_count,
-                                    s.total_cost_usd,
-                                    {
-                                        let truncated: String = s.task.chars().take(30).collect();
-                                        truncated
-                                    },
-                                );
-                            }
-                        }
-                        Err(e) => {
-                            eprintln!("Failed to list sessions: {e}");
-                            std::process::exit(1);
                         }
                     }
-                }
+                    Err(e) => {
+                        eprintln!("Failed to list sessions: {e}");
+                        std::process::exit(1);
+                    }
+                },
                 PipelineAction::Abort { session_id } => {
                     match archon_pipeline::session::abort(&session_id, &cwd) {
                         Ok(()) => println!("Session {session_id} aborted."),

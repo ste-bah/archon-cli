@@ -10,5 +10,5 @@ pub mod style;
 pub mod verification;
 
 pub use agents::{
-    ResearchAgent, ResearchPhase, ResearchToolAccess, RESEARCH_AGENTS, RESEARCH_PHASES,
+    RESEARCH_AGENTS, RESEARCH_PHASES, ResearchAgent, ResearchPhase, ResearchToolAccess,
 };

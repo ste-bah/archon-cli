@@ -196,7 +196,10 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
         display_name: "Self-Ask Decomposer",
         phase: 1,
         file: "self-ask-decomposer.md",
-        memory_keys: &["research/meta/questions", "research/foundation/decomposition"],
+        memory_keys: &[
+            "research/meta/questions",
+            "research/foundation/decomposition",
+        ],
         output_artifacts: &["essential-questions.md", "knowledge-gaps.md"],
         prompt_source_path: ".claude/agents/phdresearch/self-ask-decomposer.md",
         tool_access: BASE_TOOLS,
@@ -206,7 +209,10 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
         display_name: "Ambiguity Clarifier",
         phase: 1,
         file: "ambiguity-clarifier.md",
-        memory_keys: &["research/foundation/definitions", "research/meta/clarifications"],
+        memory_keys: &[
+            "research/foundation/definitions",
+            "research/meta/clarifications",
+        ],
         output_artifacts: &["term-definitions.md", "clarified-scope.md"],
         prompt_source_path: ".claude/agents/phdresearch/ambiguity-clarifier.md",
         tool_access: BASE_TOOLS,
@@ -226,7 +232,10 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
         display_name: "Construct Definer",
         phase: 1,
         file: "construct-definer.md",
-        memory_keys: &["research/foundation/constructs", "research/theory/definitions"],
+        memory_keys: &[
+            "research/foundation/constructs",
+            "research/theory/definitions",
+        ],
         output_artifacts: &["construct-definitions.md", "operationalizations.md"],
         prompt_source_path: ".claude/agents/phdresearch/construct-definer.md",
         tool_access: BASE_TOOLS,
@@ -236,7 +245,10 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
         display_name: "Dissertation Architect",
         phase: 1,
         file: "dissertation-architect.md",
-        memory_keys: &["research/writing/structure", "research/document/architecture"],
+        memory_keys: &[
+            "research/writing/structure",
+            "research/document/architecture",
+        ],
         output_artifacts: &["dissertation-outline.md", "chapter-structure.md"],
         prompt_source_path: ".claude/agents/phdresearch/dissertation-architect.md",
         tool_access: BASE_TOOLS,
@@ -251,7 +263,6 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
         prompt_source_path: ".claude/agents/phdresearch/chapter-synthesizer.md",
         tool_access: BASE_TOOLS,
     },
-
     // =========================================================================
     // PHASE 2: DISCOVERY (4 agents, indices 7-10)
     // =========================================================================
@@ -295,7 +306,6 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
         prompt_source_path: ".claude/agents/phdresearch/context-tier-manager.md",
         tool_access: BASE_TOOLS,
     },
-
     // =========================================================================
     // PHASE 3: ARCHITECTURE (4 agents, indices 11-14)
     // =========================================================================
@@ -314,7 +324,10 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
         display_name: "Contradiction Analyzer",
         phase: 3,
         file: "contradiction-analyzer.md",
-        memory_keys: &["research/analysis/contradictions", "research/findings/conflicts"],
+        memory_keys: &[
+            "research/analysis/contradictions",
+            "research/findings/conflicts",
+        ],
         output_artifacts: &["contradictions-report.md", "resolution-proposals.md"],
         prompt_source_path: ".claude/agents/phdresearch/contradiction-analyzer.md",
         tool_access: BASE_TOOLS,
@@ -339,7 +352,6 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
         prompt_source_path: ".claude/agents/phdresearch/risk-analyst.md",
         tool_access: BASE_TOOLS,
     },
-
     // =========================================================================
     // PHASE 4: SYNTHESIS (5 agents, indices 15-19)
     // =========================================================================
@@ -388,12 +400,14 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
         display_name: "Opportunity Identifier",
         phase: 4,
         file: "opportunity-identifier.md",
-        memory_keys: &["research/synthesis/opportunities", "research/findings/opportunities"],
+        memory_keys: &[
+            "research/synthesis/opportunities",
+            "research/findings/opportunities",
+        ],
         output_artifacts: &["research-opportunities.md", "opportunity-matrix.md"],
         prompt_source_path: ".claude/agents/phdresearch/opportunity-identifier.md",
         tool_access: BASE_TOOLS,
     },
-
     // =========================================================================
     // PHASE 5: DESIGN (9 agents, indices 20-28)
     // =========================================================================
@@ -412,7 +426,10 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
         display_name: "Hypothesis Generator",
         phase: 5,
         file: "hypothesis-generator.md",
-        memory_keys: &["research/synthesis/hypotheses", "research/theory/hypotheses"],
+        memory_keys: &[
+            "research/synthesis/hypotheses",
+            "research/theory/hypotheses",
+        ],
         output_artifacts: &["hypotheses.md", "testable-predictions.md"],
         prompt_source_path: ".claude/agents/phdresearch/hypothesis-generator.md",
         tool_access: BASE_TOOLS,
@@ -452,7 +469,10 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
         display_name: "Instrument Developer",
         phase: 5,
         file: "instrument-developer.md",
-        memory_keys: &["research/methods/instruments", "research/methodology/instruments"],
+        memory_keys: &[
+            "research/methods/instruments",
+            "research/methodology/instruments",
+        ],
         output_artifacts: &["research-instruments.md", "instrument-validation.md"],
         prompt_source_path: ".claude/agents/phdresearch/instrument-developer.md",
         tool_access: BASE_TOOLS,
@@ -487,7 +507,6 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
         prompt_source_path: ".claude/agents/phdresearch/methodology-writer.md",
         tool_access: BASE_TOOLS,
     },
-
     // =========================================================================
     // PHASE 6: WRITING (6 agents, indices 29-34)
     // =========================================================================
@@ -496,7 +515,10 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
         display_name: "Introduction Writer",
         phase: 6,
         file: "introduction-writer.md",
-        memory_keys: &["research/writing/introduction", "research/document/chapter1"],
+        memory_keys: &[
+            "research/writing/introduction",
+            "research/document/chapter1",
+        ],
         output_artifacts: &["introduction.md", "problem-statement.md"],
         prompt_source_path: ".claude/agents/phdresearch/introduction-writer.md",
         tool_access: WRITER_TOOLS,
@@ -551,7 +573,6 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
         prompt_source_path: ".claude/agents/phdresearch/abstract-writer.md",
         tool_access: WRITER_TOOLS,
     },
-
     // =========================================================================
     // PHASE 7: VALIDATION (11 agents, indices 35-45)
     // =========================================================================
@@ -560,7 +581,10 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
         display_name: "Systematic Reviewer",
         phase: 7,
         file: "systematic-reviewer.md",
-        memory_keys: &["research/literature/systematic", "research/synthesis/systematic-review"],
+        memory_keys: &[
+            "research/literature/systematic",
+            "research/synthesis/systematic-review",
+        ],
         output_artifacts: &["systematic-review.md", "prisma-flowchart.md"],
         prompt_source_path: ".claude/agents/phdresearch/systematic-reviewer.md",
         tool_access: BASE_TOOLS,
@@ -610,7 +634,10 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
         display_name: "Reproducibility Checker",
         phase: 7,
         file: "reproducibility-checker.md",
-        memory_keys: &["research/quality/reproducibility", "research/meta/replication"],
+        memory_keys: &[
+            "research/quality/reproducibility",
+            "research/meta/replication",
+        ],
         output_artifacts: &["reproducibility-report.md", "replication-guide.md"],
         prompt_source_path: ".claude/agents/phdresearch/reproducibility-checker.md",
         tool_access: BASE_TOOLS,
@@ -630,7 +657,10 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
         display_name: "Consistency Validator",
         phase: 7,
         file: "consistency-validator.md",
-        memory_keys: &["research/quality/consistency", "research/document/coherence"],
+        memory_keys: &[
+            "research/quality/consistency",
+            "research/document/coherence",
+        ],
         output_artifacts: &["consistency-report.md", "coherence-audit.md"],
         prompt_source_path: ".claude/agents/phdresearch/consistency-validator.md",
         tool_access: BASE_TOOLS,

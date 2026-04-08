@@ -54,7 +54,10 @@ fn test_pattern_match_mode_returns_results() {
 
     let resp = bank.reason(&req);
     assert_eq!(resp.mode_used, ReasoningMode::PatternMatch);
-    assert!(!resp.patterns.is_empty(), "PatternMatch should return at least one result");
+    assert!(
+        !resp.patterns.is_empty(),
+        "PatternMatch should return at least one result"
+    );
     assert!(resp.overall_confidence > 0.0);
 }
 
@@ -77,8 +80,14 @@ fn test_causal_inference_mode_is_stubbed() {
 
     let resp = bank.reason(&req);
     assert_eq!(resp.mode_used, ReasoningMode::CausalInference);
-    assert!(resp.patterns.is_empty(), "CausalInference stub returns no patterns");
-    assert!(resp.inferences.is_empty(), "CausalInference stub returns no inferences");
+    assert!(
+        resp.patterns.is_empty(),
+        "CausalInference stub returns no patterns"
+    );
+    assert!(
+        resp.inferences.is_empty(),
+        "CausalInference stub returns no inferences"
+    );
     assert_eq!(resp.overall_confidence, 0.0);
 }
 
@@ -102,7 +111,10 @@ fn test_contextual_mode_returns_similarity_results() {
 
     let resp = bank.reason(&req);
     assert_eq!(resp.mode_used, ReasoningMode::Contextual);
-    assert!(!resp.patterns.is_empty(), "Contextual mode should return similarity results");
+    assert!(
+        !resp.patterns.is_empty(),
+        "Contextual mode should return similarity results"
+    );
     assert!(resp.overall_confidence > 0.0);
 }
 
@@ -135,7 +147,11 @@ fn test_hybrid_weights_sum_to_one() {
     let config = ReasoningBankConfig::default();
     let total = config.pattern_weight + config.causal_weight + config.contextual_weight;
     // Allow floating-point tolerance
-    assert!((total - 1.0).abs() < 1e-9, "weights must sum to 1.0, got {}", total);
+    assert!(
+        (total - 1.0).abs() < 1e-9,
+        "weights must sum to 1.0, got {}",
+        total
+    );
 }
 
 // ---------------------------------------------------------------------------

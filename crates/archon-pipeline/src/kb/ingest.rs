@@ -10,8 +10,8 @@ use anyhow::Result;
 use cozo::{DataValue, DbInstance, ScriptMutability};
 use sha2::{Digest, Sha256};
 
-use super::{IngestResult, IngestSource};
 use super::schema::KbNodeType;
+use super::{IngestResult, IngestSource};
 
 // ---------------------------------------------------------------------------
 // Ingester
@@ -39,10 +39,7 @@ impl Ingester {
         let tag = domain_tag.unwrap_or("default");
         match source {
             IngestSource::FilePath(path) => {
-                let ext = path
-                    .extension()
-                    .and_then(|e| e.to_str())
-                    .unwrap_or("");
+                let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
                 match ext {
                     "md" | "markdown" => self.ingest_markdown(path, tag).await,
                     "pdf" => self.ingest_pdf(path, tag).await,
@@ -118,10 +115,7 @@ impl Ingester {
         let mut combined = IngestResult::default();
 
         for entry in walkdir(dir) {
-            let ext = entry
-                .extension()
-                .and_then(|e| e.to_str())
-                .unwrap_or("");
+            let ext = entry.extension().and_then(|e| e.to_str()).unwrap_or("");
 
             let result = match ext {
                 "md" | "markdown" => self.ingest_markdown(&entry, domain_tag).await?,
@@ -173,7 +167,10 @@ impl Ingester {
             params.insert("source".to_string(), DataValue::from(source));
             params.insert("dtag".to_string(), DataValue::from(domain_tag));
             params.insert("title".to_string(), DataValue::from(chunk.title.as_str()));
-            params.insert("content".to_string(), DataValue::from(chunk.content.as_str()));
+            params.insert(
+                "content".to_string(),
+                DataValue::from(chunk.content.as_str()),
+            );
             params.insert("chash".to_string(), DataValue::from(content_hash.as_str()));
             params.insert("cidx".to_string(), DataValue::from(idx as i64));
             params.insert("cat".to_string(), DataValue::from(now));

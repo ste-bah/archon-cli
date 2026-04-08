@@ -191,7 +191,11 @@ mod tests {
         let result = store.read_or_search("coding/understanding/task-analysis", &searcher);
 
         assert_eq!(result, "stored content");
-        assert_eq!(searcher.calls(), 0, "searcher should not be called when namespace exists");
+        assert_eq!(
+            searcher.calls(),
+            0,
+            "searcher should not be called when namespace exists"
+        );
     }
 
     #[test]
@@ -202,7 +206,11 @@ mod tests {
         let result = store.read_or_search("coding/understanding/missing", &searcher);
 
         assert_eq!(result, "leann fallback result");
-        assert_eq!(searcher.calls(), 1, "searcher should be called exactly once");
+        assert_eq!(
+            searcher.calls(),
+            1,
+            "searcher should be called exactly once"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -239,8 +247,14 @@ mod tests {
         store.save(&path).unwrap();
 
         let loaded = RlmStore::load(&path).unwrap();
-        assert_eq!(loaded.read("coding/design/api-design"), Some("api spec".to_string()));
-        assert_eq!(loaded.read("coding/implementation/parser"), Some("parser code".to_string()));
+        assert_eq!(
+            loaded.read("coding/design/api-design"),
+            Some("api spec".to_string())
+        );
+        assert_eq!(
+            loaded.read("coding/implementation/parser"),
+            Some("parser code".to_string())
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -399,7 +413,10 @@ mod tests {
         store.save(&path).unwrap();
 
         let loaded = RlmStore::load(&path).unwrap();
-        assert_eq!(loaded.read("coding/implementation/big").unwrap().len(), 100_000);
+        assert_eq!(
+            loaded.read("coding/implementation/big").unwrap().len(),
+            100_000
+        );
     }
 
     #[test]

@@ -267,29 +267,23 @@ static EVIDENCE_LANGUAGE: &[&str] = &[
 
 static CITATION_AUTHOR_YEAR: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\([A-Z][a-z]+,\s*\d{4}\)").unwrap());
-static CITATION_BRACKET_NUM: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\[\d+\]").unwrap());
+static CITATION_BRACKET_NUM: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[\d+\]").unwrap());
 static CITATION_ET_AL: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"[A-Z][a-z]+\s+et\s+al\.").unwrap());
 
 /// Regex to strip code blocks (fenced).
-static CODE_BLOCK_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?s)```[^`]*```").unwrap());
+static CODE_BLOCK_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?s)```[^`]*```").unwrap());
 /// Regex to strip inline code.
-static INLINE_CODE_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"`[^`]+`").unwrap());
+static INLINE_CODE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"`[^`]+`").unwrap());
 /// Regex to strip markdown links (keep link text).
 static MD_LINK_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\[([^\]]*)\]\([^)]*\)").unwrap());
 /// Regex to strip markdown formatting (**bold**, __underline__).
-static MD_FORMAT_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"[*_]{1,3}").unwrap());
+static MD_FORMAT_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[*_]{1,3}").unwrap());
 /// Heading markers.
-static HEADING_STRIP_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^#{1,6}\s+").unwrap());
+static HEADING_STRIP_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^#{1,6}\s+").unwrap());
 
-static NUMBERED_LIST_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^\d+\.\s").unwrap());
+static NUMBERED_LIST_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\d+\.\s").unwrap());
 
 // ---------------------------------------------------------------------------
 // Calculator
@@ -336,7 +330,13 @@ impl PhDQualityCalculator {
 
         let summary = format!(
             "{} quality ({:.2}): content_depth={:.3}, structural={:.3}, rigor={:.3}, completeness={:.3}, format={:.3}",
-            tier, score, content_depth, structural_quality, research_rigor, completeness, format_quality,
+            tier,
+            score,
+            content_depth,
+            structural_quality,
+            research_rigor,
+            completeness,
+            format_quality,
         );
 
         QualityAssessment {
@@ -547,10 +547,7 @@ impl PhDQualityCalculator {
 
         // Expected sections check
         if let Some(sections) = AGENT_EXPECTED_SECTIONS.get(context.agent_key.as_str()) {
-            let found = sections
-                .iter()
-                .filter(|s| text_lower.contains(**s))
-                .count();
+            let found = sections.iter().filter(|s| text_lower.contains(**s)).count();
             score += (found as f64 / sections.len() as f64) * 0.10;
         }
 
@@ -701,7 +698,10 @@ mod tests {
         text.push_str("The literature supports a systematic approach with empirical evidence.\n\n");
         // Add citations
         for i in 0..20 {
-            text.push_str(&format!("(Smith, 2020) evidence suggests analysis [{}] ", i));
+            text.push_str(&format!(
+                "(Smith, 2020) evidence suggests analysis [{}] ",
+                i
+            ));
         }
         text.push('\n');
         // Pad to ~500 words
@@ -813,10 +813,7 @@ mod tests {
 
         // Citations (many)
         for i in 0..80 {
-            text.push_str(&format!(
-                "(Author, 2022) [{}] Smith et al. found that ",
-                i
-            ));
+            text.push_str(&format!("(Author, 2022) [{}] Smith et al. found that ", i));
         }
         text.push('\n');
 
@@ -853,7 +850,9 @@ mod tests {
     fn test_abstract_writer_output() {
         let mut text = String::new();
         text.push_str("## Purpose\n\n");
-        text.push_str("This study examines the theoretical framework for methodology analysis.\n\n");
+        text.push_str(
+            "This study examines the theoretical framework for methodology analysis.\n\n",
+        );
         text.push_str("## Method\n\n");
         text.push_str("The research design uses systematic data collection and sampling.\n\n");
         text.push_str("## Results\n\n");
@@ -882,9 +881,7 @@ mod tests {
     // 7. Critical agent with <1000 words -> penalty
     #[test]
     fn test_critical_agent_penalty() {
-        let words: String = (0..500)
-            .map(|i| format!("word{} ", i))
-            .collect();
+        let words: String = (0..500).map(|i| format!("word{} ", i)).collect();
         let c = calc();
 
         let ctx_normal = QualityContext {
@@ -983,14 +980,13 @@ mod tests {
         // Build a maximally rich document
         let mut text = String::new();
         text.push_str("# Title\n\n## Section 1\n\n### Sub 1\n\n## Section 2\n\n### Sub 2\n\n## Section 3\n\n### Sub 3\n\n");
-        text.push_str("## Theoretical Framework\n## Key Themes\n## Gaps\n## Synthesis\n## Summary\n\n");
+        text.push_str(
+            "## Theoretical Framework\n## Key Themes\n## Gaps\n## Synthesis\n## Summary\n\n",
+        );
 
         // Tons of citations
         for i in 0..200 {
-            text.push_str(&format!(
-                "(Author, 2023) [{}] Smith et al. found ",
-                i
-            ));
+            text.push_str(&format!("(Author, 2023) [{}] Smith et al. found ", i));
         }
 
         // All methodology, statistical, evidence terms
@@ -1116,11 +1112,11 @@ mod tests {
         );
 
         // 10 raw citations -> effective 5 -> tier 5..15 -> 0.03
-        let names = ["Adams", "Brown", "Clark", "Davis", "Evans",
-                      "Frank", "Green", "Hayes", "Irwin", "James"];
-        let text_more: String = names.iter()
-            .map(|n| format!("({}, 2020) ", n))
-            .collect();
+        let names = [
+            "Adams", "Brown", "Clark", "Davis", "Evans", "Frank", "Green", "Hayes", "Irwin",
+            "James",
+        ];
+        let text_more: String = names.iter().map(|n| format!("({}, 2020) ", n)).collect();
         let r2 = c.assess_quality(&text_more, &ctx);
         // 10 raw / 2 = 5 effective -> 0.03 from citations
         assert!(

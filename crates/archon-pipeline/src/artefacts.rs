@@ -176,9 +176,10 @@ impl AcceptanceCriteriaTracedGate {
         let mut errors = Vec::new();
 
         for ac in &contract.acceptance_criteria {
-            let traced = report.ac_trace.iter().any(|t| {
-                t.ac_id == ac.id && t.evidence_source.is_some()
-            });
+            let traced = report
+                .ac_trace
+                .iter()
+                .any(|t| t.ac_id == ac.id && t.evidence_source.is_some());
             if !traced {
                 errors.push(format!(
                     "Acceptance criterion '{}' ({}) has no evidence",
@@ -200,11 +201,7 @@ impl AcceptanceCriteriaTracedGate {
 
 /// Save any serializable artefact to the session directory using an atomic
 /// write (write to `.tmp` then rename).
-pub fn save_artefact<T: Serialize>(
-    artefact: &T,
-    filename: &str,
-    session_dir: &Path,
-) -> Result<()> {
+pub fn save_artefact<T: Serialize>(artefact: &T, filename: &str, session_dir: &Path) -> Result<()> {
     std::fs::create_dir_all(session_dir)?;
     let path = session_dir.join(filename);
     let json = serde_json::to_string_pretty(artefact)?;

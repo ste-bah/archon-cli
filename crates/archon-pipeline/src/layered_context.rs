@@ -134,10 +134,7 @@ impl LayeredContextLoader {
         let corrections = if patterns.recent_corrections.is_empty() {
             "Corrections: (none)".to_string()
         } else {
-            format!(
-                "Corrections: {}",
-                patterns.recent_corrections.join(" | ")
-            )
+            format!("Corrections: {}", patterns.recent_corrections.join(" | "))
         };
 
         let decisions = if patterns.architectural_decisions.is_empty() {
@@ -194,10 +191,7 @@ impl LayeredContextLoader {
     /// Searches all namespaces in the RLM store for content matching
     /// any word from the query (case-insensitive substring match).
     pub fn load_l3(&self, query: &str, rlm_store: &RlmStore) -> String {
-        let words: Vec<String> = query
-            .split_whitespace()
-            .map(|w| w.to_lowercase())
-            .collect();
+        let words: Vec<String> = query.split_whitespace().map(|w| w.to_lowercase()).collect();
 
         let mut matches: Vec<String> = Vec::new();
         for ns in rlm_store.namespaces() {

@@ -175,7 +175,10 @@ pub static AGENTS: &[CodingAgent] = &[
         fallback_algorithm: Some(Algorithm::Reflexion),
         depends_on: &[],
         memory_reads: &["coding/input/task", "coding/context/project"],
-        memory_writes: &["coding/understanding/task-analysis", "coding/understanding/parsed-intent"],
+        memory_writes: &[
+            "coding/understanding/task-analysis",
+            "coding/understanding/parsed-intent",
+        ],
         xp_reward: 50,
         parallelizable: false,
         critical: true,
@@ -192,7 +195,10 @@ pub static AGENTS: &[CodingAgent] = &[
         fallback_algorithm: Some(Algorithm::Reflexion),
         depends_on: &["contract-agent"],
         memory_reads: &["coding/understanding/task-analysis"],
-        memory_writes: &["coding/understanding/requirements", "coding/understanding/functional-requirements"],
+        memory_writes: &[
+            "coding/understanding/requirements",
+            "coding/understanding/functional-requirements",
+        ],
         xp_reward: 45,
         parallelizable: true,
         critical: false,
@@ -226,7 +232,10 @@ pub static AGENTS: &[CodingAgent] = &[
         fallback_algorithm: Some(Algorithm::ReAct),
         depends_on: &["requirement-prioritizer"],
         memory_reads: &["coding/understanding/prioritized-requirements"],
-        memory_writes: &["coding/understanding/scope", "coding/understanding/boundaries"],
+        memory_writes: &[
+            "coding/understanding/scope",
+            "coding/understanding/boundaries",
+        ],
         xp_reward: 45,
         parallelizable: false,
         critical: false,
@@ -242,8 +251,14 @@ pub static AGENTS: &[CodingAgent] = &[
         algorithm: Algorithm::ReAct,
         fallback_algorithm: Some(Algorithm::Reflexion),
         depends_on: &["contract-agent"],
-        memory_reads: &["coding/understanding/task-analysis", "coding/context/project"],
-        memory_writes: &["coding/understanding/context", "coding/understanding/existing-code"],
+        memory_reads: &[
+            "coding/understanding/task-analysis",
+            "coding/context/project",
+        ],
+        memory_writes: &[
+            "coding/understanding/context",
+            "coding/understanding/existing-code",
+        ],
         xp_reward: 45,
         parallelizable: true,
         critical: false,
@@ -260,13 +275,15 @@ pub static AGENTS: &[CodingAgent] = &[
         fallback_algorithm: Some(Algorithm::ReAct),
         depends_on: &["scope-definer", "context-gatherer"],
         memory_reads: &["coding/understanding/scope", "coding/understanding/context"],
-        memory_writes: &["coding/understanding/feasibility", "coding/understanding/constraints"],
+        memory_writes: &[
+            "coding/understanding/feasibility",
+            "coding/understanding/constraints",
+        ],
         xp_reward: 50,
         parallelizable: false,
         critical: true,
         description: "Assesses technical, resource, and timeline feasibility of proposed implementation.",
     },
-
     // =========================================================================
     // PHASE 1: UNDERSTANDING  (TS exploration agents — merged)
     // =========================================================================
@@ -281,8 +298,14 @@ pub static AGENTS: &[CodingAgent] = &[
         algorithm: Algorithm::LATS,
         fallback_algorithm: Some(Algorithm::ToT),
         depends_on: &["phase-1-reviewer"],
-        memory_reads: &["coding/understanding/requirements", "coding/understanding/constraints"],
-        memory_writes: &["coding/exploration/patterns", "coding/exploration/best-practices"],
+        memory_reads: &[
+            "coding/understanding/requirements",
+            "coding/understanding/constraints",
+        ],
+        memory_writes: &[
+            "coding/exploration/patterns",
+            "coding/exploration/best-practices",
+        ],
         xp_reward: 45,
         parallelizable: false,
         critical: false,
@@ -298,8 +321,14 @@ pub static AGENTS: &[CodingAgent] = &[
         algorithm: Algorithm::ReAct,
         fallback_algorithm: Some(Algorithm::Reflexion),
         depends_on: &["pattern-explorer"],
-        memory_reads: &["coding/exploration/patterns", "coding/understanding/requirements"],
-        memory_writes: &["coding/exploration/technologies", "coding/exploration/recommendations"],
+        memory_reads: &[
+            "coding/exploration/patterns",
+            "coding/understanding/requirements",
+        ],
+        memory_writes: &[
+            "coding/exploration/technologies",
+            "coding/exploration/recommendations",
+        ],
         xp_reward: 40,
         parallelizable: true,
         critical: false,
@@ -316,7 +345,10 @@ pub static AGENTS: &[CodingAgent] = &[
         fallback_algorithm: Some(Algorithm::ReAct),
         depends_on: &["pattern-explorer"],
         memory_reads: &["coding/exploration/patterns", "coding/understanding/scope"],
-        memory_writes: &["coding/exploration/research-plan", "coding/exploration/unknowns"],
+        memory_writes: &[
+            "coding/exploration/research-plan",
+            "coding/exploration/unknowns",
+        ],
         xp_reward: 35,
         parallelizable: true,
         critical: false,
@@ -332,14 +364,19 @@ pub static AGENTS: &[CodingAgent] = &[
         algorithm: Algorithm::ReAct,
         fallback_algorithm: Some(Algorithm::Reflexion),
         depends_on: &["technology-scout", "research-planner"],
-        memory_reads: &["coding/exploration/technologies", "coding/understanding/context"],
-        memory_writes: &["coding/exploration/codebase-analysis", "coding/exploration/integration-points"],
+        memory_reads: &[
+            "coding/exploration/technologies",
+            "coding/understanding/context",
+        ],
+        memory_writes: &[
+            "coding/exploration/codebase-analysis",
+            "coding/exploration/integration-points",
+        ],
         xp_reward: 50,
         parallelizable: false,
         critical: false,
         description: "Performs deep analysis of relevant code sections to understand implementation context.",
     },
-
     // =========================================================================
     // PHASE 1: UNDERSTANDING  (Sherlock reviewers that gate Phase 1 → 2)
     // =========================================================================
@@ -361,7 +398,10 @@ pub static AGENTS: &[CodingAgent] = &[
             "coding/understanding/context",
             "coding/understanding/feasibility",
         ],
-        memory_writes: &["coding/forensic/phase-1-verdict", "coding/forensic/phase-1-evidence"],
+        memory_writes: &[
+            "coding/forensic/phase-1-verdict",
+            "coding/forensic/phase-1-evidence",
+        ],
         xp_reward: 100,
         parallelizable: false,
         critical: true,
@@ -383,13 +423,15 @@ pub static AGENTS: &[CodingAgent] = &[
             "coding/exploration/research-plan",
             "coding/exploration/codebase-analysis",
         ],
-        memory_writes: &["coding/forensic/phase-2-verdict", "coding/forensic/phase-2-evidence"],
+        memory_writes: &[
+            "coding/forensic/phase-2-verdict",
+            "coding/forensic/phase-2-evidence",
+        ],
         xp_reward: 100,
         parallelizable: false,
         critical: true,
         description: "Sherlock #43: Phase 2 Exploration forensic review. CRITICAL: Gates progression to Phase 3.",
     },
-
     // =========================================================================
     // PHASE 2: DESIGN  (TS architecture agents)
     // =========================================================================
@@ -404,8 +446,14 @@ pub static AGENTS: &[CodingAgent] = &[
         algorithm: Algorithm::ToT,
         fallback_algorithm: Some(Algorithm::LATS),
         depends_on: &["phase-2-reviewer"],
-        memory_reads: &["coding/exploration/codebase-analysis", "coding/understanding/requirements"],
-        memory_writes: &["coding/architecture/design", "coding/architecture/structure"],
+        memory_reads: &[
+            "coding/exploration/codebase-analysis",
+            "coding/understanding/requirements",
+        ],
+        memory_writes: &[
+            "coding/architecture/design",
+            "coding/architecture/structure",
+        ],
         xp_reward: 60,
         parallelizable: false,
         critical: true,
@@ -422,7 +470,10 @@ pub static AGENTS: &[CodingAgent] = &[
         fallback_algorithm: Some(Algorithm::Reflexion),
         depends_on: &["system-designer"],
         memory_reads: &["coding/architecture/design"],
-        memory_writes: &["coding/architecture/components", "coding/architecture/modules"],
+        memory_writes: &[
+            "coding/architecture/components",
+            "coding/architecture/modules",
+        ],
         xp_reward: 45,
         parallelizable: true,
         critical: false,
@@ -439,7 +490,10 @@ pub static AGENTS: &[CodingAgent] = &[
         fallback_algorithm: Some(Algorithm::Reflexion),
         depends_on: &["component-designer"],
         memory_reads: &["coding/architecture/components"],
-        memory_writes: &["coding/architecture/interfaces", "coding/architecture/contracts"],
+        memory_writes: &[
+            "coding/architecture/interfaces",
+            "coding/architecture/contracts",
+        ],
         xp_reward: 50,
         parallelizable: true,
         critical: true,
@@ -455,8 +509,14 @@ pub static AGENTS: &[CodingAgent] = &[
         algorithm: Algorithm::ReAct,
         fallback_algorithm: Some(Algorithm::PoT),
         depends_on: &["component-designer"],
-        memory_reads: &["coding/architecture/components", "coding/architecture/interfaces"],
-        memory_writes: &["coding/architecture/data-models", "coding/architecture/schemas"],
+        memory_reads: &[
+            "coding/architecture/components",
+            "coding/architecture/interfaces",
+        ],
+        memory_writes: &[
+            "coding/architecture/data-models",
+            "coding/architecture/schemas",
+        ],
         xp_reward: 45,
         parallelizable: true,
         critical: false,
@@ -472,14 +532,19 @@ pub static AGENTS: &[CodingAgent] = &[
         algorithm: Algorithm::ToT,
         fallback_algorithm: Some(Algorithm::Reflexion),
         depends_on: &["interface-designer", "data-architect"],
-        memory_reads: &["coding/architecture/interfaces", "coding/architecture/data-models"],
-        memory_writes: &["coding/architecture/integrations", "coding/architecture/dependencies"],
+        memory_reads: &[
+            "coding/architecture/interfaces",
+            "coding/architecture/data-models",
+        ],
+        memory_writes: &[
+            "coding/architecture/integrations",
+            "coding/architecture/dependencies",
+        ],
         xp_reward: 55,
         parallelizable: false,
         critical: false,
         description: "Designs integration patterns, external API connections, and system interoperability.",
     },
-
     // #48 wiring-obligation-agent (REQ-IMPROVE-003)
     CodingAgent {
         key: "wiring-obligation-agent",
@@ -501,7 +566,6 @@ pub static AGENTS: &[CodingAgent] = &[
         critical: true,
         description: "Produces WiringPlan with typed obligations before implementation begins. Gates Phase 4.",
     },
-
     // =========================================================================
     // PHASE 3: WIRING PLAN  (Sherlock reviewer that gates WiringPlan)
     // =========================================================================
@@ -524,13 +588,15 @@ pub static AGENTS: &[CodingAgent] = &[
             "coding/architecture/integrations",
             "coding/wiring-plan",
         ],
-        memory_writes: &["coding/forensic/phase-3-verdict", "coding/forensic/phase-3-evidence"],
+        memory_writes: &[
+            "coding/forensic/phase-3-verdict",
+            "coding/forensic/phase-3-evidence",
+        ],
         xp_reward: 100,
         parallelizable: false,
         critical: true,
         description: "Sherlock #44: Phase 3 Architecture forensic review. CRITICAL: Gates progression to Phase 4.",
     },
-
     // =========================================================================
     // PHASE 3: IMPLEMENTATION  (TS implementation agents)
     // =========================================================================
@@ -545,8 +611,14 @@ pub static AGENTS: &[CodingAgent] = &[
         algorithm: Algorithm::SelfDebug,
         fallback_algorithm: Some(Algorithm::ReAct),
         depends_on: &["phase-3-reviewer"],
-        memory_reads: &["coding/architecture/design", "coding/architecture/interfaces"],
-        memory_writes: &["coding/implementation/generated-code", "coding/implementation/core-files"],
+        memory_reads: &[
+            "coding/architecture/design",
+            "coding/architecture/interfaces",
+        ],
+        memory_writes: &[
+            "coding/implementation/generated-code",
+            "coding/implementation/core-files",
+        ],
         xp_reward: 70,
         parallelizable: false,
         critical: true,
@@ -562,8 +634,14 @@ pub static AGENTS: &[CodingAgent] = &[
         algorithm: Algorithm::SelfDebug,
         fallback_algorithm: Some(Algorithm::ReAct),
         depends_on: &["code-generator"],
-        memory_reads: &["coding/architecture/interfaces", "coding/implementation/generated-code"],
-        memory_writes: &["coding/implementation/types", "coding/implementation/type-files"],
+        memory_reads: &[
+            "coding/architecture/interfaces",
+            "coding/implementation/generated-code",
+        ],
+        memory_writes: &[
+            "coding/implementation/types",
+            "coding/implementation/type-files",
+        ],
         xp_reward: 55,
         parallelizable: true,
         critical: false,
@@ -579,8 +657,14 @@ pub static AGENTS: &[CodingAgent] = &[
         algorithm: Algorithm::SelfDebug,
         fallback_algorithm: Some(Algorithm::Reflexion),
         depends_on: &["type-implementer"],
-        memory_reads: &["coding/implementation/types", "coding/architecture/components"],
-        memory_writes: &["coding/implementation/units", "coding/implementation/entities"],
+        memory_reads: &[
+            "coding/implementation/types",
+            "coding/architecture/components",
+        ],
+        memory_writes: &[
+            "coding/implementation/units",
+            "coding/implementation/entities",
+        ],
         xp_reward: 55,
         parallelizable: true,
         critical: false,
@@ -597,7 +681,10 @@ pub static AGENTS: &[CodingAgent] = &[
         fallback_algorithm: Some(Algorithm::SelfDebug),
         depends_on: &["unit-implementer"],
         memory_reads: &["coding/implementation/units", "coding/architecture/design"],
-        memory_writes: &["coding/implementation/services", "coding/implementation/business-logic"],
+        memory_writes: &[
+            "coding/implementation/services",
+            "coding/implementation/business-logic",
+        ],
         xp_reward: 60,
         parallelizable: false,
         critical: false,
@@ -613,8 +700,14 @@ pub static AGENTS: &[CodingAgent] = &[
         algorithm: Algorithm::SelfDebug,
         fallback_algorithm: Some(Algorithm::ReAct),
         depends_on: &["unit-implementer"],
-        memory_reads: &["coding/implementation/units", "coding/architecture/data-models"],
-        memory_writes: &["coding/implementation/data-layer", "coding/implementation/repositories"],
+        memory_reads: &[
+            "coding/implementation/units",
+            "coding/architecture/data-models",
+        ],
+        memory_writes: &[
+            "coding/implementation/data-layer",
+            "coding/implementation/repositories",
+        ],
         xp_reward: 55,
         parallelizable: true,
         critical: false,
@@ -630,8 +723,14 @@ pub static AGENTS: &[CodingAgent] = &[
         algorithm: Algorithm::ReAct,
         fallback_algorithm: Some(Algorithm::SelfDebug),
         depends_on: &["service-implementer", "data-layer-implementer"],
-        memory_reads: &["coding/implementation/services", "coding/architecture/interfaces"],
-        memory_writes: &["coding/implementation/api", "coding/implementation/endpoints"],
+        memory_reads: &[
+            "coding/implementation/services",
+            "coding/architecture/interfaces",
+        ],
+        memory_writes: &[
+            "coding/implementation/api",
+            "coding/implementation/endpoints",
+        ],
         xp_reward: 60,
         parallelizable: false,
         critical: false,
@@ -647,8 +746,14 @@ pub static AGENTS: &[CodingAgent] = &[
         algorithm: Algorithm::SelfDebug,
         fallback_algorithm: Some(Algorithm::ReAct),
         depends_on: &["api-implementer"],
-        memory_reads: &["coding/implementation/api", "coding/architecture/components"],
-        memory_writes: &["coding/implementation/frontend", "coding/implementation/ui-components"],
+        memory_reads: &[
+            "coding/implementation/api",
+            "coding/architecture/components",
+        ],
+        memory_writes: &[
+            "coding/implementation/frontend",
+            "coding/implementation/ui-components",
+        ],
         xp_reward: 55,
         parallelizable: true,
         critical: false,
@@ -664,8 +769,14 @@ pub static AGENTS: &[CodingAgent] = &[
         algorithm: Algorithm::ReAct,
         fallback_algorithm: Some(Algorithm::Reflexion),
         depends_on: &["api-implementer"],
-        memory_reads: &["coding/implementation/api", "coding/implementation/services"],
-        memory_writes: &["coding/implementation/error-handling", "coding/implementation/exceptions"],
+        memory_reads: &[
+            "coding/implementation/api",
+            "coding/implementation/services",
+        ],
+        memory_writes: &[
+            "coding/implementation/error-handling",
+            "coding/implementation/exceptions",
+        ],
         xp_reward: 50,
         parallelizable: true,
         critical: false,
@@ -681,8 +792,14 @@ pub static AGENTS: &[CodingAgent] = &[
         algorithm: Algorithm::ReAct,
         fallback_algorithm: Some(Algorithm::SelfDebug),
         depends_on: &["frontend-implementer"],
-        memory_reads: &["coding/implementation/api", "coding/architecture/dependencies"],
-        memory_writes: &["coding/implementation/config", "coding/implementation/settings"],
+        memory_reads: &[
+            "coding/implementation/api",
+            "coding/architecture/dependencies",
+        ],
+        memory_writes: &[
+            "coding/implementation/config",
+            "coding/implementation/settings",
+        ],
         xp_reward: 40,
         parallelizable: true,
         critical: false,
@@ -698,8 +815,14 @@ pub static AGENTS: &[CodingAgent] = &[
         algorithm: Algorithm::ReAct,
         fallback_algorithm: Some(Algorithm::SelfDebug),
         depends_on: &["error-handler-implementer"],
-        memory_reads: &["coding/implementation/error-handling", "coding/implementation/services"],
-        memory_writes: &["coding/implementation/logging", "coding/implementation/observability"],
+        memory_reads: &[
+            "coding/implementation/error-handling",
+            "coding/implementation/services",
+        ],
+        memory_writes: &[
+            "coding/implementation/logging",
+            "coding/implementation/observability",
+        ],
         xp_reward: 45,
         parallelizable: true,
         critical: false,
@@ -715,8 +838,14 @@ pub static AGENTS: &[CodingAgent] = &[
         algorithm: Algorithm::ReAct,
         fallback_algorithm: None,
         depends_on: &["logger-implementer"],
-        memory_reads: &["coding/implementation/wiring-plan", "coding/implementation/generated-code"],
-        memory_writes: &["coding/implementation/verification-report", "coding/implementation/wiring-status"],
+        memory_reads: &[
+            "coding/implementation/wiring-plan",
+            "coding/implementation/generated-code",
+        ],
+        memory_writes: &[
+            "coding/implementation/verification-report",
+            "coding/implementation/wiring-status",
+        ],
         xp_reward: 60,
         parallelizable: false,
         critical: true,
@@ -732,8 +861,14 @@ pub static AGENTS: &[CodingAgent] = &[
         algorithm: Algorithm::ReAct,
         fallback_algorithm: Some(Algorithm::SelfDebug),
         depends_on: &["config-implementer", "logger-implementer"],
-        memory_reads: &["coding/implementation/config", "coding/architecture/dependencies"],
-        memory_writes: &["coding/implementation/dependencies", "coding/implementation/package-json"],
+        memory_reads: &[
+            "coding/implementation/config",
+            "coding/architecture/dependencies",
+        ],
+        memory_writes: &[
+            "coding/implementation/dependencies",
+            "coding/implementation/package-json",
+        ],
         xp_reward: 40,
         parallelizable: false,
         critical: false,
@@ -749,14 +884,20 @@ pub static AGENTS: &[CodingAgent] = &[
         algorithm: Algorithm::Reflexion,
         fallback_algorithm: Some(Algorithm::ReAct),
         depends_on: &["dependency-manager"],
-        memory_reads: &["coding/implementation/generated-code", "coding/implementation/services", "coding/implementation/api"],
-        memory_writes: &["coding/implementation/coordination-report", "coding/implementation/integration-status"],
+        memory_reads: &[
+            "coding/implementation/generated-code",
+            "coding/implementation/services",
+            "coding/implementation/api",
+        ],
+        memory_writes: &[
+            "coding/implementation/coordination-report",
+            "coding/implementation/integration-status",
+        ],
         xp_reward: 55,
         parallelizable: false,
         critical: true,
         description: "Coordinates implementation across all agents, manages dependencies, and ensures consistency.",
     },
-
     // =========================================================================
     // PHASE 3: IMPLEMENTATION  (Sherlock reviewer)
     // =========================================================================
@@ -778,13 +919,15 @@ pub static AGENTS: &[CodingAgent] = &[
             "coding/implementation/api",
             "coding/implementation/coordination-report",
         ],
-        memory_writes: &["coding/forensic/phase-4-verdict", "coding/forensic/phase-4-evidence"],
+        memory_writes: &[
+            "coding/forensic/phase-4-verdict",
+            "coding/forensic/phase-4-evidence",
+        ],
         xp_reward: 100,
         parallelizable: false,
         critical: true,
         description: "Sherlock #45: Phase 4 Implementation forensic review. CRITICAL: Gates progression to Phase 5.",
     },
-
     // =========================================================================
     // PHASE 4: TESTING  (TS testing agents)
     // =========================================================================
@@ -799,8 +942,14 @@ pub static AGENTS: &[CodingAgent] = &[
         algorithm: Algorithm::ToT,
         fallback_algorithm: Some(Algorithm::SelfDebug),
         depends_on: &["phase-4-reviewer"],
-        memory_reads: &["coding/implementation/services", "coding/understanding/requirements"],
-        memory_writes: &["coding/testing/generated-tests", "coding/testing/test-files"],
+        memory_reads: &[
+            "coding/implementation/services",
+            "coding/understanding/requirements",
+        ],
+        memory_writes: &[
+            "coding/testing/generated-tests",
+            "coding/testing/test-files",
+        ],
         xp_reward: 55,
         parallelizable: false,
         critical: false,
@@ -816,7 +965,10 @@ pub static AGENTS: &[CodingAgent] = &[
         algorithm: Algorithm::ReAct,
         fallback_algorithm: Some(Algorithm::SelfDebug),
         depends_on: &["test-generator"],
-        memory_reads: &["coding/testing/generated-tests", "coding/implementation/services"],
+        memory_reads: &[
+            "coding/testing/generated-tests",
+            "coding/implementation/services",
+        ],
         memory_writes: &["coding/testing/results", "coding/testing/failures"],
         xp_reward: 50,
         parallelizable: false,
@@ -834,7 +986,10 @@ pub static AGENTS: &[CodingAgent] = &[
         fallback_algorithm: Some(Algorithm::ReAct),
         depends_on: &["test-runner"],
         memory_reads: &["coding/testing/results", "coding/implementation/api"],
-        memory_writes: &["coding/testing/integration-tests", "coding/testing/integration-results"],
+        memory_writes: &[
+            "coding/testing/integration-tests",
+            "coding/testing/integration-results",
+        ],
         xp_reward: 55,
         parallelizable: true,
         critical: false,
@@ -851,7 +1006,10 @@ pub static AGENTS: &[CodingAgent] = &[
         fallback_algorithm: Some(Algorithm::SelfDebug),
         depends_on: &["test-runner"],
         memory_reads: &["coding/testing/results", "coding/understanding/context"],
-        memory_writes: &["coding/testing/regression-tests", "coding/testing/breaking-changes"],
+        memory_writes: &[
+            "coding/testing/regression-tests",
+            "coding/testing/breaking-changes",
+        ],
         xp_reward: 50,
         parallelizable: true,
         critical: false,
@@ -867,8 +1025,14 @@ pub static AGENTS: &[CodingAgent] = &[
         algorithm: Algorithm::ReAct,
         fallback_algorithm: Some(Algorithm::Reflexion),
         depends_on: &["integration-tester"],
-        memory_reads: &["coding/testing/integration-results", "coding/implementation/api"],
-        memory_writes: &["coding/testing/security-tests", "coding/testing/vulnerabilities"],
+        memory_reads: &[
+            "coding/testing/integration-results",
+            "coding/implementation/api",
+        ],
+        memory_writes: &[
+            "coding/testing/security-tests",
+            "coding/testing/vulnerabilities",
+        ],
         xp_reward: 60,
         parallelizable: true,
         critical: true,
@@ -884,8 +1048,14 @@ pub static AGENTS: &[CodingAgent] = &[
         algorithm: Algorithm::PoT,
         fallback_algorithm: Some(Algorithm::ReAct),
         depends_on: &["regression-tester", "security-tester"],
-        memory_reads: &["coding/testing/results", "coding/testing/integration-results"],
-        memory_writes: &["coding/testing/coverage-report", "coding/testing/coverage-gaps"],
+        memory_reads: &[
+            "coding/testing/results",
+            "coding/testing/integration-results",
+        ],
+        memory_writes: &[
+            "coding/testing/coverage-report",
+            "coding/testing/coverage-gaps",
+        ],
         xp_reward: 50,
         parallelizable: false,
         critical: false,
@@ -918,14 +1088,17 @@ pub static AGENTS: &[CodingAgent] = &[
         algorithm: Algorithm::SelfDebug,
         fallback_algorithm: Some(Algorithm::Reflexion),
         depends_on: &["quality-gate"],
-        memory_reads: &["coding/testing/results", "coding/testing/failures", "coding/testing/quality-verdict"],
+        memory_reads: &[
+            "coding/testing/results",
+            "coding/testing/failures",
+            "coding/testing/quality-verdict",
+        ],
         memory_writes: &["coding/testing/fix-attempts", "coding/testing/final-status"],
         xp_reward: 65,
         parallelizable: false,
         critical: false,
         description: "Self-correction loop: reads test failures, fixes code, re-tests until pass (max 3 retries). Escalates unfixable failures.",
     },
-
     // =========================================================================
     // PHASE 4: TESTING  (Sherlock reviewer)
     // =========================================================================
@@ -946,13 +1119,15 @@ pub static AGENTS: &[CodingAgent] = &[
             "coding/testing/coverage-report",
             "coding/testing/quality-verdict",
         ],
-        memory_writes: &["coding/forensic/phase-5-verdict", "coding/forensic/phase-5-evidence"],
+        memory_writes: &[
+            "coding/forensic/phase-5-verdict",
+            "coding/forensic/phase-5-evidence",
+        ],
         xp_reward: 100,
         parallelizable: false,
         critical: true,
         description: "Sherlock #46: Phase 5 Testing forensic review. CRITICAL: Gates progression to Phase 6.",
     },
-
     // =========================================================================
     // PHASE 5: REFINEMENT  (TS optimization agents)
     // =========================================================================
@@ -968,7 +1143,10 @@ pub static AGENTS: &[CodingAgent] = &[
         fallback_algorithm: Some(Algorithm::Reflexion),
         depends_on: &["phase-5-reviewer"],
         memory_reads: &["coding/implementation/services", "coding/testing/results"],
-        memory_writes: &["coding/optimization/performance", "coding/optimization/benchmarks"],
+        memory_writes: &[
+            "coding/optimization/performance",
+            "coding/optimization/benchmarks",
+        ],
         xp_reward: 60,
         parallelizable: false,
         critical: false,
@@ -984,8 +1162,14 @@ pub static AGENTS: &[CodingAgent] = &[
         algorithm: Algorithm::ToT,
         fallback_algorithm: Some(Algorithm::ReAct),
         depends_on: &["performance-optimizer"],
-        memory_reads: &["coding/optimization/performance", "coding/architecture/design"],
-        memory_writes: &["coding/optimization/architecture-improvements", "coding/optimization/scalability"],
+        memory_reads: &[
+            "coding/optimization/performance",
+            "coding/architecture/design",
+        ],
+        memory_writes: &[
+            "coding/optimization/architecture-improvements",
+            "coding/optimization/scalability",
+        ],
         xp_reward: 55,
         parallelizable: true,
         critical: false,
@@ -1001,8 +1185,14 @@ pub static AGENTS: &[CodingAgent] = &[
         algorithm: Algorithm::Reflexion,
         fallback_algorithm: Some(Algorithm::ReAct),
         depends_on: &["performance-optimizer"],
-        memory_reads: &["coding/implementation/services", "coding/testing/quality-verdict"],
-        memory_writes: &["coding/optimization/quality-improvements", "coding/optimization/refactoring"],
+        memory_reads: &[
+            "coding/implementation/services",
+            "coding/testing/quality-verdict",
+        ],
+        memory_writes: &[
+            "coding/optimization/quality-improvements",
+            "coding/optimization/refactoring",
+        ],
         xp_reward: 50,
         parallelizable: true,
         critical: false,
@@ -1018,8 +1208,14 @@ pub static AGENTS: &[CodingAgent] = &[
         algorithm: Algorithm::ReAct,
         fallback_algorithm: Some(Algorithm::Reflexion),
         depends_on: &["performance-architect", "code-quality-improver"],
-        memory_reads: &["coding/testing/vulnerabilities", "coding/implementation/api"],
-        memory_writes: &["coding/optimization/security-improvements", "coding/optimization/security-audit"],
+        memory_reads: &[
+            "coding/testing/vulnerabilities",
+            "coding/implementation/api",
+        ],
+        memory_writes: &[
+            "coding/optimization/security-improvements",
+            "coding/optimization/security-audit",
+        ],
         xp_reward: 60,
         parallelizable: false,
         critical: true,
@@ -1035,14 +1231,19 @@ pub static AGENTS: &[CodingAgent] = &[
         algorithm: Algorithm::Reflexion,
         fallback_algorithm: Some(Algorithm::SelfDebug),
         depends_on: &["security-architect"],
-        memory_reads: &["coding/optimization/quality-improvements", "coding/optimization/security-audit"],
-        memory_writes: &["coding/optimization/final-code", "coding/optimization/polish-report"],
+        memory_reads: &[
+            "coding/optimization/quality-improvements",
+            "coding/optimization/security-audit",
+        ],
+        memory_writes: &[
+            "coding/optimization/final-code",
+            "coding/optimization/polish-report",
+        ],
         xp_reward: 55,
         parallelizable: false,
         critical: false,
         description: "Performs final code polish, consistency checks, and prepares code for delivery.",
     },
-
     // =========================================================================
     // PHASE 5: REFINEMENT  (TS delivery agents — merged)
     // =========================================================================
@@ -1057,14 +1258,20 @@ pub static AGENTS: &[CodingAgent] = &[
         algorithm: Algorithm::Reflexion,
         fallback_algorithm: Some(Algorithm::ReAct),
         depends_on: &["phase-6-reviewer"],
-        memory_reads: &["coding/optimization/final-code", "coding/testing/coverage-report", "coding/testing/quality-verdict"],
-        memory_writes: &["coding/delivery/sign-off", "coding/delivery/approval-status"],
+        memory_reads: &[
+            "coding/optimization/final-code",
+            "coding/testing/coverage-report",
+            "coding/testing/quality-verdict",
+        ],
+        memory_writes: &[
+            "coding/delivery/sign-off",
+            "coding/delivery/approval-status",
+        ],
         xp_reward: 75,
         parallelizable: false,
         critical: true,
         description: "Final sign-off authority for code delivery, verifying all requirements met. CRITICAL: Must pass for pipeline completion.",
     },
-
     // =========================================================================
     // PHASE 5: REFINEMENT  (Sherlock reviewers)
     // =========================================================================
@@ -1085,13 +1292,15 @@ pub static AGENTS: &[CodingAgent] = &[
             "coding/optimization/security-audit",
             "coding/optimization/final-code",
         ],
-        memory_writes: &["coding/forensic/phase-6-verdict", "coding/forensic/phase-6-evidence"],
+        memory_writes: &[
+            "coding/forensic/phase-6-verdict",
+            "coding/forensic/phase-6-evidence",
+        ],
         xp_reward: 100,
         parallelizable: false,
         critical: true,
         description: "Sherlock #47: Phase 6 Optimization forensic review. CRITICAL: Gates progression to Phase 7.",
     },
-
     // #48 recovery-agent
     CodingAgent {
         key: "recovery-agent",

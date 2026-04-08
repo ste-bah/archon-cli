@@ -87,7 +87,8 @@ impl ForbiddenPatternScanner {
             },
             ForbiddenPattern {
                 name: "throw-not-implemented".into(),
-                regex: Regex::new(r#"throw\s+new\s+Error\s*\(\s*["']not implemented["']\s*\)"#).unwrap(),
+                regex: Regex::new(r#"throw\s+new\s+Error\s*\(\s*["']not implemented["']\s*\)"#)
+                    .unwrap(),
                 severity: Severity::Error,
             },
             ForbiddenPattern {
@@ -309,10 +310,7 @@ impl OrphanDetectionGate {
         let mut evidence_lines = Vec::new();
 
         for new_file in new_files {
-            let stem = new_file
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or("");
+            let stem = new_file.file_stem().and_then(|s| s.to_str()).unwrap_or("");
 
             if stem.is_empty() {
                 continue;
@@ -330,7 +328,10 @@ impl OrphanDetectionGate {
                 failures.push(GateFailure {
                     description: format!("Orphaned file: {}", rel),
                     file: Some(rel.clone()),
-                    details: format!("No mod/use/import references to '{}' found in project", stem),
+                    details: format!(
+                        "No mod/use/import references to '{}' found in project",
+                        stem
+                    ),
                 });
                 evidence_lines.push(format!("ORPHAN: {} — zero references", rel));
             } else {
@@ -340,8 +341,7 @@ impl OrphanDetectionGate {
                     .display()
                     .to_string();
                 let refs_str = references.join(", ");
-                evidence_lines
-                    .push(format!("OK: {} — referenced by: {}", rel, refs_str));
+                evidence_lines.push(format!("OK: {} — referenced by: {}", rel, refs_str));
             }
         }
 
@@ -608,9 +608,9 @@ impl E2ESmokeTestGate {
         ];
 
         // Check if ANY test pattern matches
-        let has_test_pattern = test_patterns.iter().any(|p| {
-            Regex::new(p).map_or(false, |re| re.is_match(output))
-        });
+        let has_test_pattern = test_patterns
+            .iter()
+            .any(|p| Regex::new(p).map_or(false, |re| re.is_match(output)));
 
         if !has_test_pattern {
             return false;
@@ -660,7 +660,9 @@ pub fn save_gate_result(result: &GateResultRecord, session_dir: &Path) -> Result
 
 /// Load a gate result from `<session_dir>/gate-results/<gate_name>.json`.
 pub fn load_gate_result(gate_name: &str, session_dir: &Path) -> Result<GateResultRecord> {
-    let path = session_dir.join("gate-results").join(format!("{}.json", gate_name));
+    let path = session_dir
+        .join("gate-results")
+        .join(format!("{}.json", gate_name));
     let data = std::fs::read_to_string(&path)?;
     let result: GateResultRecord = serde_json::from_str(&data)?;
     Ok(result)

@@ -102,10 +102,7 @@ impl PatternStore {
     }
 
     /// Create a new pattern. Rejects if initial_success_rate < 0.1 or duplicate detected.
-    pub fn create_pattern(
-        &mut self,
-        params: CreatePatternParams,
-    ) -> Result<Pattern, String> {
+    pub fn create_pattern(&mut self, params: CreatePatternParams) -> Result<Pattern, String> {
         if params.initial_success_rate < MIN_INITIAL_SUCCESS_RATE {
             return Err(format!(
                 "initial_success_rate {} below minimum {}",
@@ -169,8 +166,7 @@ impl PatternStore {
     /// Update success rate using EMA: new = alpha * value + (1 - alpha) * old.
     pub fn update_success_rate(&mut self, id: &str, new_value: f64) {
         if let Some(pattern) = self.patterns.get_mut(id) {
-            pattern.success_rate =
-                EMA_ALPHA * new_value + (1.0 - EMA_ALPHA) * pattern.success_rate;
+            pattern.success_rate = EMA_ALPHA * new_value + (1.0 - EMA_ALPHA) * pattern.success_rate;
             pattern.updated_at = epoch_secs();
         }
     }
@@ -202,8 +198,7 @@ impl PatternStore {
             .patterns
             .values()
             .filter(|p| {
-                p.success_rate < params.min_success_rate
-                    && p.usage_count >= params.min_usage_count
+                p.success_rate < params.min_success_rate && p.usage_count >= params.min_usage_count
             })
             .map(|p| p.id.clone())
             .collect();
@@ -225,7 +220,9 @@ impl PatternStore {
     pub fn stats(&self) -> PatternStats {
         let mut by_task_type: HashMap<String, usize> = HashMap::new();
         for pattern in self.patterns.values() {
-            *by_task_type.entry(pattern.task_type.to_string()).or_insert(0) += 1;
+            *by_task_type
+                .entry(pattern.task_type.to_string())
+                .or_insert(0) += 1;
         }
         PatternStats {
             total_patterns: self.patterns.len(),

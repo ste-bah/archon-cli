@@ -93,9 +93,7 @@ pub fn new_session(pipeline_type: PipelineType, task: &str) -> PipelineCheckpoin
 /// atomically renamed into place so that a crash at any point leaves either
 /// the old checkpoint or the new one -- never a half-written file.
 pub fn checkpoint(session: &PipelineCheckpoint, state_dir: &Path) -> Result<()> {
-    let dir = state_dir
-        .join(".pipeline-state")
-        .join(&session.session_id);
+    let dir = state_dir.join(".pipeline-state").join(&session.session_id);
     fs::create_dir_all(&dir)?;
 
     let tmp_path = dir.join("checkpoint.tmp");
@@ -130,9 +128,7 @@ pub fn detect_interrupted(state_dir: &Path) -> Result<Vec<PipelineCheckpoint>> {
         if cp_path.exists() {
             let data = fs::read_to_string(&cp_path)?;
             let session: PipelineCheckpoint = serde_json::from_str(&data)?;
-            if session.status == SessionStatus::Running
-                || session.status == SessionStatus::Paused
-            {
+            if session.status == SessionStatus::Running || session.status == SessionStatus::Paused {
                 sessions.push(session);
             }
         }
@@ -202,10 +198,7 @@ pub fn list_sessions(state_dir: &Path) -> Result<Vec<SessionSummary>> {
 }
 
 /// Mark a session as completed and write the final checkpoint.
-pub fn mark_completed(
-    session: &mut PipelineCheckpoint,
-    state_dir: &Path,
-) -> Result<()> {
+pub fn mark_completed(session: &mut PipelineCheckpoint, state_dir: &Path) -> Result<()> {
     session.status = SessionStatus::Completed;
     session.updated_at = Utc::now();
     checkpoint(session, state_dir)

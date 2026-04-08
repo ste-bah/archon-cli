@@ -12,11 +12,7 @@ fn test_agents_count() {
 fn test_no_duplicate_keys() {
     let mut seen = HashSet::new();
     for agent in AGENTS.iter() {
-        assert!(
-            seen.insert(agent.key),
-            "Duplicate agent key: {}",
-            agent.key
-        );
+        assert!(seen.insert(agent.key), "Duplicate agent key: {}", agent.key);
     }
 }
 
@@ -100,12 +96,21 @@ fn test_critical_agents() {
         .collect();
 
     assert_eq!(
-        expected_critical, actual_critical,
+        expected_critical,
+        actual_critical,
         "Critical agents mismatch.\nExpected but missing: {:?}\nPresent but not expected: {:?}",
-        expected_critical.difference(&actual_critical).collect::<Vec<_>>(),
-        actual_critical.difference(&expected_critical).collect::<Vec<_>>()
+        expected_critical
+            .difference(&actual_critical)
+            .collect::<Vec<_>>(),
+        actual_critical
+            .difference(&expected_critical)
+            .collect::<Vec<_>>()
     );
-    assert_eq!(actual_critical.len(), 20, "Must have exactly 20 critical agents");
+    assert_eq!(
+        actual_critical.len(),
+        20,
+        "Must have exactly 20 critical agents"
+    );
 }
 
 #[test]
@@ -117,7 +122,9 @@ fn test_all_agents_have_prompt_path() {
             agent.key
         );
         assert!(
-            agent.prompt_source_path.starts_with(".claude/agents/coding-pipeline/"),
+            agent
+                .prompt_source_path
+                .starts_with(".claude/agents/coding-pipeline/"),
             "Agent '{}' prompt_source_path '{}' must start with '.claude/agents/coding-pipeline/'",
             agent.key,
             agent.prompt_source_path
@@ -210,10 +217,18 @@ fn test_get_agent_by_key() {
 
     // Verify PRD phase reassignments
     let sa = get_agent_by_key("security-architect").unwrap();
-    assert_eq!(sa.phase, Phase::Design, "security-architect should be in Design per PRD");
+    assert_eq!(
+        sa.phase,
+        Phase::Design,
+        "security-architect should be in Design per PRD"
+    );
 
     let ia = get_agent_by_key("integration-architect").unwrap();
-    assert_eq!(ia.phase, Phase::WiringPlan, "integration-architect should be in WiringPlan");
+    assert_eq!(
+        ia.phase,
+        Phase::WiringPlan,
+        "integration-architect should be in WiringPlan"
+    );
 
     assert!(get_agent_by_key("nonexistent-agent").is_none());
 }

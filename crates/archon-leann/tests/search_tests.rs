@@ -15,7 +15,7 @@ use cozo::{DataValue, DbInstance, ScriptMutability, Vector};
 use ndarray::Array1;
 
 use archon_leann::indexer::{EmbeddingConfig, EmbeddingProviderKind, Indexer};
-use archon_leann::search::{Search, DEFAULT_MIN_SIMILARITY};
+use archon_leann::search::{DEFAULT_MIN_SIMILARITY, Search};
 use archon_memory::embedding::EmbeddingProvider;
 use archon_memory::types::MemoryError;
 
@@ -119,7 +119,10 @@ mod search_tests {
         let _ = indexer; // schema must be set up before searching
 
         let results = search.search_code("fn main", 10).expect("search_code");
-        assert!(results.is_empty(), "empty index should return empty results");
+        assert!(
+            results.is_empty(),
+            "empty index should return empty results"
+        );
     }
 
     // 2. search_code returns results sorted by relevance_score descending.
@@ -135,9 +138,27 @@ mod search_tests {
         let indexer = setup_indexer(db.clone());
 
         // Identical to query: relevance = 1.0
-        insert_chunk(&db, "chunk-a", "/a.rs", "rust", 1, 5, "fn a() {}", vec![1.0, 0.0, 0.0, 0.0]);
+        insert_chunk(
+            &db,
+            "chunk-a",
+            "/a.rs",
+            "rust",
+            1,
+            5,
+            "fn a() {}",
+            vec![1.0, 0.0, 0.0, 0.0],
+        );
         // Orthogonal to query: relevance = 0.5
-        insert_chunk(&db, "chunk-b", "/b.rs", "rust", 1, 5, "fn b() {}", vec![0.0, 1.0, 0.0, 0.0]);
+        insert_chunk(
+            &db,
+            "chunk-b",
+            "/b.rs",
+            "rust",
+            1,
+            5,
+            "fn b() {}",
+            vec![0.0, 1.0, 0.0, 0.0],
+        );
         let _ = indexer;
 
         let search = make_nonzero_search(db);
@@ -174,9 +195,27 @@ mod search_tests {
         let indexer = setup_indexer(db.clone());
 
         // Near-opposite: relevance ≈ 0.0
-        insert_chunk(&db, "opposite", "/opp.rs", "rust", 1, 5, "fn opposite() {}", vec![-1.0, 0.0, 0.0, 0.0]);
+        insert_chunk(
+            &db,
+            "opposite",
+            "/opp.rs",
+            "rust",
+            1,
+            5,
+            "fn opposite() {}",
+            vec![-1.0, 0.0, 0.0, 0.0],
+        );
         // Identical: relevance = 1.0
-        insert_chunk(&db, "identical", "/same.rs", "rust", 1, 5, "fn identical() {}", vec![1.0, 0.0, 0.0, 0.0]);
+        insert_chunk(
+            &db,
+            "identical",
+            "/same.rs",
+            "rust",
+            1,
+            5,
+            "fn identical() {}",
+            vec![1.0, 0.0, 0.0, 0.0],
+        );
         let _ = indexer;
 
         let search = make_nonzero_search(db);
@@ -196,7 +235,10 @@ mod search_tests {
         let has_opposite = results
             .iter()
             .any(|r| r.file_path.to_string_lossy().contains("/opp.rs"));
-        assert!(!has_opposite, "opposite-vector chunk should be filtered out by threshold");
+        assert!(
+            !has_opposite,
+            "opposite-vector chunk should be filtered out by threshold"
+        );
     }
 
     // 4. find_similar_code deduplicates by file_path (keeps highest score per file).
@@ -209,14 +251,43 @@ mod search_tests {
         let indexer = setup_indexer(db.clone());
 
         // Two chunks for the same file
-        insert_chunk(&db, "dup-1", "/dup.rs", "rust", 1, 5, "fn first() {}", vec![1.0, 0.0, 0.0, 0.0]);
-        insert_chunk(&db, "dup-2", "/dup.rs", "rust", 10, 15, "fn second() {}", vec![1.0, 0.0, 0.0, 0.0]);
+        insert_chunk(
+            &db,
+            "dup-1",
+            "/dup.rs",
+            "rust",
+            1,
+            5,
+            "fn first() {}",
+            vec![1.0, 0.0, 0.0, 0.0],
+        );
+        insert_chunk(
+            &db,
+            "dup-2",
+            "/dup.rs",
+            "rust",
+            10,
+            15,
+            "fn second() {}",
+            vec![1.0, 0.0, 0.0, 0.0],
+        );
         // One chunk for a different file
-        insert_chunk(&db, "other-1", "/other.rs", "rust", 1, 5, "fn other() {}", vec![1.0, 0.0, 0.0, 0.0]);
+        insert_chunk(
+            &db,
+            "other-1",
+            "/other.rs",
+            "rust",
+            1,
+            5,
+            "fn other() {}",
+            vec![1.0, 0.0, 0.0, 0.0],
+        );
         let _ = indexer;
 
         let search = make_nonzero_search(db);
-        let results = search.find_similar_code("fn example() {}", 10).expect("find_similar_code");
+        let results = search
+            .find_similar_code("fn example() {}", 10)
+            .expect("find_similar_code");
 
         // All file paths should be unique
         let mut paths: Vec<String> = results
@@ -242,8 +313,26 @@ mod search_tests {
         let db = test_db();
         let indexer = setup_indexer(db.clone());
 
-        insert_chunk(&db, "rust-1", "/a.rs", "rust", 1, 5, "fn rust_fn() {}", vec![1.0, 0.0, 0.0, 0.0]);
-        insert_chunk(&db, "py-1", "/b.py", "python", 1, 5, "def py_fn(): pass", vec![1.0, 0.0, 0.0, 0.0]);
+        insert_chunk(
+            &db,
+            "rust-1",
+            "/a.rs",
+            "rust",
+            1,
+            5,
+            "fn rust_fn() {}",
+            vec![1.0, 0.0, 0.0, 0.0],
+        );
+        insert_chunk(
+            &db,
+            "py-1",
+            "/b.py",
+            "python",
+            1,
+            5,
+            "def py_fn(): pass",
+            vec![1.0, 0.0, 0.0, 0.0],
+        );
         let _ = indexer;
 
         let search = make_nonzero_search(db);
@@ -268,8 +357,26 @@ mod search_tests {
         let db = test_db();
         let indexer = setup_indexer(db.clone());
 
-        insert_chunk(&db, "src-1", "/project/src/main.rs", "rust", 1, 5, "fn main() {}", vec![1.0, 0.0, 0.0, 0.0]);
-        insert_chunk(&db, "test-1", "/project/tests/foo_test.rs", "rust", 1, 5, "fn test_foo() {}", vec![1.0, 0.0, 0.0, 0.0]);
+        insert_chunk(
+            &db,
+            "src-1",
+            "/project/src/main.rs",
+            "rust",
+            1,
+            5,
+            "fn main() {}",
+            vec![1.0, 0.0, 0.0, 0.0],
+        );
+        insert_chunk(
+            &db,
+            "test-1",
+            "/project/tests/foo_test.rs",
+            "rust",
+            1,
+            5,
+            "fn test_foo() {}",
+            vec![1.0, 0.0, 0.0, 0.0],
+        );
         let _ = indexer;
 
         let search = make_nonzero_search(db);
@@ -277,7 +384,10 @@ mod search_tests {
             .search_with_filter("query", 10, None, Some("/project/src"))
             .expect("search_with_filter");
 
-        assert!(!results.is_empty(), "should find at least one /project/src chunk");
+        assert!(
+            !results.is_empty(),
+            "should find at least one /project/src chunk"
+        );
 
         for r in &results {
             let path_str = r.file_path.to_string_lossy();
@@ -308,14 +418,22 @@ mod search_tests {
         let _ = indexer;
 
         let search = make_nonzero_search(db);
-        let results = search.search_code("hello function", 5).expect("search_code");
+        let results = search
+            .search_code("hello function", 5)
+            .expect("search_code");
         assert!(!results.is_empty(), "should find inserted chunk");
 
         let r = &results[0];
-        assert!(!r.file_path.as_os_str().is_empty(), "file_path should be populated");
+        assert!(
+            !r.file_path.as_os_str().is_empty(),
+            "file_path should be populated"
+        );
         assert!(!r.content.is_empty(), "content should be populated");
         assert!(!r.language.is_empty(), "language should be populated");
-        assert!(r.line_end >= r.line_start, "line_end should be >= line_start");
+        assert!(
+            r.line_end >= r.line_start,
+            "line_end should be >= line_start"
+        );
         assert!(
             r.relevance_score >= 0.0 && r.relevance_score <= 1.0,
             "relevance_score should be in [0.0, 1.0], got {}",

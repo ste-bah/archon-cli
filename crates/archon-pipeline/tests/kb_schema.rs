@@ -1,4 +1,4 @@
-use archon_pipeline::kb::schema::{ensure_kb_schema, KbEdgeType, KbNodeType};
+use archon_pipeline::kb::schema::{KbEdgeType, KbNodeType, ensure_kb_schema};
 use archon_pipeline::kb::{IngestSource, KnowledgeBase, QueryOptions};
 use cozo::{DbInstance, ScriptMutability};
 use std::path::PathBuf;
@@ -13,7 +13,11 @@ fn test_ensure_kb_schema_creates_relations() {
     ensure_kb_schema(&db).unwrap();
 
     let result = db
-        .run_script("::relations", Default::default(), ScriptMutability::Immutable)
+        .run_script(
+            "::relations",
+            Default::default(),
+            ScriptMutability::Immutable,
+        )
         .unwrap();
 
     let name_col = result
@@ -28,8 +32,14 @@ fn test_ensure_kb_schema_creates_relations() {
         .map(|row| row[name_col].get_str().unwrap().to_string())
         .collect();
 
-    assert!(names.contains(&"kb_nodes".to_string()), "kb_nodes relation should exist");
-    assert!(names.contains(&"kb_edges".to_string()), "kb_edges relation should exist");
+    assert!(
+        names.contains(&"kb_nodes".to_string()),
+        "kb_nodes relation should exist"
+    );
+    assert!(
+        names.contains(&"kb_edges".to_string()),
+        "kb_edges relation should exist"
+    );
     assert!(
         names.contains(&"kb_embeddings".to_string()),
         "kb_embeddings relation should exist"
@@ -163,7 +173,10 @@ fn test_kb_edge_type_variants() {
 fn test_knowledge_base_creation() {
     let db = mem_db();
     let kb = KnowledgeBase::new(db);
-    assert!(kb.is_ok(), "KnowledgeBase::new should succeed with in-memory db");
+    assert!(
+        kb.is_ok(),
+        "KnowledgeBase::new should succeed with in-memory db"
+    );
 }
 
 #[tokio::test]
@@ -172,7 +185,9 @@ async fn test_knowledge_base_api_surface() {
     let kb = KnowledgeBase::new(db).unwrap();
 
     // All 9 methods should be callable and return Ok
-    let ingest_result = kb.ingest(&IngestSource::Url("https://example.com".into())).await;
+    let ingest_result = kb
+        .ingest(&IngestSource::Url("https://example.com".into()))
+        .await;
     assert!(ingest_result.is_ok());
 
     let compile_result = kb.compile().await;

@@ -165,7 +165,8 @@ impl ConstraintEngine {
 
         for value in &domain {
             assignment.insert(var.clone(), value.clone());
-            if Self::is_consistent(csp, assignment) && Self::backtrack(csp, assignment, var_order, idx + 1)
+            if Self::is_consistent(csp, assignment)
+                && Self::backtrack(csp, assignment, var_order, idx + 1)
             {
                 return true;
             }

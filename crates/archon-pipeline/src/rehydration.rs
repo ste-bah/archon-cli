@@ -48,11 +48,7 @@ impl RehydrationPolicy {
     ///
     /// Missing files produce None values, not errors.
     /// Memory recall is deferred to the caller (runner provides memories).
-    pub fn rehydrate(
-        &self,
-        _agent_key: &str,
-        _task_type: &str,
-    ) -> Result<RehydrationContext> {
+    pub fn rehydrate(&self, _agent_key: &str, _task_type: &str) -> Result<RehydrationContext> {
         // 1. Load contract -> render mission brief
         let contract = self.load_contract();
         let wiring_plan = self.load_wiring_plan();
@@ -109,14 +105,10 @@ impl RehydrationPolicy {
         let data = std::fs::read_to_string(&path).ok()?;
         let entries: Vec<VerificationEntry> = serde_json::from_str(&data).ok()?;
         // Find the most recent failure (last failed entry)
-        entries
-            .iter()
-            .rev()
-            .find(|e| !e.passed)
-            .map(|e| {
-                let details = e.failure_details.as_deref().unwrap_or("no details");
-                format!("[{}] {}: {}", e.gate_name, e.evidence_summary, details)
-            })
+        entries.iter().rev().find(|e| !e.passed).map(|e| {
+            let details = e.failure_details.as_deref().unwrap_or("no details");
+            format!("[{}] {}: {}", e.gate_name, e.evidence_summary, details)
+        })
     }
 }
 
@@ -155,7 +147,15 @@ pub fn render_mission_brief(
         Some(plan) if !plan.obligations.is_empty() => plan
             .obligations
             .iter()
-            .map(|o| format!("  - [{}] {} -> {:?} ({})", o.id, o.file, o.action, o.status_str()))
+            .map(|o| {
+                format!(
+                    "  - [{}] {} -> {:?} ({})",
+                    o.id,
+                    o.file,
+                    o.action,
+                    o.status_str()
+                )
+            })
             .collect::<Vec<_>>()
             .join("\n"),
         _ => "  No wiring plan yet".to_string(),

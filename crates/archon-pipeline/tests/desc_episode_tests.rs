@@ -3,8 +3,8 @@
 //! All tests use CozoDB in-memory mode. No UCM daemon dependency.
 
 use archon_pipeline::learning::desc::{
-    ConfidenceCalculator, DescEpisode, DescEpisodeStore, EpisodeQuery, InjectionFilter,
-    QualityMonitor, TrajectoryLinker, DEFAULT_MIN_INJECTION_QUALITY, DEFAULT_QUALITY_THRESHOLD,
+    ConfidenceCalculator, DEFAULT_MIN_INJECTION_QUALITY, DEFAULT_QUALITY_THRESHOLD, DescEpisode,
+    DescEpisodeStore, EpisodeQuery, InjectionFilter, QualityMonitor, TrajectoryLinker,
 };
 use archon_pipeline::learning::schema::initialize_learning_schemas;
 use cozo::DbInstance;
@@ -45,7 +45,10 @@ fn test_store_episode_returns_valid_id() {
     let store = make_store();
     let ep = episode("ep-001", "coding", 0.8);
     let returned_id = store.store_episode(&ep).unwrap();
-    assert_eq!(returned_id, "ep-001", "store_episode should return the episode_id");
+    assert_eq!(
+        returned_id, "ep-001",
+        "store_episode should return the episode_id"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -76,9 +79,15 @@ fn test_get_episode_by_id() {
 #[test]
 fn test_find_similar_episodes_by_task_type() {
     let store = make_store();
-    store.store_episode(&episode("ep-003a", "coding", 0.9)).unwrap();
-    store.store_episode(&episode("ep-003b", "coding", 0.7)).unwrap();
-    store.store_episode(&episode("ep-003c", "research", 0.8)).unwrap();
+    store
+        .store_episode(&episode("ep-003a", "coding", 0.9))
+        .unwrap();
+    store
+        .store_episode(&episode("ep-003b", "coding", 0.7))
+        .unwrap();
+    store
+        .store_episode(&episode("ep-003c", "research", 0.8))
+        .unwrap();
 
     let query = EpisodeQuery {
         task_type: Some("coding".to_string()),
@@ -119,16 +128,28 @@ fn test_update_quality_changes_score() {
 #[test]
 fn test_injection_filter_top_k_sorted_by_score() {
     let store = make_store();
-    store.store_episode(&episode("ep-005a", "coding", 0.9)).unwrap();
-    store.store_episode(&episode("ep-005b", "coding", 0.6)).unwrap();
-    store.store_episode(&episode("ep-005c", "research", 0.8)).unwrap();
+    store
+        .store_episode(&episode("ep-005a", "coding", 0.9))
+        .unwrap();
+    store
+        .store_episode(&episode("ep-005b", "coding", 0.6))
+        .unwrap();
+    store
+        .store_episode(&episode("ep-005c", "research", 0.8))
+        .unwrap();
 
     let result =
         InjectionFilter::filter_for_injection(&store, "coding", 2, DEFAULT_MIN_INJECTION_QUALITY)
             .unwrap();
 
-    assert!(result.episodes.len() <= 2, "should return at most 2 episodes");
-    assert!(!result.episodes.is_empty(), "should have at least one episode");
+    assert!(
+        result.episodes.len() <= 2,
+        "should return at most 2 episodes"
+    );
+    assert!(
+        !result.episodes.is_empty(),
+        "should have at least one episode"
+    );
 
     // Scores should be non-increasing
     for i in 1..result.episodes.len() {
@@ -146,8 +167,12 @@ fn test_injection_filter_top_k_sorted_by_score() {
 #[test]
 fn test_injection_filter_respects_min_quality() {
     let store = make_store();
-    store.store_episode(&episode("ep-006a", "coding", 0.9)).unwrap();
-    store.store_episode(&episode("ep-006b", "coding", 0.1)).unwrap(); // below threshold
+    store
+        .store_episode(&episode("ep-006a", "coding", 0.9))
+        .unwrap();
+    store
+        .store_episode(&episode("ep-006b", "coding", 0.1))
+        .unwrap(); // below threshold
 
     let result = InjectionFilter::filter_for_injection(&store, "coding", 10, 0.5).unwrap();
 
@@ -207,17 +232,22 @@ fn test_trajectory_linker_get_linked_trajectories() {
 fn test_quality_monitor_detects_degradation() {
     let store = make_store();
     // Insert low-quality episodes
-    store.store_episode(&episode("ep-009a", "coding", 0.2)).unwrap();
-    store.store_episode(&episode("ep-009b", "coding", 0.3)).unwrap();
-    store.store_episode(&episode("ep-009c", "coding", 0.25)).unwrap();
+    store
+        .store_episode(&episode("ep-009a", "coding", 0.2))
+        .unwrap();
+    store
+        .store_episode(&episode("ep-009b", "coding", 0.3))
+        .unwrap();
+    store
+        .store_episode(&episode("ep-009c", "coding", 0.25))
+        .unwrap();
 
     let report = QualityMonitor::check(&store, DEFAULT_QUALITY_THRESHOLD).unwrap();
 
     assert!(
         report.degradation_detected,
         "degradation should be detected when mean quality ({}) < threshold ({})",
-        report.mean_quality,
-        DEFAULT_QUALITY_THRESHOLD
+        report.mean_quality, DEFAULT_QUALITY_THRESHOLD
     );
     assert_eq!(report.total_episodes, 3);
     assert!((report.degradation_threshold - DEFAULT_QUALITY_THRESHOLD).abs() < 1e-9);
@@ -289,7 +319,10 @@ fn test_no_ucm_daemon_dependency() {
 fn test_confidence_calculator_basic() {
     // Fresh episode (age_secs=0): recency=1.0, result = quality * similarity * 1.0
     let score = ConfidenceCalculator::calculate(0.8, 1.0, 0);
-    assert!((score - 0.8).abs() < 1e-9, "score should be quality*similarity for fresh episode");
+    assert!(
+        (score - 0.8).abs() < 1e-9,
+        "score should be quality*similarity for fresh episode"
+    );
 
     // Clamped to [0,1]
     let clamped = ConfidenceCalculator::calculate(2.0, 2.0, 0);
@@ -309,7 +342,10 @@ fn test_quality_monitor_empty_store() {
     let store = make_store();
     let report = QualityMonitor::check(&store, DEFAULT_QUALITY_THRESHOLD).unwrap();
     assert_eq!(report.total_episodes, 0);
-    assert!(!report.degradation_detected, "no degradation on empty store");
+    assert!(
+        !report.degradation_detected,
+        "no degradation on empty store"
+    );
     assert!((report.mean_quality).abs() < 1e-9);
 }
 
@@ -321,7 +357,10 @@ fn test_quality_monitor_empty_store() {
 fn test_get_episode_missing_id() {
     let store = make_store();
     let result = store.get_episode("nonexistent-id").unwrap();
-    assert!(result.is_none(), "should return None for unknown episode_id");
+    assert!(
+        result.is_none(),
+        "should return None for unknown episode_id"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -333,10 +372,18 @@ fn test_find_episodes_default_query() {
     let store = make_store();
     for i in 0..5 {
         store
-            .store_episode(&episode(&format!("ep-015-{}", i), "coding", 0.5 + i as f64 * 0.05))
+            .store_episode(&episode(
+                &format!("ep-015-{}", i),
+                "coding",
+                0.5 + i as f64 * 0.05,
+            ))
             .unwrap();
     }
 
     let results = store.find_episodes(&EpisodeQuery::default()).unwrap();
-    assert_eq!(results.len(), 5, "default query should return all 5 episodes");
+    assert_eq!(
+        results.len(),
+        5,
+        "default query should return all 5 episodes"
+    );
 }

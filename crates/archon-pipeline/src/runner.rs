@@ -293,7 +293,11 @@ pub trait PipelineFacade: Send + Sync {
         &self,
         session: &PipelineSession,
         agent: &AgentInfo,
-    ) -> Result<(Vec<serde_json::Value>, Vec<serde_json::Value>, Vec<serde_json::Value>)>;
+    ) -> Result<(
+        Vec<serde_json::Value>,
+        Vec<serde_json::Value>,
+        Vec<serde_json::Value>,
+    )>;
 
     /// Score the quality of an agent's output after execution.
     async fn score_quality(
@@ -360,13 +364,13 @@ pub async fn run_pipeline(
                 }
 
                 // Build a fresh prompt — context isolation.
-                let (messages, system, tools) =
-                    facade.build_prompt(&session, &agent).await?;
+                let (messages, system, tools) = facade.build_prompt(&session, &agent).await?;
 
                 // Execute against the LLM.
                 let agent_start = Instant::now();
-                let llm_response =
-                    llm.send_message(messages, system, tools, &agent.model).await?;
+                let llm_response = llm
+                    .send_message(messages, system, tools, &agent.model)
+                    .await?;
                 let duration = agent_start.elapsed();
 
                 // Build the agent result.
@@ -381,8 +385,7 @@ pub async fn run_pipeline(
                 };
 
                 // Score quality.
-                let quality =
-                    facade.score_quality(&session, &agent, &result).await?;
+                let quality = facade.score_quality(&session, &agent, &result).await?;
                 result.quality = Some(quality.clone());
 
                 tracing::info!(
@@ -472,11 +475,17 @@ mod tests {
 
         let output = format_leann_results(&results);
 
-        assert!(output.starts_with("## Code Context\n"), "should start with header");
+        assert!(
+            output.starts_with("## Code Context\n"),
+            "should start with header"
+        );
         assert!(output.contains("`src/main.rs`"), "should contain file path");
         assert!(output.contains("lines 1-3"), "should contain line range");
         assert!(output.contains("```rust"), "should contain language fence");
-        assert!(output.contains("fn main() {}"), "should contain code content");
+        assert!(
+            output.contains("fn main() {}"),
+            "should contain code content"
+        );
     }
 
     #[test]

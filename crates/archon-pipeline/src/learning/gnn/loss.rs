@@ -73,11 +73,7 @@ pub fn compute_loss(
 }
 
 /// Compute average triplet loss over a batch of triplets.
-pub fn batch_triplet_loss(
-    embeddings: &[Vec<f32>],
-    triplets: &[Triplet],
-    margin: f32,
-) -> f32 {
+pub fn batch_triplet_loss(embeddings: &[Vec<f32>], triplets: &[Triplet], margin: f32) -> f32 {
     if triplets.is_empty() {
         return 0.0;
     }

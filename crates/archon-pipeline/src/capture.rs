@@ -121,8 +121,7 @@ impl AutoCapture {
             let matches: Vec<usize> = regex_set.matches(user_message).into_iter().collect();
             if !matches.is_empty() {
                 let content = Self::extract_relevant_content(user_message);
-                let confidence =
-                    Self::calculate_confidence(matches.len(), user_message.len());
+                let confidence = Self::calculate_confidence(matches.len(), user_message.len());
 
                 captures.push(CapturedMemory {
                     content,

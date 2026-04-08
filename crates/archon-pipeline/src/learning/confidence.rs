@@ -26,7 +26,10 @@ pub fn rank_patterns<'a>(patterns: &[(&'a str, f64)]) -> Vec<(&'a str, f64)> {
 }
 
 /// Filter patterns by minimum confidence threshold.
-pub fn filter_patterns<'a>(patterns: &[(&'a str, f64)], min_confidence: f64) -> Vec<(&'a str, f64)> {
+pub fn filter_patterns<'a>(
+    patterns: &[(&'a str, f64)],
+    min_confidence: f64,
+) -> Vec<(&'a str, f64)> {
     patterns
         .iter()
         .filter(|p| p.1 >= min_confidence)

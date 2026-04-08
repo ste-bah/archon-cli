@@ -26,8 +26,8 @@ impl Default for AdamConfig {
 
 /// Per-parameter Adam state (first and second moments).
 struct ParamState {
-    m: Vec<Vec<f32>>,   // First moment (mean of gradients)
-    v: Vec<Vec<f32>>,   // Second moment (mean of squared gradients)
+    m: Vec<Vec<f32>>, // First moment (mean of gradients)
+    v: Vec<Vec<f32>>, // Second moment (mean of squared gradients)
     m_bias: Vec<f32>,
     v_bias: Vec<f32>,
 }
@@ -67,11 +67,7 @@ impl AdamOptimizer {
     /// Perform one Adam update step given gradients for each layer.
     ///
     /// `grads` is a slice of (dw, db) tuples, one per layer.
-    pub fn step(
-        &mut self,
-        layers: &mut [LayerWeights],
-        grads: &[(Vec<Vec<f32>>, Vec<f32>)],
-    ) {
+    pub fn step(&mut self, layers: &mut [LayerWeights], grads: &[(Vec<Vec<f32>>, Vec<f32>)]) {
         self.step_count += 1;
         let t = self.step_count as f32;
         let beta1 = self.config.beta1;

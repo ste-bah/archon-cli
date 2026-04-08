@@ -3,7 +3,7 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -195,8 +195,7 @@ impl ProvenanceStore {
     ) -> LScoreResult {
         let recency_factor = (-recency_days / 365.0).exp();
         let authority_factor = authority_weight.clamp(0.0, 1.0);
-        let corroboration_factor =
-            (1.0 + (corroboration_count as f64).ln_1p()).min(2.0);
+        let corroboration_factor = (1.0 + (corroboration_count as f64).ln_1p()).min(2.0);
         let domain_relevance = domain_relevance.clamp(0.0, 1.0);
 
         let score = (recency_factor * 0.25
@@ -221,11 +220,7 @@ impl ProvenanceStore {
     /// those provenance records' claims (via substring match of source URLs
     /// in evidence text).  This is intentionally a lightweight heuristic —
     /// full graph traversal would require an explicit link table.
-    pub fn traverse_citation_path(
-        &self,
-        start_source_id: &str,
-        max_hops: usize,
-    ) -> CitationPath {
+    pub fn traverse_citation_path(&self, start_source_id: &str, max_hops: usize) -> CitationPath {
         let mut visited: HashSet<String> = HashSet::new();
         let mut queue: VecDeque<String> = VecDeque::new();
         let mut path: Vec<SourceID> = Vec::new();
@@ -373,7 +368,11 @@ mod tests {
         // recency = exp(0) = 1.0, authority = 0.5, corroboration = 1+ln(2) ≈ 1.693, domain = 0.5
         // score = 1.0*0.25 + 0.5*0.35 + 1.693*0.20 + 0.5*0.20
         //       = 0.25 + 0.175 + 0.3386 + 0.10 = 0.8636
-        assert!(result.score > 0.8 && result.score < 0.9, "score={}", result.score);
+        assert!(
+            result.score > 0.8 && result.score < 0.9,
+            "score={}",
+            result.score
+        );
         assert!((result.recency_factor - 1.0).abs() < 1e-6);
 
         // Old source (365 days) with low authority
@@ -410,9 +409,7 @@ mod tests {
         let sid = store
             .register_source("https://b.com", sample_embedding(), HashMap::new())
             .unwrap();
-        let pid = store
-            .create_provenance("claim", &sid, "evidence")
-            .unwrap();
+        let pid = store.create_provenance("claim", &sid, "evidence").unwrap();
 
         store
             .add_derivation_step(&pid, "deduced from X", 0.9)

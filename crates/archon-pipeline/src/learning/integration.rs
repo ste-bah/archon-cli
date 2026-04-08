@@ -133,7 +133,10 @@ impl LearningIntegration {
                     .map(|p| format!("{} (conf={:.2})", p.template, p.confidence))
                     .collect();
                 ctx.reasoning_context = if patterns.is_empty() {
-                    format!("mode={:?}, confidence={:.2}", response.mode_used, response.overall_confidence)
+                    format!(
+                        "mode={:?}, confidence={:.2}",
+                        response.mode_used, response.overall_confidence
+                    )
                 } else {
                     format!(
                         "mode={:?}, confidence={:.2}, patterns=[{}]",
@@ -249,8 +252,7 @@ impl PhDLearningIntegration {
 
     /// Record citation quality score for an agent.
     pub fn record_citation_quality(&mut self, agent_name: &str, score: f64) {
-        self.citation_scores
-            .push((agent_name.to_string(), score));
+        self.citation_scores.push((agent_name.to_string(), score));
     }
 
     /// Get a summary of style feedback across all chapters.
@@ -270,10 +272,7 @@ impl PhDLearningIntegration {
 
         let unique_issues: Vec<&str> = {
             let mut seen = std::collections::HashSet::new();
-            all_issues
-                .into_iter()
-                .filter(|i| seen.insert(*i))
-                .collect()
+            all_issues.into_iter().filter(|i| seen.insert(*i)).collect()
         };
 
         format!(
@@ -289,8 +288,7 @@ impl PhDLearningIntegration {
         if self.citation_scores.is_empty() {
             return 0.0;
         }
-        self.citation_scores.iter().map(|(_, s)| s).sum::<f64>()
-            / self.citation_scores.len() as f64
+        self.citation_scores.iter().map(|(_, s)| s).sum::<f64>() / self.citation_scores.len() as f64
     }
 }
 
@@ -340,8 +338,7 @@ impl SherlockLearningIntegration {
             SherlockVerdict::Rejected => 0.2,
         };
 
-        self.verdicts
-            .push((agent_name.to_string(), verdict));
+        self.verdicts.push((agent_name.to_string(), verdict));
 
         if verdict == SherlockVerdict::Rejected {
             self.failed_patterns_list

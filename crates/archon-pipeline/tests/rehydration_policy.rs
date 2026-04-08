@@ -4,12 +4,14 @@
 //! latest blocker, wiring plan), mission brief rendering, cap at 10 memories,
 //! missing files produce None not errors.
 
-use archon_pipeline::rehydration::{RehydrationPolicy, RehydrationContext, render_mission_brief};
 use archon_pipeline::coding::contract::{
-    TaskContract, AcceptanceCriterion, WiringRequirement, WiringType, TestRequirement, TestType,
+    AcceptanceCriterion, TaskContract, TestRequirement, TestType, WiringRequirement, WiringType,
 };
-use archon_pipeline::coding::wiring::{WiringPlan, WiringObligation, WiringAction, ObligationStatus};
+use archon_pipeline::coding::wiring::{
+    ObligationStatus, WiringAction, WiringObligation, WiringPlan,
+};
 use archon_pipeline::ledgers::{TaskEntry, TaskStatus, VerificationEntry, WiringObligationRef};
+use archon_pipeline::rehydration::{RehydrationContext, RehydrationPolicy, render_mission_brief};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -93,13 +95,15 @@ fn setup_session_dir(tmp: &std::path::Path) {
     std::fs::write(
         tmp.join("contract.json"),
         serde_json::to_string_pretty(&contract).unwrap(),
-    ).unwrap();
+    )
+    .unwrap();
 
     // wiring-plan.json
     std::fs::write(
         tmp.join("wiring-plan.json"),
         serde_json::to_string_pretty(&wiring).unwrap(),
-    ).unwrap();
+    )
+    .unwrap();
 
     // ledgers/tasks.json
     let ledger_dir = tmp.join("ledgers");
@@ -107,13 +111,15 @@ fn setup_session_dir(tmp: &std::path::Path) {
     std::fs::write(
         ledger_dir.join("tasks.json"),
         serde_json::to_string_pretty(&vec![&task]).unwrap(),
-    ).unwrap();
+    )
+    .unwrap();
 
     // ledgers/verifications.json
     std::fs::write(
         ledger_dir.join("verifications.json"),
         serde_json::to_string_pretty(&vec![&verification]).unwrap(),
-    ).unwrap();
+    )
+    .unwrap();
 }
 
 // ---------------------------------------------------------------------------
@@ -132,11 +138,20 @@ mod rehydration_tests {
         let ctx = policy.rehydrate("code-generator", "coding").unwrap();
 
         // 1. Mission brief is non-empty
-        assert!(!ctx.mission_brief.is_empty(), "mission brief should be non-empty");
-        assert!(ctx.mission_brief.contains("Add user profile page"), "should contain goal");
+        assert!(
+            !ctx.mission_brief.is_empty(),
+            "mission brief should be non-empty"
+        );
+        assert!(
+            ctx.mission_brief.contains("Add user profile page"),
+            "should contain goal"
+        );
 
         // 2. Current task state
-        assert!(ctx.current_task_state.is_some(), "task state should be loaded");
+        assert!(
+            ctx.current_task_state.is_some(),
+            "task state should be loaded"
+        );
         let task = ctx.current_task_state.unwrap();
         assert_eq!(task.task_id, "TEST-001");
 
@@ -149,7 +164,10 @@ mod rehydration_tests {
         assert!(ctx.latest_blocker.unwrap().contains("compilation"));
 
         // 5. Wiring checklist
-        assert!(ctx.wiring_checklist.is_some(), "wiring plan should be loaded");
+        assert!(
+            ctx.wiring_checklist.is_some(),
+            "wiring plan should be loaded"
+        );
         assert_eq!(ctx.wiring_checklist.unwrap().obligations.len(), 1);
     }
 
@@ -163,7 +181,10 @@ mod rehydration_tests {
         let policy = RehydrationPolicy::new(tmp.path().to_path_buf());
         let ctx = policy.rehydrate("code-generator", "coding").unwrap();
 
-        assert!(ctx.wiring_checklist.is_none(), "missing wiring plan should be None");
+        assert!(
+            ctx.wiring_checklist.is_none(),
+            "missing wiring plan should be None"
+        );
         // Other items should still load
         assert!(!ctx.mission_brief.is_empty());
     }
@@ -178,7 +199,10 @@ mod rehydration_tests {
         let policy = RehydrationPolicy::new(tmp.path().to_path_buf());
         let ctx = policy.rehydrate("code-generator", "coding").unwrap();
 
-        assert!(ctx.latest_blocker.is_none(), "missing verifications should yield no blocker");
+        assert!(
+            ctx.latest_blocker.is_none(),
+            "missing verifications should yield no blocker"
+        );
     }
 
     #[test]
@@ -203,10 +227,22 @@ mod rehydration_tests {
         let brief = render_mission_brief(&contract, &wiring, 4, "code-generator", 15, 48);
 
         assert!(brief.contains("Mission Brief"), "should have header");
-        assert!(brief.contains("Add user profile page"), "should contain goal");
-        assert!(brief.contains("Profile page renders"), "should contain acceptance criteria");
-        assert!(brief.contains("Admin dashboard"), "should contain non-goals");
-        assert!(brief.contains("Page renders"), "should contain completion criteria");
+        assert!(
+            brief.contains("Add user profile page"),
+            "should contain goal"
+        );
+        assert!(
+            brief.contains("Profile page renders"),
+            "should contain acceptance criteria"
+        );
+        assert!(
+            brief.contains("Admin dashboard"),
+            "should contain non-goals"
+        );
+        assert!(
+            brief.contains("Page renders"),
+            "should contain completion criteria"
+        );
         assert!(brief.contains("Phase: 4"), "should contain phase");
         assert!(brief.contains("code-generator"), "should contain agent key");
         assert!(brief.contains("15/48"), "should contain progress");
@@ -254,7 +290,8 @@ mod rehydration_tests {
         std::fs::write(
             ledger_dir.join("verifications.json"),
             serde_json::to_string_pretty(&vec![&failing, &passing]).unwrap(),
-        ).unwrap();
+        )
+        .unwrap();
 
         let policy = RehydrationPolicy::new(tmp.path().to_path_buf());
         let ctx = policy.rehydrate("code-generator", "coding").unwrap();

@@ -2,7 +2,7 @@
 //! REQ-IMPROVE-010, REQ-IMPROVE-019, EC-PIPE-010
 
 use archon_pipeline::coding::gates::{
-    save_gate_result, load_gate_result, E2ESmokeTestGate, Language, ManualOverride, TestsRunGate,
+    E2ESmokeTestGate, Language, ManualOverride, TestsRunGate, load_gate_result, save_gate_result,
 };
 use std::path::PathBuf;
 use tempfile::TempDir;
@@ -74,13 +74,18 @@ async fn manual_override_produces_gate_passed() {
         .run(&project_root, "echo smoke", Some(override_info))
         .await;
 
-    assert!(result.gate_passed, "Manual override should produce gate_passed=true");
+    assert!(
+        result.gate_passed,
+        "Manual override should produce gate_passed=true"
+    );
     assert!(
         result.evidence.contains("MANUAL OVERRIDE"),
         "Evidence should contain MANUAL OVERRIDE marker"
     );
     assert!(
-        result.evidence.contains("Feature requires hardware not available in CI"),
+        result
+            .evidence
+            .contains("Feature requires hardware not available in CI"),
         "Evidence should contain the justification"
     );
 }
@@ -170,7 +175,10 @@ async fn e2e_gate_rejects_test_only_evidence_even_on_exit_zero() {
         result.evidence
     );
     assert!(
-        result.failures.iter().any(|f| f.description.contains("FRAUD DETECTED")),
+        result
+            .failures
+            .iter()
+            .any(|f| f.description.contains("FRAUD DETECTED")),
         "Failure description should mention FRAUD DETECTED"
     );
 }

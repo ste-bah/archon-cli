@@ -1,8 +1,8 @@
+use archon_pipeline::coding::AGENTS;
 use archon_pipeline::coding::evidence::{
     ApiContract, CallEdge, CallGraph, Entrypoint, EvidenceFact, EvidencePack, FileLineRef,
     TestReference, load_evidence_pack, save_evidence_pack, validate_evidence_pack,
 };
-use archon_pipeline::coding::AGENTS;
 use tempfile::TempDir;
 
 fn valid_file_line_ref() -> FileLineRef {

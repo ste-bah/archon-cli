@@ -107,32 +107,104 @@ async fn test_stats_returns_default() {
 fn test_detect_language() {
     use archon_leann::language::detect_language;
 
-    assert_eq!(detect_language(Path::new("foo.rs")), Some("rust".to_string()));
-    assert_eq!(detect_language(Path::new("bar.py")), Some("python".to_string()));
-    assert_eq!(detect_language(Path::new("baz.ts")), Some("typescript".to_string()));
-    assert_eq!(detect_language(Path::new("qux.tsx")), Some("typescriptreact".to_string()));
-    assert_eq!(detect_language(Path::new("app.js")), Some("javascript".to_string()));
-    assert_eq!(detect_language(Path::new("app.jsx")), Some("javascriptreact".to_string()));
-    assert_eq!(detect_language(Path::new("main.go")), Some("go".to_string()));
-    assert_eq!(detect_language(Path::new("Main.java")), Some("java".to_string()));
+    assert_eq!(
+        detect_language(Path::new("foo.rs")),
+        Some("rust".to_string())
+    );
+    assert_eq!(
+        detect_language(Path::new("bar.py")),
+        Some("python".to_string())
+    );
+    assert_eq!(
+        detect_language(Path::new("baz.ts")),
+        Some("typescript".to_string())
+    );
+    assert_eq!(
+        detect_language(Path::new("qux.tsx")),
+        Some("typescriptreact".to_string())
+    );
+    assert_eq!(
+        detect_language(Path::new("app.js")),
+        Some("javascript".to_string())
+    );
+    assert_eq!(
+        detect_language(Path::new("app.jsx")),
+        Some("javascriptreact".to_string())
+    );
+    assert_eq!(
+        detect_language(Path::new("main.go")),
+        Some("go".to_string())
+    );
+    assert_eq!(
+        detect_language(Path::new("Main.java")),
+        Some("java".to_string())
+    );
     assert_eq!(detect_language(Path::new("foo.c")), Some("c".to_string()));
-    assert_eq!(detect_language(Path::new("foo.cpp")), Some("cpp".to_string()));
+    assert_eq!(
+        detect_language(Path::new("foo.cpp")),
+        Some("cpp".to_string())
+    );
     assert_eq!(detect_language(Path::new("foo.h")), Some("c".to_string()));
-    assert_eq!(detect_language(Path::new("foo.hpp")), Some("cpp".to_string()));
-    assert_eq!(detect_language(Path::new("foo.rb")), Some("ruby".to_string()));
-    assert_eq!(detect_language(Path::new("foo.php")), Some("php".to_string()));
-    assert_eq!(detect_language(Path::new("foo.swift")), Some("swift".to_string()));
-    assert_eq!(detect_language(Path::new("foo.kt")), Some("kotlin".to_string()));
-    assert_eq!(detect_language(Path::new("foo.scala")), Some("scala".to_string()));
-    assert_eq!(detect_language(Path::new("foo.cs")), Some("csharp".to_string()));
-    assert_eq!(detect_language(Path::new("foo.lua")), Some("lua".to_string()));
-    assert_eq!(detect_language(Path::new("foo.sh")), Some("shell".to_string()));
-    assert_eq!(detect_language(Path::new("foo.sql")), Some("sql".to_string()));
-    assert_eq!(detect_language(Path::new("foo.md")), Some("markdown".to_string()));
-    assert_eq!(detect_language(Path::new("foo.json")), Some("json".to_string()));
-    assert_eq!(detect_language(Path::new("foo.yaml")), Some("yaml".to_string()));
-    assert_eq!(detect_language(Path::new("foo.yml")), Some("yaml".to_string()));
-    assert_eq!(detect_language(Path::new("foo.toml")), Some("toml".to_string()));
+    assert_eq!(
+        detect_language(Path::new("foo.hpp")),
+        Some("cpp".to_string())
+    );
+    assert_eq!(
+        detect_language(Path::new("foo.rb")),
+        Some("ruby".to_string())
+    );
+    assert_eq!(
+        detect_language(Path::new("foo.php")),
+        Some("php".to_string())
+    );
+    assert_eq!(
+        detect_language(Path::new("foo.swift")),
+        Some("swift".to_string())
+    );
+    assert_eq!(
+        detect_language(Path::new("foo.kt")),
+        Some("kotlin".to_string())
+    );
+    assert_eq!(
+        detect_language(Path::new("foo.scala")),
+        Some("scala".to_string())
+    );
+    assert_eq!(
+        detect_language(Path::new("foo.cs")),
+        Some("csharp".to_string())
+    );
+    assert_eq!(
+        detect_language(Path::new("foo.lua")),
+        Some("lua".to_string())
+    );
+    assert_eq!(
+        detect_language(Path::new("foo.sh")),
+        Some("shell".to_string())
+    );
+    assert_eq!(
+        detect_language(Path::new("foo.sql")),
+        Some("sql".to_string())
+    );
+    assert_eq!(
+        detect_language(Path::new("foo.md")),
+        Some("markdown".to_string())
+    );
+    assert_eq!(
+        detect_language(Path::new("foo.json")),
+        Some("json".to_string())
+    );
+    assert_eq!(
+        detect_language(Path::new("foo.yaml")),
+        Some("yaml".to_string())
+    );
+    assert_eq!(
+        detect_language(Path::new("foo.yml")),
+        Some("yaml".to_string())
+    );
+    assert_eq!(
+        detect_language(Path::new("foo.toml")),
+        Some("toml".to_string())
+    );
     assert_eq!(detect_language(Path::new("foo.xyz_unknown")), None);
 }
 
@@ -141,10 +213,19 @@ fn test_is_excluded() {
     use archon_leann::language::{default_exclude_patterns, is_excluded};
 
     let patterns = default_exclude_patterns();
-    assert!(is_excluded(Path::new("project/node_modules/foo.js"), &patterns));
-    assert!(is_excluded(Path::new("project/target/debug/main"), &patterns));
+    assert!(is_excluded(
+        Path::new("project/node_modules/foo.js"),
+        &patterns
+    ));
+    assert!(is_excluded(
+        Path::new("project/target/debug/main"),
+        &patterns
+    ));
     assert!(is_excluded(Path::new("project/.git/config"), &patterns));
-    assert!(is_excluded(Path::new("project/__pycache__/mod.pyc"), &patterns));
+    assert!(is_excluded(
+        Path::new("project/__pycache__/mod.pyc"),
+        &patterns
+    ));
     assert!(!is_excluded(Path::new("project/src/main.rs"), &patterns));
     assert!(!is_excluded(Path::new("project/lib/util.py"), &patterns));
 }
@@ -154,7 +235,11 @@ fn test_default_exclude_patterns() {
     use archon_leann::language::default_exclude_patterns;
 
     let patterns = default_exclude_patterns();
-    assert!(patterns.len() >= 7, "Expected at least 7 patterns, got {}", patterns.len());
+    assert!(
+        patterns.len() >= 7,
+        "Expected at least 7 patterns, got {}",
+        patterns.len()
+    );
 
     let joined = patterns.join(" ");
     assert!(joined.contains("node_modules"), "missing node_modules");

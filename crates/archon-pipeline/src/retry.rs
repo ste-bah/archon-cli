@@ -180,9 +180,8 @@ where
                             use rand::Rng;
                             let mut rng = rand::rng();
                             let factor: f64 = rng.random_range(0.5..1.5);
-                            delay = Duration::from_millis(
-                                (delay.as_millis() as f64 * factor) as u64,
-                            );
+                            delay =
+                                Duration::from_millis((delay.as_millis() as f64 * factor) as u64);
                         }
 
                         tracing::warn!(
@@ -273,11 +272,7 @@ pub fn build_quality_feedback(score: &QualityScore, output: &str) -> String {
         feedback.push_str("Please improve the overall quality of your response.");
     } else {
         feedback.push_str("Areas needing improvement: ");
-        let low_dims: Vec<_> = score
-            .dimensions
-            .iter()
-            .filter(|(_, v)| **v < 0.6)
-            .collect();
+        let low_dims: Vec<_> = score.dimensions.iter().filter(|(_, v)| **v < 0.6).collect();
         if low_dims.is_empty() {
             // All dimensions are acceptable but overall is low.
             feedback.push_str("Overall coherence and completeness need improvement.");

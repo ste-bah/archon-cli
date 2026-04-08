@@ -42,22 +42,18 @@ fn epsilon() -> String {
 #[test]
 fn test_rust_five_functions_produces_five_chunks() {
     let chunker = default_chunker();
-    let chunks = chunker.chunk_file(
-        Path::new("example.rs"),
-        RUST_FIVE_FUNCTIONS,
-        Language::Rust,
+    let chunks = chunker.chunk_file(Path::new("example.rs"), RUST_FIVE_FUNCTIONS, Language::Rust);
+    assert_eq!(
+        chunks.len(),
+        5,
+        "Expected exactly 5 chunks for 5 Rust functions"
     );
-    assert_eq!(chunks.len(), 5, "Expected exactly 5 chunks for 5 Rust functions");
 }
 
 #[test]
 fn test_rust_chunks_contain_complete_functions() {
     let chunker = default_chunker();
-    let chunks = chunker.chunk_file(
-        Path::new("example.rs"),
-        RUST_FIVE_FUNCTIONS,
-        Language::Rust,
-    );
+    let chunks = chunker.chunk_file(Path::new("example.rs"), RUST_FIVE_FUNCTIONS, Language::Rust);
     let fn_names = ["alpha", "beta", "gamma", "delta", "epsilon"];
     for (i, name) in fn_names.iter().enumerate() {
         let content = &chunks[i].metadata.chunk_content;
@@ -71,11 +67,7 @@ fn test_rust_chunks_contain_complete_functions() {
 #[test]
 fn test_rust_chunks_have_correct_line_ranges() {
     let chunker = default_chunker();
-    let chunks = chunker.chunk_file(
-        Path::new("example.rs"),
-        RUST_FIVE_FUNCTIONS,
-        Language::Rust,
-    );
+    let chunks = chunker.chunk_file(Path::new("example.rs"), RUST_FIVE_FUNCTIONS, Language::Rust);
     for (i, chunk) in chunks.iter().enumerate() {
         assert!(
             chunk.metadata.line_start <= chunk.metadata.line_end,
@@ -141,7 +133,9 @@ fn test_python_methods_individually_searchable() {
     );
     let method_names = ["__init__", "add", "subtract", "result"];
     for name in method_names {
-        let found = chunks.iter().any(|c| c.metadata.chunk_content.contains(&format!("def {name}")));
+        let found = chunks
+            .iter()
+            .any(|c| c.metadata.chunk_content.contains(&format!("def {name}")));
         assert!(found, "Method '{name}' must appear in at least one chunk");
     }
 }
@@ -169,11 +163,7 @@ interface Config {
 #[test]
 fn test_typescript_mixed_declarations_chunk_count() {
     let chunker = default_chunker();
-    let chunks = chunker.chunk_file(
-        Path::new("app.ts"),
-        TYPESCRIPT_MIXED,
-        Language::TypeScript,
-    );
+    let chunks = chunker.chunk_file(Path::new("app.ts"), TYPESCRIPT_MIXED, Language::TypeScript);
     // Expect 3 chunks: function, class, interface
     assert_eq!(
         chunks.len(),
@@ -186,14 +176,12 @@ fn test_typescript_mixed_declarations_chunk_count() {
 #[test]
 fn test_typescript_each_declaration_in_own_chunk() {
     let chunker = default_chunker();
-    let chunks = chunker.chunk_file(
-        Path::new("app.ts"),
-        TYPESCRIPT_MIXED,
-        Language::TypeScript,
-    );
+    let chunks = chunker.chunk_file(Path::new("app.ts"), TYPESCRIPT_MIXED, Language::TypeScript);
     let declarations = ["function greet", "class Logger", "interface Config"];
     for decl in declarations {
-        let found = chunks.iter().any(|c| c.metadata.chunk_content.contains(decl));
+        let found = chunks
+            .iter()
+            .any(|c| c.metadata.chunk_content.contains(decl));
         assert!(found, "Declaration '{decl}' must appear in a chunk");
     }
 }
@@ -227,11 +215,7 @@ func (c *Calculator) Reset() {
 #[test]
 fn test_go_two_functions_one_method_produces_three_chunks() {
     let chunker = default_chunker();
-    let chunks = chunker.chunk_file(
-        Path::new("main.go"),
-        GO_TWO_FUNCS_ONE_METHOD,
-        Language::Go,
-    );
+    let chunks = chunker.chunk_file(Path::new("main.go"), GO_TWO_FUNCS_ONE_METHOD, Language::Go);
     assert_eq!(
         chunks.len(),
         3,
@@ -243,14 +227,12 @@ fn test_go_two_functions_one_method_produces_three_chunks() {
 #[test]
 fn test_go_chunks_contain_expected_symbols() {
     let chunker = default_chunker();
-    let chunks = chunker.chunk_file(
-        Path::new("main.go"),
-        GO_TWO_FUNCS_ONE_METHOD,
-        Language::Go,
-    );
+    let chunks = chunker.chunk_file(Path::new("main.go"), GO_TWO_FUNCS_ONE_METHOD, Language::Go);
     let symbols = ["func Add", "func Subtract", "func (c *Calculator) Reset"];
     for sym in symbols {
-        let found = chunks.iter().any(|c| c.metadata.chunk_content.contains(sym));
+        let found = chunks
+            .iter()
+            .any(|c| c.metadata.chunk_content.contains(sym));
         assert!(found, "Symbol '{sym}' must appear in a chunk");
     }
 }
@@ -267,11 +249,7 @@ fn test_unknown_language_falls_back_to_line_based() {
         .map(|i| format!("line {i}: data"))
         .collect::<Vec<_>>()
         .join("\n");
-    let chunks = chunker.chunk_file(
-        Path::new("data.xyz"),
-        &content,
-        Language::Unknown,
-    );
+    let chunks = chunker.chunk_file(Path::new("data.xyz"), &content, Language::Unknown);
     // Should produce at least 3 chunks (250 lines / 100 max).
     assert!(
         chunks.len() >= 3,
@@ -287,11 +265,7 @@ fn test_line_based_fallback_max_100_lines_per_chunk() {
         .map(|i| format!("line {i}: data"))
         .collect::<Vec<_>>()
         .join("\n");
-    let chunks = chunker.chunk_file(
-        Path::new("data.xyz"),
-        &content,
-        Language::Unknown,
-    );
+    let chunks = chunker.chunk_file(Path::new("data.xyz"), &content, Language::Unknown);
     for (i, chunk) in chunks.iter().enumerate() {
         let line_count = chunk.metadata.line_end - chunk.metadata.line_start + 1;
         assert!(
@@ -317,8 +291,7 @@ fn test_missing_grammar_directory_does_not_crash() {
 
 #[test]
 fn test_missing_grammar_dir_still_has_builtin_languages() {
-    let chunker = Chunker::new(Some(PathBuf::from("/nonexistent/path")))
-        .expect("must not crash");
+    let chunker = Chunker::new(Some(PathBuf::from("/nonexistent/path"))).expect("must not crash");
     let langs = chunker.available_languages();
     // Built-in grammars should still be available.
     assert!(
@@ -390,11 +363,7 @@ fn test_available_languages_contains_go() {
 #[test]
 fn test_chunks_preserve_exact_source_text() {
     let chunker = default_chunker();
-    let chunks = chunker.chunk_file(
-        Path::new("example.rs"),
-        RUST_FIVE_FUNCTIONS,
-        Language::Rust,
-    );
+    let chunks = chunker.chunk_file(Path::new("example.rs"), RUST_FIVE_FUNCTIONS, Language::Rust);
     // Concatenating all chunk contents (with appropriate separators) should
     // account for every non-blank source line.
     let all_chunk_text: String = chunks
@@ -434,8 +403,14 @@ fn test_chunk_content_not_truncated() {
     let chunks = chunker.chunk_file(Path::new("long.rs"), rust_long_fn, Language::Rust);
     assert_eq!(chunks.len(), 1);
     let content = &chunks[0].metadata.chunk_content;
-    assert!(content.contains("results.dedup()"), "Body must not be truncated");
-    assert!(content.contains("fn compute_stuff"), "Signature must be present");
+    assert!(
+        content.contains("results.dedup()"),
+        "Body must not be truncated"
+    );
+    assert!(
+        content.contains("fn compute_stuff"),
+        "Signature must be present"
+    );
 }
 
 // ===========================================================================
@@ -447,11 +422,7 @@ fn test_line_based_fallback_splits_at_blank_lines() {
     let chunker = default_chunker();
     // Two blocks of 5 lines separated by a blank line.
     let content = "aaa\nbbb\nccc\nddd\neee\n\nfff\nggg\nhhh\niii\njjj";
-    let chunks = chunker.chunk_file(
-        Path::new("notes.txt"),
-        content,
-        Language::Unknown,
-    );
+    let chunks = chunker.chunk_file(Path::new("notes.txt"), content, Language::Unknown);
     // With blank-line splitting, we should get at least 2 chunks.
     assert!(
         chunks.len() >= 2,
@@ -468,11 +439,7 @@ fn test_line_based_fallback_respects_100_line_cap_across_blank_lines() {
         .map(|i| format!("solid_line_{i}"))
         .collect::<Vec<_>>()
         .join("\n");
-    let chunks = chunker.chunk_file(
-        Path::new("big.txt"),
-        &content,
-        Language::Unknown,
-    );
+    let chunks = chunker.chunk_file(Path::new("big.txt"), &content, Language::Unknown);
     assert!(
         chunks.len() >= 2,
         "150-line block with no blank lines must still be split at 100-line cap, got {} chunk(s)",
@@ -520,11 +487,7 @@ fn test_empty_file_produces_no_chunks() {
 #[test]
 fn test_file_metadata_fields_populated() {
     let chunker = default_chunker();
-    let chunks = chunker.chunk_file(
-        Path::new("sample.rs"),
-        "fn only() {}\n",
-        Language::Rust,
-    );
+    let chunks = chunker.chunk_file(Path::new("sample.rs"), "fn only() {}\n", Language::Rust);
     assert_eq!(chunks.len(), 1);
     let meta = &chunks[0].metadata;
     assert_eq!(meta.file_path, PathBuf::from("sample.rs"));
@@ -536,11 +499,7 @@ fn test_file_metadata_fields_populated() {
 #[test]
 fn test_embedding_vector_initialized() {
     let chunker = default_chunker();
-    let chunks = chunker.chunk_file(
-        Path::new("e.rs"),
-        "fn e() {}\n",
-        Language::Rust,
-    );
+    let chunks = chunker.chunk_file(Path::new("e.rs"), "fn e() {}\n", Language::Rust);
     assert_eq!(chunks.len(), 1);
     // The chunker should initialize the embedding field (may be empty or zeroed
     // before the embedding pass, but it must exist).

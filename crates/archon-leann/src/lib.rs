@@ -1,11 +1,11 @@
 //! Archon LeANN — native semantic code search and indexing.
 
-pub mod indexer;
 pub mod chunker;
-pub mod search;
-pub mod queue;
+pub mod indexer;
 pub mod language;
 pub mod metadata;
+pub mod queue;
+pub mod search;
 pub mod stats;
 
 pub use metadata::{CodeChunk, CodeMetadata, IndexConfig, IndexStats, QueueResult, SearchResult};
@@ -32,12 +32,20 @@ impl CodeIndex {
     /// Creates the CozoDB instance and ensures the schema exists.
     pub fn new(db_path: impl Into<PathBuf>, embedding_config: EmbeddingConfig) -> Result<Self> {
         let db_path = db_path.into();
-        let db = cozo::DbInstance::new("sqlite", db_path.to_string_lossy().as_ref(), Default::default())
-            .map_err(|e| anyhow::anyhow!("failed to open CozoDB at {}: {}", db_path.display(), e))?;
+        let db = cozo::DbInstance::new(
+            "sqlite",
+            db_path.to_string_lossy().as_ref(),
+            Default::default(),
+        )
+        .map_err(|e| anyhow::anyhow!("failed to open CozoDB at {}: {}", db_path.display(), e))?;
         let indexer = Indexer::new(db, embedding_config, None)?;
         indexer.ensure_schema()?;
         let search = search::Search::new(indexer.db().clone(), indexer.embedder().clone());
-        Ok(CodeIndex { db_path, indexer, search })
+        Ok(CodeIndex {
+            db_path,
+            indexer,
+            search,
+        })
     }
 
     /// Create a `CodeIndex` from an existing CozoDB instance (for testing).

@@ -70,7 +70,10 @@ pub struct VerificationEntry {
 // Generic I/O helpers
 // ---------------------------------------------------------------------------
 
-fn append_to_ledger<T: Serialize + for<'de> Deserialize<'de>>(path: &Path, entry: &T) -> Result<()> {
+fn append_to_ledger<T: Serialize + for<'de> Deserialize<'de>>(
+    path: &Path,
+    entry: &T,
+) -> Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }

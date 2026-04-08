@@ -99,10 +99,7 @@ impl ChapterStructureLoader {
             .ok_or_else(|| ChapterStructureError::ParseError("expected JSON object".into()))?;
 
         // Check locked
-        let locked = obj
-            .get("locked")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
+        let locked = obj.get("locked").and_then(|v| v.as_bool()).unwrap_or(false);
         if !locked {
             return Err(ChapterStructureError::NotLocked);
         }
@@ -154,10 +151,7 @@ impl ChapterStructureLoader {
                 ChapterStructureError::ParseError(format!("chapter {} is not an object", i))
             })?;
 
-            let number = ch_obj
-                .get("number")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0) as u32;
+            let number = ch_obj.get("number").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
 
             let title = ch_obj
                 .get("title")
@@ -228,12 +222,9 @@ impl ChapterStructureLoader {
     }
 
     /// Parse markdown fallback format (`### Chapter N: Title`).
-    pub fn parse_from_markdown(
-        content: &str,
-    ) -> Result<ChapterStructure, ChapterStructureError> {
+    pub fn parse_from_markdown(content: &str) -> Result<ChapterStructure, ChapterStructureError> {
         let heading_re = Regex::new(r"### Chapter (\d+): (.+)").unwrap();
-        let content_re =
-            Regex::new(r"(?i)\*\*Content(?:\s+Outline)?:\*\*\s*(.+)").unwrap();
+        let content_re = Regex::new(r"(?i)\*\*Content(?:\s+Outline)?:\*\*\s*(.+)").unwrap();
         let words_re = Regex::new(r"(?i)\*\*Word Count Target:\*\*\s*(\d+)").unwrap();
 
         let lines: Vec<&str> = content.lines().collect();

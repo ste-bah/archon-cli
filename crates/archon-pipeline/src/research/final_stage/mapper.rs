@@ -1,7 +1,7 @@
 //! Semantic mapper — maps agent outputs to chapters using keyword heuristics.
 
-use std::collections::HashMap;
 use super::scanner::AgentOutput;
+use std::collections::HashMap;
 
 /// A single agent output mapped to a chapter with a relevance score.
 #[derive(Debug, Clone)]
@@ -56,18 +56,13 @@ pub fn map_to_chapters(outputs: Vec<AgentOutput>, chapters: &[(u32, String)]) ->
         }
 
         // Heuristic fallback: if no match, assign to first chapter
-        let target = best_chapter.unwrap_or_else(|| {
-            chapters.first().map(|(n, _)| *n).unwrap_or(1)
-        });
+        let target = best_chapter.unwrap_or_else(|| chapters.first().map(|(n, _)| *n).unwrap_or(1));
 
-        mappings
-            .entry(target)
-            .or_default()
-            .push(MappedAgentOutput {
-                agent_key: output.agent_key.clone(),
-                content: output.content.clone(),
-                relevance: best_score,
-            });
+        mappings.entry(target).or_default().push(MappedAgentOutput {
+            agent_key: output.agent_key.clone(),
+            content: output.content.clone(),
+            relevance: best_score,
+        });
     }
 
     ChapterMapping { mappings }

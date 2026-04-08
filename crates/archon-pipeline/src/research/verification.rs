@@ -309,9 +309,8 @@ mod tests {
             url_or_doi: "https://example.com/protected".into(),
             location: "p1".into(),
         }];
-        let verifier = |_url: &str| -> CitationStatus {
-            CitationStatus::Unverifiable("403 Forbidden".into())
-        };
+        let verifier =
+            |_url: &str| -> CitationStatus { CitationStatus::Unverifiable("403 Forbidden".into()) };
         let result = CitationVerificationGate::run_gate(&cits, &verifier);
         assert!(result.passed); // unverifiable does NOT fail gate
         assert_eq!(result.unverifiable, 1);

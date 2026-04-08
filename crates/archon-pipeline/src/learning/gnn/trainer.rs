@@ -1,19 +1,19 @@
 //! GNN training loop, background trainer, and trigger controller.
 
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
     Arc, Mutex,
+    atomic::{AtomicBool, Ordering},
 };
 
 use tracing::{info, warn};
 
+use super::GNNEnhancer;
 use super::backprop;
 use super::ewc::EWCRegularizer;
 use super::history::{TrainingHistoryManager, TrainingRunConfig, TrainingRunMetrics};
 use super::loss;
 use super::math::ActivationType;
 use super::optimizer::{AdamConfig, AdamOptimizer};
-use super::GNNEnhancer;
 
 /// Training configuration.
 #[derive(Debug, Clone)]
@@ -94,8 +94,7 @@ impl GNNTrainer {
         let start_time = std::time::Instant::now();
 
         // Split into train/val
-        let split_idx =
-            ((1.0 - self.config.validation_split) * samples.len() as f32) as usize;
+        let split_idx = ((1.0 - self.config.validation_split) * samples.len() as f32) as usize;
         let split_idx = split_idx.max(2).min(samples.len() - 1);
         let (train_samples, val_samples) = samples.split_at(split_idx);
 
@@ -113,7 +112,9 @@ impl GNNTrainer {
 
         for epoch in 0..self.config.epochs {
             // LR scheduling
-            if self.config.lr_decay_every > 0 && epoch > 0 && epoch % self.config.lr_decay_every == 0
+            if self.config.lr_decay_every > 0
+                && epoch > 0
+                && epoch % self.config.lr_decay_every == 0
             {
                 let new_lr = optimizer.learning_rate() * self.config.lr_decay_factor;
                 optimizer.set_learning_rate(new_lr);
@@ -185,7 +186,8 @@ impl GNNTrainer {
         let flat_weights = AdamOptimizer::flatten_weights(&[l1.clone(), l2.clone(), l3.clone()]);
         // Use squared gradients from last epoch as Fisher approximation
         let fisher_approx = vec![0.01; flat_weights.len()];
-        self.ewc.update_fisher_information(&flat_weights, &fisher_approx);
+        self.ewc
+            .update_fisher_information(&flat_weights, &fisher_approx);
 
         results
     }
@@ -229,14 +231,16 @@ impl GNNTrainer {
                 &fwd.activation_caches,
                 [l1, l2, l3],
                 &loss_result.grad_anchor,
-                [ActivationType::LeakyRelu, ActivationType::LeakyRelu, ActivationType::Tanh],
+                [
+                    ActivationType::LeakyRelu,
+                    ActivationType::LeakyRelu,
+                    ActivationType::Tanh,
+                ],
             );
 
             // Collect gradients
-            let mut layer_grads: Vec<(Vec<Vec<f32>>, Vec<f32>)> = grads
-                .into_iter()
-                .map(|g| (g.dw, g.db))
-                .collect();
+            let mut layer_grads: Vec<(Vec<Vec<f32>>, Vec<f32>)> =
+                grads.into_iter().map(|g| (g.dw, g.db)).collect();
 
             // Clip gradients
             for (dw, db) in &mut layer_grads {

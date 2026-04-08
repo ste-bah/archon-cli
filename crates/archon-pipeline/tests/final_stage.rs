@@ -2,12 +2,12 @@
 //!
 //! Tests TASK-PIPE-C06: research::final_stage module.
 
+use archon_pipeline::research::final_stage::combiner::{ChapterContent, combine_chapters};
+use archon_pipeline::research::final_stage::mapper::map_to_chapters;
+use archon_pipeline::research::final_stage::scanner::{AgentOutput, scan_outputs};
 use archon_pipeline::research::final_stage::{
     FinalStageError, FinalStageOptions, FinalStageOrchestrator, FinalStageState,
 };
-use archon_pipeline::research::final_stage::combiner::{combine_chapters, ChapterContent};
-use archon_pipeline::research::final_stage::mapper::map_to_chapters;
-use archon_pipeline::research::final_stage::scanner::{scan_outputs, AgentOutput};
 use std::fs;
 use tempfile::TempDir;
 
@@ -452,7 +452,8 @@ async fn test_dry_run_mode() {
         Ok(res) => {
             // In dry_run mode, no final paper should be written.
             assert!(
-                res.final_paper_path.is_empty() || !std::path::Path::new(&res.final_paper_path).exists(),
+                res.final_paper_path.is_empty()
+                    || !std::path::Path::new(&res.final_paper_path).exists(),
                 "dry_run should not produce a final paper on disk"
             );
             // But we should still get a chapter count from the mapping phase.

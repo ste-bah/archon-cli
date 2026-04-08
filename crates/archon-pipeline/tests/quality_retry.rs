@@ -14,13 +14,13 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use anyhow::Result;
 
 use archon_pipeline::retry::{
-    build_quality_feedback, retry_on_quality, QualityRetryConfig, QualityRetryResult,
+    QualityRetryConfig, QualityRetryResult, build_quality_feedback, retry_on_quality,
 };
 use archon_pipeline::runner::{AgentInfo, QualityScore, ToolAccessLevel};
 

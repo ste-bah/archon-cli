@@ -65,7 +65,10 @@ struct MockEmbeddingProvider {
 }
 
 impl EmbeddingProvider for MockEmbeddingProvider {
-    fn embed(&self, texts: &[String]) -> std::result::Result<Vec<Vec<f32>>, archon_memory::types::MemoryError> {
+    fn embed(
+        &self,
+        texts: &[String],
+    ) -> std::result::Result<Vec<Vec<f32>>, archon_memory::types::MemoryError> {
         Ok(texts.iter().map(|_| vec![0.0f32; self.dim]).collect())
     }
 
@@ -109,7 +112,9 @@ impl Indexer {
         grammar_dir: Option<PathBuf>,
     ) -> Result<Self> {
         let embedder: Arc<dyn EmbeddingProvider> = match config.provider {
-            EmbeddingProviderKind::Mock => Arc::new(MockEmbeddingProvider { dim: config.dimension }),
+            EmbeddingProviderKind::Mock => Arc::new(MockEmbeddingProvider {
+                dim: config.dimension,
+            }),
             EmbeddingProviderKind::Local => {
                 let emb_config = embedding::EmbeddingConfig {
                     provider: embedding::EmbeddingProviderKind::Local,
@@ -179,11 +184,7 @@ impl Indexer {
     ///
     /// Respects include/exclude patterns. Skips unchanged files (file hash match).
     /// Returns aggregate statistics.
-    pub async fn index_repository(
-        &self,
-        root: &Path,
-        config: &IndexConfig,
-    ) -> Result<IndexStats> {
+    pub async fn index_repository(&self, root: &Path, config: &IndexConfig) -> Result<IndexStats> {
         let mut stats = IndexStats::default();
 
         let exclude = if config.exclude_patterns.is_empty() {
@@ -327,7 +328,10 @@ impl Indexer {
 
     /// Run a CozoScript, ignoring "already exists" / "conflicts" errors.
     fn run_idempotent(&self, script: &str) -> Result<()> {
-        match self.db.run_script(script, Default::default(), ScriptMutability::Mutable) {
+        match self
+            .db
+            .run_script(script, Default::default(), ScriptMutability::Mutable)
+        {
             Ok(_) => Ok(()),
             Err(e) => {
                 let msg = e.to_string();
@@ -349,12 +353,15 @@ impl Indexer {
         params.insert("fp".to_string(), DataValue::from(file_path));
         params.insert("fh".to_string(), DataValue::from(file_hash));
 
-        let result = self.db.run_script(
-            "?[chunk_id] := *code_chunks{chunk_id, file_path, file_hash}, \
+        let result = self
+            .db
+            .run_script(
+                "?[chunk_id] := *code_chunks{chunk_id, file_path, file_hash}, \
              file_path = $fp, file_hash = $fh",
-            params,
-            ScriptMutability::Immutable,
-        ).map_err(cozo_err("hash check query"))?;
+                params,
+                ScriptMutability::Immutable,
+            )
+            .map_err(cozo_err("hash check query"))?;
 
         Ok(!result.rows.is_empty())
     }
@@ -396,7 +403,9 @@ impl Indexer {
                 .map(|(chunk, _)| chunk.metadata.chunk_content.clone())
                 .collect();
 
-            let embeddings = self.embedder.embed(&texts)
+            let embeddings = self
+                .embedder
+                .embed(&texts)
                 .map_err(|e| anyhow::anyhow!("embedding failed: {}", e))?;
 
             if embeddings.len() != batch.len() {
@@ -419,11 +428,26 @@ impl Indexer {
                     "fp".to_string(),
                     DataValue::from(chunk.metadata.file_path.to_string_lossy().as_ref()),
                 );
-                params.insert("lang".to_string(), DataValue::from(chunk.metadata.language.as_str()));
-                params.insert("ls".to_string(), DataValue::from(chunk.metadata.line_start as i64));
-                params.insert("le".to_string(), DataValue::from(chunk.metadata.line_end as i64));
-                params.insert("cc".to_string(), DataValue::from(chunk.metadata.chunk_content.as_str()));
-                params.insert("fh".to_string(), DataValue::from(chunk.metadata.file_hash.as_str()));
+                params.insert(
+                    "lang".to_string(),
+                    DataValue::from(chunk.metadata.language.as_str()),
+                );
+                params.insert(
+                    "ls".to_string(),
+                    DataValue::from(chunk.metadata.line_start as i64),
+                );
+                params.insert(
+                    "le".to_string(),
+                    DataValue::from(chunk.metadata.line_end as i64),
+                );
+                params.insert(
+                    "cc".to_string(),
+                    DataValue::from(chunk.metadata.chunk_content.as_str()),
+                );
+                params.insert(
+                    "fh".to_string(),
+                    DataValue::from(chunk.metadata.file_hash.as_str()),
+                );
                 params.insert("ts".to_string(), DataValue::from(now));
                 params.insert("emb".to_string(), DataValue::Vec(Vector::F32(arr)));
 

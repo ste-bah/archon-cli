@@ -66,25 +66,42 @@ impl ExtendedModeSelector {
         if lower.contains("explain why") || lower.contains("best explanation") {
             return Some("abductive");
         }
-        if lower.contains("argue against") || lower.contains("counter") || lower.contains("devil's advocate") {
+        if lower.contains("argue against")
+            || lower.contains("counter")
+            || lower.contains("devil's advocate")
+        {
             return Some("adversarial");
         }
-        if lower.contains("analogous") || lower.contains("similar to") || lower.contains("like how") {
+        if lower.contains("analogous") || lower.contains("similar to") || lower.contains("like how")
+        {
             return Some("analogical");
         }
         if lower.contains("constraint") || lower.contains("satisfy") || lower.contains("feasible") {
             return Some("constraint");
         }
-        if lower.contains("what if") || lower.contains("hypothetical") || lower.contains("counterfactual") {
+        if lower.contains("what if")
+            || lower.contains("hypothetical")
+            || lower.contains("counterfactual")
+        {
             return Some("counterfactual");
         }
-        if lower.contains("break down") || lower.contains("decompose") || lower.contains("sub-problem") {
+        if lower.contains("break down")
+            || lower.contains("decompose")
+            || lower.contains("sub-problem")
+        {
             return Some("decomposition");
         }
-        if lower.contains("first principles") || lower.contains("fundamental") || lower.contains("from scratch") {
+        if lower.contains("first principles")
+            || lower.contains("fundamental")
+            || lower.contains("from scratch")
+        {
             return Some("first_principles");
         }
-        if lower.contains("timeline") || lower.contains("before") || lower.contains("after") || lower.contains("temporal") {
+        if lower.contains("timeline")
+            || lower.contains("before")
+            || lower.contains("after")
+            || lower.contains("temporal")
+        {
             return Some("temporal");
         }
         None
@@ -131,7 +148,11 @@ mod tests {
         let engine = AbductiveEngine::new();
         let req = make_request(
             "explain why the server crashed",
-            vec!["high memory usage observed", "disk full alert triggered", "OOM killer active"],
+            vec![
+                "high memory usage observed",
+                "disk full alert triggered",
+                "OOM killer active",
+            ],
         );
         let output = engine.reason(&req).unwrap();
         assert_eq!(output.result_type, ResultType::Hypotheses);
@@ -144,7 +165,10 @@ mod tests {
         let engine = AdversarialEngine::new();
         let req = make_request(
             "argue against: Rust is the best language for all projects",
-            vec!["Rust has a steep learning curve", "Garbage collected languages are simpler"],
+            vec![
+                "Rust has a steep learning curve",
+                "Garbage collected languages are simpler",
+            ],
         );
         let output = engine.reason(&req).unwrap();
         assert_eq!(output.result_type, ResultType::Arguments);
@@ -186,7 +210,11 @@ mod tests {
         let engine = CounterfactualEngine::new();
         let req = make_request(
             "what if we had used a cache",
-            vec!["current latency is 200ms", "database queries dominate", "cache hit rate would be 80%"],
+            vec![
+                "current latency is 200ms",
+                "database queries dominate",
+                "cache hit rate would be 80%",
+            ],
         );
         let output = engine.reason(&req).unwrap();
         assert_eq!(output.result_type, ResultType::Outcomes);
@@ -198,7 +226,13 @@ mod tests {
         let engine = DecompositionEngine::new();
         let req = make_request(
             "build a web application",
-            vec!["need frontend", "need backend API", "need database", "frontend depends on API", "API depends on database"],
+            vec![
+                "need frontend",
+                "need backend API",
+                "need database",
+                "frontend depends on API",
+                "API depends on database",
+            ],
         );
         let output = engine.reason(&req).unwrap();
         assert_eq!(output.result_type, ResultType::Subproblems);
@@ -265,14 +299,38 @@ mod tests {
 
     #[test]
     fn test_extended_mode_selector() {
-        assert_eq!(ExtendedModeSelector::select("explain why the server failed"), Some("abductive"));
-        assert_eq!(ExtendedModeSelector::select("argue against this proposal"), Some("adversarial"));
-        assert_eq!(ExtendedModeSelector::select("this is analogous to biology"), Some("analogical"));
-        assert_eq!(ExtendedModeSelector::select("satisfy these constraints"), Some("constraint"));
-        assert_eq!(ExtendedModeSelector::select("what if we changed the API"), Some("counterfactual"));
-        assert_eq!(ExtendedModeSelector::select("break down this problem"), Some("decomposition"));
-        assert_eq!(ExtendedModeSelector::select("reason from first principles"), Some("first_principles"));
-        assert_eq!(ExtendedModeSelector::select("build a timeline of events"), Some("temporal"));
+        assert_eq!(
+            ExtendedModeSelector::select("explain why the server failed"),
+            Some("abductive")
+        );
+        assert_eq!(
+            ExtendedModeSelector::select("argue against this proposal"),
+            Some("adversarial")
+        );
+        assert_eq!(
+            ExtendedModeSelector::select("this is analogous to biology"),
+            Some("analogical")
+        );
+        assert_eq!(
+            ExtendedModeSelector::select("satisfy these constraints"),
+            Some("constraint")
+        );
+        assert_eq!(
+            ExtendedModeSelector::select("what if we changed the API"),
+            Some("counterfactual")
+        );
+        assert_eq!(
+            ExtendedModeSelector::select("break down this problem"),
+            Some("decomposition")
+        );
+        assert_eq!(
+            ExtendedModeSelector::select("reason from first principles"),
+            Some("first_principles")
+        );
+        assert_eq!(
+            ExtendedModeSelector::select("build a timeline of events"),
+            Some("temporal")
+        );
     }
 
     #[test]

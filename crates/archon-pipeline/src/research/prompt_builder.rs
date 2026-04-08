@@ -5,7 +5,7 @@
 //! task completion summary. Phase 6 agents additionally receive style
 //! injection via [`StyleInjector`].
 
-use super::agents::{get_phase_by_id, RESEARCH_AGENTS};
+use super::agents::{RESEARCH_AGENTS, get_phase_by_id};
 use super::style::StyleInjector;
 
 // ---------------------------------------------------------------------------
@@ -225,12 +225,28 @@ mod tests {
         let agent = &RESEARCH_AGENTS[15];
         assert_eq!(agent.key, "evidence-synthesizer");
 
-        let prompt = b.build(agent, 15, 46, "AI in healthcare", "some prior context", None);
+        let prompt = b.build(
+            agent,
+            15,
+            46,
+            "AI in healthcare",
+            "some prior context",
+            None,
+        );
 
-        assert!(prompt.contains("## Workflow Context"), "missing workflow context");
+        assert!(
+            prompt.contains("## Workflow Context"),
+            "missing workflow context"
+        );
         assert!(prompt.contains("## Prior Context"), "missing prior context");
-        assert!(prompt.contains("## Output Expectations"), "missing output expectations");
-        assert!(prompt.contains("## Task Completion"), "missing task completion");
+        assert!(
+            prompt.contains("## Output Expectations"),
+            "missing output expectations"
+        );
+        assert!(
+            prompt.contains("## Task Completion"),
+            "missing task completion"
+        );
         // Part 1 is the agent instructions (either file content or fallback)
         assert!(
             prompt.contains("Evidence Synthesizer") || prompt.contains("evidence-synthesizer"),
@@ -268,10 +284,7 @@ mod tests {
             "should have truncation marker"
         );
         // The prior context section should not contain all 15000 chars
-        let prior_section = prompt
-            .split("## Prior Context")
-            .nth(1)
-            .unwrap_or("");
+        let prior_section = prompt.split("## Prior Context").nth(1).unwrap_or("");
         // Truncated to 10000 + marker
         assert!(
             prior_section.chars().count() < 12_000,
@@ -366,8 +379,7 @@ mod tests {
 
         // Either the file was found OR we got the fallback
         assert!(
-            prompt.contains("Step-Back Analyzer")
-                || prompt.contains("step-back-analyzer"),
+            prompt.contains("Step-Back Analyzer") || prompt.contains("step-back-analyzer"),
             "should contain agent reference either from file or fallback"
         );
     }

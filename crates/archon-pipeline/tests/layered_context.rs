@@ -253,7 +253,10 @@ fn test_l1_empty_sona_graceful() {
     let l1 = loader.load_l1(&patterns);
 
     // Should still produce output with corrections and decisions.
-    assert!(!l1.is_empty(), "L1 should not be empty even without SONA patterns");
+    assert!(
+        !l1.is_empty(),
+        "L1 should not be empty even without SONA patterns"
+    );
     assert!(
         l1.contains("Fix lifetime annotations"),
         "L1 should contain corrections even without SONA patterns"
@@ -316,7 +319,10 @@ fn test_l2_filters_by_memory_domains() {
     // L2 should include content from the requested domains.
     // The request asks for task-analysis and api-design.
     assert!(
-        l2.contains("auth") || l2.contains("middleware") || l2.contains("JWT") || l2.contains("jwt"),
+        l2.contains("auth")
+            || l2.contains("middleware")
+            || l2.contains("JWT")
+            || l2.contains("jwt"),
         "L2 should contain content from requested domain 'task-analysis', got: {l2}"
     );
 
@@ -391,7 +397,10 @@ fn test_l3_present_when_triggered() {
         "L3 should be Some when trigger_l3 is true"
     );
     let l3 = ctx.l3_deep.unwrap();
-    assert!(!l3.is_empty(), "L3 content should not be empty when triggered");
+    assert!(
+        !l3.is_empty(),
+        "L3 content should not be empty when triggered"
+    );
 }
 
 // ===========================================================================

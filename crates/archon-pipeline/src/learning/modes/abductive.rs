@@ -58,10 +58,7 @@ impl AbductiveEngine {
 
         // Pair-wise combined hypotheses for adjacent effects.
         for i in 0..effects.len().saturating_sub(1) {
-            let cause = format!(
-                "Shared cause for '{}' and '{}'",
-                effects[i], effects[i + 1]
-            );
+            let cause = format!("Shared cause for '{}' and '{}'", effects[i], effects[i + 1]);
             let covered = vec![i, i + 1];
             hypotheses.push(Hypothesis {
                 label: format!("H{}", hypotheses.len() + 1),

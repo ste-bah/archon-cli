@@ -215,7 +215,10 @@ impl IntegrationVerifier {
         }
     }
 
-    fn verify_obligation(obligation: &WiringObligation, project_root: &Path) -> ObligationVerification {
+    fn verify_obligation(
+        obligation: &WiringObligation,
+        project_root: &Path,
+    ) -> ObligationVerification {
         if !obligation.mandatory {
             return ObligationVerification {
                 obligation_id: obligation.id.clone(),
@@ -243,7 +246,10 @@ impl IntegrationVerifier {
 
     /// Verify that a `mod <stem>;` or `pub mod <stem>;` declaration is present.
     /// The stem is extracted from line_context (e.g. `pub mod widgets;` → `widgets`).
-    fn verify_mod_decl(obligation: &WiringObligation, project_root: &Path) -> ObligationVerification {
+    fn verify_mod_decl(
+        obligation: &WiringObligation,
+        project_root: &Path,
+    ) -> ObligationVerification {
         let content = match Self::read_file(&obligation.file, project_root) {
             Some(c) => c,
             None => {
@@ -268,8 +274,7 @@ impl IntegrationVerifier {
         for line in content.lines() {
             let trimmed = line.trim();
             // Match "mod <stem>;" or "pub mod <stem>;"
-            if (trimmed == format!("mod {};", stem)
-                || trimmed == format!("pub mod {};", stem))
+            if (trimmed == format!("mod {};", stem) || trimmed == format!("pub mod {};", stem))
                 && !stem.is_empty()
             {
                 return ObligationVerification {
@@ -363,7 +368,10 @@ impl IntegrationVerifier {
     }
 
     /// Verify that `#[derive(` containing both `Serialize` and `Deserialize` is present.
-    fn verify_serde_derive(obligation: &WiringObligation, project_root: &Path) -> ObligationVerification {
+    fn verify_serde_derive(
+        obligation: &WiringObligation,
+        project_root: &Path,
+    ) -> ObligationVerification {
         let content = match Self::read_file(&obligation.file, project_root) {
             Some(c) => c,
             None => {
@@ -403,12 +411,18 @@ impl IntegrationVerifier {
     }
 
     /// Verify a config key loading pattern from line_context.
-    fn verify_config_key(obligation: &WiringObligation, project_root: &Path) -> ObligationVerification {
+    fn verify_config_key(
+        obligation: &WiringObligation,
+        project_root: &Path,
+    ) -> ObligationVerification {
         Self::verify_generic(obligation, project_root)
     }
 
     /// Generic: read file and check if line_context text appears.
-    fn verify_generic(obligation: &WiringObligation, project_root: &Path) -> ObligationVerification {
+    fn verify_generic(
+        obligation: &WiringObligation,
+        project_root: &Path,
+    ) -> ObligationVerification {
         let content = match Self::read_file(&obligation.file, project_root) {
             Some(c) => c,
             None => {
@@ -459,12 +473,7 @@ impl WiringVerificationGate {
                 .results
                 .iter()
                 .filter(|r| r.status == VerificationStatus::Unmet)
-                .map(|r| {
-                    format!(
-                        "Obligation {} unmet: {}",
-                        r.obligation_id, r.evidence
-                    )
-                })
+                .map(|r| format!("Obligation {} unmet: {}", r.obligation_id, r.evidence))
                 .collect();
             GateResult {
                 passed: false,

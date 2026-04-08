@@ -1,11 +1,24 @@
 //! Tests for structured artefact schemas — REQ-IMPROVE-017, REQ-IMPROVE-018.
 
 use archon_pipeline::artefacts::{
-    AcceptanceCriterionTrace, AcceptanceCriteriaTracedGate, ChangedFile, ChangeType,
-    EvidenceEntry, GateResultEntry, ImplementationReport, ManualOverrideEntry, MergePacket,
-    NewSymbol, RiskReport, ValidationReport, ValidationStatus, WiringObligationStatus,
+    AcceptanceCriteriaTracedGate,
+    AcceptanceCriterionTrace,
+    ChangeType,
+    ChangedFile,
+    EvidenceEntry,
     // Re-exported earlier artefacts
-    EvidencePack, TaskContract, WiringPlan,
+    EvidencePack,
+    GateResultEntry,
+    ImplementationReport,
+    ManualOverrideEntry,
+    MergePacket,
+    NewSymbol,
+    RiskReport,
+    TaskContract,
+    ValidationReport,
+    ValidationStatus,
+    WiringObligationStatus,
+    WiringPlan,
 };
 use archon_pipeline::artefacts::{load_artefact, save_artefact};
 use archon_pipeline::coding::contract::AcceptanceCriterion;
@@ -168,7 +181,10 @@ fn test_ac_traced_gate_fails_when_untraced() {
     let contract = make_task_contract(&["AC-001"]);
     let report = make_validation_report(false); // AC-001 has no evidence (None)
     let result = AcceptanceCriteriaTracedGate::check(&contract, &report);
-    assert!(!result.passed, "Gate should fail when an AC has no evidence");
+    assert!(
+        !result.passed,
+        "Gate should fail when an AC has no evidence"
+    );
     assert!(!result.errors.is_empty());
 }
 
@@ -242,8 +258,7 @@ fn test_artefact_persistence_roundtrip() {
     let report = make_implementation_report();
 
     save_artefact(&report, "impl-report.json", dir.path()).expect("save");
-    let loaded: ImplementationReport =
-        load_artefact("impl-report.json", dir.path()).expect("load");
+    let loaded: ImplementationReport = load_artefact("impl-report.json", dir.path()).expect("load");
 
     assert_eq!(report, loaded);
 }
@@ -280,11 +295,17 @@ fn test_merge_packet_has_manual_overrides() {
     let packet = make_merge_packet();
     assert_eq!(packet.manual_overrides.len(), 1);
     assert_eq!(packet.manual_overrides[0].gate_name, "live-smoke-test");
-    assert_eq!(packet.manual_overrides[0].overridden_by, "sign-off-approver");
+    assert_eq!(
+        packet.manual_overrides[0].overridden_by,
+        "sign-off-approver"
+    );
 
     // Verify it round-trips through JSON preserving the field
     let json = serde_json::to_string(&packet).expect("serialize");
-    assert!(json.contains("manual_overrides"), "JSON must contain manual_overrides key");
+    assert!(
+        json.contains("manual_overrides"),
+        "JSON must contain manual_overrides key"
+    );
     let restored: MergePacket = serde_json::from_str(&json).expect("deserialize");
     assert_eq!(restored.manual_overrides, packet.manual_overrides);
 }

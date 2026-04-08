@@ -88,7 +88,9 @@ impl std::fmt::Display for ContractValidationError {
 impl std::error::Error for ContractValidationError {}
 
 /// Validate a [`TaskContract`], returning all errors found (not just the first).
-pub fn validate_contract(contract: &TaskContract) -> std::result::Result<(), Vec<ContractValidationError>> {
+pub fn validate_contract(
+    contract: &TaskContract,
+) -> std::result::Result<(), Vec<ContractValidationError>> {
     let mut errors = Vec::new();
 
     if contract.task_id.trim().is_empty() {

@@ -137,11 +137,7 @@ impl QueryEngine {
     }
 
     /// Full Q&A flow: search, gather context, synthesize, optionally file.
-    pub async fn query(
-        &self,
-        question: &str,
-        opts: &QaQueryOptions,
-    ) -> Result<QaQueryResult> {
+    pub async fn query(&self, question: &str, opts: &QaQueryOptions) -> Result<QaQueryResult> {
         let search_start = std::time::Instant::now();
 
         // Step 1: Search for relevant nodes
@@ -177,8 +173,10 @@ impl QueryEngine {
 
         // Step 4: Optionally file the answer
         let filed_node_id = if opts.file_answer {
-            let source_ids: Vec<String> =
-                scored_nodes.iter().map(|n| n.node.node_id.clone()).collect();
+            let source_ids: Vec<String> = scored_nodes
+                .iter()
+                .map(|n| n.node.node_id.clone())
+                .collect();
             Some(self.file_answer(question, &synthesized, &source_ids)?)
         } else {
             None
@@ -282,10 +280,7 @@ impl QueryEngine {
     }
 
     /// Follow edges to collect related concepts, backlinks, provenance chains.
-    pub fn gather_graph_context(
-        &self,
-        nodes: &[ScoredKbNode],
-    ) -> Result<GraphContext> {
+    pub fn gather_graph_context(&self, nodes: &[ScoredKbNode]) -> Result<GraphContext> {
         let mut related_concepts = Vec::new();
         let mut backlinks = Vec::new();
         let mut seen_ids: HashSet<String> =
@@ -293,10 +288,7 @@ impl QueryEngine {
 
         for sn in nodes {
             let mut params = BTreeMap::new();
-            params.insert(
-                "nid".to_string(),
-                DataValue::from(sn.node.node_id.as_str()),
-            );
+            params.insert("nid".to_string(), DataValue::from(sn.node.node_id.as_str()));
 
             // Outgoing edges: this node -> targets
             if let Ok(result) = self.db.run_script(
@@ -461,14 +453,8 @@ impl QueryEngine {
             let edge_id = format!("edge-{}", uuid::Uuid::new_v4());
             let mut edge_params = BTreeMap::new();
             edge_params.insert("edge_id".into(), DataValue::from(edge_id.as_str()));
-            edge_params.insert(
-                "source_node_id".into(),
-                DataValue::from(node_id.as_str()),
-            );
-            edge_params.insert(
-                "target_node_id".into(),
-                DataValue::from(source_id.as_str()),
-            );
+            edge_params.insert("source_node_id".into(), DataValue::from(node_id.as_str()));
+            edge_params.insert("target_node_id".into(), DataValue::from(source_id.as_str()));
             edge_params.insert("edge_type".into(), DataValue::from("DerivedFrom"));
             edge_params.insert("created_at".into(), DataValue::from(now));
 
@@ -625,7 +611,13 @@ mod tests {
     #[tokio::test]
     async fn test_search_nodes_finds_matching() {
         let db = test_db();
-        insert_test_node(&db, "n1", "raw", "Rust Programming", "Rust is a systems language.");
+        insert_test_node(
+            &db,
+            "n1",
+            "raw",
+            "Rust Programming",
+            "Rust is a systems language.",
+        );
         insert_test_node(&db, "n2", "raw", "Python Basics", "Python is interpreted.");
 
         let engine = QueryEngine::new(db);
@@ -640,7 +632,13 @@ mod tests {
     async fn test_search_nodes_answer_penalty() {
         let db = test_db();
         // Same content, different types
-        insert_test_node(&db, "raw1", "raw", "Rust guide", "Learn Rust programming today.");
+        insert_test_node(
+            &db,
+            "raw1",
+            "raw",
+            "Rust guide",
+            "Learn Rust programming today.",
+        );
         insert_test_node(
             &db,
             "ans1",
@@ -655,7 +653,10 @@ mod tests {
         assert_eq!(results.len(), 2);
         // Both have "Rust" in title and content -> base score 1.0 (clamped)
         // Raw node: 1.0, Answer node: 0.9
-        let raw_result = results.iter().find(|r| r.node.node_type == KbNodeType::Raw).unwrap();
+        let raw_result = results
+            .iter()
+            .find(|r| r.node.node_type == KbNodeType::Raw)
+            .unwrap();
         let ans_result = results
             .iter()
             .find(|r| r.node.node_type == KbNodeType::Answer)
@@ -690,7 +691,11 @@ mod tests {
         };
 
         let filed_id = engine
-            .file_answer("What is the topic?", &synth_answer, &["src1".into(), "src2".into()])
+            .file_answer(
+                "What is the topic?",
+                &synth_answer,
+                &["src1".into(), "src2".into()],
+            )
             .unwrap();
 
         assert!(filed_id.starts_with("answer-"));
@@ -707,10 +712,12 @@ mod tests {
             .unwrap();
         assert_eq!(result.rows.len(), 1);
         assert_eq!(result.rows[0][0].get_str().unwrap(), "answer");
-        assert!(result.rows[0][1]
-            .get_str()
-            .unwrap()
-            .contains("synthesized answer"));
+        assert!(
+            result.rows[0][1]
+                .get_str()
+                .unwrap()
+                .contains("synthesized answer")
+        );
 
         // Verify DerivedFrom edges exist
         let mut edge_params = BTreeMap::new();

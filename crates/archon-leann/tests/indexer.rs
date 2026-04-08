@@ -95,7 +95,9 @@ mod indexer_tests {
         };
         let indexer = Indexer::new(db.clone(), config, None).expect("indexer creation");
         indexer.ensure_schema().expect("first ensure_schema");
-        indexer.ensure_schema().expect("second ensure_schema should not error");
+        indexer
+            .ensure_schema()
+            .expect("second ensure_schema should not error");
     }
 
     #[test]
@@ -168,7 +170,10 @@ mod indexer_tests {
         // Index again — same content, should be a no-op
         indexer.index_file(&rs_file).await.unwrap();
         let count2 = count_chunks(&db);
-        assert_eq!(count1, count2, "unchanged file should not produce new chunks");
+        assert_eq!(
+            count1, count2,
+            "unchanged file should not produce new chunks"
+        );
     }
 
     #[tokio::test]
@@ -252,10 +257,7 @@ mod indexer_tests {
         let index_config = IndexConfig {
             root_path: tmp.path().to_path_buf(),
             include_patterns: vec![],
-            exclude_patterns: vec![
-                "node_modules".to_string(),
-                ".git".to_string(),
-            ],
+            exclude_patterns: vec!["node_modules".to_string(), ".git".to_string()],
         };
 
         let stats = indexer
@@ -323,7 +325,10 @@ mod indexer_tests {
             .unwrap();
         // txt files have no recognized language, should still be handled (or skipped gracefully)
         // but should not panic
-        assert_eq!(stats.total_files, 0, "non-code files should not count as indexed");
+        assert_eq!(
+            stats.total_files, 0,
+            "non-code files should not count as indexed"
+        );
     }
 
     #[test]
@@ -350,10 +355,7 @@ mod indexer_tests {
             p.insert("fh".to_string(), DataValue::from("abc123"));
             p.insert("ts".to_string(), DataValue::from(1234567890.0f64));
             let arr = ndarray::Array1::from_vec(vec![0.1f32; 8]);
-            p.insert(
-                "emb".to_string(),
-                DataValue::Vec(cozo::Vector::F32(arr)),
-            );
+            p.insert("emb".to_string(), DataValue::Vec(cozo::Vector::F32(arr)));
             p
         };
 
@@ -364,7 +366,11 @@ mod indexer_tests {
             params,
             ScriptMutability::Mutable,
         );
-        assert!(put.is_ok(), "should accept vectors of configured dimension: {:?}", put.err());
+        assert!(
+            put.is_ok(),
+            "should accept vectors of configured dimension: {:?}",
+            put.err()
+        );
     }
 
     #[tokio::test]

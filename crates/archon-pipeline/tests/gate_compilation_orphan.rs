@@ -5,7 +5,7 @@
 
 use archon_pipeline::coding::gates::{
     CompilationGate, GateFailure, GateResultRecord, Language, OrphanDetectionGate,
-    save_gate_result, load_gate_result,
+    load_gate_result, save_gate_result,
 };
 
 // ---------------------------------------------------------------------------
@@ -25,12 +25,21 @@ mod compilation_tests {
         std::fs::write(
             tmp.path().join("Cargo.toml"),
             "[package]\nname = \"test-proj\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
-        ).unwrap();
-        std::fs::write(src.join("lib.rs"), "pub fn hello() -> &'static str { \"hello\" }\n").unwrap();
+        )
+        .unwrap();
+        std::fs::write(
+            src.join("lib.rs"),
+            "pub fn hello() -> &'static str { \"hello\" }\n",
+        )
+        .unwrap();
 
         let gate = CompilationGate;
         let result = gate.run(tmp.path(), Language::Rust).await;
-        assert!(result.gate_passed, "valid project should compile: {:?}", result.failures);
+        assert!(
+            result.gate_passed,
+            "valid project should compile: {:?}",
+            result.failures
+        );
         assert_eq!(result.gate_name, "compilation");
     }
 
@@ -43,7 +52,8 @@ mod compilation_tests {
         std::fs::write(
             tmp.path().join("Cargo.toml"),
             "[package]\nname = \"bad-proj\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
-        ).unwrap();
+        )
+        .unwrap();
         // Intentional syntax error
         std::fs::write(src.join("lib.rs"), "pub fn broken( { }\n").unwrap();
 
@@ -51,7 +61,10 @@ mod compilation_tests {
         let result = gate.run(tmp.path(), Language::Rust).await;
         assert!(!result.gate_passed, "syntax error should fail compilation");
         assert!(!result.failures.is_empty());
-        assert!(!result.evidence.is_empty(), "should capture compiler output");
+        assert!(
+            !result.evidence.is_empty(),
+            "should capture compiler output"
+        );
     }
 
     #[tokio::test]
@@ -63,8 +76,13 @@ mod compilation_tests {
         std::fs::write(
             tmp.path().join("Cargo.toml"),
             "[package]\nname = \"err-proj\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
-        ).unwrap();
-        std::fs::write(src.join("lib.rs"), "fn main() { let x: i32 = \"not_int\"; }\n").unwrap();
+        )
+        .unwrap();
+        std::fs::write(
+            src.join("lib.rs"),
+            "fn main() { let x: i32 = \"not_int\"; }\n",
+        )
+        .unwrap();
 
         let gate = CompilationGate;
         let result = gate.run(tmp.path(), Language::Rust).await;
@@ -99,7 +117,10 @@ mod orphan_tests {
 
         assert!(!result.gate_passed, "unreferenced file should be orphan");
         assert!(
-            result.failures.iter().any(|f| f.file.as_deref().unwrap_or("").contains("orphan")),
+            result
+                .failures
+                .iter()
+                .any(|f| f.file.as_deref().unwrap_or("").contains("orphan")),
             "failure should name orphan file"
         );
     }
@@ -111,14 +132,22 @@ mod orphan_tests {
         std::fs::create_dir_all(&src).unwrap();
 
         // Main file references utils via mod
-        std::fs::write(src.join("main.rs"), "mod utils;\nfn main() { utils::helper(); }\n").unwrap();
+        std::fs::write(
+            src.join("main.rs"),
+            "mod utils;\nfn main() { utils::helper(); }\n",
+        )
+        .unwrap();
         std::fs::write(src.join("utils.rs"), "pub fn helper() {}\n").unwrap();
 
         let gate = OrphanDetectionGate;
         let new_files = vec![src.join("utils.rs")];
         let result = gate.run(&new_files, tmp.path()).await;
 
-        assert!(result.gate_passed, "referenced file should not be orphan: {:?}", result.failures);
+        assert!(
+            result.gate_passed,
+            "referenced file should not be orphan: {:?}",
+            result.failures
+        );
     }
 
     #[tokio::test]

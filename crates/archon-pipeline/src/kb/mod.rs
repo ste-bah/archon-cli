@@ -144,7 +144,11 @@ impl KnowledgeBase {
             confidence: if result.sources.is_empty() {
                 0.0
             } else {
-                result.sources.iter().map(|s| s.relevance_score).sum::<f64>()
+                result
+                    .sources
+                    .iter()
+                    .map(|s| s.relevance_score)
+                    .sum::<f64>()
                     / result.sources.len() as f64
             },
         })
@@ -192,11 +196,14 @@ impl KnowledgeBase {
     /// Return aggregate statistics about the knowledge base.
     pub async fn stats(&self) -> Result<KbStats> {
         // Count nodes by type
-        let node_result = self.db.run_script(
-            "?[node_type, count(node_id)] := *kb_nodes{node_id, node_type}",
-            Default::default(),
-            cozo::ScriptMutability::Immutable,
-        ).map_err(|e| anyhow::anyhow!("stats node query failed: {}", e))?;
+        let node_result = self
+            .db
+            .run_script(
+                "?[node_type, count(node_id)] := *kb_nodes{node_id, node_type}",
+                Default::default(),
+                cozo::ScriptMutability::Immutable,
+            )
+            .map_err(|e| anyhow::anyhow!("stats node query failed: {}", e))?;
 
         let mut nodes_by_type = std::collections::HashMap::new();
         let mut total_nodes = 0usize;
@@ -208,13 +215,18 @@ impl KnowledgeBase {
         }
 
         // Count edges
-        let edge_result = self.db.run_script(
-            "?[count(edge_id)] := *kb_edges{edge_id}",
-            Default::default(),
-            cozo::ScriptMutability::Immutable,
-        ).map_err(|e| anyhow::anyhow!("stats edge query failed: {}", e))?;
+        let edge_result = self
+            .db
+            .run_script(
+                "?[count(edge_id)] := *kb_edges{edge_id}",
+                Default::default(),
+                cozo::ScriptMutability::Immutable,
+            )
+            .map_err(|e| anyhow::anyhow!("stats edge query failed: {}", e))?;
 
-        let total_edges = edge_result.rows.first()
+        let total_edges = edge_result
+            .rows
+            .first()
             .and_then(|r| r[0].get_int())
             .unwrap_or(0) as usize;
 
@@ -259,12 +271,15 @@ impl KnowledgeBase {
         params.insert("nid".to_string(), cozo::DataValue::from(node_id));
 
         // 1. Find derived nodes (DerivedFrom edges where target = this node)
-        let derived = self.db.run_script(
-            "?[source_node_id] := *kb_edges{source_node_id, target_node_id, edge_type}, \
+        let derived = self
+            .db
+            .run_script(
+                "?[source_node_id] := *kb_edges{source_node_id, target_node_id, edge_type}, \
              target_node_id = $nid, edge_type = 'DerivedFrom'",
-            params.clone(),
-            cozo::ScriptMutability::Immutable,
-        ).map_err(|e| anyhow::anyhow!("find derived failed: {}", e))?;
+                params.clone(),
+                cozo::ScriptMutability::Immutable,
+            )
+            .map_err(|e| anyhow::anyhow!("find derived failed: {}", e))?;
 
         // 2. Recursively delete derived nodes
         for row in &derived.rows {
@@ -275,14 +290,16 @@ impl KnowledgeBase {
         }
 
         // 3. Delete all edges where this node is source or target
-        self.db.run_script(
-            "?[edge_id, source_node_id, target_node_id, edge_type, created_at] := \
+        self.db
+            .run_script(
+                "?[edge_id, source_node_id, target_node_id, edge_type, created_at] := \
              *kb_edges{edge_id, source_node_id, target_node_id, edge_type, created_at}, \
              (source_node_id = $nid or target_node_id = $nid) \
              :rm kb_edges { edge_id => source_node_id, target_node_id, edge_type, created_at }",
-            params.clone(),
-            cozo::ScriptMutability::Mutable,
-        ).map_err(|e| anyhow::anyhow!("delete edges failed: {}", e))?;
+                params.clone(),
+                cozo::ScriptMutability::Mutable,
+            )
+            .map_err(|e| anyhow::anyhow!("delete edges failed: {}", e))?;
 
         // 4. Delete the node itself
         self.db.run_script(
@@ -373,6 +390,12 @@ fn node_type_dir(t: &KbNodeType) -> &'static str {
 /// Sanitize a string for use as a filename (replace non-alphanumeric with _).
 fn sanitize_filename(s: &str) -> String {
     s.chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect()
 }

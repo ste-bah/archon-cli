@@ -67,22 +67,31 @@ impl CodingQualityCalculator {
         Self {
             re_unwrap: Regex::new(r"\.unwrap\(\)").expect("valid regex"),
             re_unwrap_safe: Regex::new(r"//\s*(?i:safety|safe):").expect("valid regex"),
-            re_clone_hot: Regex::new(r"(?:for\s|\.iter\(\)|\.map\(|loop\s*\{|while\s)[\s\S]{0,200}\.clone\(\)").expect("valid regex"),
-            re_long_fn: Regex::new(r"(?m)^\s*(?:pub\s+)?(?:async\s+)?fn\s+\w+").expect("valid regex"),
+            re_clone_hot: Regex::new(
+                r"(?:for\s|\.iter\(\)|\.map\(|loop\s*\{|while\s)[\s\S]{0,200}\.clone\(\)",
+            )
+            .expect("valid regex"),
+            re_long_fn: Regex::new(r"(?m)^\s*(?:pub\s+)?(?:async\s+)?fn\s+\w+")
+                .expect("valid regex"),
             re_magic_number: Regex::new(r"\b(\d+)\b").expect("valid regex"),
             re_todo_markers: Regex::new(r"(?i)\b(?:TODO|FIXME|HACK|XXX)\b").expect("valid regex"),
             re_unimplemented: Regex::new(r"\b(?:unimplemented|todo)!\(\)").expect("valid regex"),
-            re_stub_markers: Regex::new(r"(?i)\b(?:stub|placeholder|not yet implemented)\b").expect("valid regex"),
+            re_stub_markers: Regex::new(r"(?i)\b(?:stub|placeholder|not yet implemented)\b")
+                .expect("valid regex"),
             re_empty_fn: Regex::new(r"fn\s+\w+[^}]*\{\s*\}").expect("valid regex"),
             re_panic_non_test: Regex::new(r"\bpanic!\(").expect("valid regex"),
-            re_use_stmt: Regex::new(r"(?m)^use\s+[\w:]+(?:::\{[^}]+\}|::\w+);").expect("valid regex"),
+            re_use_stmt: Regex::new(r"(?m)^use\s+[\w:]+(?:::\{[^}]+\}|::\w+);")
+                .expect("valid regex"),
             re_allow_dead: Regex::new(r"#\[allow\(dead_code\)\]").expect("valid regex"),
             re_wire_marker: Regex::new(r"(?i)//\s*TODO:\s*wire").expect("valid regex"),
             re_mod_decl: Regex::new(r"(?m)^(?:pub\s+)?mod\s+\w+").expect("valid regex"),
             re_doc_comment: Regex::new(r"(?m)^\s*///").expect("valid regex"),
             re_module_doc: Regex::new(r"(?m)^\s*//!").expect("valid regex"),
             re_doc_attr: Regex::new(r#"#\[doc\s*="#).expect("valid regex"),
-            re_pub_item: Regex::new(r"(?m)^\s*pub\s+(?:fn|struct|enum|trait|type|const|static|mod)\s+\w+").expect("valid regex"),
+            re_pub_item: Regex::new(
+                r"(?m)^\s*pub\s+(?:fn|struct|enum|trait|type|const|static|mod)\s+\w+",
+            )
+            .expect("valid regex"),
             re_test_attr: Regex::new(r"#\[test\]").expect("valid regex"),
             re_cfg_test: Regex::new(r"#\[cfg\(test\)\]").expect("valid regex"),
             re_assert: Regex::new(r"\b(?:assert!|assert_eq!|assert_ne!)").expect("valid regex"),
@@ -254,10 +263,7 @@ impl CodingQualityCalculator {
         score -= (empty_fn_count as f64 * 0.15).min(0.6);
 
         // panic!() not in test code — simple heuristic: split on #[cfg(test)]
-        let non_test_section = output
-            .split("#[cfg(test)]")
-            .next()
-            .unwrap_or(output);
+        let non_test_section = output.split("#[cfg(test)]").next().unwrap_or(output);
         let panic_count = self.re_panic_non_test.find_iter(non_test_section).count();
         score -= (panic_count as f64 * 0.10).min(0.3);
 
@@ -477,7 +483,11 @@ mod tests {
 }
 "#;
         let b = calc().score(code);
-        assert!(b.composite >= 0.85, "perfect code composite={}", b.composite);
+        assert!(
+            b.composite >= 0.85,
+            "perfect code composite={}",
+            b.composite
+        );
         assert!(b.code_quality >= 0.5, "cq={}", b.code_quality);
         assert!(b.completeness >= 0.9, "comp={}", b.completeness);
         assert!(b.test_coverage >= 0.5, "tc={}", b.test_coverage);
@@ -515,7 +525,11 @@ mod tests {
         let b = calc().score(code);
         // 3 TODOs -> completeness penalized by 0.24
         assert!(b.completeness <= 0.80, "completeness={}", b.completeness);
-        assert!(b.completeness >= 0.50, "completeness too low={}", b.completeness);
+        assert!(
+            b.completeness >= 0.50,
+            "completeness too low={}",
+            b.completeness
+        );
     }
 
     // ── 3. Code with no docs ─────────────────────────────────────────

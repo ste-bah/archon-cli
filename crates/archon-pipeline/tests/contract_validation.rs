@@ -1,11 +1,11 @@
 //! Tests for TaskContract schema, validation, gate, and alternatives.
 
+use archon_pipeline::coding::agents::AGENTS;
 use archon_pipeline::coding::contract::{
     AcceptanceCriterion, ContractValidatedGate, TaskContract, TestRequirement, TestType,
     WiringRequirement, WiringType, generate_alternatives, load_contract, save_contract,
     validate_contract,
 };
-use archon_pipeline::coding::agents::AGENTS;
 use tempfile::TempDir;
 
 /// Helper: build a fully valid TaskContract.
@@ -46,12 +46,18 @@ fn valid_contract_serde_roundtrip() {
     assert_eq!(deser.task_id, contract.task_id);
     assert_eq!(deser.goal, contract.goal);
     assert_eq!(deser.non_goals.len(), contract.non_goals.len());
-    assert_eq!(deser.acceptance_criteria.len(), contract.acceptance_criteria.len());
+    assert_eq!(
+        deser.acceptance_criteria.len(),
+        contract.acceptance_criteria.len()
+    );
     assert_eq!(deser.affected_files.len(), contract.affected_files.len());
     assert_eq!(deser.required_wiring.len(), contract.required_wiring.len());
     assert_eq!(deser.required_tests.len(), contract.required_tests.len());
     assert_eq!(deser.rollback_plan, contract.rollback_plan);
-    assert_eq!(deser.definition_of_done.len(), contract.definition_of_done.len());
+    assert_eq!(
+        deser.definition_of_done.len(),
+        contract.definition_of_done.len()
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -137,7 +143,10 @@ fn validate_rejects_ac_empty_id() {
     let mut contract = valid_contract();
     contract.acceptance_criteria[0].id = String::new();
     let errs = validate_contract(&contract).unwrap_err();
-    assert!(errs.iter().any(|e| e.field.contains("acceptance_criteria[0].id")));
+    assert!(
+        errs.iter()
+            .any(|e| e.field.contains("acceptance_criteria[0].id"))
+    );
 }
 
 #[test]
@@ -145,7 +154,10 @@ fn validate_rejects_ac_empty_description() {
     let mut contract = valid_contract();
     contract.acceptance_criteria[0].description = String::new();
     let errs = validate_contract(&contract).unwrap_err();
-    assert!(errs.iter().any(|e| e.field.contains("acceptance_criteria[0].description")));
+    assert!(
+        errs.iter()
+            .any(|e| e.field.contains("acceptance_criteria[0].description"))
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -175,7 +187,12 @@ fn wiring_type_serde_all_variants() {
 
 #[test]
 fn test_type_serde_all_variants() {
-    let variants = vec![TestType::Unit, TestType::Integration, TestType::E2E, TestType::Property];
+    let variants = vec![
+        TestType::Unit,
+        TestType::Integration,
+        TestType::E2E,
+        TestType::Property,
+    ];
     for variant in &variants {
         let json = serde_json::to_string(variant).expect("serialize test type");
         let deser: TestType = serde_json::from_str(&json).expect("deserialize test type");
@@ -200,7 +217,10 @@ fn generate_alternatives_for_vague_task() {
         assert!(!alt.acceptance_criteria.is_empty());
         assert!(!alt.definition_of_done.is_empty());
         // Each alternative should be independently valid
-        assert!(validate_contract(alt).is_ok(), "Alternative should be valid");
+        assert!(
+            validate_contract(alt).is_ok(),
+            "Alternative should be valid"
+        );
     }
 }
 
@@ -227,8 +247,14 @@ fn contract_persistence_roundtrip() {
     assert_eq!(loaded.task_id, contract.task_id);
     assert_eq!(loaded.goal, contract.goal);
     assert_eq!(loaded.non_goals, contract.non_goals);
-    assert_eq!(loaded.acceptance_criteria.len(), contract.acceptance_criteria.len());
-    assert_eq!(loaded.acceptance_criteria[0].id, contract.acceptance_criteria[0].id);
+    assert_eq!(
+        loaded.acceptance_criteria.len(),
+        contract.acceptance_criteria.len()
+    );
+    assert_eq!(
+        loaded.acceptance_criteria[0].id,
+        contract.acceptance_criteria[0].id
+    );
     assert_eq!(loaded.affected_files, contract.affected_files);
     assert_eq!(loaded.rollback_plan, contract.rollback_plan);
     assert_eq!(loaded.definition_of_done, contract.definition_of_done);
@@ -287,5 +313,9 @@ fn validate_reports_all_errors_at_once() {
     };
     let errs = validate_contract(&contract).unwrap_err();
     // Should have at least: task_id, goal, acceptance_criteria, definition_of_done
-    assert!(errs.len() >= 4, "Should report at least 4 errors, got {}", errs.len());
+    assert!(
+        errs.len() >= 4,
+        "Should report at least 4 errors, got {}",
+        errs.len()
+    );
 }

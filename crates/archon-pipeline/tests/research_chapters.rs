@@ -221,8 +221,8 @@ fn test_reject_missing_locked_field() {
 #[test]
 fn test_reject_malformed_json() {
     let content = "```json\n{ this is not valid json }\n```";
-    let err = ChapterStructureLoader::parse_structure(content)
-        .expect_err("should reject malformed JSON");
+    let err =
+        ChapterStructureLoader::parse_structure(content).expect_err("should reject malformed JSON");
 
     match err {
         ChapterStructureError::ParseError(_) => {} // expected
@@ -254,8 +254,8 @@ fn test_legacy_field_normalization() {
     let content = legacy_fields_json();
     let raw: serde_json::Value =
         serde_json::from_str(&content).expect("test data should be valid JSON");
-    let structure = ChapterStructureLoader::normalize_structure(raw)
-        .expect("should normalize legacy fields");
+    let structure =
+        ChapterStructureLoader::normalize_structure(raw).expect("should normalize legacy fields");
 
     assert!(structure.locked);
     // dateLocked -> generated_at
@@ -417,8 +417,8 @@ fn test_dynamic_agent_count_matches_chapters() {
 #[test]
 fn test_generated_agents_have_write_access() {
     let content = six_chapter_raw_json();
-    let structure = ChapterStructureLoader::parse_structure(&content)
-        .expect("should parse structure");
+    let structure =
+        ChapterStructureLoader::parse_structure(&content).expect("should parse structure");
 
     let agents = DynamicAgentGenerator::generate_writing_agents(&structure);
 
@@ -442,8 +442,8 @@ fn test_generated_agents_have_write_access() {
 #[test]
 fn test_generated_agent_has_chapter_context() {
     let content = six_chapter_raw_json();
-    let structure = ChapterStructureLoader::parse_structure(&content)
-        .expect("should parse structure");
+    let structure =
+        ChapterStructureLoader::parse_structure(&content).expect("should parse structure");
 
     let agents = DynamicAgentGenerator::generate_writing_agents(&structure);
 
@@ -472,8 +472,8 @@ fn test_generated_agent_has_chapter_context() {
 #[test]
 fn test_generated_agent_output_path() {
     let content = six_chapter_raw_json();
-    let structure = ChapterStructureLoader::parse_structure(&content)
-        .expect("should parse structure");
+    let structure =
+        ChapterStructureLoader::parse_structure(&content).expect("should parse structure");
 
     let agents = DynamicAgentGenerator::generate_writing_agents(&structure);
 

@@ -7,8 +7,8 @@
 
 use archon_pipeline::runner::PipelineType;
 use archon_pipeline::session::{
-    abort, checkpoint, detect_interrupted, list_sessions, mark_completed, new_session,
-    record_agent_completion, resume, CompletedAgent, PipelineCheckpoint, SessionStatus,
+    CompletedAgent, PipelineCheckpoint, SessionStatus, abort, checkpoint, detect_interrupted,
+    list_sessions, mark_completed, new_session, record_agent_completion, resume,
 };
 use std::fs;
 use tempfile::TempDir;
@@ -55,11 +55,16 @@ fn test_checkpoint_serialization_round_trip() {
     let mut cp = new_session(PipelineType::Research, "survey LLM routing");
 
     // Add a completed agent so we exercise nested serialization.
-    record_agent_completion(&mut cp, "requirement-extractor", "some output text", 0.85, 0.012);
+    record_agent_completion(
+        &mut cp,
+        "requirement-extractor",
+        "some output text",
+        0.85,
+        0.012,
+    );
 
     let json = serde_json::to_string_pretty(&cp).expect("serialize failed");
-    let deserialized: PipelineCheckpoint =
-        serde_json::from_str(&json).expect("deserialize failed");
+    let deserialized: PipelineCheckpoint = serde_json::from_str(&json).expect("deserialize failed");
 
     assert_eq!(deserialized.session_id, cp.session_id);
     assert_eq!(deserialized.pipeline_type, cp.pipeline_type);
@@ -195,8 +200,7 @@ fn test_abort_sets_failed_status() {
         .join(&cp.session_id)
         .join("checkpoint.json");
     let contents = fs::read_to_string(&path).expect("read checkpoint");
-    let reloaded: PipelineCheckpoint =
-        serde_json::from_str(&contents).expect("parse checkpoint");
+    let reloaded: PipelineCheckpoint = serde_json::from_str(&contents).expect("parse checkpoint");
     assert_eq!(reloaded.status, SessionStatus::Failed);
 }
 

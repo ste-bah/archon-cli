@@ -228,7 +228,11 @@ mod tests {
         assert_eq!(result.enhanced.len(), OUTPUT_DIM, "Output should be 1024D");
         assert_eq!(result.original.len(), INPUT_DIM, "Original preserved");
         assert!(!result.cached, "First call should not be cached");
-        assert_eq!(result.activation_caches.len(), 3, "Should have 3 layer caches");
+        assert_eq!(
+            result.activation_caches.len(),
+            3,
+            "Should have 3 layer caches"
+        );
     }
 
     #[test]
@@ -236,7 +240,11 @@ mod tests {
         let enhancer = GNNEnhancer::new();
         let input = vec![1.0f32; 100]; // shorter than 1536
         let result = enhancer.enhance(&input);
-        assert_eq!(result.enhanced.len(), OUTPUT_DIM, "Output should still be 1024D");
+        assert_eq!(
+            result.enhanced.len(),
+            OUTPUT_DIM,
+            "Output should still be 1024D"
+        );
     }
 
     #[test]
@@ -258,7 +266,10 @@ mod tests {
         assert_eq!(result.enhanced.len(), OUTPUT_DIM);
         // Should fall back to zero-padded raw embeddings (no NaN in output)
         assert!(
-            !result.enhanced.iter().any(|v| v.is_nan() || v.is_infinite()),
+            !result
+                .enhanced
+                .iter()
+                .any(|v| v.is_nan() || v.is_infinite()),
             "Output must not contain NaN or Inf"
         );
     }
@@ -281,7 +292,11 @@ mod tests {
         let input = vec![1.0, 2.0, 3.0, 4.0, 5.0];
         let sm = math::softmax(&input);
         let sum: f32 = sm.iter().sum();
-        assert!((sum - 1.0).abs() < 1e-5, "Softmax should sum to 1.0, got {}", sum);
+        assert!(
+            (sum - 1.0).abs() < 1e-5,
+            "Softmax should sum to 1.0, got {}",
+            sum
+        );
     }
 
     #[test]
@@ -322,7 +337,11 @@ mod tests {
 
         let result = backprop::layer_backward(&input, &weights, &grad_output);
         assert_eq!(result.dw.len(), out_dim, "dW should have out_dim rows");
-        assert_eq!(result.dw[0].len(), in_dim, "dW rows should have in_dim cols");
+        assert_eq!(
+            result.dw[0].len(),
+            in_dim,
+            "dW rows should have in_dim cols"
+        );
         assert_eq!(result.dx.len(), in_dim, "dx should have in_dim elements");
         assert_eq!(result.db.len(), out_dim, "db should have out_dim elements");
     }
@@ -372,7 +391,10 @@ mod tests {
         weights::WeightManager::save(&original_weights, &path).expect("save failed");
         let loaded = weights::WeightManager::load(&path).expect("load failed");
 
-        assert_eq!(original_weights, loaded, "Roundtrip should preserve weights exactly");
+        assert_eq!(
+            original_weights, loaded,
+            "Roundtrip should preserve weights exactly"
+        );
 
         // Cleanup
         let _ = std::fs::remove_file(&path);

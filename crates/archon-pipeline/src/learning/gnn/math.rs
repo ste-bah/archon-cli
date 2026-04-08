@@ -25,7 +25,10 @@ pub fn apply_activation(input: &[f32], activation: ActivationType) -> Vec<f32> {
 /// Compute the derivative of an activation function given the *output* values.
 pub fn activation_derivative(output: &[f32], activation: ActivationType) -> Vec<f32> {
     match activation {
-        ActivationType::Relu => output.iter().map(|o| if *o > 0.0 { 1.0 } else { 0.0 }).collect(),
+        ActivationType::Relu => output
+            .iter()
+            .map(|o| if *o > 0.0 { 1.0 } else { 0.0 })
+            .collect(),
         ActivationType::LeakyRelu => output
             .iter()
             .map(|o| if *o > 0.0 { 1.0 } else { 0.01 })
@@ -52,10 +55,7 @@ pub fn softmax(input: &[f32]) -> Vec<f32> {
     if input.is_empty() {
         return vec![];
     }
-    let max = input
-        .iter()
-        .cloned()
-        .fold(f32::NEG_INFINITY, f32::max);
+    let max = input.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
     let exps: Vec<f32> = input.iter().map(|x| (x - max).exp()).collect();
     let sum: f32 = exps.iter().sum();
     if sum == 0.0 {

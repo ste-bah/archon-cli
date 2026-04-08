@@ -4,7 +4,7 @@
 //! and conditionally injects style guidelines into Phase 6 research agent prompts.
 //! Default is American English, APA citation, formal academic tone.
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -295,7 +295,11 @@ pub fn uk_academic_profile() -> StyleProfile {
             source_count: 0,
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
-            tags: vec!["uk".to_string(), "academic".to_string(), "formal".to_string()],
+            tags: vec![
+                "uk".to_string(),
+                "academic".to_string(),
+                "formal".to_string(),
+            ],
         },
         characteristics: StyleCharacteristics {
             language_variant: "UK".to_string(),
@@ -353,10 +357,7 @@ mod tests {
                 formality_level: "formal".to_string(),
                 citation_style: "APA".to_string(),
                 academic_tone: true,
-                regional_settings: vec![
-                    "color".to_string(),
-                    "organization".to_string(),
-                ],
+                regional_settings: vec!["color".to_string(), "organization".to_string()],
             },
             sample_texts: vec![],
         }
@@ -369,10 +370,7 @@ mod tests {
             DEFAULT_STYLE_PROMPT.contains("American English"),
             "should mention American English"
         );
-        assert!(
-            DEFAULT_STYLE_PROMPT.contains("APA"),
-            "should mention APA"
-        );
+        assert!(DEFAULT_STYLE_PROMPT.contains("APA"), "should mention APA");
     }
 
     // 2. Phase 6 agents get style injection
@@ -509,10 +507,7 @@ mod tests {
         assert!(mgr.get_active_profile().is_none());
 
         mgr.set_active_profile("x").unwrap();
-        assert_eq!(
-            mgr.get_active_profile().unwrap().metadata.id,
-            "x"
-        );
+        assert_eq!(mgr.get_active_profile().unwrap().metadata.id, "x");
 
         // Non-existent fails
         assert!(mgr.set_active_profile("nope").is_err());
@@ -566,11 +561,31 @@ mod tests {
     fn uk_academic_profile_spelling() {
         let uk = uk_academic_profile();
         assert_eq!(uk.characteristics.language_variant, "UK");
-        assert!(uk.characteristics.regional_settings.contains(&"colour".to_string()));
-        assert!(uk.characteristics.regional_settings.contains(&"behaviour".to_string()));
-        assert!(uk.characteristics.regional_settings.contains(&"centre".to_string()));
-        assert!(uk.characteristics.regional_settings.contains(&"analyse".to_string()));
-        assert!(uk.characteristics.regional_settings.contains(&"organisation".to_string()));
+        assert!(
+            uk.characteristics
+                .regional_settings
+                .contains(&"colour".to_string())
+        );
+        assert!(
+            uk.characteristics
+                .regional_settings
+                .contains(&"behaviour".to_string())
+        );
+        assert!(
+            uk.characteristics
+                .regional_settings
+                .contains(&"centre".to_string())
+        );
+        assert!(
+            uk.characteristics
+                .regional_settings
+                .contains(&"analyse".to_string())
+        );
+        assert!(
+            uk.characteristics
+                .regional_settings
+                .contains(&"organisation".to_string())
+        );
     }
 
     // 14. Save and load round-trip
@@ -615,6 +630,9 @@ mod tests {
     fn build_styled_prompt_format() {
         let injector = StyleInjector::new();
         let result = injector.build_styled_prompt("Hello world", "Use formal tone");
-        assert_eq!(result, "Hello world\n\n## STYLE GUIDELINES\nUse formal tone");
+        assert_eq!(
+            result,
+            "Hello world\n\n## STYLE GUIDELINES\nUse formal tone"
+        );
     }
 }

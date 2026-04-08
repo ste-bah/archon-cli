@@ -97,17 +97,29 @@ impl TrainingHistoryManager {
         }
 
         let n = self.records.len() as f32;
-        let avg_final_loss: f32 =
-            self.records.iter().map(|r| r.metrics.final_loss).sum::<f32>() / n;
+        let avg_final_loss: f32 = self
+            .records
+            .iter()
+            .map(|r| r.metrics.final_loss)
+            .sum::<f32>()
+            / n;
         let best_loss_ever = self
             .records
             .iter()
             .map(|r| r.metrics.best_loss)
             .fold(f32::INFINITY, f32::min);
-        let avg_epochs: f32 =
-            self.records.iter().map(|r| r.metrics.epochs_completed as f32).sum::<f32>() / n;
+        let avg_epochs: f32 = self
+            .records
+            .iter()
+            .map(|r| r.metrics.epochs_completed as f32)
+            .sum::<f32>()
+            / n;
         let total_time: f64 = self.records.iter().map(|r| r.metrics.duration_secs).sum();
-        let early_stops = self.records.iter().filter(|r| r.metrics.early_stopped).count() as f32;
+        let early_stops = self
+            .records
+            .iter()
+            .filter(|r| r.metrics.early_stopped)
+            .count() as f32;
 
         TrainingStats {
             total_runs: self.records.len(),

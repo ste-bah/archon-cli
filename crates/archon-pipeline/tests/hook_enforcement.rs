@@ -3,7 +3,7 @@
 //! Validates: phase-based Write/Edit/Bash denial, dangerous command blocking,
 //! affected_files scope, orphan warning, periodic cargo check, forbidden patterns.
 
-use archon_pipeline::coding::hooks::{HookDecision, PreToolUseHook, PostToolUseHook};
+use archon_pipeline::coding::hooks::{HookDecision, PostToolUseHook, PreToolUseHook};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -36,42 +36,60 @@ mod pre_hook_tests {
     fn phase_1_blocks_write() {
         let hook = pre_hook(1, &["src/main.rs"]);
         let decision = hook.evaluate("Write", &tool_input_file("src/main.rs"));
-        assert!(matches!(decision, HookDecision::Block { .. }), "Phase 1 should block Write");
+        assert!(
+            matches!(decision, HookDecision::Block { .. }),
+            "Phase 1 should block Write"
+        );
     }
 
     #[test]
     fn phase_2_blocks_edit() {
         let hook = pre_hook(2, &["src/main.rs"]);
         let decision = hook.evaluate("Edit", &tool_input_edit("src/main.rs", "old", "new"));
-        assert!(matches!(decision, HookDecision::Block { .. }), "Phase 2 should block Edit");
+        assert!(
+            matches!(decision, HookDecision::Block { .. }),
+            "Phase 2 should block Edit"
+        );
     }
 
     #[test]
     fn phase_3_blocks_bash() {
         let hook = pre_hook(3, &[]);
         let decision = hook.evaluate("Bash", &tool_input_bash("echo hello"));
-        assert!(matches!(decision, HookDecision::Block { .. }), "Phase 3 should block Bash");
+        assert!(
+            matches!(decision, HookDecision::Block { .. }),
+            "Phase 3 should block Bash"
+        );
     }
 
     #[test]
     fn phase_4_allows_write() {
         let hook = pre_hook(4, &["src/new.rs"]);
         let decision = hook.evaluate("Write", &tool_input_file("src/new.rs"));
-        assert!(matches!(decision, HookDecision::Allow), "Phase 4 should allow Write to affected file");
+        assert!(
+            matches!(decision, HookDecision::Allow),
+            "Phase 4 should allow Write to affected file"
+        );
     }
 
     #[test]
     fn phase_4_warns_write_outside_scope() {
         let hook = pre_hook(4, &["src/main.rs"]);
         let decision = hook.evaluate("Write", &tool_input_file("src/other.rs"));
-        assert!(matches!(decision, HookDecision::Warn { .. }), "Phase 4 should warn on out-of-scope Write");
+        assert!(
+            matches!(decision, HookDecision::Warn { .. }),
+            "Phase 4 should warn on out-of-scope Write"
+        );
     }
 
     #[test]
     fn phase_1_blocks_write_outside_scope() {
         let hook = pre_hook(1, &["src/main.rs"]);
         let decision = hook.evaluate("Write", &tool_input_file("src/other.rs"));
-        assert!(matches!(decision, HookDecision::Block { .. }), "Phase 1 should block all writes");
+        assert!(
+            matches!(decision, HookDecision::Block { .. }),
+            "Phase 1 should block all writes"
+        );
     }
 
     #[test]
@@ -99,7 +117,10 @@ mod pre_hook_tests {
     fn safe_command_allowed_in_phase_4() {
         let hook = pre_hook(4, &[]);
         let decision = hook.evaluate("Bash", &tool_input_bash("cargo test"));
-        assert!(matches!(decision, HookDecision::Allow), "safe command should be allowed in Phase 4+");
+        assert!(
+            matches!(decision, HookDecision::Allow),
+            "safe command should be allowed in Phase 4+"
+        );
     }
 
     #[test]
@@ -107,7 +128,11 @@ mod pre_hook_tests {
         let hook = pre_hook(1, &[]);
         for tool in &["Read", "Glob", "Grep", "WebSearch", "WebFetch"] {
             let decision = hook.evaluate(tool, &serde_json::json!({}));
-            assert!(matches!(decision, HookDecision::Allow), "{} should always be allowed", tool);
+            assert!(
+                matches!(decision, HookDecision::Allow),
+                "{} should always be allowed",
+                tool
+            );
         }
     }
 
@@ -116,7 +141,10 @@ mod pre_hook_tests {
         let hook = pre_hook(4, &[]);
         let decision = hook.evaluate("Write", &tool_input_file("src/anything.rs"));
         // When affected_files is empty, allow all (no contract constraint)
-        assert!(matches!(decision, HookDecision::Allow | HookDecision::Warn { .. }));
+        assert!(matches!(
+            decision,
+            HookDecision::Allow | HookDecision::Warn { .. }
+        ));
     }
 }
 
@@ -132,7 +160,10 @@ mod post_hook_tests {
         let hook = PostToolUseHook::new(std::path::PathBuf::from("/tmp"));
         let content = "pub fn handler() { todo!() }";
         let result = hook.check_forbidden_patterns(content);
-        assert!(result.is_some(), "should detect todo!() as forbidden pattern");
+        assert!(
+            result.is_some(),
+            "should detect todo!() as forbidden pattern"
+        );
     }
 
     #[test]
@@ -164,8 +195,12 @@ mod post_hook_tests {
     #[test]
     fn hook_decision_debug_format() {
         let allow = HookDecision::Allow;
-        let block = HookDecision::Block { reason: "test".into() };
-        let warn = HookDecision::Warn { message: "test".into() };
+        let block = HookDecision::Block {
+            reason: "test".into(),
+        };
+        let warn = HookDecision::Warn {
+            message: "test".into(),
+        };
         // Should not panic
         let _ = format!("{:?}", allow);
         let _ = format!("{:?}", block);

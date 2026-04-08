@@ -103,20 +103,37 @@ fn main() {
     assert_eq!(resp.provenance.len(), 3);
 
     // --- ModeSelector auto-routing ---
-    assert_eq!(ModeSelector::select("why did this fail"), ReasoningMode::CausalInference);
-    assert_eq!(ModeSelector::select("similar to this function"), ReasoningMode::Contextual);
-    assert_eq!(ModeSelector::select("how to write a test"), ReasoningMode::PatternMatch);
-    assert_eq!(ModeSelector::select("refactor the module"), ReasoningMode::Hybrid);
+    assert_eq!(
+        ModeSelector::select("why did this fail"),
+        ReasoningMode::CausalInference
+    );
+    assert_eq!(
+        ModeSelector::select("similar to this function"),
+        ReasoningMode::Contextual
+    );
+    assert_eq!(
+        ModeSelector::select("how to write a test"),
+        ReasoningMode::PatternMatch
+    );
+    assert_eq!(
+        ModeSelector::select("refactor the module"),
+        ReasoningMode::Hybrid
+    );
     println!("[ModeSelector] all 4 routing rules verified");
 
     // --- TrajectoryTracker recorded entries ---
     let trajectories = bank.trajectories();
-    println!("[TrajectoryTracker] {} trajectories recorded", trajectories.len());
+    println!(
+        "[TrajectoryTracker] {} trajectories recorded",
+        trajectories.len()
+    );
     assert_eq!(trajectories.len(), 4);
     for t in trajectories {
         assert!(!t.trajectory_id.is_empty());
         assert!(!t.steps.is_empty());
     }
 
-    println!("\nSMOKE TEST PASSED — ReasoningBank all 4 modes, ModeSelector, TrajectoryTracker verified end-to-end.");
+    println!(
+        "\nSMOKE TEST PASSED — ReasoningBank all 4 modes, ModeSelector, TrajectoryTracker verified end-to-end."
+    );
 }

@@ -122,7 +122,8 @@ mod ingest_tests {
         std::fs::write(
             &md_file,
             "# Section One\n\nContent here.\n\n## Section Two\n\nMore content.\n",
-        ).unwrap();
+        )
+        .unwrap();
 
         let result1 = ingester.ingest_markdown(&md_file, "test").await.unwrap();
         assert!(result1.nodes_created > 0);
@@ -145,14 +146,8 @@ mod ingest_tests {
         let sub = tmp.path().join("subdir");
         std::fs::create_dir_all(&sub).unwrap();
 
-        std::fs::write(
-            tmp.path().join("root.md"),
-            "# Root\n\nRoot content.\n",
-        ).unwrap();
-        std::fs::write(
-            sub.join("nested.md"),
-            "# Nested\n\nNested content.\n",
-        ).unwrap();
+        std::fs::write(tmp.path().join("root.md"), "# Root\n\nRoot content.\n").unwrap();
+        std::fs::write(sub.join("nested.md"), "# Nested\n\nNested content.\n").unwrap();
         // Non-text file should be skipped
         std::fs::write(tmp.path().join("binary.bin"), &[0u8; 50]).unwrap();
 
@@ -177,7 +172,10 @@ mod ingest_tests {
         let md_file = tmp.path().join("tagged.md");
         std::fs::write(&md_file, "# Tagged\n\nTagged content.\n").unwrap();
 
-        ingester.ingest_markdown(&md_file, "my-domain").await.unwrap();
+        ingester
+            .ingest_markdown(&md_file, "my-domain")
+            .await
+            .unwrap();
 
         // Query for domain_tag
         let result = db
@@ -203,11 +201,15 @@ mod ingest_tests {
         std::fs::write(
             &md_file,
             "# One\n\nFirst.\n\n## Two\n\nSecond.\n\n## Three\n\nThird.\n",
-        ).unwrap();
+        )
+        .unwrap();
 
         let result = ingester.ingest_markdown(&md_file, "test").await.unwrap();
         assert!(result.nodes_created > 0, "should report nodes created");
-        assert!(result.chunks_processed > 0, "should report chunks processed");
+        assert!(
+            result.chunks_processed > 0,
+            "should report chunks processed"
+        );
         assert!(result.errors.is_empty(), "should have no errors");
     }
 
@@ -233,7 +235,11 @@ mod ingest_tests {
         for row in &result.rows {
             let hash = row[0].get_str().unwrap_or("");
             assert!(!hash.is_empty(), "content_hash should not be empty");
-            assert!(hash.len() == 64, "SHA-256 hex should be 64 chars, got {}", hash.len());
+            assert!(
+                hash.len() == 64,
+                "SHA-256 hex should be 64 chars, got {}",
+                hash.len()
+            );
         }
     }
 
@@ -247,16 +253,14 @@ mod ingest_tests {
         std::fs::write(
             &md_file,
             "# First\n\nA.\n\n## Second\n\nB.\n\n## Third\n\nC.\n",
-        ).unwrap();
+        )
+        .unwrap();
 
         let src = md_file.to_string_lossy().to_string();
         ingester.ingest_markdown(&md_file, "test").await.unwrap();
 
         let rows = nodes_by_source(&db, &src);
-        let mut indices: Vec<i64> = rows
-            .iter()
-            .filter_map(|r| r[3].get_int())
-            .collect();
+        let mut indices: Vec<i64> = rows.iter().filter_map(|r| r[3].get_int()).collect();
         let sorted = {
             let mut s = indices.clone();
             s.sort();

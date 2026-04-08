@@ -28,7 +28,10 @@ impl FirstPrinciplesEngine {
             }
             let lower = trimmed.to_lowercase();
 
-            if lower.starts_with("axiom:") || lower.starts_with("principle:") || lower.starts_with("fact:") {
+            if lower.starts_with("axiom:")
+                || lower.starts_with("principle:")
+                || lower.starts_with("fact:")
+            {
                 let content = trimmed
                     .splitn(2, ':')
                     .nth(1)
@@ -129,8 +132,7 @@ impl FirstPrinciplesEngine {
 
         // Step 4: Final conclusion linking axioms to query.
         if !axioms.is_empty() {
-            let axiom_summary: Vec<String> =
-                axioms.iter().map(|a| a.statement.clone()).collect();
+            let axiom_summary: Vec<String> = axioms.iter().map(|a| a.statement.clone()).collect();
             let conclusion = format!(
                 "From first principles [{}], we conclude regarding '{}': \
                  the answer must be grounded in these fundamentals, \
@@ -138,10 +140,7 @@ impl FirstPrinciplesEngine {
                 axiom_summary.join("; "),
                 query
             );
-            let min_certainty = axioms
-                .iter()
-                .map(|a| a.certainty)
-                .fold(f64::MAX, f64::min);
+            let min_certainty = axioms.iter().map(|a| a.certainty).fold(f64::MAX, f64::min);
             chain.push(ReasoningStep {
                 step_type: StepType::Conclusion,
                 statement: conclusion,
@@ -217,10 +216,7 @@ impl ReasoningEngine for FirstPrinciplesEngine {
             0.0
         } else {
             // Use the conclusion confidence if available, else average.
-            items
-                .last()
-                .map(|i| i.confidence)
-                .unwrap_or(0.0)
+            items.last().map(|i| i.confidence).unwrap_or(0.0)
         };
 
         Ok(ReasoningOutput {

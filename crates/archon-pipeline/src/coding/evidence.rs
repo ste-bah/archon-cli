@@ -92,7 +92,9 @@ impl std::error::Error for EvidenceValidationError {}
 
 /// Validate that every fact in the evidence pack has a non-empty file
 /// and a line number >= 1. Returns all validation errors if any are found.
-pub fn validate_evidence_pack(pack: &EvidencePack) -> std::result::Result<(), Vec<EvidenceValidationError>> {
+pub fn validate_evidence_pack(
+    pack: &EvidencePack,
+) -> std::result::Result<(), Vec<EvidenceValidationError>> {
     let mut errors = Vec::new();
     for fact in &pack.facts {
         if fact.evidence.file.trim().is_empty() {

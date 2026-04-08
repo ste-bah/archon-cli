@@ -8,9 +8,7 @@
 
 use std::path::PathBuf;
 
-use archon_pipeline::runner::{
-    extract_modified_files, format_leann_results, ToolUseEntry,
-};
+use archon_pipeline::runner::{ToolUseEntry, extract_modified_files, format_leann_results};
 
 // ---------------------------------------------------------------------------
 // format_leann_results tests

@@ -55,11 +55,7 @@ pub fn activation_backward(
 ///
 /// Given `input`, `weights`, and `grad_output` (the upstream gradient on the layer output),
 /// compute gradients for weights, biases, and the input.
-pub fn layer_backward(
-    input: &[f32],
-    weights: &[Vec<f32>],
-    grad_output: &[f32],
-) -> GradientResult {
+pub fn layer_backward(input: &[f32], weights: &[Vec<f32>], grad_output: &[f32]) -> GradientResult {
     let out_dim = weights.len();
     let in_dim = input.len();
 

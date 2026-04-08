@@ -13,8 +13,8 @@ use chrono::Utc;
 
 use archon_memory::MemoryGraph;
 use archon_pipeline::memory::{
-    create_agent_relationship, recall_for_agent, search_for_prompt, store_agent_output,
-    AgentOutputMetadata, MemoryFilters,
+    AgentOutputMetadata, MemoryFilters, create_agent_relationship, recall_for_agent,
+    search_for_prompt, store_agent_output,
 };
 use archon_pipeline::runner::PipelineType;
 
@@ -104,7 +104,9 @@ async fn test_store_and_recall_round_trip() {
     );
 
     // At least one returned entry should contain the original content.
-    let found = recalled.iter().any(|entry| entry.content.contains("REST API"));
+    let found = recalled
+        .iter()
+        .any(|entry| entry.content.contains("REST API"));
     assert!(
         found,
         "Recalled entries should include the previously stored content"
@@ -118,11 +120,7 @@ async fn test_stored_memories_have_correct_tags() {
     let meta = coding_metadata(
         "sess-003",
         1,
-        vec![
-            "pipeline".into(),
-            "coding".into(),
-            "task-analyzer".into(),
-        ],
+        vec!["pipeline".into(), "coding".into(), "task-analyzer".into()],
     );
 
     store_agent_output(

@@ -5,12 +5,9 @@
 //! step capture, weight math accuracy.
 
 use archon_pipeline::learning::sona::{
-    SonaEngine, SonaConfig, StepCaptureService,
-    Trajectory, TrajectoryStep, FeedbackInput, DriftStatus,
-    WeightCheckpoint, SonaError,
-    crc32_checksum, calculate_reward, calculate_gradient,
-    calculate_weight_update, update_fisher_information,
-    cosine_similarity,
+    DriftStatus, FeedbackInput, SonaConfig, SonaEngine, SonaError, StepCaptureService, Trajectory,
+    TrajectoryStep, WeightCheckpoint, calculate_gradient, calculate_reward,
+    calculate_weight_update, cosine_similarity, crc32_checksum, update_fisher_information,
 };
 
 // ---------------------------------------------------------------------------
@@ -39,7 +36,11 @@ mod math_tests {
     fn gradient_formula_matches_typescript() {
         // gradient = (reward - 0.5) * similarity
         let g = calculate_gradient(0.8, 0.6);
-        assert!((g - 0.18).abs() < 1e-6, "(0.8 - 0.5) * 0.6 = 0.18, got {}", g);
+        assert!(
+            (g - 0.18).abs() < 1e-6,
+            "(0.8 - 0.5) * 0.6 = 0.18, got {}",
+            g
+        );
     }
 
     #[test]
@@ -47,7 +48,12 @@ mod math_tests {
         // weight_change = learning_rate * gradient / (1 + regularization * importance)
         let w = calculate_weight_update(0.18, 0.01, 0.1, 0.5);
         let expected = 0.01 * 0.18 / (1.0 + 0.1 * 0.5);
-        assert!((w - expected).abs() < 1e-8, "expected {}, got {}", expected, w);
+        assert!(
+            (w - expected).abs() < 1e-8,
+            "expected {}, got {}",
+            expected,
+            w
+        );
     }
 
     #[test]
@@ -55,7 +61,12 @@ mod math_tests {
         // fisher = decay * old + (1 - decay) * gradient^2
         let f = update_fisher_information(1.0, 0.5, 0.9);
         let expected = 0.9 * 1.0 + 0.1 * 0.25; // 0.925
-        assert!((f - expected).abs() < 1e-8, "expected {}, got {}", expected, f);
+        assert!(
+            (f - expected).abs() < 1e-8,
+            "expected {}, got {}",
+            expected,
+            f
+        );
     }
 
     #[test]
@@ -149,7 +160,11 @@ mod trajectory_tests {
             success_rate: 1.0,
         };
         let result = engine.provide_feedback(&feedback);
-        assert!(result.is_ok(), "feedback should succeed: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "feedback should succeed: {:?}",
+            result.err()
+        );
 
         let updated = engine.get_trajectory(&tid);
         assert!(updated.is_some());
@@ -234,12 +249,14 @@ mod checkpoint_tests {
         engine.save_checkpoint();
 
         // Provide feedback that changes weights
-        engine.provide_feedback(&FeedbackInput {
-            trajectory_id: traj.trajectory_id.clone(),
-            quality: 0.9,
-            l_score: 0.95,
-            success_rate: 1.0,
-        }).unwrap();
+        engine
+            .provide_feedback(&FeedbackInput {
+                trajectory_id: traj.trajectory_id.clone(),
+                quality: 0.9,
+                l_score: 0.95,
+                success_rate: 1.0,
+            })
+            .unwrap();
 
         let weight_after = engine.get_weight("route-a", "default");
         assert!(weight_after != 0.0);
@@ -249,13 +266,19 @@ mod checkpoint_tests {
         assert!(rolled_back, "rollback should succeed");
 
         let weight_restored = engine.get_weight("route-a", "default");
-        assert!((weight_restored - 0.0).abs() < 1e-6, "weight should be restored to 0.0");
+        assert!(
+            (weight_restored - 0.0).abs() < 1e-6,
+            "weight should be restored to 0.0"
+        );
     }
 
     #[test]
     fn rollback_with_no_checkpoints_returns_false() {
         let mut engine = SonaEngine::new(default_config());
-        assert!(!engine.rollback(), "rollback with no checkpoints should return false");
+        assert!(
+            !engine.rollback(),
+            "rollback with no checkpoints should return false"
+        );
     }
 
     #[test]
@@ -302,7 +325,10 @@ mod step_capture_tests {
         let _ = service.end_capture("traj-1");
 
         let steps = service.end_capture("traj-1");
-        assert!(steps.is_empty(), "buffer should be cleared after end_capture");
+        assert!(
+            steps.is_empty(),
+            "buffer should be cleared after end_capture"
+        );
     }
 
     #[test]
@@ -314,6 +340,9 @@ mod step_capture_tests {
         service.capture_step("traj-1", "act", &large_obs, 0.5);
 
         let steps = service.end_capture("traj-1");
-        assert!(steps[0].observation.len() <= 10_000, "observation should be truncated");
+        assert!(
+            steps[0].observation.len() <= 10_000,
+            "observation should be truncated"
+        );
     }
 }

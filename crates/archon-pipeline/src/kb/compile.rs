@@ -134,7 +134,10 @@ impl Compiler {
                 if msg.contains("already exists") || msg.contains("conflicts") {
                     // Idempotent — relation already present
                 } else {
-                    return Err(anyhow::anyhow!("compile_state schema creation failed: {}", msg));
+                    return Err(anyhow::anyhow!(
+                        "compile_state schema creation failed: {}",
+                        msg
+                    ));
                 }
             }
         }
@@ -146,24 +149,33 @@ impl Compiler {
     // -----------------------------------------------------------------------
 
     fn get_last_compiled_at(&self) -> Result<f64> {
-        let result = self.db.run_script(
-            "?[value] := *compile_state{key, value}, key = 'last_compiled_at'",
-            Default::default(),
-            ScriptMutability::Immutable,
-        ).map_err(|e| anyhow::anyhow!("read compile_state failed: {}", e))?;
+        let result = self
+            .db
+            .run_script(
+                "?[value] := *compile_state{key, value}, key = 'last_compiled_at'",
+                Default::default(),
+                ScriptMutability::Immutable,
+            )
+            .map_err(|e| anyhow::anyhow!("read compile_state failed: {}", e))?;
 
-        Ok(result.rows.first().and_then(|r| r[0].get_float()).unwrap_or(0.0))
+        Ok(result
+            .rows
+            .first()
+            .and_then(|r| r[0].get_float())
+            .unwrap_or(0.0))
     }
 
     fn set_last_compiled_at(&self, ts: f64) -> Result<()> {
         let mut params = BTreeMap::new();
         params.insert("ts".to_string(), DataValue::from(ts));
-        self.db.run_script(
-            "?[key, value] <- [['last_compiled_at', $ts]] \
+        self.db
+            .run_script(
+                "?[key, value] <- [['last_compiled_at', $ts]] \
              :put compile_state { key => value }",
-            params,
-            ScriptMutability::Mutable,
-        ).map_err(|e| anyhow::anyhow!("write compile_state failed: {}", e))?;
+                params,
+                ScriptMutability::Mutable,
+            )
+            .map_err(|e| anyhow::anyhow!("write compile_state failed: {}", e))?;
         Ok(())
     }
 
@@ -183,7 +195,10 @@ impl Compiler {
         let ts = now_f64();
         let mut params = BTreeMap::new();
         params.insert("nid".to_string(), DataValue::from(node_id));
-        params.insert("ntype".to_string(), DataValue::from(node_type_str(node_type)));
+        params.insert(
+            "ntype".to_string(),
+            DataValue::from(node_type_str(node_type)),
+        );
         params.insert("title".to_string(), DataValue::from(title));
         params.insert("content".to_string(), DataValue::from(content));
         params.insert("source".to_string(), DataValue::from(source));
@@ -212,16 +227,21 @@ impl Compiler {
         params.insert("eid".to_string(), DataValue::from(edge_id.as_str()));
         params.insert("src".to_string(), DataValue::from(source_node_id));
         params.insert("tgt".to_string(), DataValue::from(target_node_id));
-        params.insert("etype".to_string(), DataValue::from(edge_type_str(edge_type)));
+        params.insert(
+            "etype".to_string(),
+            DataValue::from(edge_type_str(edge_type)),
+        );
         params.insert("ts".to_string(), DataValue::from(ts));
 
-        self.db.run_script(
-            "?[edge_id, source_node_id, target_node_id, edge_type, created_at] \
+        self.db
+            .run_script(
+                "?[edge_id, source_node_id, target_node_id, edge_type, created_at] \
              <- [[$eid, $src, $tgt, $etype, $ts]] \
              :put kb_edges { edge_id => source_node_id, target_node_id, edge_type, created_at }",
-            params,
-            ScriptMutability::Mutable,
-        ).map_err(|e| anyhow::anyhow!("insert kb_edge failed: {}", e))?;
+                params,
+                ScriptMutability::Mutable,
+            )
+            .map_err(|e| anyhow::anyhow!("insert kb_edge failed: {}", e))?;
         Ok(())
     }
 
@@ -308,16 +328,22 @@ impl Compiler {
                     });
                 }
                 Err(e) => {
-                    warn!("compile_document failed for node {}: {}", raw_node.node_id, e);
+                    warn!(
+                        "compile_document failed for node {}: {}",
+                        raw_node.node_id, e
+                    );
                 }
             }
         }
 
         // Extract concepts from all compiled nodes
-        let concepts = self.extract_concepts(&compiled_nodes).await.unwrap_or_else(|e| {
-            warn!("extract_concepts failed: {}", e);
-            vec![]
-        });
+        let concepts = self
+            .extract_concepts(&compiled_nodes)
+            .await
+            .unwrap_or_else(|e| {
+                warn!("extract_concepts failed: {}", e);
+                vec![]
+            });
         let concepts_extracted = concepts.len();
         total_edges += concepts_extracted; // each concept gets a ConceptOf edge (at minimum)
 
@@ -329,10 +355,13 @@ impl Compiler {
             .collect();
 
         // Build cross-references (errors here are non-fatal)
-        let xref_count = self.build_cross_references(&concept_ids).await.unwrap_or_else(|e| {
-            warn!("build_cross_references failed: {}", e);
-            0
-        });
+        let xref_count = self
+            .build_cross_references(&concept_ids)
+            .await
+            .unwrap_or_else(|e| {
+                warn!("build_cross_references failed: {}", e);
+                0
+            });
         total_edges += xref_count;
 
         // Update the index node
@@ -444,12 +473,13 @@ impl Compiler {
 
                     // ConceptOf edges to source nodes
                     for source_id in &concept.source_nodes {
-                        if let Err(e) = self.insert_kb_edge(
-                            &concept_node_id,
-                            source_id,
-                            &KbEdgeType::ConceptOf,
-                        ) {
-                            warn!("Failed to insert ConceptOf edge for concept '{}' → '{}': {}", concept.name, source_id, e);
+                        if let Err(e) =
+                            self.insert_kb_edge(&concept_node_id, source_id, &KbEdgeType::ConceptOf)
+                        {
+                            warn!(
+                                "Failed to insert ConceptOf edge for concept '{}' → '{}': {}",
+                                concept.name, source_id, e
+                            );
                         }
                     }
                 }
@@ -499,7 +529,10 @@ impl Compiler {
 
                     if let (Some(src), Some(tgt)) = (src_id, tgt_id) {
                         if let Err(e) = self.insert_kb_edge(src, tgt, &KbEdgeType::CrossReference) {
-                            warn!("Failed to insert CrossReference edge '{}' → '{}': {}", xref.source, xref.target, e);
+                            warn!(
+                                "Failed to insert CrossReference edge '{}' → '{}': {}",
+                                xref.source, xref.target, e
+                            );
                         } else {
                             count += 1;
                         }

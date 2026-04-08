@@ -125,10 +125,22 @@ impl DescEpisodeStore {
             .collect();
 
         let mut p = BTreeMap::new();
-        p.insert("eid".to_string(), DataValue::from(episode.episode_id.as_str()));
-        p.insert("sid".to_string(), DataValue::from(episode.session_id.as_str()));
-        p.insert("desc".to_string(), DataValue::from(episode.description.as_str()));
-        p.insert("outcome".to_string(), DataValue::from(episode.outcome.as_str()));
+        p.insert(
+            "eid".to_string(),
+            DataValue::from(episode.episode_id.as_str()),
+        );
+        p.insert(
+            "sid".to_string(),
+            DataValue::from(episode.session_id.as_str()),
+        );
+        p.insert(
+            "desc".to_string(),
+            DataValue::from(episode.description.as_str()),
+        );
+        p.insert(
+            "outcome".to_string(),
+            DataValue::from(episode.outcome.as_str()),
+        );
         p.insert("reward".to_string(), DataValue::from(episode.reward));
         p.insert("tags".to_string(), DataValue::List(tags));
         p.insert("ts".to_string(), DataValue::from(now as i64));
@@ -149,9 +161,18 @@ impl DescEpisodeStore {
         let traj = episode.trajectory_id.as_deref().unwrap_or("");
 
         let mut m = BTreeMap::new();
-        m.insert("eid".to_string(), DataValue::from(episode.episode_id.as_str()));
-        m.insert("tt".to_string(), DataValue::from(episode.task_type.as_str()));
-        m.insert("sol".to_string(), DataValue::from(episode.solution.as_str()));
+        m.insert(
+            "eid".to_string(),
+            DataValue::from(episode.episode_id.as_str()),
+        );
+        m.insert(
+            "tt".to_string(),
+            DataValue::from(episode.task_type.as_str()),
+        );
+        m.insert(
+            "sol".to_string(),
+            DataValue::from(episode.solution.as_str()),
+        );
         m.insert("qs".to_string(), DataValue::from(episode.quality_score));
         m.insert("tid".to_string(), DataValue::from(traj));
         m.insert("ts".to_string(), DataValue::from(now as i64));
@@ -332,7 +353,11 @@ impl InjectionFilter {
         let mut ranked: Vec<RankedEpisode> = episodes
             .into_iter()
             .map(|ep| {
-                let similarity = if ep.task_type == task_type { 1.0_f64 } else { 0.5_f64 };
+                let similarity = if ep.task_type == task_type {
+                    1.0_f64
+                } else {
+                    0.5_f64
+                };
                 let score = ep.quality_score * similarity;
                 RankedEpisode { episode: ep, score }
             })
@@ -400,14 +425,8 @@ impl QualityMonitor {
         let qualities: Vec<f64> = episodes.iter().map(|e| e.quality_score).collect();
         let sum: f64 = qualities.iter().sum();
         let mean = sum / qualities.len() as f64;
-        let min = qualities
-            .iter()
-            .cloned()
-            .fold(f64::INFINITY, f64::min);
-        let max = qualities
-            .iter()
-            .cloned()
-            .fold(f64::NEG_INFINITY, f64::max);
+        let min = qualities.iter().cloned().fold(f64::INFINITY, f64::min);
+        let max = qualities.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
 
         Ok(QualityReport {
             mean_quality: mean,

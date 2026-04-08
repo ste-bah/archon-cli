@@ -12,12 +12,12 @@ use std::time::Instant;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 
-use crate::coding::agents::{CodingAgent, ToolAccess, AGENTS};
-use crate::learning::integration::LearningIntegration;
+use crate::coding::agents::{AGENTS, CodingAgent, ToolAccess};
 use crate::coding::algorithm::select_algorithm;
-use crate::coding::quality::{phase_threshold, CodingQualityCalculator};
+use crate::coding::quality::{CodingQualityCalculator, phase_threshold};
 use crate::coding::rlm::RlmStore;
-use crate::prompt_cap::{truncate_prompt, PromptLayer, TruncationPriority};
+use crate::learning::integration::LearningIntegration;
+use crate::prompt_cap::{PromptLayer, TruncationPriority, truncate_prompt};
 use crate::runner::{
     AgentInfo, AgentResult, NextAgent, PipelineFacade, PipelineResult, PipelineSession,
     PipelineType, QualityScore, ToolAccessLevel,
@@ -308,13 +308,17 @@ impl PipelineFacade for CodingFacade {
         &self,
         session: &PipelineSession,
         agent: &AgentInfo,
-    ) -> Result<(Vec<serde_json::Value>, Vec<serde_json::Value>, Vec<serde_json::Value>)> {
+    ) -> Result<(
+        Vec<serde_json::Value>,
+        Vec<serde_json::Value>,
+        Vec<serde_json::Value>,
+    )> {
         // Build layers L1-L10
         let layers = self.build_layers(session, agent)?;
 
         // L11: apply prompt_cap truncation
-        let truncated = truncate_prompt(layers, MODEL_CONTEXT_WINDOW)
-            .context("prompt truncation failed")?;
+        let truncated =
+            truncate_prompt(layers, MODEL_CONTEXT_WINDOW).context("prompt truncation failed")?;
 
         // Assemble the final prompt from surviving layers
         let assembled: String = truncated
@@ -361,10 +365,7 @@ impl PipelineFacade for CodingFacade {
         );
         dimensions.insert("documentation".to_string(), breakdown.documentation);
         dimensions.insert("test_coverage".to_string(), breakdown.test_coverage);
-        dimensions.insert(
-            "phase_threshold".to_string(),
-            phase_threshold(agent.phase),
-        );
+        dimensions.insert("phase_threshold".to_string(), phase_threshold(agent.phase));
 
         Ok(QualityScore {
             overall: breakdown.composite,
@@ -402,11 +403,7 @@ impl PipelineFacade for CodingFacade {
 
     /// Produce the final pipeline result once all agents have finished.
     async fn finalize(&self, session: PipelineSession) -> Result<PipelineResult> {
-        let total_cost: f64 = session
-            .agent_results
-            .iter()
-            .map(|(_, r)| r.cost_usd)
-            .sum();
+        let total_cost: f64 = session.agent_results.iter().map(|(_, r)| r.cost_usd).sum();
 
         let duration = session.started_at.elapsed();
 
@@ -495,11 +492,14 @@ mod tests {
                 assert_eq!(info.phase, 1);
                 assert!(info.critical);
             }
-            other => panic!("expected Continue, got {:?}", match other {
-                NextAgent::Done => "Done",
-                NextAgent::Skip(_) => "Skip",
-                _ => "Unknown",
-            }),
+            other => panic!(
+                "expected Continue, got {:?}",
+                match other {
+                    NextAgent::Done => "Done",
+                    NextAgent::Skip(_) => "Skip",
+                    _ => "Unknown",
+                }
+            ),
         }
     }
 
@@ -542,8 +542,7 @@ mod tests {
             .expect("should have a phase 4 agent");
         let info = agent_to_info(phase4_agent);
 
-        let (messages, system, tools) =
-            facade.build_prompt(&session, &info).await.unwrap();
+        let (messages, system, tools) = facade.build_prompt(&session, &info).await.unwrap();
 
         // messages should have one user message
         assert_eq!(messages.len(), 1);
@@ -588,7 +587,10 @@ mod tests {
 
         // This should succeed without errors even though layers 5-9 are inactive
         let result = facade.build_prompt(&session, &info).await;
-        assert!(result.is_ok(), "build_prompt should not error with inactive learning layers");
+        assert!(
+            result.is_ok(),
+            "build_prompt should not error with inactive learning layers"
+        );
 
         // Verify the prompt does NOT contain learning system markers
         let (messages, _, _) = result.unwrap();
@@ -646,7 +648,8 @@ mod tests {
         let session = facade.init_session("task").await.unwrap();
         let info = agent_to_info(&AGENTS[0]);
 
-        let result = make_result(r#"
+        let result = make_result(
+            r#"
 //! Module documentation
 /// Public function
 pub fn process(input: &str) -> String {
@@ -666,7 +669,8 @@ mod tests {
         assert_eq!(process("hello"), "HELLO");
     }
 }
-"#);
+"#,
+        );
 
         let score = facade
             .score_quality(&session, &info, &result)

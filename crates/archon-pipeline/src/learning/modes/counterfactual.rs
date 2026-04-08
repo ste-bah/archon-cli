@@ -61,8 +61,7 @@ impl CounterfactualEngine {
 
             // Compute relevance: how many words are shared between the
             // hypothetical and this factor.
-            let hyp_words: std::collections::HashSet<&str> =
-                hyp_lower.split_whitespace().collect();
+            let hyp_words: std::collections::HashSet<&str> = hyp_lower.split_whitespace().collect();
             let factor_words: std::collections::HashSet<&str> =
                 factor_lower.split_whitespace().collect();
             let shared = hyp_words.intersection(&factor_words).count();

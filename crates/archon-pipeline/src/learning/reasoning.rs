@@ -194,9 +194,7 @@ impl ReasoningBank {
                 self.reason_pattern_match(request, max_results, threshold)
             }
             ReasoningMode::CausalInference => self.reason_causal(request, max_results),
-            ReasoningMode::Contextual => {
-                self.reason_contextual(request, max_results, threshold)
-            }
+            ReasoningMode::Contextual => self.reason_contextual(request, max_results, threshold),
             ReasoningMode::Hybrid => self.reason_hybrid(request, max_results, threshold),
         };
 
@@ -223,10 +221,7 @@ impl ReasoningBank {
         max_results: usize,
         threshold: f64,
     ) -> ReasoningResponse {
-        let task_type = request
-            .task_type
-            .clone()
-            .unwrap_or(TaskType::Coding);
+        let task_type = request.task_type.clone().unwrap_or(TaskType::Coding);
         let patterns = self.pattern_store.find_by_type(&task_type);
 
         let mut results: Vec<PatternMatchResult> = patterns
@@ -270,11 +265,7 @@ impl ReasoningBank {
         }
     }
 
-    fn reason_causal(
-        &self,
-        request: &ReasoningRequest,
-        max_results: usize,
-    ) -> ReasoningResponse {
+    fn reason_causal(&self, request: &ReasoningRequest, max_results: usize) -> ReasoningResponse {
         let causal = match self.causal_memory.as_ref() {
             Some(cm) => cm,
             None => {

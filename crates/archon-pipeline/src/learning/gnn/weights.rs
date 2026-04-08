@@ -25,7 +25,11 @@ impl std::fmt::Display for WeightError {
             WeightError::InvalidMagic => write!(f, "Invalid magic bytes in weight file"),
             WeightError::VersionMismatch(v) => write!(f, "Version mismatch: got {}", v),
             WeightError::CrcMismatch { expected, actual } => {
-                write!(f, "CRC32 mismatch: expected {:#010x}, got {:#010x}", expected, actual)
+                write!(
+                    f,
+                    "CRC32 mismatch: expected {:#010x}, got {:#010x}",
+                    expected, actual
+                )
             }
             WeightError::InvalidData(msg) => write!(f, "Invalid data: {}", msg),
         }

@@ -3,10 +3,12 @@
 //! Validates: WiringPlan schema, obligation status tracking,
 //! coverage validation against TaskContract, persistence, and gate checks.
 
-use archon_pipeline::coding::contract::{TaskContract, AcceptanceCriterion, WiringRequirement, WiringType, TestRequirement, TestType};
+use archon_pipeline::coding::contract::{
+    AcceptanceCriterion, TaskContract, TestRequirement, TestType, WiringRequirement, WiringType,
+};
 use archon_pipeline::coding::wiring::{
-    WiringPlan, WiringObligation, WiringAction, ObligationStatus,
-    WiringPlanApprovedGate, validate_coverage, save_wiring_plan, load_wiring_plan,
+    ObligationStatus, WiringAction, WiringObligation, WiringPlan, WiringPlanApprovedGate,
+    load_wiring_plan, save_wiring_plan, validate_coverage,
 };
 
 // ---------------------------------------------------------------------------
@@ -87,7 +89,10 @@ mod wiring_tests {
         assert_eq!(deserialized.task_id, "TEST-001");
         assert_eq!(deserialized.obligations.len(), 2);
         assert_eq!(deserialized.obligations[0].id, "WO-001");
-        assert_eq!(deserialized.obligations[1].status, ObligationStatus::Pending);
+        assert_eq!(
+            deserialized.obligations[1].status,
+            ObligationStatus::Pending
+        );
     }
 
     #[test]
@@ -133,7 +138,11 @@ mod wiring_tests {
         let plan = sample_plan("TEST-001");
 
         let result = validate_coverage(&contract, &plan);
-        assert!(result.is_ok(), "all wiring should be covered: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "all wiring should be covered: {:?}",
+            result.err()
+        );
     }
 
     #[test]
@@ -155,7 +164,10 @@ mod wiring_tests {
         };
 
         let result = validate_coverage(&contract, &plan);
-        assert!(result.is_err(), "should fail when wiring requirement has no matching obligation");
+        assert!(
+            result.is_err(),
+            "should fail when wiring requirement has no matching obligation"
+        );
         let errors = result.unwrap_err();
         assert!(!errors.is_empty());
     }
@@ -193,7 +205,10 @@ mod wiring_tests {
         };
 
         let result = WiringPlanApprovedGate::check(&contract, &plan);
-        assert!(!result.passed, "gate should fail with no obligations covering contract wiring");
+        assert!(
+            !result.passed,
+            "gate should fail with no obligations covering contract wiring"
+        );
         assert!(!result.errors.is_empty());
     }
 
@@ -266,9 +281,16 @@ mod wiring_tests {
     fn wiring_obligation_agent_in_phase_3() {
         use archon_pipeline::coding::{AGENTS, Phase};
         let wiring_agent = AGENTS.iter().find(|a| a.key == "wiring-obligation-agent");
-        assert!(wiring_agent.is_some(), "wiring-obligation-agent should exist in AGENTS");
+        assert!(
+            wiring_agent.is_some(),
+            "wiring-obligation-agent should exist in AGENTS"
+        );
         let agent = wiring_agent.unwrap();
-        assert_eq!(agent.phase, Phase::WiringPlan, "should be Phase 3 WiringPlan");
+        assert_eq!(
+            agent.phase,
+            Phase::WiringPlan,
+            "should be Phase 3 WiringPlan"
+        );
         assert!(agent.critical, "should be critical");
     }
 }

@@ -7,8 +7,8 @@ use std::path::Path;
 
 use cozo::{DataValue, DbInstance, ScriptMutability};
 
-use archon_pipeline::kb::schema::ensure_kb_schema;
 use archon_pipeline::kb::KnowledgeBase;
+use archon_pipeline::kb::schema::ensure_kb_schema;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -19,7 +19,14 @@ fn mem_db() -> DbInstance {
 }
 
 /// Insert a test node directly into CozoDB.
-fn insert_node(db: &DbInstance, id: &str, node_type: &str, source: &str, title: &str, content: &str) {
+fn insert_node(
+    db: &DbInstance,
+    id: &str,
+    node_type: &str,
+    source: &str,
+    title: &str,
+    content: &str,
+) {
     let hash = format!("hash_{}", id);
     let mut params = BTreeMap::new();
     params.insert("nid".to_string(), DataValue::from(id));
@@ -55,24 +62,29 @@ fn insert_edge(db: &DbInstance, edge_id: &str, src_id: &str, tgt_id: &str, edge_
          :put kb_edges { edge_id => source_node_id, target_node_id, edge_type, created_at }",
         params,
         ScriptMutability::Mutable,
-    ).expect("insert test edge");
+    )
+    .expect("insert test edge");
 }
 
 fn count_nodes(db: &DbInstance) -> usize {
-    let result = db.run_script(
-        "?[count(node_id)] := *kb_nodes{node_id}",
-        Default::default(),
-        ScriptMutability::Immutable,
-    ).unwrap();
+    let result = db
+        .run_script(
+            "?[count(node_id)] := *kb_nodes{node_id}",
+            Default::default(),
+            ScriptMutability::Immutable,
+        )
+        .unwrap();
     result.rows[0][0].get_int().unwrap_or(0) as usize
 }
 
 fn count_edges(db: &DbInstance) -> usize {
-    let result = db.run_script(
-        "?[count(edge_id)] := *kb_edges{edge_id}",
-        Default::default(),
-        ScriptMutability::Immutable,
-    ).unwrap();
+    let result = db
+        .run_script(
+            "?[count(edge_id)] := *kb_edges{edge_id}",
+            Default::default(),
+            ScriptMutability::Immutable,
+        )
+        .unwrap();
     result.rows[0][0].get_int().unwrap_or(0) as usize
 }
 
@@ -152,7 +164,11 @@ mod manage_tests {
 
         kb.delete("parent").await.expect("delete parent");
         assert_eq!(count_nodes(&db), 1, "only child should remain");
-        assert_eq!(count_edges(&db), 0, "all edges involving parent should be gone");
+        assert_eq!(
+            count_edges(&db),
+            0,
+            "all edges involving parent should be gone"
+        );
     }
 
     #[tokio::test]
@@ -162,7 +178,14 @@ mod manage_tests {
 
         // Raw node -> compiled node derived from it
         insert_node(&db, "raw1", "raw", "/r.md", "Raw", "raw content");
-        insert_node(&db, "comp1", "compiled", "/comp.md", "Compiled", "compiled content");
+        insert_node(
+            &db,
+            "comp1",
+            "compiled",
+            "/comp.md",
+            "Compiled",
+            "compiled content",
+        );
         insert_edge(&db, "e1", "comp1", "raw1", "DerivedFrom");
 
         assert_eq!(count_nodes(&db), 2);
@@ -196,12 +219,21 @@ mod manage_tests {
             .unwrap()
             .filter_map(|e| e.ok())
             .collect();
-        assert!(!files.is_empty(), "raw/ should contain at least one exported file");
+        assert!(
+            !files.is_empty(),
+            "raw/ should contain at least one exported file"
+        );
 
         // File should contain the content
         let file_content = std::fs::read_to_string(files[0].path()).unwrap();
-        assert!(file_content.contains("Export content"), "exported file should contain node content");
-        assert!(file_content.contains("node_id:"), "exported file should have frontmatter");
+        assert!(
+            file_content.contains("Export content"),
+            "exported file should contain node content"
+        );
+        assert!(
+            file_content.contains("node_id:"),
+            "exported file should have frontmatter"
+        );
     }
 
     #[tokio::test]
@@ -219,9 +251,30 @@ mod manage_tests {
         let db = mem_db();
         let kb = test_kb(db.clone());
 
-        insert_node(&db, "s1", "raw", "/a.md", "Rust Guide", "Learn Rust programming");
-        insert_node(&db, "s2", "raw", "/b.md", "Python Guide", "Learn Python scripting");
-        insert_node(&db, "s3", "compiled", "/c.md", "Rust Advanced", "Advanced Rust topics");
+        insert_node(
+            &db,
+            "s1",
+            "raw",
+            "/a.md",
+            "Rust Guide",
+            "Learn Rust programming",
+        );
+        insert_node(
+            &db,
+            "s2",
+            "raw",
+            "/b.md",
+            "Python Guide",
+            "Learn Python scripting",
+        );
+        insert_node(
+            &db,
+            "s3",
+            "compiled",
+            "/c.md",
+            "Rust Advanced",
+            "Advanced Rust topics",
+        );
 
         let results = kb.search("Rust", 10).await.expect("search");
         assert_eq!(results.len(), 2, "should find 2 nodes matching 'Rust'");
@@ -230,6 +283,9 @@ mod manage_tests {
         assert_eq!(results.len(), 1, "should find 1 node matching 'Python'");
 
         let results = kb.search("nonexistent_term", 10).await.expect("search");
-        assert!(results.is_empty(), "should find no nodes for non-matching query");
+        assert!(
+            results.is_empty(),
+            "should find no nodes for non-matching query"
+        );
     }
 }

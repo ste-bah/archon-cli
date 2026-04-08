@@ -18,7 +18,7 @@ use crate::runner::{
 
 use crate::learning::integration::PhDLearningIntegration;
 
-use super::agents::{get_agent_by_key, ResearchAgent, RESEARCH_AGENTS};
+use super::agents::{RESEARCH_AGENTS, ResearchAgent, get_agent_by_key};
 use super::prompt_builder::ResearchPromptBuilder;
 use super::quality::PhDQualityCalculator;
 
@@ -156,7 +156,11 @@ impl PipelineFacade for ResearchFacade {
         &self,
         session: &PipelineSession,
         agent: &AgentInfo,
-    ) -> Result<(Vec<serde_json::Value>, Vec<serde_json::Value>, Vec<serde_json::Value>)> {
+    ) -> Result<(
+        Vec<serde_json::Value>,
+        Vec<serde_json::Value>,
+        Vec<serde_json::Value>,
+    )> {
         let research_agent = get_agent_by_key(&agent.key)
             .with_context(|| format!("Unknown research agent key: {}", agent.key))?;
 
@@ -204,14 +208,26 @@ impl PipelineFacade for ResearchFacade {
         let assessment = self.quality_calculator.assess_quality(&result.output, &ctx);
 
         let mut dimensions = HashMap::new();
-        dimensions.insert("content_depth".to_string(), assessment.breakdown.content_depth);
+        dimensions.insert(
+            "content_depth".to_string(),
+            assessment.breakdown.content_depth,
+        );
         dimensions.insert(
             "structural_quality".to_string(),
             assessment.breakdown.structural_quality,
         );
-        dimensions.insert("research_rigor".to_string(), assessment.breakdown.research_rigor);
-        dimensions.insert("completeness".to_string(), assessment.breakdown.completeness);
-        dimensions.insert("format_quality".to_string(), assessment.breakdown.format_quality);
+        dimensions.insert(
+            "research_rigor".to_string(),
+            assessment.breakdown.research_rigor,
+        );
+        dimensions.insert(
+            "completeness".to_string(),
+            assessment.breakdown.completeness,
+        );
+        dimensions.insert(
+            "format_quality".to_string(),
+            assessment.breakdown.format_quality,
+        );
 
         Ok(QualityScore {
             overall: assessment.score,
@@ -321,7 +337,10 @@ mod tests {
             NextAgent::Continue(agent) => {
                 assert_eq!(agent.key, "step-back-analyzer");
             }
-            other => panic!("Expected Continue, got {:?}", matches!(other, NextAgent::Done)),
+            other => panic!(
+                "Expected Continue, got {:?}",
+                matches!(other, NextAgent::Done)
+            ),
         }
 
         // Simulate 46 completed agents
@@ -350,7 +369,10 @@ mod tests {
              Evidence suggests correlation between variables.",
         );
 
-        let score = facade.score_quality(&session, &agent_info, &result).await.unwrap();
+        let score = facade
+            .score_quality(&session, &agent_info, &result)
+            .await
+            .unwrap();
 
         assert!(score.overall >= 0.0 && score.overall <= 0.95);
         assert!(score.dimensions.contains_key("content_depth"));

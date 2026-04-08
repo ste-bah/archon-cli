@@ -85,7 +85,10 @@ struct MockSummaryLlm;
 #[async_trait::async_trait]
 impl KbLlmClient for MockSummaryLlm {
     async fn complete(&self, prompt: &str) -> Result<String> {
-        if prompt.contains("concepts") || prompt.contains("Concepts") || prompt.contains("Extract key concepts") {
+        if prompt.contains("concepts")
+            || prompt.contains("Concepts")
+            || prompt.contains("Extract key concepts")
+        {
             // Concept extraction response
             Ok(r#"[{"name": "TestConcept", "explanation": "A concept for testing.", "source_nodes": []}]"#.to_string())
         } else if prompt.contains("relationship") || prompt.contains("relationships") {
@@ -148,13 +151,26 @@ mod compile_tests {
     #[tokio::test]
     async fn compile_generates_summaries_for_raw_nodes() {
         let db = setup_db();
-        insert_raw_node(&db, "node-001", "Test Document", "This is test content for the document.");
-        insert_raw_node(&db, "node-002", "Another Doc", "More content for another document.");
+        insert_raw_node(
+            &db,
+            "node-001",
+            "Test Document",
+            "This is test content for the document.",
+        );
+        insert_raw_node(
+            &db,
+            "node-002",
+            "Another Doc",
+            "More content for another document.",
+        );
 
         let compiler = Compiler::new(db.clone(), Box::new(MockSummaryLlm)).unwrap();
         let metrics = compiler.compile().await.expect("compile");
 
-        assert_eq!(metrics.summaries_generated, 2, "should generate 2 summaries");
+        assert_eq!(
+            metrics.summaries_generated, 2,
+            "should generate 2 summaries"
+        );
         assert!(metrics.duration_secs >= 0.0);
 
         // Compiled nodes should exist
@@ -166,15 +182,28 @@ mod compile_tests {
     #[tokio::test]
     async fn compile_extracts_concepts() {
         let db = setup_db();
-        insert_raw_node(&db, "node-c01", "Concept Doc", "This document discusses important concepts.");
+        insert_raw_node(
+            &db,
+            "node-c01",
+            "Concept Doc",
+            "This document discusses important concepts.",
+        );
 
         let compiler = Compiler::new(db.clone(), Box::new(MockSummaryLlm)).unwrap();
         let metrics = compiler.compile().await.expect("compile");
 
-        assert!(metrics.concepts_extracted >= 1, "should extract at least 1 concept, got {}", metrics.concepts_extracted);
+        assert!(
+            metrics.concepts_extracted >= 1,
+            "should extract at least 1 concept, got {}",
+            metrics.concepts_extracted
+        );
 
         let concept_count = count_nodes_of_type(&db, "concept");
-        assert!(concept_count >= 1, "should have concept nodes in DB, got {}", concept_count);
+        assert!(
+            concept_count >= 1,
+            "should have concept nodes in DB, got {}",
+            concept_count
+        );
     }
 
     // Test 4: Compile creates provenance edges from compiled nodes to source raw nodes
@@ -187,7 +216,11 @@ mod compile_tests {
         compiler.compile().await.expect("compile");
 
         let provenance_count = count_edges_of_type(&db, "Provenance");
-        assert!(provenance_count >= 1, "should have >= 1 provenance edge, got {}", provenance_count);
+        assert!(
+            provenance_count >= 1,
+            "should have >= 1 provenance edge, got {}",
+            provenance_count
+        );
     }
 
     // Test 5: Incremental compilation — only processes nodes added after last compile
@@ -204,7 +237,10 @@ mod compile_tests {
 
         // Second compile with no new nodes — should be no-op
         let metrics2 = compiler.compile().await.expect("second compile");
-        assert_eq!(metrics2.summaries_generated, 0, "second compile: no new summaries, already compiled");
+        assert_eq!(
+            metrics2.summaries_generated, 0,
+            "second compile: no new summaries, already compiled"
+        );
 
         // Add a new node with a slightly later timestamp
         tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
@@ -212,7 +248,10 @@ mod compile_tests {
 
         // Third compile should only process the new node
         let metrics3 = compiler.compile().await.expect("third compile");
-        assert_eq!(metrics3.summaries_generated, 1, "third compile: only 1 new summary");
+        assert_eq!(
+            metrics3.summaries_generated, 1,
+            "third compile: only 1 new summary"
+        );
     }
 
     // Test 6: LLM parse failure is logged and skipped (not fatal)
@@ -224,11 +263,17 @@ mod compile_tests {
         let compiler = Compiler::new(db.clone(), Box::new(BadJsonLlm)).unwrap();
         // Should not panic or return an error — just log and continue
         let result = compiler.compile().await;
-        assert!(result.is_ok(), "compile should succeed even when LLM returns bad JSON");
+        assert!(
+            result.is_ok(),
+            "compile should succeed even when LLM returns bad JSON"
+        );
 
         // The compiled node should still be created (using raw response as fallback)
         let compiled_count = count_nodes_of_type(&db, "compiled");
-        assert!(compiled_count >= 1, "should still create compiled node with fallback content");
+        assert!(
+            compiled_count >= 1,
+            "should still create compiled node with fallback content"
+        );
     }
 
     // Test 7: Index node created/updated after compile
@@ -240,7 +285,10 @@ mod compile_tests {
         let compiler = Compiler::new(db.clone(), Box::new(MockSummaryLlm)).unwrap();
         let metrics = compiler.compile().await.expect("compile");
 
-        assert!(metrics.index_updated, "index should be updated after compile");
+        assert!(
+            metrics.index_updated,
+            "index should be updated after compile"
+        );
 
         let index_count = count_nodes_of_type(&db, "index");
         assert_eq!(index_count, 1, "should have exactly 1 index node");
@@ -257,16 +305,25 @@ mod compile_tests {
         let compiler = Compiler::new(db.clone(), Box::new(MockSummaryLlm)).unwrap();
         let metrics = compiler.compile().await.expect("compile");
 
-        assert_eq!(metrics.summaries_generated, 3, "should generate 3 summaries");
-        assert!(metrics.edges_created >= 3, "should have >= 3 provenance edges (one per compiled node)");
-        assert!(metrics.duration_secs >= 0.0, "duration should be non-negative");
+        assert_eq!(
+            metrics.summaries_generated, 3,
+            "should generate 3 summaries"
+        );
+        assert!(
+            metrics.edges_created >= 3,
+            "should have >= 3 provenance edges (one per compiled node)"
+        );
+        assert!(
+            metrics.duration_secs >= 0.0,
+            "duration should be non-negative"
+        );
     }
 
     // Test 9: compile_document produces correct DocumentCompilation
     #[tokio::test]
     async fn compile_document_returns_correct_structure() {
-        use archon_pipeline::kb::schema::KbNode;
         use archon_pipeline::kb::KbNodeType;
+        use archon_pipeline::kb::schema::KbNode;
 
         let db = setup_db();
         let compiler = Compiler::new(db.clone(), Box::new(MockSummaryLlm)).unwrap();
@@ -284,8 +341,14 @@ mod compile_tests {
             updated_at: now_secs(),
         };
 
-        let result = compiler.compile_document(&node).await.expect("compile_document");
-        assert!(!result.node_id.is_empty(), "compiled node_id should not be empty");
+        let result = compiler
+            .compile_document(&node)
+            .await
+            .expect("compile_document");
+        assert!(
+            !result.node_id.is_empty(),
+            "compiled node_id should not be empty"
+        );
         assert!(!result.summary.is_empty(), "summary should not be empty");
     }
 }

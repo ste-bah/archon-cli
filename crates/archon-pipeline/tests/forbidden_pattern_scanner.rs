@@ -186,9 +186,7 @@ fn detects_pass_as_sole_function_body_python() {
     let content = "def do_work():\n    pass\n";
     let matches = scanner.scan_content("src/app.py", content);
     assert!(
-        matches
-            .iter()
-            .any(|m| m.matched_text.contains("pass")),
+        matches.iter().any(|m| m.matched_text.contains("pass")),
         "Expected Python pass-only body to be detected, got: {:?}",
         matches
     );
@@ -321,10 +319,7 @@ fn scan_files_counts_and_aggregates_correctly() {
     let scanner = ForbiddenPatternScanner::new();
     let files: Vec<(&str, &str)> = vec![
         ("src/a.rs", "fn a() {\n    todo!()\n}\n"),
-        (
-            "src/b.rs",
-            "pub fn b(x: i32) -> i32 {\n    x + 1\n}\n",
-        ),
+        ("src/b.rs", "pub fn b(x: i32) -> i32 {\n    x + 1\n}\n"),
         ("src/c.rs", "fn c() {\n    // FIXME: broken\n}\n"),
     ];
     let result = scanner.scan_files(&files);
@@ -354,7 +349,10 @@ fn scan_files_skips_test_files() {
     let scanner = ForbiddenPatternScanner::new();
     let files: Vec<(&str, &str)> = vec![
         ("src/tests/helper.rs", "fn helper() {\n    todo!()\n}\n"),
-        ("foo_test.rs", "fn test_thing() {\n    unimplemented!()\n}\n"),
+        (
+            "foo_test.rs",
+            "fn test_thing() {\n    unimplemented!()\n}\n",
+        ),
         ("src/lib.rs", "pub fn lib_fn() {\n    42;\n}\n"),
     ];
     let result = scanner.scan_files(&files);
@@ -377,7 +375,8 @@ fn scan_files_skips_test_files() {
 #[test]
 fn line_numbers_are_one_indexed() {
     let scanner = ForbiddenPatternScanner::new();
-    let content = "pub fn ok() -> i32 {\n    42\n}\n// TODO: line four\nfn another() {\n    todo!()\n}\n";
+    let content =
+        "pub fn ok() -> i32 {\n    42\n}\n// TODO: line four\nfn another() {\n    todo!()\n}\n";
     let matches = scanner.scan_content("src/lib.rs", content);
 
     let todo_comment = matches
@@ -393,10 +392,7 @@ fn line_numbers_are_one_indexed() {
         .iter()
         .find(|m| m.matched_text.contains("todo!()"))
         .expect("Should detect todo!() macro");
-    assert_eq!(
-        todo_macro.line, 6,
-        "todo!() macro is on line 6 (1-indexed)"
-    );
+    assert_eq!(todo_macro.line, 6, "todo!() macro is on line 6 (1-indexed)");
 }
 
 // ---------------------------------------------------------------------------

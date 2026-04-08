@@ -16,11 +16,7 @@ fn test_agent_count() {
 fn test_no_duplicate_keys() {
     let mut seen = HashSet::new();
     for agent in RESEARCH_AGENTS.iter() {
-        assert!(
-            seen.insert(agent.key),
-            "Duplicate agent key: {}",
-            agent.key
-        );
+        assert!(seen.insert(agent.key), "Duplicate agent key: {}", agent.key);
     }
 }
 

@@ -22,7 +22,11 @@ const ALL_RELATIONS: [&str; 12] = [
 
 fn get_relation_names(db: &DbInstance) -> Vec<String> {
     let result = db
-        .run_script("::relations", Default::default(), ScriptMutability::Immutable)
+        .run_script(
+            "::relations",
+            Default::default(),
+            ScriptMutability::Immutable,
+        )
         .unwrap();
     let name_col = result
         .headers
@@ -353,7 +357,10 @@ fn test_desc_episodes_crud() {
 
     assert_eq!(result.rows.len(), 1);
     assert_eq!(result.rows[0][0].get_str().unwrap(), "ep-001");
-    assert_eq!(result.rows[0][1].get_str().unwrap(), "Refactored auth module");
+    assert_eq!(
+        result.rows[0][1].get_str().unwrap(),
+        "Refactored auth module"
+    );
     assert!((result.rows[0][2].get_float().unwrap() - 1.0).abs() < f64::EPSILON);
 }
 
@@ -581,7 +588,6 @@ fn test_key_constraint_trajectories() {
             trajectory_id => route, agent_key, session_id, patterns, context, quality, reward, feedback_score, weights_path, created_at, updated_at
         }
     "#;
-    let err = db
-        .run_script(insert_dup, Default::default(), ScriptMutability::Mutable);
+    let err = db.run_script(insert_dup, Default::default(), ScriptMutability::Mutable);
     assert!(err.is_err(), ":insert with duplicate key should fail");
 }

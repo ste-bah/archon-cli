@@ -52,8 +52,17 @@ fn compile_dangerous_patterns() -> Vec<Regex> {
 // ---------------------------------------------------------------------------
 
 const READ_ONLY_TOOLS: &[&str] = &[
-    "Read", "Glob", "Grep", "WebSearch", "WebFetch", "LS",
-    "Agent", "TaskCreate", "TaskUpdate", "TaskGet", "TaskList",
+    "Read",
+    "Glob",
+    "Grep",
+    "WebSearch",
+    "WebFetch",
+    "LS",
+    "Agent",
+    "TaskCreate",
+    "TaskUpdate",
+    "TaskGet",
+    "TaskList",
 ];
 
 fn is_read_only_tool(tool_name: &str) -> bool {
@@ -131,10 +140,7 @@ impl PreToolUseHook {
                 {
                     if self.current_phase <= 3 {
                         return HookDecision::Block {
-                            reason: format!(
-                                "File '{}' is outside affected_files scope",
-                                file_path
-                            ),
+                            reason: format!("File '{}' is outside affected_files scope", file_path),
                         };
                     } else {
                         return HookDecision::Warn {
@@ -185,7 +191,14 @@ impl PostToolUseHook {
         } else {
             let details: Vec<String> = matches
                 .iter()
-                .map(|m| format!("  - line {}: {} ({})", m.line, m.pattern_name, m.matched_text.trim()))
+                .map(|m| {
+                    format!(
+                        "  - line {}: {} ({})",
+                        m.line,
+                        m.pattern_name,
+                        m.matched_text.trim()
+                    )
+                })
                 .collect();
             Some(format!(
                 "WARNING: Forbidden patterns detected:\n{}",

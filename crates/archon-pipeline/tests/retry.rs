@@ -13,14 +13,14 @@
 
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 use anyhow::Result;
 
 use archon_pipeline::retry::{
-    calculate_delay, classify_error, with_retry, RetryConfig, RetryableError,
+    RetryConfig, RetryableError, calculate_delay, classify_error, with_retry,
 };
 
 // ---------------------------------------------------------------------------
@@ -137,7 +137,11 @@ async fn test_success_on_first_attempt() {
 
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), "immediate");
-    assert_eq!(counter.load(Ordering::SeqCst), 1, "should call exactly once");
+    assert_eq!(
+        counter.load(Ordering::SeqCst),
+        1,
+        "should call exactly once"
+    );
 }
 
 /// 2. First 2 calls return 429, 3rd succeeds. Verify 3 total calls.
@@ -218,11 +222,7 @@ async fn test_fails_immediately_on_401_403_404_422() {
 
         let result = with_retry(&config, op).await;
 
-        assert!(
-            result.is_err(),
-            "status {} should be non-retryable",
-            status
-        );
+        assert!(result.is_err(), "status {} should be non-retryable", status);
         assert_eq!(
             counter.load(Ordering::SeqCst),
             1,

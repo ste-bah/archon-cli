@@ -44,14 +44,18 @@ impl AnalogicalEngine {
 
         let source_concepts: Vec<&DomainConcept> = concepts
             .iter()
-            .filter(|c| c.entity.to_lowercase().contains(&source_lower)
-                || c.relation.to_lowercase().contains(&source_lower))
+            .filter(|c| {
+                c.entity.to_lowercase().contains(&source_lower)
+                    || c.relation.to_lowercase().contains(&source_lower)
+            })
             .collect();
 
         let target_concepts: Vec<&DomainConcept> = concepts
             .iter()
-            .filter(|c| c.entity.to_lowercase().contains(&target_lower)
-                || c.relation.to_lowercase().contains(&target_lower))
+            .filter(|c| {
+                c.entity.to_lowercase().contains(&target_lower)
+                    || c.relation.to_lowercase().contains(&target_lower)
+            })
             .collect();
 
         // Create positional mappings between source and target concepts.

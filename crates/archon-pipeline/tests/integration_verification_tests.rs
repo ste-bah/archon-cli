@@ -1,13 +1,12 @@
 //! Tests for IntegrationVerifier, VerificationReport, WiringVerificationGate
 //! (TASK-PIPE-E04 — REQ-IMPROVE-004, REQ-IMPROVE-007).
 
-use archon_pipeline::coding::wiring::{
-    IntegrationVerifier, ObligationVerification, VerificationReport, VerificationStatus,
-    WiringAction, WiringObligation, WiringPlan, ObligationStatus,
-    WiringVerificationGate,
-    save_verification_report, load_verification_report,
-};
 use archon_pipeline::coding::contract::GateResult;
+use archon_pipeline::coding::wiring::{
+    IntegrationVerifier, ObligationStatus, ObligationVerification, VerificationReport,
+    VerificationStatus, WiringAction, WiringObligation, WiringPlan, WiringVerificationGate,
+    load_verification_report, save_verification_report,
+};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -114,11 +113,7 @@ mod integration_verification {
         let src_dir = tmp.path().join("src");
         std::fs::create_dir_all(&src_dir).unwrap();
         let handler = src_dir.join("handler.rs");
-        std::fs::write(
-            &handler,
-            "use crate::widgets::Button;\n\nfn render() {}\n",
-        )
-        .unwrap();
+        std::fs::write(&handler, "use crate::widgets::Button;\n\nfn render() {}\n").unwrap();
 
         let ob = make_obligation(
             "WO-002",
@@ -245,20 +240,21 @@ mod integration_verification {
     fn gate_fails_when_mandatory_unmet() {
         let report = VerificationReport {
             task_id: "TEST-001".into(),
-            results: vec![
-                ObligationVerification {
-                    obligation_id: "WO-001".into(),
-                    status: VerificationStatus::Unmet,
-                    evidence: "pattern not found".into(),
-                    tool_used: "Read".into(),
-                },
-            ],
+            results: vec![ObligationVerification {
+                obligation_id: "WO-001".into(),
+                status: VerificationStatus::Unmet,
+                evidence: "pattern not found".into(),
+                tool_used: "Read".into(),
+            }],
             all_mandatory_met: false,
             verified_at: "1234567890Z".into(),
         };
 
         let gate: GateResult = WiringVerificationGate::check(&report);
-        assert!(!gate.passed, "gate should fail when mandatory obligation unmet");
+        assert!(
+            !gate.passed,
+            "gate should fail when mandatory obligation unmet"
+        );
         assert!(!gate.errors.is_empty());
         assert!(gate.errors[0].contains("WO-001"));
     }
@@ -303,7 +299,11 @@ mod integration_verification {
         );
 
         let gate: GateResult = WiringVerificationGate::check(&report);
-        assert!(gate.passed, "gate should pass despite skipped non-mandatory: {:?}", gate.errors);
+        assert!(
+            gate.passed,
+            "gate should pass despite skipped non-mandatory: {:?}",
+            gate.errors
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -358,7 +358,10 @@ mod integration_verification {
         save_verification_report(&report, &session_dir).unwrap();
 
         let report_path = session_dir.join("verification-report.json");
-        assert!(report_path.exists(), "verification-report.json should exist");
+        assert!(
+            report_path.exists(),
+            "verification-report.json should exist"
+        );
 
         let loaded = load_verification_report(&session_dir).unwrap();
         assert_eq!(loaded.task_id, "TEST-PERSIST");

@@ -211,8 +211,8 @@ impl<'a> QueueProcessor<'a> {
 
 /// Atomically write queue entries to `path` (write to a `.tmp` sibling, then rename).
 fn write_queue_atomic(path: &Path, entries: &[&QueueEntry]) -> Result<()> {
-    let json = serde_json::to_string_pretty(entries)
-        .context("failed to serialize queue entries")?;
+    let json =
+        serde_json::to_string_pretty(entries).context("failed to serialize queue entries")?;
 
     // Determine a temp path in the same directory so rename is atomic.
     let tmp_path = path.with_extension("json.tmp");

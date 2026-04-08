@@ -45,11 +45,11 @@ pub struct CompressedMemory {
 #[derive(Debug, Default)]
 struct Extracted {
     entities: BTreeSet<String>,
-    decisions: Vec<(String, String)>, // (choice, context)
+    decisions: Vec<(String, String)>,     // (choice, context)
     relationships: Vec<(String, String)>, // (from, to)
-    patterns: Vec<(String, String)>,  // (name, role)
+    patterns: Vec<(String, String)>,      // (name, role)
     corrections: Vec<String>,
-    verdicts: Vec<(String, String)>, // (phase/label, verdict)
+    verdicts: Vec<(String, String)>,         // (phase/label, verdict)
     phase_entities: Vec<(u32, Vec<String>)>, // (phase, entities)
 }
 
@@ -82,11 +82,7 @@ pub fn compress(raw: &str, budget_tokens: usize) -> CompressedMemory {
 ///
 /// Entities/decisions/relationships that already appear (case-insensitive) in
 /// `existing_context` are omitted from the output.
-pub fn compress_with_dedup(
-    raw: &str,
-    existing_context: &str,
-    budget: usize,
-) -> CompressedMemory {
+pub fn compress_with_dedup(raw: &str, existing_context: &str, budget: usize) -> CompressedMemory {
     if raw.trim().is_empty() {
         return CompressedMemory {
             text: String::new(),
@@ -234,19 +230,18 @@ fn extract_relationships(raw: &str, ex: &mut Extracted) {
 /// Extract pattern mentions.
 fn extract_patterns(raw: &str, ex: &mut Extracted) {
     let pat_re = Regex::new(
-        r"(?i)([a-zA-Z]+)\s+(?:pattern|strategy|approach)\s+(?:for\s+)?([a-zA-Z ]{2,30})"
-    ).unwrap();
+        r"(?i)([a-zA-Z]+)\s+(?:pattern|strategy|approach)\s+(?:for\s+)?([a-zA-Z ]{2,30})",
+    )
+    .unwrap();
     for cap in pat_re.captures_iter(raw) {
         let name = cap[1].to_string();
-        let role = cap
-            .get(2)
-            .map_or(String::new(), |m| {
-                m.as_str()
-                    .split_whitespace()
-                    .take(2)
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            });
+        let role = cap.get(2).map_or(String::new(), |m| {
+            m.as_str()
+                .split_whitespace()
+                .take(2)
+                .collect::<Vec<_>>()
+                .join(" ")
+        });
         ex.patterns.push((name, role));
     }
 }
@@ -254,8 +249,9 @@ fn extract_patterns(raw: &str, ex: &mut Extracted) {
 /// Extract correction phrases.
 fn extract_corrections(raw: &str, ex: &mut Extracted) {
     let fix_re = Regex::new(
-        r"(?i)(?:fixed|don't|avoid|instead of)\s+([a-zA-Z0-9_.!]+(?:\s+[a-zA-Z0-9_.]+){0,3})"
-    ).unwrap();
+        r"(?i)(?:fixed|don't|avoid|instead of)\s+([a-zA-Z0-9_.!]+(?:\s+[a-zA-Z0-9_.]+){0,3})",
+    )
+    .unwrap();
     for cap in fix_re.captures_iter(raw) {
         ex.corrections.push(cap[1].to_string());
     }
@@ -271,12 +267,10 @@ fn extract_verdicts(raw: &str, ex: &mut Extracted) {
         // Try the various groups.
         if let Some(phase) = cap.get(1) {
             let verdict = cap[2].to_string();
-            ex.verdicts
-                .push((format!("P{}", phase.as_str()), verdict));
+            ex.verdicts.push((format!("P{}", phase.as_str()), verdict));
         } else if let Some(phase) = cap.get(4) {
             let verdict = cap[3].to_string();
-            ex.verdicts
-                .push((format!("P{}", phase.as_str()), verdict));
+            ex.verdicts.push((format!("P{}", phase.as_str()), verdict));
         } else if let Some(verdict) = cap.get(5) {
             ex.verdicts
                 .push(("SH".to_string(), verdict.as_str().to_string()));
@@ -429,11 +423,7 @@ fn build_compressed(
 
     // Dedup filter: lowercase set of words from existing context.
     let dedup_set: BTreeSet<String> = existing_context
-        .map(|ctx| {
-            ctx.split_whitespace()
-                .map(|w| w.to_lowercase())
-                .collect()
-        })
+        .map(|ctx| ctx.split_whitespace().map(|w| w.to_lowercase()).collect())
         .unwrap_or_default();
 
     let should_keep = |name: &str| -> bool {
@@ -922,7 +912,10 @@ Sherlock final integration review: APPROVED — all 156 integration points verif
         let est = estimate_tokens(&text);
         let expected = 250; // 1000/4
         let diff = (est as f64 - expected as f64).abs() / expected as f64;
-        assert!(diff < 0.20, "Token estimate {est} too far from expected {expected}");
+        assert!(
+            diff < 0.20,
+            "Token estimate {est} too far from expected {expected}"
+        );
     }
 
     #[test]
