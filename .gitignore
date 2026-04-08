@@ -35,6 +35,7 @@ dist/
 !web/dist/
 archon-*.tar.gz
 archon-*.zip
+.claude
 
 # Coverage / profiling
 lcov.info

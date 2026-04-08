@@ -1,4 +1,4 @@
-//! Load user-defined output styles from `~/.claude/output-styles/`.
+//! Load user-defined output styles from `~/.archon/output-styles/`.
 //!
 //! Each `.md` file in the directory is parsed as one `OutputStyleConfig`:
 //!

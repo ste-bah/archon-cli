@@ -1,0 +1,5 @@
+{
+  "recall_queries": ["IDE extension VS Code JetBrains", "JSON-RPC protocol", "TypeScript SDK Kotlin SDK"],
+  "leann_queries": ["archon-sdk", "dispatch.rs", "*.ts", "*.kt", "plugin.xml"],
+  "tags": ["agent-definition", "ide-extension", "vscode", "jetbrains", "json-rpc"]
+}

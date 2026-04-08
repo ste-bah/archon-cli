@@ -1,10 +1,23 @@
 use std::fs;
 use std::path::Path;
 
-/// Load CLAUDE.md from the given directory, or empty string if not found.
-pub fn load_claude_md(project_dir: &Path) -> String {
-    let path = project_dir.join("CLAUDE.md");
-    fs::read_to_string(&path).unwrap_or_default()
+/// Load ARCHON.md from the given directory, or empty string if not found.
+/// Falls back to CLAUDE.md for backward compatibility.
+pub fn load_archon_md(project_dir: &Path) -> String {
+    let new_path = project_dir.join("ARCHON.md");
+    if new_path.is_file() {
+        return fs::read_to_string(&new_path).unwrap_or_default();
+    }
+    let old_path = project_dir.join("CLAUDE.md");
+    if old_path.is_file() {
+        tracing::warn!(
+            "Loading from deprecated path {}. Rename to {} to suppress this warning.",
+            old_path.display(),
+            new_path.display()
+        );
+        return fs::read_to_string(&old_path).unwrap_or_default();
+    }
+    String::new()
 }
 
 /// Build the environment section for the system prompt.
@@ -41,8 +54,8 @@ mod tests {
     }
 
     #[test]
-    fn load_claude_md_missing_returns_empty() {
-        let content = load_claude_md(Path::new("/nonexistent/path"));
+    fn load_archon_md_missing_returns_empty() {
+        let content = load_archon_md(Path::new("/nonexistent/path"));
         assert!(content.is_empty());
     }
 }

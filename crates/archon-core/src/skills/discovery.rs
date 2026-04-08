@@ -23,21 +23,31 @@ impl Skill for UserSkill {
     }
 }
 
-/// Discover user-defined skills from `.claude/skills/` and `.archon/skills/` directories.
+/// Discover user-defined skills from `.archon/skills/` directory (and `.claude/skills/` for backward compat).
 ///
 /// Each skill is expected to live in its own subdirectory containing a `SKILL.md` file
 /// with YAML front-matter (`name`, `description`) followed by a body.
 pub fn discover_user_skills(working_dir: &Path) -> Vec<UserSkill> {
     let search_roots = [
-        working_dir.join(".claude/skills"),
         working_dir.join(".archon/skills"),
+        working_dir.join(".claude/skills"), // backward compat
     ];
 
     let mut skills = Vec::new();
 
+    let archon_root = &search_roots[0];
     for root in &search_roots {
         if !root.is_dir() {
             continue;
+        }
+
+        // Warn when loading from deprecated .claude/skills/ path
+        if root != archon_root && !archon_root.is_dir() {
+            tracing::warn!(
+                "Loading from deprecated path {}. Rename to {} to suppress this warning.",
+                root.display(),
+                archon_root.display()
+            );
         }
 
         let entries = match std::fs::read_dir(root) {

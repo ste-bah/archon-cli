@@ -43,7 +43,22 @@ impl Tool for TeamDeleteTool {
             None => return ToolResult::error("missing 'team_id'"),
         };
 
-        let team_dir = self.project_dir.join(".claude").join("teams").join(team_id);
+        let new_team_dir = self.project_dir.join(".archon").join("teams").join(team_id);
+        let team_dir = if new_team_dir.exists() {
+            new_team_dir
+        } else {
+            let old_team_dir = self.project_dir.join(".claude").join("teams").join(team_id);
+            if old_team_dir.exists() {
+                tracing::warn!(
+                    "Loading from deprecated path {}. Rename to {} to suppress this warning.",
+                    old_team_dir.display(),
+                    new_team_dir.display()
+                );
+                old_team_dir
+            } else {
+                new_team_dir
+            }
+        };
 
         if !team_dir.exists() {
             return ToolResult::error(format!("team '{}' not found", team_id));

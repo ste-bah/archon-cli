@@ -75,7 +75,7 @@ async fn cron_create_writes_task_to_file() {
     );
 
     // Verify file exists
-    let tasks_file = dir.path().join(".claude").join("scheduled_tasks.json");
+    let tasks_file = dir.path().join(".archon").join("scheduled_tasks.json");
     assert!(tasks_file.exists(), "scheduled_tasks.json must be created");
 }
 
@@ -160,7 +160,7 @@ async fn cron_create_stores_name_in_metadata() {
 
     // Load raw JSON and verify name is in metadata, not CronTask
     let raw =
-        std::fs::read_to_string(dir.path().join(".claude").join("scheduled_tasks.json")).unwrap();
+        std::fs::read_to_string(dir.path().join(".archon").join("scheduled_tasks.json")).unwrap();
     let json: serde_json::Value = serde_json::from_str(&raw).unwrap();
 
     // Task struct must NOT have name field
@@ -188,7 +188,7 @@ async fn cron_create_recurring_defaults_to_true() {
         .await;
 
     let raw =
-        std::fs::read_to_string(dir.path().join(".claude").join("scheduled_tasks.json")).unwrap();
+        std::fs::read_to_string(dir.path().join(".archon").join("scheduled_tasks.json")).unwrap();
     let json: serde_json::Value = serde_json::from_str(&raw).unwrap();
     let task = &json["tasks"][0];
 
@@ -212,7 +212,7 @@ async fn cron_create_one_shot_stores_false() {
     .await;
 
     let raw =
-        std::fs::read_to_string(dir.path().join(".claude").join("scheduled_tasks.json")).unwrap();
+        std::fs::read_to_string(dir.path().join(".archon").join("scheduled_tasks.json")).unwrap();
     let json: serde_json::Value = serde_json::from_str(&raw).unwrap();
     let task = &json["tasks"][0];
 
@@ -307,7 +307,7 @@ async fn cron_delete_removes_task() {
 
     // Extract ID from JSON file
     let raw =
-        std::fs::read_to_string(dir.path().join(".claude").join("scheduled_tasks.json")).unwrap();
+        std::fs::read_to_string(dir.path().join(".archon").join("scheduled_tasks.json")).unwrap();
     let json: serde_json::Value = serde_json::from_str(&raw).unwrap();
     let task_id = json["tasks"][0]["id"].as_str().unwrap().to_string();
 

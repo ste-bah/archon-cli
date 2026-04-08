@@ -974,11 +974,25 @@ async fn main() -> Result<()> {
 
         let mut reg = OutputStyleRegistry::new();
 
-        // Load user styles from ~/.claude/output-styles/
+        // Load user styles from ~/.archon/output-styles/
         if let Some(home) = dirs::home_dir() {
-            let user_styles_dir = home.join(".claude").join("output-styles");
-            for style in load_styles_from_dir(&user_styles_dir) {
-                reg.register(style);
+            let new_dir = home.join(".archon").join("output-styles");
+            if new_dir.is_dir() {
+                for style in load_styles_from_dir(&new_dir) {
+                    reg.register(style);
+                }
+            } else {
+                let old_dir = home.join(".claude").join("output-styles");
+                if old_dir.is_dir() {
+                    tracing::warn!(
+                        "Loading from deprecated path {}. Rename to {} to suppress this warning.",
+                        old_dir.display(),
+                        new_dir.display()
+                    );
+                    for style in load_styles_from_dir(&old_dir) {
+                        reg.register(style);
+                    }
+                }
             }
         }
 
@@ -1609,20 +1623,20 @@ async fn run_print_mode_session(
     // Apply tool filtering from resolved flags (CLI-220)
     apply_tool_filters(&mut registry, resolved_flags);
 
-    // Build a minimal system prompt (skip CLAUDE.md in bare mode)
-    let claude_md = if resolved_flags.bare_mode {
+    // Build a minimal system prompt (skip ARCHON.md in bare mode)
+    let archon_md = if resolved_flags.bare_mode {
         String::new()
     } else {
-        archon_core::claudemd::load_hierarchical_claude_md_with_limit(
+        archon_core::archonmd::load_hierarchical_archon_md_with_limit(
             &working_dir,
-            config.context.claudemd_max_tokens as usize,
+            config.context.archonmd_max_tokens as usize,
         )
     };
     let git_info = archon_core::git::detect_git_info(&working_dir);
     let git_branch = git_info.as_ref().map(|g| g.branch.as_str());
     let env_section = build_environment_section(&working_dir, git_branch);
 
-    let mut identity_blocks = identity.system_prompt_blocks("", &claude_md, &env_section);
+    let mut identity_blocks = identity.system_prompt_blocks("", &archon_md, &env_section);
     // Gated by config.context.prompt_cache (TASK-WIRE-003) — strip cache_control
     // from identity blocks when disabled so print mode honours the flag too.
     strip_cache_control_if_disabled(&mut identity_blocks, config.context.prompt_cache);
@@ -1635,8 +1649,23 @@ async fn run_print_mode_session(
 
         let mut reg = OutputStyleRegistry::new();
         if let Some(home) = dirs::home_dir() {
-            for style in load_styles_from_dir(&home.join(".claude").join("output-styles")) {
-                reg.register(style);
+            let new_dir = home.join(".archon").join("output-styles");
+            if new_dir.is_dir() {
+                for style in load_styles_from_dir(&new_dir) {
+                    reg.register(style);
+                }
+            } else {
+                let old_dir = home.join(".claude").join("output-styles");
+                if old_dir.is_dir() {
+                    tracing::warn!(
+                        "Loading from deprecated path {}. Rename to {} to suppress this warning.",
+                        old_dir.display(),
+                        new_dir.display()
+                    );
+                    for style in load_styles_from_dir(&old_dir) {
+                        reg.register(style);
+                    }
+                }
             }
         }
 
@@ -2147,13 +2176,13 @@ async fn run_interactive_session(
     let tool_defs = registry.tool_definitions();
 
     // ── Phase 2: Assemble system prompt with consciousness (CLI-108) ──
-    let claude_md = if resolved_flags.bare_mode {
-        tracing::info!("bare mode: skipping CLAUDE.md loading");
+    let archon_md = if resolved_flags.bare_mode {
+        tracing::info!("bare mode: skipping ARCHON.md loading");
         String::new()
     } else {
-        archon_core::claudemd::load_hierarchical_claude_md_with_limit(
+        archon_core::archonmd::load_hierarchical_archon_md_with_limit(
             &working_dir,
-            config.context.claudemd_max_tokens as usize,
+            config.context.archonmd_max_tokens as usize,
         )
     };
     let git_info = archon_core::git::detect_git_info(&working_dir);
@@ -2180,7 +2209,7 @@ async fn run_interactive_session(
     }
 
     // Build identity blocks as a text string for the assembler
-    let identity_blocks = identity.system_prompt_blocks("", &claude_md, &env_section);
+    let identity_blocks = identity.system_prompt_blocks("", &archon_md, &env_section);
     let identity_text = identity_blocks
         .iter()
         .filter_map(|b| b.get("text").and_then(|v| v.as_str()))
@@ -2209,10 +2238,10 @@ async fn run_interactive_session(
         },
         memories: None, // Memory injection on first turn is empty (no context yet)
         user_prompt: None,
-        project_instructions: if claude_md.is_empty() {
+        project_instructions: if archon_md.is_empty() {
             None
         } else {
-            Some(claude_md.clone())
+            Some(archon_md.clone())
         },
         environment: if env_section.is_empty() {
             None
@@ -2276,8 +2305,23 @@ async fn run_interactive_session(
 
                 let mut reg = OutputStyleRegistry::new();
                 if let Some(home) = dirs::home_dir() {
-                    for style in load_styles_from_dir(&home.join(".claude").join("output-styles")) {
-                        reg.register(style);
+                    let new_dir = home.join(".archon").join("output-styles");
+                    if new_dir.is_dir() {
+                        for style in load_styles_from_dir(&new_dir) {
+                            reg.register(style);
+                        }
+                    } else {
+                        let old_dir = home.join(".claude").join("output-styles");
+                        if old_dir.is_dir() {
+                            tracing::warn!(
+                                "Loading from deprecated path {}. Rename to {} to suppress this warning.",
+                                old_dir.display(),
+                                new_dir.display()
+                            );
+                            for style in load_styles_from_dir(&old_dir) {
+                                reg.register(style);
+                            }
+                        }
                     }
                 }
 
@@ -2485,24 +2529,10 @@ async fn run_interactive_session(
         }
     }
 
-    // Wire hook system — load hooks from .claude/settings.json if present
+    // Wire hook system — load hooks from all sources (settings.json + TOML)
     let hook_registry_arc = {
-        let settings_json_path = working_dir.join(".claude").join("settings.json");
-        let hook_registry = if settings_json_path.exists() {
-            match std::fs::read_to_string(&settings_json_path) {
-                Ok(content) => archon_core::hooks::HookRegistry::load_from_settings_json(&content)
-                    .unwrap_or_else(|e| {
-                        tracing::warn!("hooks: failed to load settings.json: {e}");
-                        archon_core::hooks::HookRegistry::new()
-                    }),
-                Err(e) => {
-                    tracing::warn!("hooks: could not read settings.json: {e}");
-                    archon_core::hooks::HookRegistry::new()
-                }
-            }
-        } else {
-            archon_core::hooks::HookRegistry::new()
-        };
+        let home_dir = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
+        let hook_registry = archon_core::hooks::HookRegistry::load_all(&working_dir, &home_dir);
         let arc = std::sync::Arc::new(hook_registry);
         agent.set_hook_registry(Arc::clone(&arc));
         arc
@@ -2811,12 +2841,30 @@ async fn run_interactive_session(
             .await;
 
         // CRIT-06: Fire SessionStart hook at the beginning of the session
-        agent
+        let session_start_agg = agent
             .fire_hook(
                 archon_core::hooks::HookType::SessionStart,
                 serde_json::json!({
                     "hook_event": "SessionStart",
                     "reason": "new_session",
+                }),
+            )
+            .await;
+        // Consume watch_paths from SessionStart hooks (REQ-HOOK-017)
+        if !session_start_agg.watch_paths.is_empty() {
+            tracing::info!(
+                "SessionStart hook returned {} watch paths",
+                session_start_agg.watch_paths.len()
+            );
+            agent.add_watch_paths(session_start_agg.watch_paths);
+        }
+
+        // CRIT-06: Fire InstructionsLoaded hook after session starts and instructions are loaded
+        agent
+            .fire_hook(
+                archon_core::hooks::HookType::InstructionsLoaded,
+                serde_json::json!({
+                    "hook_event": "InstructionsLoaded",
                 }),
             )
             .await;
@@ -2998,6 +3046,7 @@ async fn run_interactive_session(
                             serde_json::json!({"hook_type": "session_end", "reason": "exit"}),
                         )
                         .await;
+                    agent.clear_watch_paths();
                     let _ = input_tui_tx
                         .send(TuiEvent::TextDelta("\nGoodbye.\n".into()))
                         .await;
@@ -3064,6 +3113,7 @@ async fn run_interactive_session(
                             serde_json::json!({"hook_type": "session_end", "reason": "clear"}),
                         )
                         .await;
+                    agent.clear_watch_paths();
                     // Clear conversation
                     agent.clear_conversation().await;
                     // Reset session stats
@@ -3077,12 +3127,19 @@ async fn run_interactive_session(
                         resp.clear();
                     }
                     // Fire SessionStart hook after
-                    agent
+                    let clear_start_agg = agent
                         .fire_hook(
                             archon_core::hooks::HookType::SessionStart,
                             serde_json::json!({"hook_type": "session_start", "reason": "clear"}),
                         )
                         .await;
+                    if !clear_start_agg.watch_paths.is_empty() {
+                        tracing::info!(
+                            "SessionStart hook returned {} watch paths",
+                            clear_start_agg.watch_paths.len()
+                        );
+                        agent.add_watch_paths(clear_start_agg.watch_paths);
+                    }
                     let _ = input_tui_tx
                         .send(TuiEvent::TextDelta(
                             "\nConversation cleared. Session reset.\n".into(),
@@ -3323,15 +3380,31 @@ async fn run_interactive_session(
         }
 
         // CRIT-06: Fire Stop hook when the input channel closes (session ending)
-        agent
-            .fire_hook(
+        let stop_result = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            agent.fire_hook(
                 archon_core::hooks::HookType::Stop,
                 serde_json::json!({
                     "hook_event": "Stop",
                     "reason": "session_end",
                 }),
-            )
-            .await;
+            ),
+        )
+        .await;
+
+        // CRIT-06: Fire StopFailure if the graceful stop timed out
+        if stop_result.is_err() {
+            tracing::warn!("Stop hook timed out — firing StopFailure");
+            agent
+                .fire_hook(
+                    archon_core::hooks::HookType::StopFailure,
+                    serde_json::json!({
+                        "hook_event": "StopFailure",
+                        "reason": "stop_hook_timeout",
+                    }),
+                )
+                .await;
+        }
     });
 
     // Build splash screen config with recent activity from session store
@@ -4058,7 +4131,7 @@ async fn handle_slash_command(
         "/login" => {
             let cred_path = dirs::home_dir()
                 .unwrap_or_default()
-                .join(".claude")
+                .join(".archon")
                 .join(".credentials.json");
             let mut msg = String::from("\nAuthentication status:\n");
             msg.push_str(&format!("  Method: {}\n", ctx.auth_label));
@@ -4183,7 +4256,7 @@ async fn handle_slash_command(
             // Clear OAuth credentials file
             let cred_path = dirs::home_dir()
                 .unwrap_or_default()
-                .join(".claude")
+                .join(".archon")
                 .join(".credentials.json");
             if cred_path.exists() {
                 match std::fs::remove_file(&cred_path) {

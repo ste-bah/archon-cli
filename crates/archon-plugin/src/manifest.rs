@@ -1,6 +1,6 @@
 //! Manifest loading and validation for TASK-CLI-303.
 //!
-//! Loads `.claude-plugin/plugin.json` from a plugin directory,
+//! Loads `.archon-plugin/plugin.json` from a plugin directory,
 //! parses it as `PluginManifest`, and validates required fields.
 
 use std::path::Path;
@@ -11,20 +11,32 @@ use crate::types::PluginManifest;
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 /// Relative path from a plugin directory to its manifest.
-pub const MANIFEST_RELATIVE_PATH: &str = ".claude-plugin/plugin.json";
+pub const MANIFEST_RELATIVE_PATH: &str = ".archon-plugin/plugin.json";
 
 // ── Loading ───────────────────────────────────────────────────────────────────
 
-/// Load and parse a `PluginManifest` from `<plugin_dir>/.claude-plugin/plugin.json`.
+/// Load and parse a `PluginManifest` from `<plugin_dir>/.archon-plugin/plugin.json`.
 ///
 /// Returns `None` if the manifest file does not exist (silent skip).
 /// Returns `Err` with `ManifestParseError` on JSON parse failure.
 /// Returns `Err` with `ManifestValidationError` on field validation failure.
 pub fn load_manifest(plugin_dir: &Path) -> Option<Result<PluginManifest, PluginError>> {
     let manifest_path = plugin_dir.join(MANIFEST_RELATIVE_PATH);
-    if !manifest_path.exists() {
-        return None;
-    }
+    let manifest_path = if manifest_path.exists() {
+        manifest_path
+    } else {
+        let old_path = plugin_dir.join(".claude-plugin/plugin.json");
+        if old_path.exists() {
+            tracing::warn!(
+                "Loading from deprecated path {}. Rename to {} to suppress this warning.",
+                old_path.display(),
+                manifest_path.display()
+            );
+            old_path
+        } else {
+            return None;
+        }
+    };
 
     let contents = match std::fs::read_to_string(&manifest_path) {
         Ok(c) => c,

@@ -34,12 +34,17 @@ fn write_test_credentials(path: &std::path::Path, expires_ms: i64) {
 }
 
 #[test]
-fn credentials_path_points_to_claude_dir() {
+fn credentials_path_returns_valid_path() {
     let path = credentials_path();
     let s = path.to_string_lossy();
+    // Must point to .credentials.json under either .archon (new) or .claude (backward compat)
     assert!(
-        s.contains(".claude") && s.contains(".credentials.json"),
-        "expected .claude/.credentials.json, got: {s}"
+        s.contains(".credentials.json"),
+        "expected .credentials.json in path, got: {s}"
+    );
+    assert!(
+        s.contains(".archon") || s.contains(".claude"),
+        "expected .archon or .claude dir in path, got: {s}"
     );
 }
 

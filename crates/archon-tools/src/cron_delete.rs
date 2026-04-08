@@ -18,11 +18,20 @@ impl CronDeleteTool {
     }
 
     fn store(&self) -> CronStore {
-        CronStore::new(
-            self.project_dir
-                .join(".claude")
-                .join("scheduled_tasks.json"),
-        )
+        let new_path = self.project_dir.join(".archon").join("scheduled_tasks.json");
+        if new_path.exists() {
+            return CronStore::new(new_path);
+        }
+        let old_path = self.project_dir.join(".claude").join("scheduled_tasks.json");
+        if old_path.exists() {
+            tracing::warn!(
+                "Loading from deprecated path {}. Rename to {} to suppress this warning.",
+                old_path.display(),
+                new_path.display()
+            );
+            return CronStore::new(old_path);
+        }
+        CronStore::new(new_path)
     }
 }
 

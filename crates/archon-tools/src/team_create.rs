@@ -101,7 +101,7 @@ impl Tool for TeamCreateTool {
             members: members.clone(),
         };
 
-        let teams_dir = self.project_dir.join(".claude").join("teams");
+        let teams_dir = self.project_dir.join(".archon").join("teams");
         let team_dir = teams_dir.join(&team_id);
         if let Err(e) = std::fs::create_dir_all(&team_dir) {
             return ToolResult::error(format!("failed to create team directory: {e}"));

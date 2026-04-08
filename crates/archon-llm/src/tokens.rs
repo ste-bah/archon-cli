@@ -95,12 +95,26 @@ fn parse_refresh_response(body: &str) -> Result<OAuthCredentials, AuthError> {
 // Credential file operations with file locking
 // ---------------------------------------------------------------------------
 
-/// Default credential file path.
+/// Default credential file path: `~/.archon/.credentials.json`
+///
+/// Falls back to `~/.claude/.credentials.json` if the new path doesn't exist
+/// (backward compatibility). Mirrors `auth::default_credentials_path()`.
 pub fn credentials_path() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".claude")
-        .join(".credentials.json")
+    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    let new_path = home.join(".archon").join(".credentials.json");
+    if new_path.exists() {
+        return new_path;
+    }
+    let old_path = home.join(".claude").join(".credentials.json");
+    if old_path.exists() {
+        tracing::warn!(
+            "Loading from deprecated path {}. Rename to {} to suppress this warning.",
+            old_path.display(),
+            new_path.display()
+        );
+        return old_path;
+    }
+    new_path
 }
 
 /// Read the credential file with an advisory file lock.

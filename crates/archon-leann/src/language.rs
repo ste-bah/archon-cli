@@ -76,7 +76,8 @@ pub fn default_exclude_patterns() -> Vec<String> {
         "build".to_string(),
         "coverage".to_string(),
         ".tv".to_string(),
-        ".claude".to_string(),
+        ".archon".to_string(),
+        ".claude".to_string(), // backward compat exclusion
         "site-packages".to_string(),
     ]
 }

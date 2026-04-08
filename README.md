@@ -45,6 +45,11 @@ A privacy-first, self-aware AI coding assistant written in Rust. Archon replaces
 - [Cost, Effort & Fast Mode](#cost-effort--fast-mode)
 - [Context Compaction](#context-compaction)
 - [Pipeline Engine](#pipeline-engine)
+  - [Agent Definition System](#agent-definition-system)
+  - [Gate Enforcement](#gate-enforcement)
+  - [Structured Artefacts](#structured-artefacts)
+  - [Session Recovery](#session-recovery)
+  - [Ledger System](#ledger-system)
 - [LEANN Semantic Code Search](#leann-semantic-code-search)
 - [Knowledge Base](#knowledge-base)
 - [Learning Systems](#learning-systems)
@@ -67,7 +72,7 @@ A privacy-first, self-aware AI coding assistant written in Rust. Archon replaces
 | Personality | Fixed | Configurable (MBTI, Enneagram, traits) |
 | Personality persistence | None | Full cross-session snapshot (InnerVoice + rule scores + trends) |
 | Self-reflection | None | InnerVoice (confidence, energy, struggles, successes) |
-| Behavioral rules | CLAUDE.md only | Scored rules (0-100) with decay, reinforcement, trend tracking |
+| Behavioral rules | ARCHON.md only | Scored rules (0-100) with decay, reinforcement, trend tracking |
 | TUI | Basic | Full ratatui TUI with 22 themes |
 | Session resume | ID only | ID prefix, name, or name prefix |
 | Tool execution | Node.js | Native Rust async |
@@ -77,7 +82,7 @@ A privacy-first, self-aware AI coding assistant written in Rust. Archon replaces
 | Multi-agent teams | Single agent | Sequential, Parallel, Pipeline, DAG modes |
 | LSP integration | No | goToDefinition, findReferences, hover, callHierarchy, etc. |
 | Remote control | No | `archon serve` + `archon remote ws/ssh` |
-| Coding pipeline | No | 48-agent pipeline (11-layer prompt, 6 phases) |
+| Coding pipeline | No | 50-agent pipeline (11-layer prompt, 6 phases) |
 | Research pipeline | No | 46-agent PhD research pipeline (5-part prompt) |
 | Semantic code search | No | Native LEANN (tree-sitter chunking, HNSW vectors) |
 | Knowledge base | No | CozoDB document ingest, LLM compilation, Q&A |
@@ -128,7 +133,7 @@ graph TB
             TOOLS["archon-tools<br/>(40+ tools)"]
         end
         subgraph pipeline["Pipeline & Intelligence Layer"]
-            PIPE["archon-pipeline<br/>(48 coding + 46 research agents)"]
+            PIPE["archon-pipeline<br/>(50 coding + 46 research agents)"]
             LEANN["archon-leann<br/>(semantic code search)"]
         end
         subgraph infra["Infrastructure Layer"]
@@ -533,7 +538,7 @@ On first startup, Archon sends a cheap probe request (Haiku, 1 token) to validat
 | `--permission-mode <MODE>` | Override permission enforcement |
 | `--dangerously-skip-permissions` | Skip all permission checks |
 | `--sandbox` | Enforce read-only mode |
-| `--bare` | Minimal mode (no hooks, CLAUDE.md, MCP auto-start) |
+| `--bare` | Minimal mode (no hooks, ARCHON.md, MCP auto-start) |
 | `--init` | Run init hooks then start interactive |
 | `--headless` | No TUI, JSON-lines stdio (for backend integration) |
 | `--mcp-config <FILES>` | MCP config files (repeatable) |
@@ -601,7 +606,7 @@ All slash commands work in the interactive TUI. Type `/help` to see them in-app.
 |---------|-------------|
 | `/restore <FILE> [CHECKPOINT]` | Restore file from checkpoint |
 | `/undo` | Undo last file modification |
-| `/init` | Initialize project with CLAUDE.md template |
+| `/init` | Initialize project with ARCHON.md template |
 | `/add-dir <PATH>` | Add working directory for file access |
 | `/agents` | List agent definitions from `.archon/agents/` |
 | `/recall <QUERY>` | Search memories by keyword |
@@ -1174,7 +1179,7 @@ Once dropped into `.archon/skills/`, invoke with `/review-pr 42` in the TUI.
 
 ## Hooks System
 
-Shell commands that execute in response to lifecycle events. Defined in `config.toml` or `.claude/settings.json` for Claude Code compatibility.
+Shell commands that execute in response to lifecycle events. Defined in `config.toml` or `.archon/settings.json` (also loads `.claude/settings.json` for backward compat).
 
 ### Hook events
 
@@ -1193,7 +1198,7 @@ command = "git status --short"
 timeout = 5
 ```
 
-### Example, `.claude/settings.json` (structured matchers)
+### Example, `.archon/settings.json` (structured matchers)
 
 ```json
 {
@@ -1641,56 +1646,65 @@ prompt_cache = true           # Enable Anthropic prompt cache
 
 Archon includes two full agent pipelines ported from the TypeScript god-agent SDK to native Rust.
 
-### Coding Pipeline (48 agents)
+### Coding Pipeline (50 agents)
 
-A 6-phase, 48-agent software development pipeline. Each agent receives an 11-layer composite prompt assembled from task analysis, codebase context, LEANN search results, and prior agent outputs.
+A 6-phase, 50-agent software development pipeline with runtime-loaded agent definitions (.md frontmatter + TOML manifests), gate enforcement, session recovery, and structured artefacts. Each agent receives an 11-layer composite prompt assembled from task analysis, agent instructions (.md body), codebase context, LEANN search results, and prior agent outputs.
 
 ```mermaid
 graph LR
     subgraph P1["Phase 1: Understanding"]
-        TA["task-analyzer"] --> RE["requirement-extractor"]
+        CA2["contract-agent"] --> RE["requirement-extractor"]
         RE --> RP["requirement-prioritizer"]
+        RP --> SD3["scope-definer"]
+        SD3 --> CG["context-gatherer"]
+        CG --> PE["pattern-explorer"]
+        PE --> TS["technology-scout"]
+        TS --> CBA["codebase-analyzer"]
     end
 
-    subgraph P2["Phase 2: Exploration"]
-        CA["codebase-analyzer"] --> PE["pattern-explorer"]
-        PE --> FA["feasibility-analyzer"]
-        FA --> TS["technology-scout"]
-        TS --> RP2["research-planner"]
-    end
-
-    subgraph P3["Phase 3: Architecture"]
-        SD["system-designer"] --> SA["security-architect"]
-        SA --> DA["data-architect"]
-        DA --> CD["component-designer"]
+    subgraph P2["Phase 2: Design"]
+        FA["feasibility-analyzer"] --> RPL["research-planner"]
+        RPL --> SD["system-designer"]
+        SD --> CD["component-designer"]
         CD --> ID["interface-designer"]
-        ID --> PA["performance-architect"]
-        PA --> IA["integration-architect"]
+        ID --> DA["data-architect"]
+        DA --> PA["performance-architect"]
+        PA --> SA["security-architect"]
+    end
+
+    subgraph P3["Phase 3: Wiring Plan"]
+        IA["integration-architect"] --> WO["wiring-obligation-agent"]
     end
 
     subgraph P4["Phase 4: Implementation"]
-        TI["type-implementer"] --> UI["unit-implementer"]
+        CG2["code-generator"] --> TI["type-implementer"]
+        TI --> UI["unit-implementer"]
         UI --> SI["service-implementer"]
         SI --> DL["data-layer-implementer"]
         DL --> API["api-implementer"]
         API --> FI["frontend-implementer"]
-        FI --> CI["config-implementer"]
-        CI --> EH["error-handler-implementer"]
-        EH --> LI["logger-implementer"]
+        FI --> EH["error-handler-implementer"]
+        EH --> CI["config-implementer"]
+        CI --> LI["logger-implementer"]
+        LI --> IVA["integration-verification-agent"]
     end
 
     subgraph P5["Phase 5: Testing"]
-        TG["test-generator"] --> IT["integration-tester"]
-        IT --> ST["security-tester"]
-        ST --> RT["regression-tester"]
-        RT --> COV["coverage-analyzer"]
+        TG["test-generator"] --> TR["test-runner"]
+        TR --> IT["integration-tester"]
+        IT --> RT["regression-tester"]
+        RT --> ST["security-tester"]
+        ST --> COV["coverage-analyzer"]
+        COV --> TF["test-fixer"]
     end
 
-    subgraph P6["Phase 6: Optimization"]
-        CQI["code-quality-improver"] --> FR["final-refactorer"]
+    subgraph P6["Phase 6: Refinement"]
+        PO["performance-optimizer"] --> CQI["code-quality-improver"]
+        CQI --> FR["final-refactorer"]
         FR --> DM["dependency-manager"]
         DM --> IC["implementation-coordinator"]
-        IC --> SO["sign-off-approver"]
+        IC --> QG["quality-gate"]
+        QG --> SO["sign-off-approver"]
     end
 
     P1 --> P2 --> P3 --> P4 --> P5 --> P6
@@ -1703,82 +1717,101 @@ graph LR
     style P6 fill:#1a1a2e,stroke:#e94560,color:#e0e0e0
 ```
 
+NOTE: Each phase also has a phase-N-reviewer (Sherlock adversarial gate) and a recovery-agent in Phase 6, but they are omitted from the diagram for clarity.
+
 **Prompt Assembly (11 layers):**
 
-| Layer | Source |
-|-------|--------|
-| 1 | Agent role and persona |
-| 2 | Task specification |
-| 3 | Codebase context (from prior agents) |
-| 4 | LEANN semantic search results |
-| 5 | Prior agent outputs (chain context) |
-| 6 | Behavioral rules |
-| 7 | Quality gates and L-Score requirements |
-| 8 | Tool access definitions |
-| 9 | Output format schema |
-| 10 | Learning context (SONA, ReasoningBank) |
-| 11 | Reflexion context (failed trajectory injection for retry agents) |
+| Layer | Name | Priority | Source |
+|-------|------|----------|--------|
+| L1 | `base_prompt` | Required | Agent role, phase, model, description |
+| L1.5 | `agent_instructions` | AgentInstructions | Full .md file body (parsed via frontmatter) |
+| L2 | `task_context` | Required | User's task description |
+| L3 | `leann_semantic_context` | LeannSemanticContext | LEANN code search results |
+| L4 | `rlm_namespace_context` | RlmContext | Prior agent outputs from RLM store |
+| L5 | `desc_episodes` | DescEpisodes | DESC episodic memory |
+| L6 | `sona_patterns` | SonaPatterns | SONA trajectory patterns |
+| L7 | `reflexion_trajectories` | ReflexionTrajectories | Failed trajectory injection for retries |
+| L8 | `pattern_matcher_results` | PatternMatcherResults | Reasoning context |
+| L9 | `sherlock_verdicts` | SherlockVerdicts | (reserved) |
+| L10 | `algorithm_strategy` | AlgorithmStrategy | Algorithm-specific prompt snippet |
+| L11 | `prompt_cap` | — | Token budget enforcement via truncation |
 
 ### Research Pipeline (46 agents)
 
-A 46-agent PhD-level research pipeline for systematic literature reviews, theory building, and dissertation writing. Organized across phases from planning through final synthesis.
+A 7-phase, 46-agent PhD-level research pipeline with runtime-loaded agent definitions. Organized from Foundation through Validation with phases 6-7 having full tool access for writing output.
 
 ```mermaid
 graph LR
-    subgraph RP["Research Planning"]
+    subgraph P1["Phase 1: Foundation"]
         SB["step-back-analyzer"] --> SD2["self-ask-decomposer"]
         SD2 --> AC["ambiguity-clarifier"]
-        AC --> CDef["construct-definer"]
+        AC --> RPL["research-planner"]
+        RPL --> CDef["construct-definer"]
+        CDef --> DA2["dissertation-architect"]
+        DA2 --> CS["chapter-synthesizer"]
     end
 
-    subgraph LR2["Literature & Analysis"]
-        LM["literature-mapper"] --> MS["methodology-scanner"]
-        MS --> ST2["source-tier-classifier"]
-        ST2 --> QA["quality-assessor"]
-        QA --> BD["bias-detector"]
+    subgraph P2["Phase 2: Discovery"]
+        LM["literature-mapper"] --> STC["source-tier-classifier"]
+        STC --> CE["citation-extractor"]
+        CE --> CTM["context-tier-manager"]
     end
 
-    subgraph TB["Theory Building"]
-        PA2["pattern-analyst"] --> TS2["thematic-synthesizer"]
+    subgraph P3["Phase 3: Architecture"]
+        TFA["theoretical-framework-analyst"] --> CA["contradiction-analyzer"]
+        CA --> GH["gap-hunter"]
+        GH --> RA["risk-analyst"]
+    end
+
+    subgraph P4["Phase 4: Synthesis"]
+        ES["evidence-synthesizer"] --> PAN["pattern-analyst"]
+        PAN --> TS2["thematic-synthesizer"]
         TS2 --> TB2["theory-builder"]
-        TB2 --> HG["hypothesis-generator"]
+        TB2 --> OI["opportunity-identifier"]
+    end
+
+    subgraph P5["Phase 5: Design"]
+        MD["method-designer"] --> HG["hypothesis-generator"]
         HG --> MA["model-architect"]
+        MA --> AP["analysis-planner"]
+        AP --> SS["sampling-strategist"]
+        SS --> IND["instrument-developer"]
+        IND --> VG["validity-guardian"]
+        VG --> MSC["methodology-scanner"]
+        MSC --> MW["methodology-writer"]
     end
 
-    subgraph VV["Verification"]
-        AR["adversarial-reviewer"] --> VG["validity-guardian"]
-        VG --> CQ["confidence-quantifier"]
-        CQ --> CV["citation-validator"]
-    end
-
-    subgraph WR["Writing"]
-        DA2["dissertation-architect"] --> IW["introduction-writer"]
-        IW --> LRW["literature-review-writer"]
-        LRW --> MW["methodology-writer"]
-        MW --> RW["results-writer"]
+    subgraph P6["Phase 6: Writing"]
+        IW["introduction-writer"] --> LRW["literature-review-writer"]
+        LRW --> RW["results-writer"]
         RW --> DW["discussion-writer"]
         DW --> CW["conclusion-writer"]
         CW --> AW["abstract-writer"]
     end
 
-    RP --> LR2 --> TB --> VV --> WR
+    subgraph P7["Phase 7: Validation"]
+        SR["systematic-reviewer"] --> ER["ethics-reviewer"]
+        ER --> ADR["adversarial-reviewer"]
+        ADR --> CQ["confidence-quantifier"]
+        CQ --> CIV["citation-validator"]
+        CIV --> RC["reproducibility-checker"]
+        RC --> APA["apa-citation-specialist"]
+        APA --> CON["consistency-validator"]
+        CON --> QAS["quality-assessor"]
+        QAS --> BD["bias-detector"]
+        BD --> FLM["file-length-manager"]
+    end
 
-    style RP fill:#0f3460,stroke:#533483,color:#e0e0e0
-    style LR2 fill:#16213e,stroke:#533483,color:#e0e0e0
-    style TB fill:#1a1a2e,stroke:#533483,color:#e0e0e0
-    style VV fill:#0f3460,stroke:#e94560,color:#e0e0e0
-    style WR fill:#16213e,stroke:#e94560,color:#e0e0e0
+    P1 --> P2 --> P3 --> P4 --> P5 --> P6 --> P7
+
+    style P1 fill:#0f3460,stroke:#533483,color:#e0e0e0
+    style P2 fill:#16213e,stroke:#533483,color:#e0e0e0
+    style P3 fill:#1a1a2e,stroke:#533483,color:#e0e0e0
+    style P4 fill:#0f3460,stroke:#e94560,color:#e0e0e0
+    style P5 fill:#16213e,stroke:#e94560,color:#e0e0e0
+    style P6 fill:#1a1a2e,stroke:#e94560,color:#e0e0e0
+    style P7 fill:#0a0a1a,stroke:#e94560,color:#e0e0e0
 ```
-
-**Prompt Assembly (5 parts):**
-
-| Part | Content |
-|------|---------|
-| 1 | Agent expertise and role definition |
-| 2 | Research topic and scope |
-| 3 | Prior phase outputs (chain context) |
-| 4 | Style guide and citation standards (APA 7th) |
-| 5 | Quality verification requirements |
 
 ### Pipeline Execution
 
@@ -1809,6 +1842,92 @@ graph TD
     style REFLEXION fill:#1a0a2e,stroke:#e94560,color:#e0e0e0
     style DONE fill:#0f3460,stroke:#533483,color:#e0e0e0
 ```
+
+### Agent Definition System
+
+Agent behavior is defined in `.archon/agents/` markdown files with YAML frontmatter and loaded at runtime by the `agent_loader` module. Execution order is governed by TOML manifests.
+
+```
+.archon/agents/
+├── coding-pipeline/
+│   ├── pipeline.toml          # 50-agent execution order + phase defs
+│   ├── contract-agent.md      # Agent #1 (YAML frontmatter + instructions)
+│   ├── requirement-extractor.md
+│   ├── ...
+│   └── recovery-agent.md      # Agent #50
+└── phdresearch/
+    ├── pipeline.toml          # 46-agent execution order + phase defs
+    ├── step-back-analyzer.md
+    ├── ...
+    └── file-length-manager.md
+```
+
+**Frontmatter fields** (parsed by `agent_loader::parse_frontmatter`):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | string | Agent key (kebab-case) |
+| `type` | string | Phase name |
+| `description` | string | Role description |
+| `algorithm` | string | Primary reasoning algorithm (ReAct, ToT, Reflexion) |
+| `fallback_algorithm` | string | Fallback if primary fails |
+| `memory_reads` | list | RLM namespaces to read |
+| `memory_writes` | list | RLM namespaces to write |
+| `tools` | list | Allowed tools |
+| `qualityGates` | list/map | Quality gate criteria |
+| `capabilities` | list | Agent capabilities |
+
+### Gate Enforcement
+
+Five deterministic gates enforce code quality using tool output only (no LLM self-assessment):
+
+| Gate | Module | Description |
+|------|--------|-------------|
+| ForbiddenPatternScanner | `coding/gates.rs` | Blocks TODO, stubs, `unimplemented!()`, empty function bodies |
+| CompilationGate | `coding/gates.rs` | `cargo build` / `npm run build` must exit 0 |
+| OrphanDetectionGate | `coding/gates.rs` | Every new file must be referenced by at least one other file |
+| TestsRunGate | `coding/gates.rs` | Test suite must exit 0 |
+| E2ESmokeTestGate | `coding/gates.rs` | Feature invoked end-to-end with fraud detection (rejects test-only output) |
+
+### Structured Artefacts
+
+Six typed artefacts form the pipeline's audit chain:
+
+```
+TaskContract → EvidencePack → WiringPlan → ImplementationReport → ValidationReport → MergePacket
+```
+
+| Artefact | Producer | Contents |
+|----------|----------|----------|
+| `TaskContract` | contract-agent | Parsed intent, acceptance criteria, constraints |
+| `EvidencePack` | Phase reviewers | File-line facts, call graphs, test references |
+| `WiringPlan` | wiring-obligation-agent | Typed obligations that gate Phase 4 |
+| `ImplementationReport` | implementation-coordinator | Changed files, new symbols, wiring status |
+| `ValidationReport` | quality-gate | Gate results, AC trace with evidence |
+| `MergePacket` | sign-off-approver | Risk report, evidence bundle, sign-off |
+
+All artefacts are persisted atomically (write-to-tmp + rename) via `artefacts::save_artefact()`.
+
+### Session Recovery
+
+Pipeline sessions checkpoint after every agent completion. Interrupted sessions can be detected and resumed:
+
+| Function | Description |
+|----------|-------------|
+| `checkpoint()` | Atomic write of session state (fsync + rename) |
+| `resume()` | Reload interrupted session, reset to Running |
+| `detect_interrupted()` | Find all Running/Paused sessions |
+| `abort()` | Mark session as permanently failed |
+
+### Ledger System
+
+Three append-only ledgers provide a complete audit trail:
+
+| Ledger | Records |
+|--------|---------|
+| `DecisionLedger` | All decisions with reason, affected files, timestamp |
+| `TaskLedger` | Task assignments, status changes, wiring obligations |
+| `VerificationLedger` | Gate pass/fail results with evidence summaries |
 
 ---
 
@@ -2094,10 +2213,24 @@ archon (binary)
 │   ├── theme.rs         22 themes
 │   └── vim.rs           Vim mode keybindings
 │
-├── archon-pipeline      48-agent coding + 46-agent research pipelines
-│   ├── coding/          CodingFacade, 48 agent definitions, 11-layer prompt
-│   ├── research/        ResearchFacade, 46 agent definitions, verification
-│   ├── runner.rs        PipelineFacade trait, shared runner loop, LEANN integration
+├── archon-pipeline      50-agent coding + 46-agent research pipelines
+│   ├── coding/          CodingFacade, 50 agent definitions, 11-layer prompt
+│   │   ├── agents.rs    Static AGENTS array (50 agents, 6 phases)
+│   │   ├── facade.rs    CodingFacade with agent_instructions layer
+│   │   ├── gates.rs     5 deterministic gates + fraud detection
+│   │   ├── contract.rs  TaskContract artefact
+│   │   ├── evidence.rs  EvidencePack + validation
+│   │   └── wiring.rs    WiringPlan obligations
+│   ├── research/        ResearchFacade, 46 agent definitions, 7 phases
+│   ├── agent_loader.rs  Runtime .md frontmatter parser
+│   ├── manifest.rs      TOML pipeline manifest parser
+│   ├── artefacts.rs     6 typed artefacts + AC traced gate
+│   ├── session.rs       Checkpoint / resume / detect_interrupted
+│   ├── ledgers.rs       Append-only Decision/Task/Verification ledgers
+│   ├── layered_context.rs  L0-L3 four-tier context loader
+│   ├── runner.rs        PipelineFacade trait, shared runner loop
+│   ├── prompt_cap.rs    Token budget enforcement (12 priority tiers)
+│   ├── retry.rs         Retry with Reflexion injection
 │   ├── kb/              Knowledge base (ingest, compile, query, Q&A)
 │   ├── learning/        SONA, ReasoningBank, GNN, CausalMemory, Provenance,
 │   │                    ShadowVectorSearch, DESC, Reflexion, extended modes
@@ -2152,7 +2285,7 @@ archon (binary)
 | **Phase 3**, UX & Ergonomics | ✅ Complete | 22 themes, MBTI themes, resume by name/prefix, `/color` and `/theme` commands, memory tools wired |
 | **Phase 4**, Plugins & Skills | ✅ Complete | Plugin system (`archon-plugin`), user-defined slash commands, skill system, hook extensibility |
 | **Phase 5**, Multi-Agent & Learning | ✅ Complete | Subagent orchestration, team execution, MCP transport, LSP client, WebSocket remote, personality persistence (cross-session InnerVoice + rule scores + trends), memory garden (6-phase consolidation + `/garden` command), correction tracking with severity-based rule reinforcement |
-| **Phase 6**, Pipelines & Intelligence | ✅ Complete | 48-agent coding pipeline (CodingFacade, 11-layer prompt, 6 phases), 46-agent research pipeline (ResearchFacade, 5-part prompt), LEANN semantic code search (tree-sitter + HNSW), Knowledge Base (ingest/compile/Q&A), Learning systems (SONA, ReasoningBank 12 modes, GNN 3-layer attention, CausalMemory hypergraph, ProvenanceStore L-Scores, ShadowVectorSearch contradiction detection, DESC, Reflexion), AutoCapture |
+| **Phase 6**, Pipelines & Intelligence | ✅ Complete | 50-agent coding pipeline (CodingFacade, 11-layer prompt, 6 phases), agent_loader (.md frontmatter + TOML manifests), 5 deterministic gates, 6 structured artefacts, session recovery, append-only ledgers, layered context (L0-L3), 46-agent research pipeline (ResearchFacade, 7 phases), LEANN semantic code search (tree-sitter + HNSW), Knowledge Base (ingest/compile/Q&A), Learning systems (SONA, ReasoningBank 12 modes, GNN 3-layer attention, CausalMemory hypergraph, ProvenanceStore L-Scores, ShadowVectorSearch contradiction detection, DESC, Reflexion), AutoCapture |
 
 ---
 

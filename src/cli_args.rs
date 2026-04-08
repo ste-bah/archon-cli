@@ -200,7 +200,7 @@ pub struct Cli {
     pub add_dir: Vec<PathBuf>,
 
     // ── NEW: Mode control ──────────────────────────────────────
-    /// Minimal mode: skip hooks, CLAUDE.md, MCP auto-start
+    /// Minimal mode: skip hooks, ARCHON.md, MCP auto-start
     #[arg(long)]
     pub bare: bool,
 

@@ -275,7 +275,7 @@ async fn test_dead_letter_after_max_retries() {
     );
 }
 
-/// 8. JSON format compatibility with `.claude/runtime/leann-index-queue.json`:
+/// 8. JSON format compatibility with `.archon/runtime/leann-index-queue.json`:
 ///    `[{"filePath": "/path", "addedAt": "2024-01-01T00:00:00Z"}]`
 #[tokio::test]
 async fn test_json_format_compatibility() {

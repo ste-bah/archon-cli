@@ -46,7 +46,7 @@ pub struct ResolvedFlags {
     pub tool_blacklist: Option<Vec<String>>,
     /// Tools that execute without prompting (auto-allowed patterns).
     pub allowed_tools: Option<Vec<String>>,
-    /// Minimal mode: skip hooks, CLAUDE.md, MCP auto-start.
+    /// Minimal mode: skip hooks, ARCHON.md, MCP auto-start.
     pub bare_mode: bool,
     /// Disable slash command parsing.
     pub disable_slash_commands: bool,

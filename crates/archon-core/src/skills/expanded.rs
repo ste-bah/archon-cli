@@ -588,11 +588,11 @@ expanded_skill!(
 expanded_skill!(
     InitSkill,
     "init",
-    "Initialize project with CLAUDE.md",
+    "Initialize project with ARCHON.md",
     |_args, ctx| {
-        let claude_md = ctx.working_dir.join("CLAUDE.md");
-        if claude_md.exists() {
-            return SkillOutput::Text("CLAUDE.md already exists in this project.".to_string());
+        let archon_md = ctx.working_dir.join("ARCHON.md");
+        if archon_md.exists() {
+            return SkillOutput::Text("ARCHON.md already exists in this project.".to_string());
         }
         let template = "# Project Instructions\n\n\
             ## Overview\n\
@@ -605,12 +605,12 @@ expanded_skill!(
             ```\n\
             # Add your build/test/lint commands here\n\
             ```\n";
-        match std::fs::write(&claude_md, template) {
+        match std::fs::write(&archon_md, template) {
             Ok(()) => SkillOutput::Text(format!(
-                "Created CLAUDE.md at {}\nEdit it to add your project instructions.",
-                claude_md.display()
+                "Created ARCHON.md at {}\nEdit it to add your project instructions.",
+                archon_md.display()
             )),
-            Err(e) => SkillOutput::Error(format!("Failed to create CLAUDE.md: {e}")),
+            Err(e) => SkillOutput::Error(format!("Failed to create ARCHON.md: {e}")),
         }
     }
 );

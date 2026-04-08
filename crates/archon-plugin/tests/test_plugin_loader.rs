@@ -27,7 +27,7 @@ fn unique_tmp(prefix: &str) -> PathBuf {
 /// Write a minimal valid plugin into `dir/<name>/`.
 fn write_plugin(plugins_dir: &std::path::Path, name: &str, version: &str, capabilities: &[&str]) {
     let plugin_dir = plugins_dir.join(name);
-    let manifest_dir = plugin_dir.join(".claude-plugin");
+    let manifest_dir = plugin_dir.join(".archon-plugin");
     std::fs::create_dir_all(&manifest_dir).unwrap();
 
     let caps_json = capabilities
@@ -50,7 +50,7 @@ fn write_plugin(plugins_dir: &std::path::Path, name: &str, version: &str, capabi
 /// Write a minimal plugin that depends on another plugin.
 fn write_plugin_with_deps(plugins_dir: &std::path::Path, name: &str, deps: &[&str]) {
     let plugin_dir = plugins_dir.join(name);
-    let manifest_dir = plugin_dir.join(".claude-plugin");
+    let manifest_dir = plugin_dir.join(".archon-plugin");
     std::fs::create_dir_all(&manifest_dir).unwrap();
 
     let deps_json = deps
@@ -110,7 +110,7 @@ fn loader_discovers_plugin_with_manifest() {
 fn loader_skips_dir_without_manifest() {
     let dir = unique_tmp("archon-test-loader-no-manifest");
     std::fs::create_dir_all(&dir).unwrap();
-    // Create a plugin directory with no .claude-plugin/plugin.json
+    // Create a plugin directory with no .archon-plugin/plugin.json
     std::fs::create_dir_all(dir.join("ghost-plugin")).unwrap();
 
     let loader = PluginLoader::new(dir);
@@ -128,7 +128,7 @@ fn loader_handles_invalid_manifest_json() {
     let dir = unique_tmp("archon-test-loader-bad-json");
     std::fs::create_dir_all(&dir).unwrap();
     let plugin_dir = dir.join("bad-plugin");
-    let manifest_dir = plugin_dir.join(".claude-plugin");
+    let manifest_dir = plugin_dir.join(".archon-plugin");
     std::fs::create_dir_all(&manifest_dir).unwrap();
     std::fs::write(manifest_dir.join("plugin.json"), "{ not json }").unwrap();
 
@@ -143,7 +143,7 @@ fn loader_handles_manifest_missing_required_fields() {
     let dir = unique_tmp("archon-test-loader-missing-fields");
     std::fs::create_dir_all(&dir).unwrap();
     let plugin_dir = dir.join("bad-plugin");
-    let manifest_dir = plugin_dir.join(".claude-plugin");
+    let manifest_dir = plugin_dir.join(".archon-plugin");
     std::fs::create_dir_all(&manifest_dir).unwrap();
     // Missing "name" field
     std::fs::write(manifest_dir.join("plugin.json"), r#"{"version": "1.0.0"}"#).unwrap();
@@ -158,7 +158,7 @@ fn loader_handles_manifest_name_with_spaces() {
     let dir = unique_tmp("archon-test-loader-spaces");
     std::fs::create_dir_all(&dir).unwrap();
     let plugin_dir = dir.join("bad-plugin");
-    let manifest_dir = plugin_dir.join(".claude-plugin");
+    let manifest_dir = plugin_dir.join(".archon-plugin");
     std::fs::create_dir_all(&manifest_dir).unwrap();
     // Name contains spaces — invalid
     std::fs::write(
@@ -366,7 +366,7 @@ fn loader_continues_after_bad_plugin() {
     let dir = unique_tmp("archon-test-loader-fail-open");
     std::fs::create_dir_all(&dir).unwrap();
     // Bad plugin
-    let bad_dir = dir.join("bad-plugin").join(".claude-plugin");
+    let bad_dir = dir.join("bad-plugin").join(".archon-plugin");
     std::fs::create_dir_all(&bad_dir).unwrap();
     std::fs::write(bad_dir.join("plugin.json"), "{ invalid }").unwrap();
     // Good plugin
@@ -385,7 +385,7 @@ fn loader_continues_after_bad_plugin() {
 fn load_result_error_contains_plugin_id() {
     let dir = unique_tmp("archon-test-loader-error-id");
     std::fs::create_dir_all(&dir).unwrap();
-    let bad_dir = dir.join("error-plugin").join(".claude-plugin");
+    let bad_dir = dir.join("error-plugin").join(".archon-plugin");
     std::fs::create_dir_all(&bad_dir).unwrap();
     std::fs::write(bad_dir.join("plugin.json"), "{ invalid }").unwrap();
 
@@ -401,7 +401,7 @@ fn load_result_errors_are_typed_plugin_errors() {
     use archon_plugin::error::PluginError;
     let dir = unique_tmp("archon-test-loader-typed-errors");
     std::fs::create_dir_all(&dir).unwrap();
-    let bad_dir = dir.join("bad-plugin").join(".claude-plugin");
+    let bad_dir = dir.join("bad-plugin").join(".archon-plugin");
     std::fs::create_dir_all(&bad_dir).unwrap();
     std::fs::write(bad_dir.join("plugin.json"), "{ invalid }").unwrap();
 

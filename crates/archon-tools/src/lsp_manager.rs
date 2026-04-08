@@ -8,10 +8,10 @@ use std::path::{Path, PathBuf};
 use crate::lsp_client::LspClient;
 
 // ---------------------------------------------------------------------------
-// LspConfig — custom server paths from .claude/lsp-config.json
+// LspConfig — custom server paths from .archon/lsp-config.json
 // ---------------------------------------------------------------------------
 
-/// Per-language server config from `.claude/lsp-config.json`.
+/// Per-language server config from `.archon/lsp-config.json`.
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize, Default)]
 pub struct LspServerConfig {
     /// Server binary path (overrides auto-detection).
@@ -22,7 +22,7 @@ pub struct LspServerConfig {
     pub language_id: Option<String>,
 }
 
-/// Top-level `.claude/lsp-config.json` structure.
+/// Top-level `.archon/lsp-config.json` structure.
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize, Default)]
 pub struct LspConfig {
     pub servers: Vec<LspServerConfig>,
@@ -30,11 +30,24 @@ pub struct LspConfig {
 
 impl LspConfig {
     pub fn load(project_root: &Path) -> Self {
-        let config_path = project_root.join(".claude").join("lsp-config.json");
-        std::fs::read_to_string(&config_path)
-            .ok()
-            .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default()
+        let new_path = project_root.join(".archon").join("lsp-config.json");
+        if let Ok(s) = std::fs::read_to_string(&new_path) {
+            if let Ok(cfg) = serde_json::from_str(&s) {
+                return cfg;
+            }
+        }
+        let old_path = project_root.join(".claude").join("lsp-config.json");
+        if let Ok(s) = std::fs::read_to_string(&old_path) {
+            if let Ok(cfg) = serde_json::from_str(&s) {
+                tracing::warn!(
+                    "Loading from deprecated path {}. Rename to {} to suppress this warning.",
+                    old_path.display(),
+                    new_path.display()
+                );
+                return cfg;
+            }
+        }
+        Self::default()
     }
 }
 
@@ -77,7 +90,7 @@ impl LspServerManager {
     /// Returns `(binary_name, extra_args)` or `None` if no server is detected.
     ///
     /// Detection order:
-    /// 1. Custom config from `.claude/lsp-config.json` (first matching entry)
+    /// 1. Custom config from `.archon/lsp-config.json` (first matching entry)
     /// 2. `Cargo.toml` → rust-analyzer
     /// 3. `package.json` → typescript-language-server
     /// 4. `pyproject.toml` or `setup.py` → pylsp (prefer) or pyright

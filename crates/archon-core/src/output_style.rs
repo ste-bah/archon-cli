@@ -16,7 +16,7 @@ use std::collections::HashMap;
 pub enum OutputStyleSource {
     /// Shipped with Archon (always available).
     BuiltIn,
-    /// Loaded from `~/.claude/output-styles/` at startup.
+    /// Loaded from `~/.archon/output-styles/` at startup.
     Config,
     /// Provided by a plugin via its `output-styles/` directory.
     Plugin,

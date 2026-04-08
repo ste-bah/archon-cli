@@ -60,7 +60,7 @@ struct TaskMetadata {
 // CronStore — JSON file I/O
 // ---------------------------------------------------------------------------
 
-/// Handle for reading and writing `.claude/scheduled_tasks.json`.
+/// Handle for reading and writing `.archon/scheduled_tasks.json`.
 pub struct CronStore {
     path: PathBuf,
 }

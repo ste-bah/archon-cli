@@ -2,37 +2,49 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 
-/// Discover and load all CLAUDE.md files from global to project.
+/// Discover and load all ARCHON.md files from global to project.
 ///
 /// Loading order:
-/// 1. `~/.claude/CLAUDE.md` (global)
+/// 1. `~/.archon/ARCHON.md` (global, new) — falls back to `~/.claude/CLAUDE.md`
 /// 2. Walk from filesystem root toward `working_dir`, checking each ancestor for:
-///    - `.claude/CLAUDE.md` (preferred)
-///    - `CLAUDE.md` (fallback)
+///    - `.archon/ARCHON.md` (preferred)
+///    - `.claude/CLAUDE.md` (deprecated fallback)
+///    - `ARCHON.md` (root fallback)
+///    - `CLAUDE.md` (root deprecated fallback)
 /// 3. Check `working_dir` itself with the same preference
 ///
-/// Each file is emitted with a section header: `# CLAUDE.md from {path}`
+/// Each file is emitted with a section header: `# ARCHON.md from {path}`
 /// Files are deduplicated by canonical path so symlinks don't cause double-loading.
-pub fn load_hierarchical_claude_md(working_dir: &Path) -> String {
-    collect_claude_md_sections(working_dir, None)
+pub fn load_hierarchical_archon_md(working_dir: &Path) -> String {
+    collect_archon_md_sections(working_dir, None)
 }
 
-/// Same as [`load_hierarchical_claude_md`] but truncates from the beginning
+/// Same as [`load_hierarchical_archon_md`] but truncates from the beginning
 /// (global entries first) if the total exceeds `max_chars`, preserving the
 /// most-local (project) content.
-pub fn load_hierarchical_claude_md_with_limit(working_dir: &Path, max_chars: usize) -> String {
-    collect_claude_md_sections(working_dir, Some(max_chars))
+pub fn load_hierarchical_archon_md_with_limit(working_dir: &Path, max_chars: usize) -> String {
+    collect_archon_md_sections(working_dir, Some(max_chars))
 }
 
 /// Internal: collect sections, optionally truncating.
-fn collect_claude_md_sections(working_dir: &Path, max_chars: Option<usize>) -> String {
+fn collect_archon_md_sections(working_dir: &Path, max_chars: Option<usize>) -> String {
     let mut sections: Vec<String> = Vec::new();
     let mut seen: HashSet<std::path::PathBuf> = HashSet::new();
 
-    // 1. Global: ~/.claude/CLAUDE.md
+    // 1. Global: ~/.archon/ARCHON.md (with ~/.claude/CLAUDE.md fallback)
     if let Some(home) = dirs::home_dir() {
-        let global_path = home.join(".claude").join("CLAUDE.md");
-        try_load(&global_path, &mut sections, &mut seen);
+        let new_global = home.join(".archon").join("ARCHON.md");
+        let old_global = home.join(".claude").join("CLAUDE.md");
+        if new_global.is_file() {
+            try_load(&new_global, &mut sections, &mut seen);
+        } else if old_global.is_file() {
+            tracing::warn!(
+                "Loading from deprecated path {}. Rename to {} to suppress this warning.",
+                old_global.display(),
+                new_global.display()
+            );
+            try_load(&old_global, &mut sections, &mut seen);
+        }
     }
 
     // 2. Walk ancestors from root toward working_dir
@@ -44,8 +56,6 @@ fn collect_claude_md_sections(working_dir: &Path, max_chars: Option<usize>) -> S
     let ancestors: Vec<&Path> = canonical.ancestors().collect();
     // ancestors goes from working_dir up to root; reverse to go root-first
     // Skip the last element (working_dir itself) -- we handle it in step 3.
-    // Also skip the first element in reversed order if it's "/" (root) since
-    // it's unlikely to have CLAUDE.md and we already checked global.
     for ancestor in ancestors.iter().rev() {
         // Skip the working_dir itself (handled after the loop)
         if *ancestor == canonical.as_path() {
@@ -65,20 +75,42 @@ fn collect_claude_md_sections(working_dir: &Path, max_chars: Option<usize>) -> S
     }
 }
 
-/// Try to load CLAUDE.md from a directory, preferring `.claude/CLAUDE.md`.
+/// Try to load ARCHON.md from a directory, with backward compat fallback.
+///
+/// Preference order:
+/// 1. `.archon/ARCHON.md` (new, preferred)
+/// 2. `.claude/CLAUDE.md` (deprecated fallback)
+/// 3. `ARCHON.md` (root-level new)
+/// 4. `CLAUDE.md` (root-level deprecated fallback)
 fn try_load_dir(dir: &Path, sections: &mut Vec<String>, seen: &mut HashSet<std::path::PathBuf>) {
+    let dot_archon = dir.join(".archon").join("ARCHON.md");
     let dot_claude = dir.join(".claude").join("CLAUDE.md");
-    let plain = dir.join("CLAUDE.md");
+    let plain_archon = dir.join("ARCHON.md");
+    let plain_claude = dir.join("CLAUDE.md");
 
-    // Prefer .claude/CLAUDE.md; if it exists, skip the plain one
-    if dot_claude.is_file() {
+    // Prefer .archon/ARCHON.md; fall back to .claude/CLAUDE.md; then root files
+    if dot_archon.is_file() {
+        try_load(&dot_archon, sections, seen);
+    } else if dot_claude.is_file() {
+        tracing::warn!(
+            "Loading from deprecated path {}. Rename to {} to suppress this warning.",
+            dot_claude.display(),
+            dot_archon.display()
+        );
         try_load(&dot_claude, sections, seen);
-    } else if plain.is_file() {
-        try_load(&plain, sections, seen);
+    } else if plain_archon.is_file() {
+        try_load(&plain_archon, sections, seen);
+    } else if plain_claude.is_file() {
+        tracing::warn!(
+            "Loading from deprecated path {}. Rename to {} to suppress this warning.",
+            plain_claude.display(),
+            plain_archon.display()
+        );
+        try_load(&plain_claude, sections, seen);
     }
 }
 
-/// Try to load a single CLAUDE.md file, deduplicating by canonical path.
+/// Try to load a single instructions file, deduplicating by canonical path.
 fn try_load(path: &Path, sections: &mut Vec<String>, seen: &mut HashSet<std::path::PathBuf>) {
     let canon = match path.canonicalize() {
         Ok(p) => p,
@@ -98,7 +130,7 @@ fn try_load(path: &Path, sections: &mut Vec<String>, seen: &mut HashSet<std::pat
         return;
     }
 
-    let header = format!("# CLAUDE.md from {}\n", path.display());
+    let header = format!("# ARCHON.md from {}\n", path.display());
     sections.push(format!("{header}\n{content}"));
 }
 

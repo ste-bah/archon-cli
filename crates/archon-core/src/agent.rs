@@ -250,6 +250,8 @@ pub struct Agent {
     pub session_stats: Arc<Mutex<SessionStats>>,
     /// Hook registry for pre/post tool execution hooks.
     hook_registry: Option<Arc<crate::hooks::HookRegistry>>,
+    /// File watch manager for dynamic watch paths from hooks (REQ-HOOK-017).
+    file_watch_manager: Arc<crate::hooks::FileWatchManager>,
     /// Channel for permission prompt responses from the TUI.
     /// Agent sends PermissionRequired event, then waits on this for y/n.
     pub permission_response_rx: Option<Arc<tokio::sync::Mutex<tokio::sync::mpsc::Receiver<bool>>>>,
@@ -267,6 +269,8 @@ pub struct Agent {
     personality_briefing: Option<String>,
     /// CLI-417: Memory garden briefing injected into system prompt on first turn only.
     pub memory_briefing: Option<String>,
+    /// Permission store for hook-driven permission updates (REQ-HOOK-016).
+    permission_store: Arc<dyn crate::hooks::PermissionStore>,
 }
 
 impl Agent {
@@ -276,6 +280,14 @@ impl Agent {
         config: AgentConfig,
         event_tx: tokio::sync::mpsc::Sender<AgentEvent>,
     ) -> Self {
+        let permission_store: Arc<dyn crate::hooks::PermissionStore> =
+            Arc::new(crate::hooks::RuntimePermissionStore::new(
+                dirs::home_dir()
+                    .unwrap_or_default()
+                    .join(".archon")
+                    .join("settings.json"),
+                config.working_dir.join(".archon").join("settings.json"),
+            ));
         Self {
             client,
             registry,
@@ -294,6 +306,7 @@ impl Agent {
             show_thinking: Arc::new(AtomicBool::new(true)),
             session_stats: Arc::new(Mutex::new(SessionStats::default())),
             hook_registry: None,
+            file_watch_manager: Arc::new(crate::hooks::FileWatchManager::new(100)),
             permission_response_rx: None,
             inner_voice: None,
             ask_user_response_rx: None,
@@ -301,6 +314,7 @@ impl Agent {
             denial_log: Arc::new(Mutex::new(archon_permissions::denial_log::DenialLog::new())),
             personality_briefing: None,
             memory_briefing: None,
+            permission_store,
         }
     }
 
@@ -345,8 +359,23 @@ impl Agent {
         self.hook_registry = Some(registry);
     }
 
-    /// Fire a hook by event with a JSON payload. No-op if no registry is set.
-    pub async fn fire_hook(&self, event: crate::hooks::HookEvent, payload: serde_json::Value) {
+    /// Add dynamic watch paths from hooks (REQ-HOOK-017).
+    pub fn add_watch_paths(&self, paths: Vec<String>) {
+        self.file_watch_manager.add_watch_paths(paths);
+    }
+
+    /// Clear all dynamic watch paths (called on SessionEnd).
+    pub fn clear_watch_paths(&self) {
+        self.file_watch_manager.clear();
+    }
+
+    /// Fire a hook by event with a JSON payload. Returns the aggregated result.
+    /// No-op (returns empty aggregate) if no registry is set.
+    pub async fn fire_hook(
+        &self,
+        event: crate::hooks::HookEvent,
+        payload: serde_json::Value,
+    ) -> crate::hooks::AggregatedHookResult {
         if let Some(ref registry) = self.hook_registry {
             registry
                 .execute_hooks(
@@ -355,7 +384,9 @@ impl Agent {
                     &self.config.working_dir,
                     &self.config.session_id,
                 )
-                .await;
+                .await
+        } else {
+            crate::hooks::AggregatedHookResult::new()
         }
     }
 
@@ -632,7 +663,7 @@ impl Agent {
                 let mut allowed: Vec<PreflightResult> = Vec::new();
 
                 for tool in &pending_tools {
-                    let input: serde_json::Value =
+                    let mut input: serde_json::Value =
                         serde_json::from_str(&tool.input_json).unwrap_or(serde_json::json!({}));
 
                     // --- Permission check ---
@@ -650,7 +681,7 @@ impl Agent {
                             | "TodoWrite" | "Sleep" | "Write" | "Edit" | "Config"
                             | "EnterPlanMode" | "ExitPlanMode" | "NotebookEdit" => true,
                             _ => {
-                                self.fire_hook(
+                                let perm_agg = self.fire_hook(
                                     crate::hooks::HookEvent::PermissionRequest,
                                     serde_json::json!({
                                         "hook_event": "PermissionRequest",
@@ -659,6 +690,18 @@ impl Agent {
                                     }),
                                 )
                                 .await;
+                                // Apply updated_permissions from hooks (REQ-HOOK-016)
+                                if !perm_agg.updated_permissions.is_empty() {
+                                    let authority = crate::hooks::SourceAuthority::Project;
+                                    let errors = crate::hooks::apply_permission_updates(
+                                        &perm_agg.updated_permissions,
+                                        &authority,
+                                        self.permission_store.as_ref(),
+                                    );
+                                    for err in &errors {
+                                        tracing::error!("permission update failed: {}", err);
+                                    }
+                                }
                                 self.send_event(AgentEvent::PermissionRequired {
                                     tool: tool.name.clone(),
                                     description: format!("Permission required for {}", tool.name),
@@ -687,7 +730,7 @@ impl Agent {
                                 true
                             }
                             _ => {
-                                self.fire_hook(
+                                let perm_agg = self.fire_hook(
                                     crate::hooks::HookEvent::PermissionRequest,
                                     serde_json::json!({
                                         "hook_event": "PermissionRequest",
@@ -696,6 +739,18 @@ impl Agent {
                                     }),
                                 )
                                 .await;
+                                // Apply updated_permissions from hooks (REQ-HOOK-016)
+                                if !perm_agg.updated_permissions.is_empty() {
+                                    let authority = crate::hooks::SourceAuthority::Project;
+                                    let errors = crate::hooks::apply_permission_updates(
+                                        &perm_agg.updated_permissions,
+                                        &authority,
+                                        self.permission_store.as_ref(),
+                                    );
+                                    for err in &errors {
+                                        tracing::error!("permission update failed: {}", err);
+                                    }
+                                }
                                 self.send_event(AgentEvent::PermissionRequired {
                                     tool: tool.name.clone(),
                                     description: format!(
@@ -880,14 +935,14 @@ impl Agent {
                         }
                     }
 
-                    // --- Pre-tool-use hook ---
+                    // --- Pre-tool-use hook (REQ-HOOK-001/003/004) ---
                     if let Some(ref registry) = self.hook_registry {
                         let hook_input = serde_json::json!({
                             "hook_event": "PreToolUse",
                             "tool_name": tool.name,
                             "tool_input": input,
                         });
-                        let hook_result = registry
+                        let hook_agg = registry
                             .execute_hooks(
                                 crate::hooks::HookEvent::PreToolUse,
                                 hook_input,
@@ -895,7 +950,12 @@ impl Agent {
                                 &self.config.session_id,
                             )
                             .await;
-                        if let crate::hooks::HookResult::Block { reason } = hook_result {
+
+                        // Check for blocking (any hook returned exit 2 or outcome=Blocking)
+                        if hook_agg.is_blocked() {
+                            let reason = hook_agg
+                                .block_reason()
+                                .unwrap_or_else(|| "hook blocked".to_owned());
                             let result = ToolResult::error(format!("Hook blocked: {reason}"));
                             self.send_event(AgentEvent::ToolCallComplete {
                                 name: tool.name.clone(),
@@ -906,6 +966,73 @@ impl Agent {
                             self.state
                                 .add_tool_result(&tool.id, &result.content, result.is_error);
                             continue;
+                        }
+
+                        // Check permission_behavior override (REQ-HOOK-004)
+                        if let Some(ref pb) = hook_agg.permission_behavior {
+                            match pb {
+                                crate::hooks::PermissionBehavior::Deny => {
+                                    let reason = hook_agg
+                                        .permission_decision_reason
+                                        .as_deref()
+                                        .unwrap_or("hook denied permission");
+                                    let result =
+                                        ToolResult::error(format!("Permission denied: {reason}"));
+                                    self.send_event(AgentEvent::ToolCallComplete {
+                                        name: tool.name.clone(),
+                                        id: tool.id.clone(),
+                                        result: result.clone(),
+                                    })
+                                    .await;
+                                    self.state.add_tool_result(
+                                        &tool.id,
+                                        &result.content,
+                                        result.is_error,
+                                    );
+                                    continue;
+                                }
+                                crate::hooks::PermissionBehavior::Allow => {
+                                    // Skip normal permission check — hook allowed it
+                                    tracing::debug!(
+                                        tool = %tool.name,
+                                        "permission overridden to Allow by policy hook"
+                                    );
+                                }
+                                crate::hooks::PermissionBehavior::Ask => {
+                                    // TODO(Phase 2): force interactive prompt
+                                    tracing::debug!(
+                                        tool = %tool.name,
+                                        "permission_behavior=ask (not yet implemented, using normal flow)"
+                                    );
+                                }
+                                crate::hooks::PermissionBehavior::Passthrough => {
+                                    // No-op: normal permission flow proceeds
+                                }
+                            }
+                        }
+
+                        // Apply updated_input if hook modified it (REQ-HOOK-003)
+                        if let Some(modified_input) = hook_agg.updated_input {
+                            if modified_input.is_object() {
+                                tracing::debug!(
+                                    tool = %tool.name,
+                                    "PreToolUse hook modified tool input"
+                                );
+                                input = modified_input;
+                            } else {
+                                tracing::warn!(
+                                    tool = %tool.name,
+                                    "PreToolUse hook returned non-object updated_input, ignoring"
+                                );
+                            }
+                        }
+
+                        // Log system messages from hooks (REQ-HOOK-001)
+                        for msg in &hook_agg.system_messages {
+                            tracing::warn!(tool = %tool.name, "[Hook Warning] {}", msg);
+                        }
+                        for msg in &hook_agg.status_messages {
+                            tracing::info!(tool = %tool.name, "[Hook Status] {}", msg);
                         }
                     }
 
@@ -1019,6 +1146,7 @@ impl Agent {
                 // Handle interceptions, fire post-hooks, emit events,
                 // update inner voice, record results in conversation state.
                 // -------------------------------------------------------
+                let mut prevent_continuation_reason: Option<String> = None;
                 for (pre, result) in allowed.iter().zip(dispatch_results.into_iter()) {
                     // GAP 8: Detect SubagentRequest and execute one-shot.
                     let result = if !result.is_error
@@ -1107,13 +1235,56 @@ impl Agent {
                     };
 
                     // CRIT-09: Intercept AskUserQuestion sentinel.
-                    let result =
+                    let mut result =
                         if !result.is_error && result.content.starts_with("[PENDING_USER_INPUT]") {
                             let question = result
                                 .content
                                 .strip_prefix("[PENDING_USER_INPUT]")
                                 .unwrap_or(&result.content)
                                 .to_string();
+
+                            // CRIT-06: Fire Elicitation hook before presenting question to user
+                            let elicitation_agg = self.fire_hook(
+                                crate::hooks::HookEvent::Elicitation,
+                                serde_json::json!({
+                                    "hook_event": "Elicitation",
+                                    "question": question,
+                                }),
+                            )
+                            .await;
+
+                            // REQ-HOOK-019: If hook returns elicitation_action, auto-respond
+                            if let Some(ref action) = elicitation_agg.elicitation_action {
+                                let auto_response = match action {
+                                    crate::hooks::ElicitationAction::Accept => {
+                                        if let Some(ref content) = elicitation_agg.elicitation_content {
+                                            serde_json::to_string(content)
+                                                .unwrap_or_else(|_| "accepted".to_string())
+                                        } else {
+                                            "accepted".to_string()
+                                        }
+                                    }
+                                    crate::hooks::ElicitationAction::Decline => {
+                                        "declined".to_string()
+                                    }
+                                    crate::hooks::ElicitationAction::Cancel => {
+                                        "cancelled".to_string()
+                                    }
+                                };
+
+                                // Fire ElicitationResult with auto-response
+                                self.fire_hook(
+                                    crate::hooks::HookEvent::ElicitationResult,
+                                    serde_json::json!({
+                                        "hook_event": "ElicitationResult",
+                                        "result": &auto_response,
+                                        "auto_responded": true,
+                                    }),
+                                )
+                                .await;
+
+                                ToolResult::success(auto_response)
+                            } else {
 
                             self.send_event(AgentEvent::AskUser {
                                 question: question.clone(),
@@ -1122,7 +1293,18 @@ impl Agent {
 
                             if let Some(rx) = &self.ask_user_response_rx {
                                 match rx.lock().await.recv().await {
-                                    Some(answer) => ToolResult::success(answer),
+                                    Some(answer) => {
+                                        // CRIT-06: Fire ElicitationResult hook after user responds
+                                        self.fire_hook(
+                                            crate::hooks::HookEvent::ElicitationResult,
+                                            serde_json::json!({
+                                                "hook_event": "ElicitationResult",
+                                                "result": &answer,
+                                            }),
+                                        )
+                                        .await;
+                                        ToolResult::success(answer)
+                                    }
                                     None => ToolResult::error(
                                         "User input channel closed unexpectedly.".to_string(),
                                     ),
@@ -1133,36 +1315,112 @@ impl Agent {
                                         .to_string(),
                                 )
                             }
+                            } // end else (no elicitation_action)
                         } else {
                             result
                         };
 
-                    // CRIT-06: Fire PostToolUse / PostToolUseFailure hooks
-                    if result.is_error {
-                        self.fire_hook(
-                            crate::hooks::HookEvent::PostToolUseFailure,
-                            serde_json::json!({
-                                "hook_event": "PostToolUseFailure",
-                                "tool_name": pre.tool_name,
-                                "tool_id": pre.tool_id,
-                                "error": result.content,
-                            }),
-                        )
-                        .await;
-                    } else {
-                        self.fire_hook(
-                            crate::hooks::HookEvent::PostToolUse,
-                            serde_json::json!({
-                                "hook_event": "PostToolUse",
-                                "tool_name": pre.tool_name,
-                                "tool_id": pre.tool_id,
-                                "result": result.content,
-                            }),
-                        )
-                        .await;
+                    // CRIT-06: Fire PostToolUse / PostToolUseFailure hooks (REQ-HOOK-005)
+                    // Retry loop: max 3 re-executions if PostToolUse hook sets retry=true
+                    let max_retries: u32 = 3;
+                    let mut retry_count: u32 = 0;
+                    loop {
+                        if result.is_error {
+                            let _post_agg = self
+                                .fire_hook(
+                                    crate::hooks::HookEvent::PostToolUseFailure,
+                                    serde_json::json!({
+                                        "hook_event": "PostToolUseFailure",
+                                        "tool_name": pre.tool_name,
+                                        "tool_id": pre.tool_id,
+                                        "error": result.content,
+                                    }),
+                                )
+                                .await;
+                            break; // No retry on failure
+                        }
 
-                        if let Some(ref fp) = pre.file_path {
-                            self.fire_hook(
+                        let post_agg = self
+                            .fire_hook(
+                                crate::hooks::HookEvent::PostToolUse,
+                                serde_json::json!({
+                                    "hook_event": "PostToolUse",
+                                    "tool_name": pre.tool_name,
+                                    "tool_id": pre.tool_id,
+                                    "result": result.content,
+                                }),
+                            )
+                            .await;
+
+                        // Apply updated_mcp_tool_output (REQ-HOOK-005)
+                        if let Some(modified_output) = post_agg.updated_mcp_tool_output {
+                            tracing::debug!(
+                                tool = %pre.tool_name,
+                                "PostToolUse hook modified tool output"
+                            );
+                            let new_content = match modified_output {
+                                serde_json::Value::String(s) => s,
+                                other => serde_json::to_string(&other)
+                                    .unwrap_or_else(|_| other.to_string()),
+                            };
+                            result = ToolResult::success(new_content);
+                        }
+
+                        // Append additional_contexts (REQ-HOOK-005)
+                        if !post_agg.additional_contexts.is_empty() {
+                            let context = post_agg.additional_contexts.join("\n");
+                            result = ToolResult::success(format!(
+                                "{}\n---\n[Hook Context]\n{}",
+                                result.content, context
+                            ));
+                        }
+
+                        // Log system/status messages from PostToolUse hooks
+                        for msg in &post_agg.system_messages {
+                            tracing::warn!(tool = %pre.tool_name, "[Hook Warning] {}", msg);
+                        }
+                        for msg in &post_agg.status_messages {
+                            tracing::info!(tool = %pre.tool_name, "[Hook Status] {}", msg);
+                        }
+
+                        // Handle prevent_continuation (REQ-HOOK-005 flow control)
+                        if post_agg.prevent_continuation {
+                            let reason = post_agg
+                                .stop_reason
+                                .as_deref()
+                                .unwrap_or("hook requested stop");
+                            tracing::info!(
+                                tool = %pre.tool_name,
+                                "PostToolUse hook set prevent_continuation: {}", reason
+                            );
+                            prevent_continuation_reason = Some(reason.to_string());
+                        }
+
+                        // Handle retry (REQ-HOOK-005 flow control)
+                        if post_agg.retry && retry_count < max_retries {
+                            retry_count += 1;
+                            tracing::info!(
+                                tool = %pre.tool_name,
+                                attempt = retry_count,
+                                max = max_retries,
+                                "PostToolUse hook requested retry, re-executing tool"
+                            );
+                            result = pre.tool_arc.execute(pre.input.clone(), &ctx).await;
+                            continue; // Loop back to fire PostToolUse again
+                        } else if post_agg.retry {
+                            tracing::warn!(
+                                tool = %pre.tool_name,
+                                "PostToolUse hook requested retry but max retries ({}) exceeded",
+                                max_retries
+                            );
+                        }
+
+                        break; // Normal exit — no retry requested or retries exhausted
+                    }
+
+                    if let Some(ref fp) = pre.file_path {
+                        let file_agg = self
+                            .fire_hook(
                                 crate::hooks::HookEvent::FileChanged,
                                 serde_json::json!({
                                     "hook_event": "FileChanged",
@@ -1171,7 +1429,62 @@ impl Agent {
                                 }),
                             )
                             .await;
+                        // Consume watch_paths from FileChanged hooks (REQ-HOOK-017)
+                        if !file_agg.watch_paths.is_empty() {
+                            tracing::info!(
+                                "Hook returned {} watch paths",
+                                file_agg.watch_paths.len()
+                            );
+                            self.file_watch_manager.add_watch_paths(file_agg.watch_paths);
                         }
+                    }
+
+                    // CRIT-06: Fire CwdChanged if a Bash tool call changed the working directory
+                    if pre.tool_name == "Bash" {
+                        if let Some(cmd) = pre.input.get("command").and_then(|v| v.as_str()) {
+                            if cmd.trim_start().starts_with("cd ")
+                                || cmd.contains(" && cd ")
+                                || cmd.contains("; cd ")
+                            {
+                                let cwd_agg = self.fire_hook(
+                                    crate::hooks::HookEvent::CwdChanged,
+                                    serde_json::json!({
+                                        "hook_event": "CwdChanged",
+                                        "command": cmd,
+                                    }),
+                                )
+                                .await;
+                                // Consume watch_paths from CwdChanged hooks (REQ-HOOK-017)
+                                if !cwd_agg.watch_paths.is_empty() {
+                                    tracing::info!(
+                                        "Hook returned {} watch paths",
+                                        cwd_agg.watch_paths.len()
+                                    );
+                                    self.file_watch_manager.add_watch_paths(cwd_agg.watch_paths);
+                                }
+                            }
+                        }
+                    }
+
+                    // CRIT-06: Fire WorktreeCreate/WorktreeRemove based on tool name
+                    if pre.tool_name == "EnterWorktree" {
+                        self.fire_hook(
+                            crate::hooks::HookEvent::WorktreeCreate,
+                            serde_json::json!({
+                                "hook_event": "WorktreeCreate",
+                                "tool_name": pre.tool_name,
+                            }),
+                        )
+                        .await;
+                    } else if pre.tool_name == "ExitWorktree" {
+                        self.fire_hook(
+                            crate::hooks::HookEvent::WorktreeRemove,
+                            serde_json::json!({
+                                "hook_event": "WorktreeRemove",
+                                "tool_name": pre.tool_name,
+                            }),
+                        )
+                        .await;
                     }
 
                     self.send_event(AgentEvent::ToolCallComplete {
@@ -1223,6 +1536,12 @@ impl Agent {
 
                     self.state
                         .add_tool_result(&pre.tool_id, &result.content, result.is_error);
+                }
+
+                // If a PostToolUse hook requested prevent_continuation, stop the loop
+                if let Some(reason) = prevent_continuation_reason {
+                    tracing::info!("Hook requested conversation stop: {}", reason);
+                    break;
                 }
 
                 // Loop back to send tool results to the API
@@ -1975,6 +2294,16 @@ impl Agent {
                 {
                     tracing::warn!("failed to mark subagent complete: {e}");
                 }
+
+                // CRIT-06: Fire TeammateIdle hook when subagent completes its work
+                self.fire_hook(
+                    crate::hooks::HookEvent::TeammateIdle,
+                    serde_json::json!({
+                        "hook_event": "TeammateIdle",
+                        "subagent_id": subagent_id,
+                    }),
+                )
+                .await;
 
                 // CRIT-06: Fire SubagentStop hook
                 self.fire_hook(

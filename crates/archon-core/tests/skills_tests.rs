@@ -154,7 +154,7 @@ fn discover_empty_dir() {
 #[test]
 fn discover_skill_from_claude_dir() {
     let tmp = TempDir::new().unwrap();
-    let skill_dir = tmp.path().join(".claude/skills/test");
+    let skill_dir = tmp.path().join(".archon/skills/test");
     std::fs::create_dir_all(&skill_dir).unwrap();
     std::fs::write(
         skill_dir.join("SKILL.md"),

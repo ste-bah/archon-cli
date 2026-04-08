@@ -1,0 +1,5 @@
+{
+  "recall_queries": ["voice audio speech TUI", "cpal whisper STT", "audio capture rust"],
+  "leann_queries": ["voice.rs", "audio", "cpal", "whisper", "*.rs"],
+  "tags": ["agent-definition", "voice", "audio", "speech-to-text", "rust"]
+}

@@ -192,7 +192,7 @@ fn test_output_artifacts_non_empty() {
 #[test]
 fn test_prompt_source_paths() {
     for agent in RESEARCH_AGENTS.iter() {
-        let expected = format!(".claude/agents/phdresearch/{}.md", agent.key);
+        let expected = format!(".archon/agents/phdresearch/{}.md", agent.key);
         assert_eq!(
             agent.prompt_source_path, expected,
             "Agent '{}' has wrong prompt_source_path: expected '{}', got '{}'",

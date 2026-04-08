@@ -1,5 +1,5 @@
 pub mod agent;
-pub mod claudemd;
+pub mod archonmd;
 pub mod cli_flags;
 pub mod commands;
 pub mod config;

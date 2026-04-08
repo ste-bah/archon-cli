@@ -188,7 +188,7 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
         file: "step-back-analyzer.md",
         memory_keys: &["research/foundation/framing", "research/meta/perspective"],
         output_artifacts: &["high-level-framing.md", "abstraction-analysis.md"],
-        prompt_source_path: ".claude/agents/phdresearch/step-back-analyzer.md",
+        prompt_source_path: ".archon/agents/phdresearch/step-back-analyzer.md",
         tool_access: BASE_TOOLS,
     },
     ResearchAgent {
@@ -201,7 +201,7 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
             "research/foundation/decomposition",
         ],
         output_artifacts: &["essential-questions.md", "knowledge-gaps.md"],
-        prompt_source_path: ".claude/agents/phdresearch/self-ask-decomposer.md",
+        prompt_source_path: ".archon/agents/phdresearch/self-ask-decomposer.md",
         tool_access: BASE_TOOLS,
     },
     ResearchAgent {
@@ -214,7 +214,7 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
             "research/meta/clarifications",
         ],
         output_artifacts: &["term-definitions.md", "clarified-scope.md"],
-        prompt_source_path: ".claude/agents/phdresearch/ambiguity-clarifier.md",
+        prompt_source_path: ".archon/agents/phdresearch/ambiguity-clarifier.md",
         tool_access: BASE_TOOLS,
     },
     ResearchAgent {
@@ -224,7 +224,7 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
         file: "research-planner.md",
         memory_keys: &["research/foundation/plan", "research/meta/strategy"],
         output_artifacts: &["research-plan.md", "timeline.md"],
-        prompt_source_path: ".claude/agents/phdresearch/research-planner.md",
+        prompt_source_path: ".archon/agents/phdresearch/research-planner.md",
         tool_access: BASE_TOOLS,
     },
     ResearchAgent {
@@ -237,7 +237,7 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
             "research/theory/definitions",
         ],
         output_artifacts: &["construct-definitions.md", "operationalizations.md"],
-        prompt_source_path: ".claude/agents/phdresearch/construct-definer.md",
+        prompt_source_path: ".archon/agents/phdresearch/construct-definer.md",
         tool_access: BASE_TOOLS,
     },
     ResearchAgent {
@@ -250,7 +250,7 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
             "research/document/architecture",
         ],
         output_artifacts: &["dissertation-outline.md", "chapter-structure.md"],
-        prompt_source_path: ".claude/agents/phdresearch/dissertation-architect.md",
+        prompt_source_path: ".archon/agents/phdresearch/dissertation-architect.md",
         tool_access: BASE_TOOLS,
     },
     ResearchAgent {
@@ -260,7 +260,7 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
         file: "chapter-synthesizer.md",
         memory_keys: &["research/quality/synthesis", "research/document/final"],
         output_artifacts: &["final-synthesis.md", "dissertation-complete.md"],
-        prompt_source_path: ".claude/agents/phdresearch/chapter-synthesizer.md",
+        prompt_source_path: ".archon/agents/phdresearch/chapter-synthesizer.md",
         tool_access: BASE_TOOLS,
     },
     // =========================================================================
@@ -273,7 +273,7 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
         file: "literature-mapper.md",
         memory_keys: &["research/literature/map", "research/sources/index"],
         output_artifacts: &["literature-map.md", "source-catalog.md"],
-        prompt_source_path: ".claude/agents/phdresearch/literature-mapper.md",
+        prompt_source_path: ".archon/agents/phdresearch/literature-mapper.md",
         tool_access: BASE_TOOLS,
     },
     ResearchAgent {
@@ -283,7 +283,7 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
         file: "source-tier-classifier.md",
         memory_keys: &["research/literature/tiers", "research/quality/sources"],
         output_artifacts: &["source-tiers.md", "credibility-assessment.md"],
-        prompt_source_path: ".claude/agents/phdresearch/source-tier-classifier.md",
+        prompt_source_path: ".archon/agents/phdresearch/source-tier-classifier.md",
         tool_access: BASE_TOOLS,
     },
     ResearchAgent {
@@ -293,7 +293,7 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
         file: "citation-extractor.md",
         memory_keys: &["research/quality/extraction", "research/sources/citations"],
         output_artifacts: &["extracted-citations.md", "reference-list.md"],
-        prompt_source_path: ".claude/agents/phdresearch/citation-extractor.md",
+        prompt_source_path: ".archon/agents/phdresearch/citation-extractor.md",
         tool_access: BASE_TOOLS,
     },
     ResearchAgent {
@@ -303,7 +303,7 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
         file: "context-tier-manager.md",
         memory_keys: &["research/literature/context", "research/meta/tiers"],
         output_artifacts: &["context-hierarchy.md", "tier-mappings.md"],
-        prompt_source_path: ".claude/agents/phdresearch/context-tier-manager.md",
+        prompt_source_path: ".archon/agents/phdresearch/context-tier-manager.md",
         tool_access: BASE_TOOLS,
     },
     // =========================================================================
@@ -316,7 +316,7 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
         file: "theoretical-framework-analyst.md",
         memory_keys: &["research/foundation/framework", "research/theory/analysis"],
         output_artifacts: &["theoretical-framework.md", "framework-map.md"],
-        prompt_source_path: ".claude/agents/phdresearch/theoretical-framework-analyst.md",
+        prompt_source_path: ".archon/agents/phdresearch/theoretical-framework-analyst.md",
         tool_access: BASE_TOOLS,
     },
     ResearchAgent {
@@ -329,7 +329,7 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
             "research/findings/conflicts",
         ],
         output_artifacts: &["contradictions-report.md", "resolution-proposals.md"],
-        prompt_source_path: ".claude/agents/phdresearch/contradiction-analyzer.md",
+        prompt_source_path: ".archon/agents/phdresearch/contradiction-analyzer.md",
         tool_access: BASE_TOOLS,
     },
     ResearchAgent {
@@ -339,7 +339,7 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
         file: "gap-hunter.md",
         memory_keys: &["research/analysis/gaps", "research/findings/gaps"],
         output_artifacts: &["research-gaps.md", "gap-priorities.md"],
-        prompt_source_path: ".claude/agents/phdresearch/gap-hunter.md",
+        prompt_source_path: ".archon/agents/phdresearch/gap-hunter.md",
         tool_access: BASE_TOOLS,
     },
     ResearchAgent {
@@ -349,7 +349,7 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
         file: "risk-analyst.md",
         memory_keys: &["research/analysis/risks", "research/meta/risks"],
         output_artifacts: &["risk-assessment.md", "risk-mitigation.md"],
-        prompt_source_path: ".claude/agents/phdresearch/risk-analyst.md",
+        prompt_source_path: ".archon/agents/phdresearch/risk-analyst.md",
         tool_access: BASE_TOOLS,
     },
     // =========================================================================
@@ -362,7 +362,7 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
         file: "evidence-synthesizer.md",
         memory_keys: &["research/analysis/evidence", "research/synthesis/evidence"],
         output_artifacts: &["evidence-synthesis.md", "evidence-matrix.md"],
-        prompt_source_path: ".claude/agents/phdresearch/evidence-synthesizer.md",
+        prompt_source_path: ".archon/agents/phdresearch/evidence-synthesizer.md",
         tool_access: BASE_TOOLS,
     },
     ResearchAgent {
@@ -372,7 +372,7 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
         file: "pattern-analyst.md",
         memory_keys: &["research/synthesis/patterns", "research/findings/patterns"],
         output_artifacts: &["pattern-analysis.md", "pattern-catalog.md"],
-        prompt_source_path: ".claude/agents/phdresearch/pattern-analyst.md",
+        prompt_source_path: ".archon/agents/phdresearch/pattern-analyst.md",
         tool_access: BASE_TOOLS,
     },
     ResearchAgent {
@@ -382,7 +382,7 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
         file: "thematic-synthesizer.md",
         memory_keys: &["research/synthesis/themes", "research/findings/themes"],
         output_artifacts: &["thematic-synthesis.md", "theme-hierarchy.md"],
-        prompt_source_path: ".claude/agents/phdresearch/thematic-synthesizer.md",
+        prompt_source_path: ".archon/agents/phdresearch/thematic-synthesizer.md",
         tool_access: BASE_TOOLS,
     },
     ResearchAgent {
@@ -392,7 +392,7 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
         file: "theory-builder.md",
         memory_keys: &["research/synthesis/theory", "research/theory/construction"],
         output_artifacts: &["theory-development.md", "theoretical-model.md"],
-        prompt_source_path: ".claude/agents/phdresearch/theory-builder.md",
+        prompt_source_path: ".archon/agents/phdresearch/theory-builder.md",
         tool_access: BASE_TOOLS,
     },
     ResearchAgent {
@@ -405,7 +405,7 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
             "research/findings/opportunities",
         ],
         output_artifacts: &["research-opportunities.md", "opportunity-matrix.md"],
-        prompt_source_path: ".claude/agents/phdresearch/opportunity-identifier.md",
+        prompt_source_path: ".archon/agents/phdresearch/opportunity-identifier.md",
         tool_access: BASE_TOOLS,
     },
     // =========================================================================
@@ -418,7 +418,7 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
         file: "method-designer.md",
         memory_keys: &["research/methods/design", "research/methodology/approach"],
         output_artifacts: &["research-design.md", "method-rationale.md"],
-        prompt_source_path: ".claude/agents/phdresearch/method-designer.md",
+        prompt_source_path: ".archon/agents/phdresearch/method-designer.md",
         tool_access: BASE_TOOLS,
     },
     ResearchAgent {
@@ -431,7 +431,7 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
             "research/theory/hypotheses",
         ],
         output_artifacts: &["hypotheses.md", "testable-predictions.md"],
-        prompt_source_path: ".claude/agents/phdresearch/hypothesis-generator.md",
+        prompt_source_path: ".archon/agents/phdresearch/hypothesis-generator.md",
         tool_access: BASE_TOOLS,
     },
     ResearchAgent {
@@ -441,7 +441,7 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
         file: "model-architect.md",
         memory_keys: &["research/synthesis/models", "research/theory/models"],
         output_artifacts: &["conceptual-model.md", "model-specifications.md"],
-        prompt_source_path: ".claude/agents/phdresearch/model-architect.md",
+        prompt_source_path: ".archon/agents/phdresearch/model-architect.md",
         tool_access: BASE_TOOLS,
     },
     ResearchAgent {
@@ -451,7 +451,7 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
         file: "analysis-planner.md",
         memory_keys: &["research/methods/analysis", "research/methodology/analysis"],
         output_artifacts: &["analysis-plan.md", "statistical-approach.md"],
-        prompt_source_path: ".claude/agents/phdresearch/analysis-planner.md",
+        prompt_source_path: ".archon/agents/phdresearch/analysis-planner.md",
         tool_access: BASE_TOOLS,
     },
     ResearchAgent {
@@ -461,7 +461,7 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
         file: "sampling-strategist.md",
         memory_keys: &["research/methods/sampling", "research/methodology/sampling"],
         output_artifacts: &["sampling-strategy.md", "sample-specifications.md"],
-        prompt_source_path: ".claude/agents/phdresearch/sampling-strategist.md",
+        prompt_source_path: ".archon/agents/phdresearch/sampling-strategist.md",
         tool_access: BASE_TOOLS,
     },
     ResearchAgent {
@@ -474,7 +474,7 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
             "research/methodology/instruments",
         ],
         output_artifacts: &["research-instruments.md", "instrument-validation.md"],
-        prompt_source_path: ".claude/agents/phdresearch/instrument-developer.md",
+        prompt_source_path: ".archon/agents/phdresearch/instrument-developer.md",
         tool_access: BASE_TOOLS,
     },
     ResearchAgent {
@@ -484,7 +484,7 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
         file: "validity-guardian.md",
         memory_keys: &["research/methods/validity", "research/quality/validity"],
         output_artifacts: &["validity-assessment.md", "threat-mitigation.md"],
-        prompt_source_path: ".claude/agents/phdresearch/validity-guardian.md",
+        prompt_source_path: ".archon/agents/phdresearch/validity-guardian.md",
         tool_access: BASE_TOOLS,
     },
     ResearchAgent {
@@ -494,7 +494,7 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
         file: "methodology-scanner.md",
         memory_keys: &["research/literature/methods", "research/methodology/survey"],
         output_artifacts: &["methodology-survey.md", "method-comparison.md"],
-        prompt_source_path: ".claude/agents/phdresearch/methodology-scanner.md",
+        prompt_source_path: ".archon/agents/phdresearch/methodology-scanner.md",
         tool_access: BASE_TOOLS,
     },
     ResearchAgent {
@@ -504,7 +504,7 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
         file: "methodology-writer.md",
         memory_keys: &["research/writing/methodology", "research/document/chapter3"],
         output_artifacts: &["methodology-chapter.md", "method-details.md"],
-        prompt_source_path: ".claude/agents/phdresearch/methodology-writer.md",
+        prompt_source_path: ".archon/agents/phdresearch/methodology-writer.md",
         tool_access: BASE_TOOLS,
     },
     // =========================================================================
@@ -520,7 +520,7 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
             "research/document/chapter1",
         ],
         output_artifacts: &["introduction.md", "problem-statement.md"],
-        prompt_source_path: ".claude/agents/phdresearch/introduction-writer.md",
+        prompt_source_path: ".archon/agents/phdresearch/introduction-writer.md",
         tool_access: WRITER_TOOLS,
     },
     ResearchAgent {
@@ -530,7 +530,7 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
         file: "literature-review-writer.md",
         memory_keys: &["research/writing/literature", "research/document/chapter2"],
         output_artifacts: &["literature-review.md", "synthesis-narrative.md"],
-        prompt_source_path: ".claude/agents/phdresearch/literature-review-writer.md",
+        prompt_source_path: ".archon/agents/phdresearch/literature-review-writer.md",
         tool_access: WRITER_TOOLS,
     },
     ResearchAgent {
@@ -540,7 +540,7 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
         file: "results-writer.md",
         memory_keys: &["research/writing/results", "research/document/chapter4"],
         output_artifacts: &["results-chapter.md", "findings-narrative.md"],
-        prompt_source_path: ".claude/agents/phdresearch/results-writer.md",
+        prompt_source_path: ".archon/agents/phdresearch/results-writer.md",
         tool_access: WRITER_TOOLS,
     },
     ResearchAgent {
@@ -550,7 +550,7 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
         file: "discussion-writer.md",
         memory_keys: &["research/writing/discussion", "research/document/chapter5"],
         output_artifacts: &["discussion-chapter.md", "implications.md"],
-        prompt_source_path: ".claude/agents/phdresearch/discussion-writer.md",
+        prompt_source_path: ".archon/agents/phdresearch/discussion-writer.md",
         tool_access: WRITER_TOOLS,
     },
     ResearchAgent {
@@ -560,7 +560,7 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
         file: "conclusion-writer.md",
         memory_keys: &["research/writing/conclusion", "research/document/chapter6"],
         output_artifacts: &["conclusion-chapter.md", "future-directions.md"],
-        prompt_source_path: ".claude/agents/phdresearch/conclusion-writer.md",
+        prompt_source_path: ".archon/agents/phdresearch/conclusion-writer.md",
         tool_access: WRITER_TOOLS,
     },
     ResearchAgent {
@@ -570,7 +570,7 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
         file: "abstract-writer.md",
         memory_keys: &["research/writing/abstract", "research/document/abstract"],
         output_artifacts: &["abstract.md", "executive-summary.md"],
-        prompt_source_path: ".claude/agents/phdresearch/abstract-writer.md",
+        prompt_source_path: ".archon/agents/phdresearch/abstract-writer.md",
         tool_access: WRITER_TOOLS,
     },
     // =========================================================================
@@ -586,7 +586,7 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
             "research/synthesis/systematic-review",
         ],
         output_artifacts: &["systematic-review.md", "prisma-flowchart.md"],
-        prompt_source_path: ".claude/agents/phdresearch/systematic-reviewer.md",
+        prompt_source_path: ".archon/agents/phdresearch/systematic-reviewer.md",
         tool_access: BASE_TOOLS,
     },
     ResearchAgent {
@@ -596,7 +596,7 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
         file: "ethics-reviewer.md",
         memory_keys: &["research/methods/ethics", "research/compliance/ethics"],
         output_artifacts: &["ethics-review.md", "irb-protocol.md"],
-        prompt_source_path: ".claude/agents/phdresearch/ethics-reviewer.md",
+        prompt_source_path: ".archon/agents/phdresearch/ethics-reviewer.md",
         tool_access: BASE_TOOLS,
     },
     ResearchAgent {
@@ -606,7 +606,7 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
         file: "adversarial-reviewer.md",
         memory_keys: &["research/quality/critique", "research/review/adversarial"],
         output_artifacts: &["adversarial-critique.md", "weakness-report.md"],
-        prompt_source_path: ".claude/agents/phdresearch/adversarial-reviewer.md",
+        prompt_source_path: ".archon/agents/phdresearch/adversarial-reviewer.md",
         tool_access: BASE_TOOLS,
     },
     ResearchAgent {
@@ -616,7 +616,7 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
         file: "confidence-quantifier.md",
         memory_keys: &["research/quality/confidence", "research/meta/certainty"],
         output_artifacts: &["confidence-scores.md", "uncertainty-analysis.md"],
-        prompt_source_path: ".claude/agents/phdresearch/confidence-quantifier.md",
+        prompt_source_path: ".archon/agents/phdresearch/confidence-quantifier.md",
         tool_access: BASE_TOOLS,
     },
     ResearchAgent {
@@ -626,7 +626,7 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
         file: "citation-validator.md",
         memory_keys: &["research/quality/validation", "research/sources/verified"],
         output_artifacts: &["citation-validation.md", "source-verification.md"],
-        prompt_source_path: ".claude/agents/phdresearch/citation-validator.md",
+        prompt_source_path: ".archon/agents/phdresearch/citation-validator.md",
         tool_access: BASE_TOOLS,
     },
     ResearchAgent {
@@ -639,7 +639,7 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
             "research/meta/replication",
         ],
         output_artifacts: &["reproducibility-report.md", "replication-guide.md"],
-        prompt_source_path: ".claude/agents/phdresearch/reproducibility-checker.md",
+        prompt_source_path: ".archon/agents/phdresearch/reproducibility-checker.md",
         tool_access: BASE_TOOLS,
     },
     ResearchAgent {
@@ -649,7 +649,7 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
         file: "apa-citation-specialist.md",
         memory_keys: &["research/quality/citations", "research/document/references"],
         output_artifacts: &["citation-audit.md", "apa-compliance.md"],
-        prompt_source_path: ".claude/agents/phdresearch/apa-citation-specialist.md",
+        prompt_source_path: ".archon/agents/phdresearch/apa-citation-specialist.md",
         tool_access: BASE_TOOLS,
     },
     ResearchAgent {
@@ -662,7 +662,7 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
             "research/document/coherence",
         ],
         output_artifacts: &["consistency-report.md", "coherence-audit.md"],
-        prompt_source_path: ".claude/agents/phdresearch/consistency-validator.md",
+        prompt_source_path: ".archon/agents/phdresearch/consistency-validator.md",
         tool_access: BASE_TOOLS,
     },
     ResearchAgent {
@@ -672,7 +672,7 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
         file: "quality-assessor.md",
         memory_keys: &["research/analysis/quality", "research/meta/assessment"],
         output_artifacts: &["quality-assessment.md", "quality-scores.md"],
-        prompt_source_path: ".claude/agents/phdresearch/quality-assessor.md",
+        prompt_source_path: ".archon/agents/phdresearch/quality-assessor.md",
         tool_access: BASE_TOOLS,
     },
     ResearchAgent {
@@ -682,7 +682,7 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
         file: "bias-detector.md",
         memory_keys: &["research/analysis/bias", "research/quality/bias"],
         output_artifacts: &["bias-analysis.md", "bias-mitigation.md"],
-        prompt_source_path: ".claude/agents/phdresearch/bias-detector.md",
+        prompt_source_path: ".archon/agents/phdresearch/bias-detector.md",
         tool_access: BASE_TOOLS,
     },
     ResearchAgent {
@@ -692,7 +692,7 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
         file: "file-length-manager.md",
         memory_keys: &["research/quality/structure", "research/document/formatting"],
         output_artifacts: &["structure-audit.md", "length-compliance.md"],
-        prompt_source_path: ".claude/agents/phdresearch/file-length-manager.md",
+        prompt_source_path: ".archon/agents/phdresearch/file-length-manager.md",
         tool_access: BASE_TOOLS,
     },
 ];

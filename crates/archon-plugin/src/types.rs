@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 // ── PluginManifest ────────────────────────────────────────────────────────────
 
-/// Parsed contents of `.claude-plugin/plugin.json`.
+/// Parsed contents of `.archon-plugin/plugin.json`.
 ///
 /// This is the JSON manifest format (not TOML). Fields are snake_case on-disk
 /// to match common JSON conventions.

@@ -65,7 +65,7 @@ pub struct AssemblyInput {
 /// 3. Rules (truncated to budget)
 /// 4. Memories (truncated to budget)
 /// 5. User prompt
-/// 6. Project instructions (CLAUDE.md)
+/// 6. Project instructions (ARCHON.md)
 /// 7. Environment
 /// 8. Inner voice (ephemeral)
 /// 9. Dynamic (date + session) — marked ephemeral
@@ -152,7 +152,7 @@ impl SystemPromptAssembler {
             });
         }
 
-        // 6. Project instructions (CLAUDE.md)
+        // 6. Project instructions (ARCHON.md)
         if let Some(ref text) = input.project_instructions
             && !text.is_empty()
         {
@@ -238,7 +238,7 @@ mod tests {
             rules: Some("Rule 1. Rule 2.".into()),
             memories: Some("User prefers Rust.".into()),
             user_prompt: Some("Write a function.".into()),
-            project_instructions: Some("See CLAUDE.md".into()),
+            project_instructions: Some("See ARCHON.md".into()),
             environment: Some("Linux x86_64".into()),
             inner_voice: Some("<inner_voice>state</inner_voice>".into()),
             personality_briefing: Some("<personality_briefing>data</personality_briefing>".into()),

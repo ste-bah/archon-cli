@@ -448,8 +448,9 @@ pub struct ContextConfig {
     pub preserve_recent_turns: u32,
     /// Whether to use prompt caching (cache_control breakpoints on static blocks).
     pub prompt_cache: bool,
-    /// Maximum characters for hierarchical CLAUDE.md content.
-    pub claudemd_max_tokens: u32,
+    /// Maximum characters for hierarchical ARCHON.md content.
+    #[serde(alias = "claudemd_max_tokens")]
+    pub archonmd_max_tokens: u32,
 }
 
 impl Default for ContextConfig {
@@ -459,7 +460,7 @@ impl Default for ContextConfig {
             max_tokens: None,
             preserve_recent_turns: 3,
             prompt_cache: true,
-            claudemd_max_tokens: 8192,
+            archonmd_max_tokens: 8192,
         }
     }
 }

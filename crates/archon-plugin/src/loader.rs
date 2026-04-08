@@ -15,7 +15,7 @@ use crate::result::{LoadedPlugin, PluginLoadResult};
 ///
 /// ## Loading semantics
 /// - Plugins are directories inside `plugins_dir` (and optionally `seed_dirs`).
-/// - Each must have `.claude-plugin/plugin.json`.
+/// - Each must have `.archon-plugin/plugin.json`.
 /// - Missing manifests are silently skipped (not errors).
 /// - Parse/validation failures produce typed errors in `PluginLoadResult.errors`.
 /// - Capability mismatches produce `PluginError::CapabilityDenied` errors.

@@ -124,8 +124,8 @@ fn test_all_agents_have_prompt_path() {
         assert!(
             agent
                 .prompt_source_path
-                .starts_with(".claude/agents/coding-pipeline/"),
-            "Agent '{}' prompt_source_path '{}' must start with '.claude/agents/coding-pipeline/'",
+                .starts_with(".archon/agents/coding-pipeline/"),
+            "Agent '{}' prompt_source_path '{}' must start with '.archon/agents/coding-pipeline/'",
             agent.key,
             agent.prompt_source_path
         );
