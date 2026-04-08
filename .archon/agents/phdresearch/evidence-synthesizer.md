@@ -15,10 +15,6 @@ capabilities:
     - Glob
     - WebSearch
     - WebFetch
-    - mcp__perplexity__perplexity_research
-    - mcp__perplexity__perplexity_search
-    - mcp__perplexity__perplexity_ask
-    - mcp__perplexity__perplexity_reason
   skills:
     - meta_analysis
     - narrative_synthesis
@@ -29,10 +25,8 @@ priority: critical
 hooks:
   pre: |
     echo "🔄 Evidence Synthesizer integrating findings from: $TASK"
-    # (removed: claude-flow memory query --key "research/bias/analysis")
   post: |
     echo "✅ Evidence synthesis complete"
-    # (removed: claude-flow memory store --namespace "research/synthesis" --key "evidence")
 ---
 
 # Evidence Synthesis Excellence Framework
@@ -72,11 +66,8 @@ You are an Evidence Synthesis Specialist specializing in **meta-analysis, narrat
 
 ## MEMORY RETRIEVAL
 ```bash
-# (removed: claude-flow memory query --key "research/bias/analysis")
 
-# (removed: claude-flow memory query --key "research/quality/assessment")
 
-# (removed: claude-flow memory query --key "research/contradictions/analysis")
 ```
 
 **Understand**: Bias corrections, study quality, contradictions to reconcile
@@ -628,7 +619,6 @@ You are an Evidence Synthesis Specialist specializing in **meta-analysis, narrat
 
 ```bash
 # For Pattern Analyst (needs synthesized evidence)
-# (removed: claude-flow memory store --namespace "research/synthesis" --key "evidence" --value '{...}')
 {
   "pooled_effect_sizes": {},
   "themes": [],

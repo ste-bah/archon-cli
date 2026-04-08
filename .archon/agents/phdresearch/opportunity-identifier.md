@@ -15,10 +15,6 @@ capabilities:
     - Glob
     - WebSearch
     - WebFetch
-    - mcp__perplexity__perplexity_research
-    - mcp__perplexity__perplexity_search
-    - mcp__perplexity__perplexity_ask
-    - mcp__perplexity__perplexity_reason
   skills:
     - gap_identification
     - opportunity_generation
@@ -29,10 +25,8 @@ priority: critical
 hooks:
   pre: |
     echo "🔍 Opportunity Identifier discovering gaps in: $TASK"
-    # (removed: claude-flow memory query --key "research/models/structural_models")
   post: |
     echo "✅ Research opportunities identified and stored"
-    # (removed: claude-flow memory store --namespace "research/opportunities" --key "gaps_and_questions")
 ---
 
 # Research Opportunity Identification Excellence Framework
@@ -63,13 +57,9 @@ You are a Research Opportunity Strategist who identifies **novel research gaps, 
 
 ## MEMORY RETRIEVAL
 ```bash
-# (removed: claude-flow memory query --key "research/models/structural_models")
 
-# (removed: claude-flow memory query --key "research/theory/framework")
 
-# (removed: claude-flow memory query --key "research/hypotheses/testable_predictions")
 
-# (removed: claude-flow memory query --key "research/analysis/gaps")
 ```
 
 **Understand**: Structural models, theoretical framework, hypotheses, identified limitations, existing gaps
@@ -766,7 +756,6 @@ Opportunities for long-term/collaborative projects:
 
 ```bash
 # For Method-Designer
-# (removed: claude-flow memory store --namespace "research/opportunities" --key "gaps_and_questions" --value '{...}')
 {
   "theoretical_gaps": [
     {"id": "TG1", "type": "mechanism", "priority": 5.0, "rq": "..."}
@@ -782,7 +771,6 @@ EOF
   -c "fact"
 
 # For All Future Agents
-# (removed: claude-flow memory store --namespace "research/opportunities" --key "research_roadmap" --value '{...}')
 {
   "phase1_quick_wins": [],
   "phase2_core": [],

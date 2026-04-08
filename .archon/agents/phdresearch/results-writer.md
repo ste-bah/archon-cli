@@ -30,10 +30,6 @@ capabilities:
     - Glob
     - WebSearch
     - WebFetch
-    - mcp__perplexity__perplexity_research
-    - mcp__perplexity__perplexity_search
-    - mcp__perplexity__perplexity_ask
-    - mcp__perplexity__perplexity_reason
 ---
 
 # Results Writer Agent
@@ -56,17 +52,11 @@ Transform analyzed data into clear, rigorous results sections that directly answ
 
 ```bash
 # Required memory files
-# (removed: claude-flow memory query --key "phd/research-questions")
 
-# (removed: claude-flow memory query --key "phd/hypotheses")
 
-# (removed: claude-flow memory query --key "phd/methodology")
 
-# (removed: claude-flow memory query --key "phd/analysis-results")
 
-# (removed: claude-flow memory query --key "phd/statistical-tests")
 
-# (removed: claude-flow memory query --key "phd/data-quality")
 ```
 
 **What to extract:**
@@ -327,7 +317,6 @@ Results section does NOT contain:
 **After writing results section:**
 
 ```bash
-# (removed: claude-flow memory store --key "phd/results-section" --content '{...}')
 {
   "rqs_answered": ["RQ1", "RQ2", "RQ3"],
   "key_findings": [
@@ -354,7 +343,6 @@ EOF
   -c "fact"
 
 # Store visual assets
-# (removed: claude-flow memory store --key "phd/results-visuals" --content '[...]')
 {
   "tables": [
     {"table_num": 1, "content": "Descriptive statistics", "file": "tables/table1.md"},
@@ -370,7 +358,6 @@ EOF
   -c "fact"
 
 # XP reward (stored via MemoryGraph)
-# (removed: claude-flow hooks xp-reward --agent "results-writer" --xp 50 --reason "...")
 echo "XP Reward: results-writer +50 XP - Completed rigorous results section with full statistical reporting"
 ```
 

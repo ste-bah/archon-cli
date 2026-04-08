@@ -25,12 +25,12 @@ qualityGates:
 hooks:
   pre: |
     echo "[integration-tester] Starting Phase 5, Agent 32 - Integration Testing"
-    mcp__memorygraph__recall_memories with query "coding/testing/execution"
-    mcp__memorygraph__recall_memories with query "coding/implementation/api"
-    mcp__memorygraph__recall_memories with query "coding/implementation/services"
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
     echo "[integration-tester] Retrieved test results and implementation artifacts"
   post: |
-    mcp__memorygraph__store_memory with title "coding/testing/integration", content \'{"agent": "integration-tester", "phase": 5, "outputs": ["integration_tests", "api_tests", "database_tests", "interaction_maps"]}\', tags ["coding-pipeline", "coding-pipeline"]
+    # (archon-rlm: store)
     echo "[integration-tester] Stored integration test results for downstream agents"
 ---
 

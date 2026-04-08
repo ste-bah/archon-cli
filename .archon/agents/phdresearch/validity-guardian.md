@@ -15,10 +15,6 @@ capabilities:
     - Glob
     - WebSearch
     - WebFetch
-    - mcp__perplexity__perplexity_research
-    - mcp__perplexity__perplexity_search
-    - mcp__perplexity__perplexity_ask
-    - mcp__perplexity__perplexity_reason
   skills:
     - validity_threat_identification
     - confound_detection
@@ -29,10 +25,8 @@ priority: critical
 hooks:
   pre: |
     echo "🛡️ Validity Guardian assessing threats for: $TASK"
-    # (removed: claude-flow memory query --key "research/methodology/analysis_plan")
   post: |
     echo "✅ Validity threats identified and mitigations documented"
-    # (removed: claude-flow memory store --namespace "research/validity" --key "threat_assessment")
 ---
 
 # Validity Guardian Excellence Framework
@@ -65,11 +59,8 @@ You are a Validity Protection Specialist ensuring **internal**, **external**, **
 
 ## MEMORY RETRIEVAL
 ```bash
-# (removed: claude-flow memory query --key "research/methodology/analysis_plan")
 
-# (removed: claude-flow memory query --key "research/questions/refined")
 
-# (removed: claude-flow memory query --key "research/design/type")
 ```
 
 **Understand**: Research design, sample, measures, analysis plan, research questions
@@ -540,7 +531,6 @@ Treatment Fidelity: [Measured? Reported?]
 
 ```bash
 # For Results Interpreter
-# (removed: claude-flow memory store --namespace "research/validity" --key "threat_assessment" --value '{...}')
 cat > /tmp/validity-threat-assessment.json << 'EOF'
 {
   "internal_validity": "strong/moderate/weak",
@@ -558,7 +548,6 @@ EOF
 rm -f /tmp/validity-threat-assessment.json
 
 # For Manuscript Writer
-# (removed: claude-flow memory store --namespace "research/validity" --key "methods_text" --value "...")
   -d "research/validity" \
   -t "methods_text" \
   -c "fact"

@@ -23,20 +23,20 @@ qualityGates:
 hooks:
   pre: |
     echo "[phase-4-reviewer] Starting Sherlock Review - Phase 4 Implementation"
-    mcp__memorygraph__recall_memories with query "coding/implementation/generation"
-    mcp__memorygraph__recall_memories with query "coding/implementation/domain"
-    mcp__memorygraph__recall_memories with query "coding/implementation/services"
-    mcp__memorygraph__recall_memories with query "coding/implementation/api"
-    mcp__memorygraph__recall_memories with query "coding/implementation/frontend"
-    mcp__memorygraph__recall_memories with query "coding/implementation/persistence"
-    mcp__memorygraph__recall_memories with query "coding/implementation/events"
-    mcp__memorygraph__recall_memories with query "coding/implementation/error-handling"
-    mcp__memorygraph__recall_memories with query "coding/implementation/config"
-    mcp__memorygraph__recall_memories with query "coding/implementation/logging"
-    mcp__memorygraph__recall_memories with query "coding/implementation/dependencies"
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
     echo "[phase-4-reviewer] Retrieved all Phase 4 outputs for review"
   post: |
-    mcp__memorygraph__store_memory with title "coding/sherlock/phase-4-review", content \'{"agent": "phase-4-reviewer", "phase": "sherlock", "outputs": ["phase_report", "code_quality", "architecture_adherence", "implementation_completeness"]}\', tags ["coding-pipeline", "coding-pipeline"]
+    # (archon-rlm: store)
     echo "[phase-4-reviewer] Phase 4 review complete - stored for Quality Gate"
 ---
 

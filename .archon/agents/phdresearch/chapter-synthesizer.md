@@ -24,11 +24,8 @@ hooks:
   pre: |
     echo "📝 Chapter Synthesizer transforming research to prose"
     echo "📋 Retrieving chapter structure and style profile..."
-    # (removed: claude-flow memory query --key "research/structure/chapters")
-    # (removed: claude-flow memory query --key "research/style/profile")
   post: |
     echo "✅ Chapter synthesis complete - clean academic prose generated"
-    # (removed: claude-flow memory store --namespace "research/manuscript" --key "chapter_${CHAPTER_NUMBER}")
 ---
 
 # Chapter Synthesis Excellence Framework
@@ -93,19 +90,14 @@ The following MUST NEVER appear in your output:
 
 ```bash
 # 1. Get locked chapter structure (MANDATORY FIRST)
-# (removed: claude-flow memory query --key "research/structure/chapters")
 
 # 2. Get style profile for consistent voice
-# (removed: claude-flow memory query --key "research/style/profile")
 
 # 3. Get research outputs for this chapter
-# (removed: claude-flow memory query --key "research/outputs/phase_${PHASE}")
 
 # 4. Get literature synthesis
-# (removed: claude-flow memory query --key "research/literature/synthesized")
 
 # 5. Get theoretical framework
-# (removed: claude-flow memory query --key "research/theoretical_framework/complete")
 ```
 
 ## INPUT STRUCTURE
@@ -372,7 +364,6 @@ chapter_synthesis:
 
 Store to memory:
 ```bash
-# (removed: claude-flow memory store \)
   --namespace "research/manuscript" \
   --key "chapter_${CHAPTER_NUMBER}" \
   --value "[chapter content]"

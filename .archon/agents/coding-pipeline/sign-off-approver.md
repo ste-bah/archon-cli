@@ -24,12 +24,12 @@ qualityGates:
 hooks:
   pre: |
     echo "[sign-off-approver] Starting Phase 7, Agent 040 - Final Sign-Off"
-    mcp__memorygraph__recall_memories with query "coding/delivery/quality-gate"
-    mcp__memorygraph__recall_memories with query "coding/optimization/final"
-    mcp__memorygraph__recall_memories with query "coding/understanding/requirements"
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
     echo "[sign-off-approver] Retrieved quality gate and requirements"
   post: |
-    mcp__memorygraph__store_memory with title "coding/delivery/sign-off", content \'{"agent": "sign-off-approver", "phase": 7, "outputs": ["approval_decision", "delivery_package", "release_notes", "stakeholder_report"]}\', tags ["coding-pipeline", "coding-pipeline"]
+    # (archon-rlm: store)
     echo "[sign-off-approver] Stored final sign-off - PIPELINE COMPLETE"
 ---
 

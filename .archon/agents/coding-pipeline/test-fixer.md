@@ -28,7 +28,7 @@ This agent is triggered when:
 
 ### Step 1: Retrieve Failure Details
 ```bash
-# Previously: mcp__memorygraph__recall_memories with appropriate query
+# (archon-rlm: recall)
 ```
 
 Extract from memory:
@@ -80,7 +80,7 @@ Parse new results. If still failing:
 
 ### Step 6: Store Fix Results
 ```bash
-# Previously: mcp__memorygraph__store_memory with appropriate title, content, tags ["coding-pipeline"]
+# (archon-rlm: store)
   "totalAttempts": [N],
   "fixesApplied": [
     {"file": "path", "change": "description", "reason": "why"},
@@ -139,7 +139,7 @@ After 3 fix attempts per failure, escalate.
 
 ```bash
 # Retrieve verified test results
-RESULTS=$(# Previously: mcp__memorygraph__recall_memories with appropriate query
+# (archon-rlm: recall)
 
 # Parse failure information
 FAILED_TESTS=$(echo "$RESULTS" | jq -r '.failedTests[]')
@@ -227,7 +227,7 @@ npm test 2>&1
 ### Phase 5: Result Storage
 
 ```bash
-# Previously: mcp__memorygraph__store_memory with appropriate title, content, tags ["coding-pipeline"]
+# (archon-rlm: store)
   "timestamp": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'",
   "totalAttempts": '$TOTAL_ATTEMPTS',
   "fixesApplied": [

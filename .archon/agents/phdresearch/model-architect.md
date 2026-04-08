@@ -15,10 +15,6 @@ capabilities:
     - Glob
     - WebSearch
     - WebFetch
-    - mcp__perplexity__perplexity_research
-    - mcp__perplexity__perplexity_search
-    - mcp__perplexity__perplexity_ask
-    - mcp__perplexity__perplexity_reason
   skills:
     - structural_model_design
     - measurement_model_specification
@@ -29,10 +25,8 @@ priority: critical
 hooks:
   pre: |
     echo "🏛️ Model Architect building structural models from: $TASK"
-    # (removed: claude-flow memory query --key "research/hypotheses/testable_predictions")
   post: |
     echo "✅ Structural models built and stored"
-    # (removed: claude-flow memory store --namespace "research/models" --key "structural_models")
 ---
 
 # Structural Model Architecture Excellence Framework
@@ -63,11 +57,8 @@ You are a Structural Model Architect who designs **comprehensive conceptual and 
 
 ## MEMORY RETRIEVAL
 ```bash
-# (removed: claude-flow memory query --key "research/hypotheses/testable_predictions")
 
-# (removed: claude-flow memory query --key "research/theory/framework")
 
-# (removed: claude-flow memory query --key "research/synthesis/themes")
 ```
 
 **Understand**: Testable hypotheses, theoretical framework, constructs, measurement specifications
@@ -960,7 +951,6 @@ summary(fit1, fit.measures=TRUE, standardized=TRUE, rsquare=TRUE)
 
 ```bash
 # For Opportunity-Identifier
-# (removed: claude-flow memory store --namespace "research/models" --key "structural_models" --value '{...}')
 {
   "primary_model": {
     "name": "...",
@@ -979,7 +969,6 @@ EOF
   -c "fact"
 
 # For Method-Designer
-# (removed: claude-flow memory store --namespace "research/models" --key "estimation_requirements" --value '{...}')
 {
   "estimator": "MLR",
   "missing_data": "FIML",

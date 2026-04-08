@@ -25,11 +25,11 @@ qualityGates:
 hooks:
   pre: |
     echo "[config-implementer] Starting Phase 4, Agent 27 - Configuration Implementation"
-    mcp__memorygraph__recall_memories with query "coding/architecture/system"
-    mcp__memorygraph__recall_memories with query "coding/implementation/errors"
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
     echo "[config-implementer] Retrieved system architecture and error handling"
   post: |
-    mcp__memorygraph__store_memory with title "coding/implementation/config", content \'{"agent": "config-implementer", "phase": 4, "outputs": ["config_loader", "env_schemas", "feature_flags", "secrets_manager"]}\', tags ["coding-pipeline", "coding-pipeline"]
+    # (archon-rlm: store)
     echo "[config-implementer] Stored configuration implementation for all agents"
 ---
 

@@ -23,14 +23,14 @@ qualityGates:
 hooks:
   pre: |
     echo "[performance-architect] Starting Phase 3, Agent 17 - Performance Architecture"
-    mcp__memorygraph__recall_memories with query "coding/understanding/requirements"
-    mcp__memorygraph__recall_memories with query "coding/exploration/analysis"
-    mcp__memorygraph__recall_memories with query "coding/architecture/system"
-    mcp__memorygraph__recall_memories with query "coding/architecture/data"
-    mcp__memorygraph__recall_memories with query "coding/architecture/integration"
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
     echo "[performance-architect] Retrieved all architecture outputs"
   post: |
-    mcp__memorygraph__store_memory with title "coding/architecture/performance", content \'{"agent": "performance-architect", "phase": 3, "outputs": ["performance_requirements", "scalability_design", "caching_strategy", "optimization_plan"]}\', tags ["coding-pipeline", "coding-pipeline"]
+    # (archon-rlm: store)
     echo "[performance-architect] Stored performance architecture for Phase 4 Implementation"
     echo "[performance-architect] Phase 3 COMPLETE - All 7 Architecture agents finished"
 ---

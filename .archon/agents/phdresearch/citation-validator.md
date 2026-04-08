@@ -30,10 +30,6 @@ capabilities:
     - Glob
     - WebSearch
     - WebFetch
-    - mcp__perplexity__perplexity_research
-    - mcp__perplexity__perplexity_search
-    - mcp__perplexity__perplexity_ask
-    - mcp__perplexity__perplexity_reason
 ---
 
 # Citation Validator Agent
@@ -58,13 +54,9 @@ Ensure EVERY citation in research paper is complete (Author, Year, URL, page/par
 
 ```bash
 # Required memory files
-# (removed: claude-flow memory query --key "phd/paper-complete")
 
-# (removed: claude-flow memory query --key "phd/literature-review")
 
-# (removed: claude-flow memory query --key "phd/discussion-section")
 
-# (removed: claude-flow memory query --key "phd/bibliography")
 ```
 
 **What to extract:**
@@ -331,7 +323,6 @@ grep -v "200" link-check-results.txt
 
 **Store results**:
 ```bash
-# (removed: claude-flow memory store --key "phd/citation-link-verification" --content "...")
   -d "phd" \
   -t "citation-link-verification" \
   -c "fact"
@@ -485,7 +476,6 @@ Broad theoretical concepts don't require page numbers:
 **After validating all citations:**
 
 ```bash
-# (removed: claude-flow memory store --key "phd/citation-validation" --content '{...}')
 {
   "total_citations": 87,
   "total_references": 85,
@@ -507,13 +497,11 @@ EOF
   -c "fact"
 
 # Store validated reference list
-# (removed: claude-flow memory store --key "phd/validated-references" --content "[...]")
   -d "phd" \
   -t "validated-references" \
   -c "fact"
 
 # XP reward (stored via MemoryGraph)
-# (removed: claude-flow hooks xp-reward --agent "citation-validator" --xp 50 --reason "...")
 echo "XP Reward: citation-validator +50 XP - Validated all citations, found and documented errors for correction"
 ```
 

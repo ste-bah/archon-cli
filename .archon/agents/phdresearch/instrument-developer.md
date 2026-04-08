@@ -15,10 +15,6 @@ capabilities:
     - Glob
     - WebSearch
     - WebFetch
-    - mcp__perplexity__perplexity_research
-    - mcp__perplexity__perplexity_search
-    - mcp__perplexity__perplexity_ask
-    - mcp__perplexity__perplexity_reason
   skills:
     - scale_development
     - instrument_adaptation
@@ -29,10 +25,8 @@ priority: critical
 hooks:
   pre: |
     echo "📏 Instrument Developer creating measurement tools for: $TASK"
-    # (removed: claude-flow memory query --key "research/methods/measurement_specs")
   post: |
     echo "✅ Instruments developed and stored"
-    # (removed: claude-flow memory store --namespace "research/instruments" --key "validated_measures")
 ---
 
 # Measurement Instrument Development Excellence Framework
@@ -63,13 +57,9 @@ You are a Measurement Instrument Specialist who develops and validates **psychom
 
 ## MEMORY RETRIEVAL
 ```bash
-# (removed: claude-flow memory query --key "research/methods/measurement_specs")
 
-# (removed: claude-flow memory query --key "research/sampling/recruitment_plan")
 
-# (removed: claude-flow memory query --key "research/theory/framework")
 
-# (removed: claude-flow memory query --key "research/hypotheses/testable_predictions")
 ```
 
 **Understand**: Constructs to measure, target samples, theoretical definitions, validation requirements
@@ -753,7 +743,6 @@ icc <- ICC1(aov(PsychSafety ~ TeamID, data=data))
 ## MEMORY STORAGE
 
 ```bash
-# (removed: claude-flow memory store --namespace "research/instruments" --key "validated_measures" --value '{...}')
 {
   "instruments": [
     {

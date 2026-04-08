@@ -24,12 +24,12 @@ qualityGates:
 hooks:
   pre: |
     echo "[technology-scout] Starting Phase 2, Agent 9 - Technology Scouting"
-    mcp__memorygraph__recall_memories with query "coding/understanding/context"
-    mcp__memorygraph__recall_memories with query "coding/exploration/research_plan"
-    mcp__memorygraph__recall_memories with query "coding/exploration/analysis"
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
     echo "[technology-scout] Retrieved context, research plan, and analysis"
   post: |
-    mcp__memorygraph__store_memory with title "coding/exploration/technology", content \'{"agent": "technology-scout", "phase": 2, "outputs": ["technology_options", "library_assessment", "integration_requirements", "technology_recommendations"]}\', tags ["coding-pipeline", "coding-pipeline"]
+    # (archon-rlm: store)
     echo "[technology-scout] Stored technology assessment for downstream agents"
 ---
 

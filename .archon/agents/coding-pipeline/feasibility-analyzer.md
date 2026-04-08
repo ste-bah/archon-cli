@@ -21,14 +21,14 @@ qualityGates:
 hooks:
   pre: |
     echo "[feasibility-analyzer] Starting Phase 2, Agent 10 - Feasibility Analysis"
-    mcp__memorygraph__recall_memories with query "coding/understanding/priorities"
-    mcp__memorygraph__recall_memories with query "coding/exploration/research_plan"
-    mcp__memorygraph__recall_memories with query "coding/exploration/patterns"
-    mcp__memorygraph__recall_memories with query "coding/exploration/analysis"
-    mcp__memorygraph__recall_memories with query "coding/exploration/technology"
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
     echo "[feasibility-analyzer] Retrieved all Phase 1 and Phase 2 exploration outputs"
   post: |
-    mcp__memorygraph__store_memory with title "coding/exploration/feasibility", content \'{"agent": "feasibility-analyzer", "phase": 2, "outputs": ["feasibility_assessment", "risk_analysis", "constraint_validation", "go_no_go_decision"]}\', tags ["coding-pipeline", "coding-pipeline"]
+    # (archon-rlm: store)
     echo "[feasibility-analyzer] Stored feasibility analysis for Phase 3 Architecture"
     echo "[feasibility-analyzer] Phase 2 COMPLETE - All 5 Exploration agents finished"
 ---

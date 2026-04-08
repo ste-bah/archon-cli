@@ -25,12 +25,12 @@ qualityGates:
 hooks:
   pre: |
     echo "[api-implementer] Starting Phase 4, Agent 23 - API Implementation"
-    mcp__memorygraph__recall_memories with query "coding/architecture/interfaces"
-    mcp__memorygraph__recall_memories with query "coding/implementation/services"
-    mcp__memorygraph__recall_memories with query "coding/implementation/generation"
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
     echo "[api-implementer] Retrieved interface contracts and services"
   post: |
-    mcp__memorygraph__store_memory with title "coding/implementation/api", content \'{"agent": "api-implementer", "phase": 4, "outputs": ["controllers", "routes", "middleware", "validation"]}\', tags ["coding-pipeline", "coding-pipeline"]
+    # (archon-rlm: store)
     echo "[api-implementer] Stored API implementations for Frontend and Test agents"
 ---
 

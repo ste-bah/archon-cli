@@ -21,10 +21,8 @@ personality: "INTJ + Enneagram 8"
 hooks:
   pre: |
     echo "🔍 Consistency Validator checking references for: $TASK"
-    # (removed: claude-flow memory query --key "research/structure/chapters")
   post: |
     echo "✅ Consistency validation complete"
-    # (removed: claude-flow memory store --namespace "research/qa" --key "consistency-report")
 capabilities:
   allowed_tools:
     - Read
@@ -35,10 +33,6 @@ capabilities:
     - Glob
     - WebSearch
     - WebFetch
-    - mcp__perplexity__perplexity_research
-    - mcp__perplexity__perplexity_search
-    - mcp__perplexity__perplexity_ask
-    - mcp__perplexity__perplexity_reason
 ---
 
 # Consistency Validation Framework
@@ -72,10 +66,8 @@ You are a Post-Production Consistency Validator who ensures all cross-references
 ## MEMORY RETRIEVAL
 ```bash
 # Get the LOCKED chapter structure
-# (removed: claude-flow memory query --key "research/structure/chapters")
 
 # Get list of all output files
-# (removed: claude-flow memory query --key "research/files/manifest")
 ```
 
 ## VALIDATION PROTOCOL
@@ -84,7 +76,6 @@ You are a Post-Production Consistency Validator who ensures all cross-references
 
 ```bash
 # Retrieve structure
-STRUCTURE=$(# (removed: claude-flow memory query --key "research/structure/chapters"))
 
 # Parse to get:
 # - totalChapters: N
@@ -184,7 +175,7 @@ if ref_number > max_valid_chapter:
 
 ```bash
 # Store validation report
-mcp__memorygraph__store_memory with title "consistency-report", content \'{...}\', tags ["research/qa"]
+# (archon-rlm: store)
 cat > /tmp/consistency-report.json << 'EOF'
 {
   "status": "PASS|FAIL",

@@ -22,11 +22,11 @@ qualityGates:
 hooks:
   pre: |
     echo "[requirement-prioritizer] Starting Phase 1, Agent 5 - Requirement Prioritization"
-    mcp__memorygraph__recall_memories with query "coding/understanding/requirements"
-    mcp__memorygraph__recall_memories with query "coding/understanding/scope"
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
     echo "[requirement-prioritizer] Retrieved requirements and scope from Agents 2 and 3"
   post: |
-    mcp__memorygraph__store_memory with title "coding/understanding/priorities", content \'{"agent": "requirement-prioritizer", "phase": 1, "outputs": ["prioritized_requirements", "dependency_map", "effort_matrix", "risk_factors"]}\', tags ["coding-pipeline", "coding-pipeline"]
+    # (archon-rlm: store)
     echo "[requirement-prioritizer] Stored prioritized requirements for Phase 2 agents"
     echo "[requirement-prioritizer] Phase 1 COMPLETE - All 5 Understanding agents finished"
 ---

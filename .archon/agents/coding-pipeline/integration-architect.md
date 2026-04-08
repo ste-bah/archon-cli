@@ -24,13 +24,13 @@ qualityGates:
 hooks:
   pre: |
     echo "[integration-architect] Starting Phase 3, Agent 16 - Integration Architecture"
-    mcp__memorygraph__recall_memories with query "coding/understanding/requirements"
-    mcp__memorygraph__recall_memories with query "coding/exploration/technology"
-    mcp__memorygraph__recall_memories with query "coding/architecture/system"
-    mcp__memorygraph__recall_memories with query "coding/architecture/security"
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
     echo "[integration-architect] Retrieved requirements, technology, system, and security architecture"
   post: |
-    mcp__memorygraph__store_memory with title "coding/architecture/integration", content \'{"agent": "integration-architect", "phase": 3, "outputs": ["integration_patterns", "api_gateway_design", "event_schemas", "external_contracts"]}\', tags ["coding-pipeline", "coding-pipeline"]
+    # (archon-rlm: store)
     echo "[integration-architect] Stored integration architecture for downstream agents"
 ---
 

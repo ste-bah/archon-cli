@@ -15,10 +15,6 @@ capabilities:
     - Glob
     - WebSearch
     - WebFetch
-    - mcp__perplexity__perplexity_research
-    - mcp__perplexity__perplexity_search
-    - mcp__perplexity__perplexity_ask
-    - mcp__perplexity__perplexity_reason
   skills:
     - context_tiering
     - priority_classification
@@ -29,10 +25,8 @@ priority: high
 hooks:
   pre: |
     echo "🗂️ Context Tier Manager organizing sources for: $TASK"
-    # (removed: claude-flow memory query --key "research/execution/research-plan")
   post: |
     echo "✅ Context tiers established: hot/warm/cold"
-    # (removed: claude-flow memory store --namespace "research/organization" --key "context-tiers")
 ---
 
 # Context Tier Management Excellence Framework
@@ -75,13 +69,9 @@ You are a Context Organization Strategist specializing in **hot/warm/cold tier m
 
 ## MEMORY RETRIEVAL
 ```bash
-# (removed: claude-flow memory query --key "research/execution/research-plan")
 
-# (removed: claude-flow memory query --key "research/meta/self-ask-questions")
 
-# (removed: claude-flow memory query --key "research/meta/principles")
 
-# (removed: claude-flow memory query --key "research/session/config")
 ```
 
 **Understand**: Expected source count, research questions, quality thresholds, domain context
@@ -202,7 +192,6 @@ ELSE: COLD TIER
 **Hot Tier Retrieval**:
 ```bash
 # Always in memory - immediate access
-# (removed: claude-flow memory query --key "research/context/hot-tier")
 
 # Return: Full citations + abstracts + key findings + direct quotes
 # Format: Ready for immediate synthesis
@@ -212,7 +201,6 @@ ELSE: COLD TIER
 **Warm Tier Retrieval**:
 ```bash
 # Fast cache - on-demand loading
-# (removed: claude-flow memory query --key "research/context/warm-tier/{source-id}")
 
 # Return: Full citations + abstracts (full text on request)
 # Format: Summary with expansion option
@@ -222,7 +210,6 @@ ELSE: COLD TIER
 **Cold Tier Retrieval**:
 ```bash
 # Indexed search - retrieve when needed
-# (removed: claude-flow memory query --namespace "research/context/cold-tier" --query "{keywords}")
 
 # Return: Citations only (full text requires explicit request)
 # Format: Reference list with relevance scores
@@ -389,7 +376,6 @@ IF warm-tier source S outside refined scope:
 ### Hot Tier Retrieval
 ```bash
 # Immediate access - always in memory
-# (removed: claude-flow memory query --key "research/context/hot-tier")
 ```
 **Returns**: Full text, annotations, key findings, direct quotes
 **Latency**: <1 second
@@ -398,7 +384,6 @@ IF warm-tier source S outside refined scope:
 ### Warm Tier Retrieval
 ```bash
 # Fast cache - on-demand
-# (removed: claude-flow memory query --key "research/context/warm-tier/{source-id}")
 ```
 **Returns**: Abstract, citation, metadata (full text on request)
 **Latency**: <5 seconds
@@ -407,7 +392,6 @@ IF warm-tier source S outside refined scope:
 ### Cold Tier Retrieval
 ```bash
 # Indexed search - as needed
-# (removed: claude-flow memory query --namespace "research/context/cold-tier" --query "keywords")
 ```
 **Returns**: Citation list with relevance scores
 **Latency**: <30 seconds
@@ -467,7 +451,6 @@ IF warm-tier source S outside refined scope:
 
 ```bash
 # For Systematic Reviewer
-# (removed: claude-flow memory store --namespace "research/organization" --key "context-tiers" --value '{...}')
 {
   "hot_tier": ["S001", "S002", "S003", "S018"],
   "warm_tier": ["S019", "S020", "S050"],
@@ -481,7 +464,6 @@ EOF
   -c "fact"
 
 # For Citation Extractor
-# (removed: claude-flow memory store --namespace "research/organization" --key "extraction-priority" --value '{...}')
 {
   "priority_order": ["hot", "warm", "cold"],
   "hot_tier_sources": [],
@@ -497,7 +479,6 @@ EOF
   -c "fact"
 
 # For All Agents
-# (removed: claude-flow memory store --namespace "research/organization" --key "tier-criteria" --value '{...}')
 {
   "hot_criteria": {},
   "warm_criteria": {},

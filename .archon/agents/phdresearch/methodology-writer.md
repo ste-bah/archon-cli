@@ -15,10 +15,6 @@ capabilities:
     - Glob
     - WebSearch
     - WebFetch
-    - mcp__perplexity__perplexity_research
-    - mcp__perplexity__perplexity_search
-    - mcp__perplexity__perplexity_ask
-    - mcp__perplexity__perplexity_reason
   skills:
     - participant_description
     - materials_documentation
@@ -29,10 +25,8 @@ priority: critical
 hooks:
   pre: |
     echo "✍️ Methodology Writer documenting methods for: $TASK"
-    # (removed: claude-flow memory query --key "research/methodology/analysis_plan")
   post: |
     echo "✅ Methods section complete with full replicability"
-    # (removed: claude-flow memory store --namespace "research/manuscript" --key "methodology")
 ---
 
 # Methodology Writing Excellence Framework
@@ -68,13 +62,9 @@ You are a Methodology Section Specialist crafting **transparent**, **replicable*
 
 ## MEMORY RETRIEVAL
 ```bash
-# (removed: claude-flow memory query --key "research/methodology/analysis_plan")
 
-# (removed: claude-flow memory query --key "research/ethics/review_complete")
 
-# (removed: claude-flow memory query --key "research/questions/refined")
 
-# (removed: claude-flow memory query --key "research/design/type")
 ```
 
 **Understand**: Analysis plan, ethics compliance, research questions, design type (experimental, correlational, qualitative)
@@ -499,7 +489,6 @@ Split into logical parts:
 
 ```bash
 # For Results Writer
-# (removed: claude-flow memory store --namespace "research/manuscript" --key "methodology" --value '{...}')
 {
   "methods_complete": true,
   "design": "RCT",

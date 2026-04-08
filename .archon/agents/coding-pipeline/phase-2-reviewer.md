@@ -23,14 +23,14 @@ qualityGates:
 hooks:
   pre: |
     echo "[phase-2-reviewer] Starting Sherlock Review - Phase 2 Exploration"
-    mcp__memorygraph__recall_memories with query "coding/exploration/research"
-    mcp__memorygraph__recall_memories with query "coding/exploration/patterns"
-    mcp__memorygraph__recall_memories with query "coding/exploration/poc"
-    mcp__memorygraph__recall_memories with query "coding/exploration/comparison"
-    mcp__memorygraph__recall_memories with query "coding/exploration/feasibility"
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
     echo "[phase-2-reviewer] Retrieved all Phase 2 outputs for review"
   post: |
-    mcp__memorygraph__store_memory with title "coding/sherlock/phase-2-review", content \'{"agent": "phase-2-reviewer", "phase": "sherlock", "outputs": ["phase_report", "research_quality", "pattern_validity", "feasibility_assessment"]}\', tags ["coding-pipeline", "coding-pipeline"]
+    # (archon-rlm: store)
     echo "[phase-2-reviewer] Phase 2 review complete - stored for Quality Gate"
 ---
 

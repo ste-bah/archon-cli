@@ -15,10 +15,6 @@ capabilities:
     - Glob
     - WebSearch
     - WebFetch
-    - mcp__perplexity__perplexity_research
-    - mcp__perplexity__perplexity_search
-    - mcp__perplexity__perplexity_ask
-    - mcp__perplexity__perplexity_reason
   skills:
     - source_quality_classification
     - journal_impact_assessment
@@ -30,10 +26,8 @@ priority: high
 hooks:
   pre: |
     echo "🏆 Source Tier Classifier evaluating quality for: $TASK"
-    # (removed: claude-flow memory query --key "research/synthesis/systematic-review")
   post: |
     echo "✅ Sources classified into Tier 1/2/3 - quality threshold checked"
-    # (removed: claude-flow memory store --namespace "research/quality" --key "source-tiers")
 ---
 
 # Source Tier Classification Excellence Framework
@@ -80,11 +74,8 @@ You are a Source Quality Evaluator specializing in **tier-based source classific
 
 ## MEMORY RETRIEVAL
 ```bash
-# (removed: claude-flow memory query --key "research/citations/citation-database")
 
-# (removed: claude-flow memory query --key "research/synthesis/systematic-review")
 
-# (removed: claude-flow memory query --key "research/meta/principles")
 ```
 
 **Understand**: Complete source list, quality assessments, PhD standards
@@ -560,7 +551,6 @@ ELSE TIER_SCORE < 40: TIER 3 (Acceptable with Justification)
 
 ```bash
 # For All Synthesis Agents
-# (removed: claude-flow memory store --namespace "research/quality" --key "source-tiers" --value '{...}')
 cat > /tmp/source-tiers.json << 'EOF'
 {
   "tier1_sources": ["S001", "S002", "...", "S234"],
@@ -576,7 +566,6 @@ EOF
 rm -f /tmp/source-tiers.json
 
 # For Citation Strategies
-# (removed: claude-flow memory store --namespace "research/quality" --key "tier-citation-strategy" --value '{...}')
 cat > /tmp/tier-citation-strategy.json << 'EOF'
 {
   "primary_claims": "Use Tier 1 sources only",
@@ -590,7 +579,6 @@ EOF
 rm -f /tmp/tier-citation-strategy.json
 
 # For Theoretical Framework Analyst
-# (removed: claude-flow memory store --namespace "research/quality" --key "theory-quality-filter" --value '{...}')
 cat > /tmp/theory-quality-filter.json << 'EOF'
 {
   "high_quality_theory": ["S001", "S002", "S003"],

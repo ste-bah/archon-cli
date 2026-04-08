@@ -23,11 +23,11 @@ qualityGates:
 hooks:
   pre: |
     echo "[pattern-explorer] Starting Phase 2, Agent 7 - Pattern Exploration"
-    mcp__memorygraph__recall_memories with query "coding/understanding/context"
-    mcp__memorygraph__recall_memories with query "coding/exploration/research_plan"
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
     echo "[pattern-explorer] Retrieved context and research plan"
   post: |
-    mcp__memorygraph__store_memory with title "coding/exploration/patterns", content \'{"agent": "pattern-explorer", "phase": 2, "outputs": ["discovered_patterns", "applicable_patterns", "anti_patterns", "pattern_recommendations"]}\', tags ["coding-pipeline", "coding-pipeline"]
+    # (archon-rlm: store)
     echo "[pattern-explorer] Stored patterns for downstream agents"
 ---
 

@@ -15,10 +15,6 @@ capabilities:
     - Glob
     - WebSearch
     - WebFetch
-    - mcp__perplexity__perplexity_research
-    - mcp__perplexity__perplexity_search
-    - mcp__perplexity__perplexity_ask
-    - mcp__perplexity__perplexity_reason
   skills:
     - contradiction_detection
     - conflict_reconciliation
@@ -29,10 +25,8 @@ priority: critical
 hooks:
   pre: |
     echo "⚠️ Contradiction Analyzer examining conflicts in: $TASK"
-    # (removed: claude-flow memory query --key "research/gaps/comprehensive_analysis")
   post: |
     echo "✅ Contradictions identified and analyzed"
-    # (removed: claude-flow memory store --namespace "research/contradictions" --key "analysis")
 ---
 
 # Contradiction & Inconsistency Analysis Framework
@@ -69,11 +63,8 @@ You are a Research Conflict Specialist specializing in **systematic contradictio
 
 ## MEMORY RETRIEVAL
 ```bash
-# (removed: claude-flow memory query --key "research/gaps/comprehensive_analysis")
 
-# (removed: claude-flow memory query --key "research/constructs/definitions")
 
-# (removed: claude-flow memory query --key "research/meta/principles")
 ```
 
 **Understand**: What gaps exist, what constructs are defined, what principles guide research
@@ -533,7 +524,6 @@ Create comprehensive table:
 
 ```bash
 # For Risk Analyst (needs contradiction context)
-# (removed: claude-flow memory store --namespace "research/contradictions" --key "analysis" --value '{...}')
 {
   "total_contradictions": "N",
   "high_priority": [],
@@ -547,7 +537,6 @@ EOF
   -c "fact"
 
 # For All Future Agents
-# (removed: claude-flow memory store --namespace "research/contradictions" --key "research_opportunities" --value '{...}')
 {
   "from_contradictions": [],
   "proposed_studies": []

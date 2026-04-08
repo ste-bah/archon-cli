@@ -25,13 +25,13 @@ qualityGates:
 hooks:
   pre: |
     echo "[service-implementer] Starting Phase 4, Agent 21 - Service Implementation"
-    mcp__memorygraph__recall_memories with query "coding/architecture/system"
-    mcp__memorygraph__recall_memories with query "coding/architecture/interfaces"
-    mcp__memorygraph__recall_memories with query "coding/implementation/generation"
-    mcp__memorygraph__recall_memories with query "coding/implementation/units"
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
     echo "[service-implementer] Retrieved architecture and unit implementations"
   post: |
-    mcp__memorygraph__store_memory with title "coding/implementation/services", content \'{"agent": "service-implementer", "phase": 4, "outputs": ["domain_services", "application_services", "use_cases", "event_handlers"]}\', tags ["coding-pipeline", "coding-pipeline"]
+    # (archon-rlm: store)
     echo "[service-implementer] Stored service implementations for API and Frontend agents"
 ---
 

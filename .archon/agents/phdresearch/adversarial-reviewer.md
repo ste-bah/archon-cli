@@ -30,10 +30,6 @@ capabilities:
     - Glob
     - WebSearch
     - WebFetch
-    - mcp__perplexity__perplexity_research
-    - mcp__perplexity__perplexity_search
-    - mcp__perplexity__perplexity_ask
-    - mcp__perplexity__perplexity_reason
 ---
 
 # Adversarial Reviewer Agent
@@ -58,17 +54,11 @@ Subject completed research to aggressive scrutiny by challenging every assumptio
 
 ```bash
 # Required memory files
-# (removed: claude-flow memory query --key "phd/paper-complete")
 
-# (removed: claude-flow memory query --key "phd/methodology")
 
-# (removed: claude-flow memory query --key "phd/results-section")
 
-# (removed: claude-flow memory query --key "phd/discussion-section")
 
-# (removed: claude-flow memory query --key "phd/theoretical-framework")
 
-# (removed: claude-flow memory query --key "phd/statistical-tests")
 ```
 
 **What to extract:**
@@ -525,7 +515,6 @@ undermine it. Every challenge serves epistemic rigor.**
 **After completing adversarial review:**
 
 ```bash
-# (removed: claude-flow memory store --key "phd/adversarial-review" --content '{...}')
 cat > /tmp/phd-adversarial-review.json << 'EOF'
 {
   "review_date": "2025-11-20",
@@ -559,7 +548,6 @@ EOF
 rm -f /tmp/phd-adversarial-review.json
 
 # XP reward (stored via MemoryGraph)
-# (removed: claude-flow hooks xp-reward --agent "adversarial-reviewer" --xp 60 --reason "...")
 echo "XP Reward: adversarial-reviewer +60 XP - Conducted rigorous adversarial review, identified critical issues before publication"
 ```
 

@@ -25,12 +25,12 @@ qualityGates:
 hooks:
   pre: |
     echo "[code-quality-improver] Starting Phase 6, Agent 37 - Code Quality Improvement"
-    mcp__memorygraph__recall_memories with query "coding/optimization/performance"
-    mcp__memorygraph__recall_memories with query "coding/testing/coverage"
-    mcp__memorygraph__recall_memories with query "coding/implementation/services"
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
     echo "[code-quality-improver] Retrieved performance optimizations and coverage data"
   post: |
-    mcp__memorygraph__store_memory with title "coding/optimization/quality", content \'{"agent": "code-quality-improver", "phase": 6, "outputs": ["quality_report", "refactorings", "pattern_applications", "maintainability_improvements"]}\', tags ["coding-pipeline", "coding-pipeline"]
+    # (archon-rlm: store)
     echo "[code-quality-improver] Stored quality improvements for Final Refactorer"
 ---
 
@@ -1482,7 +1482,7 @@ END IF
 ### Step 5: Store Results in Memory
 
 ```bash
-# Previously: mcp__memorygraph__store_memory with appropriate title, content, tags ["coding-pipeline"]
+# (archon-rlm: store)
   --value '{
     "initialTypeErrors": [INITIAL_TYPE_ERRORS],
     "finalTypeErrors": [TYPE_ERRORS],

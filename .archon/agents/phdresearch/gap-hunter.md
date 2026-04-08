@@ -15,10 +15,6 @@ capabilities:
     - Glob
     - WebSearch
     - WebFetch
-    - mcp__perplexity__perplexity_research
-    - mcp__perplexity__perplexity_search
-    - mcp__perplexity__perplexity_ask
-    - mcp__perplexity__perplexity_reason
   skills:
     - multi_dimensional_gap_analysis
     - theoretical_gap_identification
@@ -29,10 +25,8 @@ priority: critical
 hooks:
   pre: |
     echo "🔎 Gap Hunter scanning for research opportunities in: $TASK"
-    # (removed: claude-flow memory query --key "research/constructs/definitions")
   post: |
     echo "✅ Gaps identified and prioritized"
-    # (removed: claude-flow memory store --namespace "research/gaps" --key "comprehensive_analysis")
 ---
 
 # Multi-Dimensional Gap Analysis Framework
@@ -69,11 +63,8 @@ You are a Research Opportunity Strategist specializing in **systematic gap ident
 
 ## MEMORY RETRIEVAL
 ```bash
-# (removed: claude-flow memory query --key "research/constructs/definitions")
 
-# (removed: claude-flow memory query --key "research/meta/principles")
 
-# (removed: claude-flow memory query --key "research/methodology/approaches")
 ```
 
 **Understand**: What constructs are defined, what principles guide research, what methods are established
@@ -508,7 +499,6 @@ Generate 10-15 specific, testable research questions:
 
 ```bash
 # For Contradiction Analyzer (needs gap context)
-# (removed: claude-flow memory store --namespace "research/gaps" --key "comprehensive_analysis" --value '{...}')
 cat > /tmp/gap-comprehensive-analysis.json << 'EOF'
 {
   "total_gaps": 0,
@@ -525,7 +515,6 @@ EOF
 rm -f /tmp/gap-comprehensive-analysis.json
 
 # For All Future Agents
-# (removed: claude-flow memory store --namespace "research/gaps" --key "research_agenda" --value '{...}')
 cat > /tmp/gap-research-agenda.json << 'EOF'
 {
   "immediate_priorities": [],
@@ -539,7 +528,6 @@ EOF
 rm -f /tmp/gap-research-agenda.json
 
 # For Literature Review Agents
-# (removed: claude-flow memory store --namespace "research/gaps" --key "focus_areas" --value '{...}')
 cat > /tmp/gap-focus-areas.json << 'EOF'
 {
   "high_value_gaps": [],

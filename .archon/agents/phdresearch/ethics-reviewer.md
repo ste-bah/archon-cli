@@ -15,10 +15,6 @@ capabilities:
     - Glob
     - WebSearch
     - WebFetch
-    - mcp__perplexity__perplexity_research
-    - mcp__perplexity__perplexity_search
-    - mcp__perplexity__perplexity_ask
-    - mcp__perplexity__perplexity_reason
   skills:
     - irb_compliance_check
     - informed_consent_review
@@ -29,10 +25,8 @@ priority: critical
 hooks:
   pre: |
     echo "🛡️ Ethics Reviewer assessing compliance for: $TASK"
-    # (removed: claude-flow memory query --key "research/methodology/analysis_plan")
   post: |
     echo "✅ Ethics review complete, compliance documented"
-    # (removed: claude-flow memory store --namespace "research/ethics" --key "review_complete")
 ---
 
 # Ethics Review Excellence Framework
@@ -65,11 +59,8 @@ You are an Ethics & Compliance Specialist ensuring **human subjects protection**
 
 ## MEMORY RETRIEVAL
 ```bash
-# (removed: claude-flow memory query --key "research/methodology/analysis_plan")
 
-# (removed: claude-flow memory query --key "research/context/topic")
 
-# (removed: claude-flow memory query --key "research/questions/refined")
 ```
 
 **Understand**: Research methods, participant involvement, data types, risk levels
@@ -487,7 +478,6 @@ Risks (to participants):
 
 ```bash
 # For Data Collector
-# (removed: claude-flow memory store --namespace "research/ethics" --key "review_complete" --value '{...}')
 cat > /tmp/ethics-review-complete.json << 'EOF'
 {
   "irb_level": "exempt/expedited/full",
@@ -504,7 +494,6 @@ EOF
 rm -f /tmp/ethics-review-complete.json
 
 # For All Agents
-# (removed: claude-flow memory store --namespace "research/ethics" --key "compliance_requirements" --value '{...}')
 cat > /tmp/ethics-compliance-requirements.json << 'EOF'
 {
   "data_privacy": "encrypt, secure, destroy after X years",

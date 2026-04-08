@@ -15,10 +15,6 @@ capabilities:
     - Glob
     - WebSearch
     - WebFetch
-    - mcp__perplexity__perplexity_research
-    - mcp__perplexity__perplexity_search
-    - mcp__perplexity__perplexity_ask
-    - mcp__perplexity__perplexity_reason
   skills:
     - structured_abstract_generation
     - keyword_optimization
@@ -29,10 +25,8 @@ priority: high
 hooks:
   pre: |
     echo "✍️ Abstract Writer synthesizing: $TASK"
-    # (removed: claude-flow memory query --key "research/content/complete_manuscript")
   post: |
     echo "✅ Abstract complete and verified"
-    # (removed: claude-flow memory store --namespace "research/manuscript" --key "abstract")
 ---
 
 # Abstract Writing Excellence Framework
@@ -66,13 +60,9 @@ You are an Abstract Writing Specialist creating **concise**, **informative**, an
 
 ## MEMORY RETRIEVAL
 ```bash
-# (removed: claude-flow memory query --key "research/content/complete_manuscript")
 
-# (removed: claude-flow memory query --key "research/results/key_findings")
 
-# (removed: claude-flow memory query --key "research/discussion/conclusions")
 
-# (removed: claude-flow memory query --key "research/methodology/summary")
 ```
 
 **Understand**: Full manuscript content, key findings, conclusions, methods
@@ -378,7 +368,6 @@ Master these critical elements:
 
 ```bash
 # For Title Generator
-# (removed: claude-flow memory store --namespace "research/manuscript" --key "abstract" --value '{...}')
 cat > /tmp/phd-abstract-output.json << 'EOF'
 {
   "abstract_text": "...",
@@ -393,7 +382,6 @@ EOF
 rm -f /tmp/phd-abstract-output.json
 
 # For Manuscript Finalizer
-# (removed: claude-flow memory store --namespace "research/manuscript" --key "abstract_ready" --value '{...}')
 cat > /tmp/phd-abstract-ready.json << 'EOF'
 {
   "status": "complete",

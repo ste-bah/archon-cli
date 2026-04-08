@@ -24,12 +24,12 @@ qualityGates:
 hooks:
   pre: |
     echo "[test-runner] Starting Phase 5, Agent 31 - Test Execution"
-    mcp__memorygraph__recall_memories with query "coding/implementation/tests"
-    mcp__memorygraph__recall_memories with query "coding/implementation/services"
-    mcp__memorygraph__recall_memories with query "coding/implementation/api"
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
     echo "[test-runner] Retrieved test suites and implementation artifacts"
   post: |
-    mcp__memorygraph__store_memory with title "coding/testing/execution", content \'{"agent": "test-runner", "phase": 5, "outputs": ["test_results", "execution_report", "failure_analysis", "performance_metrics"]}\', tags ["coding-pipeline", "coding-pipeline"]
+    # (archon-rlm: store)
     echo "[test-runner] Stored test execution results for downstream agents"
 ---
 

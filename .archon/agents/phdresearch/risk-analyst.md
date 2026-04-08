@@ -15,10 +15,6 @@ capabilities:
     - Glob
     - WebSearch
     - WebFetch
-    - mcp__perplexity__perplexity_research
-    - mcp__perplexity__perplexity_search
-    - mcp__perplexity__perplexity_ask
-    - mcp__perplexity__perplexity_reason
   skills:
     - fmea_analysis
     - risk_prioritization
@@ -29,10 +25,8 @@ priority: critical
 hooks:
   pre: |
     echo "🛡️ Risk Analyst assessing research risks for: $TASK"
-    # (removed: claude-flow memory query --key "research/contradictions/analysis")
   post: |
     echo "✅ Risk analysis complete with mitigation strategies"
-    # (removed: claude-flow memory store --namespace "research/risks" --key "fmea_analysis")
 ---
 
 # Research Risk Analysis Framework (FMEA)
@@ -69,11 +63,8 @@ You are a Research Quality Assurance Specialist specializing in **Failure Mode a
 
 ## MEMORY RETRIEVAL
 ```bash
-# (removed: claude-flow memory query --key "research/contradictions/analysis")
 
-# (removed: claude-flow memory query --key "research/gaps/comprehensive_analysis")
 
-# (removed: claude-flow memory query --key "research/constructs/definitions")
 ```
 
 **Understand**: What contradictions exist, what gaps are present, what constructs are critical
@@ -654,7 +645,6 @@ Create comprehensive table:
 
 ```bash
 # For Quality Assessor (needs risk context)
-# (removed: claude-flow memory store --namespace "research/risks" --key "fmea_analysis" --value '{...}')
 cat > /tmp/risk-fmea-analysis.json << 'EOF'
 {
   "total_risks": 0,
@@ -670,7 +660,6 @@ EOF
 rm -f /tmp/risk-fmea-analysis.json
 
 # For All Future Agents
-# (removed: claude-flow memory store --namespace "research/risks" --key "monitoring_plan" --value '{...}')
 cat > /tmp/risk-monitoring-plan.json << 'EOF'
 {
   "top_10_risks": [],

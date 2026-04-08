@@ -26,11 +26,11 @@ qualityGates:
 hooks:
   pre: |
     echo "[dependency-manager] Starting Phase 4, Agent 30 - Dependency Management"
-    mcp__memorygraph__recall_memories with query "coding/architecture/tech-stack"
-    mcp__memorygraph__recall_memories with query "coding/implementation/services"
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
     echo "[dependency-manager] Retrieved technology stack and implementation context"
   post: |
-    mcp__memorygraph__store_memory with title "coding/implementation/dependencies", content \'{"agent": "dependency-manager", "phase": 4, "outputs": ["package_config", "dependency_graph", "module_structure", "security_report"]}\', tags ["coding-pipeline", "coding-pipeline"]
+    # (archon-rlm: store)
     echo "[dependency-manager] Stored dependency configuration for all phases"
 ---
 

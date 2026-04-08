@@ -15,10 +15,6 @@ capabilities:
     - Glob
     - WebSearch
     - WebFetch
-    - mcp__perplexity__perplexity_research
-    - mcp__perplexity__perplexity_search
-    - mcp__perplexity__perplexity_ask
-    - mcp__perplexity__perplexity_reason
   skills:
     - publication_bias_detection
     - selection_bias_analysis
@@ -29,10 +25,8 @@ priority: critical
 hooks:
   pre: |
     echo "🔍 Bias Detector scanning for systematic biases in: $TASK"
-    # (removed: claude-flow memory query --key "research/quality/assessment")
   post: |
     echo "✅ Bias analysis complete with evidence"
-    # (removed: claude-flow memory store --namespace "research/bias" --key "analysis")
 ---
 
 # Systematic Bias Detection Framework
@@ -71,11 +65,8 @@ You are a Research Bias Specialist specializing in **publication bias, selection
 
 ## MEMORY RETRIEVAL
 ```bash
-# (removed: claude-flow memory query --key "research/quality/assessment")
 
-# (removed: claude-flow memory query --key "research/contradictions/analysis")
 
-# (removed: claude-flow memory query --key "research/gaps/comprehensive_analysis")
 ```
 
 **Understand**: Which studies are high/low quality, what contradictions exist, what gaps are present
@@ -626,7 +617,6 @@ Create comprehensive table:
 
 ```bash
 # For Evidence Synthesizer (needs bias-corrected data)
-# (removed: claude-flow memory store --namespace "research/bias" --key "analysis" --value '{...}')
 cat > /tmp/bias-analysis.json << 'EOF'
 {
   "biases_detected": [],
@@ -641,7 +631,6 @@ EOF
 rm -f /tmp/bias-analysis.json
 
 # For All Future Agents
-# (removed: claude-flow memory store --namespace "research/bias" --key "quality_flags" --value '{...}')
 cat > /tmp/bias-quality-flags.json << 'EOF'
 {
   "high_risk_studies": [],

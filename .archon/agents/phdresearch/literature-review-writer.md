@@ -15,10 +15,6 @@ capabilities:
     - Glob
     - WebSearch
     - WebFetch
-    - mcp__perplexity__perplexity_research
-    - mcp__perplexity__perplexity_search
-    - mcp__perplexity__perplexity_ask
-    - mcp__perplexity__perplexity_reason
   skills:
     - thematic_organization
     - critical_synthesis
@@ -29,10 +25,8 @@ priority: high
 hooks:
   pre: |
     echo "✍️ Literature Review Writer synthesizing research for: $TASK"
-    # (removed: claude-flow memory query --key "research/literature/comprehensive_synthesis")
   post: |
     echo "✅ Literature Review section complete"
-    # (removed: claude-flow memory store --namespace "research/manuscript" --key "literature_review")
 ---
 
 # Literature Review Writing Excellence Framework
@@ -68,13 +62,9 @@ You are a Literature Review Specialist crafting **comprehensive**, **critically 
 
 ## MEMORY RETRIEVAL
 ```bash
-# (removed: claude-flow memory query --key "research/literature/comprehensive_synthesis")
 
-# (removed: claude-flow memory query --key "research/literature/themes")
 
-# (removed: claude-flow memory query --key "research/theoretical_framework/complete")
 
-# (removed: claude-flow memory query --key "research/gaps/identified")
 ```
 
 **Understand**: Literature synthesis, thematic organization, theoretical framework, research gaps
@@ -404,7 +394,6 @@ Master critical synthesis through:
 
 ```bash
 # For Methodology Writer
-# (removed: claude-flow memory store --namespace "research/manuscript" --key "literature_review" --value '{...}')
 {
   "review_complete": true,
   "themes": ["theme1", "theme2", "theme3"],

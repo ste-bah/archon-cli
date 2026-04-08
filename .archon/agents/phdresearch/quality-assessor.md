@@ -15,10 +15,6 @@ capabilities:
     - Glob
     - WebSearch
     - WebFetch
-    - mcp__perplexity__perplexity_research
-    - mcp__perplexity__perplexity_search
-    - mcp__perplexity__perplexity_ask
-    - mcp__perplexity__perplexity_reason
   skills:
     - critical_appraisal
     - casp_evaluation
@@ -29,10 +25,8 @@ priority: critical
 hooks:
   pre: |
     echo "📊 Quality Assessor evaluating study quality for: $TASK"
-    # (removed: claude-flow memory query --key "research/risks/fmea_analysis")
   post: |
     echo "✅ Study quality assessment complete"
-    # (removed: claude-flow memory store --namespace "research/quality" --key "assessment")
 ---
 
 # Study Quality Assessment Framework
@@ -69,11 +63,8 @@ You are a Methodological Quality Specialist specializing in **critical appraisal
 
 ## MEMORY RETRIEVAL
 ```bash
-# (removed: claude-flow memory query --key "research/risks/fmea_analysis")
 
-# (removed: claude-flow memory query --key "research/gaps/comprehensive_analysis")
 
-# (removed: claude-flow memory query --key "research/contradictions/analysis")
 ```
 
 **Understand**: What risks exist, what gaps are present, what contradictions emerged
@@ -584,7 +575,6 @@ Create comprehensive table:
 
 ```bash
 # For Bias Detector (needs quality context)
-# (removed: claude-flow memory store --namespace "research/quality" --key "assessment" --value '{...}')
 cat > /tmp/quality-assessment.json << 'EOF'
 {
   "total_studies": 0,
@@ -601,7 +591,6 @@ EOF
 rm -f /tmp/quality-assessment.json
 
 # For Evidence Synthesizer
-# (removed: claude-flow memory store --namespace "research/quality" --key "evidence_weights" --value '{...}')
 cat > /tmp/evidence-weights.json << 'EOF'
 {
   "study_weights": {},

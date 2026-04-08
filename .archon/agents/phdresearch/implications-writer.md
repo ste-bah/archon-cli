@@ -29,10 +29,6 @@ capabilities:
     - Glob
     - WebSearch
     - WebFetch
-    - mcp__perplexity__perplexity_research
-    - mcp__perplexity__perplexity_search
-    - mcp__perplexity__perplexity_ask
-    - mcp__perplexity__perplexity_reason
 ---
 
 # Discussion Writer Agent
@@ -55,19 +51,12 @@ Transform results into meaningful interpretation by integrating findings with ex
 
 ```bash
 # Required memory files
-# (removed: claude-flow memory query --key "phd/results-section")
 
-# (removed: claude-flow memory query --key "phd/research-questions")
 
-# (removed: claude-flow memory query --key "phd/hypotheses")
 
-# (removed: claude-flow memory query --key "phd/literature-synthesis")
 
-# (removed: claude-flow memory query --key "phd/theoretical-framework")
 
-# (removed: claude-flow memory query --key "phd/methodology")
 
-# (removed: claude-flow memory query --key "phd/gap-analysis")
 ```
 
 **What to extract:**
@@ -494,7 +483,6 @@ should [specific next step].
 **After writing discussion section:**
 
 ```bash
-# (removed: claude-flow memory store --key "phd/discussion-section" --content '{...}')
 {
   "key_interpretations": [
     "RQ1: X→Y relationship supports Theory Z via mechanism M",
@@ -529,7 +517,6 @@ EOF
   -c "fact"
 
 # XP reward (stored via MemoryGraph)
-# (removed: claude-flow hooks xp-reward --agent "discussion-writer" --xp 50 --reason "...")
 echo "XP Reward: discussion-writer +50 XP - Completed intellectually rigorous discussion with honest limitations"
 ```
 

@@ -26,13 +26,13 @@ qualityGates:
 hooks:
   pre: |
     echo "[test-generator] Starting Phase 4, Agent 29 - Test Generation"
-    mcp__memorygraph__recall_memories with query "coding/implementation/services"
-    mcp__memorygraph__recall_memories with query "coding/implementation/api"
-    mcp__memorygraph__recall_memories with query "coding/implementation/types"
-    mcp__memorygraph__recall_memories with query "coding/architecture/test-strategy"
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
     echo "[test-generator] Retrieved all implementation artifacts for testing"
   post: |
-    mcp__memorygraph__store_memory with title "coding/implementation/tests", content \'{"agent": "test-generator", "phase": 4, "outputs": ["unit_tests", "integration_tests", "e2e_tests", "test_utilities"]}\', tags ["coding-pipeline", "coding-pipeline"]
+    # (archon-rlm: store)
     echo "[test-generator] Stored test suites for Phase 5 Test Runner"
 ---
 

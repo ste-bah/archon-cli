@@ -26,7 +26,7 @@ hooks:
     echo "[task-analyzer] Starting Phase 1, Agent 1 - Task Analysis"
     echo "[task-analyzer] This is the pipeline entry point - no prior memories to retrieve"
   post: |
-    mcp__memorygraph__store_memory with title "coding/understanding/parsed_task", content \'{"agent": "task-analyzer", "phase": 1, "outputs": ["parsed_task", "acceptance_criteria", "task_type", "complexity_estimate"]}\', tags ["coding-pipeline", "coding-pipeline"]
+    # (archon-rlm: store)
     echo "[task-analyzer] Stored parsed task context for downstream agents"
 ---
 

@@ -15,10 +15,6 @@ capabilities:
     - Glob
     - WebSearch
     - WebFetch
-    - mcp__perplexity__perplexity_research
-    - mcp__perplexity__perplexity_search
-    - mcp__perplexity__perplexity_ask
-    - mcp__perplexity__perplexity_reason
   skills:
     - apa_citation_extraction
     - url_verification
@@ -30,10 +26,8 @@ priority: high
 hooks:
   pre: |
     echo "📖 Citation Extractor processing sources for: $TASK"
-    # (removed: claude-flow memory query --key "research/synthesis/systematic-review")
   post: |
     echo "✅ Citations extracted - full APA format with URLs and page numbers"
-    # (removed: claude-flow memory store --namespace "research/citations" --key "citation-database")
 ---
 
 # Citation Extraction Excellence Framework
@@ -82,13 +76,9 @@ You are a Citation Management Specialist ensuring **complete APA 7th edition cit
 
 ## MEMORY RETRIEVAL
 ```bash
-# (removed: claude-flow memory query --key "research/synthesis/systematic-review")
 
-# (removed: claude-flow memory query --key "research/organization/context-tiers")
 
-# (removed: claude-flow memory query --key "research/literature/literature-map")
 
-# (removed: claude-flow memory query --key "research/meta/self-ask-questions")
 ```
 
 **Understand**: Included sources, quality assessments, tier classifications, research questions
@@ -549,7 +539,6 @@ Anderson, P. T., Chen, M., & Davis, K. (2020). Blended learning effectiveness: A
 
 ```bash
 # For All Synthesis Agents
-# (removed: claude-flow memory store --namespace "research/citations" --key "citation-database" --value '...')
 cat > /tmp/citation-database.json << 'EOF'
 {
   "total_sources": 382,
@@ -574,7 +563,6 @@ EOF
 rm -f /tmp/citation-database.json
 
 # For Theoretical Framework Analyst
-# (removed: claude-flow memory store --namespace "research/citations" --key "theory-citations" --value '...')
 cat > /tmp/theory-citations.json << 'EOF'
 {
   "constructivism": ["S001", "S003", "..."],
@@ -587,7 +575,6 @@ EOF
 rm -f /tmp/theory-citations.json
 
 # For Methodology Scanner
-# (removed: claude-flow memory store --namespace "research/citations" --key "method-citations" --value '...')
 cat > /tmp/method-citations.json << 'EOF'
 {
   "RCT": ["S015", "S023", "..."],
@@ -600,7 +587,6 @@ EOF
 rm -f /tmp/method-citations.json
 
 # Citation Quality Metrics
-# (removed: claude-flow memory store --namespace "research/citations" --key "citation-quality" --value '...')
 cat > /tmp/citation-quality.json << 'EOF'
 {
   "doi_url_coverage": 1.0,

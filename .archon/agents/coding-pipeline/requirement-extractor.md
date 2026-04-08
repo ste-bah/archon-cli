@@ -20,10 +20,10 @@ qualityGates:
 hooks:
   pre: |
     echo "[requirement-extractor] Starting Phase 1, Agent 2 - Requirement Extraction"
-    mcp__memorygraph__recall_memories with query "coding/understanding/parsed_task"
+    # (archon-rlm: recall)
     echo "[requirement-extractor] Retrieved parsed task from Agent 1"
   post: |
-    mcp__memorygraph__store_memory with title "coding/understanding/requirements", content \'{"agent": "requirement-extractor", "phase": 1, "outputs": ["functional_requirements", "non_functional_requirements", "constraints"]}\', tags ["coding-pipeline", "coding-pipeline"]
+    # (archon-rlm: store)
     echo "[requirement-extractor] Stored requirements for downstream agents"
 ---
 

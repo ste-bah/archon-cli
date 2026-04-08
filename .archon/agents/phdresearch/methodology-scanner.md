@@ -15,10 +15,6 @@ capabilities:
     - Glob
     - WebSearch
     - WebFetch
-    - mcp__perplexity__perplexity_research
-    - mcp__perplexity__perplexity_search
-    - mcp__perplexity__perplexity_ask
-    - mcp__perplexity__perplexity_reason
   skills:
     - methodology_classification
     - method_theory_alignment
@@ -30,10 +26,8 @@ priority: high
 hooks:
   pre: |
     echo "🔬 Methodology Scanner analyzing research designs for: $TASK"
-    # (removed: claude-flow memory query --key "research/theory/theoretical-frameworks")
   post: |
     echo "✅ Methodologies scanned and categorized - gaps identified"
-    # (removed: claude-flow memory store --namespace "research/methods" --key "methodology-scan")
 ---
 
 # Methodology Scanning Excellence Framework
@@ -80,13 +74,9 @@ You are a Research Methodology Strategist specializing in **method classificatio
 
 ## MEMORY RETRIEVAL
 ```bash
-# (removed: claude-flow memory query --key "research/theory/theoretical-frameworks")
 
-# (removed: claude-flow memory query --key "research/synthesis/systematic-review")
 
-# (removed: claude-flow memory query --key "research/literature/methodological-clusters")
 
-# (removed: claude-flow memory query --key "research/meta/self-ask-questions")
 ```
 
 **Understand**: Theoretical paradigms, quality assessments, method clusters, research questions
@@ -531,7 +521,6 @@ You are a Research Methodology Strategist specializing in **method classificatio
 
 ```bash
 # For Gap Hunter
-# (removed: claude-flow memory store --namespace "research/methods" --key "methodology-scan" --value '{...}')
 {
   "methodological_gaps": ["longitudinal", "neuroimaging", "mixed_methods", "DBR", "participatory"],
   "gap_evidence": {},
@@ -543,7 +532,6 @@ EOF
   -c "fact"
 
 # For Discussion Writer
-# (removed: claude-flow memory store --namespace "research/methods" --key "method-limitations" --value '{...}')
 {
   "dominant_methods": ["quasi-experimental", "case_study"],
   "quality_issues": ["small_n", "high_attrition", "no_effect_sizes"],

@@ -15,10 +15,6 @@ capabilities:
     - Glob
     - WebSearch
     - WebFetch
-    - mcp__perplexity__perplexity_research
-    - mcp__perplexity__perplexity_search
-    - mcp__perplexity__perplexity_ask
-    - mcp__perplexity__perplexity_reason
   skills:
     - rewoo_planning
     - task_sequencing
@@ -29,10 +25,8 @@ priority: critical
 hooks:
   pre: |
     echo "📋 Research Planner creating comprehensive plan for: $TASK"
-    # (removed: claude-flow memory query --key "research/meta/self-ask-questions")
   post: |
     echo "✅ Research plan complete with dependencies and quality gates"
-    # (removed: claude-flow memory store --namespace "research/execution" --key "research-plan")
 ---
 
 # Research Planning Excellence Framework (ReWOO Methodology)
@@ -76,13 +70,9 @@ You are a Research Planning Strategist specializing in **ReWOO (Reasoning WithOu
 
 ## MEMORY RETRIEVAL
 ```bash
-# (removed: claude-flow memory query --key "research/meta/self-ask-questions")
 
-# (removed: claude-flow memory query --key "research/meta/ambiguities")
 
-# (removed: claude-flow memory query --key "research/meta/principles")
 
-# (removed: claude-flow memory query --key "research/session/config")
 ```
 
 **Understand**: Research questions, terminology, quality standards, domain context
@@ -419,7 +409,6 @@ T1 → T2 → T3 → T4 → T10 → T15 → T20 → T25 → T30
 
 ```bash
 # For Literature Mapper
-# (removed: claude-flow memory store --namespace "research/execution" --key "research-plan" --value '{...}')
 cat > /tmp/research-plan.json << 'EOF'
 {
   "total_tasks": 30,
@@ -442,7 +431,6 @@ EOF
 rm -f /tmp/research-plan.json
 
 # For Systematic Reviewer
-# (removed: claude-flow memory store --namespace "research/execution" --key "quality-gates" --value '{...}')
 cat > /tmp/quality-gates.json << 'EOF'
 {
   "qg1_criteria": [],
@@ -457,7 +445,6 @@ EOF
 rm -f /tmp/quality-gates.json
 
 # For All Agents
-# (removed: claude-flow memory store --namespace "research/execution" --key "task-dependencies" --value '{...}')
 cat > /tmp/task-dependencies.json << 'EOF'
 {
   "dependency_graph": {},

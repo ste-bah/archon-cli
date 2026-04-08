@@ -26,13 +26,13 @@ qualityGates:
 hooks:
   pre: |
     echo "[data-layer-implementer] Starting Phase 4, Agent 22 - Data Layer Implementation"
-    mcp__memorygraph__recall_memories with query "coding/architecture/data"
-    mcp__memorygraph__recall_memories with query "coding/implementation/generation"
-    mcp__memorygraph__recall_memories with query "coding/implementation/units"
-    mcp__memorygraph__recall_memories with query "coding/implementation/coordination"
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
     echo "[data-layer-implementer] Retrieved data architecture and entity implementations"
   post: |
-    mcp__memorygraph__store_memory with title "coding/implementation/data-layer", content \'{"agent": "data-layer-implementer", "phase": 4, "outputs": ["repositories", "mappers", "migrations", "query_builders"]}\', tags ["coding-pipeline", "coding-pipeline"]
+    # (archon-rlm: store)
     echo "[data-layer-implementer] Stored data layer for Service and API agents"
 ---
 

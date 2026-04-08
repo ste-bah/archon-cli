@@ -38,7 +38,7 @@ Before proceeding, understand what you MUST NOT do:
 First, get the actual test results from the test-execution-verifier:
 
 ```bash
-# Previously: mcp__memorygraph__recall_memories with appropriate query
+# (archon-rlm: recall)
 ```
 
 **CRITICAL**: If `verified: true` is not present, FAIL immediately - test-execution-verifier did not run properly.
@@ -52,7 +52,7 @@ Check for existing baseline in the target project:
 cat [target-dir]/.pipeline-state/test-baseline.json 2>/dev/null || echo '{"exists":false}'
 
 # Also check for stored baseline in memory
-# Previously: mcp__memorygraph__recall_memories with appropriate query
+# (archon-rlm: recall)
 ```
 
 Baseline structure expected:
@@ -115,7 +115,7 @@ Compare failed test lists:
 
 ```bash
 # Get current failures from verified-results
-CURRENT_FAILURES=$(# Previously: mcp__memorygraph__recall_memories with appropriate query
+# (archon-rlm: recall)
 
 # Get baseline failures (if baseline exists)
 BASELINE_FAILURES=$(cat [target-dir]/.pipeline-state/test-baseline.json 2>/dev/null | jq -r '.failingTests[]' | sort)
@@ -133,7 +133,7 @@ echo "$NEW_FAILURES"
 Store the detailed regression analysis:
 
 ```bash
-# Previously: mcp__memorygraph__store_memory with appropriate title, content, tags ["coding-pipeline"]
+# (archon-rlm: store)
   "baselineExists": [true/false],
   "baselinePassRate": [number or null],
   "baselineTestCount": [number or null],
@@ -190,7 +190,7 @@ mkdir -p [target-dir]/.pipeline-state
 
 ```bash
 # Also store in memory for cross-session access
-# Previously: mcp__memorygraph__store_memory with appropriate title, content, tags ["coding-pipeline"]
+# (archon-rlm: store)
 ```
 
 ## FAILURE CONDITIONS
@@ -241,7 +241,7 @@ VERDICT: FAIL - Cannot analyze: test-execution-verifier did not provide verified
 
 ```bash
 # Step 1: Retrieve verified results
-# Previously: mcp__memorygraph__recall_memories with appropriate query
+# (archon-rlm: recall)
 # Returns: {"testsTotal": 50, "testsPassed": 48, "verified": true, ...}
 
 # Step 2: Load baseline
@@ -252,7 +252,7 @@ cat ./project/.pipeline-state/test-baseline.json
 # Current: 48/50 = 96% | Baseline: 95.5% | Diff: +0.5%
 
 # Step 4: Store analysis
-# Previously: mcp__memorygraph__store_memory with appropriate title, content, tags ["coding-pipeline"]
+# (archon-rlm: store)
   "baselineExists": true,
   "baselinePassRate": 95.5,
   "currentPassRate": 96,
@@ -273,7 +273,7 @@ VERDICT: PASS - No regressions detected (baseline: 95.5%, current: 96%)
 
 ```bash
 # Step 1: Retrieve verified results
-# Previously: mcp__memorygraph__recall_memories with appropriate query
+# (archon-rlm: recall)
 # Returns: {"testsTotal": 50, "testsPassed": 40, "verified": true, ...}
 
 # Step 2: Load baseline
@@ -284,7 +284,7 @@ cat ./project/.pipeline-state/test-baseline.json
 # Current: 40/50 = 80% | Baseline: 96% | Diff: -16%
 
 # Step 4: Store analysis
-# Previously: mcp__memorygraph__store_memory with appropriate title, content, tags ["coding-pipeline"]
+# (archon-rlm: store)
   "baselineExists": true,
   "baselinePassRate": 96,
   "currentPassRate": 80,
@@ -306,7 +306,7 @@ VERDICT: FAIL - Regression detected: pass rate dropped from 96% to 80%
 
 ```bash
 # Step 1: Retrieve verified results
-# Previously: mcp__memorygraph__recall_memories with appropriate query
+# (archon-rlm: recall)
 # Returns: {"testsTotal": 20, "testsPassed": 18, "verified": true, ...}
 
 # Step 2: Check for baseline
@@ -317,7 +317,7 @@ cat ./project/.pipeline-state/test-baseline.json 2>/dev/null || echo "No baselin
 # Current: 18/20 = 90%
 
 # Step 4: Store analysis
-# Previously: mcp__memorygraph__store_memory with appropriate title, content, tags ["coding-pipeline"]
+# (archon-rlm: store)
   "baselineExists": false,
   "baselinePassRate": null,
   "currentPassRate": 90,

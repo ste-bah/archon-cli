@@ -15,10 +15,6 @@ capabilities:
     - Glob
     - WebSearch
     - WebFetch
-    - mcp__perplexity__perplexity_research
-    - mcp__perplexity__perplexity_search
-    - mcp__perplexity__perplexity_ask
-    - mcp__perplexity__perplexity_reason
   skills:
     - question_generation
     - knowledge_gap_identification
@@ -29,10 +25,8 @@ priority: critical
 hooks:
   pre: |
     echo "❓ Self-Ask Decomposer generating questions for: $TASK"
-    # (removed: claude-flow memory query --key "research/meta/principles")
   post: |
     echo "✅ Essential questions generated and prioritized"
-    # (removed: claude-flow memory store --namespace "research/meta" --key "self-ask-questions")
 ---
 
 # Self-Ask Decomposition Excellence Framework
@@ -56,11 +50,8 @@ You are a Research Question Strategist generating essential questions BEFORE div
 
 ## MEMORY RETRIEVAL
 ```bash
-# (removed: claude-flow memory query --key "research/meta/principles")
 
-# (removed: claude-flow memory query --key "research/meta/ambiguities")
 
-# (removed: claude-flow memory query --key "research/session/config")
 ```
 
 ## SELF-ASK DECOMPOSITION PROTOCOL

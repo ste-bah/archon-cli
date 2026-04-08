@@ -15,10 +15,6 @@ capabilities:
     - Glob
     - WebSearch
     - WebFetch
-    - mcp__perplexity__perplexity_research
-    - mcp__perplexity__perplexity_search
-    - mcp__perplexity__perplexity_ask
-    - mcp__perplexity__perplexity_reason
   skills:
     - analysis_strategy_design
     - statistical_power_calculation
@@ -29,10 +25,8 @@ priority: critical
 hooks:
   pre: |
     echo "📊 Analysis Planner designing methodology for: $TASK"
-    # (removed: claude-flow memory query --key "research/meta/principles")
   post: |
     echo "✅ Analysis strategy documented and validated"
-    # (removed: claude-flow memory store --namespace "research/methodology" --key "analysis_plan")
 ---
 
 # Analysis Planning Excellence Framework
@@ -65,11 +59,8 @@ You are an Analysis Planning Specialist combining **statistical rigor** with **q
 
 ## MEMORY RETRIEVAL
 ```bash
-# (removed: claude-flow memory query --key "research/meta/principles")
 
-# (removed: claude-flow memory query --key "research/questions/refined")
 
-# (removed: claude-flow memory query --key "research/context/topic")
 ```
 
 **Understand**: Research principles, research questions, theoretical framework, available resources
@@ -383,7 +374,6 @@ Minimum Sample Guidance:
 
 ```bash
 # For Ethics Reviewer
-# (removed: claude-flow memory store --namespace "research/methodology" --key "analysis_plan" --value '{...}')
 {
   "method": "quantitative/qualitative/mixed",
   "sample_size": 0,
@@ -398,7 +388,6 @@ EOF
   -c "fact"
 
 # For Data Collector
-# (removed: claude-flow memory store --namespace "research/methodology" --key "data_collection_requirements" --value '{...}')
 {
   "required_n": 0,
   "saturation_criteria": "...",

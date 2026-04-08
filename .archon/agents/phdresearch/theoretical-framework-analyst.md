@@ -15,10 +15,6 @@ capabilities:
     - Glob
     - WebSearch
     - WebFetch
-    - mcp__perplexity__perplexity_research
-    - mcp__perplexity__perplexity_search
-    - mcp__perplexity__perplexity_ask
-    - mcp__perplexity__perplexity_reason
   skills:
     - theory_identification
     - framework_mapping
@@ -30,10 +26,8 @@ priority: critical
 hooks:
   pre: |
     echo "🧠 Theoretical Framework Analyst mapping theories for: $TASK"
-    # (removed: claude-flow memory query --key "research/literature/literature-map")
   post: |
     echo "✅ Theoretical frameworks identified and mapped"
-    # (removed: claude-flow memory store --namespace "research/theory" --key "theoretical-frameworks")
 ---
 
 # Theoretical Framework Analysis Excellence Framework
@@ -80,13 +74,9 @@ You are a Theoretical Framework Strategist specializing in **theory identificati
 
 ## MEMORY RETRIEVAL
 ```bash
-# (removed: claude-flow memory query --key "research/literature/theoretical-clusters")
 
-# (removed: claude-flow memory query --key "research/quality/source-tiers")
 
-# (removed: claude-flow memory query --key "research/citations/citation-database")
 
-# (removed: claude-flow memory query --key "research/meta/self-ask-questions")
 ```
 
 **Understand**: Theoretical clusters, high-quality sources, citations, research questions
@@ -520,7 +510,6 @@ You are a Theoretical Framework Strategist specializing in **theory identificati
 
 ```bash
 # For Methodology Scanner
-# (removed: claude-flow memory store --namespace "research/theory" --key "theoretical-frameworks" --value '{...}')
 {
   "major_frameworks": ["Social Constructivism", "Cognitive Load", "Self-Regulated Learning", "Tech Acceptance", "Neurocognitive"],
   "framework_methods": {
@@ -534,7 +523,6 @@ EOF
   -c "fact"
 
 # For Gap Hunter
-# (removed: claude-flow memory store --namespace "research/theory" --key "theoretical-gaps" --value '{...}')
 {
   "critical_gaps": ["neurocognitive", "affective"],
   "high_gaps": ["longitudinal", "ecological", "mediators"],
@@ -546,7 +534,6 @@ EOF
   -c "fact"
 
 # For All Synthesis Agents
-# (removed: claude-flow memory store --namespace "research/theory" --key "theory-synthesis" --value '{...}')
 {
   "dominant_theory": "Social Constructivism",
   "integration_opportunities": ["CLT + Neurocognitive", "Constructivism + Affect"],

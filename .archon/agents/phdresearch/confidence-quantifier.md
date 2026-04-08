@@ -30,10 +30,6 @@ capabilities:
     - Glob
     - WebSearch
     - WebFetch
-    - mcp__perplexity__perplexity_research
-    - mcp__perplexity__perplexity_search
-    - mcp__perplexity__perplexity_ask
-    - mcp__perplexity__perplexity_reason
 ---
 
 # Confidence Quantifier Agent
@@ -56,17 +52,11 @@ Transform vague qualitative uncertainty ("possibly," "likely," "suggests") into 
 
 ```bash
 # Required memory files
-# (removed: claude-flow memory query --key "phd/adversarial-review")
 
-# (removed: claude-flow memory query --key "phd/results-section")
 
-# (removed: claude-flow memory query --key "phd/discussion-section")
 
-# (removed: claude-flow memory query --key "phd/statistical-tests")
 
-# (removed: claude-flow memory query --key "phd/methodology")
 
-# (removed: claude-flow memory query --key "phd/conclusion-section")
 ```
 
 **What to extract:**

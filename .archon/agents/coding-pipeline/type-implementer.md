@@ -25,12 +25,12 @@ qualityGates:
 hooks:
   pre: |
     echo "[type-implementer] Starting Phase 4, Agent 28 - Type Implementation"
-    mcp__memorygraph__recall_memories with query "coding/architecture/interfaces"
-    mcp__memorygraph__recall_memories with query "coding/architecture/data-flow"
-    mcp__memorygraph__recall_memories with query "coding/implementation/services"
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
     echo "[type-implementer] Retrieved interface contracts and service types"
   post: |
-    mcp__memorygraph__store_memory with title "coding/implementation/types", content \'{"agent": "type-implementer", "phase": 4, "outputs": ["domain_types", "dto_types", "utility_types", "type_guards"]}\', tags ["coding-pipeline", "coding-pipeline"]
+    # (archon-rlm: store)
     echo "[type-implementer] Stored type definitions for all downstream agents"
 ---
 

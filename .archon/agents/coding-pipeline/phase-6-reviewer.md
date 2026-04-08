@@ -26,16 +26,16 @@ qualityGates:
 hooks:
   pre: |
     echo "[phase-6-reviewer] Starting Sherlock Phase 6 Review..."
-    mcp__memorygraph__recall_memories with query "coding/optimization/performance-improvements"
-    mcp__memorygraph__recall_memories with query "coding/optimization/quality-improvements"
-    mcp__memorygraph__recall_memories with query "coding/optimization/refactoring-changes"
-    mcp__memorygraph__recall_memories with query "coding/optimization/type-fixes"
-    mcp__memorygraph__recall_memories with query "coding/optimization/test-verification"
-    mcp__memorygraph__recall_memories with query "coding/testing/coverage-report"
-    mcp__memorygraph__recall_memories with query "coding/testing/results"
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
     echo "[phase-6-reviewer] Retrieved all Phase 6 results including fix verification"
   post: |
-    mcp__memorygraph__store_memory with appropriate title, content, tags ["coding-pipeline"]
+    # (archon-rlm: store)
     echo "[phase-6-reviewer] Phase 6 Review complete..."
 ---
 
@@ -629,7 +629,7 @@ export class FixVerificationGate {
 
   private async retrieveMemory(key: string): Promise<any> {
     // Integration with MemoryGraph memory system
-    const result = await this.exec(`mcp__memorygraph__recall_memories with query "${key}"`);
+    # (archon-rlm: recall)
     try {
       return JSON.parse(result);
     } catch {
@@ -848,8 +848,8 @@ Before issuing verdict, you MUST verify that auto-fixes were executed and are wo
 ### Step 1: Check Fix Loop Execution
 
 ```bash
-# Previously: mcp__memorygraph__recall_memories with appropriate query
-# Previously: mcp__memorygraph__recall_memories with appropriate query
+# (archon-rlm: recall)
+# (archon-rlm: recall)
 ```
 
 Verify the following:

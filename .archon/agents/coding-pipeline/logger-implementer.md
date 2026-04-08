@@ -25,11 +25,11 @@ qualityGates:
 hooks:
   pre: |
     echo "[logger-implementer] Starting Phase 4, Agent 26 - Logger Implementation"
-    mcp__memorygraph__recall_memories with query "coding/architecture/system"
-    mcp__memorygraph__recall_memories with query "coding/implementation/errors"
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
     echo "[logger-implementer] Retrieved system architecture and error handling"
   post: |
-    mcp__memorygraph__store_memory with title "coding/implementation/logger", content \'{"agent": "logger-implementer", "phase": 4, "outputs": ["logger_service", "formatters", "transports", "middleware"]}\', tags ["coding-pipeline", "coding-pipeline"]
+    # (archon-rlm: store)
     echo "[logger-implementer] Stored logging implementation for all agents"
 ---
 

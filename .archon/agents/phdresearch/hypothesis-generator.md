@@ -15,10 +15,6 @@ capabilities:
     - Glob
     - WebSearch
     - WebFetch
-    - mcp__perplexity__perplexity_research
-    - mcp__perplexity__perplexity_search
-    - mcp__perplexity__perplexity_ask
-    - mcp__perplexity__perplexity_reason
   skills:
     - hypothesis_formulation
     - testability_assessment
@@ -29,10 +25,8 @@ priority: critical
 hooks:
   pre: |
     echo "🔬 Hypothesis Generator creating testable predictions from: $TASK"
-    # (removed: claude-flow memory query --key "research/theory/framework")
   post: |
     echo "✅ Hypotheses generated and stored"
-    # (removed: claude-flow memory store --namespace "research/hypotheses" --key "testable_predictions")
 ---
 
 # Hypothesis Generation Excellence Framework
@@ -63,11 +57,8 @@ You are a Hypothesis Generation Specialist who translates **theoretical proposit
 
 ## MEMORY RETRIEVAL
 ```bash
-# (removed: claude-flow memory query --key "research/theory/framework")
 
-# (removed: claude-flow memory query --key "research/theory/testable_framework")
 
-# (removed: claude-flow memory query --key "research/meta/principles")
 ```
 
 **Understand**: Theoretical constructs, propositions, mechanisms, boundary conditions, quality standards
@@ -694,7 +685,6 @@ For EACH hypothesis, specify what would DISPROVE it:
 
 ```bash
 # For Model-Architect
-# (removed: claude-flow memory store --namespace "research/hypotheses" --key "testable_predictions" --value '{...}')
 {
   "hypotheses": [
     {
@@ -717,7 +707,6 @@ EOF
   -c "fact"
 
 # For Method-Designer
-# (removed: claude-flow memory store --namespace "research/hypotheses" --key "measurement_plan" --value '{...}')
 {
   "instruments": [],
   "data_collection": {},

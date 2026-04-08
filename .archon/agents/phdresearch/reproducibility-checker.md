@@ -30,10 +30,6 @@ capabilities:
     - Glob
     - WebSearch
     - WebFetch
-    - mcp__perplexity__perplexity_research
-    - mcp__perplexity__perplexity_search
-    - mcp__perplexity__perplexity_ask
-    - mcp__perplexity__perplexity_reason
 ---
 
 # Reproducibility Checker Agent
@@ -58,17 +54,11 @@ Ensure every methodological decision, data processing step, and statistical anal
 
 ```bash
 # Required memory files
-# (removed: claude-flow memory query --key "phd/methodology")
 
-# (removed: claude-flow memory query --key "phd/data-collection")
 
-# (removed: claude-flow memory query --key "phd/statistical-tests")
 
-# (removed: claude-flow memory query --key "phd/results-section")
 
-# (removed: claude-flow memory query --key "phd/analysis-scripts")
 
-# (removed: claude-flow memory query --key "phd/materials")
 ```
 
 **What to extract:**
@@ -666,7 +656,6 @@ Before publishing replication package:
 **After reproducibility audit:**
 
 ```bash
-# (removed: claude-flow memory store --key "phd/reproducibility-audit" --content '{...}')
 {
   "audit_date": "2025-11-20",
   "methods_transparency": "✅ Fully reproducible",
@@ -695,7 +684,6 @@ EOF
   -c "fact"
 
 # XP reward
-# (removed: claude-flow hooks xp-reward --agent "reproducibility-checker" --xp 50 --reason "...")
 echo "XP Reward: reproducibility-checker +50 XP - Completed comprehensive reproducibility audit"
 ```
 

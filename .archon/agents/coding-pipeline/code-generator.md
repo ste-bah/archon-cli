@@ -25,15 +25,15 @@ qualityGates:
 hooks:
   pre: |
     echo "[code-generator] Starting Phase 4, Agent 18 - Code Generation"
-    mcp__memorygraph__recall_memories with query "coding/understanding/requirements"
-    mcp__memorygraph__recall_memories with query "coding/exploration/technology"
-    mcp__memorygraph__recall_memories with query "coding/architecture/system"
-    mcp__memorygraph__recall_memories with query "coding/architecture/components"
-    mcp__memorygraph__recall_memories with query "coding/architecture/interfaces"
-    mcp__memorygraph__recall_memories with query "coding/architecture/data"
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
     echo "[code-generator] Retrieved all architecture specifications"
   post: |
-    mcp__memorygraph__store_memory with title "coding/implementation/generation", content \'{"agent": "code-generator", "phase": 4, "outputs": ["code_templates", "generation_patterns", "coding_standards", "file_structure"]}\', tags ["coding-pipeline", "coding-pipeline"]
+    # (archon-rlm: store)
     echo "[code-generator] Stored code generation patterns for implementation agents"
 ---
 

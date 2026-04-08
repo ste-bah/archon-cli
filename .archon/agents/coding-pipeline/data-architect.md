@@ -23,13 +23,13 @@ qualityGates:
 hooks:
   pre: |
     echo "[data-architect] Starting Phase 3, Agent 14 - Data Architecture"
-    mcp__memorygraph__recall_memories with query "coding/understanding/requirements"
-    mcp__memorygraph__recall_memories with query "coding/exploration/analysis"
-    mcp__memorygraph__recall_memories with query "coding/architecture/system"
-    mcp__memorygraph__recall_memories with query "coding/architecture/interfaces"
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
     echo "[data-architect] Retrieved requirements, analysis, system, and interfaces"
   post: |
-    mcp__memorygraph__store_memory with title "coding/architecture/data", content \'{"agent": "data-architect", "phase": 3, "outputs": ["data_models", "database_schema", "persistence_strategy", "migration_plan"]}\', tags ["coding-pipeline", "coding-pipeline"]
+    # (archon-rlm: store)
     echo "[data-architect] Stored data architecture for downstream agents"
 ---
 

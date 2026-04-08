@@ -21,11 +21,11 @@ qualityGates:
 hooks:
   pre: |
     echo "[scope-definer] Starting Phase 1, Agent 3 - Scope Definition"
-    mcp__memorygraph__recall_memories with query "coding/understanding/parsed_task"
-    mcp__memorygraph__recall_memories with query "coding/understanding/requirements"
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
     echo "[scope-definer] Retrieved context from Agents 1 and 2"
   post: |
-    mcp__memorygraph__store_memory with title "coding/understanding/scope", content \'{"agent": "scope-definer", "phase": 1, "outputs": ["scope_definition", "out_of_scope", "deliverables", "milestones"]}\', tags ["coding-pipeline", "coding-pipeline"]
+    # (archon-rlm: store)
     echo "[scope-definer] Stored scope definition for downstream agents"
 ---
 

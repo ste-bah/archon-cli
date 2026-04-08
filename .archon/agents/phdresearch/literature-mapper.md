@@ -15,10 +15,6 @@ capabilities:
     - Glob
     - WebSearch
     - WebFetch
-    - mcp__perplexity__perplexity_research
-    - mcp__perplexity__perplexity_search
-    - mcp__perplexity__perplexity_ask
-    - mcp__perplexity__perplexity_reason
   skills:
     - systematic_search
     - database_querying
@@ -30,10 +26,8 @@ priority: critical
 hooks:
   pre: |
     echo "📚 Literature Mapper executing search strategy for: $TASK"
-    # (removed: claude-flow memory query --key "research/execution/research-plan")
   post: |
     echo "✅ Literature search complete - sources mapped and organized"
-    # (removed: claude-flow memory store --namespace "research/literature" --key "literature-map")
 ---
 
 # Literature Mapping Excellence Framework
@@ -80,13 +74,9 @@ You are a Literature Search Strategist specializing in **systematic literature m
 
 ## MEMORY RETRIEVAL
 ```bash
-# (removed: claude-flow memory query --key "research/execution/research-plan")
 
-# (removed: claude-flow memory query --key "research/meta/ambiguities")
 
-# (removed: claude-flow memory query --key "research/meta/self-ask-questions")
 
-# (removed: claude-flow memory query --key "research/meta/principles")
 ```
 
 **Understand**: Search strategy, keywords, databases, inclusion/exclusion criteria, research questions, terminology
@@ -563,7 +553,6 @@ TS=((("educational technology" OR "learning technology" OR "edtech")
 
 ```bash
 # For Systematic Reviewer
-# (removed: claude-flow memory store --namespace "research/literature" --key "literature-map" --value '{...}')
 cat > /tmp/literature-map.json << 'EOF'
 {
   "total_sources": 634,
@@ -581,7 +570,6 @@ EOF
 rm -f /tmp/literature-map.json
 
 # For Citation Extractor
-# (removed: claude-flow memory store --namespace "research/literature" --key "citation-network" --value '{...}')
 cat > /tmp/citation-network.json << 'EOF'
 {
   "seminal_sources": [],
@@ -595,7 +583,6 @@ EOF
 rm -f /tmp/citation-network.json
 
 # For Theoretical Framework Analyst
-# (removed: claude-flow memory store --namespace "research/literature" --key "theoretical-clusters" --value '{...}')
 cat > /tmp/theoretical-clusters.json << 'EOF'
 {
   "clusters": []
@@ -607,7 +594,6 @@ EOF
 rm -f /tmp/theoretical-clusters.json
 
 # For All Agents
-# (removed: claude-flow memory store --namespace "research/literature" --key "search-metadata" --value '{...}')
 cat > /tmp/search-metadata.json << 'EOF'
 {
   "databases": ["Web of Science", "Scopus", "PubMed", "Google Scholar"],

@@ -23,12 +23,12 @@ qualityGates:
 hooks:
   pre: |
     echo "[research-planner] Starting Phase 2, Agent 6 - Research Planning"
-    mcp__memorygraph__recall_memories with query "coding/understanding/parsed_task"
-    mcp__memorygraph__recall_memories with query "coding/understanding/priorities"
-    mcp__memorygraph__recall_memories with query "coding/understanding/context"
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
     echo "[research-planner] Retrieved Phase 1 outputs for research planning"
   post: |
-    mcp__memorygraph__store_memory with title "coding/exploration/research_plan", content \'{"agent": "research-planner", "phase": 2, "outputs": ["research_questions", "investigation_areas", "knowledge_gaps", "research_methodology"]}\', tags ["coding-pipeline", "coding-pipeline"]
+    # (archon-rlm: store)
     echo "[research-planner] Stored research plan for downstream exploration agents"
 ---
 

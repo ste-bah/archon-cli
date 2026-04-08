@@ -15,10 +15,6 @@ capabilities:
     - Glob
     - WebSearch
     - WebFetch
-    - mcp__perplexity__perplexity_research
-    - mcp__perplexity__perplexity_search
-    - mcp__perplexity__perplexity_ask
-    - mcp__perplexity__perplexity_reason
   skills:
     - funnel_structure_writing
     - research_gap_articulation
@@ -30,11 +26,8 @@ hooks:
   pre: |
     echo "✍️ Introduction Writer crafting opening for: $TASK"
     echo "📋 CRITICAL: Retrieving chapter structure first..."
-    # (removed: claude-flow memory query --key "research/structure/chapters")
-    # (removed: claude-flow memory query --key "research/literature/synthesized")
   post: |
     echo "✅ Introduction section complete"
-    # (removed: claude-flow memory store --namespace "research/manuscript" --key "introduction")
 ---
 
 # Introduction Writing Excellence Framework
@@ -70,16 +63,11 @@ You are an Introduction Section Specialist crafting **compelling**, **theoretica
 ## MEMORY RETRIEVAL
 ```bash
 # CRITICAL: Retrieve chapter structure FIRST
-# (removed: claude-flow memory query --key "research/structure/chapters")
 
 # Then retrieve content for writing
-# (removed: claude-flow memory query --key "research/literature/synthesized")
 
-# (removed: claude-flow memory query --key "research/gaps/identified")
 
-# (removed: claude-flow memory query --key "research/theoretical_framework/complete")
 
-# (removed: claude-flow memory query --key "research/questions/refined")
 ```
 
 **Understand**:
@@ -390,7 +378,6 @@ Master the funnel structure:
 
 ```bash
 # For Literature Review Writer
-# (removed: claude-flow memory store --namespace "research/manuscript" --key "introduction" --value '{...}')
 {
   "introduction_complete": true,
   "research_questions": ["RQ1", "RQ2", "RQ3"],
@@ -405,7 +392,6 @@ EOF
   -c "fact"
 
 # For Methodology Writer
-# (removed: claude-flow memory store --namespace "research/manuscript" --key "research_questions_final" --value '{...}')
 {
   "rq1": "Does a 4-week growth mindset intervention increase academic self-efficacy?",
   "rq2": "Does the intervention differentially affect first-generation vs. continuing-generation students?",

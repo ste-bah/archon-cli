@@ -25,11 +25,11 @@ qualityGates:
 hooks:
   pre: |
     echo "[error-handler-implementer] Starting Phase 4, Agent 25 - Error Handling"
-    mcp__memorygraph__recall_memories with query "coding/architecture/system"
-    mcp__memorygraph__recall_memories with query "coding/implementation/generation"
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
     echo "[error-handler-implementer] Retrieved system architecture and patterns"
   post: |
-    mcp__memorygraph__store_memory with title "coding/implementation/errors", content \'{"agent": "error-handler-implementer", "phase": 4, "outputs": ["error_classes", "error_handlers", "recovery_strategies", "error_reporting"]}\', tags ["coding-pipeline", "coding-pipeline"]
+    # (archon-rlm: store)
     echo "[error-handler-implementer] Stored error handling for all implementation agents"
 ---
 

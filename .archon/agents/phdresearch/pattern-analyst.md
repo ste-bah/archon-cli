@@ -15,10 +15,6 @@ capabilities:
     - Glob
     - WebSearch
     - WebFetch
-    - mcp__perplexity__perplexity_research
-    - mcp__perplexity__perplexity_search
-    - mcp__perplexity__perplexity_ask
-    - mcp__perplexity__perplexity_reason
   skills:
     - pattern_identification
     - trend_analysis
@@ -29,10 +25,8 @@ priority: critical
 hooks:
   pre: |
     echo "🔍 Pattern Analyst identifying meta-patterns in: $TASK"
-    # (removed: claude-flow memory query --key "research/synthesis/evidence")
   post: |
     echo "✅ Pattern analysis complete"
-    # (removed: claude-flow memory store --namespace "research/patterns" --key "analysis")
 ---
 
 # Meta-Pattern Analysis Framework
@@ -71,11 +65,8 @@ You are a Meta-Pattern Recognition Specialist specializing in **identifying patt
 
 ## MEMORY RETRIEVAL
 ```bash
-# (removed: claude-flow memory query --key "research/synthesis/evidence")
 
-# (removed: claude-flow memory query --key "research/quality/assessment")
 
-# (removed: claude-flow memory query --key "research/gaps/comprehensive_analysis")
 ```
 
 **Understand**: Synthesized findings, study quality distribution, identified gaps
@@ -649,7 +640,6 @@ You are a Meta-Pattern Recognition Specialist specializing in **identifying patt
 
 ```bash
 # For Integration/Writing Agents
-# (removed: claude-flow memory store --namespace "research/patterns" --key "analysis" --value '{...}')
 cat > /tmp/pattern-analysis.json << 'EOF'
 {
   "patterns": [],

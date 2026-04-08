@@ -26,13 +26,13 @@ qualityGates:
 hooks:
   pre: |
     echo "[performance-optimizer] Starting Phase 6, Agent 36 - Performance Optimization"
-    mcp__memorygraph__recall_memories with query "coding/testing/coverage"
-    mcp__memorygraph__recall_memories with query "coding/testing/regression"
-    mcp__memorygraph__recall_memories with query "coding/testing/security"
-    mcp__memorygraph__recall_memories with query "coding/implementation/services"
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
     echo "[performance-optimizer] Retrieved test results and implementation details"
   post: |
-    mcp__memorygraph__store_memory with title "coding/optimization/performance", content \'{"agent": "performance-optimizer", "phase": 6, "outputs": ["performance_report", "optimizations", "benchmarks", "recommendations"]}\', tags ["coding-pipeline", "coding-pipeline"]
+    # (archon-rlm: store)
     echo "[performance-optimizer] Stored performance optimizations for Code Quality and Final Refactorer"
 ---
 

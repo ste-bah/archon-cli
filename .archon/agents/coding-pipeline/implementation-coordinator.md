@@ -24,13 +24,13 @@ qualityGates:
 hooks:
   pre: |
     echo "[implementation-coordinator] Starting Phase 4, Agent 19 - Implementation Coordination"
-    mcp__memorygraph__recall_memories with query "coding/understanding/requirements"
-    mcp__memorygraph__recall_memories with query "coding/architecture/system"
-    mcp__memorygraph__recall_memories with query "coding/architecture/components"
-    mcp__memorygraph__recall_memories with query "coding/implementation/generation"
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
     echo "[implementation-coordinator] Retrieved architecture and generation patterns"
   post: |
-    mcp__memorygraph__store_memory with title "coding/implementation/coordination", content \'{"agent": "implementation-coordinator", "phase": 4, "outputs": ["implementation_plan", "dependency_graph", "task_assignments", "progress_tracking"]}\', tags ["coding-pipeline", "coding-pipeline"]
+    # (archon-rlm: store)
     echo "[implementation-coordinator] Stored implementation coordination for all Phase 4 agents"
 ---
 

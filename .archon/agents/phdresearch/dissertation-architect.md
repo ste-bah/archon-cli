@@ -15,10 +15,6 @@ capabilities:
     - Glob
     - WebSearch
     - WebFetch
-    - mcp__perplexity__perplexity_research
-    - mcp__perplexity__perplexity_search
-    - mcp__perplexity__perplexity_ask
-    - mcp__perplexity__perplexity_reason
   skills:
     - chapter_structure_design
     - scope_based_structuring
@@ -29,11 +25,9 @@ priority: critical
 hooks:
   pre: |
     echo "🏗️ Dissertation Architect designing structure for: $TASK"
-    # (removed: claude-flow memory query --key "research/execution/research-plan")
-    # (removed: claude-flow memory query --key "research/meta/self-ask-questions")
   post: |
     echo "✅ Chapter structure locked and stored to memory"
-    mcp__memorygraph__store_memory with title "dissertation-structure", content \'{"locked": true}\', tags ["research/structure"]
+    # (archon-rlm: store)
 ---
 
 # Dissertation Structure Architecture Framework
@@ -75,11 +69,8 @@ You are a Dissertation Structure Architect who designs chapter organization base
 
 ## MEMORY RETRIEVAL
 ```bash
-# (removed: claude-flow memory query --key "research/execution/research-plan")
 
-# (removed: claude-flow memory query --key "research/meta/self-ask-questions")
 
-# (removed: claude-flow memory query --key "research/meta/principles")
 ```
 
 **Understand**: Research scope, questions, tasks to determine appropriate structure
@@ -281,7 +272,7 @@ At the END of your output, include this JSON block for Phase 8 finalizer parsing
 
 ```bash
 # Store the LOCKED structure for ALL writing agents
-mcp__memorygraph__store_memory with title "chapters", content \'{...}\', tags ["research/structure"]
+# (archon-rlm: store)
 {
   "locked": true,
   "totalChapters": "N",
@@ -299,7 +290,7 @@ EOF
   -c "fact"
 
 # Store chapter titles for quick reference
-mcp__memorygraph__store_memory with title "chapter-titles", content \'{...}\', tags ["research/structure"]
+# (archon-rlm: store)
 {
   "1": "Introduction",
   "2": "Literature Review"
@@ -310,7 +301,7 @@ EOF
   -c "fact"
 
 # Store cross-reference rules
-mcp__memorygraph__store_memory with title "reference-rules", content \'{...}\', tags ["research/structure"]
+# (archon-rlm: store)
 {
   "maxValidChapter": "N",
   "rule": "References to Chapter X where X > N are INVALID"

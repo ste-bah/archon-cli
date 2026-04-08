@@ -23,13 +23,13 @@ qualityGates:
 hooks:
   pre: |
     echo "[interface-designer] Starting Phase 3, Agent 13 - Interface Design"
-    mcp__memorygraph__recall_memories with query "coding/understanding/requirements"
-    mcp__memorygraph__recall_memories with query "coding/exploration/analysis"
-    mcp__memorygraph__recall_memories with query "coding/architecture/system"
-    mcp__memorygraph__recall_memories with query "coding/architecture/components"
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
     echo "[interface-designer] Retrieved requirements, analysis, system, and components"
   post: |
-    mcp__memorygraph__store_memory with title "coding/architecture/interfaces", content \'{"agent": "interface-designer", "phase": 3, "outputs": ["interface_definitions", "type_schemas", "api_contracts", "validation_rules"]}\', tags ["coding-pipeline", "coding-pipeline"]
+    # (archon-rlm: store)
     echo "[interface-designer] Stored interface designs for downstream agents"
 ---
 

@@ -15,10 +15,6 @@ capabilities:
     - Glob
     - WebSearch
     - WebFetch
-    - mcp__perplexity__perplexity_research
-    - mcp__perplexity__perplexity_search
-    - mcp__perplexity__perplexity_ask
-    - mcp__perplexity__perplexity_reason
   skills:
     - theme_extraction
     - conceptual_clustering
@@ -29,10 +25,8 @@ priority: critical
 hooks:
   pre: |
     echo "🎨 Thematic Synthesizer extracting themes from: $TASK"
-    # (removed: claude-flow memory query --key "research/analysis/patterns")
   post: |
     echo "✅ Themes synthesized and stored"
-    # (removed: claude-flow memory store --namespace "research/synthesis" --key "themes")
 ---
 
 # Thematic Synthesis Excellence Framework
@@ -63,11 +57,8 @@ You are a Thematic Synthesis Specialist who identifies **recurring themes, conce
 
 ## MEMORY RETRIEVAL
 ```bash
-# (removed: claude-flow memory query --key "research/analysis/patterns")
 
-# (removed: claude-flow memory query --key "research/meta/principles")
 
-# (removed: claude-flow memory query --key "research/analysis/findings")
 ```
 
 **Understand**: Identified patterns, recurring concepts, analytical findings, quality standards
@@ -385,7 +376,6 @@ THEME 4 THEME 7  THEME 5 THEME 6  THEME 8
 
 ```bash
 # For Theory-Builder
-# (removed: claude-flow memory store --namespace "research/synthesis" --key "themes" --value '{...}')
 {
   "themes": [
     {
@@ -406,7 +396,6 @@ EOF
   -c "fact"
 
 # For All Future Agents
-# (removed: claude-flow memory store --namespace "research/synthesis" --key "thematic_framework" --value '{...}')
 {
   "framework_type": "hierarchical|network|sequential",
   "primary_meta_theme": "...",

@@ -15,10 +15,6 @@ capabilities:
     - Glob
     - WebSearch
     - WebFetch
-    - mcp__perplexity__perplexity_research
-    - mcp__perplexity__perplexity_search
-    - mcp__perplexity__perplexity_ask
-    - mcp__perplexity__perplexity_reason
   skills:
     - framework_construction
     - mechanism_specification
@@ -29,10 +25,8 @@ priority: critical
 hooks:
   pre: |
     echo "🏗️ Theory-Builder constructing framework from: $TASK"
-    # (removed: claude-flow memory query --key "research/synthesis/themes")
   post: |
     echo "✅ Theoretical framework constructed and stored"
-    # (removed: claude-flow memory store --namespace "research/theory" --key "framework")
 ---
 
 # Theoretical Framework Construction Excellence
@@ -63,11 +57,8 @@ You are a Theoretical Framework Architect who transforms **themes into coherent,
 
 ## MEMORY RETRIEVAL
 ```bash
-# (removed: claude-flow memory query --key "research/synthesis/themes")
 
-# (removed: claude-flow memory query --key "research/synthesis/thematic_framework")
 
-# (removed: claude-flow memory query --key "research/meta/principles")
 ```
 
 **Understand**: Extracted themes, theme relationships, meta-themes, quality standards
@@ -546,7 +537,6 @@ Example:
 
 ```bash
 # For Hypothesis-Generator
-# (removed: claude-flow memory store --namespace "research/theory" --key "framework" --value '{...}')
 {
   "constructs": [
     {"name": "...", "definition": "...", "operational": "..."}
@@ -563,7 +553,6 @@ EOF
   -c "fact"
 
 # For All Future Agents
-# (removed: claude-flow memory store --namespace "research/theory" --key "testable_framework" --value '{...}')
 {
   "framework_type": "mediation|moderation|multilevel",
   "core_mechanism": "...",

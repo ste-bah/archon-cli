@@ -24,10 +24,8 @@ priority: critical
 hooks:
   pre: |
     echo "🎯 Step-Back Analyzer establishing principles for: $TASK"
-    # (removed: claude-flow memory query --key "research/meta/context")
   post: |
     echo "✅ Principles established and stored"
-    # (removed: claude-flow memory store --namespace "research/meta" --key "principles")
 ---
 
 # Step-Back Analysis Excellence Framework
@@ -57,9 +55,7 @@ You are a Meta-Research Strategist specializing in **step-back prompting** - est
 
 ## MEMORY RETRIEVAL
 ```bash
-# (removed: claude-flow memory query --key "research/session/config")
 
-# (removed: claude-flow memory query --key "research/context/topic")
 ```
 
 **Understand**: Research topic, domain, objectives, PhD-level expectations
@@ -200,7 +196,6 @@ Document common mistakes:
 
 ```bash
 # For Ambiguity Clarifier
-# (removed: claude-flow memory store --namespace "research/meta" --key "principles" --value '{...}')
 cat > /tmp/meta-principles.json << 'EOF'
 {
   "principles": [],
@@ -215,7 +210,6 @@ EOF
 rm -f /tmp/meta-principles.json
 
 # For All Future Agents
-# (removed: claude-flow memory store --namespace "research/meta" --key "quality_standards" --value '{...}')
 cat > /tmp/quality-standards.json << 'EOF'
 {
   "minimum_citations": 15,

@@ -26,12 +26,12 @@ qualityGates:
 hooks:
   pre: |
     echo "[final-refactorer] Starting Phase 6, Agent 38 - Final Refactoring"
-    mcp__memorygraph__recall_memories with query "coding/optimization/performance"
-    mcp__memorygraph__recall_memories with query "coding/optimization/quality"
-    mcp__memorygraph__recall_memories with query "coding/testing/security"
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
     echo "[final-refactorer] Retrieved all optimization and testing results"
   post: |
-    mcp__memorygraph__store_memory with title "coding/optimization/final", content \'{"agent": "final-refactorer", "phase": 6, "outputs": ["polish_report", "consistency_fixes", "formatting_changes", "delivery_checklist"]}\', tags ["coding-pipeline", "coding-pipeline"]
+    # (archon-rlm: store)
     echo "[final-refactorer] Stored final refactoring results for Quality Gate"
 ---
 
@@ -1117,7 +1117,7 @@ export class TestVerificationLoop {
   private async retrieveTypeFixes(): Promise<any> {
     // Retrieve from memory: coding/optimization/type-fixes
     const output = await this.exec(
-      '# Previously: mcp__memorygraph__recall_memories with appropriate query
+      # (archon-rlm: recall)
     );
     try {
       return JSON.parse(output);
@@ -1292,7 +1292,7 @@ When executing, you MUST verify all fixes work:
 
 ### Step 1: Retrieve Prior Fix Results
 ```bash
-# Previously: mcp__memorygraph__recall_memories with appropriate query
+# (archon-rlm: recall)
 ```
 
 ### Step 2: Run Full Test Suite
@@ -1334,7 +1334,7 @@ npm test           # 100% pass
 
 ### Step 5: Store Results
 ```bash
-# Previously: mcp__memorygraph__store_memory with appropriate title, content, tags ["coding-pipeline"]
+# (archon-rlm: store)
   --value '{"initialFailures": [N], "finalFailures": [M], "status": "ALL_PASS|PARTIAL|FAILED|ESCALATED"}' \
   --namespace default
 ```

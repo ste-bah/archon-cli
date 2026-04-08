@@ -124,7 +124,7 @@ grep -A 20 "at " /tmp/test-output-*.txt | head -100
 **Only store results after actual execution:**
 
 ```bash
-# Previously: mcp__memorygraph__store_memory with appropriate title, content, tags ["coding-pipeline"]
+# (archon-rlm: store)
   "testsTotal": [ACTUAL_COUNT_FROM_OUTPUT],
   "testsPassed": [ACTUAL_COUNT_FROM_OUTPUT],
   "testsFailed": [ACTUAL_COUNT_FROM_OUTPUT],
@@ -163,7 +163,7 @@ Before storing results, verify:
 
 ```bash
 # Store error state - do NOT estimate
-# Previously: mcp__memorygraph__store_memory with appropriate title, content, tags ["coding-pipeline"]
+# (archon-rlm: store)
   "error": true,
   "errorType": "[dependency-missing|script-not-found|compilation-error]",
   "errorMessage": "[ACTUAL_ERROR_FROM_OUTPUT]",
@@ -182,7 +182,7 @@ Before storing results, verify:
 find [target-dir] -name "*.test.*" -o -name "*.spec.*" -o -name "__tests__" | head -20
 
 # If none found, report accurately
-# Previously: mcp__memorygraph__store_memory with appropriate title, content, tags ["coding-pipeline"]
+# (archon-rlm: store)
   "testsTotal": 0,
   "testsPassed": 0,
   "testsFailed": 0,
@@ -235,7 +235,7 @@ FAILED=1
 PERCENTAGE=80
 
 # Step 4: Store verified results
-# Previously: mcp__memorygraph__store_memory with appropriate title, content, tags ["coding-pipeline"]
+# (archon-rlm: store)
   "testsTotal": 5,
   "testsPassed": 4,
   "testsFailed": 1,

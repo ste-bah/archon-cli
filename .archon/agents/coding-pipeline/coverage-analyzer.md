@@ -24,12 +24,12 @@ qualityGates:
 hooks:
   pre: |
     echo "[coverage-analyzer] Starting Phase 5, Agent 33 - Coverage Analysis"
-    mcp__memorygraph__recall_memories with query "coding/testing/execution"
-    mcp__memorygraph__recall_memories with query "coding/testing/integration"
-    mcp__memorygraph__recall_memories with query "coding/implementation/services"
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
     echo "[coverage-analyzer] Retrieved test execution and integration results"
   post: |
-    mcp__memorygraph__store_memory with title "coding/testing/coverage", content \'{"agent": "coverage-analyzer", "phase": 5, "outputs": ["coverage_report", "gap_analysis", "critical_path_coverage", "recommendations"]}\', tags ["coding-pipeline", "coding-pipeline"]
+    # (archon-rlm: store)
     echo "[coverage-analyzer] Stored coverage analysis for downstream agents"
 ---
 

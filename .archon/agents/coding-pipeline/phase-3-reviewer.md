@@ -23,16 +23,16 @@ qualityGates:
 hooks:
   pre: |
     echo "[phase-3-reviewer] Starting Sherlock Review - Phase 3 Architecture"
-    mcp__memorygraph__recall_memories with query "coding/architecture/system-design"
-    mcp__memorygraph__recall_memories with query "coding/architecture/data-model"
-    mcp__memorygraph__recall_memories with query "coding/architecture/interfaces"
-    mcp__memorygraph__recall_memories with query "coding/architecture/security"
-    mcp__memorygraph__recall_memories with query "coding/architecture/infrastructure"
-    mcp__memorygraph__recall_memories with query "coding/architecture/integration"
-    mcp__memorygraph__recall_memories with query "coding/architecture/performance"
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
     echo "[phase-3-reviewer] Retrieved all Phase 3 outputs for review"
   post: |
-    mcp__memorygraph__store_memory with title "coding/sherlock/phase-3-review", content \'{"agent": "phase-3-reviewer", "phase": "sherlock", "outputs": ["phase_report", "architecture_quality", "design_consistency", "structural_integrity"]}\', tags ["coding-pipeline", "coding-pipeline"]
+    # (archon-rlm: store)
     echo "[phase-3-reviewer] Phase 3 review complete - stored for Quality Gate"
 ---
 

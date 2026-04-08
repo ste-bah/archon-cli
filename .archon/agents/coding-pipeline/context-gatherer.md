@@ -29,11 +29,11 @@ qualityGates:
 hooks:
   pre: |
     echo "[context-gatherer] Starting Phase 1, Agent 4 - Context Gathering"
-    mcp__memorygraph__recall_memories with query "coding/understanding/parsed_task"
+    # (archon-rlm: recall)
     echo "[context-gatherer] Retrieved parsed task from Agent 1"
     echo "[context-gatherer] Initiating LEANN semantic search and ReAct reasoning..."
   post: |
-    mcp__memorygraph__store_memory with title "coding/understanding/context", content \'{"agent": "context-gatherer", "phase": 1, "outputs": ["relevant_files", "existing_patterns", "similar_implementations", "tech_stack"]}\', tags ["coding-pipeline", "coding-pipeline"]
+    # (archon-rlm: store)
     echo "[context-gatherer] Stored codebase context for downstream agents"
 ---
 

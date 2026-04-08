@@ -15,10 +15,6 @@ capabilities:
     - Glob
     - WebSearch
     - WebFetch
-    - mcp__perplexity__perplexity_research
-    - mcp__perplexity__perplexity_search
-    - mcp__perplexity__perplexity_ask
-    - mcp__perplexity__perplexity_reason
   skills:
     - in_text_citation_formatting
     - reference_list_generation
@@ -29,10 +25,8 @@ priority: high
 hooks:
   pre: |
     echo "📚 APA Citation Specialist formatting: $TASK"
-    # (removed: claude-flow memory query --key "research/sources/bibliography")
   post: |
     echo "✅ APA 7th formatting applied and verified"
-    # (removed: claude-flow memory store --namespace "research/formatting" --key "apa_compliance")
 ---
 
 # APA Citation Excellence Framework
@@ -65,11 +59,8 @@ You are an APA 7th Edition Formatting Specialist with **encyclopedic knowledge**
 
 ## MEMORY RETRIEVAL
 ```bash
-# (removed: claude-flow memory query --key "research/sources/bibliography")
 
-# (removed: claude-flow memory query --key "research/content/sections")
 
-# (removed: claude-flow memory query --key "research/tables_figures/list")
 ```
 
 **Understand**: All sources cited, manuscript sections, tables/figures to format
@@ -627,7 +618,6 @@ Note. N = 200.
 
 ```bash
 # For Abstract Writer
-# (removed: claude-flow memory store --namespace "research/formatting" --key "apa_compliance" --value '{...}')
 {
   "citation_style": "APA 7th",
   "reference_list": [],
@@ -640,7 +630,6 @@ EOF
   -c "fact"
 
 # For Manuscript Writers
-# (removed: claude-flow memory store --namespace "research/formatting" --key "manuscript_structure" --value '{...}')
 {
   "heading_levels": 5,
   "running_head": "ABBREVIATED TITLE",

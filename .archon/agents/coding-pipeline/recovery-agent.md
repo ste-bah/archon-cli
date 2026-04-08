@@ -30,13 +30,13 @@ qualityGates:
 hooks:
   pre: |
     echo "[recovery-agent] Starting Sherlock Recovery Agent..."
-    mcp__memorygraph__recall_memories with query "coding/sherlock/phase-*-review"
-    mcp__memorygraph__recall_memories with query "coding/pipeline/state"
-    mcp__memorygraph__recall_memories with query "coding/failures/history"
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
     echo "[recovery-agent] Checking MANDATORY feedback status..."
-    mcp__memorygraph__recall_memories with query "coding/pipeline/feedback-status"
+    # (archon-rlm: recall)
   post: |
-    mcp__memorygraph__store_memory with appropriate title, content, tags ["coding-pipeline"]
+    # (archon-rlm: store)
     echo "[recovery-agent] Notifying pipeline-alerts channel..."
     echo "[recovery-agent] Recovery Agent complete..."
 ---
@@ -349,7 +349,7 @@ export class RecoveryStrategyEngine {
         order: 2,
         action: 'inject_quality_hints',
         memoryKey: `coding/hints/${failure.agentId}`,
-        command: `mcp__memorygraph__store_memory with title "coding/hints/${failure.agentId}", content \'${JSON.stringify({ rootCause: rootCause.category, hints: rootCause.evidence })}\', tags ["coding-pipeline", "coding-pipeline"]`,
+        # (archon-rlm: store)
         timeout: 10000,
       },
       {

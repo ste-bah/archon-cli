@@ -24,12 +24,12 @@ qualityGates:
 hooks:
   pre: |
     echo "[quality-gate] Starting Phase 7, Agent 039 - Quality Gate Validation"
-    mcp__memorygraph__recall_memories with query "coding/optimization/final"
-    mcp__memorygraph__recall_memories with query "coding/testing/coverage"
-    mcp__memorygraph__recall_memories with query "coding/testing/security"
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
     echo "[quality-gate] Retrieved optimization and testing results"
   post: |
-    mcp__memorygraph__store_memory with title "coding/delivery/quality-gate", content \'{"agent": "quality-gate", "phase": 7, "outputs": ["l_score_report", "gate_validation", "metric_summary", "phase_eligibility"]}\', tags ["coding-pipeline", "coding-pipeline"]
+    # (archon-rlm: store)
     echo "[quality-gate] Stored quality gate results for Sign-Off Approver"
 ---
 
@@ -1057,12 +1057,12 @@ When EMERG triggers fire, the Quality Gate MUST:
 
 1. **Log the emergency** to memory:
    ```bash
-   mcp__memorygraph__store_memory with title "coding/emerg/quality-gate", content \'{"trigger": "EMERG_XX", "timestamp": "...", "context": {...}}\', tags ["coding-pipeline", "coding-pipeline"]
+   # (archon-rlm: store)
    ```
 
 2. **Invoke recovery-agent** for fallback chain execution:
    ```bash
-   mcp__memorygraph__store_memory with title "coding/recovery/request", content \'{"from": "quality-gate", "trigger": "EMERG_XX", "priority": "high"}\', tags ["coding-pipeline", "coding-pipeline"]
+   # (archon-rlm: store)
    ```
 
 3. **Block pipeline progression** until emergency is resolved or escalated

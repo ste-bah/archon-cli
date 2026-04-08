@@ -30,10 +30,6 @@ capabilities:
     - Glob
     - WebSearch
     - WebFetch
-    - mcp__perplexity__perplexity_research
-    - mcp__perplexity__perplexity_search
-    - mcp__perplexity__perplexity_ask
-    - mcp__perplexity__perplexity_reason
 ---
 
 # File Length Manager Agent
@@ -58,11 +54,8 @@ Monitor all research files for length violations (>1500 lines), intelligently sp
 
 ```bash
 # Required memory files
-# (removed: claude-flow memory query --key "phd/paper-complete")
 
-# (removed: claude-flow memory query --key "phd/file-structure")
 
-# (removed: claude-flow memory query --key "phd/section-lengths")
 ```
 
 **What to extract:**
@@ -94,7 +87,6 @@ find docs/phdresearch -name "*.md" -exec wc -l {} \; | \
       '$1 <= 1200 {print "✅ OK:", $2, "("$1" lines)"}'
 
 # Store results
-# (removed: claude-flow memory store --key "phd/file-lengths" --content "...")
 find docs/phdresearch -name '*.md' -exec wc -l {} \; > /tmp/phd-file-lengths.txt
   -d "phd" \
   -t "file-lengths" \
@@ -579,7 +571,6 @@ diff <(grep -v "^#" original-file.md | grep -v "^>") \
 
 **10. Update memory**
 ```bash
-# (removed: claude-flow memory store --key "phd/file-splits" --content '{...}')
 {
   "original_file": "original-file.md",
   "split_date": "2025-11-20",
@@ -622,7 +613,6 @@ mv original-file.md archive/original-file-PRESPLIT-$(date +%Y%m%d).md
 **After any split operation:**
 
 ```bash
-# (removed: claude-flow memory store --key "phd/file-length-status" --content '{...}')
 {
   "monitoring_date": "2025-11-20",
   "total_files_monitored": 25,
@@ -644,7 +634,6 @@ EOF
   -c "fact"
 
 # Store split metadata for each split file
-# (removed: claude-flow memory store --key "phd/split-metadata/literature-review" --content '{...}')
 {
   "original_file": "literature-review.md",
   "original_length": 2340,
@@ -664,7 +653,6 @@ EOF
   -c "fact"
 
 # XP reward (bigger reward for complex splits)
-# (removed: claude-flow hooks xp-reward --agent "file-length-manager" --xp 60 --reason "...")
 echo "XP Reward: file-length-manager +60 XP - Executed complex 3-part split with complete navigation and context preservation"
 ```
 

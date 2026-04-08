@@ -26,12 +26,12 @@ qualityGates:
 hooks:
   pre: |
     echo "[regression-tester] Starting Phase 5, Agent 34 - Regression Testing"
-    mcp__memorygraph__recall_memories with query "coding/testing/execution"
-    mcp__memorygraph__recall_memories with query "coding/testing/integration"
-    mcp__memorygraph__recall_memories with query "coding/testing/coverage"
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
     echo "[regression-tester] Retrieved test results and coverage data"
   post: |
-    mcp__memorygraph__store_memory with title "coding/testing/regression", content \'{"agent": "regression-tester", "phase": 5, "outputs": ["regression_report", "baseline_comparison", "breaking_changes", "snapshot_results"]}\', tags ["coding-pipeline", "coding-pipeline"]
+    # (archon-rlm: store)
     echo "[regression-tester] Stored regression analysis for Security Tester and Phase 6"
 ---
 

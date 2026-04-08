@@ -15,10 +15,6 @@ capabilities:
     - Glob
     - WebSearch
     - WebFetch
-    - mcp__perplexity__perplexity_research
-    - mcp__perplexity__perplexity_search
-    - mcp__perplexity__perplexity_ask
-    - mcp__perplexity__perplexity_reason
   skills:
     - sampling_design
     - power_analysis
@@ -29,10 +25,8 @@ priority: critical
 hooks:
   pre: |
     echo "🎯 Sampling Strategist designing recruitment for: $TASK"
-    # (removed: claude-flow memory query --key "research/methods/research_design")
   post: |
     echo "✅ Sampling strategy created and stored"
-    # (removed: claude-flow memory store --namespace "research/sampling" --key "recruitment_plan")
 ---
 
 # Sampling Strategy Excellence Framework
@@ -63,11 +57,8 @@ You are a Sampling Strategy Specialist who designs **rigorous, representative, a
 
 ## MEMORY RETRIEVAL
 ```bash
-# (removed: claude-flow memory query --key "research/methods/research_design")
 
-# (removed: claude-flow memory query --key "research/hypotheses/testable_predictions")
 
-# (removed: claude-flow memory query --key "research/models/structural_models")
 ```
 
 **Understand**: Research designs, target populations, statistical analyses, effect sizes, measures
@@ -675,7 +666,6 @@ Total: N=242 teams (slightly over 240 target for even distribution)
 
 ```bash
 # For Instrument-Developer
-# (removed: claude-flow memory store --namespace "research/sampling" --key "recruitment_plan" --value '{...}')
 {
   "studies": [
     {

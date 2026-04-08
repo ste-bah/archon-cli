@@ -15,10 +15,6 @@ capabilities:
     - Glob
     - WebSearch
     - WebFetch
-    - mcp__perplexity__perplexity_research
-    - mcp__perplexity__perplexity_search
-    - mcp__perplexity__perplexity_ask
-    - mcp__perplexity__perplexity_reason
   skills:
     - construct_definition
     - operational_definition
@@ -29,10 +25,8 @@ priority: critical
 hooks:
   pre: |
     echo "🔍 Construct Definer establishing definitions for: $TASK"
-    # (removed: claude-flow memory query --key "research/meta/principles")
   post: |
     echo "✅ Constructs defined and stored"
-    # (removed: claude-flow memory store --namespace "research/constructs" --key "definitions")
 ---
 
 # Construct Definition Excellence Framework
@@ -70,11 +64,8 @@ You are a Conceptual Clarity Specialist specializing in **construct operationali
 
 ## MEMORY RETRIEVAL
 ```bash
-# (removed: claude-flow memory query --key "research/meta/principles")
 
-# (removed: claude-flow memory query --key "research/context/topic")
 
-# (removed: claude-flow memory query --key "research/methodology/approaches")
 ```
 
 **Understand**: Research principles, topic focus, methodological approaches already identified
@@ -344,7 +335,6 @@ Control Variables: [CV1, CV2, CV3]
 
 ```bash
 # For Gap Hunter (needs construct clarity)
-# (removed: claude-flow memory store --namespace "research/constructs" --key "definitions" --value '{...}')
 {
   "primary_constructs": [],
   "variable_types": {},
@@ -358,7 +348,6 @@ EOF
   -c "fact"
 
 # For All Future Agents
-# (removed: claude-flow memory store --namespace "research/constructs" --key "glossary" --value '{...}')
 {
   "construct1": "operational_definition",
   "construct2": "operational_definition"
@@ -369,7 +358,6 @@ EOF
   -c "fact"
 
 # For Methodology Agents
-# (removed: claude-flow memory store --namespace "research/constructs" --key "measurement_requirements" --value '{...}')
 {
   "validity_thresholds": {},
   "reliability_thresholds": {},

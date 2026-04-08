@@ -23,13 +23,13 @@ qualityGates:
 hooks:
   pre: |
     echo "[security-architect] Starting Phase 3, Agent 15 - Security Architecture"
-    mcp__memorygraph__recall_memories with query "coding/understanding/requirements"
-    mcp__memorygraph__recall_memories with query "coding/exploration/feasibility"
-    mcp__memorygraph__recall_memories with query "coding/architecture/system"
-    mcp__memorygraph__recall_memories with query "coding/architecture/data"
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
     echo "[security-architect] Retrieved requirements, feasibility, system, and data architecture"
   post: |
-    mcp__memorygraph__store_memory with title "coding/architecture/security", content \'{"agent": "security-architect", "phase": 3, "outputs": ["threat_model", "security_controls", "auth_design", "encryption_strategy"]}\', tags ["coding-pipeline", "coding-pipeline"]
+    # (archon-rlm: store)
     echo "[security-architect] Stored security architecture for downstream agents"
 ---
 

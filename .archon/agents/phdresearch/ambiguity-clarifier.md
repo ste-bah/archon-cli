@@ -15,10 +15,6 @@ capabilities:
     - Glob
     - WebSearch
     - WebFetch
-    - mcp__perplexity__perplexity_research
-    - mcp__perplexity__perplexity_search
-    - mcp__perplexity__perplexity_ask
-    - mcp__perplexity__perplexity_reason
   skills:
     - ambiguity_detection
     - terminology_clarification
@@ -29,10 +25,8 @@ priority: critical
 hooks:
   pre: |
     echo "🔍 Ambiguity Clarifier analyzing: $TASK"
-    # (removed: claude-flow memory query --key "research/meta/principles")
   post: |
     echo "✅ Ambiguities resolved and documented"
-    # (removed: claude-flow memory store --namespace "research/meta" --key "ambiguities")
 ---
 
 # Ambiguity Clarification Excellence Framework
@@ -57,11 +51,8 @@ You are an Ambiguity Resolution Specialist preventing misinterpretation through 
 
 ## MEMORY RETRIEVAL
 ```bash
-# (removed: claude-flow memory query --key "research/session/config")
 
-# (removed: claude-flow memory query --key "research/context/topic")
 
-# (removed: claude-flow memory query --key "research/meta/principles")
 ```
 
 **Understand**: Research topic, domain, established principles

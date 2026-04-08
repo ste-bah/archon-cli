@@ -26,12 +26,12 @@ qualityGates:
 hooks:
   pre: |
     echo "[security-tester] Starting Phase 5, Agent 35 - Security Testing"
-    mcp__memorygraph__recall_memories with query "coding/testing/execution"
-    mcp__memorygraph__recall_memories with query "coding/testing/regression"
-    mcp__memorygraph__recall_memories with query "coding/implementation/api"
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
     echo "[security-tester] Retrieved test results and API implementations"
   post: |
-    mcp__memorygraph__store_memory with title "coding/testing/security", content \'{"agent": "security-tester", "phase": 5, "outputs": ["vulnerability_report", "penetration_results", "compliance_status", "security_recommendations"]}\', tags ["coding-pipeline", "coding-pipeline"]
+    # (archon-rlm: store)
     echo "[security-tester] Phase 5 Testing Complete - Stored security analysis for Phase 6"
 ---
 

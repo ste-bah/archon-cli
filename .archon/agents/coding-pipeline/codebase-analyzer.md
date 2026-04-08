@@ -23,12 +23,12 @@ qualityGates:
 hooks:
   pre: |
     echo "[codebase-analyzer] Starting Phase 2, Agent 8 - Codebase Analysis"
-    mcp__memorygraph__recall_memories with query "coding/understanding/context"
-    mcp__memorygraph__recall_memories with query "coding/exploration/research_plan"
-    mcp__memorygraph__recall_memories with query "coding/exploration/patterns"
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
     echo "[codebase-analyzer] Retrieved context, research plan, and patterns"
   post: |
-    mcp__memorygraph__store_memory with title "coding/exploration/analysis", content \'{"agent": "codebase-analyzer", "phase": 2, "outputs": ["code_analysis", "interface_contracts", "dependency_map", "complexity_assessment"]}\', tags ["coding-pipeline", "coding-pipeline"]
+    # (archon-rlm: store)
     echo "[codebase-analyzer] Stored codebase analysis for downstream agents"
 ---
 

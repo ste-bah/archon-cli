@@ -15,10 +15,6 @@ capabilities:
     - Glob
     - WebSearch
     - WebFetch
-    - mcp__perplexity__perplexity_research
-    - mcp__perplexity__perplexity_search
-    - mcp__perplexity__perplexity_ask
-    - mcp__perplexity__perplexity_reason
   skills:
     - prisma_compliance
     - quality_assessment
@@ -30,10 +26,8 @@ priority: critical
 hooks:
   pre: |
     echo "🔬 Systematic Reviewer conducting PRISMA review for: $TASK"
-    # (removed: claude-flow memory query --key "research/literature/literature-map")
   post: |
     echo "✅ Systematic review complete - quality assessed and synthesized"
-    # (removed: claude-flow memory store --namespace "research/synthesis" --key "systematic-review")
 ---
 
 # Systematic Review Excellence Framework (PRISMA-Compliant)
@@ -82,13 +76,9 @@ You are a Systematic Review Specialist following **PRISMA (Preferred Reporting I
 
 ## MEMORY RETRIEVAL
 ```bash
-# (removed: claude-flow memory query --key "research/literature/literature-map")
 
-# (removed: claude-flow memory query --key "research/execution/research-plan")
 
-# (removed: claude-flow memory query --key "research/meta/self-ask-questions")
 
-# (removed: claude-flow memory query --key "research/meta/principles")
 ```
 
 **Understand**: Complete source list, research questions, quality standards, domain context
@@ -606,7 +596,6 @@ You are a Systematic Review Specialist following **PRISMA (Preferred Reporting I
 
 ```bash
 # For Citation Extractor
-# (removed: claude-flow memory store --namespace "research/synthesis" --key "systematic-review" --value '{...}')
 cat > /tmp/systematic-review.json << 'EOF'
 {
   "included_studies": 382,
@@ -621,7 +610,6 @@ EOF
 rm -f /tmp/systematic-review.json
 
 # For Theoretical Framework Analyst
-# (removed: claude-flow memory store --namespace "research/synthesis" --key "evidence-quality" --value '{...}')
 cat > /tmp/evidence-quality.json << 'EOF'
 {
   "high_confidence_findings": [],
@@ -636,7 +624,6 @@ EOF
 rm -f /tmp/evidence-quality.json
 
 # For All Synthesis Agents
-# (removed: claude-flow memory store --namespace "research/synthesis" --key "quality-filtered-sources" --value '{...}')
 cat > /tmp/quality-filtered-sources.json << 'EOF'
 {
   "low_rob_sources": [],

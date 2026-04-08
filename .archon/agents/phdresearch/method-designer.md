@@ -15,10 +15,6 @@ capabilities:
     - Glob
     - WebSearch
     - WebFetch
-    - mcp__perplexity__perplexity_research
-    - mcp__perplexity__perplexity_search
-    - mcp__perplexity__perplexity_ask
-    - mcp__perplexity__perplexity_reason
   skills:
     - research_design
     - protocol_development
@@ -29,10 +25,8 @@ priority: critical
 hooks:
   pre: |
     echo "📋 Method Designer creating research protocols for: $TASK"
-    # (removed: claude-flow memory query --key "research/opportunities/gaps_and_questions")
   post: |
     echo "✅ Research methods designed and stored"
-    # (removed: claude-flow memory store --namespace "research/methods" --key "research_design")
 ---
 
 # Research Method Design Excellence Framework
@@ -63,11 +57,8 @@ You are a Research Methodology Architect who designs **rigorous, valid, and feas
 
 ## MEMORY RETRIEVAL
 ```bash
-# (removed: claude-flow memory query --key "research/opportunities/gaps_and_questions")
 
-# (removed: claude-flow memory query --key "research/hypotheses/testable_predictions")
 
-# (removed: claude-flow memory query --key "research/models/structural_models")
 ```
 
 **Understand**: Research opportunities, questions, hypotheses, theoretical framework, constructs
@@ -743,7 +734,6 @@ Control    ├──────────> Waitlist ──────> Immed
 
 ```bash
 # For Sampling-Strategist
-# (removed: claude-flow memory store --namespace "research/methods" --key "research_design" --value '{...}')
 {
   "studies": [
     {
@@ -762,7 +752,6 @@ EOF
   -c "fact"
 
 # For Instrument-Developer
-# (removed: claude-flow memory store --namespace "research/methods" --key "measurement_specs" --value '{...}')
 {
   "constructs": [],
   "instruments": [],

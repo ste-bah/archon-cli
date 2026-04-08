@@ -23,16 +23,16 @@ qualityGates:
 hooks:
   pre: |
     echo "[system-designer] Starting Phase 3, Agent 11 - System Design"
-    mcp__memorygraph__recall_memories with query "coding/understanding/requirements"
-    mcp__memorygraph__recall_memories with query "coding/understanding/scope"
-    mcp__memorygraph__recall_memories with query "coding/understanding/context"
-    mcp__memorygraph__recall_memories with query "coding/understanding/priorities"
-    mcp__memorygraph__recall_memories with query "coding/exploration/feasibility"
-    mcp__memorygraph__recall_memories with query "coding/exploration/patterns"
-    mcp__memorygraph__recall_memories with query "coding/exploration/technology"
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
+    # (archon-rlm: recall)
     echo "[system-designer] Retrieved all Phase 1 and Phase 2 outputs"
   post: |
-    mcp__memorygraph__store_memory with title "coding/architecture/system", content \'{"agent": "system-designer", "phase": 3, "outputs": ["system_architecture", "module_boundaries", "architectural_decisions", "component_relationships"]}\', tags ["coding-pipeline", "coding-pipeline"]
+    # (archon-rlm: store)
     echo "[system-designer] Stored system architecture for downstream agents"
 ---
 

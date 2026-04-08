@@ -29,10 +29,6 @@ capabilities:
     - Glob
     - WebSearch
     - WebFetch
-    - mcp__perplexity__perplexity_research
-    - mcp__perplexity__perplexity_search
-    - mcp__perplexity__perplexity_ask
-    - mcp__perplexity__perplexity_reason
 ---
 
 # Conclusion Writer Agent
@@ -55,17 +51,11 @@ Synthesize entire research study into powerful conclusion that crystallizes cont
 
 ```bash
 # Required memory files
-# (removed: claude-flow memory query --key "phd/research-questions")
 
-# (removed: claude-flow memory query --key "phd/gap-analysis")
 
-# (removed: claude-flow memory query --key "phd/results-section")
 
-# (removed: claude-flow memory query --key "phd/discussion-section")
 
-# (removed: claude-flow memory query --key "phd/theoretical-framework")
 
-# (removed: claude-flow memory query --key "phd/objectives")
 ```
 
 **What to extract:**
@@ -330,7 +320,6 @@ provides the empirical foundation; the next chapter is application.
 **After writing conclusion section:**
 
 ```bash
-# (removed: claude-flow memory store --key "phd/conclusion-section" --content '{...}')
 {
   "core_contributions": [
     "Theoretical: Extended Theory X to context Y",
@@ -358,7 +347,6 @@ EOF
   -c "fact"
 
 # Mark research paper complete
-# (removed: claude-flow memory store --key "phd/paper-complete" --content '{...}')
 {
   "sections_complete": [
     "Abstract", "Introduction", "Literature Review", "Theoretical Framework",
@@ -379,7 +367,6 @@ EOF
   -c "fact"
 
 # XP reward (stored via MemoryGraph)
-# (removed: claude-flow hooks xp-reward --agent "conclusion-writer" --xp 50 --reason "...")
 echo "XP Reward: conclusion-writer +50 XP - Completed powerful synthesis conclusion"
 ```
 
