@@ -65,6 +65,7 @@ fn register_hook(registry: &mut HookRegistry, event: HookEvent, config: HookConf
 // ---------------------------------------------------------------------------
 
 /// Agent hook fires, runs command, and parses stdout JSON as HookResult.
+#[cfg(unix)]
 #[tokio::test]
 async fn test_agent_hook_fires_and_parses_response() {
     let mut registry = HookRegistry::new();
@@ -87,6 +88,7 @@ async fn test_agent_hook_fires_and_parses_response() {
 
 /// When the recursion guard is set, execute_hooks returns immediately
 /// with default AggregatedHookResult (no hooks fire).
+#[cfg(unix)]
 #[tokio::test]
 async fn test_recursion_guard_prevents_nested_hook_fires() {
     let mut registry = HookRegistry::new();
@@ -133,6 +135,7 @@ async fn test_recursion_guard_default_is_false() {
 }
 
 /// After an Agent hook finishes execution, the guard must be reset to false.
+#[cfg(unix)]
 #[tokio::test]
 async fn test_agent_hook_sets_guard_during_execution() {
     // Use a command that succeeds. The guard should be true DURING execution
@@ -156,6 +159,7 @@ async fn test_agent_hook_sets_guard_during_execution() {
 /// We verify this by spawning two agent hooks on separate tokio tasks
 /// (which can land on different threads, avoiding the thread_local guard
 /// conflict) and checking that total wall-clock time is >= 2s.
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_agent_hook_mutex_serialization() {
     use std::sync::Arc;
@@ -214,6 +218,7 @@ async fn test_agent_hook_mutex_serialization() {
 
 /// Agent hook with short timeout and a long-running command should time out
 /// and return default (fail-open) result.
+#[cfg(unix)]
 #[tokio::test]
 async fn test_agent_hook_timeout() {
     let mut registry = HookRegistry::new();

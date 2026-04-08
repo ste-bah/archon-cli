@@ -2,13 +2,18 @@
 
 use archon_pipeline::agent_loader::load_research_agents;
 use archon_pipeline::manifest::{load_manifest, validate};
-use std::path::Path;
-
-const PROJECT_ROOT: &str = "/home/unixdude/Archon-projects/archon/project-work/archon-cli";
+fn project_root() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .to_path_buf()
+}
 
 #[test]
 fn smoke_research_pipeline_toml_parses() {
-    let manifest_path = Path::new(PROJECT_ROOT).join(".archon/agents/phdresearch/pipeline.toml");
+    let manifest_path = project_root().join(".archon/agents/phdresearch/pipeline.toml");
     let manifest = load_manifest(&manifest_path).expect("should parse research pipeline.toml");
 
     assert_eq!(manifest.pipeline.name, "phdresearch");
@@ -27,10 +32,10 @@ fn smoke_research_pipeline_toml_parses() {
 
 #[test]
 fn smoke_research_manifest_cross_references_md_files() {
-    let manifest_path = Path::new(PROJECT_ROOT).join(".archon/agents/phdresearch/pipeline.toml");
+    let manifest_path = project_root().join(".archon/agents/phdresearch/pipeline.toml");
     let manifest = load_manifest(&manifest_path).expect("parse manifest");
 
-    let research_dir = Path::new(PROJECT_ROOT).join(".archon/agents/phdresearch");
+    let research_dir = project_root().join(".archon/agents/phdresearch");
     let agents = load_research_agents(&research_dir).expect("load research agents");
     let agent_keys: Vec<String> = agents.iter().map(|a| a.key.clone()).collect();
 
