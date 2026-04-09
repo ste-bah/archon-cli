@@ -1,5 +1,6 @@
 //! Phase 3 integration tests — all hook subsystems working together.
 
+use std::io::Write as _;
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -79,16 +80,19 @@ fn function_hook(name: &str) -> HookConfig {
 
 #[tokio::test]
 async fn test_agent_hook_spawns_and_parses_response() {
-    // Agent hook: command that outputs JSON with a specific outcome field.
-    // Use python for cross-platform JSON echo (cmd.exe mangles braces and quotes).
-    // GitHub Actions has `python` on all platforms (windows uses `python`, linux/mac have both).
-    #[cfg(target_os = "windows")]
-    let agent_cmd = r#"python -c "import json; print(json.dumps({'outcome':'blocking','reason':'agent says no'}))"#;
-    #[cfg(not(target_os = "windows"))]
-    let agent_cmd = r#"echo '{"outcome":"blocking","reason":"agent says no"}'"#;
+    // Agent hook: write JSON to a temp file and cat it, avoiding all shell quoting issues.
+    let json_file = tempfile::NamedTempFile::new().unwrap();
+    write!(
+        json_file.as_file(),
+        r#"{{"outcome":"blocking","reason":"agent says no"}}"#
+    )
+    .unwrap();
+    // Normalize path separators so `sh -c` on Windows doesn't eat backslashes.
+    let path_str = json_file.path().to_string_lossy().replace('\\', "/");
+    let agent_cmd = format!("cat {path_str}");
     let hook = HookConfig {
         hook_type: HookCommandType::Agent,
-        command: agent_cmd.to_string(),
+        command: agent_cmd.clone(),
         if_condition: None,
         timeout: Some(5),
         once: None,
