@@ -229,8 +229,12 @@ impl WorktreeManager {
         working_dir: &std::path::Path,
         session_id: &str,
     ) -> Result<WorktreeInfo, String> {
-        let repo = Repository::open(working_dir)
-            .map_err(|e| format!("Failed to open repository at {}: {e}", working_dir.display()))?;
+        let repo = Repository::open(working_dir).map_err(|e| {
+            format!(
+                "Failed to open repository at {}: {e}",
+                working_dir.display()
+            )
+        })?;
         Self::create_worktree(&repo, session_id)
     }
 

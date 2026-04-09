@@ -314,9 +314,9 @@ impl Skill for EvolveAgentSkill {
         };
 
         if !["FIX", "DERIVED", "CAPTURED"].contains(&evolution_type.as_str()) {
-            return SkillOutput::Error(
-                format!("Unknown evolution type: {evolution_type}. Use FIX, DERIVED, or CAPTURED."),
-            );
+            return SkillOutput::Error(format!(
+                "Unknown evolution type: {evolution_type}. Use FIX, DERIVED, or CAPTURED."
+            ));
         }
 
         let agent_dir = ctx
@@ -426,9 +426,7 @@ impl Skill for AgentHistorySkill {
 
     fn execute(&self, args: &[String], ctx: &SkillContext) -> SkillOutput {
         if args.is_empty() {
-            return SkillOutput::Error(
-                "Usage: /agent-history <agent-name>".into(),
-            );
+            return SkillOutput::Error("Usage: /agent-history <agent-name>".into());
         }
 
         let agent_name = &args[0];
@@ -460,10 +458,22 @@ impl Skill for AgentHistorySkill {
         };
 
         let version = meta.get("version").and_then(|v| v.as_str()).unwrap_or("?");
-        let created = meta.get("created_at").and_then(|v| v.as_str()).unwrap_or("?");
-        let updated = meta.get("updated_at").and_then(|v| v.as_str()).unwrap_or("?");
-        let invocations = meta.get("invocation_count").and_then(|v| v.as_u64()).unwrap_or(0);
-        let archived = meta.get("archived").and_then(|v| v.as_bool()).unwrap_or(false);
+        let created = meta
+            .get("created_at")
+            .and_then(|v| v.as_str())
+            .unwrap_or("?");
+        let updated = meta
+            .get("updated_at")
+            .and_then(|v| v.as_str())
+            .unwrap_or("?");
+        let invocations = meta
+            .get("invocation_count")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let archived = meta
+            .get("archived")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
 
         let mut out = format!(
             "Agent: {agent_name}\nVersion: {version}\nCreated: {created}\nUpdated: {updated}\nInvocations: {invocations}\nArchived: {archived}\n"
@@ -473,11 +483,20 @@ impl Skill for AgentHistorySkill {
             if history.is_empty() {
                 out.push_str("\nNo evolution history.\n");
             } else {
-                out.push_str(&format!("\nEvolution history ({} entries):\n", history.len()));
+                out.push_str(&format!(
+                    "\nEvolution history ({} entries):\n",
+                    history.len()
+                ));
                 for (i, entry) in history.iter().enumerate() {
                     let etype = entry.get("type").and_then(|v| v.as_str()).unwrap_or("?");
-                    let desc = entry.get("description").and_then(|v| v.as_str()).unwrap_or("");
-                    let ts = entry.get("timestamp").and_then(|v| v.as_str()).unwrap_or("?");
+                    let desc = entry
+                        .get("description")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    let ts = entry
+                        .get("timestamp")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("?");
                     out.push_str(&format!("  {}. [{etype}] {desc} ({ts})\n", i + 1));
                 }
             }
@@ -566,10 +585,7 @@ mod tests {
 
     #[test]
     fn derive_name_skips_short_words() {
-        assert_eq!(
-            derive_agent_name("a bug fix helper"),
-            "bug-fix-helper"
-        );
+        assert_eq!(derive_agent_name("a bug fix helper"), "bug-fix-helper");
     }
 
     #[test]
@@ -726,7 +742,12 @@ mod tests {
             agent_registry: None,
         };
         let output = skill.execute(
-            &["code-reviewer".into(), "Review".into(), "auth".into(), "module".into()],
+            &[
+                "code-reviewer".into(),
+                "Review".into(),
+                "auth".into(),
+                "module".into(),
+            ],
             &ctx,
         );
         match output {
@@ -765,7 +786,13 @@ mod tests {
             agent_registry: None,
         };
         let output = skill.execute(
-            &["my-agent".into(), "Add".into(), "SQL".into(), "injection".into(), "check".into()],
+            &[
+                "my-agent".into(),
+                "Add".into(),
+                "SQL".into(),
+                "injection".into(),
+                "check".into(),
+            ],
             &ctx,
         );
         match output {
@@ -821,7 +848,12 @@ mod tests {
             agent_registry: None,
         };
         let output = skill.execute(
-            &["my-agent".into(), "fix".into(), "improve".into(), "accuracy".into()],
+            &[
+                "my-agent".into(),
+                "fix".into(),
+                "improve".into(),
+                "accuracy".into(),
+            ],
             &ctx,
         );
         match output {

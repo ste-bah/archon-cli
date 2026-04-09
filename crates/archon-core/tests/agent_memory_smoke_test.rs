@@ -7,9 +7,8 @@ use std::path::Path;
 
 use archon_core::agents::definition::AgentMemoryScope;
 use archon_core::agents::memory::{
-    ensure_memory_dir_exists, get_agent_memory_dir, load_agent_memory_prompt,
+    ExtractionState, ensure_memory_dir_exists, get_agent_memory_dir, load_agent_memory_prompt,
     scan_memory_files, should_extract, truncate_entrypoint_content,
-    ExtractionState,
 };
 
 /// Full lifecycle: create dir → write MEMORY.md → load prompt → verify content.
@@ -20,7 +19,10 @@ async fn smoke_full_memory_lifecycle() {
 
     // 1. Resolve memory dir
     let dir = get_agent_memory_dir("smoke-agent", &AgentMemoryScope::Project, cwd);
-    assert!(dir.to_string_lossy().contains(".archon/agent-memory/smoke-agent"));
+    assert!(
+        dir.to_string_lossy()
+            .contains(".archon/agent-memory/smoke-agent")
+    );
 
     // 2. Create directory
     ensure_memory_dir_exists(&dir).await;
@@ -30,14 +32,12 @@ async fn smoke_full_memory_lifecycle() {
     std::fs::write(
         dir.join("MEMORY.md"),
         "- [Role](role.md) — Senior Rust developer\n- [Prefs](prefs.md) — Prefers terse output",
-    ).unwrap();
+    )
+    .unwrap();
 
     // 4. Load prompt
-    let prompt = load_agent_memory_prompt(
-        "smoke-agent",
-        Some(&AgentMemoryScope::Project),
-        cwd,
-    ).unwrap();
+    let prompt =
+        load_agent_memory_prompt("smoke-agent", Some(&AgentMemoryScope::Project), cwd).unwrap();
 
     // 5. Verify prompt contains lifecycle elements
     assert!(prompt.contains("# auto memory"), "header");

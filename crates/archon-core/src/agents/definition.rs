@@ -352,8 +352,7 @@ mod tests {
     fn agent_meta_serde_roundtrip() {
         let meta = AgentMeta::default();
         let json = serde_json::to_string(&meta).expect("serialize AgentMeta");
-        let restored: AgentMeta =
-            serde_json::from_str(&json).expect("deserialize AgentMeta");
+        let restored: AgentMeta = serde_json::from_str(&json).expect("deserialize AgentMeta");
         assert_eq!(restored.version, "1.0");
         assert_eq!(restored.invocation_count, 0);
         assert!(!restored.archived);
@@ -367,8 +366,7 @@ mod tests {
             completion_rate: 0.92,
         };
         let json = serde_json::to_string(&q).expect("serialize AgentQuality");
-        let restored: AgentQuality =
-            serde_json::from_str(&json).expect("deserialize AgentQuality");
+        let restored: AgentQuality = serde_json::from_str(&json).expect("deserialize AgentQuality");
         assert!((restored.applied_rate - 0.85).abs() < f64::EPSILON);
         assert!((restored.completion_rate - 0.92).abs() < f64::EPSILON);
     }

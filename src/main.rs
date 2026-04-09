@@ -11,12 +11,12 @@ use archon_consciousness::assembler::{AssemblyInput, BudgetConfig, SystemPromptA
 use archon_consciousness::defaults::load_configured_defaults;
 use archon_consciousness::rules::RulesEngine;
 use archon_core::agent::{Agent, AgentConfig, AgentEvent, SessionStats};
+use archon_core::agents::AgentRegistry;
 use archon_core::cli_flags::resolve_flags;
 use archon_core::config::LlmConfig;
 use archon_core::config::default_config_path;
 use archon_core::config_layers::ConfigLayer;
 use archon_core::cost_alerts::{CostAlertAction, CostAlertState};
-use archon_core::agents::AgentRegistry;
 use archon_core::dispatch::create_default_registry;
 use archon_core::env_vars::{self, ArchonEnvVars};
 use archon_core::input_format::InputFormat;
@@ -470,7 +470,8 @@ async fn main() -> Result<()> {
                     );
                     let team_provider = build_llm_provider(&config.llm, team_client);
                     let cwd = std::env::current_dir().unwrap_or_default();
-                    let team_agent_registry = Arc::new(std::sync::RwLock::new(AgentRegistry::load(&cwd)));
+                    let team_agent_registry =
+                        Arc::new(std::sync::RwLock::new(AgentRegistry::load(&cwd)));
                     let executor = Arc::new(RealSubtaskExecutor::new(
                         team_provider,
                         cwd,
@@ -1637,7 +1638,9 @@ async fn run_print_mode_session(
             .iter()
             .map(|a| (a.agent_type.clone(), a.description.clone()))
             .collect();
-        registry.register(Box::new(archon_tools::agent_tool::AgentTool::with_agent_listing(&agents)));
+        registry.register(Box::new(
+            archon_tools::agent_tool::AgentTool::with_agent_listing(&agents),
+        ));
     }
 
     let agent_def = if let Some(ref agent_name) = resolved_flags.agent {
@@ -1671,7 +1674,8 @@ async fn run_print_mode_session(
     // Pre-flight check: required MCP servers must be available for --agent mode
     if let Some(ref def) = agent_def {
         let available_tools = registry.tool_names();
-        let available_mcp: Vec<String> = available_tools.iter()
+        let available_mcp: Vec<String> = available_tools
+            .iter()
             .filter(|n| n.starts_with("mcp__"))
             .map(|n| n.to_string())
             .collect();
@@ -1712,25 +1716,34 @@ async fn run_print_mode_session(
 
         // Inject tool guidance
         if !def.tool_guidance.is_empty() {
-            agent_prompt = format!("{agent_prompt}\n\n<tool-guidance>\n{}\n</tool-guidance>", def.tool_guidance);
+            agent_prompt = format!(
+                "{agent_prompt}\n\n<tool-guidance>\n{}\n</tool-guidance>",
+                def.tool_guidance
+            );
         }
 
         // Inject skills
         if let Some(ref skills) = def.skills {
             if !skills.is_empty() {
                 let skills_list = skills.join(", ");
-                agent_prompt = format!("{agent_prompt}\n\n<available-skills>\nThe following skills are available to you: {skills_list}\nInvoke them by name when relevant to the task.\n</available-skills>");
+                agent_prompt = format!(
+                    "{agent_prompt}\n\n<available-skills>\nThe following skills are available to you: {skills_list}\nInvoke them by name when relevant to the task.\n</available-skills>"
+                );
             }
         }
 
         // Inject LEANN queries and memory tags
         if !def.leann_queries.is_empty() {
             let queries = def.leann_queries.join(", ");
-            agent_prompt = format!("{agent_prompt}\n\n<leann-queries>\nRelevant code search queries for your task: {queries}\nUse these with the LEANN semantic search tool when exploring the codebase.\n</leann-queries>");
+            agent_prompt = format!(
+                "{agent_prompt}\n\n<leann-queries>\nRelevant code search queries for your task: {queries}\nUse these with the LEANN semantic search tool when exploring the codebase.\n</leann-queries>"
+            );
         }
         if !def.tags.is_empty() {
             let tags = def.tags.join(", ");
-            agent_prompt = format!("{agent_prompt}\n\n<agent-tags>\nYour memory tags: {tags}\nUse these tags when storing or recalling memories relevant to your role.\n</agent-tags>");
+            agent_prompt = format!(
+                "{agent_prompt}\n\n<agent-tags>\nYour memory tags: {tags}\nUse these tags when storing or recalling memories relevant to your role.\n</agent-tags>"
+            );
         }
 
         system_prompt = vec![serde_json::json!({
@@ -1874,7 +1887,13 @@ async fn run_print_mode_session(
             tracing::warn!(%err, "agent load error");
         }
     }
-    let mut agent = Agent::new(provider, registry, agent_config, agent_event_tx, agent_registry);
+    let mut agent = Agent::new(
+        provider,
+        registry,
+        agent_config,
+        agent_event_tx,
+        agent_registry,
+    );
 
     // Wire hook system for print mode — load hooks then register agent-specific hooks
     {
@@ -1893,7 +1912,9 @@ async fn run_print_mode_session(
                         }
                         tracing::info!(agent = %def.agent_type, "print mode: registered agent session-scoped hooks");
                     }
-                    Err(e) => tracing::warn!(agent = %def.agent_type, error = %e, "failed to parse agent hooks"),
+                    Err(e) => {
+                        tracing::warn!(agent = %def.agent_type, error = %e, "failed to parse agent hooks")
+                    }
                 }
             }
         }
@@ -2373,23 +2394,26 @@ async fn run_interactive_session(
             .iter()
             .map(|a| (a.agent_type.clone(), a.description.clone()))
             .collect();
-        registry.register(Box::new(archon_tools::agent_tool::AgentTool::with_agent_listing(&agents)));
+        registry.register(Box::new(
+            archon_tools::agent_tool::AgentTool::with_agent_listing(&agents),
+        ));
     }
 
-    let agent_def: Option<archon_core::agents::CustomAgentDefinition> = if let Some(ref agent_name) = resolved_flags.agent {
-        match agent_registry_tmp.resolve(agent_name) {
-            Some(def) => {
-                tracing::info!(agent = agent_name, "resolved custom agent definition");
-                Some(def.clone())
+    let agent_def: Option<archon_core::agents::CustomAgentDefinition> =
+        if let Some(ref agent_name) = resolved_flags.agent {
+            match agent_registry_tmp.resolve(agent_name) {
+                Some(def) => {
+                    tracing::info!(agent = agent_name, "resolved custom agent definition");
+                    Some(def.clone())
+                }
+                None => {
+                    let available = agent_registry_tmp.available_agent_names().join(", ");
+                    anyhow::bail!("Unknown agent '{}'. Available: {}", agent_name, available);
+                }
             }
-            None => {
-                let available = agent_registry_tmp.available_agent_names().join(", ");
-                anyhow::bail!("Unknown agent '{}'. Available: {}", agent_name, available);
-            }
-        }
-    } else {
-        None
-    };
+        } else {
+            None
+        };
     drop(agent_registry_tmp);
 
     // Apply agent tool filtering to registry
@@ -2407,14 +2431,16 @@ async fn run_interactive_session(
     // Pre-flight check: required MCP servers must be available for --agent mode
     if let Some(ref def) = agent_def {
         let available_tools = registry.tool_names();
-        let available_mcp: Vec<String> = available_tools.iter()
+        let available_mcp: Vec<String> = available_tools
+            .iter()
             .filter(|n| n.starts_with("mcp__"))
             .map(|n| n.to_string())
             .collect();
         if !def.has_required_mcp_servers(&available_mcp) {
             anyhow::bail!(
                 "Agent '{}' requires MCP servers {:?} but they are not available.",
-                def.agent_type, def.required_mcp_servers,
+                def.agent_type,
+                def.required_mcp_servers,
             );
         }
     }
@@ -2735,7 +2761,13 @@ async fn run_interactive_session(
         }
     }
     let agent_registry_for_skills = Arc::clone(&agent_registry);
-    let mut agent = Agent::new(provider, registry, agent_config, agent_event_tx, agent_registry);
+    let mut agent = Agent::new(
+        provider,
+        registry,
+        agent_config,
+        agent_event_tx,
+        agent_registry,
+    );
 
     // Wire checkpoint store into agent (CLI-116)
     if let Some(store) = checkpoint_store {
@@ -2877,7 +2909,9 @@ async fn run_interactive_session(
                     }
                     tracing::info!(agent = %def.agent_type, "registered agent session-scoped hooks");
                 }
-                Err(e) => tracing::warn!(agent = %def.agent_type, error = %e, "failed to parse agent hooks"),
+                Err(e) => {
+                    tracing::warn!(agent = %def.agent_type, error = %e, "failed to parse agent hooks")
+                }
             }
         }
         // Set critical system reminder for per-turn injection
@@ -3220,16 +3254,17 @@ async fn run_interactive_session(
 
         // AGT-015: Send agent name/color to TUI status bar when in --agent mode
         if let Some(ref def) = agent_def {
-            let _ = input_tui_tx.send(TuiEvent::SetAgentInfo {
-                name: def.agent_type.clone(),
-                color: def.color.clone(),
-            }).await;
+            let _ = input_tui_tx
+                .send(TuiEvent::SetAgentInfo {
+                    name: def.agent_type.clone(),
+                    color: def.color.clone(),
+                })
+                .await;
         }
 
         // AGT-011: Track whether the agent's initial_prompt has been prepended
-        let mut initial_prompt_pending: Option<String> = agent_def
-            .as_ref()
-            .and_then(|d| d.initial_prompt.clone());
+        let mut initial_prompt_pending: Option<String> =
+            agent_def.as_ref().and_then(|d| d.initial_prompt.clone());
 
         while let Some(input) = user_input_rx.recv().await {
             // Session picker selection — load messages and restore conversation
@@ -3762,7 +3797,10 @@ async fn run_interactive_session(
             if let Some(ref base_dir) = def.base_dir {
                 let agent_dir = std::path::Path::new(base_dir);
                 if let Err(e) = archon_core::agents::memory::increment_invocation_count(agent_dir) {
-                    tracing::warn!(agent = def.agent_type.as_str(), "failed to increment invocation count: {e}");
+                    tracing::warn!(
+                        agent = def.agent_type.as_str(),
+                        "failed to increment invocation count: {e}"
+                    );
                 }
             }
         }

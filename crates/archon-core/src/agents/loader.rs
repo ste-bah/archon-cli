@@ -2,7 +2,9 @@ use std::path::Path;
 
 use tracing::warn;
 
-use super::definition::{AgentMemoryScope, AgentMeta, AgentQuality, AgentSource, CustomAgentDefinition, PermissionMode};
+use super::definition::{
+    AgentMemoryScope, AgentMeta, AgentQuality, AgentSource, CustomAgentDefinition, PermissionMode,
+};
 use crate::hooks::{HookConfig, HookEvent};
 
 // ---------------------------------------------------------------------------
@@ -73,7 +75,8 @@ fn load_single_agent(dir: &Path, name: &str, source: AgentSource) -> CustomAgent
     let system_prompt = assemble_system_prompt(&agent_md, &behavior_md, &context_md);
     let allowed_tools = extract_tools(&tools_md);
     let tool_guidance = extract_tool_guidance(&tools_md);
-    let (recall_queries, leann_queries, tags, memory_scope) = parse_memory_keys(&memory_keys_str, name);
+    let (recall_queries, leann_queries, tags, memory_scope) =
+        parse_memory_keys(&memory_keys_str, name);
     let (meta, exec_config) = parse_meta_json(&meta_str, name);
 
     CustomAgentDefinition {
@@ -187,7 +190,12 @@ const MAX_AGENT_PROMPT_TOKENS: usize = 8192;
 const CHARS_PER_TOKEN: usize = 4;
 
 fn assemble_system_prompt(agent_md: &str, behavior_md: &str, context_md: &str) -> String {
-    truncate_agent_prompt(agent_md.trim(), behavior_md.trim(), context_md.trim(), MAX_AGENT_PROMPT_TOKENS)
+    truncate_agent_prompt(
+        agent_md.trim(),
+        behavior_md.trim(),
+        context_md.trim(),
+        MAX_AGENT_PROMPT_TOKENS,
+    )
 }
 
 /// Find the largest byte index <= `idx` that is a valid char boundary.
@@ -219,9 +227,15 @@ pub fn truncate_agent_prompt(
 
     if total <= max_chars {
         let mut parts = Vec::new();
-        if !agent_md.is_empty() { parts.push(agent_md); }
-        if !behavior_md.is_empty() { parts.push(behavior_md); }
-        if !context_md.is_empty() { parts.push(context_md); }
+        if !agent_md.is_empty() {
+            parts.push(agent_md);
+        }
+        if !behavior_md.is_empty() {
+            parts.push(behavior_md);
+        }
+        if !context_md.is_empty() {
+            parts.push(context_md);
+        }
         return parts.join("\n\n");
     }
 
@@ -267,9 +281,15 @@ pub fn truncate_agent_prompt(
     };
 
     let mut parts = Vec::new();
-    if !agent_md.is_empty() { parts.push(agent_md.to_string()); }
-    if !trimmed_behavior.is_empty() { parts.push(trimmed_behavior); }
-    if !trimmed_context.is_empty() { parts.push(trimmed_context); }
+    if !agent_md.is_empty() {
+        parts.push(agent_md.to_string());
+    }
+    if !trimmed_behavior.is_empty() {
+        parts.push(trimmed_behavior);
+    }
+    if !trimmed_context.is_empty() {
+        parts.push(trimmed_context);
+    }
     parts.join("\n\n")
 }
 
@@ -313,11 +333,7 @@ pub fn extract_tools(tools_md: &str) -> Option<Vec<String>> {
         }
     }
 
-    if tools.is_empty() {
-        None
-    } else {
-        Some(tools)
-    }
+    if tools.is_empty() { None } else { Some(tools) }
 }
 
 /// Extract tool usage guidance from tools.md — everything outside the
@@ -331,9 +347,9 @@ pub fn extract_tool_guidance(tools_md: &str) -> String {
     let lines: Vec<&str> = tools_md.lines().collect();
 
     // Find the Primary Tools section bounds
-    let section_start = lines.iter().position(|l| {
-        l.trim().to_uppercase().starts_with("## PRIMARY TOOLS")
-    });
+    let section_start = lines
+        .iter()
+        .position(|l| l.trim().to_uppercase().starts_with("## PRIMARY TOOLS"));
 
     let (section_start_idx, section_end_idx) = if let Some(start) = section_start {
         // Find end of section (next ## heading or EOF)
@@ -367,7 +383,12 @@ pub fn extract_tool_guidance(tools_md: &str) -> String {
 fn parse_memory_keys(
     json_str: &str,
     agent_name: &str,
-) -> (Vec<String>, Vec<String>, Vec<String>, Option<AgentMemoryScope>) {
+) -> (
+    Vec<String>,
+    Vec<String>,
+    Vec<String>,
+    Option<AgentMemoryScope>,
+) {
     if json_str.trim().is_empty() {
         return (Vec::new(), Vec::new(), Vec::new(), None);
     }
@@ -392,9 +413,10 @@ fn parse_memory_keys(
     let memory_scope = parsed
         .get("memory_scope")
         .and_then(|v| v.as_str())
-        .and_then(|s| serde_json::from_value::<AgentMemoryScope>(
-            serde_json::Value::String(s.to_string()),
-        ).ok());
+        .and_then(|s| {
+            serde_json::from_value::<AgentMemoryScope>(serde_json::Value::String(s.to_string()))
+                .ok()
+        });
 
     (recall, leann, tags, memory_scope)
 }
@@ -580,19 +602,16 @@ fn parse_meta_json(json_str: &str, agent_name: &str) -> (AgentMeta, ExecConfig) 
 ///
 /// Returns an error if the JSON is not an object, contains unknown event names,
 /// or has malformed hook configs.
-pub fn parse_agent_hooks(
-    json: &serde_json::Value,
-) -> Result<Vec<(HookEvent, HookConfig)>, String> {
+pub fn parse_agent_hooks(json: &serde_json::Value) -> Result<Vec<(HookEvent, HookConfig)>, String> {
     let map = json
         .as_object()
         .ok_or_else(|| "hooks must be a JSON object".to_string())?;
 
     let mut result = Vec::new();
     for (event_name, configs_val) in map {
-        let event: HookEvent = serde_json::from_value(serde_json::Value::String(
-            event_name.clone(),
-        ))
-        .map_err(|e| format!("unknown hook event '{event_name}': {e}"))?;
+        let event: HookEvent =
+            serde_json::from_value(serde_json::Value::String(event_name.clone()))
+                .map_err(|e| format!("unknown hook event '{event_name}': {e}"))?;
 
         let configs: Vec<HookConfig> = serde_json::from_value(configs_val.clone())
             .map_err(|e| format!("malformed hook configs for '{event_name}': {e}"))?;
@@ -908,7 +927,10 @@ mod tests {
         .unwrap();
 
         let agents = load_custom_agents(tmp.path(), AgentSource::Project).unwrap();
-        assert_eq!(agents[0].mcp_servers, Some(vec!["github".into(), "slack".into()]));
+        assert_eq!(
+            agents[0].mcp_servers,
+            Some(vec!["github".into(), "slack".into()])
+        );
         assert_eq!(agents[0].required_mcp_servers, Some(vec!["github".into()]));
     }
 
@@ -1272,7 +1294,10 @@ mod tests {
             fs::write(agent_dir.join("agent.md"), "# Agent\n").unwrap();
             fs::write(
                 agent_dir.join("memory-keys.json"),
-                format!(r#"{{"recall_queries":[],"leann_queries":[],"tags":[],"memory_scope":"{}"}}"#, scope_str),
+                format!(
+                    r#"{{"recall_queries":[],"leann_queries":[],"tags":[],"memory_scope":"{}"}}"#,
+                    scope_str
+                ),
             )
             .unwrap();
 
@@ -1292,10 +1317,12 @@ mod tests {
 
     #[test]
     fn loads_all_9_real_agents_from_custom_dir() {
-        let custom_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../.archon/agents/custom");
+        let custom_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.archon/agents/custom");
         if !custom_dir.exists() {
-            eprintln!("Skipping: .archon/agents/custom/ not found at {:?}", custom_dir);
+            eprintln!(
+                "Skipping: .archon/agents/custom/ not found at {:?}",
+                custom_dir
+            );
             return;
         }
 
@@ -1328,10 +1355,12 @@ mod tests {
 
     #[test]
     fn code_reviewer_loads_with_nonempty_fields() {
-        let custom_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../.archon/agents/custom");
+        let custom_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.archon/agents/custom");
         if !custom_dir.exists() {
-            eprintln!("Skipping: .archon/agents/custom/ not found at {:?}", custom_dir);
+            eprintln!(
+                "Skipping: .archon/agents/custom/ not found at {:?}",
+                custom_dir
+            );
             return;
         }
 

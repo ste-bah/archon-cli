@@ -13,8 +13,7 @@ fn project_root() -> std::path::PathBuf {
 
 #[test]
 fn smoke_coding_pipeline_toml_parses() {
-    let manifest_path =
-        project_root().join(".archon/agents/coding-pipeline/pipeline.toml");
+    let manifest_path = project_root().join(".archon/agents/coding-pipeline/pipeline.toml");
     let manifest = load_manifest(&manifest_path).expect("should parse coding pipeline.toml");
 
     assert_eq!(manifest.pipeline.name, "coding");
@@ -36,8 +35,7 @@ fn smoke_coding_pipeline_toml_parses() {
 
 #[test]
 fn smoke_coding_manifest_cross_references_md_files() {
-    let manifest_path =
-        project_root().join(".archon/agents/coding-pipeline/pipeline.toml");
+    let manifest_path = project_root().join(".archon/agents/coding-pipeline/pipeline.toml");
     let manifest = load_manifest(&manifest_path).expect("parse manifest");
 
     let coding_dir = project_root().join(".archon/agents/coding-pipeline");

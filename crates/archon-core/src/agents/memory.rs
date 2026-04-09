@@ -5,8 +5,8 @@
 
 use std::path::{Path, PathBuf};
 
-use archon_memory::types::{MemoryError, MemoryType, SearchFilter};
 use archon_memory::MemoryTrait;
+use archon_memory::types::{MemoryError, MemoryType, SearchFilter};
 
 use super::definition::AgentMemoryScope;
 
@@ -127,25 +127,15 @@ pub const MAX_ENTRYPOINT_BYTES: usize = 25_000;
 /// - Local:   `<cwd>/.archon/agent-memory-local/<agent_type>/`
 ///
 /// Agent type colons are sanitized to dashes (Windows-safe, plugin-namespaced types).
-pub fn get_agent_memory_dir(
-    agent_type: &str,
-    scope: &AgentMemoryScope,
-    cwd: &Path,
-) -> PathBuf {
+pub fn get_agent_memory_dir(agent_type: &str, scope: &AgentMemoryScope, cwd: &Path) -> PathBuf {
     let safe_name = agent_type.replace(':', "-");
     match scope {
-        AgentMemoryScope::User => {
-            dirs::home_dir()
-                .unwrap_or_else(|| PathBuf::from("/tmp"))
-                .join(".archon/agent-memory")
-                .join(&safe_name)
-        }
-        AgentMemoryScope::Project => {
-            cwd.join(".archon/agent-memory").join(&safe_name)
-        }
-        AgentMemoryScope::Local => {
-            cwd.join(".archon/agent-memory-local").join(&safe_name)
-        }
+        AgentMemoryScope::User => dirs::home_dir()
+            .unwrap_or_else(|| PathBuf::from("/tmp"))
+            .join(".archon/agent-memory")
+            .join(&safe_name),
+        AgentMemoryScope::Project => cwd.join(".archon/agent-memory").join(&safe_name),
+        AgentMemoryScope::Local => cwd.join(".archon/agent-memory-local").join(&safe_name),
     }
 }
 
@@ -222,7 +212,7 @@ pub fn build_full_memory_prompt(
     };
 
     format!(
-r#"# auto memory
+        r#"# auto memory
 
 You have a persistent, file-based memory system at `{dir}`. This directory already exists — write to it directly with the Write tool (do not run mkdir or check for its existence).
 
@@ -351,13 +341,14 @@ pub fn load_agent_memory_prompt(
     let memory_content = std::fs::read_to_string(&memory_md_path).unwrap_or_default();
 
     // Truncate to 200 lines AND 25KB (whichever fires first)
-    let truncated = truncate_entrypoint_content(
-        &memory_content,
-        MAX_ENTRYPOINT_LINES,
-        MAX_ENTRYPOINT_BYTES,
-    );
+    let truncated =
+        truncate_entrypoint_content(&memory_content, MAX_ENTRYPOINT_LINES, MAX_ENTRYPOINT_BYTES);
 
-    Some(build_full_memory_prompt(&memory_dir, scope_guidance, &truncated))
+    Some(build_full_memory_prompt(
+        &memory_dir,
+        scope_guidance,
+        &truncated,
+    ))
 }
 
 // ---------------------------------------------------------------------------
@@ -420,8 +411,10 @@ pub fn has_memory_writes_since(
                     let name = block.get("name").and_then(|n| n.as_str()).unwrap_or("");
                     if name == "Write" || name == "Edit" {
                         if let Some(input) = block.get("input") {
-                            let file_path =
-                                input.get("file_path").and_then(|p| p.as_str()).unwrap_or("");
+                            let file_path = input
+                                .get("file_path")
+                                .and_then(|p| p.as_str())
+                                .unwrap_or("");
                             if file_path.starts_with(&*mem_path) {
                                 return true;
                             }
@@ -479,7 +472,11 @@ pub fn should_extract(
     state.turns_since_last_extraction = 0;
 
     // Gate 3: Mutual exclusion via SCAN — check if agent wrote memory directly
-    if has_memory_writes_since(messages, state.last_memory_message_uuid.as_deref(), memory_dir) {
+    if has_memory_writes_since(
+        messages,
+        state.last_memory_message_uuid.as_deref(),
+        memory_dir,
+    ) {
         tracing::debug!("Skipping extraction — agent wrote to memory directly");
         // Advance cursor past this range
         if let Some(last) = messages.last() {
@@ -504,15 +501,13 @@ pub fn should_extract(
 /// Increment the invocation_count in an agent's meta.json.
 ///
 /// Returns the new count, or an error message.
-pub fn increment_invocation_count(
-    agent_dir: &std::path::Path,
-) -> Result<u64, String> {
+pub fn increment_invocation_count(agent_dir: &std::path::Path) -> Result<u64, String> {
     let meta_path = agent_dir.join("meta.json");
     let content = std::fs::read_to_string(&meta_path)
         .map_err(|e| format!("failed to read meta.json: {e}"))?;
 
-    let mut meta: serde_json::Value = serde_json::from_str(&content)
-        .map_err(|e| format!("failed to parse meta.json: {e}"))?;
+    let mut meta: serde_json::Value =
+        serde_json::from_str(&content).map_err(|e| format!("failed to parse meta.json: {e}"))?;
 
     let count = meta
         .get("invocation_count")
@@ -543,24 +538,62 @@ mod tests {
 
     impl MemoryTrait for NullMemory {
         fn store_memory(
-            &self, _content: &str, _title: &str, _memory_type: MemoryType,
-            _importance: f64, _tags: &[String], _source_type: &str, _project_path: &str,
+            &self,
+            _content: &str,
+            _title: &str,
+            _memory_type: MemoryType,
+            _importance: f64,
+            _tags: &[String],
+            _source_type: &str,
+            _project_path: &str,
         ) -> Result<String, MemoryError> {
             Ok("null-id".to_string())
         }
         fn get_memory(&self, _id: &str) -> Result<Memory, MemoryError> {
             Err(MemoryError::NotFound("null".into()))
         }
-        fn update_memory(&self, _id: &str, _content: Option<&str>, _tags: Option<&[String]>) -> Result<(), MemoryError> { Ok(()) }
-        fn update_importance(&self, _id: &str, _importance: f64) -> Result<(), MemoryError> { Ok(()) }
-        fn delete_memory(&self, _id: &str) -> Result<(), MemoryError> { Ok(()) }
-        fn create_relationship(&self, _from: &str, _to: &str, _rel: RelType, _ctx: Option<&str>, _str: f64) -> Result<(), MemoryError> { Ok(()) }
-        fn recall_memories(&self, _query: &str, _limit: usize) -> Result<Vec<Memory>, MemoryError> { Ok(vec![]) }
-        fn search_memories(&self, _filter: &SearchFilter) -> Result<Vec<Memory>, MemoryError> { Ok(vec![]) }
-        fn list_recent(&self, _limit: usize) -> Result<Vec<Memory>, MemoryError> { Ok(vec![]) }
-        fn memory_count(&self) -> Result<usize, MemoryError> { Ok(0) }
-        fn clear_all(&self) -> Result<usize, MemoryError> { Ok(0) }
-        fn get_related_memories(&self, _id: &str, _depth: u32) -> Result<Vec<Memory>, MemoryError> { Ok(vec![]) }
+        fn update_memory(
+            &self,
+            _id: &str,
+            _content: Option<&str>,
+            _tags: Option<&[String]>,
+        ) -> Result<(), MemoryError> {
+            Ok(())
+        }
+        fn update_importance(&self, _id: &str, _importance: f64) -> Result<(), MemoryError> {
+            Ok(())
+        }
+        fn delete_memory(&self, _id: &str) -> Result<(), MemoryError> {
+            Ok(())
+        }
+        fn create_relationship(
+            &self,
+            _from: &str,
+            _to: &str,
+            _rel: RelType,
+            _ctx: Option<&str>,
+            _str: f64,
+        ) -> Result<(), MemoryError> {
+            Ok(())
+        }
+        fn recall_memories(&self, _query: &str, _limit: usize) -> Result<Vec<Memory>, MemoryError> {
+            Ok(vec![])
+        }
+        fn search_memories(&self, _filter: &SearchFilter) -> Result<Vec<Memory>, MemoryError> {
+            Ok(vec![])
+        }
+        fn list_recent(&self, _limit: usize) -> Result<Vec<Memory>, MemoryError> {
+            Ok(vec![])
+        }
+        fn memory_count(&self) -> Result<usize, MemoryError> {
+            Ok(0)
+        }
+        fn clear_all(&self) -> Result<usize, MemoryError> {
+            Ok(0)
+        }
+        fn get_related_memories(&self, _id: &str, _depth: u32) -> Result<Vec<Memory>, MemoryError> {
+            Ok(vec![])
+        }
     }
 
     /// Mock memory that records store calls for verification.
@@ -570,31 +603,74 @@ mod tests {
 
     impl MockMemory {
         fn new() -> Self {
-            Self { stored: Mutex::new(vec![]) }
+            Self {
+                stored: Mutex::new(vec![]),
+            }
         }
     }
 
     impl MemoryTrait for MockMemory {
         fn store_memory(
-            &self, content: &str, _title: &str, _memory_type: MemoryType,
-            _importance: f64, tags: &[String], _source_type: &str, _project_path: &str,
+            &self,
+            content: &str,
+            _title: &str,
+            _memory_type: MemoryType,
+            _importance: f64,
+            tags: &[String],
+            _source_type: &str,
+            _project_path: &str,
         ) -> Result<String, MemoryError> {
-            self.stored.lock().unwrap().push((content.to_string(), tags.to_vec()));
+            self.stored
+                .lock()
+                .unwrap()
+                .push((content.to_string(), tags.to_vec()));
             Ok("mock-id".to_string())
         }
         fn get_memory(&self, _id: &str) -> Result<Memory, MemoryError> {
             Err(MemoryError::NotFound("mock".into()))
         }
-        fn update_memory(&self, _id: &str, _content: Option<&str>, _tags: Option<&[String]>) -> Result<(), MemoryError> { Ok(()) }
-        fn update_importance(&self, _id: &str, _importance: f64) -> Result<(), MemoryError> { Ok(()) }
-        fn delete_memory(&self, _id: &str) -> Result<(), MemoryError> { Ok(()) }
-        fn create_relationship(&self, _from: &str, _to: &str, _rel: RelType, _ctx: Option<&str>, _str: f64) -> Result<(), MemoryError> { Ok(()) }
-        fn recall_memories(&self, _query: &str, _limit: usize) -> Result<Vec<Memory>, MemoryError> { Ok(vec![]) }
-        fn search_memories(&self, _filter: &SearchFilter) -> Result<Vec<Memory>, MemoryError> { Ok(vec![]) }
-        fn list_recent(&self, _limit: usize) -> Result<Vec<Memory>, MemoryError> { Ok(vec![]) }
-        fn memory_count(&self) -> Result<usize, MemoryError> { Ok(0) }
-        fn clear_all(&self) -> Result<usize, MemoryError> { Ok(0) }
-        fn get_related_memories(&self, _id: &str, _depth: u32) -> Result<Vec<Memory>, MemoryError> { Ok(vec![]) }
+        fn update_memory(
+            &self,
+            _id: &str,
+            _content: Option<&str>,
+            _tags: Option<&[String]>,
+        ) -> Result<(), MemoryError> {
+            Ok(())
+        }
+        fn update_importance(&self, _id: &str, _importance: f64) -> Result<(), MemoryError> {
+            Ok(())
+        }
+        fn delete_memory(&self, _id: &str) -> Result<(), MemoryError> {
+            Ok(())
+        }
+        fn create_relationship(
+            &self,
+            _from: &str,
+            _to: &str,
+            _rel: RelType,
+            _ctx: Option<&str>,
+            _str: f64,
+        ) -> Result<(), MemoryError> {
+            Ok(())
+        }
+        fn recall_memories(&self, _query: &str, _limit: usize) -> Result<Vec<Memory>, MemoryError> {
+            Ok(vec![])
+        }
+        fn search_memories(&self, _filter: &SearchFilter) -> Result<Vec<Memory>, MemoryError> {
+            Ok(vec![])
+        }
+        fn list_recent(&self, _limit: usize) -> Result<Vec<Memory>, MemoryError> {
+            Ok(vec![])
+        }
+        fn memory_count(&self) -> Result<usize, MemoryError> {
+            Ok(0)
+        }
+        fn clear_all(&self) -> Result<usize, MemoryError> {
+            Ok(0)
+        }
+        fn get_related_memories(&self, _id: &str, _depth: u32) -> Result<Vec<Memory>, MemoryError> {
+            Ok(vec![])
+        }
     }
 
     #[test]
@@ -614,7 +690,12 @@ mod tests {
     fn load_agent_memory_null_memory_returns_empty() {
         let memory = NullMemory;
         let queries = vec!["test query".to_string()];
-        let results = load_agent_memory("test-agent", &queries, &memory, Some(&AgentMemoryScope::User));
+        let results = load_agent_memory(
+            "test-agent",
+            &queries,
+            &memory,
+            Some(&AgentMemoryScope::User),
+        );
         assert!(results.is_empty());
     }
 
@@ -623,7 +704,10 @@ mod tests {
         let memory = NullMemory;
         let queries = vec!["test query".to_string()];
         let results = load_agent_memory("test-agent", &queries, &memory, None);
-        assert!(results.is_empty(), "AC-101: None scope = no persistent memory");
+        assert!(
+            results.is_empty(),
+            "AC-101: None scope = no persistent memory"
+        );
     }
 
     #[test]
@@ -725,21 +809,30 @@ mod tests {
     fn get_agent_memory_dir_project_scope() {
         let cwd = Path::new("/tmp/project");
         let dir = get_agent_memory_dir("code-reviewer", &AgentMemoryScope::Project, cwd);
-        assert_eq!(dir, PathBuf::from("/tmp/project/.archon/agent-memory/code-reviewer"));
+        assert_eq!(
+            dir,
+            PathBuf::from("/tmp/project/.archon/agent-memory/code-reviewer")
+        );
     }
 
     #[test]
     fn get_agent_memory_dir_local_scope() {
         let cwd = Path::new("/tmp/project");
         let dir = get_agent_memory_dir("code-reviewer", &AgentMemoryScope::Local, cwd);
-        assert_eq!(dir, PathBuf::from("/tmp/project/.archon/agent-memory-local/code-reviewer"));
+        assert_eq!(
+            dir,
+            PathBuf::from("/tmp/project/.archon/agent-memory-local/code-reviewer")
+        );
     }
 
     #[test]
     fn get_agent_memory_dir_sanitizes_colons() {
         let cwd = Path::new("/tmp/project");
         let dir = get_agent_memory_dir("plugin:my-agent", &AgentMemoryScope::Project, cwd);
-        assert_eq!(dir, PathBuf::from("/tmp/project/.archon/agent-memory/plugin-my-agent"));
+        assert_eq!(
+            dir,
+            PathBuf::from("/tmp/project/.archon/agent-memory/plugin-my-agent")
+        );
     }
 
     #[tokio::test]
@@ -778,7 +871,10 @@ mod tests {
 
     #[test]
     fn truncate_line_limit_fires() {
-        let content = (0..10).map(|i| format!("line {i}")).collect::<Vec<_>>().join("\n");
+        let content = (0..10)
+            .map(|i| format!("line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
         let result = truncate_entrypoint_content(&content, 5, 25_000);
         assert!(result.contains("WARNING"));
         assert!(result.contains("10 lines"));
@@ -799,7 +895,10 @@ mod tests {
 
     #[test]
     fn truncate_both_limits_fire() {
-        let content = (0..300).map(|i| format!("line {i} with some extra padding text")).collect::<Vec<_>>().join("\n");
+        let content = (0..300)
+            .map(|i| format!("line {i} with some extra padding text"))
+            .collect::<Vec<_>>()
+            .join("\n");
         let result = truncate_entrypoint_content(&content, 200, 500);
         assert!(result.contains("WARNING"));
         assert!(result.contains("lines and"));
@@ -816,14 +915,29 @@ mod tests {
         // Header
         assert!(prompt.contains("# auto memory"), "must have header");
         // Dir path
-        assert!(prompt.contains("/tmp/.archon/agent-memory/test-agent"), "must have dir path");
+        assert!(
+            prompt.contains("/tmp/.archon/agent-memory/test-agent"),
+            "must have dir path"
+        );
         // Scope guidance
-        assert!(prompt.contains("Project-scoped memories."), "must have scope guidance");
+        assert!(
+            prompt.contains("Project-scoped memories."),
+            "must have scope guidance"
+        );
         // 4 memory types
         assert!(prompt.contains("<name>user</name>"), "must have user type");
-        assert!(prompt.contains("<name>feedback</name>"), "must have feedback type");
-        assert!(prompt.contains("<name>project</name>"), "must have project type");
-        assert!(prompt.contains("<name>reference</name>"), "must have reference type");
+        assert!(
+            prompt.contains("<name>feedback</name>"),
+            "must have feedback type"
+        );
+        assert!(
+            prompt.contains("<name>project</name>"),
+            "must have project type"
+        );
+        assert!(
+            prompt.contains("<name>reference</name>"),
+            "must have reference type"
+        );
         // What not to save
         assert!(prompt.contains("What NOT to save"), "must have exclusions");
         // How to save (2-step)
@@ -837,9 +951,15 @@ mod tests {
         // When to access
         assert!(prompt.contains("When to access"), "must have access rules");
         // Before recommending
-        assert!(prompt.contains("Before recommending"), "must have verification rules");
+        assert!(
+            prompt.contains("Before recommending"),
+            "must have verification rules"
+        );
         // Existing content
-        assert!(prompt.contains("- [Role](role.md)"), "must include existing content");
+        assert!(
+            prompt.contains("- [Role](role.md)"),
+            "must include existing content"
+        );
     }
 
     #[test]
@@ -860,11 +980,8 @@ mod tests {
     #[tokio::test]
     async fn load_prompt_with_scope_returns_some() {
         let tmp = tempfile::tempdir().unwrap();
-        let result = load_agent_memory_prompt(
-            "test-agent",
-            Some(&AgentMemoryScope::Project),
-            tmp.path(),
-        );
+        let result =
+            load_agent_memory_prompt("test-agent", Some(&AgentMemoryScope::Project), tmp.path());
         assert!(result.is_some(), "should return prompt for valid scope");
         let prompt = result.unwrap();
         assert!(prompt.contains("# auto memory"));
@@ -879,14 +996,16 @@ mod tests {
         std::fs::write(
             memory_dir.join("MEMORY.md"),
             "- [Pref](pref.md) — prefers short responses",
-        ).unwrap();
+        )
+        .unwrap();
 
-        let prompt = load_agent_memory_prompt(
-            "test-agent",
-            Some(&AgentMemoryScope::Project),
-            tmp.path(),
-        ).unwrap();
-        assert!(prompt.contains("prefers short responses"), "must include existing MEMORY.md content");
+        let prompt =
+            load_agent_memory_prompt("test-agent", Some(&AgentMemoryScope::Project), tmp.path())
+                .unwrap();
+        assert!(
+            prompt.contains("prefers short responses"),
+            "must include existing MEMORY.md content"
+        );
     }
 
     // --- has_memory_writes_since tests ---

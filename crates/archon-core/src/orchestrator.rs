@@ -101,7 +101,13 @@ impl SubtaskExecutor for RealSubtaskExecutor {
             ..AgentConfig::default()
         };
 
-        let mut agent = Agent::new(self.provider.clone(), registry, config, event_tx, self.agent_registry.clone());
+        let mut agent = Agent::new(
+            self.provider.clone(),
+            registry,
+            config,
+            event_tx,
+            self.agent_registry.clone(),
+        );
 
         // Collect text output in a background task
         let output = Arc::new(Mutex::new(String::new()));

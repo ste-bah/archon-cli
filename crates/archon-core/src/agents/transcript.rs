@@ -154,10 +154,7 @@ pub struct ResumeContext {
 ///
 /// Returns `None` if the transcript is missing or empty.
 /// Falls back to `"general-purpose"` if metadata is missing or has no agent_type.
-pub fn load_resume_context(
-    store: &AgentTranscriptStore,
-    agent_id: &str,
-) -> Option<ResumeContext> {
+pub fn load_resume_context(store: &AgentTranscriptStore, agent_id: &str) -> Option<ResumeContext> {
     let messages = store.get_transcript(agent_id)?;
     let metadata = store.read_metadata(agent_id);
 
@@ -291,8 +288,14 @@ mod tests {
     #[test]
     fn multiple_agents_separate_transcripts() {
         let (store, _tmp) = test_store();
-        store.record_message("agent-a", &serde_json::json!({"role": "user", "content": "a"}));
-        store.record_message("agent-b", &serde_json::json!({"role": "user", "content": "b"}));
+        store.record_message(
+            "agent-a",
+            &serde_json::json!({"role": "user", "content": "a"}),
+        );
+        store.record_message(
+            "agent-b",
+            &serde_json::json!({"role": "user", "content": "b"}),
+        );
 
         let ta = store.get_transcript("agent-a").unwrap();
         let tb = store.get_transcript("agent-b").unwrap();
@@ -328,8 +331,14 @@ mod tests {
             filename: None,
         };
         store.write_metadata("resume-1", &meta);
-        store.record_message("resume-1", &serde_json::json!({"role": "user", "content": "hi"}));
-        store.record_message("resume-1", &serde_json::json!({"role": "assistant", "content": "hello"}));
+        store.record_message(
+            "resume-1",
+            &serde_json::json!({"role": "user", "content": "hi"}),
+        );
+        store.record_message(
+            "resume-1",
+            &serde_json::json!({"role": "assistant", "content": "hello"}),
+        );
 
         let ctx = load_resume_context(&store, "resume-1").unwrap();
         assert_eq!(ctx.agent_type, "explore");
@@ -341,7 +350,10 @@ mod tests {
     fn resume_context_falls_back_to_general_purpose() {
         let (store, _tmp) = test_store();
         // No metadata written — just a transcript
-        store.record_message("resume-2", &serde_json::json!({"role": "user", "content": "x"}));
+        store.record_message(
+            "resume-2",
+            &serde_json::json!({"role": "user", "content": "x"}),
+        );
 
         let ctx = load_resume_context(&store, "resume-2").unwrap();
         assert_eq!(ctx.agent_type, "general-purpose");
@@ -363,7 +375,10 @@ mod tests {
             filename: None,
         };
         store.write_metadata("resume-3", &meta);
-        store.record_message("resume-3", &serde_json::json!({"role": "user", "content": "test"}));
+        store.record_message(
+            "resume-3",
+            &serde_json::json!({"role": "user", "content": "test"}),
+        );
 
         let ctx = load_resume_context(&store, "resume-3").unwrap();
         assert_eq!(ctx.agent_type, "plan");

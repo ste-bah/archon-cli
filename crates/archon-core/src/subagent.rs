@@ -236,15 +236,14 @@ impl SubagentManager {
     /// Drain all pending messages for an agent (take + clear).
     /// Returns empty vec if no messages queued.
     pub fn drain_pending_messages(&mut self, agent_id: &str) -> Vec<String> {
-        self.pending_messages
-            .remove(agent_id)
-            .unwrap_or_default()
+        self.pending_messages.remove(agent_id).unwrap_or_default()
     }
 
     /// Request graceful shutdown of a running agent.
     pub fn request_shutdown(&self, agent_id: &str) -> bool {
         if let Some(info) = self.agents.get(agent_id) {
-            info.shutdown_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+            info.shutdown_flag
+                .store(true, std::sync::atomic::Ordering::Relaxed);
             true
         } else {
             false
@@ -252,8 +251,13 @@ impl SubagentManager {
     }
 
     /// Get a clone of the shutdown flag for a registered agent.
-    pub fn get_shutdown_flag(&self, agent_id: &str) -> Option<std::sync::Arc<std::sync::atomic::AtomicBool>> {
-        self.agents.get(agent_id).map(|info| std::sync::Arc::clone(&info.shutdown_flag))
+    pub fn get_shutdown_flag(
+        &self,
+        agent_id: &str,
+    ) -> Option<std::sync::Arc<std::sync::atomic::AtomicBool>> {
+        self.agents
+            .get(agent_id)
+            .map(|info| std::sync::Arc::clone(&info.shutdown_flag))
     }
 
     /// Clean up all state for an agent on completion:
@@ -437,7 +441,8 @@ pub mod runner {
             const MAX_CONTEXT_CHARS: usize = 600_000;
             const PRESERVE_RECENT_TURNS: usize = 3;
 
-            let total_chars: usize = messages.iter()
+            let total_chars: usize = messages
+                .iter()
                 .map(|m| serde_json::to_string(m).map(|s| s.len()).unwrap_or(0))
                 .sum();
 
@@ -464,33 +469,37 @@ pub mod runner {
             }
 
             messages.drain(1..keep_from);
-            messages.insert(1, serde_json::json!({
-                "role": "user",
-                "content": "[Earlier conversation was truncated to fit context window]"
-            }));
+            messages.insert(
+                1,
+                serde_json::json!({
+                    "role": "user",
+                    "content": "[Earlier conversation was truncated to fit context window]"
+                }),
+            );
         }
 
         /// Run the subagent loop with the given initial prompt.
         /// Returns the accumulated text output from the final turn.
         pub async fn run(&self, initial_prompt: &str) -> anyhow::Result<String> {
             // AGT-024: Use initial_messages for resume, or start fresh
-            let mut messages: Vec<serde_json::Value> = if let Some(ref initial) = self.initial_messages {
-                let mut msgs = initial.clone();
-                let user_msg = serde_json::json!({
-                    "role": "user",
-                    "content": initial_prompt,
-                });
-                self.record_transcript(&user_msg);
-                msgs.push(user_msg);
-                msgs
-            } else {
-                let user_msg = serde_json::json!({
-                    "role": "user",
-                    "content": initial_prompt,
-                });
-                self.record_transcript(&user_msg);
-                vec![user_msg]
-            };
+            let mut messages: Vec<serde_json::Value> =
+                if let Some(ref initial) = self.initial_messages {
+                    let mut msgs = initial.clone();
+                    let user_msg = serde_json::json!({
+                        "role": "user",
+                        "content": initial_prompt,
+                    });
+                    self.record_transcript(&user_msg);
+                    msgs.push(user_msg);
+                    msgs
+                } else {
+                    let user_msg = serde_json::json!({
+                        "role": "user",
+                        "content": initial_prompt,
+                    });
+                    self.record_transcript(&user_msg);
+                    vec![user_msg]
+                };
 
             let deadline = Instant::now() + Duration::from_secs(self.timeout_secs);
 
@@ -501,7 +510,10 @@ pub mod runner {
                 }
 
                 // Check for graceful shutdown request
-                if self.shutdown_flag.load(std::sync::atomic::Ordering::Relaxed) {
+                if self
+                    .shutdown_flag
+                    .load(std::sync::atomic::Ordering::Relaxed)
+                {
                     return Ok("[Agent shutdown requested]".to_string());
                 }
 
@@ -531,7 +543,10 @@ pub mod runner {
                 };
 
                 // Stream the response
-                let mut rx = self.provider.stream(request).await
+                let mut rx = self
+                    .provider
+                    .stream(request)
+                    .await
                     .map_err(|e| anyhow::anyhow!("LLM stream error: {e}"))?;
 
                 let mut text_content = String::new();
@@ -558,7 +573,10 @@ pub mod runner {
                         StreamEvent::TextDelta { text, .. } => {
                             text_content.push_str(&text);
                         }
-                        StreamEvent::InputJsonDelta { index, partial_json } => {
+                        StreamEvent::InputJsonDelta {
+                            index,
+                            partial_json,
+                        } => {
                             if Some(index) == current_tool_index {
                                 if let Some(tool) = pending_tools.last_mut() {
                                     tool.input_json.push_str(&partial_json);
@@ -568,7 +586,10 @@ pub mod runner {
                         StreamEvent::ContentBlockStop { .. } => {
                             current_tool_index = None;
                         }
-                        StreamEvent::Error { error_type, message } => {
+                        StreamEvent::Error {
+                            error_type,
+                            message,
+                        } => {
                             anyhow::bail!("LLM error: {error_type}: {message}");
                         }
                         _ => {} // MessageStart, MessageDelta, MessageStop, Ping, etc.
@@ -596,8 +617,8 @@ pub mod runner {
                     }));
                 }
                 for tool in &pending_tools {
-                    let input: serde_json::Value = serde_json::from_str(&tool.input_json)
-                        .unwrap_or(serde_json::json!({}));
+                    let input: serde_json::Value =
+                        serde_json::from_str(&tool.input_json).unwrap_or(serde_json::json!({}));
                     assistant_content.push(serde_json::json!({
                         "type": "tool_use",
                         "id": tool.id,
@@ -615,10 +636,13 @@ pub mod runner {
                 // Dispatch each tool call
                 let mut tool_results: Vec<serde_json::Value> = Vec::new();
                 for tool in &pending_tools {
-                    let input: serde_json::Value = serde_json::from_str(&tool.input_json)
-                        .unwrap_or(serde_json::json!({}));
+                    let input: serde_json::Value =
+                        serde_json::from_str(&tool.input_json).unwrap_or(serde_json::json!({}));
 
-                    let result = self.registry.dispatch(&tool.name, input, &self.tool_context).await;
+                    let result = self
+                        .registry
+                        .dispatch(&tool.name, input, &self.tool_context)
+                        .await;
                     tool_results.push(serde_json::json!({
                         "type": "tool_result",
                         "tool_use_id": tool.id,
@@ -676,11 +700,21 @@ pub mod runner {
 
         #[async_trait::async_trait]
         impl LlmProvider for MockProvider {
-            fn name(&self) -> &str { "mock" }
-            fn models(&self) -> Vec<ModelInfo> { vec![] }
-            fn supports_feature(&self, _: ProviderFeature) -> bool { false }
+            fn name(&self) -> &str {
+                "mock"
+            }
+            fn models(&self) -> Vec<ModelInfo> {
+                vec![]
+            }
+            fn supports_feature(&self, _: ProviderFeature) -> bool {
+                false
+            }
 
-            async fn stream(&self, _request: LlmRequest) -> Result<tokio::sync::mpsc::Receiver<StreamEvent>, archon_llm::provider::LlmError> {
+            async fn stream(
+                &self,
+                _request: LlmRequest,
+            ) -> Result<tokio::sync::mpsc::Receiver<StreamEvent>, archon_llm::provider::LlmError>
+            {
                 let idx = self.call_count.fetch_add(1, Ordering::SeqCst) as usize;
                 let events = {
                     let mut responses = self.responses.lock().unwrap();
@@ -691,7 +725,12 @@ pub mod runner {
                             StreamEvent::MessageStart {
                                 id: "msg-end".into(),
                                 model: "mock".into(),
-                                usage: Usage { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+                                usage: Usage {
+                                    input_tokens: 0,
+                                    output_tokens: 0,
+                                    cache_creation_input_tokens: 0,
+                                    cache_read_input_tokens: 0,
+                                },
                             },
                             StreamEvent::ContentBlockStart {
                                 index: 0,
@@ -699,7 +738,10 @@ pub mod runner {
                                 tool_use_id: None,
                                 tool_name: None,
                             },
-                            StreamEvent::TextDelta { index: 0, text: "(done)".into() },
+                            StreamEvent::TextDelta {
+                                index: 0,
+                                text: "(done)".into(),
+                            },
                             StreamEvent::ContentBlockStop { index: 0 },
                             StreamEvent::MessageStop,
                         ]
@@ -713,7 +755,10 @@ pub mod runner {
                 Ok(rx)
             }
 
-            async fn complete(&self, _request: LlmRequest) -> Result<LlmResponse, archon_llm::provider::LlmError> {
+            async fn complete(
+                &self,
+                _request: LlmRequest,
+            ) -> Result<LlmResponse, archon_llm::provider::LlmError> {
                 unimplemented!()
             }
         }
@@ -723,7 +768,12 @@ pub mod runner {
                 StreamEvent::MessageStart {
                     id: "msg-1".into(),
                     model: "mock".into(),
-                    usage: Usage { input_tokens: 10, output_tokens: 5, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+                    usage: Usage {
+                        input_tokens: 10,
+                        output_tokens: 5,
+                        cache_creation_input_tokens: 0,
+                        cache_read_input_tokens: 0,
+                    },
                 },
                 StreamEvent::ContentBlockStart {
                     index: 0,
@@ -745,7 +795,12 @@ pub mod runner {
                 StreamEvent::MessageStart {
                     id: "msg-tool".into(),
                     model: "mock".into(),
-                    usage: Usage { input_tokens: 10, output_tokens: 20, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+                    usage: Usage {
+                        input_tokens: 10,
+                        output_tokens: 20,
+                        cache_creation_input_tokens: 0,
+                        cache_read_input_tokens: 0,
+                    },
                 },
                 StreamEvent::ContentBlockStart {
                     index: 0,
@@ -787,9 +842,9 @@ pub mod runner {
 
         #[tokio::test]
         async fn text_only_returns_immediately() {
-            let provider = Arc::new(MockProvider::new(vec![
-                text_response("Hello from subagent"),
-            ]));
+            let provider = Arc::new(MockProvider::new(vec![text_response(
+                "Hello from subagent",
+            )]));
             let runner = make_runner(provider.clone(), 10);
             let result = runner.run("Say hello").await.unwrap();
             assert_eq!(result, "Hello from subagent");
@@ -826,12 +881,10 @@ pub mod runner {
 
         #[tokio::test]
         async fn api_error_propagated() {
-            let provider = Arc::new(MockProvider::new(vec![
-                vec![StreamEvent::Error {
-                    error_type: "server_error".into(),
-                    message: "internal failure".into(),
-                }],
-            ]));
+            let provider = Arc::new(MockProvider::new(vec![vec![StreamEvent::Error {
+                error_type: "server_error".into(),
+                message: "internal failure".into(),
+            }]]));
             let runner = make_runner(provider, 10);
             let err = runner.run("trigger error").await.unwrap_err();
             assert!(err.to_string().contains("internal failure"));
@@ -840,9 +893,7 @@ pub mod runner {
         #[tokio::test]
         async fn isolated_messages() {
             // Verify that each run starts with fresh messages
-            let provider = Arc::new(MockProvider::new(vec![
-                text_response("First run"),
-            ]));
+            let provider = Arc::new(MockProvider::new(vec![text_response("First run")]));
             let runner = make_runner(provider.clone(), 10);
             let r1 = runner.run("First prompt").await.unwrap();
             assert_eq!(r1, "First run");
@@ -866,9 +917,7 @@ pub mod runner {
 
         #[tokio::test]
         async fn empty_tool_definitions_still_works() {
-            let provider = Arc::new(MockProvider::new(vec![
-                text_response("No tools needed"),
-            ]));
+            let provider = Arc::new(MockProvider::new(vec![text_response("No tools needed")]));
             let registry = crate::dispatch::create_default_registry(
                 std::env::current_dir().unwrap_or_default(),
             );
@@ -910,10 +959,14 @@ pub mod runner {
             }
 
             // Should be over 600k chars
-            let total: usize = messages.iter()
+            let total: usize = messages
+                .iter()
                 .map(|m| serde_json::to_string(m).unwrap().len())
                 .sum();
-            assert!(total > 600_000, "test setup: messages should exceed threshold");
+            assert!(
+                total > 600_000,
+                "test setup: messages should exceed threshold"
+            );
 
             SubagentRunner::snip_context_if_needed(&mut messages);
 
@@ -923,7 +976,12 @@ pub mod runner {
 
             // Truncation notice at index 1
             assert_eq!(messages[1]["role"], "user");
-            assert!(messages[1]["content"].as_str().unwrap().contains("truncated"));
+            assert!(
+                messages[1]["content"]
+                    .as_str()
+                    .unwrap()
+                    .contains("truncated")
+            );
 
             // Remaining messages should be assistant/user pairs
             for chunk in messages[2..].chunks(2) {
@@ -1072,41 +1130,61 @@ mod tests {
 
     #[test]
     fn auto_background_disabled_by_default() {
-        unsafe { std::env::remove_var("ARCHON_AUTO_BACKGROUND_TASKS"); }
+        unsafe {
+            std::env::remove_var("ARCHON_AUTO_BACKGROUND_TASKS");
+        }
         assert!(!super::is_auto_background_enabled());
         assert_eq!(super::get_auto_background_ms(), 0);
     }
 
     #[test]
     fn auto_background_enabled_with_1() {
-        unsafe { std::env::set_var("ARCHON_AUTO_BACKGROUND_TASKS", "1"); }
+        unsafe {
+            std::env::set_var("ARCHON_AUTO_BACKGROUND_TASKS", "1");
+        }
         assert!(super::is_auto_background_enabled());
         assert_eq!(super::get_auto_background_ms(), 120_000);
-        unsafe { std::env::remove_var("ARCHON_AUTO_BACKGROUND_TASKS"); }
+        unsafe {
+            std::env::remove_var("ARCHON_AUTO_BACKGROUND_TASKS");
+        }
     }
 
     #[test]
     fn auto_background_enabled_with_true() {
-        unsafe { std::env::set_var("ARCHON_AUTO_BACKGROUND_TASKS", "true"); }
+        unsafe {
+            std::env::set_var("ARCHON_AUTO_BACKGROUND_TASKS", "true");
+        }
         assert!(super::is_auto_background_enabled());
-        unsafe { std::env::remove_var("ARCHON_AUTO_BACKGROUND_TASKS"); }
+        unsafe {
+            std::env::remove_var("ARCHON_AUTO_BACKGROUND_TASKS");
+        }
     }
 
     #[test]
     fn auto_background_disabled_for_zero() {
-        unsafe { std::env::set_var("ARCHON_AUTO_BACKGROUND_TASKS", "0"); }
+        unsafe {
+            std::env::set_var("ARCHON_AUTO_BACKGROUND_TASKS", "0");
+        }
         assert!(!super::is_auto_background_enabled());
         assert_eq!(super::get_auto_background_ms(), 0);
-        unsafe { std::env::remove_var("ARCHON_AUTO_BACKGROUND_TASKS"); }
+        unsafe {
+            std::env::remove_var("ARCHON_AUTO_BACKGROUND_TASKS");
+        }
     }
 
     #[test]
     fn auto_background_case_insensitive() {
-        unsafe { std::env::set_var("ARCHON_AUTO_BACKGROUND_TASKS", "TRUE"); }
+        unsafe {
+            std::env::set_var("ARCHON_AUTO_BACKGROUND_TASKS", "TRUE");
+        }
         assert!(super::is_auto_background_enabled());
-        unsafe { std::env::set_var("ARCHON_AUTO_BACKGROUND_TASKS", "True"); }
+        unsafe {
+            std::env::set_var("ARCHON_AUTO_BACKGROUND_TASKS", "True");
+        }
         assert!(super::is_auto_background_enabled());
-        unsafe { std::env::remove_var("ARCHON_AUTO_BACKGROUND_TASKS"); }
+        unsafe {
+            std::env::remove_var("ARCHON_AUTO_BACKGROUND_TASKS");
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -1237,7 +1315,10 @@ mod tests {
         mgr.cleanup_agent(&id);
 
         let drained = mgr.drain_pending_messages(&id);
-        assert!(drained.is_empty(), "pending messages should be lost on cleanup");
+        assert!(
+            drained.is_empty(),
+            "pending messages should be lost on cleanup"
+        );
     }
 
     #[test]

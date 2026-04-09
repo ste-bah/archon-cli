@@ -42,10 +42,13 @@ async fn send_message_to_named_agent_queues_and_drains() {
         "summary": "Review parser module"
     });
     let result = tool.execute(input, &ctx()).await;
-    assert!(!result.is_error, "tool validation failed: {}", result.content);
+    assert!(
+        !result.is_error,
+        "tool validation failed: {}",
+        result.content
+    );
 
-    let request: SendMessageRequest =
-        serde_json::from_str(&result.content).expect("valid JSON");
+    let request: SendMessageRequest = serde_json::from_str(&result.content).expect("valid JSON");
     assert_eq!(request.to, "code-reviewer");
 
     // 2. SubagentManager resolves name and queues message

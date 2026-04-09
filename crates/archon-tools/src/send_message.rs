@@ -237,7 +237,10 @@ mod tests {
         let tool = SendMessageTool;
         let schema = tool.input_schema();
         let props = schema["properties"].as_object().unwrap();
-        assert!(props.contains_key("summary"), "schema must define summary property");
+        assert!(
+            props.contains_key("summary"),
+            "schema must define summary property"
+        );
         assert_eq!(props["summary"]["type"], "string");
     }
 
@@ -400,7 +403,10 @@ mod tests {
         });
 
         let result = tool.execute(input, &make_ctx()).await;
-        assert!(result.is_error, "whitespace-only summary should be an error");
+        assert!(
+            result.is_error,
+            "whitespace-only summary should be an error"
+        );
         assert!(
             result.content.contains("summary"),
             "error should mention summary: {}",
@@ -439,7 +445,10 @@ mod tests {
         });
 
         let result = tool.execute(input, &ctx).await;
-        assert!(result.is_error, "parent session targeting should be rejected");
+        assert!(
+            result.is_error,
+            "parent session targeting should be rejected"
+        );
         assert!(
             result.content.contains("parent") || result.content.contains("main"),
             "error should mention parent/main: {}",
@@ -474,7 +483,9 @@ mod tests {
 
     #[test]
     fn is_valid_agent_id_accepts_structured_id() {
-        assert!(is_valid_agent_id("agent-550e8400-e29b-41d4-a716-446655440000"));
+        assert!(is_valid_agent_id(
+            "agent-550e8400-e29b-41d4-a716-446655440000"
+        ));
     }
 
     #[test]

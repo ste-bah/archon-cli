@@ -67,18 +67,22 @@ impl AgentTool {
     /// Create an AgentTool with default description (no agent listing).
     pub fn new() -> Self {
         Self {
-            description: "Spawn a subagent to handle a complex task autonomously. Returns a SubagentRequest \
+            description:
+                "Spawn a subagent to handle a complex task autonomously. Returns a SubagentRequest \
                 for the agent loop to execute. The subagent runs with its own conversation and \
-                tool set.".into(),
+                tool set."
+                    .into(),
         }
     }
 
     /// Create an AgentTool with an injected agent listing.
     /// The listing is appended to the description so the LLM knows valid subagent_type values.
     pub fn with_agent_listing(agents: &[(String, String)]) -> Self {
-        let mut desc = "Spawn a subagent to handle a complex task autonomously. Returns a SubagentRequest \
+        let mut desc =
+            "Spawn a subagent to handle a complex task autonomously. Returns a SubagentRequest \
             for the agent loop to execute. The subagent runs with its own conversation and \
-            tool set.".to_string();
+            tool set."
+                .to_string();
 
         if !agents.is_empty() {
             desc.push_str("\n\nAvailable agents: ");

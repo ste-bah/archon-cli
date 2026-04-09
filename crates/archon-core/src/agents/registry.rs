@@ -5,7 +5,7 @@ use tracing::debug;
 
 use super::built_in::get_built_in_agents;
 use super::definition::{AgentSource, CustomAgentDefinition};
-use super::loader::{load_custom_agents, AgentLoadError};
+use super::loader::{AgentLoadError, load_custom_agents};
 
 // ---------------------------------------------------------------------------
 // AgentRegistry
@@ -134,9 +134,7 @@ impl AgentRegistry {
     pub fn color_map(&self) -> HashMap<String, String> {
         self.agents
             .iter()
-            .filter_map(|(name, def)| {
-                def.color.as_ref().map(|c| (name.clone(), c.clone()))
-            })
+            .filter_map(|(name, def)| def.color.as_ref().map(|c| (name.clone(), c.clone())))
             .collect()
     }
 }
@@ -310,7 +308,10 @@ mod tests {
         let project_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let custom_dir = project_root.join(".archon/agents/custom");
         if !custom_dir.exists() {
-            eprintln!("Skipping: .archon/agents/custom/ not found at {:?}", custom_dir);
+            eprintln!(
+                "Skipping: .archon/agents/custom/ not found at {:?}",
+                custom_dir
+            );
             return;
         }
 
