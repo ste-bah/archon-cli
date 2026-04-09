@@ -1024,7 +1024,13 @@ mod tests {
         let output = skill.execute(&["security".into(), "scanner".into()], &ctx);
         match output {
             SkillOutput::Prompt(p) => {
-                assert!(p.contains("/home/user/project/.archon/agents/custom/security-scanner"));
+                // Normalize to forward slashes for cross-platform comparison
+                let normalized = p.replace('\\', "/");
+                assert!(
+                    normalized
+                        .contains("/home/user/project/.archon/agents/custom/security-scanner"),
+                    "prompt did not contain expected path: {p}"
+                );
             }
             other => panic!("expected Prompt, got: {:?}", other),
         }
