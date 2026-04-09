@@ -1195,6 +1195,20 @@ impl Agent {
                     let result = if !result.is_error && pre.tool_name == "SendMessage" {
                         match serde_json::from_str::<SendMessageRequest>(&result.content) {
                             Ok(req) => {
+                                // Handle structured message types
+                                if req.message_type == "shutdown_request" {
+                                    let mgr = self.subagent_manager.lock().await;
+                                    // Try by name first, then by raw ID
+                                    let target_id = mgr.resolve_name(&req.to)
+                                        .map(|s| s.to_string())
+                                        .unwrap_or_else(|| req.to.clone());
+                                    if mgr.request_shutdown(&target_id) {
+                                        ToolResult::success(format!("Shutdown requested for agent '{}'", req.to))
+                                    } else {
+                                        ToolResult::error(format!("Agent '{}' not found or not running", req.to))
+                                    }
+                                } else {
+
                                 // AGT-026: Resolve target via name registry, then format validation
                                 let (agent_id, is_running) = {
                                     let mgr = self.subagent_manager.lock().await;
@@ -1280,6 +1294,7 @@ impl Agent {
                                         }
                                     }
                                 }
+                                } // else (non-shutdown message types)
                             }
                             Err(e) => ToolResult::error(format!(
                                 "Failed to parse SendMessage result: {e}"
@@ -2416,13 +2431,46 @@ impl Agent {
             None
         };
 
-        let system_prompt = resolved_def.as_ref()
-            .map(|d| d.system_prompt.clone())
-            .unwrap_or_else(|| {
-                request.subagent_type.as_ref()
-                    .map(|t| format!("You are a '{}' subagent. Complete the task described in the user message. Be thorough and precise.", t))
-                    .unwrap_or_else(|| "You are a subagent. Complete the task described in the user message. Be thorough and precise.".into())
-            });
+        let system_prompt = {
+            let base_prompt = resolved_def.as_ref()
+                .map(|d| d.system_prompt.clone())
+                .unwrap_or_else(|| {
+                    request.subagent_type.as_ref()
+                        .map(|t| format!("You are a '{}' subagent. Complete the task described in the user message. Be thorough and precise.", t))
+                        .unwrap_or_else(|| "You are a subagent. Complete the task described in the user message. Be thorough and precise.".into())
+                });
+
+            // Fork agent inherits parent system prompt for context parity.
+            // Extract text from parent's Vec<serde_json::Value> system blocks,
+            // truncate to 50KB, prepend to fork's own prompt.
+            // Skip ARCHON.md/memory sections since fork gets those through its own
+            // resolution path at lines below.
+            let is_fork = resolved_def.as_ref().map(|d| d.agent_type == "fork").unwrap_or(false);
+            if is_fork {
+                const MAX_PARENT_PROMPT_BYTES: usize = 50_000;
+                let parent_text: String = self.config.system_prompt.iter()
+                    .filter_map(|block| block.get("text").and_then(|t| t.as_str()))
+                    .collect::<Vec<_>>()
+                    .join("\n\n");
+                if parent_text.is_empty() {
+                    base_prompt
+                } else {
+                    let truncated = if parent_text.len() > MAX_PARENT_PROMPT_BYTES {
+                        let cut = parent_text.char_indices()
+                            .map(|(i, _)| i)
+                            .take_while(|&i| i <= MAX_PARENT_PROMPT_BYTES)
+                            .last()
+                            .unwrap_or(0);
+                        format!("{}...[truncated]", &parent_text[..cut])
+                    } else {
+                        parent_text
+                    };
+                    format!("<parent-context>\n{truncated}\n</parent-context>\n\n{base_prompt}")
+                }
+            } else {
+                base_prompt
+            }
+        };
 
         // Prepend ARCHON.md content when omit_claude_md is false (default)
         let omit_claude_md = resolved_def.as_ref().map(|d| d.omit_claude_md).unwrap_or(false);
@@ -2578,6 +2626,21 @@ impl Agent {
             system_prompt
         };
 
+        // Inject file-based memory prompt (MEMORY.md) if agent has memory_scope
+        let system_prompt = if let Some(ref def) = resolved_def {
+            if let Some(memory_prompt) = crate::agents::memory::load_agent_memory_prompt(
+                &def.agent_type,
+                def.memory_scope.as_ref(),
+                &self.config.working_dir,
+            ) {
+                format!("{system_prompt}\n\n{memory_prompt}")
+            } else {
+                system_prompt
+            }
+        } else {
+            system_prompt
+        };
+
         // Inject LEANN queries and tags into system prompt as agent context
         let system_prompt = if let Some(ref def) = resolved_def {
             let mut additions = Vec::new();
@@ -2700,6 +2763,14 @@ impl Agent {
             Arc::clone(&self.subagent_manager),
             subagent_id.clone(),
         );
+
+        // Wire shutdown flag for graceful shutdown via SendMessage
+        {
+            let mgr = self.subagent_manager.lock().await;
+            if let Some(flag) = mgr.get_shutdown_flag(&subagent_id) {
+                runner.set_shutdown_flag(flag);
+            }
+        }
 
         // Background mode: spawn and return immediately while updating the
         // shared SubagentManager when the spawned task finishes.

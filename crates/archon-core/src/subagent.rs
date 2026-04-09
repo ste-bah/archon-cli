@@ -54,6 +54,8 @@ pub struct SubagentInfo {
     pub status: SubagentStatus,
     pub created_at: DateTime<Utc>,
     pub result: Option<String>,
+    /// Flag for graceful shutdown (set by SendMessage shutdown_request).
+    pub shutdown_flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 // ---------------------------------------------------------------------------
@@ -120,6 +122,7 @@ impl SubagentManager {
             status: SubagentStatus::Running,
             created_at: Utc::now(),
             result: None,
+            shutdown_flag: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         };
         self.agents.insert(id.clone(), info);
         Ok(id)
@@ -238,6 +241,21 @@ impl SubagentManager {
             .unwrap_or_default()
     }
 
+    /// Request graceful shutdown of a running agent.
+    pub fn request_shutdown(&self, agent_id: &str) -> bool {
+        if let Some(info) = self.agents.get(agent_id) {
+            info.shutdown_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Get a clone of the shutdown flag for a registered agent.
+    pub fn get_shutdown_flag(&self, agent_id: &str) -> Option<std::sync::Arc<std::sync::atomic::AtomicBool>> {
+        self.agents.get(agent_id).map(|info| std::sync::Arc::clone(&info.shutdown_flag))
+    }
+
     /// Clean up all state for an agent on completion:
     /// drops pending messages, removes from name registry if name matches.
     pub fn cleanup_agent(&mut self, agent_id: &str) {
@@ -297,6 +315,8 @@ pub mod runner {
         subagent_manager: Option<Arc<tokio::sync::Mutex<super::SubagentManager>>>,
         /// AGT-026: This runner's agent ID (for draining its pending messages).
         runner_agent_id: Option<String>,
+        /// Graceful shutdown flag (checked each turn).
+        shutdown_flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
     }
 
     /// A single pending tool call collected from the stream.
@@ -335,6 +355,7 @@ pub mod runner {
                 initial_messages: None,
                 subagent_manager: None,
                 runner_agent_id: None,
+                shutdown_flag: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             }
         }
 
@@ -346,6 +367,11 @@ pub mod runner {
         ) {
             self.subagent_manager = Some(manager);
             self.runner_agent_id = Some(agent_id);
+        }
+
+        /// Set the shutdown flag (shared with SubagentManager for graceful shutdown).
+        pub fn set_shutdown_flag(&mut self, flag: std::sync::Arc<std::sync::atomic::AtomicBool>) {
+            self.shutdown_flag = flag;
         }
 
         /// Drain pending messages and return them as user turn JSON values.
@@ -402,6 +428,48 @@ pub mod runner {
             }
         }
 
+        /// Snip oldest complete turn-pairs when messages exceed context limit.
+        ///
+        /// A turn-pair is an assistant message (possibly with tool_use) followed by
+        /// a user message (possibly with tool_result). Snipping in pairs avoids
+        /// breaking the tool_use/tool_result contract required by the Claude API.
+        fn snip_context_if_needed(messages: &mut Vec<serde_json::Value>) {
+            const MAX_CONTEXT_CHARS: usize = 600_000;
+            const PRESERVE_RECENT_TURNS: usize = 3;
+
+            let total_chars: usize = messages.iter()
+                .map(|m| serde_json::to_string(m).map(|s| s.len()).unwrap_or(0))
+                .sum();
+
+            if total_chars <= MAX_CONTEXT_CHARS {
+                return;
+            }
+
+            // Find turn boundaries from the end by scanning for assistant messages.
+            // Each assistant message starts a "turn" (assistant + following user = pair).
+            let mut turn_count = 0;
+            let mut keep_from = messages.len();
+            for i in (1..messages.len()).rev() {
+                if messages[i].get("role").and_then(|r| r.as_str()) == Some("assistant") {
+                    turn_count += 1;
+                    if turn_count >= PRESERVE_RECENT_TURNS {
+                        keep_from = i;
+                        break;
+                    }
+                }
+            }
+
+            if keep_from <= 1 {
+                return; // Nothing to snip
+            }
+
+            messages.drain(1..keep_from);
+            messages.insert(1, serde_json::json!({
+                "role": "user",
+                "content": "[Earlier conversation was truncated to fit context window]"
+            }));
+        }
+
         /// Run the subagent loop with the given initial prompt.
         /// Returns the accumulated text output from the final turn.
         pub async fn run(&self, initial_prompt: &str) -> anyhow::Result<String> {
@@ -432,6 +500,11 @@ pub mod runner {
                     anyhow::bail!("Subagent timed out after {turn} turns");
                 }
 
+                // Check for graceful shutdown request
+                if self.shutdown_flag.load(std::sync::atomic::Ordering::Relaxed) {
+                    return Ok("[Agent shutdown requested]".to_string());
+                }
+
                 let mut system = vec![serde_json::json!({
                     "type": "text",
                     "text": &self.system_prompt,
@@ -443,6 +516,9 @@ pub mod runner {
                         "text": format!("<system-reminder>{reminder}</system-reminder>"),
                     }));
                 }
+
+                // Context snipping: prevent unbounded message growth
+                Self::snip_context_if_needed(&mut messages);
 
                 let request = LlmRequest {
                     model: self.model.clone(),
@@ -814,6 +890,48 @@ pub mod runner {
             );
             let result = runner.run("hello").await.unwrap();
             assert_eq!(result, "No tools needed");
+        }
+
+        #[test]
+        fn snip_context_preserves_recent_turns() {
+            let mut messages = Vec::new();
+            // Original prompt
+            messages.push(serde_json::json!({"role": "user", "content": "do something"}));
+            // Generate many turn pairs to exceed threshold
+            for i in 0..20 {
+                messages.push(serde_json::json!({
+                    "role": "assistant",
+                    "content": [{"type": "tool_use", "id": format!("t{i}"), "name": "Bash", "input": {}}]
+                }));
+                messages.push(serde_json::json!({
+                    "role": "user",
+                    "content": [{"type": "tool_result", "tool_use_id": format!("t{i}"), "content": "x".repeat(40_000)}]
+                }));
+            }
+
+            // Should be over 600k chars
+            let total: usize = messages.iter()
+                .map(|m| serde_json::to_string(m).unwrap().len())
+                .sum();
+            assert!(total > 600_000, "test setup: messages should exceed threshold");
+
+            SubagentRunner::snip_context_if_needed(&mut messages);
+
+            // First message preserved
+            assert_eq!(messages[0]["role"], "user");
+            assert_eq!(messages[0]["content"], "do something");
+
+            // Truncation notice at index 1
+            assert_eq!(messages[1]["role"], "user");
+            assert!(messages[1]["content"].as_str().unwrap().contains("truncated"));
+
+            // Remaining messages should be assistant/user pairs
+            for chunk in messages[2..].chunks(2) {
+                assert_eq!(chunk[0]["role"], "assistant");
+                if chunk.len() > 1 {
+                    assert_eq!(chunk[1]["role"], "user");
+                }
+            }
         }
     }
 }

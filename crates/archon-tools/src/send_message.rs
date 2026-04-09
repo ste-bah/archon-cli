@@ -25,6 +25,13 @@ pub struct SendMessageRequest {
     /// Short preview for UI. Schema-optional, validated as required for string msgs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub summary: Option<String>,
+    /// Structured message type. Defaults to "text" if omitted.
+    #[serde(default = "default_message_type")]
+    pub message_type: String,
+}
+
+fn default_message_type() -> String {
+    "text".into()
 }
 
 // ---------------------------------------------------------------------------
@@ -110,10 +117,18 @@ impl SendMessageTool {
             ));
         }
 
+        // --- Extract `message_type` (optional, defaults to "text") ---
+        let message_type = input
+            .get("message_type")
+            .and_then(|v| v.as_str())
+            .unwrap_or("text")
+            .to_string();
+
         Ok(SendMessageRequest {
             to,
             message,
             summary,
+            message_type,
         })
     }
 }
@@ -148,6 +163,11 @@ impl Tool for SendMessageTool {
                 "summary": {
                     "type": "string",
                     "description": "A 5-10 word summary for UI preview (required for string messages)"
+                },
+                "message_type": {
+                    "type": "string",
+                    "enum": ["text", "shutdown_request"],
+                    "description": "Message type. 'text' for plain messages, 'shutdown_request' to gracefully stop an agent. Defaults to 'text'."
                 }
             }
         })
@@ -254,6 +274,7 @@ mod tests {
             to: "test-agent".into(),
             message: "test message".into(),
             summary: Some("test summary".into()),
+            message_type: default_message_type(),
         };
 
         let json_str = serde_json::to_string(&request).expect("serialize");
@@ -268,6 +289,7 @@ mod tests {
             to: "test-agent".into(),
             message: "test message".into(),
             summary: None,
+            message_type: default_message_type(),
         };
 
         let json_str = serde_json::to_string(&request).expect("serialize");
