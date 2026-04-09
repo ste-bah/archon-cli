@@ -19,9 +19,10 @@ async fn smoke_full_memory_lifecycle() {
 
     // 1. Resolve memory dir
     let dir = get_agent_memory_dir("smoke-agent", &AgentMemoryScope::Project, cwd);
+    let dir_str = dir.to_string_lossy().replace('\\', "/");
     assert!(
-        dir.to_string_lossy()
-            .contains(".archon/agent-memory/smoke-agent")
+        dir_str.contains(".archon/agent-memory/smoke-agent"),
+        "dir was: {dir_str}"
     );
 
     // 2. Create directory
