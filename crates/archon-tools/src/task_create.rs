@@ -51,6 +51,18 @@ impl Tool for TaskCreateTool {
                 "max_turns": {
                     "type": "integer",
                     "description": "Maximum conversation turns for the subagent (default 10, max 100)"
+                },
+                "subagent_type": {
+                    "type": "string",
+                    "description": "Optional agent type name for the spawned subagent"
+                },
+                "run_in_background": {
+                    "type": "boolean",
+                    "description": "When true, the spawned subagent runs in the background"
+                },
+                "cwd": {
+                    "type": "string",
+                    "description": "Working directory override for the spawned subagent"
                 }
             }
         })
@@ -100,12 +112,33 @@ impl Tool for TaskCreateTool {
                 None => SubagentRequest::DEFAULT_MAX_TURNS,
             };
 
+            let subagent_type = input
+                .get("subagent_type")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.trim().is_empty())
+                .map(|s| s.to_string());
+
+            let run_in_background = input
+                .get("run_in_background")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+
+            let cwd = input
+                .get("cwd")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.trim().is_empty())
+                .map(|s| s.to_string());
+
             let request = SubagentRequest {
                 prompt: prompt.to_string(),
                 model,
                 allowed_tools,
                 max_turns,
                 timeout_secs: SubagentRequest::DEFAULT_TIMEOUT_SECS,
+                subagent_type,
+                run_in_background,
+                cwd,
+                isolation: None,
             };
 
             response["subagent_request"] =
@@ -129,5 +162,77 @@ impl Tool for TaskCreateTool {
         } else {
             PermissionLevel::Safe
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_ctx() -> ToolContext {
+        ToolContext {
+            working_dir: std::env::temp_dir(),
+            session_id: "test-session".into(),
+            mode: crate::tool::AgentMode::Normal,
+            extra_dirs: vec![],
+        }
+    }
+
+    #[tokio::test]
+    async fn schema_includes_subagent_request_fields() {
+        let tool = TaskCreateTool;
+        let schema = tool.input_schema();
+        let props = schema["properties"].as_object().expect("schema properties");
+
+        assert!(props.contains_key("subagent_type"));
+        assert!(props.contains_key("run_in_background"));
+        assert!(props.contains_key("cwd"));
+    }
+
+    #[tokio::test]
+    async fn execute_propagates_new_subagent_request_fields() {
+        let tool = TaskCreateTool;
+        let input = json!({
+            "subject": "Review",
+            "description": "Review agent tool wiring",
+            "prompt": "Review AGT-006",
+            "subagent_type": "code-reviewer",
+            "run_in_background": true,
+            "cwd": "/tmp"
+        });
+
+        let result = tool.execute(input, &make_ctx()).await;
+        assert!(!result.is_error, "unexpected error: {}", result.content);
+
+        let response: serde_json::Value =
+            serde_json::from_str(&result.content).expect("response json");
+        let request: SubagentRequest =
+            serde_json::from_value(response["subagent_request"].clone()).expect("request");
+
+        assert_eq!(request.subagent_type.as_deref(), Some("code-reviewer"));
+        assert!(request.run_in_background);
+        assert_eq!(request.cwd.as_deref(), Some("/tmp"));
+    }
+
+    #[tokio::test]
+    async fn execute_defaults_new_subagent_request_fields() {
+        let tool = TaskCreateTool;
+        let input = json!({
+            "subject": "Analyze",
+            "description": "Analyze project",
+            "prompt": "Analyze AGT-006"
+        });
+
+        let result = tool.execute(input, &make_ctx()).await;
+        assert!(!result.is_error, "unexpected error: {}", result.content);
+
+        let response: serde_json::Value =
+            serde_json::from_str(&result.content).expect("response json");
+        let request: SubagentRequest =
+            serde_json::from_value(response["subagent_request"].clone()).expect("request");
+
+        assert!(request.subagent_type.is_none());
+        assert!(!request.run_in_background);
+        assert!(request.cwd.is_none());
     }
 }

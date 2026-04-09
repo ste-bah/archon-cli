@@ -287,5 +287,15 @@ pub fn register_builtins() -> SkillRegistry {
     // Expanded skills (CLI-225)
     super::expanded::register_expanded_skills(&mut registry);
 
+    // Agent management skills (PRD-AGENTS-001)
+    registry.register(Box::new(super::agent_skills::CreateAgentSkill));
+    registry.register(Box::new(super::agent_skills::ListAgentsSkill));
+    registry.register(Box::new(super::agent_skills::RunAgentSkill));
+    registry.register(Box::new(super::agent_skills::AdjustBehaviorSkill));
+    registry.register(Box::new(super::agent_skills::EvolveAgentSkill));
+    registry.register(Box::new(super::agent_skills::ArchiveAgentSkill));
+    registry.register(Box::new(super::agent_skills::AgentHistorySkill));
+    registry.register(Box::new(super::agent_skills::RollbackBehaviorSkill));
+
     registry
 }

@@ -45,6 +45,19 @@ impl ToolRegistry {
         self.tools.retain(|k, _| names.contains(&k.as_str()));
     }
 
+    /// Create a new registry containing only the tools whose names appear
+    /// in `allowed`. Arc pointers are cloned (cheap ref-count bump).
+    /// An empty `allowed` list produces an empty registry.
+    pub fn clone_filtered(&self, allowed: &[&str]) -> Self {
+        let filtered = self
+            .tools
+            .iter()
+            .filter(|(name, _)| allowed.contains(&name.as_str()))
+            .map(|(name, tool)| (name.clone(), Arc::clone(tool)))
+            .collect();
+        Self { tools: filtered }
+    }
+
     /// Remove tools whose names appear in the blacklist.
     pub fn filter_blacklist(&mut self, names: &[&str]) {
         self.tools.retain(|k, _| !names.contains(&k.as_str()));
@@ -121,7 +134,7 @@ pub fn create_default_registry(working_dir: PathBuf) -> ToolRegistry {
     registry.register(Box::new(archon_tools::plan_mode::ExitPlanModeTool));
     registry.register(Box::new(archon_tools::webfetch::WebFetchTool));
     registry.register(Box::new(archon_tools::config_tool::ConfigTool));
-    registry.register(Box::new(archon_tools::agent_tool::AgentTool));
+    registry.register(Box::new(archon_tools::agent_tool::AgentTool::new()));
     registry.register(Box::new(archon_tools::send_message::SendMessageTool));
     registry.register(Box::new(archon_tools::notebook::NotebookEditTool));
     registry.register(Box::new(archon_tools::task_create::TaskCreateTool));
@@ -297,6 +310,51 @@ mod tests {
 
         assert!(result.is_error);
         assert!(result.content.contains("Unknown tool"));
+    }
+
+    #[test]
+    fn clone_filtered_with_subset() {
+        let registry = create_default_registry(std::env::temp_dir());
+        let filtered = registry.clone_filtered(&["Read", "Grep"]);
+        let names = filtered.tool_names();
+        assert_eq!(names.len(), 2);
+        assert!(names.contains(&"Read"));
+        assert!(names.contains(&"Grep"));
+    }
+
+    #[test]
+    fn clone_filtered_empty_list_returns_empty() {
+        let registry = create_default_registry(std::env::temp_dir());
+        let filtered = registry.clone_filtered(&[]);
+        assert!(filtered.tool_names().is_empty());
+    }
+
+    #[test]
+    fn clone_filtered_nonexistent_tool_ignored() {
+        let registry = create_default_registry(std::env::temp_dir());
+        let filtered = registry.clone_filtered(&["Read", "FakeTool"]);
+        let names = filtered.tool_names();
+        assert_eq!(names.len(), 1);
+        assert!(names.contains(&"Read"));
+    }
+
+    #[test]
+    fn clone_filtered_does_not_mutate_original() {
+        let registry = create_default_registry(std::env::temp_dir());
+        let original_count = registry.tool_names().len();
+        let _filtered = registry.clone_filtered(&["Read"]);
+        assert_eq!(registry.tool_names().len(), original_count);
+    }
+
+    #[test]
+    fn clone_filtered_tool_definitions_match() {
+        let registry = create_default_registry(std::env::temp_dir());
+        let filtered = registry.clone_filtered(&["Read", "Glob"]);
+        let defs = filtered.tool_definitions();
+        assert_eq!(defs.len(), 2);
+        let def_names: Vec<&str> = defs.iter().map(|d| d["name"].as_str().unwrap()).collect();
+        assert!(def_names.contains(&"Read"));
+        assert!(def_names.contains(&"Glob"));
     }
 
     #[tokio::test]

@@ -1,4 +1,5 @@
 pub mod agent;
+pub mod agents;
 pub mod archonmd;
 pub mod cli_flags;
 pub mod commands;

@@ -84,6 +84,11 @@ pub enum TuiEvent {
     VimToggle,
     /// Transcribed voice text — inject into the input buffer.
     VoiceText(String),
+    /// Set the active agent name and color in the status bar (AGT-015).
+    SetAgentInfo {
+        name: String,
+        color: Option<String>,
+    },
     Done,
 }
 
@@ -1013,6 +1018,10 @@ pub async fn run_tui(
                 }
                 TuiEvent::VoiceText(text) => {
                     app.input.inject_text(&text);
+                }
+                TuiEvent::SetAgentInfo { name, color } => {
+                    app.status.agent_name = Some(name);
+                    app.status.agent_color = color;
                 }
                 TuiEvent::Done => {
                     app.should_quit = true;

@@ -12,6 +12,7 @@ use events::{OrchestratorEvent, Subtask, SubtaskStatus};
 use pool::AgentPool;
 
 use crate::agent::{Agent, AgentConfig, AgentEvent};
+use crate::agents::AgentRegistry;
 use crate::dispatch::create_default_registry;
 use archon_llm::provider::LlmProvider;
 
@@ -50,14 +51,21 @@ pub struct RealSubtaskExecutor {
     provider: Arc<dyn LlmProvider>,
     working_dir: PathBuf,
     model: String,
+    agent_registry: Arc<std::sync::RwLock<AgentRegistry>>,
 }
 
 impl RealSubtaskExecutor {
-    pub fn new(provider: Arc<dyn LlmProvider>, working_dir: PathBuf, model: String) -> Self {
+    pub fn new(
+        provider: Arc<dyn LlmProvider>,
+        working_dir: PathBuf,
+        model: String,
+        agent_registry: Arc<std::sync::RwLock<AgentRegistry>>,
+    ) -> Self {
         Self {
             provider,
             working_dir,
             model,
+            agent_registry,
         }
     }
 }
@@ -93,7 +101,7 @@ impl SubtaskExecutor for RealSubtaskExecutor {
             ..AgentConfig::default()
         };
 
-        let mut agent = Agent::new(self.provider.clone(), registry, config, event_tx);
+        let mut agent = Agent::new(self.provider.clone(), registry, config, event_tx, self.agent_registry.clone());
 
         // Collect text output in a background task
         let output = Arc::new(Mutex::new(String::new()));

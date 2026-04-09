@@ -433,55 +433,7 @@ expanded_skill!(
     }
 );
 
-// ---------------------------------------------------------------------------
-// Agents
-// ---------------------------------------------------------------------------
-
-expanded_skill!(
-    AgentsSkill,
-    "agents",
-    "List agent definitions from .archon/agents/ directory",
-    |_args, ctx| {
-        let agents_dir = ctx.working_dir.join(".archon").join("agents");
-        if !agents_dir.exists() {
-            return SkillOutput::Text("No agents directory found (.archon/agents/).".to_string());
-        }
-        let mut entries = Vec::new();
-        if let Ok(dir) = std::fs::read_dir(&agents_dir) {
-            for entry in dir.flatten() {
-                let path = entry.path();
-                if path.is_dir() {
-                    let name = path
-                        .file_name()
-                        .unwrap_or_default()
-                        .to_string_lossy()
-                        .to_string();
-                    let agent_md = path.join("agent.md");
-                    let desc = if agent_md.exists() {
-                        std::fs::read_to_string(&agent_md)
-                            .ok()
-                            .and_then(|c| {
-                                c.lines()
-                                    .next()
-                                    .map(|l| l.trim_start_matches('#').trim().to_string())
-                            })
-                            .unwrap_or_default()
-                    } else {
-                        String::new()
-                    };
-                    entries.push(format!("  {name}: {desc}"));
-                }
-            }
-        }
-        if entries.is_empty() {
-            SkillOutput::Text("No agents found in .archon/agents/.".to_string())
-        } else {
-            let mut out = format!("{} agents:\n", entries.len());
-            out.push_str(&entries.join("\n"));
-            SkillOutput::Text(out)
-        }
-    }
-);
+// Agents: Moved to agent_skills.rs (ListAgentsSkill with /agents alias)
 
 // ---------------------------------------------------------------------------
 // Configuration (additional)
@@ -788,8 +740,7 @@ pub fn register_expanded_skills(registry: &mut SkillRegistry) {
     registry.register(Box::new(ForkSkill));
     registry.register(Box::new(RewindSkill));
 
-    // Agents
-    registry.register(Box::new(AgentsSkill));
+    // Agents: /agents is now an alias for /list-agents in agent_skills.rs
 
     // File
     registry.register(Box::new(RestoreSkill));

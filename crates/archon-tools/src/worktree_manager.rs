@@ -224,6 +224,16 @@ impl WorktreeManager {
         result
     }
 
+    /// Convenience wrapper: open repo at `working_dir` and create a worktree.
+    pub fn create_worktree_from_path(
+        working_dir: &std::path::Path,
+        session_id: &str,
+    ) -> Result<WorktreeInfo, String> {
+        let repo = Repository::open(working_dir)
+            .map_err(|e| format!("Failed to open repository at {}: {e}", working_dir.display()))?;
+        Self::create_worktree(&repo, session_id)
+    }
+
     /// Cleanup a worktree session if it has no uncommitted changes.
     pub fn cleanup_session(session_id: &str) -> Result<(), String> {
         let wt_path = Self::worktrees_dir().join(session_id);

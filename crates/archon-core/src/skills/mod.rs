@@ -1,3 +1,4 @@
+pub mod agent_skills;
 pub mod builtin;
 pub mod discovery;
 pub mod expanded;
@@ -23,6 +24,8 @@ pub struct SkillContext {
     pub session_id: String,
     pub working_dir: std::path::PathBuf,
     pub model: String,
+    /// Agent registry for agent management skills (/create-agent, /run-agent, etc.).
+    pub agent_registry: Option<std::sync::Arc<std::sync::RwLock<crate::agents::AgentRegistry>>>,
 }
 
 /// A skill that can be invoked via a slash command.

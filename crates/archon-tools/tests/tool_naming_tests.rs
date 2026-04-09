@@ -42,7 +42,7 @@ fn builtin_tool_names_match_claude_code_conventions() {
         Box::new(archon_tools::grep::GrepTool),
         Box::new(archon_tools::webfetch::WebFetchTool),
         Box::new(archon_tools::ask_user::AskUserTool),
-        Box::new(archon_tools::agent_tool::AgentTool),
+        Box::new(archon_tools::agent_tool::AgentTool::new()),
         Box::new(archon_tools::send_message::SendMessageTool),
         Box::new(archon_tools::todo_write::TodoWriteTool),
         Box::new(archon_tools::sleep::SleepTool),

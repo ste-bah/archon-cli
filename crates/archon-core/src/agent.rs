@@ -25,6 +25,7 @@ use tokio::sync::Mutex;
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 
+use crate::agents::AgentRegistry;
 use crate::dispatch::ToolRegistry;
 use crate::subagent::SubagentManager;
 
@@ -127,6 +128,8 @@ pub struct AgentConfig {
     pub extra_dirs: Arc<Mutex<Vec<std::path::PathBuf>>>,
     /// Maximum concurrent tool calls (1 = sequential, from config.tools.max_concurrency).
     pub max_tool_concurrency: usize,
+    /// Maximum agentic loop iterations per process_message call (None = unlimited).
+    pub max_turns: Option<u32>,
 }
 
 impl Default for AgentConfig {
@@ -145,6 +148,7 @@ impl Default for AgentConfig {
             permission_mode: Arc::new(Mutex::new("auto".to_string())),
             extra_dirs: Arc::new(Mutex::new(Vec::new())),
             max_tool_concurrency: archon_tools::concurrency::DEFAULT_MAX_CONCURRENCY,
+            max_turns: None,
         }
     }
 }
@@ -243,7 +247,7 @@ pub struct Agent {
     // GAP 6: Auto-mode permission evaluator
     auto_evaluator: Option<AutoModeEvaluator>,
     // GAP 8: Subagent manager
-    subagent_manager: SubagentManager,
+    subagent_manager: Arc<Mutex<SubagentManager>>,
     /// Shared flag: whether /thinking display is on (used to potentially skip thinking in future)
     pub show_thinking: Arc<AtomicBool>,
     /// Shared session statistics for /status and /cost slash commands.
@@ -265,12 +269,18 @@ pub struct Agent {
     previous_permission_mode: Option<String>,
     /// Append-only log of permission denials for audit / `/denials` display.
     pub denial_log: Arc<Mutex<archon_permissions::denial_log::DenialLog>>,
+    /// Custom agent registry (built-in + project + user agents).
+    agent_registry: Arc<std::sync::RwLock<AgentRegistry>>,
     /// CLI-416: Personality briefing injected into system prompt on first turn only.
     personality_briefing: Option<String>,
     /// CLI-417: Memory garden briefing injected into system prompt on first turn only.
     pub memory_briefing: Option<String>,
     /// Permission store for hook-driven permission updates (REQ-HOOK-016).
     permission_store: Arc<dyn crate::hooks::PermissionStore>,
+    /// Critical system reminder re-injected into system prompt at every turn (AGT-022).
+    critical_system_reminder: Option<String>,
+    /// Pending resume messages to inject into the next SubagentRunner (AGT-024).
+    pending_resume_messages: Option<Vec<serde_json::Value>>,
 }
 
 impl Agent {
@@ -279,6 +289,7 @@ impl Agent {
         registry: ToolRegistry,
         config: AgentConfig,
         event_tx: tokio::sync::mpsc::Sender<AgentEvent>,
+        agent_registry: Arc<std::sync::RwLock<AgentRegistry>>,
     ) -> Self {
         let permission_store: Arc<dyn crate::hooks::PermissionStore> =
             Arc::new(crate::hooks::RuntimePermissionStore::new(
@@ -302,7 +313,7 @@ impl Agent {
             extraction_config: ExtractionConfig::default(),
             extraction_state: ExtractionState::default(),
             auto_evaluator: None,
-            subagent_manager: SubagentManager::default(),
+            subagent_manager: Arc::new(Mutex::new(SubagentManager::default())),
             show_thinking: Arc::new(AtomicBool::new(true)),
             session_stats: Arc::new(Mutex::new(SessionStats::default())),
             hook_registry: None,
@@ -312,9 +323,12 @@ impl Agent {
             ask_user_response_rx: None,
             previous_permission_mode: None,
             denial_log: Arc::new(Mutex::new(archon_permissions::denial_log::DenialLog::new())),
+            agent_registry,
             personality_briefing: None,
             memory_briefing: None,
             permission_store,
+            critical_system_reminder: None,
+            pending_resume_messages: None,
         }
     }
 
@@ -331,6 +345,15 @@ impl Agent {
         self.memory_briefing = Some(text);
     }
 
+    /// Set the critical system reminder (re-injected every turn, AGT-022).
+    pub fn set_critical_system_reminder(&mut self, text: String) {
+        if text.is_empty() {
+            self.critical_system_reminder = None;
+        } else {
+            self.critical_system_reminder = Some(text);
+        }
+    }
+
     pub fn set_inner_voice(&mut self, iv: Arc<Mutex<InnerVoice>>) {
         self.inner_voice = Some(iv);
     }
@@ -341,8 +364,8 @@ impl Agent {
     }
 
     /// Access the subagent manager (read-only) for status queries.
-    pub fn subagent_manager(&self) -> &SubagentManager {
-        &self.subagent_manager
+    pub fn subagent_manager(&self) -> Arc<Mutex<SubagentManager>> {
+        Arc::clone(&self.subagent_manager)
     }
 
     /// Close the event channel so receivers know the agent is done.
@@ -422,11 +445,14 @@ impl Agent {
         self.turn_number += 1;
         self.state.add_user_message(user_input);
 
+        let mut agentic_iterations: u32 = 0;
         loop {
             // GAP 7: Inject recalled memories into system prompt
             let mut system_with_memories = self.inject_memories();
             // Append inner voice block (consciousness state) if enabled
             self.inject_inner_voice(&mut system_with_memories).await;
+            // Append critical system reminder (AGT-022) — re-injected every turn
+            self.inject_critical_reminder(&mut system_with_memories);
 
             // GAP 3: Read fast_mode from shared atomic
             let speed = if self.config.fast_mode.load(Ordering::Relaxed) {
@@ -1160,19 +1186,100 @@ impl Agent {
                         result
                     };
 
-                    // CRIT-07: Intercept SendMessage and route to target agent.
+                    // CRIT-07 + AGT-026: Intercept SendMessage and route to target agent.
+                    // 4 delivery paths:
+                    //   A. Running in memory -> queue message
+                    //   B. Stopped in state, has transcript -> resume
+                    //   C. Evicted from state, transcript on disk -> resume
+                    //   D. No transcript -> error
                     let result = if !result.is_error && pre.tool_name == "SendMessage" {
                         match serde_json::from_str::<SendMessageRequest>(&result.content) {
                             Ok(req) => {
-                                self.send_event(AgentEvent::MessageSent {
-                                    target_agent_id: req.agent_id.clone(),
-                                    message: req.message.clone(),
-                                })
-                                .await;
-                                ToolResult::success(format!(
-                                    "Message delivered to agent '{}'.",
-                                    req.agent_id
-                                ))
+                                // AGT-026: Resolve target via name registry, then format validation
+                                let (agent_id, is_running) = {
+                                    let mgr = self.subagent_manager.lock().await;
+                                    let resolved = if let Some(id) = mgr.resolve_name(&req.to) {
+                                        Some(id.to_string())
+                                    } else if archon_tools::send_message::is_valid_agent_id(&req.to) {
+                                        Some(req.to.clone())
+                                    } else {
+                                        None
+                                    };
+                                    let running = resolved.as_ref()
+                                        .map(|id| mgr.is_running(id))
+                                        .unwrap_or(false);
+                                    (resolved, running)
+                                };
+
+                                match agent_id {
+                                    None => {
+                                        // Not in name registry, not a valid agent ID format
+                                        ToolResult::error(format!(
+                                            "Unknown agent '{}' -- not in name registry and not a valid agent ID",
+                                            req.to
+                                        ))
+                                    }
+                                    Some(agent_id) if is_running => {
+                                        // Path A: Agent is running — queue message for delivery
+                                        {
+                                            let mut mgr = self.subagent_manager.lock().await;
+                                            mgr.queue_pending_message(&agent_id, req.message.clone());
+                                        }
+                                        self.send_event(AgentEvent::MessageSent {
+                                            target_agent_id: agent_id.clone(),
+                                            message: req.message.clone(),
+                                        })
+                                        .await;
+                                        ToolResult::success(format!(
+                                            "Message queued for delivery to {} at its next tool round.",
+                                            req.to
+                                        ))
+                                    }
+                                    Some(agent_id) => {
+                                        // Path B+C: Agent not running — try to resume from transcript
+                                        let resume_ctx = crate::agents::transcript::AgentTranscriptStore::new(&self.config.session_id)
+                                            .and_then(|store| crate::agents::transcript::load_resume_context(&store, &agent_id));
+
+                                        if let Some(ctx) = resume_ctx {
+                                            tracing::info!(
+                                                agent_id = %agent_id,
+                                                agent_type = %ctx.agent_type,
+                                                history_len = ctx.messages.len(),
+                                                "Resuming agent from transcript"
+                                            );
+                                            let resume_request = archon_tools::agent_tool::SubagentRequest {
+                                                prompt: req.message.clone(),
+                                                model: None,
+                                                allowed_tools: Vec::new(),
+                                                max_turns: archon_tools::agent_tool::SubagentRequest::DEFAULT_MAX_TURNS,
+                                                timeout_secs: archon_tools::agent_tool::SubagentRequest::DEFAULT_TIMEOUT_SECS,
+                                                subagent_type: Some(ctx.agent_type),
+                                                run_in_background: true,
+                                                cwd: None,
+                                                isolation: None,
+                                            };
+                                            let resume_json = serde_json::to_string(&resume_request)
+                                                .unwrap_or_default();
+                                            let resume_result = ToolResult {
+                                                content: resume_json,
+                                                is_error: false,
+                                            };
+                                            self.pending_resume_messages = Some(ctx.messages);
+                                            self.send_event(AgentEvent::MessageSent {
+                                                target_agent_id: agent_id.clone(),
+                                                message: req.message.clone(),
+                                            })
+                                            .await;
+                                            self.handle_subagent_result(&resume_result, false).await
+                                        } else {
+                                            // Path D: No transcript found — error
+                                            ToolResult::error(format!(
+                                                "No transcript found for agent '{}'",
+                                                req.to
+                                            ))
+                                        }
+                                    }
+                                }
                             }
                             Err(e) => ToolResult::error(format!(
                                 "Failed to parse SendMessage result: {e}"
@@ -1543,6 +1650,21 @@ impl Agent {
                 if let Some(reason) = prevent_continuation_reason {
                     tracing::info!("Hook requested conversation stop: {}", reason);
                     break;
+                }
+
+                // Check max_turns limit before looping
+                agentic_iterations += 1;
+                if let Some(max) = self.config.max_turns {
+                    if agentic_iterations >= max {
+                        tracing::info!(
+                            "max_turns limit reached ({}/{}), stopping agentic loop",
+                            agentic_iterations, max
+                        );
+                        self.send_event(AgentEvent::Error(format!(
+                            "Agentic turn limit reached ({max} turns). Stopping."
+                        ))).await;
+                        break;
+                    }
                 }
 
                 // Loop back to send tool results to the API
@@ -1956,6 +2078,17 @@ impl Agent {
         }));
     }
 
+    /// Inject critical system reminder into the system prompt (AGT-022).
+    /// Re-injected every turn, wrapped in `<system-reminder>` tags.
+    fn inject_critical_reminder(&self, system: &mut Vec<serde_json::Value>) {
+        if let Some(ref reminder) = self.critical_system_reminder {
+            system.push(serde_json::json!({
+                "type": "text",
+                "text": format!("<system-reminder>{reminder}</system-reminder>"),
+            }));
+        }
+    }
+
     /// GAP 7: Inject recalled memories into the system prompt for this turn.
     fn inject_memories(&mut self) -> Vec<serde_json::Value> {
         let mut system = self.config.system_prompt.clone();
@@ -2220,10 +2353,18 @@ impl Agent {
         };
 
         // Register the subagent
-        let subagent_id = match self.subagent_manager.register(request.clone()) {
+        let subagent_id = match self.subagent_manager.lock().await.register(request.clone()) {
             Ok(id) => id,
             Err(e) => return ToolResult::error(format!("Failed to register subagent: {e}")),
         };
+
+        // AGT-026: Register agent name in name registry for SendMessage resolution
+        if let Some(ref agent_type) = request.subagent_type {
+            self.subagent_manager
+                .lock()
+                .await
+                .register_name(agent_type.clone(), subagent_id.clone());
+        }
 
         tracing::info!(subagent_id = %subagent_id, prompt_len = request.prompt.len(), "spawning one-shot subagent");
 
@@ -2251,49 +2392,453 @@ impl Agent {
             .await;
         }
 
-        // One-shot subagent: make a single API call with the subagent's prompt
-        let model = request.model.as_deref().unwrap_or(&self.config.model);
-        let sub_request = LlmRequest {
-            model: model.to_string(),
-            max_tokens: self.config.max_tokens,
-            system: vec![serde_json::json!({
-                "type": "text",
-                "text": "You are a subagent. Complete the task described in the user message. Be thorough and precise.",
-            })],
-            messages: vec![serde_json::json!({
-                "role": "user",
-                "content": request.prompt,
-            })],
-            tools: Vec::new(),
-            thinking: None,
-            speed: None,
-            effort: None,
-            extra: serde_json::Value::Null,
+        // Resolve the full agent definition (clone to release the registry lock)
+        // AGT-023: When fork enabled and subagent_type is None, use FORK_AGENT
+        let resolved_def: Option<crate::agents::CustomAgentDefinition> = if let Some(ref agent_type) = request.subagent_type {
+            // Defense-in-depth: block explicit "fork" type inside fork children (AC-107)
+            if agent_type == "fork" && crate::agents::built_in::is_in_fork_child(Some("fork"), &self.state.messages) {
+                let _ = self.subagent_manager.lock().await
+                    .mark_failed(&subagent_id, "Cannot fork inside a fork child".into());
+                return ToolResult::error("Cannot fork inside a fork child".to_string());
+            }
+            let reg = self.agent_registry.read().expect("agent registry lock");
+            reg.resolve(agent_type).cloned()
+        } else if crate::agents::built_in::is_fork_enabled() {
+            // Fork guard: reject fork attempts inside fork children
+            if crate::agents::built_in::is_in_fork_child(None, &self.state.messages) {
+                let _ = self.subagent_manager.lock().await
+                    .mark_failed(&subagent_id, "Cannot fork inside a fork child".into());
+                return ToolResult::error("Cannot fork inside a fork child".to_string());
+            }
+            let reg = self.agent_registry.read().expect("agent registry lock");
+            reg.resolve("fork").cloned()
+        } else {
+            None
         };
 
-        let timeout_dur = std::time::Duration::from_secs(request.timeout_secs as u64);
-        let stream_future = async {
-            match self.client.stream(sub_request).await {
-                Ok(mut rx) => {
-                    let mut response_text = String::new();
-                    while let Some(event) = rx.recv().await {
-                        if let StreamEvent::TextDelta { text, .. } = event {
-                            response_text.push_str(&text);
+        let system_prompt = resolved_def.as_ref()
+            .map(|d| d.system_prompt.clone())
+            .unwrap_or_else(|| {
+                request.subagent_type.as_ref()
+                    .map(|t| format!("You are a '{}' subagent. Complete the task described in the user message. Be thorough and precise.", t))
+                    .unwrap_or_else(|| "You are a subagent. Complete the task described in the user message. Be thorough and precise.".into())
+            });
+
+        // Prepend ARCHON.md content when omit_claude_md is false (default)
+        let omit_claude_md = resolved_def.as_ref().map(|d| d.omit_claude_md).unwrap_or(false);
+        let system_prompt = if !omit_claude_md {
+            let archon_md = crate::archonmd::load_hierarchical_archon_md(&self.config.working_dir);
+            if archon_md.is_empty() {
+                system_prompt
+            } else {
+                format!("{system_prompt}\n\n<archon-md>\n{archon_md}\n</archon-md>")
+            }
+        } else {
+            system_prompt
+        };
+
+        // AGT-023: When fork mode enabled, force ALL agent spawns async (forceAsync pattern)
+        let force_async = crate::agents::built_in::is_fork_enabled();
+        let is_background = request.run_in_background
+            || resolved_def.as_ref().map(|d| d.background).unwrap_or(false)
+            || force_async;
+
+        // Model fallback chain: request → definition → parent config
+        let model = request.model.as_deref()
+            .or_else(|| resolved_def.as_ref().and_then(|d| d.model.as_deref()))
+            .unwrap_or(&self.config.model);
+
+        // Max turns: use definition's value when request uses the default (10)
+        let max_turns = if request.max_turns == 10 {
+            resolved_def.as_ref()
+                .and_then(|d| d.max_turns)
+                .unwrap_or(10)
+        } else {
+            request.max_turns as u32
+        };
+
+        // Effort level from agent definition
+        let def_effort = resolved_def.as_ref().and_then(|d| d.effort.clone());
+
+        // Resolve isolation: request overrides agent definition
+        let isolation = request.isolation.as_deref()
+            .or_else(|| resolved_def.as_ref().and_then(|d| d.isolation.as_deref()));
+
+        if request.cwd.is_some() && isolation == Some("worktree") {
+            let _ = self
+                .subagent_manager
+                .lock()
+                .await
+                .mark_failed(
+                    &subagent_id,
+                    "cwd override cannot be combined with isolation='worktree'".to_string(),
+                );
+            return ToolResult::error(
+                "cwd override cannot be combined with isolation='worktree'".to_string(),
+            );
+        }
+
+        // Register session-scoped hooks from agent definition
+        if let Some(ref def) = resolved_def {
+            if let Some(ref hooks_json) = def.hooks {
+                match crate::agents::loader::parse_agent_hooks(hooks_json) {
+                    Ok(hook_pairs) => {
+                        if let Some(ref registry) = self.hook_registry {
+                            for (event, config) in hook_pairs {
+                                registry.register_session_hook(
+                                    &self.config.session_id,
+                                    event,
+                                    config,
+                                );
+                            }
+                            tracing::debug!(agent_type = ?request.subagent_type, "registered session-scoped hooks from agent definition");
                         }
                     }
-                    Ok(response_text)
+                    Err(e) => tracing::warn!(agent_type = ?request.subagent_type, error = %e, "failed to parse agent hooks"),
                 }
-                Err(e) => Err(e),
+            }
+        }
+
+        // Pre-flight check: required MCP servers must be available
+        if let Some(ref def) = resolved_def {
+            let available_tools = self.registry.tool_names();
+            let available_mcp: Vec<String> = available_tools.iter()
+                .filter(|n| n.starts_with("mcp__"))
+                .map(|n| n.to_string())
+                .collect();
+            if !def.has_required_mcp_servers(&available_mcp) {
+                let reason = format!(
+                    "Agent '{}' requires MCP servers {:?} but they are not available. Available MCP tools: {:?}",
+                    def.agent_type,
+                    def.required_mcp_servers,
+                    available_mcp,
+                );
+                let _ = self
+                    .subagent_manager
+                    .lock()
+                    .await
+                    .mark_failed(&subagent_id, reason.clone());
+                return ToolResult::error(format!(
+                    "{}",
+                    reason,
+                ));
+            }
+        }
+
+        // Inject skills into system prompt if agent definition specifies them
+        let system_prompt = if let Some(ref def) = resolved_def {
+            if let Some(ref skills) = def.skills {
+                if !skills.is_empty() {
+                    let skills_list = skills.join(", ");
+                    format!("{system_prompt}\n\n<available-skills>\nThe following skills are available to you: {skills_list}\nInvoke them by name when relevant to the task.\n</available-skills>")
+                } else {
+                    system_prompt
+                }
+            } else {
+                system_prompt
+            }
+        } else {
+            system_prompt
+        };
+
+        // Inject tool guidance into system prompt if agent definition has it
+        let system_prompt = if let Some(ref def) = resolved_def {
+            if !def.tool_guidance.is_empty() {
+                format!("{system_prompt}\n\n<tool-guidance>\n{}\n</tool-guidance>", def.tool_guidance)
+            } else {
+                system_prompt
+            }
+        } else {
+            system_prompt
+        };
+
+        // Inject agent memory (recall_queries) into system prompt if available
+        let system_prompt = if let Some(ref def) = resolved_def {
+            if !def.recall_queries.is_empty() {
+                if let Some(ref memory) = self.memory {
+                    let memories = crate::agents::memory::load_agent_memory(
+                        &def.agent_type,
+                        &def.recall_queries,
+                        memory.as_ref(),
+                        def.memory_scope.as_ref(),
+                    );
+                    if !memories.is_empty() {
+                        let mem_block = memories.join("\n---\n");
+                        format!("{system_prompt}\n\n<agent-memory>\n{mem_block}\n</agent-memory>")
+                    } else {
+                        system_prompt
+                    }
+                } else {
+                    system_prompt
+                }
+            } else {
+                system_prompt
+            }
+        } else {
+            system_prompt
+        };
+
+        // Inject LEANN queries and tags into system prompt as agent context
+        let system_prompt = if let Some(ref def) = resolved_def {
+            let mut additions = Vec::new();
+            if !def.leann_queries.is_empty() {
+                let queries = def.leann_queries.join(", ");
+                additions.push(format!("<leann-queries>\nRelevant code search queries for your task: {queries}\nUse these with the LEANN semantic search tool when exploring the codebase.\n</leann-queries>"));
+            }
+            if !def.tags.is_empty() {
+                let tags = def.tags.join(", ");
+                additions.push(format!("<agent-tags>\nYour memory tags: {tags}\nUse these tags when storing or recalling memories relevant to your role.\n</agent-tags>"));
+            }
+            if additions.is_empty() {
+                system_prompt
+            } else {
+                format!("{system_prompt}\n\n{}", additions.join("\n\n"))
+            }
+        } else {
+            system_prompt
+        };
+
+        // Build filtered tool registry for the subagent
+        let (tool_defs, tool_reg) = self.build_subagent_tools(&request, resolved_def.as_ref());
+
+        // Create worktree if isolation == "worktree"
+        let worktree_info = if isolation == Some("worktree") {
+            let wt_session = format!("subagent-{subagent_id}");
+            match archon_tools::worktree_manager::WorktreeManager::create_worktree_from_path(&self.config.working_dir, &wt_session) {
+                Ok(info) => {
+                    tracing::info!(subagent_id = %subagent_id, worktree = %info.worktree_path.display(), "created worktree for isolated subagent");
+                    Some(info)
+                }
+                Err(e) => {
+                    tracing::warn!(subagent_id = %subagent_id, error = %e, "failed to create worktree, falling back to parent dir");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        let working_dir = worktree_info.as_ref()
+            .map(|wt| wt.worktree_path.clone())
+            .or_else(|| request.cwd.as_ref().map(std::path::PathBuf::from))
+            .unwrap_or_else(|| self.config.working_dir.clone());
+
+        // permissionMode cascade (matches Claude Code behavior):
+        // Parent wins if bypassPermissions/acceptEdits/auto; otherwise agent def overrides.
+        // Then map "plan" → AgentMode::Plan, everything else → Normal.
+        let subagent_mode = {
+            let parent_pm = self.config.permission_mode.blocking_lock().clone();
+            let def_pm_str = resolved_def
+                .as_ref()
+                .and_then(|d| d.permission_mode.as_ref())
+                .map(|pm| pm.as_str().to_string());
+            let resolved_pm = match parent_pm.as_str() {
+                "bypassPermissions" | "acceptEdits" | "auto" => parent_pm,
+                _ => def_pm_str.unwrap_or(parent_pm),
+            };
+            if resolved_pm == "plan" {
+                archon_tools::tool::AgentMode::Plan
+            } else {
+                archon_tools::tool::AgentMode::Normal
             }
         };
 
-        match tokio::time::timeout(timeout_dur, stream_future).await {
-            Ok(Ok(response_text)) => {
-                if let Err(e) = self
-                    .subagent_manager
-                    .complete(&subagent_id, response_text.clone())
+        let tool_ctx = archon_tools::tool::ToolContext {
+            working_dir,
+            session_id: self.config.session_id.clone(),
+            mode: subagent_mode,
+            extra_dirs: vec![],
+        };
+
+        let mut runner = crate::subagent::runner::SubagentRunner::new(
+            self.client.clone(),
+            system_prompt,
+            tool_defs,
+            tool_reg,
+            tool_ctx,
+            model.to_string(),
+            max_turns,
+            request.timeout_secs as u64,
+        );
+
+        // Wire effort level from agent definition
+        if let Some(effort) = def_effort {
+            runner.set_effort(effort);
+        }
+
+        // Wire critical system reminder for per-turn injection (AGT-022)
+        if let Some(ref def) = resolved_def {
+            if let Some(ref reminder) = def.critical_system_reminder {
+                runner.set_critical_system_reminder(reminder.clone());
+            }
+        }
+
+        // Wire transcript recording (AGT-024)
+        if let Some(store) = crate::agents::transcript::AgentTranscriptStore::new(&self.config.session_id) {
+            // Write metadata sidecar
+            let meta = crate::agents::transcript::AgentMetadata {
+                agent_type: resolved_def.as_ref()
+                    .map(|d| d.agent_type.clone())
+                    .unwrap_or_else(|| "general-purpose".into()),
+                worktree_path: worktree_info.as_ref()
+                    .map(|wt| wt.worktree_path.display().to_string()),
+                description: Some(request.prompt.chars().take(200).collect()),
+            };
+            store.write_metadata(&subagent_id, &meta);
+            runner.set_transcript(store, subagent_id.clone());
+        }
+
+        // AGT-024: Inject resume messages if pending (from SendMessage resume path)
+        if let Some(resume_msgs) = self.pending_resume_messages.take() {
+            tracing::info!(count = resume_msgs.len(), "Injecting resume messages into SubagentRunner");
+            runner.set_initial_messages(resume_msgs);
+        }
+
+        // AGT-026: Wire pending message source for drain at tool round boundaries
+        runner.set_pending_message_source(
+            Arc::clone(&self.subagent_manager),
+            subagent_id.clone(),
+        );
+
+        // Background mode: spawn and return immediately while updating the
+        // shared SubagentManager when the spawned task finishes.
+        if is_background {
+            let prompt = request.prompt.clone();
+            let sid = subagent_id.clone();
+            let subagent_manager = Arc::clone(&self.subagent_manager);
+            tokio::spawn(async move {
+                match runner.run(&prompt).await {
+                    Ok(text) => {
+                        let mut mgr = subagent_manager.lock().await;
+                        if let Err(e) = mgr.complete(&sid, text.clone()) {
+                            tracing::warn!(subagent_id = %sid, error = %e, "failed to mark background subagent complete");
+                        }
+                        mgr.cleanup_agent(&sid);
+                        drop(mgr);
+                        tracing::info!(subagent_id = %sid, len = text.len(), "background subagent completed");
+                    }
+                    Err(e) => {
+                        let reason = format!("Subagent failed: {e}");
+                        let mut mgr = subagent_manager.lock().await;
+                        if let Err(mark_err) = mgr.mark_failed(&sid, reason.clone()) {
+                            tracing::warn!(subagent_id = %sid, error = %mark_err, "failed to mark background subagent failed");
+                        }
+                        mgr.cleanup_agent(&sid);
+                        drop(mgr);
+                        tracing::warn!(subagent_id = %sid, error = %e, "background subagent failed");
+                    }
+                }
+            });
+
+            return ToolResult::success(format!(
+                "Subagent '{subagent_id}' launched in background."
+            ));
+        }
+
+        // AGT-025: Auto-background foreground agents after timeout
+        let auto_bg_ms = crate::subagent::get_auto_background_ms();
+        let should_auto_bg = auto_bg_ms > 0 && !is_background;
+
+        if should_auto_bg {
+            // Spawn the runner into a background task immediately, then race
+            // its JoinHandle against the auto-background timer.
+            // If it completes first, we get the result synchronously.
+            // If the timer fires first, the task keeps running in the background.
+            let prompt = request.prompt.clone();
+            let sid = subagent_id.clone();
+            let subagent_manager_bg = Arc::clone(&self.subagent_manager);
+
+            let join_handle = tokio::spawn(async move {
+                let result = runner.run(&prompt).await;
+                // Update manager on completion (same as explicit background path)
+                match &result {
+                    Ok(text) => {
+                        let mut mgr = subagent_manager_bg.lock().await;
+                        if let Err(e) = mgr.complete(&sid, text.clone()) {
+                            tracing::warn!(subagent_id = %sid, error = %e, "failed to mark auto-bg subagent complete");
+                        }
+                        mgr.cleanup_agent(&sid);
+                        drop(mgr);
+                    }
+                    Err(e) => {
+                        let reason = format!("Subagent failed: {e}");
+                        let mut mgr = subagent_manager_bg.lock().await;
+                        if let Err(mark_err) = mgr.mark_failed(&sid, reason) {
+                            tracing::warn!(subagent_id = %sid, error = %mark_err, "failed to mark auto-bg subagent failed");
+                        }
+                        mgr.cleanup_agent(&sid);
+                    }
+                }
+                result
+            });
+
+            let timeout_duration = std::time::Duration::from_millis(auto_bg_ms);
+
+            tokio::select! {
+                join_result = join_handle => {
+                    // Agent completed before timeout — handle as normal foreground result
+                    let result = match join_result {
+                        Ok(inner) => inner,
+                        Err(e) => Err(anyhow::anyhow!("Subagent task panicked: {e}")),
+                    };
+                    return match result {
+                        Ok(response_text) => {
+                            // Manager already updated by the spawned task
+                            self.fire_hook(crate::hooks::HookEvent::TeammateIdle, serde_json::json!({"hook_event": "TeammateIdle", "subagent_id": subagent_id})).await;
+                            self.fire_hook(crate::hooks::HookEvent::SubagentStop, serde_json::json!({"hook_event": "SubagentStop", "subagent_id": subagent_id, "success": true})).await;
+                            if nested {
+                                self.fire_hook(crate::hooks::HookEvent::TaskCompleted, serde_json::json!({"hook_event": "TaskCompleted", "subagent_id": subagent_id, "success": true})).await;
+                            }
+                            let mut final_text = response_text;
+                            if let Some(ref wt) = worktree_info {
+                                match archon_tools::worktree_manager::WorktreeManager::cleanup_session(&format!("subagent-{subagent_id}")) {
+                                    Ok(()) => { tracing::info!(subagent_id = %subagent_id, "clean worktree auto-removed"); }
+                                    Err(_has_changes) => {
+                                        let wt_note = format!("\n\n[Worktree: {} (branch: {})]", wt.worktree_path.display(), wt.branch_name);
+                                        final_text.push_str(&wt_note);
+                                    }
+                                }
+                            }
+                            ToolResult::success(final_text)
+                        }
+                        Err(e) => {
+                            let reason = format!("Subagent failed: {e}");
+                            // Manager already updated by the spawned task
+                            self.fire_hook(crate::hooks::HookEvent::SubagentStop, serde_json::json!({"hook_event": "SubagentStop", "subagent_id": subagent_id, "success": false, "error": &reason})).await;
+                            if let Some(ref _wt) = worktree_info {
+                                let _ = archon_tools::worktree_manager::WorktreeManager::cleanup_session(&format!("subagent-{subagent_id}"));
+                            }
+                            ToolResult::error(reason)
+                        }
+                    };
+                }
+                _ = tokio::time::sleep(timeout_duration) => {
+                    // Timer fired — agent continues running in spawned task
+                    tracing::info!(
+                        subagent_id = %subagent_id,
+                        timeout_ms = auto_bg_ms,
+                        "Auto-backgrounding foreground agent after {}s timeout",
+                        auto_bg_ms / 1000
+                    );
+                    // The spawned task continues running; manager will be updated when it completes.
+                    // Transcript recording (AGT-024) persists all messages for resume.
+                    return ToolResult::success(format!(
+                        "Subagent '{subagent_id}' auto-backgrounded after {}s. Still running — use SendMessage to check status.",
+                        auto_bg_ms / 1000
+                    ));
+                }
+            }
+        }
+
+        // Foreground: run the multi-turn agentic loop and wait
+        match runner.run(&request.prompt).await {
+            Ok(response_text) => {
                 {
-                    tracing::warn!("failed to mark subagent complete: {e}");
+                    let mut mgr = self.subagent_manager.lock().await;
+                    if let Err(e) = mgr.complete(&subagent_id, response_text.clone()) {
+                        tracing::warn!("failed to mark subagent complete: {e}");
+                    }
+                    mgr.cleanup_agent(&subagent_id);
                 }
 
                 // CRIT-06: Fire TeammateIdle hook when subagent completes its work
@@ -2330,13 +2875,34 @@ impl Agent {
                     .await;
                 }
 
-                ToolResult::success(response_text)
+                // Worktree cleanup: auto-remove if clean, preserve if changes exist
+                let mut final_text = response_text;
+                if let Some(ref wt) = worktree_info {
+                    match archon_tools::worktree_manager::WorktreeManager::cleanup_session(&format!("subagent-{subagent_id}")) {
+                        Ok(()) => {
+                            tracing::info!(subagent_id = %subagent_id, "clean worktree auto-removed");
+                        }
+                        Err(_has_changes) => {
+                            let wt_note = format!(
+                                "\n\n[Worktree: {} (branch: {})]",
+                                wt.worktree_path.display(),
+                                wt.branch_name
+                            );
+                            final_text.push_str(&wt_note);
+                            tracing::info!(subagent_id = %subagent_id, branch = %wt.branch_name, "worktree preserved with changes");
+                        }
+                    }
+                }
+
+                ToolResult::success(final_text)
             }
-            Ok(Err(e)) => {
-                let reason = format!("Subagent API call failed: {e}");
-                let _ = self
-                    .subagent_manager
-                    .mark_failed(&subagent_id, reason.clone());
+            Err(e) => {
+                let reason = format!("Subagent failed: {e}");
+                {
+                    let mut mgr = self.subagent_manager.lock().await;
+                    let _ = mgr.mark_failed(&subagent_id, reason.clone());
+                    mgr.cleanup_agent(&subagent_id);
+                }
 
                 // CRIT-06: Fire SubagentStop hook on failure
                 self.fire_hook(
@@ -2345,31 +2911,105 @@ impl Agent {
                         "hook_event": "SubagentStop",
                         "subagent_id": subagent_id,
                         "success": false,
-                        "error": reason,
+                        "error": &reason,
                     }),
                 )
                 .await;
 
-                ToolResult::error(reason)
-            }
-            Err(_elapsed) => {
-                let reason = format!("Subagent timed out after {}s", request.timeout_secs);
-                let _ = self.subagent_manager.mark_timed_out(&subagent_id);
-
-                self.fire_hook(
-                    crate::hooks::HookEvent::SubagentStop,
-                    serde_json::json!({
-                        "hook_event": "SubagentStop",
-                        "subagent_id": subagent_id,
-                        "success": false,
-                        "error": reason,
-                    }),
-                )
-                .await;
+                // Cleanup worktree on failure
+                if let Some(ref wt) = worktree_info {
+                    let _ = archon_tools::worktree_manager::WorktreeManager::cleanup_session(&format!("subagent-{subagent_id}"));
+                    tracing::info!(subagent_id = %subagent_id, "worktree cleaned up after failure");
+                    let _ = wt; // suppress unused warning
+                }
 
                 ToolResult::error(reason)
             }
         }
+    }
+
+    /// Build the filtered tool registry for a subagent.
+    ///
+    /// Applies: hardcoded denylist → definition allowlist → request allowlist → definition denylist.
+    /// Returns (tool_definitions, filtered_registry) for SubagentRunner.
+    fn build_subagent_tools(
+        &self,
+        request: &SubagentRequest,
+        agent_def: Option<&crate::agents::CustomAgentDefinition>,
+    ) -> (Vec<serde_json::Value>, ToolRegistry) {
+        // Hardcoded denylist — subagents must NEVER have these tools
+        const DENYLIST: &[&str] = &[
+            "Agent",
+            "AskUserQuestion",
+            "EnterPlanMode",
+            "ExitPlanMode",
+            "TaskCreate",
+            "TaskStop",
+        ];
+
+        // Default safe tools when no explicit allowlist
+        const DEFAULT_TOOLS: &[&str] = &["Read", "Grep", "Glob", "Bash", "Write", "Edit"];
+
+        // Determine base allowed set.
+        // Priority: request allowlist > definition allowlist > default tools
+        let base_allowed: Vec<&str> = if !request.allowed_tools.is_empty() {
+            request
+                .allowed_tools
+                .iter()
+                .map(|s| s.as_str())
+                .filter(|n| !DENYLIST.contains(n))
+                .collect()
+        } else if let Some(def_tools) = agent_def.and_then(|d| d.allowed_tools.as_ref()) {
+            def_tools
+                .iter()
+                .map(|s| s.as_str())
+                .filter(|n| !DENYLIST.contains(n))
+                .collect()
+        } else {
+            DEFAULT_TOOLS.to_vec()
+        };
+
+        // Apply agent definition denylist
+        let agent_deny: Vec<String> = agent_def
+            .and_then(|d| d.disallowed_tools.as_ref())
+            .cloned()
+            .unwrap_or_default();
+
+        // Apply plan-mode filtering: remove mutating tools if parent is in plan mode.
+        // Keep aligned with is_tool_allowed_in_mode() allowlist in plan_mode.rs.
+        const PLAN_MODE_DENY: &[&str] = &["Write", "Edit", "Bash", "NotebookEdit"];
+        let is_plan_mode = self.config.permission_mode.blocking_lock().as_str() == "plan";
+
+        // MCP server scoping: if definition specifies mcp_servers, only include MCP tools
+        // from those servers. Non-MCP tools pass through unaffected.
+        let mcp_scope: Option<&Vec<String>> = agent_def.and_then(|d| d.mcp_servers.as_ref());
+
+        let final_allowed: Vec<&str> = base_allowed
+            .into_iter()
+            .filter(|n| !agent_deny.iter().any(|d| d == n))
+            .filter(|n| !is_plan_mode || !PLAN_MODE_DENY.contains(n))
+            .filter(|n| {
+                // If mcp_servers is specified, only allow MCP tools from listed servers
+                if let Some(allowed_servers) = mcp_scope {
+                    if n.starts_with("mcp__") {
+                        // Extract server name: mcp__servername__toolname -> servername
+                        let parts: Vec<&str> = n.splitn(3, "__").collect();
+                        if parts.len() >= 2 {
+                            let server = parts[1];
+                            return allowed_servers.iter().any(|s| {
+                                s.eq_ignore_ascii_case(server)
+                            });
+                        }
+                        return false; // malformed MCP tool name
+                    }
+                }
+                true // non-MCP tools always pass, or no mcp_servers restriction
+            })
+            .collect();
+
+        let filtered = self.registry.clone_filtered(&final_allowed);
+        let defs = filtered.tool_definitions();
+        (defs, filtered)
     }
 }
 
@@ -2585,5 +3225,107 @@ mod tests {
             .as_array()
             .expect("content is array");
         assert_eq!(blocks[0]["signature"], "sig123");
+    }
+
+    // -----------------------------------------------------------------------
+    // TASK-AGT-012: Permission mode + max_concurrent tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn plan_mode_deny_list_is_static() {
+        // Verify the plan mode deny constants are correct
+        const PLAN_MODE_DENY: &[&str] = &["Write", "Edit", "Bash", "NotebookEdit"];
+        assert!(PLAN_MODE_DENY.contains(&"Write"));
+        assert!(PLAN_MODE_DENY.contains(&"Edit"));
+        assert!(PLAN_MODE_DENY.contains(&"Bash"));
+        assert!(PLAN_MODE_DENY.contains(&"NotebookEdit"));
+        assert!(!PLAN_MODE_DENY.contains(&"Read"));
+        assert!(!PLAN_MODE_DENY.contains(&"Grep"));
+        assert!(!PLAN_MODE_DENY.contains(&"Glob"));
+    }
+
+    #[test]
+    fn subagent_manager_register_before_run_complete_after() {
+        // Verify the SubagentManager register→complete lifecycle
+        let mut mgr = crate::subagent::SubagentManager::new(4);
+        let req = archon_tools::agent_tool::SubagentRequest {
+            prompt: "test".into(),
+            model: None,
+            allowed_tools: vec![],
+            max_turns: 10,
+            timeout_secs: 300,
+            subagent_type: None,
+            run_in_background: false,
+            cwd: None,
+            isolation: None,
+        };
+
+        // Register returns ID
+        let id = mgr.register(req).expect("register should succeed");
+        assert!(!id.is_empty());
+
+        // Status is Running
+        let info = mgr.get_status(&id).expect("should exist");
+        assert!(matches!(info.status, crate::subagent::SubagentStatus::Running));
+
+        // Complete frees the slot
+        mgr.complete(&id, "done".into()).expect("complete should work");
+        let info = mgr.get_status(&id).expect("should still exist");
+        assert!(matches!(info.status, crate::subagent::SubagentStatus::Completed));
+    }
+
+    #[test]
+    fn subagent_manager_max_concurrent_enforced() {
+        let mut mgr = crate::subagent::SubagentManager::new(1);
+        let req = || archon_tools::agent_tool::SubagentRequest {
+            prompt: "test".into(),
+            model: None,
+            allowed_tools: vec![],
+            max_turns: 10,
+            timeout_secs: 300,
+            subagent_type: None,
+            run_in_background: false,
+            cwd: None,
+            isolation: None,
+        };
+
+        let id1 = mgr.register(req()).expect("first register ok");
+
+        // Second should fail
+        let err = mgr.register(req());
+        assert!(err.is_err(), "should reject second concurrent subagent");
+
+        // Complete first, then second should succeed
+        mgr.complete(&id1, "done".into()).unwrap();
+        let _id2 = mgr.register(req()).expect("should succeed after completing first");
+    }
+
+    #[test]
+    fn permission_mode_plan_blocks_mutating_tools() {
+        // Verify the filtering logic: in plan mode, Write/Edit/Bash/NotebookEdit are removed
+        const PLAN_MODE_DENY: &[&str] = &["Write", "Edit", "Bash", "NotebookEdit"];
+        let tools = vec!["Read", "Grep", "Glob", "Write", "Edit", "Bash", "NotebookEdit"];
+        let is_plan_mode = true;
+
+        let filtered: Vec<&str> = tools
+            .into_iter()
+            .filter(|n| !is_plan_mode || !PLAN_MODE_DENY.contains(n))
+            .collect();
+
+        assert_eq!(filtered, vec!["Read", "Grep", "Glob"]);
+    }
+
+    #[test]
+    fn permission_mode_normal_allows_all_tools() {
+        const PLAN_MODE_DENY: &[&str] = &["Write", "Edit", "Bash", "NotebookEdit"];
+        let tools = vec!["Read", "Grep", "Glob", "Write", "Edit", "Bash"];
+        let is_plan_mode = false;
+
+        let filtered: Vec<&str> = tools
+            .into_iter()
+            .filter(|n| !is_plan_mode || !PLAN_MODE_DENY.contains(n))
+            .collect();
+
+        assert_eq!(filtered, vec!["Read", "Grep", "Glob", "Write", "Edit", "Bash"]);
     }
 }

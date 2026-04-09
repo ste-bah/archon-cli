@@ -16,6 +16,7 @@ use archon_core::config::LlmConfig;
 use archon_core::config::default_config_path;
 use archon_core::config_layers::ConfigLayer;
 use archon_core::cost_alerts::{CostAlertAction, CostAlertState};
+use archon_core::agents::AgentRegistry;
 use archon_core::dispatch::create_default_registry;
 use archon_core::env_vars::{self, ArchonEnvVars};
 use archon_core::input_format::InputFormat;
@@ -469,10 +470,12 @@ async fn main() -> Result<()> {
                     );
                     let team_provider = build_llm_provider(&config.llm, team_client);
                     let cwd = std::env::current_dir().unwrap_or_default();
+                    let team_agent_registry = Arc::new(std::sync::RwLock::new(AgentRegistry::load(&cwd)));
                     let executor = Arc::new(RealSubtaskExecutor::new(
                         team_provider,
                         cwd,
                         config.api.default_model.clone(),
+                        team_agent_registry,
                     ));
                     let team_cfg = archon_core::orchestrator::config::TeamConfig {
                         name: team.clone(),
@@ -1623,7 +1626,67 @@ async fn run_print_mode_session(
     // Apply tool filtering from resolved flags (CLI-220)
     apply_tool_filters(&mut registry, resolved_flags);
 
+    // ── Resolve --agent flag against AgentRegistry (AGT-008) ──
+    // Load registry early so we can resolve before tool_defs extraction.
+    let agent_registry_early = AgentRegistry::load(&working_dir);
+
+    // ── Inject agent listing into Agent tool description (AGT-011) ──
+    {
+        let agents: Vec<(String, String)> = agent_registry_early
+            .list()
+            .iter()
+            .map(|a| (a.agent_type.clone(), a.description.clone()))
+            .collect();
+        registry.register(Box::new(archon_tools::agent_tool::AgentTool::with_agent_listing(&agents)));
+    }
+
+    let agent_def = if let Some(ref agent_name) = resolved_flags.agent {
+        match agent_registry_early.resolve(agent_name) {
+            Some(def) => {
+                tracing::info!(agent = agent_name, "print mode: resolved custom agent");
+                Some(def.clone())
+            }
+            None => {
+                let available = agent_registry_early.available_agent_names().join(", ");
+                eprintln!("Unknown agent '{}'. Available: {}", agent_name, available);
+                return 1;
+            }
+        }
+    } else {
+        None
+    };
+
+    // Apply agent tool filtering to registry
+    if let Some(ref def) = agent_def {
+        if let Some(ref allowed) = def.allowed_tools {
+            let allowed_refs: Vec<&str> = allowed.iter().map(|s| s.as_str()).collect();
+            registry.filter_whitelist(&allowed_refs);
+        }
+        if let Some(ref denied) = def.disallowed_tools {
+            let denied_refs: Vec<&str> = denied.iter().map(|s| s.as_str()).collect();
+            registry.filter_blacklist(&denied_refs);
+        }
+    }
+
+    // Pre-flight check: required MCP servers must be available for --agent mode
+    if let Some(ref def) = agent_def {
+        let available_tools = registry.tool_names();
+        let available_mcp: Vec<String> = available_tools.iter()
+            .filter(|n| n.starts_with("mcp__"))
+            .map(|n| n.to_string())
+            .collect();
+        if !def.has_required_mcp_servers(&available_mcp) {
+            eprintln!(
+                "Agent '{}' requires MCP servers {:?} but they are not available.",
+                def.agent_type, def.required_mcp_servers,
+            );
+            return 1;
+        }
+    }
+
     // Build a minimal system prompt (skip ARCHON.md in bare mode)
+    // Note: omit_claude_md is subagent-spawn only (matches Claude Code behavior).
+    // --agent CLI mode always gets full ARCHON.md.
     let archon_md = if resolved_flags.bare_mode {
         String::new()
     } else {
@@ -1641,6 +1704,40 @@ async fn run_print_mode_session(
     // from identity blocks when disabled so print mode honours the flag too.
     strip_cache_control_if_disabled(&mut identity_blocks, config.context.prompt_cache);
     let mut system_prompt: Vec<serde_json::Value> = identity_blocks;
+
+    // Inject agent system prompt (replaces default personality in print mode)
+    if let Some(ref def) = agent_def {
+        // Clear default identity blocks and inject agent prompt instead
+        let mut agent_prompt = def.system_prompt.clone();
+
+        // Inject tool guidance
+        if !def.tool_guidance.is_empty() {
+            agent_prompt = format!("{agent_prompt}\n\n<tool-guidance>\n{}\n</tool-guidance>", def.tool_guidance);
+        }
+
+        // Inject skills
+        if let Some(ref skills) = def.skills {
+            if !skills.is_empty() {
+                let skills_list = skills.join(", ");
+                agent_prompt = format!("{agent_prompt}\n\n<available-skills>\nThe following skills are available to you: {skills_list}\nInvoke them by name when relevant to the task.\n</available-skills>");
+            }
+        }
+
+        // Inject LEANN queries and memory tags
+        if !def.leann_queries.is_empty() {
+            let queries = def.leann_queries.join(", ");
+            agent_prompt = format!("{agent_prompt}\n\n<leann-queries>\nRelevant code search queries for your task: {queries}\nUse these with the LEANN semantic search tool when exploring the codebase.\n</leann-queries>");
+        }
+        if !def.tags.is_empty() {
+            let tags = def.tags.join(", ");
+            agent_prompt = format!("{agent_prompt}\n\n<agent-tags>\nYour memory tags: {tags}\nUse these tags when storing or recalling memories relevant to your role.\n</agent-tags>");
+        }
+
+        system_prompt = vec![serde_json::json!({
+            "type": "text",
+            "text": agent_prompt,
+        })];
+    }
 
     // ── Output style injection for print mode (CLI-310) ──────────
     {
@@ -1704,7 +1801,7 @@ async fn run_print_mode_session(
     };
     let permission_mode_shared = Arc::new(tokio::sync::Mutex::new(initial_perm_mode));
 
-    let agent_config = AgentConfig {
+    let mut agent_config = AgentConfig {
         model: config.api.default_model.clone(),
         max_tokens: config.api.thinking_budget,
         thinking_budget: config.api.thinking_budget,
@@ -1718,12 +1815,89 @@ async fn run_print_mode_session(
         permission_mode: permission_mode_shared,
         extra_dirs: Arc::new(tokio::sync::Mutex::new(Vec::new())),
         max_tool_concurrency: config.tools.max_concurrency as usize,
+        max_turns: None,
     };
+
+    // Apply agent execution config overrides (AGT-008)
+    if let Some(ref def) = agent_def {
+        // AC-113: model="inherit" means use parent model (skip override)
+        if let Some(ref m) = def.model {
+            if m != "inherit" {
+                agent_config.model = m.clone();
+                *agent_config.model_override.blocking_lock() = m.clone();
+            }
+        }
+        if let Some(ref e) = def.effort {
+            if let Ok(level) = e.parse::<archon_llm::effort::EffortLevel>() {
+                *agent_config.effort_level.blocking_lock() = level;
+            } else {
+                tracing::warn!(agent = %def.agent_type, effort = %e, "invalid effort level in agent definition, using default");
+            }
+        }
+        if let Some(ref pm) = def.permission_mode {
+            let mode_str = pm.as_str();
+            // AC-103: Agent permission_mode must NOT override parent BypassPermissions/AcceptEdits/Auto
+            let parent_mode = agent_config.permission_mode.blocking_lock().clone();
+            let parent_is_privileged = matches!(
+                parent_mode.as_str(),
+                "bypassPermissions" | "acceptEdits" | "auto"
+            );
+            if parent_is_privileged {
+                tracing::debug!(
+                    agent = %def.agent_type, parent_mode = %parent_mode, agent_mode = %mode_str,
+                    "agent permission_mode skipped — parent has privileged mode"
+                );
+            } else if mode_str == "bypassPermissions" && !cli.dangerously_skip_permissions {
+                tracing::warn!(
+                    agent = %def.agent_type, raw_mode = %pm,
+                    "agent requests bypassPermissions but --dangerously-skip-permissions not passed; ignoring"
+                );
+            } else {
+                *agent_config.permission_mode.blocking_lock() = mode_str.to_string();
+            }
+        }
+        if def.max_turns.is_some() {
+            agent_config.max_turns = def.max_turns;
+        }
+    }
 
     let (agent_event_tx, agent_event_rx) = tokio::sync::mpsc::channel::<AgentEvent>(256);
     let provider = build_llm_provider(&config.llm, api_client);
     tracing::info!("LLM provider: {}", provider.name());
-    let mut agent = Agent::new(provider, registry, agent_config, agent_event_tx);
+
+    // Load custom agent registry (built-in + project + user agents)
+    let agent_registry = Arc::new(std::sync::RwLock::new(AgentRegistry::load(&working_dir)));
+    {
+        let reg = agent_registry.read().expect("agent registry lock");
+        tracing::info!(count = reg.len(), "loaded agent definitions");
+        for err in reg.load_errors() {
+            tracing::warn!(%err, "agent load error");
+        }
+    }
+    let mut agent = Agent::new(provider, registry, agent_config, agent_event_tx, agent_registry);
+
+    // Wire hook system for print mode — load hooks then register agent-specific hooks
+    {
+        let home_dir = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
+        let hook_registry = archon_core::hooks::HookRegistry::load_all(&working_dir, &home_dir);
+        let arc = std::sync::Arc::new(hook_registry);
+        agent.set_hook_registry(Arc::clone(&arc));
+
+        // Register agent-specific hooks as session-scoped hooks
+        if let Some(ref def) = agent_def {
+            if let Some(ref hooks_json) = def.hooks {
+                match archon_core::agents::loader::parse_agent_hooks(hooks_json) {
+                    Ok(hook_pairs) => {
+                        for (event, config) in hook_pairs {
+                            arc.register_session_hook(session_id, event, config);
+                        }
+                        tracing::info!(agent = %def.agent_type, "print mode: registered agent session-scoped hooks");
+                    }
+                    Err(e) => tracing::warn!(agent = %def.agent_type, error = %e, "failed to parse agent hooks"),
+                }
+            }
+        }
+    }
 
     // Wire auto-mode evaluator
     let auto_eval = AutoModeEvaluator::new(AutoModeConfig {
@@ -1731,6 +1905,21 @@ async fn run_print_mode_session(
         ..Default::default()
     });
     agent.set_auto_evaluator(auto_eval);
+
+    // Wire Phase G: critical_system_reminder for per-turn injection in print mode
+    if let Some(ref def) = agent_def {
+        if let Some(ref reminder) = def.critical_system_reminder {
+            agent.set_critical_system_reminder(reminder.clone());
+        }
+    }
+
+    // AGT-011: Prepend initial_prompt to the query in print mode
+    let mut print_config = print_config;
+    if let Some(ref def) = agent_def {
+        if let Some(ref prefix) = def.initial_prompt {
+            print_config.query = format!("{prefix}\n\n{}", print_config.query);
+        }
+    }
 
     run_print_mode(print_config, config, &mut agent, agent_event_rx).await
 }
@@ -2173,9 +2362,68 @@ async fn run_interactive_session(
         tracing::info!("registered {mcp_tool_count} MCP tools into agent registry");
     }
 
+    // ── Resolve --agent flag against AgentRegistry (AGT-008) ──
+    // Load a temporary registry for resolution; the Arc-wrapped one is created later.
+    let agent_registry_tmp = AgentRegistry::load(&working_dir);
+
+    // ── Inject agent listing into Agent tool description (AGT-011) ──
+    {
+        let agents: Vec<(String, String)> = agent_registry_tmp
+            .list()
+            .iter()
+            .map(|a| (a.agent_type.clone(), a.description.clone()))
+            .collect();
+        registry.register(Box::new(archon_tools::agent_tool::AgentTool::with_agent_listing(&agents)));
+    }
+
+    let agent_def: Option<archon_core::agents::CustomAgentDefinition> = if let Some(ref agent_name) = resolved_flags.agent {
+        match agent_registry_tmp.resolve(agent_name) {
+            Some(def) => {
+                tracing::info!(agent = agent_name, "resolved custom agent definition");
+                Some(def.clone())
+            }
+            None => {
+                let available = agent_registry_tmp.available_agent_names().join(", ");
+                anyhow::bail!("Unknown agent '{}'. Available: {}", agent_name, available);
+            }
+        }
+    } else {
+        None
+    };
+    drop(agent_registry_tmp);
+
+    // Apply agent tool filtering to registry
+    if let Some(ref def) = agent_def {
+        if let Some(ref allowed) = def.allowed_tools {
+            let allowed_refs: Vec<&str> = allowed.iter().map(|s: &String| s.as_str()).collect();
+            registry.filter_whitelist(&allowed_refs);
+        }
+        if let Some(ref denied) = def.disallowed_tools {
+            let denied_refs: Vec<&str> = denied.iter().map(|s: &String| s.as_str()).collect();
+            registry.filter_blacklist(&denied_refs);
+        }
+    }
+
+    // Pre-flight check: required MCP servers must be available for --agent mode
+    if let Some(ref def) = agent_def {
+        let available_tools = registry.tool_names();
+        let available_mcp: Vec<String> = available_tools.iter()
+            .filter(|n| n.starts_with("mcp__"))
+            .map(|n| n.to_string())
+            .collect();
+        if !def.has_required_mcp_servers(&available_mcp) {
+            anyhow::bail!(
+                "Agent '{}' requires MCP servers {:?} but they are not available.",
+                def.agent_type, def.required_mcp_servers,
+            );
+        }
+    }
+
     let tool_defs = registry.tool_definitions();
 
     // ── Phase 2: Assemble system prompt with consciousness (CLI-108) ──
+    // Note: omit_claude_md is subagent-spawn only (matches Claude Code behavior).
+    // --agent CLI mode always gets full ARCHON.md.
     let archon_md = if resolved_flags.bare_mode {
         tracing::info!("bare mode: skipping ARCHON.md loading");
         String::new()
@@ -2226,7 +2474,7 @@ async fn run_interactive_session(
         } else {
             Some(identity_text)
         },
-        personality: if resolved_flags.bare_mode {
+        personality: if agent_def.is_some() || resolved_flags.bare_mode {
             None
         } else {
             Some(personality_text)
@@ -2249,7 +2497,30 @@ async fn run_interactive_session(
             Some(env_section.clone())
         },
         inner_voice: None, // Populated on subsequent turns by InnerVoice::to_prompt_block()
-        personality_briefing: None, // Injected on first turn via agent field
+        personality_briefing: agent_def.as_ref().map(|a| {
+            let mut prompt = a.system_prompt.clone();
+            // Inject tool guidance into agent system prompt
+            if !a.tool_guidance.is_empty() {
+                prompt = format!("{prompt}\n\n<tool-guidance>\n{}\n</tool-guidance>", a.tool_guidance);
+            }
+            // Inject skills into agent system prompt
+            if let Some(ref skills) = a.skills {
+                if !skills.is_empty() {
+                    let skills_list = skills.join(", ");
+                    prompt = format!("{prompt}\n\n<available-skills>\nThe following skills are available to you: {skills_list}\nInvoke them by name when relevant to the task.\n</available-skills>");
+                }
+            }
+            // Inject LEANN queries and memory tags
+            if !a.leann_queries.is_empty() {
+                let queries = a.leann_queries.join(", ");
+                prompt = format!("{prompt}\n\n<leann-queries>\nRelevant code search queries for your task: {queries}\nUse these with the LEANN semantic search tool when exploring the codebase.\n</leann-queries>");
+            }
+            if !a.tags.is_empty() {
+                let tags = a.tags.join(", ");
+                prompt = format!("{prompt}\n\n<agent-tags>\nYour memory tags: {tags}\nUse these tags when storing or recalling memories relevant to your role.\n</agent-tags>");
+            }
+            prompt
+        }),
         memory_briefing: None, // Injected on first turn via agent field
         dynamic: Some(format!(
             "Date: {}\nSession: {}\n\n\
@@ -2372,7 +2643,7 @@ async fn run_interactive_session(
         .sum();
 
     // Build agent config with shared fast_mode + effort state (GAP 3 & 4)
-    let agent_config = AgentConfig {
+    let mut agent_config = AgentConfig {
         model: config.api.default_model.clone(),
         max_tokens: config.api.thinking_budget,
         thinking_budget: config.api.thinking_budget,
@@ -2386,7 +2657,52 @@ async fn run_interactive_session(
         permission_mode: Arc::clone(&permission_mode_shared),
         extra_dirs: Arc::new(tokio::sync::Mutex::new(Vec::new())),
         max_tool_concurrency: config.tools.max_concurrency as usize,
+        max_turns: None,
     };
+
+    // Apply agent execution config overrides
+    if let Some(ref def) = agent_def {
+        // AC-113: model="inherit" means use parent model (skip override)
+        if let Some(ref m) = def.model {
+            if m != "inherit" {
+                agent_config.model = m.clone();
+                *agent_config.model_override.blocking_lock() = m.clone();
+            }
+        }
+        if let Some(ref e) = def.effort {
+            if let Ok(level) = e.parse::<archon_llm::effort::EffortLevel>() {
+                *agent_config.effort_level.blocking_lock() = level;
+            } else {
+                tracing::warn!(agent = %def.agent_type, effort = %e, "invalid effort level in agent definition, using default");
+            }
+        }
+        if let Some(ref pm) = def.permission_mode {
+            let mode_str = pm.as_str();
+            // AC-103: Agent permission_mode must NOT override parent BypassPermissions/AcceptEdits/Auto
+            let parent_mode = agent_config.permission_mode.blocking_lock().clone();
+            let parent_is_privileged = matches!(
+                parent_mode.as_str(),
+                "bypassPermissions" | "acceptEdits" | "auto"
+            );
+            if parent_is_privileged {
+                tracing::debug!(
+                    agent = %def.agent_type, parent_mode = %parent_mode, agent_mode = %mode_str,
+                    "agent permission_mode skipped — parent has privileged mode"
+                );
+            } else if mode_str == "bypassPermissions" && !cli.dangerously_skip_permissions {
+                tracing::warn!(
+                    agent = %def.agent_type, raw_mode = %pm,
+                    "agent requests bypassPermissions but --dangerously-skip-permissions not passed; ignoring"
+                );
+            } else {
+                *agent_config.permission_mode.blocking_lock() = mode_str.to_string();
+            }
+        }
+        if def.max_turns.is_some() {
+            agent_config.max_turns = def.max_turns;
+        }
+    }
+
     let extra_dirs_shared = Arc::clone(&agent_config.extra_dirs);
 
     // Create channels
@@ -2408,7 +2724,18 @@ async fn run_interactive_session(
     // Create agent
     let provider = build_llm_provider(&config.llm, api_client);
     tracing::info!("LLM provider: {}", provider.name());
-    let mut agent = Agent::new(provider, registry, agent_config, agent_event_tx);
+
+    // Load custom agent registry (built-in + project + user agents)
+    let agent_registry = Arc::new(std::sync::RwLock::new(AgentRegistry::load(&working_dir)));
+    {
+        let reg = agent_registry.read().expect("agent registry lock");
+        tracing::info!(count = reg.len(), "loaded agent definitions");
+        for err in reg.load_errors() {
+            tracing::warn!(%err, "agent load error");
+        }
+    }
+    let agent_registry_for_skills = Arc::clone(&agent_registry);
+    let mut agent = Agent::new(provider, registry, agent_config, agent_event_tx, agent_registry);
 
     // Wire checkpoint store into agent (CLI-116)
     if let Some(store) = checkpoint_store {
@@ -2538,6 +2865,26 @@ async fn run_interactive_session(
         agent.set_hook_registry(Arc::clone(&arc));
         arc
     };
+
+    // Wire Phase G agent definition fields (hooks, critical_system_reminder)
+    if let Some(ref def) = agent_def {
+        // Register agent-specific hooks as session-scoped hooks
+        if let Some(ref hooks_json) = def.hooks {
+            match archon_core::agents::loader::parse_agent_hooks(hooks_json) {
+                Ok(hook_pairs) => {
+                    for (event, config) in hook_pairs {
+                        hook_registry_arc.register_session_hook(session_id, event, config);
+                    }
+                    tracing::info!(agent = %def.agent_type, "registered agent session-scoped hooks");
+                }
+                Err(e) => tracing::warn!(agent = %def.agent_type, error = %e, "failed to parse agent hooks"),
+            }
+        }
+        // Set critical system reminder for per-turn injection
+        if let Some(ref reminder) = def.critical_system_reminder {
+            agent.set_critical_system_reminder(reminder.clone());
+        }
+    }
 
     // GAP 6: Wire auto-mode evaluator
     let auto_eval = AutoModeEvaluator::new(AutoModeConfig {
@@ -2812,6 +3159,7 @@ async fn run_interactive_session(
         allow_bypass_permissions: cli.allow_dangerously_skip_permissions
             || cli.dangerously_skip_permissions,
         denial_log: Arc::clone(&agent.denial_log),
+        agent_registry: Arc::clone(&agent_registry_for_skills),
     };
 
     // Spawn agent input processor with slash command dispatch
@@ -2869,6 +3217,19 @@ async fn run_interactive_session(
                 }),
             )
             .await;
+
+        // AGT-015: Send agent name/color to TUI status bar when in --agent mode
+        if let Some(ref def) = agent_def {
+            let _ = input_tui_tx.send(TuiEvent::SetAgentInfo {
+                name: def.agent_type.clone(),
+                color: def.color.clone(),
+            }).await;
+        }
+
+        // AGT-011: Track whether the agent's initial_prompt has been prepended
+        let mut initial_prompt_pending: Option<String> = agent_def
+            .as_ref()
+            .and_then(|d| d.initial_prompt.clone());
 
         while let Some(input) = user_input_rx.recv().await {
             // Session picker selection — load messages and restore conversation
@@ -3309,6 +3670,7 @@ async fn run_interactive_session(
                         session_id: cmd_ctx.session_id.clone(),
                         working_dir: cmd_ctx.working_dir.clone(),
                         model: cmd_ctx.default_model.clone(),
+                        agent_registry: Some(Arc::clone(&cmd_ctx.agent_registry)),
                     };
                     let output = skill.execute(&cmd_args, &skill_ctx);
                     match output {
@@ -3322,6 +3684,13 @@ async fn run_interactive_session(
                             let _ = input_tui_tx.send(TuiEvent::GenerationStarted).await;
                             if let Err(e) = agent.process_message(&prompt).await {
                                 tracing::error!("insights agent error: {e}");
+                            }
+                            // Hot-reload agent registry after agent-management skills
+                            if cmd_name == "create-agent" {
+                                if let Ok(mut reg) = cmd_ctx.agent_registry.write() {
+                                    reg.reload(&cmd_ctx.working_dir);
+                                    tracing::info!("agent registry reloaded after /create-agent");
+                                }
                             }
                             let _ = input_tui_tx.send(TuiEvent::SlashCommandComplete).await;
                         }
@@ -3362,7 +3731,13 @@ async fn run_interactive_session(
             // Signal the TUI that generation is starting BEFORE the agent runs.
             // This is the canonical place is_generating gets set to true.
             let _ = input_tui_tx.send(TuiEvent::GenerationStarted).await;
-            if let Err(e) = agent.process_message(&input).await {
+            // AGT-011: Prepend initial_prompt to first user message
+            let effective_input = if let Some(prefix) = initial_prompt_pending.take() {
+                format!("{prefix}\n\n{input}")
+            } else {
+                input.clone()
+            };
+            if let Err(e) = agent.process_message(&effective_input).await {
                 tracing::error!("agent loop error: {e}");
             }
             // Persist messages to session store for /resume
@@ -3376,6 +3751,18 @@ async fn run_interactive_session(
                     )
                 {
                     tracing::warn!("save_message failed at idx {idx}: {e}");
+                }
+            }
+        }
+
+        // AGT-015: Increment agent invocation count on session end.
+        // Wired ONLY here (not at /exit) to avoid double-counting — the Stop
+        // hook fires on ALL exit paths (/exit, /quit, Ctrl-C, channel close).
+        if let Some(ref def) = agent_def {
+            if let Some(ref base_dir) = def.base_dir {
+                let agent_dir = std::path::Path::new(base_dir);
+                if let Err(e) = archon_core::agents::memory::increment_invocation_count(agent_dir) {
+                    tracing::warn!(agent = def.agent_type.as_str(), "failed to increment invocation count: {e}");
                 }
             }
         }
@@ -3672,6 +4059,8 @@ struct SlashCommandContext {
     allow_bypass_permissions: bool,
     /// Shared denial log for `/denials` display.
     denial_log: Arc<tokio::sync::Mutex<archon_permissions::denial_log::DenialLog>>,
+    /// Agent registry for agent management skills.
+    agent_registry: Arc<std::sync::RwLock<AgentRegistry>>,
 }
 
 /// Handle slash commands. Returns `true` if the command was recognized and handled.
