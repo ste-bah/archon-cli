@@ -2683,6 +2683,7 @@ impl Agent {
                 worktree_path: worktree_info.as_ref()
                     .map(|wt| wt.worktree_path.display().to_string()),
                 description: Some(request.prompt.chars().take(200).collect()),
+                filename: resolved_def.as_ref().and_then(|d| d.filename.clone()),
             };
             store.write_metadata(&subagent_id, &meta);
             runner.set_transcript(store, subagent_id.clone());
@@ -2706,6 +2707,11 @@ impl Agent {
             let prompt = request.prompt.clone();
             let sid = subagent_id.clone();
             let subagent_manager = Arc::clone(&self.subagent_manager);
+            let mem_agent_type = resolved_def.as_ref().map(|d| d.agent_type.clone());
+            let mem_scope = resolved_def.as_ref().and_then(|d| d.memory_scope.clone());
+            let mem_tags = resolved_def.as_ref().map(|d| d.tags.clone()).unwrap_or_default();
+            let mem_arc = self.memory.as_ref().map(Arc::clone);
+            let mem_project_path = self.config.working_dir.to_string_lossy().into_owned();
             tokio::spawn(async move {
                 match runner.run(&prompt).await {
                     Ok(text) => {
@@ -2715,6 +2721,22 @@ impl Agent {
                         }
                         mgr.cleanup_agent(&sid);
                         drop(mgr);
+                        // Save agent memory on successful completion
+                        if let (Some(agent_type), Some(memory)) = (&mem_agent_type, &mem_arc) {
+                            let content: String = text.chars().take(500).collect();
+                            let title = format!("completion:{}:{}", agent_type, sid);
+                            if let Err(e) = crate::agents::memory::save_agent_memory(
+                                agent_type,
+                                &content,
+                                &title,
+                                &mem_tags,
+                                memory.as_ref(),
+                                &mem_project_path,
+                                mem_scope.as_ref(),
+                            ) {
+                                tracing::warn!(agent = %agent_type, error = %e, "failed to save agent memory");
+                            }
+                        }
                         tracing::info!(subagent_id = %sid, len = text.len(), "background subagent completed");
                     }
                     Err(e) => {
@@ -2747,6 +2769,11 @@ impl Agent {
             let prompt = request.prompt.clone();
             let sid = subagent_id.clone();
             let subagent_manager_bg = Arc::clone(&self.subagent_manager);
+            let mem_agent_type_bg = resolved_def.as_ref().map(|d| d.agent_type.clone());
+            let mem_scope_bg = resolved_def.as_ref().and_then(|d| d.memory_scope.clone());
+            let mem_tags_bg = resolved_def.as_ref().map(|d| d.tags.clone()).unwrap_or_default();
+            let mem_arc_bg = self.memory.as_ref().map(Arc::clone);
+            let mem_project_path_bg = self.config.working_dir.to_string_lossy().into_owned();
 
             let join_handle = tokio::spawn(async move {
                 let result = runner.run(&prompt).await;
@@ -2759,6 +2786,22 @@ impl Agent {
                         }
                         mgr.cleanup_agent(&sid);
                         drop(mgr);
+                        // Save agent memory on successful completion
+                        if let (Some(agent_type), Some(memory)) = (&mem_agent_type_bg, &mem_arc_bg) {
+                            let content: String = text.chars().take(500).collect();
+                            let title = format!("completion:{}:{}", agent_type, sid);
+                            if let Err(e) = crate::agents::memory::save_agent_memory(
+                                agent_type,
+                                &content,
+                                &title,
+                                &mem_tags_bg,
+                                memory.as_ref(),
+                                &mem_project_path_bg,
+                                mem_scope_bg.as_ref(),
+                            ) {
+                                tracing::warn!(agent = %agent_type, error = %e, "failed to save agent memory");
+                            }
+                        }
                     }
                     Err(e) => {
                         let reason = format!("Subagent failed: {e}");
@@ -2873,6 +2916,24 @@ impl Agent {
                         }),
                     )
                     .await;
+                }
+
+                // Save agent memory on successful completion
+                if let (Some(def), Some(memory)) = (&resolved_def, &self.memory) {
+                    let content: String = response_text.chars().take(500).collect();
+                    let title = format!("completion:{}:{}", def.agent_type, subagent_id);
+                    let project_path = self.config.working_dir.to_string_lossy();
+                    if let Err(e) = crate::agents::memory::save_agent_memory(
+                        &def.agent_type,
+                        &content,
+                        &title,
+                        &def.tags,
+                        memory.as_ref(),
+                        &project_path,
+                        def.memory_scope.as_ref(),
+                    ) {
+                        tracing::warn!(agent = %def.agent_type, error = %e, "failed to save agent memory");
+                    }
                 }
 
                 // Worktree cleanup: auto-remove if clean, preserve if changes exist

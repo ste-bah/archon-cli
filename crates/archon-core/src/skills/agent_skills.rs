@@ -171,8 +171,9 @@ impl Skill for ListAgentsSkill {
                 crate::agents::AgentSource::Project => "project",
                 crate::agents::AgentSource::User => "user",
             };
+            let path = def.base_dir.as_deref().unwrap_or("built-in");
             out.push_str(&format!(
-                "  {:<24} {:<40} [{source}, {model}]\n",
+                "  {:<24} {:<40} [{source}, {model}]\n                         {path}\n",
                 def.agent_type, def.description
             ));
         }

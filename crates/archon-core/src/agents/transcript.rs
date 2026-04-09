@@ -20,6 +20,8 @@ pub struct AgentMetadata {
     pub worktree_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filename: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -233,6 +235,7 @@ mod tests {
             agent_type: "explore".into(),
             worktree_path: Some("/tmp/wt".into()),
             description: Some("test agent".into()),
+            filename: None,
         };
         store.write_metadata("test-2", &meta);
 
@@ -254,6 +257,7 @@ mod tests {
             agent_type: "code-reviewer".into(),
             worktree_path: None,
             description: Some("reviews code".into()),
+            filename: None,
         };
         let json = serde_json::to_string(&meta).unwrap();
         let restored: AgentMetadata = serde_json::from_str(&json).unwrap();
@@ -268,10 +272,12 @@ mod tests {
             agent_type: "explore".into(),
             worktree_path: None,
             description: None,
+            filename: None,
         };
         let json = serde_json::to_string(&meta).unwrap();
         assert!(!json.contains("worktree_path"));
         assert!(!json.contains("description"));
+        assert!(!json.contains("filename"));
     }
 
     #[test]
@@ -319,6 +325,7 @@ mod tests {
             agent_type: "explore".into(),
             worktree_path: None,
             description: Some("test".into()),
+            filename: None,
         };
         store.write_metadata("resume-1", &meta);
         store.record_message("resume-1", &serde_json::json!({"role": "user", "content": "hi"}));
@@ -353,6 +360,7 @@ mod tests {
             agent_type: "plan".into(),
             worktree_path: Some("/tmp/nonexistent-worktree-abc123".into()),
             description: None,
+            filename: None,
         };
         store.write_metadata("resume-3", &meta);
         store.record_message("resume-3", &serde_json::json!({"role": "user", "content": "test"}));
