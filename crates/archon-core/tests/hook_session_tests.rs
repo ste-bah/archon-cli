@@ -14,10 +14,13 @@ use archon_core::hooks::{HookCommandType, HookConfig, HookEvent, HookMatcher, Ho
 // ---------------------------------------------------------------------------
 
 fn make_hook_config(exit_code: i32) -> HookConfig {
+    // The hook executor wraps the command in `sh -c`, so we can use plain
+    // shell builtins directly — no need for `bash -c` (which may not exist
+    // on Windows CI where only MSYS2 `sh` is available).
     let command = if exit_code == 0 {
         "echo session-hook-test".to_string()
     } else {
-        format!("bash -c 'echo blocked >&2; exit {exit_code}'")
+        format!("exit {exit_code}")
     };
 
     HookConfig {
