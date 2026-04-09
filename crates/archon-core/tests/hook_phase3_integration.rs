@@ -16,7 +16,11 @@ use archon_core::hooks::{
 // ---------------------------------------------------------------------------
 
 fn tmp_cwd() -> &'static Path {
-    Path::new("/tmp")
+    if cfg!(target_os = "windows") {
+        Path::new("C:\\Windows\\Temp")
+    } else {
+        Path::new("/tmp")
+    }
 }
 
 fn empty_input() -> serde_json::Value {
@@ -35,6 +39,22 @@ fn command_hook(cmd: &str) -> HookConfig {
         status_message: None,
         headers: Default::default(),
         allowed_env_vars: Vec::new(),
+    }
+}
+
+/// Cross-platform sleep command (Windows has no `sleep` binary).
+fn sleep_cmd(secs: u32) -> &'static str {
+    if cfg!(target_os = "windows") {
+        // ping -n N+1 waits ~N seconds; stdout suppressed
+        match secs {
+            1 => "ping -n 2 127.0.0.1 >nul",
+            _ => "ping -n 4 127.0.0.1 >nul",
+        }
+    } else {
+        match secs {
+            1 => "sleep 1",
+            _ => "sleep 3",
+        }
     }
 }
 
@@ -60,6 +80,10 @@ fn function_hook(name: &str) -> HookConfig {
 #[tokio::test]
 async fn test_agent_hook_spawns_and_parses_response() {
     // Agent hook: command that outputs JSON with a specific outcome field.
+    // Windows cmd.exe doesn't support single quotes, so use different quoting per platform.
+    #[cfg(target_os = "windows")]
+    let agent_cmd = r#"echo {"outcome":"blocking","reason":"agent says no"}"#;
+    #[cfg(not(target_os = "windows"))]
     let agent_cmd = r#"echo '{"outcome":"blocking","reason":"agent says no"}'"#;
     let hook = HookConfig {
         hook_type: HookCommandType::Agent,
@@ -419,7 +443,7 @@ async fn test_timeout_budget_exhaustion_and_skip() {
     });
 
     // Register 3 slow hooks that each sleep 1 second.
-    let slow_hooks: Vec<HookConfig> = (0..3).map(|_| command_hook("sleep 1")).collect();
+    let slow_hooks: Vec<HookConfig> = (0..3).map(|_| command_hook(sleep_cmd(1))).collect();
 
     registry.register_matchers(
         HookEvent::PreToolUse,
@@ -624,7 +648,7 @@ async fn test_callbacks_skipped_when_budget_exhausted() {
     set_in_hook_agent(false);
 
     // Persistent command hook that will consume the entire budget.
-    let slow_hook = command_hook("sleep 1");
+    let slow_hook = command_hook(sleep_cmd(1));
     registry.register_matchers(
         HookEvent::PreToolUse,
         vec![HookMatcher {
