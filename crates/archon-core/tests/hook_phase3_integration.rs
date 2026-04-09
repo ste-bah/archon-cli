@@ -80,9 +80,10 @@ fn function_hook(name: &str) -> HookConfig {
 #[tokio::test]
 async fn test_agent_hook_spawns_and_parses_response() {
     // Agent hook: command that outputs JSON with a specific outcome field.
-    // Windows cmd.exe doesn't support single quotes, so use different quoting per platform.
+    // Use python for cross-platform JSON echo (cmd.exe mangles braces and quotes).
+    // GitHub Actions has `python` on all platforms (windows uses `python`, linux/mac have both).
     #[cfg(target_os = "windows")]
-    let agent_cmd = r#"echo {"outcome":"blocking","reason":"agent says no"}"#;
+    let agent_cmd = r#"python -c "import json; print(json.dumps({'outcome':'blocking','reason':'agent says no'}))"#;
     #[cfg(not(target_os = "windows"))]
     let agent_cmd = r#"echo '{"outcome":"blocking","reason":"agent says no"}'"#;
     let hook = HookConfig {
