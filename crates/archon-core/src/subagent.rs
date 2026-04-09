@@ -5,6 +5,33 @@ use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 // ---------------------------------------------------------------------------
+// Auto-background configuration (AGT-025)
+// ---------------------------------------------------------------------------
+
+/// Default auto-background timeout in milliseconds (120 seconds).
+pub const AUTO_BACKGROUND_MS: u64 = 120_000;
+
+/// Check if auto-backgrounding is enabled via environment variable.
+///
+/// When enabled, foreground sync agents that run longer than `AUTO_BACKGROUND_MS`
+/// are automatically converted to background agents. The agent continues running
+/// but the parent stops waiting synchronously.
+pub fn is_auto_background_enabled() -> bool {
+    std::env::var("ARCHON_AUTO_BACKGROUND_TASKS")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+}
+
+/// Returns the auto-background timeout in milliseconds, or 0 if disabled.
+pub fn get_auto_background_ms() -> u64 {
+    if is_auto_background_enabled() {
+        AUTO_BACKGROUND_MS
+    } else {
+        0
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Subagent status
 // ---------------------------------------------------------------------------
 
@@ -53,6 +80,12 @@ pub enum SubagentError {
 pub struct SubagentManager {
     agents: HashMap<String, SubagentInfo>,
     max_concurrent: usize,
+    /// Name registry: maps agent display names to agent IDs.
+    /// Populated when Agent tool spawns a named agent, cleared on completion.
+    name_registry: HashMap<String, String>,
+    /// Pending messages queued for delivery at next tool round boundary.
+    /// Key: agent_id, Value: queued messages (FIFO order).
+    pending_messages: HashMap<String, Vec<String>>,
 }
 
 impl SubagentManager {
@@ -63,6 +96,8 @@ impl SubagentManager {
         Self {
             agents: HashMap::new(),
             max_concurrent,
+            name_registry: HashMap::new(),
+            pending_messages: HashMap::new(),
         }
     }
 
@@ -148,6 +183,68 @@ impl SubagentManager {
         info.status = SubagentStatus::Failed(reason);
         Ok(())
     }
+
+    // -------------------------------------------------------------------
+    // Agent name registry (AGT-026)
+    // -------------------------------------------------------------------
+
+    /// Register a human-readable name for an agent ID.
+    /// Called when Agent tool spawns a named agent.
+    pub fn register_name(&mut self, name: String, agent_id: String) {
+        self.name_registry.insert(name, agent_id);
+    }
+
+    /// Remove a name from the registry. Called when agent completes.
+    pub fn unregister_name(&mut self, name: &str) {
+        self.name_registry.remove(name);
+    }
+
+    /// Resolve an agent name to its ID, if registered.
+    pub fn resolve_name(&self, name: &str) -> Option<&str> {
+        self.name_registry.get(name).map(|s| s.as_str())
+    }
+
+    /// Check if an agent ID is currently running.
+    pub fn is_running(&self, agent_id: &str) -> bool {
+        self.agents
+            .get(agent_id)
+            .map(|info| info.status == SubagentStatus::Running)
+            .unwrap_or(false)
+    }
+
+    /// Check if an agent ID exists in state (running or stopped).
+    pub fn has_agent(&self, agent_id: &str) -> bool {
+        self.agents.contains_key(agent_id)
+    }
+
+    // -------------------------------------------------------------------
+    // Pending messages (AGT-026)
+    // -------------------------------------------------------------------
+
+    /// Queue a message for delivery to a running agent.
+    /// Messages are delivered at the next tool round boundary.
+    pub fn queue_pending_message(&mut self, agent_id: &str, message: String) {
+        self.pending_messages
+            .entry(agent_id.to_string())
+            .or_default()
+            .push(message);
+    }
+
+    /// Drain all pending messages for an agent (take + clear).
+    /// Returns empty vec if no messages queued.
+    pub fn drain_pending_messages(&mut self, agent_id: &str) -> Vec<String> {
+        self.pending_messages
+            .remove(agent_id)
+            .unwrap_or_default()
+    }
+
+    /// Clean up all state for an agent on completion:
+    /// drops pending messages, removes from name registry if name matches.
+    pub fn cleanup_agent(&mut self, agent_id: &str) {
+        self.pending_messages.remove(agent_id);
+        // Remove from name registry if this ID is registered
+        self.name_registry.retain(|_, id| id != agent_id);
+    }
 }
 
 impl Default for SubagentManager {
@@ -157,7 +254,572 @@ impl Default for SubagentManager {
 }
 
 // ---------------------------------------------------------------------------
-// Tests
+// SubagentRunner — multi-turn agentic loop with tool dispatch (AGT-009)
+// ---------------------------------------------------------------------------
+
+pub mod runner {
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    use archon_llm::provider::{LlmProvider, LlmRequest};
+    use archon_llm::streaming::StreamEvent;
+    use archon_llm::types::ContentBlockType;
+    use archon_tools::tool::ToolContext;
+
+    use crate::dispatch::ToolRegistry;
+
+    /// A multi-turn subagent that streams LLM responses and dispatches tool calls.
+    ///
+    /// Unlike the one-shot approach, SubagentRunner loops:
+    ///   send request → collect response → if tool_use, dispatch tools → loop
+    /// until: no tool_use, max_turns reached, or timeout.
+    pub struct SubagentRunner {
+        provider: Arc<dyn LlmProvider>,
+        system_prompt: String,
+        tool_definitions: Vec<serde_json::Value>,
+        registry: ToolRegistry,
+        tool_context: ToolContext,
+        model: String,
+        max_turns: u32,
+        timeout_secs: u64,
+        max_tokens: u32,
+        /// Critical system reminder re-injected every turn (AGT-022).
+        critical_system_reminder: Option<String>,
+        /// Effort level passed to the LLM API (e.g. "low", "medium", "high").
+        effort: Option<String>,
+        /// Transcript store for fire-and-forget recording (AGT-024).
+        transcript_store: Option<crate::agents::transcript::AgentTranscriptStore>,
+        /// Agent ID for transcript recording (AGT-024).
+        transcript_agent_id: Option<String>,
+        /// Initial messages for resume — prepended before the prompt (AGT-024).
+        initial_messages: Option<Vec<serde_json::Value>>,
+        /// AGT-026: SubagentManager for draining pending messages at tool round boundaries.
+        subagent_manager: Option<Arc<tokio::sync::Mutex<super::SubagentManager>>>,
+        /// AGT-026: This runner's agent ID (for draining its pending messages).
+        runner_agent_id: Option<String>,
+    }
+
+    /// A single pending tool call collected from the stream.
+    #[derive(Debug)]
+    struct PendingTool {
+        id: String,
+        name: String,
+        input_json: String,
+    }
+
+    impl SubagentRunner {
+        pub fn new(
+            provider: Arc<dyn LlmProvider>,
+            system_prompt: String,
+            tool_definitions: Vec<serde_json::Value>,
+            registry: ToolRegistry,
+            tool_context: ToolContext,
+            model: String,
+            max_turns: u32,
+            timeout_secs: u64,
+        ) -> Self {
+            Self {
+                provider,
+                system_prompt,
+                tool_definitions,
+                registry,
+                tool_context,
+                model,
+                max_turns,
+                timeout_secs,
+                max_tokens: 16384,
+                critical_system_reminder: None,
+                effort: None,
+                transcript_store: None,
+                transcript_agent_id: None,
+                initial_messages: None,
+                subagent_manager: None,
+                runner_agent_id: None,
+            }
+        }
+
+        /// Set subagent manager and agent ID for pending message drain (AGT-026).
+        pub fn set_pending_message_source(
+            &mut self,
+            manager: Arc<tokio::sync::Mutex<super::SubagentManager>>,
+            agent_id: String,
+        ) {
+            self.subagent_manager = Some(manager);
+            self.runner_agent_id = Some(agent_id);
+        }
+
+        /// Drain pending messages and return them as user turn JSON values.
+        async fn drain_pending_as_user_turns(&self) -> Vec<serde_json::Value> {
+            let (Some(mgr), Some(aid)) = (&self.subagent_manager, &self.runner_agent_id) else {
+                return Vec::new();
+            };
+            let messages = mgr.lock().await.drain_pending_messages(aid);
+            messages
+                .into_iter()
+                .map(|msg| serde_json::json!({ "role": "user", "content": msg }))
+                .collect()
+        }
+
+        /// Set the critical system reminder for per-turn injection (AGT-022).
+        pub fn set_critical_system_reminder(&mut self, reminder: String) {
+            if reminder.is_empty() {
+                self.critical_system_reminder = None;
+            } else {
+                self.critical_system_reminder = Some(reminder);
+            }
+        }
+
+        /// Set the effort level for the LLM API (e.g. "low", "medium").
+        pub fn set_effort(&mut self, effort: String) {
+            if effort.is_empty() || effort.eq_ignore_ascii_case("high") {
+                self.effort = None; // high is the default, no need to set
+            } else {
+                self.effort = Some(effort);
+            }
+        }
+
+        /// Set transcript store and agent ID for fire-and-forget recording (AGT-024).
+        pub fn set_transcript(
+            &mut self,
+            store: crate::agents::transcript::AgentTranscriptStore,
+            agent_id: String,
+        ) {
+            self.transcript_store = Some(store);
+            self.transcript_agent_id = Some(agent_id);
+        }
+
+        /// Set initial messages for resume — these are prepended before the prompt (AGT-024).
+        pub fn set_initial_messages(&mut self, messages: Vec<serde_json::Value>) {
+            if !messages.is_empty() {
+                self.initial_messages = Some(messages);
+            }
+        }
+
+        /// Fire-and-forget record a message to the transcript (AGT-024).
+        fn record_transcript(&self, message: &serde_json::Value) {
+            if let (Some(store), Some(aid)) = (&self.transcript_store, &self.transcript_agent_id) {
+                store.record_message(aid, message);
+            }
+        }
+
+        /// Run the subagent loop with the given initial prompt.
+        /// Returns the accumulated text output from the final turn.
+        pub async fn run(&self, initial_prompt: &str) -> anyhow::Result<String> {
+            // AGT-024: Use initial_messages for resume, or start fresh
+            let mut messages: Vec<serde_json::Value> = if let Some(ref initial) = self.initial_messages {
+                let mut msgs = initial.clone();
+                let user_msg = serde_json::json!({
+                    "role": "user",
+                    "content": initial_prompt,
+                });
+                self.record_transcript(&user_msg);
+                msgs.push(user_msg);
+                msgs
+            } else {
+                let user_msg = serde_json::json!({
+                    "role": "user",
+                    "content": initial_prompt,
+                });
+                self.record_transcript(&user_msg);
+                vec![user_msg]
+            };
+
+            let deadline = Instant::now() + Duration::from_secs(self.timeout_secs);
+
+            for turn in 0..self.max_turns {
+                // Check timeout
+                if Instant::now() >= deadline {
+                    anyhow::bail!("Subagent timed out after {turn} turns");
+                }
+
+                let mut system = vec![serde_json::json!({
+                    "type": "text",
+                    "text": &self.system_prompt,
+                })];
+                // Inject critical system reminder every turn (AGT-022)
+                if let Some(ref reminder) = self.critical_system_reminder {
+                    system.push(serde_json::json!({
+                        "type": "text",
+                        "text": format!("<system-reminder>{reminder}</system-reminder>"),
+                    }));
+                }
+
+                let request = LlmRequest {
+                    model: self.model.clone(),
+                    max_tokens: self.max_tokens,
+                    system,
+                    messages: messages.clone(),
+                    tools: self.tool_definitions.clone(),
+                    effort: self.effort.clone(),
+                    ..LlmRequest::default()
+                };
+
+                // Stream the response
+                let mut rx = self.provider.stream(request).await
+                    .map_err(|e| anyhow::anyhow!("LLM stream error: {e}"))?;
+
+                let mut text_content = String::new();
+                let mut pending_tools: Vec<PendingTool> = Vec::new();
+                let mut current_tool_index: Option<u32> = None;
+
+                while let Some(event) = rx.recv().await {
+                    match event {
+                        StreamEvent::ContentBlockStart {
+                            index,
+                            block_type,
+                            tool_use_id,
+                            tool_name,
+                        } => {
+                            if block_type == ContentBlockType::ToolUse {
+                                current_tool_index = Some(index);
+                                pending_tools.push(PendingTool {
+                                    id: tool_use_id.unwrap_or_default(),
+                                    name: tool_name.unwrap_or_default(),
+                                    input_json: String::new(),
+                                });
+                            }
+                        }
+                        StreamEvent::TextDelta { text, .. } => {
+                            text_content.push_str(&text);
+                        }
+                        StreamEvent::InputJsonDelta { index, partial_json } => {
+                            if Some(index) == current_tool_index {
+                                if let Some(tool) = pending_tools.last_mut() {
+                                    tool.input_json.push_str(&partial_json);
+                                }
+                            }
+                        }
+                        StreamEvent::ContentBlockStop { .. } => {
+                            current_tool_index = None;
+                        }
+                        StreamEvent::Error { error_type, message } => {
+                            anyhow::bail!("LLM error: {error_type}: {message}");
+                        }
+                        _ => {} // MessageStart, MessageDelta, MessageStop, Ping, etc.
+                    }
+                }
+
+                // If no tool calls, subagent is done — return accumulated text
+                if pending_tools.is_empty() {
+                    // Record final assistant text to transcript (AGT-024)
+                    if !text_content.is_empty() {
+                        self.record_transcript(&serde_json::json!({
+                            "role": "assistant",
+                            "content": text_content,
+                        }));
+                    }
+                    return Ok(text_content);
+                }
+
+                // Build assistant message with text + tool_use blocks
+                let mut assistant_content: Vec<serde_json::Value> = Vec::new();
+                if !text_content.is_empty() {
+                    assistant_content.push(serde_json::json!({
+                        "type": "text",
+                        "text": text_content,
+                    }));
+                }
+                for tool in &pending_tools {
+                    let input: serde_json::Value = serde_json::from_str(&tool.input_json)
+                        .unwrap_or(serde_json::json!({}));
+                    assistant_content.push(serde_json::json!({
+                        "type": "tool_use",
+                        "id": tool.id,
+                        "name": tool.name,
+                        "input": input,
+                    }));
+                }
+                let assistant_msg = serde_json::json!({
+                    "role": "assistant",
+                    "content": assistant_content,
+                });
+                self.record_transcript(&assistant_msg);
+                messages.push(assistant_msg);
+
+                // Dispatch each tool call
+                let mut tool_results: Vec<serde_json::Value> = Vec::new();
+                for tool in &pending_tools {
+                    let input: serde_json::Value = serde_json::from_str(&tool.input_json)
+                        .unwrap_or(serde_json::json!({}));
+
+                    let result = self.registry.dispatch(&tool.name, input, &self.tool_context).await;
+                    tool_results.push(serde_json::json!({
+                        "type": "tool_result",
+                        "tool_use_id": tool.id,
+                        "content": result.content,
+                        "is_error": result.is_error,
+                    }));
+                }
+
+                // Add tool results as a user message
+                let tool_result_msg = serde_json::json!({
+                    "role": "user",
+                    "content": tool_results,
+                });
+                self.record_transcript(&tool_result_msg);
+                messages.push(tool_result_msg);
+
+                // AGT-026: Drain pending messages at tool round boundary and inject as user turns
+                let pending = self.drain_pending_as_user_turns().await;
+                for msg in pending {
+                    self.record_transcript(&msg);
+                    messages.push(msg);
+                }
+            }
+
+            anyhow::bail!("Subagent reached max turns ({})", self.max_turns)
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Tests
+    // -----------------------------------------------------------------------
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use archon_llm::provider::{LlmResponse, ModelInfo, ProviderFeature};
+        use archon_llm::types::Usage;
+        use std::sync::atomic::{AtomicU32, Ordering};
+        use tokio::sync::mpsc;
+
+        /// Mock provider that returns pre-configured responses.
+        struct MockProvider {
+            responses: std::sync::Mutex<Vec<Vec<StreamEvent>>>,
+            call_count: AtomicU32,
+        }
+
+        impl MockProvider {
+            fn new(responses: Vec<Vec<StreamEvent>>) -> Self {
+                Self {
+                    responses: std::sync::Mutex::new(responses),
+                    call_count: AtomicU32::new(0),
+                }
+            }
+        }
+
+        #[async_trait::async_trait]
+        impl LlmProvider for MockProvider {
+            fn name(&self) -> &str { "mock" }
+            fn models(&self) -> Vec<ModelInfo> { vec![] }
+            fn supports_feature(&self, _: ProviderFeature) -> bool { false }
+
+            async fn stream(&self, _request: LlmRequest) -> Result<tokio::sync::mpsc::Receiver<StreamEvent>, archon_llm::provider::LlmError> {
+                let idx = self.call_count.fetch_add(1, Ordering::SeqCst) as usize;
+                let events = {
+                    let mut responses = self.responses.lock().unwrap();
+                    if idx < responses.len() {
+                        responses[idx].drain(..).collect::<Vec<_>>()
+                    } else {
+                        vec![
+                            StreamEvent::MessageStart {
+                                id: "msg-end".into(),
+                                model: "mock".into(),
+                                usage: Usage { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+                            },
+                            StreamEvent::ContentBlockStart {
+                                index: 0,
+                                block_type: ContentBlockType::Text,
+                                tool_use_id: None,
+                                tool_name: None,
+                            },
+                            StreamEvent::TextDelta { index: 0, text: "(done)".into() },
+                            StreamEvent::ContentBlockStop { index: 0 },
+                            StreamEvent::MessageStop,
+                        ]
+                    }
+                }; // MutexGuard dropped here
+
+                let (tx, rx) = mpsc::channel(events.len() + 1);
+                for event in events {
+                    let _ = tx.send(event).await;
+                }
+                Ok(rx)
+            }
+
+            async fn complete(&self, _request: LlmRequest) -> Result<LlmResponse, archon_llm::provider::LlmError> {
+                unimplemented!()
+            }
+        }
+
+        fn text_response(text: &str) -> Vec<StreamEvent> {
+            vec![
+                StreamEvent::MessageStart {
+                    id: "msg-1".into(),
+                    model: "mock".into(),
+                    usage: Usage { input_tokens: 10, output_tokens: 5, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+                },
+                StreamEvent::ContentBlockStart {
+                    index: 0,
+                    block_type: ContentBlockType::Text,
+                    tool_use_id: None,
+                    tool_name: None,
+                },
+                StreamEvent::TextDelta {
+                    index: 0,
+                    text: text.into(),
+                },
+                StreamEvent::ContentBlockStop { index: 0 },
+                StreamEvent::MessageStop,
+            ]
+        }
+
+        fn tool_use_response(tool_id: &str, tool_name: &str, input_json: &str) -> Vec<StreamEvent> {
+            vec![
+                StreamEvent::MessageStart {
+                    id: "msg-tool".into(),
+                    model: "mock".into(),
+                    usage: Usage { input_tokens: 10, output_tokens: 20, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+                },
+                StreamEvent::ContentBlockStart {
+                    index: 0,
+                    block_type: ContentBlockType::ToolUse,
+                    tool_use_id: Some(tool_id.into()),
+                    tool_name: Some(tool_name.into()),
+                },
+                StreamEvent::InputJsonDelta {
+                    index: 0,
+                    partial_json: input_json.into(),
+                },
+                StreamEvent::ContentBlockStop { index: 0 },
+                StreamEvent::MessageStop,
+            ]
+        }
+
+        fn make_runner(provider: Arc<dyn LlmProvider>, max_turns: u32) -> SubagentRunner {
+            let registry = crate::dispatch::create_default_registry(
+                std::env::current_dir().unwrap_or_default(),
+            );
+            let tool_defs = registry.tool_definitions();
+            let ctx = ToolContext {
+                working_dir: std::env::current_dir().unwrap_or_default(),
+                session_id: "test-session".into(),
+                mode: archon_tools::tool::AgentMode::Normal,
+                extra_dirs: vec![],
+            };
+            SubagentRunner::new(
+                provider,
+                "You are a test subagent.".into(),
+                tool_defs,
+                registry,
+                ctx,
+                "mock-model".into(),
+                max_turns,
+                300,
+            )
+        }
+
+        #[tokio::test]
+        async fn text_only_returns_immediately() {
+            let provider = Arc::new(MockProvider::new(vec![
+                text_response("Hello from subagent"),
+            ]));
+            let runner = make_runner(provider.clone(), 10);
+            let result = runner.run("Say hello").await.unwrap();
+            assert_eq!(result, "Hello from subagent");
+            assert_eq!(provider.call_count.load(Ordering::SeqCst), 1);
+        }
+
+        #[tokio::test]
+        async fn tool_use_then_text_returns_after_two_turns() {
+            let provider = Arc::new(MockProvider::new(vec![
+                // Turn 1: LLM uses a tool
+                tool_use_response("tool-1", "Read", r#"{"file_path":"/tmp/test.txt"}"#),
+                // Turn 2: LLM returns text
+                text_response("I read the file."),
+            ]));
+            let runner = make_runner(provider.clone(), 10);
+            let result = runner.run("Read /tmp/test.txt").await.unwrap();
+            assert_eq!(result, "I read the file.");
+            assert_eq!(provider.call_count.load(Ordering::SeqCst), 2);
+        }
+
+        #[tokio::test]
+        async fn max_turns_enforced() {
+            // Every turn uses a tool, never returns text
+            let provider = Arc::new(MockProvider::new(vec![
+                tool_use_response("t1", "Read", r#"{"file_path":"/tmp/a"}"#),
+                tool_use_response("t2", "Read", r#"{"file_path":"/tmp/b"}"#),
+                tool_use_response("t3", "Read", r#"{"file_path":"/tmp/c"}"#),
+            ]));
+            let runner = make_runner(provider.clone(), 2);
+            let err = runner.run("keep going").await.unwrap_err();
+            assert!(err.to_string().contains("max turns (2)"));
+            assert_eq!(provider.call_count.load(Ordering::SeqCst), 2);
+        }
+
+        #[tokio::test]
+        async fn api_error_propagated() {
+            let provider = Arc::new(MockProvider::new(vec![
+                vec![StreamEvent::Error {
+                    error_type: "server_error".into(),
+                    message: "internal failure".into(),
+                }],
+            ]));
+            let runner = make_runner(provider, 10);
+            let err = runner.run("trigger error").await.unwrap_err();
+            assert!(err.to_string().contains("internal failure"));
+        }
+
+        #[tokio::test]
+        async fn isolated_messages() {
+            // Verify that each run starts with fresh messages
+            let provider = Arc::new(MockProvider::new(vec![
+                text_response("First run"),
+            ]));
+            let runner = make_runner(provider.clone(), 10);
+            let r1 = runner.run("First prompt").await.unwrap();
+            assert_eq!(r1, "First run");
+
+            // Second run should start fresh (provider returns default "(done)")
+            let r2 = runner.run("Second prompt").await.unwrap();
+            assert_eq!(r2, "(done)");
+        }
+
+        #[tokio::test]
+        async fn tool_dispatch_error_continues() {
+            // Use a nonexistent tool — dispatch should return error, loop continues
+            let provider = Arc::new(MockProvider::new(vec![
+                tool_use_response("t1", "NonexistentTool", r#"{}"#),
+                text_response("Recovered after tool error"),
+            ]));
+            let runner = make_runner(provider.clone(), 10);
+            let result = runner.run("use bad tool").await.unwrap();
+            assert_eq!(result, "Recovered after tool error");
+        }
+
+        #[tokio::test]
+        async fn empty_tool_definitions_still_works() {
+            let provider = Arc::new(MockProvider::new(vec![
+                text_response("No tools needed"),
+            ]));
+            let registry = crate::dispatch::create_default_registry(
+                std::env::current_dir().unwrap_or_default(),
+            );
+            let ctx = ToolContext {
+                working_dir: std::env::current_dir().unwrap_or_default(),
+                session_id: "test".into(),
+                mode: archon_tools::tool::AgentMode::Normal,
+                extra_dirs: vec![],
+            };
+            let runner = SubagentRunner::new(
+                provider,
+                "Test agent".into(),
+                vec![], // Empty tool defs
+                registry,
+                ctx,
+                "mock".into(),
+                5,
+                60,
+            );
+            let result = runner.run("hello").await.unwrap();
+            assert_eq!(result, "No tools needed");
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests (SubagentManager)
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
@@ -171,6 +833,10 @@ mod tests {
             allowed_tools: vec!["Read".into(), "Glob".into()],
             max_turns: 10,
             timeout_secs: 300,
+            subagent_type: None,
+            run_in_background: false,
+            cwd: None,
+            isolation: None,
         }
     }
 
@@ -275,5 +941,213 @@ mod tests {
     fn get_status_nonexistent_returns_none() {
         let mgr = SubagentManager::default();
         assert!(mgr.get_status("nonexistent").is_none());
+    }
+
+    // -----------------------------------------------------------------------
+    // Auto-background tests (AGT-025)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn auto_background_constant_is_120s() {
+        assert_eq!(super::AUTO_BACKGROUND_MS, 120_000);
+    }
+
+    #[test]
+    fn auto_background_disabled_by_default() {
+        unsafe { std::env::remove_var("ARCHON_AUTO_BACKGROUND_TASKS"); }
+        assert!(!super::is_auto_background_enabled());
+        assert_eq!(super::get_auto_background_ms(), 0);
+    }
+
+    #[test]
+    fn auto_background_enabled_with_1() {
+        unsafe { std::env::set_var("ARCHON_AUTO_BACKGROUND_TASKS", "1"); }
+        assert!(super::is_auto_background_enabled());
+        assert_eq!(super::get_auto_background_ms(), 120_000);
+        unsafe { std::env::remove_var("ARCHON_AUTO_BACKGROUND_TASKS"); }
+    }
+
+    #[test]
+    fn auto_background_enabled_with_true() {
+        unsafe { std::env::set_var("ARCHON_AUTO_BACKGROUND_TASKS", "true"); }
+        assert!(super::is_auto_background_enabled());
+        unsafe { std::env::remove_var("ARCHON_AUTO_BACKGROUND_TASKS"); }
+    }
+
+    #[test]
+    fn auto_background_disabled_for_zero() {
+        unsafe { std::env::set_var("ARCHON_AUTO_BACKGROUND_TASKS", "0"); }
+        assert!(!super::is_auto_background_enabled());
+        assert_eq!(super::get_auto_background_ms(), 0);
+        unsafe { std::env::remove_var("ARCHON_AUTO_BACKGROUND_TASKS"); }
+    }
+
+    #[test]
+    fn auto_background_case_insensitive() {
+        unsafe { std::env::set_var("ARCHON_AUTO_BACKGROUND_TASKS", "TRUE"); }
+        assert!(super::is_auto_background_enabled());
+        unsafe { std::env::set_var("ARCHON_AUTO_BACKGROUND_TASKS", "True"); }
+        assert!(super::is_auto_background_enabled());
+        unsafe { std::env::remove_var("ARCHON_AUTO_BACKGROUND_TASKS"); }
+    }
+
+    // -----------------------------------------------------------------------
+    // Name registry tests (AGT-026)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn register_name_and_resolve() {
+        let mut mgr = SubagentManager::default();
+        mgr.register_name("explorer".into(), "agent-uuid-123".into());
+
+        assert_eq!(mgr.resolve_name("explorer"), Some("agent-uuid-123"));
+        assert_eq!(mgr.resolve_name("unknown"), None);
+    }
+
+    #[test]
+    fn unregister_name_removes_entry() {
+        let mut mgr = SubagentManager::default();
+        mgr.register_name("explorer".into(), "agent-uuid-123".into());
+        mgr.unregister_name("explorer");
+
+        assert_eq!(mgr.resolve_name("explorer"), None);
+    }
+
+    #[test]
+    fn register_name_overwrites_previous() {
+        let mut mgr = SubagentManager::default();
+        mgr.register_name("explorer".into(), "old-id".into());
+        mgr.register_name("explorer".into(), "new-id".into());
+
+        assert_eq!(mgr.resolve_name("explorer"), Some("new-id"));
+    }
+
+    #[test]
+    fn is_running_checks_status() {
+        let mut mgr = SubagentManager::default();
+        let id = mgr.register(sample_request()).unwrap();
+
+        assert!(mgr.is_running(&id));
+
+        mgr.complete(&id, "done".into()).unwrap();
+        assert!(!mgr.is_running(&id));
+    }
+
+    #[test]
+    fn is_running_false_for_nonexistent() {
+        let mgr = SubagentManager::default();
+        assert!(!mgr.is_running("nonexistent-id"));
+    }
+
+    #[test]
+    fn has_agent_checks_existence() {
+        let mut mgr = SubagentManager::default();
+        let id = mgr.register(sample_request()).unwrap();
+
+        assert!(mgr.has_agent(&id));
+        assert!(!mgr.has_agent("nonexistent-id"));
+
+        // Completed agents still exist in state
+        mgr.complete(&id, "done".into()).unwrap();
+        assert!(mgr.has_agent(&id));
+    }
+
+    // -----------------------------------------------------------------------
+    // Pending message tests (AGT-026)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn queue_and_drain_pending_messages() {
+        let mut mgr = SubagentManager::default();
+        let id = mgr.register(sample_request()).unwrap();
+
+        mgr.queue_pending_message(&id, "msg1".into());
+        mgr.queue_pending_message(&id, "msg2".into());
+        mgr.queue_pending_message(&id, "msg3".into());
+
+        let drained = mgr.drain_pending_messages(&id);
+        assert_eq!(drained, vec!["msg1", "msg2", "msg3"]);
+
+        // Second drain returns empty (queue was cleared)
+        let drained2 = mgr.drain_pending_messages(&id);
+        assert!(drained2.is_empty());
+    }
+
+    #[test]
+    fn drain_nonexistent_agent_returns_empty() {
+        let mut mgr = SubagentManager::default();
+        let drained = mgr.drain_pending_messages("nonexistent-id");
+        assert!(drained.is_empty());
+    }
+
+    #[test]
+    fn pending_messages_are_fifo() {
+        let mut mgr = SubagentManager::default();
+        mgr.queue_pending_message("agent-1", "first".into());
+        mgr.queue_pending_message("agent-1", "second".into());
+        mgr.queue_pending_message("agent-1", "third".into());
+
+        let drained = mgr.drain_pending_messages("agent-1");
+        assert_eq!(drained[0], "first");
+        assert_eq!(drained[1], "second");
+        assert_eq!(drained[2], "third");
+    }
+
+    #[test]
+    fn pending_messages_isolated_per_agent() {
+        let mut mgr = SubagentManager::default();
+        mgr.queue_pending_message("agent-1", "msg-a".into());
+        mgr.queue_pending_message("agent-2", "msg-b".into());
+
+        let drained1 = mgr.drain_pending_messages("agent-1");
+        assert_eq!(drained1, vec!["msg-a"]);
+
+        let drained2 = mgr.drain_pending_messages("agent-2");
+        assert_eq!(drained2, vec!["msg-b"]);
+    }
+
+    // -----------------------------------------------------------------------
+    // Cleanup tests (AGT-026)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn cleanup_agent_drops_pending_messages() {
+        let mut mgr = SubagentManager::default();
+        let id = mgr.register(sample_request()).unwrap();
+        mgr.queue_pending_message(&id, "lost message".into());
+
+        mgr.cleanup_agent(&id);
+
+        let drained = mgr.drain_pending_messages(&id);
+        assert!(drained.is_empty(), "pending messages should be lost on cleanup");
+    }
+
+    #[test]
+    fn cleanup_agent_removes_name_registry_entry() {
+        let mut mgr = SubagentManager::default();
+        let id = mgr.register(sample_request()).unwrap();
+        mgr.register_name("explorer".into(), id.clone());
+
+        mgr.cleanup_agent(&id);
+
+        assert_eq!(
+            mgr.resolve_name("explorer"),
+            None,
+            "name should be removed on cleanup"
+        );
+    }
+
+    #[test]
+    fn cleanup_only_removes_matching_name() {
+        let mut mgr = SubagentManager::default();
+        let id1 = mgr.register(sample_request()).unwrap();
+        let id2 = mgr.register(sample_request()).unwrap();
+        mgr.register_name("explorer".into(), id1.clone());
+        mgr.register_name("reviewer".into(), id2.clone());
+
+        mgr.cleanup_agent(&id1);
+
+        assert_eq!(mgr.resolve_name("explorer"), None);
+        assert_eq!(mgr.resolve_name("reviewer"), Some(id2.as_str()));
     }
 }
