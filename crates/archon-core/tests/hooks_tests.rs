@@ -698,7 +698,8 @@ async fn exit_1_non_blocking_failure_returns_not_blocked() {
 #[tokio::test(flavor = "multi_thread")]
 async fn post_tool_use_hook_fires_after_execution() {
     let tmp = tempfile::NamedTempFile::new().expect("temp file");
-    let out_path = tmp.path().to_string_lossy().to_string();
+    // Normalize backslashes so `sh -c` on Windows doesn't eat them.
+    let out_path = tmp.path().to_string_lossy().replace('\\', "/");
 
     let registry = make_registry_with_command(
         HookEvent::PostToolUse,
@@ -860,7 +861,8 @@ async fn async_hook_returns_allow_immediately() {
 #[tokio::test(flavor = "multi_thread")]
 async fn hooks_execute_in_config_order() {
     let tmp = tempfile::NamedTempFile::new().expect("temp file");
-    let out_path = tmp.path().to_string_lossy().to_string();
+    // Normalize backslashes so `sh -c` on Windows doesn't eat them.
+    let out_path = tmp.path().to_string_lossy().replace('\\', "/");
 
     let mut registry = HookRegistry::new();
     registry.register_matchers(
@@ -1108,7 +1110,8 @@ async fn exit_2_overrides_stdout_success() {
 #[tokio::test(flavor = "multi_thread")]
 async fn multiple_hooks_all_run_no_short_circuit() {
     let tmp = tempfile::NamedTempFile::new().expect("temp file");
-    let out_path = tmp.path().to_string_lossy().to_string();
+    // Normalize backslashes so `sh -c` on Windows doesn't eat them.
+    let out_path = tmp.path().to_string_lossy().replace('\\', "/");
 
     // First hook: blocks (exit 2) and writes "first" to file
     // Second hook: also writes "second" to file (would be skipped in old short-circuit)
