@@ -9,6 +9,15 @@ use std::path::Path;
 
 use archon_core::hooks::{HookCommandType, HookConfig, HookEvent, HookMatcher, HookRegistry};
 
+/// Cross-platform temp directory for hook cwd.
+fn tmp_cwd() -> &'static Path {
+    if cfg!(target_os = "windows") {
+        Path::new("C:\\Windows\\Temp")
+    } else {
+        tmp_cwd()
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Helper: build a HookConfig with a command that exits with `exit_code`
 // ---------------------------------------------------------------------------
@@ -52,7 +61,7 @@ async fn test_register_session_hook_fires() {
         .execute_hooks(
             HookEvent::PreToolUse,
             serde_json::json!({}),
-            Path::new("/tmp"),
+            tmp_cwd(),
             "s1",
         )
         .await;
@@ -81,7 +90,7 @@ async fn test_clear_session_hooks_removes_all() {
         .execute_hooks(
             HookEvent::PreToolUse,
             serde_json::json!({}),
-            Path::new("/tmp"),
+            tmp_cwd(),
             "s1",
         )
         .await;
@@ -108,7 +117,7 @@ async fn test_session_hooks_auto_clear_on_session_end() {
         .execute_hooks(
             HookEvent::SessionEnd,
             serde_json::json!({}),
-            Path::new("/tmp"),
+            tmp_cwd(),
             "s1",
         )
         .await;
@@ -118,7 +127,7 @@ async fn test_session_hooks_auto_clear_on_session_end() {
         .execute_hooks(
             HookEvent::PreToolUse,
             serde_json::json!({}),
-            Path::new("/tmp"),
+            tmp_cwd(),
             "s1",
         )
         .await;
@@ -145,7 +154,7 @@ async fn test_session_hooks_isolated_between_sessions() {
         .execute_hooks(
             HookEvent::PreToolUse,
             serde_json::json!({}),
-            Path::new("/tmp"),
+            tmp_cwd(),
             "s2",
         )
         .await;
@@ -160,7 +169,7 @@ async fn test_session_hooks_isolated_between_sessions() {
         .execute_hooks(
             HookEvent::PreToolUse,
             serde_json::json!({}),
-            Path::new("/tmp"),
+            tmp_cwd(),
             "s1",
         )
         .await;
@@ -208,7 +217,7 @@ async fn test_session_hooks_merged_with_persistent() {
         .execute_hooks(
             HookEvent::PreToolUse,
             serde_json::json!({}),
-            Path::new("/tmp"),
+            tmp_cwd(),
             "s1",
         )
         .await;
@@ -237,7 +246,7 @@ async fn test_session_hook_count() {
         .execute_hooks(
             HookEvent::PreToolUse,
             serde_json::json!({}),
-            Path::new("/tmp"),
+            tmp_cwd(),
             "s1",
         )
         .await;
