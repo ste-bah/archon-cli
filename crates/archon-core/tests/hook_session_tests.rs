@@ -14,7 +14,7 @@ fn tmp_cwd() -> &'static Path {
     if cfg!(target_os = "windows") {
         Path::new("C:\\Windows\\Temp")
     } else {
-        tmp_cwd()
+        Path::new("/tmp")
     }
 }
 
