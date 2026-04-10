@@ -83,6 +83,10 @@ pub enum AgentSource {
     Project,
     /// Compiled into the binary
     BuiltIn,
+    /// Loaded from a plugin bundle: `.archon/plugins/<name>/agents/...`
+    /// or `~/.archon/plugins/<name>/agents/...`. The inner string is the
+    /// plugin name (the directory name under `plugins/`).
+    Plugin(String),
 }
 
 // ---------------------------------------------------------------------------
@@ -346,6 +350,24 @@ mod tests {
         assert_ne!(AgentSource::User, AgentSource::Project);
         assert_ne!(AgentSource::User, AgentSource::BuiltIn);
         assert_ne!(AgentSource::Project, AgentSource::BuiltIn);
+    }
+
+    #[test]
+    fn agent_source_plugin_carries_name_and_compares_by_name() {
+        // G5: AgentSource::Plugin(name) variant
+        let foo = AgentSource::Plugin("foo".to_string());
+        let foo_also = AgentSource::Plugin("foo".to_string());
+        let bar = AgentSource::Plugin("bar".to_string());
+
+        assert_eq!(foo, foo_also, "same plugin name must compare equal");
+        assert_ne!(foo, bar, "different plugin names must compare unequal");
+        assert_ne!(
+            foo,
+            AgentSource::BuiltIn,
+            "Plugin must not equal BuiltIn"
+        );
+        assert_ne!(foo, AgentSource::Project);
+        assert_ne!(foo, AgentSource::User);
     }
 
     #[test]

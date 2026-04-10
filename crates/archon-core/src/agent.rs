@@ -1194,27 +1194,8 @@ impl Agent {
                     //   D. No transcript -> error
                     let result = if !result.is_error && pre.tool_name == "SendMessage" {
                         match serde_json::from_str::<SendMessageRequest>(&result.content) {
-                            Ok(req) => {
-                                // Handle structured message types
-                                if req.message_type == "shutdown_request" {
-                                    let mgr = self.subagent_manager.lock().await;
-                                    // Try by name first, then by raw ID
-                                    let target_id = mgr
-                                        .resolve_name(&req.to)
-                                        .map(|s| s.to_string())
-                                        .unwrap_or_else(|| req.to.clone());
-                                    if mgr.request_shutdown(&target_id) {
-                                        ToolResult::success(format!(
-                                            "Shutdown requested for agent '{}'",
-                                            req.to
-                                        ))
-                                    } else {
-                                        ToolResult::error(format!(
-                                            "Agent '{}' not found or not running",
-                                            req.to
-                                        ))
-                                    }
-                                } else {
+                            Ok(req) => match req.message_type.as_str() {
+                                "text" => {
                                     // AGT-026: Resolve target via name registry, then format validation
                                     let (agent_id, is_running) = {
                                         let mgr = self.subagent_manager.lock().await;
@@ -1308,8 +1289,74 @@ impl Agent {
                                             }
                                         }
                                     }
-                                } // else (non-shutdown message types)
-                            }
+                                }
+                                "shutdown_request" => {
+                                    let mgr = self.subagent_manager.lock().await;
+                                    // Try by name first, then by raw ID
+                                    let target_id = mgr
+                                        .resolve_name(&req.to)
+                                        .map(|s| s.to_string())
+                                        .unwrap_or_else(|| req.to.clone());
+                                    if mgr.request_shutdown(&target_id) {
+                                        ToolResult::success(format!(
+                                            "Shutdown requested for agent '{}'",
+                                            req.to
+                                        ))
+                                    } else {
+                                        ToolResult::error(format!(
+                                            "Agent '{}' not found or not running",
+                                            req.to
+                                        ))
+                                    }
+                                }
+                                "shutdown_response" | "plan_approval_response" => {
+                                    // TASK-T2 (G2): Structured response message types.
+                                    // Build an XML envelope and deliver via the pending-message
+                                    // queue so the target agent can parse it on its next tool round.
+                                    let envelope =
+                                        archon_tools::send_message::build_structured_envelope(&req);
+                                    let delivered = {
+                                        let mut mgr = self.subagent_manager.lock().await;
+                                        let target_id = mgr
+                                            .resolve_name(&req.to)
+                                            .map(|s| s.to_string())
+                                            .unwrap_or_else(|| req.to.clone());
+                                        if !mgr.is_running(&target_id) {
+                                            None
+                                        } else {
+                                            mgr.queue_pending_message(&target_id, envelope);
+                                            Some(target_id)
+                                        }
+                                    };
+
+                                    match delivered {
+                                        Some(target_id) => {
+                                            // Guard has been dropped — safe to send event.
+                                            self.send_event(AgentEvent::MessageSent {
+                                                target_agent_id: target_id,
+                                                message: format!(
+                                                    "[{}] request_id={}",
+                                                    req.message_type,
+                                                    req.request_id.as_deref().unwrap_or("")
+                                                ),
+                                            })
+                                            .await;
+                                            ToolResult::success(format!(
+                                                "{} delivered to {}",
+                                                req.message_type, req.to
+                                            ))
+                                        }
+                                        None => ToolResult::error(format!(
+                                            "Agent '{}' not running — cannot deliver structured response",
+                                            req.to
+                                        )),
+                                    }
+                                }
+                                other => ToolResult::error(format!(
+                                    "Unknown message_type: {}",
+                                    other
+                                )),
+                            },
                             Err(e) => ToolResult::error(format!(
                                 "Failed to parse SendMessage result: {e}"
                             )),
@@ -2816,6 +2863,11 @@ impl Agent {
             let mgr = self.subagent_manager.lock().await;
             if let Some(flag) = mgr.get_shutdown_flag(&subagent_id) {
                 runner.set_shutdown_flag(flag);
+            }
+            // TASK-T3 (G4): wire shared progress tracker so the runner can
+            // accumulate token usage and tool-use counts during the loop.
+            if let Some(tracker) = mgr.get_progress_tracker_arc(&subagent_id) {
+                runner.set_progress_tracker(tracker);
             }
         }
 

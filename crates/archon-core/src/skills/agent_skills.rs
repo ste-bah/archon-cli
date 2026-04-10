@@ -166,10 +166,15 @@ impl Skill for ListAgentsSkill {
         let mut out = format!("{} agents loaded:\n\n", agents.len());
         for def in &agents {
             let model = def.model.as_deref().unwrap_or("default");
-            let source = match def.source {
+            let source_label;
+            let source = match &def.source {
                 crate::agents::AgentSource::BuiltIn => "built-in",
                 crate::agents::AgentSource::Project => "project",
                 crate::agents::AgentSource::User => "user",
+                crate::agents::AgentSource::Plugin(name) => {
+                    source_label = format!("plugin:{name}");
+                    source_label.as_str()
+                }
             };
             let path = def.base_dir.as_deref().unwrap_or("built-in");
             out.push_str(&format!(

@@ -44,6 +44,59 @@ pub enum SubagentStatus {
 }
 
 // ---------------------------------------------------------------------------
+// Progress tracking (TASK-T3 / G4) — per-agent live progress counters
+// ---------------------------------------------------------------------------
+
+/// A single tool invocation recorded on the recent-activity ring.
+#[derive(Debug, Clone)]
+pub struct ToolActivity {
+    pub tool_name: String,
+    pub timestamp: DateTime<Utc>,
+}
+
+/// Mutable per-agent progress state shared between the runner (writer) and
+/// observers (readers).  Wrapped in `std::sync::Mutex` so the runner can
+/// update it from inside its synchronous stream-event match arms without
+/// holding any lock across an `.await`.
+#[derive(Debug, Clone)]
+pub struct ProgressTracker {
+    pub tool_use_count: u32,
+    pub cumulative_input_tokens: u64,
+    pub cumulative_output_tokens: u64,
+    pub cumulative_cache_creation_tokens: u64,
+    pub cumulative_cache_read_tokens: u64,
+    /// Bounded ring of the most recent tool dispatches (cap 5).
+    pub recent_activities: std::collections::VecDeque<ToolActivity>,
+    pub last_update: DateTime<Utc>,
+}
+
+impl Default for ProgressTracker {
+    fn default() -> Self {
+        Self {
+            tool_use_count: 0,
+            cumulative_input_tokens: 0,
+            cumulative_output_tokens: 0,
+            cumulative_cache_creation_tokens: 0,
+            cumulative_cache_read_tokens: 0,
+            recent_activities: std::collections::VecDeque::new(),
+            last_update: Utc::now(),
+        }
+    }
+}
+
+/// Read-only snapshot returned by `SubagentManager::get_progress`.
+#[derive(Debug, Clone)]
+pub struct ProgressSnapshot {
+    pub tool_use_count: u32,
+    pub cumulative_input_tokens: u64,
+    pub cumulative_output_tokens: u64,
+    pub cumulative_cache_creation_tokens: u64,
+    pub cumulative_cache_read_tokens: u64,
+    pub recent_activities: Vec<ToolActivity>,
+    pub last_update: DateTime<Utc>,
+}
+
+// ---------------------------------------------------------------------------
 // Subagent info — tracks a single subagent's lifecycle
 // ---------------------------------------------------------------------------
 
@@ -56,6 +109,8 @@ pub struct SubagentInfo {
     pub result: Option<String>,
     /// Flag for graceful shutdown (set by SendMessage shutdown_request).
     pub shutdown_flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// TASK-T3 (G4): live progress counters shared with the runner.
+    pub progress: std::sync::Arc<std::sync::Mutex<ProgressTracker>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -123,6 +178,7 @@ impl SubagentManager {
             created_at: Utc::now(),
             result: None,
             shutdown_flag: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            progress: std::sync::Arc::new(std::sync::Mutex::new(ProgressTracker::default())),
         };
         self.agents.insert(id.clone(), info);
         Ok(id)
@@ -260,6 +316,35 @@ impl SubagentManager {
             .map(|info| std::sync::Arc::clone(&info.shutdown_flag))
     }
 
+    // -------------------------------------------------------------------
+    // Progress tracking (TASK-T3 / G4)
+    // -------------------------------------------------------------------
+
+    /// Clone the progress tracker `Arc` for an agent so the runner can write
+    /// to it directly.  Returns `None` if the agent is unknown.
+    pub fn get_progress_tracker_arc(
+        &self,
+        id: &str,
+    ) -> Option<std::sync::Arc<std::sync::Mutex<ProgressTracker>>> {
+        self.agents.get(id).map(|info| info.progress.clone())
+    }
+
+    /// Take a read-only snapshot of an agent's current progress.
+    /// Returns `None` if the agent is unknown or the inner mutex is poisoned.
+    pub fn get_progress(&self, id: &str) -> Option<ProgressSnapshot> {
+        let info = self.agents.get(id)?;
+        let guard = info.progress.lock().ok()?;
+        Some(ProgressSnapshot {
+            tool_use_count: guard.tool_use_count,
+            cumulative_input_tokens: guard.cumulative_input_tokens,
+            cumulative_output_tokens: guard.cumulative_output_tokens,
+            cumulative_cache_creation_tokens: guard.cumulative_cache_creation_tokens,
+            cumulative_cache_read_tokens: guard.cumulative_cache_read_tokens,
+            recent_activities: guard.recent_activities.iter().cloned().collect(),
+            last_update: guard.last_update,
+        })
+    }
+
     /// Clean up all state for an agent on completion:
     /// drops pending messages, removes from name registry if name matches.
     pub fn cleanup_agent(&mut self, agent_id: &str) {
@@ -321,6 +406,8 @@ pub mod runner {
         runner_agent_id: Option<String>,
         /// Graceful shutdown flag (checked each turn).
         shutdown_flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        /// TASK-T3 (G4): per-agent progress tracker shared with SubagentManager.
+        progress: Option<std::sync::Arc<std::sync::Mutex<super::ProgressTracker>>>,
     }
 
     /// A single pending tool call collected from the stream.
@@ -360,7 +447,17 @@ pub mod runner {
                 subagent_manager: None,
                 runner_agent_id: None,
                 shutdown_flag: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                progress: None,
             }
+        }
+
+        /// TASK-T3 (G4): wire a shared ProgressTracker so the runner can
+        /// accumulate token usage and tool-use counts during the agentic loop.
+        pub fn set_progress_tracker(
+            &mut self,
+            tracker: std::sync::Arc<std::sync::Mutex<super::ProgressTracker>>,
+        ) {
+            self.progress = Some(tracker);
         }
 
         /// Set subagent manager and agent ID for pending message drain (AGT-026).
@@ -592,7 +689,38 @@ pub mod runner {
                         } => {
                             anyhow::bail!("LLM error: {error_type}: {message}");
                         }
-                        _ => {} // MessageStart, MessageDelta, MessageStop, Ping, etc.
+                        StreamEvent::MessageStart { ref usage, .. } => {
+                            // TASK-T3 (G4): accumulate Usage from message_start.
+                            // Lock guard MUST NOT cross an .await — only sync work in here.
+                            if let Some(ref t) = self.progress {
+                                if let Ok(mut g) = t.lock() {
+                                    g.cumulative_input_tokens += usage.input_tokens;
+                                    g.cumulative_output_tokens += usage.output_tokens;
+                                    g.cumulative_cache_creation_tokens +=
+                                        usage.cache_creation_input_tokens;
+                                    g.cumulative_cache_read_tokens +=
+                                        usage.cache_read_input_tokens;
+                                    g.last_update = chrono::Utc::now();
+                                }
+                            }
+                        }
+                        StreamEvent::MessageDelta {
+                            usage: Some(ref u), ..
+                        } => {
+                            // TASK-T3 (G4): accumulate Usage from message_delta.
+                            if let Some(ref t) = self.progress {
+                                if let Ok(mut g) = t.lock() {
+                                    g.cumulative_input_tokens += u.input_tokens;
+                                    g.cumulative_output_tokens += u.output_tokens;
+                                    g.cumulative_cache_creation_tokens +=
+                                        u.cache_creation_input_tokens;
+                                    g.cumulative_cache_read_tokens +=
+                                        u.cache_read_input_tokens;
+                                    g.last_update = chrono::Utc::now();
+                                }
+                            }
+                        }
+                        _ => {} // ThinkingDelta, SignatureDelta, MessageDelta{usage:None}, MessageStop, Ping, etc.
                     }
                 }
 
@@ -643,6 +771,23 @@ pub mod runner {
                         .registry
                         .dispatch(&tool.name, input, &self.tool_context)
                         .await;
+
+                    // TASK-T3 (G4): record tool dispatch in progress tracker.
+                    // Lock is acquired and dropped synchronously — never across an await.
+                    if let Some(ref t) = self.progress {
+                        if let Ok(mut g) = t.lock() {
+                            g.tool_use_count += 1;
+                            if g.recent_activities.len() >= 5 {
+                                g.recent_activities.pop_front();
+                            }
+                            g.recent_activities.push_back(super::ToolActivity {
+                                tool_name: tool.name.clone(),
+                                timestamp: chrono::Utc::now(),
+                            });
+                            g.last_update = chrono::Utc::now();
+                        }
+                    }
+
                     tool_results.push(serde_json::json!({
                         "type": "tool_result",
                         "tool_use_id": tool.id,
@@ -990,6 +1135,104 @@ pub mod runner {
                     assert_eq!(chunk[1]["role"], "user");
                 }
             }
+        }
+
+        // -----------------------------------------------------------------
+        // TASK-T3 (G4): SubagentRunner accumulates Usage from a streamed turn
+        // -----------------------------------------------------------------
+
+        #[tokio::test]
+        async fn runner_accumulates_tokens_from_mock_stream() {
+            // Single-turn stream: MessageStart with input/cache tokens, then a
+            // text body, then MessageDelta carrying the final output_tokens,
+            // then MessageStop.  No tool_use, so the runner returns after one turn.
+            let stream_events = vec![
+                StreamEvent::MessageStart {
+                    id: "msg-prog-1".into(),
+                    model: "mock".into(),
+                    usage: Usage {
+                        input_tokens: 100,
+                        output_tokens: 5,
+                        cache_creation_input_tokens: 10,
+                        cache_read_input_tokens: 20,
+                    },
+                },
+                StreamEvent::ContentBlockStart {
+                    index: 0,
+                    block_type: ContentBlockType::Text,
+                    tool_use_id: None,
+                    tool_name: None,
+                },
+                StreamEvent::TextDelta {
+                    index: 0,
+                    text: "ok".into(),
+                },
+                StreamEvent::ContentBlockStop { index: 0 },
+                StreamEvent::MessageDelta {
+                    stop_reason: Some("end_turn".into()),
+                    usage: Some(Usage {
+                        input_tokens: 0,
+                        output_tokens: 25,
+                        cache_creation_input_tokens: 0,
+                        cache_read_input_tokens: 0,
+                    }),
+                },
+                StreamEvent::MessageStop,
+            ];
+
+            let provider = Arc::new(MockProvider::new(vec![stream_events]));
+            let mut runner = make_runner(provider, 5);
+
+            // Wire a fresh ProgressTracker arc into the runner.
+            let tracker = std::sync::Arc::new(std::sync::Mutex::new(
+                crate::subagent::ProgressTracker::default(),
+            ));
+            runner.set_progress_tracker(tracker.clone());
+
+            let result = runner.run("hello").await.unwrap();
+            assert_eq!(result, "ok");
+
+            let g = tracker.lock().unwrap();
+            assert_eq!(g.cumulative_input_tokens, 100);
+            // 5 from MessageStart + 25 from MessageDelta
+            assert_eq!(g.cumulative_output_tokens, 30);
+            assert_eq!(g.cumulative_cache_creation_tokens, 10);
+            assert_eq!(g.cumulative_cache_read_tokens, 20);
+            // No tool_use blocks were dispatched.
+            assert_eq!(g.tool_use_count, 0);
+            assert!(g.recent_activities.is_empty());
+        }
+
+        #[tokio::test]
+        async fn runner_increments_tool_use_count_on_dispatch() {
+            // Turn 1: tool_use a (will fail dispatch — fine, counter still bumps)
+            // Turn 2: text response, runner returns.
+            let provider = Arc::new(MockProvider::new(vec![
+                tool_use_response("call-1", "NonexistentTool", r#"{}"#),
+                text_response("done"),
+            ]));
+            let mut runner = make_runner(provider, 5);
+
+            let tracker = std::sync::Arc::new(std::sync::Mutex::new(
+                crate::subagent::ProgressTracker::default(),
+            ));
+            runner.set_progress_tracker(tracker.clone());
+
+            let result = runner.run("use a tool").await.unwrap();
+            assert_eq!(result, "done");
+
+            let g = tracker.lock().unwrap();
+            assert_eq!(g.tool_use_count, 1);
+            assert_eq!(g.recent_activities.len(), 1);
+            assert_eq!(
+                g.recent_activities.front().unwrap().tool_name,
+                "NonexistentTool"
+            );
+            // Tokens accumulated across two turns:
+            // Turn 1 (tool_use_response): MessageStart input=10, output=20
+            // Turn 2 (text_response):     MessageStart input=10, output=5
+            assert_eq!(g.cumulative_input_tokens, 20);
+            assert_eq!(g.cumulative_output_tokens, 25);
         }
     }
 }
@@ -1348,5 +1591,163 @@ mod tests {
 
         assert_eq!(mgr.resolve_name("explorer"), None);
         assert_eq!(mgr.resolve_name("reviewer"), Some(id2.as_str()));
+    }
+
+    // -----------------------------------------------------------------------
+    // TASK-T2 (G2): Structured envelope delivery via queue
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn structured_envelope_delivers_through_queue() {
+        use archon_tools::send_message::{build_structured_envelope, SendMessageRequest};
+
+        let mut mgr = SubagentManager::new(4);
+        let id_a = mgr.register(sample_request()).unwrap();
+        let id_b = mgr.register(sample_request()).unwrap();
+
+        let envelope_req = SendMessageRequest {
+            to: id_b.clone(),
+            message: String::new(),
+            summary: None,
+            message_type: "shutdown_response".into(),
+            request_id: Some("req-1".into()),
+            approve: Some(true),
+            reason: Some("done".into()),
+            feedback: None,
+        };
+        let envelope = build_structured_envelope(&envelope_req);
+        mgr.queue_pending_message(&id_b, envelope);
+
+        let drained = mgr.drain_pending_messages(&id_b);
+        assert_eq!(drained.len(), 1);
+        assert!(
+            drained[0].starts_with("<archon_structured_message type=\"shutdown_response\""),
+            "envelope should start with structured opening tag: {}",
+            drained[0]
+        );
+        assert!(drained[0].contains("request_id=\"req-1\""));
+        assert!(drained[0].contains("approve=\"true\""));
+        assert!(drained[0].contains("<reason>done</reason>"));
+        assert!(drained[0].ends_with("</archon_structured_message>"));
+
+        // Agent A's queue should remain untouched
+        assert!(mgr.drain_pending_messages(&id_a).is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // TASK-T3 (G4): ProgressTracker accumulation tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn progress_tracker_default_has_sane_state() {
+        let t = ProgressTracker::default();
+        assert_eq!(t.tool_use_count, 0);
+        assert_eq!(t.cumulative_input_tokens, 0);
+        assert_eq!(t.cumulative_output_tokens, 0);
+        assert_eq!(t.cumulative_cache_creation_tokens, 0);
+        assert_eq!(t.cumulative_cache_read_tokens, 0);
+        assert!(t.recent_activities.is_empty());
+    }
+
+    #[test]
+    fn progress_tracker_activities_bounded_at_five() {
+        let mut t = ProgressTracker::default();
+        for i in 0..7u32 {
+            // Mirror the runner's bounding logic: pop oldest before push when at cap.
+            if t.recent_activities.len() >= 5 {
+                t.recent_activities.pop_front();
+            }
+            t.recent_activities.push_back(ToolActivity {
+                tool_name: format!("tool-{i}"),
+                timestamp: chrono::Utc::now(),
+            });
+        }
+        assert_eq!(t.recent_activities.len(), 5);
+        // Oldest two ("tool-0", "tool-1") should have been evicted.
+        assert_eq!(t.recent_activities.front().unwrap().tool_name, "tool-2");
+        assert_eq!(t.recent_activities.back().unwrap().tool_name, "tool-6");
+    }
+
+    #[test]
+    fn progress_tracker_accumulates_usage_from_message_start() {
+        // Simulate the same accumulation the runner performs in its
+        // MessageStart / MessageDelta arms.
+        let usages = [
+            archon_llm::types::Usage {
+                input_tokens: 100,
+                output_tokens: 5,
+                cache_creation_input_tokens: 10,
+                cache_read_input_tokens: 20,
+            },
+            archon_llm::types::Usage {
+                input_tokens: 50,
+                output_tokens: 25,
+                cache_creation_input_tokens: 0,
+                cache_read_input_tokens: 5,
+            },
+            archon_llm::types::Usage {
+                input_tokens: 0,
+                output_tokens: 12,
+                cache_creation_input_tokens: 2,
+                cache_read_input_tokens: 0,
+            },
+        ];
+
+        let mut t = ProgressTracker::default();
+        for u in &usages {
+            t.cumulative_input_tokens += u.input_tokens;
+            t.cumulative_output_tokens += u.output_tokens;
+            t.cumulative_cache_creation_tokens += u.cache_creation_input_tokens;
+            t.cumulative_cache_read_tokens += u.cache_read_input_tokens;
+            t.last_update = chrono::Utc::now();
+        }
+
+        assert_eq!(t.cumulative_input_tokens, 150);
+        assert_eq!(t.cumulative_output_tokens, 42);
+        assert_eq!(t.cumulative_cache_creation_tokens, 12);
+        assert_eq!(t.cumulative_cache_read_tokens, 25);
+    }
+
+    #[test]
+    fn subagent_manager_get_progress_returns_snapshot() {
+        let mut mgr = SubagentManager::default();
+        let id = mgr.register(sample_request()).unwrap();
+
+        let snap = mgr.get_progress(&id).expect("snapshot exists for live agent");
+        assert_eq!(snap.tool_use_count, 0);
+        assert_eq!(snap.cumulative_input_tokens, 0);
+        assert_eq!(snap.cumulative_output_tokens, 0);
+        assert_eq!(snap.cumulative_cache_creation_tokens, 0);
+        assert_eq!(snap.cumulative_cache_read_tokens, 0);
+        assert!(snap.recent_activities.is_empty());
+
+        // Unknown id returns None
+        assert!(mgr.get_progress("not-a-real-id").is_none());
+    }
+
+    #[test]
+    fn subagent_manager_get_progress_tracker_arc_clones_same_arc() {
+        let mut mgr = SubagentManager::default();
+        let id = mgr.register(sample_request()).unwrap();
+
+        let arc1 = mgr.get_progress_tracker_arc(&id).expect("arc1");
+        let arc2 = mgr.get_progress_tracker_arc(&id).expect("arc2");
+
+        // Mutate via arc1, observe via arc2 — proves both point to the same inner mutex.
+        {
+            let mut g = arc1.lock().unwrap();
+            g.tool_use_count = 42;
+            g.cumulative_input_tokens = 1234;
+        }
+        {
+            let g = arc2.lock().unwrap();
+            assert_eq!(g.tool_use_count, 42);
+            assert_eq!(g.cumulative_input_tokens, 1234);
+        }
+
+        // And the manager's snapshot view also reflects the mutation.
+        let snap = mgr.get_progress(&id).unwrap();
+        assert_eq!(snap.tool_use_count, 42);
+        assert_eq!(snap.cumulative_input_tokens, 1234);
     }
 }

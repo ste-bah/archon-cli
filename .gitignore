@@ -47,3 +47,6 @@ lcov.info
 
 # Scratch / test files
 hello.txt
+
+# Local documentation (not committed)
+/docs/
