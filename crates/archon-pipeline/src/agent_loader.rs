@@ -17,6 +17,9 @@ use std::path::Path;
 /// If no valid frontmatter delimiters are found, returns an empty YAML mapping
 /// and the original content as the body.
 pub fn parse_frontmatter(content: &str) -> Result<(serde_yml::Value, String)> {
+    // Normalize CRLF → LF so frontmatter delimiters work on Windows.
+    let content = &content.replace("\r\n", "\n");
+
     let empty_result = || {
         (
             serde_yml::Value::Mapping(Default::default()),
