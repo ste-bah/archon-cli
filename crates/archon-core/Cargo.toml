@@ -49,3 +49,6 @@ jsonschema.workspace = true
 uuid.workspace = true
 tempfile.workspace = true
 toml.workspace = true
+# TASK-AGS-009: PRESERVE-D5 regression guard uses serial_test to
+# serialise the ARCHON_AUTO_BACKGROUND_TASKS env var flip test.
+serial_test.workspace = true
