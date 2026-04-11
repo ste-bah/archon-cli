@@ -68,6 +68,14 @@ jobs:
           CARGO_BUILD_JOBS: "1"
         run: cargo test --workspace --verbose -- --test-threads=1
 
+  arch-lint:
+    name: arch-lint (D10 spawn-everything)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run architecture lint scaffold
+        run: bash scripts/lint/arch-lint.sh
+
   build-release-smoke:
     name: release build smoke
     runs-on: ubuntu-latest

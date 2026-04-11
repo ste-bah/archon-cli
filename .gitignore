@@ -48,5 +48,10 @@ lcov.info
 # Scratch / test files
 hello.txt
 
-# Local documentation (not committed)
-/docs/
+# Local documentation (not committed).
+# Use /docs/* instead of /docs/ so that negated sub-paths below can be
+# re-included (git cannot re-include children of a fully excluded parent).
+/docs/*
+# Exception: architectural guidelines are committed (REQ-FOR-D10 et al.)
+!/docs/architecture/
+!/docs/architecture/**
