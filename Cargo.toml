@@ -49,7 +49,6 @@ fastembed = { version = "4", default-features = false, features = ["ort-download
 getrandom = { version = "0.3", features = ["std"] }
 urlencoding = "2"
 which = "7"
-tempfile = "3"
 notify = "7"
 pulldown-cmark = "0.12"
 tree-sitter = "0.25"
@@ -85,6 +84,22 @@ tower-http = { version = "0.6", features = ["cors"] }
 cpal = "0.15"
 hound = "3"
 rust-embed = "8"
+
+# TASK-AGS-006: dev-only test/bench deps (not opted into by any crate yet).
+# - insta:            snapshot testing (REQ-FOR-PRESERVE-D8)
+# - wiremock:         HTTP mocking for provider tests (REQ-FOR-D6)
+# - serial_test:      serialize tests touching .archon/ or global state (REQ-FOR-D6)
+# - criterion:        bench harness (REQ-FOR-D4)
+# - tempfile:         scoped temp dirs (REQ-FOR-D6) — moved here from above
+# - pretty_assertions: diff-friendly assertions (REQ-FOR-D6)
+# - rstest:           parameterized tests (REQ-FOR-D6)
+insta = { version = "1.40", features = ["yaml", "json"] }
+wiremock = "0.6"
+serial_test = "3.1"
+criterion = { version = "0.5", features = ["html_reports"] }
+tempfile = "3.12"
+pretty_assertions = "1.4"
+rstest = "0.22"
 
 [[bin]]
 name = "archon"
