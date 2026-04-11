@@ -34,12 +34,15 @@
 //! are therefore internally inconsistent.
 //!
 //! **Resolution**: inline a `RecordingMemory` in THIS test file that
-//! implements the real 13-method `MemoryTrait`. Twelve of the methods
-//! are `unimplemented!()` because `save_agent_memory` only calls
-//! `store_memory`. This mirrors what `MockMemoryTrait` *would* do if it
-//! were wired to the real trait, but without forcing archon-test-support
-//! to take a dev-dep on archon-memory (and the cozo build chain it
-//! pulls in transitively).
+//! implements the real 12-method `MemoryTrait` (the trait's own doc
+//! comment at `archon-memory/src/access.rs:20` says "13 public
+//! operations" but the actual declaration has 12 fn items — a minor
+//! doc drift in production code that phase-0 intentionally does NOT
+//! touch). Eleven of the methods are `unimplemented!()` because
+//! `save_agent_memory` only calls `store_memory`. This mirrors what
+//! `MockMemoryTrait` *would* do if it were wired to the real trait,
+//! but without forcing archon-test-support to take a dev-dep on
+//! archon-memory (and the cozo build chain it pulls in transitively).
 
 use std::sync::{Arc, Mutex};
 
@@ -259,7 +262,16 @@ fn test_store_memory_called_when_scope_is_some() {
         "importance drifted from 0.5: {}",
         call.importance
     );
-    // Tags must include both scoping tags plus the extra tag.
+    // Tags must include both scoping tags plus the extra tag, and
+    // NOTHING ELSE — a refactor that silently injects debug/leak tags
+    // would be caught by the length check (adversarial-review fix,
+    // 2026-04-11).
+    assert_eq!(
+        call.tags.len(),
+        3,
+        "expected exactly 3 tags (agent, scope, extra), got {:?}",
+        call.tags
+    );
     assert!(call.tags.contains(&"agent:researcher".to_string()));
     assert!(call.tags.contains(&"scope:project".to_string()));
     assert!(call.tags.contains(&"from-test".to_string()));

@@ -122,21 +122,50 @@ fn test_timeout_branch_does_not_reawait_join_handle() {
         "timeout sleep arm missing from agent.rs — AGT-025 race structure removed"
     );
 
-    // The sleep arm's BODY must NOT re-await join_handle. We isolate
-    // the arm by splitting on the sleep pattern and inspecting the
-    // next ~50 lines until the arm's closing `}` terminator.
+    // Isolate the sleep arm's BODY by splitting on the sleep pattern
+    // and collecting lines up to the arm's `return` statement. The arm
+    // body MUST end with a `return` (that is precisely the invariant:
+    // the arm returns without awaiting anything, abandoning the
+    // join_handle). Anything after `return` is out-of-arm code that we
+    // do not want to inspect.
     let after_sleep = source
         .split("_ = tokio::time::sleep(timeout_duration) =>")
         .nth(1)
         .expect("sleep arm pattern not found");
-    // Grab a conservative window — enough to cover the entire arm but
-    // stop before the next select arm or enclosing block.
-    let window: String = after_sleep.lines().take(20).collect::<Vec<_>>().join("\n");
+
+    let mut arm_body = String::new();
+    let mut saw_return = false;
+    for (idx, line) in after_sleep.lines().enumerate() {
+        arm_body.push_str(line);
+        arm_body.push('\n');
+        if line.contains("return ") {
+            saw_return = true;
+            break;
+        }
+        if idx >= 40 {
+            panic!(
+                "REQ-FOR-PRESERVE-D5 (c): could not find a `return` within 40 lines of the \
+                 sleep arm — arm structure changed, re-validate the guard"
+            );
+        }
+    }
     assert!(
-        !window.contains("join_handle.await"),
-        "REQ-FOR-PRESERVE-D5 (c) violated: timeout arm re-awaits join_handle, creating a \
-         double-await race. The whole point of auto-background is to ABANDON the handle \
-         and let the spawned task keep running in the background."
+        saw_return,
+        "REQ-FOR-PRESERVE-D5 (c): sleep arm body did not contain a `return` statement"
+    );
+
+    // Tighter invariant (adversarial-review fix, 2026-04-11): forbid ANY
+    // `.await` in the timeout arm body. The original assertion only
+    // looked for the literal `join_handle.await` and could be bypassed
+    // by a simple rename (`let handle = ...; handle.await`). The
+    // auto-background design requires the arm to RETURN without
+    // awaiting anything at all — the spawned task is abandoned by
+    // construction. Any `.await` in this arm breaks the invariant.
+    assert!(
+        !arm_body.contains(".await"),
+        "REQ-FOR-PRESERVE-D5 (c) violated: timeout arm body contains `.await`. The auto- \
+         background arm MUST return without awaiting — awaiting anything here re-blocks on \
+         the spawned task and defeats the purpose of backgrounding. Arm body was:\n{arm_body}"
     );
 }
 
