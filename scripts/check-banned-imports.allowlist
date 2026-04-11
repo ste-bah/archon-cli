@@ -1,0 +1,27 @@
+# Banned-Imports Guard — path allowlist.
+#
+# Format: `pattern: repo-relative-path`, one per non-comment line.
+# A hit matching BOTH the pattern AND the exact path is skipped.
+#
+# Every entry MUST be preceded by a comment citing the REQ that still
+# applies to the file and explaining WHY the match is legitimate.
+#
+# This allowlist SHRINKS over time. It is not a release valve for
+# convenience — only defensive/documentation references belong here.
+
+# REQ-FOR-PRESERVE-D8 — tool_bridge.rs needs the literal outer MCP tool
+# name as a string to identify and replace the tool at bridge-bind time.
+# This is the archon-cli's REPLACEMENT for the outer MemoryGraph MCP;
+# naming the target is defensive, not a reintroduction.
+mcp__memorygraph__: crates/archon-mcp/src/tool_bridge.rs
+
+# REQ-FOR-PRESERVE-D8 — permission_expansion_tests.rs verifies the
+# permission layer recognises and handles the outer MCP tool name
+# (testing that the ban is enforced).
+mcp__memorygraph__: crates/archon-permissions/tests/permission_expansion_tests.rs
+
+# REQ-FOR-PRESERVE-D8 — doc comments in the archon-cli replacement tool
+# explain what each method "mirrors" from the outer MCP namespace. The
+# crate's own struct is the inner-archon memory differentiator; naming
+# what it supersedes is documentation, not reintroduction.
+mcp__memorygraph__: crates/archon-tools/src/memory.rs
