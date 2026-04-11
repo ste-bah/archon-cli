@@ -666,11 +666,22 @@ impl Agent {
                     }
                 };
                 let extra = self.config.extra_dirs.lock().await.clone();
+                // TASK-AGS-105: compute in_fork once per turn from the
+                // parent's message history so the SubagentExecutor can
+                // enforce the fork-in-fork guard without crossing the
+                // `state.messages` boundary into archon-tools.
+                let in_fork =
+                    crate::agents::built_in::is_in_fork_child_by_messages(&self.state.messages);
                 let ctx = ToolContext {
                     working_dir: self.config.working_dir.clone(),
                     session_id: self.config.session_id.clone(),
                     mode: effective_mode,
                     extra_dirs: extra,
+                    in_fork,
+                    // `nested` stays false here — only TaskCreateTool::execute
+                    // flips it to true when routing a subagent request through
+                    // the executor.
+                    nested: false,
                 };
 
                 // -------------------------------------------------------
@@ -1177,15 +1188,10 @@ impl Agent {
                 // -------------------------------------------------------
                 let mut prevent_continuation_reason: Option<String> = None;
                 for (pre, result) in allowed.iter().zip(dispatch_results.into_iter()) {
-                    // GAP 8: Detect SubagentRequest and execute one-shot.
-                    let result = if !result.is_error
-                        && (pre.tool_name == "Agent" || pre.tool_name == "TaskCreate")
-                    {
-                        self.handle_subagent_result(&result, pre.tool_name == "TaskCreate")
-                            .await
-                    } else {
-                        result
-                    };
+                    // TASK-AGS-105: AgentTool / TaskCreate now return their
+                    // final user-facing ToolResult directly via the
+                    // SubagentExecutor seam. No re-parse or indirection here.
+                    let result = result;
 
                     // CRIT-07 + AGT-026: Intercept SendMessage and route to target agent.
                     // 4 delivery paths:
@@ -2806,6 +2812,7 @@ impl Agent {
             session_id: self.config.session_id.clone(),
             mode: subagent_mode,
             extra_dirs: vec![],
+            ..Default::default()
         };
 
         let mut runner = crate::subagent::runner::SubagentRunner::new(
