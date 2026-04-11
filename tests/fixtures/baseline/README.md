@@ -63,3 +63,38 @@ regen script therefore:
   as `timeout=T` and skipped, not retried
 
 Do not "optimize" these constraints away.
+
+## Phase-4/6/7 inventory baselines (TASK-AGS-012)
+
+Three additional snapshots live beside the cargo-test baseline. They
+are NOT run by `regen-baseline.sh` — they have their own capture
+script and a different regeneration cadence.
+
+- `main_rs_loc.txt` — single LoC number for `src/main.rs` (REQ-FOR-D4).
+  Phase-4 TUI modularization tasks diff against this to prove they
+  have actually shrunk main.rs.
+- `slash_commands.txt` — sorted, unique slash literals found in match
+  arms of `src/main.rs` (REQ-FOR-D7). Phase-7 slash-command coverage
+  tasks assert their new list is a strict superset of this baseline.
+- `providers.txt` — sorted concrete types that `impl LlmProvider for`
+  under `crates/archon-llm/src/providers/` (REQ-FOR-D6). Phase-6
+  provider breadth tasks likewise assert superset.
+
+Regenerate with:
+
+```bash
+bash scripts/capture-inventory.sh
+```
+
+The script is deterministic (`LC_ALL=C sort`) and idempotent at a
+fixed git rev — running it twice at the same SHA produces byte-
+identical files. Every output file has a header comment
+`# captured <YYYY-MM-DD> from git rev <SHA>` so drift is traceable.
+
+**Who regenerates:** the person advancing the D4/D6/D7 gauges. The new
+values get committed as a progress milestone alongside the code that
+justifies them. Phase-0 does NOT assert superset yet — that assertion
+is unlocked in phase-4/6/7 by extending
+`crates/archon-core/tests/baseline_inventory_superset.rs` (a
+placeholder no-op test lives there today).
+
