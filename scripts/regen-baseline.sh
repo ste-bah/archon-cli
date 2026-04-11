@@ -1,6 +1,19 @@
 #!/usr/bin/env bash
 # regen-baseline.sh — Capture a deterministic cargo test baseline snapshot.
 #
+# SPEC DIVERGENCE (approved 2026-04-11):
+#   1. Spec §"Scope — In Scope" mandates a single `cargo test --workspace
+#      ... -- --list --format=terse` invocation. Reality: the archon-cli
+#      workspace has crashed WSL2 twice under `cargo test --workspace`
+#      (unbounded rustc + test parallelism). This script therefore loops
+#      per-crate with `--jobs 1 --test-threads=1`. Same output domain,
+#      safe under WSL2.
+#   2. Spec §1 requires every line in `cargo_test_list.txt` to match
+#      `^[a-z0-9_:]+$`. Doctests emit `crates/<crate>/src/<file>.rs -
+#      <path> (line N)` which contains spaces, hyphens, and parentheses.
+#      This script filters doctest lines out at the normalization stage
+#      so the committed fixture stays regex-clean.
+#
 # SAFETY: This workspace has crashed WSL2 when cargo runs unconstrained.
 # Every cargo invocation in this script uses --jobs 1 and --test-threads=1,
 # and iterates crates sequentially. Do NOT parallelize.
@@ -101,8 +114,11 @@ for crate in "${CRATES[@]}"; do
   set -e
 
   # Lines of form "test_name: test" — extract the name.
+  # Drop doctest entries (contain "crates/.../src/....rs - ") so the
+  # fixture obeys the spec §1 `^[a-z0-9_:]+$` regex contract.
   grep -E ': test$' "$LIST_LOG" 2>/dev/null \
     | sed -r 's/: test$//' \
+    | grep -vE '^crates/.*\.rs ' \
     | normalize \
     >> "$NAMES_AGGREGATE" || true
 done

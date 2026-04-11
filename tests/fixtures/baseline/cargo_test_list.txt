@@ -736,11 +736,6 @@ cost_alerts::tests::reset_clears_state
 cost_alerts::tests::warn_fires_once
 cost_alerts::tests::warn_threshold_zero_means_disabled
 count_turns_correct
-crates/archon-sdk/src/builder.rs - builder::AgentBuilder (line 111)
-crates/archon-sdk/src/builder.rs - builder::SessionBuilder (line 275)
-crates/archon-sdk/src/lib.rs - (line 9)
-crates/archon-sdk/src/mcp_server.rs - mcp_server::create_sdk_mcp_server (line 103)
-crates/archon-sdk/src/query.rs - query::query (line 59)
 crc32_tests::crc32_deterministic
 crc32_tests::crc32_different_inputs_differ
 crc32_tests::crc32_known_value

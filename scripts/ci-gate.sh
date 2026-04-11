@@ -121,7 +121,7 @@ fi
 # ---------------------------------------------------------------------
 if should_run "clippy"; then
     banner 4 "cargo clippy"
-    cargo clippy --workspace --all-targets -- -D warnings
+    cargo clippy --workspace --all-targets --jobs 1 -- -D warnings
 fi
 
 # ---------------------------------------------------------------------
@@ -131,7 +131,7 @@ if should_run "test"; then
     banner 5 "cargo test --test-threads=2"
     # The `--` separator passes --test-threads to each test binary; the
     # literal is visible in `bash -x` traces (validation criterion #3).
-    cargo test --workspace --no-fail-fast -- --test-threads=2
+    cargo test --workspace --jobs 1 --no-fail-fast -- --test-threads=2
 fi
 
 # ---------------------------------------------------------------------
@@ -146,7 +146,7 @@ if should_run "baseline-diff"; then
     fi
     TMPLIST="$(mktemp)"
     trap 'rm -f "$TMPLIST"' EXIT
-    cargo test --workspace --no-fail-fast -- --list --format=terse \
+    cargo test --workspace --jobs 1 --no-fail-fast -- --list --format=terse \
         2>/dev/null | sort -u > "$TMPLIST" || true
     # A test may only be ADDED, never silently removed. `comm -23` gives
     # lines in baseline that are NOT in the current list — those are the
@@ -166,7 +166,7 @@ if should_run "bench"; then
         printf "${C_BANNER}== STEP 7: bench SKIPPED (--skip-bench) ==${C_OFF}\n"
     else
         banner 7 "cargo bench -p archon-bench --no-run"
-        cargo bench -p archon-bench --no-run
+        cargo bench -p archon-bench --jobs 1 --no-run
     fi
 fi
 

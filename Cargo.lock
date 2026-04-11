@@ -603,6 +603,7 @@ name = "archon-test-support"
 version = "0.1.4"
 dependencies = [
  "anyhow",
+ "archon-memory",
  "async-trait",
  "insta",
  "serde",

@@ -19,151 +19,21 @@
 //!   (e)  archon-memory crate still uses `cozo::DbInstance` as its
 //!        storage backend
 //!
-//! ## Spec-vs-reality divergence #4 (approved phase-0 2026-04-11)
+//! ## Spec-vs-reality divergence #4 (RESOLVED 2026-04-11)
 //!
-//! Tests (b2) and (c) in the spec say "use `archon_test_support::
-//! MockMemoryTrait`". That mock implements a LOCAL trait
-//! `MemoryTraitLike` (2-arg async `store_memory(content, tags)`) which
-//! was kept intentionally decoupled from the real `archon_memory::
-//! MemoryTrait` (7-arg sync `store_memory`, 13 methods total) — per
-//! TASK-AGS-008 spec §"verified visually against the real crate, not
-//! imported, to keep this a test-only sibling".
-//!
-//! The real `save_agent_memory` takes `&dyn archon_memory::MemoryTrait`,
-//! so `MockMemoryTrait` cannot satisfy the bound. Spec 008 and spec 010
-//! are therefore internally inconsistent.
-//!
-//! **Resolution**: inline a `RecordingMemory` in THIS test file that
-//! implements the real 12-method `MemoryTrait` (the trait's own doc
-//! comment at `archon-memory/src/access.rs:20` says "13 public
-//! operations" but the actual declaration has 12 fn items — a minor
-//! doc drift in production code that phase-0 intentionally does NOT
-//! touch). Eleven of the methods are `unimplemented!()` because
-//! `save_agent_memory` only calls `store_memory`. This mirrors what
-//! `MockMemoryTrait` *would* do if it were wired to the real trait,
-//! but without forcing archon-test-support to take a dev-dep on
-//! archon-memory (and the cozo build chain it pulls in transitively).
-
-use std::sync::{Arc, Mutex};
+//! Originally this test inlined a 100-line `RecordingMemory` double
+//! because `archon_test_support::MockMemoryTrait` had been defined
+//! against a local 1-method trait instead of the real 12-method
+//! `archon_memory::MemoryTrait`. Forensic audit of TASK-AGS-008
+//! identified the mock as unusable for its stated purpose; the fix
+//! landed the real trait impl in archon-test-support and this file
+//! now uses `MockMemoryTrait` directly as the spec originally
+//! intended.
 
 use archon_core::agents::definition::AgentMemoryScope;
 use archon_core::agents::memory::save_agent_memory;
-use archon_memory::MemoryTrait;
-use archon_memory::types::{Memory, MemoryError, MemoryType, RelType, SearchFilter};
-
-// --------------------------------------------------------------------
-// Inline RecordingMemory — satisfies the real 13-method MemoryTrait.
-// Only store_memory is exercised; every other method panics so the
-// test will fail loudly if a refactor starts calling a different API.
-// --------------------------------------------------------------------
-
-#[derive(Debug, Clone)]
-struct StoredCall {
-    content: String,
-    title: String,
-    memory_type: MemoryType,
-    importance: f64,
-    tags: Vec<String>,
-    source_type: String,
-    project_path: String,
-}
-
-#[derive(Default)]
-struct RecordingMemory {
-    calls: Arc<Mutex<Vec<StoredCall>>>,
-}
-
-impl RecordingMemory {
-    fn new() -> Self {
-        Self {
-            calls: Arc::new(Mutex::new(Vec::new())),
-        }
-    }
-
-    fn calls(&self) -> Vec<StoredCall> {
-        self.calls.lock().unwrap().clone()
-    }
-}
-
-impl MemoryTrait for RecordingMemory {
-    fn store_memory(
-        &self,
-        content: &str,
-        title: &str,
-        memory_type: MemoryType,
-        importance: f64,
-        tags: &[String],
-        source_type: &str,
-        project_path: &str,
-    ) -> Result<String, MemoryError> {
-        self.calls.lock().unwrap().push(StoredCall {
-            content: content.to_string(),
-            title: title.to_string(),
-            memory_type,
-            importance,
-            tags: tags.to_vec(),
-            source_type: source_type.to_string(),
-            project_path: project_path.to_string(),
-        });
-        Ok("recorded-id".to_string())
-    }
-
-    fn get_memory(&self, _id: &str) -> Result<Memory, MemoryError> {
-        unimplemented!("RecordingMemory: get_memory not used by save_agent_memory")
-    }
-
-    fn update_memory(
-        &self,
-        _id: &str,
-        _content: Option<&str>,
-        _tags: Option<&[String]>,
-    ) -> Result<(), MemoryError> {
-        unimplemented!("RecordingMemory: update_memory not used by save_agent_memory")
-    }
-
-    fn update_importance(&self, _id: &str, _importance: f64) -> Result<(), MemoryError> {
-        unimplemented!("RecordingMemory: update_importance not used by save_agent_memory")
-    }
-
-    fn delete_memory(&self, _id: &str) -> Result<(), MemoryError> {
-        unimplemented!("RecordingMemory: delete_memory not used by save_agent_memory")
-    }
-
-    fn create_relationship(
-        &self,
-        _from_id: &str,
-        _to_id: &str,
-        _rel_type: RelType,
-        _context: Option<&str>,
-        _strength: f64,
-    ) -> Result<(), MemoryError> {
-        unimplemented!("RecordingMemory: create_relationship not used by save_agent_memory")
-    }
-
-    fn recall_memories(&self, _query: &str, _limit: usize) -> Result<Vec<Memory>, MemoryError> {
-        unimplemented!("RecordingMemory: recall_memories not used by save_agent_memory")
-    }
-
-    fn search_memories(&self, _filter: &SearchFilter) -> Result<Vec<Memory>, MemoryError> {
-        unimplemented!("RecordingMemory: search_memories not used by save_agent_memory")
-    }
-
-    fn list_recent(&self, _limit: usize) -> Result<Vec<Memory>, MemoryError> {
-        unimplemented!("RecordingMemory: list_recent not used by save_agent_memory")
-    }
-
-    fn memory_count(&self) -> Result<usize, MemoryError> {
-        unimplemented!("RecordingMemory: memory_count not used by save_agent_memory")
-    }
-
-    fn clear_all(&self) -> Result<usize, MemoryError> {
-        unimplemented!("RecordingMemory: clear_all not used by save_agent_memory")
-    }
-
-    fn get_related_memories(&self, _id: &str, _depth: u32) -> Result<Vec<Memory>, MemoryError> {
-        unimplemented!("RecordingMemory: get_related_memories not used by save_agent_memory")
-    }
-}
+use archon_memory::types::MemoryType;
+use archon_test_support::memory::MockMemoryTrait;
 
 // --------------------------------------------------------------------
 // Test (a): three call sites in agent.rs
@@ -227,7 +97,7 @@ fn test_no_mcp_memorygraph_references() {
 /// REGRESSION GUARD: DO NOT RELAX. See REQ-FOR-PRESERVE-D8 (b2).
 #[test]
 fn test_store_memory_called_when_scope_is_some() {
-    let memory = RecordingMemory::new();
+    let memory = MockMemoryTrait::new();
     let scope = AgentMemoryScope::Project;
     let extra_tags = vec!["from-test".to_string()];
 
@@ -284,7 +154,7 @@ fn test_store_memory_called_when_scope_is_some() {
 /// REGRESSION GUARD: DO NOT RELAX. See REQ-FOR-PRESERVE-D8 (c).
 #[test]
 fn test_memory_scope_none_is_no_op() {
-    let memory = RecordingMemory::new();
+    let memory = MockMemoryTrait::new();
 
     let result = save_agent_memory(
         "researcher",
