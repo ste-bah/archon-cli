@@ -25,3 +25,13 @@ mcp__memorygraph__: crates/archon-permissions/tests/permission_expansion_tests.r
 # crate's own struct is the inner-archon memory differentiator; naming
 # what it supersedes is documentation, not reintroduction.
 mcp__memorygraph__: crates/archon-tools/src/memory.rs
+
+# REQ-FOR-PRESERVE-D8 — preserve_d8_save_agent_memory.rs regression
+# guard NEGATIVELY asserts the literal string does not appear in
+# production source (test b1). The literal only appears inside
+# `assert!(!source.contains("mcp__memorygraph__"))` call sites and the
+# accompanying failure messages — a defensive reference that enforces
+# the ban, not a reintroduction. Removing this entry would make the
+# very regression guard that protects D8 fail the D8-enforcing CI
+# step. (TASK-AGS-010, 2026-04-11.)
+mcp__memorygraph__: crates/archon-core/tests/preserve_d8_save_agent_memory.rs
