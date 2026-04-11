@@ -1,4 +1,9 @@
 pub mod ask_user;
+// TASK-AGS-104: relocated from archon-core to break the
+// archon-core <-> archon-tools dependency cycle. archon-core
+// re-exports this module for back-compat so existing consumers
+// keep the `archon_core::background_agents::*` path.
+pub mod background_agents;
 pub mod bash;
 pub mod concurrency;
 pub mod config_tool;

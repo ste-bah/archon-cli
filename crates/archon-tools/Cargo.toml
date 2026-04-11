@@ -25,6 +25,10 @@ dirs.workspace = true
 async-lsp.workspace = true
 lsp-types.workspace = true
 tokio-util.workspace = true
+# TASK-AGS-104: background_agents registry relocated here from
+# archon-core to break the archon-core <-> archon-tools cycle.
+dashmap.workspace = true
+once_cell.workspace = true
 tower.workspace = true
 which.workspace = true
 tree-sitter.workspace = true

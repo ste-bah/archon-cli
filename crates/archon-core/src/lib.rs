@@ -1,13 +1,12 @@
 pub mod agent;
 pub mod agents;
 pub mod archonmd;
-// TASK-AGS-101: BackgroundAgentRegistry scaffold (REQ-FOR-D2 [1/5]).
-// Global DashMap-backed registry owning JoinHandle + CancellationToken
-// for every spawned subagent. Not yet wired into the spawn sites —
-// TASK-AGS-104/105/106 redirect the legacy agent.rs spawn through
-// `BACKGROUND_AGENTS`.
-pub mod background_agents;
-pub use background_agents::{
+// TASK-AGS-101/104: BackgroundAgentRegistry. The module was relocated
+// to archon-tools in TASK-AGS-104 to break the
+// archon-core <-> archon-tools dependency cycle. Re-exported here so
+// existing `archon_core::background_agents::*` paths keep working.
+pub use archon_tools::background_agents;
+pub use archon_tools::background_agents::{
     AgentStatus, BackgroundAgentHandle, BackgroundAgentRegistry, BackgroundAgentRegistryApi,
     RegistryError, RegistryEvent, BACKGROUND_AGENTS,
 };

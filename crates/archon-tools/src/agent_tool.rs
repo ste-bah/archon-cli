@@ -1,6 +1,14 @@
+use std::sync::{Arc, Mutex};
+use std::time::SystemTime;
+
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use tokio_util::sync::CancellationToken;
+use uuid::Uuid;
 
+use crate::background_agents::{
+    new_result_slot, AgentStatus, BackgroundAgentHandle, BACKGROUND_AGENTS,
+};
 use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
 
 // ---------------------------------------------------------------------------
@@ -244,18 +252,114 @@ impl Tool for AgentTool {
         })
     }
 
-    async fn execute(&self, input: serde_json::Value, _ctx: &ToolContext) -> ToolResult {
-        match self.validate_and_build(&input) {
-            Ok(request) => match serde_json::to_string_pretty(&request) {
-                Ok(json_str) => ToolResult::success(json_str),
-                Err(e) => ToolResult::error(format!("failed to serialize request: {e}")),
-            },
-            Err(e) => ToolResult::error(e.to_string()),
+    async fn execute(&self, input: serde_json::Value, ctx: &ToolContext) -> ToolResult {
+        // TASK-AGS-104: tool-owned spawn site (REQ-FOR-D2 [2/5]).
+        // 1. Validate + build SubagentRequest (error path returns synchronously).
+        // 2. Create CancellationToken, allocate fresh Uuid v4.
+        // 3. tokio::spawn(run_subagent(...)) — owned by the spawned task.
+        // 4. Build BackgroundAgentHandle + register in BACKGROUND_AGENTS.
+        // 5. Return `{"agent_id": "<uuid>", "status": "spawned"}` synchronously.
+        let request = match self.validate_and_build(&input) {
+            Ok(req) => req,
+            Err(e) => return ToolResult::error(e.to_string()),
+        };
+
+        let agent_id: Uuid = Uuid::new_v4();
+        let cancel = CancellationToken::new();
+        let cancel_child = cancel.clone();
+        // Kept alive after `cancel` is moved into the handle so the
+        // register-failure branch below can still fire cancellation on
+        // the already-spawned task.
+        let cancel_for_failure = cancel.clone();
+        let status: Arc<Mutex<AgentStatus>> = Arc::new(Mutex::new(AgentStatus::Running));
+        let status_child = Arc::clone(&status);
+        let result_slot = new_result_slot();
+        let result_slot_child = Arc::clone(&result_slot);
+        let ctx_clone = ctx.clone();
+
+        let join = tokio::spawn(async move {
+            let outcome = run_subagent(request, cancel_child, ctx_clone).await;
+            let (final_status, payload) = match outcome {
+                Ok(body) => (AgentStatus::Finished, Ok(body)),
+                Err(e) => (AgentStatus::Failed, Err(e.to_string())),
+            };
+            *status_child
+                .lock()
+                .expect("status mutex poisoned in AgentTool::execute spawn") = final_status;
+            *result_slot_child
+                .lock()
+                .expect("result_slot mutex poisoned in AgentTool::execute spawn") = Some(payload);
+        });
+
+        let handle = BackgroundAgentHandle {
+            agent_id,
+            join_handle: Some(join),
+            cancel_token: cancel,
+            spawned_at: SystemTime::now(),
+            status,
+            result_slot,
+        };
+
+        if let Err(e) = BACKGROUND_AGENTS.register(handle) {
+            // TASK-AGS-108 will add a retry on Duplicate (ERR-ARCH-01).
+            // For now, surface the collision as a tool error and fire
+            // the pre-clone cancel token so the already-spawned task
+            // wakes, observes cancellation, and exits cleanly instead
+            // of being leaked.
+            cancel_for_failure.cancel();
+            return ToolResult::error(format!("background registry register failed: {e}"));
         }
+        // Happy path: drop the failure-branch clone — the registry now
+        // owns the canonical token via the stored handle.
+        drop(cancel_for_failure);
+
+        ToolResult::success(
+            json!({
+                "agent_id": agent_id.to_string(),
+                "status": "spawned",
+            })
+            .to_string(),
+        )
     }
 
     fn permission_level(&self, _input: &serde_json::Value) -> PermissionLevel {
         PermissionLevel::Risky
+    }
+}
+
+// ---------------------------------------------------------------------------
+// run_subagent — the callable entry point executed inside the spawned task.
+// ---------------------------------------------------------------------------
+//
+// TASK-AGS-104 intentionally ships this as a scaffold: the real
+// subagent execution still lives in `crates/archon-core/src/agent.rs`
+// around lines 2939-2977, and TASK-AGS-105 is the task that removes
+// that duplicate indirection and redirects the real execution path
+// through this function. Wiring the real implementation now would
+// require a circular dependency on archon-core (the very cycle this
+// task relocated the background_agents module to avoid).
+//
+// The scaffold body respects the cancel token and surfaces a
+// structured error so any caller that pops the result_slot before
+// TASK-AGS-105 lands knows the execution path is not yet wired.
+pub async fn run_subagent(
+    req: SubagentRequest,
+    cancel: CancellationToken,
+    _ctx: ToolContext,
+) -> Result<String, AgentToolError> {
+    tokio::select! {
+        _ = cancel.cancelled() => {
+            Err(AgentToolError::InvalidInput(format!(
+                "subagent {} cancelled before TASK-AGS-105 wiring",
+                req.prompt.chars().take(40).collect::<String>()
+            )))
+        }
+        _ = tokio::task::yield_now() => {
+            Err(AgentToolError::InvalidInput(
+                "run_subagent is a TASK-AGS-104 scaffold; real execution is delivered by TASK-AGS-105"
+                    .to_string(),
+            ))
+        }
     }
 }
 
@@ -278,6 +382,8 @@ mod tests {
 
     #[tokio::test]
     async fn valid_input_returns_subagent_request() {
+        // TASK-AGS-104: execute() now returns {agent_id,status}; validate
+        // SubagentRequest shape directly via validate_and_build.
         let tool = AgentTool::new();
         let input = json!({
             "prompt": "Summarize the codebase",
@@ -286,11 +392,7 @@ mod tests {
             "max_turns": 5
         });
 
-        let result = tool.execute(input, &make_ctx()).await;
-        assert!(!result.is_error, "unexpected error: {}", result.content);
-
-        let request: SubagentRequest =
-            serde_json::from_str(&result.content).expect("should deserialize");
+        let request = tool.validate_and_build(&input).expect("valid input");
         assert_eq!(request.prompt, "Summarize the codebase");
         assert_eq!(request.model.as_deref(), Some("claude-sonnet-4-6"));
         assert_eq!(request.allowed_tools, vec!["Read", "Glob"]);
@@ -329,10 +431,7 @@ mod tests {
         let tool = AgentTool::new();
         let input = json!({ "prompt": "Do something" });
 
-        let result = tool.execute(input, &make_ctx()).await;
-        assert!(!result.is_error);
-
-        let request: SubagentRequest = serde_json::from_str(&result.content).unwrap();
+        let request = tool.validate_and_build(&input).expect("valid input");
         assert_eq!(request.max_turns, SubagentRequest::DEFAULT_MAX_TURNS);
         assert_eq!(request.timeout_secs, SubagentRequest::DEFAULT_TIMEOUT_SECS);
         assert!(!request.run_in_background);
@@ -347,10 +446,7 @@ mod tests {
             "allowed_tools": ["Read", "Write", "Edit"]
         });
 
-        let result = tool.execute(input, &make_ctx()).await;
-        assert!(!result.is_error);
-
-        let request: SubagentRequest = serde_json::from_str(&result.content).unwrap();
+        let request = tool.validate_and_build(&input).expect("valid input");
         assert_eq!(request.allowed_tools, vec!["Read", "Write", "Edit"]);
     }
 
@@ -359,10 +455,7 @@ mod tests {
         let tool = AgentTool::new();
         let input = json!({ "prompt": "Analyze code" });
 
-        let result = tool.execute(input, &make_ctx()).await;
-        assert!(!result.is_error);
-
-        let request: SubagentRequest = serde_json::from_str(&result.content).unwrap();
+        let request = tool.validate_and_build(&input).expect("valid input");
         assert!(request.allowed_tools.is_empty());
     }
 
@@ -397,10 +490,7 @@ mod tests {
             "subagent_type": "code-reviewer"
         });
 
-        let result = tool.execute(input, &make_ctx()).await;
-        assert!(!result.is_error);
-
-        let request: SubagentRequest = serde_json::from_str(&result.content).unwrap();
+        let request = tool.validate_and_build(&input).expect("valid input");
         assert_eq!(request.subagent_type.as_deref(), Some("code-reviewer"));
     }
 
@@ -409,10 +499,7 @@ mod tests {
         let tool = AgentTool::new();
         let input = json!({ "prompt": "Do something" });
 
-        let result = tool.execute(input, &make_ctx()).await;
-        assert!(!result.is_error);
-
-        let request: SubagentRequest = serde_json::from_str(&result.content).unwrap();
+        let request = tool.validate_and_build(&input).expect("valid input");
         assert!(request.subagent_type.is_none());
     }
 
@@ -463,10 +550,7 @@ mod tests {
             "run_in_background": true
         });
 
-        let result = tool.execute(input, &make_ctx()).await;
-        assert!(!result.is_error);
-
-        let request: SubagentRequest = serde_json::from_str(&result.content).unwrap();
+        let request = tool.validate_and_build(&input).expect("valid input");
         assert!(request.run_in_background);
     }
 
@@ -507,10 +591,7 @@ mod tests {
             "cwd": "/tmp"
         });
 
-        let result = tool.execute(input, &make_ctx()).await;
-        assert!(!result.is_error);
-
-        let request: SubagentRequest = serde_json::from_str(&result.content).unwrap();
+        let request = tool.validate_and_build(&input).expect("valid input");
         assert_eq!(request.cwd.as_deref(), Some("/tmp"));
     }
 
@@ -555,10 +636,7 @@ mod tests {
             "isolation": "worktree"
         });
 
-        let result = tool.execute(input, &make_ctx()).await;
-        assert!(!result.is_error);
-
-        let request: SubagentRequest = serde_json::from_str(&result.content).unwrap();
+        let request = tool.validate_and_build(&input).expect("valid input");
         assert_eq!(request.isolation.as_deref(), Some("worktree"));
     }
 
@@ -567,10 +645,7 @@ mod tests {
         let tool = AgentTool::new();
         let input = json!({ "prompt": "Do something" });
 
-        let result = tool.execute(input, &make_ctx()).await;
-        assert!(!result.is_error);
-
-        let request: SubagentRequest = serde_json::from_str(&result.content).unwrap();
+        let request = tool.validate_and_build(&input).expect("valid input");
         assert!(request.isolation.is_none());
     }
 

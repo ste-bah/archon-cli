@@ -9,7 +9,7 @@
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use archon_core::background_agents::{
+use archon_tools::background_agents::{
     self, AgentStatus, BackgroundAgentHandle, BackgroundAgentRegistry,
     BackgroundAgentRegistryApi, RegistryError, BACKGROUND_AGENTS,
 };
