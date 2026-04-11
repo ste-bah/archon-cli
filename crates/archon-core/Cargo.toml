@@ -34,6 +34,13 @@ sha2.workspace = true
 semver.workspace = true
 hex.workspace = true
 async-trait.workspace = true
+# TASK-AGS-101: BackgroundAgentRegistry scaffold (REQ-FOR-D2 [1/5]).
+# dashmap = sharded concurrent map for the registry inner storage.
+# once_cell = global Lazy<Arc<dyn BackgroundAgentRegistryApi>>.
+# tokio-util = CancellationToken for per-subagent cancellation propagation.
+dashmap.workspace = true
+once_cell.workspace = true
+tokio-util.workspace = true
 russh.workspace = true
 axum.workspace = true
 tower-http.workspace = true

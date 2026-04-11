@@ -1,6 +1,16 @@
 pub mod agent;
 pub mod agents;
 pub mod archonmd;
+// TASK-AGS-101: BackgroundAgentRegistry scaffold (REQ-FOR-D2 [1/5]).
+// Global DashMap-backed registry owning JoinHandle + CancellationToken
+// for every spawned subagent. Not yet wired into the spawn sites —
+// TASK-AGS-104/105/106 redirect the legacy agent.rs spawn through
+// `BACKGROUND_AGENTS`.
+pub mod background_agents;
+pub use background_agents::{
+    AgentStatus, BackgroundAgentHandle, BackgroundAgentRegistry, BackgroundAgentRegistryApi,
+    RegistryError, RegistryEvent, BACKGROUND_AGENTS,
+};
 pub mod cli_flags;
 pub mod commands;
 pub mod config;
