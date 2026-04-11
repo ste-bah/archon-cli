@@ -1,0 +1,109 @@
+# FileSizeGuard allowlist — pre-existing NFR-FOR-D4 debt captured at phase-0.
+#
+# SPEC DIVERGENCE (approved 2026-04-11):
+# TASK-AGS-002 §"Allowlist starter content: exactly one entry, src/main.rs"
+# was written under the assumption that main.rs was the sole >500-line file.
+# Phase-0 baseline execution discovered 67 additional offenders across 11
+# crates. Steven explicitly approved adding all 67 to this allowlist to
+# preserve the guard's forward-looking purpose: catch NEW >500-line files
+# while phases 4+ progressively refactor existing debt. The guard's intent
+# (NFR-FOR-D4-MAINTAINABILITY) is preserved even though the starter-content
+# clause is relaxed.
+#
+# The allowlist SHRINKS over time. Every phase-N task that refactors a file
+# below 500 lines MUST remove its entry here in the same commit.
+#
+# Format: repo-relative path, one per line. Lines starting with '#' and
+# blank lines are ignored. Grouped by crate for review-friendliness.
+
+# --- Phase-4 primary target (REQ-FOR-D4) ---
+src/main.rs
+
+# --- archon-consciousness ---
+crates/archon-consciousness/src/assembler.rs
+crates/archon-consciousness/src/rules.rs
+
+# --- archon-core ---
+crates/archon-core/src/agent.rs
+crates/archon-core/src/agents/definition.rs
+crates/archon-core/src/agents/loader.rs
+crates/archon-core/src/agents/memory.rs
+crates/archon-core/src/agents/registry.rs
+crates/archon-core/src/config.rs
+crates/archon-core/src/hooks/registry.rs
+crates/archon-core/src/hooks/types.rs
+crates/archon-core/src/skills/agent_skills.rs
+crates/archon-core/src/skills/expanded.rs
+crates/archon-core/src/subagent.rs
+crates/archon-core/tests/config_layers_tests.rs
+crates/archon-core/tests/env_vars_tests.rs
+crates/archon-core/tests/hook_phase3_integration.rs
+crates/archon-core/tests/hook_toml_tests.rs
+crates/archon-core/tests/hooks_tests.rs
+
+# --- archon-leann ---
+crates/archon-leann/src/indexer.rs
+crates/archon-leann/tests/chunker.rs
+
+# --- archon-llm ---
+crates/archon-llm/src/anthropic.rs
+crates/archon-llm/src/identity.rs
+crates/archon-llm/src/providers/bedrock.rs
+crates/archon-llm/src/providers/vertex.rs
+
+# --- archon-mcp ---
+crates/archon-mcp/src/lifecycle.rs
+
+# --- archon-memory ---
+crates/archon-memory/src/access.rs
+crates/archon-memory/src/garden.rs
+crates/archon-memory/src/graph.rs
+crates/archon-memory/tests/garden_tests.rs
+crates/archon-memory/tests/memory_server_tests.rs
+
+# --- archon-pipeline ---
+crates/archon-pipeline/src/agent_loader.rs
+crates/archon-pipeline/src/coding/agents.rs
+crates/archon-pipeline/src/coding/facade.rs
+crates/archon-pipeline/src/coding/gates.rs
+crates/archon-pipeline/src/coding/quality.rs
+crates/archon-pipeline/src/coding/wiring.rs
+crates/archon-pipeline/src/compression.rs
+crates/archon-pipeline/src/kb/compile.rs
+crates/archon-pipeline/src/kb/query.rs
+crates/archon-pipeline/src/learning/causal.rs
+crates/archon-pipeline/src/learning/desc.rs
+crates/archon-pipeline/src/learning/integration.rs
+crates/archon-pipeline/src/learning/reasoning.rs
+crates/archon-pipeline/src/learning/sona.rs
+crates/archon-pipeline/src/manifest.rs
+crates/archon-pipeline/src/research/agents.rs
+crates/archon-pipeline/src/research/facade.rs
+crates/archon-pipeline/src/research/quality.rs
+crates/archon-pipeline/src/research/style.rs
+crates/archon-pipeline/src/runner.rs
+crates/archon-pipeline/tests/final_stage.rs
+crates/archon-pipeline/tests/layered_context.rs
+crates/archon-pipeline/tests/learning_schema.rs
+crates/archon-pipeline/tests/runner.rs
+
+# --- archon-plugin ---
+crates/archon-plugin/src/host.rs
+crates/archon-plugin/tests/test_plugin_loader.rs
+crates/archon-plugin/tests/test_wasm_host.rs
+
+# --- archon-session ---
+crates/archon-session/src/checkpoint.rs
+crates/archon-session/src/storage.rs
+
+# --- archon-tools ---
+crates/archon-tools/src/agent_tool.rs
+crates/archon-tools/src/config_tool.rs
+crates/archon-tools/src/send_message.rs
+
+# --- archon-tui ---
+crates/archon-tui/src/app.rs
+crates/archon-tui/src/markdown.rs
+crates/archon-tui/src/output.rs
+crates/archon-tui/src/theme.rs
+crates/archon-tui/src/vim.rs
