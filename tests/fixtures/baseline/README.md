@@ -64,6 +64,37 @@ regen script therefore:
 
 Do not "optimize" these constraints away.
 
+## Public-API snapshots (TASK-AGS-011)
+
+Two additional fixtures lock the public API of the preserve-D8 crates:
+
+- `archon_memory_api.txt` — full public surface of the `archon-memory`
+  crate (CozoDB-backed memory graph). REQ-FOR-PRESERVE-D8 (d).
+- `agents_memory_api.txt` — the `archon_core::agents::memory::*`
+  sub-surface of `archon-core`, grep-filtered from the full archon-core
+  snapshot. REQ-FOR-PRESERVE-D8 (d) + NFR-ARCH-002.
+
+Both files are produced by `scripts/regen-public-api.sh` and start
+with a deterministic `# cargo-public-api <version>` header so drift
+between tool versions is distinguishable from real code drift.
+
+**Who regenerates:** the author of an approved public-API change.
+Regenerate, review the diff, and commit the updated fixture alongside
+the code change — never as a standalone "silence the drift test" commit.
+
+**Prerequisites:** `cargo install cargo-public-api --locked` and
+`rustup toolchain install nightly --profile minimal`. See
+`scripts/regen-public-api.README.md` for full setup details.
+
+**Drift detection:** the tests at
+`crates/archon-core/tests/public_api_snapshot.rs` and
+`crates/archon-memory/tests/public_api_snapshot.rs` run on every
+`cargo test` in fixture-sanity mode (header + anchor items present).
+Set `ARCHON_RUN_PUBLIC_API_DRIFT=1` to additionally invoke
+`cargo public-api` and byte-compare against the fixture — that mode is
+opt-in because it nests a cargo build inside `cargo test` and needs a
+separate `CARGO_TARGET_DIR` on WSL2 to avoid lock contention.
+
 ## Phase-4/6/7 inventory baselines (TASK-AGS-012)
 
 Three additional snapshots live beside the cargo-test baseline. They

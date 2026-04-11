@@ -315,12 +315,10 @@ fn test_memory_scope_none_is_no_op() {
 
 /// REGRESSION GUARD: DO NOT RELAX. See REQ-FOR-PRESERVE-D8 (d).
 ///
-/// This test intentionally ships `#[ignore]` on HEAD — the snapshot
-/// file is owned by TASK-AGS-011 (`cargo public-api` baseline) and
-/// lands in a later phase-0 task. Once that task merges, remove the
-/// `#[ignore]` attribute and this guard will flip green.
+/// TASK-AGS-011 has landed the snapshot; this guard is now live. It
+/// simply asserts the fixture file exists on disk — the live drift
+/// check is in `crates/archon-core/tests/public_api_snapshot.rs`.
 #[test]
-#[ignore = "waits on TASK-AGS-011 cargo public-api snapshot"]
 fn test_agents_memory_api_snapshot_exists() {
     let candidates = [
         "tests/fixtures/baseline/agents_memory_api.txt",
