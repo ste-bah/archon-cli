@@ -280,7 +280,10 @@ pub struct Agent {
     /// Critical system reminder re-injected into system prompt at every turn (AGT-022).
     critical_system_reminder: Option<String>,
     /// Pending resume messages to inject into the next SubagentRunner (AGT-024).
-    pending_resume_messages: Option<Vec<serde_json::Value>>,
+    /// TASK-AGS-105: Arc<Mutex<...>> so the `AgentSubagentExecutor` can
+    /// `take()` this slot from inside `run_to_completion` via its own
+    /// clone (see mapping doc Section 2g).
+    pending_resume_messages: Arc<tokio::sync::Mutex<Option<Vec<serde_json::Value>>>>,
 }
 
 impl Agent {
@@ -328,8 +331,36 @@ impl Agent {
             memory_briefing: None,
             permission_store,
             critical_system_reminder: None,
-            pending_resume_messages: None,
+            pending_resume_messages: Arc::new(tokio::sync::Mutex::new(None)),
         }
+    }
+
+    /// TASK-AGS-105: install the `AgentSubagentExecutor` into the process
+    /// OnceLock so `AgentTool::execute` and `TaskCreateTool::execute` can
+    /// resolve it via `archon_tools::subagent_executor::get_subagent_executor`.
+    ///
+    /// Called explicitly by the embedder (CLI, tests) AFTER constructing the
+    /// `Agent` with its full field set (hook_registry, memory, etc.). This is
+    /// a separate step from `Agent::new` because many of the fields the
+    /// executor needs are set via post-construction setters
+    /// (`set_hook_registry`, `set_memory`, ...). The install is idempotent
+    /// per-process (OnceLock semantics): first caller wins.
+    pub fn install_subagent_executor(&self) {
+        let exec = crate::subagent_executor::AgentSubagentExecutor::new(
+            Arc::clone(&self.client),
+            self.registry.clone(),
+            Arc::clone(&self.subagent_manager),
+            Arc::clone(&self.agent_registry),
+            self.hook_registry.as_ref().map(Arc::clone),
+            self.memory.as_ref().map(Arc::clone),
+            self.config.working_dir.clone(),
+            self.config.session_id.clone(),
+            self.config.model.clone(),
+            self.config.system_prompt.clone(),
+            Arc::clone(&self.config.permission_mode),
+            Arc::clone(&self.pending_resume_messages),
+        );
+        archon_tools::subagent_executor::install_subagent_executor(Arc::new(exec));
     }
 
     /// Enable the inner voice feature. The supplied state is shared so that
@@ -1279,7 +1310,8 @@ impl Agent {
                                                     content: resume_json,
                                                     is_error: false,
                                                 };
-                                                self.pending_resume_messages = Some(ctx.messages);
+                                                *self.pending_resume_messages.lock().await =
+                                                    Some(ctx.messages);
                                                 self.send_event(AgentEvent::MessageSent {
                                                     target_agent_id: agent_id.clone(),
                                                     message: req.message.clone(),
@@ -2859,7 +2891,7 @@ impl Agent {
         }
 
         // AGT-024: Inject resume messages if pending (from SendMessage resume path)
-        if let Some(resume_msgs) = self.pending_resume_messages.take() {
+        if let Some(resume_msgs) = self.pending_resume_messages.lock().await.take() {
             tracing::info!(
                 count = resume_msgs.len(),
                 "Injecting resume messages into SubagentRunner"

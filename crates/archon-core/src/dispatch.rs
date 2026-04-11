@@ -6,6 +6,7 @@ use archon_tools::plan_mode::is_tool_allowed_in_mode;
 use archon_tools::tool::{Tool, ToolContext, ToolResult};
 
 /// Registry of available tools.
+#[derive(Clone)]
 pub struct ToolRegistry {
     tools: HashMap<String, Arc<dyn Tool>>,
 }
@@ -302,6 +303,7 @@ mod tests {
             session_id: "test".into(),
             mode: AgentMode::Normal,
             extra_dirs: vec![],
+            ..Default::default()
         };
 
         let result = registry
@@ -365,6 +367,7 @@ mod tests {
             session_id: "test".into(),
             mode: AgentMode::Plan,
             extra_dirs: vec![],
+            ..Default::default()
         };
 
         let result = registry
