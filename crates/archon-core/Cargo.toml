@@ -52,3 +52,8 @@ toml.workspace = true
 # TASK-AGS-009: PRESERVE-D5 regression guard uses serial_test to
 # serialise the ARCHON_AUTO_BACKGROUND_TASKS env var flip test.
 serial_test.workspace = true
+# TASK-AGS-014: insta + archon-test-support drive the TUI frame
+# snapshot baseline test (crates/archon-core/tests/tui_frame_baseline.rs).
+# Both are dev-only — neither leaks into the production graph.
+insta.workspace = true
+archon-test-support = { path = "../archon-test-support" }

@@ -12,3 +12,11 @@ serde = { workspace = true, features = ["derive"] }
 async-trait.workspace = true
 anyhow.workspace = true
 tempfile.workspace = true
+
+# TASK-AGS-014: insta is available as a dev-dep so downstream phase-4
+# snapshot tests can pull it transitively when they use the
+# `tui_capture` helpers. Kept out of `[dependencies]` to prevent it
+# from leaking into the production graph of any crate that depends on
+# archon-test-support at dev time.
+[dev-dependencies]
+insta.workspace = true

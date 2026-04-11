@@ -27,7 +27,11 @@
 //!   REQ-FOR-PRESERVE-D8 regression guard.
 //! - [`tempdir`] — `ArchonTempDir` RAII wrapper around `tempfile` that
 //!   lays out the standard `.archon/` skeleton.
+//! - [`tui_capture`] — `FrameBuffer`, `AppLike`, `DummyApp`, and
+//!   `render_frame_to_string` for insta-based TUI snapshot tests
+//!   (phase-4 REQ-FOR-D4 modularization safety net).
 
 pub mod memory;
 pub mod provider;
 pub mod tempdir;
+pub mod tui_capture;

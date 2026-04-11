@@ -1,0 +1,14 @@
+# Reference: project-tasks/archon-fixes/agentshit/phase-0-prereqs/TASK-AGS-014.md
+# Based on: 02-technical-spec.md §1009 "snapshot-test TUI frames with insta"
+#
+# Declares the snapshot tree layout for the workspace. Phase-4 TUI
+# modularization (REQ-FOR-D4) will land many `.snap` files under this
+# tree; the baseline seed lives at
+# `tests/fixtures/snapshots/archon-core/tui_frame_baseline__startup.snap`
+# and is driven by `crates/archon-core/tests/tui_frame_baseline.rs`.
+#
+# Note: insta does not interpolate `{crate}` at config-load time — each
+# crate's test opts in with `with_settings!({ snapshot_path => ... })`
+# so the .snap files land in the crate-specific sub-tree beneath
+# `tests/fixtures/snapshots/`. This file records the convention.
+snapshot_path: "tests/fixtures/snapshots/{crate}"
