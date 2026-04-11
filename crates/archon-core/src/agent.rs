@@ -1317,8 +1317,35 @@ impl Agent {
                                                     message: req.message.clone(),
                                                 })
                                                 .await;
-                                                self.handle_subagent_result(&resume_result, false)
-                                                    .await
+                                                // TASK-AGS-105 Section 2f: route resume through
+                                                // run_subagent (the AGT-025 auto-bg race still
+                                                // applies) instead of the legacy
+                                                // handle_subagent_result indirection.
+                                                let _ = resume_result; // legacy stub, drop
+                                                let resume_sid = agent_id.clone();
+                                                let cancel = tokio_util::sync::CancellationToken::new();
+                                                let resume_ctx = archon_tools::tool::ToolContext {
+                                                    working_dir: self.config.working_dir.clone(),
+                                                    session_id: self.config.session_id.clone(),
+                                                    mode: archon_tools::tool::AgentMode::Normal,
+                                                    extra_dirs: vec![],
+                                                    in_fork: crate::agents::built_in::is_in_fork_child_by_messages(&self.state.messages),
+                                                    nested: false,
+                                                };
+                                                match archon_tools::agent_tool::run_subagent(
+                                                    resume_sid,
+                                                    resume_request,
+                                                    cancel,
+                                                    resume_ctx,
+                                                ).await {
+                                                    archon_tools::subagent_executor::SubagentOutcome::Completed(text) => ToolResult::success(text),
+                                                    archon_tools::subagent_executor::SubagentOutcome::Failed(err) => ToolResult::error(err),
+                                                    archon_tools::subagent_executor::SubagentOutcome::AutoBackgrounded => ToolResult::success(format!(
+                                                        "Subagent '{}' auto-backgrounded. Still running — use SendMessage to check status.",
+                                                        agent_id
+                                                    )),
+                                                    archon_tools::subagent_executor::SubagentOutcome::Cancelled => ToolResult::error("subagent cancelled"),
+                                                }
                                             } else {
                                                 // Path D: No transcript found — error
                                                 ToolResult::error(format!(
