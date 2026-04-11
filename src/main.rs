@@ -3057,8 +3057,36 @@ async fn run_interactive_session(
     let last_assistant_response_shared: Arc<tokio::sync::Mutex<String>> =
         Arc::new(tokio::sync::Mutex::new(String::new()));
     let last_response_for_fwd = Arc::clone(&last_assistant_response_shared);
+    // TASK-AGS-103: consumer-side back-pressure.
+    // Producers push into an unbounded channel (TASK-AGS-102); here we
+    // bound the in-TUI buffer through an EventCoalescer so a slow render
+    // loop cannot accumulate unbounded memory. State events are preserved;
+    // Progress events are dropped oldest-first once the buffer exceeds
+    // SOFT_CAP / HARD_CAP. Up to RENDER_EVENT_BUDGET events are drained
+    // per tick to keep the forwarder responsive.
+    use archon_cli_workspace::event_coalescer::{EventCoalescer, RENDER_EVENT_BUDGET};
     tokio::spawn(async move {
-        while let Some(event) = agent_event_rx.recv().await {
+        let mut coalescer = EventCoalescer::with_defaults();
+        loop {
+            // Block for at least one event; if the channel is closed, exit.
+            let first = match agent_event_rx.recv().await {
+                Some(ev) => ev,
+                None => break,
+            };
+            coalescer.push(first);
+            // Drain any further pending events up to the per-tick budget.
+            let mut drained = 1usize;
+            while drained < RENDER_EVENT_BUDGET {
+                match agent_event_rx.try_recv() {
+                    Ok(ev) => {
+                        coalescer.push(ev);
+                        drained += 1;
+                    }
+                    Err(_) => break,
+                }
+            }
+            // Forward coalesced events to the TUI.
+            while let Some(event) = coalescer.pop() {
             let tui_event = match event {
                 AgentEvent::TextDelta(text) => {
                     // Track last assistant response for /copy
@@ -3130,7 +3158,8 @@ async fn run_interactive_session(
                 _ => continue,
             };
             if tui_tx.send(tui_event).await.is_err() {
-                break;
+                return;
+            }
             }
         }
     });

@@ -4,3 +4,4 @@
 //! without depending on the binary entry point.
 
 pub mod cli_args;
+pub mod event_coalescer;
