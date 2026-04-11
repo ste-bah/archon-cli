@@ -84,7 +84,7 @@ impl SubtaskExecutor for RealSubtaskExecutor {
 
         let registry = create_default_registry(self.working_dir.clone());
         let tool_defs = registry.tool_definitions();
-        let (event_tx, mut event_rx) = tokio::sync::mpsc::channel::<AgentEvent>(256);
+        let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel::<AgentEvent>();
 
         let config = AgentConfig {
             model: self.model.clone(),

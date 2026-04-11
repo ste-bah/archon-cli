@@ -55,7 +55,7 @@ pub async fn run_print_mode(
     config: PrintModeConfig,
     _archon_config: &ArchonConfig,
     agent: &mut Agent,
-    mut event_rx: tokio::sync::mpsc::Receiver<AgentEvent>,
+    mut event_rx: tokio::sync::mpsc::UnboundedReceiver<AgentEvent>,
 ) -> i32 {
     let query = config.query.clone();
     let output_format = config.output_format.clone();

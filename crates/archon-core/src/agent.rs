@@ -235,7 +235,7 @@ pub struct Agent {
     registry: ToolRegistry,
     config: AgentConfig,
     state: ConversationState,
-    event_tx: tokio::sync::mpsc::Sender<AgentEvent>,
+    event_tx: tokio::sync::mpsc::UnboundedSender<AgentEvent>,
     checkpoint_store: Option<Arc<Mutex<CheckpointStore>>>,
     plan_store: Option<PlanStore>,
     turn_number: u64,
@@ -288,7 +288,7 @@ impl Agent {
         client: Arc<dyn LlmProvider>,
         registry: ToolRegistry,
         config: AgentConfig,
-        event_tx: tokio::sync::mpsc::Sender<AgentEvent>,
+        event_tx: tokio::sync::mpsc::UnboundedSender<AgentEvent>,
         agent_registry: Arc<std::sync::RwLock<AgentRegistry>>,
     ) -> Self {
         let permission_store: Arc<dyn crate::hooks::PermissionStore> =
@@ -371,8 +371,9 @@ impl Agent {
     /// Close the event channel so receivers know the agent is done.
     /// Used by print mode to unblock the event consumer task.
     pub fn close_event_channel(&mut self) {
-        // Replace the sender with a closed one by dropping it
-        let (tx, _) = tokio::sync::mpsc::channel(1);
+        // Replace the sender with a closed one by dropping it.
+        // TASK-AGS-102: unbounded variant — same drop-to-close semantics.
+        let (tx, _) = tokio::sync::mpsc::unbounded_channel();
         self.event_tx = tx;
         // The old sender is dropped, closing the channel
     }
@@ -1809,7 +1810,11 @@ impl Agent {
     }
 
     async fn send_event(&self, event: AgentEvent) {
-        let _ = self.event_tx.send(event).await;
+        // TASK-AGS-102: unbounded send — synchronous, fails only if rx dropped.
+        // ERR-ARCH-02 (TASK-AGS-108) will formalise the closed-channel WARN.
+        if let Err(e) = self.event_tx.send(event) {
+            tracing::trace!("agent_event_tx closed: {e}");
+        }
     }
 
     /// Get the auth provider for spawning parallel API calls (e.g. /btw).

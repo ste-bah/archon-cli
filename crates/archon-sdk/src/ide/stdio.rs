@@ -59,7 +59,7 @@ impl StdioTransport {
     /// The loop terminates when stdin reaches EOF or the event channel closes.
     pub async fn run_with_events(
         &mut self,
-        mut event_rx: mpsc::Receiver<AgentEvent>,
+        mut event_rx: mpsc::UnboundedReceiver<AgentEvent>,
         session_id: &str,
     ) -> anyhow::Result<()> {
         let stdin = tokio::io::stdin();

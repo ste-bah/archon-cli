@@ -555,7 +555,7 @@ async fn main() -> Result<()> {
             // handler's prompt method once sessions are fully connected (Phase 6).
             // For now, create a placeholder channel so the transport compiles.
             let (_event_tx, event_rx) =
-                tokio::sync::mpsc::channel::<archon_core::agent::AgentEvent>(256);
+                tokio::sync::mpsc::unbounded_channel::<archon_core::agent::AgentEvent>();
             let session_id = uuid::Uuid::new_v4().to_string();
             tracing::info!("IDE stdio mode: session={session_id}");
             if let Err(e) = transport.run_with_events(event_rx, &session_id).await {
@@ -1874,7 +1874,7 @@ async fn run_print_mode_session(
         }
     }
 
-    let (agent_event_tx, agent_event_rx) = tokio::sync::mpsc::channel::<AgentEvent>(256);
+    let (agent_event_tx, agent_event_rx) = tokio::sync::mpsc::unbounded_channel::<AgentEvent>();
     let provider = build_llm_provider(&config.llm, api_client);
     tracing::info!("LLM provider: {}", provider.name());
 
@@ -2732,7 +2732,8 @@ async fn run_interactive_session(
     let extra_dirs_shared = Arc::clone(&agent_config.extra_dirs);
 
     // Create channels
-    let (agent_event_tx, mut agent_event_rx) = tokio::sync::mpsc::channel::<AgentEvent>(256);
+    let (agent_event_tx, mut agent_event_rx) =
+        tokio::sync::mpsc::unbounded_channel::<AgentEvent>();
     let (tui_event_tx, tui_event_rx) = tokio::sync::mpsc::channel::<TuiEvent>(256);
     // CRIT-13: Forward voice pipeline events to TUI event channel
     if let Some(mut voice_rx) = voice_event_rx {
