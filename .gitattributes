@@ -1,0 +1,18 @@
+# Reference: project-tasks/archon-fixes/agentshit/phase-0-prereqs/TASK-AGS-013.md
+# Based on: tests/fixtures/baseline/cargo_test_list.txt (TASK-AGS-001 baseline),
+#           tests/fixtures/agents/generated/ (TASK-AGS-004 fixtures),
+#           scripts/*.sh (TASK-AGS-002/003/007 guard scripts)
+#
+# Ensures baseline + generated fixture + shell-script line endings are
+# stable across Linux/macOS/Windows checkouts and marks generated
+# fixture files so GitHub's linguist excludes them from language stats
+# (and diffs collapse them by default).
+
+# Baseline snapshots — plain text with stable LF endings.
+tests/fixtures/baseline/*.txt text eol=lf
+
+# Generated discovery fixtures (TASK-AGS-004 produces 300 agent files).
+tests/fixtures/agents/generated/** linguist-generated=true
+
+# Shell scripts — always LF regardless of checkout OS.
+scripts/*.sh text eol=lf
