@@ -40,6 +40,7 @@ use archon_mcp::lifecycle::McpServerManager;
 use archon_memory::{MemoryAccess, MemoryGraph, MemoryTrait};
 use archon_permissions::auto::{AutoModeConfig, AutoModeEvaluator};
 use archon_tui::app::{TuiEvent, run_tui};
+use tokio_util::sync::CancellationToken;
 
 use cli_args::{Cli, Commands};
 
@@ -3250,9 +3251,18 @@ async fn run_interactive_session(
     };
     // Clone api_url for the btw_tx background task (line ~1683); the spawn below consumes it.
     let api_url_for_btw = api_url.clone();
+    // TASK-AGS-106: shared slot for current agent task — accessible from outside
+    // the handler spawn so TASK-AGS-107's Ctrl+C signal handler can fire the token.
+    let current_agent_task: Arc<tokio::sync::Mutex<Option<(CancellationToken, tokio::task::JoinHandle<()>)>>>
+        = Arc::new(tokio::sync::Mutex::new(None));
+    let current_agent_task_inner = Arc::clone(&current_agent_task);
     tokio::spawn(async move {
+        let agent = Arc::new(tokio::sync::Mutex::new(agent));
+
         // CRIT-06: Fire Setup hook once agent is fully configured
         agent
+            .lock()
+            .await
             .fire_hook(
                 archon_core::hooks::HookType::Setup,
                 serde_json::json!({
@@ -3263,6 +3273,8 @@ async fn run_interactive_session(
 
         // CRIT-06: Fire SessionStart hook at the beginning of the session
         let session_start_agg = agent
+            .lock()
+            .await
             .fire_hook(
                 archon_core::hooks::HookType::SessionStart,
                 serde_json::json!({
@@ -3277,11 +3289,13 @@ async fn run_interactive_session(
                 "SessionStart hook returned {} watch paths",
                 session_start_agg.watch_paths.len()
             );
-            agent.add_watch_paths(session_start_agg.watch_paths);
+            agent.lock().await.add_watch_paths(session_start_agg.watch_paths);
         }
 
         // CRIT-06: Fire InstructionsLoaded hook after session starts and instructions are loaded
         agent
+            .lock()
+            .await
             .fire_hook(
                 archon_core::hooks::HookType::InstructionsLoaded,
                 serde_json::json!({
@@ -3325,7 +3339,7 @@ async fn run_interactive_session(
                                     .filter_map(|s| serde_json::from_str(s).ok())
                                     .collect();
                                 let count = messages.len();
-                                agent.clear_conversation().await;
+                                agent.lock().await.clear_conversation().await;
 
                                 // Display the loaded conversation history in the output
                                 let _ = input_tui_tx.send(TuiEvent::TextDelta(
@@ -3364,7 +3378,7 @@ async fn run_interactive_session(
                                     ))
                                     .await;
 
-                                agent.restore_conversation(messages);
+                                agent.lock().await.restore_conversation(messages);
                             }
                             Err(e) => {
                                 let _ = input_tui_tx
@@ -3440,7 +3454,8 @@ async fn run_interactive_session(
                 if input.trim() == "/exit" || input.trim() == "/quit" {
                     // CLI-416: Save personality snapshot before session ends.
                     if persist_personality {
-                        if let Some(iv_arc) = agent.inner_voice() {
+                        let iv_arc = agent.lock().await.inner_voice().cloned();
+                        if let Some(iv_arc) = iv_arc {
                             let iv = iv_arc.lock().await;
                             let stats = iv.to_session_stats(
                                 session_start_confidence,
@@ -3476,12 +3491,14 @@ async fn run_interactive_session(
 
                     // Fire SessionEnd hook and close the TUI
                     agent
+                        .lock()
+                        .await
                         .fire_hook(
                             archon_core::hooks::HookType::SessionEnd,
                             serde_json::json!({"hook_type": "session_end", "reason": "exit"}),
                         )
                         .await;
-                    agent.clear_watch_paths();
+                    agent.lock().await.clear_watch_paths();
                     let _ = input_tui_tx
                         .send(TuiEvent::TextDelta("\nGoodbye.\n".into()))
                         .await;
@@ -3495,7 +3512,7 @@ async fn run_interactive_session(
                     } else {
                         Some(subcommand)
                     };
-                    let msg = agent.compact(subcommand).await;
+                    let msg = agent.lock().await.compact(subcommand).await;
                     let _ = input_tui_tx
                         .send(TuiEvent::TextDelta(format!("\n{msg}\n")))
                         .await;
@@ -3507,7 +3524,8 @@ async fn run_interactive_session(
                 if input.trim() == "/clear" {
                     // CLI-416: Save personality snapshot before clearing session.
                     if persist_personality {
-                        if let Some(iv_arc) = agent.inner_voice() {
+                        let iv_arc = agent.lock().await.inner_voice().cloned();
+                        if let Some(iv_arc) = iv_arc {
                             let iv = iv_arc.lock().await;
                             let stats = iv.to_session_stats(
                                 session_start_confidence,
@@ -3543,14 +3561,16 @@ async fn run_interactive_session(
 
                     // Fire SessionEnd hook before clearing
                     agent
+                        .lock()
+                        .await
                         .fire_hook(
                             archon_core::hooks::HookType::SessionEnd,
                             serde_json::json!({"hook_type": "session_end", "reason": "clear"}),
                         )
                         .await;
-                    agent.clear_watch_paths();
+                    agent.lock().await.clear_watch_paths();
                     // Clear conversation
-                    agent.clear_conversation().await;
+                    agent.lock().await.clear_conversation().await;
                     // Reset session stats
                     {
                         let mut stats = cmd_ctx.session_stats.lock().await;
@@ -3563,6 +3583,8 @@ async fn run_interactive_session(
                     }
                     // Fire SessionStart hook after
                     let clear_start_agg = agent
+                        .lock()
+                        .await
                         .fire_hook(
                             archon_core::hooks::HookType::SessionStart,
                             serde_json::json!({"hook_type": "session_start", "reason": "clear"}),
@@ -3573,7 +3595,7 @@ async fn run_interactive_session(
                             "SessionStart hook returned {} watch paths",
                             clear_start_agg.watch_paths.len()
                         );
-                        agent.add_watch_paths(clear_start_agg.watch_paths);
+                        agent.lock().await.add_watch_paths(clear_start_agg.watch_paths);
                     }
                     let _ = input_tui_tx
                         .send(TuiEvent::TextDelta(
@@ -3600,10 +3622,12 @@ async fn run_interactive_session(
                     let _ = std::fs::remove_file(&raw_cache);
 
                     // Spawn background re-discovery using a temporary client
-                    let (refresh_auth, refresh_identity) =
-                        match (agent.auth_provider(), agent.identity_provider()) {
-                            (Some(a), Some(i)) => (a.clone(), i.clone()),
+                    let (refresh_auth, refresh_identity) = {
+                        let guard = agent.lock().await;
+                        match (guard.auth_provider().cloned(), guard.identity_provider().cloned()) {
+                            (Some(a), Some(i)) => (a, i),
                             _ => {
+                                drop(guard);
                                 let _ = input_tui_tx
                                     .send(TuiEvent::TextDelta(
                                         "\nIdentity refresh not supported for this provider.\n"
@@ -3612,7 +3636,8 @@ async fn run_interactive_session(
                                     .await;
                                 continue;
                             }
-                        };
+                        }
+                    };
                     let refresh_api_url = api_url.clone();
                     let refresh_tui_tx = input_tui_tx.clone();
                     tokio::spawn(async move {
@@ -3662,12 +3687,16 @@ async fn run_interactive_session(
                             }
                         }
                     };
-                    let messages = &agent.conversation_state().messages;
-                    match archon_session::export::export_session(
-                        messages,
-                        &cmd_ctx.session_id,
-                        format,
-                    ) {
+                    let export_result = {
+                        let guard = agent.lock().await;
+                        let messages = &guard.conversation_state().messages;
+                        archon_session::export::export_session(
+                            messages,
+                            &cmd_ctx.session_id,
+                            format,
+                        )
+                    };
+                    match export_result {
                         Ok(content) => {
                             let export_dir = dirs::data_dir()
                                 .unwrap_or_else(|| PathBuf::from("."))
@@ -3755,17 +3784,33 @@ async fn run_interactive_session(
                                 resp.clear();
                             }
                             let _ = input_tui_tx.send(TuiEvent::GenerationStarted).await;
-                            if let Err(e) = agent.process_message(&prompt).await {
-                                tracing::error!("insights agent error: {e}");
-                            }
-                            // Hot-reload agent registry after agent-management skills
-                            if cmd_name == "create-agent" {
-                                if let Ok(mut reg) = cmd_ctx.agent_registry.write() {
-                                    reg.reload(&cmd_ctx.working_dir);
-                                    tracing::info!("agent registry reloaded after /create-agent");
+                            // TASK-AGS-106: await previous task to serialize
+                            {
+                                let mut guard = current_agent_task_inner.lock().await;
+                                if let Some((_cancel, handle)) = guard.take() {
+                                    let _ = handle.await;
                                 }
                             }
-                            let _ = input_tui_tx.send(TuiEvent::SlashCommandComplete).await;
+                            let cancel = CancellationToken::new();
+                            let agent_for_task = Arc::clone(&agent);
+                            let cmd_name_owned = cmd_name.clone();
+                            let agent_registry_clone = Arc::clone(&cmd_ctx.agent_registry);
+                            let working_dir_clone = cmd_ctx.working_dir.clone();
+                            let tui_tx_clone = input_tui_tx.clone();
+                            let handle = tokio::spawn(async move {
+                                if let Err(e) = agent_for_task.lock().await.process_message(&prompt).await {
+                                    tracing::error!("skill agent error: {e}");
+                                }
+                                // Hot-reload agent registry after agent-management skills
+                                if cmd_name_owned == "create-agent" {
+                                    if let Ok(mut reg) = agent_registry_clone.write() {
+                                        reg.reload(&working_dir_clone);
+                                        tracing::info!("agent registry reloaded after /create-agent");
+                                    }
+                                }
+                                let _ = tui_tx_clone.send(TuiEvent::SlashCommandComplete).await;
+                            });
+                            *current_agent_task_inner.lock().await = Some((cancel, handle));
                         }
                         SkillOutput::Text(t) | SkillOutput::Markdown(t) => {
                             let _ = input_tui_tx
@@ -3793,6 +3838,8 @@ async fn run_interactive_session(
             }
             // CRIT-06: Fire UserPromptSubmit hook before processing
             agent
+                .lock()
+                .await
                 .fire_hook(
                     archon_core::hooks::HookType::UserPromptSubmit,
                     serde_json::json!({
@@ -3810,22 +3857,38 @@ async fn run_interactive_session(
             } else {
                 input.clone()
             };
-            if let Err(e) = agent.process_message(&effective_input).await {
-                tracing::error!("agent loop error: {e}");
-            }
-            // Persist messages to session store for /resume
-            let messages = &agent.conversation_state().messages;
-            for (idx, msg) in messages.iter().enumerate() {
-                if let Ok(json_str) = serde_json::to_string(msg)
-                    && let Err(e) = session_store_for_input.save_message(
-                        &session_id_for_input,
-                        idx as u64,
-                        &json_str,
-                    )
-                {
-                    tracing::warn!("save_message failed at idx {idx}: {e}");
+            // TASK-AGS-106: await previous task to serialize
+            {
+                let mut guard = current_agent_task_inner.lock().await;
+                if let Some((_cancel, handle)) = guard.take() {
+                    let _ = handle.await;
                 }
             }
+            let cancel = CancellationToken::new();
+            let agent_for_task = Arc::clone(&agent);
+            let session_store_clone = Arc::clone(&session_store_for_input);
+            let session_id_clone = session_id_for_input.clone();
+            let handle = tokio::spawn(async move {
+                let mut guard = agent_for_task.lock().await;
+                if let Err(e) = guard.process_message(&effective_input).await {
+                    tracing::error!("agent loop error: {e}");
+                }
+                // Persist messages to session store for /resume
+                let messages = &guard.conversation_state().messages;
+                for (idx, msg) in messages.iter().enumerate() {
+                    if let Ok(json_str) = serde_json::to_string(msg) {
+                        if let Err(e) = session_store_clone.save_message(
+                            &session_id_clone,
+                            idx as u64,
+                            &json_str,
+                        ) {
+                            tracing::warn!("save_message failed at idx {idx}: {e}");
+                        }
+                    }
+                }
+                drop(guard);
+            });
+            *current_agent_task_inner.lock().await = Some((cancel, handle));
         }
 
         // AGT-015: Increment agent invocation count on session end.
@@ -3843,10 +3906,18 @@ async fn run_interactive_session(
             }
         }
 
+        // TASK-AGS-106: await running task before firing Stop
+        {
+            let mut guard = current_agent_task_inner.lock().await;
+            if let Some((_cancel, handle)) = guard.take() {
+                let _ = handle.await;
+            }
+        }
+
         // CRIT-06: Fire Stop hook when the input channel closes (session ending)
         let stop_result = tokio::time::timeout(
             std::time::Duration::from_secs(10),
-            agent.fire_hook(
+            agent.lock().await.fire_hook(
                 archon_core::hooks::HookType::Stop,
                 serde_json::json!({
                     "hook_event": "Stop",
@@ -3860,6 +3931,8 @@ async fn run_interactive_session(
         if stop_result.is_err() {
             tracing::warn!("Stop hook timed out — firing StopFailure");
             agent
+                .lock()
+                .await
                 .fire_hook(
                     archon_core::hooks::HookType::StopFailure,
                     serde_json::json!({
