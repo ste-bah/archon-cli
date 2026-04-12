@@ -178,6 +178,16 @@ pub enum TaskError {
     Corrupted,
     #[error("task queue full")]
     QueueFull,
+    #[error("not yet implemented")]
+    Unimplemented,
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
+}
+
+/// Result stream for task output retrieval.
+/// Full variants (File, Chunks) added in TASK-AGS-203.
+#[derive(Debug)]
+pub enum TaskResultStream {
+    /// Small inline result.
+    Inline(String),
 }
