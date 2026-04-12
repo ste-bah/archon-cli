@@ -54,6 +54,15 @@ sqlite.workspace = true
 crc32fast.workspace = true
 sysinfo.workspace = true
 
+# Phase 3: Agent discovery system (TASK-AGS-300..307)
+arc-swap.workspace = true
+walkdir.workspace = true
+moka.workspace = true
+strsim.workspace = true
+globset.workspace = true
+rayon.workspace = true
+serde_yml.workspace = true
+
 [dev-dependencies]
 uuid.workspace = true
 tempfile.workspace = true
@@ -66,3 +75,5 @@ serial_test.workspace = true
 # Both are dev-only — neither leaks into the production graph.
 insta.workspace = true
 archon-test-support = { path = "../archon-test-support" }
+# Phase 3: wiremock for remote discovery integration tests (TASK-AGS-304)
+wiremock.workspace = true

@@ -384,6 +384,47 @@ pub enum Commands {
     },
     /// Show task execution metrics (prometheus format)
     Metrics,
+    /// List all discovered agents
+    AgentList {
+        /// Include invalid/broken agent entries
+        #[arg(long)]
+        include_invalid: bool,
+    },
+    /// Search agents by tag, capability, name pattern, or version
+    AgentSearch {
+        /// Filter by tag (repeatable)
+        #[arg(long = "tag", value_name = "TAG")]
+        tags: Vec<String>,
+        /// Filter by capability (repeatable)
+        #[arg(long = "capability", value_name = "CAP")]
+        capabilities: Vec<String>,
+        /// Filter by name pattern (glob, e.g. "code-*")
+        #[arg(long, value_name = "PATTERN")]
+        name_pattern: Option<String>,
+        /// Filter by version requirement (e.g. "^1", "=2.0.0")
+        #[arg(long, value_name = "REQ")]
+        version: Option<String>,
+        /// Filter logic: and (default) or or
+        #[arg(long, default_value = "and")]
+        logic: String,
+        /// Include invalid/broken agent entries
+        #[arg(long)]
+        include_invalid: bool,
+        /// Remote registry URL to include
+        #[arg(long, value_name = "URL")]
+        registry_url: Option<String>,
+    },
+    /// Show detailed information about a specific agent
+    AgentInfo {
+        /// Agent name
+        name: String,
+        /// Pin to a specific version (e.g. "=1.0.0", "^2")
+        #[arg(long, value_name = "REQ")]
+        version: Option<String>,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]

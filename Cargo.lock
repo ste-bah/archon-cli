@@ -284,6 +284,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3d036a3c4ab069c7b410a2ce876bd74808d2d0888a82667669f8e783a898bf1"
 
 [[package]]
+name = "arc-swap"
+version = "1.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6a3a1fd6f75306b68087b831f025c712524bcb19aad54e557b1129cfa0a2b207"
+dependencies = [
+ "rustversion",
+]
+
+[[package]]
 name = "archon-bench"
 version = "0.1.4"
 dependencies = [
@@ -312,9 +321,11 @@ dependencies = [
  "chrono",
  "clap",
  "dirs",
+ "globset",
  "openssl",
  "regex",
  "reqwest 0.12.28",
+ "semver",
  "serde_json",
  "tempfile",
  "tokio",
@@ -355,6 +366,7 @@ name = "archon-core"
 version = "0.1.4"
 dependencies = [
  "anyhow",
+ "arc-swap",
  "archon-consciousness",
  "archon-context",
  "archon-llm",
@@ -372,20 +384,25 @@ dependencies = [
  "dashmap",
  "dirs",
  "futures-util",
+ "globset",
  "hex",
  "insta",
  "jsonschema",
+ "moka",
  "notify",
  "petgraph",
  "rand 0.9.2",
+ "rayon",
  "reqwest 0.12.28",
  "russh",
  "semver",
  "serde",
  "serde_json",
+ "serde_yml",
  "serial_test",
  "sha2 0.10.9",
  "sqlite",
+ "strsim",
  "sysinfo",
  "tempfile",
  "thiserror 2.0.18",
@@ -400,6 +417,8 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "uuid",
+ "walkdir",
+ "wiremock",
 ]
 
 [[package]]
@@ -1222,6 +1241,16 @@ name = "borrow-or-share"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dc0b364ead1874514c8c2855ab558056ebfeb775653e7ae45ff72f28f8f3166c"
+
+[[package]]
+name = "bstr"
+version = "1.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "63044e1ae8e69f3b5a92c736ca6269b8d12fa7efe39bf34ddb06d102cf0e2cab"
+dependencies = [
+ "memchr",
+ "serde",
+]
 
 [[package]]
 name = "built"
@@ -3132,6 +3161,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0cc23270f6e1808e30a928bdc84dea0b9b4136a8bc82338574f23baf47bbd280"
 
 [[package]]
+name = "globset"
+version = "0.4.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "52dfc19153a48bde0cbd630453615c8151bce3a5adfac7a0aebfbf0a1e1f57e3"
+dependencies = [
+ "aho-corasick",
+ "bstr",
+ "log",
+ "regex-automata",
+ "regex-syntax",
+]
+
+[[package]]
 name = "h2"
 version = "0.4.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4535,6 +4577,23 @@ dependencies = [
  "ctutils",
  "hybrid-array",
  "num-traits",
+]
+
+[[package]]
+name = "moka"
+version = "0.12.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "957228ad12042ee839f93c8f257b62b4c0ab5eaae1d4fa60de53b27c9d7c5046"
+dependencies = [
+ "crossbeam-channel",
+ "crossbeam-epoch",
+ "crossbeam-utils",
+ "equivalent",
+ "parking_lot",
+ "portable-atomic",
+ "smallvec",
+ "tagptr",
+ "uuid",
 ]
 
 [[package]]
@@ -7348,6 +7407,12 @@ dependencies = [
  "rayon",
  "windows 0.54.0",
 ]
+
+[[package]]
+name = "tagptr"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7b2093cf4c8eb1e67749a6762251bc9cd836b6fc171623bd0a9d324d37af2417"
 
 [[package]]
 name = "tar"
