@@ -12,6 +12,7 @@ use crate::tasks::models::{
     SubmitRequest, Task, TaskError, TaskEvent, TaskFilter, TaskId,
     TaskResultStream, TaskSnapshot, TaskState,
 };
+use crate::tasks::queue::TaskQueue;
 
 /// Core async task service trait (TECH-AGS-ASYNC L329-337).
 #[async_trait]
@@ -37,6 +38,7 @@ pub struct DefaultTaskService {
     tasks: Arc<DashMap<TaskId, Task>>,
     seq_counters: Arc<DashMap<TaskId, AtomicU64>>,
     max_queue_size: usize,
+    queue: Option<Arc<dyn TaskQueue>>,
 }
 
 impl DefaultTaskService {
@@ -46,6 +48,22 @@ impl DefaultTaskService {
             tasks: Arc::new(DashMap::new()),
             seq_counters: Arc::new(DashMap::new()),
             max_queue_size,
+            queue: None,
+        }
+    }
+
+    /// Create a service backed by a per-agent bounded queue.
+    pub fn with_queue(
+        registry: Arc<AgentRegistry>,
+        queue: Arc<dyn TaskQueue>,
+        max_queue_size: usize,
+    ) -> Self {
+        Self {
+            registry,
+            tasks: Arc::new(DashMap::new()),
+            seq_counters: Arc::new(DashMap::new()),
+            max_queue_size,
+            queue: Some(queue),
         }
     }
 
@@ -94,10 +112,20 @@ impl TaskService for DefaultTaskService {
         };
 
         // 4. Insert into in-memory store (no I/O).
-        self.tasks.insert(task_id, task);
+        self.tasks.insert(task_id, task.clone());
 
         // 5. Initialize per-task seq counter (REQ-ASYNC-009).
         self.seq_counters.insert(task_id, AtomicU64::new(0));
+
+        // 6. Enqueue into per-agent queue when configured.
+        if let Some(ref queue) = self.queue {
+            if let Err(e) = queue.enqueue(task_id, &task.agent_name) {
+                // Roll back the in-memory inserts on queue failure.
+                self.tasks.remove(&task_id);
+                self.seq_counters.remove(&task_id);
+                return Err(e);
+            }
+        }
 
         Ok(task_id)
     }
