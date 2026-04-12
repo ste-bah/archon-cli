@@ -308,6 +308,7 @@ dependencies = [
  "archon-session",
  "archon-tools",
  "archon-tui",
+ "async-trait",
  "chrono",
  "clap",
  "dirs",
