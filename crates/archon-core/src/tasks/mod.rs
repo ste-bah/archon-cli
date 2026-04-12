@@ -18,3 +18,4 @@ pub use metrics::MetricsRegistry;
 pub use queue::{PerAgentTaskQueue, QueueConfig, TaskQueue};
 pub use service::{DefaultTaskService, TaskService};
 pub use store::{InMemoryTaskStateStore, SqliteTaskStateStore, TaskStateStore};
+pub use api::CliTaskApi;

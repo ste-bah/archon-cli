@@ -956,6 +956,109 @@ async fn main() -> Result<()> {
             }
             return Ok(());
         }
+        Some(Commands::RunAgentAsync { name, input, version, detach }) => {
+            let registry = Arc::new(archon_core::agents::AgentRegistry::load(&working_dir_for_config));
+            let service: Arc<dyn archon_core::tasks::TaskService> =
+                Arc::new(archon_core::tasks::DefaultTaskService::new(registry, 10000));
+            let metrics = Arc::new(archon_core::tasks::MetricsRegistry::new());
+            let api = archon_core::tasks::CliTaskApi::new(service, metrics);
+            match api.submit(name, input, version, detach).await {
+                Ok(output) => println!("{output}"),
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    std::process::exit(1);
+                }
+            }
+            return Ok(());
+        }
+        Some(Commands::TaskStatus { task_id, watch }) => {
+            let registry = Arc::new(archon_core::agents::AgentRegistry::load(&working_dir_for_config));
+            let service: Arc<dyn archon_core::tasks::TaskService> =
+                Arc::new(archon_core::tasks::DefaultTaskService::new(registry, 10000));
+            let metrics = Arc::new(archon_core::tasks::MetricsRegistry::new());
+            let api = archon_core::tasks::CliTaskApi::new(service, metrics);
+            match api.status(&task_id, watch).await {
+                Ok(output) => println!("{output}"),
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    std::process::exit(1);
+                }
+            }
+            return Ok(());
+        }
+        Some(Commands::TaskResult { task_id, stream }) => {
+            let registry = Arc::new(archon_core::agents::AgentRegistry::load(&working_dir_for_config));
+            let service: Arc<dyn archon_core::tasks::TaskService> =
+                Arc::new(archon_core::tasks::DefaultTaskService::new(registry, 10000));
+            let metrics = Arc::new(archon_core::tasks::MetricsRegistry::new());
+            let api = archon_core::tasks::CliTaskApi::new(service, metrics);
+            match api.result(&task_id, stream).await {
+                Ok(output) => println!("{output}"),
+                Err(archon_core::tasks::TaskError::Pending) => {
+                    eprintln!("TASK_PENDING: task has not completed yet");
+                    std::process::exit(2);
+                }
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    std::process::exit(1);
+                }
+            }
+            return Ok(());
+        }
+        Some(Commands::TaskCancel { task_id }) => {
+            let registry = Arc::new(archon_core::agents::AgentRegistry::load(&working_dir_for_config));
+            let service: Arc<dyn archon_core::tasks::TaskService> =
+                Arc::new(archon_core::tasks::DefaultTaskService::new(registry, 10000));
+            let metrics = Arc::new(archon_core::tasks::MetricsRegistry::new());
+            let api = archon_core::tasks::CliTaskApi::new(service, metrics);
+            match api.cancel(&task_id).await {
+                Ok(output) => println!("{output}"),
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    std::process::exit(1);
+                }
+            }
+            return Ok(());
+        }
+        Some(Commands::TaskList { state, agent, since }) => {
+            let registry = Arc::new(archon_core::agents::AgentRegistry::load(&working_dir_for_config));
+            let service: Arc<dyn archon_core::tasks::TaskService> =
+                Arc::new(archon_core::tasks::DefaultTaskService::new(registry, 10000));
+            let metrics = Arc::new(archon_core::tasks::MetricsRegistry::new());
+            let api = archon_core::tasks::CliTaskApi::new(service, metrics);
+            match api.list(state, agent, since).await {
+                Ok(output) => println!("{output}"),
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    std::process::exit(1);
+                }
+            }
+            return Ok(());
+        }
+        Some(Commands::TaskEvents { task_id, from_seq }) => {
+            let registry = Arc::new(archon_core::agents::AgentRegistry::load(&working_dir_for_config));
+            let service: Arc<dyn archon_core::tasks::TaskService> =
+                Arc::new(archon_core::tasks::DefaultTaskService::new(registry, 10000));
+            let metrics = Arc::new(archon_core::tasks::MetricsRegistry::new());
+            let api = archon_core::tasks::CliTaskApi::new(service, metrics);
+            match api.events(&task_id, from_seq).await {
+                Ok(_) => {}
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    std::process::exit(1);
+                }
+            }
+            return Ok(());
+        }
+        Some(Commands::Metrics) => {
+            let registry = Arc::new(archon_core::agents::AgentRegistry::load(&working_dir_for_config));
+            let service: Arc<dyn archon_core::tasks::TaskService> =
+                Arc::new(archon_core::tasks::DefaultTaskService::new(registry, 10000));
+            let metrics = Arc::new(archon_core::tasks::MetricsRegistry::new());
+            let api = archon_core::tasks::CliTaskApi::new(service, metrics);
+            print!("{}", api.metrics());
+            return Ok(());
+        }
         None => {}
     }
 

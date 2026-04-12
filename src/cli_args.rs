@@ -327,6 +327,63 @@ pub enum Commands {
         #[arg(long)]
         no_open: bool,
     },
+    /// Submit an async agent task
+    RunAgentAsync {
+        /// Agent name to run
+        name: String,
+        /// Path to input file (use `-` for stdin)
+        #[arg(long)]
+        input: Option<String>,
+        /// Agent version constraint
+        #[arg(long)]
+        version: Option<String>,
+        /// Detach after submission (don't wait for result)
+        #[arg(long)]
+        detach: bool,
+    },
+    /// Check status of an async task
+    TaskStatus {
+        /// Task ID (UUID)
+        task_id: String,
+        /// Poll every 500ms until terminal state
+        #[arg(long)]
+        watch: bool,
+    },
+    /// Get result of a completed async task
+    TaskResult {
+        /// Task ID (UUID)
+        task_id: String,
+        /// Stream result chunks
+        #[arg(long)]
+        stream: bool,
+    },
+    /// Cancel a running async task
+    TaskCancel {
+        /// Task ID (UUID)
+        task_id: String,
+    },
+    /// List async tasks
+    TaskList {
+        /// Filter by state (Pending, Running, Finished, Failed, Cancelled)
+        #[arg(long)]
+        state: Option<String>,
+        /// Filter by agent name
+        #[arg(long)]
+        agent: Option<String>,
+        /// Filter tasks created after duration (e.g. "1h", "30m")
+        #[arg(long)]
+        since: Option<String>,
+    },
+    /// Stream events for a task (NDJSON)
+    TaskEvents {
+        /// Task ID (UUID)
+        task_id: String,
+        /// Start from this sequence number
+        #[arg(long, default_value = "0")]
+        from_seq: u64,
+    },
+    /// Show task execution metrics (prometheus format)
+    Metrics,
 }
 
 #[derive(Subcommand, Debug)]
