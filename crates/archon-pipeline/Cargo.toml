@@ -23,9 +23,19 @@ cozo.workspace = true
 archon-memory = { path = "../archon-memory" }
 archon-leann = { path = "../archon-leann" }
 archon-llm = { path = "../archon-llm" }
+archon-core = { path = "../archon-core" }
+cel-interpreter.workspace = true
+petgraph.workspace = true
+thiserror.workspace = true
+futures-util.workspace = true
+tokio-util.workspace = true
+dashmap.workspace = true
 
 [dev-dependencies]
 tokio.workspace = true
 tempfile.workspace = true
 serde_json.workspace = true
 cozo.workspace = true
+async-trait.workspace = true
+futures-util.workspace = true
+chrono.workspace = true

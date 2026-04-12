@@ -476,6 +476,24 @@ pub enum PipelineAction {
         /// Session ID to abort
         session_id: String,
     },
+    /// Run a declarative pipeline from a spec file
+    #[command(name = "run")]
+    Run {
+        /// Path to pipeline spec file (YAML or JSON)
+        file: std::path::PathBuf,
+        /// Override format auto-detection (yaml or json)
+        #[arg(long)]
+        format: Option<String>,
+        /// Return immediately after submission (don't poll for completion)
+        #[arg(long)]
+        detach: bool,
+    },
+    /// Cancel a running declarative pipeline
+    #[command(name = "cancel")]
+    Cancel {
+        /// Pipeline run ID (UUID)
+        id: String,
+    },
 }
 
 #[derive(Subcommand, Debug)]

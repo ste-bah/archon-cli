@@ -953,6 +953,159 @@ async fn main() -> Result<()> {
                         }
                     }
                 }
+                PipelineAction::Run { file, format, detach } => {
+                    // 1. Read the spec file.
+                    let src = match std::fs::read_to_string(&file) {
+                        Ok(s) => s,
+                        Err(e) => {
+                            eprintln!("Failed to read {}: {e}", file.display());
+                            std::process::exit(3);
+                        }
+                    };
+
+                    // 2. Detect format.
+                    let fmt = match format.as_deref() {
+                        Some("yaml" | "yml") => archon_pipeline::PipelineFormat::Yaml,
+                        Some("json") => archon_pipeline::PipelineFormat::Json,
+                        Some(other) => {
+                            eprintln!("Unknown format: {other} (expected yaml or json)");
+                            std::process::exit(3);
+                        }
+                        None => {
+                            // Auto-detect from extension.
+                            match file.extension().and_then(|e| e.to_str()) {
+                                Some("json") => archon_pipeline::PipelineFormat::Json,
+                                Some("yaml" | "yml") => archon_pipeline::PipelineFormat::Yaml,
+                                _ => {
+                                    // Sniff content.
+                                    if src.trim_start().starts_with('{') || src.trim_start().starts_with('[') {
+                                        archon_pipeline::PipelineFormat::Json
+                                    } else {
+                                        archon_pipeline::PipelineFormat::Yaml
+                                    }
+                                }
+                            }
+                        }
+                    };
+
+                    // 3. Build the declarative pipeline engine.
+                    let store_path = cwd.join(".archon").join("pipelines");
+                    let _ = std::fs::create_dir_all(&store_path);
+                    let store = std::sync::Arc::new(archon_pipeline::PipelineStateStore::new(&store_path));
+
+                    let registry = std::sync::Arc::new(
+                        archon_core::agents::AgentRegistry::load(&cwd),
+                    );
+                    let task_service: std::sync::Arc<dyn archon_core::tasks::TaskService> =
+                        std::sync::Arc::new(
+                            archon_core::tasks::DefaultTaskService::new(registry, 10000),
+                        );
+
+                    let engine = archon_pipeline::DefaultPipelineEngine::new(
+                        store.clone(),
+                        task_service,
+                    );
+
+                    // 4. Parse and validate.
+                    let spec = match engine.parse(&src, fmt) {
+                        Ok(s) => s,
+                        Err(e) => {
+                            eprintln!("Parse error: {e}");
+                            std::process::exit(3);
+                        }
+                    };
+
+                    if let Err(e) = engine.validate(&spec) {
+                        eprintln!("Validation error: {e}");
+                        std::process::exit(3);
+                    }
+
+                    // 5. Run the pipeline.
+                    use archon_pipeline::PipelineEngine;
+                    match engine.run(spec).await {
+                        Ok(id) => {
+                            println!("{id}");
+
+                            if !detach {
+                                // Poll status until terminal.
+                                loop {
+                                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                                    match engine.status(id).await {
+                                        Ok(run) => {
+                                            let finished_count = run.steps.values()
+                                                .filter(|s| s.state == archon_pipeline::StepRunState::Finished)
+                                                .count();
+                                            let total = run.steps.len();
+                                            eprint!("\r[{}/{}] {:?}  ", finished_count, total, run.state);
+
+                                            match run.state {
+                                                archon_pipeline::PipelineState::Finished => {
+                                                    eprintln!();
+                                                    break;
+                                                }
+                                                archon_pipeline::PipelineState::Failed => {
+                                                    eprintln!();
+                                                    std::process::exit(1);
+                                                }
+                                                archon_pipeline::PipelineState::Cancelled => {
+                                                    eprintln!();
+                                                    std::process::exit(2);
+                                                }
+                                                archon_pipeline::PipelineState::RolledBack => {
+                                                    eprintln!();
+                                                    std::process::exit(1);
+                                                }
+                                                _ => {} // Keep polling
+                                            }
+                                        }
+                                        Err(e) => {
+                                            eprintln!("\nFailed to get status: {e}");
+                                            std::process::exit(1);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("Pipeline failed: {e}");
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                PipelineAction::Cancel { id } => {
+                    let pipeline_id: archon_pipeline::PipelineId = match id.parse() {
+                        Ok(pid) => pid,
+                        Err(e) => {
+                            eprintln!("Invalid pipeline ID '{id}': {e}");
+                            std::process::exit(1);
+                        }
+                    };
+
+                    let store_path = cwd.join(".archon").join("pipelines");
+                    let store = std::sync::Arc::new(archon_pipeline::PipelineStateStore::new(&store_path));
+
+                    let registry = std::sync::Arc::new(
+                        archon_core::agents::AgentRegistry::load(&cwd),
+                    );
+                    let task_service: std::sync::Arc<dyn archon_core::tasks::TaskService> =
+                        std::sync::Arc::new(
+                            archon_core::tasks::DefaultTaskService::new(registry, 10000),
+                        );
+
+                    let engine = archon_pipeline::DefaultPipelineEngine::new(
+                        store,
+                        task_service,
+                    );
+
+                    use archon_pipeline::PipelineEngine;
+                    match engine.cancel(pipeline_id).await {
+                        Ok(()) => println!("Pipeline {id} cancelled."),
+                        Err(e) => {
+                            eprintln!("Failed to cancel pipeline {id}: {e}");
+                            std::process::exit(1);
+                        }
+                    }
+                }
             }
             return Ok(());
         }
