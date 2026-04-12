@@ -1,6 +1,7 @@
 use std::pin::Pin;
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use chrono::Utc;
@@ -9,9 +10,10 @@ use tokio_stream::Stream;
 
 use crate::agents::registry::AgentRegistry;
 use crate::tasks::events::EventBus;
+use crate::tasks::executor::CancelHandle;
 use crate::tasks::models::{
-    SubmitRequest, Task, TaskError, TaskEvent, TaskFilter, TaskId,
-    TaskResultStream, TaskSnapshot, TaskState,
+    SubmitRequest, Task, TaskError, TaskEvent, TaskEventKind, TaskFilter,
+    TaskId, TaskResultStream, TaskSnapshot, TaskState,
 };
 use crate::tasks::queue::TaskQueue;
 use crate::tasks::store::{InMemoryTaskStateStore, TaskStateStore};
@@ -43,6 +45,10 @@ pub struct DefaultTaskService {
     queue: Option<Arc<dyn TaskQueue>>,
     store: Arc<dyn TaskStateStore>,
     event_bus: Arc<EventBus>,
+    cancel_handles: Arc<DashMap<TaskId, Arc<CancelHandle>>>,
+    /// Grace period before a running task is force-aborted after
+    /// cancellation token fires. Default: 30 seconds.
+    grace_period: Duration,
 }
 
 impl DefaultTaskService {
@@ -55,6 +61,8 @@ impl DefaultTaskService {
             queue: None,
             store: Arc::new(InMemoryTaskStateStore::new()),
             event_bus: Arc::new(EventBus::new()),
+            cancel_handles: Arc::new(DashMap::new()),
+            grace_period: Duration::from_secs(30),
         }
     }
 
@@ -72,7 +80,34 @@ impl DefaultTaskService {
             queue: Some(queue),
             store: Arc::new(InMemoryTaskStateStore::new()),
             event_bus: Arc::new(EventBus::new()),
+            cancel_handles: Arc::new(DashMap::new()),
+            grace_period: Duration::from_secs(30),
         }
+    }
+
+    /// Create a service with a custom grace period (for testing).
+    pub fn with_queue_and_grace(
+        registry: Arc<AgentRegistry>,
+        queue: Arc<dyn TaskQueue>,
+        max_queue_size: usize,
+        grace_period: Duration,
+    ) -> Self {
+        Self {
+            registry,
+            tasks: Arc::new(DashMap::new()),
+            seq_counters: Arc::new(DashMap::new()),
+            max_queue_size,
+            queue: Some(queue),
+            store: Arc::new(InMemoryTaskStateStore::new()),
+            event_bus: Arc::new(EventBus::new()),
+            cancel_handles: Arc::new(DashMap::new()),
+            grace_period,
+        }
+    }
+
+    /// Access the shared cancel handles map (used by executor).
+    pub fn cancel_handles(&self) -> &Arc<DashMap<TaskId, Arc<CancelHandle>>> {
+        &self.cancel_handles
     }
 
     /// Access the shared tasks map (used by downstream tasks for hot-cache).
@@ -176,8 +211,68 @@ impl TaskService for DefaultTaskService {
         }
     }
 
-    async fn cancel(&self, _id: TaskId) -> Result<(), TaskError> {
-        Err(TaskError::Unimplemented)
+    async fn cancel(&self, id: TaskId) -> Result<(), TaskError> {
+        // 1. Get current state.
+        let task = self.tasks.get(&id).ok_or(TaskError::NotFound(id))?;
+        let state = task.state;
+        drop(task); // release DashMap ref before mutation
+
+        match state {
+            // Already terminal — error.
+            TaskState::Finished | TaskState::Failed | TaskState::Corrupted => {
+                Err(TaskError::InvalidState)
+            }
+            TaskState::Cancelled => Err(TaskError::AlreadyCancelled),
+
+            // Pending: remove from queue, mark cancelled, never invoke.
+            TaskState::Pending => {
+                if let Some(ref q) = self.queue {
+                    q.remove_pending(id);
+                }
+                if let Some(mut task) = self.tasks.get_mut(&id) {
+                    task.state = TaskState::Cancelled;
+                    task.finished_at = Some(Utc::now());
+                    let _ = self.store.put_snapshot(&task);
+                }
+                // Emit Cancelled event.
+                let seq = self
+                    .seq_counters
+                    .entry(id)
+                    .or_insert_with(|| AtomicU64::new(0))
+                    .fetch_add(1, Ordering::Relaxed);
+                let event = TaskEvent {
+                    task_id: id,
+                    seq,
+                    kind: TaskEventKind::Cancelled,
+                    payload: serde_json::json!({}),
+                    at: Utc::now(),
+                };
+                self.event_bus.broadcast(id, event);
+                Ok(())
+            }
+
+            // Running: fire cancellation token, spawn grace-period watchdog.
+            TaskState::Running => {
+                if let Some(handle) = self.cancel_handles.get(&id) {
+                    let handle = handle.clone();
+                    handle.token.cancel();
+
+                    // Spawn watchdog that force-aborts after grace period.
+                    let grace = self.grace_period;
+                    tokio::spawn(async move {
+                        tokio::time::sleep(grace).await;
+                        let join_guard = handle.join.lock().await;
+                        if let Some(jh) = join_guard.as_ref() {
+                            jh.abort();
+                        }
+                    });
+                    Ok(())
+                } else {
+                    // No cancel handle found — task may have just finished.
+                    Err(TaskError::InvalidState)
+                }
+            }
+        }
     }
 
     async fn subscribe_events(

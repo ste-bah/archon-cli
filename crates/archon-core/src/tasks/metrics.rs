@@ -7,6 +7,7 @@ pub struct MetricsRegistry {
     pub(crate) tasks_started_total: AtomicU64,
     pub(crate) tasks_finished_total: AtomicU64,
     pub(crate) tasks_failed_total: AtomicU64,
+    pub(crate) tasks_cancelled_total: AtomicU64,
     queue_depths: DashMap<String, AtomicU64>,
 }
 
@@ -16,6 +17,7 @@ impl MetricsRegistry {
             tasks_started_total: AtomicU64::new(0),
             tasks_finished_total: AtomicU64::new(0),
             tasks_failed_total: AtomicU64::new(0),
+            tasks_cancelled_total: AtomicU64::new(0),
             queue_depths: DashMap::new(),
         }
     }
@@ -30,6 +32,10 @@ impl MetricsRegistry {
 
     pub fn inc_failed(&self) {
         self.tasks_failed_total.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn inc_cancelled(&self) {
+        self.tasks_cancelled_total.fetch_add(1, Ordering::Relaxed);
     }
 
     pub fn set_queue_depth(&self, agent: &str, depth: u64) {
@@ -54,6 +60,11 @@ impl MetricsRegistry {
         self.tasks_failed_total.load(Ordering::Relaxed)
     }
 
+    /// Read the current value of `tasks_cancelled_total`.
+    pub fn cancelled_total(&self) -> u64 {
+        self.tasks_cancelled_total.load(Ordering::Relaxed)
+    }
+
     /// Export all metrics in Prometheus text exposition format.
     pub fn export_prometheus(&self) -> String {
         let mut out = String::new();
@@ -68,6 +79,10 @@ impl MetricsRegistry {
         out.push_str(&format!(
             "tasks_failed_total {}\n",
             self.tasks_failed_total.load(Ordering::Relaxed)
+        ));
+        out.push_str(&format!(
+            "tasks_cancelled_total {}\n",
+            self.tasks_cancelled_total.load(Ordering::Relaxed)
         ));
 
         // Sort agent names for deterministic output.

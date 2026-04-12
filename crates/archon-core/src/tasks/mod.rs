@@ -13,7 +13,7 @@ pub use models::{
     TaskResultRef, TaskResultStream, TaskSnapshot, TaskState,
 };
 pub use events::{EventBus, EventLog};
-pub use executor::{AgentExecutor, TaskExecutor};
+pub use executor::{AgentExecutor, CancelHandle, TaskExecutor};
 pub use metrics::MetricsRegistry;
 pub use queue::{PerAgentTaskQueue, QueueConfig, TaskQueue};
 pub use service::{DefaultTaskService, TaskService};

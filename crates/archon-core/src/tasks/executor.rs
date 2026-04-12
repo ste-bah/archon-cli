@@ -17,6 +17,14 @@ use crate::tasks::models::{
 use crate::tasks::queue::TaskQueue;
 use crate::tasks::store::TaskStateStore;
 
+/// Handle used to cancel a running task. Holds the cancellation token
+/// and the JoinHandle for the spawned task so it can be aborted after
+/// a grace period.
+pub struct CancelHandle {
+    pub token: CancellationToken,
+    pub join: tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
+}
+
 /// Trait abstracting agent invocation. Production impl wraps BackgroundAgents.
 /// Tests supply a mock.
 #[async_trait]
@@ -43,6 +51,7 @@ pub struct TaskExecutor {
     metrics: Arc<MetricsRegistry>,
     poll_interval: Duration,
     shutdown: CancellationToken,
+    cancel_handles: Arc<DashMap<TaskId, Arc<CancelHandle>>>,
 }
 
 impl TaskExecutor {
@@ -67,7 +76,41 @@ impl TaskExecutor {
             metrics,
             poll_interval,
             shutdown,
+            cancel_handles: Arc::new(DashMap::new()),
         }
+    }
+
+    /// Create a TaskExecutor with a pre-existing cancel_handles map
+    /// (shared with DefaultTaskService for coordinated cancellation).
+    pub fn with_cancel_handles(
+        queue: Arc<dyn TaskQueue>,
+        store: Arc<dyn TaskStateStore>,
+        event_bus: Arc<EventBus>,
+        agent_executor: Arc<dyn AgentExecutor>,
+        seq_counters: Arc<DashMap<TaskId, AtomicU64>>,
+        tasks: Arc<DashMap<TaskId, Task>>,
+        metrics: Arc<MetricsRegistry>,
+        poll_interval: Duration,
+        shutdown: CancellationToken,
+        cancel_handles: Arc<DashMap<TaskId, Arc<CancelHandle>>>,
+    ) -> Self {
+        Self {
+            queue,
+            store,
+            event_bus,
+            agent_executor,
+            seq_counters,
+            tasks,
+            metrics,
+            poll_interval,
+            shutdown,
+            cancel_handles,
+        }
+    }
+
+    /// Access the shared cancel handles map.
+    pub fn cancel_handles(&self) -> &Arc<DashMap<TaskId, Arc<CancelHandle>>> {
+        &self.cancel_handles
     }
 
     /// Main poll loop. Iterates agents, dequeues tasks, spawns per-task futures.
@@ -106,8 +149,9 @@ impl TaskExecutor {
                     let tasks = self.tasks.clone();
                     let metrics = self.metrics.clone();
                     let agent_name = agent.clone();
+                    let cancel_handles = self.cancel_handles.clone();
 
-                    tokio::spawn(async move {
+                    let handle = tokio::spawn(async move {
                         Self::run_task(
                             task_id,
                             agent_name,
@@ -119,9 +163,17 @@ impl TaskExecutor {
                             seq_counters,
                             tasks,
                             metrics,
+                            cancel_handles,
                         )
                         .await;
                     });
+
+                    // Store the JoinHandle in the CancelHandle so abort()
+                    // can be called from the watchdog timer.
+                    if let Some(ch) = self.cancel_handles.get(&task_id) {
+                        let mut guard = ch.join.lock().await;
+                        *guard = Some(handle);
+                    }
                 }
             }
 
@@ -144,6 +196,7 @@ impl TaskExecutor {
         seq_counters: Arc<DashMap<TaskId, AtomicU64>>,
         tasks: Arc<DashMap<TaskId, Task>>,
         metrics: Arc<MetricsRegistry>,
+        cancel_handles: Arc<DashMap<TaskId, Arc<CancelHandle>>>,
     ) {
         // Helper to get next seq for this task.
         let next_seq = |counters: &DashMap<TaskId, AtomicU64>| -> u64 {
@@ -164,7 +217,15 @@ impl TaskExecutor {
 
         metrics.inc_started();
 
-        // 2. Emit Started event.
+        // 2. Create cancel token and register a CancelHandle.
+        let cancel_token = CancellationToken::new();
+        let cancel_handle = Arc::new(CancelHandle {
+            token: cancel_token.clone(),
+            join: tokio::sync::Mutex::new(None),
+        });
+        cancel_handles.insert(task_id, cancel_handle);
+
+        // 3. Emit Started event.
         let started_event = TaskEvent {
             task_id,
             seq: next_seq(&seq_counters),
@@ -174,14 +235,13 @@ impl TaskExecutor {
         };
         event_bus.broadcast(task_id, started_event);
 
-        // 3. Get input from task.
+        // 4. Get input from task.
         let input = tasks
             .get(&task_id)
             .map(|t| t.input.clone())
             .unwrap_or(serde_json::json!({}));
 
-        // 4. Spawn resource sampler.
-        let cancel_token = CancellationToken::new();
+        // 5. Spawn resource sampler.
         let sampler_cancel = cancel_token.clone();
         let sampler_tasks = tasks.clone();
         let sampler_task_id = task_id;
@@ -214,18 +274,24 @@ impl TaskExecutor {
             }
         });
 
-        // 5. Execute agent.
-        let result = agent_executor
-            .execute(&agent_name, input, cancel_token.clone())
-            .await;
+        // 6. Execute agent with cancellation support via tokio::select!
+        let cancelled_token = cancel_token.clone();
+        let execute_result = tokio::select! {
+            res = agent_executor.execute(&agent_name, input, cancel_token.clone()) => {
+                Some(res)
+            }
+            _ = cancelled_token.cancelled() => {
+                None // Cancelled path
+            }
+        };
 
-        // 6. Stop resource sampler.
+        // 7. Stop resource sampler.
         cancel_token.cancel();
         let _ = sampler_handle.await;
 
-        // 7. Persist terminal state.
-        match result {
-            Ok(output) => {
+        // 8. Persist terminal state and emit events.
+        match execute_result {
+            Some(Ok(output)) => {
                 if let Some(mut task) = tasks.get_mut(&task_id) {
                     task.state = TaskState::Finished;
                     task.finished_at = Some(Utc::now());
@@ -247,7 +313,7 @@ impl TaskExecutor {
                 };
                 event_bus.broadcast(task_id, finished_event);
             }
-            Err(e) => {
+            Some(Err(e)) => {
                 if let Some(mut task) = tasks.get_mut(&task_id) {
                     task.state = TaskState::Failed;
                     task.finished_at = Some(Utc::now());
@@ -265,6 +331,27 @@ impl TaskExecutor {
                 };
                 event_bus.broadcast(task_id, failed_event);
             }
+            None => {
+                // Cancelled path.
+                if let Some(mut task) = tasks.get_mut(&task_id) {
+                    task.state = TaskState::Cancelled;
+                    task.finished_at = Some(Utc::now());
+                    let _ = store.put_snapshot(&task);
+                }
+                metrics.inc_cancelled();
+
+                let cancelled_event = TaskEvent {
+                    task_id,
+                    seq: next_seq(&seq_counters),
+                    kind: TaskEventKind::Cancelled,
+                    payload: serde_json::json!({}),
+                    at: Utc::now(),
+                };
+                event_bus.broadcast(task_id, cancelled_event);
+            }
         }
+
+        // 9. Remove the cancel handle — task is done.
+        cancel_handles.remove(&task_id);
     }
 }
