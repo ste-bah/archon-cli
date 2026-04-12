@@ -3320,6 +3320,7 @@ async fn run_interactive_session(
         let mut initial_prompt_pending: Option<String> =
             agent_def.as_ref().and_then(|d| d.initial_prompt.clone());
 
+        // BEGIN INPUT_HANDLER — arch-lint.sh scopes D1 grep to this region
         while let Some(input) = user_input_rx.recv().await {
             // Session picker selection — load messages and restore conversation
             if let Some(session_id) = input.strip_prefix("__resume_session__ ") {
@@ -3917,6 +3918,7 @@ async fn run_interactive_session(
             });
             *current_agent_task_inner.lock().await = Some((cancel, handle));
         }
+        // END INPUT_HANDLER — arch-lint.sh scopes D1 grep to this region
 
         // AGT-015: Increment agent invocation count on session end.
         // Wired ONLY here (not at /exit) to avoid double-counting — the Stop

@@ -313,6 +313,7 @@ dependencies = [
  "clap",
  "dirs",
  "openssl",
+ "regex",
  "reqwest 0.12.28",
  "serde_json",
  "tempfile",

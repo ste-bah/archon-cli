@@ -1,22 +1,20 @@
 #!/usr/bin/env bash
-# arch-lint — TASK-AGS-100 scaffold, activated by TASK-AGS-110.
+# arch-lint — Enforces the D10 architectural rules from
+# docs/architecture/spawn-everything-philosophy.md
 #
-# Enforces the three D10 rules from
-# docs/architecture/spawn-everything-philosophy.md:
+# Created: TASK-AGS-100 (scaffold)
+# Activated: TASK-AGS-110
 #
-#   1. no .await >100ms in main event handler
-#   2. producer channels are unbounded
-#   3. tools own task lifecycle
-#
-# Until TASK-AGS-110 lands, the activation lines below are commented out and
-# this script exits 0. TASK-AGS-110 will uncomment the `grep` invocations and
-# turn the script into an enforcing check.
+# Rules:
+#   1 (D1, TC-ARCH-02): no .process_message().await at handler scope in INPUT_HANDLER region
+#   2 (D3, TC-ARCH-05): no .send().await on agent event channel (must be unbounded)
+#   3 (D1 broad):       no .await in functions named handle_*_input / on_key / process_key
 #
 # Run locally:  bash scripts/lint/arch-lint.sh
 # Run in CI:    via the `arch-lint` job in .github/workflows/ci.yml
 #
 # Exit codes:
-#   0  success (or scaffold mode)
+#   0  clean
 #   1  a forbidden pattern was found
 
 set -u
@@ -39,45 +37,65 @@ fail() {
 }
 
 # ---------------------------------------------------------------------------
-# Rule 1 — no .await on agent work in the main input handler.
-# Forbidden pattern: `agent.process_message(...).await` or
-#                    `agent\.process_message\(.*\)\.await`
-# Activation deferred to TASK-AGS-110.
+# Rule 1 (TC-ARCH-02, D1): no .process_message().await at handler scope
+#
+# Scoped to lines between BEGIN INPUT_HANDLER and END INPUT_HANDLER markers
+# in src/main.rs. Only flags calls at handler body indentation (<=15 spaces),
+# NOT calls inside tokio::spawn blocks (16+ spaces). The spawn pattern is
+# correct — it's the direct .await that blocks the handler.
 # ---------------------------------------------------------------------------
-RULE1_PATTERN='agent\.process_message\([^)]*\)\.await'
-RULE1_PATHS=(src/main.rs)
-# TASK-AGS-110: uncomment the block below to activate.
-# if match=$(grep -nE "${RULE1_PATTERN}" "${RULE1_PATHS[@]}" 2>/dev/null); then
-#     fail "no .await >100ms in main event handler" "${match}"
-# fi
+BEGIN_LINE=$(grep -n 'BEGIN INPUT_HANDLER' src/main.rs 2>/dev/null | head -1 | cut -d: -f1)
+END_LINE=$(grep -n 'END INPUT_HANDLER' src/main.rs 2>/dev/null | head -1 | cut -d: -f1)
+
+if [[ -n "${BEGIN_LINE}" && -n "${END_LINE}" ]]; then
+    # Match .process_message().await only at <=15 leading spaces (handler scope)
+    # Lines at 16+ spaces are inside tokio::spawn blocks (correct pattern)
+    if match=$(sed -n "${BEGIN_LINE},${END_LINE}p" src/main.rs \
+        | grep -nE '^[[:space:]]{0,15}[^[:space:]].*\.process_message\([^)]*\)\.await' 2>/dev/null); then
+        fail "no .await on agent work in input handler (D1)" "src/main.rs INPUT_HANDLER region: ${match}"
+    fi
+else
+    echo "arch-lint: WARNING — BEGIN/END INPUT_HANDLER markers not found in src/main.rs" >&2
+    # No markers = can't scope; warn but don't fail (markers might be in transit)
+fi
 
 # ---------------------------------------------------------------------------
-# Rule 2 — producer channels are unbounded.
-# Forbidden pattern: `mpsc::channel::<AgentEvent>(` (bounded constructor on
-# the agent-event carrier).
-# Activation deferred to TASK-AGS-110.
+# Rule 2 (TC-ARCH-05, D3): no .send().await on agent event channel
+#
+# The agent event channel MUST be unbounded (non-async send). Any
+# `event_tx.send(...).await` in agent.rs or main.rs is a violation.
 # ---------------------------------------------------------------------------
-RULE2_PATTERN='mpsc::channel::<AgentEvent>\('
-RULE2_PATHS=(src/main.rs)
-# TASK-AGS-110: uncomment the block below to activate.
-# if match=$(grep -nE "${RULE2_PATTERN}" "${RULE2_PATHS[@]}" 2>/dev/null); then
-#     fail "producer channels are unbounded" "${match}"
-# fi
+RULE2_PATTERN='event_tx\.send\([^)]*\)\.await'
+RULE2_PATHS=(crates/archon-core/src/agent.rs src/main.rs)
+
+if match=$(grep -nE "${RULE2_PATTERN}" "${RULE2_PATHS[@]}" 2>/dev/null); then
+    fail "producer channels must be unbounded — no .send().await on event_tx (D3)" "${match}"
+fi
 
 # ---------------------------------------------------------------------------
-# Rule 3 — tools own task lifecycle.
-# Forbidden pattern: direct `tokio::spawn` inside the agent loop for subagent
-# work (covered by TC-ARCH-05). Paths are restricted so grep does not trigger
-# on legitimate spawn sites inside tool implementations or the registry.
-# Activation deferred to TASK-AGS-110.
+# Rule 3 (D1 broad): no .await in input handler functions
+#
+# Heuristic fallback: catches any .await inside functions whose names
+# suggest they handle user input directly. These functions must delegate
+# async work via tokio::spawn, not .await directly.
 # ---------------------------------------------------------------------------
-RULE3_PATTERN='tokio::spawn\('
-RULE3_PATHS=(crates/archon-core/src/agent.rs)
-# TASK-AGS-110: uncomment the block below to activate (note: TASK-AGS-105
-# removes the legacy spawn at agent.rs:2939-2977 first).
-# if match=$(grep -nE "${RULE3_PATTERN}" "${RULE3_PATHS[@]}" 2>/dev/null); then
-#     fail "tools own task lifecycle" "${match}"
-# fi
+RULE3_FN_PATTERN='fn[[:space:]]+(handle_.*_input|on_key|process_key)[[:space:]]*\('
+RULE3_PATHS=(src/main.rs crates/archon-tui/src/app.rs)
 
-echo "arch-lint: scaffold mode — no patterns active (activation in TASK-AGS-110)"
+for file in "${RULE3_PATHS[@]}"; do
+    if [[ ! -f "${file}" ]]; then
+        continue
+    fi
+    fn_lines=$(grep -nE "${RULE3_FN_PATTERN}" "${file}" 2>/dev/null | cut -d: -f1)
+    for fn_line in $fn_lines; do
+        # Extract ~200 lines from function start and look for .await
+        chunk=$(sed -n "${fn_line},$((fn_line + 200))p" "${file}")
+        if echo "${chunk}" | grep -qE '\.await'; then
+            match=$(echo "${chunk}" | grep -nE '\.await' | head -3)
+            fail "no .await in input handler function (D1 broad)" "${file}:${fn_line}+: ${match}"
+        fi
+    done
+done
+
+echo "arch-lint: all checks passed"
 exit 0

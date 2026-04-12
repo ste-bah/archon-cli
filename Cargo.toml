@@ -136,6 +136,7 @@ uuid.workspace = true
 [dev-dependencies]
 tempfile.workspace = true
 async-trait.workspace = true
+regex.workspace = true
 
 [profile.release]
 lto = true
