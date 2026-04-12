@@ -29,6 +29,7 @@ pub mod logging;
 pub mod orchestrator;
 pub mod output_format;
 pub mod output_style;
+pub mod patterns;
 pub mod output_style_loader;
 pub mod print_mode;
 pub mod reasoning;

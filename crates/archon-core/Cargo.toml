@@ -48,6 +48,8 @@ futures-util.workspace = true
 url.workspace = true
 rand.workspace = true
 petgraph.workspace = true
+wasmtime.workspace = true
+inventory.workspace = true
 
 jsonschema.workspace = true
 sqlite.workspace = true
@@ -64,6 +66,9 @@ rayon.workspace = true
 serde_yml.workspace = true
 
 [dev-dependencies]
+# TASK-AGS-506: test-util feature needed for tokio::time::pause/advance in
+# circuit_breaker tests. This only affects test builds.
+tokio = { workspace = true, features = ["test-util"] }
 uuid.workspace = true
 tempfile.workspace = true
 toml.workspace = true
@@ -77,3 +82,5 @@ insta.workspace = true
 archon-test-support = { path = "../archon-test-support" }
 # Phase 3: wiremock for remote discovery integration tests (TASK-AGS-304)
 wiremock.workspace = true
+wat.workspace = true
+tracing-test.workspace = true
