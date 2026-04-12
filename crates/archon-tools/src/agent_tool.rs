@@ -7,7 +7,7 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::background_agents::{
-    new_result_slot, AgentStatus, BackgroundAgentHandle, BACKGROUND_AGENTS,
+    new_result_slot, AgentStatus, BackgroundAgentHandle, RegistryError, BACKGROUND_AGENTS,
 };
 use crate::subagent_executor::{
     get_subagent_executor, SubagentClassification, SubagentOutcome,
@@ -355,6 +355,8 @@ impl Tool for AgentTool {
                 let _ = join.await;
             });
 
+            // TASK-AGS-108 ERR-ARCH-01: keep a clone for retry on collision.
+            let result_slot_retry = Arc::clone(&result_slot);
             let handle = BackgroundAgentHandle {
                 agent_id,
                 join_handle: Some(adapter),
@@ -364,16 +366,39 @@ impl Tool for AgentTool {
                 result_slot,
             };
 
-            if let Err(e) = BACKGROUND_AGENTS.register(handle) {
-                // TASK-AGS-108 will add a retry on Duplicate (ERR-ARCH-01).
-                // For now, surface the collision as a tool error and fire
-                // the pre-clone cancel token so the already-spawned task
-                // wakes, observes cancellation, and exits cleanly instead
-                // of being leaked.
-                cancel_for_failure.cancel();
-                return ToolResult::error(format!(
-                    "background registry register failed: {e}"
-                ));
+            // TASK-AGS-108 ERR-ARCH-01: retry-once on duplicate UUID collision.
+            // If the astronomically-rare UUID collision hits, regenerate the
+            // agent_id in the handle and retry once. On second collision,
+            // surface the error and cancel the spawned task.
+            match BACKGROUND_AGENTS.register(handle) {
+                Ok(()) => {}
+                Err(RegistryError::Duplicate(dup_id)) => {
+                    tracing::warn!(
+                        agent_id = %dup_id,
+                        "Subagent ID collision: retrying with new UUID"
+                    );
+                    let new_id = Uuid::new_v4();
+                    let retry_handle = BackgroundAgentHandle {
+                        agent_id: new_id,
+                        join_handle: None, // adapter already consumed; the task runs detached
+                        cancel_token: cancel_for_failure.clone(),
+                        spawned_at: SystemTime::now(),
+                        status: Arc::new(Mutex::new(AgentStatus::Running)),
+                        result_slot: result_slot_retry,
+                    };
+                    if let Err(e2) = BACKGROUND_AGENTS.register(retry_handle) {
+                        cancel_for_failure.cancel();
+                        return ToolResult::error(format!(
+                            "background registry register failed after retry: {e2}"
+                        ));
+                    }
+                }
+                Err(e) => {
+                    cancel_for_failure.cancel();
+                    return ToolResult::error(format!(
+                        "background registry register failed: {e}"
+                    ));
+                }
             }
             drop(cancel_for_failure);
 

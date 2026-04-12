@@ -102,6 +102,30 @@ pub enum AgentEvent {
     },
 }
 
+impl AgentEvent {
+    /// TASK-AGS-108 ERR-ARCH-02: stable event name for WARN logging when
+    /// the channel is closed. Returns the variant name as a static string.
+    pub fn event_name(&self) -> &'static str {
+        match self {
+            AgentEvent::UserPromptReady => "UserPromptReady",
+            AgentEvent::ApiCallStarted { .. } => "ApiCallStarted",
+            AgentEvent::TextDelta(_) => "TextDelta",
+            AgentEvent::ThinkingDelta(_) => "ThinkingDelta",
+            AgentEvent::ToolCallStarted { .. } => "ToolCallStarted",
+            AgentEvent::ToolCallComplete { .. } => "ToolCallComplete",
+            AgentEvent::PermissionRequired { .. } => "PermissionRequired",
+            AgentEvent::PermissionGranted { .. } => "PermissionGranted",
+            AgentEvent::PermissionDenied { .. } => "PermissionDenied",
+            AgentEvent::TurnComplete { .. } => "TurnComplete",
+            AgentEvent::Error(_) => "Error",
+            AgentEvent::CompactionTriggered => "CompactionTriggered",
+            AgentEvent::SessionComplete => "SessionComplete",
+            AgentEvent::AskUser { .. } => "AskUser",
+            AgentEvent::MessageSent { .. } => "MessageSent",
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Agent configuration
 // ---------------------------------------------------------------------------
@@ -1892,9 +1916,13 @@ impl Agent {
 
     async fn send_event(&self, event: AgentEvent) {
         // TASK-AGS-102: unbounded send — synchronous, fails only if rx dropped.
-        // ERR-ARCH-02 (TASK-AGS-108) will formalise the closed-channel WARN.
-        if let Err(e) = self.event_tx.send(event) {
-            tracing::trace!("agent_event_tx closed: {e}");
+        // TASK-AGS-108 ERR-ARCH-02: WARN on closed channel, continue execution.
+        let event_name = event.event_name();
+        if let Err(_) = self.event_tx.send(event) {
+            tracing::warn!(
+                event_id = event_name,
+                "Agent event channel closed: dropping event"
+            );
         }
     }
 
