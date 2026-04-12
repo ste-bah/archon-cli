@@ -13,6 +13,7 @@ use crate::tasks::models::{
     TaskResultStream, TaskSnapshot, TaskState,
 };
 use crate::tasks::queue::TaskQueue;
+use crate::tasks::store::{InMemoryTaskStateStore, TaskStateStore};
 
 /// Core async task service trait (TECH-AGS-ASYNC L329-337).
 #[async_trait]
@@ -39,6 +40,7 @@ pub struct DefaultTaskService {
     seq_counters: Arc<DashMap<TaskId, AtomicU64>>,
     max_queue_size: usize,
     queue: Option<Arc<dyn TaskQueue>>,
+    store: Arc<dyn TaskStateStore>,
 }
 
 impl DefaultTaskService {
@@ -49,6 +51,7 @@ impl DefaultTaskService {
             seq_counters: Arc::new(DashMap::new()),
             max_queue_size,
             queue: None,
+            store: Arc::new(InMemoryTaskStateStore::new()),
         }
     }
 
@@ -64,6 +67,7 @@ impl DefaultTaskService {
             seq_counters: Arc::new(DashMap::new()),
             max_queue_size,
             queue: Some(queue),
+            store: Arc::new(InMemoryTaskStateStore::new()),
         }
     }
 
@@ -114,6 +118,9 @@ impl TaskService for DefaultTaskService {
         // 4. Insert into in-memory store (no I/O).
         self.tasks.insert(task_id, task.clone());
 
+        // 4b. Write snapshot to hot-cache store (TASK-AGS-202).
+        let _ = self.store.put_snapshot(&task);
+
         // 5. Initialize per-task seq counter (REQ-ASYNC-009).
         self.seq_counters.insert(task_id, AtomicU64::new(0));
 
@@ -130,8 +137,8 @@ impl TaskService for DefaultTaskService {
         Ok(task_id)
     }
 
-    async fn status(&self, _id: TaskId) -> Result<TaskSnapshot, TaskError> {
-        Err(TaskError::Unimplemented)
+    async fn status(&self, id: TaskId) -> Result<TaskSnapshot, TaskError> {
+        self.store.get_snapshot(id)
     }
 
     async fn result(&self, _id: TaskId, _stream: bool) -> Result<TaskResultStream, TaskError> {
@@ -150,7 +157,7 @@ impl TaskService for DefaultTaskService {
         Err(TaskError::Unimplemented)
     }
 
-    async fn list(&self, _filter: TaskFilter) -> Result<Vec<TaskSnapshot>, TaskError> {
-        Err(TaskError::Unimplemented)
+    async fn list(&self, filter: TaskFilter) -> Result<Vec<TaskSnapshot>, TaskError> {
+        self.store.list_snapshots(&filter)
     }
 }
