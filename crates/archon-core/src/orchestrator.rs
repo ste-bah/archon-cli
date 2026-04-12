@@ -109,6 +109,9 @@ impl SubtaskExecutor for RealSubtaskExecutor {
             self.agent_registry.clone(),
         );
 
+        // Wire subagent executor (TASK-AGS-105)
+        agent.install_subagent_executor();
+
         // Collect text output in a background task
         let output = Arc::new(Mutex::new(String::new()));
         let output_collector = Arc::clone(&output);

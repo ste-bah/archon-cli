@@ -1927,6 +1927,10 @@ async fn run_print_mode_session(
     });
     agent.set_auto_evaluator(auto_eval);
 
+    // Wire subagent executor (TASK-AGS-105) — must be AFTER all post-construction
+    // setters so AgentSubagentExecutor captures hook_registry, memory, etc.
+    agent.install_subagent_executor();
+
     // Wire Phase G: critical_system_reminder for per-turn injection in print mode
     if let Some(ref def) = agent_def {
         if let Some(ref reminder) = def.critical_system_reminder {
@@ -2927,6 +2931,10 @@ async fn run_interactive_session(
         ..Default::default()
     });
     agent.set_auto_evaluator(auto_eval);
+
+    // Wire subagent executor (TASK-AGS-105) — must be AFTER all post-construction
+    // setters so AgentSubagentExecutor captures hook_registry, memory, etc.
+    agent.install_subagent_executor();
 
     // Permission prompt channel — agent waits for y/n, TUI sends response
     let (perm_prompt_tx, perm_prompt_rx) = tokio::sync::mpsc::channel::<bool>(1);
@@ -5338,6 +5346,7 @@ async fn handle_config_command(
             session_id: String::new(),
             mode: AgentMode::Normal,
             extra_dirs: Vec::new(),
+            ..Default::default()
         };
         let result = archon_tools::tool::Tool::execute(
             &tool,
