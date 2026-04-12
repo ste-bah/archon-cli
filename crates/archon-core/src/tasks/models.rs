@@ -185,9 +185,10 @@ pub enum TaskError {
 }
 
 /// Result stream for task output retrieval.
-/// Full variants (File, Chunks) added in TASK-AGS-203.
 #[derive(Debug)]
 pub enum TaskResultStream {
     /// Small inline result.
     Inline(String),
+    /// File-backed result (path to file on disk).
+    File(std::path::PathBuf),
 }

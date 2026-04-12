@@ -86,6 +86,8 @@ tower-http = { version = "0.6", features = ["cors"] }
 cpal = "0.15"
 hound = "3"
 rust-embed = "8"
+sqlite = "0.36"
+crc32fast = "1"
 
 # TASK-AGS-006: dev-only test/bench deps (not opted into by any crate yet).
 # - insta:            snapshot testing (REQ-FOR-PRESERVE-D8)

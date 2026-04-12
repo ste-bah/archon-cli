@@ -141,8 +141,30 @@ impl TaskService for DefaultTaskService {
         self.store.get_snapshot(id)
     }
 
-    async fn result(&self, _id: TaskId, _stream: bool) -> Result<TaskResultStream, TaskError> {
-        Err(TaskError::Unimplemented)
+    async fn result(&self, id: TaskId, _stream: bool) -> Result<TaskResultStream, TaskError> {
+        // 1. Get snapshot from store to check state.
+        let snap = self.store.get_snapshot(id)?;
+
+        // 2. Must be in a terminal state before results are available.
+        if !snap.state.is_terminal() {
+            return Err(TaskError::Pending);
+        }
+
+        // 3. Look up full task for result_ref.
+        let task = self.tasks.get(&id).ok_or(TaskError::NotFound(id))?;
+
+        match &task.result_ref {
+            Some(rr) => {
+                if let Some(ref inline) = rr.inline {
+                    Ok(TaskResultStream::Inline(inline.clone()))
+                } else if let Some(ref path) = rr.file_path {
+                    Ok(TaskResultStream::File(path.clone()))
+                } else {
+                    Err(TaskError::NotFound(id))
+                }
+            }
+            None => Err(TaskError::NotFound(id)),
+        }
     }
 
     async fn cancel(&self, _id: TaskId) -> Result<(), TaskError> {
