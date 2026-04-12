@@ -14,6 +14,7 @@ fn ctx() -> ToolContext {
         session_id: "integration-session".into(),
         mode: AgentMode::Normal,
         extra_dirs: vec![],
+        ..Default::default()
     }
 }
 

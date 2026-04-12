@@ -40,19 +40,25 @@ use archon_test_support::memory::MockMemoryTrait;
 // --------------------------------------------------------------------
 
 /// REGRESSION GUARD: DO NOT RELAX. See REQ-FOR-PRESERVE-D8 (a).
+///
+/// TASK-AGS-105: the three legacy `save_agent_memory` call sites in agent.rs
+/// (foreground subagent result, background-result arrival, and
+/// handle_subagent_result) were intentionally collapsed into a single call
+/// in `AgentSubagentExecutor::on_inner_complete` inside
+/// `archon-core/src/subagent_executor.rs`. The invariant is now "at least
+/// one call site in subagent_executor.rs, zero in agent.rs" — the old
+/// indirection MUST NOT be reintroduced.
 #[test]
 fn test_save_agent_memory_invoked_at_all_three_call_sites() {
-    let source = include_str!("../src/agent.rs");
+    let agent_source = include_str!("../src/agent.rs");
+    let exec_source = include_str!("../src/subagent_executor.rs");
 
-    // Count non-comment occurrences of `save_agent_memory(`. We accept
-    // both bare `save_agent_memory(` and the qualified
-    // `crate::agents::memory::save_agent_memory(` form that the current
-    // agent.rs uses — the `save_agent_memory(` suffix is the invariant.
-    let count = source
+    // Count non-comment occurrences of `save_agent_memory(` in
+    // subagent_executor.rs. Must be >= 1 (collapsed call site).
+    let exec_count = exec_source
         .lines()
         .filter(|line| {
             let trimmed = line.trim_start();
-            // Skip comment lines.
             if trimmed.starts_with("//") || trimmed.starts_with("*") || trimmed.starts_with("///")
             {
                 return false;
@@ -62,10 +68,31 @@ fn test_save_agent_memory_invoked_at_all_three_call_sites() {
         .count();
 
     assert!(
-        count >= 3,
-        "REQ-FOR-PRESERVE-D8 (a) violated: expected ≥3 save_agent_memory( call sites in \
-         agent.rs, found {count}. If a call site was refactored away, the subagent-completion \
-         memory-persistence path is broken."
+        exec_count >= 1,
+        "REQ-FOR-PRESERVE-D8 (a) violated: expected ≥1 save_agent_memory( call site in \
+         subagent_executor.rs, found {exec_count}. The collapsed call site in \
+         on_inner_complete is the post-TASK-AGS-105 persistence path."
+    );
+
+    // agent.rs must not reintroduce the old indirection. Zero non-comment
+    // call sites there.
+    let agent_count = agent_source
+        .lines()
+        .filter(|line| {
+            let trimmed = line.trim_start();
+            if trimmed.starts_with("//") || trimmed.starts_with("*") || trimmed.starts_with("///")
+            {
+                return false;
+            }
+            trimmed.contains("save_agent_memory(")
+        })
+        .count();
+
+    assert_eq!(
+        agent_count, 0,
+        "REQ-FOR-PRESERVE-D8 (a) violated: agent.rs reintroduced {agent_count} \
+         save_agent_memory( call site(s). TASK-AGS-105 collapsed all persistence calls \
+         into subagent_executor.rs::on_inner_complete; agent.rs must stay empty of them."
     );
 }
 

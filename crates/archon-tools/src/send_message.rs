@@ -355,6 +355,7 @@ mod tests {
             session_id: "test-session-abc123".into(),
             mode: crate::tool::AgentMode::Normal,
             extra_dirs: vec![],
+            ..Default::default()
         }
     }
 

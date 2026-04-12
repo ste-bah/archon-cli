@@ -972,6 +972,7 @@ pub mod runner {
                 session_id: "test-session".into(),
                 mode: archon_tools::tool::AgentMode::Normal,
                 extra_dirs: vec![],
+                ..Default::default()
             };
             SubagentRunner::new(
                 provider,
@@ -1071,6 +1072,7 @@ pub mod runner {
                 session_id: "test".into(),
                 mode: archon_tools::tool::AgentMode::Normal,
                 extra_dirs: vec![],
+                ..Default::default()
             };
             let runner = SubagentRunner::new(
                 provider,

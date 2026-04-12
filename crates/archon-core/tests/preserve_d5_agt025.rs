@@ -106,66 +106,83 @@ fn test_env_gate_archon_auto_background_tasks() {
 // --------------------------------------------------------------------
 
 /// REGRESSION GUARD: DO NOT RELAX. See REQ-FOR-PRESERVE-D5 (c).
+///
+/// TASK-AGS-105: the legacy `handle_subagent_result` indirection was removed
+/// from `archon-core/src/agent.rs` and the AGT-025 race structure now lives
+/// in `archon-tools/src/agent_tool.rs::run_subagent`. This guard scans the
+/// new location so the invariant continues to fire if anyone drifts it.
 #[test]
 fn test_timeout_branch_does_not_reawait_join_handle() {
-    let source = include_str!("../src/agent.rs");
+    let source = include_str!("../../archon-tools/src/agent_tool.rs");
 
     // Must contain the select! construct.
     assert!(
         source.contains("tokio::select!"),
-        "tokio::select! missing from agent.rs — AGT-025 race structure removed"
+        "tokio::select! missing from agent_tool.rs — AGT-025 race structure removed"
     );
 
-    // Must contain the timeout-sleep arm.
+    // Must contain the timer-sleep setup. TASK-AGS-105 moved the race into
+    // archon-tools::agent_tool::run_subagent and the timer is now bound to a
+    // local `timer` variable driven by `auto_bg_ms` (the executor's
+    // auto_background_ms()), not a `timeout_duration` field.
     assert!(
-        source.contains("tokio::time::sleep(timeout_duration)"),
-        "timeout sleep arm missing from agent.rs — AGT-025 race structure removed"
+        source.contains("tokio::time::sleep(Duration::from_millis(auto_bg_ms))"),
+        "auto-background sleep timer missing from agent_tool.rs — AGT-025 race structure removed"
     );
 
-    // Isolate the sleep arm's BODY by splitting on the sleep pattern
-    // and collecting lines up to the arm's `return` statement. The arm
-    // body MUST end with a `return` (that is precisely the invariant:
-    // the arm returns without awaiting anything, abandoning the
-    // join_handle). Anything after `return` is out-of-arm code that we
-    // do not want to inspect.
-    let after_sleep = source
-        .split("_ = tokio::time::sleep(timeout_duration) =>")
+    // The timer arm must produce AutoBackgrounded without awaiting anything.
+    // The arm is `_ = timer => SubagentOutcome::AutoBackgrounded,` — assert
+    // that literal is present.
+    assert!(
+        source.contains("_ = timer => SubagentOutcome::AutoBackgrounded"),
+        "timer arm must evaluate to SubagentOutcome::AutoBackgrounded without awaiting"
+    );
+
+    // The AutoBackgrounded match arm downstream MUST NOT call
+    // on_visible_complete — this is PRESERVE-D5: the abandoned spawn
+    // keeps running, but visible hooks are suppressed. Scan the
+    // AutoBackgrounded arm body for any await or on_visible_complete call.
+    let after_autobg = source
+        .split("SubagentOutcome::AutoBackgrounded =>")
         .nth(1)
-        .expect("sleep arm pattern not found");
+        .expect("AutoBackgrounded match arm not found");
 
     let mut arm_body = String::new();
-    let mut saw_return = false;
-    for (idx, line) in after_sleep.lines().enumerate() {
-        arm_body.push_str(line);
-        arm_body.push('\n');
-        if line.contains("return ") {
-            saw_return = true;
-            break;
+    let mut depth: i32 = 0;
+    let mut started = false;
+    for ch in after_autobg.chars() {
+        arm_body.push(ch);
+        match ch {
+            '{' => {
+                depth += 1;
+                started = true;
+            }
+            '}' => {
+                depth -= 1;
+                if started && depth == 0 {
+                    break;
+                }
+            }
+            _ => {}
         }
-        if idx >= 40 {
+        if arm_body.len() > 4000 {
             panic!(
-                "REQ-FOR-PRESERVE-D5 (c): could not find a `return` within 40 lines of the \
-                 sleep arm — arm structure changed, re-validate the guard"
+                "REQ-FOR-PRESERVE-D5 (c): could not locate end of AutoBackgrounded arm body"
             );
         }
     }
-    assert!(
-        saw_return,
-        "REQ-FOR-PRESERVE-D5 (c): sleep arm body did not contain a `return` statement"
-    );
 
-    // Tighter invariant (adversarial-review fix, 2026-04-11): forbid ANY
-    // `.await` in the timeout arm body. The original assertion only
-    // looked for the literal `join_handle.await` and could be bypassed
-    // by a simple rename (`let handle = ...; handle.await`). The
-    // auto-background design requires the arm to RETURN without
-    // awaiting anything at all — the spawned task is abandoned by
-    // construction. Any `.await` in this arm breaks the invariant.
     assert!(
         !arm_body.contains(".await"),
-        "REQ-FOR-PRESERVE-D5 (c) violated: timeout arm body contains `.await`. The auto- \
-         background arm MUST return without awaiting — awaiting anything here re-blocks on \
-         the spawned task and defeats the purpose of backgrounding. Arm body was:\n{arm_body}"
+        "REQ-FOR-PRESERVE-D5 (c) violated: AutoBackgrounded arm body contains `.await`. \
+         The auto-background arm MUST NOT await anything — awaiting re-blocks on the \
+         spawned task and defeats the purpose of backgrounding. Arm body was:\n{arm_body}"
+    );
+    assert!(
+        !arm_body.contains("on_visible_complete"),
+        "REQ-FOR-PRESERVE-D5 violated: AutoBackgrounded arm calls on_visible_complete. \
+         PRESERVE-D5 requires the auto-backgrounded path to skip visible hooks. \
+         Arm body was:\n{arm_body}"
     );
 }
 

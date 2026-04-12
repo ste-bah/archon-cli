@@ -36,6 +36,7 @@ pub mod remote;
 pub mod schema_validation;
 pub mod skills;
 pub mod subagent;
+pub mod subagent_executor;
 pub mod team;
 pub mod update;
 

@@ -203,6 +203,7 @@ mod tests {
             session_id: "test-session".to_string(),
             mode: crate::tool::AgentMode::Normal,
             extra_dirs: vec![],
+            ..Default::default()
         }
     }
 

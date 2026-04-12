@@ -40,3 +40,6 @@ petgraph.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+# TASK-AGS-105: serialize tests that rely on process-global
+# subagent executor state installed via OnceLock.
+serial_test.workspace = true

@@ -9,13 +9,80 @@
 
 use std::collections::HashSet;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::Once;
 use std::time::Instant;
 
 use serde_json::{json, Value};
 
-use archon_tools::agent_tool::AgentTool;
+use archon_tools::agent_tool::{AgentTool, SubagentRequest};
 use archon_tools::background_agents::{AgentStatus, BACKGROUND_AGENTS};
+use archon_tools::subagent_executor::{
+    install_subagent_executor, ExecutorError, OutcomeSideEffects, SubagentClassification,
+    SubagentExecutor,
+};
 use archon_tools::tool::{AgentMode, Tool, ToolContext};
+use async_trait::async_trait;
+use tokio_util::sync::CancellationToken;
+
+// ---------- Stub executor ----------
+//
+// TASK-AGS-105 changed the AgentTool::execute contract: a process-global
+// SubagentExecutor must be installed before the tool will spawn. These tests
+// were written for TASK-AGS-104 and only care about the spawn + registry
+// side-effect, so we install a minimal no-op executor here that returns
+// immediately.
+
+struct StubExecutor;
+
+#[async_trait]
+impl SubagentExecutor for StubExecutor {
+    async fn run_to_completion(
+        &self,
+        _subagent_id: String,
+        _request: SubagentRequest,
+        _ctx: ToolContext,
+        _cancel: CancellationToken,
+    ) -> Result<String, ExecutorError> {
+        Ok(String::new())
+    }
+
+    async fn on_inner_complete(
+        &self,
+        _subagent_id: String,
+        _result: Result<String, String>,
+    ) {
+    }
+
+    async fn on_visible_complete(
+        &self,
+        _subagent_id: String,
+        _result: Result<String, String>,
+        _nested: bool,
+    ) -> OutcomeSideEffects {
+        OutcomeSideEffects::default()
+    }
+
+    fn auto_background_ms(&self) -> u64 {
+        0
+    }
+
+    fn classify(&self, req: &SubagentRequest) -> SubagentClassification {
+        if req.run_in_background {
+            SubagentClassification::ExplicitBackground
+        } else {
+            SubagentClassification::Foreground
+        }
+    }
+}
+
+static INSTALL_ONCE: Once = Once::new();
+
+fn ensure_stub_executor() {
+    INSTALL_ONCE.call_once(|| {
+        install_subagent_executor(Arc::new(StubExecutor));
+    });
+}
 
 fn make_ctx() -> ToolContext {
     ToolContext {
@@ -23,6 +90,7 @@ fn make_ctx() -> ToolContext {
         session_id: "task-ags-104-test".into(),
         mode: AgentMode::Normal,
         extra_dirs: vec![],
+        ..Default::default()
     }
 }
 
@@ -34,8 +102,9 @@ fn parse_result(content: &str) -> Value {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn execute_returns_agent_id_and_spawned_status() {
+    ensure_stub_executor();
     let tool = AgentTool::new();
-    let input = json!({ "prompt": "Do something" });
+    let input = json!({ "prompt": "Do something", "run_in_background": true });
 
     let result = tool.execute(input, &make_ctx()).await;
     assert!(!result.is_error, "unexpected error: {}", result.content);
@@ -51,8 +120,9 @@ async fn execute_latency_under_10ms() {
     // AC-01: each call returns in <10ms. Allow a generous 50ms bound
     // to absorb CI jitter; the goal is to prove we are NOT blocking on
     // any agent I/O synchronously.
+    ensure_stub_executor();
     let tool = AgentTool::new();
-    let input = json!({ "prompt": "Do something" });
+    let input = json!({ "prompt": "Do something", "run_in_background": true });
 
     // Warm-up to page in dashmap + lazy singleton.
     let _ = tool.execute(input.clone(), &make_ctx()).await;
@@ -70,8 +140,9 @@ async fn execute_latency_under_10ms() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn execute_registers_running_handle() {
+    ensure_stub_executor();
     let tool = AgentTool::new();
-    let input = json!({ "prompt": "Track me" });
+    let input = json!({ "prompt": "Track me", "run_in_background": true });
 
     let result = tool.execute(input, &make_ctx()).await;
     assert!(!result.is_error);
@@ -107,11 +178,12 @@ async fn execute_registers_running_handle() {
 async fn spawn_100_yields_100_unique_agent_ids() {
     // TC-ARCH-03 smoke: 100 sequential spawns must all register and all
     // get distinct agent_ids.
+    ensure_stub_executor();
     let tool = AgentTool::new();
     let mut ids: HashSet<uuid::Uuid> = HashSet::new();
 
     for i in 0..100 {
-        let input = json!({ "prompt": format!("agent {i}") });
+        let input = json!({ "prompt": format!("agent {i}"), "run_in_background": true });
         let result = tool.execute(input, &make_ctx()).await;
         assert!(!result.is_error, "call {i} errored: {}", result.content);
         let v = parse_result(&result.content);

@@ -13,6 +13,7 @@ fn smoke_ctx() -> ToolContext {
         session_id: "smoke-session-001".into(),
         mode: AgentMode::Normal,
         extra_dirs: vec![],
+        ..Default::default()
     }
 }
 

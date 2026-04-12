@@ -23,6 +23,10 @@ pub mod toolsearch;
 pub mod webfetch;
 
 pub mod agent_tool;
+// TASK-AGS-105: SubagentExecutor trait + OnceLock registry. The
+// concrete AgentSubagentExecutor is installed by archon-core at
+// Agent::new time.
+pub mod subagent_executor;
 pub mod git;
 pub mod send_message;
 pub mod validation;

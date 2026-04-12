@@ -19,6 +19,7 @@ fn test_ctx() -> ToolContext {
         session_id: "test-session".into(),
         mode: archon_tools::tool::AgentMode::Normal,
         extra_dirs: vec![],
+        ..Default::default()
     }
 }
 

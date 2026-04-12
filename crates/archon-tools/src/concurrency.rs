@@ -191,6 +191,7 @@ mod tests {
             session_id: "test".into(),
             mode: crate::tool::AgentMode::Normal,
             extra_dirs: vec![],
+            ..Default::default()
         })
     }
 
