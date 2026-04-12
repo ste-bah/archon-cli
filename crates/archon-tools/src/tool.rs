@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
+use tokio_util::sync::CancellationToken;
 
 // ---------------------------------------------------------------------------
 // Permission level -- tools declare their danger level
@@ -57,6 +58,12 @@ pub struct ToolContext {
     /// hook on successful completion. Name retained verbatim — do NOT
     /// rename to `is_nested`, `spawned_from_task_create`, etc.
     pub nested: bool,
+    /// TASK-AGS-107: parent CancellationToken for cascading cancellation.
+    /// When set, `AgentTool::execute` creates a `child_token()` so that
+    /// cancelling the parent (e.g. Ctrl+C in the input handler) cascades
+    /// to all spawned subagents. `None` for top-level tool invocations
+    /// where no parent cancel exists.
+    pub cancel_parent: Option<CancellationToken>,
 }
 
 // ---------------------------------------------------------------------------

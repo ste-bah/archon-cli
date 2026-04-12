@@ -1830,6 +1830,7 @@ async fn run_print_mode_session(
         extra_dirs: Arc::new(tokio::sync::Mutex::new(Vec::new())),
         max_tool_concurrency: config.tools.max_concurrency as usize,
         max_turns: None,
+        cancel_token: None,
     };
 
     // Apply agent execution config overrides (AGT-008)
@@ -2689,6 +2690,7 @@ async fn run_interactive_session(
         extra_dirs: Arc::new(tokio::sync::Mutex::new(Vec::new())),
         max_tool_concurrency: config.tools.max_concurrency as usize,
         max_turns: None,
+        cancel_token: None,
     };
 
     // Apply agent execution config overrides
@@ -3397,6 +3399,21 @@ async fn run_interactive_session(
                 continue;
             }
 
+            // ── TASK-AGS-107: Ctrl+C cancel ──────────────────────
+            // TUI sends "__cancel__" when user presses Ctrl+C during
+            // generation. Fire the CancellationToken stored in
+            // current_agent_task to cancel the running process_message.
+            // The .cancel() call is synchronous and never blocks.
+            if input == "__cancel__" {
+                let guard = current_agent_task_inner.lock().await;
+                if let Some((ref token, _)) = *guard {
+                    token.cancel();
+                    tracing::info!("Ctrl+C: fired CancellationToken on current agent task");
+                }
+                drop(guard);
+                continue;
+            }
+
             // ── MCP manager actions from the overlay ─────────────
             if let Some(rest) = input.strip_prefix("__mcp_action__ ") {
                 let parts: Vec<&str> = rest.trim().splitn(2, ' ').collect();
@@ -3797,10 +3814,15 @@ async fn run_interactive_session(
                             let agent_registry_clone = Arc::clone(&cmd_ctx.agent_registry);
                             let working_dir_clone = cmd_ctx.working_dir.clone();
                             let tui_tx_clone = input_tui_tx.clone();
+                            let cancel_for_agent = cancel.clone();
                             let handle = tokio::spawn(async move {
-                                if let Err(e) = agent_for_task.lock().await.process_message(&prompt).await {
+                                let mut guard = agent_for_task.lock().await;
+                                // TASK-AGS-107: set cancel token for Ctrl+C propagation
+                                guard.set_cancel_token(Some(cancel_for_agent));
+                                if let Err(e) = guard.process_message(&prompt).await {
                                     tracing::error!("skill agent error: {e}");
                                 }
+                                guard.set_cancel_token(None);
                                 // Hot-reload agent registry after agent-management skills
                                 if cmd_name_owned == "create-agent" {
                                     if let Ok(mut reg) = agent_registry_clone.write() {
@@ -3868,11 +3890,16 @@ async fn run_interactive_session(
             let agent_for_task = Arc::clone(&agent);
             let session_store_clone = Arc::clone(&session_store_for_input);
             let session_id_clone = session_id_for_input.clone();
+            let cancel_for_agent = cancel.clone();
             let handle = tokio::spawn(async move {
                 let mut guard = agent_for_task.lock().await;
+                // TASK-AGS-107: set cancel token so ToolContext.cancel_parent
+                // propagates to subagent child_token() chains.
+                guard.set_cancel_token(Some(cancel_for_agent));
                 if let Err(e) = guard.process_message(&effective_input).await {
                     tracing::error!("agent loop error: {e}");
                 }
+                guard.set_cancel_token(None);
                 // Persist messages to session store for /resume
                 let messages = &guard.conversation_state().messages;
                 for (idx, msg) in messages.iter().enumerate() {

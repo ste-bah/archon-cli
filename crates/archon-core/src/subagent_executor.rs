@@ -718,6 +718,9 @@ impl SubagentExecutor for AgentSubagentExecutor {
             extra_dirs: vec![],
             in_fork: subagent_in_fork,
             nested: false,
+            // TASK-AGS-107: propagate cancel from parent context so child
+            // subagents inherit the cancellation chain.
+            cancel_parent: ctx.cancel_parent.clone(),
         };
 
         let mut runner = crate::subagent::runner::SubagentRunner::new(

@@ -1307,6 +1307,11 @@ pub async fn run_tui(
                             if app.is_generating {
                                 app.is_generating = false;
                                 app.output.append_line("[interrupted]");
+                                // TASK-AGS-107: send __cancel__ control message
+                                // to fire the CancellationToken in the input
+                                // handler. input_tx.try_send avoids blocking
+                                // the TUI render loop.
+                                let _ = input_tx.try_send("__cancel__".to_string());
                             } else {
                                 app.should_quit = true;
                             }

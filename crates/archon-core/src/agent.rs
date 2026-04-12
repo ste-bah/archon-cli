@@ -129,6 +129,11 @@ pub struct AgentConfig {
     pub max_tool_concurrency: usize,
     /// Maximum agentic loop iterations per process_message call (None = unlimited).
     pub max_turns: Option<u32>,
+    /// TASK-AGS-107: parent CancellationToken for Ctrl+C propagation.
+    /// When set, the agent threads this into ToolContext.cancel_parent so
+    /// subagent spawns create child_token() chains. Set by the input
+    /// handler spawn in main.rs.
+    pub cancel_token: Option<tokio_util::sync::CancellationToken>,
 }
 
 impl Default for AgentConfig {
@@ -148,6 +153,7 @@ impl Default for AgentConfig {
             extra_dirs: Arc::new(Mutex::new(Vec::new())),
             max_tool_concurrency: archon_tools::concurrency::DEFAULT_MAX_CONCURRENCY,
             max_turns: None,
+            cancel_token: None,
         }
     }
 }
@@ -341,6 +347,13 @@ impl Agent {
     /// Called explicitly by the embedder (CLI, tests) AFTER constructing the
     /// `Agent` with its full field set (hook_registry, memory, etc.). This is
     /// a separate step from `Agent::new` because many of the fields the
+    /// TASK-AGS-107: set the cancel token for Ctrl+C propagation.
+    /// Called from the input handler spawn in main.rs before
+    /// process_message, cleared afterward.
+    pub fn set_cancel_token(&mut self, token: Option<tokio_util::sync::CancellationToken>) {
+        self.config.cancel_token = token;
+    }
+
     /// executor needs are set via post-construction setters
     /// (`set_hook_registry`, `set_memory`, ...). The install is idempotent
     /// per-process (OnceLock semantics): first caller wins.
@@ -712,6 +725,9 @@ impl Agent {
                     // flips it to true when routing a subagent request through
                     // the executor.
                     nested: false,
+                    // TASK-AGS-107: propagate cancel token so subagent spawns
+                    // create child_token() chains for Ctrl+C cascading.
+                    cancel_parent: self.config.cancel_token.clone(),
                 };
 
                 // -------------------------------------------------------
@@ -1330,6 +1346,7 @@ impl Agent {
                                                     extra_dirs: vec![],
                                                     in_fork: crate::agents::built_in::is_in_fork_child_by_messages(&self.state.messages),
                                                     nested: false,
+                                                    cancel_parent: self.config.cancel_token.clone(),
                                                 };
                                                 match archon_tools::agent_tool::run_subagent(
                                                     resume_sid,

@@ -293,7 +293,13 @@ impl Tool for AgentTool {
         };
         let classification = exec.classify(&request);
 
-        let cancel = CancellationToken::new();
+        // TASK-AGS-107: if the parent agent has a cancel_parent token,
+        // create a child so cancelling the parent (Ctrl+C) cascades to
+        // this subagent. Otherwise create a standalone token.
+        let cancel = match &ctx.cancel_parent {
+            Some(parent) => parent.child_token(),
+            None => CancellationToken::new(),
+        };
         let cancel_child = cancel.clone();
         // Kept alive after `cancel` is moved into the handle so the
         // register-failure branch below can still fire cancellation on
