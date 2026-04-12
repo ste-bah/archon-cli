@@ -8,6 +8,7 @@ use dashmap::DashMap;
 use tokio_stream::Stream;
 
 use crate::agents::registry::AgentRegistry;
+use crate::tasks::events::EventBus;
 use crate::tasks::models::{
     SubmitRequest, Task, TaskError, TaskEvent, TaskFilter, TaskId,
     TaskResultStream, TaskSnapshot, TaskState,
@@ -41,6 +42,7 @@ pub struct DefaultTaskService {
     max_queue_size: usize,
     queue: Option<Arc<dyn TaskQueue>>,
     store: Arc<dyn TaskStateStore>,
+    event_bus: Arc<EventBus>,
 }
 
 impl DefaultTaskService {
@@ -52,6 +54,7 @@ impl DefaultTaskService {
             max_queue_size,
             queue: None,
             store: Arc::new(InMemoryTaskStateStore::new()),
+            event_bus: Arc::new(EventBus::new()),
         }
     }
 
@@ -68,6 +71,7 @@ impl DefaultTaskService {
             max_queue_size,
             queue: Some(queue),
             store: Arc::new(InMemoryTaskStateStore::new()),
+            event_bus: Arc::new(EventBus::new()),
         }
     }
 
@@ -79,6 +83,11 @@ impl DefaultTaskService {
     /// Access the shared seq counters (used by executor + events).
     pub fn seq_counters(&self) -> &Arc<DashMap<TaskId, AtomicU64>> {
         &self.seq_counters
+    }
+
+    /// Access the shared event bus (used by executor + events).
+    pub fn event_bus(&self) -> &Arc<EventBus> {
+        &self.event_bus
     }
 }
 
@@ -173,10 +182,16 @@ impl TaskService for DefaultTaskService {
 
     async fn subscribe_events(
         &self,
-        _id: TaskId,
+        id: TaskId,
         _from_seq: u64,
     ) -> Result<Pin<Box<dyn Stream<Item = TaskEvent> + Send>>, TaskError> {
-        Err(TaskError::Unimplemented)
+        // Verify task exists.
+        if !self.tasks.contains_key(&id) {
+            return Err(TaskError::NotFound(id));
+        }
+
+        let stream = self.event_bus.subscribe(id);
+        Ok(stream)
     }
 
     async fn list(&self, filter: TaskFilter) -> Result<Vec<TaskSnapshot>, TaskError> {

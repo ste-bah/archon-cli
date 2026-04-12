@@ -11,6 +11,7 @@ pub use models::{
     ResourceSample, SubmitRequest, Task, TaskError, TaskEvent, TaskEventKind, TaskFilter, TaskId,
     TaskResultRef, TaskResultStream, TaskSnapshot, TaskState,
 };
+pub use events::{EventBus, EventLog};
 pub use queue::{PerAgentTaskQueue, QueueConfig, TaskQueue};
 pub use service::{DefaultTaskService, TaskService};
 pub use store::{InMemoryTaskStateStore, SqliteTaskStateStore, TaskStateStore};
