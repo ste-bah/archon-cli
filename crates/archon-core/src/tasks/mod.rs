@@ -4,6 +4,7 @@ pub mod queue; // TODO: TASK-AGS-205
 pub mod store; // TODO: TASK-AGS-203
 pub mod events; // TODO: TASK-AGS-204
 pub mod executor; // TODO: TASK-AGS-206
+pub mod metrics;
 pub mod gc; // TODO: TASK-AGS-206
 pub mod api; // TODO: TASK-AGS-208
 
@@ -12,6 +13,8 @@ pub use models::{
     TaskResultRef, TaskResultStream, TaskSnapshot, TaskState,
 };
 pub use events::{EventBus, EventLog};
+pub use executor::{AgentExecutor, TaskExecutor};
+pub use metrics::MetricsRegistry;
 pub use queue::{PerAgentTaskQueue, QueueConfig, TaskQueue};
 pub use service::{DefaultTaskService, TaskService};
 pub use store::{InMemoryTaskStateStore, SqliteTaskStateStore, TaskStateStore};

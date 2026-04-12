@@ -52,6 +52,7 @@ petgraph.workspace = true
 jsonschema.workspace = true
 sqlite.workspace = true
 crc32fast.workspace = true
+sysinfo.workspace = true
 
 [dev-dependencies]
 uuid.workspace = true
