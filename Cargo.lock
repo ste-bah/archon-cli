@@ -498,6 +498,7 @@ dependencies = [
  "tiny_http",
  "tokio",
  "tracing",
+ "url",
  "urlencoding",
  "uuid",
  "which",

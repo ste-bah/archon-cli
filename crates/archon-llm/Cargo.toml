@@ -31,6 +31,8 @@ aws-sigv4 = { version = "1", features = ["sign-http"] }
 aws-credential-types.workspace = true
 jsonwebtoken.workspace = true
 hmac.workspace = true
+# TASK-AGS-700: descriptor `base_url: Url` + serde round-trip support.
+url = { version = "2", features = ["serde"] }
 
 [dev-dependencies]
 async-trait.workspace = true
