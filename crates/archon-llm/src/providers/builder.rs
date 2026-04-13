@@ -44,6 +44,7 @@ use crate::secrets::ApiKey;
 
 use super::descriptor::{AuthFlavor, CompatKind, ProviderDescriptor};
 use super::error::ProviderError;
+use super::local::LocalProvider;
 use super::native_gap::{AzureProvider, CohereProvider, CopilotProvider, MinimaxProvider};
 use super::openai::OpenAiProvider;
 use super::openai_compat::OpenAiCompatProvider;
@@ -94,7 +95,7 @@ pub fn build_llm_provider_with_policy(
         CompatKind::OpenAiCompat => Arc::new(OpenAiCompatProvider::new(
             descriptor, http, api_key,
         )),
-        CompatKind::Native => dispatch_native(descriptor, http, api_key)?,
+        CompatKind::Native => dispatch_native(cfg, descriptor, http, api_key)?,
     };
 
     Ok(Arc::new(RetryProvider::<dyn LlmProvider>::new(inner, policy)))
@@ -107,7 +108,13 @@ pub fn build_llm_provider_with_policy(
 ///
 /// Validation Criterion 8: `grep -c 'match.*descriptor.id'` on this file
 /// MUST return exactly 1 — that is this match, right below.
+///
+/// TASK-AGS-710: the `cfg` parameter threads flat-config overrides
+/// (`base_url`, `model`) into native arms that can accept them (currently
+/// just `local`). Other natives ignore `cfg` because their construction
+/// data comes from the descriptor + `api_key` only.
 fn dispatch_native(
+    cfg: &LlmConfig,
     descriptor: &'static ProviderDescriptor,
     http: Arc<reqwest::Client>,
     api_key: ApiKey,
@@ -119,13 +126,7 @@ fn dispatch_native(
         "copilot" => Ok(Arc::new(CopilotProvider::new(descriptor, http, api_key))),
         "minimax" => Ok(Arc::new(MinimaxProvider::new(descriptor, http, api_key))),
 
-        // --- 5 hand-rolled existing natives ---
-        //
-        // openai has the simplest legacy constructor shape so we wire it
-        // directly from descriptor metadata. The other four take
-        // non-trivial setup (GCP service account JWT, AnthropicClient,
-        // Ollama health probe, AWS SigV4) that archon-cli threads in at
-        // main.rs:1885; TASK-AGS-710 will take over that wiring.
+        // --- openai: hand-rolled native, simplest constructor ---
         "openai" => {
             let default_model = descriptor.default_model.clone();
             let base_url = descriptor.base_url.to_string();
@@ -137,15 +138,79 @@ fn dispatch_native(
             )))
         }
 
-        "anthropic" | "bedrock" | "vertex" | "local" | "gemini" | "xai" => {
-            Err(ProviderError::InvalidResponse {
-                name: descriptor.display_name.clone(),
-                detail: format!(
-                    "native provider {} wiring deferred to TASK-AGS-710 main.rs integration",
-                    descriptor.id
-                ),
-            })
+        // --- TASK-AGS-710: newly wired native arms ------------------------
+
+        // xai's native-registry descriptor declares CompatKind::Native, but
+        // its wire protocol is OpenAI-compatible (https://api.x.ai/v1).
+        // Route through OpenAiCompatProvider so the native-registry entry
+        // drives behavior via the compat adapter.
+        "xai" => Ok(Arc::new(OpenAiCompatProvider::new(
+            descriptor, http, api_key,
+        ))),
+
+        // `local` is not currently in NATIVE_REGISTRY (the archon-cli
+        // adapter at src/runtime/llm.rs handles the `local` case directly
+        // against the nested archon_core::config::LlmLocalConfig shape),
+        // so this arm is defensive dead code protecting against future
+        // registry additions. Honors cfg.base_url / cfg.model overrides
+        // when the entry does get registered.
+        "local" => {
+            let base_url = cfg
+                .base_url
+                .as_ref()
+                .map(|u| u.to_string())
+                .unwrap_or_else(|| descriptor.base_url.to_string());
+            let model = cfg
+                .model
+                .clone()
+                .unwrap_or_else(|| descriptor.default_model.clone());
+            Ok(Arc::new(LocalProvider::new(base_url, model, 300, true)))
         }
+
+        // --- TASK-AGS-710: explicit architectural errors
+        //
+        // These natives cannot be constructed from the flat
+        // archon_llm::LlmConfig because their constructors require shapes
+        // the flat config cannot express. Callers that need them must go
+        // through the archon-cli adapter (src/runtime/llm.rs) which reads
+        // the nested archon_core::config::LlmConfig.
+        "anthropic" => Err(ProviderError::InvalidResponse {
+            name: descriptor.display_name.clone(),
+            detail: "native anthropic requires AnthropicClient (auth + \
+                     identity) not expressible in the flat \
+                     archon_llm::LlmConfig; construct directly via \
+                     archon_llm::providers::AnthropicProvider::new or \
+                     through the archon-cli runtime/llm.rs wrapper"
+                .to_string(),
+        }),
+
+        "bedrock" => Err(ProviderError::InvalidResponse {
+            name: descriptor.display_name.clone(),
+            detail: "native bedrock requires region + model_id from nested \
+                     archon_core::config::LlmBedrockConfig; not expressible \
+                     in the flat archon_llm::LlmConfig — use the archon-cli \
+                     runtime/llm.rs wrapper"
+                .to_string(),
+        }),
+
+        "vertex" => Err(ProviderError::InvalidResponse {
+            name: descriptor.display_name.clone(),
+            detail: "native vertex requires project_id, region, \
+                     credentials_file from nested \
+                     archon_core::config::LlmVertexConfig; not expressible \
+                     in the flat archon_llm::LlmConfig — use the archon-cli \
+                     runtime/llm.rs wrapper"
+                .to_string(),
+        }),
+
+        "gemini" => Err(ProviderError::InvalidResponse {
+            name: descriptor.display_name.clone(),
+            detail: "native gemini (Google Generative Language API with \
+                     x-goog-api-key auth) has no concrete provider impl in \
+                     this crate; use Vertex AI via archon-cli runtime/llm.rs \
+                     wrapper or add a native gemini provider"
+                .to_string(),
+        }),
 
         // Any id the registry claims is Native but dispatch doesn't know
         // about is a registry/dispatch skew bug. Surface as
