@@ -1,5 +1,6 @@
 mod cli_args;
 mod command;
+mod runtime;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -14,7 +15,6 @@ use archon_consciousness::rules::RulesEngine;
 use archon_core::agent::{Agent, AgentConfig, AgentEvent, SessionStats};
 use archon_core::agents::AgentRegistry;
 use archon_core::cli_flags::resolve_flags;
-use archon_core::config::LlmConfig;
 use archon_core::config::default_config_path;
 use archon_core::config_layers::ConfigLayer;
 use archon_core::cost_alerts::{CostAlertAction, CostAlertState};
@@ -36,7 +36,6 @@ use archon_llm::identity::{
     IdentityMode, IdentityProvider, get_or_create_device_id, resolve_and_validate_betas,
     resolve_betas,
 };
-use archon_llm::provider::LlmProvider;
 use archon_mcp::lifecycle::McpServerManager;
 use archon_memory::{MemoryAccess, MemoryGraph, MemoryTrait};
 use archon_permissions::auto::{AutoModeConfig, AutoModeEvaluator};
@@ -44,6 +43,7 @@ use archon_tui::app::{TuiEvent, run_tui};
 use tokio_util::sync::CancellationToken;
 
 use cli_args::{Cli, Commands};
+use crate::runtime::llm::build_llm_provider;
 
 /// Parse `--setting-sources` names into [`ConfigLayer`] variants, warning on
 /// unrecognised values.
@@ -4543,80 +4543,6 @@ async fn run_interactive_session(
 // ---------------------------------------------------------------------------
 // CLI-220: Tool filtering helper
 // ---------------------------------------------------------------------------
-
-/// Build the active LLM provider from the `[llm]` config section.
-///
-/// Matches on `llm_cfg.provider` to construct the appropriate provider.
-/// Falls back to Anthropic when the selected provider is missing required
-/// credentials or is unrecognised.
-fn build_llm_provider(llm_cfg: &LlmConfig, api_client: AnthropicClient) -> Arc<dyn LlmProvider> {
-    use archon_llm::providers::{
-        AnthropicProvider, BedrockProvider, LocalProvider, OpenAiProvider, VertexProvider,
-    };
-
-    match llm_cfg.provider.as_str() {
-        "openai" => {
-            let key = llm_cfg.openai.api_key.clone().unwrap_or_default();
-            let resolved = OpenAiProvider::resolve_api_key(&key);
-            if resolved.is_empty() {
-                tracing::warn!("OpenAI selected but no API key found; falling back to Anthropic");
-                return Arc::new(AnthropicProvider::new(api_client));
-            }
-            Arc::new(OpenAiProvider::new(
-                key,
-                llm_cfg.openai.base_url.clone(),
-                llm_cfg.openai.model.clone(),
-            ))
-        }
-        "bedrock" => {
-            if llm_cfg.bedrock.region.is_empty() || llm_cfg.bedrock.model_id.is_empty() {
-                tracing::warn!(
-                    "Bedrock selected but region/model_id missing; falling back to Anthropic"
-                );
-                return Arc::new(AnthropicProvider::new(api_client));
-            }
-            Arc::new(BedrockProvider::new(
-                llm_cfg.bedrock.region.clone(),
-                llm_cfg.bedrock.model_id.clone(),
-            ))
-        }
-        "vertex" => {
-            let project_id = llm_cfg.vertex.project_id.as_deref().unwrap_or("");
-            if project_id.is_empty() {
-                tracing::warn!("Vertex selected but project_id missing; falling back to Anthropic");
-                return Arc::new(AnthropicProvider::new(api_client));
-            }
-            let publisher = if llm_cfg.vertex.model.contains("claude") {
-                "anthropic"
-            } else {
-                "google"
-            };
-            Arc::new(VertexProvider::new(
-                project_id.to_string(),
-                llm_cfg.vertex.region.clone(),
-                llm_cfg.vertex.model.clone(),
-                publisher.to_string(),
-                llm_cfg.vertex.credentials_file.clone(),
-            ))
-        }
-        "local" => Arc::new(LocalProvider::new(
-            llm_cfg.local.base_url.clone(),
-            llm_cfg.local.model.clone(),
-            llm_cfg.local.timeout_secs,
-            llm_cfg.local.pull_if_missing,
-        )),
-        _ => {
-            // Default / "anthropic" / unknown → Anthropic
-            if llm_cfg.provider != "anthropic" {
-                tracing::warn!(
-                    "Unknown LLM provider '{}'; falling back to Anthropic",
-                    llm_cfg.provider
-                );
-            }
-            Arc::new(AnthropicProvider::new(api_client))
-        }
-    }
-}
 
 /// Apply `--tools` (whitelist) and `--disallowed-tools` (blacklist) from
 /// resolved CLI flags to the tool registry.
