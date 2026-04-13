@@ -398,7 +398,7 @@ dependencies = [
  "chrono",
  "clap",
  "crc32fast",
- "dashmap",
+ "dashmap 6.1.0",
  "dirs",
  "futures-util",
  "globset",
@@ -583,7 +583,7 @@ dependencies = [
  "cel-interpreter",
  "chrono",
  "cozo-ce",
- "dashmap",
+ "dashmap 6.1.0",
  "futures-util",
  "glob",
  "hex",
@@ -686,7 +686,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "cron",
- "dashmap",
+ "dashmap 6.1.0",
  "dirs",
  "git2",
  "glob",
@@ -745,6 +745,7 @@ name = "archon-tui-test-support"
 version = "0.1.4"
 dependencies = [
  "criterion",
+ "dashmap 5.5.3",
  "futures-util",
  "hdrhistogram",
  "insta",
@@ -2369,6 +2370,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06d2e3287df1c007e74221c49ca10a95d557349e54b3a75dc2fb14712c751f04"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "dashmap"
+version = "5.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "978747c1d849a7d2ee5e8adc0159961c48fb7e5db2f06af6723b80123bb53856"
+dependencies = [
+ "cfg-if",
+ "hashbrown 0.14.5",
+ "lock_api",
+ "once_cell",
+ "parking_lot_core",
 ]
 
 [[package]]

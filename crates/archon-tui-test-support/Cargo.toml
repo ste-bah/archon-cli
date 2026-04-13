@@ -13,6 +13,7 @@ tracing = "0.1"
 regex-lite = "0.1"
 insta = { version = "1", features = ["yaml"] }
 hdrhistogram = "7"
+dashmap = "5"
 
 [dev-dependencies]
 insta = { version = "1", features = ["yaml"] }
