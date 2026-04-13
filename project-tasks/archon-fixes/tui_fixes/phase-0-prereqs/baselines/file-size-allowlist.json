@@ -1,0 +1,47 @@
+{
+  "max_lines_default": 500,
+  "allowlist": [
+    {
+      "path": "src/main.rs",
+      "current_lines": 6158,
+      "target_phase": "phase-3",
+      "target_lines": 500
+    },
+    {
+      "path": "crates/archon-tui/src/app.rs",
+      "current_lines": 1772,
+      "target_phase": "phase-3",
+      "target_lines": 500
+    },
+    {
+      "path": "crates/archon-tui/src/vim.rs",
+      "current_lines": 1008,
+      "target_phase": "phase-3",
+      "target_lines": 500
+    },
+    {
+      "path": "crates/archon-tui/src/output.rs",
+      "current_lines": 634,
+      "target_phase": "phase-3",
+      "target_lines": 500
+    },
+    {
+      "path": "crates/archon-tui/src/theme.rs",
+      "current_lines": 624,
+      "target_phase": "phase-3",
+      "target_lines": 500
+    },
+    {
+      "path": "src/cli_args.rs",
+      "current_lines": 561,
+      "target_phase": "phase-3",
+      "target_lines": 500
+    },
+    {
+      "path": "crates/archon-tui/src/markdown.rs",
+      "current_lines": 533,
+      "target_phase": "phase-3",
+      "target_lines": 500
+    }
+  ]
+}
