@@ -25,6 +25,11 @@ pub mod registry;
 // registry (TASK-AGS-702) and credential wrapper (TASK-AGS-701).
 pub mod openai_compat;
 
+// TASK-AGS-704: native registry (9 descriptors) + stub impls for the 4
+// gap-filler natives (azure, cohere, copilot, minimax).
+pub mod native_registry;
+pub mod native_gap;
+
 pub use anthropic::AnthropicProvider;
 pub use bedrock::BedrockProvider;
 pub use local::LocalProvider;
@@ -39,3 +44,5 @@ pub use quirks::ProviderQuirks;
 pub use registry::{
     count as count_compat, get as get_compat, list_compat, OPENAI_COMPAT_REGISTRY,
 };
+pub use native_gap::{AzureProvider, CohereProvider, CopilotProvider, MinimaxProvider};
+pub use native_registry::{count_native, get_native, list_native, NATIVE_REGISTRY};
