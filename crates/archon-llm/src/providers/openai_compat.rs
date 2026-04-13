@@ -25,7 +25,8 @@ use crate::streaming::StreamEvent;
 use crate::types::Usage;
 
 use super::descriptor::{AuthFlavor, ProviderDescriptor};
-use super::quirks::{ProviderQuirks, ToolCallFormat};
+use super::quirks::{ProviderQuirks, StreamDelimiter, ToolCallFormat};
+use super::stream_decode::{decode_ndjson_line, decode_sse_line, FrameOutcome};
 
 /// OpenAI-compatible provider driven by a static `ProviderDescriptor`.
 ///
@@ -387,13 +388,147 @@ impl LlmProvider for OpenAiCompatProvider {
         Self::parse_chat_response(json)
     }
 
+    /// TASK-AGS-707: streaming chat for OpenAI-compatible providers.
+    ///
+    /// Feature-gated on `descriptor.supports.streaming`. Delimiter dispatch
+    /// uses `descriptor.quirks.stream_delimiter` — SSE vs NDJSON — so there
+    /// is never a `match provider_id` inside the stream body (REQ-FOR-D6:
+    /// adding a provider is a data-only change).
+    ///
+    /// Spec deviation (documented in `tests/compat_stream_sse.rs`): the
+    /// receiver carries `StreamEvent`, not `Result<StreamEvent, _>`, so
+    /// mid-stream network errors are surfaced as `StreamEvent::Error`
+    /// rather than as an `Err` on the channel. This matches the existing
+    /// `OpenAiProvider::do_stream` pattern and the Anthropic-style
+    /// `StreamEvent` enum the rest of the codebase consumes.
     async fn stream(
         &self,
-        _request: LlmRequest,
+        request: LlmRequest,
     ) -> Result<Receiver<StreamEvent>, LlmError> {
-        Err(LlmError::Unsupported(
-            "streaming deferred to TASK-AGS-707".into(),
-        ))
+        // Feature gate FIRST — never touch the network if streaming is off.
+        // Validation Criterion 6.
+        if !self.descriptor.supports.streaming {
+            return Err(LlmError::Unsupported(format!(
+                "{}: streaming not supported by this provider",
+                self.name()
+            )));
+        }
+
+        // Build request body and inject `stream: true`. `to_openai_wire`
+        // always returns a JSON object, so `as_object_mut` never fails in
+        // practice; we guard defensively.
+        let url = self.build_chat_url();
+        let mut body = self.to_openai_wire(&request);
+        if let Some(obj) = body.as_object_mut() {
+            obj.insert("stream".into(), Value::Bool(true));
+        }
+
+        let rb = self.http.post(&url).json(&body);
+        let rb = self.apply_auth(rb);
+        let resp = rb
+            .send()
+            .await
+            .map_err(|e| LlmError::Http(e.to_string()))?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            let text = resp.text().await.unwrap_or_default();
+            return Err(Self::map_http_error(status, text, self.name()));
+        }
+
+        let (tx, rx) = tokio::sync::mpsc::channel::<StreamEvent>(256);
+        let delimiter = self.descriptor.quirks.stream_delimiter;
+        let mut byte_stream = resp.bytes_stream();
+
+        tokio::spawn(async move {
+            use futures_util::StreamExt;
+
+            let mut buffer: Vec<u8> = Vec::new();
+
+            while let Some(chunk_result) = byte_stream.next().await {
+                let chunk_bytes = match chunk_result {
+                    Ok(b) => b,
+                    Err(e) => {
+                        // Mid-stream network error: surface as
+                        // StreamEvent::Error and close the channel.
+                        let _ = tx
+                            .send(StreamEvent::Error {
+                                error_type: "http_error".into(),
+                                message: e.to_string(),
+                            })
+                            .await;
+                        return;
+                    }
+                };
+                buffer.extend_from_slice(&chunk_bytes);
+
+                // Drain complete newline-terminated lines from the buffer.
+                // Both SSE (`\n\n` between events) and NDJSON (`\n` between
+                // objects) terminate each payload line with a single `\n`,
+                // so a single `find('\n')` loop serves both delimiters.
+                while let Some(nl_pos) = buffer.iter().position(|b| *b == b'\n') {
+                    let mut line: Vec<u8> = buffer.drain(..=nl_pos).collect();
+                    // Drop the trailing `\n` (and any `\r` before it) so
+                    // the decoder sees just the payload.
+                    line.pop(); // \n
+                    if line.last() == Some(&b'\r') {
+                        line.pop();
+                    }
+
+                    let outcome = match delimiter {
+                        StreamDelimiter::Sse => decode_sse_line(&line),
+                        StreamDelimiter::MistralNdjson => decode_ndjson_line(&line),
+                    };
+
+                    match outcome {
+                        None => continue,
+                        Some(FrameOutcome::Events(events)) => {
+                            for ev in events {
+                                if tx.send(ev).await.is_err() {
+                                    return;
+                                }
+                            }
+                        }
+                        Some(FrameOutcome::End) => {
+                            let _ = tx.send(StreamEvent::MessageStop).await;
+                            return;
+                        }
+                    }
+                }
+            }
+
+            // EOF reached. Try to decode any trailing partial (useful for
+            // NDJSON streams that don't terminate the final line, and for
+            // SSE streams that close mid-event).
+            if !buffer.is_empty() {
+                let outcome = match delimiter {
+                    StreamDelimiter::Sse => decode_sse_line(&buffer),
+                    StreamDelimiter::MistralNdjson => decode_ndjson_line(&buffer),
+                };
+                match outcome {
+                    Some(FrameOutcome::Events(events)) => {
+                        for ev in events {
+                            if tx.send(ev).await.is_err() {
+                                return;
+                            }
+                        }
+                    }
+                    Some(FrameOutcome::End) => {
+                        let _ = tx.send(StreamEvent::MessageStop).await;
+                        return;
+                    }
+                    None => {}
+                }
+            }
+
+            // NDJSON has no [DONE] sentinel; SSE streams that close
+            // cleanly without [DONE] also reach here. In both cases we
+            // emit a final MessageStop so the consumer knows the stream
+            // has completed.
+            let _ = tx.send(StreamEvent::MessageStop).await;
+        });
+
+        Ok(rx)
     }
 
     fn supports_feature(&self, feature: ProviderFeature) -> bool {

@@ -286,19 +286,30 @@ async fn models_exposes_descriptor_default_model() {
 }
 
 #[tokio::test]
-async fn stream_returns_placeholder_error_pending_task_707() {
+async fn stream_performs_real_network_call_post_task_707() {
+    // Post-TASK-AGS-707: the stream() placeholder (`LlmError::Unsupported("…deferred…")`)
+    // is gone. `stream()` now issues a real POST; on a wiremock server with
+    // no mount the request surfaces as `LlmError::Http` carrying a 404
+    // status. That proves the method is wired end-to-end and no longer
+    // short-circuits with the TASK-AGS-707 placeholder. Positive-path
+    // streaming (3 frames + [DONE], NDJSON, unsupported short-circuit,
+    // 401 mapping, truncated-stream close) is covered in
+    // `tests/compat_stream_sse.rs` and `tests/compat_stream_ndjson.rs`.
     let server = MockServer::start().await;
     let descriptor = make_descriptor(&server.uri(), AuthFlavor::BearerApiKey);
     let provider = make_provider(descriptor, "k");
     let err = provider
         .stream(simple_user_request("test-default-model"))
         .await
-        .expect_err("stream() must return a placeholder error until TASK-AGS-707");
-    // Any LlmError variant is acceptable as long as it is NOT a panic and
-    // the message mentions streaming or task 707.
+        .expect_err("stream() against unmounted wiremock must Err on the 404");
     let s = format!("{err}");
+    let lower = s.to_lowercase();
     assert!(
-        s.to_lowercase().contains("stream") || s.contains("707"),
-        "placeholder error must reference streaming/707; got: {s}"
+        !lower.contains("deferred") && !s.contains("707"),
+        "post-707 error must NOT reference the TASK-AGS-707 placeholder; got: {s}"
+    );
+    assert!(
+        lower.contains("404") || lower.contains("http"),
+        "expected an LlmError::Http referencing 404; got: {s}"
     );
 }

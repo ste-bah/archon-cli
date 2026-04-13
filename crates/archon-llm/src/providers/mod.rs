@@ -33,6 +33,9 @@ pub mod native_gap;
 // TASK-AGS-706: runtime dispatcher routing LlmConfig -> concrete provider.
 pub mod builder;
 
+// TASK-AGS-707: SSE + NDJSON line decoders used by `OpenAiCompatProvider::stream`.
+pub(crate) mod stream_decode;
+
 pub use anthropic::AnthropicProvider;
 pub use bedrock::BedrockProvider;
 pub use local::LocalProvider;
