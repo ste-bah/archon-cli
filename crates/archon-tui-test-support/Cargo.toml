@@ -9,3 +9,8 @@ tokio = { version = "1", features = ["test-util", "rt-multi-thread", "macros", "
 ratatui = { workspace = true }
 futures-util = "0.3"
 tracing = "0.1"
+regex-lite = "0.1"
+insta = { version = "1", features = ["yaml"] }
+
+[dev-dependencies]
+insta = { version = "1", features = ["yaml"] }
