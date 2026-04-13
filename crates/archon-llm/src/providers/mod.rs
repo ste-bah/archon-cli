@@ -52,4 +52,4 @@ pub use registry::{
 };
 pub use native_gap::{AzureProvider, CohereProvider, CopilotProvider, MinimaxProvider};
 pub use native_registry::{count_native, get_native, list_native, NATIVE_REGISTRY};
-pub use builder::build_llm_provider;
+pub use builder::{build_llm_provider, build_llm_provider_with_policy};

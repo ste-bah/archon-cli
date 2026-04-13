@@ -1,3 +1,5 @@
+// TASK-AGS-709: ActiveProvider — ArcSwap-backed live-swappable handle.
+pub mod active;
 pub mod anthropic;
 pub mod auth;
 // TASK-AGS-706: LlmConfig + resolve_descriptor — feeds build_llm_provider.
@@ -33,3 +35,7 @@ pub use secrets::ApiKey;
 // TASK-AGS-708: surface RetryProvider/RetryPolicy at the crate root so
 // `build_llm_provider` consumers don't need to reach into `retry::`.
 pub use retry::{classify as classify_retry, RetryDecision, RetryPolicy, RetryProvider};
+
+// TASK-AGS-709: surface ActiveProvider so all new call sites (and
+// TASK-AGS-710's archon-cli main.rs rework) can `use archon_llm::ActiveProvider`.
+pub use active::ActiveProvider;

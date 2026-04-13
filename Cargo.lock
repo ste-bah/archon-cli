@@ -475,6 +475,7 @@ name = "archon-llm"
 version = "0.1.4"
 dependencies = [
  "anyhow",
+ "arc-swap",
  "async-trait",
  "aws-credential-types",
  "aws-sigv4",
