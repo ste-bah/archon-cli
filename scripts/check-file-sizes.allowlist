@@ -107,3 +107,34 @@ crates/archon-tui/src/markdown.rs
 crates/archon-tui/src/output.rs
 crates/archon-tui/src/theme.rs
 crates/archon-tui/src/vim.rs
+
+# ============================================================================
+# Added during TASK-AGS-627 (2026-04-13): carryover debt from phases 1-5.
+# ============================================================================
+# These 11 files grew past 500 lines between the 2026-04-11 phase-0 baseline
+# and TASK-AGS-627 execution. None are from phase-6 TUI-MOD work (phase 6
+# strictly refactored crates/archon-tui/src/views/ and src/command/).
+#
+# Steven approved option A on 2026-04-13: extend the allowlist to match
+# current reality so TASK-627's CI wiring can ship green, and flag these
+# 11 entries in TASK-AGS-629 phase-6 REPORT.md as "technical debt to
+# address in a future phase". The guard's forward-looking purpose is
+# preserved — NEW >500-line files (post-2026-04-13) will still fail CI.
+# ============================================================================
+
+# --- archon-core (carryover) ---
+crates/archon-core/src/agents/catalog.rs
+crates/archon-core/src/patterns/circuit_breaker.rs
+crates/archon-core/src/patterns/composite.rs
+crates/archon-core/src/patterns/plugin.rs
+crates/archon-core/src/subagent_executor.rs
+crates/archon-core/tests/task_cancel.rs
+
+# --- archon-pipeline (carryover) ---
+crates/archon-pipeline/src/executor.rs
+crates/archon-pipeline/src/store.rs
+crates/archon-pipeline/tests/executor_retry.rs
+crates/archon-pipeline/tests/executor_rollback.rs
+
+# --- root bin (carryover) ---
+src/cli_args.rs

@@ -24,5 +24,7 @@ pub mod terminal_panel;
 
 pub mod split_pane;
 
+pub mod views;
+
 // Stubs for later phases
 pub mod scroll {}

@@ -1,0 +1,7 @@
+---
+source: crates/archon-tui/tests/tui_snapshots.rs
+expression: lines
+---
+[
+    Line::from(Span::from("No changes detected in src/lib.rs").green().bold()),
+]

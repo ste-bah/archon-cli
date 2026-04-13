@@ -1,0 +1,9 @@
+---
+source: crates/archon-tui/tests/tui_snapshots.rs
+expression: lines
+---
+[
+    Line::from(Span::from("Title").cyan().bold()),
+    Line::default(),
+    Line::from("body"),
+]

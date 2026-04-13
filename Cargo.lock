@@ -719,6 +719,7 @@ dependencies = [
  "crossterm",
  "dirs",
  "hound",
+ "insta",
  "libloading",
  "pulldown-cmark",
  "ratatui",

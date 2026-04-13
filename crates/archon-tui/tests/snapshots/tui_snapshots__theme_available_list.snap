@@ -1,0 +1,28 @@
+---
+source: crates/archon-tui/tests/tui_snapshots.rs
+expression: list
+---
+[
+    "intj",
+    "intp",
+    "entj",
+    "entp",
+    "infj",
+    "infp",
+    "enfj",
+    "enfp",
+    "istj",
+    "isfj",
+    "estj",
+    "esfj",
+    "istp",
+    "isfp",
+    "estp",
+    "esfp",
+    "dark",
+    "light",
+    "ocean",
+    "fire",
+    "forest",
+    "mono",
+]

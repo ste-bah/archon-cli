@@ -1,0 +1,23 @@
+---
+source: crates/archon-tui/tests/tui_snapshots.rs
+expression: lines
+---
+[
+    Line::from(Span::from("--- a/main.rs").blue().bold()),
+    Line::from(Span::from("+++ b/main.rs").blue().bold()),
+    Line::from(Span::from("@@ -1,3 +1,4 @@").cyan().bold()),
+    Line::from(Span::from(" fn main() {").dark_gray()),
+    Line::from_iter([
+        Span::from("-").red(),
+        Span::from("    println!(\"old\");"),
+    ]),
+    Line::from_iter([
+        Span::from("+").green(),
+        Span::from("    println!(\"new\");"),
+    ]),
+    Line::from_iter([
+        Span::from("+").green(),
+        Span::from("    println!(\"extra\");"),
+    ]),
+    Line::from(Span::from(" }").dark_gray()),
+]

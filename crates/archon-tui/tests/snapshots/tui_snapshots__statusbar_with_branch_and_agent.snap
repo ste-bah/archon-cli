@@ -1,0 +1,5 @@
+---
+source: crates/archon-tui/tests/tui_snapshots.rs
+expression: bar.format()
+---
+[code-reviewer] | claude-opus-4-6 | spoof | ask | $1.23 | main

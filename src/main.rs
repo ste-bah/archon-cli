@@ -1,4 +1,5 @@
 mod cli_args;
+mod command;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -3611,6 +3612,19 @@ async fn run_interactive_session(
         Err(_) => "none".to_string(),
     };
 
+    // TASK-AGS-622: construct the shared command registry exactly once at App level.
+    let registry: std::sync::Arc<crate::command::registry::Registry> =
+        std::sync::Arc::new(crate::command::registry::default_registry());
+
+    // TASK-AGS-623: construct the dispatcher over the shared registry.
+    // PATH A hybrid — dispatcher runs as a gate at the top of
+    // `handle_slash_command` while the legacy inline match continues to
+    // execute the actual command bodies.
+    let dispatcher: std::sync::Arc<crate::command::dispatcher::Dispatcher> =
+        std::sync::Arc::new(crate::command::dispatcher::Dispatcher::new(
+            std::sync::Arc::clone(&registry),
+        ));
+
     let mut cmd_ctx = SlashCommandContext {
         fast_mode_shared: Arc::clone(&fast_mode_shared),
         effort_level_shared: Arc::clone(&effort_level_shared),
@@ -3654,6 +3668,8 @@ async fn run_interactive_session(
             || cli.dangerously_skip_permissions,
         denial_log: Arc::clone(&agent.denial_log),
         agent_registry: Arc::clone(&agent_registry_for_skills),
+        registry: std::sync::Arc::clone(&registry),
+        dispatcher: std::sync::Arc::clone(&dispatcher),
     };
 
     // Spawn agent input processor with slash command dispatch
@@ -4658,6 +4674,17 @@ struct SlashCommandContext {
     denial_log: Arc<tokio::sync::Mutex<archon_permissions::denial_log::DenialLog>>,
     /// Agent registry for agent management skills.
     agent_registry: Arc<std::sync::RwLock<AgentRegistry>>,
+    /// TASK-AGS-622: Shared command registry (constructed once at App level).
+    /// Dispatch via `Registry::get` is wired in TASK-AGS-623; this task only
+    /// holds the Arc.
+    #[allow(dead_code)]
+    registry: std::sync::Arc<crate::command::registry::Registry>,
+    /// TASK-AGS-623: Shared dispatcher (parser → registry → handler).
+    /// Installed as a parallel gate at the top of `handle_slash_command`
+    /// (PATH A hybrid) while the legacy inline match continues to run
+    /// the actual command bodies.
+    #[allow(dead_code)]
+    dispatcher: std::sync::Arc<crate::command::dispatcher::Dispatcher>,
 }
 
 /// Handle slash commands. Returns `true` if the command was recognized and handled.
@@ -4668,6 +4695,24 @@ async fn handle_slash_command(
     tui_tx: &tokio::sync::mpsc::Sender<TuiEvent>,
     ctx: &mut SlashCommandContext,
 ) -> bool {
+    // TASK-AGS-623 dispatcher gate (PATH A hybrid).
+    //
+    // Every slash input now flows through exactly one `Dispatcher::dispatch`
+    // call: parser → registry lookup → handler (currently no-op stubs from
+    // TASK-AGS-622) or `TuiEvent::Error("Unknown command: /{name}")` on miss.
+    // Recognized commands fall through to the legacy 43-arm match below,
+    // which continues to perform the actual command bodies until TASK-AGS-624
+    // migrates those bodies into the registry's stub `execute` methods.
+    // Non-slash / empty / bare-`/` inputs short-circuit with `false` — the
+    // same behaviour the TASK-AGS-621 parser gate provided.
+    let mut __cmd_ctx = crate::command::registry::CommandContext {
+        tui_tx: tui_tx.clone(),
+    };
+    let _ = ctx.dispatcher.dispatch(&mut __cmd_ctx, input);
+    if !ctx.dispatcher.recognizes(input) {
+        return false;
+    }
+
     match input {
         "/fast" => {
             let new_state = fast_mode.toggle();

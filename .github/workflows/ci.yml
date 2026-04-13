@@ -75,6 +75,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Run architecture lint scaffold
         run: bash scripts/lint/arch-lint.sh
+      - name: check-file-sizes (NFR-FOR-D4-MAINTAINABILITY)
+        run: bash scripts/check-file-sizes.sh
 
   build-release-smoke:
     name: release build smoke

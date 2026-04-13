@@ -24,6 +24,9 @@ serde_json.workspace = true
 archon-core = { path = "../archon-core" }
 cpal = { workspace = true, optional = true }
 
+[dev-dependencies]
+insta = { workspace = true }
+
 [features]
 default = []
 terminal-panel = []

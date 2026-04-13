@@ -1,0 +1,5 @@
+---
+source: crates/archon-tui/tests/tui_snapshots.rs
+expression: state.collapsed_line()
+---
+▶ Tool: read_file -- error ENOENT
