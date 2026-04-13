@@ -749,6 +749,7 @@ dependencies = [
  "ratatui",
  "regex-lite",
  "tokio",
+ "tokio-util",
  "tracing",
 ]
 

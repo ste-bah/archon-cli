@@ -6,6 +6,7 @@ publish = false
 
 [dependencies]
 tokio = { version = "1", features = ["test-util", "rt-multi-thread", "macros", "sync", "time"] }
+tokio-util = { version = "0.7", features = ["rt"] }
 ratatui = { workspace = true }
 futures-util = "0.3"
 tracing = "0.1"
