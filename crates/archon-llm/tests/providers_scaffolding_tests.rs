@@ -111,11 +111,12 @@ fn compat_kind_variants_exist() {
 }
 
 // ---------------------------------------------------------------------------
-// ProviderDescriptor: exhaustive 9-field construction
+// ProviderDescriptor: exhaustive field construction
+// (TASK-AGS-700: 9 fields; TASK-AGS-705 added `quirks` -> 10 fields)
 // ---------------------------------------------------------------------------
 
 #[test]
-fn provider_descriptor_has_exactly_nine_fields() {
+fn provider_descriptor_exhaustive_construction() {
     let mut headers = HashMap::new();
     headers.insert("x-vendor".to_string(), "groq".to_string());
 
@@ -132,6 +133,7 @@ fn provider_descriptor_has_exactly_nine_fields() {
         default_model: "llama-3.3-70b-versatile".to_string(),
         supports: ProviderFeatures::chat_only(),
         headers,
+        quirks: ProviderQuirks::DEFAULT,
     };
 
     assert_eq!(d.id, "groq");
@@ -157,20 +159,26 @@ fn provider_descriptor_is_clone() {
         default_model: "m".into(),
         supports: ProviderFeatures::none(),
         headers: HashMap::new(),
+        quirks: ProviderQuirks::DEFAULT,
     };
     let _cloned = d.clone(); // proves Clone is derived
 }
 
 // ---------------------------------------------------------------------------
-// ProviderQuirks: default placeholder
+// ProviderQuirks: DEFAULT baseline matches "no deviation" semantics
+// (TASK-AGS-705 replaced Option/HashMap placeholders with enums +
+// &'static [&'static str])
 // ---------------------------------------------------------------------------
 
 #[test]
-fn provider_quirks_default_is_empty() {
+fn provider_quirks_default_is_baseline() {
+    use archon_llm::providers::{StreamDelimiter, ToolCallFormat};
     let q = ProviderQuirks::default();
-    assert!(q.tool_call_format.is_none());
-    assert!(q.stream_delimiter.is_none());
-    assert!(q.response_field_overrides.is_empty());
+    assert_eq!(q.tool_call_format, ToolCallFormat::Standard);
+    assert_eq!(q.stream_delimiter, StreamDelimiter::Sse);
+    assert!(q.ignore_response_fields.is_empty());
+    // DEFAULT const matches Default::default()
+    assert_eq!(q, ProviderQuirks::DEFAULT);
 }
 
 // ---------------------------------------------------------------------------
@@ -194,6 +202,7 @@ fn descriptor_has_no_secret_field() {
         default_model: "m".into(),
         supports: ProviderFeatures::none(),
         headers: HashMap::new(),
+        quirks: ProviderQuirks::DEFAULT,
     };
     // Prove the descriptor only *names* the env var, not the value.
     assert_eq!(d.env_key_var, "X_API_KEY");

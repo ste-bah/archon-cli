@@ -15,6 +15,7 @@ use url::Url;
 
 use super::descriptor::{AuthFlavor, CompatKind, ProviderDescriptor};
 use super::features::ProviderFeatures;
+use super::quirks::ProviderQuirks;
 
 fn parse_url(s: &str) -> Url {
     Url::parse(s).expect("TASK-AGS-704: hardcoded native base_url must parse")
@@ -42,6 +43,7 @@ pub static NATIVE_REGISTRY: Lazy<HashMap<&'static str, ProviderDescriptor>> = La
                 json_mode: true,
             },
             headers: HashMap::new(),
+            quirks: ProviderQuirks::DEFAULT,
         },
     );
 
@@ -64,6 +66,7 @@ pub static NATIVE_REGISTRY: Lazy<HashMap<&'static str, ProviderDescriptor>> = La
                 json_mode: false,
             },
             headers: HashMap::new(),
+            quirks: ProviderQuirks::DEFAULT,
         },
     );
 
@@ -88,6 +91,7 @@ pub static NATIVE_REGISTRY: Lazy<HashMap<&'static str, ProviderDescriptor>> = La
                 json_mode: true,
             },
             headers: HashMap::new(),
+            quirks: ProviderQuirks::DEFAULT,
         },
     );
 
@@ -110,6 +114,7 @@ pub static NATIVE_REGISTRY: Lazy<HashMap<&'static str, ProviderDescriptor>> = La
                 json_mode: true,
             },
             headers: HashMap::new(),
+            quirks: ProviderQuirks::DEFAULT,
         },
     );
 
@@ -132,6 +137,7 @@ pub static NATIVE_REGISTRY: Lazy<HashMap<&'static str, ProviderDescriptor>> = La
                 json_mode: false,
             },
             headers: HashMap::new(),
+            quirks: ProviderQuirks::DEFAULT,
         },
     );
 
@@ -151,6 +157,7 @@ pub static NATIVE_REGISTRY: Lazy<HashMap<&'static str, ProviderDescriptor>> = La
             default_model: "gpt-4o".into(),
             supports: ProviderFeatures::chat_only(),
             headers: HashMap::new(),
+            quirks: ProviderQuirks::DEFAULT,
         },
     );
 
@@ -167,6 +174,7 @@ pub static NATIVE_REGISTRY: Lazy<HashMap<&'static str, ProviderDescriptor>> = La
             default_model: "command-r-plus".into(),
             supports: ProviderFeatures::chat_only(),
             headers: HashMap::new(),
+            quirks: ProviderQuirks::DEFAULT,
         },
     );
 
@@ -183,6 +191,7 @@ pub static NATIVE_REGISTRY: Lazy<HashMap<&'static str, ProviderDescriptor>> = La
             default_model: "gpt-4o".into(),
             supports: ProviderFeatures::chat_only(),
             headers: HashMap::new(),
+            quirks: ProviderQuirks::DEFAULT,
         },
     );
 
@@ -199,6 +208,7 @@ pub static NATIVE_REGISTRY: Lazy<HashMap<&'static str, ProviderDescriptor>> = La
             default_model: "abab6.5s-chat".into(),
             supports: ProviderFeatures::chat_only(),
             headers: HashMap::new(),
+            quirks: ProviderQuirks::DEFAULT,
         },
     );
 

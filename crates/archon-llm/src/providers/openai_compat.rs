@@ -25,6 +25,7 @@ use crate::streaming::StreamEvent;
 use crate::types::Usage;
 
 use super::descriptor::{AuthFlavor, ProviderDescriptor};
+use super::quirks::{ProviderQuirks, ToolCallFormat};
 
 /// OpenAI-compatible provider driven by a static `ProviderDescriptor`.
 ///
@@ -131,11 +132,28 @@ impl OpenAiCompatProvider {
             messages.push(m.clone());
         }
 
+        // TASK-AGS-705: tool_calls serialization branches on
+        // `descriptor.quirks.tool_call_format`. Request-side tool
+        // forwarding lands in a later slice; the enum is staged here
+        // so TASK-AGS-707/708 can consume it without touching request
+        // construction. Reading the field prevents dead-code warnings
+        // and proves the quirks dispatch path is wired.
+        let _tool_format: ToolCallFormat = self.descriptor.quirks.tool_call_format;
+
         json!({
             "model": model,
             "messages": messages,
             "max_tokens": req.max_tokens,
         })
+    }
+
+    /// TASK-AGS-705: delimiter bytes for the provider's streaming wire
+    /// format. Crate-visible so TASK-AGS-707 can drive its chunk parser
+    /// without knowing which provider it's talking to. Marked
+    /// `#[allow(dead_code)]` until TASK-AGS-707 consumes it.
+    #[allow(dead_code)]
+    pub(crate) fn delimiter_bytes(&self) -> &'static [u8] {
+        self.descriptor.quirks.delimiter_bytes()
     }
 
     // -----------------------------------------------------------------
@@ -165,6 +183,32 @@ impl OpenAiCompatProvider {
     // -----------------------------------------------------------------
     // Response parsing
     // -----------------------------------------------------------------
+
+    /// Apply `quirks.ignore_response_fields` to a response body in place.
+    /// Strips the named keys from the top-level object and from each
+    /// element of `choices` if present. Used for DeepSeek's `logprobs`
+    /// bag whose shape deviates from OpenAI's canonical form and whose
+    /// contents archon never consumes. Pure data transform — no
+    /// provider-id branching.
+    fn strip_ignored_fields(body: &mut Value, quirks: &ProviderQuirks) {
+        if quirks.ignore_response_fields.is_empty() {
+            return;
+        }
+        if let Some(obj) = body.as_object_mut() {
+            for field in quirks.ignore_response_fields {
+                obj.remove(*field);
+            }
+            if let Some(Value::Array(choices)) = obj.get_mut("choices") {
+                for choice in choices.iter_mut() {
+                    if let Some(choice_obj) = choice.as_object_mut() {
+                        for field in quirks.ignore_response_fields {
+                            choice_obj.remove(*field);
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     /// Parse an OpenAI `chat.completion` JSON body into an `LlmResponse`.
     fn parse_chat_response(body: Value) -> Result<LlmResponse, LlmError> {
@@ -333,10 +377,13 @@ impl LlmProvider for OpenAiCompatProvider {
             let text = resp.text().await.unwrap_or_default();
             return Err(Self::map_http_error(status, text, self.name()));
         }
-        let json: Value = resp
+        let mut json: Value = resp
             .json()
             .await
             .map_err(|e| LlmError::Serialize(format!("invalid JSON body: {e}")))?;
+        // TASK-AGS-705: strip quirk-ignored fields (e.g. DeepSeek
+        // `logprobs`) before the generic parser walks the body.
+        Self::strip_ignored_fields(&mut json, &self.descriptor.quirks);
         Self::parse_chat_response(json)
     }
 

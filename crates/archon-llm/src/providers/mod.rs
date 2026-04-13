@@ -40,7 +40,7 @@ pub use descriptor::{AuthFlavor, CompatKind, ProviderDescriptor};
 pub use error::ProviderError;
 pub use features::ProviderFeatures;
 pub use openai_compat::OpenAiCompatProvider;
-pub use quirks::ProviderQuirks;
+pub use quirks::{ProviderQuirks, StreamDelimiter, ToolCallFormat};
 pub use registry::{
     count as count_compat, get as get_compat, list_compat, OPENAI_COMPAT_REGISTRY,
 };

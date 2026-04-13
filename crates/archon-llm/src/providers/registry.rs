@@ -19,6 +19,7 @@ use url::Url;
 
 use super::descriptor::{AuthFlavor, CompatKind, ProviderDescriptor};
 use super::features::ProviderFeatures;
+use super::quirks::ProviderQuirks;
 
 fn parse_url(s: &str) -> Url {
     Url::parse(s).expect("TASK-AGS-702 registry url literal must parse")
@@ -45,6 +46,7 @@ pub static OPENAI_COMPAT_REGISTRY: Lazy<HashMap<&'static str, ProviderDescriptor
                 default_model: "llama3.2".into(),
                 supports: ProviderFeatures::chat_only(),
                 headers: HashMap::new(),
+                quirks: ProviderQuirks::DEFAULT,
             },
         );
 
@@ -60,6 +62,7 @@ pub static OPENAI_COMPAT_REGISTRY: Lazy<HashMap<&'static str, ProviderDescriptor
                 default_model: "local-model".into(),
                 supports: ProviderFeatures::chat_only(),
                 headers: HashMap::new(),
+                quirks: ProviderQuirks::DEFAULT,
             },
         );
 
@@ -75,6 +78,7 @@ pub static OPENAI_COMPAT_REGISTRY: Lazy<HashMap<&'static str, ProviderDescriptor
                 default_model: "local-model".into(),
                 supports: ProviderFeatures::chat_only(),
                 headers: HashMap::new(),
+                quirks: ProviderQuirks::DEFAULT,
             },
         );
 
@@ -92,6 +96,7 @@ pub static OPENAI_COMPAT_REGISTRY: Lazy<HashMap<&'static str, ProviderDescriptor
                 default_model: "deepseek-chat".into(),
                 supports: ProviderFeatures::chat_only(),
                 headers: HashMap::new(),
+                quirks: ProviderQuirks::DEEPSEEK,
             },
         );
 
@@ -107,6 +112,7 @@ pub static OPENAI_COMPAT_REGISTRY: Lazy<HashMap<&'static str, ProviderDescriptor
                 default_model: "llama-3.3-70b-versatile".into(),
                 supports: ProviderFeatures::chat_only(),
                 headers: HashMap::new(),
+                quirks: ProviderQuirks::GROQ,
             },
         );
 
@@ -122,6 +128,7 @@ pub static OPENAI_COMPAT_REGISTRY: Lazy<HashMap<&'static str, ProviderDescriptor
                 default_model: "grok-2".into(),
                 supports: ProviderFeatures::chat_only(),
                 headers: HashMap::new(),
+                quirks: ProviderQuirks::DEFAULT,
             },
         );
 
@@ -137,6 +144,7 @@ pub static OPENAI_COMPAT_REGISTRY: Lazy<HashMap<&'static str, ProviderDescriptor
                 default_model: "meta-llama/Llama-3.3-70B-Instruct".into(),
                 supports: ProviderFeatures::chat_only(),
                 headers: HashMap::new(),
+                quirks: ProviderQuirks::DEFAULT,
             },
         );
 
@@ -152,6 +160,7 @@ pub static OPENAI_COMPAT_REGISTRY: Lazy<HashMap<&'static str, ProviderDescriptor
                 default_model: "llama3.1-70b".into(),
                 supports: ProviderFeatures::chat_only(),
                 headers: HashMap::new(),
+                quirks: ProviderQuirks::DEFAULT,
             },
         );
 
@@ -167,6 +176,7 @@ pub static OPENAI_COMPAT_REGISTRY: Lazy<HashMap<&'static str, ProviderDescriptor
                 default_model: "meta-llama/Llama-3.3-70B-Instruct-Turbo".into(),
                 supports: ProviderFeatures::chat_only(),
                 headers: HashMap::new(),
+                quirks: ProviderQuirks::DEFAULT,
             },
         );
 
@@ -182,6 +192,7 @@ pub static OPENAI_COMPAT_REGISTRY: Lazy<HashMap<&'static str, ProviderDescriptor
                 default_model: "llama-3.1-sonar-large-128k-online".into(),
                 supports: ProviderFeatures::chat_only(),
                 headers: HashMap::new(),
+                quirks: ProviderQuirks::DEFAULT,
             },
         );
 
@@ -197,6 +208,7 @@ pub static OPENAI_COMPAT_REGISTRY: Lazy<HashMap<&'static str, ProviderDescriptor
                 default_model: "anthropic/claude-3.5-sonnet".into(),
                 supports: ProviderFeatures::chat_only(),
                 headers: HashMap::new(),
+                quirks: ProviderQuirks::DEFAULT,
             },
         );
 
@@ -212,6 +224,7 @@ pub static OPENAI_COMPAT_REGISTRY: Lazy<HashMap<&'static str, ProviderDescriptor
                 default_model: "mistral-large-latest".into(),
                 supports: ProviderFeatures::chat_only(),
                 headers: HashMap::new(),
+                quirks: ProviderQuirks::MISTRAL,
             },
         );
 
@@ -227,6 +240,7 @@ pub static OPENAI_COMPAT_REGISTRY: Lazy<HashMap<&'static str, ProviderDescriptor
                 default_model: "Meta-Llama-3.3-70B-Instruct".into(),
                 supports: ProviderFeatures::chat_only(),
                 headers: HashMap::new(),
+                quirks: ProviderQuirks::DEFAULT,
             },
         );
 
@@ -242,6 +256,7 @@ pub static OPENAI_COMPAT_REGISTRY: Lazy<HashMap<&'static str, ProviderDescriptor
                 default_model: "meta-llama/Llama-3.3-70B-Instruct".into(),
                 supports: ProviderFeatures::chat_only(),
                 headers: HashMap::new(),
+                quirks: ProviderQuirks::DEFAULT,
             },
         );
 
@@ -257,6 +272,7 @@ pub static OPENAI_COMPAT_REGISTRY: Lazy<HashMap<&'static str, ProviderDescriptor
                 default_model: "meta/llama-3.3-70b-instruct".into(),
                 supports: ProviderFeatures::chat_only(),
                 headers: HashMap::new(),
+                quirks: ProviderQuirks::DEFAULT,
             },
         );
 
@@ -272,6 +288,7 @@ pub static OPENAI_COMPAT_REGISTRY: Lazy<HashMap<&'static str, ProviderDescriptor
                 default_model: "deepseek-ai/DeepSeek-V3".into(),
                 supports: ProviderFeatures::chat_only(),
                 headers: HashMap::new(),
+                quirks: ProviderQuirks::DEFAULT,
             },
         );
 
@@ -287,6 +304,7 @@ pub static OPENAI_COMPAT_REGISTRY: Lazy<HashMap<&'static str, ProviderDescriptor
                 default_model: "moonshot-v1-8k".into(),
                 supports: ProviderFeatures::chat_only(),
                 headers: HashMap::new(),
+                quirks: ProviderQuirks::DEFAULT,
             },
         );
 
@@ -302,6 +320,7 @@ pub static OPENAI_COMPAT_REGISTRY: Lazy<HashMap<&'static str, ProviderDescriptor
                 default_model: "glm-4".into(),
                 supports: ProviderFeatures::chat_only(),
                 headers: HashMap::new(),
+                quirks: ProviderQuirks::DEFAULT,
             },
         );
 
@@ -317,6 +336,7 @@ pub static OPENAI_COMPAT_REGISTRY: Lazy<HashMap<&'static str, ProviderDescriptor
                 default_model: "glm-4.6".into(),
                 supports: ProviderFeatures::chat_only(),
                 headers: HashMap::new(),
+                quirks: ProviderQuirks::DEFAULT,
             },
         );
 
@@ -332,6 +352,7 @@ pub static OPENAI_COMPAT_REGISTRY: Lazy<HashMap<&'static str, ProviderDescriptor
                 default_model: "meta-llama/Llama-3.3-70B-Instruct".into(),
                 supports: ProviderFeatures::chat_only(),
                 headers: HashMap::new(),
+                quirks: ProviderQuirks::DEFAULT,
             },
         );
 
@@ -347,6 +368,7 @@ pub static OPENAI_COMPAT_REGISTRY: Lazy<HashMap<&'static str, ProviderDescriptor
                 default_model: "meta-llama/llama-3.3-70b-instruct".into(),
                 supports: ProviderFeatures::chat_only(),
                 headers: HashMap::new(),
+                quirks: ProviderQuirks::DEFAULT,
             },
         );
 
@@ -364,6 +386,7 @@ pub static OPENAI_COMPAT_REGISTRY: Lazy<HashMap<&'static str, ProviderDescriptor
                 default_model: "Meta-Llama-3_3-70B-Instruct".into(),
                 supports: ProviderFeatures::chat_only(),
                 headers: HashMap::new(),
+                quirks: ProviderQuirks::DEFAULT,
             },
         );
 
@@ -379,6 +402,7 @@ pub static OPENAI_COMPAT_REGISTRY: Lazy<HashMap<&'static str, ProviderDescriptor
                 default_model: "llama-3.3-70b-instruct".into(),
                 supports: ProviderFeatures::chat_only(),
                 headers: HashMap::new(),
+                quirks: ProviderQuirks::DEFAULT,
             },
         );
 
@@ -394,6 +418,7 @@ pub static OPENAI_COMPAT_REGISTRY: Lazy<HashMap<&'static str, ProviderDescriptor
                 default_model: "llama-3.3-70b-instruct".into(),
                 supports: ProviderFeatures::chat_only(),
                 headers: HashMap::new(),
+                quirks: ProviderQuirks::DEFAULT,
             },
         );
 
@@ -409,6 +434,7 @@ pub static OPENAI_COMPAT_REGISTRY: Lazy<HashMap<&'static str, ProviderDescriptor
                 default_model: "meta-llama/Llama-3-70b-chat-hf".into(),
                 supports: ProviderFeatures::chat_only(),
                 headers: HashMap::new(),
+                quirks: ProviderQuirks::DEFAULT,
             },
         );
 
@@ -424,6 +450,7 @@ pub static OPENAI_COMPAT_REGISTRY: Lazy<HashMap<&'static str, ProviderDescriptor
                 default_model: "meta-llama-3.1-70b-instruct".into(),
                 supports: ProviderFeatures::chat_only(),
                 headers: HashMap::new(),
+                quirks: ProviderQuirks::DEFAULT,
             },
         );
 
@@ -439,6 +466,7 @@ pub static OPENAI_COMPAT_REGISTRY: Lazy<HashMap<&'static str, ProviderDescriptor
                 default_model: "solar-pro".into(),
                 supports: ProviderFeatures::chat_only(),
                 headers: HashMap::new(),
+                quirks: ProviderQuirks::DEFAULT,
             },
         );
 
@@ -454,6 +482,7 @@ pub static OPENAI_COMPAT_REGISTRY: Lazy<HashMap<&'static str, ProviderDescriptor
                 default_model: "step-2-16k".into(),
                 supports: ProviderFeatures::chat_only(),
                 headers: HashMap::new(),
+                quirks: ProviderQuirks::DEFAULT,
             },
         );
 
@@ -469,6 +498,7 @@ pub static OPENAI_COMPAT_REGISTRY: Lazy<HashMap<&'static str, ProviderDescriptor
                 default_model: "accounts/fireworks/models/llama-v3p3-70b-instruct".into(),
                 supports: ProviderFeatures::chat_only(),
                 headers: HashMap::new(),
+                quirks: ProviderQuirks::DEFAULT,
             },
         );
 
@@ -484,6 +514,7 @@ pub static OPENAI_COMPAT_REGISTRY: Lazy<HashMap<&'static str, ProviderDescriptor
                 default_model: "qwen-max".into(),
                 supports: ProviderFeatures::chat_only(),
                 headers: HashMap::new(),
+                quirks: ProviderQuirks::DEFAULT,
             },
         );
 
@@ -499,6 +530,7 @@ pub static OPENAI_COMPAT_REGISTRY: Lazy<HashMap<&'static str, ProviderDescriptor
                 default_model: "venice-uncensored".into(),
                 supports: ProviderFeatures::chat_only(),
                 headers: HashMap::new(),
+                quirks: ProviderQuirks::DEFAULT,
             },
         );
 

@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use url::Url;
 
 use super::features::ProviderFeatures;
+use super::quirks::ProviderQuirks;
 
 /// Which HTTP authentication scheme a provider expects.
 ///
@@ -74,4 +75,11 @@ pub struct ProviderDescriptor {
     /// Extra static headers to attach to every request, e.g.
     /// `{"HTTP-Referer": "https://archon.dev"}` for OpenRouter.
     pub headers: HashMap<String, String>,
+    /// TASK-AGS-705: per-provider wire quirks (Groq tool-call format,
+    /// DeepSeek logprobs-strip, Mistral NDJSON delimiter). Skipped from
+    /// serde round-trips because quirks are an internal implementation
+    /// detail — users never configure them via TOML/YAML. The `default`
+    /// attribute fills in `ProviderQuirks::DEFAULT` on deserialize.
+    #[serde(skip, default)]
+    pub quirks: ProviderQuirks,
 }

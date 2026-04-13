@@ -27,6 +27,7 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use archon_llm::providers::{
     AuthFlavor, CompatKind, OpenAiCompatProvider, ProviderDescriptor, ProviderFeatures,
+    ProviderQuirks,
 };
 use archon_llm::provider::{LlmError, LlmProvider, LlmRequest};
 use archon_llm::ApiKey;
@@ -53,6 +54,7 @@ fn make_descriptor(uri: &str, auth_flavor: AuthFlavor) -> &'static ProviderDescr
         default_model: "test-default-model".into(),
         supports: ProviderFeatures::chat_only(),
         headers: HashMap::new(),
+        quirks: ProviderQuirks::DEFAULT,
     };
     Box::leak(Box::new(d))
 }
