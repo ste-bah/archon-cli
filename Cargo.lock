@@ -504,6 +504,7 @@ dependencies = [
  "urlencoding",
  "uuid",
  "which",
+ "wiremock",
 ]
 
 [[package]]

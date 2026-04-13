@@ -21,6 +21,10 @@ pub mod error;
 // TASK-AGS-702: static 31-entry OpenAI-compatible provider registry.
 pub mod registry;
 
+// TASK-AGS-703: parametric OpenAI-compatible provider impl backed by the
+// registry (TASK-AGS-702) and credential wrapper (TASK-AGS-701).
+pub mod openai_compat;
+
 pub use anthropic::AnthropicProvider;
 pub use bedrock::BedrockProvider;
 pub use local::LocalProvider;
@@ -30,6 +34,7 @@ pub use vertex::VertexProvider;
 pub use descriptor::{AuthFlavor, CompatKind, ProviderDescriptor};
 pub use error::ProviderError;
 pub use features::ProviderFeatures;
+pub use openai_compat::OpenAiCompatProvider;
 pub use quirks::ProviderQuirks;
 pub use registry::{
     count as count_compat, get as get_compat, list_compat, OPENAI_COMPAT_REGISTRY,

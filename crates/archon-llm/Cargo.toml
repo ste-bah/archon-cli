@@ -44,3 +44,5 @@ once_cell.workspace = true
 async-trait.workspace = true
 uuid.workspace = true
 reqwest = { workspace = true, features = ["blocking"] }
+# TASK-AGS-703: wiremock HTTP mock server for OpenAiCompatProvider integration tests.
+wiremock = { workspace = true }
