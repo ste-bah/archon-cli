@@ -1,0 +1,37 @@
+{
+  "rules": [
+    {
+      "id": "BOUNDED_CHAN",
+      "regex": "mpsc::channel::<[^>]*>\\(\\s*256\\s*\\)",
+      "severity": "error",
+      "owner_phase": "phase-2",
+      "path_glob": ""
+    },
+    {
+      "id": "SEND_AWAIT",
+      "regex": "agent_event_tx\\s*\\.send\\([^)]*\\)\\s*\\.await",
+      "severity": "error",
+      "owner_phase": "phase-2",
+      "path_glob": ""
+    },
+    {
+      "id": "INLINE_AGENT_AWAIT",
+      "regex": "process_message\\([^)]*\\)\\s*\\.await",
+      "severity": "error",
+      "owner_phase": "phase-1",
+      "path_glob": ""
+    },
+    {
+      "id": "TUI_MCP_IMPORT",
+      "regex": "^\\s*use\\s+mcp::",
+      "severity": "error",
+      "owner_phase": "phase-3",
+      "path_glob": "crates/archon-tui/**"
+    }
+  ],
+  "allowlist": [
+    { "path": "src/main.rs", "rule": "BOUNDED_CHAN",       "line_approx": 3164, "phase": "phase-2" },
+    { "path": "src/main.rs", "rule": "INLINE_AGENT_AWAIT", "line_approx": 4258, "phase": "phase-1" },
+    { "path": "src/main.rs", "rule": "INLINE_AGENT_AWAIT", "line_approx": 4335, "phase": "phase-1" }
+  ]
+}
