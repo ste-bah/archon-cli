@@ -488,6 +488,7 @@ dependencies = [
  "hmac 0.12.1",
  "jsonwebtoken",
  "oauth2",
+ "once_cell",
  "open",
  "regex",
  "reqwest 0.12.28",

@@ -18,6 +18,9 @@ pub mod quirks;
 // descriptor-driven provider impl (702..706) and the retry layer (708).
 pub mod error;
 
+// TASK-AGS-702: static 31-entry OpenAI-compatible provider registry.
+pub mod registry;
+
 pub use anthropic::AnthropicProvider;
 pub use bedrock::BedrockProvider;
 pub use local::LocalProvider;
@@ -28,3 +31,6 @@ pub use descriptor::{AuthFlavor, CompatKind, ProviderDescriptor};
 pub use error::ProviderError;
 pub use features::ProviderFeatures;
 pub use quirks::ProviderQuirks;
+pub use registry::{
+    count as count_compat, get as get_compat, list_compat, OPENAI_COMPAT_REGISTRY,
+};
