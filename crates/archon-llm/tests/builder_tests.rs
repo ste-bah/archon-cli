@@ -68,6 +68,7 @@ fn provider_openai_backward_compat_resolves_to_native() {
         model: None,
         base_url: None,
         api_key_env: None,
+        retry: None,
     };
     let desc = cfg
         .resolve_descriptor()
@@ -82,6 +83,7 @@ fn openai_compat_prefix_resolves_to_compat_descriptor() {
         provider: "openai-compat:deepseek".into(),
         model: None,
         base_url: None,
+        retry: None,
         api_key_env: None,
     };
     let desc = cfg
@@ -96,6 +98,7 @@ fn unknown_provider_returns_missing_credential_with_message() {
     let cfg = LlmConfig {
         provider: "nonexistent".into(),
         model: None,
+        retry: None,
         base_url: None,
         api_key_env: None,
     };
@@ -125,6 +128,7 @@ fn build_llm_provider_with_groq_api_key_returns_compat_provider() {
             model: Some("llama-3.3-70b-versatile".into()),
             base_url: None,
             api_key_env: None,
+            retry: None,
         };
         let provider = build_llm_provider(&cfg, http())
             .expect("groq must build when GROQ_API_KEY is set");
@@ -144,6 +148,7 @@ fn build_llm_provider_without_groq_api_key_errors_with_var_name() {
     }
     let cfg = LlmConfig {
         provider: "groq".into(),
+        retry: None,
         model: None,
         base_url: None,
         // Force a deterministic var name that we can guarantee is unset.
@@ -168,6 +173,7 @@ fn build_llm_provider_auth_flavor_none_requires_no_env_var() {
         model: None,
         base_url: None,
         api_key_env: None,
+        retry: None,
     };
     let provider = build_llm_provider(&cfg, http())
         .expect("ollama AuthFlavor::None must build without env var");
@@ -218,6 +224,7 @@ fn llm_config_round_trips_through_toml() {
         model: Some("gpt-4o".into()),
         base_url: None,
         api_key_env: Some("OPENAI_API_KEY".into()),
+        retry: None,
     };
     let s = toml::to_string(&cfg).expect("serialize");
     let back: LlmConfig = toml::from_str(&s).expect("deserialize");

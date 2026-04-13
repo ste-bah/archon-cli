@@ -12,12 +12,15 @@
 //! - Shorthand `provider = "<id>"` auto-routes to `OPENAI_COMPAT_REGISTRY`
 //!   when the id isn't in `NATIVE_REGISTRY`.
 
+use std::time::Duration;
+
 use serde::{Deserialize, Serialize};
 use url::Url;
 
 use crate::providers::{
     get_compat, get_native, ProviderDescriptor, ProviderError,
 };
+use crate::retry::RetryPolicy;
 
 /// Runtime configuration for the chosen LLM provider.
 ///
@@ -43,6 +46,37 @@ pub struct LlmConfig {
     /// `descriptor.env_key_var` when absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_key_env: Option<String>,
+
+    /// TASK-AGS-708: optional retry policy override. When absent,
+    /// `build_llm_provider` uses `RetryPolicy::default()` (3 attempts,
+    /// 500ms initial backoff, 8s cap, 2x multiplier, ±25% jitter) which
+    /// matches ERR-PROV-02.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry: Option<RetryPolicyConfig>,
+}
+
+/// Serde-friendly mirror of `RetryPolicy` that uses plain integer seconds
+/// and milliseconds instead of `std::time::Duration` (which doesn't have a
+/// clean serde representation). Converted via `From`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RetryPolicyConfig {
+    pub max_attempts: u32,
+    pub initial_backoff_ms: u64,
+    pub max_backoff_ms: u64,
+    pub multiplier: f64,
+    pub jitter: bool,
+}
+
+impl From<RetryPolicyConfig> for RetryPolicy {
+    fn from(c: RetryPolicyConfig) -> Self {
+        Self {
+            max_attempts: c.max_attempts,
+            initial_backoff: Duration::from_millis(c.initial_backoff_ms),
+            max_backoff: Duration::from_millis(c.max_backoff_ms),
+            multiplier: c.multiplier,
+            jitter: c.jitter,
+        }
+    }
 }
 
 impl LlmConfig {

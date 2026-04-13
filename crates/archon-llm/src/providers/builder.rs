@@ -39,6 +39,7 @@ use std::sync::Arc;
 
 use crate::config::LlmConfig;
 use crate::provider::LlmProvider;
+use crate::retry::{RetryPolicy, RetryProvider};
 use crate::secrets::ApiKey;
 
 use super::descriptor::{AuthFlavor, CompatKind, ProviderDescriptor};
@@ -50,9 +51,31 @@ use super::openai_compat::OpenAiCompatProvider;
 /// Single public entry point for obtaining an `Arc<dyn LlmProvider>` from
 /// a runtime `LlmConfig`. Every code path that previously instantiated a
 /// provider directly should route through this function.
+///
+/// TASK-AGS-708: the returned provider is wrapped in `RetryProvider` so
+/// every caller automatically gets ERR-PROV-02 retry semantics. The
+/// policy comes from `cfg.retry` if set, otherwise `RetryPolicy::default()`.
 pub fn build_llm_provider(
     cfg: &LlmConfig,
     http: Arc<reqwest::Client>,
+) -> Result<Arc<dyn LlmProvider>, ProviderError> {
+    let policy = cfg
+        .retry
+        .clone()
+        .map(RetryPolicy::from)
+        .unwrap_or_default();
+    build_llm_provider_with_policy(cfg, http, policy)
+}
+
+/// Variant of `build_llm_provider` that accepts an explicit `RetryPolicy`,
+/// for call sites that want to override the default (tests, retries
+/// disabled, custom backoff). The returned provider is still wrapped in
+/// `RetryProvider` — pass `RetryPolicy { max_attempts: 1, .. }` to
+/// effectively disable retries.
+pub fn build_llm_provider_with_policy(
+    cfg: &LlmConfig,
+    http: Arc<reqwest::Client>,
+    policy: RetryPolicy,
 ) -> Result<Arc<dyn LlmProvider>, ProviderError> {
     let descriptor = cfg.resolve_descriptor()?;
 
@@ -67,12 +90,14 @@ pub fn build_llm_provider(
         }
     };
 
-    match descriptor.compat_kind {
-        CompatKind::OpenAiCompat => Ok(Arc::new(OpenAiCompatProvider::new(
+    let inner: Arc<dyn LlmProvider> = match descriptor.compat_kind {
+        CompatKind::OpenAiCompat => Arc::new(OpenAiCompatProvider::new(
             descriptor, http, api_key,
-        ))),
-        CompatKind::Native => dispatch_native(descriptor, http, api_key),
-    }
+        )),
+        CompatKind::Native => dispatch_native(descriptor, http, api_key)?,
+    };
+
+    Ok(Arc::new(RetryProvider::<dyn LlmProvider>::new(inner, policy)))
 }
 
 /// The **one** allowed `match descriptor.id` site in the whole providers

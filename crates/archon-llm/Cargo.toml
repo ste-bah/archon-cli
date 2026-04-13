@@ -39,6 +39,10 @@ url = { version = "2", features = ["serde"] }
 secrecy = "0.8"
 # TASK-AGS-702: 31-entry OpenAI-compat registry built once on first access.
 once_cell.workspace = true
+# TASK-AGS-708: ±25% jitter on RetryProvider backoffs (workspace rand = 0.9
+# overrides the spec's stale `rand = "0.8"` suggestion per phase-wide
+# "workspace wins" convention already established for reqwest/thiserror).
+rand.workspace = true
 
 [dev-dependencies]
 async-trait.workspace = true
@@ -48,3 +52,6 @@ reqwest = { workspace = true, features = ["blocking"] }
 wiremock = { workspace = true }
 # TASK-AGS-706: TOML round-trip tests for LlmConfig.
 toml = { workspace = true }
+# TASK-AGS-708: paused-time testing for RetryProvider backoff progression.
+# `features=["full"]` does NOT include `test-util`; add it here.
+tokio = { workspace = true, features = ["test-util"] }
