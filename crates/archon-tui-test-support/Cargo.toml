@@ -12,6 +12,13 @@ futures-util = "0.3"
 tracing = "0.1"
 regex-lite = "0.1"
 insta = { version = "1", features = ["yaml"] }
+hdrhistogram = "7"
 
 [dev-dependencies]
 insta = { version = "1", features = ["yaml"] }
+criterion = { version = "0.5", features = ["html_reports"] }
+hdrhistogram = "7"
+
+[[bench]]
+name = "eventloop_throughput"
+harness = false
