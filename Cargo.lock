@@ -741,6 +741,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "archon-tui-test-support"
+version = "0.1.4"
+dependencies = [
+ "futures-util",
+ "ratatui",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "arg_enum_proc_macro"
 version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"

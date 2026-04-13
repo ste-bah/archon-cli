@@ -1,0 +1,11 @@
+[package]
+name = "archon-tui-test-support"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+tokio = { version = "1", features = ["test-util", "rt-multi-thread", "macros", "sync", "time"] }
+ratatui = { workspace = true }
+futures-util = "0.3"
+tracing = "0.1"
