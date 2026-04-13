@@ -30,6 +30,9 @@ pub mod openai_compat;
 pub mod native_registry;
 pub mod native_gap;
 
+// TASK-AGS-706: runtime dispatcher routing LlmConfig -> concrete provider.
+pub mod builder;
+
 pub use anthropic::AnthropicProvider;
 pub use bedrock::BedrockProvider;
 pub use local::LocalProvider;
@@ -46,3 +49,4 @@ pub use registry::{
 };
 pub use native_gap::{AzureProvider, CohereProvider, CopilotProvider, MinimaxProvider};
 pub use native_registry::{count_native, get_native, list_native, NATIVE_REGISTRY};
+pub use builder::build_llm_provider;

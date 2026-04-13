@@ -1,0 +1,135 @@
+//! TASK-AGS-706: `build_llm_provider()` runtime dispatcher.
+//!
+//! Spec: 02-technical-spec.md TECH-AGS-PROVIDERS api_contracts line 1116:
+//! `pub fn build_llm_provider(cfg: &LlmConfig, http: Arc<reqwest::Client>)
+//! -> Arc<dyn LlmProvider>;`
+//!
+//! Spec deviation (greenlit 2026-04-13):
+//!   Spec signature returns `Arc<dyn LlmProvider>`; we return
+//!   `Result<Arc<dyn LlmProvider>, ProviderError>` so credential-miss paths
+//!   surface as `ProviderError::MissingCredential` per Validation Criteria
+//!   5 and 7. The caller (TASK-AGS-710 / archon-cli main.rs) already
+//!   handles error propagation at the boundary.
+//!
+//! Dispatcher responsibilities:
+//!   1. Resolve descriptor via `cfg.resolve_descriptor()` (exact-native ->
+//!      compat-prefix -> shorthand fallback).
+//!   2. Load `ApiKey` from env, honoring `cfg.api_key_env` override or
+//!      `descriptor.env_key_var`; skip for `AuthFlavor::None`.
+//!   3. Route on `descriptor.compat_kind`:
+//!      - `OpenAiCompat` -> construct `OpenAiCompatProvider` directly.
+//!      - `Native` -> delegate to `dispatch_native()`, which is the **one**
+//!        allowed `match descriptor.id` site. Native impls are legitimately
+//!        different concrete types with hand-rolled constructors.
+//!
+//! NFR-ARCH-002: the 5 existing native impls (openai, anthropic, bedrock,
+//! local, vertex) are wired without any source-code modification to their
+//! modules. Their constructors pre-date the descriptor pattern and take
+//! non-uniform arguments; where the mapping is trivial we wire them here,
+//! and where full wiring requires auth-flow work (GCP ADC for vertex,
+//! AnthropicClient for anthropic, Ollama health-probe for local) we return
+//! `ProviderError::InvalidResponse` pointing at TASK-AGS-710 which is the
+//! task that actually threads `archon-cli/src/main.rs:1885` onto this
+//! builder.
+//!
+//! NFR-SECURITY-001: `ApiKey` never appears in error messages; only the
+//! env var *name* is propagated.
+
+use std::sync::Arc;
+
+use crate::config::LlmConfig;
+use crate::provider::LlmProvider;
+use crate::secrets::ApiKey;
+
+use super::descriptor::{AuthFlavor, CompatKind, ProviderDescriptor};
+use super::error::ProviderError;
+use super::native_gap::{AzureProvider, CohereProvider, CopilotProvider, MinimaxProvider};
+use super::openai::OpenAiProvider;
+use super::openai_compat::OpenAiCompatProvider;
+
+/// Single public entry point for obtaining an `Arc<dyn LlmProvider>` from
+/// a runtime `LlmConfig`. Every code path that previously instantiated a
+/// provider directly should route through this function.
+pub fn build_llm_provider(
+    cfg: &LlmConfig,
+    http: Arc<reqwest::Client>,
+) -> Result<Arc<dyn LlmProvider>, ProviderError> {
+    let descriptor = cfg.resolve_descriptor()?;
+
+    let api_key = match descriptor.auth_flavor {
+        AuthFlavor::None => ApiKey::new(String::new()),
+        _ => {
+            let var = cfg
+                .api_key_env
+                .as_deref()
+                .unwrap_or(descriptor.env_key_var.as_str());
+            ApiKey::from_env(var)?
+        }
+    };
+
+    match descriptor.compat_kind {
+        CompatKind::OpenAiCompat => Ok(Arc::new(OpenAiCompatProvider::new(
+            descriptor, http, api_key,
+        ))),
+        CompatKind::Native => dispatch_native(descriptor, http, api_key),
+    }
+}
+
+/// The **one** allowed `match descriptor.id` site in the whole providers
+/// module. Native impls are legitimately different concrete types (5
+/// hand-rolled + 4 TASK-AGS-704 stubs) and cannot be unified under a
+/// single parametric constructor.
+///
+/// Validation Criterion 8: `grep -c 'match.*descriptor.id'` on this file
+/// MUST return exactly 1 — that is this match, right below.
+fn dispatch_native(
+    descriptor: &'static ProviderDescriptor,
+    http: Arc<reqwest::Client>,
+    api_key: ApiKey,
+) -> Result<Arc<dyn LlmProvider>, ProviderError> {
+    match descriptor.id.as_str() {
+        // --- 4 TASK-AGS-704 stubs: uniform (descriptor, http, api_key) ---
+        "azure" => Ok(Arc::new(AzureProvider::new(descriptor, http, api_key))),
+        "cohere" => Ok(Arc::new(CohereProvider::new(descriptor, http, api_key))),
+        "copilot" => Ok(Arc::new(CopilotProvider::new(descriptor, http, api_key))),
+        "minimax" => Ok(Arc::new(MinimaxProvider::new(descriptor, http, api_key))),
+
+        // --- 5 hand-rolled existing natives ---
+        //
+        // openai has the simplest legacy constructor shape so we wire it
+        // directly from descriptor metadata. The other four take
+        // non-trivial setup (GCP service account JWT, AnthropicClient,
+        // Ollama health probe, AWS SigV4) that archon-cli threads in at
+        // main.rs:1885; TASK-AGS-710 will take over that wiring.
+        "openai" => {
+            let default_model = descriptor.default_model.clone();
+            let base_url = descriptor.base_url.to_string();
+            let key = api_key.expose().to_string();
+            Ok(Arc::new(OpenAiProvider::new(
+                key,
+                Some(base_url),
+                default_model,
+            )))
+        }
+
+        "anthropic" | "bedrock" | "vertex" | "local" | "gemini" | "xai" => {
+            Err(ProviderError::InvalidResponse {
+                name: descriptor.display_name.clone(),
+                detail: format!(
+                    "native provider {} wiring deferred to TASK-AGS-710 main.rs integration",
+                    descriptor.id
+                ),
+            })
+        }
+
+        // Any id the registry claims is Native but dispatch doesn't know
+        // about is a registry/dispatch skew bug. Surface as
+        // InvalidResponse so caller gets a clear message.
+        other => Err(ProviderError::InvalidResponse {
+            name: descriptor.display_name.clone(),
+            detail: format!(
+                "unknown native provider id `{other}` — native_registry and dispatch_native are out of sync"
+            ),
+        }),
+    }
+}

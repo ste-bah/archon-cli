@@ -46,3 +46,5 @@ uuid.workspace = true
 reqwest = { workspace = true, features = ["blocking"] }
 # TASK-AGS-703: wiremock HTTP mock server for OpenAiCompatProvider integration tests.
 wiremock = { workspace = true }
+# TASK-AGS-706: TOML round-trip tests for LlmConfig.
+toml = { workspace = true }
