@@ -14,6 +14,10 @@ pub mod descriptor;
 pub mod features;
 pub mod quirks;
 
+// TASK-AGS-701: unified provider error enum used by every Phase 7
+// descriptor-driven provider impl (702..706) and the retry layer (708).
+pub mod error;
+
 pub use anthropic::AnthropicProvider;
 pub use bedrock::BedrockProvider;
 pub use local::LocalProvider;
@@ -21,5 +25,6 @@ pub use openai::OpenAiProvider;
 pub use vertex::VertexProvider;
 
 pub use descriptor::{AuthFlavor, CompatKind, ProviderDescriptor};
+pub use error::ProviderError;
 pub use features::ProviderFeatures;
 pub use quirks::ProviderQuirks;

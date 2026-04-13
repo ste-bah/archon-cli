@@ -6,6 +6,7 @@ pub mod identity;
 pub mod oauth;
 pub mod provider;
 pub mod providers;
+pub mod secrets;
 pub mod streaming;
 pub mod thinking;
 pub mod tokens;
@@ -16,3 +17,7 @@ pub mod types;
 pub use providers::{
     AuthFlavor, CompatKind, ProviderDescriptor, ProviderFeatures, ProviderQuirks,
 };
+
+// TASK-AGS-701: re-export ApiKey at crate root so every Phase 7 provider
+// impl can `use archon_llm::ApiKey` without reaching into `secrets::`.
+pub use secrets::ApiKey;

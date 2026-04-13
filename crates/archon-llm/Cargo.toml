@@ -33,6 +33,10 @@ jsonwebtoken.workspace = true
 hmac.workspace = true
 # TASK-AGS-700: descriptor `base_url: Url` + serde round-trip support.
 url = { version = "2", features = ["serde"] }
+# TASK-AGS-701: ApiKey wraps SecretString to enforce NFR-SECURITY-001.
+# thiserror/reqwest already satisfied via workspace (v2 / v0.12) — spec's
+# "thiserror=1" and "reqwest=0.11" versions are stale, workspace wins.
+secrecy = "0.8"
 
 [dev-dependencies]
 async-trait.workspace = true
