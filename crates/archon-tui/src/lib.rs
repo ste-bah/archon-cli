@@ -30,6 +30,9 @@ pub use task_dispatch::{
     TurnRunner,
 };
 
+pub mod layout;
+pub use layout::{ReflowOutcome, handle_resize, last_known_size};
+
 pub mod views;
 
 // Stubs for later phases

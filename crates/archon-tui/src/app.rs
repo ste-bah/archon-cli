@@ -89,6 +89,12 @@ pub enum TuiEvent {
         name: String,
         color: Option<String>,
     },
+    /// Terminal was resized — route through `crate::layout::handle_resize`
+    /// to record the new dimensions and mark the next frame dirty (TUI-105).
+    Resize {
+        cols: u16,
+        rows: u16,
+    },
     Done,
 }
 
@@ -1023,6 +1029,9 @@ pub async fn run_tui(
                     app.status.agent_name = Some(name);
                     app.status.agent_color = color;
                 }
+                TuiEvent::Resize { cols, rows } => {
+                    crate::layout::handle_resize(cols, rows);
+                }
                 TuiEvent::Done => {
                     app.should_quit = true;
                 }
@@ -1523,7 +1532,10 @@ pub async fn run_tui(
                         _ => {}
                     }
                 }
-                _ => {} // Resize and other events
+                Event::Resize(cols, rows) => {
+                    crate::layout::handle_resize(cols, rows);
+                }
+                _ => {} // FocusGained/FocusLost/Paste
             }
         } else {
             // No key event — tick animations
