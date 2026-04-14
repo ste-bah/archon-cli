@@ -33,6 +33,9 @@ pub use task_dispatch::{
 pub mod layout;
 pub use layout::{ReflowOutcome, handle_resize, last_known_size};
 
+pub mod event_loop;
+pub use event_loop::{EventLoopConfig, run_event_loop};
+
 pub mod views;
 
 // Stubs for later phases

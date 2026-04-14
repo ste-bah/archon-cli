@@ -95,6 +95,15 @@ pub enum TuiEvent {
         cols: u16,
         rows: u16,
     },
+    /// User submitted a prompt via the input line. Consumed by
+    /// `run_event_loop` (TUI-106).
+    UserInput(String),
+    /// User pressed /cancel — the dispatcher should abort the in-flight
+    /// turn. Consumed by `run_event_loop` (TUI-106).
+    SlashCancel,
+    /// User ran /agent <id> — the dispatcher should switch the active
+    /// agent. Consumed by `run_event_loop` (TUI-106).
+    SlashAgent(String),
     Done,
 }
 
@@ -1031,6 +1040,15 @@ pub async fn run_tui(
                 }
                 TuiEvent::Resize { cols, rows } => {
                     crate::layout::handle_resize(cols, rows);
+                }
+                TuiEvent::UserInput(_) => {
+                    // TUI-106: handled by run_event_loop; old run_tui path is a no-op.
+                }
+                TuiEvent::SlashCancel => {
+                    // TUI-106: handled by run_event_loop; old run_tui path is a no-op.
+                }
+                TuiEvent::SlashAgent(_) => {
+                    // TUI-106: handled by run_event_loop; old run_tui path is a no-op.
                 }
                 TuiEvent::Done => {
                     app.should_quit = true;
