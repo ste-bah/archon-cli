@@ -109,19 +109,44 @@ impl AgentDispatcher {
         }
     }
 
-    /// Spawn (or queue) a turn to run the given prompt. Body lands in
-    /// TASK-TUI-101. Spec: 02-technical-spec.md:101-110.
+    /// Spawn (or queue) a turn to run the given prompt.
+    /// Spec: 02-technical-spec.md:101-110.
+    ///
+    /// Contract:
+    /// 1. If `self.current_query.is_some()` → push a [`QueuedPrompt`] onto
+    ///    `pending_queue` and return [`DispatchResult::Queued`].
+    /// 2. Otherwise, clone the runner `Arc` and hand the clone to
+    ///    `tokio::spawn(async move { runner.run_turn(prompt).await })`. Store
+    ///    the `JoinHandle` in `self.current_query` and return
+    ///    [`DispatchResult::Running`] with `spawned_at = Instant::now()`.
+    ///
+    /// This function MUST NOT `.await` the spawned handle — that would
+    /// re-introduce the exact input-loop blockage this subsystem exists to
+    /// remove (see REQ-TUI-LOOP-001 / AC-EVENTLOOP-02).
     pub fn spawn_turn(
         &mut self,
-        _prompt: String,
-        _runner: Arc<dyn TurnRunner>,
+        prompt: String,
+        runner: Arc<dyn TurnRunner>,
     ) -> DispatchResult {
-        // Shut the unused-field lint up while still making sure the field
-        // types resolve. Body lands in TASK-TUI-101.
-        let _ = &self.current_query;
-        let _ = &self.pending_queue;
-        let _ = &self.agent_event_tx;
-        todo!("TASK-TUI-101")
+        if self.current_query.is_some() {
+            let qp = QueuedPrompt {
+                prompt,
+                agent_id: None,
+                submitted_at: Instant::now(),
+            };
+            self.pending_queue.push_back(qp);
+            return DispatchResult::Queued;
+        }
+        let spawned_at = Instant::now();
+        // Clone the Arc so the spawned future owns a 'static handle to the
+        // runner. The `&self` borrow in `TurnRunner::run_turn` is tied to
+        // the Arc's lifetime; tokio::spawn requires 'static, hence the clone.
+        let runner_clone = Arc::clone(&runner);
+        let handle = tokio::spawn(async move {
+            runner_clone.run_turn(prompt).await
+        });
+        self.current_query = Some(handle);
+        DispatchResult::Running { spawned_at }
     }
 
     /// Abort the in-flight turn, if any. Body lands in TASK-TUI-102.
@@ -160,100 +185,5 @@ impl AgentDispatcher {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::Arc;
-
-    #[test]
-    fn queued_prompt_fields_are_reachable() {
-        let q = QueuedPrompt {
-            prompt: "hello".into(),
-            agent_id: None,
-            submitted_at: std::time::Instant::now(),
-        };
-        assert_eq!(q.prompt, "hello");
-        assert!(q.agent_id.is_none());
-        let _ = q.submitted_at;
-    }
-
-    #[test]
-    fn cancel_outcome_variants_are_exhaustive() {
-        let a = CancelOutcome::NoInflight;
-        let b = CancelOutcome::Aborted { elapsed_ms: 0 };
-        for v in [a, b] {
-            match v {
-                CancelOutcome::NoInflight => {}
-                CancelOutcome::Aborted { elapsed_ms: _ } => {}
-            }
-        }
-    }
-
-    #[test]
-    fn dispatch_result_variants_are_exhaustive() {
-        let r1 = DispatchResult::Queued;
-        let r2 = DispatchResult::Running {
-            spawned_at: std::time::Instant::now(),
-        };
-        let r3 = DispatchResult::Rejected("nope".into());
-        for v in [r1, r2, r3] {
-            match v {
-                DispatchResult::Queued => {}
-                DispatchResult::Running { spawned_at: _ } => {}
-                DispatchResult::Rejected(_) => {}
-            }
-        }
-    }
-
-    #[test]
-    fn turn_outcome_variants_are_exhaustive() {
-        let a = TurnOutcome::Completed;
-        let b = TurnOutcome::Cancelled;
-        let c = TurnOutcome::Failed("boom".into());
-        for v in [a, b, c] {
-            match v {
-                TurnOutcome::Completed => {}
-                TurnOutcome::Cancelled => {}
-                TurnOutcome::Failed(_) => {}
-            }
-        }
-    }
-
-    struct NoopRouter;
-    impl AgentRouter for NoopRouter {
-        fn switch(&self, _agent_id: &str) -> anyhow::Result<()> {
-            Ok(())
-        }
-    }
-
-    #[test]
-    fn agent_router_is_object_safe_and_buildable() {
-        let r: Arc<dyn AgentRouter> = Arc::new(NoopRouter);
-        r.switch("foo").unwrap();
-    }
-
-    struct NoopRunner;
-    impl TurnRunner for NoopRunner {
-        fn run_turn<'a>(
-            &'a self,
-            _prompt: String,
-        ) -> std::pin::Pin<
-            Box<dyn std::future::Future<Output = anyhow::Result<()>> + Send + 'a>,
-        > {
-            Box::pin(async { Ok(()) })
-        }
-    }
-
-    #[test]
-    fn turn_runner_is_object_safe_and_buildable() {
-        let _: Arc<dyn TurnRunner> = Arc::new(NoopRunner);
-    }
-
-    #[test]
-    fn dispatcher_constructs_with_noop_router() {
-        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel::<AgentEvent>();
-        let router: Arc<dyn AgentRouter> = Arc::new(NoopRouter);
-        let d = AgentDispatcher::new(router, tx);
-        assert_eq!(d.queue_len(), 0);
-        assert!(!d.is_busy());
-    }
-}
+#[path = "task_dispatch_tests.rs"]
+mod tests;
