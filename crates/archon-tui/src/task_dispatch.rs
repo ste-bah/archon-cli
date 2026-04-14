@@ -149,11 +149,31 @@ impl AgentDispatcher {
         DispatchResult::Running { spawned_at }
     }
 
-    /// Abort the in-flight turn, if any. Body lands in TASK-TUI-102.
+    /// Abort the in-flight turn, if any.
     /// Spec: 02-technical-spec.md:112-119.
+    ///
+    /// Contract:
+    /// 1. If `current_query` is `None`, return [`CancelOutcome::NoInflight`].
+    /// 2. Otherwise, take ownership of the [`tokio::task::JoinHandle`], call
+    ///    `abort()` on it, and return [`CancelOutcome::Aborted`] carrying the
+    ///    wall-clock latency of the abort path (NFR-TUI-PERF-003).
+    ///
+    /// This function MUST NOT `.await` the handle after `abort()`.
+    /// `JoinHandle::abort` is cooperative: the spawned task is cancelled at
+    /// its next `.await` point. The render loop (TASK-TUI-103) detects
+    /// completion via `JoinError::is_cancelled()` on its next poll. Awaiting
+    /// here would re-introduce the input-loop blockage this subsystem exists
+    /// to remove (REQ-TUI-LOOP-001 / AC-EVENTLOOP-02).
     pub fn cancel_current(&mut self) -> CancelOutcome {
-        let _ = &self.current_query;
-        todo!("TASK-TUI-102")
+        let start = std::time::Instant::now();
+        match self.current_query.take() {
+            None => CancelOutcome::NoInflight,
+            Some(h) => {
+                h.abort();
+                let elapsed_ms = start.elapsed().as_millis() as u64;
+                CancelOutcome::Aborted { elapsed_ms }
+            }
+        }
     }
 
     /// Poll the in-flight `JoinHandle` for completion. Body lands in

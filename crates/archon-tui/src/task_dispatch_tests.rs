@@ -167,3 +167,55 @@ async fn test_spawn_turn_does_not_await_agent() {
         let _ = h.await;
     }
 }
+
+// ---- TASK-TUI-102 tests ----
+
+#[tokio::test]
+async fn test_cancel_when_no_inflight_returns_noinflight() {
+    let mut d = make_dispatcher();
+    let outcome = d.cancel_current();
+    assert!(matches!(outcome, CancelOutcome::NoInflight));
+    assert!(!d.is_busy());
+}
+
+#[tokio::test]
+async fn test_cancel_aborts_running_turn() {
+    let mut d = make_dispatcher();
+    let slow: Arc<dyn TurnRunner> = Arc::new(MockTurnRunner { sleep_ms: 10_000 });
+    let _ = d.spawn_turn("hello".into(), slow);
+    assert!(d.is_busy());
+    let outcome = d.cancel_current();
+    assert!(
+        matches!(outcome, CancelOutcome::Aborted { elapsed_ms } if elapsed_ms < 50),
+        "expected Aborted with elapsed_ms < 50",
+    );
+    assert!(!d.is_busy());
+    assert!(d.current_query.is_none());
+}
+
+#[tokio::test]
+async fn test_cancel_does_not_await_handle() {
+    let mut d = make_dispatcher();
+    let slow: Arc<dyn TurnRunner> = Arc::new(MockTurnRunner { sleep_ms: 10_000 });
+    let _ = d.spawn_turn("hello".into(), slow);
+    let start = std::time::Instant::now();
+    let _ = d.cancel_current();
+    let elapsed = start.elapsed();
+    assert!(
+        elapsed < std::time::Duration::from_millis(10),
+        "cancel_current blocked for {}ms (>=10ms) — likely awaited the handle",
+        elapsed.as_millis()
+    );
+}
+
+#[tokio::test]
+async fn test_cancel_twice_is_idempotent() {
+    let mut d = make_dispatcher();
+    let slow: Arc<dyn TurnRunner> = Arc::new(MockTurnRunner { sleep_ms: 10_000 });
+    let _ = d.spawn_turn("hello".into(), slow);
+    let first = d.cancel_current();
+    assert!(matches!(first, CancelOutcome::Aborted { .. }));
+    let second = d.cancel_current();
+    assert!(matches!(second, CancelOutcome::NoInflight));
+    assert!(!d.is_busy());
+}
