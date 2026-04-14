@@ -1,3 +1,4 @@
+mod agent_handle;
 mod cli_args;
 mod command;
 mod runtime;
@@ -40,7 +41,6 @@ use archon_mcp::lifecycle::McpServerManager;
 use archon_memory::{MemoryAccess, MemoryGraph, MemoryTrait};
 use archon_permissions::auto::{AutoModeConfig, AutoModeEvaluator};
 use archon_tui::app::{TuiEvent, run_tui};
-use tokio_util::sync::CancellationToken;
 
 use cli_args::{Cli, Commands};
 use crate::runtime::llm::build_llm_provider;
@@ -3189,6 +3189,10 @@ async fn run_interactive_session(
         }
     }
     let agent_registry_for_skills = Arc::clone(&agent_registry);
+    // TASK-TUI-107: clone the agent_event_tx so the dispatcher constructed
+    // inside the input-loop spawn can also hold a producer. The original
+    // sender is moved into Agent::new below.
+    let agent_event_tx_for_dispatcher = agent_event_tx.clone();
     let mut agent = Agent::new(
         provider,
         registry,
@@ -3688,11 +3692,8 @@ async fn run_interactive_session(
     };
     // Clone api_url for the btw_tx background task (line ~1683); the spawn below consumes it.
     let api_url_for_btw = api_url.clone();
-    // TASK-AGS-106: shared slot for current agent task — accessible from outside
-    // the handler spawn so TASK-AGS-107's Ctrl+C signal handler can fire the token.
-    let current_agent_task: Arc<tokio::sync::Mutex<Option<(CancellationToken, tokio::task::JoinHandle<()>)>>>
-        = Arc::new(tokio::sync::Mutex::new(None));
-    let current_agent_task_inner = Arc::clone(&current_agent_task);
+    // TASK-TUI-107: old `handle.await`-prior serialization slot deleted.
+    // Turn lifecycle now lives in `AgentDispatcher` (constructed below).
     tokio::spawn(async move {
         let agent = Arc::new(tokio::sync::Mutex::new(agent));
 
@@ -3755,8 +3756,83 @@ async fn run_interactive_session(
         let mut initial_prompt_pending: Option<String> =
             agent_def.as_ref().and_then(|d| d.initial_prompt.clone());
 
+        // TASK-TUI-107: AgentDispatcher owns the in-flight turn lifecycle,
+        // queues overflow prompts FIFO, and polls completion without
+        // blocking. AgentHandle bridges `Arc<Mutex<Agent>>` to TurnRunner.
+        let adapter = Arc::new(crate::agent_handle::AgentHandle::new(Arc::clone(&agent)));
+        let router: Arc<dyn archon_tui::AgentRouter> =
+            Arc::new(crate::agent_handle::NoopAgentRouter);
+        let mut dispatcher =
+            archon_tui::AgentDispatcher::new(router, agent_event_tx_for_dispatcher);
+        // Per-turn post-completion actions: pushed in dispatch order,
+        // popped on each `poll_completion()` outcome. Replaces the
+        // per-spawn tail logic that used to live inside the deleted
+        // `tokio::spawn(async move { process_message })` wrapper.
+        enum PostTurnAction {
+            PersistSession,
+            SkillComplete { reload_registry_for: Option<String> },
+        }
+        let mut post_turn_queue: std::collections::VecDeque<PostTurnAction> =
+            std::collections::VecDeque::new();
+        let mut poll_tick = tokio::time::interval(std::time::Duration::from_millis(16));
+        poll_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
         // BEGIN INPUT_HANDLER — arch-lint.sh scopes D1 grep to this region
-        while let Some(input) = user_input_rx.recv().await {
+        loop {
+            let input = tokio::select! {
+                biased;
+                _ = poll_tick.tick() => {
+                    if let Some(outcome) = dispatcher.poll_completion() {
+                        tracing::debug!("dispatcher turn outcome: {}",
+                            match &outcome {
+                                archon_tui::TurnOutcome::Completed => "completed",
+                                archon_tui::TurnOutcome::Cancelled => "cancelled",
+                                archon_tui::TurnOutcome::Failed(_) => "failed",
+                            });
+                        // FIFO: pop the post-turn action for the dispatch
+                        // that just completed and run it.
+                        match post_turn_queue.pop_front() {
+                            Some(PostTurnAction::PersistSession) => {
+                                let guard = agent.lock().await;
+                                for (idx, msg) in
+                                    guard.conversation_state().messages.iter().enumerate()
+                                {
+                                    if let Ok(json_str) = serde_json::to_string(msg) {
+                                        if let Err(e) = session_store_for_input
+                                            .save_message(
+                                                &session_id_for_input,
+                                                idx as u64,
+                                                &json_str,
+                                            )
+                                        {
+                                            tracing::warn!("save_message idx {idx}: {e}");
+                                        }
+                                    }
+                                }
+                            }
+                            Some(PostTurnAction::SkillComplete { reload_registry_for }) => {
+                                if reload_registry_for.as_deref() == Some("create-agent") {
+                                    if let Ok(mut reg) = cmd_ctx.agent_registry.write() {
+                                        reg.reload(&cmd_ctx.working_dir);
+                                        tracing::info!("agent registry reloaded");
+                                    }
+                                }
+                                let _ = input_tui_tx
+                                    .send(TuiEvent::SlashCommandComplete)
+                                    .await;
+                            }
+                            None => {}
+                        }
+                    }
+                    continue;
+                }
+                maybe_input = user_input_rx.recv() => {
+                    match maybe_input {
+                        Some(input) => input,
+                        None => break,
+                    }
+                }
+            };
             // Session picker selection — load messages and restore conversation
             if let Some(session_id) = input.strip_prefix("__resume_session__ ") {
                 let session_id = session_id.trim();
@@ -3835,18 +3911,25 @@ async fn run_interactive_session(
                 continue;
             }
 
-            // ── TASK-AGS-107: Ctrl+C cancel ──────────────────────
+            // ── TASK-AGS-107 / TASK-TUI-107: Ctrl+C cancel ───────
             // TUI sends "__cancel__" when user presses Ctrl+C during
-            // generation. Fire the CancellationToken stored in
-            // current_agent_task to cancel the running process_message.
-            // The .cancel() call is synchronous and never blocks.
+            // generation. Fire the CancellationToken held by the adapter
+            // (propagates into ToolContext.cancel_parent → subagent
+            // child_token() chains) AND abort the tracked JoinHandle via
+            // the dispatcher (reaches the turn future at its next `.await`).
+            // Both operations are non-blocking.
             if input == "__cancel__" {
-                let guard = current_agent_task_inner.lock().await;
-                if let Some((ref token, _)) = *guard {
-                    token.cancel();
-                    tracing::info!("Ctrl+C: fired CancellationToken on current agent task");
+                adapter.fire_cancel();
+                match dispatcher.cancel_current() {
+                    archon_tui::CancelOutcome::NoInflight => {
+                        tracing::debug!("Ctrl+C: no in-flight turn to cancel");
+                    }
+                    archon_tui::CancelOutcome::Aborted { elapsed_ms } => {
+                        tracing::info!(
+                            "Ctrl+C: aborted in-flight turn (elapsed_ms={elapsed_ms})"
+                        );
+                    }
                 }
-                drop(guard);
                 continue;
             }
 
@@ -4237,38 +4320,30 @@ async fn run_interactive_session(
                                 resp.clear();
                             }
                             let _ = input_tui_tx.send(TuiEvent::GenerationStarted).await;
-                            // TASK-AGS-106: await previous task to serialize
-                            {
-                                let mut guard = current_agent_task_inner.lock().await;
-                                if let Some((_cancel, handle)) = guard.take() {
-                                    let _ = handle.await;
+                            // TASK-TUI-107: dispatch via AgentDispatcher. The
+                            // old `handle.await`-prior serialization pattern
+                            // is gone — queued prompts drain via poll_completion.
+                            // Post-turn work (SlashCommandComplete event,
+                            // optional registry reload) is pushed onto
+                            // post_turn_queue and runs when poll_completion
+                            // observes this turn's outcome.
+                            match dispatcher.spawn_turn(
+                                prompt.clone(),
+                                adapter.clone() as std::sync::Arc<dyn archon_tui::TurnRunner>,
+                            ) {
+                                archon_tui::DispatchResult::Running { .. } => {
+                                    tracing::debug!("spawned skill agent turn");
+                                }
+                                archon_tui::DispatchResult::Queued => {
+                                    tracing::debug!("agent busy; queued skill prompt");
+                                }
+                                archon_tui::DispatchResult::Rejected(err) => {
+                                    tracing::error!("skill dispatch rejected: {err}");
                                 }
                             }
-                            let cancel = CancellationToken::new();
-                            let agent_for_task = Arc::clone(&agent);
-                            let cmd_name_owned = cmd_name.clone();
-                            let agent_registry_clone = Arc::clone(&cmd_ctx.agent_registry);
-                            let working_dir_clone = cmd_ctx.working_dir.clone();
-                            let tui_tx_clone = input_tui_tx.clone();
-                            let cancel_for_agent = cancel.clone();
-                            let handle = tokio::spawn(async move {
-                                let mut guard = agent_for_task.lock().await;
-                                // TASK-AGS-107: set cancel token for Ctrl+C propagation
-                                guard.set_cancel_token(Some(cancel_for_agent));
-                                if let Err(e) = guard.process_message(&prompt).await {
-                                    tracing::error!("skill agent error: {e}");
-                                }
-                                guard.set_cancel_token(None);
-                                // Hot-reload agent registry after agent-management skills
-                                if cmd_name_owned == "create-agent" {
-                                    if let Ok(mut reg) = agent_registry_clone.write() {
-                                        reg.reload(&working_dir_clone);
-                                        tracing::info!("agent registry reloaded after /create-agent");
-                                    }
-                                }
-                                let _ = tui_tx_clone.send(TuiEvent::SlashCommandComplete).await;
+                            post_turn_queue.push_back(PostTurnAction::SkillComplete {
+                                reload_registry_for: Some(cmd_name.clone()),
                             });
-                            *current_agent_task_inner.lock().await = Some((cancel, handle));
                         }
                         SkillOutput::Text(t) | SkillOutput::Markdown(t) => {
                             let _ = input_tui_tx
@@ -4315,43 +4390,26 @@ async fn run_interactive_session(
             } else {
                 input.clone()
             };
-            // TASK-AGS-106: await previous task to serialize
-            {
-                let mut guard = current_agent_task_inner.lock().await;
-                if let Some((_cancel, handle)) = guard.take() {
-                    let _ = handle.await;
+            // TASK-TUI-107: dispatch via AgentDispatcher. The old
+            // `handle.await`-prior serialization pattern is gone — queued
+            // prompts drain via poll_completion. Session persistence is
+            // pushed onto post_turn_queue and runs when poll_completion
+            // observes this turn's outcome.
+            match dispatcher.spawn_turn(
+                effective_input,
+                adapter.clone() as std::sync::Arc<dyn archon_tui::TurnRunner>,
+            ) {
+                archon_tui::DispatchResult::Running { .. } => {
+                    tracing::debug!("spawned agent turn");
+                }
+                archon_tui::DispatchResult::Queued => {
+                    tracing::debug!("agent busy; queued prompt");
+                }
+                archon_tui::DispatchResult::Rejected(err) => {
+                    tracing::error!("dispatch rejected: {err}");
                 }
             }
-            let cancel = CancellationToken::new();
-            let agent_for_task = Arc::clone(&agent);
-            let session_store_clone = Arc::clone(&session_store_for_input);
-            let session_id_clone = session_id_for_input.clone();
-            let cancel_for_agent = cancel.clone();
-            let handle = tokio::spawn(async move {
-                let mut guard = agent_for_task.lock().await;
-                // TASK-AGS-107: set cancel token so ToolContext.cancel_parent
-                // propagates to subagent child_token() chains.
-                guard.set_cancel_token(Some(cancel_for_agent));
-                if let Err(e) = guard.process_message(&effective_input).await {
-                    tracing::error!("agent loop error: {e}");
-                }
-                guard.set_cancel_token(None);
-                // Persist messages to session store for /resume
-                let messages = &guard.conversation_state().messages;
-                for (idx, msg) in messages.iter().enumerate() {
-                    if let Ok(json_str) = serde_json::to_string(msg) {
-                        if let Err(e) = session_store_clone.save_message(
-                            &session_id_clone,
-                            idx as u64,
-                            &json_str,
-                        ) {
-                            tracing::warn!("save_message failed at idx {idx}: {e}");
-                        }
-                    }
-                }
-                drop(guard);
-            });
-            *current_agent_task_inner.lock().await = Some((cancel, handle));
+            post_turn_queue.push_back(PostTurnAction::PersistSession);
         }
         // END INPUT_HANDLER — arch-lint.sh scopes D1 grep to this region
 
@@ -4370,12 +4428,13 @@ async fn run_interactive_session(
             }
         }
 
-        // TASK-AGS-106: await running task before firing Stop
+        // TASK-TUI-107: drain in-flight turn + queue before the Stop hook.
+        let drain_deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while (dispatcher.is_busy() || dispatcher.queue_len() > 0)
+            && std::time::Instant::now() < drain_deadline
         {
-            let mut guard = current_agent_task_inner.lock().await;
-            if let Some((_cancel, handle)) = guard.take() {
-                let _ = handle.await;
-            }
+            tokio::time::sleep(std::time::Duration::from_millis(16)).await;
+            let _ = dispatcher.poll_completion();
         }
 
         // CRIT-06: Fire Stop hook when the input channel closes (session ending)
