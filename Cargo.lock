@@ -725,6 +725,7 @@ dependencies = [
  "cpal",
  "crossterm",
  "dirs",
+ "futures-util",
  "hound",
  "insta",
  "libloading",

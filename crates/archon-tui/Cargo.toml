@@ -23,6 +23,7 @@ reqwest = { workspace = true, features = ["multipart"] }
 serde_json.workspace = true
 archon-core = { path = "../archon-core" }
 cpal = { workspace = true, optional = true }
+futures-util = { workspace = true }
 
 [dev-dependencies]
 insta = { workspace = true }
