@@ -30,6 +30,7 @@ pub fn render_markdown(text: &str) -> Vec<Line<'static>> {
     opts.insert(Options::ENABLE_TABLES);
     let parser = Parser::new_ext(text, opts);
     let mut renderer = MarkdownRenderer::new();
+    // yield_now not needed: sync loop, not cancellable regardless.
     for event in parser {
         renderer.push_event(event);
     }
@@ -317,6 +318,7 @@ impl MarkdownRenderer {
     fn emit_table_row(&mut self) {
         let sep_style = Style::default().fg(Color::DarkGray);
         let mut row_spans: Vec<Span<'static>> = vec![Span::styled("| ".to_string(), sep_style)];
+        // yield_now not needed: sync loop, not cancellable regardless.
         for (i, cell) in self.table_row_cells.iter().enumerate() {
             if i > 0 {
                 row_spans.push(Span::styled(" | ".to_string(), sep_style));
@@ -426,12 +428,14 @@ fn parse_inline_styles(text: &str, theme: &Theme) -> Vec<Span<'static>> {
     let mut current = String::new();
     let mut chars = text.chars().peekable();
 
+    // yield_now not needed: sync loop, not cancellable regardless.
     while let Some(ch) = chars.next() {
         if ch == '`' {
             if !current.is_empty() {
                 spans.push(Span::raw(std::mem::take(&mut current)));
             }
             let mut code = String::new();
+            // yield_now not needed: sync loop, not cancellable regardless.
             for c in chars.by_ref() {
                 if c == '`' {
                     break;
@@ -445,6 +449,7 @@ fn parse_inline_styles(text: &str, theme: &Theme) -> Vec<Span<'static>> {
                 spans.push(Span::raw(std::mem::take(&mut current)));
             }
             let mut bold = String::new();
+            // yield_now not needed: sync loop, not cancellable regardless.
             while let Some(c) = chars.next() {
                 if c == '*' && chars.peek() == Some(&'*') {
                     chars.next();
