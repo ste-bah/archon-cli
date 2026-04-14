@@ -514,3 +514,319 @@ async fn test_poll_completion_preserves_no_loss() {
         assert_eq!(got[i + 1], format!("burst-{i}"));
     }
 }
+
+// ---- TASK-TUI-104 tests ----
+
+/// Fake [`AgentRouter`] that records every `switch(agent_id)` call. Optional
+/// `reject` field makes the router bail if the agent_id matches, exercising
+/// the error-propagation path.
+struct MockRouter {
+    calls: Arc<std::sync::Mutex<Vec<String>>>,
+    reject: Option<String>,
+}
+
+impl MockRouter {
+    fn new() -> (Self, Arc<std::sync::Mutex<Vec<String>>>) {
+        let calls = Arc::new(std::sync::Mutex::new(Vec::new()));
+        (
+            Self {
+                calls: Arc::clone(&calls),
+                reject: None,
+            },
+            calls,
+        )
+    }
+
+    fn rejecting(agent_id: &str) -> (Self, Arc<std::sync::Mutex<Vec<String>>>) {
+        let calls = Arc::new(std::sync::Mutex::new(Vec::new()));
+        (
+            Self {
+                calls: Arc::clone(&calls),
+                reject: Some(agent_id.to_string()),
+            },
+            calls,
+        )
+    }
+}
+
+impl AgentRouter for MockRouter {
+    fn switch(&self, agent_id: &str) -> anyhow::Result<()> {
+        if let Some(ref rej) = self.reject {
+            if agent_id == rej {
+                anyhow::bail!("router rejected agent_id: {agent_id}");
+            }
+        }
+        self.calls.lock().unwrap().push(agent_id.to_string());
+        Ok(())
+    }
+}
+
+/// Turn runner that records `(prompt, marker)` for every run_turn invocation
+/// and returns `Ok(())` immediately. The `marker` tags which runner was used
+/// so cross-switch assertions can prove each prompt went to its
+/// captured-at-enqueue runner.
+#[derive(Clone)]
+struct MarkingRunner {
+    marker: &'static str,
+    log: Arc<std::sync::Mutex<Vec<(String, &'static str)>>>,
+}
+
+impl MarkingRunner {
+    fn new(
+        marker: &'static str,
+        log: Arc<std::sync::Mutex<Vec<(String, &'static str)>>>,
+    ) -> Self {
+        Self { marker, log }
+    }
+}
+
+impl TurnRunner for MarkingRunner {
+    fn run_turn<'a>(
+        &'a self,
+        prompt: String,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<()>> + Send + 'a>> {
+        let marker = self.marker;
+        let log = Arc::clone(&self.log);
+        Box::pin(async move {
+            // Small yield so tokio advances the task queue between spawns in
+            // multi-spawn tests. Does not affect correctness.
+            tokio::task::yield_now().await;
+            log.lock().unwrap().push((prompt, marker));
+            Ok(())
+        })
+    }
+}
+
+/// Build a dispatcher backed by [`MockRouter`] and return the `calls` vec so
+/// tests can inspect which agent_ids were passed through.
+fn make_dispatcher_with_mock_router() -> (AgentDispatcher, Arc<std::sync::Mutex<Vec<String>>>) {
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel::<AgentEvent>();
+    let (mock, calls) = MockRouter::new();
+    let router: Arc<dyn AgentRouter> = Arc::new(mock);
+    (AgentDispatcher::new(router, tx), calls)
+}
+
+/// Build a dispatcher backed by a rejecting [`MockRouter`] whose `switch` call
+/// returns `Err` for the given agent_id.
+fn make_dispatcher_with_rejecting_router(
+    reject: &str,
+) -> (AgentDispatcher, Arc<std::sync::Mutex<Vec<String>>>) {
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel::<AgentEvent>();
+    let (mock, calls) = MockRouter::rejecting(reject);
+    let router: Arc<dyn AgentRouter> = Arc::new(mock);
+    (AgentDispatcher::new(router, tx), calls)
+}
+
+#[tokio::test]
+async fn test_switch_agent_does_not_touch_current_query() {
+    let (mut d, calls) = make_dispatcher_with_mock_router();
+    // Spawn a SleepForever turn so current_query stays Some and in-flight.
+    let recorded = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let runner: Arc<dyn TurnRunner> = Arc::new(ConfigurableRunner::new(
+        vec![MockOutcome::SleepForever],
+        Arc::clone(&recorded),
+        0,
+    ));
+    let _ = d.spawn_turn("prompt-0".into(), runner);
+    assert!(d.is_busy());
+    assert!(d.current_handle_is_inflight());
+
+    // Switch to agent-B while prompt-0 is still running.
+    d.switch_agent("agent-B").expect("switch should succeed");
+
+    // Router saw the switch.
+    assert_eq!(
+        calls.lock().unwrap().as_slice(),
+        &["agent-B".to_string()],
+        "router should have received exactly agent-B"
+    );
+    // current_query is untouched — still Some and still in-flight.
+    assert!(d.current_query.is_some(), "current_query must remain Some");
+    assert!(
+        d.current_handle_is_inflight(),
+        "handle must still be in-flight after switch"
+    );
+    assert!(d.is_busy());
+    assert_eq!(d.queue_len(), 0);
+
+    // Cleanup: abort the SleepForever so the test process does not leak.
+    let _ = d.cancel_current();
+}
+
+#[tokio::test]
+async fn test_switch_agent_returns_router_error_on_invalid_id() {
+    let (mut d, calls) = make_dispatcher_with_rejecting_router("agent-zzz");
+    let result = d.switch_agent("agent-zzz");
+    assert!(result.is_err(), "switch_agent should bubble router error");
+    // Router refused — nothing should be recorded.
+    assert!(
+        calls.lock().unwrap().is_empty(),
+        "rejecting router should not record rejected id"
+    );
+    // Dispatcher state untouched.
+    assert!(d.current_query.is_none());
+    assert_eq!(d.queue_len(), 0);
+}
+
+#[tokio::test]
+async fn test_switch_agent_when_idle() {
+    let (mut d, calls) = make_dispatcher_with_mock_router();
+    assert!(!d.is_busy());
+    assert!(!d.current_handle_is_inflight());
+    d.switch_agent("agent-B").expect("switch should succeed");
+    assert_eq!(
+        calls.lock().unwrap().as_slice(),
+        &["agent-B".to_string()],
+        "router should have received agent-B"
+    );
+    // current_query remains None — idle dispatchers stay idle.
+    assert!(d.current_query.is_none());
+    assert!(!d.current_handle_is_inflight());
+    assert_eq!(d.queue_len(), 0);
+}
+
+#[tokio::test]
+async fn test_switch_preserves_in_flight_against_old_runner() {
+    let (mut d, _calls) = make_dispatcher_with_mock_router();
+    let log: Arc<std::sync::Mutex<Vec<(String, &'static str)>>> =
+        Arc::new(std::sync::Mutex::new(Vec::new()));
+    let runner_a: Arc<dyn TurnRunner> = Arc::new(MarkingRunner::new("A", Arc::clone(&log)));
+
+    // Spawn prompt-0 against runner A.
+    let _ = d.spawn_turn("prompt-0".into(), runner_a);
+
+    // Switch to agent-B — the spawned task is already running A and must not
+    // be reassigned to anything else.
+    d.switch_agent("agent-B").expect("switch should succeed");
+
+    // Drain to completion; prompt-0 should land in the log tagged "A".
+    let outcomes = drain_until_idle(&mut d).await;
+    assert_eq!(outcomes.len(), 1, "expected one completion for prompt-0");
+    assert!(matches!(outcomes[0], TurnOutcome::Completed));
+    let log_snapshot = log.lock().unwrap().clone();
+    assert_eq!(
+        log_snapshot,
+        vec![("prompt-0".to_string(), "A")],
+        "prompt-0 must have executed on the original runner A, not on the post-switch runner"
+    );
+}
+
+#[tokio::test]
+async fn test_switch_to_new_runner_with_empty_queue() {
+    let (mut d, calls) = make_dispatcher_with_mock_router();
+    let log: Arc<std::sync::Mutex<Vec<(String, &'static str)>>> =
+        Arc::new(std::sync::Mutex::new(Vec::new()));
+
+    // Switch while idle; then the CALLER spawns prompt-1 with runner B. The
+    // dispatcher does not hold any implicit "current runner" — switch only
+    // informs the router.
+    d.switch_agent("agent-B").expect("switch should succeed");
+    assert_eq!(calls.lock().unwrap().as_slice(), &["agent-B".to_string()]);
+
+    let runner_b: Arc<dyn TurnRunner> = Arc::new(MarkingRunner::new("B", Arc::clone(&log)));
+    let _ = d.spawn_turn("prompt-1".into(), runner_b);
+    let outcomes = drain_until_idle(&mut d).await;
+    assert_eq!(outcomes.len(), 1);
+    assert!(matches!(outcomes[0], TurnOutcome::Completed));
+    assert_eq!(
+        log.lock().unwrap().clone(),
+        vec![("prompt-1".to_string(), "B")],
+        "prompt-1 must execute on the caller-supplied runner B"
+    );
+}
+
+#[tokio::test]
+async fn test_capture_at_enqueue_holds_across_switch() {
+    // THE critical regression guard: demonstrates that the capture-at-enqueue
+    // contract from TASK-TUI-103 is preserved transitively across a mid-flight
+    // switch_agent call. Prompt-1 was queued with runner A; prompt-2 was
+    // queued with runner B after a switch. When the queue drains, prompt-1
+    // MUST run on A and prompt-2 MUST run on B.
+    let (mut d, _calls) = make_dispatcher_with_mock_router();
+    let log: Arc<std::sync::Mutex<Vec<(String, &'static str)>>> =
+        Arc::new(std::sync::Mutex::new(Vec::new()));
+
+    // Step 1: spawn prompt-0 against a SleepForever runner so the slot stays
+    // busy. We use ConfigurableRunner for SleepForever since MarkingRunner
+    // always returns immediately.
+    let recorded = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let sleeper: Arc<dyn TurnRunner> = Arc::new(ConfigurableRunner::new(
+        vec![MockOutcome::SleepForever],
+        Arc::clone(&recorded),
+        0,
+    ));
+    let _ = d.spawn_turn("prompt-0".into(), sleeper);
+    assert!(d.is_busy());
+
+    // Step 2: enqueue prompt-1 with runner A (captured at enqueue time).
+    let runner_a: Arc<dyn TurnRunner> = Arc::new(MarkingRunner::new("A", Arc::clone(&log)));
+    let q1 = d.spawn_turn("prompt-1".into(), runner_a);
+    assert!(matches!(q1, DispatchResult::Queued));
+    assert_eq!(d.queue_len(), 1);
+
+    // Step 3: switch the router to agent-B.
+    d.switch_agent("agent-B").expect("switch should succeed");
+
+    // Step 4: enqueue prompt-2 with runner B.
+    let runner_b: Arc<dyn TurnRunner> = Arc::new(MarkingRunner::new("B", Arc::clone(&log)));
+    let q2 = d.spawn_turn("prompt-2".into(), runner_b);
+    assert!(matches!(q2, DispatchResult::Queued));
+    assert_eq!(d.queue_len(), 2);
+
+    // Step 5: cancel the SleepForever in-flight so the queue can drain.
+    let _ = d.cancel_current();
+    // current_query is now None; but we need the drain to run prompt-1 next.
+    // The drain happens via poll_completion only when current_query becomes
+    // finished. cancel_current() took the handle, so poll_completion will
+    // never observe it — we must re-spawn the next queued entry ourselves by
+    // routing through the same drain path. The simplest way: push a new
+    // trivial current_query we can poll. Instead, call poll_completion in a
+    // loop after manually re-spawning via a helper: enqueue a no-op first so
+    // the queue head gets dispatched.
+    //
+    // Simpler approach: spawn a trivial completed turn, then drain. The
+    // completed turn will pop prompt-1 from the queue on drain.
+    let noop: Arc<dyn TurnRunner> = Arc::new(NoopRunner);
+    let _ = d.spawn_turn("noop-trigger".into(), noop);
+
+    // Drain — the noop completes, which pops prompt-1 (runner A), which
+    // completes, which pops prompt-2 (runner B), which completes.
+    let outcomes = drain_until_idle(&mut d).await;
+    assert_eq!(
+        outcomes.len(),
+        3,
+        "expected 3 drain outcomes (noop + prompt-1 + prompt-2), got {}",
+        outcomes.len()
+    );
+    for o in &outcomes {
+        assert!(matches!(o, TurnOutcome::Completed));
+    }
+
+    let log_snapshot = log.lock().unwrap().clone();
+    assert_eq!(
+        log_snapshot,
+        vec![
+            ("prompt-1".to_string(), "A"),
+            ("prompt-2".to_string(), "B"),
+        ],
+        "capture-at-enqueue broken: queued prompts must run on their originally-captured runners across a switch boundary"
+    );
+}
+
+#[tokio::test]
+async fn test_switch_twice_rapidly() {
+    let (mut d, calls) = make_dispatcher_with_mock_router();
+    d.switch_agent("A").expect("switch A");
+    d.switch_agent("B").expect("switch B");
+    d.switch_agent("C").expect("switch C");
+    assert_eq!(
+        calls.lock().unwrap().as_slice(),
+        &["A".to_string(), "B".to_string(), "C".to_string()],
+        "router should have received A, B, C in order"
+    );
+    assert!(d.current_query.is_none());
+    assert!(d.pending_queue.is_empty());
+    assert_eq!(d.queue_len(), 0);
+    assert!(!d.is_busy());
+    assert!(!d.current_handle_is_inflight());
+}

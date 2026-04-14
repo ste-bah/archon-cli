@@ -314,10 +314,56 @@ impl AgentDispatcher {
         Some(outcome)
     }
 
-    /// Switch the active agent via the router. Body lands in TASK-TUI-104.
-    pub fn switch_agent(&mut self, _agent_id: &str) -> anyhow::Result<()> {
-        let _ = &self.router;
-        todo!("TASK-TUI-104")
+    /// Switch the active agent via the router.
+    /// Spec: 02-technical-spec.md:51
+    /// (`TuiEvent::SlashAgent → router.switch(agent_id) (non-blocking)`).
+    ///
+    /// ## Thin delegation model
+    ///
+    /// This is **Option (c)** from the TASK-TUI-104 design space: a pure
+    /// delegation to `self.router.switch(agent_id)` that returns the router's
+    /// result verbatim. The dispatcher holds no implicit "current runner"
+    /// state — `spawn_turn` takes an explicit `Arc<dyn TurnRunner>` from its
+    /// caller, so the router's updated selection only affects *future*
+    /// caller-driven dispatches that read from it. Nothing queued and nothing
+    /// in flight is touched.
+    ///
+    /// ## Zero-mutation contract (sherlock-probe #2, corrected anchor)
+    ///
+    /// This function MUST NOT touch:
+    /// - `self.current_query` — the in-flight `JoinHandle` keeps streaming
+    ///   into `agent_event_tx` until it completes or is cancelled, per
+    ///   REQ-TUI-LOOP-005 and AC-EVENTLOOP-06. Aborting here would strand
+    ///   the agent mid-turn; awaiting here would re-introduce the input-loop
+    ///   blockage the dispatcher exists to remove.
+    /// - `self.pending_queue` — queued prompts already carry their
+    ///   `runner: Arc<dyn TurnRunner>` captured at enqueue time (TASK-TUI-103
+    ///   deviation). A switch does NOT rewrite those captured runners; the
+    ///   capture-at-enqueue contract is preserved transitively across the
+    ///   switch boundary.
+    /// - `self.agent_event_tx` — the event channel outlives individual
+    ///   turns and agent switches.
+    ///
+    /// ## Non-blocking contract
+    ///
+    /// Zero `.await` calls. `AgentRouter::switch` is a synchronous trait
+    /// method by design so this whole path stays sync-callable from the
+    /// event loop (TASK-TUI-106).
+    pub fn switch_agent(&mut self, agent_id: &str) -> anyhow::Result<()> {
+        self.router.switch(agent_id)
+    }
+
+    /// Read-only accessor: `true` iff a current turn is tracked and its
+    /// [`tokio::task::JoinHandle`] has not yet finished.
+    ///
+    /// Used by TASK-TUI-106's event-loop dispatch and by TASK-TUI-104 tests
+    /// that need to assert an in-flight turn survived a `switch_agent` call
+    /// without the dispatcher taking the handle.
+    pub fn current_handle_is_inflight(&self) -> bool {
+        self.current_query
+            .as_ref()
+            .map(|h| !h.is_finished())
+            .unwrap_or(false)
     }
 
     /// Number of prompts currently waiting in the FIFO queue.
