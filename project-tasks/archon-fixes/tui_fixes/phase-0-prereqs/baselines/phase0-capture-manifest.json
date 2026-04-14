@@ -1,7 +1,7 @@
 {
-  "captured_at": "2026-04-13T20:01:33+01:00",
-  "git_commit": "2b9b70d51f6ff017168172c57b909426491add12",
-  "loc_baseline_sha": "0261aa8a5838f136bd707a4acac9620b33a120d12e6cbcde6a8e735efc4a59b7",
+  "captured_at": "2026-04-13T23:04:25+01:00",
+  "git_commit": "1386e139c57f610ff4eab2bbefb85cf278531cca",
+  "loc_baseline_sha": "23eca0baa1d7849f7e26ceef73aac5f07fe3906cfbe13b638a7e0d5815a9587f",
   "file_size_gate": "pass",
   "banned_patterns_gate": "pass",
   "cargo_test_archon_tui_test_support": "pass",

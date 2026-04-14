@@ -1,7 +1,7 @@
 # LoC Baseline -- TUI Refactor
 
 This document is the day-0 line-of-count baseline captured by
-TASK-TUI-002 on 2026-04-13T20:01:30+01:00 at git commit `2b9b70d51f6ff017168172c57b909426491add12`. It enumerates every
+TASK-TUI-002 on 2026-04-13T23:04:22+01:00 at git commit `1386e139c57f610ff4eab2bbefb85cf278531cca`. It enumerates every
 Rust source file under `src/` and `crates/archon-tui/src/` and
 flags the files that exceed the 500-line budget. Files listed in
 the table below are the refactor targets for phase-3; the
