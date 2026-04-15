@@ -17,7 +17,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use archon_core::agent::AgentEvent;
+use archon_core::agent::{AgentEvent, TimestampedEvent};
 use archon_tui::{AgentDispatcher, AgentRouter, TurnRunner};
 use tokio::sync::mpsc::unbounded_channel;
 
@@ -53,7 +53,7 @@ impl Lcg {
 struct FakeTurnRunner {
     id: usize,
     delay_ms: u64,
-    event_tx: tokio::sync::mpsc::UnboundedSender<AgentEvent>,
+    event_tx: tokio::sync::mpsc::UnboundedSender<TimestampedEvent>,
 }
 
 impl TurnRunner for FakeTurnRunner {
@@ -73,7 +73,8 @@ impl TurnRunner for FakeTurnRunner {
                 let event = AgentEvent::TextDelta(format!(
                     "event-{counter} from agent-{id}"
                 ));
-                let _ = tx.send(event);
+                let timestamped = TimestampedEvent { sent_at: Instant::now(), inner: event };
+                let _ = tx.send(timestamped);
                 counter += 1;
             }
 
@@ -137,7 +138,7 @@ async fn run_concurrent_test(n: usize, wall_budget_ms: u64, p99_budget_ms: u64) 
     let t0 = Instant::now();
 
     // Shared event channel
-    let (event_tx, _event_rx) = unbounded_channel::<AgentEvent>();
+    let (event_tx, _event_rx) = unbounded_channel::<TimestampedEvent>();
 
     let router: Arc<dyn AgentRouter> = Arc::new(NoopRouter);
 

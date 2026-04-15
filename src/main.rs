@@ -13,7 +13,7 @@ use clap::Parser;
 use archon_consciousness::assembler::{AssemblyInput, BudgetConfig, SystemPromptAssembler};
 use archon_consciousness::defaults::load_configured_defaults;
 use archon_consciousness::rules::RulesEngine;
-use archon_core::agent::{Agent, AgentConfig, AgentEvent, SessionStats};
+use archon_core::agent::{Agent, AgentConfig, AgentEvent, SessionStats, TimestampedEvent};
 use archon_core::agents::AgentRegistry;
 use archon_core::cli_flags::resolve_flags;
 use archon_core::config::default_config_path;
@@ -557,7 +557,7 @@ async fn main() -> Result<()> {
             // handler's prompt method once sessions are fully connected (Phase 6).
             // For now, create a placeholder channel so the transport compiles.
             let (_event_tx, event_rx) =
-                tokio::sync::mpsc::unbounded_channel::<archon_core::agent::AgentEvent>();
+                tokio::sync::mpsc::unbounded_channel::<archon_core::agent::TimestampedEvent>();
             let session_id = uuid::Uuid::new_v4().to_string();
             tracing::info!("IDE stdio mode: session={session_id}");
             if let Err(e) = transport.run_with_events(event_rx, &session_id).await {
@@ -2296,7 +2296,7 @@ async fn run_print_mode_session(
         }
     }
 
-    let (agent_event_tx, agent_event_rx) = tokio::sync::mpsc::unbounded_channel::<AgentEvent>();
+    let (agent_event_tx, agent_event_rx) = tokio::sync::mpsc::unbounded_channel::<TimestampedEvent>();
     let provider = build_llm_provider(&config.llm, api_client);
     tracing::info!("LLM provider: {}", provider.name());
 
@@ -3165,7 +3165,7 @@ async fn run_interactive_session(
 
     // Create channels
     let (agent_event_tx, mut agent_event_rx) =
-        tokio::sync::mpsc::unbounded_channel::<AgentEvent>();
+        tokio::sync::mpsc::unbounded_channel::<TimestampedEvent>();
     let (tui_event_tx, tui_event_rx) = tokio::sync::mpsc::channel::<TuiEvent>(256);
     // CRIT-13: Forward voice pipeline events to TUI event channel
     if let Some(mut voice_rx) = voice_event_rx {
@@ -3512,17 +3512,19 @@ async fn run_interactive_session(
         let mut coalescer = EventCoalescer::with_defaults();
         loop {
             // Block for at least one event; if the channel is closed, exit.
-            let first = match agent_event_rx.recv().await {
-                Some(ev) => ev,
+            let timestamped = match agent_event_rx.recv().await {
+                Some(ts) => ts,
                 None => break,
             };
-            coalescer.push(first);
+            let elapsed_ms = (timestamped.sent_at.elapsed().as_millis() as u64).max(1);
+            metrics.record_latency_ms(elapsed_ms);
+            coalescer.push(timestamped.inner);
             // Drain any further pending events up to the per-tick budget.
             let mut drained = 1usize;
             while drained < RENDER_EVENT_BUDGET {
                 match agent_event_rx.try_recv() {
-                    Ok(ev) => {
-                        coalescer.push(ev);
+                    Ok(ts) => {
+                        coalescer.push(ts.inner);
                         drained += 1;
                     }
                     Err(_) => break,

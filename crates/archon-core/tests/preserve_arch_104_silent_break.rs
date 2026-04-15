@@ -48,7 +48,7 @@ use archon_tools::subagent_executor::{
 };
 use archon_tools::tool::ToolContext;
 
-use archon_core::agent::{Agent, AgentConfig, AgentEvent};
+use archon_core::agent::{Agent, AgentConfig, AgentEvent, TimestampedEvent};
 use archon_core::agents::AgentRegistry;
 use archon_core::dispatch::ToolRegistry;
 
@@ -292,7 +292,7 @@ async fn agent_process_message_carries_real_subagent_text_across_seam() {
     // 4. Build the Agent. Event channel is unbounded; drain it in a
     //    background task so send_event never fails.
     let (event_tx, mut event_rx) =
-        tokio::sync::mpsc::unbounded_channel::<AgentEvent>();
+        tokio::sync::mpsc::unbounded_channel::<TimestampedEvent>();
     tokio::spawn(async move { while event_rx.recv().await.is_some() {} });
 
     let agent_registry = Arc::new(std::sync::RwLock::new(AgentRegistry::load(

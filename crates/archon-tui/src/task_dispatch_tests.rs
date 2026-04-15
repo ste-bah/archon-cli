@@ -6,7 +6,7 @@
 //! `task_dispatch.rs`, so `super::*` resolves to items in `task_dispatch`.
 
 use super::*;
-use archon_core::agent::AgentEvent;
+use archon_core::agent::{AgentEvent, TimestampedEvent};
 use std::sync::Arc;
 
 #[test]
@@ -94,7 +94,7 @@ fn turn_runner_is_object_safe_and_buildable() {
 
 #[test]
 fn dispatcher_constructs_with_noop_router() {
-    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel::<AgentEvent>();
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel::<TimestampedEvent>();
     let router: Arc<dyn AgentRouter> = Arc::new(NoopRouter);
     let d = AgentDispatcher::new(router, tx);
     assert_eq!(d.queue_len(), 0);
@@ -123,7 +123,7 @@ impl TurnRunner for MockTurnRunner {
 }
 
 fn make_dispatcher() -> AgentDispatcher {
-    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel::<AgentEvent>();
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel::<TimestampedEvent>();
     let router: Arc<dyn AgentRouter> = Arc::new(NoopRouter);
     AgentDispatcher::new(router, tx)
 }
@@ -600,7 +600,7 @@ impl TurnRunner for MarkingRunner {
 /// Build a dispatcher backed by [`MockRouter`] and return the `calls` vec so
 /// tests can inspect which agent_ids were passed through.
 fn make_dispatcher_with_mock_router() -> (AgentDispatcher, Arc<std::sync::Mutex<Vec<String>>>) {
-    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel::<AgentEvent>();
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel::<TimestampedEvent>();
     let (mock, calls) = MockRouter::new();
     let router: Arc<dyn AgentRouter> = Arc::new(mock);
     (AgentDispatcher::new(router, tx), calls)
@@ -611,7 +611,7 @@ fn make_dispatcher_with_mock_router() -> (AgentDispatcher, Arc<std::sync::Mutex<
 fn make_dispatcher_with_rejecting_router(
     reject: &str,
 ) -> (AgentDispatcher, Arc<std::sync::Mutex<Vec<String>>>) {
-    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel::<AgentEvent>();
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel::<TimestampedEvent>();
     let (mock, calls) = MockRouter::rejecting(reject);
     let router: Arc<dyn AgentRouter> = Arc::new(mock);
     (AgentDispatcher::new(router, tx), calls)

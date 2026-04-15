@@ -20,7 +20,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use archon_core::agent::AgentEvent;
+use archon_core::agent::{AgentEvent, TimestampedEvent};
 use archon_tui::{
     AgentDispatcher, AgentRouter, DispatchResult, TurnOutcome, TurnRunner,
 };
@@ -68,7 +68,7 @@ const NON_BLOCKING_TOLERANCE: Duration = Duration::from_millis(50);
 async fn test_dispatcher_does_not_block_on_inflight_turn() {
     // Agent event channel — unused in this test, but AgentDispatcher::new
     // requires a live UnboundedSender<AgentEvent>.
-    let (agent_event_tx, _agent_event_rx) = unbounded_channel::<AgentEvent>();
+    let (agent_event_tx, _agent_event_rx) = unbounded_channel::<TimestampedEvent>();
 
     // Fake runner with a 500ms per-turn delay. If the dispatcher
     // serialized, spawning the second turn would wait at least 500ms for

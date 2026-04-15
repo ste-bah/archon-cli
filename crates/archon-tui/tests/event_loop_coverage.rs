@@ -5,7 +5,7 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use archon_core::agent::AgentEvent;
+use archon_core::agent::{AgentEvent, TimestampedEvent};
 use archon_tui::{AgentDispatcher, AgentRouter, EventLoopConfig, TurnOutcome, TurnRunner};
 use tokio::sync::mpsc::unbounded_channel;
 use tokio::time::sleep;
@@ -95,7 +95,7 @@ async fn drain_until_idle(d: &mut AgentDispatcher) -> Vec<TurnOutcome> {
 /// future. Uses a SlowRunner (5 s) and measures wall time inside spawn_turn.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_tc_01_input_handler_spawns_without_await() {
-    let (agent_event_tx, _agent_event_rx) = unbounded_channel::<AgentEvent>();
+    let (agent_event_tx, _agent_event_rx) = unbounded_channel::<TimestampedEvent>();
     let router: Arc<dyn AgentRouter> = Arc::new(NoopRouter);
     let mut dispatcher = AgentDispatcher::new(router, agent_event_tx);
 
@@ -120,7 +120,7 @@ async fn test_tc_01_input_handler_spawns_without_await() {
 /// turn, returns false after natural completion, and false after cancel.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_tc_02_current_query_tracking() {
-    let (agent_event_tx, _agent_event_rx) = unbounded_channel::<AgentEvent>();
+    let (agent_event_tx, _agent_event_rx) = unbounded_channel::<TimestampedEvent>();
     let router: Arc<dyn AgentRouter> = Arc::new(NoopRouter);
     let mut dispatcher = AgentDispatcher::new(router, agent_event_tx);
 
@@ -186,7 +186,7 @@ impl TurnRunner for BurstRunner {
 /// Verifies 10 prompts queued during an in-flight turn drain FIFO with zero loss.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_tc_04_burst_10_messages_fifo_no_loss() {
-    let (agent_event_tx, _agent_event_rx) = unbounded_channel::<AgentEvent>();
+    let (agent_event_tx, _agent_event_rx) = unbounded_channel::<TimestampedEvent>();
     let router: Arc<dyn AgentRouter> = Arc::new(NoopRouter);
     let mut dispatcher = AgentDispatcher::new(router, agent_event_tx);
 
@@ -222,7 +222,7 @@ async fn test_tc_04_burst_10_messages_fifo_no_loss() {
 /// touch the in-flight handle — which remains in-flight after switch.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_tc_05_agent_switch_mid_flight() {
-    let (agent_event_tx, _agent_event_rx) = unbounded_channel::<AgentEvent>();
+    let (agent_event_tx, _agent_event_rx) = unbounded_channel::<TimestampedEvent>();
     let (router_fake, calls) = RecordingRouter::new();
     let router: Arc<dyn AgentRouter> = Arc::new(router_fake);
     let mut dispatcher = AgentDispatcher::new(router, agent_event_tx);
@@ -281,7 +281,7 @@ async fn test_tc_06_sigwinch_reflow_no_frame_drop() {
     let frames_clone = Arc::clone(&frames);
 
     let (tui_event_tx, tui_event_rx) = unbounded_channel::<archon_tui::app::TuiEvent>();
-    let (agent_event_tx, _agent_event_rx) = unbounded_channel::<AgentEvent>();
+    let (agent_event_tx, _agent_event_rx) = unbounded_channel::<TimestampedEvent>();
     let runner: Arc<dyn TurnRunner> = Arc::new(StreamRunner::new(frames_clone, 20, 10));
     let router: Arc<dyn AgentRouter> = Arc::new(NoopRouter);
 

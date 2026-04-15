@@ -25,7 +25,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Instant;
 
-use archon_core::agent::AgentEvent;
+use archon_core::agent::{AgentEvent, TimestampedEvent};
 use tokio::sync::mpsc::UnboundedSender;
 
 /// Abstraction over "something that can run a single agent turn". Defined
@@ -103,14 +103,14 @@ pub struct AgentDispatcher {
     pub router: std::sync::Arc<dyn AgentRouter>,
     /// Unbounded producer side of the agent event channel
     /// (see TECH-TUI-EVENTCHANNEL).
-    pub agent_event_tx: tokio::sync::mpsc::UnboundedSender<AgentEvent>,
+    pub agent_event_tx: tokio::sync::mpsc::UnboundedSender<TimestampedEvent>,
 }
 
 impl AgentDispatcher {
     /// Construct a new dispatcher with no in-flight turn and an empty queue.
     pub fn new(
         router: Arc<dyn AgentRouter>,
-        agent_event_tx: UnboundedSender<AgentEvent>,
+        agent_event_tx: UnboundedSender<TimestampedEvent>,
     ) -> Self {
         Self {
             current_query: None,

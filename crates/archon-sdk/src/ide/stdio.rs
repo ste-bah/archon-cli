@@ -12,7 +12,7 @@ use std::io::{BufRead, Write};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 use tokio::sync::mpsc;
 
-use archon_core::agent::AgentEvent;
+use archon_core::agent::{AgentEvent, TimestampedEvent};
 
 use crate::ide::handler::{IdeProtocolHandler, event_to_notification};
 
@@ -59,7 +59,7 @@ impl StdioTransport {
     /// The loop terminates when stdin reaches EOF or the event channel closes.
     pub async fn run_with_events(
         &mut self,
-        mut event_rx: mpsc::UnboundedReceiver<AgentEvent>,
+        mut event_rx: mpsc::UnboundedReceiver<TimestampedEvent>,
         session_id: &str,
     ) -> anyhow::Result<()> {
         let stdin = tokio::io::stdin();
@@ -90,7 +90,7 @@ impl StdioTransport {
                 event = event_rx.recv() => {
                     match event {
                         Some(evt) => {
-                            if let Some(notification) = event_to_notification(session_id, &evt) {
+                            if let Some(notification) = event_to_notification(session_id, &evt.inner) {
                                 if let Ok(json) = serde_json::to_string(&notification) {
                                     stdout.write_all(json.as_bytes()).await?;
                                     stdout.write_all(b"\n").await?;

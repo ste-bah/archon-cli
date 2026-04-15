@@ -127,6 +127,14 @@ impl AgentEvent {
     }
 }
 
+/// Wrapper that timestamps when an AgentEvent was sent into the channel.
+/// Used to compute send-to-render latency in the drain loop.
+#[derive(Debug, Clone)]
+pub struct TimestampedEvent {
+    pub sent_at: std::time::Instant,
+    pub inner: AgentEvent,
+}
+
 // ---------------------------------------------------------------------------
 // Agent configuration
 // ---------------------------------------------------------------------------
@@ -265,7 +273,7 @@ pub struct Agent {
     registry: ToolRegistry,
     config: AgentConfig,
     state: ConversationState,
-    event_tx: tokio::sync::mpsc::UnboundedSender<AgentEvent>,
+    event_tx: tokio::sync::mpsc::UnboundedSender<TimestampedEvent>,
     checkpoint_store: Option<Arc<Mutex<CheckpointStore>>>,
     plan_store: Option<PlanStore>,
     turn_number: u64,
@@ -323,7 +331,7 @@ impl Agent {
         client: Arc<dyn LlmProvider>,
         registry: ToolRegistry,
         config: AgentConfig,
-        event_tx: tokio::sync::mpsc::UnboundedSender<AgentEvent>,
+        event_tx: tokio::sync::mpsc::UnboundedSender<TimestampedEvent>,
         agent_registry: Arc<std::sync::RwLock<AgentRegistry>>,
     ) -> Self {
         let permission_store: Arc<dyn crate::hooks::PermissionStore> =
@@ -1926,7 +1934,8 @@ impl Agent {
         // TASK-AGS-102: unbounded send — synchronous, fails only if rx dropped.
         // TASK-AGS-108 ERR-ARCH-02: WARN on closed channel, continue execution.
         let event_name = event.event_name();
-        if let Err(_) = self.event_tx.send(event) {
+        let timestamped = TimestampedEvent { sent_at: std::time::Instant::now(), inner: event };
+        if let Err(_) = self.event_tx.send(timestamped) {
             tracing::warn!(
                 event_id = event_name,
                 "Agent event channel closed: dropping event"

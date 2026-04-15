@@ -43,7 +43,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
-use archon_core::agent::AgentEvent;
+use archon_core::agent::{AgentEvent, TimestampedEvent};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 use crate::app::TuiEvent;
@@ -53,7 +53,7 @@ use crate::task_dispatch::{AgentDispatcher, AgentRouter, CancelOutcome, TurnRunn
 /// are pinned by the TUI-106 spec (with TUI-100 deviation for `runner`).
 pub struct EventLoopConfig {
     pub tui_event_rx: UnboundedReceiver<TuiEvent>,
-    pub agent_event_tx: UnboundedSender<AgentEvent>,
+    pub agent_event_tx: UnboundedSender<TimestampedEvent>,
     pub runner: Arc<dyn TurnRunner>,
     pub router: Arc<dyn AgentRouter>,
 }

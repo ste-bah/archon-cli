@@ -30,7 +30,7 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use archon_core::agent::AgentEvent;
+use archon_core::agent::{AgentEvent, TimestampedEvent};
 use archon_tui::{AgentRouter, EventLoopConfig, TurnRunner, app::TuiEvent, run_event_loop};
 use tokio::sync::mpsc;
 
@@ -72,7 +72,7 @@ impl AgentRouter for NoopRouter {
 fn make_cfg() -> (
     EventLoopConfig,
     mpsc::UnboundedSender<TuiEvent>,
-    mpsc::UnboundedReceiver<AgentEvent>,
+    mpsc::UnboundedReceiver<TimestampedEvent>,
     Arc<Mutex<Vec<(String, Instant)>>>,
 ) {
     let log: Arc<Mutex<Vec<(String, Instant)>>> = Arc::new(Mutex::new(Vec::new()));
@@ -80,7 +80,7 @@ fn make_cfg() -> (
     let router: Arc<dyn AgentRouter> = Arc::new(NoopRouter);
 
     let (tui_event_tx, tui_event_rx) = mpsc::unbounded_channel::<TuiEvent>();
-    let (agent_event_tx, agent_event_rx) = mpsc::unbounded_channel::<AgentEvent>();
+    let (agent_event_tx, agent_event_rx) = mpsc::unbounded_channel::<TimestampedEvent>();
 
     let cfg = EventLoopConfig {
         tui_event_rx,

@@ -20,7 +20,7 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use archon_core::agent::AgentEvent;
+use archon_core::agent::{AgentEvent, TimestampedEvent};
 use archon_tui::{AgentRouter, EventLoopConfig, TurnRunner, app::TuiEvent, run_event_loop};
 use tokio::sync::mpsc::unbounded_channel;
 
@@ -77,7 +77,7 @@ async fn test_event_loop_user_input_spawns_turn() {
     let router: Arc<dyn AgentRouter> = Arc::new(NoopRouter);
 
     let (tui_event_tx, tui_event_rx) = unbounded_channel::<TuiEvent>();
-    let (agent_event_tx, _agent_event_rx) = unbounded_channel::<AgentEvent>();
+    let (agent_event_tx, _agent_event_rx) = unbounded_channel::<TimestampedEvent>();
 
     let cfg = EventLoopConfig {
         tui_event_rx,
@@ -117,7 +117,7 @@ async fn test_event_loop_cancel_aborts_running_turn() {
     let router: Arc<dyn AgentRouter> = Arc::new(NoopRouter);
 
     let (tui_event_tx, tui_event_rx) = unbounded_channel::<TuiEvent>();
-    let (agent_event_tx, _agent_event_rx) = unbounded_channel::<AgentEvent>();
+    let (agent_event_tx, _agent_event_rx) = unbounded_channel::<TimestampedEvent>();
 
     let cfg = EventLoopConfig {
         tui_event_rx,
@@ -166,7 +166,7 @@ async fn test_event_loop_drains_queue_after_completion() {
     let router: Arc<dyn AgentRouter> = Arc::new(NoopRouter);
 
     let (tui_event_tx, tui_event_rx) = unbounded_channel::<TuiEvent>();
-    let (agent_event_tx, _agent_event_rx) = unbounded_channel::<AgentEvent>();
+    let (agent_event_tx, _agent_event_rx) = unbounded_channel::<TimestampedEvent>();
 
     let cfg = EventLoopConfig {
         tui_event_rx,
