@@ -29,6 +29,14 @@ hdrhistogram = "7.5"
 
 [dev-dependencies]
 insta = { workspace = true }
+criterion.workspace = true
+futures = "0.3"
+procfs = "0.16"
+
+[[bench]]
+name = "eventchannel_load"
+path = "benches/eventchannel_load.rs"
+harness = false
 
 [features]
 default = []
