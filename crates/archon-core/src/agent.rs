@@ -27,6 +27,7 @@ use tokio::task::JoinSet;
 use crate::agents::AgentRegistry;
 use crate::dispatch::ToolRegistry;
 use crate::subagent::SubagentManager;
+use crate::ChannelMetricSink;
 
 // ---------------------------------------------------------------------------
 // Shared session statistics -- updated by the agent, read by slash commands
@@ -313,6 +314,8 @@ pub struct Agent {
     /// `take()` this slot from inside `run_to_completion` via its own
     /// clone (see mapping doc Section 2g).
     pending_resume_messages: Arc<tokio::sync::Mutex<Option<Vec<serde_json::Value>>>>,
+    /// Channel instrumentation sink for tracking sent/drained counts.
+    metrics: Option<Arc<dyn ChannelMetricSink>>,
 }
 
 impl Agent {
@@ -361,6 +364,7 @@ impl Agent {
             permission_store,
             critical_system_reminder: None,
             pending_resume_messages: Arc::new(tokio::sync::Mutex::new(None)),
+            metrics: None,
         }
     }
 
@@ -423,6 +427,10 @@ impl Agent {
 
     pub fn set_inner_voice(&mut self, iv: Arc<Mutex<InnerVoice>>) {
         self.inner_voice = Some(iv);
+    }
+
+    pub fn set_channel_metrics(&mut self, metrics: Arc<dyn ChannelMetricSink>) {
+        self.metrics = Some(metrics);
     }
 
     /// Access the inner voice handle, if enabled.
@@ -1923,6 +1931,9 @@ impl Agent {
                 event_id = event_name,
                 "Agent event channel closed: dropping event"
             );
+        }
+        if let Some(m) = &self.metrics {
+            m.record_sent();
         }
     }
 

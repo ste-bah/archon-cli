@@ -1,6 +1,8 @@
+pub mod metrics;
 pub mod agent;
 pub mod agents;
 pub mod archonmd;
+pub use metrics::ChannelMetricSink;
 // TASK-AGS-101/104: BackgroundAgentRegistry. The module was relocated
 // to archon-tools in TASK-AGS-104 to break the
 // archon-core <-> archon-tools dependency cycle. Re-exported here so

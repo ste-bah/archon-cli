@@ -2317,6 +2317,11 @@ async fn run_print_mode_session(
         agent_registry,
     );
 
+    // Wire channel metrics for observability (TASK-TUI-206)
+    let metrics = Arc::new(archon_tui::observability::ChannelMetrics::default());
+    let metrics_for_agent = Arc::clone(&metrics);
+    agent.set_channel_metrics(metrics_for_agent);
+
     // Wire hook system for print mode — load hooks then register agent-specific hooks
     {
         let home_dir = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
@@ -3200,6 +3205,9 @@ async fn run_interactive_session(
         agent_event_tx,
         agent_registry,
     );
+    let metrics = Arc::new(archon_tui::observability::ChannelMetrics::default());
+    let metrics_for_agent = Arc::clone(&metrics);
+    agent.set_channel_metrics(metrics_for_agent);
 
     // Wire checkpoint store into agent (CLI-116)
     if let Some(store) = checkpoint_store {
@@ -3520,6 +3528,8 @@ async fn run_interactive_session(
                     Err(_) => break,
                 }
             }
+            // Record drained batch size for channel observability (TASK-TUI-206)
+            metrics.record_drained(drained as u64);
             // Forward coalesced events to the TUI.
             while let Some(event) = coalescer.pop() {
             let tui_event = match event {

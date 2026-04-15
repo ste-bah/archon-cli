@@ -156,3 +156,14 @@ mod tests {
         assert_eq!(snap.max_batch_size, 2);
     }
 }
+
+impl archon_core::ChannelMetricSink for ChannelMetrics {
+    #[inline]
+    fn record_sent(&self) {
+        self.record_sent();
+    }
+    #[inline]
+    fn record_drained(&self, batch_size: u64) {
+        self.record_drained(batch_size);
+    }
+}
