@@ -38,6 +38,11 @@ name = "eventchannel_load"
 path = "benches/eventchannel_load.rs"
 harness = false
 
+[[bench]]
+name = "eventchannel_latency"
+path = "benches/eventchannel_latency.rs"
+harness = false
+
 [features]
 default = []
 terminal-panel = []

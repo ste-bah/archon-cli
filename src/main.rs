@@ -3524,6 +3524,8 @@ async fn run_interactive_session(
             while drained < RENDER_EVENT_BUDGET {
                 match agent_event_rx.try_recv() {
                     Ok(ts) => {
+                        let elapsed = (ts.sent_at.elapsed().as_millis() as u64).max(1);
+                        metrics.record_latency_ms(elapsed);
                         coalescer.push(ts.inner);
                         drained += 1;
                     }

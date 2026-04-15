@@ -71,25 +71,36 @@ fn snapshot_reflects_samples_post_drain() {
     );
 }
 
-/// Verify that same-tick zero-ms samples are clamped to the histogram floor (1ms)
-/// and do NOT panic. The histogram silently drops sub-1ms samples.
+/// Verify that zero-ms (same-tick) samples are silently dropped by the
+/// histogram — no artificial floor is applied. A single 0ms sample on a
+/// fresh ChannelMetrics produces p95 == 0, confirming that the histogram
+/// has no artificial minimum.
 #[test]
-fn same_tick_send_drain_clamped_to_floor() {
+fn zero_ms_sample_is_silently_dropped() {
     let metrics = ChannelMetrics::new();
 
-    // First, record a valid 1ms sample to establish a floor reference
-    metrics.record_latency_ms(1);
-
-    // Zero-ms (same tick) should be silently clamped to 1ms — no panic
-    // The histogram minimum is 1ms, so 0 gets recorded as 1
+    // Zero-ms sample: histogram with min=1ms silently drops it
     metrics.record_latency_ms(0);
 
-    // The histogram should have recorded both samples
-    // (0ms clamped to 1ms, so we now have two entries at ~1ms)
     let snap = metrics.snapshot();
-    assert!(
-        snap.p95_send_to_render_ms >= 1,
-        "After recording 1ms then 0ms (clamped to 1), P95 should still be >= 1ms; got {}",
+    assert_eq!(
+        snap.p95_send_to_render_ms, 0,
+        "After recording only 0ms, p95 should be 0 (silent drop); got {}",
+        snap.p95_send_to_render_ms
+    );
+}
+
+/// Verify that a single valid 1ms sample produces p95 == 1.
+#[test]
+fn one_ms_sample_produces_p95_of_one() {
+    let metrics = ChannelMetrics::new();
+
+    metrics.record_latency_ms(1);
+
+    let snap = metrics.snapshot();
+    assert_eq!(
+        snap.p95_send_to_render_ms, 1,
+        "After recording only 1ms, p95 should be 1; got {}",
         snap.p95_send_to_render_ms
     );
 }
