@@ -86,6 +86,14 @@ jobs:
       - name: check-tui-file-sizes
         run: bash scripts/check-tui-file-sizes.sh
 
+  tui-cycle-check:
+    name: tui-cycle-check (NFR-TUI-MOD-002)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: check-tui-module-cycles
+        run: bash scripts/check-tui-module-cycles.sh
+
   build-release-smoke:
     name: release build smoke
     runs-on: ubuntu-latest
