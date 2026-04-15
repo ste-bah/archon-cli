@@ -1,0 +1,7 @@
+# archon-tui carryover >=500 lines (phase-3 ratchet; shrinks to zero by TUI-310..329)
+crates/archon-tui/src/app.rs
+crates/archon-tui/src/markdown.rs
+crates/archon-tui/src/output.rs
+crates/archon-tui/src/task_dispatch_tests.rs
+crates/archon-tui/src/theme.rs
+crates/archon-tui/src/vim.rs

@@ -78,6 +78,14 @@ jobs:
       - name: check-file-sizes (NFR-FOR-D4-MAINTAINABILITY)
         run: bash scripts/check-file-sizes.sh
 
+  tui-file-size-lint:
+    name: tui-file-size-lint (NFR-TUI-QUAL-001)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: check-tui-file-sizes
+        run: bash scripts/check-tui-file-sizes.sh
+
   build-release-smoke:
     name: release build smoke
     runs-on: ubuntu-latest
