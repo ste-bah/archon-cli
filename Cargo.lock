@@ -723,14 +723,17 @@ dependencies = [
  "async-trait",
  "chrono",
  "cpal",
+ "criterion",
  "crossterm",
  "dirs",
+ "futures",
  "futures-util",
  "hdrhistogram",
  "hound",
  "insta",
  "libloading",
  "parking_lot",
+ "procfs",
  "pulldown-cmark",
  "ratatui",
  "reqwest 0.12.28",
@@ -5835,6 +5838,32 @@ dependencies = [
  "tokio",
  "tracing",
  "windows 0.62.2",
+]
+
+[[package]]
+name = "procfs"
+version = "0.16.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "731e0d9356b0c25f16f33b5be79b1c57b562f141ebfcdb0ad8ac2c13a24293b4"
+dependencies = [
+ "bitflags 2.11.0",
+ "chrono",
+ "flate2",
+ "hex",
+ "lazy_static",
+ "procfs-core",
+ "rustix 0.38.44",
+]
+
+[[package]]
+name = "procfs-core"
+version = "0.16.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2d3554923a69f4ce04c4a754260c338f505ce22642d3830e049a399fc2059a29"
+dependencies = [
+ "bitflags 2.11.0",
+ "chrono",
+ "hex",
 ]
 
 [[package]]

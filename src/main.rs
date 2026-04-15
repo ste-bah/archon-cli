@@ -3532,6 +3532,8 @@ async fn run_interactive_session(
             }
             // Record drained batch size for channel observability (TASK-TUI-206)
             metrics.record_drained(drained as u64);
+            // Rate-limited backlog WARN if over 10_000 (TASK-TUI-206 fix-forward)
+            let _ = metrics.warn_if_backlog_over(10_000);
             // Forward coalesced events to the TUI.
             while let Some(event) = coalescer.pop() {
             let tui_event = match event {

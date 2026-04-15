@@ -23,6 +23,8 @@ pub struct ChannelMetrics {
     pub max_batch_size: AtomicU64,
     /// P95 send-to-render latency in milliseconds.
     pub p95_send_to_render_ms: Mutex<Histogram<u64>>,
+    /// Timestamp of last WARN fire (unix ms). 0 == never fired.
+    pub last_warn_unix_ms: AtomicU64,
 }
 
 impl ChannelMetrics {
@@ -33,6 +35,7 @@ impl ChannelMetrics {
             total_sent: AtomicU64::new(0),
             total_drained: AtomicU64::new(0),
             max_batch_size: AtomicU64::new(0),
+            last_warn_unix_ms: AtomicU64::new(0),
             // histogram min=1ms, max=60_000ms (1 min), 3 significant figures
             p95_send_to_render_ms: Mutex::new(
                 // Histogram range: 1ms floor (sub-ms rounded up), 60_000ms ceiling
@@ -69,6 +72,41 @@ impl ChannelMetrics {
         let mut guard = self.p95_send_to_render_ms.lock();
         // Silently ignore recording errors — histogram has bounded range
         let _ = guard.record(ms);
+    }
+
+    /// Rate-limited backlog-depth warning gate.
+    ///
+    /// Returns `true` if a WARN should be emitted this call. Fires at most
+    /// once per 1000 ms while `backlog_depth > threshold`. Uses
+    /// `compare_exchange` on `last_warn_unix_ms` to avoid double-fire under
+    /// concurrent races.
+    #[inline]
+    pub fn warn_if_backlog_over(&self, threshold: u64) -> bool {
+        let backlog = self.backlog_depth.load(Ordering::Relaxed);
+        if backlog <= threshold {
+            return false;
+        }
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        let last = self.last_warn_unix_ms.load(Ordering::Relaxed);
+        if now_ms.saturating_sub(last) < 1000 {
+            return false;
+        }
+        // compare_exchange to avoid double-fire under race
+        if self.last_warn_unix_ms
+            .compare_exchange(last, now_ms, Ordering::Relaxed, Ordering::Relaxed)
+            .is_err()
+        {
+            return false;
+        }
+        tracing::warn!(
+            backlog_depth = backlog,
+            threshold = threshold,
+            "AgentEvent channel backlog exceeded threshold"
+        );
+        true
     }
 
     /// Take an atomic snapshot of all counters.
