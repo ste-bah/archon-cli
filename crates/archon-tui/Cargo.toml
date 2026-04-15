@@ -24,6 +24,8 @@ serde_json.workspace = true
 archon-core = { path = "../archon-core" }
 cpal = { workspace = true, optional = true }
 futures-util = { workspace = true }
+parking_lot = "0.12"
+hdrhistogram = "7.5"
 
 [dev-dependencies]
 insta = { workspace = true }

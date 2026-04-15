@@ -25,6 +25,7 @@ pub mod terminal_panel;
 pub mod split_pane;
 
 pub mod task_dispatch;
+pub mod observability;
 pub use task_dispatch::{
     AgentDispatcher, AgentRouter, CancelOutcome, DispatchResult, QueuedPrompt, TurnOutcome,
     TurnRunner,
