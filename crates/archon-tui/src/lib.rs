@@ -42,5 +42,18 @@ pub use cancel::YieldGate;
 
 pub mod views;
 
+pub mod events;
+pub mod state;
+pub mod terminal;
+pub mod keybindings;
+pub mod render;
+pub mod prompt_input;
+pub mod overlays;
+pub mod virtual_list;
+pub mod message_renderer;
+pub mod notifications;
+pub mod context_viz;
+pub mod screens;
+
 // Stubs for later phases
 pub mod scroll {}
