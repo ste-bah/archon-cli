@@ -105,6 +105,30 @@ jobs:
       - name: check-tui-duplication
         run: bash scripts/check-tui-duplication.sh
 
+  tui-complexity:
+    name: tui-complexity (NFR-TUI-QUAL-003)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - name: check-tui-complexity
+        run: bash scripts/check-tui-complexity.sh
+
+  tui-coverage:
+    name: tui-coverage (NFR-TUI-QUAL-002)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      - name: Install cargo-llvm-cov
+        run: cargo install cargo-llvm-cov --locked
+      - name: check-tui-coverage
+        run: TUI_COVERAGE_MIN=10 bash scripts/check-tui-coverage.sh
+
   build-release-smoke:
     name: release build smoke
     runs-on: ubuntu-latest
