@@ -16,6 +16,13 @@ pub enum SettingField {
     Enum { key: String, value: String, options: Vec<String> },
 }
 
+/// Trait for settings persistence.
+/// Implemented by types that can store and retrieve settings key-value pairs.
+pub trait SettingsStore: Send + Sync {
+    fn get(&self, key: &str) -> Option<String>;
+    fn set(&mut self, key: &str, value: String);
+}
+
 /// Settings screen with virtualized list.
 #[derive(Debug)]
 pub struct SettingsScreen {

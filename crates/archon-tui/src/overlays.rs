@@ -37,8 +37,12 @@ impl OverlayStack {
         self.stack.pop()
     }
 
-    /// Renders all overlays. For multiple overlays, lower ones appear
-    /// dimmed beneath the top overlay.
+    /// Returns a reference to the top overlay without removing it.
+    pub fn peek(&self) -> Option<&dyn OverlayRenderer> {
+        self.stack.last().map(|b| b.as_ref())
+    }
+
+    /// Renders the top overlay only.
     pub fn render(&self, f: &mut Frame, area: Rect) {
         // If empty, nothing to render
         if self.stack.is_empty() {
