@@ -5,7 +5,6 @@ use crossterm::event::{
     self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind,
     KeyModifiers, MouseEventKind,
 };
-use crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen};
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
@@ -22,6 +21,7 @@ use crate::output::{OutputBuffer, ThinkingState, ToolOutputState};
 use crate::splash::{self, ActivityEntry};
 use crate::split_pane::SplitPaneManager;
 use crate::status::StatusBar;
+use crate::terminal::TerminalGuard;
 use crate::theme::{Theme, intj_theme};
 use crate::ultrathink;
 use crate::vim::{VimAction, VimState};
@@ -455,9 +455,9 @@ pub async fn run_tui(
     btw_tx: Option<tokio::sync::mpsc::Sender<String>>,
     permission_tx: Option<tokio::sync::mpsc::Sender<bool>>,
 ) -> Result<(), io::Error> {
-    // Setup terminal
-    terminal::enable_raw_mode()?;
-    io::stdout().execute(EnterAlternateScreen)?;
+    // Setup terminal - TerminalGuard handles raw mode, alternate screen, and cursor hide.
+    // Its Drop will restore the terminal on function exit.
+    let _guard = TerminalGuard::enter()?;
     // Mouse capture enabled for scroll support. Most terminals let you hold Shift
     // while dragging to select text even with mouse capture active (works in
     // Windows Terminal, WezTerm, Kitty, iTerm2, GNOME Terminal, etc.).
@@ -1562,10 +1562,9 @@ pub async fn run_tui(
         }
     }
 
-    // Restore terminal
+    // Restore terminal - DisableMouseCapture only; TerminalGuard's Drop handles
+    // cursor show, leave alternate screen, and disable raw mode.
     io::stdout().execute(DisableMouseCapture)?;
-    terminal::disable_raw_mode()?;
-    io::stdout().execute(LeaveAlternateScreen)?;
 
     Ok(())
 }
