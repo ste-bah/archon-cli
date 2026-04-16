@@ -8,6 +8,16 @@ use ratatui::widgets::{Block, Borders, List, ListItem};
 use crate::virtual_list::VirtualList;
 use crate::theme::Theme;
 
+/// HookStore is the abstract interface for hook specification persistence.
+/// Space bar toggles the enabled state of the selected hook.
+pub trait HookStore: Send + Sync {
+    /// Persist the updated enabled state for a hook by name.
+    fn save_hook_enabled(&self, name: &str, enabled: bool) -> bool;
+
+    /// Load all hook specifications from the store.
+    fn load_hooks(&self) -> Vec<HookSpec>;
+}
+
 /// A hook specification.
 #[derive(Debug, Clone)]
 pub struct HookSpec {

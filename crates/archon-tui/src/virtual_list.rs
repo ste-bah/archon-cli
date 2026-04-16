@@ -84,9 +84,22 @@ impl<T> VirtualList<T> {
     }
 
     pub fn set_items(&mut self, items: Vec<T>) {
+        let prev_len = self.items.len();
         self.items = items;
-        self.selected = 0;
-        self.viewport_offset = 0;
+        // Clamp selected to valid range after items change
+        if prev_len == 0 {
+            self.selected = 0;
+        } else if self.selected >= self.items.len() {
+            self.selected = self.items.len().saturating_sub(1);
+        }
+        // Keep viewport_offset aligned with selected
+        if self.selected < self.viewport_offset {
+            self.viewport_offset = self.selected;
+        }
+        let bottom = self.viewport_offset + self.viewport_height;
+        if self.selected >= bottom {
+            self.viewport_offset = self.selected.saturating_sub(self.viewport_height.saturating_sub(1));
+        }
     }
 
     pub fn len(&self) -> usize {
@@ -105,7 +118,7 @@ impl<T> VirtualList<T> {
         // If selected is below viewport, scroll down
         let bottom = self.viewport_offset + self.viewport_height;
         if self.selected >= bottom {
-            self.viewport_offset = self.selected.saturating_sub(self.viewport_height - 1).min(self.selected);
+            self.viewport_offset = self.selected.saturating_sub(self.viewport_height.saturating_sub(1));
         }
     }
 }

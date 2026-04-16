@@ -8,6 +8,26 @@ use ratatui::widgets::{Block, Borders, List, ListItem};
 use crate::virtual_list::VirtualList;
 use crate::theme::Theme;
 
+/// MemoryStore is the abstract interface for loading memory entries.
+/// Implementors can fetch from filesystem, network, or in-memory store.
+pub trait MemoryStore: Send + Sync {
+    /// Load all memory entries, returning path, size_kb, and modified timestamp.
+    fn load_entries(&self) -> Vec<MemoryEntry>;
+
+    /// Get entries filtered by query string (substring match on path).
+    fn filter_entries(&self, entries: &[MemoryEntry], query: &str) -> Vec<MemoryEntry> {
+        if query.is_empty() {
+            entries.to_vec()
+        } else {
+            let q = query.to_lowercase();
+            entries.iter()
+                .filter(|e| e.path.to_lowercase().contains(&q))
+                .cloned()
+                .collect()
+        }
+    }
+}
+
 /// A memory entry in the browser.
 #[derive(Debug, Clone)]
 pub struct MemoryEntry {
