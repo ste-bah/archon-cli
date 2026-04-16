@@ -110,6 +110,29 @@ pub enum TuiEvent {
 /// Callback type for sending user input to the agent loop.
 pub type InputSender = tokio::sync::mpsc::Sender<String>;
 
+/// Configuration for launching the TUI session.
+/// Passed from main.rs to app::run().
+pub struct AppConfig {
+    pub event_rx: tokio::sync::mpsc::Receiver<TuiEvent>,
+    pub input_tx: InputSender,
+    pub splash: Option<SplashConfig>,
+    pub btw_tx: Option<tokio::sync::mpsc::Sender<String>>,
+    pub permission_tx: Option<tokio::sync::mpsc::Sender<bool>>,
+}
+
+/// Thin entry point that sets up terminal infrastructure and delegates to run_tui().
+/// This is the public API called from main.rs.
+pub async fn run(config: AppConfig) -> Result<(), io::Error> {
+    run_tui(
+        config.event_rx,
+        config.input_tx,
+        config.splash,
+        config.btw_tx,
+        config.permission_tx,
+    )
+    .await
+}
+
 /// The main TUI application state.
 pub struct App {
     pub output: OutputBuffer,
