@@ -94,6 +94,17 @@ jobs:
       - name: check-tui-module-cycles
         run: bash scripts/check-tui-module-cycles.sh
 
+  tui-duplication-check:
+    name: tui-duplication-check (NFR-TUI-MOD-003)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: check-tui-duplication
+        run: bash scripts/check-tui-duplication.sh
+
   build-release-smoke:
     name: release build smoke
     runs-on: ubuntu-latest
