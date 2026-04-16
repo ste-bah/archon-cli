@@ -18,8 +18,8 @@ use crate::theme::Theme;
 // Skeleton module placeholders (replace when modules are populated)
 // ---------------------------------------------------------------------------
 
-/// Placeholder for notifications module. Populated in a later phase-3 task.
-pub struct NotificationManager;
+/// Notification queue for toast-style overlay messages (REQ-MOD-017).
+pub use crate::notifications::NotificationQueue;
 
 /// Placeholder for keybindings module. Populated in a later phase-3 task.
 pub struct KeyBindings;
@@ -134,8 +134,8 @@ pub struct AppState {
     pub session: SessionState,
     /// Layout and resize state.
     pub layout: LayoutState,
-    /// Notification overlay state (placeholder).
-    pub notifications: NotificationManager,
+    /// Notification queue for toast-style overlay messages.
+    pub notifications: NotificationQueue,
     /// Channel observability metrics.
     pub metrics: ChannelMetrics,
     /// Active color theme.
@@ -165,7 +165,7 @@ impl AppState {
                 mcp_manager: None,
             },
             layout: LayoutState::default(),
-            notifications: NotificationManager,
+            notifications: NotificationQueue::new(),
             metrics: ChannelMetrics::new(),
             theme,
             keybindings: KeyBindings,
