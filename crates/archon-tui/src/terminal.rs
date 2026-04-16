@@ -6,14 +6,7 @@
 use std::io::stdout;
 use std::io::Result as IoResult;
 
-/// Minimal placeholder TuiEvent for SIGWINCH handling.
-/// The real TuiEvent is defined in `app.rs`; this placeholder allows
-/// install_sigwinch to compile and function until events.rs is populated.
-#[derive(Debug, Clone)]
-pub enum TuiEvent {
-    /// Terminal was resized.
-    Resize { cols: u16, rows: u16 },
-}
+pub use crate::events::TuiEvent;
 
 /// Guard that manages raw mode and alternate screen lifecycle.
 ///

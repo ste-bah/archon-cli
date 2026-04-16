@@ -198,6 +198,7 @@ async fn main() -> Result<()> {
         config.context.compact_threshold,
         config.context.max_tokens,
     );
+    // TODO(TUI-330): app::TuiEvent moves to archon_tui::events::TuiEvent
     let mut voice_event_rx: Option<tokio::sync::mpsc::Receiver<archon_tui::app::TuiEvent>> = None;
     if config.voice.enabled {
         use archon_tui::app::TuiEvent as VTuiEvent;

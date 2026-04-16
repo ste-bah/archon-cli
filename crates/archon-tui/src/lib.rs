@@ -43,6 +43,7 @@ pub use cancel::YieldGate;
 pub mod views;
 
 pub mod events;
+pub use events::TuiEvent;
 pub mod state;
 pub mod terminal;
 pub mod keybindings;
