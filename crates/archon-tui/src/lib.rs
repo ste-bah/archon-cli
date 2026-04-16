@@ -1,5 +1,10 @@
 pub mod app;
 pub use app::should_process_key_event;
+// TUI-327: re-export public TUI entry points so integration tests and
+// downstream callers can pick the right one without reaching into `app::`.
+// `run` is the production crossterm path; `run_with_backend` is the
+// backend-injection seam for headless tests.
+pub use app::{run, run_with_backend};
 pub mod commands;
 pub mod input;
 pub mod markdown;

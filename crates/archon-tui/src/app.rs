@@ -133,6 +133,30 @@ pub async fn run(config: AppConfig) -> Result<(), io::Error> {
     .await
 }
 
+/// Backend-injection seam for integration tests (TUI-327).
+///
+/// Runs the shared event loop against a caller-owned `ratatui::Terminal`.
+/// Unlike [`run`], this entry point performs **no terminal infrastructure
+/// setup**: it does not enable raw mode, the alternate screen, mouse capture,
+/// or hide the cursor. The caller is responsible for whatever terminal
+/// lifecycle is appropriate for their backend (production callers should use
+/// [`run`] instead, which wires up the real `crossterm` terminal).
+///
+/// This exists so headless backends — most importantly
+/// `ratatui::backend::TestBackend` — can drive the full TUI event loop in
+/// integration tests without touching `stdout()` or requiring a TTY. The
+/// caller retains `&mut Terminal<B>`, so after the loop exits the caller can
+/// inspect `terminal.backend()` to verify what was rendered.
+pub async fn run_with_backend<B>(
+    config: AppConfig,
+    terminal: &mut ratatui::Terminal<B>,
+) -> Result<(), io::Error>
+where
+    B: ratatui::backend::Backend,
+{
+    run_tui_inner(config, terminal).await
+}
+
 /// The main TUI application state.
 pub struct App {
     pub output: OutputBuffer,
@@ -480,7 +504,7 @@ pub fn should_process_key_event(key: &KeyEvent) -> bool {
 ///
 /// This function takes over the terminal and returns when the user quits.
 pub async fn run_tui(
-    mut event_rx: tokio::sync::mpsc::Receiver<TuiEvent>,
+    event_rx: tokio::sync::mpsc::Receiver<TuiEvent>,
     input_tx: InputSender,
     splash: Option<SplashConfig>,
     btw_tx: Option<tokio::sync::mpsc::Sender<String>>,
@@ -497,11 +521,59 @@ pub async fn run_tui(
     let backend = CrosstermBackend::new(io::stdout());
     let mut terminal = Terminal::new(backend)?;
 
+    let config = AppConfig {
+        event_rx,
+        input_tx,
+        splash,
+        btw_tx,
+        permission_tx,
+    };
+
+    let result = run_tui_inner(config, &mut terminal).await;
+
+    // Restore terminal - DisableMouseCapture only; TerminalGuard's Drop handles
+    // cursor show, leave alternate screen, and disable raw mode.
+    io::stdout().execute(DisableMouseCapture)?;
+
+    result
+}
+
+/// Backend-generic event loop body shared by [`run_tui`] (production crossterm
+/// path) and [`run_with_backend`] (test injection path).
+///
+/// **No terminal lifecycle here**: this helper assumes raw mode / alternate
+/// screen / mouse capture have already been arranged (or are not needed, for
+/// `TestBackend`). Both callers handle their own setup and teardown.
+async fn run_tui_inner<B>(
+    config: AppConfig,
+    terminal: &mut Terminal<B>,
+) -> Result<(), io::Error>
+where
+    B: ratatui::backend::Backend,
+{
+    let AppConfig {
+        mut event_rx,
+        input_tx,
+        splash,
+        btw_tx,
+        permission_tx,
+    } = config;
+
     let mut app = App::new();
-    if let Some(cfg) = splash {
-        app.splash_model = cfg.model;
-        app.splash_working_dir = cfg.working_dir;
-        app.splash_activity = cfg.activity;
+    match splash {
+        Some(cfg) => {
+            app.splash_model = cfg.model;
+            app.splash_working_dir = cfg.working_dir;
+            app.splash_activity = cfg.activity;
+        }
+        // `splash: None` is the bare-mode / headless-test contract: no
+        // welcome screen, start directly on the empty output buffer so the
+        // first agent event (or scripted TextDelta) is rendered on the next
+        // frame. Matches how `session.rs` constructs `splash_opt` when the
+        // user passes `--bare`.
+        None => {
+            app.show_splash = false;
+        }
     }
 
     let keymap = crate::keybindings::KeyMap::default();
@@ -640,8 +712,25 @@ pub async fn run_tui(
             break;
         }
 
-        // Check for keyboard input; tick animations on timeout
-        if event::poll(timeout)? {
+        // Check for keyboard input; tick animations on timeout.
+        //
+        // `event::poll` returns an error in non-tty environments (e.g.
+        // integration tests driving the TUI through
+        // `run_with_backend` + `TestBackend`): crossterm can't open an
+        // input reader without a real stdin. Treat any poll error as
+        // "no key available" and fall through to the animation-tick
+        // branch — we still honour the timeout by sleeping for it,
+        // so scripted event senders get a chance to deliver the next
+        // frame worth of events.
+        let poll_result = event::poll(timeout);
+        let has_event = match poll_result {
+            Ok(v) => v,
+            Err(_) => {
+                tokio::time::sleep(timeout).await;
+                false
+            }
+        };
+        if has_event {
             match event::read()? {
                 Event::Mouse(mouse) => match mouse.kind {
                     MouseEventKind::ScrollUp => {
@@ -925,10 +1014,6 @@ pub async fn run_tui(
             app.thinking.tick_thinking();
         }
     }
-
-    // Restore terminal - DisableMouseCapture only; TerminalGuard's Drop handles
-    // cursor show, leave alternate screen, and disable raw mode.
-    io::stdout().execute(DisableMouseCapture)?;
 
     Ok(())
 }
