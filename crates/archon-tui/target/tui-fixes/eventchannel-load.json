@@ -1,0 +1,17 @@
+{
+  "channel_metrics": {
+    "max_batch_size": 1,
+    "p95_send_to_render_ms": 51,
+    "total_drained": 100000,
+    "total_sent": 100000
+  },
+  "duration_secs": 0.07115078,
+  "events_per_producer": 1000,
+  "events_per_sec": 1405465.9695930248,
+  "passed": true,
+  "producers": 100,
+  "task_id": "TASK-TUI-209",
+  "threshold_events_per_sec": 10000,
+  "timestamp_utc": "2026-04-15T14:18:22.557050054+00:00",
+  "total_events": 100000
+}
