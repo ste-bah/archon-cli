@@ -2,52 +2,23 @@ mod agent_handle;
 pub(crate) mod session;
 pub(crate) mod setup;
 mod slash_context;
-use slash_context::SlashCommandContext;
 pub(crate) mod cli_args;
 mod command;
 mod runtime;
 
-use std::path::PathBuf;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-
 use anyhow::Result;
 use clap::Parser;
 
-use archon_consciousness::assembler::{AssemblyInput, BudgetConfig, SystemPromptAssembler};
-use archon_consciousness::defaults::load_configured_defaults;
-use archon_consciousness::rules::RulesEngine;
-use archon_core::agent::{Agent, AgentConfig, AgentEvent, SessionStats, TimestampedEvent};
-use archon_core::agents::AgentRegistry;
 use archon_core::cli_flags::resolve_flags;
 use archon_core::config::default_config_path;
 use archon_core::config_layers::ConfigLayer;
-use archon_core::cost_alerts::{CostAlertAction, CostAlertState};
-use archon_core::dispatch::create_default_registry;
-use archon_core::env_vars::{self, ArchonEnvVars};
+use archon_core::env_vars;
 use archon_core::input_format::InputFormat;
 use archon_core::logging::{default_log_dir, init_logging, rotate_logs};
 use archon_core::output_format::OutputFormat;
-use archon_core::print_mode::{PrintModeConfig, run_print_mode};
-use archon_core::reasoning::build_environment_section;
-use archon_core::skills::builtin::register_builtins;
-use archon_core::skills::discovery::discover_user_skills;
-use archon_core::skills::{SkillContext, SkillOutput};
-use archon_llm::anthropic::AnthropicClient;
-use archon_llm::auth::resolve_auth_with_keys;
-use archon_llm::effort::{self, EffortLevel, EffortState};
-use archon_llm::fast_mode::FastModeState;
-use archon_llm::identity::{
-    IdentityMode, IdentityProvider, get_or_create_device_id, resolve_and_validate_betas,
-    resolve_betas,
-};
-use archon_mcp::lifecycle::McpServerManager;
-use archon_memory::{MemoryAccess, MemoryGraph, MemoryTrait};
-use archon_permissions::auto::{AutoModeConfig, AutoModeEvaluator};
-use archon_tui::app::TuiEvent;
+use archon_core::print_mode::PrintModeConfig;
 
 use cli_args::{Cli, Commands};
-use crate::runtime::llm::build_llm_provider;
 
 #[tokio::main]
 async fn main() -> Result<()> {
