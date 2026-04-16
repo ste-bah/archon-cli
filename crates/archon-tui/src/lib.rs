@@ -45,6 +45,7 @@ pub mod views;
 pub mod events;
 pub use events::TuiEvent;
 pub mod state;
+pub use state::AppState;
 pub mod terminal;
 pub mod keybindings;
 pub mod render;
