@@ -13,7 +13,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT"
 
-TUI_SRC="crates/archon-tui/src"
+TUI_SRC="${TUI_SRC:-crates/archon-tui/src}"
 REPORT_DIR="target"
 REPORT_FILE="${REPORT_DIR}/jscpd-report.json"
 THRESHOLD=5
