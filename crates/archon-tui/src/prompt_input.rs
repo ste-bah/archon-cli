@@ -53,20 +53,18 @@ impl PromptBuffer {
 
     pub fn backspace(&mut self) {
         if self.cursor_col > 0 {
+            // Normal backspace: delete char before cursor
             let row = self.cursor_row;
             self.lines[row].remove(self.cursor_col - 1);
             self.cursor_col -= 1;
         } else if self.cursor_row > 0 {
-            // At col 0 of non-first row: remove char before cursor on previous line
+            // At col 0 of non-first row: join current line with previous line
+            let current_line = self.lines.remove(self.cursor_row);
             self.cursor_row -= 1;
-            self.cursor_col = self.lines[self.cursor_row].len().saturating_sub(1);
-            if self.cursor_col > 0 {
-                self.lines[self.cursor_row].remove(self.cursor_col - 1);
-                self.cursor_col -= 1;
-            }
-            // Merge: append remaining of current line to previous line
-            // Actually just remove the char — no merge per spec (NOT line join)
+            self.cursor_col = self.lines[self.cursor_row].len();
+            self.lines[self.cursor_row].push_str(&current_line);
         }
+        // At (0, 0): nothing to backspace
     }
 
     pub fn delete(&mut self) {
@@ -89,12 +87,15 @@ impl PromptBuffer {
     }
 
     pub fn move_right(&mut self) {
-        if self.cursor_col < self.lines[self.cursor_row].len() {
+        let row = self.cursor_row;
+        if self.cursor_col < self.lines[row].len() {
             self.cursor_col += 1;
         } else if self.cursor_row + 1 < self.lines.len() {
+            // At end of line: move to start of next line
             self.cursor_row += 1;
             self.cursor_col = 0;
         }
+        // At end of last line: do nothing
     }
 
     pub fn move_up(&mut self) {
