@@ -40,7 +40,7 @@ use archon_llm::identity::{
 use archon_mcp::lifecycle::McpServerManager;
 use archon_memory::{MemoryAccess, MemoryGraph, MemoryTrait};
 use archon_permissions::auto::{AutoModeConfig, AutoModeEvaluator};
-use archon_tui::app::{TuiEvent, run_tui};
+use archon_tui::app::{TuiEvent, run_tui, AppConfig, run as app_run};
 
 use cli_args::{Cli, Commands};
 use crate::runtime::llm::build_llm_provider;
@@ -4600,14 +4600,15 @@ async fn run_interactive_session(
     }
 
     // Run the TUI (blocks until user quits)
-    run_tui(
+    let config = AppConfig::new(
         tui_event_rx,
         user_input_tx,
         splash_opt,
         Some(btw_tx),
         Some(perm_prompt_tx),
-    )
-    .await?;
+        config.tui.vim_mode,
+    );
+    app_run(config).await?;
 
     // ── Phase 2: Graceful MCP shutdown ──────────────────────────
     mcp_manager.shutdown_all().await;
