@@ -212,6 +212,14 @@ impl App {
         Self::default()
     }
 
+    pub fn last_esc(&self) -> Option<std::time::Instant> {
+        self.last_esc
+    }
+
+    pub fn set_last_esc(&mut self, instant: Option<std::time::Instant>) {
+        self.last_esc = instant;
+    }
+
     pub fn on_text_delta(&mut self, text: &str) {
         // A non-thinking event while thinking is active means thinking ended.
         if self.thinking.active {
@@ -495,6 +503,8 @@ pub async fn run_tui(
         app.splash_working_dir = cfg.working_dir;
         app.splash_activity = cfg.activity;
     }
+
+    let keymap = crate::keybindings::KeyMap::default();
 
     loop {
         // Draw UI
@@ -886,238 +896,22 @@ pub async fn run_tui(
                         }
                         continue;
                     }
-                    match key {
-                        // Ctrl+D = quit
-                        KeyEvent {
-                            code: KeyCode::Char('d'),
-                            modifiers: KeyModifiers::CONTROL,
-                            ..
-                        } => {
+                    match crate::input::handle_key(&mut app, key, &keymap) {
+                        crate::input::KeyResult::Nothing => {}
+                        crate::input::KeyResult::Quit => {
                             app.should_quit = true;
                         }
-                        // Ctrl+C = interrupt generation or quit
-                        KeyEvent {
-                            code: KeyCode::Char('c'),
-                            modifiers: KeyModifiers::CONTROL,
-                            ..
-                        } => {
-                            if app.is_generating {
-                                app.is_generating = false;
-                                app.output.append_line("[interrupted]");
-                                // TASK-AGS-107: send __cancel__ control message
-                                // to fire the CancellationToken in the input
-                                // handler. input_tx.try_send avoids blocking
-                                // the TUI render loop.
-                                let _ = input_tx.try_send("__cancel__".to_string());
-                            } else {
-                                app.should_quit = true;
+                        crate::input::KeyResult::SendInput(text) => {
+                            let _ = input_tx.send(text).await;
+                        }
+                        crate::input::KeyResult::SendCancel => {
+                            let _ = input_tx.try_send("__cancel__".to_string());
+                        }
+                        crate::input::KeyResult::SendBtw(q) => {
+                            if let Some(ref btw) = btw_tx {
+                                let _ = btw.send(q).await;
                             }
                         }
-                        // Ctrl+T = toggle thinking expand
-                        KeyEvent {
-                            code: KeyCode::Char('t'),
-                            modifiers: KeyModifiers::CONTROL,
-                            ..
-                        } => {
-                            app.thinking.toggle_expand();
-                        }
-                        // Ctrl+V = voice hotkey; dispatch respects
-                        // config.voice.toggle_mode (TASK-WIRE-007/009).
-                        KeyEvent {
-                            code: KeyCode::Char('v'),
-                            modifiers: KeyModifiers::CONTROL,
-                            ..
-                        } => {
-                            crate::voice::pipeline::fire_trigger_for_hotkey();
-                        }
-                        // Ctrl+\ = toggle split pane
-                        KeyEvent {
-                            code: KeyCode::Char('\\'),
-                            modifiers: KeyModifiers::CONTROL,
-                            ..
-                        } => {
-                            app.panes.toggle_split();
-                        }
-                        // Ctrl+W = switch pane focus
-                        KeyEvent {
-                            code: KeyCode::Char('w'),
-                            modifiers: KeyModifiers::CONTROL,
-                            ..
-                        } => {
-                            app.panes.switch_focus();
-                        }
-                        // Page Up = scroll up
-                        KeyEvent {
-                            code: KeyCode::PageUp,
-                            ..
-                        } => {
-                            app.output.scroll_up(10);
-                        }
-                        // Page Down = scroll down
-                        KeyEvent {
-                            code: KeyCode::PageDown,
-                            ..
-                        } => {
-                            app.output.scroll_down(10);
-                        }
-                        // Home = scroll to top
-                        KeyEvent {
-                            code: KeyCode::Home,
-                            modifiers: KeyModifiers::CONTROL,
-                            ..
-                        } => {
-                            app.output.scroll_offset = u16::MAX; // will be clamped by effective_scroll
-                            app.output.scroll_locked = true;
-                        }
-                        // End = scroll to bottom
-                        KeyEvent {
-                            code: KeyCode::End,
-                            modifiers: KeyModifiers::CONTROL,
-                            ..
-                        } => {
-                            app.output.scroll_to_bottom();
-                        }
-                        // Esc = dismiss suggestions, or double-Esc to cancel generation
-                        KeyEvent {
-                            code: KeyCode::Esc, ..
-                        } => {
-                            if app.is_generating {
-                                // Double-Esc within 500ms cancels generation
-                                let now = std::time::Instant::now();
-                                if let Some(last) = app.last_esc
-                                    && now.duration_since(last).as_millis() < 500
-                                {
-                                    app.is_generating = false;
-                                    app.active_tool = None;
-                                    app.output.append_line("[interrupted]");
-                                    app.last_esc = None;
-                                    continue;
-                                }
-                                app.last_esc = Some(now);
-                            } else {
-                                app.input.dismiss_suggestions();
-                            }
-                        }
-                        // Shift+Tab = cycle permission mode
-                        KeyEvent {
-                            code: KeyCode::BackTab,
-                            ..
-                        } => {
-                            let current = &app.status.permission_mode;
-                            let modes = [
-                                "default",
-                                "acceptEdits",
-                                "plan",
-                                "auto",
-                                "dontAsk",
-                                "bypassPermissions",
-                            ];
-                            let idx = modes.iter().position(|m| m == current).unwrap_or(0);
-                            let next = modes[(idx + 1) % modes.len()];
-                            app.status.permission_mode = next.to_string();
-                            let _ = input_tx.send(format!("/permissions {next}")).await;
-                        }
-                        // Tab = accept selected suggestion
-                        KeyEvent {
-                            code: KeyCode::Tab,
-                            modifiers: KeyModifiers::NONE,
-                            ..
-                        } => {
-                            app.input.accept_suggestion();
-                        }
-                        // Enter = submit input (queue if generating)
-                        KeyEvent {
-                            code: KeyCode::Enter,
-                            modifiers: KeyModifiers::NONE,
-                            ..
-                        } => {
-                            if app.input.suggestions.active {
-                                let is_exact_match = app
-                                    .input
-                                    .suggestions
-                                    .suggestions
-                                    .iter()
-                                    .any(|cmd| cmd.name == app.input.text());
-                                if is_exact_match {
-                                    app.input.dismiss_suggestions();
-                                } else {
-                                    app.input.accept_suggestion();
-                                    continue;
-                                }
-                            }
-                            let text = app.submit_input();
-                            if !text.is_empty() {
-                                // /btw is ALWAYS immediate — never queued
-                                if text.starts_with("/btw ") {
-                                    if let Some(ref btw) = btw_tx {
-                                        let question = text
-                                            .strip_prefix("/btw ")
-                                            .unwrap_or("")
-                                            .trim()
-                                            .to_string();
-                                        if !question.is_empty() {
-                                            let _ = btw.send(question).await;
-                                        }
-                                    } else {
-                                        let _ = input_tx.send(text).await;
-                                    }
-                                } else if app.is_generating {
-                                    // Queue non-btw input to send after current turn completes
-                                    app.pending_input.push(text);
-                                    app.output
-                                        .append_line("[queued — will send after current turn]");
-                                } else {
-                                    let _ = input_tx.send(text).await;
-                                }
-                            }
-                        }
-                        // Backspace
-                        KeyEvent {
-                            code: KeyCode::Backspace,
-                            ..
-                        } => {
-                            app.input.backspace();
-                        }
-                        // Up arrow = navigate suggestions or history
-                        KeyEvent {
-                            code: KeyCode::Up, ..
-                        } => {
-                            if app.input.suggestions.active {
-                                app.input.suggestions.select_prev();
-                            } else {
-                                app.input.history_up();
-                            }
-                        }
-                        // Down arrow = navigate suggestions or history
-                        KeyEvent {
-                            code: KeyCode::Down,
-                            ..
-                        } => {
-                            if app.input.suggestions.active {
-                                app.input.suggestions.select_next();
-                            } else {
-                                app.input.history_down();
-                            }
-                        }
-                        // Left arrow
-                        KeyEvent {
-                            code: KeyCode::Left,
-                            ..
-                        } => app.input.move_left(),
-                        // Right arrow
-                        KeyEvent {
-                            code: KeyCode::Right,
-                            ..
-                        } => app.input.move_right(),
-                        // Regular character input
-                        KeyEvent {
-                            code: KeyCode::Char(c),
-                            modifiers: KeyModifiers::NONE | KeyModifiers::SHIFT,
-                            ..
-                        } => {
-                            app.input.insert(c);
-                        }
-                        _ => {}
                     }
                 }
                 Event::Resize(cols, rows) => {
