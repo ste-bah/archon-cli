@@ -172,78 +172,15 @@ async fn main() -> Result<()> {
         config.context.max_tokens,
     );
     // TODO(TUI-330): app::TuiEvent moves to archon_tui::events::TuiEvent
-    let mut voice_event_rx: Option<tokio::sync::mpsc::Receiver<archon_tui::app::TuiEvent>> = None;
-    if config.voice.enabled {
-        use archon_tui::app::TuiEvent as VTuiEvent;
-        use archon_tui::voice::pipeline::{
-            AudioSource, MockAudioSource, VoicePipeline, VoiceTrigger, hotkey_action_for_mode,
-            install_toggle_mode, install_trigger_sender, voice_loop,
-        };
-        use archon_tui::voice::stt::{LocalStt, MockStt, OpenAiStt, SttProvider};
-        use std::sync::Arc as StdArc;
-
-        let (trig_tx, trig_rx) = tokio::sync::mpsc::channel::<VoiceTrigger>(16);
-        install_trigger_sender(trig_tx);
-        install_toggle_mode(config.voice.toggle_mode);
-        tracing::info!(
-            "voice: toggle_mode={} (hotkey action={:?})",
-            config.voice.toggle_mode,
-            hotkey_action_for_mode(config.voice.toggle_mode)
-        );
-        let (voice_evt_tx, voice_evt_rx_inner) = tokio::sync::mpsc::channel::<VTuiEvent>(16);
-        voice_event_rx = Some(voice_evt_rx_inner);
-        let audio_capture = archon_tui::voice::capture::AudioCapture::new();
-        let audio: StdArc<dyn AudioSource> = if audio_capture.is_supported() {
-            tracing::info!(
-                "voice: real audio device detected (sample_rate={}, channels={})",
-                audio_capture.sample_rate,
-                audio_capture.channels
-            );
-            // TODO: Wire CpalAudioSource when AudioCapture implements AudioSource
-            StdArc::new(MockAudioSource::with_samples(vec![
-                0.0_f32;
-                audio_capture.sample_rate
-                    as usize
-            ]))
-        } else {
-            tracing::warn!("voice: no audio device available, using mock audio source");
-            StdArc::new(MockAudioSource::with_samples(vec![0.0_f32; 16000]))
-        };
-        let stt: StdArc<dyn SttProvider> = match config.voice.stt_provider.as_str() {
-            "openai" if !config.voice.stt_api_key.is_empty() => StdArc::new(OpenAiStt {
-                api_key: config.voice.stt_api_key.clone(),
-                url: config.voice.stt_url.clone(),
-            }),
-            "local" => StdArc::new(LocalStt {
-                url: config.voice.stt_url.clone(),
-            }),
-            _ => StdArc::new(MockStt {
-                response: "[voice: no STT configured]".to_string(),
-            }),
-        };
-        let pipeline = VoicePipeline::new(audio, stt, config.voice.vad_threshold);
-        tokio::spawn(async move {
-            voice_loop(trig_rx, voice_evt_tx, pipeline).await;
-        });
-        tracing::info!(
-            "voice: pipeline wired (provider={}, device={}, hotkey={})",
-            config.voice.stt_provider,
-            config.voice.device,
-            config.voice.hotkey,
-        );
-        // Give the spawned voice_loop task a chance to emit its startup log.
-        tokio::task::yield_now().await;
-    } else {
-        tracing::info!("voice: disabled (config.voice.enabled=false)");
-    }
+    let voice_event_rx = crate::command::tui_helpers::setup_voice_pipeline(&config).await;
 
     // Handle subcommands
     match cli.command {
         Some(Commands::Login) => {
-            return handle_login(&config).await;
+            return crate::command::login::handle_login(&config).await;
         }
         Some(Commands::Plugin { action }) => {
-            return handle_plugin_command(action);
+            return crate::command::plugin::handle_plugin_command(action);
         }
         Some(Commands::Update { check, force }) => {
             use crate::command::update::handle_update_command;
@@ -338,85 +275,22 @@ async fn main() -> Result<()> {
 
     // ── Output style: --list-output-styles (CLI-310) ─────────────
     if cli.list_output_styles {
-        use archon_core::output_style::OutputStyleRegistry;
-        use archon_core::output_style_loader::load_styles_from_dir;
-
-        let mut reg = OutputStyleRegistry::new();
-
-        // Load user styles from ~/.archon/output-styles/
-        if let Some(home) = dirs::home_dir() {
-            let new_dir = home.join(".archon").join("output-styles");
-            if new_dir.is_dir() {
-                for style in load_styles_from_dir(&new_dir) {
-                    reg.register(style);
-                }
-            } else {
-                let old_dir = home.join(".claude").join("output-styles");
-                if old_dir.is_dir() {
-                    tracing::warn!(
-                        "Loading from deprecated path {}. Rename to {} to suppress this warning.",
-                        old_dir.display(),
-                        new_dir.display()
-                    );
-                    for style in load_styles_from_dir(&old_dir) {
-                        reg.register(style);
-                    }
-                }
-            }
-        }
-
-        println!("Available output styles:");
-        for name in reg.list() {
-            let style = reg.get(&name).unwrap();
-            let has_prompt = if style.prompt.is_some() {
-                "injects prompt"
-            } else {
-                "no injection"
-            };
-            println!("  {:20} {} [{}]", style.name, style.description, has_prompt);
-        }
-        return Ok(());
+        return crate::command::tui_helpers::handle_list_output_styles();
     }
 
     // ── Theme: --list-themes (CLI-315) ───────────────────────────
     if cli.list_themes {
-        use archon_tui::theme::available_themes;
-        use archon_tui::theme_registry::detect_system_theme;
-
-        println!("Available themes:");
-        for name in available_themes() {
-            println!("  {name}");
-        }
-        println!("  daltonized  (colorblind-friendly)");
-        println!("  auto        (system dark/light detection → {:?})", {
-            let detected = detect_system_theme();
-            let dark_bg = archon_tui::theme::dark_theme().bg;
-            if detected.bg == dark_bg {
-                "dark"
-            } else {
-                "light"
-            }
-        });
-
-        if let Some(theme_name) = cli.theme.as_deref().or(config.tui.theme.as_deref()) {
-            let resolved = archon_tui::theme_registry::ThemeRegistry::new().resolve(theme_name);
-            println!(
-                "\nActive theme: {theme_name}  (bg={:?}, fg={:?})",
-                resolved.bg, resolved.fg
-            );
-        }
-
-        return Ok(());
+        return crate::command::tui_helpers::handle_list_themes(&cli, &config);
     }
 
     // Handle --resume with no ID: list recent sessions and exit
     if let Some(None) = &cli.resume {
-        return handle_resume_list().await;
+        return crate::session::handle_resume_list().await;
     }
 
     // For --resume with ID, load the session messages to restore
     let mut resume_messages = if let Some(Some(ref id)) = cli.resume {
-        Some(load_resume_messages(id)?)
+        Some(crate::session::load_resume_messages(id)?)
     } else {
         None
     };
@@ -512,24 +386,24 @@ async fn main() -> Result<()> {
 
     // ── Session search & management (CLI-208) ──────────────────
     if cli.sessions {
-        return handle_sessions(&cli);
+        return crate::command::sessions::handle_sessions(&cli);
     }
 
     // ── Background sessions (CLI-221) ─────────────────────────
     if cli.ps {
-        return handle_bg_list();
+        return crate::command::background::handle_bg_list();
     }
     if let Some(ref id) = cli.kill_session {
-        return handle_bg_kill(id);
+        return crate::command::background::handle_bg_kill(id);
     }
     if let Some(ref id) = cli.attach {
-        return handle_bg_attach(id);
+        return crate::command::background::handle_bg_attach(id);
     }
     if let Some(ref id) = cli.logs {
-        return handle_bg_logs(id);
+        return crate::command::background::handle_bg_logs(id);
     }
     if cli.bg.is_some() {
-        return handle_bg_launch(&cli);
+        return crate::command::background::handle_bg_launch(&cli);
     }
 
     // ── Print mode: non-interactive single-query ──────────────
@@ -568,7 +442,7 @@ async fn main() -> Result<()> {
         };
 
         // Build a minimal agent for print mode (no TUI)
-        let exit_code = run_print_mode_session(
+        let exit_code = crate::session::run_print_mode_session(
             &config,
             &session_id,
             &cli,
@@ -581,7 +455,7 @@ async fn main() -> Result<()> {
     }
 
     // Default: interactive session (with optional resume messages)
-    run_interactive_session(
+    crate::session::run_interactive_session(
         &config,
         &session_id,
         &cli,
@@ -591,168 +465,6 @@ async fn main() -> Result<()> {
         voice_event_rx,
     )
     .await
-}
-
-fn handle_plugin_command(action: cli_args::PluginAction) -> Result<()> {
-    crate::command::plugin::handle_plugin_command(action)
-}
-
-async fn handle_login(_config: &archon_core::config::ArchonConfig) -> Result<()> {
-    let http_client = reqwest::Client::new();
-    let cred_path = archon_llm::tokens::credentials_path();
-
-    eprintln!("Starting OAuth login...");
-    match archon_llm::oauth::login(&cred_path, &http_client).await {
-        Ok(_) => {
-            eprintln!("Login successful! Credentials saved.");
-            Ok(())
-        }
-        Err(e) => {
-            eprintln!("Login failed: {e}");
-            std::process::exit(1);
-        }
-    }
-}
-
-// ── Background session handlers (CLI-221) — delegated to command/background ──
-
-fn handle_bg_list() -> Result<()> {
-    crate::command::background::handle_bg_list()
-}
-
-#[cfg(unix)]
-fn handle_bg_kill(id: &str) -> Result<()> {
-    crate::command::background::handle_bg_kill(id)
-}
-
-#[cfg(not(unix))]
-fn handle_bg_kill(id: &str) -> Result<()> {
-    crate::command::background::handle_bg_kill(id)
-}
-
-#[cfg(unix)]
-fn handle_bg_attach(id: &str) -> Result<()> {
-    crate::command::background::handle_bg_attach(id)
-}
-
-#[cfg(not(unix))]
-fn handle_bg_attach(id: &str) -> Result<()> {
-    crate::command::background::handle_bg_attach(id)
-}
-
-fn handle_bg_logs(id: &str) -> Result<()> {
-    crate::command::background::handle_bg_logs(id)
-}
-
-#[cfg(unix)]
-fn handle_bg_launch(cli: &Cli) -> Result<()> {
-    crate::command::background::handle_bg_launch(cli)
-}
-
-#[cfg(not(unix))]
-fn handle_bg_launch(_cli: &Cli) -> Result<()> {
-    crate::command::background::handle_bg_launch(_cli)
-}
-
-/// Handle `--sessions` flag: search, stats, or delete sessions.
-fn handle_sessions(cli: &Cli) -> Result<()> {
-    crate::command::sessions::handle_sessions(cli)
-}
-
-/// List recent sessions for `--resume` with no ID.
-async fn handle_resume_list() -> Result<()> {
-    crate::session::handle_resume_list().await
-}
-
-/// Load resume messages for `--resume <id>`.
-fn load_resume_messages(session_id: &str) -> Result<Vec<serde_json::Value>> {
-    crate::session::load_resume_messages(session_id)
-}
-
-/// Run a print-mode session: set up auth/agent, process one query, return exit code.
-pub(crate) async fn run_print_mode_session(
-    config: &archon_core::config::ArchonConfig,
-    session_id: &str,
-    cli: &Cli,
-    env_vars: &ArchonEnvVars,
-    print_config: PrintModeConfig,
-    resolved_flags: &archon_core::cli_flags::ResolvedFlags,
-) -> i32 {
-    crate::session::run_print_mode_session(config, session_id, cli, env_vars, print_config, resolved_flags).await
-}
-
-pub(crate) async fn run_interactive_session(
-    config: &archon_core::config::ArchonConfig,
-    session_id: &str,
-    cli: &Cli,
-    env_vars: &ArchonEnvVars,
-    resume_messages: Option<Vec<serde_json::Value>>,
-    resolved_flags: &archon_core::cli_flags::ResolvedFlags,
-    voice_event_rx: Option<tokio::sync::mpsc::Receiver<archon_tui::app::TuiEvent>>,
-) -> Result<()> {
-    crate::session::run_interactive_session(
-        config,
-        session_id,
-        cli,
-        env_vars,
-        resume_messages,
-        resolved_flags,
-        voice_event_rx,
-    )
-    .await
-}
-
-
-
-// ---------------------------------------------------------------------------
-// CLI-220: Tool filtering helper
-// ---------------------------------------------------------------------------
-
-/// Handle slash commands. Returns `true` if the command was recognized and handled.
-pub(crate) async fn handle_slash_command(
-    input: &str,
-    fast_mode: &mut FastModeState,
-    effort_state: &mut EffortState,
-    tui_tx: &tokio::sync::mpsc::Sender<TuiEvent>,
-    ctx: &mut SlashCommandContext,
-) -> bool {
-    crate::command::slash::handle_slash_command(input, fast_mode, effort_state, tui_tx, ctx).await
-}
-
-
-// ---------------------------------------------------------------------------
-// /config handler
-// ---------------------------------------------------------------------------
-
-async fn handle_config_command(
-    input: &str,
-    tui_tx: &tokio::sync::mpsc::Sender<TuiEvent>,
-    ctx: &SlashCommandContext,
-) {
-    crate::command::config::handle_config_command(input, tui_tx, ctx).await
-}
-
-// ---------------------------------------------------------------------------
-// /memory handler
-// ---------------------------------------------------------------------------
-
-async fn handle_memory_command(
-    input: &str,
-    tui_tx: &tokio::sync::mpsc::Sender<TuiEvent>,
-    memory: &Arc<dyn MemoryTrait>,
-) {
-    crate::command::memory::handle_memory_command(input, tui_tx, memory).await
-}
-
-// ---------------------------------------------------------------------------
-// /doctor handler
-// ---------------------------------------------------------------------------
-
-async fn handle_doctor_command(
-    tui_tx: &tokio::sync::mpsc::Sender<TuiEvent>,
-    ctx: &SlashCommandContext,
-) {
-    crate::command::doctor::handle_doctor_command(tui_tx, ctx).await
 }
 
 #[cfg(test)]
@@ -788,12 +500,3 @@ mod wire_tests {
         assert_eq!(blocks[2].get("text").unwrap(), "c");
     }
 }
-
-
-
-
-
-
-
-
-
