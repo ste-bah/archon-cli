@@ -446,7 +446,6 @@ pub fn should_process_key_event(key: &KeyEvent) -> bool {
 
 /// - `input_tx`: sends user input to the agent loop
 /// - `splash`: optional splash-screen configuration
-/// - `stdin_event_rx`: receives stdin events from a spawned task (TUI-310)
 ///
 /// This function takes over the terminal and returns when the user quits.
 pub async fn run_tui(
@@ -455,7 +454,6 @@ pub async fn run_tui(
     splash: Option<SplashConfig>,
     btw_tx: Option<tokio::sync::mpsc::Sender<String>>,
     permission_tx: Option<tokio::sync::mpsc::Sender<bool>>,
-    mut stdin_event_rx: tokio::sync::mpsc::Receiver<crossterm::event::Event>,
 ) -> Result<(), io::Error> {
     // Setup terminal - TerminalGuard handles raw mode, alternate screen, and cursor hide.
     // Its Drop will restore the terminal on function exit.
@@ -475,20 +473,133 @@ pub async fn run_tui(
         app.splash_activity = cfg.activity;
     }
 
-    // Animation tick interval
-    let mut tick_interval = tokio::time::interval(std::time::Duration::from_millis(80));
-    tick_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-
     loop {
-        // Draw UI - blocking call is OK on Tokio's threaded runtime
-        // (other tasks run on other threads while this one is blocked)
+        // Draw UI
         terminal.draw(|frame| { crate::render::draw(frame, &mut app) })?;
 
-        // Drain agent events first (non-blocking)
+        // Handle events: use shorter poll when animation is active
+        let timeout = if app.input.ultrathink.active || app.thinking.active {
+            std::time::Duration::from_millis(80) // 12.5fps — smooth for bounce cycle
+        } else {
+            std::time::Duration::from_millis(250) // 4fps — poll returns immediately on events
+        };
+
+        // Check for agent events (non-blocking)
         while let Ok(tui_event) = event_rx.try_recv() {
-            handle_tui_event(&mut app, tui_event, &input_tx);
-            if app.should_quit {
-                break;
+            match tui_event {
+                TuiEvent::TextDelta(text) => app.on_text_delta(&text),
+                TuiEvent::ThinkingDelta(text) => app.on_thinking_delta(&text),
+                TuiEvent::ToolStart { name, id } => app.on_tool_start(&name, &id),
+                TuiEvent::ToolComplete {
+                    name,
+                    id,
+                    success,
+                    output,
+                } => {
+                    app.on_tool_complete(&name, &id, success, &output);
+                }
+                TuiEvent::TurnComplete {
+                    input_tokens,
+                    output_tokens,
+                } => {
+                    app.on_turn_complete();
+                    // Anthropic pricing: $3/MTok input, $15/MTok output
+                    app.status.cost +=
+                        (input_tokens as f64 * 3.0 + output_tokens as f64 * 15.0) / 1_000_000.0;
+                    // Drain any input queued during generation
+                    let queued: Vec<String> = app.pending_input.drain(..).collect();
+                    for text in queued {
+                        let _ = input_tx.send(text).await;
+                    }
+                }
+                TuiEvent::Error(msg) => app.on_error(&msg),
+                TuiEvent::GenerationStarted => app.on_generation_started(),
+                TuiEvent::SlashCommandComplete => app.on_slash_command_complete(),
+                TuiEvent::ThinkingToggle(enabled) => {
+                    app.show_thinking = enabled;
+                }
+                TuiEvent::ModelChanged(model) => {
+                    app.status.model = model;
+                }
+                TuiEvent::BtwResponse(response) => {
+                    app.btw_overlay = Some(response);
+                }
+                TuiEvent::PermissionPrompt {
+                    tool,
+                    description: _,
+                } => {
+                    app.permission_prompt = Some(tool);
+                }
+                TuiEvent::SessionRenamed(name) => {
+                    app.session_name = Some(name);
+                }
+                TuiEvent::PermissionModeChanged(mode) => {
+                    app.status.permission_mode = mode;
+                }
+                TuiEvent::ShowSessionPicker(sessions) => {
+                    app.session_picker = Some(SessionPicker {
+                        sessions,
+                        selected: 0,
+                    });
+                }
+                TuiEvent::SetAccentColor(color) => {
+                    app.theme.accent = color;
+                    app.theme.header = color;
+                    app.theme.border_active = color;
+                    app.theme.thinking_dot = color;
+                }
+                TuiEvent::SetTheme(name) => {
+                    if let Some(t) = crate::theme::theme_by_name(&name) {
+                        app.theme = t;
+                    }
+                }
+                TuiEvent::ShowMcpManager(servers) => {
+                    app.mcp_manager = Some(McpManager {
+                        servers,
+                        view: McpManagerView::ServerList { selected: 0 },
+                    });
+                }
+                TuiEvent::UpdateMcpManager(servers) => {
+                    if let Some(ref mut mgr) = app.mcp_manager {
+                        mgr.servers = servers;
+                    }
+                }
+                TuiEvent::SetVimMode(enabled) => {
+                    if enabled {
+                        app.vim_state = Some(VimState::new());
+                    } else {
+                        app.vim_state = None;
+                    }
+                }
+                TuiEvent::VimToggle => {
+                    if app.vim_state.is_some() {
+                        app.vim_state = None;
+                    } else {
+                        app.vim_state = Some(VimState::new());
+                    }
+                }
+                TuiEvent::VoiceText(text) => {
+                    app.input.inject_text(&text);
+                }
+                TuiEvent::SetAgentInfo { name, color } => {
+                    app.status.agent_name = Some(name);
+                    app.status.agent_color = color;
+                }
+                TuiEvent::Resize { cols, rows } => {
+                    crate::layout::handle_resize(cols, rows);
+                }
+                TuiEvent::UserInput(_) => {
+                    // TUI-106: handled by run_event_loop; old run_tui path is a no-op.
+                }
+                TuiEvent::SlashCancel => {
+                    // TUI-106: handled by run_event_loop; old run_tui path is a no-op.
+                }
+                TuiEvent::SlashAgent(_) => {
+                    // TUI-106: handled by run_event_loop; old run_tui path is a no-op.
+                }
+                TuiEvent::Done => {
+                    app.should_quit = true;
+                }
             }
         }
 
@@ -496,732 +607,511 @@ pub async fn run_tui(
             break;
         }
 
-        // Use tokio::select! to wait for stdin OR tick
-        // Biased: agent events are processed first (see biased! below)
-        tokio::select! {
-            biased;
-
-            // Stdin events from the spawned task
-            Some(stdin_event) = stdin_event_rx.recv() => {
-                match stdin_event {
-                    Event::Mouse(mouse) => match mouse.kind {
-                        MouseEventKind::ScrollUp => {
-                            app.output.scroll_up(3);
+        // Check for keyboard input; tick animations on timeout
+        if event::poll(timeout)? {
+            match event::read()? {
+                Event::Mouse(mouse) => match mouse.kind {
+                    MouseEventKind::ScrollUp => {
+                        app.output.scroll_up(3);
+                    }
+                    MouseEventKind::ScrollDown => {
+                        app.output.scroll_down(3);
+                    }
+                    _ => {}
+                },
+                Event::Key(key) => {
+                    // Windows emits both Press and Release for each keystroke;
+                    // process only Press and Repeat to avoid double input.
+                    if !should_process_key_event(&key) {
+                        continue;
+                    }
+                    // Handle session picker — Up/Down/Enter/Esc
+                    if app.session_picker.is_some() {
+                        match key.code {
+                            KeyCode::Up => {
+                                if let Some(ref mut picker) = app.session_picker {
+                                    if picker.selected > 0 {
+                                        picker.selected -= 1;
+                                    } else {
+                                        picker.selected = picker.sessions.len().saturating_sub(1);
+                                    }
+                                }
+                                continue;
+                            }
+                            KeyCode::Down => {
+                                if let Some(ref mut picker) = app.session_picker {
+                                    if picker.selected + 1 < picker.sessions.len() {
+                                        picker.selected += 1;
+                                    } else {
+                                        picker.selected = 0;
+                                    }
+                                }
+                                continue;
+                            }
+                            KeyCode::Enter => {
+                                if let Some(picker) = app.session_picker.take()
+                                    && let Some(s) = picker.sessions.get(picker.selected)
+                                {
+                                    let _ =
+                                        input_tx.send(format!("__resume_session__ {}", s.id)).await;
+                                }
+                                continue;
+                            }
+                            KeyCode::Esc => {
+                                app.session_picker = None;
+                                continue;
+                            }
+                            _ => continue, // swallow other keys
                         }
-                        MouseEventKind::ScrollDown => {
-                            app.output.scroll_down(3);
+                    }
+                    // Handle MCP manager overlay — Up/Down/Enter/Esc
+                    if app.mcp_manager.is_some() {
+                        match key.code {
+                            KeyCode::Up => {
+                                if let Some(ref mut mgr) = app.mcp_manager {
+                                    match &mut mgr.view {
+                                        McpManagerView::ServerList { selected } => {
+                                            if *selected > 0 {
+                                                *selected -= 1;
+                                            } else {
+                                                *selected = mgr.servers.len().saturating_sub(1);
+                                            }
+                                        }
+                                        McpManagerView::ServerMenu {
+                                            action_idx,
+                                            server_idx,
+                                        } => {
+                                            let count =
+                                                mcp_action_count(mgr.servers.get(*server_idx));
+                                            if *action_idx > 0 {
+                                                *action_idx -= 1;
+                                            } else {
+                                                *action_idx = count.saturating_sub(1);
+                                            }
+                                        }
+                                        McpManagerView::ToolList { scroll, .. } => {
+                                            *scroll = scroll.saturating_sub(1);
+                                        }
+                                    }
+                                }
+                                continue;
+                            }
+                            KeyCode::Down => {
+                                if let Some(ref mut mgr) = app.mcp_manager {
+                                    match &mut mgr.view {
+                                        McpManagerView::ServerList { selected } => {
+                                            if *selected + 1 < mgr.servers.len() {
+                                                *selected += 1;
+                                            } else {
+                                                *selected = 0;
+                                            }
+                                        }
+                                        McpManagerView::ServerMenu {
+                                            action_idx,
+                                            server_idx,
+                                        } => {
+                                            let action_count =
+                                                mcp_action_count(mgr.servers.get(*server_idx));
+                                            if *action_idx + 1 < action_count {
+                                                *action_idx += 1;
+                                            } else {
+                                                *action_idx = 0;
+                                            }
+                                        }
+                                        McpManagerView::ToolList { scroll, tools, .. } => {
+                                            if *scroll + 1 < tools.len() {
+                                                *scroll += 1;
+                                            }
+                                        }
+                                    }
+                                }
+                                continue;
+                            }
+                            KeyCode::Enter => {
+                                if let Some(ref mut mgr) = app.mcp_manager {
+                                    match mgr.view.clone() {
+                                        McpManagerView::ServerList { selected } => {
+                                            if !mgr.servers.is_empty() {
+                                                mgr.view = McpManagerView::ServerMenu {
+                                                    server_idx: selected,
+                                                    action_idx: 0,
+                                                };
+                                            }
+                                        }
+                                        McpManagerView::ServerMenu {
+                                            server_idx,
+                                            action_idx,
+                                        } => {
+                                            if let Some(server) = mgr.servers.get(server_idx) {
+                                                let actions = mcp_actions_for(server);
+                                                if let Some(action) = actions.get(action_idx) {
+                                                    match *action {
+                                                        "back" => {
+                                                            mgr.view = McpManagerView::ServerList {
+                                                                selected: server_idx,
+                                                            };
+                                                        }
+                                                        "tools" => {
+                                                            mgr.view = McpManagerView::ToolList {
+                                                                server_name: server.name.clone(),
+                                                                tools: server.tools.clone(),
+                                                                scroll: 0,
+                                                            };
+                                                        }
+                                                        _ => {
+                                                            let cmd = format!(
+                                                                "__mcp_action__ {} {}",
+                                                                server.name, action
+                                                            );
+                                                            let _ = input_tx.send(cmd).await;
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        McpManagerView::ToolList { .. } => {
+                                            // Enter/Esc handled below — nothing to do on Enter
+                                        }
+                                    }
+                                }
+                                continue;
+                            }
+                            KeyCode::Esc => {
+                                if let Some(ref mut mgr) = app.mcp_manager {
+                                    match &mgr.view {
+                                        McpManagerView::ToolList { server_name, .. } => {
+                                            // Find the server index to return to its menu
+                                            let idx = mgr
+                                                .servers
+                                                .iter()
+                                                .position(|s| s.name == *server_name)
+                                                .unwrap_or(0);
+                                            mgr.view = McpManagerView::ServerMenu {
+                                                server_idx: idx,
+                                                action_idx: 0,
+                                            };
+                                        }
+                                        McpManagerView::ServerMenu { server_idx, .. } => {
+                                            let idx = *server_idx;
+                                            mgr.view = McpManagerView::ServerList { selected: idx };
+                                        }
+                                        McpManagerView::ServerList { .. } => {
+                                            app.mcp_manager = None;
+                                        }
+                                    }
+                                }
+                                continue;
+                            }
+                            _ => continue, // swallow other keys while overlay is up
+                        }
+                    }
+                    // Handle permission prompt — y/n/Enter/Esc
+                    if app.permission_prompt.is_some() {
+                        match key.code {
+                            KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
+                                let tool = app.permission_prompt.take().unwrap_or_default();
+                                if let Some(ref tx) = permission_tx {
+                                    let _ = tx.send(true).await;
+                                }
+                                app.output.append_line(&format!("[{tool}: approved]"));
+                                continue;
+                            }
+                            KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                                let tool = app.permission_prompt.take().unwrap_or_default();
+                                if let Some(ref tx) = permission_tx {
+                                    let _ = tx.send(false).await;
+                                }
+                                app.output.append_line(&format!("[{tool}: denied]"));
+                                continue;
+                            }
+                            _ => continue, // swallow other keys during permission prompt
+                        }
+                    }
+                    // Dismiss /btw overlay on any of Esc/Enter/Space
+                    if app.btw_overlay.is_some() {
+                        match key.code {
+                            KeyCode::Esc | KeyCode::Enter | KeyCode::Char(' ') => {
+                                app.btw_overlay = None;
+                                continue;
+                            }
+                            _ => continue, // swallow all other keys while overlay is up
+                        }
+                    }
+                    // Vim mode key routing — Ctrl+D / Ctrl+C fall through to normal handling
+                    let is_ctrl_quit = key.modifiers == KeyModifiers::CONTROL
+                        && matches!(key.code, KeyCode::Char('d') | KeyCode::Char('c'));
+                    if !is_ctrl_quit && let Some(ref mut vim) = app.vim_state {
+                        let action = vim.handle_key(key);
+                        match action {
+                            VimAction::Submit => {
+                                let text = vim.text();
+                                *vim = VimState::new();
+                                if !text.trim().is_empty() {
+                                    if app.is_generating {
+                                        app.pending_input.push(text);
+                                        app.output
+                                            .append_line("[queued — will send after current turn]");
+                                    } else {
+                                        let _ = input_tx.send(text).await;
+                                    }
+                                }
+                            }
+                            VimAction::Quit => {
+                                app.vim_state = None;
+                            }
+                            _ => {}
+                        }
+                        continue;
+                    }
+                    match key {
+                        // Ctrl+D = quit
+                        KeyEvent {
+                            code: KeyCode::Char('d'),
+                            modifiers: KeyModifiers::CONTROL,
+                            ..
+                        } => {
+                            app.should_quit = true;
+                        }
+                        // Ctrl+C = interrupt generation or quit
+                        KeyEvent {
+                            code: KeyCode::Char('c'),
+                            modifiers: KeyModifiers::CONTROL,
+                            ..
+                        } => {
+                            if app.is_generating {
+                                app.is_generating = false;
+                                app.output.append_line("[interrupted]");
+                                // TASK-AGS-107: send __cancel__ control message
+                                // to fire the CancellationToken in the input
+                                // handler. input_tx.try_send avoids blocking
+                                // the TUI render loop.
+                                let _ = input_tx.try_send("__cancel__".to_string());
+                            } else {
+                                app.should_quit = true;
+                            }
+                        }
+                        // Ctrl+T = toggle thinking expand
+                        KeyEvent {
+                            code: KeyCode::Char('t'),
+                            modifiers: KeyModifiers::CONTROL,
+                            ..
+                        } => {
+                            app.thinking.toggle_expand();
+                        }
+                        // Ctrl+V = voice hotkey; dispatch respects
+                        // config.voice.toggle_mode (TASK-WIRE-007/009).
+                        KeyEvent {
+                            code: KeyCode::Char('v'),
+                            modifiers: KeyModifiers::CONTROL,
+                            ..
+                        } => {
+                            crate::voice::pipeline::fire_trigger_for_hotkey();
+                        }
+                        // Ctrl+\ = toggle split pane
+                        KeyEvent {
+                            code: KeyCode::Char('\\'),
+                            modifiers: KeyModifiers::CONTROL,
+                            ..
+                        } => {
+                            app.panes.toggle_split();
+                        }
+                        // Ctrl+W = switch pane focus
+                        KeyEvent {
+                            code: KeyCode::Char('w'),
+                            modifiers: KeyModifiers::CONTROL,
+                            ..
+                        } => {
+                            app.panes.switch_focus();
+                        }
+                        // Page Up = scroll up
+                        KeyEvent {
+                            code: KeyCode::PageUp,
+                            ..
+                        } => {
+                            app.output.scroll_up(10);
+                        }
+                        // Page Down = scroll down
+                        KeyEvent {
+                            code: KeyCode::PageDown,
+                            ..
+                        } => {
+                            app.output.scroll_down(10);
+                        }
+                        // Home = scroll to top
+                        KeyEvent {
+                            code: KeyCode::Home,
+                            modifiers: KeyModifiers::CONTROL,
+                            ..
+                        } => {
+                            app.output.scroll_offset = u16::MAX; // will be clamped by effective_scroll
+                            app.output.scroll_locked = true;
+                        }
+                        // End = scroll to bottom
+                        KeyEvent {
+                            code: KeyCode::End,
+                            modifiers: KeyModifiers::CONTROL,
+                            ..
+                        } => {
+                            app.output.scroll_to_bottom();
+                        }
+                        // Esc = dismiss suggestions, or double-Esc to cancel generation
+                        KeyEvent {
+                            code: KeyCode::Esc, ..
+                        } => {
+                            if app.is_generating {
+                                // Double-Esc within 500ms cancels generation
+                                let now = std::time::Instant::now();
+                                if let Some(last) = app.last_esc
+                                    && now.duration_since(last).as_millis() < 500
+                                {
+                                    app.is_generating = false;
+                                    app.active_tool = None;
+                                    app.output.append_line("[interrupted]");
+                                    app.last_esc = None;
+                                    continue;
+                                }
+                                app.last_esc = Some(now);
+                            } else {
+                                app.input.dismiss_suggestions();
+                            }
+                        }
+                        // Shift+Tab = cycle permission mode
+                        KeyEvent {
+                            code: KeyCode::BackTab,
+                            ..
+                        } => {
+                            let current = &app.status.permission_mode;
+                            let modes = [
+                                "default",
+                                "acceptEdits",
+                                "plan",
+                                "auto",
+                                "dontAsk",
+                                "bypassPermissions",
+                            ];
+                            let idx = modes.iter().position(|m| m == current).unwrap_or(0);
+                            let next = modes[(idx + 1) % modes.len()];
+                            app.status.permission_mode = next.to_string();
+                            let _ = input_tx.send(format!("/permissions {next}")).await;
+                        }
+                        // Tab = accept selected suggestion
+                        KeyEvent {
+                            code: KeyCode::Tab,
+                            modifiers: KeyModifiers::NONE,
+                            ..
+                        } => {
+                            app.input.accept_suggestion();
+                        }
+                        // Enter = submit input (queue if generating)
+                        KeyEvent {
+                            code: KeyCode::Enter,
+                            modifiers: KeyModifiers::NONE,
+                            ..
+                        } => {
+                            if app.input.suggestions.active {
+                                let is_exact_match = app
+                                    .input
+                                    .suggestions
+                                    .suggestions
+                                    .iter()
+                                    .any(|cmd| cmd.name == app.input.text());
+                                if is_exact_match {
+                                    app.input.dismiss_suggestions();
+                                } else {
+                                    app.input.accept_suggestion();
+                                    continue;
+                                }
+                            }
+                            let text = app.submit_input();
+                            if !text.is_empty() {
+                                // /btw is ALWAYS immediate — never queued
+                                if text.starts_with("/btw ") {
+                                    if let Some(ref btw) = btw_tx {
+                                        let question = text
+                                            .strip_prefix("/btw ")
+                                            .unwrap_or("")
+                                            .trim()
+                                            .to_string();
+                                        if !question.is_empty() {
+                                            let _ = btw.send(question).await;
+                                        }
+                                    } else {
+                                        let _ = input_tx.send(text).await;
+                                    }
+                                } else if app.is_generating {
+                                    // Queue non-btw input to send after current turn completes
+                                    app.pending_input.push(text);
+                                    app.output
+                                        .append_line("[queued — will send after current turn]");
+                                } else {
+                                    let _ = input_tx.send(text).await;
+                                }
+                            }
+                        }
+                        // Backspace
+                        KeyEvent {
+                            code: KeyCode::Backspace,
+                            ..
+                        } => {
+                            app.input.backspace();
+                        }
+                        // Up arrow = navigate suggestions or history
+                        KeyEvent {
+                            code: KeyCode::Up, ..
+                        } => {
+                            if app.input.suggestions.active {
+                                app.input.suggestions.select_prev();
+                            } else {
+                                app.input.history_up();
+                            }
+                        }
+                        // Down arrow = navigate suggestions or history
+                        KeyEvent {
+                            code: KeyCode::Down,
+                            ..
+                        } => {
+                            if app.input.suggestions.active {
+                                app.input.suggestions.select_next();
+                            } else {
+                                app.input.history_down();
+                            }
+                        }
+                        // Left arrow
+                        KeyEvent {
+                            code: KeyCode::Left,
+                            ..
+                        } => app.input.move_left(),
+                        // Right arrow
+                        KeyEvent {
+                            code: KeyCode::Right,
+                            ..
+                        } => app.input.move_right(),
+                        // Regular character input
+                        KeyEvent {
+                            code: KeyCode::Char(c),
+                            modifiers: KeyModifiers::NONE | KeyModifiers::SHIFT,
+                            ..
+                        } => {
+                            app.input.insert(c);
                         }
                         _ => {}
-                    },
-                    Event::Key(key) => {
-                        handle_key_event(&mut app, key, &input_tx, &btw_tx, &permission_tx);
                     }
-                    Event::Resize(cols, rows) => {
-                        crate::layout::handle_resize(cols, rows);
-                    }
-                    _ => {} // FocusGained/FocusLost/Paste
                 }
+                Event::Resize(cols, rows) => {
+                    crate::layout::handle_resize(cols, rows);
+                }
+                _ => {} // FocusGained/FocusLost/Paste
             }
-
-            // Animation tick
-            _ = tick_interval.tick() => {
-                // Tick animations - rate-limited to reduce CPU
-                app.input.ultrathink.tick();
-                app.thinking.tick_thinking();
-            }
+        } else {
+            // No key event — tick animations
+            app.input.ultrathink.tick();
+            app.thinking.tick_thinking();
         }
     }
 
     // Restore terminal - DisableMouseCapture only; TerminalGuard's Drop handles
     // cursor show, leave alternate screen, and disable raw mode.
     io::stdout().execute(DisableMouseCapture)?;
-
-    Ok(())
-}
-
-/// Handle a TuiEvent dispatched from the agent loop.
-fn handle_tui_event(
-    app: &mut App,
-    tui_event: TuiEvent,
-    input_tx: &tokio::sync::mpsc::Sender<String>,
-) {
-    match tui_event {
-        TuiEvent::TextDelta(text) => app.on_text_delta(&text),
-        TuiEvent::ThinkingDelta(text) => app.on_thinking_delta(&text),
-        TuiEvent::ToolStart { name, id } => app.on_tool_start(&name, &id),
-        TuiEvent::ToolComplete {
-            name,
-            id,
-            success,
-            output,
-        } => {
-            app.on_tool_complete(&name, &id, success, &output);
-        }
-        TuiEvent::TurnComplete {
-            input_tokens,
-            output_tokens,
-        } => {
-            app.on_turn_complete();
-            app.status.cost +=
-                (input_tokens as f64 * 3.0 + output_tokens as f64 * 15.0) / 1_000_000.0;
-            let queued: Vec<String> = app.pending_input.drain(..).collect();
-            for text in queued {
-                let _ = input_tx.try_send(text);
-            }
-        }
-        TuiEvent::Error(msg) => app.on_error(&msg),
-        TuiEvent::GenerationStarted => app.on_generation_started(),
-        TuiEvent::SlashCommandComplete => app.on_slash_command_complete(),
-        TuiEvent::ThinkingToggle(enabled) => {
-            app.show_thinking = enabled;
-        }
-        TuiEvent::ModelChanged(model) => {
-            app.status.model = model;
-        }
-        TuiEvent::BtwResponse(response) => {
-            app.btw_overlay = Some(response);
-        }
-        TuiEvent::PermissionPrompt {
-            tool,
-            description: _,
-        } => {
-            app.permission_prompt = Some(tool);
-        }
-        TuiEvent::SessionRenamed(name) => {
-            app.session_name = Some(name);
-        }
-        TuiEvent::PermissionModeChanged(mode) => {
-            app.status.permission_mode = mode;
-        }
-        TuiEvent::ShowSessionPicker(sessions) => {
-            app.session_picker = Some(SessionPicker {
-                sessions,
-                selected: 0,
-            });
-        }
-        TuiEvent::SetAccentColor(color) => {
-            app.theme.accent = color;
-            app.theme.header = color;
-            app.theme.border_active = color;
-            app.theme.thinking_dot = color;
-        }
-        TuiEvent::SetTheme(name) => {
-            if let Some(t) = crate::theme::theme_by_name(&name) {
-                app.theme = t;
-            }
-        }
-        TuiEvent::ShowMcpManager(servers) => {
-            app.mcp_manager = Some(McpManager {
-                servers,
-                view: McpManagerView::ServerList { selected: 0 },
-            });
-        }
-        TuiEvent::UpdateMcpManager(servers) => {
-            if let Some(ref mut mgr) = app.mcp_manager {
-                mgr.servers = servers;
-            }
-        }
-        TuiEvent::SetVimMode(enabled) => {
-            if enabled {
-                app.vim_state = Some(VimState::new());
-            } else {
-                app.vim_state = None;
-            }
-        }
-        TuiEvent::VimToggle => {
-            if app.vim_state.is_some() {
-                app.vim_state = None;
-            } else {
-                app.vim_state = Some(VimState::new());
-            }
-        }
-        TuiEvent::VoiceText(text) => {
-            app.input.inject_text(&text);
-        }
-        TuiEvent::SetAgentInfo { name, color } => {
-            app.status.agent_name = Some(name);
-            app.status.agent_color = color;
-        }
-        TuiEvent::Resize { cols, rows } => {
-            crate::layout::handle_resize(cols, rows);
-        }
-        TuiEvent::UserInput(_) => {
-            // TUI-106: handled by run_event_loop; old run_tui path is a no-op.
-        }
-        TuiEvent::SlashCancel => {
-            // TUI-106: handled by run_event_loop; old run_tui path is a no-op.
-        }
-        TuiEvent::SlashAgent(_) => {
-            // TUI-106: handled by run_event_loop; old run_tui path is a no-op.
-        }
-        TuiEvent::Done => {
-            app.should_quit = true;
-        }
-    }
-}
-
-/// Handle a key event from stdin.
-fn handle_key_event(
-    app: &mut App,
-    key: KeyEvent,
-    input_tx: &tokio::sync::mpsc::Sender<String>,
-    btw_tx: &Option<tokio::sync::mpsc::Sender<String>>,
-    permission_tx: &Option<tokio::sync::mpsc::Sender<bool>>,
-) {
-    // Windows emits both Press and Release for each keystroke;
-    // process only Press and Repeat to avoid double input.
-    if !should_process_key_event(&key) {
-        return;
-    }
-
-    // Handle session picker — Up/Down/Enter/Esc
-    if app.session_picker.is_some() {
-        match key.code {
-            KeyCode::Up => {
-                if let Some(ref mut picker) = app.session_picker {
-                    if picker.selected > 0 {
-                        picker.selected -= 1;
-                    } else {
-                        picker.selected = picker.sessions.len().saturating_sub(1);
-                    }
-                }
-                return;
-            }
-            KeyCode::Down => {
-                if let Some(ref mut picker) = app.session_picker {
-                    if picker.selected + 1 < picker.sessions.len() {
-                        picker.selected += 1;
-                    } else {
-                        picker.selected = 0;
-                    }
-                }
-                return;
-            }
-            KeyCode::Enter => {
-                if let Some(picker) = app.session_picker.take()
-                    && let Some(s) = picker.sessions.get(picker.selected)
-                {
-                    let _ = input_tx.try_send(format!("__resume_session__ {}", s.id));
-                }
-                return;
-            }
-            KeyCode::Esc => {
-                app.session_picker = None;
-                return;
-            }
-            _ => return, // swallow other keys
-        }
-    }
-
-    // Handle MCP manager overlay — Up/Down/Enter/Esc
-    if app.mcp_manager.is_some() {
-        match key.code {
-            KeyCode::Up => {
-                if let Some(ref mut mgr) = app.mcp_manager {
-                    match &mut mgr.view {
-                        McpManagerView::ServerList { selected } => {
-                            if *selected > 0 {
-                                *selected -= 1;
-                            } else {
-                                *selected = mgr.servers.len().saturating_sub(1);
-                            }
-                        }
-                        McpManagerView::ServerMenu {
-                            action_idx,
-                            server_idx,
-                        } => {
-                            let count = mcp_action_count(mgr.servers.get(*server_idx));
-                            if *action_idx > 0 {
-                                *action_idx -= 1;
-                            } else {
-                                *action_idx = count.saturating_sub(1);
-                            }
-                        }
-                        McpManagerView::ToolList { scroll, .. } => {
-                            *scroll = scroll.saturating_sub(1);
-                        }
-                    }
-                }
-                return;
-            }
-            KeyCode::Down => {
-                if let Some(ref mut mgr) = app.mcp_manager {
-                    match &mut mgr.view {
-                        McpManagerView::ServerList { selected } => {
-                            if *selected + 1 < mgr.servers.len() {
-                                *selected += 1;
-                            } else {
-                                *selected = 0;
-                            }
-                        }
-                        McpManagerView::ServerMenu {
-                            action_idx,
-                            server_idx,
-                        } => {
-                            let action_count = mcp_action_count(mgr.servers.get(*server_idx));
-                            if *action_idx + 1 < action_count {
-                                *action_idx += 1;
-                            } else {
-                                *action_idx = 0;
-                            }
-                        }
-                        McpManagerView::ToolList { scroll, tools, .. } => {
-                            if *scroll + 1 < tools.len() {
-                                *scroll += 1;
-                            }
-                        }
-                    }
-                }
-                return;
-            }
-            KeyCode::Enter => {
-                if let Some(ref mut mgr) = app.mcp_manager {
-                    match mgr.view.clone() {
-                        McpManagerView::ServerList { selected } => {
-                            if !mgr.servers.is_empty() {
-                                mgr.view = McpManagerView::ServerMenu {
-                                    server_idx: selected,
-                                    action_idx: 0,
-                                };
-                            }
-                        }
-                        McpManagerView::ServerMenu {
-                            server_idx,
-                            action_idx,
-                        } => {
-                            if let Some(server) = mgr.servers.get(server_idx) {
-                                let actions = mcp_actions_for(server);
-                                if let Some(action) = actions.get(action_idx) {
-                                    match *action {
-                                        "back" => {
-                                            mgr.view = McpManagerView::ServerList {
-                                                selected: server_idx,
-                                            };
-                                        }
-                                        "tools" => {
-                                            mgr.view = McpManagerView::ToolList {
-                                                server_name: server.name.clone(),
-                                                tools: server.tools.clone(),
-                                                scroll: 0,
-                                            };
-                                        }
-                                        _ => {
-                                            let cmd = format!(
-                                                "__mcp_action__ {} {}",
-                                                server.name, action
-                                            );
-                                            let _ = input_tx.try_send(cmd);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        McpManagerView::ToolList { .. } => {}
-                    }
-                }
-                return;
-            }
-            KeyCode::Esc => {
-                if let Some(ref mut mgr) = app.mcp_manager {
-                    match &mgr.view {
-                        McpManagerView::ToolList { server_name, .. } => {
-                            let idx = mgr
-                                .servers
-                                .iter()
-                                .position(|s| s.name == *server_name)
-                                .unwrap_or(0);
-                            mgr.view = McpManagerView::ServerMenu {
-                                server_idx: idx,
-                                action_idx: 0,
-                            };
-                        }
-                        McpManagerView::ServerMenu { server_idx, .. } => {
-                            let idx = *server_idx;
-                            mgr.view = McpManagerView::ServerList { selected: idx };
-                        }
-                        McpManagerView::ServerList { .. } => {
-                            app.mcp_manager = None;
-                        }
-                    }
-                }
-                return;
-            }
-            _ => return,
-        }
-    }
-
-    // Handle permission prompt — y/n/Enter/Esc
-    if app.permission_prompt.is_some() {
-        match key.code {
-            KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
-                let tool = app.permission_prompt.take().unwrap_or_default();
-                if let Some(tx) = permission_tx {
-                    let _ = tx.try_send(true);
-                }
-                app.output.append_line(&format!("[{tool}: approved]"));
-                return;
-            }
-            KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
-                let tool = app.permission_prompt.take().unwrap_or_default();
-                if let Some(tx) = permission_tx {
-                    let _ = tx.try_send(false);
-                }
-                app.output.append_line(&format!("[{tool}: denied]"));
-                return;
-            }
-            _ => return,
-        }
-    }
-
-    // Dismiss /btw overlay on any of Esc/Enter/Space
-    if app.btw_overlay.is_some() {
-        match key.code {
-            KeyCode::Esc | KeyCode::Enter | KeyCode::Char(' ') => {
-                app.btw_overlay = None;
-                return;
-            }
-            _ => return,
-        }
-    }
-
-    // Vim mode key routing — Ctrl+D / Ctrl+C fall through to normal handling
-    let is_ctrl_quit = key.modifiers == KeyModifiers::CONTROL
-        && matches!(key.code, KeyCode::Char('d') | KeyCode::Char('c'));
-    if !is_ctrl_quit && let Some(ref mut vim) = app.vim_state {
-        let action = vim.handle_key(key);
-        match action {
-            VimAction::Submit => {
-                let text = vim.text();
-                *vim = VimState::new();
-                if !text.trim().is_empty() {
-                    if app.is_generating {
-                        app.pending_input.push(text);
-                        app.output
-                            .append_line("[queued — will send after current turn]");
-                    } else {
-                        let _ = input_tx.try_send(text);
-                    }
-                }
-            }
-            VimAction::Quit => {
-                app.vim_state = None;
-            }
-            _ => {}
-        }
-        return;
-    }
-
-    match key {
-        // Ctrl+D = quit
-        KeyEvent {
-            code: KeyCode::Char('d'),
-            modifiers: KeyModifiers::CONTROL,
-            ..
-        } => {
-            app.should_quit = true;
-        }
-        // Ctrl+C = interrupt generation or quit
-        KeyEvent {
-            code: KeyCode::Char('c'),
-            modifiers: KeyModifiers::CONTROL,
-            ..
-        } => {
-            if app.is_generating {
-                app.is_generating = false;
-                app.output.append_line("[interrupted]");
-                let _ = input_tx.try_send("__cancel__".to_string());
-            } else {
-                app.should_quit = true;
-            }
-        }
-        // Ctrl+T = toggle thinking expand
-        KeyEvent {
-            code: KeyCode::Char('t'),
-            modifiers: KeyModifiers::CONTROL,
-            ..
-        } => {
-            app.thinking.toggle_expand();
-        }
-        // Ctrl+V = voice hotkey
-        KeyEvent {
-            code: KeyCode::Char('v'),
-            modifiers: KeyModifiers::CONTROL,
-            ..
-        } => {
-            crate::voice::pipeline::fire_trigger_for_hotkey();
-        }
-        // Ctrl+\ = toggle split pane
-        KeyEvent {
-            code: KeyCode::Char('\\'),
-            modifiers: KeyModifiers::CONTROL,
-            ..
-        } => {
-            app.panes.toggle_split();
-        }
-        // Ctrl+W = switch pane focus
-        KeyEvent {
-            code: KeyCode::Char('w'),
-            modifiers: KeyModifiers::CONTROL,
-            ..
-        } => {
-            app.panes.switch_focus();
-        }
-        // Page Up = scroll up
-        KeyEvent {
-            code: KeyCode::PageUp,
-            ..
-        } => {
-            app.output.scroll_up(10);
-        }
-        // Page Down = scroll down
-        KeyEvent {
-            code: KeyCode::PageDown,
-            ..
-        } => {
-            app.output.scroll_down(10);
-        }
-        // Home = scroll to top
-        KeyEvent {
-            code: KeyCode::Home,
-            modifiers: KeyModifiers::CONTROL,
-            ..
-        } => {
-            app.output.scroll_offset = u16::MAX;
-            app.output.scroll_locked = true;
-        }
-        // End = scroll to bottom
-        KeyEvent {
-            code: KeyCode::End,
-            modifiers: KeyModifiers::CONTROL,
-            ..
-        } => {
-            app.output.scroll_to_bottom();
-        }
-        // Esc = dismiss suggestions, or double-Esc to cancel generation
-        KeyEvent {
-            code: KeyCode::Esc, ..
-        } => {
-            if app.is_generating {
-                let now = std::time::Instant::now();
-                if let Some(last) = app.last_esc
-                    && now.duration_since(last).as_millis() < 500
-                {
-                    app.is_generating = false;
-                    app.active_tool = None;
-                    app.output.append_line("[interrupted]");
-                    app.last_esc = None;
-                } else {
-                    app.last_esc = Some(now);
-                }
-            } else {
-                app.input.dismiss_suggestions();
-            }
-        }
-        // Shift+Tab = cycle permission mode
-        KeyEvent {
-            code: KeyCode::BackTab,
-            ..
-        } => {
-            let current = &app.status.permission_mode;
-            let modes = [
-                "default",
-                "acceptEdits",
-                "plan",
-                "auto",
-                "dontAsk",
-                "bypassPermissions",
-            ];
-            let idx = modes.iter().position(|m| m == current).unwrap_or(0);
-            let next = modes[(idx + 1) % modes.len()];
-            app.status.permission_mode = next.to_string();
-            let _ = input_tx.try_send(format!("/permissions {next}"));
-        }
-        // Tab = accept selected suggestion
-        KeyEvent {
-            code: KeyCode::Tab,
-            modifiers: KeyModifiers::NONE,
-            ..
-        } => {
-            app.input.accept_suggestion();
-        }
-        // Enter = submit input (queue if generating)
-        KeyEvent {
-            code: KeyCode::Enter,
-            modifiers: KeyModifiers::NONE,
-            ..
-        } => {
-            if app.input.suggestions.active {
-                let is_exact_match = app
-                    .input
-                    .suggestions
-                    .suggestions
-                    .iter()
-                    .any(|cmd| cmd.name == app.input.text());
-                if is_exact_match {
-                    app.input.dismiss_suggestions();
-                } else {
-                    app.input.accept_suggestion();
-                    return;
-                }
-            }
-            let text = app.submit_input();
-            if !text.is_empty() {
-                if text.starts_with("/btw ") {
-                    if let Some(btw) = btw_tx {
-                        let question = text
-                            .strip_prefix("/btw ")
-                            .unwrap_or("")
-                            .trim()
-                            .to_string();
-                        if !question.is_empty() {
-                            let _ = btw.try_send(question);
-                        }
-                    } else {
-                        let _ = input_tx.try_send(text);
-                    }
-                } else if app.is_generating {
-                    app.pending_input.push(text);
-                    app.output
-                        .append_line("[queued — will send after current turn]");
-                } else {
-                    let _ = input_tx.try_send(text);
-                }
-            }
-        }
-        // Backspace
-        KeyEvent {
-            code: KeyCode::Backspace,
-            ..
-        } => {
-            app.input.backspace();
-        }
-        // Up arrow = navigate suggestions or history
-        KeyEvent {
-            code: KeyCode::Up, ..
-        } => {
-            if app.input.suggestions.active {
-                app.input.suggestions.select_prev();
-            } else {
-                app.input.history_up();
-            }
-        }
-        // Down arrow = navigate suggestions or history
-        KeyEvent {
-            code: KeyCode::Down,
-            ..
-        } => {
-            if app.input.suggestions.active {
-                app.input.suggestions.select_next();
-            } else {
-                app.input.history_down();
-            }
-        }
-        // Left arrow
-        KeyEvent {
-            code: KeyCode::Left,
-            ..
-        } => app.input.move_left(),
-        // Right arrow
-        KeyEvent {
-            code: KeyCode::Right,
-            ..
-        } => app.input.move_right(),
-        // Regular character input
-        KeyEvent {
-            code: KeyCode::Char(c),
-            modifiers: KeyModifiers::NONE | KeyModifiers::SHIFT,
-            ..
-        } => {
-            app.input.insert(c);
-        }
-        _ => {}
-    }
-}
-
-/// Configuration for app::run() — the single event loop entry point (TUI-310).
-///
-/// Bundles everything needed to set up the TUI event loop. main.rs parses
-/// args and constructs this config, then calls app::run().
-pub struct AppConfig {
-    pub event_rx: tokio::sync::mpsc::Receiver<TuiEvent>,
-    pub input_tx: tokio::sync::mpsc::Sender<String>,
-    pub splash: Option<SplashConfig>,
-    pub btw_tx: Option<tokio::sync::mpsc::Sender<String>>,
-    pub permission_tx: Option<tokio::sync::mpsc::Sender<bool>>,
-    pub vim_mode: bool,
-}
-
-impl AppConfig {
-    /// Create an AppConfig from the given channels and options.
-    pub fn new(
-        event_rx: tokio::sync::mpsc::Receiver<TuiEvent>,
-        input_tx: tokio::sync::mpsc::Sender<String>,
-        splash: Option<SplashConfig>,
-        btw_tx: Option<tokio::sync::mpsc::Sender<String>>,
-        permission_tx: Option<tokio::sync::mpsc::Sender<bool>>,
-        vim_mode: bool,
-    ) -> Self {
-        Self {
-            event_rx,
-            input_tx,
-            splash,
-            btw_tx,
-            permission_tx,
-            vim_mode,
-        }
-    }
-}
-
-/// The single TUI event loop entry point (TUI-310).
-///
-/// Sets up:
-/// - SIGWINCH handler for resize events
-/// - Blocking task for stdin event reading (crossterm event::poll)
-/// - Main loop via run_tui()
-///
-/// Returns when the user quits.
-pub async fn run(config: AppConfig) -> anyhow::Result<()> {
-    // Create channel for stdin events (sender goes to blocking task, receiver goes to run_tui)
-    let (stdin_event_tx, stdin_event_rx) = tokio::sync::mpsc::channel::<crossterm::event::Event>(32);
-
-    // Spawn blocking task that runs event::poll() and sends events
-    // This avoids blocking the async executor on the synchronous crossterm API
-    tokio::task::spawn_blocking(move || {
-        // Run a local event loop on this blocking thread
-        loop {
-            // Use a short timeout to allow checking for shutdown
-            // The actual rate-limiting is done by the tick_interval in run_tui
-            let timeout = std::time::Duration::from_millis(100);
-            if crossterm::event::poll(timeout).is_err() {
-                // Error reading events — terminal may have been closed
-                break;
-            }
-            // Read the event (poll returned true, so this should not block)
-            match crossterm::event::read() {
-                Ok(event) => {
-                    if stdin_event_tx.blocking_send(event).is_err() {
-                        // Receiver dropped — shutdown
-                        break;
-                    }
-                }
-                Err(_) => {
-                    // Error reading event — terminal may have been closed
-                    break;
-                }
-            }
-        }
-    });
-
-    // Run the TUI loop
-    run_tui(
-        config.event_rx,
-        config.input_tx,
-        config.splash,
-        config.btw_tx,
-        config.permission_tx,
-        stdin_event_rx,
-    )
-    .await?;
 
     Ok(())
 }
