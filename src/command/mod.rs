@@ -8,6 +8,16 @@
 //! Declared as `mod command;` from `main.rs` so that `pub(crate)`
 //! visibility scopes to the binary crate (not the library target).
 
+pub(crate) mod background;
+pub(crate) mod config;
 pub(crate) mod dispatcher;
+pub(crate) mod doctor;
+pub(crate) mod memory;
 pub(crate) mod parser;
+pub(crate) mod pipeline;
+pub(crate) mod remote;
+pub(crate) mod plugin;
 pub(crate) mod registry;
+pub(crate) mod sessions;
+pub(crate) mod slash;
+pub(crate) mod team;
