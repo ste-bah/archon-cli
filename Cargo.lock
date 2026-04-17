@@ -720,6 +720,7 @@ version = "0.1.4"
 dependencies = [
  "anyhow",
  "archon-core",
+ "archon-tools",
  "async-trait",
  "chrono",
  "cpal",
@@ -741,9 +742,11 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-util",
  "tracing",
  "tree-sitter",
  "tree-sitter-highlight",
+ "uuid",
 ]
 
 [[package]]

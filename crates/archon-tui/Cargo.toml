@@ -32,6 +32,13 @@ insta = { workspace = true }
 criterion.workspace = true
 futures = "0.3"
 procfs = "0.16"
+# TASK-TUI-410: load test drives archon-tools directly (AgentTool,
+# poll_background_agent, cancel_background_agent) per TECH-TUI-SUBAGENT
+# implementation_notes. uuid + tokio-util needed for the test-local
+# StubExecutor fixture reused from crates/archon-tools/tests/task_ags_104.rs.
+archon-tools = { path = "../archon-tools" }
+uuid = { workspace = true }
+tokio-util = { workspace = true }
 
 [[bench]]
 name = "eventchannel_load"
