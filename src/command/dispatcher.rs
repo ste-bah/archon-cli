@@ -19,8 +19,7 @@
 
 use std::sync::Arc;
 
-use crate::command::parser;
-use crate::command::parser::suggest;
+use crate::command::parser::{self, CommandParser, ParseError};
 use crate::command::registry::{CommandContext, Registry};
 
 /// Slash command dispatcher.
@@ -47,25 +46,75 @@ impl Dispatcher {
     /// Non-slash / empty / bare-`/` input is a no-op returning `Ok(())`
     /// with no events emitted — matching the pre-existing behaviour of
     /// the legacy inline match's `_ => false` arm for such inputs.
+    ///
+    /// ## TASK-AGS-803 wiring
+    ///
+    /// Tokenization is delegated to [`CommandParser::parse`] (TASK-AGS-801)
+    /// for its richer `Result<ParsedCommand, ParseError>` surface. The
+    /// leading-`/` gate stays HERE inside the dispatcher (option B from
+    /// Steven's orchestrator directive) so the dispatcher does NOT steal
+    /// non-slash input from the legacy inline match in `main.rs` — that
+    /// behaviour is pinned by `dispatch_non_slash_input_returns_ok_no_emit`.
+    ///
+    /// Registry lookup uses `Registry::get`, which is alias-aware after
+    /// TASK-AGS-802 — no extra alias code lives here.
     pub(crate) fn dispatch(
         &self,
         ctx: &mut CommandContext,
         input: &str,
     ) -> anyhow::Result<()> {
-        let parsed = match parser::parse(input) {
-            Some(p) => p,
-            None => return Ok(()),
+        let trimmed = input.trim();
+
+        // PATH A hybrid gate: the dispatcher MUST NOT consume non-slash
+        // input. `dispatch_non_slash_input_returns_ok_no_emit` and
+        // `dispatch_whitespace_only_input_no_emit` pin this invariant.
+        if !trimmed.starts_with('/') {
+            return Ok(());
+        }
+
+        // Bare `/` is a silent no-op (matches the legacy inline match's
+        // `_ => false` arm and the pre-existing
+        // `dispatch_bare_slash_returns_ok_no_emit` test).
+        if trimmed == "/" {
+            return Ok(());
+        }
+
+        // Delegate tokenization to the structured-error wrapper.
+        // `CommandParser::parse` itself relaxes the leading-`/`
+        // requirement, but we already enforced it above, so the only
+        // error variants reachable here are `UnclosedQuote` and
+        // `MalformedFlag` (true tokenizer failures). `Empty` /
+        // `MissingName` are defended as quiet no-ops for safety against
+        // future refactors.
+        let parsed = match CommandParser::parse(trimmed) {
+            Ok(p) => p,
+            Err(ParseError::Empty) | Err(ParseError::MissingName) => {
+                return Ok(());
+            }
+            Err(ParseError::UnclosedQuote) => {
+                let _ = ctx.tui_tx.try_send(archon_tui::app::TuiEvent::Error(
+                    "Parse error: unclosed quote".to_string(),
+                ));
+                return Ok(());
+            }
+            Err(ParseError::MalformedFlag(tok)) => {
+                let _ = ctx.tui_tx.try_send(archon_tui::app::TuiEvent::Error(
+                    format!("Parse error: malformed flag '{tok}'"),
+                ));
+                return Ok(());
+            }
         };
+
         match self.registry.get(&parsed.name) {
             Some(handler) => handler.execute(ctx, &parsed.args),
             None => {
-                // TASK-AGS-802: consume `parser::suggest` to enrich the
-                // unknown-command diagnostic with a fuzzy-match hint
-                // (≤ 3 candidates, ≤ 2 edits). AGS-804 will format this
-                // more nicely; a plain comma-join is adequate today.
+                // TASK-AGS-802: enrich the unknown-command diagnostic
+                // with a fuzzy-match hint (≤ 3 candidates, ≤ 2 edits).
+                // AGS-804 will prettify this; a plain comma-join is
+                // adequate today.
                 let names = self.registry.names();
                 let suggestions =
-                    suggest(&parsed.name, names.iter().copied(), 3);
+                    parser::suggest(&parsed.name, names.iter().copied(), 3);
                 let msg = if suggestions.is_empty() {
                     format!("Unknown command: /{}", parsed.name)
                 } else {
@@ -75,13 +124,12 @@ impl Dispatcher {
                         suggestions.join(", ")
                     )
                 };
-                // Emit via the TUI event channel. Use `try_send` so the
+                // Emit via the TUI event channel. `try_send` so the
                 // dispatcher cannot block on a full channel; dropping a
-                // diagnostic on backpressure is acceptable and cannot
-                // stall the input pipeline. `TuiEvent::Error` is the
-                // correct text-emitting variant for user-visible error
-                // diagnostics in this codebase (see
-                // `crates/archon-tui/src/app.rs::TuiEvent`).
+                // diagnostic under backpressure is preferable to stalling
+                // the input pipeline. `TuiEvent::Error` is the correct
+                // text-emitting variant for user-visible diagnostics
+                // (see `crates/archon-tui/src/app.rs::TuiEvent`).
                 let _ = ctx
                     .tui_tx
                     .try_send(archon_tui::app::TuiEvent::Error(msg));
@@ -91,11 +139,20 @@ impl Dispatcher {
     }
 
     /// Returns `true` if `input` parses as a slash command whose name
-    /// is registered. Used by `handle_slash_command` to decide whether
-    /// to fall through to the legacy inline match (PATH A hybrid only
-    /// — removed once handler bodies migrate into the registry).
+    /// is registered (directly or via an alias). Used by
+    /// `handle_slash_command` to decide whether to fall through to the
+    /// legacy inline match (PATH A hybrid only — removed once handler
+    /// bodies migrate into the registry).
+    ///
+    /// Mirrors the leading-`/` gate from `dispatch` so a plain-text
+    /// input never claims to be a recognized slash command.
     pub(crate) fn recognizes(&self, input: &str) -> bool {
-        parser::parse(input)
+        let trimmed = input.trim();
+        if !trimmed.starts_with('/') || trimmed == "/" {
+            return false;
+        }
+        CommandParser::parse(trimmed)
+            .ok()
             .and_then(|p| self.registry.get(&p.name).map(|_| ()))
             .is_some()
     }
@@ -294,6 +351,194 @@ mod tests {
             recorded[0],
             vec!["hello world".to_string()],
             "quoted argument must arrive at the handler as a single token"
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // TASK-AGS-803: alias-aware dispatch + structured parse-error tests.
+    //
+    // The first three exercise the alias-fallback path in
+    // `Registry::get` (wired in AGS-802) through the dispatcher; the
+    // next two verify the suggestion/no-suggestion branches of the
+    // unknown-command error formatter; and the last three exercise the
+    // `CommandParser::parse` -> `ParseError` -> `TuiEvent::Error` edges
+    // (UnclosedQuote / MalformedFlag) plus the whitespace-only guard.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn dispatch_alias_resolves_to_primary_handler() {
+        // "h" is registered as an alias for "help" in the default
+        // registry (see `HelpHandler::aliases`). Dispatching "/h" must
+        // land on the help handler (via Registry::get's alias fallback)
+        // and NOT emit an "Unknown command" error.
+        let registry = Arc::new(default_registry());
+        let dispatcher = Dispatcher::new(registry);
+        let (mut ctx, mut rx) = make_ctx();
+
+        let result = dispatcher.dispatch(&mut ctx, "/h");
+        assert!(result.is_ok(), "alias dispatch must return Ok");
+
+        match rx.try_recv() {
+            Err(mpsc::error::TryRecvError::Empty) => {}
+            Ok(TuiEvent::Error(msg)) => panic!(
+                "alias dispatch must not emit TuiEvent::Error, got: {msg}"
+            ),
+            Ok(ev) => panic!("unexpected event emitted: {ev:?}"),
+            Err(e) => panic!("unexpected channel error: {e:?}"),
+        }
+    }
+
+    #[test]
+    fn recognizes_returns_true_for_alias() {
+        // `recognizes` must honour the registry's alias map — "/h"
+        // resolves to the /help primary, so recognizes must report true.
+        let registry = Arc::new(default_registry());
+        let dispatcher = Dispatcher::new(registry);
+        assert!(
+            dispatcher.recognizes("/h"),
+            "recognizes must return true for registered alias '/h' -> /help"
+        );
+    }
+
+    #[test]
+    fn recognizes_returns_false_for_unknown_alias() {
+        let registry = Arc::new(default_registry());
+        let dispatcher = Dispatcher::new(registry);
+        assert!(
+            !dispatcher.recognizes("/xyz123"),
+            "recognizes must return false for an unregistered name"
+        );
+    }
+
+    #[test]
+    fn dispatch_unknown_emits_suggestion_when_close_match_exists() {
+        // "/hel" is 1 edit away from "/help"; the unknown-command
+        // formatter must append a "Did you mean: help" hint.
+        let registry = Arc::new(default_registry());
+        let dispatcher = Dispatcher::new(registry);
+        let (mut ctx, mut rx) = make_ctx();
+
+        let result = dispatcher.dispatch(&mut ctx, "/hel");
+        assert!(result.is_ok(), "unknown command must still return Ok");
+
+        let ev = rx.try_recv().expect("error event must be emitted");
+        match ev {
+            TuiEvent::Error(msg) => {
+                assert!(
+                    msg.contains("Unknown command: /hel"),
+                    "error should name the unknown command, got: {msg}"
+                );
+                assert!(
+                    msg.contains("Did you mean"),
+                    "error should include 'Did you mean' hint, got: {msg}"
+                );
+                assert!(
+                    msg.contains("help"),
+                    "error should suggest 'help' for '/hel', got: {msg}"
+                );
+            }
+            other => panic!("expected TuiEvent::Error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn dispatch_unknown_emits_plain_error_when_no_close_match() {
+        // "/zzzqqq" is > 2 edits from every primary, so the suggest()
+        // list is empty and the formatter must fall back to the plain
+        // "Unknown command: /zzzqqq" message with no "Did you mean".
+        let registry = Arc::new(default_registry());
+        let dispatcher = Dispatcher::new(registry);
+        let (mut ctx, mut rx) = make_ctx();
+
+        let result = dispatcher.dispatch(&mut ctx, "/zzzqqq");
+        assert!(result.is_ok());
+
+        let ev = rx.try_recv().expect("error event must be emitted");
+        match ev {
+            TuiEvent::Error(msg) => {
+                assert!(
+                    msg.contains("Unknown command: /zzzqqq"),
+                    "error should name the unknown command, got: {msg}"
+                );
+                assert!(
+                    !msg.contains("Did you mean"),
+                    "error must NOT include suggestion hint when no close match, got: {msg}"
+                );
+            }
+            other => panic!("expected TuiEvent::Error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn dispatch_unclosed_quote_emits_parse_error() {
+        // CommandParser::parse returns ParseError::UnclosedQuote for
+        // `/foo "unterminated`. The dispatcher must surface this as a
+        // TuiEvent::Error describing the parse failure and return Ok(()).
+        let registry = Arc::new(default_registry());
+        let dispatcher = Dispatcher::new(registry);
+        let (mut ctx, mut rx) = make_ctx();
+
+        let result = dispatcher.dispatch(&mut ctx, "/foo \"unterminated");
+        assert!(result.is_ok(), "parse error must not propagate as Err");
+
+        let ev = rx.try_recv().expect("parse error event must be emitted");
+        match ev {
+            TuiEvent::Error(msg) => {
+                assert!(
+                    msg.contains("Parse error"),
+                    "error should be tagged 'Parse error', got: {msg}"
+                );
+                assert!(
+                    msg.contains("unclosed quote"),
+                    "error should mention 'unclosed quote', got: {msg}"
+                );
+            }
+            other => panic!("expected TuiEvent::Error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn dispatch_malformed_flag_emits_parse_error() {
+        // `/foo --` triggers ParseError::MalformedFlag("--"). The
+        // dispatcher must surface it as a TuiEvent::Error tagged
+        // "Parse error" mentioning "malformed flag".
+        let registry = Arc::new(default_registry());
+        let dispatcher = Dispatcher::new(registry);
+        let (mut ctx, mut rx) = make_ctx();
+
+        let result = dispatcher.dispatch(&mut ctx, "/foo --");
+        assert!(result.is_ok());
+
+        let ev = rx.try_recv().expect("parse error event must be emitted");
+        match ev {
+            TuiEvent::Error(msg) => {
+                assert!(
+                    msg.contains("Parse error"),
+                    "error should be tagged 'Parse error', got: {msg}"
+                );
+                assert!(
+                    msg.contains("malformed flag"),
+                    "error should mention 'malformed flag', got: {msg}"
+                );
+            }
+            other => panic!("expected TuiEvent::Error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn dispatch_whitespace_only_input_no_emit() {
+        // Whitespace-only input is rejected by the dispatcher's
+        // leading-`/` gate BEFORE CommandParser is invoked, so no
+        // TuiEvent::Error is emitted and the call returns Ok(()).
+        let registry = Arc::new(default_registry());
+        let dispatcher = Dispatcher::new(registry);
+        let (mut ctx, mut rx) = make_ctx();
+
+        let result = dispatcher.dispatch(&mut ctx, "   ");
+        assert!(result.is_ok(), "whitespace input must return Ok");
+        assert!(
+            matches!(rx.try_recv(), Err(mpsc::error::TryRecvError::Empty)),
+            "whitespace input must not emit any event"
         );
     }
 }
