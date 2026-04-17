@@ -4,6 +4,8 @@ pub mod ask_user;
 // re-exports this module for back-compat so existing consumers
 // keep the `archon_core::background_agents::*` path.
 pub mod background_agents;
+// TASK-TUI-402: thin shim API re-exports for TUI layer.
+pub use background_agents::{cancel_background_agent, poll_background_agent, PollOutcome};
 pub mod bash;
 pub mod concurrency;
 pub mod config_tool;

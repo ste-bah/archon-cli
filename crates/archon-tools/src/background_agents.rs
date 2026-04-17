@@ -246,6 +246,56 @@ pub static BACKGROUND_AGENTS: Lazy<Arc<dyn BackgroundAgentRegistryApi>> =
     Lazy::new(|| Arc::new(BackgroundAgentRegistry::new()));
 
 // ---------------------------------------------------------------------------
+// TASK-TUI-402 / TASK-TUI-409: Thin shim API for TUI layer (Option A per
+// Phase B drift-reconcile). The original spec (TASK-TUI-402) used pre-AGS-101
+// primitives (oneshot receiver, started_at, &str keys, SubagentOutcome
+// payload). AGS-101 replaced those with a snapshot-based AgentStatus model.
+// This shim wraps the shipped registry with the minimum API the TUI needs.
+//
+// 5 spec→shipped reconciliations (Phase C spec-edit work):
+//   R1: agent id is &AgentId (Uuid) — not &str (AGS-101 typing)
+//   R2: PollOutcome::Running carries no `elapsed` field — trait doesn't
+//       expose spawned_at (would require trait surgery touching AGS-104/105/107)
+//   R3: PollOutcome::Complete(AgentStatus) — not Complete(SubagentOutcome).
+//       AgentStatus::{Finished, Failed, Cancelled} is the reconciled
+//       discriminant; result_slot payload not exposed on trait.
+//   R4: sync (non-async) preserved — matches spec EC-TUI-010
+//   R5: snapshot-idempotent — caller can re-poll without consumption
+//       side-effects (oneshot-drain semantics do not apply)
+
+/// Non-blocking poll outcome for a background subagent. Reconciles the
+/// pre-AGS-101 spec contract to the shipped snapshot-based registry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PollOutcome {
+    /// The id is not (or no longer) in the registry.
+    Unknown,
+    /// The subagent is still executing.
+    Running,
+    /// The subagent has reached a terminal state. Payload is the
+    /// specific terminal `AgentStatus` (Finished, Failed, or Cancelled).
+    Complete(AgentStatus),
+}
+
+/// Non-blocking poll. Callers may invoke this from sync contexts (e.g.
+/// TUI refresh loop). Snapshot-idempotent: repeated calls with the same
+/// id return the same outcome until the registry state changes.
+pub fn poll_background_agent(id: &AgentId) -> PollOutcome {
+    match BACKGROUND_AGENTS.get(id) {
+        None => PollOutcome::Unknown,
+        Some(AgentStatus::Running) => PollOutcome::Running,
+        Some(terminal) => PollOutcome::Complete(terminal),
+    }
+}
+
+/// Fire the registered cancellation token. Idempotent at the shim layer —
+/// re-cancelling a cancelled agent returns Ok(()) from the registry impl
+/// because the token is already cancelled (verify by Gate 3 probe).
+/// Propagates RegistryError::NotFound for unknown ids.
+pub fn cancel_background_agent(id: &AgentId) -> Result<(), RegistryError> {
+    BACKGROUND_AGENTS.cancel(id)
+}
+
+// ---------------------------------------------------------------------------
 // Module-local unit tests (smoke — full contract tests live in
 // crates/archon-core/tests/task_ags_101.rs).
 // ---------------------------------------------------------------------------
@@ -286,6 +336,17 @@ mod tests {
         assert!(AgentStatus::Finished.is_terminal());
         assert!(AgentStatus::Failed.is_terminal());
         assert!(AgentStatus::Cancelled.is_terminal());
+    }
+
+    // TASK-TUI-402: shim unit test. Running-handle happy-path coverage is
+    // deferred to TASK-TUI-409 integration tests to avoid contaminating
+    // the global BACKGROUND_AGENTS singleton across unit-test runs.
+    #[test]
+    fn poll_unknown_id_returns_unknown() {
+        assert_eq!(
+            poll_background_agent(&Uuid::new_v4()),
+            PollOutcome::Unknown
+        );
     }
 
     #[test]
