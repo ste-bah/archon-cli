@@ -7,12 +7,23 @@ crates/archon-tui/src/output.rs
 crates/archon-tui/src/task_dispatch_tests.rs
 crates/archon-tui/src/theme.rs
 crates/archon-tui/src/vim.rs
-# TUI-330 (added): event_loop.rs at 639 lines is the receiver of the app.rs
+# TUI-330 (added): event_loop.rs at ~656 lines is the receiver of the app.rs
 # extraction under TUI-310 (app.rs dropped from 1250 -> 493 -> 485). Further
 # splitting event_loop.rs would reintroduce a circular dependency with the
 # app::App struct it mutates (App has >40 fields that every branch of the
 # single TuiEvent match arm touches) and fragment the architectural focal
 # point of the loop. Coverage is tracked via the TUI-328 80% coverage
-# ratchet; when a natural seam opens (e.g. when App is decomposed under a
-# later task) this entry must be removed.
+# ratchet.
+#
+# TUI-331 (tightened justification): Remove this allowlist entry when either:
+#   (a) An `App::process_tui_event(&mut self, event: TuiEvent)` method is
+#       introduced that moves the match arms from run_inner() onto impl App.
+#       TUI-311 tracks the input.rs extraction which is step 1 of path (a).
+#   (b) The App struct is decomposed into sub-states (App::Input,
+#       App::Thinking, App::Output, App::Overlays) allowing variant-specific
+#       helpers to accept a narrower &mut receiver than the current &mut App
+#       over 40+ fields.
+# Once either (a) or (b) lands, run_inner() can be broken into sub-modules
+# grouped by TuiEvent category (agent-output, slash-commands, UI-state,
+# permissions, voice), dropping event_loop.rs below 500 lines.
 crates/archon-tui/src/event_loop.rs

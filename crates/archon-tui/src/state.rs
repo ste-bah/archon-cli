@@ -15,7 +15,12 @@ use crate::task_dispatch::{AgentDispatcher, AgentRouter};
 use crate::theme::Theme;
 
 // ---------------------------------------------------------------------------
-// Skeleton module placeholders (replace when modules are populated)
+// Skeleton module placeholders
+// ---------------------------------------------------------------------------
+//
+// AppState is currently a construction skeleton — session UI state still
+// lives on `app::App`. Future tasks (TUI-311+) will migrate fields
+// incrementally using canonical types from `crate::app` / `crate::events`.
 // ---------------------------------------------------------------------------
 
 /// Notification queue for toast-style overlay messages (REQ-MOD-017).
@@ -25,60 +30,21 @@ pub use crate::notifications::NotificationQueue;
 pub struct KeyBindings;
 
 // ---------------------------------------------------------------------------
-// Session state (local structs — avoids crate::app import)
+// Session state
 // ---------------------------------------------------------------------------
 
-/// Active session picker state.
+/// Session-scoped UI state.
 ///
-/// We define a local struct rather than importing from crate::app to preserve
-/// the direction invariant (state.rs must not import from crate::app).
-#[derive(Debug, Clone)]
-pub struct SessionPicker {
-    pub entries: Vec<SessionPickerEntry>,
-    pub selected: usize,
-}
-
-#[derive(Debug, Clone)]
-pub struct SessionPickerEntry {
-    pub id: String,
-    pub name: String,
-    pub turns: u64,
-    pub cost: f64,
-    pub last_active: String,
-}
-
-/// MCP manager view state.
-///
-/// We define a local enum rather than importing from crate::app to preserve
-/// the direction invariant.
-#[derive(Debug, Clone)]
-pub enum McpManagerView {
-    ServerList { selected: usize },
-    ServerMenu { server_idx: usize, action_idx: usize },
-    ToolList { scroll: usize },
-}
-
-/// Active MCP manager state.
-#[derive(Debug, Clone)]
-pub struct McpManager {
-    pub server_count: usize,
-    pub view: McpManagerView,
-}
-
-/// Session-scoped UI state extracted from app.rs App struct.
-///
-/// These fields represent transient UI state tied to the current session,
-/// not the session itself (which lives in archon_core).
-#[derive(Debug, Clone)]
+/// Currently a skeleton placeholder — the real session UI state (session
+/// picker, MCP manager overlay, etc.) still lives on `app::App`. Future
+/// tasks (TUI-311+) will migrate those fields here using the canonical
+/// types defined in `crate::app` / `crate::events`.
+#[derive(Debug, Clone, Default)]
 pub struct SessionState {
-    /// Whether the session picker overlay is currently active.
-    pub session_picker: Option<SessionPicker>,
-    /// Session display name (shown on input line badge).
+    /// Session display name (shown on input line badge). Not yet wired.
     pub name: Option<String>,
-    /// Whether vim keybinding mode is currently active.
+    /// Whether vim keybinding mode is currently active. Not yet wired.
     pub vim_mode_active: bool,
-    /// Active MCP manager overlay, if any.
-    pub mcp_manager: Option<McpManager>,
 }
 
 // ---------------------------------------------------------------------------
@@ -159,10 +125,8 @@ impl AppState {
         Self {
             dispatcher: AgentDispatcher::new(router, agent_event_tx),
             session: SessionState {
-                session_picker: None,
                 name: None,
                 vim_mode_active: false,
-                mcp_manager: None,
             },
             layout: LayoutState::default(),
             notifications: NotificationQueue::new(),

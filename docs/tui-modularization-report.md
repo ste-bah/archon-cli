@@ -491,3 +491,156 @@ Three changes landed under TASK-TUI-330 to close the TUI-329 blockers:
   complexity — those violations still exist in archon-core,
   archon-memory, archon-llm, archon-mcp, archon-tools and remain the
   responsibility of each dep's own gates.
+
+---
+
+## TUI-331: Debt Cleanup (2026-04-17)
+
+Pure-refactor cleanup of TUI-329 / TUI-330 debt. No behavior changes; no
+new tests. Baseline preserved: 711 pass / 0 fail / 54 binaries.
+
+### Summary
+
+| Debt | Status | Action |
+|---|---|---|
+| Debt-1: `state.rs` orphan duplicate types | RESOLVED | Deleted 4 type defs + 2 `SessionState` fields |
+| Debt-2: `mcp_actions_for` byte-identical duplicate | RESOLVED | Deleted from `render/body.rs`; call site now delegates to `event_loop.rs` |
+| Debt-3: `event_loop.rs` 656-line allowlist | RETAINED | Justification tightened with concrete unblock conditions |
+| Debt-4: 3 `#[allow(clippy::cognitive_complexity)]` | RETAINED (all 3) | Fix 3 attempted on `run_event_loop`; reverted after only 36 -> 32 (still > 25). All 3 justifications tightened. |
+
+### Debt-1 resolved: `state.rs` consolidation
+
+`crates/archon-tui/src/state.rs` previously declared its own local copies of
+`SessionPicker`, `SessionPickerEntry`, `McpManagerView`, and `McpManager`
+(4 types). Three of the four had shapes that diverged from the canonical
+definitions in `crate::app` / `crate::events`:
+
+- `SessionPicker`: `entries` (state.rs) vs `sessions` (app.rs)
+- `McpManagerView::ToolList`: `{ scroll }` only (state.rs) vs
+  `{ server_name, tools, scroll }` (app.rs)
+- `McpManager`: `server_count: usize` (state.rs) vs
+  `servers: Vec<McpServerEntry>` (app.rs)
+
+`SessionState` held `session_picker: Option<SessionPicker>` and
+`mcp_manager: Option<McpManager>` using those state.rs-local types. Both
+fields were constructed as `None` in `AppState::new` and NEVER populated
+or read anywhere at runtime (verified via grep; zero writers, zero
+readers outside the constructor).
+
+**Action**: Deleted all 4 type defs and both orphan fields. `SessionState`
+now holds only `name: Option<String>` and `vim_mode_active: bool` — also
+unpopulated but honest placeholders for future migration. Module
+doc-comment updated: "AppState is currently a construction skeleton —
+session UI state still lives on `app::App`. Future tasks (TUI-311+) will
+migrate fields incrementally using canonical types from `crate::app` /
+`crate::events`."
+
+**Verification**: `cargo build -j1 -p archon-tui` clean. `cargo test`:
+`tests/app_state.rs` still passes (the only external consumer of
+`AppState`; it only constructs, never reads session fields).
+
+### Debt-2 resolved: `mcp_actions_for` deduplication
+
+Discovered by independent investigation (not in TUI-330 subagent's listed
+debt): a byte-identical copy of `mcp_actions_for` existed in both
+`event_loop.rs:633` (as `pub(crate)`) and `render/body.rs:22` (as `fn`).
+Two sources of truth for the MCP action-list ordering — a latent
+drift-risk defect.
+
+**Action**: Deleted the private copy in `render/body.rs` (lines 22-38).
+Updated the single call site at `render/body.rs:371` from
+`mcp_actions_for(server)` to `crate::event_loop::mcp_actions_for(server)`.
+The unused `McpServerEntry` import was also removed.
+
+**Verification**: `cargo test` — 711 pass / 0 fail (unchanged).
+
+### Debt-3 status: `event_loop.rs` allowlist retained
+
+`event_loop.rs` grew from 656 -> 677 lines under TUI-331 (expanded inline
+justification comments for the three `#[allow]`s). Still in the
+allowlist. A ~30-variant `match` over `TuiEvent` all mutating `&mut App`
+remains the architectural focal point and cannot be cheaply
+decomposed without first decomposing `App` itself.
+
+**Tightened justification** (in `scripts/check-tui-file-sizes.allowlist`):
+Remove the entry when either (a) an `App::process_tui_event(&mut self,
+event)` method is introduced moving the match arms onto `impl App`, OR
+(b) `App` is decomposed into sub-states (`App::Input`, `App::Thinking`,
+`App::Output`, `App::Overlays`) so variant-specific helpers can accept
+a narrower `&mut` receiver. TUI-311 tracks the `input.rs` extraction
+which is step 1 of path (a).
+
+### Debt-4 status: 3 `#[allow(clippy::cognitive_complexity)]` retained
+
+**Fix 3 attempt (BONUS path)**: Extracted a `handle_tui_event(dispatcher,
+runner, ev) -> LoopAction` helper with `enum LoopAction { Continue,
+Break }` per the plan's pseudocode. Clippy measured the refactored
+`run_event_loop` at **32/25** — lower than the 36/25 baseline, still
+above the 25 threshold. The outer `tokio::select!` + `Some/None` match +
+post-event `poll_completion()` drain accounted for the residual
+complexity. Per the plan's revert path, the refactor was reverted.
+Allow retained; comment extended with the Fix 3 finding and two concrete
+unblock conditions (stream-abstraction OR TUI-107 `AgentHandle` actor).
+
+**`run_inner` (64/25)** and **`voice_loop` (96/25)**: Not attempted (per
+plan). Both justifications tightened with specific unblock conditions:
+
+- `run_inner`: Remove when `App::process_tui_event` OR `App` sub-state
+  decomposition lands (same trigger as Debt-3).
+- `voice_loop`: Remove when `VoicePipeline` is split into
+  `VoicePipeline::Input` (audio capture) and `VoicePipeline::Output`
+  (STT + emission) sub-structs, allowing per-trigger handlers to accept
+  a narrower `&mut` receiver.
+
+### Out of scope (flagged for follow-up)
+
+- **`TuiEvent` dual definition** in `app.rs:28` and `events.rs:48`:
+  discovered during sherlock adversarial review of the TUI-331 plan.
+  Both are distinct public enums with overlapping variant sets;
+  `app.rs::TuiEvent` pre-dates TUI-329/330 (initial commit) while
+  `events.rs::TuiEvent` was added in TUI-305. Consolidating requires a
+  multi-file migration touching 4+ integration tests. **Flagged for a
+  dedicated follow-up ticket (TUI-332).**
+
+### Files changed
+
+- `crates/archon-tui/src/state.rs` — removed `SessionPicker`,
+  `SessionPickerEntry`, `McpManagerView`, `McpManager` type defs and
+  `session_picker` / `mcp_manager` fields from `SessionState`;
+  simplified module doc-comment; added `Default` derive on `SessionState`.
+- `crates/archon-tui/src/render/body.rs` — removed private
+  `mcp_actions_for`; call site now delegates to
+  `crate::event_loop::mcp_actions_for`; removed unused `McpServerEntry`
+  import.
+- `crates/archon-tui/src/event_loop.rs` — tightened inline justification
+  comments on both `#[allow(clippy::cognitive_complexity)]` attributes
+  (run_event_loop + run_inner) with concrete unblock conditions.
+- `crates/archon-tui/src/voice/pipeline.rs` — tightened `voice_loop`
+  `#[allow]` justification with concrete unblock condition
+  (`VoicePipeline::Input` / `VoicePipeline::Output` split).
+- `scripts/check-tui-file-sizes.allowlist` — tightened `event_loop.rs`
+  entry comment with two concrete unblock conditions.
+- `docs/tui-modularization-report.md` — this section.
+
+### Test impact
+
+- 711 pass / 0 fail / 7 ignored / 54 test binaries (unchanged from
+  pre-TUI-331 baseline).
+- No new tests (pure refactor; deletion of orphan dead code + byte-identical
+  function dedup; existing tests cover all behavior through consumers).
+
+### Coverage impact
+
+- 81.74% -> **81.87%** (line coverage). Slight increase: removing
+  ~25 lines of 0%-covered dead code from `state.rs` raises the
+  percentage marginally.
+
+### Gates
+
+| Gate | Status |
+|---|---|
+| `check-tui-file-sizes.sh` | PASS (67 files, 0 over 500, 6 allowlisted — event_loop.rs now 677 lines due to expanded comments) |
+| `check-tui-module-cycles.sh` | PASS (10 rules checked, 0 violations) |
+| `check-tui-duplication.sh` | PASS (0.15% duplication vs 5% threshold) |
+| `check-tui-coverage.sh` | PASS (81.87% >= 80%) |
+| `check-tui-complexity.sh` | PASS (no archon-tui function over threshold) |

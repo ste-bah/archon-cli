@@ -13,29 +13,11 @@ use ratatui::{
     Frame,
 };
 
-use crate::app::{App, McpManagerView, McpServerEntry};
+use crate::app::{App, McpManagerView};
 use crate::markdown::render_markdown_line;
 use crate::output::{OutputBuffer, ThinkingState, ToolOutputState};
 use crate::splash;
 use crate::vim::VimState;
-
-/// Return the action strings available for a given server entry.
-fn mcp_actions_for(server: &McpServerEntry) -> Vec<&'static str> {
-    let mut actions: Vec<&'static str> = Vec::new();
-    if server.disabled {
-        actions.push("enable");
-    } else {
-        if matches!(server.state.as_str(), "crashed" | "stopped") {
-            actions.push("reconnect");
-        }
-        if server.state == "ready" {
-            actions.push("tools");
-        }
-        actions.push("disable");
-    }
-    actions.push("back");
-    actions
-}
 
 /// Render the output area (top section with scrollable content).
 pub fn draw_output_area(frame: &mut Frame, app: &App, area: Rect) {
@@ -368,7 +350,7 @@ pub fn draw_mcp_manager(frame: &mut Frame, app: &App) {
         }
         McpManagerView::ServerMenu { server_idx, action_idx } => {
             if let Some(server) = mcp_mgr.servers.get(*server_idx) {
-                let actions = mcp_actions_for(server);
+                let actions = crate::event_loop::mcp_actions_for(server);
                 let overlay_height = (actions.len() as u16 + 4)
                     .max(6)
                     .min(area.height.saturating_sub(4));

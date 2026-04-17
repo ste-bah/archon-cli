@@ -74,6 +74,18 @@ pub struct EventLoopConfig {
 // architectural focal point of this function and require threading
 // dispatcher / runner / router through every helper. Kept as a single
 // function intentionally.
+//
+// TUI-331: Fix 3 attempted extracting a `handle_tui_event(dispatcher, runner,
+// ev) -> LoopAction` helper; measured complexity dropped only 36 → 32, still
+// over the 25 threshold (the outer `tokio::select!` + `Some/None` match +
+// `poll_completion()` drain account for the residual complexity). Refactor
+// reverted; allow retained. Remove this allow when either:
+//   (a) The outer loop's `tokio::select!` is replaced with a single-source
+//       stream abstraction that folds the poll-interval branch into the
+//       event channel (removing one level of nesting), OR
+//   (b) TUI-107's `AgentHandle` adapter is introduced, at which point the
+//       dispatcher / runner / router become fields on a single actor struct
+//       and the helper extraction in Fix 3 will land <25.
 #[allow(clippy::cognitive_complexity)]
 pub async fn run_event_loop(cfg: EventLoopConfig) -> Result<()> {
     let EventLoopConfig {
@@ -150,8 +162,17 @@ pub async fn run_event_loop(cfg: EventLoopConfig) -> Result<()> {
 // would require threading `&mut App` plus several ancillary senders through
 // every helper and would fragment the single match arm that is the
 // architectural focal point of the loop. Coverage is tracked via the
-// TUI-328 80% coverage ratchet; further decomposition awaits a natural seam
-// (e.g. App struct split under a later modularization task).
+// TUI-328 80% coverage ratchet.
+//
+// TUI-331: Remove this allow when either:
+//   (a) An `App::process_tui_event(&mut self, event: TuiEvent)` method is
+//       introduced that moves the match arms onto `impl App`, so each arm
+//       borrows `&mut self` through a single receiver (TUI-311 tracks the
+//       input.rs extraction that is step 1 of this path), OR
+//   (b) The `App` struct is decomposed into sub-state groups (App::Input,
+//       App::Thinking, App::Output, App::Overlays) so variant-specific
+//       handlers can accept a narrower `&mut` receiver rather than the
+//       current &mut App over 40+ fields.
 #[allow(clippy::cognitive_complexity)]
 pub(crate) async fn run_inner<B>(
     config: AppConfig,

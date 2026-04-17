@@ -201,8 +201,15 @@ impl VoicePipeline {
 // Extracting arms into helpers requires threading >=4 mutable references
 // through function boundaries with no coherence gain, and fragments the
 // `select!` / match cascade that is the architectural focal point of this
-// loop. Tracked for a future refactor under a voice-pipeline-specific task
-// once a natural seam opens (likely when multi-device capture is added).
+// loop.
+//
+// TUI-331: Remove this allow when `VoicePipeline` is split into
+// `VoicePipeline::Input` (audio capture: device handle, recording state,
+// capture buffers) and `VoicePipeline::Output` (STT decoding + TuiEvent
+// emission: tui_event_tx, transcription state) sub-structs. After that
+// split, per-trigger handlers can accept a narrower `&mut` receiver (either
+// Input or Output, not both), which will drop helper-threading cost below
+// the breakeven point and let the arm extraction land <25.
 #[allow(clippy::cognitive_complexity)]
 pub async fn voice_loop(
     mut trigger_rx: mpsc::Receiver<VoiceTrigger>,
