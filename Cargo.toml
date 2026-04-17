@@ -146,6 +146,11 @@ anyhow.workspace = true
 uuid.workspace = true
 semver.workspace = true
 globset.workspace = true
+# TASK-AGS-801: parser drift-reconcile + gap-fill
+# - strsim:    Levenshtein distance for `suggest()` fuzzy-match helper
+# - thiserror: derive(Error) on `ParseError` for the `CommandParser` wrapper
+strsim.workspace = true
+thiserror.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

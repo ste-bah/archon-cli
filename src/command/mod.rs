@@ -44,3 +44,18 @@ pub(crate) mod web;
 // new types. See the TASK-AGS-800 commit body for the full R-item list.
 #[allow(unused_imports)]
 pub(crate) use registry::CommandHandler as SlashCommand;
+
+// TASK-AGS-801 (Stage 6, Q1=A): parser drift-reconcile + gap-fill.
+//
+// Re-export the parser types so future readers grepping for
+// `CommandParser` / `ParseError` / `Arg` / `suggest` land on the real
+// definitions without having to dig through the `parser` submodule
+// directly. This matches the additive-shim pattern established by the
+// `SlashCommand` alias above and is the `mod.rs` re-export mandated by
+// TASK-AGS-801 (G9).
+//
+// Note: `ParsedCommand` is already reachable via `parser::ParsedCommand`
+// from dispatcher.rs; the re-export just widens the surface to match
+// the spec's "mod.rs re-exports the 5 parser types" wiring check.
+#[allow(unused_imports)]
+pub(crate) use parser::{suggest, Arg, CommandParser, ParseError, ParsedCommand};
