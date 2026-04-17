@@ -190,6 +190,10 @@ mod tests {
             CommandContext {
                 tui_tx: tx,
                 status_snapshot: snapshot,
+                // TASK-AGS-808: /status tests never exercise /model
+                // paths — None on both new fields.
+                model_snapshot: None,
+                pending_effect: None,
             },
             rx,
         )

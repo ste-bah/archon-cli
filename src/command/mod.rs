@@ -18,6 +18,7 @@ pub(crate) mod errors;
 pub(crate) mod ide_stdio;
 pub(crate) mod login;
 pub(crate) mod memory;
+pub(crate) mod model;
 pub(crate) mod parser;
 pub(crate) mod pipeline;
 pub(crate) mod remote;

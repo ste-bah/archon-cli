@@ -29,6 +29,12 @@ use crate::command::task::TasksHandler;
 // resolves to the real impl (snapshot-consuming) instead of the prior
 // `declare_handler!` stub. Alias migrates from [stat] to [info] per spec.
 use crate::command::status::StatusHandler;
+// TASK-AGS-808: real /model handler lives in `crate::command::model`.
+// Imported here so `b.insert_primary("model", Arc::new(ModelHandler))`
+// resolves to the real impl (snapshot-consuming READ + effect-slot WRITE)
+// instead of the prior `declare_handler!` stub. Aliases migrate from
+// [models] to [m, switch-model] per spec.
+use crate::command::model::ModelHandler;
 
 /// Execution context threaded through every command handler.
 ///
@@ -90,6 +96,59 @@ pub(crate) struct CommandContext {
     /// acquires the four `/status` async locks in advance and passes
     /// the owned values via this field.
     pub(crate) status_snapshot: Option<crate::command::status::StatusSnapshot>,
+    /// TASK-AGS-808 snapshot-pattern field (READ side of /model).
+    ///
+    /// Populated by `build_command_context` for `/model` (and its
+    /// aliases `/m`, `/switch-model`) ONLY. Every other command
+    /// observes `None` and pays zero additional lock traffic. Mirrors
+    /// the AGS-807 `status_snapshot` convention (separate typed struct
+    /// per ticket; fields differ across handlers so snapshots are not
+    /// cross-reused).
+    pub(crate) model_snapshot: Option<crate::command::model::ModelSnapshot>,
+    /// TASK-AGS-808 effect-slot field (WRITE side of /model and future
+    /// write-tickets).
+    ///
+    /// The Rule-5 extension pattern: sync `CommandHandler::execute`
+    /// cannot await mutex writes on shared state. Instead, a handler
+    /// synchronously stashes a [`CommandEffect`] variant here; the
+    /// dispatch site in `slash.rs::handle_slash_command` takes the
+    /// value (consuming the slot via `.take()`) and awaits the write
+    /// in `command::context::apply_effect` AFTER dispatch returns. The
+    /// single-shot `Option` guarantees exactly-once application even
+    /// if the dispatcher were to re-fire on the same context.
+    pub(crate) pending_effect: Option<CommandEffect>,
+}
+
+/// Side-effect descriptors produced synchronously by
+/// [`CommandHandler::execute`] and applied asynchronously after
+/// dispatch returns.
+///
+/// TASK-AGS-808 introduces this enum to bridge the sync-handler /
+/// async-shared-state gap for the `/model` write path. The shipped
+/// body performed `*slash_ctx.model_override_shared.lock().await = ...`
+/// inline, which is forbidden inside a sync trait method. Handlers now
+/// stash the intended mutation as an enum variant in
+/// `CommandContext::pending_effect`; `slash.rs` post-dispatch takes the
+/// value and calls `command::context::apply_effect`, which awaits the
+/// correct mutex write.
+///
+/// Future body-migrate tickets (AGS-809 /cost read-only, AGS-814
+/// /context read-only, AGS-817 /memory sync-trait, AGS-819 /theme
+/// write) may extend this enum with additional variants. Each variant
+/// should:
+///
+/// 1. Carry owned data (no borrows, no `Arc<Mutex<_>>` guards).
+/// 2. Map 1:1 to a single write-side field on `SlashCommandContext`.
+/// 3. Be applied in `command::context::apply_effect` via a new match
+///    arm alongside `SetModelOverride`.
+#[derive(Debug, Clone)]
+pub(crate) enum CommandEffect {
+    /// Overwrite `SlashCommandContext::model_override_shared` with the
+    /// resolved full model id. Produced by `ModelHandler::execute`
+    /// after `validate_model_name` succeeds. Applied by
+    /// `command::context::apply_effect`, which awaits the mutex write
+    /// at the dispatch site in `slash.rs`.
+    SetModelOverride(String),
 }
 
 /// Trait every registered slash command handler implements.
@@ -335,11 +394,10 @@ declare_handler!(
 declare_handler!(ThinkingHandler, "Toggle extended thinking display on/off");
 declare_handler!(EffortHandler, "Show or set reasoning effort (high|medium|low)");
 declare_handler!(GardenHandler, "Run memory garden consolidation or show stats");
-declare_handler!(
-    ModelHandler,
-    "Show or switch the active model",
-    &["models"]
-);
+// TASK-AGS-808: ModelHandler moved to `crate::command::model` (real
+// impl with body-migrated execute via snapshot pattern for READ +
+// effect-slot pattern for WRITE, aliases migrated from [models] to
+// [m, switch-model] per spec). Imported at the top of this file.
 declare_handler!(CopyHandler, "Copy the last assistant message to the clipboard");
 declare_handler!(
     ContextHandler,
@@ -764,5 +822,60 @@ mod tests {
             via_abort.description(),
             "'abort' must resolve to the same handler as /cancel"
         );
+    }
+
+    // -----------------------------------------------------------------
+    // TASK-AGS-808: /model aliases [m, switch-model] + CommandEffect
+    // enum sanity. The /model body-migrate moves ModelHandler out of
+    // the declare_handler! stub and into `crate::command::model`.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn registry_resolves_model_aliases_m_and_switch_model() {
+        let reg = default_registry();
+        let primary = reg
+            .get("model")
+            .expect("model primary must be registered");
+        let via_m = reg
+            .get("m")
+            .expect("'m' alias must resolve to /model per AGS-808");
+        let via_switch_model = reg
+            .get("switch-model")
+            .expect("'switch-model' alias must resolve to /model per AGS-808");
+        assert_eq!(
+            primary.description(),
+            via_m.description(),
+            "'m' must resolve to the same handler as /model"
+        );
+        assert_eq!(
+            primary.description(),
+            via_switch_model.description(),
+            "'switch-model' must resolve to the same handler as /model"
+        );
+        // Pin the Registry helper APIs — `model` is a primary,
+        // `m` is not.
+        assert!(reg.is_primary("model"));
+        assert!(!reg.is_primary("m"));
+        assert!(!reg.is_primary("switch-model"));
+        assert_eq!(reg.primary_for_alias("m"), Some("model"));
+        assert_eq!(reg.primary_for_alias("switch-model"), Some("model"));
+        assert_eq!(reg.primary_for_alias("model"), None);
+    }
+
+    #[test]
+    fn command_effect_debug_and_clone() {
+        // Sanity: CommandEffect derives Debug + Clone and the
+        // SetModelOverride variant round-trips its payload without
+        // panic. Prevents accidental removal of the derives that
+        // ModelHandler tests depend on for assertions.
+        let e = CommandEffect::SetModelOverride("claude-sonnet-4-6".to_string());
+        let cloned = e.clone();
+        match cloned {
+            CommandEffect::SetModelOverride(s) => {
+                assert_eq!(s, "claude-sonnet-4-6");
+            }
+        }
+        // Debug impl must not panic — format! exercises it.
+        let _ = format!("{e:?}");
     }
 }

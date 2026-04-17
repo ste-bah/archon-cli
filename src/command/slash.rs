@@ -44,6 +44,15 @@ pub(crate) async fn handle_slash_command(
     )
     .await;
     let _ = ctx.dispatcher.dispatch(&mut __cmd_ctx, input);
+    // TASK-AGS-808 effect-slot drain. Handlers that need to write to
+    // async-guarded shared state (e.g. /model mutating
+    // `model_override_shared`) stash a CommandEffect in
+    // `pending_effect` synchronously; we consume it with `.take()`
+    // here — where `.await` is legal — and apply the mutation via
+    // `command::context::apply_effect`. Single-shot by construction.
+    if let Some(effect) = __cmd_ctx.pending_effect.take() {
+        crate::command::context::apply_effect(effect, ctx).await;
+    }
     if !ctx.dispatcher.recognizes(input) {
         return false;
     }
@@ -144,40 +153,14 @@ pub(crate) async fn handle_slash_command(
             true
         }
         // ── /model ─────────────────────────────────────────────
-        s if s.starts_with("/model") => {
-            let model_str = s.strip_prefix("/model").unwrap_or("").trim();
-            if model_str.is_empty() {
-                let current = {
-                    let ov = ctx.model_override_shared.lock().await;
-                    if ov.is_empty() {
-                        ctx.default_model.clone()
-                    } else {
-                        ov.clone()
-                    }
-                };
-                let _ = tui_tx
-                    .send(TuiEvent::TextDelta(format!(
-                        "\nCurrent model: {current}\nUsage: /model <name>\nShortcuts: opus, sonnet, haiku\n"
-                    )))
-                    .await;
-            } else {
-                match archon_tools::validation::validate_model_name(model_str) {
-                    Ok(resolved) => {
-                        *ctx.model_override_shared.lock().await = resolved.clone();
-                        let _ = tui_tx.send(TuiEvent::ModelChanged(resolved.clone())).await;
-                        let _ = tui_tx
-                            .send(TuiEvent::TextDelta(format!(
-                                "\nModel switched to {resolved}.\n"
-                            )))
-                            .await;
-                    }
-                    Err(msg) => {
-                        let _ = tui_tx.send(TuiEvent::Error(msg)).await;
-                    }
-                }
-            }
-            true
-        }
+        // Body migrated to src/command/model.rs (TASK-AGS-808).
+        // Read side (no-args): ModelSnapshot populated by
+        // build_command_context. Write side (with arg):
+        // CommandEffect::SetModelOverride stored in
+        // CommandContext::pending_effect; slash.rs post-dispatch
+        // apply_effect awaits the mutex write on
+        // slash_ctx.model_override_shared. Aliases: [m, switch-model].
+        // Do not re-add the legacy arm — TUI-410 lesson.
         // ── /copy ───────────────────────────────────────────────
         "/copy" => {
             // Find the last assistant message content

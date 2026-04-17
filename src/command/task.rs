@@ -219,6 +219,10 @@ mod tests {
                 // TASK-AGS-807: snapshot-pattern field. /tasks tests
                 // never read the /status snapshot, so None is correct.
                 status_snapshot: None,
+                // TASK-AGS-808: /tasks tests never read the /model
+                // snapshot or stash a CommandEffect — None on both.
+                model_snapshot: None,
+                pending_effect: None,
             },
             rx,
         )

@@ -176,6 +176,11 @@ mod tests {
                 // tests never exercise the /status body, so None is the
                 // correct default here.
                 status_snapshot: None,
+                // TASK-AGS-808: same rationale for /model snapshot +
+                // the effect slot — dispatcher tests only exercise
+                // routing/parsing, not handler bodies.
+                model_snapshot: None,
+                pending_effect: None,
             },
             rx,
         )
