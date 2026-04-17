@@ -312,6 +312,15 @@ declare_handler!(ThemeHandler, "Show or change the UI theme");
 // other handler.
 declare_handler!(RecallHandler, "Recall memories matching a query");
 declare_handler!(RulesHandler, "List, edit, or remove behavioral rules");
+// TASK-AGS-805: /cancel thin wrapper. Body-migrate deferred (shipped
+// CommandContext does not expose `task_service`; the stub returns
+// `Ok(())` consistent with the 37 peer handlers). Aliases `stop` and
+// `abort` route to this handler via the registry alias map.
+declare_handler!(
+    CancelHandler,
+    "Cancel the currently running task",
+    &["stop", "abort"]
+);
 
 /// Build the default command registry containing every slash command
 /// currently dispatched from `main.rs::handle_slash_command`.
@@ -359,6 +368,8 @@ pub(crate) fn default_registry() -> Registry {
     b.insert_primary("theme", Arc::new(ThemeHandler));
     b.insert_primary("recall", Arc::new(RecallHandler));
     b.insert_primary("rules", Arc::new(RulesHandler));
+    // TASK-AGS-805: /cancel primary (aliases: stop, abort).
+    b.insert_primary("cancel", Arc::new(CancelHandler));
     // Aliases are collected from each handler's aliases() method
     // inside RegistryBuilder::build(). Collisions panic.
     b.build()
@@ -375,9 +386,12 @@ mod tests {
     /// Count of distinct command names extracted from the 37 match
     /// arms in `main.rs::handle_slash_command` as of TASK-AGS-622.
     /// Two of those arms (`/compact | /clear` and the `/thinking`
-    /// family) contribute separately-named commands, so the final
-    /// count is 37 unique names.
-    const EXPECTED_COMMAND_COUNT: usize = 37;
+    /// family) contribute separately-named commands, so the baseline
+    /// count was 37 unique names.
+    ///
+    /// TASK-AGS-805 adds `/cancel` (gap-fix thin wrapper) as a new
+    /// primary, bringing the total to 38.
+    const EXPECTED_COMMAND_COUNT: usize = 38;
 
     #[test]
     fn default_registry_contains_all_commands() {
@@ -599,6 +613,48 @@ mod tests {
         assert!(
             !registry.aliases_map_contains("recall"),
             "recall must NOT appear as an alias"
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // TASK-AGS-805: /cancel registration + aliases (stop, abort).
+    // Body-migrate is deferred until CommandContext exposes a task
+    // service; these tests verify the registry-level wiring only.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn cancel_primary_registered() {
+        let registry = default_registry();
+        let handler = registry
+            .get("cancel")
+            .expect("cancel must be registered as a primary");
+        assert!(
+            !handler.description().is_empty(),
+            "cancel handler must carry a non-empty description"
+        );
+    }
+
+    #[test]
+    fn cancel_aliases_resolve_to_cancel_handler() {
+        let registry = default_registry();
+        let primary = registry
+            .get("cancel")
+            .expect("cancel primary registered");
+        let via_stop = registry
+            .get("stop")
+            .expect("alias 'stop' must resolve to cancel");
+        let via_abort = registry
+            .get("abort")
+            .expect("alias 'abort' must resolve to cancel");
+        assert_eq!(
+            primary.description(),
+            via_stop.description(),
+            "'stop' must resolve to the same handler as /cancel"
+        );
+        assert_eq!(
+            primary.description(),
+            via_abort.description(),
+            "'abort' must resolve to the same handler as /cancel"
         );
     }
 }
