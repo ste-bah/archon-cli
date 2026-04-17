@@ -19,6 +19,12 @@ use std::sync::Arc;
 
 use archon_tui::app::TuiEvent;
 
+// TASK-AGS-806: real /tasks handler lives in `crate::command::task` so the
+// body-migrate keeps registry.rs declarative (just struct registrations).
+// Imported here so `b.insert_primary("tasks", Arc::new(TasksHandler))`
+// resolves to the real impl, not the prior `declare_handler!` stub.
+use crate::command::task::TasksHandler;
+
 /// Execution context threaded through every command handler.
 ///
 /// Kept deliberately minimal for TASK-AGS-622: the registry's job is
@@ -327,7 +333,10 @@ declare_handler!(DenialsHandler, "List tool-use denials recorded this session");
 declare_handler!(LoginHandler, "Authenticate against the configured backend");
 declare_handler!(VimHandler, "Toggle vim-style modal input");
 declare_handler!(UsageHandler, "Show aggregate API usage for the session");
-declare_handler!(TasksHandler, "List or manage project tasks", &["todo"]);
+// TASK-AGS-806: TasksHandler moved to `crate::command::task` (real
+// impl with body-migrated execute, alias set extended to
+// [todo, ps, jobs], and TuiEvent::OpenView(ViewId::Tasks) forward-
+// compat per AGS-822). Imported at the top of this file.
 declare_handler!(ReleaseNotesHandler, "Show release notes for the current build");
 declare_handler!(ReloadHandler, "Reload configuration from disk");
 declare_handler!(LogoutHandler, "Clear stored credentials");

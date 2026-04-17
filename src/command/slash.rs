@@ -544,21 +544,11 @@ pub(crate) async fn handle_slash_command(
             true
         }
         // ── /tasks ────────────────────────────────────────────
-        "/tasks" => {
-            let tasks = archon_tools::task_manager::TASK_MANAGER.list_tasks();
-            if tasks.is_empty() {
-                let _ = tui_tx
-                    .send(TuiEvent::TextDelta("\nNo background tasks.\n".into()))
-                    .await;
-            } else {
-                let mut out = format!("\n{} background tasks:\n", tasks.len());
-                for t in &tasks {
-                    out.push_str(&format!("  {} [{}] {}\n", &t.id, t.status, t.description));
-                }
-                let _ = tui_tx.send(TuiEvent::TextDelta(out)).await;
-            }
-            true
-        }
+        // TASK-AGS-806: body migrated to
+        // `crate::command::task::TasksHandler` (registered as a
+        // primary in registry.rs). Legacy match arm removed; the
+        // dispatcher routes /tasks (and aliases todo/ps/jobs)
+        // through the registry path.
         // ── /release-notes ────────────────────────────────────
         "/release-notes" => {
             let _ = tui_tx
