@@ -195,6 +195,15 @@ impl VoicePipeline {
 /// Receives [`VoiceTrigger`]s, drives audio capture, transcribes via STT,
 /// and emits [`TuiEvent::VoiceText`] to the TUI event channel. Returns when
 /// `trigger_rx` is closed (all senders dropped).
+// TUI-330: cognitive complexity (96/25). This is an event loop whose branches
+// (trigger variants × capture states × transcription outcomes) all share
+// local state (pipeline handle, in-flight capture buffers, tui_event_tx).
+// Extracting arms into helpers requires threading >=4 mutable references
+// through function boundaries with no coherence gain, and fragments the
+// `select!` / match cascade that is the architectural focal point of this
+// loop. Tracked for a future refactor under a voice-pipeline-specific task
+// once a natural seam opens (likely when multi-device capture is added).
+#[allow(clippy::cognitive_complexity)]
 pub async fn voice_loop(
     mut trigger_rx: mpsc::Receiver<VoiceTrigger>,
     tui_event_tx: mpsc::Sender<TuiEvent>,

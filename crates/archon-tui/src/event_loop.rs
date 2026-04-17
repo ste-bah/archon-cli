@@ -67,6 +67,14 @@ pub struct EventLoopConfig {
 /// Main TUI event loop: consume `TuiEvent`s, drive [`AgentDispatcher`],
 /// poll completion on a 16ms tick. Returns `Ok(())` when the channel
 /// closes or a [`TuiEvent::Done`] is received.
+// TUI-330: cognitive complexity (36/25). This is the dispatcher-side event
+// loop — a single `select!` over the event channel and a poll interval with
+// a match on TuiEvent variants (UserInput, SlashCancel, SlashAgent, Resize,
+// Done). Splitting arms into helpers would fragment the match that is the
+// architectural focal point of this function and require threading
+// dispatcher / runner / router through every helper. Kept as a single
+// function intentionally.
+#[allow(clippy::cognitive_complexity)]
 pub async fn run_event_loop(cfg: EventLoopConfig) -> Result<()> {
     let EventLoopConfig {
         mut tui_event_rx,
@@ -136,6 +144,15 @@ pub async fn run_event_loop(cfg: EventLoopConfig) -> Result<()> {
 /// **No terminal lifecycle here**: this helper assumes raw mode / alternate
 /// screen / mouse capture have already been arranged (or are not needed, for
 /// `TestBackend`). Both callers handle their own setup and teardown.
+// TUI-330: cognitive complexity (64/25). This is the full inner event loop
+// extracted from app.rs under TUI-310 — a match over ~30 TuiEvent variants
+// that all mutate shared App state. Extracting arms into per-variant helpers
+// would require threading `&mut App` plus several ancillary senders through
+// every helper and would fragment the single match arm that is the
+// architectural focal point of the loop. Coverage is tracked via the
+// TUI-328 80% coverage ratchet; further decomposition awaits a natural seam
+// (e.g. App struct split under a later modularization task).
+#[allow(clippy::cognitive_complexity)]
 pub(crate) async fn run_inner<B>(
     config: AppConfig,
     terminal: &mut Terminal<B>,

@@ -16,6 +16,13 @@ use crate::terminal::TerminalGuard;
 use crate::theme::{Theme, intj_theme};
 use crate::vim::VimState;
 
+// TUI-330: Re-export entry types from their canonical location in
+// `crate::events` (layer 0). Moved here from `app.rs` to satisfy the
+// module-direction invariant (events.rs may not import from app.rs).
+// External consumers that reference `archon_tui::app::McpServerEntry` or
+// `archon_tui::app::SessionPickerEntry` remain unbroken via these re-exports.
+pub use crate::events::{McpServerEntry, SessionPickerEntry};
+
 /// Message from the agent loop to the TUI.
 #[derive(Debug, Clone)]
 pub enum TuiEvent {
@@ -414,33 +421,18 @@ impl App {
     }
 }
 
-/// A session entry for the /resume picker.
-#[derive(Debug, Clone)]
-pub struct SessionPickerEntry {
-    pub id: String,
-    pub name: String,
-    pub turns: u64,
-    pub cost: f64,
-    pub last_active: String,
-}
+// TUI-330: `SessionPickerEntry` and `McpServerEntry` moved to `crate::events`
+// to honor the layer-0 direction invariant. Both types are re-exported via
+// `pub use crate::events::{...}` at the top of this file so the public API
+// (`archon_tui::app::SessionPickerEntry` / `archon_tui::app::McpServerEntry`)
+// is preserved for `src/session.rs`, `src/command/slash.rs`, and existing
+// integration tests.
 
 /// Interactive session picker state (shown as modal overlay on /resume).
 #[derive(Debug, Clone)]
 pub struct SessionPicker {
     pub sessions: Vec<SessionPickerEntry>,
     pub selected: usize,
-}
-
-/// An MCP server entry shown in the MCP manager overlay.
-#[derive(Debug, Clone)]
-pub struct McpServerEntry {
-    pub name: String,
-    /// One of: "ready", "crashed", "starting", "stopped", "disabled".
-    pub state: String,
-    pub tool_count: usize,
-    pub disabled: bool,
-    /// Fully-qualified tool names (mcp__server__tool) for View Tools.
-    pub tools: Vec<String>,
 }
 
 /// Which sub-view is active inside the MCP manager overlay.

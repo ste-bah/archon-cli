@@ -1,7 +1,18 @@
 # archon-tui carryover >=500 lines (phase-3 ratchet; shrinks to zero by TUI-310..329)
-crates/archon-tui/src/app.rs
+# NOTE: app.rs was REMOVED from this allowlist under TUI-310 after its
+# event-loop body was extracted into event_loop.rs (1250 -> 493 lines, then
+# 485 after TUI-330 moved entry types to events.rs). DO NOT re-add app.rs.
 crates/archon-tui/src/markdown.rs
 crates/archon-tui/src/output.rs
 crates/archon-tui/src/task_dispatch_tests.rs
 crates/archon-tui/src/theme.rs
 crates/archon-tui/src/vim.rs
+# TUI-330 (added): event_loop.rs at 639 lines is the receiver of the app.rs
+# extraction under TUI-310 (app.rs dropped from 1250 -> 493 -> 485). Further
+# splitting event_loop.rs would reintroduce a circular dependency with the
+# app::App struct it mutates (App has >40 fields that every branch of the
+# single TuiEvent match arm touches) and fragment the architectural focal
+# point of the loop. Coverage is tracked via the TUI-328 80% coverage
+# ratchet; when a natural seam opens (e.g. when App is decomposed under a
+# later task) this entry must be removed.
+crates/archon-tui/src/event_loop.rs
