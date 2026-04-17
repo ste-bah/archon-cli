@@ -169,7 +169,16 @@ mod tests {
     /// input pipeline order of magnitude while leaving headroom.
     fn make_ctx() -> (CommandContext, mpsc::Receiver<TuiEvent>) {
         let (tx, rx) = mpsc::channel::<TuiEvent>(8);
-        (CommandContext { tui_tx: tx }, rx)
+        (
+            CommandContext {
+                tui_tx: tx,
+                // TASK-AGS-807: snapshot-pattern field. Dispatcher-level
+                // tests never exercise the /status body, so None is the
+                // correct default here.
+                status_snapshot: None,
+            },
+            rx,
+        )
     }
 
     /// A test-only handler that records every `execute` invocation so

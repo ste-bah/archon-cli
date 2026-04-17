@@ -213,7 +213,15 @@ mod tests {
     /// emitted events.
     fn make_ctx() -> (CommandContext, mpsc::Receiver<TuiEvent>) {
         let (tx, rx) = mpsc::channel::<TuiEvent>(16);
-        (CommandContext { tui_tx: tx }, rx)
+        (
+            CommandContext {
+                tui_tx: tx,
+                // TASK-AGS-807: snapshot-pattern field. /tasks tests
+                // never read the /status snapshot, so None is correct.
+                status_snapshot: None,
+            },
+            rx,
+        )
     }
 
     #[test]

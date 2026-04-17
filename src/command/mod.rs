@@ -11,6 +11,7 @@
 pub(crate) mod agent;
 pub(crate) mod background;
 pub(crate) mod config;
+pub(crate) mod context;
 pub(crate) mod dispatcher;
 pub(crate) mod doctor;
 pub(crate) mod errors;
@@ -24,6 +25,7 @@ pub(crate) mod plugin;
 pub(crate) mod registry;
 pub(crate) mod sessions;
 pub(crate) mod slash;
+pub(crate) mod status;
 pub(crate) mod team;
 pub(crate) mod task;
 pub(crate) mod tui_helpers;

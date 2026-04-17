@@ -32,9 +32,17 @@ pub(crate) async fn handle_slash_command(
     // migrates those bodies into the registry's stub `execute` methods.
     // Non-slash / empty / bare-`/` inputs short-circuit with `false` — the
     // same behaviour the TASK-AGS-621 parser gate provided.
-    let mut __cmd_ctx = crate::command::registry::CommandContext {
-        tui_tx: tui_tx.clone(),
-    };
+    // TASK-AGS-807 snapshot-pattern builder. Pre-populates
+    // `CommandContext::status_snapshot` (owned values, no locks) when
+    // the primary command resolves to /status or its alias /info.
+    // Sync CommandHandler::execute cannot await; the builder bridges
+    // that gap here at the dispatch site where .await is legal.
+    let mut __cmd_ctx = crate::command::context::build_command_context(
+        input,
+        tui_tx.clone(),
+        ctx,
+    )
+    .await;
     let _ = ctx.dispatcher.dispatch(&mut __cmd_ctx, input);
     if !ctx.dispatcher.recognizes(input) {
         return false;
@@ -339,45 +347,11 @@ pub(crate) async fn handle_slash_command(
             true
         }
         // ── /status ────────────────────────────────────────────
-        "/status" => {
-            let stats = ctx.session_stats.lock().await;
-            let current_model = {
-                let ov = ctx.model_override_shared.lock().await;
-                if ov.is_empty() {
-                    ctx.default_model.clone()
-                } else {
-                    ov.clone()
-                }
-            };
-            let perm_mode = ctx.permission_mode.lock().await;
-            let fast = ctx.fast_mode_shared.load(Ordering::Relaxed);
-            let effort = ctx.effort_level_shared.lock().await;
-            let thinking_visible = ctx.show_thinking.load(Ordering::Relaxed);
-            let thinking_str = if thinking_visible {
-                "visible"
-            } else {
-                "hidden"
-            };
-            let in_k = stats.input_tokens as f64 / 1000.0;
-            let out_k = stats.output_tokens as f64 / 1000.0;
-            let msg = format!(
-                "\n\
-                 Model: {current_model}\n\
-                 Mode: {perm_mode} (permissions)\n\
-                 Fast mode: {fast_label}\n\
-                 Effort: {effort}\n\
-                 Thinking: {thinking_str}\n\
-                 Session: {sid}\n\
-                 Tokens: {in_k:.1}k in / {out_k:.1}k out\n\
-                 Turns: {turns}\n",
-                fast_label = if fast { "on" } else { "off" },
-                effort = *effort,
-                sid = &ctx.session_id[..8.min(ctx.session_id.len())],
-                turns = stats.turn_count,
-            );
-            let _ = tui_tx.send(TuiEvent::TextDelta(msg)).await;
-            true
-        }
+        // Body migrated to src/command/status.rs (TASK-AGS-807).
+        // Dispatcher at slash.rs:35-41 (PATH A hybrid) fires StatusHandler
+        // via alias-aware registry lookup. StatusSnapshot is populated by
+        // build_command_context before dispatch. Aliases: [info].
+        // Do not re-add the legacy arm — see TUI-410 lesson.
         // ── /cost ──────────────────────────────────────────────
         "/cost" => {
             let stats = ctx.session_stats.lock().await;

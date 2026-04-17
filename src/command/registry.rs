@@ -24,6 +24,11 @@ use archon_tui::app::TuiEvent;
 // Imported here so `b.insert_primary("tasks", Arc::new(TasksHandler))`
 // resolves to the real impl, not the prior `declare_handler!` stub.
 use crate::command::task::TasksHandler;
+// TASK-AGS-807: real /status handler lives in `crate::command::status`.
+// Imported here so `b.insert_primary("status", Arc::new(StatusHandler))`
+// resolves to the real impl (snapshot-consuming) instead of the prior
+// `declare_handler!` stub. Alias migrates from [stat] to [info] per spec.
+use crate::command::status::StatusHandler;
 
 /// Execution context threaded through every command handler.
 ///
@@ -71,11 +76,20 @@ use crate::command::task::TasksHandler;
 /// the session.rs construction block in lockstep.
 pub(crate) struct CommandContext {
     // TASK-AGS-822 extension-pattern reference (commented out — no
-    // field added by this ticket; see body-migrate AGS-806..819):
+    // field added by THAT ticket; see body-migrate AGS-806..819):
     //   pub(crate) task_service: Arc<dyn TaskService>,
     /// TUI event sink for text deltas, errors, and state change
     /// notifications.
     pub(crate) tui_tx: tokio::sync::mpsc::Sender<TuiEvent>,
+    /// TASK-AGS-807 snapshot-pattern field.
+    ///
+    /// Populated by `build_command_context` for `/status` (and its
+    /// alias `/info`) ONLY. Every other command observes `None` and
+    /// pays zero additional lock traffic. The sync
+    /// [`CommandHandler::execute`] cannot await, so the dispatch site
+    /// acquires the four `/status` async locks in advance and passes
+    /// the owned values via this field.
+    pub(crate) status_snapshot: Option<crate::command::status::StatusSnapshot>,
 }
 
 /// Trait every registered slash command handler implements.
@@ -163,6 +177,25 @@ impl Registry {
     #[cfg(test)]
     pub(crate) fn aliases_map_contains(&self, alias: &str) -> bool {
         self.aliases.contains_key(alias)
+    }
+
+    /// TASK-AGS-807 helper: returns `true` if `name` is registered as a
+    /// PRIMARY command (not just reachable via the alias map).
+    ///
+    /// Used by `crate::command::context::resolve_primary_from_input`
+    /// to decide whether the parsed input name is already the primary
+    /// or needs an alias→primary lookup.
+    pub(crate) fn is_primary(&self, name: &str) -> bool {
+        self.commands.contains_key(name)
+    }
+
+    /// TASK-AGS-807 helper: map an alias to its primary command name.
+    /// Returns `None` if `alias` is not registered in the alias map.
+    ///
+    /// Alias entries are internalized as `&'static str`, so we can
+    /// return a borrowed static reference without cloning.
+    pub(crate) fn primary_for_alias(&self, alias: &str) -> Option<&'static str> {
+        self.aliases.get(alias).copied()
     }
 }
 
@@ -313,11 +346,10 @@ declare_handler!(
     "Show current context window usage",
     &["ctx"]
 );
-declare_handler!(
-    StatusHandler,
-    "Show session status (model, effort, token use)",
-    &["stat"]
-);
+// TASK-AGS-807: StatusHandler moved to `crate::command::status` (real
+// impl with body-migrated execute via snapshot pattern, alias migrated
+// from [stat] to [info] per spec REQ-FOR-D7 validation criterion 2).
+// Imported at the top of this file.
 declare_handler!(CostHandler, "Show session token cost breakdown");
 declare_handler!(PermissionsHandler, "Show or update tool permissions");
 declare_handler!(ConfigHandler, "Show or update Archon configuration");
@@ -682,6 +714,32 @@ mod tests {
             !handler.description().is_empty(),
             "cancel handler must carry a non-empty description"
         );
+    }
+
+    // -----------------------------------------------------------------
+    // TASK-AGS-807: /status alias `info` resolves to the /status handler.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn registry_resolves_status_alias_info() {
+        let reg = default_registry();
+        let primary = reg
+            .get("status")
+            .expect("status primary must be registered");
+        let via_info = reg
+            .get("info")
+            .expect("'info' alias must resolve to /status per AGS-807");
+        assert_eq!(
+            primary.description(),
+            via_info.description(),
+            "'info' must resolve to the same handler as /status"
+        );
+        // Also pin the Registry helper APIs introduced for the
+        // builder's alias-aware primary-name resolution.
+        assert!(reg.is_primary("status"));
+        assert!(!reg.is_primary("info"));
+        assert_eq!(reg.primary_for_alias("info"), Some("status"));
+        assert_eq!(reg.primary_for_alias("status"), None);
     }
 
     #[test]
