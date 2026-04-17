@@ -29,3 +29,18 @@ pub(crate) mod tui_helpers;
 pub(crate) mod update;
 pub(crate) mod utils;
 pub(crate) mod web;
+
+// TASK-AGS-800 (Stage 6, Q1=A): spec-name discoverability shim.
+//
+// The phase-8 spec (`TASK-AGS-800.md`) used the name `SlashCommand` for
+// the trait. Shipped code (TASK-AGS-622) calls it `CommandHandler`.
+// Stage 6 orchestrator decision Q1=A preserves the shipped trait
+// verbatim (sync, `anyhow::Result<()>`, no `CommandOutcome`/`CommandError`/
+// `ViewId` enums, no `inventory` registration). This re-export is a
+// zero-cost namespace alias so future readers grepping for
+// `SlashCommand` land on the real trait.
+//
+// Purely additive: no runtime behavior change, no new dependencies, no
+// new types. See the TASK-AGS-800 commit body for the full R-item list.
+#[allow(unused_imports)]
+pub(crate) use registry::CommandHandler as SlashCommand;
