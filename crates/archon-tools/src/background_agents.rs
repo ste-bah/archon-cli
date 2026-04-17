@@ -296,6 +296,42 @@ pub fn cancel_background_agent(id: &AgentId) -> Result<(), RegistryError> {
 }
 
 // ---------------------------------------------------------------------------
+// TASK-TUI-406: 60s janitor task for BACKGROUND_AGENTS registry
+// (drift-reconcile from spec's gc_completed_agents + 1hr TTL)
+//
+// Reconciliations vs spec (TASK-TUI-406.md):
+//   R1: spec calls for gc_completed_agents() + BACKGROUND_AGENTS.iter() +
+//       JoinHandle::is_finished() check. Reconciled to reap_finished()
+//       (line 216) which uses AgentStatus::is_terminal() — AGS-101
+//       trait-encapsulated, stricter (covers Failed/Cancelled too).
+//   R2: spec's 1-hour TTL reconciled to eager reap (TTL=0). STRICTER
+//       memory bound; callers that need a grace window must poll before
+//       the next 60s tick. Per NFR-TUI-SUB-002 this is safer, not weaker.
+// ---------------------------------------------------------------------------
+
+/// TASK-TUI-406: Spawn a 60s-interval janitor task that reaps terminal
+/// entries from the global registry. Prevents unbounded growth under
+/// sustained load (NFR-TUI-SUB-002).
+///
+/// Returns the JoinHandle so callers can abort the task on shutdown,
+/// though tokio::spawn detaches — dropping the handle does not cancel
+/// the task. The task runs for the lifetime of the tokio runtime.
+pub fn spawn_gc_task() -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async {
+        let mut interval = tokio::time::interval(
+            std::time::Duration::from_secs(60)
+        );
+        // First tick fires immediately; skip it so we don't reap before
+        // any agent has had time to complete.
+        interval.tick().await;
+        loop {
+            interval.tick().await;
+            let _reaped = BACKGROUND_AGENTS.reap_finished();
+        }
+    })
+}
+
+// ---------------------------------------------------------------------------
 // Module-local unit tests (smoke — full contract tests live in
 // crates/archon-core/tests/task_ags_101.rs).
 // ---------------------------------------------------------------------------

@@ -5,7 +5,8 @@ pub mod ask_user;
 // keep the `archon_core::background_agents::*` path.
 pub mod background_agents;
 // TASK-TUI-402: thin shim API re-exports for TUI layer.
-pub use background_agents::{cancel_background_agent, poll_background_agent, PollOutcome};
+// TASK-TUI-406: spawn_gc_task added for registry memory bounds.
+pub use background_agents::{cancel_background_agent, poll_background_agent, spawn_gc_task, PollOutcome};
 pub mod bash;
 pub mod concurrency;
 pub mod config_tool;
