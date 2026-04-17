@@ -13,6 +13,7 @@ pub(crate) mod background;
 pub(crate) mod config;
 pub(crate) mod dispatcher;
 pub(crate) mod doctor;
+pub(crate) mod errors;
 pub(crate) mod ide_stdio;
 pub(crate) mod login;
 pub(crate) mod memory;

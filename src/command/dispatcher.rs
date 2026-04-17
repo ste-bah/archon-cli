@@ -19,7 +19,8 @@
 
 use std::sync::Arc;
 
-use crate::command::parser::{self, CommandParser, ParseError};
+use crate::command::errors;
+use crate::command::parser::{CommandParser, ParseError};
 use crate::command::registry::{CommandContext, Registry};
 
 /// Slash command dispatcher.
@@ -108,22 +109,15 @@ impl Dispatcher {
         match self.registry.get(&parsed.name) {
             Some(handler) => handler.execute(ctx, &parsed.args),
             None => {
-                // TASK-AGS-802: enrich the unknown-command diagnostic
-                // with a fuzzy-match hint (≤ 3 candidates, ≤ 2 edits).
-                // AGS-804 will prettify this; a plain comma-join is
-                // adequate today.
-                let names = self.registry.names();
-                let suggestions =
-                    parser::suggest(&parsed.name, names.iter().copied(), 3);
-                let msg = if suggestions.is_empty() {
-                    format!("Unknown command: /{}", parsed.name)
-                } else {
-                    format!(
-                        "Unknown command: /{}. Did you mean: {}?",
-                        parsed.name,
-                        suggestions.join(", ")
-                    )
-                };
+                // TASK-AGS-804: delegate message assembly to the
+                // dedicated formatter, which owns the zero / one /
+                // many branching, the case-insensitive exact-match
+                // fallback, and the defensive 3-suggestion cap. The
+                // dispatcher is only responsible for emission.
+                let msg = errors::format_unknown_command(
+                    &parsed.name,
+                    &self.registry,
+                );
                 // Emit via the TUI event channel. `try_send` so the
                 // dispatcher cannot block on a full channel; dropping a
                 // diagnostic under backpressure is preferable to stalling
@@ -229,9 +223,9 @@ mod tests {
 
     #[test]
     fn dispatch_unknown_command_emits_error_message() {
-        // `/nope` is not a registered command. The dispatcher must
-        // return Ok(()) AND push a `TuiEvent::Error` containing the
-        // literal string "Unknown command: /nope".
+        // `/nope` is not a registered command and is > 2 edits from
+        // every primary. The dispatcher must return Ok(()) AND push a
+        // `TuiEvent::Error` matching the AGS-804 zero-suggestion form.
         let registry = Arc::new(default_registry());
         let dispatcher = Dispatcher::new(registry);
         let (mut ctx, mut rx) = make_ctx();
@@ -243,8 +237,8 @@ mod tests {
         match ev {
             TuiEvent::Error(msg) => {
                 assert!(
-                    msg.contains("Unknown command: /nope"),
-                    "expected error to contain 'Unknown command: /nope', got: {msg}"
+                    msg.contains("Unknown command '/nope'"),
+                    "expected error to quote '/nope', got: {msg}"
                 );
             }
             other => panic!("expected TuiEvent::Error, got {other:?}"),
@@ -313,7 +307,8 @@ mod tests {
         handler: &dyn CommandHandler,
         input: &str,
     ) -> anyhow::Result<()> {
-        let parsed = parser::parse(input).expect("parser must accept input");
+        let parsed = crate::command::parser::parse(input)
+            .expect("parser must accept input");
         let (mut ctx, _rx) = make_ctx();
         handler.execute(&mut ctx, &parsed.args)
     }
@@ -412,8 +407,9 @@ mod tests {
 
     #[test]
     fn dispatch_unknown_emits_suggestion_when_close_match_exists() {
-        // "/hel" is 1 edit away from "/help"; the unknown-command
-        // formatter must append a "Did you mean: help" hint.
+        // "/hel" is 1 edit away from "/help" and > 2 from every other
+        // primary. The TASK-AGS-804 formatter emits the single-match
+        // form verbatim: `Unknown command '/hel'. Did you mean '/help'?`
         let registry = Arc::new(default_registry());
         let dispatcher = Dispatcher::new(registry);
         let (mut ctx, mut rx) = make_ctx();
@@ -424,17 +420,10 @@ mod tests {
         let ev = rx.try_recv().expect("error event must be emitted");
         match ev {
             TuiEvent::Error(msg) => {
-                assert!(
-                    msg.contains("Unknown command: /hel"),
-                    "error should name the unknown command, got: {msg}"
-                );
-                assert!(
-                    msg.contains("Did you mean"),
-                    "error should include 'Did you mean' hint, got: {msg}"
-                );
-                assert!(
-                    msg.contains("help"),
-                    "error should suggest 'help' for '/hel', got: {msg}"
+                assert_eq!(
+                    msg,
+                    "Unknown command '/hel'. Did you mean '/help'?",
+                    "single-match form must match the AGS-804 spec verbatim"
                 );
             }
             other => panic!("expected TuiEvent::Error, got {other:?}"),
@@ -443,9 +432,9 @@ mod tests {
 
     #[test]
     fn dispatch_unknown_emits_plain_error_when_no_close_match() {
-        // "/zzzqqq" is > 2 edits from every primary, so the suggest()
-        // list is empty and the formatter must fall back to the plain
-        // "Unknown command: /zzzqqq" message with no "Did you mean".
+        // "/zzzqqq" is > 2 edits from every primary, so suggest()
+        // returns []. The AGS-804 formatter emits the zero-suggestion
+        // "/help" hint form verbatim.
         let registry = Arc::new(default_registry());
         let dispatcher = Dispatcher::new(registry);
         let (mut ctx, mut rx) = make_ctx();
@@ -456,13 +445,10 @@ mod tests {
         let ev = rx.try_recv().expect("error event must be emitted");
         match ev {
             TuiEvent::Error(msg) => {
-                assert!(
-                    msg.contains("Unknown command: /zzzqqq"),
-                    "error should name the unknown command, got: {msg}"
-                );
-                assert!(
-                    !msg.contains("Did you mean"),
-                    "error must NOT include suggestion hint when no close match, got: {msg}"
+                assert_eq!(
+                    msg,
+                    "Unknown command '/zzzqqq'. Type /help for the full list.",
+                    "zero-suggestion form must match the AGS-804 spec verbatim"
                 );
             }
             other => panic!("expected TuiEvent::Error, got {other:?}"),
