@@ -55,3 +55,5 @@ hello.txt
 # Exception: architectural guidelines are committed (REQ-FOR-D10 et al.)
 !/docs/architecture/
 !/docs/architecture/**
+# Exception: coverage baseline snapshot (TUI-328 / NFR-TUI-QUAL-003).
+!/docs/tui-coverage-baseline.json

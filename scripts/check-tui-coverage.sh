@@ -2,14 +2,19 @@
 # check-tui-coverage.sh
 # Line coverage gate for archon-tui using cargo llvm-cov.
 #
-# NFR-TUI-QUAL-002: archon-tui must maintain >= TUI_COVERAGE_MIN line coverage.
-# Default TUI_COVERAGE_MIN is 10 (skeleton floor). TASK-TUI-330 raises to 80.
+# NFR-TUI-QUAL-002 / NFR-TUI-QUAL-003: archon-tui must maintain >= 80% line
+# coverage. TASK-TUI-328 ratcheted this from the 10% skeleton floor to the
+# 80% production gate after TASK-TUI-305..327 filled in unit coverage.
 #
-# Usage:   bash scripts/check-tui-coverage.sh
-# Env:     TUI_COVERAGE_MIN (int, default 10)
+# The threshold is intentionally hardcoded: TUI-328 removed the
+# TUI_COVERAGE_MIN env override so CI cannot silently drift below the gate.
+# If coverage legitimately needs to change, update this constant AND
+# docs/tui-coverage-baseline.json in the same commit.
+#
+# Usage: bash scripts/check-tui-coverage.sh
 set -euo pipefail
 
-THRESHOLD="${TUI_COVERAGE_MIN:-10}"
+THRESHOLD=80
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
