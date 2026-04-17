@@ -26,6 +26,29 @@ pub struct SessionPickerEntry {
     pub last_active: String,
 }
 
+/// Identifies an overlay view the TUI can open in response to a
+/// slash-command-originated `TuiEvent::OpenView`.
+///
+/// Defined at layer 0 (events.rs) so variants of `TuiEvent` can
+/// reference it without the file taking on a `crate::app` dependency.
+/// Re-exported from `crate::app` for external-API stability
+/// (matches `SessionPickerEntry` / `McpServerEntry` pattern).
+///
+/// TASK-AGS-822: seeded with the 6 variants named by body-migrate
+/// tickets AGS-806..819. Future view-opening slash commands extend
+/// this enum per-ticket; the compile error on any missing arm is the
+/// preferred contract (so `#[non_exhaustive]` is deliberately NOT
+/// applied).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ViewId {
+    Tasks,
+    Settings,
+    Context,
+    MemoryBrowser,
+    ModelPicker,
+    Status,
+}
+
 /// An MCP server entry shown in the MCP manager overlay.
 ///
 /// Defined here (layer 0) so that `TuiEvent::ShowMcpManager` and
@@ -78,6 +101,13 @@ pub enum TuiEvent {
     SetTheme(String),
     ShowMcpManager(Vec<McpServerEntry>),
     UpdateMcpManager(Vec<McpServerEntry>),
+    /// TASK-AGS-822: open an overlay view identified by `ViewId`.
+    /// Emitted by the slash-command dispatcher in response to
+    /// view-opening commands (`/tasks`, `/settings`, `/context`,
+    /// `/memory`, `/model`, `/status`). Clustered here with the other
+    /// overlay-opening variants (`ShowSessionPicker`, `ShowMcpManager`)
+    /// so future readers locate overlay events in one place.
+    OpenView(ViewId),
     SetVimMode(bool),
     VimToggle,
     VoiceText(String),

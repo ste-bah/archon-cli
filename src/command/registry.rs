@@ -25,7 +25,48 @@ use archon_tui::app::TuiEvent;
 /// shape, not plumbing. TASK-AGS-623 (dispatcher) grows this struct to
 /// carry the real `SlashCommandContext` fields (fast mode, effort,
 /// memory, config, etc.) once handlers are migrated off `main.rs`.
+///
+/// # TASK-AGS-822: Extension Pattern for Body-Migrate Tickets
+///
+/// Body-migrate tickets AGS-806..819 grow `CommandContext` **one field
+/// at a time**, each field gated on exactly the deps the migrating
+/// handler body needs. The rules each body-migrate follows:
+///
+/// 1. **Field visibility**: every new field is `pub(crate)` so handlers
+///    in this crate can read/write it without adding trait indirection.
+/// 2. **Shared services → `Arc<_>`**: `task_service`, `memory`,
+///    `config`, `cost_tracker`, and similar long-lived services ship
+///    as `Arc<dyn Trait>` (or `Arc<ConcreteType>`) so cheap clone-out
+///    works at call time and handler bodies never hold a borrow on the
+///    context longer than their `execute` call.
+/// 3. **Construction site**: the field is populated in `src/session.rs`
+///    inside the block that currently constructs `SlashCommandContext`
+///    (and the shared `Registry` / `Dispatcher` immediately above it,
+///    around session.rs:1817-1827). Body-migrates add the field to
+///    that block in the same commit that adds the field here.
+/// 4. **Threading contract**: `CommandContext` is passed `&mut` to
+///    `CommandHandler::execute`, so fields are borrowed mutably by
+///    handlers that mutate app state (e.g. picker selection) or
+///    cloned-out of the Arc when the handler only needs a read view.
+/// 5. **No unused deps**: AGS-822 deliberately leaves the struct at
+///    exactly one field (`tui_tx`). This proves the extension pattern
+///    compiles end-to-end WITHOUT committing to any specific
+///    body-migrate's dep set. First body-migrate that actually needs
+///    `task_service` is the first ticket that adds it.
+///
+/// Pattern reference (how the next field will slot in):
+/// ```ignore
+/// // e.g. pub(crate) task_service: Arc<dyn TaskService>,
+/// // e.g. pub(crate) memory:       Arc<Memory>,
+/// // e.g. pub(crate) config:       Arc<ArchonConfig>,
+/// ```
+///
+/// The extension is additive — new fields append to the struct and to
+/// the session.rs construction block in lockstep.
 pub(crate) struct CommandContext {
+    // TASK-AGS-822 extension-pattern reference (commented out — no
+    // field added by this ticket; see body-migrate AGS-806..819):
+    //   pub(crate) task_service: Arc<dyn TaskService>,
     /// TUI event sink for text deltas, errors, and state change
     /// notifications.
     pub(crate) tui_tx: tokio::sync::mpsc::Sender<TuiEvent>,

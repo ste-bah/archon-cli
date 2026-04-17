@@ -21,7 +21,11 @@ use crate::vim::VimState;
 // module-direction invariant (events.rs may not import from app.rs).
 // External consumers that reference `archon_tui::app::McpServerEntry` or
 // `archon_tui::app::SessionPickerEntry` remain unbroken via these re-exports.
-pub use crate::events::{McpServerEntry, SessionPickerEntry};
+// TASK-AGS-822: `ViewId` added to the re-export list for the same
+// layer-0 reasoning as `McpServerEntry` / `SessionPickerEntry` —
+// external consumers (bin-crate command handlers, integration tests)
+// reach the enum via `archon_tui::app::ViewId`.
+pub use crate::events::{McpServerEntry, SessionPickerEntry, ViewId};
 
 /// Message from the agent loop to the TUI.
 #[derive(Debug, Clone)]
@@ -75,6 +79,14 @@ pub enum TuiEvent {
     ShowMcpManager(Vec<McpServerEntry>),
     /// Update MCP server manager with fresh state (after reconnect/disable).
     UpdateMcpManager(Vec<McpServerEntry>),
+    /// TASK-AGS-822: open an overlay view identified by `ViewId`.
+    /// Emitted by the slash-command dispatcher in response to
+    /// view-opening commands (`/tasks`, `/settings`, `/context`,
+    /// `/memory`, `/model`, `/status`). Clustered with other
+    /// overlay-opening variants so future readers locate overlay
+    /// events in one place. `ViewId` is defined at layer 0
+    /// (`crate::events::ViewId`) and re-exported from this module.
+    OpenView(ViewId),
     /// Enable or disable vim keybindings (from config at startup).
     SetVimMode(bool),
     /// Toggle vim keybindings on/off (used by /vim slash command).

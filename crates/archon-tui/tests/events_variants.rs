@@ -192,3 +192,68 @@ fn done_variant() {
 fn notification_timeout_variant() {
     let _e = TuiEvent::NotificationTimeout(5000);
 }
+
+// -----------------------------------------------------------------
+// TASK-AGS-822: OpenView(ViewId) round-trip + per-variant ViewId
+// coverage. `ViewId` is defined at layer 0 (events.rs) and re-exported
+// from `crate::app::ViewId` per the SessionPickerEntry / McpServerEntry
+// precedent. These tests exercise BOTH access paths to pin the
+// re-export contract (body-migrates AGS-806..819 will consume
+// `archon_tui::app::ViewId`).
+// -----------------------------------------------------------------
+
+#[test]
+fn open_view_variant() {
+    // Constructs OpenView via the re-export path. `archon_tui::app::ViewId`
+    // must resolve to the same type defined in `archon_tui::events::ViewId`.
+    use archon_tui::app::ViewId;
+    let _e = TuiEvent::OpenView(ViewId::Tasks);
+}
+
+#[test]
+fn view_id_tasks() {
+    use archon_tui::app::ViewId;
+    let v = ViewId::Tasks;
+    let cloned = v;
+    assert_eq!(v, cloned);
+}
+
+#[test]
+fn view_id_settings() {
+    use archon_tui::app::ViewId;
+    let v = ViewId::Settings;
+    let cloned = v;
+    assert_eq!(v, cloned);
+}
+
+#[test]
+fn view_id_context() {
+    use archon_tui::app::ViewId;
+    let v = ViewId::Context;
+    let cloned = v;
+    assert_eq!(v, cloned);
+}
+
+#[test]
+fn view_id_memory_browser() {
+    use archon_tui::app::ViewId;
+    let v = ViewId::MemoryBrowser;
+    let cloned = v;
+    assert_eq!(v, cloned);
+}
+
+#[test]
+fn view_id_model_picker() {
+    use archon_tui::app::ViewId;
+    let v = ViewId::ModelPicker;
+    let cloned = v;
+    assert_eq!(v, cloned);
+}
+
+#[test]
+fn view_id_status() {
+    use archon_tui::app::ViewId;
+    let v = ViewId::Status;
+    let cloned = v;
+    assert_eq!(v, cloned);
+}
