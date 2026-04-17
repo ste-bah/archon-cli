@@ -36,9 +36,24 @@ pub(crate) struct CommandContext {
 /// `execute` runs the handler against the supplied context and
 /// positional argument list. `description` is a one-line human label
 /// used by `/help`, the command picker, and future introspection.
+///
+/// TASK-AGS-802: `aliases()` returns zero or more alternative names
+/// the registry routes to the same handler. Default `&[]` keeps every
+/// pre-existing handler wire-compatible — only handlers that opt in by
+/// overriding the method contribute to the alias map.
 pub(crate) trait CommandHandler: Send + Sync {
     fn execute(&self, ctx: &mut CommandContext, args: &[String]) -> anyhow::Result<()>;
     fn description(&self) -> &str;
+
+    /// Alternative names that resolve to this handler. The registry
+    /// builds an alias -> primary-name map at init time; `Registry::get`
+    /// falls back to that map when the direct lookup misses.
+    ///
+    /// Default empty slice: handlers that do not declare aliases do not
+    /// contribute any entries. No allocations at call time.
+    fn aliases(&self) -> &'static [&'static str] {
+        &[]
+    }
 }
 
 /// Typed command table.
@@ -46,22 +61,137 @@ pub(crate) trait CommandHandler: Send + Sync {
 /// Owns `Arc<dyn CommandHandler>` so the dispatcher can clone handlers
 /// out of the map cheaply and invoke them without holding a borrow on
 /// the registry. Insertion order is irrelevant; lookup is by name.
+///
+/// TASK-AGS-802: an `aliases` map routes alternative names onto their
+/// primary command. `get()` consults `commands` first, then falls back
+/// to `aliases` for alias -> primary -> handler resolution. The alias
+/// map does NOT inflate `len()`; `alias_count()` reports the alias
+/// total separately.
 pub(crate) struct Registry {
     commands: HashMap<&'static str, Arc<dyn CommandHandler>>,
+    aliases: HashMap<&'static str, &'static str>,
 }
 
 impl Registry {
     /// Look up a registered handler by command name (without the
     /// leading `/`). Returns a cloned `Arc`, or `None` if no handler
     /// is registered under that name.
+    ///
+    /// Resolution order: primary-name map first, then alias map.
+    /// Aliases resolve by looking up the primary name they target and
+    /// re-reading the commands map.
     pub(crate) fn get(&self, name: &str) -> Option<Arc<dyn CommandHandler>> {
-        self.commands.get(name).cloned()
+        if let Some(h) = self.commands.get(name) {
+            return Some(Arc::clone(h));
+        }
+        let primary = self.aliases.get(name)?;
+        self.commands.get(primary).cloned()
     }
 
-    /// Number of registered commands. Primarily for tests / `/help`.
+    /// Number of registered primary commands. Aliases are counted
+    /// separately (see [`Registry::alias_count`]).
     #[allow(dead_code)]
     pub(crate) fn len(&self) -> usize {
         self.commands.len()
+    }
+
+    /// Number of registered aliases (not counted against `len()`).
+    #[allow(dead_code)]
+    pub(crate) fn alias_count(&self) -> usize {
+        self.aliases.len()
+    }
+
+    /// All primary command names, in unspecified order. Used by the
+    /// dispatcher's unknown-command path to feed
+    /// [`crate::command::parser::suggest`] with the list of candidates,
+    /// and reused by TASK-AGS-804 for fuzzy-match hints.
+    pub(crate) fn names(&self) -> Vec<&'static str> {
+        self.commands.keys().copied().collect()
+    }
+
+    /// Test-only helper: returns `true` if `alias` is registered in the
+    /// alias map. The `recall_is_standalone_not_alias` test uses this
+    /// to enforce Steven's directive that `/recall` stays a primary
+    /// command and is never an alias for anything.
+    #[cfg(test)]
+    pub(crate) fn aliases_map_contains(&self, alias: &str) -> bool {
+        self.aliases.contains_key(alias)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Registry builder (init-time assembly + collision detection)
+// ---------------------------------------------------------------------------
+
+/// Assembles a [`Registry`] with alias support and panics on any of
+/// three collision classes at build time:
+///
+/// 1. **Primary/primary**: two primaries sharing the same name.
+/// 2. **Alias/primary**: an alias whose string equals an existing
+///    primary name.
+/// 3. **Alias/alias**: two handlers claiming the same alias.
+///
+/// Insertion order matters: callers must insert ALL primaries before
+/// any aliases so the alias-vs-primary check can see every primary
+/// name in the commands map. `build()` enforces this by walking every
+/// primary handler's `aliases()` method after primaries are frozen.
+pub(crate) struct RegistryBuilder {
+    commands: HashMap<&'static str, Arc<dyn CommandHandler>>,
+    primary_order: Vec<&'static str>,
+}
+
+impl RegistryBuilder {
+    pub(crate) fn new() -> Self {
+        Self {
+            commands: HashMap::new(),
+            primary_order: Vec::new(),
+        }
+    }
+
+    /// Insert a primary command. Panics if the name is already
+    /// registered.
+    pub(crate) fn insert_primary(
+        &mut self,
+        name: &'static str,
+        handler: Arc<dyn CommandHandler>,
+    ) {
+        if self.commands.contains_key(name) {
+            panic!(
+                "duplicate primary slash command: /{name} registered twice"
+            );
+        }
+        self.commands.insert(name, handler);
+        self.primary_order.push(name);
+    }
+
+    /// Freeze the commands map, walk every handler's `aliases()`,
+    /// build the alias index, and detect alias/primary and alias/alias
+    /// collisions. Panics on any collision.
+    pub(crate) fn build(self) -> Registry {
+        let Self {
+            commands,
+            primary_order,
+        } = self;
+        let mut aliases: HashMap<&'static str, &'static str> = HashMap::new();
+        for primary in &primary_order {
+            let handler = commands
+                .get(primary)
+                .expect("primary registered via insert_primary");
+            for alias in handler.aliases() {
+                if commands.contains_key(alias) {
+                    panic!(
+                        "alias collides with primary: alias '{alias}' (on /{primary}) matches existing primary command /{alias}"
+                    );
+                }
+                if let Some(prior) = aliases.get(alias) {
+                    panic!(
+                        "duplicate alias: '{alias}' registered by both /{prior} and /{primary}"
+                    );
+                }
+                aliases.insert(alias, primary);
+            }
+        }
+        Registry { commands, aliases }
     }
 }
 
@@ -93,23 +223,62 @@ macro_rules! declare_handler {
             }
         }
     };
+    // TASK-AGS-802 arm: handler declared with a static alias slice.
+    ($struct_name:ident, $description:literal, $aliases:expr) => {
+        struct $struct_name;
+        impl CommandHandler for $struct_name {
+            fn execute(
+                &self,
+                _ctx: &mut CommandContext,
+                _args: &[String],
+            ) -> anyhow::Result<()> {
+                Ok(())
+            }
+            fn description(&self) -> &str {
+                $description
+            }
+            fn aliases(&self) -> &'static [&'static str] {
+                $aliases
+            }
+        }
+    };
 }
 
 declare_handler!(FastHandler, "Toggle fast mode (lower quality, faster responses)");
 declare_handler!(CompactHandler, "Compact the current conversation history");
-declare_handler!(ClearHandler, "Clear the current conversation");
-declare_handler!(ExportHandler, "Export the current session to a file");
+declare_handler!(ClearHandler, "Clear the current conversation", &["cls"]);
+declare_handler!(
+    ExportHandler,
+    "Export the current session to a file",
+    &["save"]
+);
 declare_handler!(ThinkingHandler, "Toggle extended thinking display on/off");
 declare_handler!(EffortHandler, "Show or set reasoning effort (high|medium|low)");
 declare_handler!(GardenHandler, "Run memory garden consolidation or show stats");
-declare_handler!(ModelHandler, "Show or switch the active model");
+declare_handler!(
+    ModelHandler,
+    "Show or switch the active model",
+    &["models"]
+);
 declare_handler!(CopyHandler, "Copy the last assistant message to the clipboard");
-declare_handler!(ContextHandler, "Show current context window usage");
-declare_handler!(StatusHandler, "Show session status (model, effort, token use)");
+declare_handler!(
+    ContextHandler,
+    "Show current context window usage",
+    &["ctx"]
+);
+declare_handler!(
+    StatusHandler,
+    "Show session status (model, effort, token use)",
+    &["stat"]
+);
 declare_handler!(CostHandler, "Show session token cost breakdown");
 declare_handler!(PermissionsHandler, "Show or update tool permissions");
 declare_handler!(ConfigHandler, "Show or update Archon configuration");
-declare_handler!(MemoryHandler, "Inspect or manage long-term memory");
+declare_handler!(
+    MemoryHandler,
+    "Inspect or manage long-term memory",
+    &["mem"]
+);
 declare_handler!(DoctorHandler, "Run environment health checks");
 declare_handler!(BugHandler, "Report a bug with current session context");
 declare_handler!(DiffHandler, "Show a diff of recent file modifications");
@@ -117,19 +286,30 @@ declare_handler!(DenialsHandler, "List tool-use denials recorded this session");
 declare_handler!(LoginHandler, "Authenticate against the configured backend");
 declare_handler!(VimHandler, "Toggle vim-style modal input");
 declare_handler!(UsageHandler, "Show aggregate API usage for the session");
-declare_handler!(TasksHandler, "List or manage project tasks");
+declare_handler!(TasksHandler, "List or manage project tasks", &["todo"]);
 declare_handler!(ReleaseNotesHandler, "Show release notes for the current build");
 declare_handler!(ReloadHandler, "Reload configuration from disk");
 declare_handler!(LogoutHandler, "Clear stored credentials");
-declare_handler!(HelpHandler, "Show help for commands and shortcuts");
+declare_handler!(
+    HelpHandler,
+    "Show help for commands and shortcuts",
+    &["?", "h"]
+);
 declare_handler!(RenameHandler, "Rename the current session");
-declare_handler!(ResumeHandler, "Resume a previous session by id");
+declare_handler!(
+    ResumeHandler,
+    "Resume a previous session by id",
+    &["continue"]
+);
 declare_handler!(McpHandler, "Show MCP server status");
 declare_handler!(ForkHandler, "Fork the current session into a new branch");
 declare_handler!(CheckpointHandler, "Create or restore a session checkpoint");
 declare_handler!(AddDirHandler, "Add a directory to the working context");
 declare_handler!(ColorHandler, "Show or change the UI color scheme");
 declare_handler!(ThemeHandler, "Show or change the UI theme");
+// /recall stays a standalone primary command and has NO aliases —
+// Steven directive. Do NOT add "recall" as an alias on /memory or any
+// other handler.
 declare_handler!(RecallHandler, "Recall memories matching a query");
 declare_handler!(RulesHandler, "List, edit, or remove behavioral rules");
 
@@ -140,45 +320,48 @@ declare_handler!(RulesHandler, "List, edit, or remove behavioral rules");
 /// whose `execute` body is a no-op stub. Migrating the real bodies
 /// out of `handle_slash_command` is scoped to TASK-AGS-624 / Phase 8.
 pub(crate) fn default_registry() -> Registry {
-    let mut commands: HashMap<&'static str, Arc<dyn CommandHandler>> = HashMap::new();
-    commands.insert("fast", Arc::new(FastHandler));
-    commands.insert("compact", Arc::new(CompactHandler));
-    commands.insert("clear", Arc::new(ClearHandler));
-    commands.insert("export", Arc::new(ExportHandler));
-    commands.insert("thinking", Arc::new(ThinkingHandler));
-    commands.insert("effort", Arc::new(EffortHandler));
-    commands.insert("garden", Arc::new(GardenHandler));
-    commands.insert("model", Arc::new(ModelHandler));
-    commands.insert("copy", Arc::new(CopyHandler));
-    commands.insert("context", Arc::new(ContextHandler));
-    commands.insert("status", Arc::new(StatusHandler));
-    commands.insert("cost", Arc::new(CostHandler));
-    commands.insert("permissions", Arc::new(PermissionsHandler));
-    commands.insert("config", Arc::new(ConfigHandler));
-    commands.insert("memory", Arc::new(MemoryHandler));
-    commands.insert("doctor", Arc::new(DoctorHandler));
-    commands.insert("bug", Arc::new(BugHandler));
-    commands.insert("diff", Arc::new(DiffHandler));
-    commands.insert("denials", Arc::new(DenialsHandler));
-    commands.insert("login", Arc::new(LoginHandler));
-    commands.insert("vim", Arc::new(VimHandler));
-    commands.insert("usage", Arc::new(UsageHandler));
-    commands.insert("tasks", Arc::new(TasksHandler));
-    commands.insert("release-notes", Arc::new(ReleaseNotesHandler));
-    commands.insert("reload", Arc::new(ReloadHandler));
-    commands.insert("logout", Arc::new(LogoutHandler));
-    commands.insert("help", Arc::new(HelpHandler));
-    commands.insert("rename", Arc::new(RenameHandler));
-    commands.insert("resume", Arc::new(ResumeHandler));
-    commands.insert("mcp", Arc::new(McpHandler));
-    commands.insert("fork", Arc::new(ForkHandler));
-    commands.insert("checkpoint", Arc::new(CheckpointHandler));
-    commands.insert("add-dir", Arc::new(AddDirHandler));
-    commands.insert("color", Arc::new(ColorHandler));
-    commands.insert("theme", Arc::new(ThemeHandler));
-    commands.insert("recall", Arc::new(RecallHandler));
-    commands.insert("rules", Arc::new(RulesHandler));
-    Registry { commands }
+    let mut b = RegistryBuilder::new();
+    // Primaries FIRST — builder panics on duplicate primary names.
+    b.insert_primary("fast", Arc::new(FastHandler));
+    b.insert_primary("compact", Arc::new(CompactHandler));
+    b.insert_primary("clear", Arc::new(ClearHandler));
+    b.insert_primary("export", Arc::new(ExportHandler));
+    b.insert_primary("thinking", Arc::new(ThinkingHandler));
+    b.insert_primary("effort", Arc::new(EffortHandler));
+    b.insert_primary("garden", Arc::new(GardenHandler));
+    b.insert_primary("model", Arc::new(ModelHandler));
+    b.insert_primary("copy", Arc::new(CopyHandler));
+    b.insert_primary("context", Arc::new(ContextHandler));
+    b.insert_primary("status", Arc::new(StatusHandler));
+    b.insert_primary("cost", Arc::new(CostHandler));
+    b.insert_primary("permissions", Arc::new(PermissionsHandler));
+    b.insert_primary("config", Arc::new(ConfigHandler));
+    b.insert_primary("memory", Arc::new(MemoryHandler));
+    b.insert_primary("doctor", Arc::new(DoctorHandler));
+    b.insert_primary("bug", Arc::new(BugHandler));
+    b.insert_primary("diff", Arc::new(DiffHandler));
+    b.insert_primary("denials", Arc::new(DenialsHandler));
+    b.insert_primary("login", Arc::new(LoginHandler));
+    b.insert_primary("vim", Arc::new(VimHandler));
+    b.insert_primary("usage", Arc::new(UsageHandler));
+    b.insert_primary("tasks", Arc::new(TasksHandler));
+    b.insert_primary("release-notes", Arc::new(ReleaseNotesHandler));
+    b.insert_primary("reload", Arc::new(ReloadHandler));
+    b.insert_primary("logout", Arc::new(LogoutHandler));
+    b.insert_primary("help", Arc::new(HelpHandler));
+    b.insert_primary("rename", Arc::new(RenameHandler));
+    b.insert_primary("resume", Arc::new(ResumeHandler));
+    b.insert_primary("mcp", Arc::new(McpHandler));
+    b.insert_primary("fork", Arc::new(ForkHandler));
+    b.insert_primary("checkpoint", Arc::new(CheckpointHandler));
+    b.insert_primary("add-dir", Arc::new(AddDirHandler));
+    b.insert_primary("color", Arc::new(ColorHandler));
+    b.insert_primary("theme", Arc::new(ThemeHandler));
+    b.insert_primary("recall", Arc::new(RecallHandler));
+    b.insert_primary("rules", Arc::new(RulesHandler));
+    // Aliases are collected from each handler's aliases() method
+    // inside RegistryBuilder::build(). Collisions panic.
+    b.build()
 }
 
 // ---------------------------------------------------------------------------
@@ -257,5 +440,165 @@ mod tests {
         let second = registry.get("fast");
         assert!(first.is_some());
         assert!(second.is_some());
+    }
+
+    // -----------------------------------------------------------------
+    // TASK-AGS-802: 9 new tests for alias support + collision panics.
+    // -----------------------------------------------------------------
+
+    /// Minimal handler used by collision tests (test-local, no real body).
+    struct TestHandler {
+        desc: &'static str,
+        aliases: &'static [&'static str],
+    }
+    impl CommandHandler for TestHandler {
+        fn execute(
+            &self,
+            _ctx: &mut CommandContext,
+            _args: &[String],
+        ) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn description(&self) -> &str {
+            self.desc
+        }
+        fn aliases(&self) -> &'static [&'static str] {
+            self.aliases
+        }
+    }
+
+    /// Handler with no alias override — exercises the default empty-slice
+    /// implementation on the trait.
+    struct NoAliasHandler;
+    impl CommandHandler for NoAliasHandler {
+        fn execute(
+            &self,
+            _ctx: &mut CommandContext,
+            _args: &[String],
+        ) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn description(&self) -> &str {
+            "no-alias handler (test only)"
+        }
+    }
+
+    #[test]
+    fn aliases_method_default_empty() {
+        // A handler that does NOT override aliases() returns &[].
+        let h = NoAliasHandler;
+        assert_eq!(h.aliases(), &[] as &[&'static str]);
+    }
+
+    #[test]
+    fn default_registry_resolves_alias_to_primary() {
+        // "h" is an alias for "help" in the starter set. Resolution
+        // must return the SAME handler (same description) as the
+        // primary lookup.
+        let registry = default_registry();
+        let via_primary = registry.get("help").expect("primary help registered");
+        let via_alias = registry.get("h").expect("alias h resolves to help");
+        assert_eq!(
+            via_primary.description(),
+            via_alias.description(),
+            "alias must resolve to same handler as primary"
+        );
+    }
+
+    #[test]
+    fn default_registry_alias_count_minimum() {
+        let registry = default_registry();
+        assert!(
+            registry.alias_count() >= 8,
+            "starter set must have >= 8 aliases, got {}",
+            registry.alias_count()
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "duplicate primary")]
+    fn duplicate_primary_name_panics() {
+        // Two primaries with the same name must panic at build time.
+        let mut b = RegistryBuilder::new();
+        b.insert_primary("dup", Arc::new(NoAliasHandler));
+        b.insert_primary("dup", Arc::new(NoAliasHandler));
+        let _ = b.build();
+    }
+
+    #[test]
+    #[should_panic(expected = "alias collides with primary")]
+    fn alias_collides_with_primary_panics() {
+        // An alias equal to an existing primary name must panic.
+        let h = Arc::new(TestHandler {
+            desc: "has alias 'existing'",
+            aliases: &["existing"],
+        });
+        let other = Arc::new(NoAliasHandler);
+        let mut b = RegistryBuilder::new();
+        b.insert_primary("existing", other);
+        b.insert_primary("mycmd", h);
+        let _ = b.build();
+    }
+
+    #[test]
+    #[should_panic(expected = "duplicate alias")]
+    fn alias_collides_with_alias_panics() {
+        // Two handlers claiming the same alias must panic.
+        let a = Arc::new(TestHandler {
+            desc: "handler a",
+            aliases: &["shared"],
+        });
+        let b_h = Arc::new(TestHandler {
+            desc: "handler b",
+            aliases: &["shared"],
+        });
+        let mut b = RegistryBuilder::new();
+        b.insert_primary("alpha", a);
+        b.insert_primary("beta", b_h);
+        let _ = b.build();
+    }
+
+    #[test]
+    fn registry_len_counts_primaries_only() {
+        // Aliases must NOT inflate the primary count.
+        let registry = default_registry();
+        assert_eq!(
+            registry.len(),
+            EXPECTED_COMMAND_COUNT,
+            "len() must count primaries only, not primaries + aliases"
+        );
+    }
+
+    #[test]
+    fn registry_names_returns_all_primaries() {
+        let registry = default_registry();
+        let names = registry.names();
+        assert_eq!(
+            names.len(),
+            EXPECTED_COMMAND_COUNT,
+            "names() must return one entry per primary command"
+        );
+        // Spot-check a few well-known primaries.
+        assert!(names.contains(&"help"));
+        assert!(names.contains(&"recall"));
+        assert!(names.contains(&"config"));
+    }
+
+    #[test]
+    fn recall_is_standalone_not_alias() {
+        // /recall stays a primary command and is NOT registered as an
+        // alias for anything (Steven directive).
+        let registry = default_registry();
+        let handler = registry.get("recall").expect("recall is a primary");
+        assert!(
+            handler.description().to_lowercase().contains("recall")
+                || handler.description().to_lowercase().contains("memor"),
+            "recall handler description should reference recall/memory, got: {}",
+            handler.description()
+        );
+        assert!(
+            !registry.aliases_map_contains("recall"),
+            "recall must NOT appear as an alias"
+        );
     }
 }

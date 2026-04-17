@@ -20,6 +20,7 @@
 use std::sync::Arc;
 
 use crate::command::parser;
+use crate::command::parser::suggest;
 use crate::command::registry::{CommandContext, Registry};
 
 /// Slash command dispatcher.
@@ -58,7 +59,22 @@ impl Dispatcher {
         match self.registry.get(&parsed.name) {
             Some(handler) => handler.execute(ctx, &parsed.args),
             None => {
-                let msg = format!("Unknown command: /{}", parsed.name);
+                // TASK-AGS-802: consume `parser::suggest` to enrich the
+                // unknown-command diagnostic with a fuzzy-match hint
+                // (≤ 3 candidates, ≤ 2 edits). AGS-804 will format this
+                // more nicely; a plain comma-join is adequate today.
+                let names = self.registry.names();
+                let suggestions =
+                    suggest(&parsed.name, names.iter().copied(), 3);
+                let msg = if suggestions.is_empty() {
+                    format!("Unknown command: /{}", parsed.name)
+                } else {
+                    format!(
+                        "Unknown command: /{}. Did you mean: {}?",
+                        parsed.name,
+                        suggestions.join(", ")
+                    )
+                };
                 // Emit via the TUI event channel. Use `try_send` so the
                 // dispatcher cannot block on a full channel; dropping a
                 // diagnostic on backpressure is acceptable and cannot
