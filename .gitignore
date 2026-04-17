@@ -57,3 +57,5 @@ hello.txt
 !/docs/architecture/**
 # Exception: coverage baseline snapshot (TUI-328 / NFR-TUI-QUAL-003).
 !/docs/tui-coverage-baseline.json
+# Exception: phase-3 modularization final report (TUI-329).
+!/docs/tui-modularization-report.md
