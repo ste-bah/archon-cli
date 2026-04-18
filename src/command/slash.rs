@@ -653,77 +653,11 @@ pub(crate) async fn handle_slash_command(
             }
             true
         }
-        // ── /resume ─────────────────────────────────────────────
-        s if s.starts_with("/resume") => {
-            let arg = s.strip_prefix("/resume").unwrap_or("").trim();
-            let db_path = archon_session::storage::default_db_path();
-            match archon_session::storage::SessionStore::open(&db_path) {
-                Ok(store) => {
-                    if arg.is_empty() {
-                        // Show interactive session picker
-                        let query = archon_session::search::SessionSearchQuery::default();
-                        match archon_session::search::search_sessions(&store, &query) {
-                            Ok(results) => {
-                                if results.is_empty() {
-                                    let _ = tui_tx
-                                        .send(TuiEvent::TextDelta(
-                                            "\nNo previous sessions found.\n".into(),
-                                        ))
-                                        .await;
-                                } else {
-                                    let entries: Vec<archon_tui::app::SessionPickerEntry> = results
-                                        .iter()
-                                        .map(|m| archon_tui::app::SessionPickerEntry {
-                                            id: m.id.clone(),
-                                            name: m.name.clone().unwrap_or_default(),
-                                            turns: m.message_count / 2,
-                                            cost: m.total_cost,
-                                            last_active: m.last_active.chars().take(10).collect(),
-                                        })
-                                        .collect();
-                                    let _ = tui_tx.send(TuiEvent::ShowSessionPicker(entries)).await;
-                                }
-                            }
-                            Err(e) => {
-                                let _ = tui_tx
-                                    .send(TuiEvent::Error(format!("Search failed: {e}")))
-                                    .await;
-                            }
-                        }
-                    } else {
-                        // Try to resolve by name or ID prefix
-                        match archon_session::naming::resolve_by_name(&store, arg) {
-                            Ok(Some(meta)) => {
-                                let _ = tui_tx
-                                    .send(TuiEvent::TextDelta(format!(
-                                        "\nSession found: {}\nRestart with: archon --resume {}\n",
-                                        meta.id, meta.id
-                                    )))
-                                    .await;
-                            }
-                            Ok(None) => {
-                                let _ = tui_tx
-                                    .send(TuiEvent::TextDelta(format!(
-                                        "\nNo session matching '{arg}'. Use /sessions to list.\n"
-                                    )))
-                                    .await;
-                            }
-                            Err(e) => {
-                                let _ = tui_tx
-                                    .send(TuiEvent::Error(format!("Lookup failed: {e}")))
-                                    .await;
-                            }
-                        }
-                    }
-                }
-                Err(e) => {
-                    let _ = tui_tx
-                        .send(TuiEvent::Error(format!("Session store error: {e}")))
-                        .await;
-                }
-            }
-            true
-        }
+        // ── /resume: body migrated to src/command/resume.rs (AGS-810,
+        //    DIRECT pattern). Dispatcher PATH A at slash.rs:46 fires
+        //    ResumeHandler::execute via the registry BEFORE this arm;
+        //    aliases /continue and /open-session route there too. Arm
+        //    deleted per TUI-410 dead-code rule. ──────────────────
         // ── /mcp (MCP server manager overlay) ─────────────────
         "/mcp" => {
             let info = ctx.mcp_manager.get_server_info().await;

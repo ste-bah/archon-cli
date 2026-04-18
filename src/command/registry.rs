@@ -41,6 +41,11 @@ use crate::command::model::ModelHandler;
 // instead of the prior `declare_handler!` stub. Aliases migrate from
 // [] to [usage, billing] per spec REQ-FOR-D7 validation criterion 2.
 use crate::command::cost::{CostHandler, CostSnapshot};
+// TASK-AGS-810: real /resume handler lives in `crate::command::resume`.
+// DIRECT-pattern body-migrate (sync archon_session API — no snapshot,
+// no effect slot required). Aliases extended from [continue] to
+// [continue, open-session] per spec REQ-FOR-D7 validation criterion 4.
+use crate::command::resume::ResumeHandler;
 
 /// Execution context threaded through every command handler.
 ///
@@ -454,11 +459,11 @@ declare_handler!(
     &["?", "h"]
 );
 declare_handler!(RenameHandler, "Rename the current session");
-declare_handler!(
-    ResumeHandler,
-    "Resume a previous session by id",
-    &["continue"]
-);
+// TASK-AGS-810: ResumeHandler moved to `crate::command::resume` (real
+// impl with body-migrated execute via DIRECT pattern — sync
+// archon_session API reads, no snapshot/effect-slot needed). Aliases
+// migrated from [continue] to [continue, open-session] per spec
+// REQ-FOR-D7 validation criterion 4. Imported at the top of this file.
 declare_handler!(McpHandler, "Show MCP server status");
 declare_handler!(ForkHandler, "Fork the current session into a new branch");
 declare_handler!(CheckpointHandler, "Create or restore a session checkpoint");
@@ -920,6 +925,48 @@ mod tests {
         assert_eq!(reg.primary_for_alias("billing"), Some("cost"));
         assert_eq!(reg.primary_for_alias("usage"), None);
         assert_eq!(reg.primary_for_alias("cost"), None);
+    }
+
+    // -----------------------------------------------------------------
+    // TASK-AGS-810: /resume aliases [continue, open-session] resolve.
+    // DIRECT-pattern body-migrate — no snapshot or effect slot. This
+    // test pins the alias surface so future ticketing cannot silently
+    // drop `open-session` (AGS-810 spec validation criterion 4).
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn registry_resolves_resume_aliases_continue_and_open_session() {
+        let reg = default_registry();
+        let primary = reg
+            .get("resume")
+            .expect("resume primary must be registered");
+        let via_continue = reg
+            .get("continue")
+            .expect("'continue' alias must resolve to /resume");
+        let via_open_session = reg
+            .get("open-session")
+            .expect(
+                "'open-session' alias must resolve to /resume per AGS-810",
+            );
+        assert_eq!(
+            primary.description(),
+            via_continue.description(),
+            "'continue' must resolve to the same handler as /resume"
+        );
+        assert_eq!(
+            primary.description(),
+            via_open_session.description(),
+            "'open-session' must resolve to the same handler as /resume"
+        );
+
+        // Pin the Registry helper APIs — `resume` is a primary,
+        // `continue` and `open-session` are aliases (not primaries).
+        assert!(reg.is_primary("resume"));
+        assert!(!reg.is_primary("continue"));
+        assert!(!reg.is_primary("open-session"));
+        assert_eq!(reg.primary_for_alias("continue"), Some("resume"));
+        assert_eq!(reg.primary_for_alias("open-session"), Some("resume"));
+        assert_eq!(reg.primary_for_alias("resume"), None);
     }
 
     #[test]
