@@ -58,6 +58,10 @@ impl Usage {
     }
 }
 
+/// Token usage statistics for a session.
+/// Alias for Usage - represents input/output token counts.
+pub type TokenUsage = Usage;
+
 /// Content block types returned by the API.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

@@ -722,6 +722,7 @@ version = "0.1.4"
 dependencies = [
  "anyhow",
  "archon-core",
+ "archon-llm",
  "archon-tools",
  "async-trait",
  "chrono",

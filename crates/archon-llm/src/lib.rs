@@ -39,3 +39,6 @@ pub use retry::{classify as classify_retry, RetryDecision, RetryPolicy, RetryPro
 // TASK-AGS-709: surface ActiveProvider so all new call sites (and
 // TASK-AGS-710's archon-cli main.rs rework) can `use archon_llm::ActiveProvider`.
 pub use active::ActiveProvider;
+
+// TASK-TUI-702: re-export TokenUsage at crate root for SessionStats struct.
+pub use types::TokenUsage;
