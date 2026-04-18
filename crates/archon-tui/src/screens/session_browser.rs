@@ -1,12 +1,64 @@
 //! Session browser screen.
+//!
+//! REQ-TUI-MOD-006 / REQ-TUI-MOD-007
 //! Layer 1 module — no imports from screens/ or app/.
 
+use chrono::{DateTime, Utc};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::widgets::{Block, Borders, List, ListItem};
+use serde::{Deserialize, Serialize};
 
 use crate::virtual_list::VirtualList;
 use crate::theme::Theme;
+
+/// Branch point in session history.
+/// Tracks a forked session with metadata about when the fork occurred.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BranchPoint {
+    /// Unique identifier for this branch point.
+    pub id: String,
+    /// The parent session ID this branch was created from.
+    pub parent_session: String,
+    /// The message index at which branching occurred.
+    pub branched_at_message: usize,
+    /// Human-readable label for this branch.
+    pub label: String,
+    /// Timestamp when this branch point was created.
+    pub created_at: DateTime<Utc>,
+}
+
+/// Session state tracking current session and branch history.
+/// Used for session switching and history navigation.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SessionState {
+    /// The currently active session ID, if any.
+    pub current_id: Option<String>,
+    /// All known branch points in session history.
+    pub branches: Vec<BranchPoint>,
+    /// Current position in history navigation (0 = latest).
+    pub history_cursor: usize,
+}
+
+impl SessionState {
+    /// Create a new empty session state.
+    pub fn new() -> Self {
+        Self {
+            current_id: None,
+            branches: Vec::new(),
+            history_cursor: 0,
+        }
+    }
+
+    /// Create a session state with the given session ID.
+    pub fn with_session(id: String) -> Self {
+        Self {
+            current_id: Some(id),
+            branches: Vec::new(),
+            history_cursor: 0,
+        }
+    }
+}
 
 /// Metadata for a session entry.
 #[derive(Debug, Clone)]
