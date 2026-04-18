@@ -45,7 +45,6 @@ pub use event_loop::{EventLoopConfig, run_event_loop};
 pub mod cancel;
 pub use cancel::YieldGate;
 
-pub mod views;
 
 pub mod events;
 pub use events::TuiEvent;
