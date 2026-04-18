@@ -42,7 +42,7 @@ fn test_switch_to_known_branch_updates_state() {
     let mut state = SessionState::new();
     state.branches.push(branch);
 
-    let branching = SessionBranching::new(Arc::new(store), state);
+    let mut branching = SessionBranching::new(Arc::new(store), state);
     let result = branching.switch("known_id");
 
     assert!(result.is_ok(), "switch to known branch should succeed");
@@ -71,7 +71,7 @@ fn test_switch_to_unknown_branch_errs() {
     let mut state = SessionState::new();
     state.branches.push(branch);
 
-    let branching = SessionBranching::new(Arc::new(store), state);
+    let mut branching = SessionBranching::new(Arc::new(store), state);
     let result = branching.switch("unknown_id");
 
     assert!(result.is_err(), "switch to unknown branch should fail");
