@@ -458,7 +458,14 @@ declare_handler!(
 // migrated from [] to [usage, billing] per spec REQ-FOR-D7 validation
 // criterion 2). Imported at the top of this file.
 declare_handler!(PermissionsHandler, "Show or update tool permissions");
-declare_handler!(ConfigHandler, "Show or update Archon configuration");
+// TASK-AGS-813: ConfigHandler gains aliases [settings, prefs] via
+// alias-only drift-reconcile (shipped-wins). Spec called for /settings
+// as a primary — body-migrate deferred to a post-Stage-6 ticket.
+declare_handler!(
+    ConfigHandler,
+    "Show or update Archon configuration",
+    &["settings", "prefs"]
+);
 declare_handler!(
     MemoryHandler,
     "Inspect or manage long-term memory",
@@ -1021,6 +1028,27 @@ mod tests {
     // and cannot silently promote a sibling handler to share the
     // `hooks` primary name.
     // -----------------------------------------------------------------
+
+    // -----------------------------------------------------------------
+    // TASK-AGS-813: /settings and /prefs alias onto /config primary.
+    // ALIAS-ONLY ticket — no new primary, no body-migrate. Spec called
+    // for /settings as a primary with body+get/set; shipped-wins
+    // drift-reconcile inverts the relationship: existing /config
+    // primary gains [settings, prefs] aliases. Pin the alias surface
+    // and the primary/alias directionality so future ticketing cannot
+    // silently flip it or drop an alias.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn registry_resolves_config_aliases_settings_and_prefs() {
+        let reg = default_registry();
+        assert_eq!(reg.primary_for_alias("settings"), Some("config"));
+        assert_eq!(reg.primary_for_alias("prefs"), Some("config"));
+        assert_eq!(reg.primary_for_alias("config"), None); // primary, not alias
+        assert!(!reg.is_primary("settings")); // alias-only, not a primary
+        assert!(!reg.is_primary("prefs"));
+        assert!(reg.is_primary("config")); // primary remains
+    }
 
     #[test]
     fn registry_hooks_primary_with_no_aliases() {
