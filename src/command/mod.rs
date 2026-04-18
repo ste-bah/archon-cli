@@ -36,6 +36,7 @@ pub(crate) mod slash;
 pub(crate) mod status;
 pub(crate) mod team;
 pub(crate) mod task;
+pub(crate) mod theme;
 pub(crate) mod tui_helpers;
 pub(crate) mod update;
 pub(crate) mod utils;

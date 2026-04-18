@@ -107,6 +107,20 @@ use crate::command::export::ExportHandler;
 // insert_primary call below. Aliases `["mem"]` are PRESERVED per
 // shipped-wins drift-reconcile (see command/memory.rs Aliases rustdoc).
 use crate::command::memory::MemoryHandler;
+// TASK-AGS-819: real /theme handler lives in `crate::command::theme`.
+// DIRECT-pattern body-migrate (sync theme helpers — `theme_by_name` +
+// `available_themes` are both plain `fn` lookups; no snapshot/effect-
+// slot needed, no new CommandContext field added). FIFTH Batch-3
+// ticket. Shipped stub `declare_handler!(ThemeHandler, "Show or
+// change the UI theme")` at registry.rs:607 is REPLACED by this
+// import + the insert_primary call below. No aliases — shipped stub
+// had none and AGS-817 shipped-wins rule preserves zero aliases.
+// Theme mutation is signalled via `TuiEvent::SetTheme(name)` to the
+// TUI event loop; the handler does NOT write to SlashCommandContext,
+// so no `CommandEffect` variant is required (see registry.rs:272 NOTE
+// — the speculative AGS-819 "write" extension turned out to be DIRECT
+// pattern, not effect-slot).
+use crate::command::theme::ThemeHandler;
 
 /// Execution context threaded through every command handler.
 ///
@@ -269,9 +283,19 @@ pub(crate) struct CommandContext {
 /// correct mutex write.
 ///
 /// Future body-migrate tickets (AGS-809 /cost read-only, AGS-814
-/// /context read-only, AGS-817 /memory sync-trait, AGS-819 /theme
-/// write) may extend this enum with additional variants. Each variant
-/// should:
+/// /context read-only, AGS-817 /memory sync-trait) may extend this
+/// enum with additional variants.
+///
+/// NOTE (AGS-819): the original speculative list also named
+/// "AGS-819 /theme write" as a candidate effect-slot extension, but
+/// the actual /theme migration turned out to be DIRECT pattern, NOT
+/// effect-slot — `TuiEvent::SetTheme(name)` is the canonical theme-
+/// mutation channel (consumed by the TUI event loop), so the handler
+/// has no `SlashCommandContext` field to write back. See
+/// `src/command/theme.rs` module rustdoc R1 for the full pattern
+/// rationale.
+///
+/// Each new variant should:
 ///
 /// 1. Carry owned data (no borrows, no `Arc<Mutex<_>>` guards).
 /// 2. Map 1:1 to a single write-side field on `SlashCommandContext`.
@@ -604,7 +628,12 @@ declare_handler!(RenameHandler, "Rename the current session");
 declare_handler!(CheckpointHandler, "Create or restore a session checkpoint");
 declare_handler!(AddDirHandler, "Add a directory to the working context");
 declare_handler!(ColorHandler, "Show or change the UI color scheme");
-declare_handler!(ThemeHandler, "Show or change the UI theme");
+// TASK-AGS-819: ThemeHandler moved to `crate::command::theme` (real
+// impl with body-migrated execute via DIRECT pattern — sync theme
+// helpers `theme_by_name` + `available_themes`, no snapshot/effect-
+// slot needed, no new CommandContext field added). FIFTH Batch-3
+// ticket. No aliases (shipped stub had none; AGS-817 shipped-wins
+// rule preserves zero aliases). Imported at the top of this file.
 // /recall stays a standalone primary command and has NO aliases —
 // Steven directive. Do NOT add "recall" as an alias on /memory or any
 // other handler.
@@ -1201,6 +1230,39 @@ mod tests {
         assert_eq!(reg.primary_for_alias("voice"), None);
         // No alias entry points to `voice`.
         assert!(!reg.aliases_map_contains("voice"));
+    }
+
+    // -----------------------------------------------------------------
+    // TASK-AGS-819: /theme primary registration (no aliases). The
+    // /theme body-migrate moves ThemeHandler out of the
+    // declare_handler! stub at registry.rs:607 and into
+    // `crate::command::theme`. Shipped stub had no alias slice; spec
+    // lists none; handler ships `&[]` per AGS-817 shipped-wins rule
+    // (zero aliases shipped → zero aliases preserved). FIFTH Batch-3
+    // ticket — EXPECTED_COMMAND_COUNT stays at 40 (body-migrate, not
+    // gap-fix). Pin the invariant so future ticketing cannot silently
+    // add an alias without updating the registry collision-detection
+    // tests.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn registry_theme_primary_with_no_aliases() {
+        let reg = default_registry();
+        let primary = reg
+            .get("theme")
+            .expect("theme primary must be registered post AGS-819");
+        let desc = primary.description().to_lowercase();
+        assert!(
+            desc.contains("theme") || desc.contains("ui"),
+            "ThemeHandler description should reference theme/ui, got: {}",
+            primary.description()
+        );
+        // `theme` is a primary — not an alias of anything.
+        assert!(reg.is_primary("theme"));
+        assert_eq!(reg.primary_for_alias("theme"), None);
+        // Spot-check alias-less invariant: `aliases_for` analogue —
+        // no alias entry points to `theme`.
+        assert!(!reg.aliases_map_contains("theme"));
     }
 
     // -----------------------------------------------------------------

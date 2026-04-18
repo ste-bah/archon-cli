@@ -751,33 +751,16 @@ pub(crate) async fn handle_slash_command(
             }
             true
         }
-        // ── /theme ─────────────────────────────────────────────
-        s if s.starts_with("/theme") => {
-            let theme_arg = s.strip_prefix("/theme").unwrap_or("").trim();
-            if theme_arg.is_empty() {
-                let names = archon_tui::theme::available_themes().join(", ");
-                let _ = tui_tx
-                    .send(TuiEvent::TextDelta(format!(
-                        "\nAvailable themes: {names}\nUsage: /theme <name>\n"
-                    )))
-                    .await;
-            } else if archon_tui::theme::theme_by_name(theme_arg).is_some() {
-                let _ = tui_tx.send(TuiEvent::SetTheme(theme_arg.to_string())).await;
-                let _ = tui_tx
-                    .send(TuiEvent::TextDelta(format!(
-                        "\nTheme set to '{theme_arg}'.\n"
-                    )))
-                    .await;
-            } else {
-                let names = archon_tui::theme::available_themes().join(", ");
-                let _ = tui_tx
-                    .send(TuiEvent::Error(format!(
-                        "Unknown theme '{theme_arg}'. Available: {names}"
-                    )))
-                    .await;
-            }
-            true
-        }
+        // ── /theme: body migrated to src/command/theme.rs (AGS-819,
+        //    DIRECT pattern, export.rs-style breadcrumb). Dispatcher
+        //    PATH A at slash.rs:46 fires ThemeHandler::execute via the
+        //    registry BEFORE this arm; `archon_tui::theme::theme_by_name`
+        //    and `archon_tui::theme::available_themes` are sync helpers
+        //    so the handler emits TuiEvent::SetTheme + TextDelta + Error
+        //    directly via `ctx.tui_tx.try_send(..)` — no snapshot, no
+        //    effect slot, no new CommandContext field. Arm deleted per
+        //    TUI-410 dead-code rule. Do NOT re-add — see TUI-410 lesson.
+        //    ──────────────────────────────────────────────────────
         // ── /recall ────────────────────────────────────────────
         s if s.starts_with("/recall") => {
             let query = s.strip_prefix("/recall").unwrap_or("").trim();
