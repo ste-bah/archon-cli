@@ -8,6 +8,9 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::widgets::{Block, Borders, List, ListItem};
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+
+use archon_session::storage::SessionStore;
 
 use crate::virtual_list::VirtualList;
 use crate::theme::Theme;
@@ -68,51 +71,144 @@ pub struct SessionMeta {
     pub last_active: String,
 }
 
+/// Session summary for browser display.
+/// Used by SessionBrowser to display session list items.
+#[derive(Debug, Clone)]
+pub struct SessionSummary {
+    /// Unique identifier for the session.
+    pub id: String,
+    /// Human-readable session name.
+    pub name: String,
+    /// Last time this session was updated.
+    pub last_updated: DateTime<Utc>,
+    /// Number of messages in the session.
+    pub message_count: u64,
+}
+
 /// Session browser state.
-#[derive(Debug)]
 pub struct SessionBrowser {
-    list: VirtualList<SessionMeta>,
+    /// Reference to the session store.
+    store: Arc<SessionStore>,
+    /// List of session summaries available for browsing.
+    sessions: Vec<SessionSummary>,
+    /// Current cursor position in the sessions list.
+    cursor: usize,
+    /// Current session state.
+    state: SessionState,
+}
+
+impl std::fmt::Debug for SessionBrowser {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SessionBrowser")
+            .field("sessions", &self.sessions)
+            .field("cursor", &self.cursor)
+            .field("state", &self.state)
+            .finish()
+    }
 }
 
 impl SessionBrowser {
-    pub fn new() -> Self {
-        Self { list: VirtualList::new(Vec::new(), 10) }
+    /// Create a new SessionBrowser with the given store.
+    pub fn new(store: Arc<SessionStore>) -> Self {
+        Self {
+            store,
+            sessions: Vec::new(),
+            cursor: 0,
+            state: SessionState::new(),
+        }
+    }
+
+    /// Returns the current cursor position.
+    pub fn cursor(&self) -> usize {
+        self.cursor
+    }
+
+    /// Returns a reference to the current session state.
+    pub fn state(&self) -> &SessionState {
+        &self.state
+    }
+
+    /// Refresh sessions from the store.
+    pub async fn refresh(&mut self) -> Result<(), archon_session::storage::SessionError> {
+        let metadata = self.store.list_sessions(100)?;
+        self.sessions = metadata
+            .into_iter()
+            .map(|m| SessionSummary {
+                id: m.id,
+                name: m.name.unwrap_or_else(|| "Unnamed Session".to_string()),
+                last_updated: m.last_active.parse().unwrap_or_else(|_| Utc::now()),
+                message_count: m.message_count,
+            })
+            .collect();
+        // Reset cursor to valid position after refresh
+        if !self.sessions.is_empty() && self.cursor >= self.sessions.len() {
+            self.cursor = self.sessions.len() - 1;
+        }
+        Ok(())
+    }
+
+    /// Move cursor down (toward end of list), bounded.
+    pub fn move_cursor_down(&mut self) {
+        if self.sessions.is_empty() {
+            return;
+        }
+        if self.cursor < self.sessions.len().saturating_sub(1) {
+            self.cursor += 1;
+        }
+        // else stay at max position
+    }
+
+    /// Move cursor up (toward start of list), bounded.
+    pub fn move_cursor_up(&mut self) {
+        if self.cursor > 0 {
+            self.cursor -= 1;
+        }
+        // else stay at 0
+    }
+
+    /// Returns the selected session summary, if any.
+    pub fn selected(&self) -> Option<&SessionSummary> {
+        self.sessions.get(self.cursor)
     }
 
     pub fn is_empty(&self) -> bool {
-        self.list.is_empty()
+        self.sessions.is_empty()
     }
 
     pub fn len(&self) -> usize {
-        self.list.len()
+        self.sessions.len()
     }
 
     pub fn selected_index(&self) -> usize {
-        self.list.selected_index()
+        self.cursor
     }
 
-    pub fn selected(&self) -> Option<&SessionMeta> {
-        self.list.selected()
-    }
-
-    pub fn set_sessions(&mut self, sessions: Vec<SessionMeta>) {
-        self.list.set_items(sessions);
+    /// Set sessions directly (bypassing store refresh).
+    pub fn set_sessions(&mut self, sessions: Vec<SessionSummary>) {
+        self.sessions = sessions;
+        // Reset cursor to valid position
+        if self.cursor > 0 && self.cursor >= self.sessions.len() {
+            self.cursor = self.sessions.len().saturating_sub(1);
+        }
     }
 
     pub fn move_up(&mut self) {
-        self.list.move_up();
+        self.move_cursor_up();
     }
 
     pub fn move_down(&mut self) {
-        self.list.move_down();
+        self.move_cursor_down();
     }
 
     pub fn page_up(&mut self) {
-        self.list.page_up();
+        // Move up by 10 or to start
+        self.cursor = self.cursor.saturating_sub(10);
     }
 
     pub fn page_down(&mut self) {
-        self.list.page_down();
+        // Move down by 10 or to end
+        let max_idx = self.sessions.len().saturating_sub(1);
+        self.cursor = (self.cursor + 10).min(max_idx);
     }
 
     /// Render session list into area.
@@ -121,8 +217,8 @@ impl SessionBrowser {
             .borders(Borders::ALL)
             .title("Session Browser");
 
-        let items: Vec<ListItem> = self.list.visible_items().iter().map(|s| {
-            ListItem::new(format!("{} [{}]", s.label, s.last_active))
+        let items: Vec<ListItem> = self.sessions.iter().map(|s| {
+            ListItem::new(format!("{} [{} msgs]", s.name, s.message_count))
         }).collect();
 
         let list = List::new(items).block(block);
@@ -130,9 +226,23 @@ impl SessionBrowser {
     }
 }
 
+impl SessionBrowser {
+    /// Create a default SessionBrowser (used only for testing with no store).
+    #[cfg(test)]
+    fn new_for_tests() -> Self {
+        use archon_session::storage::SessionStore;
+        // Create an in-memory store for testing
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let store = SessionStore::open(temp_dir.path().join("test.db"))
+            .expect("test store");
+        Self::new(Arc::new(store))
+    }
+}
+
+#[cfg(test)]
 impl Default for SessionBrowser {
     fn default() -> Self {
-        Self::new()
+        Self::new_for_tests()
     }
 }
 
@@ -181,16 +291,16 @@ mod tests {
 
     #[test]
     fn new_browser_empty() {
-        let browser = SessionBrowser::new();
+        let browser = SessionBrowser::new_for_tests();
         assert!(browser.is_empty());
     }
 
     #[test]
     fn set_sessions_updates_list() {
-        let mut browser = SessionBrowser::new();
+        let mut browser = SessionBrowser::new_for_tests();
         let sessions = vec![
-            SessionMeta { id: "1".into(), label: "A".into(), last_active: "1m".into() },
-            SessionMeta { id: "2".into(), label: "B".into(), last_active: "2m".into() },
+            SessionSummary { id: "1".into(), name: "A".into(), last_updated: Utc::now(), message_count: 5 },
+            SessionSummary { id: "2".into(), name: "B".into(), last_updated: Utc::now(), message_count: 10 },
         ];
         browser.set_sessions(sessions);
         assert_eq!(browser.len(), 2);
@@ -198,12 +308,12 @@ mod tests {
     }
 
     #[test]
-    fn cursor_wraps_at_boundaries() {
-        let mut browser = SessionBrowser::new();
+    fn cursor_bounded_at_end() {
+        let mut browser = SessionBrowser::new_for_tests();
         let sessions = vec![
-            SessionMeta { id: "0".into(), label: "A".into(), last_active: "1m".into() },
-            SessionMeta { id: "1".into(), label: "B".into(), last_active: "2m".into() },
-            SessionMeta { id: "2".into(), label: "C".into(), last_active: "3m".into() },
+            SessionSummary { id: "0".into(), name: "A".into(), last_updated: Utc::now(), message_count: 1 },
+            SessionSummary { id: "1".into(), name: "B".into(), last_updated: Utc::now(), message_count: 2 },
+            SessionSummary { id: "2".into(), name: "C".into(), last_updated: Utc::now(), message_count: 3 },
         ];
         browser.set_sessions(sessions);
         browser.move_down();
@@ -211,18 +321,20 @@ mod tests {
         browser.move_down();
         assert_eq!(browser.selected_index(), 2);
         browser.move_down();
-        assert_eq!(browser.selected_index(), 0); // wrap
+        // Should be bounded at last index
+        assert_eq!(browser.selected_index(), 2);
     }
 
     #[test]
-    fn move_up_wraps_to_last() {
-        let mut browser = SessionBrowser::new();
+    fn move_up_bounded_at_zero() {
+        let mut browser = SessionBrowser::new_for_tests();
         let sessions = vec![
-            SessionMeta { id: "0".into(), label: "A".into(), last_active: "1m".into() },
-            SessionMeta { id: "1".into(), label: "B".into(), last_active: "2m".into() },
+            SessionSummary { id: "0".into(), name: "A".into(), last_updated: Utc::now(), message_count: 1 },
+            SessionSummary { id: "1".into(), name: "B".into(), last_updated: Utc::now(), message_count: 2 },
         ];
         browser.set_sessions(sessions);
         browser.move_up();
-        assert_eq!(browser.selected_index(), 1); // wrap to last
+        // Should be bounded at 0
+        assert_eq!(browser.selected_index(), 0);
     }
 }

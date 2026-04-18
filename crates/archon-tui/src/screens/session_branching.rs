@@ -1,12 +1,18 @@
 //! Session branching / branch picker screen.
 //! Layer 1 module — no imports from screens/ or app/.
 
+use std::sync::Arc;
+use thiserror::Error;
+
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::widgets::{Block, Borders, List, ListItem};
 
 use crate::virtual_list::VirtualList;
 use crate::theme::Theme;
+
+use super::session_browser::{BranchPoint, SessionState};
+use archon_session::storage::SessionStore;
 
 /// Reference to a message / branch point.
 #[derive(Debug, Clone)]
@@ -131,5 +137,72 @@ mod tests {
         assert_eq!(picker.selected_index(), 0); // wrap
         picker.move_up();
         assert_eq!(picker.selected_index(), 0); // wrap
+    }
+}
+
+// ============================================================================
+// SessionBranching — TUI-707
+// ============================================================================
+
+/// Error returned when a branch operation fails.
+#[derive(Debug, Error)]
+pub enum BranchError {
+    /// The requested branch ID was not found in visible_branches.
+    #[error("unknown branch: {0}")]
+    UnknownBranch(String),
+}
+
+/// SessionBranching manages session branch switching and visibility.
+///
+/// Stores a reference to the session store, current session state,
+/// and tracks which branch points are visible for switching.
+pub struct SessionBranching {
+    store: Arc<SessionStore>,
+    state: SessionState,
+    visible_branches: Vec<BranchPoint>,
+}
+
+impl std::fmt::Debug for SessionBranching {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SessionBranching")
+            .field("state", &self.state)
+            .field("visible_branches", &self.visible_branches)
+            .finish()
+    }
+}
+
+impl SessionBranching {
+    /// Create a new SessionBranching with the given store and initial state.
+    pub fn new(store: Arc<SessionStore>, state: SessionState) -> Self {
+        let visible_branches = state.branches.clone();
+        Self {
+            store,
+            state,
+            visible_branches,
+        }
+    }
+
+    /// Returns a slice of the currently visible branch points.
+    pub fn branches(&self) -> &[BranchPoint] {
+        &self.visible_branches
+    }
+
+    /// Switch to the branch with the given branch_id.
+    ///
+    /// Returns Ok(()) if the branch was found and state.current_id is updated.
+    /// Returns Err(BranchError::UnknownBranch) if the branch_id is not in visible_branches.
+    pub fn switch(&mut self, branch_id: &str) -> Result<(), BranchError> {
+        let found = self.visible_branches.iter().any(|b| b.id == branch_id);
+        if found {
+            self.state.current_id = Some(branch_id.to_string());
+            Ok(())
+        } else {
+            Err(BranchError::UnknownBranch(branch_id.to_string()))
+        }
+    }
+
+    /// Returns a reference to the current session state.
+    pub fn state(&self) -> &SessionState {
+        &self.state
     }
 }

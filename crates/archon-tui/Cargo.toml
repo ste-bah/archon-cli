@@ -23,10 +23,12 @@ reqwest = { workspace = true, features = ["multipart"] }
 serde_json.workspace = true
 archon-core = { path = "../archon-core" }
 archon-llm = { path = "../archon-llm" }
+archon-session = { path = "../archon-session" }
 cpal = { workspace = true, optional = true }
 futures-util = { workspace = true }
 parking_lot = "0.12"
 hdrhistogram = "7.5"
+tempfile = "3.12"
 
 [dev-dependencies]
 insta = { workspace = true }
