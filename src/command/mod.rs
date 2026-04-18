@@ -38,6 +38,7 @@ pub(crate) mod task;
 pub(crate) mod tui_helpers;
 pub(crate) mod update;
 pub(crate) mod utils;
+pub(crate) mod voice;
 pub(crate) mod web;
 
 // TASK-AGS-800 (Stage 6, Q1=A): spec-name discoverability shim.

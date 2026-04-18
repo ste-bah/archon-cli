@@ -77,6 +77,13 @@ use crate::command::fork::ForkHandler;
 // worked. File name is `context_cmd.rs` not `context.rs` to avoid a
 // collision with the existing `crate::command::context` builder module.
 use crate::command::context_cmd::{ContextHandler, ContextSnapshot};
+// TASK-AGS-816: NEW /voice primary (Q4=A gap-fix — `/voice` did not
+// exist in shipped slash.rs or registry.rs pre-AGS-816). DIRECT-pattern
+// handler — sync `archon_core::config::load_config`, no
+// snapshot/effect-slot needed. No aliases (spec lists none). Primary
+// count grows from 39 -> 40 (SECOND Batch-3 NEW-primary after AGS-812
+// /hooks, which took the count from 38 -> 39).
+use crate::command::voice::VoiceHandler;
 
 /// Execution context threaded through every command handler.
 ///
@@ -621,6 +628,8 @@ pub(crate) fn default_registry() -> Registry {
     b.insert_primary("rules", Arc::new(RulesHandler));
     // TASK-AGS-805: /cancel primary (aliases: stop, abort).
     b.insert_primary("cancel", Arc::new(CancelHandler));
+    // TASK-AGS-816: NEW /voice primary (gap-fix Q4=A, no aliases).
+    b.insert_primary("voice", Arc::new(VoiceHandler));
     // Aliases are collected from each handler's aliases() method
     // inside RegistryBuilder::build(). Collisions panic.
     b.build()
@@ -645,7 +654,10 @@ mod tests {
     ///
     /// TASK-AGS-812 adds `/hooks` (gap-fix Q4=A) as a new primary,
     /// bringing the total to 39.
-    const EXPECTED_COMMAND_COUNT: usize = 39;
+    ///
+    /// TASK-AGS-816 adds `/voice` (gap-fix Q4=A, SECOND Batch-3 NEW
+    /// primary) as a new primary, bringing the total to 40.
+    const EXPECTED_COMMAND_COUNT: usize = 40;
 
     #[test]
     fn default_registry_contains_all_commands() {
@@ -1117,6 +1129,36 @@ mod tests {
         assert_eq!(reg.primary_for_alias("hooks"), None);
         // No alias entry points to `hooks`.
         assert!(!reg.aliases_map_contains("hooks"));
+    }
+
+    // -----------------------------------------------------------------
+    // TASK-AGS-816: /voice primary registration (no aliases). The
+    // /voice gap-fix adds a brand-new primary — there was NO prior
+    // /voice entry in the shipped match block or registry. SECOND
+    // Batch-3 NEW primary (after AGS-812 /hooks). Pin the invariant so
+    // future ticketing cannot silently introduce an alias without
+    // updating the registry collision-detection tests, and cannot
+    // silently promote a sibling handler to share the `voice` primary
+    // name.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn registry_voice_primary_with_no_aliases() {
+        let reg = default_registry();
+        let primary = reg
+            .get("voice")
+            .expect("voice primary must be registered post AGS-816");
+        let desc = primary.description().to_lowercase();
+        assert!(
+            desc.contains("voice"),
+            "VoiceHandler description should reference 'voice', got: {}",
+            primary.description()
+        );
+        // `voice` is a primary — not an alias of anything.
+        assert!(reg.is_primary("voice"));
+        assert_eq!(reg.primary_for_alias("voice"), None);
+        // No alias entry points to `voice`.
+        assert!(!reg.aliases_map_contains("voice"));
     }
 
     // -----------------------------------------------------------------
