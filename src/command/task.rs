@@ -225,6 +225,9 @@ mod tests {
                 // TASK-AGS-809: /tasks tests never read the /cost
                 // snapshot — None is correct.
                 cost_snapshot: None,
+                // TASK-AGS-811: /tasks tests never read the /mcp
+                // snapshot — None is correct.
+                mcp_snapshot: None,
                 pending_effect: None,
             },
             rx,

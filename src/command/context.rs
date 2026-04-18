@@ -17,7 +17,7 @@
 use archon_tui::app::TuiEvent;
 
 use crate::command::registry::{CommandContext, CommandEffect, Registry};
-use crate::command::{cost, model, status};
+use crate::command::{cost, mcp, model, status};
 use crate::slash_context::SlashCommandContext;
 
 /// Build the per-dispatch [`CommandContext`] for the supplied slash
@@ -44,6 +44,7 @@ pub(crate) async fn build_command_context(
         status_snapshot: None,
         model_snapshot: None,
         cost_snapshot: None,
+        mcp_snapshot: None,
         pending_effect: None,
     };
 
@@ -70,6 +71,17 @@ pub(crate) async fn build_command_context(
             // `usage` remains a separate primary (UsageHandler).
             ctx.cost_snapshot =
                 Some(cost::build_cost_snapshot(slash_ctx).await);
+        }
+        Some("mcp") => {
+            // TASK-AGS-811 snapshot population. /mcp is read-only, so
+            // there is no paired `apply_effect` branch. No aliases —
+            // the shipped stub at registry.rs had none and the spec
+            // lists none. The builder awaits
+            // `McpServerManager::get_server_info` + N per-server
+            // `list_tools_for` calls here so the sync handler
+            // consumes pre-computed owned `McpServerEntry` values.
+            ctx.mcp_snapshot =
+                Some(mcp::build_mcp_snapshot(slash_ctx).await);
         }
         _ => {}
     }
@@ -294,6 +306,32 @@ mod tests {
             Some("cost"),
             "/cost must resolve to primary 'cost' so build_command_context \
              populates a CostSnapshot"
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // TASK-AGS-811: /mcp snapshot routing. Same rationale as AGS-807 /
+    // AGS-808 / AGS-809 — we pin the routing decision via
+    // `resolve_primary_from_input` because standing up a full
+    // `SlashCommandContext` fixture drags McpServerManager /
+    // MemoryTrait / SkillRegistry into the test crate. The primary
+    // name returned here is what `build_command_context` uses to
+    // decide whether to populate `ctx.mcp_snapshot`.
+    //
+    // /mcp is READ-ONLY, so there is no matching `apply_effect` test
+    // in this ticket — no CommandEffect variant was added for AGS-811.
+    // Also no aliases — the shipped stub had none and the AGS-811
+    // spec lists none.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn build_command_context_populates_mcp_snapshot_for_slash_mcp() {
+        let reg = default_registry();
+        assert_eq!(
+            resolve_primary_from_input("/mcp", &reg).as_deref(),
+            Some("mcp"),
+            "/mcp must resolve to primary 'mcp' so build_command_context \
+             populates an McpSnapshot"
         );
     }
 

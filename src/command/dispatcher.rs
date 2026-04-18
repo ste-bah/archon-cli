@@ -184,6 +184,10 @@ mod tests {
                 // dispatcher tests only exercise routing/parsing, not
                 // handler bodies.
                 cost_snapshot: None,
+                // TASK-AGS-811: same rationale for /mcp snapshot —
+                // dispatcher tests only exercise routing/parsing, not
+                // handler bodies.
+                mcp_snapshot: None,
                 pending_effect: None,
             },
             rx,

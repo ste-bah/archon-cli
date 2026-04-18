@@ -658,38 +658,14 @@ pub(crate) async fn handle_slash_command(
         //    ResumeHandler::execute via the registry BEFORE this arm;
         //    aliases /continue and /open-session route there too. Arm
         //    deleted per TUI-410 dead-code rule. ──────────────────
-        // ── /mcp (MCP server manager overlay) ─────────────────
-        "/mcp" => {
-            let info = ctx.mcp_manager.get_server_info().await;
-            let mut entries: Vec<archon_tui::app::McpServerEntry> = Vec::new();
-            for (name, state, disabled) in info {
-                let state_str = if disabled {
-                    "disabled"
-                } else {
-                    match state {
-                        archon_mcp::types::ServerState::Ready => "ready",
-                        archon_mcp::types::ServerState::Starting
-                        | archon_mcp::types::ServerState::Restarting => "starting",
-                        archon_mcp::types::ServerState::Crashed => "crashed",
-                        archon_mcp::types::ServerState::Stopped => "stopped",
-                    }
-                };
-                let tools = if state_str == "ready" {
-                    ctx.mcp_manager.list_tools_for(&name).await
-                } else {
-                    Vec::new()
-                };
-                entries.push(archon_tui::app::McpServerEntry {
-                    name: name.clone(),
-                    state: state_str.to_string(),
-                    tool_count: tools.len(),
-                    disabled,
-                    tools,
-                });
-            }
-            let _ = tui_tx.send(TuiEvent::ShowMcpManager(entries)).await;
-            true
-        }
+        // ── /mcp: body migrated to src/command/mcp.rs (AGS-811,
+        //    SNAPSHOT-ONLY pattern). Dispatcher PATH A at slash.rs:46
+        //    fires McpHandler::execute via the registry BEFORE this
+        //    arm; build_command_context awaits
+        //    McpServerManager::get_server_info + list_tools_for at the
+        //    dispatch site and threads an owned McpSnapshot through
+        //    CommandContext. Arm deleted per TUI-410 dead-code rule.
+        //    ──────────────────────────────────────────────────────
         // ── /fork (branch conversation) ────────────────────────
         s if s == "/fork" || s.starts_with("/fork ") => {
             let name_arg = s.strip_prefix("/fork").unwrap_or("").trim();

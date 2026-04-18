@@ -196,6 +196,9 @@ mod tests {
                 // TASK-AGS-809: /status tests never exercise /cost
                 // paths — None.
                 cost_snapshot: None,
+                // TASK-AGS-811: /status tests never exercise /mcp
+                // paths — None.
+                mcp_snapshot: None,
                 pending_effect: None,
             },
             rx,

@@ -46,6 +46,12 @@ use crate::command::cost::{CostHandler, CostSnapshot};
 // no effect slot required). Aliases extended from [continue] to
 // [continue, open-session] per spec REQ-FOR-D7 validation criterion 4.
 use crate::command::resume::ResumeHandler;
+// TASK-AGS-811: real /mcp handler lives in `crate::command::mcp`.
+// SNAPSHOT-ONLY body-migrate (async McpServerManager reads move to the
+// builder; no effect slot required — /mcp is read-only). Shipped stub
+// at registry.rs:467 is REPLACED by this import + the insert_primary
+// call below. No aliases — spec lists none and shipped stub had none.
+use crate::command::mcp::{McpHandler, McpSnapshot};
 
 /// Execution context threaded through every command handler.
 ///
@@ -125,6 +131,19 @@ pub(crate) struct CommandContext {
     /// typed snapshot field — /cost is READ-only so there is NO
     /// matching `CommandEffect` variant.
     pub(crate) cost_snapshot: Option<CostSnapshot>,
+    /// TASK-AGS-811 snapshot-pattern field (READ-only /mcp).
+    ///
+    /// Populated by `build_command_context` for `/mcp` ONLY (no
+    /// aliases). Every other command observes `None` and pays zero
+    /// additional lock traffic on `McpServerManager`. Per the AGS-822
+    /// Rule 5 extension pattern: each body-migrate ticket appends one
+    /// typed snapshot field — /mcp is READ-only so there is NO
+    /// matching `CommandEffect` variant. Subcommands `connect` /
+    /// `disconnect` / `reload` listed in the AGS-811 spec are
+    /// SCOPE-HELD (shipped wins drift-reconcile); the first ticket
+    /// that actually needs them adds the write-side field at that
+    /// point.
+    pub(crate) mcp_snapshot: Option<McpSnapshot>,
     /// TASK-AGS-808 effect-slot field (WRITE side of /model and future
     /// write-tickets).
     ///
@@ -464,7 +483,11 @@ declare_handler!(RenameHandler, "Rename the current session");
 // archon_session API reads, no snapshot/effect-slot needed). Aliases
 // migrated from [continue] to [continue, open-session] per spec
 // REQ-FOR-D7 validation criterion 4. Imported at the top of this file.
-declare_handler!(McpHandler, "Show MCP server status");
+// TASK-AGS-811: McpHandler moved to `crate::command::mcp` (real impl
+// with body-migrated execute via SNAPSHOT-ONLY pattern — async
+// `McpServerManager::get_server_info` / `list_tools_for` calls move
+// to the builder). No aliases (shipped stub had none; spec lists
+// none). Imported at the top of this file.
 declare_handler!(ForkHandler, "Fork the current session into a new branch");
 declare_handler!(CheckpointHandler, "Create or restore a session checkpoint");
 declare_handler!(AddDirHandler, "Add a directory to the working context");
@@ -967,6 +990,36 @@ mod tests {
         assert_eq!(reg.primary_for_alias("continue"), Some("resume"));
         assert_eq!(reg.primary_for_alias("open-session"), Some("resume"));
         assert_eq!(reg.primary_for_alias("resume"), None);
+    }
+
+    // -----------------------------------------------------------------
+    // TASK-AGS-811: /mcp primary registration (no aliases). The /mcp
+    // body-migrate moves McpHandler out of the declare_handler! stub
+    // and into `crate::command::mcp`. Shipped stub had no aliases and
+    // the AGS-811 spec lists none either — this test pins that
+    // invariant so future ticketing cannot silently introduce one
+    // without updating the registry collision-detection tests.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn registry_mcp_primary_with_no_aliases() {
+        let reg = default_registry();
+        let primary = reg
+            .get("mcp")
+            .expect("mcp primary must be registered post AGS-811");
+        let desc = primary.description().to_lowercase();
+        assert!(
+            desc.contains("mcp") || desc.contains("server"),
+            "McpHandler description should reference mcp/server, got: {}",
+            primary.description()
+        );
+        // `mcp` is a primary — not an alias of anything.
+        assert!(reg.is_primary("mcp"));
+        assert_eq!(reg.primary_for_alias("mcp"), None);
+        // No alias entry points to `mcp`. Walk the aliases_map via the
+        // test-only helper for a spot-check of common collision
+        // candidates — none should resolve to /mcp.
+        assert!(!reg.aliases_map_contains("mcp"));
     }
 
     #[test]
