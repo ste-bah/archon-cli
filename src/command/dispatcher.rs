@@ -180,6 +180,10 @@ mod tests {
                 // the effect slot — dispatcher tests only exercise
                 // routing/parsing, not handler bodies.
                 model_snapshot: None,
+                // TASK-AGS-809: same rationale for /cost snapshot —
+                // dispatcher tests only exercise routing/parsing, not
+                // handler bodies.
+                cost_snapshot: None,
                 pending_effect: None,
             },
             rx,

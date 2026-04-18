@@ -336,33 +336,16 @@ pub(crate) async fn handle_slash_command(
         // build_command_context before dispatch. Aliases: [info].
         // Do not re-add the legacy arm — see TUI-410 lesson.
         // ── /cost ──────────────────────────────────────────────
-        "/cost" => {
-            let stats = ctx.session_stats.lock().await;
-            let input_cost = stats.input_tokens as f64 * 3.0 / 1_000_000.0;
-            let output_cost = stats.output_tokens as f64 * 15.0 / 1_000_000.0;
-            let total = input_cost + output_cost;
-            let warn = ctx.cost_config.warn_threshold;
-            let hard = ctx.cost_config.hard_limit;
-            let hard_label = if hard <= 0.0 {
-                "$0.00 (disabled)".to_string()
-            } else {
-                format!("${hard:.2}")
-            };
-            let cache_line = stats.cache_stats.format_for_cost();
-            let msg = format!(
-                "\n\
-                 Session cost: ${total:.2}\n\
-                 Input tokens: {input_tok} (${input_cost:.2})\n\
-                 Output tokens: {output_tok} (${output_cost:.2})\n\
-                 {cache_line}\n\
-                 Warn threshold: ${warn:.2}\n\
-                 Hard limit: {hard_label}\n",
-                input_tok = stats.input_tokens,
-                output_tok = stats.output_tokens,
-            );
-            let _ = tui_tx.send(TuiEvent::TextDelta(msg)).await;
-            true
-        }
+        // Body migrated to src/command/cost.rs (TASK-AGS-809).
+        // Dispatcher at slash.rs:40-55 (PATH A hybrid) fires CostHandler
+        // via alias-aware registry lookup. CostSnapshot is populated by
+        // build_command_context before dispatch (single mutex acquisition
+        // on session_stats; cache_stats_line + hard_label pre-computed).
+        // Aliases: [billing] only — spec wanted [usage, billing] but
+        // `usage` is already a shipped primary (UsageHandler) so the
+        // collision-free subset is all we apply. See cost.rs rustdoc
+        // for the CONFIRM R-item. Do not re-add the legacy arm — see
+        // TUI-410 lesson.
         // ── /permissions ───────────────────────────────────────
         s if s.starts_with("/permissions") => {
             let arg = s.strip_prefix("/permissions").unwrap_or("").trim();

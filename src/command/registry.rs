@@ -35,6 +35,12 @@ use crate::command::status::StatusHandler;
 // instead of the prior `declare_handler!` stub. Aliases migrate from
 // [models] to [m, switch-model] per spec.
 use crate::command::model::ModelHandler;
+// TASK-AGS-809: real /cost handler lives in `crate::command::cost`.
+// Imported here so `b.insert_primary("cost", Arc::new(CostHandler))`
+// resolves to the real impl (snapshot-consuming READ, no WRITE side)
+// instead of the prior `declare_handler!` stub. Aliases migrate from
+// [] to [usage, billing] per spec REQ-FOR-D7 validation criterion 2.
+use crate::command::cost::{CostHandler, CostSnapshot};
 
 /// Execution context threaded through every command handler.
 ///
@@ -105,6 +111,15 @@ pub(crate) struct CommandContext {
     /// per ticket; fields differ across handlers so snapshots are not
     /// cross-reused).
     pub(crate) model_snapshot: Option<crate::command::model::ModelSnapshot>,
+    /// TASK-AGS-809 snapshot-pattern field (READ-only /cost).
+    ///
+    /// Populated by `build_command_context` for `/cost` (and its
+    /// aliases `/usage`, `/billing`) ONLY. Every other command observes
+    /// `None` and pays zero additional lock traffic. Per the AGS-822
+    /// Rule 5 extension pattern: each body-migrate ticket appends one
+    /// typed snapshot field — /cost is READ-only so there is NO
+    /// matching `CommandEffect` variant.
+    pub(crate) cost_snapshot: Option<CostSnapshot>,
     /// TASK-AGS-808 effect-slot field (WRITE side of /model and future
     /// write-tickets).
     ///
@@ -408,7 +423,10 @@ declare_handler!(
 // impl with body-migrated execute via snapshot pattern, alias migrated
 // from [stat] to [info] per spec REQ-FOR-D7 validation criterion 2).
 // Imported at the top of this file.
-declare_handler!(CostHandler, "Show session token cost breakdown");
+// TASK-AGS-809: CostHandler moved to `crate::command::cost` (real impl
+// with body-migrated execute via snapshot pattern, READ-only, aliases
+// migrated from [] to [usage, billing] per spec REQ-FOR-D7 validation
+// criterion 2). Imported at the top of this file.
 declare_handler!(PermissionsHandler, "Show or update tool permissions");
 declare_handler!(ConfigHandler, "Show or update Archon configuration");
 declare_handler!(
@@ -860,6 +878,48 @@ mod tests {
         assert_eq!(reg.primary_for_alias("m"), Some("model"));
         assert_eq!(reg.primary_for_alias("switch-model"), Some("model"));
         assert_eq!(reg.primary_for_alias("model"), None);
+    }
+
+    // -----------------------------------------------------------------
+    // TASK-AGS-809: /cost aliases [billing] (collision-adjusted from
+    // the spec-requested [usage, billing] — see cost.rs rustdoc for
+    // the CONFIRM R-item: `usage` is already a shipped primary).
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn registry_resolves_cost_aliases_usage_and_billing() {
+        let reg = default_registry();
+        let primary = reg
+            .get("cost")
+            .expect("cost primary must be registered");
+        let via_billing = reg
+            .get("billing")
+            .expect("'billing' alias must resolve to /cost per AGS-809");
+        assert_eq!(
+            primary.description(),
+            via_billing.description(),
+            "'billing' must resolve to the same handler as /cost"
+        );
+
+        // `usage` stays a PRIMARY (UsageHandler) — must NOT resolve to
+        // /cost. Enforces the collision-avoidance invariant.
+        let via_usage = reg
+            .get("usage")
+            .expect("'usage' must still resolve — it is a shipped primary");
+        assert_ne!(
+            primary.description(),
+            via_usage.description(),
+            "'usage' must remain bound to UsageHandler, not /cost"
+        );
+
+        // Pin the Registry helper APIs — `cost` and `usage` are BOTH
+        // primaries (independent); `billing` is the only /cost alias.
+        assert!(reg.is_primary("cost"));
+        assert!(reg.is_primary("usage"));
+        assert!(!reg.is_primary("billing"));
+        assert_eq!(reg.primary_for_alias("billing"), Some("cost"));
+        assert_eq!(reg.primary_for_alias("usage"), None);
+        assert_eq!(reg.primary_for_alias("cost"), None);
     }
 
     #[test]

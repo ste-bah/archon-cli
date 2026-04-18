@@ -222,6 +222,9 @@ mod tests {
                 // TASK-AGS-808: /tasks tests never read the /model
                 // snapshot or stash a CommandEffect — None on both.
                 model_snapshot: None,
+                // TASK-AGS-809: /tasks tests never read the /cost
+                // snapshot — None is correct.
+                cost_snapshot: None,
                 pending_effect: None,
             },
             rx,

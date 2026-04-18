@@ -17,15 +17,16 @@
 use archon_tui::app::TuiEvent;
 
 use crate::command::registry::{CommandContext, CommandEffect, Registry};
-use crate::command::{model, status};
+use crate::command::{cost, model, status};
 use crate::slash_context::SlashCommandContext;
 
 /// Build the per-dispatch [`CommandContext`] for the supplied slash
 /// `input`. Awaits the lock-protected shared state ONLY when the primary
 /// command resolves to a handler that consumes one of the typed
 /// snapshots (currently: `/status` -> [`status::StatusSnapshot`],
-/// `/model` -> [`model::ModelSnapshot`]). Other primaries observe every
-/// optional field as `None` and pay zero lock traffic.
+/// `/model` -> [`model::ModelSnapshot`], `/cost` ->
+/// [`cost::CostSnapshot`]). Other primaries observe every optional
+/// field as `None` and pay zero lock traffic.
 ///
 /// # Panics
 ///
@@ -42,6 +43,7 @@ pub(crate) async fn build_command_context(
         tui_tx,
         status_snapshot: None,
         model_snapshot: None,
+        cost_snapshot: None,
         pending_effect: None,
     };
 
@@ -60,6 +62,14 @@ pub(crate) async fn build_command_context(
         Some("model") => {
             ctx.model_snapshot =
                 Some(model::build_model_snapshot(slash_ctx).await);
+        }
+        Some("cost") => {
+            // TASK-AGS-809 snapshot population. /cost is read-only,
+            // so there is no paired `apply_effect` branch. The alias
+            // `billing` also routes here via the registry alias map;
+            // `usage` remains a separate primary (UsageHandler).
+            ctx.cost_snapshot =
+                Some(cost::build_cost_snapshot(slash_ctx).await);
         }
         _ => {}
     }
@@ -260,6 +270,56 @@ mod tests {
             got, "claude-sonnet-4-6",
             "apply_effect must overwrite model_override_shared with the \
              resolved full model id"
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // TASK-AGS-809: /cost snapshot routing. Same rationale as AGS-807 +
+    // AGS-808 — we pin the routing decision via
+    // `resolve_primary_from_input` because standing up a full
+    // `SlashCommandContext` fixture drags McpServerManager /
+    // MemoryTrait / SkillRegistry into the test crate. The primary
+    // name returned here is what `build_command_context` uses to
+    // decide whether to populate `ctx.cost_snapshot`.
+    //
+    // /cost is READ-ONLY, so there is no matching `apply_effect` test
+    // in this ticket — no CommandEffect variant was added for AGS-809.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn build_command_context_populates_cost_snapshot_for_slash_cost() {
+        let reg = default_registry();
+        assert_eq!(
+            resolve_primary_from_input("/cost", &reg).as_deref(),
+            Some("cost"),
+            "/cost must resolve to primary 'cost' so build_command_context \
+             populates a CostSnapshot"
+        );
+    }
+
+    #[test]
+    fn build_command_context_populates_cost_snapshot_for_slash_billing_alias() {
+        // Spec wanted `/usage` as an alias for /cost, but `usage` is
+        // already a shipped primary (UsageHandler). Only `/billing`
+        // routes to /cost; `/usage` remains bound to UsageHandler.
+        // See cost.rs module rustdoc + the CONFIRM R-item in the
+        // AGS-809 executor report.
+        let reg = default_registry();
+        assert_eq!(
+            resolve_primary_from_input("/billing", &reg).as_deref(),
+            Some("cost"),
+            "alias '/billing' must route through the registry alias map \
+             back to primary 'cost' so build_command_context fires the \
+             cost snapshot branch"
+        );
+        // Sanity: /usage must NOT route to 'cost'. It is a primary in
+        // its own right and its snapshot branch (if any) belongs to a
+        // future UsageHandler body-migrate, not AGS-809.
+        assert_eq!(
+            resolve_primary_from_input("/usage", &reg).as_deref(),
+            Some("usage"),
+            "/usage is a shipped primary (UsageHandler); must NOT resolve \
+             to 'cost'"
         );
     }
 }

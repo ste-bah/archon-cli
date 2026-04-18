@@ -193,6 +193,9 @@ mod tests {
                 // TASK-AGS-808: /status tests never exercise /model
                 // paths — None on both new fields.
                 model_snapshot: None,
+                // TASK-AGS-809: /status tests never exercise /cost
+                // paths — None.
+                cost_snapshot: None,
                 pending_effect: None,
             },
             rx,

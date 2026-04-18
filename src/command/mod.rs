@@ -12,6 +12,7 @@ pub(crate) mod agent;
 pub(crate) mod background;
 pub(crate) mod config;
 pub(crate) mod context;
+pub(crate) mod cost;
 pub(crate) mod dispatcher;
 pub(crate) mod doctor;
 pub(crate) mod errors;

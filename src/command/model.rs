@@ -165,6 +165,9 @@ mod tests {
                 tui_tx: tx,
                 status_snapshot: None,
                 model_snapshot: snapshot,
+                // TASK-AGS-809: /model tests never exercise /cost
+                // paths — None.
+                cost_snapshot: None,
                 pending_effect: None,
             },
             rx,
