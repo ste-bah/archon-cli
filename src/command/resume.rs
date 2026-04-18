@@ -221,6 +221,8 @@ mod tests {
                 cost_snapshot: None,
                 // TASK-AGS-811: /resume tests never exercise /mcp paths — None.
                 mcp_snapshot: None,
+                // TASK-AGS-814: /resume tests never exercise /context paths — None.
+                context_snapshot: None,
                 pending_effect: None,
             },
             rx,

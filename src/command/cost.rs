@@ -250,6 +250,8 @@ mod tests {
                 cost_snapshot: snapshot,
                 // TASK-AGS-811: /cost tests never exercise /mcp paths — None.
                 mcp_snapshot: None,
+                // TASK-AGS-814: /cost tests never exercise /context paths — None.
+                context_snapshot: None,
                 pending_effect: None,
             },
             rx,

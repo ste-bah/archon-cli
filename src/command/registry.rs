@@ -58,6 +58,16 @@ use crate::command::mcp::{McpHandler, McpSnapshot};
 // no snapshot/effect-slot needed. No aliases (spec lists none). Primary
 // count grows from 38 -> 39.
 use crate::command::hooks::HooksHandler;
+// TASK-AGS-814: real /context handler lives in `crate::command::context_cmd`.
+// SNAPSHOT-ONLY body-migrate (single `session_stats.lock().await` moves
+// to the builder; no effect slot required — /context is read-only).
+// Shipped `declare_handler!(ContextHandler, ...)` stub at registry.rs:447
+// is REPLACED by this import + the insert_primary call below. Aliases
+// drop from shipped stub's `["ctx"]` to `[]` because the legacy match
+// arm in slash.rs only matched `/context` literally — `/ctx` never
+// worked. File name is `context_cmd.rs` not `context.rs` to avoid a
+// collision with the existing `crate::command::context` builder module.
+use crate::command::context_cmd::{ContextHandler, ContextSnapshot};
 
 /// Execution context threaded through every command handler.
 ///
@@ -150,6 +160,16 @@ pub(crate) struct CommandContext {
     /// that actually needs them adds the write-side field at that
     /// point.
     pub(crate) mcp_snapshot: Option<McpSnapshot>,
+    /// TASK-AGS-814 snapshot-pattern field (READ-only /context).
+    ///
+    /// Populated by `build_command_context` for `/context` ONLY (no
+    /// aliases — the shipped stub's `ctx` alias was cosmetic; see
+    /// `context_cmd.rs` module rustdoc). Every other command observes
+    /// `None` and pays zero additional lock traffic on `session_stats`.
+    /// Per the AGS-822 Rule 5 extension pattern: each body-migrate
+    /// ticket appends one typed snapshot field — /context is READ-only
+    /// so there is NO matching `CommandEffect` variant.
+    pub(crate) context_snapshot: Option<ContextSnapshot>,
     /// TASK-AGS-808 effect-slot field (WRITE side of /model and future
     /// write-tickets).
     ///
@@ -444,11 +464,11 @@ declare_handler!(GardenHandler, "Run memory garden consolidation or show stats")
 // effect-slot pattern for WRITE, aliases migrated from [models] to
 // [m, switch-model] per spec). Imported at the top of this file.
 declare_handler!(CopyHandler, "Copy the last assistant message to the clipboard");
-declare_handler!(
-    ContextHandler,
-    "Show current context window usage",
-    &["ctx"]
-);
+// TASK-AGS-814: ContextHandler moved to `crate::command::context_cmd`
+// (real impl with body-migrated execute via SNAPSHOT-ONLY pattern,
+// aliases dropped from stub's [ctx] to []). Imported at the top of
+// this file. See module rustdoc for the naming rationale
+// (`context_cmd.rs` not `context.rs` — collision with builder module).
 // TASK-AGS-807: StatusHandler moved to `crate::command::status` (real
 // impl with body-migrated execute via snapshot pattern, alias migrated
 // from [stat] to [info] per spec REQ-FOR-D7 validation criterion 2).
@@ -1067,6 +1087,48 @@ mod tests {
         assert_eq!(reg.primary_for_alias("hooks"), None);
         // No alias entry points to `hooks`.
         assert!(!reg.aliases_map_contains("hooks"));
+    }
+
+    // -----------------------------------------------------------------
+    // TASK-AGS-814: /context primary registration (no aliases). The
+    // /context body-migrate moves ContextHandler out of the
+    // declare_handler! stub and into `crate::command::context_cmd`.
+    // Shipped stub had `&["ctx"]` but the legacy match arm in slash.rs
+    // only matched `/context` literally — the alias was cosmetic. Real
+    // handler drops it to `&[]` to align with user-visible behaviour.
+    // Pin the invariant so future ticketing cannot silently re-add
+    // `ctx` (or any other alias) without updating the registry
+    // collision-detection tests.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn registry_context_primary_with_no_aliases() {
+        let reg = default_registry();
+        let primary = reg
+            .get("context")
+            .expect("context primary must be registered post AGS-814");
+        let desc = primary.description().to_lowercase();
+        assert!(
+            desc.contains("context")
+                || desc.contains("window")
+                || desc.contains("usage"),
+            "ContextHandler description should reference \
+             context/window/usage, got: {}",
+            primary.description()
+        );
+        // `context` is a primary — not an alias of anything.
+        assert!(reg.is_primary("context"));
+        assert_eq!(reg.primary_for_alias("context"), None);
+        // No alias entry points to `context`. Also spot-check that
+        // the shipped stub's `ctx` alias is GONE — AGS-814 drops it.
+        assert!(!reg.aliases_map_contains("context"));
+        assert!(
+            !reg.aliases_map_contains("ctx"),
+            "'ctx' alias must NOT be registered post AGS-814 — the \
+             shipped stub had it but the legacy match arm only matched \
+             `/context` literally so the alias was cosmetic"
+        );
+        assert_eq!(reg.primary_for_alias("ctx"), None);
     }
 
     #[test]

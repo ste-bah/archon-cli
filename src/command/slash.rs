@@ -265,70 +265,15 @@ pub(crate) async fn handle_slash_command(
             true
         }
         // ── /context ────────────────────────────────────────────
-        "/context" => {
-            let stats = ctx.session_stats.lock().await;
-            let input_k = stats.input_tokens as f64 / 1000.0;
-            let output_k = stats.output_tokens as f64 / 1000.0;
-
-            // Estimate token counts from character sizes (~4 chars per token)
-            let sys_prompt_tokens = ctx.system_prompt_chars as f64 / 4.0;
-            let tool_def_tokens = ctx.tool_defs_chars as f64 / 4.0;
-
-            // Conversation tokens: input tokens minus the fixed overhead
-            // (system prompt + tools are sent every turn, so the last
-            // input_tokens from the API already includes them).
-            let fixed_overhead = sys_prompt_tokens + tool_def_tokens;
-            let conversation_tokens = if stats.input_tokens > 0 {
-                (stats.input_tokens as f64).max(fixed_overhead) - fixed_overhead
-            } else {
-                0.0
-            };
-
-            // Total estimated context = fixed overhead + conversation
-            let total_context = fixed_overhead + conversation_tokens;
-
-            let context_limit = 200_000.0_f64;
-            let pct = (total_context / context_limit * 100.0).min(100.0);
-            let bar_width = 40usize;
-            let filled = (pct / 100.0 * bar_width as f64) as usize;
-            let bar: String = format!(
-                "[{}{}] {pct:.1}%",
-                "#".repeat(filled),
-                "-".repeat(bar_width.saturating_sub(filled))
-            );
-
-            // Format a token count nicely (e.g. 3.2k or 312)
-            let fmt_tok = |t: f64| -> String {
-                if t >= 1000.0 {
-                    format!("{:.1}k", t / 1000.0)
-                } else {
-                    format!("{:.0}", t)
-                }
-            };
-
-            let msg = format!(
-                "\nContext window usage:\n\
-                 {bar}\n\
-                 \n\
-                 System prompt:    ~{sys} tokens\n\
-                 Tool definitions: ~{tools} tokens\n\
-                 Conversation:     ~{conv} tokens\n\
-                 Total context:    ~{total} / {limit}k tokens\n\
-                 \n\
-                 API usage this session:\n\
-                 Input:  {input_k:.1}k tokens\n\
-                 Output: {output_k:.1}k tokens\n\
-                 Turns:  {turns}\n",
-                sys = fmt_tok(sys_prompt_tokens),
-                tools = fmt_tok(tool_def_tokens),
-                conv = fmt_tok(conversation_tokens),
-                total = fmt_tok(total_context),
-                limit = context_limit as u64 / 1000,
-                turns = stats.turn_count,
-            );
-            let _ = tui_tx.send(TuiEvent::TextDelta(msg)).await;
-            true
-        }
+        // Body migrated to src/command/context_cmd.rs (TASK-AGS-814).
+        // Dispatcher at slash.rs:40-45 (PATH A hybrid) fires
+        // ContextHandler via registry lookup. ContextSnapshot is
+        // populated by build_command_context before dispatch
+        // (single `session_stats.lock().await` in the builder —
+        // SNAPSHOT-ONLY pattern). Aliases dropped from stub's
+        // `["ctx"]` to `[]` because the legacy match arm only matched
+        // `/context` literally — `/ctx` never worked for users. Do not
+        // re-add the legacy arm — TUI-410 dead-code lesson.
         // ── /status ────────────────────────────────────────────
         // Body migrated to src/command/status.rs (TASK-AGS-807).
         // Dispatcher at slash.rs:35-41 (PATH A hybrid) fires StatusHandler

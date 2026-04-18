@@ -228,6 +228,9 @@ mod tests {
                 // TASK-AGS-811: /tasks tests never read the /mcp
                 // snapshot — None is correct.
                 mcp_snapshot: None,
+                // TASK-AGS-814: /tasks tests never read the /context
+                // snapshot — None is correct.
+                context_snapshot: None,
                 pending_effect: None,
             },
             rx,

@@ -247,6 +247,8 @@ mod tests {
                 model_snapshot: None,
                 cost_snapshot: None,
                 mcp_snapshot: snapshot,
+                // TASK-AGS-814: /mcp tests never exercise /context paths — None.
+                context_snapshot: None,
                 pending_effect: None,
             },
             rx,

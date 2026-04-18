@@ -188,6 +188,10 @@ mod tests {
                 // dispatcher tests only exercise routing/parsing, not
                 // handler bodies.
                 mcp_snapshot: None,
+                // TASK-AGS-814: same rationale for /context snapshot —
+                // dispatcher tests only exercise routing/parsing, not
+                // handler bodies.
+                context_snapshot: None,
                 pending_effect: None,
             },
             rx,

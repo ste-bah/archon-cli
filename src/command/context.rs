@@ -17,7 +17,7 @@
 use archon_tui::app::TuiEvent;
 
 use crate::command::registry::{CommandContext, CommandEffect, Registry};
-use crate::command::{cost, mcp, model, status};
+use crate::command::{context_cmd, cost, mcp, model, status};
 use crate::slash_context::SlashCommandContext;
 
 /// Build the per-dispatch [`CommandContext`] for the supplied slash
@@ -45,6 +45,7 @@ pub(crate) async fn build_command_context(
         model_snapshot: None,
         cost_snapshot: None,
         mcp_snapshot: None,
+        context_snapshot: None,
         pending_effect: None,
     };
 
@@ -82,6 +83,17 @@ pub(crate) async fn build_command_context(
             // consumes pre-computed owned `McpServerEntry` values.
             ctx.mcp_snapshot =
                 Some(mcp::build_mcp_snapshot(slash_ctx).await);
+        }
+        Some("context") => {
+            // TASK-AGS-814 snapshot population. /context is read-only,
+            // so there is no paired `apply_effect` branch. No aliases —
+            // the shipped stub carried `["ctx"]` but the legacy match
+            // arm only matched `/context` literally, so the alias was
+            // cosmetic (see context_cmd.rs module rustdoc). The
+            // builder awaits a single `session_stats.lock()` here so
+            // the sync handler consumes pre-captured owned counters.
+            ctx.context_snapshot =
+                Some(context_cmd::build_context_snapshot(slash_ctx).await);
         }
         _ => {}
     }
@@ -332,6 +344,32 @@ mod tests {
             Some("mcp"),
             "/mcp must resolve to primary 'mcp' so build_command_context \
              populates an McpSnapshot"
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // TASK-AGS-814: /context snapshot routing. Same rationale as
+    // AGS-807/808/809/811 — we pin the routing decision via
+    // `resolve_primary_from_input` because standing up a full
+    // `SlashCommandContext` fixture drags McpServerManager /
+    // MemoryTrait / SkillRegistry into the test crate. The primary
+    // name returned here is what `build_command_context` uses to
+    // decide whether to populate `ctx.context_snapshot`.
+    //
+    // /context is READ-ONLY, so there is no matching `apply_effect`
+    // test in this ticket — no CommandEffect variant was added for
+    // AGS-814. No aliases either — shipped stub's `ctx` alias was
+    // cosmetic (legacy match arm only matched `/context` literally).
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn build_command_context_populates_context_snapshot_for_slash_context() {
+        let reg = default_registry();
+        assert_eq!(
+            resolve_primary_from_input("/context", &reg).as_deref(),
+            Some("context"),
+            "/context must resolve to primary 'context' so \
+             build_command_context populates a ContextSnapshot"
         );
     }
 

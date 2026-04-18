@@ -194,6 +194,8 @@ mod tests {
                 model_snapshot: None,
                 cost_snapshot: None,
                 mcp_snapshot: None,
+                // TASK-AGS-814: /hooks tests never exercise /context paths — None.
+                context_snapshot: None,
                 pending_effect: None,
             },
             rx,
