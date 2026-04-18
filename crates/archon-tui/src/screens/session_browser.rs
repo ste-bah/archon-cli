@@ -227,19 +227,18 @@ impl SessionBrowser {
 }
 
 impl SessionBrowser {
-    /// Create a default SessionBrowser (used only for testing with no store).
-    #[cfg(test)]
-    fn new_for_tests() -> Self {
+    /// Create a SessionBrowser with a temporary test store.
+    /// This is intended for testing scenarios where a real store is needed.
+    pub fn new_for_tests() -> Self {
         use archon_session::storage::SessionStore;
         // Create an in-memory store for testing
         let temp_dir = tempfile::tempdir().expect("temp dir");
-        let store = SessionStore::open(temp_dir.path().join("test.db"))
+        let store = SessionStore::open(&temp_dir.path().join("test.db"))
             .expect("test store");
         Self::new(Arc::new(store))
     }
 }
 
-#[cfg(test)]
 impl Default for SessionBrowser {
     fn default() -> Self {
         Self::new_for_tests()

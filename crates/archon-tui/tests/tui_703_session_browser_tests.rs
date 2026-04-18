@@ -17,7 +17,7 @@ fn test_session_browser_new_accepts_store() {
     // Create a mock or use test infrastructure
     // SessionBrowser::new should take Arc<SessionStore>
     // For this test, we verify the constructor signature exists
-    let browser = SessionBrowser::new();
+    let browser = SessionBrowser::default();
     // Browser should start empty with no store interaction yet
     assert!(browser.is_empty());
 }
@@ -42,7 +42,7 @@ fn test_session_summary_fields() {
 /// Gate 1: Verify move_cursor_down does not exceed sessions.len() - 1.
 #[test]
 fn test_move_cursor_down_bounded() {
-    let mut browser = SessionBrowser::new();
+    let mut browser = SessionBrowser::default();
 
     // Add 3 sessions
     let sessions = vec![
@@ -86,7 +86,7 @@ fn test_move_cursor_down_bounded() {
 /// Gate 1: Verify move_cursor_up does not go below 0.
 #[test]
 fn test_move_cursor_up_bounded() {
-    let mut browser = SessionBrowser::new();
+    let mut browser = SessionBrowser::default();
 
     let sessions = vec![
         SessionSummary {
@@ -121,14 +121,14 @@ fn test_move_cursor_up_bounded() {
 /// Gate 1: Verify selected() returns None when sessions is empty.
 #[test]
 fn test_selected_returns_none_when_empty() {
-    let browser = SessionBrowser::new();
+    let browser = SessionBrowser::default();
     assert!(browser.selected().is_none());
 }
 
 /// Gate 1: Verify selected() returns the session at cursor position.
 #[test]
 fn test_selected_returns_session_at_cursor() {
-    let mut browser = SessionBrowser::new();
+    let mut browser = SessionBrowser::default();
 
     let sessions = vec![
         SessionSummary {
@@ -163,7 +163,7 @@ fn test_refresh_populates_sessions() {
     // The actual refresh() is async and queries the SessionStore.
     // Here we verify that after refresh, sessions are populated.
 
-    let browser = SessionBrowser::new();
+    let browser = SessionBrowser::default();
     // Before refresh, should be empty
     assert!(browser.is_empty());
 
@@ -175,7 +175,7 @@ fn test_refresh_populates_sessions() {
 /// Gate 1: Verify cursor wraps or is bounded at boundaries.
 #[test]
 fn test_cursor_wraps_at_boundaries() {
-    let mut browser = SessionBrowser::new();
+    let mut browser = SessionBrowser::default();
 
     let sessions = vec![
         SessionSummary {
@@ -233,7 +233,7 @@ fn test_session_state_with_session() {
 /// Gate 1: Verify state() accessor returns SessionState.
 #[test]
 fn test_state_accessor() {
-    let browser = SessionBrowser::new();
+    let browser = SessionBrowser::default();
     let state = browser.state();
     assert!(state.current_id.is_none());
 }
@@ -241,7 +241,7 @@ fn test_state_accessor() {
 /// Gate 1: Verify set_sessions updates both sessions vec and resets cursor appropriately.
 #[test]
 fn test_set_sessions_updates_list() {
-    let mut browser = SessionBrowser::new();
+    let mut browser = SessionBrowser::default();
 
     // Initially empty
     assert!(browser.is_empty());
