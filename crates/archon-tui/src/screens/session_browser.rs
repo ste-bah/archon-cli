@@ -136,6 +136,45 @@ impl Default for SessionBrowser {
     }
 }
 
+/// Represents the outcome of attempting to resume a session.
+/// EC-TUI-016: Context overflow handling when resuming sessions with large histories.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ResumeOutcome {
+    /// Session was successfully restored.
+    Restored {
+        /// The session ID that was restored.
+        session_id: String,
+        /// Number of messages loaded from the session history.
+        messages_loaded: usize,
+    },
+    /// Session restore failed due to context overflow.
+    /// EC-TUI-016: Context limit exceeded, action taken to handle overflow.
+    ContextOverflow {
+        /// Estimated token count at time of overflow.
+        estimated_tokens: u64,
+        /// The context limit that was exceeded.
+        limit: u64,
+        /// The action taken to handle the overflow.
+        action: OverflowAction,
+    },
+    /// Session was not found in storage.
+    NotFound,
+}
+
+/// Actions that can be taken when context overflow occurs.
+/// TruncateOldest: Removes oldest messages until context is at 90% of limit.
+/// SwitchModel: Switches to a model with larger context window.
+/// Cancelled: User cancelled the operation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OverflowAction {
+    /// Truncate oldest messages to bring context within limit (90% of limit).
+    TruncateOldest(usize),
+    /// Switch to a different model with larger context window.
+    SwitchModel(String),
+    /// Operation was cancelled.
+    Cancelled,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
