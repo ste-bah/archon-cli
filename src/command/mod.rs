@@ -16,6 +16,7 @@ pub(crate) mod cost;
 pub(crate) mod dispatcher;
 pub(crate) mod doctor;
 pub(crate) mod errors;
+pub(crate) mod hooks;
 pub(crate) mod ide_stdio;
 pub(crate) mod login;
 pub(crate) mod mcp;

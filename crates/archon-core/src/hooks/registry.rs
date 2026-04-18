@@ -19,6 +19,29 @@ struct HookEntry {
     matcher: HookMatcher,
 }
 
+/// Per-hook summary exposed for UI enumeration (e.g. `/hooks list`).
+///
+/// Flat shape: one `HookSummary` per individual `HookConfig` in the
+/// registry (matchers are exploded). Consumers that need to group hooks
+/// back under their matcher can do so by `(event, matcher)` key.
+///
+/// Added for TASK-AGS-812 — the shipped registry keeps `HookEntry`
+/// private, so external callers had no way to enumerate per-hook detail
+/// beyond the aggregate `hook_count()`.
+#[derive(Debug, Clone)]
+pub struct HookSummary {
+    /// The event this hook fires on.
+    pub event: HookEvent,
+    /// Optional tool-name matcher (e.g. `"Bash"`, `"*"`, `None` = any).
+    pub matcher: Option<String>,
+    /// The shell command or URL the hook runs (verbatim from `HookConfig.command`).
+    pub command: String,
+    /// The source-authority tag assigned at load time: `"user"`,
+    /// `"project"`, `"local"`, `"policy"`, or `None` for in-memory /
+    /// test-only registrations.
+    pub source: Option<String>,
+}
+
 /// Registry of hook matchers, organized by `HookEvent`.
 ///
 /// Loaded once at startup from `.archon/settings.json` and optionally
@@ -437,6 +460,45 @@ impl HookRegistry {
             .sum()
     }
 
+    /// Iterate every registered hook as a flat `HookSummary` vector in a
+    /// stable order (events sorted by `Debug` name, matchers in
+    /// registration order, hooks in declaration order).
+    ///
+    /// Introduced for the `/hooks list` slash command (TASK-AGS-812).
+    /// The shipped `entries` field is `HashMap<HookEvent, Vec<HookEntry>>`
+    /// with `HookEntry` private (holds `source` tag + inner `HookMatcher`
+    /// which owns the `Vec<HookConfig>`). Neither `HookEntry` nor its
+    /// owning `Vec` is `pub` — this accessor is the only sanctioned way
+    /// to enumerate per-hook detail without leaking internals.
+    ///
+    /// `HookSummary` carries exactly the four fields `/hooks list`
+    /// renders: event variant, optional matcher string, hook command
+    /// text, and optional source-authority tag (`"user"`, `"project"`,
+    /// `"local"`, `"policy"`, or `None` for in-memory/test registrations).
+    pub fn summaries(&self) -> Vec<HookSummary> {
+        let mut events: Vec<HookEvent> = self.entries.keys().cloned().collect();
+        // Stable ordering across HashMap iteration: sort by Debug name.
+        events.sort_by_key(|e| format!("{e:?}"));
+
+        let mut out: Vec<HookSummary> = Vec::new();
+        for event in events {
+            let Some(entries) = self.entries.get(&event) else {
+                continue;
+            };
+            for entry in entries {
+                for hook in &entry.matcher.hooks {
+                    out.push(HookSummary {
+                        event: event.clone(),
+                        matcher: entry.matcher.matcher.clone(),
+                        command: hook.command.clone(),
+                        source: entry.source.clone(),
+                    });
+                }
+            }
+        }
+        out
+    }
+
     /// Register an in-process callback for the given event.
     pub fn register_callback(&self, event: HookEvent, entry: HookCallbackEntry) {
         let mut map = self.callbacks.write().unwrap_or_else(|p| p.into_inner());
@@ -534,4 +596,80 @@ fn matcher_matches(matcher: &str, tool_name: &str) -> bool {
 
 fn make_once_key(event_name: &str, source: &Option<String>, command: &str) -> String {
     format!("{event_name}:{}:{command}", source.as_deref().unwrap_or(""))
+}
+
+// ---------------------------------------------------------------------------
+// TASK-AGS-812: unit test for the new `summaries()` public accessor.
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod summaries_tests {
+    use super::*;
+    use crate::hooks::types::{HookCommandType, HookConfig, HookMatcher};
+
+    fn make_hook(cmd: &str) -> HookConfig {
+        HookConfig {
+            hook_type: HookCommandType::Command,
+            command: cmd.to_string(),
+            if_condition: None,
+            timeout: None,
+            once: None,
+            r#async: None,
+            async_rewake: None,
+            status_message: None,
+            headers: std::collections::HashMap::new(),
+            allowed_env_vars: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn summaries_empty_registry_is_empty() {
+        let reg = HookRegistry::new();
+        assert_eq!(reg.summaries().len(), 0);
+    }
+
+    #[test]
+    fn summaries_exposes_every_hook_with_source_and_matcher() {
+        let mut reg = HookRegistry::new();
+        reg.register_matchers(
+            HookEvent::PreToolUse,
+            vec![HookMatcher {
+                matcher: Some("Bash".to_string()),
+                hooks: vec![make_hook("guard-secrets"), make_hook("audit-log")],
+            }],
+            Some("project"),
+        );
+        reg.register_matchers(
+            HookEvent::SessionStart,
+            vec![HookMatcher {
+                matcher: None,
+                hooks: vec![make_hook("welcome.sh")],
+            }],
+            Some("user"),
+        );
+
+        let summaries = reg.summaries();
+        assert_eq!(
+            summaries.len(),
+            3,
+            "summaries() must produce one entry per HookConfig (2 + 1 = 3)"
+        );
+
+        // Stable ordering: PreToolUse sorts before SessionStart (Debug
+        // name lexicographic). Walk and assert the full payload.
+        assert_eq!(summaries[0].event, HookEvent::PreToolUse);
+        assert_eq!(summaries[0].matcher.as_deref(), Some("Bash"));
+        assert_eq!(summaries[0].command, "guard-secrets");
+        assert_eq!(summaries[0].source.as_deref(), Some("project"));
+
+        assert_eq!(summaries[1].event, HookEvent::PreToolUse);
+        assert_eq!(summaries[1].matcher.as_deref(), Some("Bash"));
+        assert_eq!(summaries[1].command, "audit-log");
+        assert_eq!(summaries[1].source.as_deref(), Some("project"));
+
+        assert_eq!(summaries[2].event, HookEvent::SessionStart);
+        assert!(summaries[2].matcher.is_none());
+        assert_eq!(summaries[2].command, "welcome.sh");
+        assert_eq!(summaries[2].source.as_deref(), Some("user"));
+    }
 }

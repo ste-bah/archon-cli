@@ -52,6 +52,12 @@ use crate::command::resume::ResumeHandler;
 // at registry.rs:467 is REPLACED by this import + the insert_primary
 // call below. No aliases — spec lists none and shipped stub had none.
 use crate::command::mcp::{McpHandler, McpSnapshot};
+// TASK-AGS-812: NEW /hooks primary (Q4=A gap-fix — `/hooks` did not
+// exist in shipped slash.rs or registry.rs pre-AGS-812). DIRECT-pattern
+// handler — sync `HookRegistry::load_all` + new `summaries()` accessor,
+// no snapshot/effect-slot needed. No aliases (spec lists none). Primary
+// count grows from 38 -> 39.
+use crate::command::hooks::HooksHandler;
 
 /// Execution context threaded through every command handler.
 ///
@@ -547,6 +553,8 @@ pub(crate) fn default_registry() -> Registry {
     b.insert_primary("rename", Arc::new(RenameHandler));
     b.insert_primary("resume", Arc::new(ResumeHandler));
     b.insert_primary("mcp", Arc::new(McpHandler));
+    // TASK-AGS-812: NEW /hooks primary (gap-fix Q4=A, no aliases).
+    b.insert_primary("hooks", Arc::new(HooksHandler));
     b.insert_primary("fork", Arc::new(ForkHandler));
     b.insert_primary("checkpoint", Arc::new(CheckpointHandler));
     b.insert_primary("add-dir", Arc::new(AddDirHandler));
@@ -577,7 +585,10 @@ mod tests {
     ///
     /// TASK-AGS-805 adds `/cancel` (gap-fix thin wrapper) as a new
     /// primary, bringing the total to 38.
-    const EXPECTED_COMMAND_COUNT: usize = 38;
+    ///
+    /// TASK-AGS-812 adds `/hooks` (gap-fix Q4=A) as a new primary,
+    /// bringing the total to 39.
+    const EXPECTED_COMMAND_COUNT: usize = 39;
 
     #[test]
     fn default_registry_contains_all_commands() {
@@ -1000,6 +1011,35 @@ mod tests {
     // invariant so future ticketing cannot silently introduce one
     // without updating the registry collision-detection tests.
     // -----------------------------------------------------------------
+
+    // -----------------------------------------------------------------
+    // TASK-AGS-812: /hooks primary registration (no aliases). The
+    // /hooks gap-fix adds a brand-new primary — there was NO prior
+    // /hooks entry in the shipped match block or registry. Pin the
+    // invariant so future ticketing cannot silently introduce an
+    // alias without updating the registry collision-detection tests,
+    // and cannot silently promote a sibling handler to share the
+    // `hooks` primary name.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn registry_hooks_primary_with_no_aliases() {
+        let reg = default_registry();
+        let primary = reg
+            .get("hooks")
+            .expect("hooks primary must be registered post AGS-812");
+        let desc = primary.description().to_lowercase();
+        assert!(
+            desc.contains("hook"),
+            "HooksHandler description should reference 'hook', got: {}",
+            primary.description()
+        );
+        // `hooks` is a primary — not an alias of anything.
+        assert!(reg.is_primary("hooks"));
+        assert_eq!(reg.primary_for_alias("hooks"), None);
+        // No alias entry points to `hooks`.
+        assert!(!reg.aliases_map_contains("hooks"));
+    }
 
     #[test]
     fn registry_mcp_primary_with_no_aliases() {
