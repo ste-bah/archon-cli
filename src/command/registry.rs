@@ -84,6 +84,18 @@ use crate::command::context_cmd::{ContextHandler, ContextSnapshot};
 // count grows from 39 -> 40 (SECOND Batch-3 NEW-primary after AGS-812
 // /hooks, which took the count from 38 -> 39).
 use crate::command::voice::VoiceHandler;
+// TASK-AGS-818: real /export handler lives in `crate::command::export`.
+// CANARY-pattern registry-hygiene migration (Option D) — shipped
+// /export body stays in session.rs:2409-2480 (intercept-before-
+// dispatcher) under a zero-diff invariant held since AGS-805. The
+// handler here exists only to (a) clear the `declare_handler!` stub
+// and (b) emit a diagnostic canary message if the dispatcher ever DOES
+// reach it, which would signal a dispatch-ordering regression. Aliases
+// `["save"]` are PRESERVED per shipped-wins drift-reconcile (AGS-817
+// /memory precedent). Real body-migrate deferred to POST-STAGE-6
+// (ticket AGS-POST-6-EXPORT). See `src/command/export.rs` module
+// rustdoc for R1..R5.
+use crate::command::export::ExportHandler;
 // TASK-AGS-817: real /memory handler lives in `crate::command::memory`.
 // DIRECT-pattern body-migrate (sync `archon_memory::MemoryTrait` — all
 // 12 methods plain `fn`; no snapshot/effect-slot needed). The handler
@@ -510,11 +522,14 @@ macro_rules! declare_handler {
 declare_handler!(FastHandler, "Toggle fast mode (lower quality, faster responses)");
 declare_handler!(CompactHandler, "Compact the current conversation history");
 declare_handler!(ClearHandler, "Clear the current conversation", &["cls"]);
-declare_handler!(
-    ExportHandler,
-    "Export the current session to a file",
-    &["save"]
-);
+// TASK-AGS-818: ExportHandler moved to `crate::command::export` (real
+// impl with CANARY-pattern execute body — session.rs:2409-2480
+// intercepts /export before the handler is reachable, so arrival at
+// the handler indicates a dispatch ordering bug; see export.rs module
+// rustdoc for R1..R5). Aliases `["save"]` are PRESERVED per shipped-
+// wins drift-reconcile (AGS-817 /memory precedent). Imported at the
+// top of this file. Real body-migrate deferred to POST-STAGE-6
+// (ticket AGS-POST-6-EXPORT).
 declare_handler!(ThinkingHandler, "Toggle extended thinking display on/off");
 declare_handler!(EffortHandler, "Show or set reasoning effort (high|medium|low)");
 declare_handler!(GardenHandler, "Run memory garden consolidation or show stats");
@@ -1320,6 +1335,51 @@ mod tests {
             primary.description(),
             via_alias.description(),
             "'mem' must resolve to the same handler as /memory"
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // TASK-AGS-818: /export primary registration (alias: `save`). The
+    // /export body-migrate (Option D / CANARY pattern, registry-hygiene
+    // only) moves ExportHandler out of the declare_handler! stub at
+    // registry.rs:513-517 and into `crate::command::export`. Shipped
+    // stub carried `&["save"]`; the real handler preserves the alias
+    // per shipped-wins drift-reconcile (AGS-817 /memory precedent).
+    // The real /export BODY stays in session.rs:2409-2480 — session.rs
+    // zero-diff invariant held since AGS-805 is preserved by Option D,
+    // with real body-migrate deferred to POST-STAGE-6 (ticket
+    // AGS-POST-6-EXPORT). Pin the invariant so future ticketing cannot
+    // silently drop the `save` alias or promote a sibling handler to
+    // share the `export` primary name.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn registry_export_primary_with_save_alias() {
+        let reg = default_registry();
+        let primary = reg
+            .get("export")
+            .expect("export primary must be registered post AGS-818");
+        let desc = primary.description().to_lowercase();
+        assert!(
+            desc.contains("export") || desc.contains("session"),
+            "ExportHandler description should reference export/session, \
+             got: {}",
+            primary.description()
+        );
+        // `export` is a primary — not an alias of anything.
+        assert!(reg.is_primary("export"));
+        assert_eq!(reg.primary_for_alias("export"), None);
+        // `save` is the PRESERVED alias (shipped-wins drift-reconcile).
+        assert_eq!(reg.primary_for_alias("save"), Some("export"));
+        assert!(!reg.is_primary("save"));
+        // The alias resolves to the same handler.
+        let via_alias = reg
+            .get("save")
+            .expect("'save' alias must resolve to /export per AGS-818");
+        assert_eq!(
+            primary.description(),
+            via_alias.description(),
+            "'save' must resolve to the same handler as /export"
         );
     }
 

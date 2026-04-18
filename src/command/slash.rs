@@ -70,7 +70,12 @@ pub(crate) async fn handle_slash_command(
         }
         // /compact and /clear are handled inline in the input processor (need agent access)
         "/compact" | "/clear" => true,
-        s if s == "/export" || s.starts_with("/export ") => true,
+        // TASK-AGS-818: /export body lives in session.rs:2409-2480 — the
+        // TUI input loop intercepts /export before reaching this match
+        // block because it needs agent.lock().await for conversation
+        // state. The Option D canary in `crate::command::export` only
+        // fires if that intercept regresses. Real body-migrate deferred
+        // to POST-STAGE-6 (ticket AGS-POST-6-EXPORT).
         "/thinking on" | "/thinking" => {
             ctx.show_thinking.store(true, Ordering::Relaxed);
             let _ = tui_tx.send(TuiEvent::ThinkingToggle(true)).await;
