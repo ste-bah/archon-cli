@@ -202,6 +202,9 @@ mod tests {
                 // TASK-AGS-814: /status tests never exercise /context
                 // paths — None.
                 context_snapshot: None,
+                // TASK-AGS-815: /status tests never exercise /fork
+                // paths — None.
+                session_id: None,
                 pending_effect: None,
             },
             rx,

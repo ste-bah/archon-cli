@@ -192,6 +192,10 @@ mod tests {
                 // dispatcher tests only exercise routing/parsing, not
                 // handler bodies.
                 context_snapshot: None,
+                // TASK-AGS-815: same rationale for /fork session_id —
+                // dispatcher tests only exercise routing/parsing, not
+                // handler bodies.
+                session_id: None,
                 pending_effect: None,
             },
             rx,

@@ -196,6 +196,8 @@ mod tests {
                 mcp_snapshot: None,
                 // TASK-AGS-814: /hooks tests never exercise /context paths — None.
                 context_snapshot: None,
+                // TASK-AGS-815: /hooks tests never exercise /fork paths — None.
+                session_id: None,
                 pending_effect: None,
             },
             rx,

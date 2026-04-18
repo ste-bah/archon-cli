@@ -46,6 +46,15 @@ pub(crate) async fn build_command_context(
         cost_snapshot: None,
         mcp_snapshot: None,
         context_snapshot: None,
+        // TASK-AGS-815: DIRECT-pattern field. Populated UNCONDITIONALLY
+        // here (not gated on the primary name, unlike the snapshot
+        // fields above). Every command observes the current session id
+        // via `ctx.session_id`; /fork is the first consumer but any
+        // future DIRECT handler that needs the id can read it without a
+        // builder match arm. Clone is a single String alloc per
+        // dispatch — cheaper than stashing an `Arc<str>` threaded
+        // through `SlashCommandContext`.
+        session_id: Some(slash_ctx.session_id.clone()),
         pending_effect: None,
     };
 

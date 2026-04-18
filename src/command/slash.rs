@@ -611,38 +611,17 @@ pub(crate) async fn handle_slash_command(
         //    dispatch site and threads an owned McpSnapshot through
         //    CommandContext. Arm deleted per TUI-410 dead-code rule.
         //    ──────────────────────────────────────────────────────
-        // ── /fork (branch conversation) ────────────────────────
-        s if s == "/fork" || s.starts_with("/fork ") => {
-            let name_arg = s.strip_prefix("/fork").unwrap_or("").trim();
-            let db_path = archon_session::storage::default_db_path();
-            match archon_session::storage::SessionStore::open(&db_path) {
-                Ok(store) => {
-                    let fork_name = if name_arg.is_empty() {
-                        None
-                    } else {
-                        Some(name_arg)
-                    };
-                    match archon_session::fork::fork_session(&store, &ctx.session_id, fork_name) {
-                        Ok(new_id) => {
-                            let _ = tui_tx.send(TuiEvent::TextDelta(
-                                format!("\nConversation forked as: {new_id}\nResume with: archon --resume {new_id}\nOriginal session: {}\n", ctx.session_id)
-                            )).await;
-                        }
-                        Err(e) => {
-                            let _ = tui_tx
-                                .send(TuiEvent::Error(format!("Fork failed: {e}")))
-                                .await;
-                        }
-                    }
-                }
-                Err(e) => {
-                    let _ = tui_tx
-                        .send(TuiEvent::Error(format!("Session store error: {e}")))
-                        .await;
-                }
-            }
-            true
-        }
+        // ── /fork: body migrated to src/command/fork.rs (AGS-815,
+        //    DIRECT pattern). Dispatcher PATH A at slash.rs:46 fires
+        //    ForkHandler::execute via the registry BEFORE this arm;
+        //    build_command_context populates `CommandContext::session_id`
+        //    unconditionally (DIRECT-pattern contract — not gated on
+        //    the primary name, unlike the SNAPSHOT-ONLY fields) so the
+        //    sync handler body can call
+        //    `archon_session::fork::fork_session` without needing a
+        //    per-command match arm in the builder. Arm deleted per
+        //    TUI-410 dead-code rule. Do NOT re-add — see TUI-410 lesson.
+        //    ──────────────────────────────────────────────────────
         // ── /checkpoint list | /checkpoint restore <file> ──────
         s if s == "/checkpoint" || s.starts_with("/checkpoint ") => {
             let arg = s.strip_prefix("/checkpoint").unwrap_or("").trim();

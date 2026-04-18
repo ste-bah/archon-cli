@@ -231,6 +231,9 @@ mod tests {
                 // TASK-AGS-814: /tasks tests never read the /context
                 // snapshot — None is correct.
                 context_snapshot: None,
+                // TASK-AGS-815: /tasks tests never read the /fork
+                // session_id field — None is correct.
+                session_id: None,
                 pending_effect: None,
             },
             rx,

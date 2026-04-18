@@ -58,6 +58,15 @@ use crate::command::mcp::{McpHandler, McpSnapshot};
 // no snapshot/effect-slot needed. No aliases (spec lists none). Primary
 // count grows from 38 -> 39.
 use crate::command::hooks::HooksHandler;
+// TASK-AGS-815: real /fork handler lives in `crate::command::fork`.
+// DIRECT-pattern body-migrate (sync `archon_session::fork::fork_session`
+// + `SessionStore::open`; no snapshot/effect-slot needed — session_id
+// threads through a new `CommandContext::session_id` field populated
+// unconditionally by `build_command_context`). Shipped stub
+// `declare_handler!(ForkHandler, ...)` at registry.rs:524 is REPLACED
+// by this import + the insert_primary call below. No aliases — shipped
+// stub had none and spec lists none.
+use crate::command::fork::ForkHandler;
 // TASK-AGS-814: real /context handler lives in `crate::command::context_cmd`.
 // SNAPSHOT-ONLY body-migrate (single `session_stats.lock().await` moves
 // to the builder; no effect slot required — /context is read-only).
@@ -170,6 +179,22 @@ pub(crate) struct CommandContext {
     /// ticket appends one typed snapshot field — /context is READ-only
     /// so there is NO matching `CommandEffect` variant.
     pub(crate) context_snapshot: Option<ContextSnapshot>,
+    /// TASK-AGS-815 DIRECT-pattern field (/fork).
+    ///
+    /// Clone of `SlashCommandContext::session_id` populated
+    /// UNCONDITIONALLY by `build_command_context` (not per-command —
+    /// session_id is always meaningful and cheap to clone). `/fork`
+    /// reads it to pass `source_id` to
+    /// `archon_session::fork::fork_session`. `Option<String>` so the
+    /// dispatcher/handler test fixtures can construct a
+    /// `CommandContext` without standing up a full
+    /// `SlashCommandContext` — in those tests the field observes
+    /// `None` and the handler returns an Err-with-message describing
+    /// the missing-session-id condition rather than panicking.
+    /// No matching `CommandEffect` variant — `/fork` is a pure
+    /// DIRECT-pattern sync body (no async mutex writes back to
+    /// shared state).
+    pub(crate) session_id: Option<String>,
     /// TASK-AGS-808 effect-slot field (WRITE side of /model and future
     /// write-tickets).
     ///
@@ -521,7 +546,12 @@ declare_handler!(RenameHandler, "Rename the current session");
 // `McpServerManager::get_server_info` / `list_tools_for` calls move
 // to the builder). No aliases (shipped stub had none; spec lists
 // none). Imported at the top of this file.
-declare_handler!(ForkHandler, "Fork the current session into a new branch");
+// TASK-AGS-815: ForkHandler moved to `crate::command::fork` (real impl
+// with body-migrated execute via DIRECT pattern — sync
+// archon_session::fork::fork_session + SessionStore::open, no
+// snapshot/effect-slot needed; session_id threads through
+// CommandContext::session_id populated unconditionally by
+// build_command_context). No aliases. Imported at the top of this file.
 declare_handler!(CheckpointHandler, "Create or restore a session checkpoint");
 declare_handler!(AddDirHandler, "Add a directory to the working context");
 declare_handler!(ColorHandler, "Show or change the UI color scheme");
@@ -1150,6 +1180,36 @@ mod tests {
         // test-only helper for a spot-check of common collision
         // candidates — none should resolve to /mcp.
         assert!(!reg.aliases_map_contains("mcp"));
+    }
+
+    // -----------------------------------------------------------------
+    // TASK-AGS-815: /fork primary registration (no aliases). The
+    // /fork body-migrate moves ForkHandler out of the
+    // declare_handler! stub at registry.rs:524 and into
+    // `crate::command::fork`. Shipped stub had `&[]` (no aliases);
+    // spec lists none; handler ships `&[]`. Pin the invariant so
+    // future ticketing cannot silently add an alias without updating
+    // the registry collision-detection tests.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn registry_fork_primary_with_no_aliases() {
+        let reg = default_registry();
+        let primary = reg
+            .get("fork")
+            .expect("fork primary must be registered post AGS-815");
+        let desc = primary.description().to_lowercase();
+        assert!(
+            desc.contains("fork") || desc.contains("session"),
+            "ForkHandler description should reference fork/session, \
+             got: {}",
+            primary.description()
+        );
+        // `fork` is a primary — not an alias of anything.
+        assert!(reg.is_primary("fork"));
+        assert_eq!(reg.primary_for_alias("fork"), None);
+        // No alias entry points to `fork`.
+        assert!(!reg.aliases_map_contains("fork"));
     }
 
     #[test]
