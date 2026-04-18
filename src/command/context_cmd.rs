@@ -271,6 +271,8 @@ mod tests {
                 context_snapshot: snapshot,
                 // TASK-AGS-815: /context tests never exercise /fork paths — None.
                 session_id: None,
+                // TASK-AGS-817: /context tests never exercise /memory paths — None.
+                memory: None,
                 pending_effect: None,
             },
             rx,

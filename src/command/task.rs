@@ -234,6 +234,9 @@ mod tests {
                 // TASK-AGS-815: /tasks tests never read the /fork
                 // session_id field — None is correct.
                 session_id: None,
+                // TASK-AGS-817: /tasks tests never read the /memory
+                // handle — None is correct.
+                memory: None,
                 pending_effect: None,
             },
             rx,

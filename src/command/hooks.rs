@@ -198,6 +198,8 @@ mod tests {
                 context_snapshot: None,
                 // TASK-AGS-815: /hooks tests never exercise /fork paths — None.
                 session_id: None,
+                // TASK-AGS-817: /hooks tests never exercise /memory paths — None.
+                memory: None,
                 pending_effect: None,
             },
             rx,

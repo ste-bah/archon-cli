@@ -14,6 +14,8 @@
 //! self-contained [`CommandContext`] with only the values the sync
 //! handler will need.
 
+use std::sync::Arc;
+
 use archon_tui::app::TuiEvent;
 
 use crate::command::registry::{CommandContext, CommandEffect, Registry};
@@ -55,6 +57,13 @@ pub(crate) async fn build_command_context(
         // dispatch — cheaper than stashing an `Arc<str>` threaded
         // through `SlashCommandContext`.
         session_id: Some(slash_ctx.session_id.clone()),
+        // TASK-AGS-817: /memory DIRECT-pattern consumer. Populated
+        // UNCONDITIONALLY here (not gated on the primary name, same
+        // as AGS-815 session_id). `Arc<dyn MemoryTrait>` is cheap to
+        // clone (~8 bytes + atomic refcount increment); every future
+        // handler that needs a memory handle inherits this field for
+        // free without a per-command builder match arm.
+        memory: Some(Arc::clone(&slash_ctx.memory)),
         pending_effect: None,
     };
 

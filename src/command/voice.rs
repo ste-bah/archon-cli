@@ -199,6 +199,8 @@ mod tests {
                 mcp_snapshot: None,
                 context_snapshot: None,
                 session_id: None,
+                // TASK-AGS-817: /voice tests never exercise /memory paths — None.
+                memory: None,
                 pending_effect: None,
             },
             rx,

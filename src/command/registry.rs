@@ -84,6 +84,17 @@ use crate::command::context_cmd::{ContextHandler, ContextSnapshot};
 // count grows from 39 -> 40 (SECOND Batch-3 NEW-primary after AGS-812
 // /hooks, which took the count from 38 -> 39).
 use crate::command::voice::VoiceHandler;
+// TASK-AGS-817: real /memory handler lives in `crate::command::memory`.
+// DIRECT-pattern body-migrate (sync `archon_memory::MemoryTrait` — all
+// 12 methods plain `fn`; no snapshot/effect-slot needed). The handler
+// reads `Arc<dyn MemoryTrait>` from a new `CommandContext::memory` field
+// populated UNCONDITIONALLY by `build_command_context` (mirrors AGS-815
+// session_id cross-cutting precedent). Shipped stub
+// `declare_handler!(MemoryHandler, "Inspect or manage long-term memory",
+// &["mem"])` at registry.rs:521-525 is REPLACED by this import + the
+// insert_primary call below. Aliases `["mem"]` are PRESERVED per
+// shipped-wins drift-reconcile (see command/memory.rs Aliases rustdoc).
+use crate::command::memory::MemoryHandler;
 
 /// Execution context threaded through every command handler.
 ///
@@ -202,6 +213,22 @@ pub(crate) struct CommandContext {
     /// DIRECT-pattern sync body (no async mutex writes back to
     /// shared state).
     pub(crate) session_id: Option<String>,
+    /// TASK-AGS-817 DIRECT-pattern field (/memory).
+    ///
+    /// Shared memory handle for `/memory` (DIRECT pattern). `Arc` clone
+    /// per dispatch is cheap (~8 bytes + atomic refcount increment).
+    /// Populated UNCONDITIONALLY in context.rs outer builder literal
+    /// (mirrors the AGS-815 `session_id` cross-cutting precedent, not
+    /// gated on the primary name). `None` sentinel reserved for test
+    /// fixtures that construct `CommandContext` directly without
+    /// standing up a full `SlashCommandContext`; in those tests the
+    /// handler observes `None` and returns an Err-with-message
+    /// describing the missing-memory condition rather than panicking.
+    /// `archon_memory::MemoryTrait` is fully sync (all 12 trait methods
+    /// are plain `fn`) so no matching `CommandEffect` variant is
+    /// required — `/memory clear` performs the `clear_all()` mutation
+    /// via a direct sync call inside `execute`, not an async write-back.
+    pub(crate) memory: Option<Arc<dyn archon_memory::MemoryTrait>>,
     /// TASK-AGS-808 effect-slot field (WRITE side of /model and future
     /// write-tickets).
     ///
@@ -518,11 +545,11 @@ declare_handler!(
     "Show or update Archon configuration",
     &["settings", "prefs"]
 );
-declare_handler!(
-    MemoryHandler,
-    "Inspect or manage long-term memory",
-    &["mem"]
-);
+// TASK-AGS-817: MemoryHandler moved to `crate::command::memory` (real
+// impl with body-migrated execute via DIRECT pattern — sync
+// `archon_memory::MemoryTrait`, no snapshot/effect-slot needed). The
+// real handler preserves the shipped `["mem"]` alias set per
+// shipped-wins drift-reconcile. Imported at the top of this file.
 declare_handler!(DoctorHandler, "Run environment health checks");
 declare_handler!(BugHandler, "Report a bug with current session context");
 declare_handler!(DiffHandler, "Show a diff of recent file modifications");
@@ -1252,6 +1279,48 @@ mod tests {
         assert_eq!(reg.primary_for_alias("fork"), None);
         // No alias entry points to `fork`.
         assert!(!reg.aliases_map_contains("fork"));
+    }
+
+    // -----------------------------------------------------------------
+    // TASK-AGS-817: /memory primary registration (alias: `mem`). The
+    // /memory body-migrate moves MemoryHandler out of the
+    // declare_handler! stub at registry.rs:521-525 and into
+    // `crate::command::memory`. Shipped stub carried `&["mem"]`; the
+    // spec (orchestrator directive) called for `&[]` but the body-
+    // migrate preserves `["mem"]` per shipped-wins drift-reconcile
+    // (dropping the alias would regress operators using /mem today).
+    // Pin the invariant so future ticketing cannot silently drop the
+    // alias or promote a sibling handler to share the `memory` primary
+    // name.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn registry_memory_primary_with_mem_alias() {
+        let reg = default_registry();
+        let primary = reg
+            .get("memory")
+            .expect("memory primary must be registered post AGS-817");
+        let desc = primary.description().to_lowercase();
+        assert!(
+            desc.contains("memor"),
+            "MemoryHandler description should reference 'memory', got: {}",
+            primary.description()
+        );
+        // `memory` is a primary — not an alias of anything.
+        assert!(reg.is_primary("memory"));
+        assert_eq!(reg.primary_for_alias("memory"), None);
+        // `mem` is the PRESERVED alias (shipped-wins drift-reconcile).
+        assert_eq!(reg.primary_for_alias("mem"), Some("memory"));
+        assert!(!reg.is_primary("mem"));
+        // The alias resolves to the same handler.
+        let via_alias = reg
+            .get("mem")
+            .expect("'mem' alias must resolve to /memory per AGS-817");
+        assert_eq!(
+            primary.description(),
+            via_alias.description(),
+            "'mem' must resolve to the same handler as /memory"
+        );
     }
 
     #[test]

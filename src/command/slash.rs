@@ -10,7 +10,6 @@ use archon_tools::task_manager;
 use archon_tui::app::TuiEvent;
 use crate::command::config::handle_config_command;
 use crate::command::doctor::handle_doctor_command;
-use crate::command::memory::handle_memory_command;
 use crate::command::registry::CommandContext;
 use crate::slash_context::SlashCommandContext;
 
@@ -338,11 +337,14 @@ pub(crate) async fn handle_slash_command(
             handle_config_command(s, tui_tx, ctx).await;
             true
         }
-        // ── /memory [subcommand] ───────────────────────────────
-        s if s == "/memory" || s.starts_with("/memory ") => {
-            handle_memory_command(s, tui_tx, &ctx.memory).await;
-            true
-        }
+        // ── /memory: body migrated to src/command/memory.rs (AGS-817,
+        //    DIRECT pattern). Dispatcher PATH A at slash.rs:40 fires
+        //    MemoryHandler::execute via the registry BEFORE this arm;
+        //    build_command_context populates `CommandContext::memory`
+        //    UNCONDITIONALLY (mirrors AGS-815 session_id — Arc<dyn
+        //    MemoryTrait> is cheap to clone). Arm deleted per TUI-410
+        //    dead-code rule. Do NOT re-add — see TUI-410 lesson.
+        //    ──────────────────────────────────────────────────────
         // ── /doctor ────────────────────────────────────────────
         "/doctor" => {
             handle_doctor_command(tui_tx, ctx).await;

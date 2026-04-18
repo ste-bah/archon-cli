@@ -196,6 +196,10 @@ mod tests {
                 // dispatcher tests only exercise routing/parsing, not
                 // handler bodies.
                 session_id: None,
+                // TASK-AGS-817: same rationale for /memory Arc<dyn
+                // MemoryTrait> — dispatcher tests only exercise
+                // routing/parsing, not handler bodies.
+                memory: None,
                 pending_effect: None,
             },
             rx,
