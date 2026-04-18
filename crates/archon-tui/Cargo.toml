@@ -40,8 +40,6 @@ procfs = "0.16"
 archon-tools = { path = "../archon-tools" }
 uuid = { workspace = true }
 tokio-util = { workspace = true }
-# archon-llm for SessionStats tests (TokenUsage type)
-archon-llm = { path = "../archon-llm" }
 
 [[bench]]
 name = "eventchannel_load"
