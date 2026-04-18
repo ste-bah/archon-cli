@@ -1461,4 +1461,256 @@ mod tests {
         // Debug impl must not panic — format! exercises it.
         let _ = format!("{e:?}");
     }
+
+    // -----------------------------------------------------------------
+    // TASK-AGS-820: Registry integration test (Option C, 3 invariants).
+    //
+    // Prior HALT finding (agentId a95fe1d3b42139765): 27
+    // `declare_handler!` stubs still registered in `default_registry()`.
+    // Batch-3 (AGS-805..819) migrated only 13/40 commands. Orchestrator
+    // accepted Option C: DROP the NO-STUB invariant, keep COUNT +
+    // ALIAS-RESOLUTION + PARSER round-trip. NO-STUB is SCOPE-HELD to
+    // new ticket AGS-POST-6-NO-STUB.
+    //
+    // The three invariants together prove WIRING INTEGRITY: every
+    // primary is registered, every alias resolves to the same handler
+    // instance as its primary, and every primary round-trips through
+    // the parser back into the registry. They do NOT prove runtime
+    // dispatch correctness — that is SCOPE-HELD to
+    // AGS-POST-6-DISPATCH-SMOKE (per-handler execute() + TuiEvent
+    // smoke).
+    //
+    // # R-items
+    //
+    // - R1 STRUCTURAL-NOT-DISPATCH: This test proves wiring integrity,
+    //   not runtime behavior. Per-handler `execute()` + `TuiEvent` smoke
+    //   is SCOPE-HELD to AGS-POST-6-DISPATCH-SMOKE. We deliberately do
+    //   NOT call `handler.execute()`, do NOT assert `TuiEvent`
+    //   emission, and do NOT build `CommandContext` fixtures here.
+    //
+    // - R2 HANDLER-IDENTITY-MECHANISM: Alias↔primary handler identity
+    //   is compared via `Arc::ptr_eq` on the `Arc<dyn CommandHandler>`
+    //   values returned by `Registry::get`. Justification: both the
+    //   primary-name path (line 364-366) and the alias path (line
+    //   367-368) read from the SAME `self.commands` map and
+    //   `Arc::clone` the SAME stored Arc. So alias and primary
+    //   lookups return two `Arc` handles to the SAME allocation, and
+    //   `Arc::ptr_eq` returns `true`. This avoids adding any new
+    //   method to the `CommandHandler` trait (which the task brief
+    //   explicitly forbids for the `is_stub` hook and which would be
+    //   unnecessary surface for the handler_id hook).
+    //
+    // - R3 PARSER-REGISTRY-COHERENCE: Round-trip `/{name}` through
+    //   `CommandParser::parse` for every primary in
+    //   `default_registry()`, then look the parsed name back up in
+    //   the registry. One-directional (registry → parser → registry)
+    //   per orchestrator scope. Asymmetric direction (parser → registry
+    //   → parser) is out of scope — the parser's free function has no
+    //   enumerable domain.
+    //
+    // - R4 FAIL-AT-SPECIFIC-LINK: Each invariant collects failures
+    //   into a `Vec<String>` rather than panicking at the first
+    //   failure. The final `assert!` concatenates all failure
+    //   messages with newlines, so a single test run surfaces EVERY
+    //   broken command/alias simultaneously instead of forcing N test
+    //   iterations to discover them one at a time. Each message names
+    //   the specific command/alias that triggered the failure.
+    //
+    // - R5 STAGE-SCOPE (DESIGN) — 4-row decomposition of the 40
+    //   registered primaries. Prior revisions of this rustdoc used a
+    //   2-row frame ("13 body-migrates + 27 stubs") that lied by
+    //   aggregation — it folded a CANARY handler, an alias-only
+    //   primary, and a Q4=A violation into a single "body-migrate"
+    //   bucket. The 4-row decomposition below is authoritative.
+    //
+    //   Row A — REAL BODY-MIGRATE (12 primaries, sync CommandHandler
+    //   impls with shipped imperative logic moved into Handler::execute
+    //   or an informational thin-wrapper when no shipped body existed):
+    //     /tasks (AGS-806), /status (AGS-807), /model (AGS-808), /cost
+    //     (AGS-809), /resume (AGS-810), /mcp (AGS-811), /hooks thin-
+    //     wrapper gap-fix (AGS-812), /context (AGS-814), /fork
+    //     (AGS-815), /voice thin-wrapper gap-fix (AGS-816), /memory
+    //     (AGS-817), /theme (AGS-819).
+    //
+    //   Row B — CANARY (1 primary, shipped body stays in session.rs
+    //   because it needs agent.lock().await which the sync execute
+    //   signature cannot service; handler emits a diagnostic TextDelta
+    //   if it ever fires — see src/command/export.rs rustdoc R1..R5):
+    //     /export (AGS-818).
+    //
+    //   Row C — ALIAS-HOST STUB (1 primary, functionally a
+    //   declare_handler! stub like Row D, categorized separately to
+    //   preserve AGS-813's shipped-wins alias-reconcile provenance —
+    //   /config is the primary that HOSTS the /settings and /prefs
+    //   aliases; /settings → /config resolves through the aliases
+    //   HashMap inside `Registry::get` to /config's handler, and
+    //   /config's execute currently returns `Ok(())` until body-
+    //   migrate lands):
+    //     /config (AGS-813 hosts aliases /settings + /prefs).
+    //
+    //   Row D — PURE STUB (26 primaries, `declare_handler!` macro
+    //   invocations with no shipped slash body reached from this
+    //   registry; body-migrates DEFERRED to AGS-POST-6-NO-STUB). The
+    //   26 are enumerated below by primary name for the benefit of any
+    //   future reader who needs the complete list without counting
+    //   macro sites:
+    //     /cancel, /fast, /compact, /clear, /thinking, /effort,
+    //     /garden, /copy, /permissions, /doctor, /bug, /diff,
+    //     /denials, /login, /vim, /usage, /release-notes, /reload,
+    //     /logout, /help, /rename, /checkpoint, /add-dir, /color,
+    //     /recall, /rules.
+    //
+    //   Row totals: 12 + 1 + 1 + 26 = 40 primaries = EXPECTED_COMMAND_
+    //   COUNT. Of the 26 pure stubs, AGS-802 registered them as PARSER
+    //   PLACEHOLDERS so `/name` tokens parse and dispatch through this
+    //   registry; the runtime behavior for most of them is either
+    //   session.rs interception (like /export in Row B) or no-op until
+    //   body-migrate lands. The NO-STUB invariant is DEFERRED to
+    //   AGS-POST-6-NO-STUB.
+    //
+    // - R-item STAGE-DRIFT — /cancel Q4=A violation (documented here,
+    //   NOT fixed mid-AGS-820). Stage 6 Q4=A ("thin-wrapper for
+    //   missing commands") required AGS-805 to deliver a handler that
+    //   emits an informational TextDelta when a user types `/cancel`
+    //   (the real cancel mechanism is TUI Ctrl-C → dispatcher.cancel_
+    //   current() at src/session.rs:2120 and headless --cancel-task
+    //   → main.rs::handle_task_cancel at main.rs:193). AGS-805 instead
+    //   shipped /cancel as a silent `Ok(())` stub via declare_handler!,
+    //   so typing `/cancel` today produces no operator feedback at
+    //   all. This is a Q4=A violation classified as STAGE-DRIFT for
+    //   Phase C reconciliation — the fix is a follow-up ticket, not
+    //   an AGS-820 amendment. Row D above lists /cancel as a pure
+    //   stub because that is the observed state, not the intended
+    //   state.
+    //
+    // - R-item METRICS-PROPAGATION-CORRECTION — Sherlock Gate 3
+    //   independent warning-count verification caught an error that
+    //   propagated across ~17 Stage 6 commit messages (AGS-802..819
+    //   and AGS-822). Those commits documented a cargo-warnings
+    //   baseline of 40 for the `archon` bin; real baseline per
+    //   independent rebuild is 56. AGS-820 adds zero new warnings
+    //   (the invariant "no new warnings introduced by this ticket"
+    //   still holds), but the absolute figure in older commit
+    //   messages is wrong. Canonical warning command (LOCKED going
+    //   forward, `^warning:` anchor excludes in-source strings):
+    //       cargo build -j1 --bin archon 2>&1 | grep -c '^warning:'
+    //   Every future ticket must run this command independently and
+    //   must NOT propagate a figure from prior commit messages. No
+    //   history rewrite is planned — the correction starts here.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn registry_integration_all_commands_wired() {
+        use crate::command::parser::CommandParser;
+
+        let registry = default_registry();
+        let mut failures: Vec<String> = Vec::new();
+
+        // -------------------------------------------------------------
+        // INVARIANT 1 — COUNT
+        // -------------------------------------------------------------
+        // `default_registry().len()` must equal the expected primary-
+        // count constant. If the count drifts, the test names WHICH
+        // direction it drifted in the failure message so the operator
+        // can reconcile without re-running the test.
+        let actual = registry.len();
+        if actual != EXPECTED_COMMAND_COUNT {
+            failures.push(format!(
+                "COUNT invariant failed: expected {EXPECTED_COMMAND_COUNT}, got {actual}"
+            ));
+        }
+
+        // -------------------------------------------------------------
+        // INVARIANT 2 — ALIAS-RESOLUTION
+        // -------------------------------------------------------------
+        // For every alias declared by every primary handler, assert
+        // that `registry.get(alias)` returns an `Arc` pointing at the
+        // SAME allocation as `registry.get(primary)`.
+        //
+        // Iteration strategy: walk `registry.names()` (every primary),
+        // fetch the primary handler, read `handler.aliases()` for its
+        // static alias list, then do a registry lookup for each alias
+        // and compare with `Arc::ptr_eq`. This walks the full
+        // (primary, alias) space without needing a public iterator
+        // over the private `aliases` HashMap.
+        for primary_name in registry.names() {
+            let primary_handler = match registry.get(primary_name) {
+                Some(h) => h,
+                None => {
+                    failures.push(format!(
+                        "ALIAS-RESOLUTION invariant failed: primary '{primary_name}' \
+                         enumerated via names() but missing from registry.get()"
+                    ));
+                    continue;
+                }
+            };
+            for alias in primary_handler.aliases() {
+                let alias_handler = match registry.get(alias) {
+                    Some(h) => h,
+                    None => {
+                        failures.push(format!(
+                            "ALIAS-RESOLUTION invariant failed: alias '{alias}' → handler '<missing>' \
+                             does NOT match primary '{primary_name}' → handler '{primary}'",
+                            primary = primary_name,
+                        ));
+                        continue;
+                    }
+                };
+                // R2: Arc::ptr_eq on Arc<dyn CommandHandler> returns
+                // true iff both handles point to the same allocation.
+                // Registry::get for a primary and its alias both
+                // Arc::clone the SAME stored Arc, so ptr_eq must hold.
+                if !Arc::ptr_eq(&primary_handler, &alias_handler) {
+                    failures.push(format!(
+                        "ALIAS-RESOLUTION invariant failed: alias '{alias}' → handler '{alias_desc}' \
+                         does NOT match primary '{primary_name}' → handler '{primary_desc}'",
+                        alias_desc = alias_handler.description(),
+                        primary_desc = primary_handler.description(),
+                    ));
+                }
+            }
+        }
+
+        // -------------------------------------------------------------
+        // INVARIANT 3 — PARSER ROUND-TRIP
+        // -------------------------------------------------------------
+        // For every primary name N in default_registry():
+        //   (a) `CommandParser::parse(&format!("/{N}"))` must succeed.
+        //   (b) The resulting `ParsedCommand::name` must resolve to a
+        //       handler in the registry via `Registry::get`.
+        //
+        // (a)+(b) together prove the parser recognizes every primary
+        // and the registry can route the parsed output back to its
+        // handler. One-directional per R3.
+        for primary_name in registry.names() {
+            let input = format!("/{primary_name}");
+            match CommandParser::parse(&input) {
+                Ok(parsed) => {
+                    if registry.get(&parsed.name).is_none() {
+                        failures.push(format!(
+                            "PARSER round-trip invariant failed: primary '{primary_name}' \
+                             → parser result 'Ok(name={parsed_name:?})' → registry lookup 'None'",
+                            parsed_name = parsed.name,
+                        ));
+                    }
+                }
+                Err(e) => {
+                    failures.push(format!(
+                        "PARSER round-trip invariant failed: primary '{primary_name}' \
+                         → parser result 'Err({e:?})' → registry lookup '<skipped: parse failed>'"
+                    ));
+                }
+            }
+        }
+
+        // R4: collect-and-report — one test run surfaces every broken
+        // command/alias simultaneously instead of panicking at the
+        // first failure.
+        assert!(
+            failures.is_empty(),
+            "registry_integration_all_commands_wired: {} invariant failure(s):\n{}",
+            failures.len(),
+            failures.join("\n")
+        );
+    }
 }
