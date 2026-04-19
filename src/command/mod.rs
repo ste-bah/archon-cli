@@ -38,6 +38,8 @@ pub(crate) mod team;
 pub(crate) mod task;
 pub(crate) mod theme;
 pub(crate) mod tui_helpers;
+#[cfg(test)]
+pub(crate) mod test_support;
 pub(crate) mod update;
 pub(crate) mod utils;
 pub(crate) mod voice;
