@@ -149,7 +149,7 @@ impl CommandHandler for ModelHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::command::test_support::test_support::*;
+    use crate::command::test_support::*;
 
     #[test]
     fn model_handler_description_matches() {

@@ -210,7 +210,7 @@ impl CommandHandler for CostHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::command::test_support::test_support::*;
+    use crate::command::test_support::*;
 
     #[test]
     fn cost_handler_description_matches() {
