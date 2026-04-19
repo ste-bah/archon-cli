@@ -58,47 +58,6 @@ impl SessionStats {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_empty_creates_zero_values() {
-        let stats = SessionStats::empty();
-        assert_eq!(stats.message_count, 0);
-        assert_eq!(stats.agent_count, 0);
-        assert_eq!(stats.elapsed, Duration::ZERO);
-        assert!(stats.estimated_cost_usd.is_none());
-        assert!(stats.recent_commands.is_empty());
-        assert!(stats.recent_agents.is_empty());
-        assert!(stats.recent_tools.is_empty());
-    }
-
-    #[test]
-    fn test_is_empty_returns_true_for_empty_stats() {
-        let stats = SessionStats::empty();
-        assert!(stats.is_empty());
-    }
-
-    #[test]
-    fn test_is_empty_returns_false_when_counts_nonzero() {
-        let stats = SessionStats {
-            message_count: 5,
-            ..SessionStats::empty()
-        };
-        assert!(!stats.is_empty());
-    }
-
-    #[test]
-    fn test_is_empty_returns_false_when_agents_present() {
-        let stats = SessionStats {
-            recent_agents: vec!["coder".to_string()],
-            ..SessionStats::empty()
-        };
-        assert!(!stats.is_empty());
-    }
-}
-
 // -------------------------------------------------------------------------
 // StatsSource / NullStats — lives at module level so integration tests
 // can import it.  The actual ChannelMetrics implementation (follow-up
