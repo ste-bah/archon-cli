@@ -210,57 +210,7 @@ impl CommandHandler for CostHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use archon_tui::app::TuiEvent;
-    use tokio::sync::mpsc;
-
-    /// Minimal test-only CostSnapshot used by handler tests. Values
-    /// chosen so the format substitutions are obvious in assertion
-    /// output: 1_000_000 input tokens @ $3/Mtok = $3.00, 500_000
-    /// output tokens @ $15/Mtok = $7.50, total = $10.50.
-    fn fixture_snapshot() -> CostSnapshot {
-        CostSnapshot {
-            input_tokens: 1_000_000,
-            output_tokens: 500_000,
-            input_cost: 3.00,
-            output_cost: 7.50,
-            total_cost: 10.50,
-            cache_stats_line:
-                "Cache hit rate: 0.0% (0 reads / 0 total)\n\
-                 Cache creation: 0 tokens\n\
-                 Estimated savings: 0 token-equivalents"
-                    .to_string(),
-            warn_threshold: 5.0,
-            hard_label: "$0.00 (disabled)".to_string(),
-        }
-    }
-
-    /// Build a `CommandContext` with a freshly-created channel and the
-    /// supplied optional cost snapshot. Tests that do not exercise the
-    /// snapshot path pass `None` to verify the defensive Err branch.
-    fn make_ctx(
-        snapshot: Option<CostSnapshot>,
-    ) -> (CommandContext, mpsc::Receiver<TuiEvent>) {
-        let (tx, rx) = mpsc::channel::<TuiEvent>(16);
-        (
-            CommandContext {
-                tui_tx: tx,
-                // /cost tests never touch /status, /model paths.
-                status_snapshot: None,
-                model_snapshot: None,
-                cost_snapshot: snapshot,
-                // TASK-AGS-811: /cost tests never exercise /mcp paths — None.
-                mcp_snapshot: None,
-                // TASK-AGS-814: /cost tests never exercise /context paths — None.
-                context_snapshot: None,
-                // TASK-AGS-815: /cost tests never exercise /fork paths — None.
-                session_id: None,
-                // TASK-AGS-817: /cost tests never exercise /memory paths — None.
-                memory: None,
-                pending_effect: None,
-            },
-            rx,
-        )
-    }
+    use crate::command::test_support::test_support::*;
 
     #[test]
     fn cost_handler_description_matches() {
@@ -295,7 +245,7 @@ mod tests {
 
     #[test]
     fn cost_handler_execute_without_snapshot_returns_err() {
-        let (mut ctx, _rx) = make_ctx(None);
+        let (mut ctx, _rx) = make_cost_ctx(None);
         let h = CostHandler;
         let result = h.execute(&mut ctx, &[]);
         assert!(
@@ -313,7 +263,7 @@ mod tests {
 
     #[test]
     fn cost_handler_execute_with_snapshot_emits_text_delta_with_session_cost_line() {
-        let (mut ctx, mut rx) = make_ctx(Some(fixture_snapshot()));
+        let (mut ctx, mut rx) = make_cost_ctx(Some(fixture_cost_snapshot()));
         let h = CostHandler;
         h.execute(&mut ctx, &[])
             .expect("CostHandler::execute must return Ok with snapshot populated");
@@ -371,7 +321,7 @@ mod tests {
             warn_threshold: 2.5,
             hard_label: "$25.00".to_string(),
         };
-        let (mut ctx, mut rx) = make_ctx(Some(snap));
+        let (mut ctx, mut rx) = make_cost_ctx(Some(snap));
         let h = CostHandler;
         h.execute(&mut ctx, &[])
             .expect("snapshot-populated execute must return Ok");
@@ -398,7 +348,7 @@ mod tests {
         // that cloning preserves every field. Required because the type
         // is inserted into Option<CostSnapshot> in CommandContext and
         // read back by the handler (no Copy on String).
-        let snap = fixture_snapshot();
+        let snap = fixture_cost_snapshot();
         let cloned = snap.clone();
         assert_eq!(snap.input_tokens, cloned.input_tokens);
         assert_eq!(snap.output_tokens, cloned.output_tokens);

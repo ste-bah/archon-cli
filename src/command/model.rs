@@ -149,42 +149,7 @@ impl CommandHandler for ModelHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use archon_tui::app::TuiEvent;
-    use tokio::sync::mpsc;
-
-    /// Build a `CommandContext` with a freshly-created channel and the
-    /// supplied optional model snapshot. Tests exercising only the
-    /// WRITE path pass `None`; tests exercising the READ path pass
-    /// `Some(ModelSnapshot { .. })`.
-    fn make_ctx(
-        snapshot: Option<ModelSnapshot>,
-    ) -> (CommandContext, mpsc::Receiver<TuiEvent>) {
-        let (tx, rx) = mpsc::channel::<TuiEvent>(16);
-        (
-            CommandContext {
-                tui_tx: tx,
-                status_snapshot: None,
-                model_snapshot: snapshot,
-                // TASK-AGS-809: /model tests never exercise /cost
-                // paths — None.
-                cost_snapshot: None,
-                // TASK-AGS-811: /model tests never exercise /mcp
-                // paths — None.
-                mcp_snapshot: None,
-                // TASK-AGS-814: /model tests never exercise /context
-                // paths — None.
-                context_snapshot: None,
-                // TASK-AGS-815: /model tests never exercise /fork
-                // paths — None.
-                session_id: None,
-                // TASK-AGS-817: /model tests never exercise /memory
-                // paths — None.
-                memory: None,
-                pending_effect: None,
-            },
-            rx,
-        )
-    }
+    use crate::command::test_support::test_support::*;
 
     #[test]
     fn model_handler_description_matches() {
@@ -212,7 +177,7 @@ mod tests {
         let snap = ModelSnapshot {
             current_model: "opus".to_string(),
         };
-        let (mut ctx, mut rx) = make_ctx(Some(snap));
+        let (mut ctx, mut rx) = make_model_ctx(Some(snap));
         let h = ModelHandler;
         h.execute(&mut ctx, &[])
             .expect("ModelHandler::execute must return Ok with snapshot populated");
@@ -244,7 +209,7 @@ mod tests {
 
     #[test]
     fn model_handler_execute_no_args_without_snapshot_returns_err() {
-        let (mut ctx, _rx) = make_ctx(None);
+        let (mut ctx, _rx) = make_model_ctx(None);
         let h = ModelHandler;
         let result = h.execute(&mut ctx, &[]);
         assert!(
@@ -263,7 +228,7 @@ mod tests {
     #[test]
     fn model_handler_execute_with_valid_arg_sets_effect_and_emits_events() {
         // snapshot not needed for WRITE path, pass None.
-        let (mut ctx, mut rx) = make_ctx(None);
+        let (mut ctx, mut rx) = make_model_ctx(None);
         let h = ModelHandler;
         h.execute(&mut ctx, &["opus".to_string()])
             .expect("valid arg must produce Ok(())");
@@ -315,7 +280,7 @@ mod tests {
 
     #[test]
     fn model_handler_execute_with_invalid_arg_emits_error_no_effect() {
-        let (mut ctx, mut rx) = make_ctx(None);
+        let (mut ctx, mut rx) = make_model_ctx(None);
         let h = ModelHandler;
         h.execute(&mut ctx, &["definitely-not-a-model-xyz".to_string()])
             .expect("invalid arg path still returns Ok(()) — error is emitted as event");

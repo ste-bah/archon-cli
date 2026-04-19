@@ -159,60 +159,7 @@ impl CommandHandler for StatusHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use archon_tui::app::TuiEvent;
-    use tokio::sync::mpsc;
-
-    /// Minimal test-only StatusSnapshot used by handler tests. Values
-    /// are chosen so format-string substitutions are obvious in
-    /// assertion output (e.g. 1234 tokens → "1.2k in").
-    fn fixture_snapshot() -> StatusSnapshot {
-        StatusSnapshot {
-            current_model: "claude-opus-4-7".to_string(),
-            perm_mode: "default".to_string(),
-            fast_mode: false,
-            effort: EffortLevel::Medium,
-            thinking_visible: false,
-            session_id_short: "abcd1234".to_string(),
-            input_tokens: 1234,
-            output_tokens: 567,
-            turn_count: 3,
-        }
-    }
-
-    /// Build a `CommandContext` with a freshly-created channel and the
-    /// supplied (optional) snapshot. Tests that do not exercise the
-    /// snapshot path pass `None`.
-    fn make_ctx(
-        snapshot: Option<StatusSnapshot>,
-    ) -> (CommandContext, mpsc::Receiver<TuiEvent>) {
-        let (tx, rx) = mpsc::channel::<TuiEvent>(16);
-        (
-            CommandContext {
-                tui_tx: tx,
-                status_snapshot: snapshot,
-                // TASK-AGS-808: /status tests never exercise /model
-                // paths — None on both new fields.
-                model_snapshot: None,
-                // TASK-AGS-809: /status tests never exercise /cost
-                // paths — None.
-                cost_snapshot: None,
-                // TASK-AGS-811: /status tests never exercise /mcp
-                // paths — None.
-                mcp_snapshot: None,
-                // TASK-AGS-814: /status tests never exercise /context
-                // paths — None.
-                context_snapshot: None,
-                // TASK-AGS-815: /status tests never exercise /fork
-                // paths — None.
-                session_id: None,
-                // TASK-AGS-817: /status tests never exercise /memory
-                // paths — None.
-                memory: None,
-                pending_effect: None,
-            },
-            rx,
-        )
-    }
+    use crate::command::test_support::test_support::*;
 
     #[test]
     fn status_handler_description_matches() {
@@ -240,7 +187,7 @@ mod tests {
 
     #[test]
     fn status_handler_execute_with_snapshot_emits_text_delta_with_model_line() {
-        let (mut ctx, mut rx) = make_ctx(Some(fixture_snapshot()));
+        let (mut ctx, mut rx) = make_status_ctx(Some(fixture_status_snapshot()));
         let h = StatusHandler;
         h.execute(&mut ctx, &[])
             .expect("StatusHandler::execute must return Ok with snapshot populated");
@@ -279,7 +226,7 @@ mod tests {
 
     #[test]
     fn status_handler_execute_without_snapshot_returns_err() {
-        let (mut ctx, _rx) = make_ctx(None);
+        let (mut ctx, _rx) = make_status_ctx(None);
         let h = StatusHandler;
         let result = h.execute(&mut ctx, &[]);
         assert!(
@@ -301,7 +248,7 @@ mod tests {
         // and that cloning preserves all fields (so the type can be
         // inserted into Option<StatusSnapshot> in CommandContext and
         // read back by the handler without needing Copy).
-        let snap = fixture_snapshot();
+        let snap = fixture_status_snapshot();
         let cloned = snap.clone();
         assert_eq!(snap.current_model, cloned.current_model);
         assert_eq!(snap.perm_mode, cloned.perm_mode);
