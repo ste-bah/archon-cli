@@ -138,11 +138,105 @@ mod tests {
     ///
     /// Pricing table resolution is a follow-up: `estimated_cost_usd` is always `None`.
     pub fn compute_stats(
-        _store: &archon_session::storage::SessionStore,
-        _session_id: &str,
+        store: &archon_session::storage::SessionStore,
+        session_id: &str,
         _metrics: &dyn StatsSource,
     ) -> SessionStats {
-        unimplemented!("compute_stats implementation pending")
+        // Fetch session; on error return empty stats (never panic)
+        let session = match store.get_session(session_id) {
+            Ok(s) => s,
+            Err(_) => return SessionStats::empty(),
+        };
+
+        // Load all messages for this session
+        let messages = match store.load_messages(session_id) {
+            Ok(msgs) => msgs,
+            Err(_) => return SessionStats::empty(),
+        };
+
+        let message_count = messages.len() as u64;
+
+        // Collect distinct agents via HashSet
+        let mut agents = std::collections::HashSet::new();
+        // Collect recent entries (newest-first = reverse iteration, cap at 10)
+        let mut recent_commands: Vec<String> = Vec::new();
+        let mut recent_agents: Vec<String> = Vec::new();
+        let mut recent_tools: Vec<String> = Vec::new();
+
+        // Accumulate token usage across all messages
+        let mut total_input_tokens: u64 = 0;
+        let mut total_output_tokens: u64 = 0;
+        let mut total_cache_creation_input_tokens: u64 = 0;
+        let mut total_cache_read_input_tokens: u64 = 0;
+
+        // Parse messages in reverse (newest-first) to build recent lists
+        for content in messages.iter().rev() {
+            // Parse JSON message content
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(content) {
+                // Extract agent
+                if let Some(agent_val) = json.get("agent").and_then(|v| v.as_str()) {
+                    if agents.insert(agent_val.to_string()) {
+                        if recent_agents.len() < 10 {
+                            recent_agents.push(agent_val.to_string());
+                        }
+                    }
+                }
+
+                // Extract command
+                if let Some(cmd_val) = json.get("command").and_then(|v| v.as_str()) {
+                    if !cmd_val.is_empty() && !recent_commands.contains(&cmd_val.to_string()) {
+                        recent_commands.push(cmd_val.to_string());
+                        if recent_commands.len() > 10 {
+                            recent_commands.remove(0);
+                        }
+                    }
+                }
+
+                // Extract tool
+                if let Some(tool_val) = json.get("tool").and_then(|v| v.as_str()) {
+                    if !tool_val.is_empty() && !recent_tools.contains(&tool_val.to_string()) {
+                        recent_tools.push(tool_val.to_string());
+                        if recent_tools.len() > 10 {
+                            recent_tools.remove(0);
+                        }
+                    }
+                }
+
+                // Extract token usage if present
+                if let Some(token_obj) = json.get("token_usage") {
+                    total_input_tokens += token_obj.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+                    total_output_tokens += token_obj.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+                    total_cache_creation_input_tokens += token_obj.get("cache_creation_input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+                    total_cache_read_input_tokens += token_obj.get("cache_read_input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+                }
+            }
+        }
+
+        // Compute elapsed time; clamp negative durations to zero
+        let created_at = chrono::DateTime::parse_from_rfc3339(&session.created_at)
+            .map(|dt| dt.with_timezone(&chrono::Utc))
+            .unwrap_or_else(|_| chrono::Utc::now());
+        let elapsed = chrono::Utc::now()
+            .signed_duration_since(created_at);
+        let elapsed = std::time::Duration::from_secs(
+            elapsed.num_seconds().try_into().unwrap_or(0).max(0)
+        );
+
+        SessionStats {
+            message_count,
+            agent_count: agents.len() as u64,
+            token_usage: TokenUsage {
+                input_tokens: total_input_tokens,
+                output_tokens: total_output_tokens,
+                cache_creation_input_tokens: total_cache_creation_input_tokens,
+                cache_read_input_tokens: total_cache_read_input_tokens,
+            },
+            elapsed,
+            estimated_cost_usd: None, // pricing table is follow-up work
+            recent_commands,
+            recent_agents,
+            recent_tools,
+        }
     }
 
     #[test]
