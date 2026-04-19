@@ -4,6 +4,8 @@
 use std::sync::Arc;
 use thiserror::Error;
 
+use anyhow::Result;
+use chrono::Utc;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::widgets::{Block, Borders, List, ListItem};
@@ -13,6 +15,7 @@ use crate::theme::Theme;
 
 use super::session_browser::{BranchPoint, SessionState};
 use archon_session::storage::SessionStore;
+use archon_session::fork;
 
 /// Reference to a message / branch point.
 #[derive(Debug, Clone)]
@@ -201,8 +204,131 @@ impl SessionBranching {
         }
     }
 
+    /// Fork the current session at the given message index with the given label.
+    ///
+    /// Merge is FUTURE per PRD out-of-scope.
+    ///
+    /// Adapter: archon_session::fork::fork_at does not exist in the current API.
+    /// Uses fork_session from archon-session/src/fork.rs:16-47 which copies all
+    /// messages (no at_message truncation). The at_message parameter is stored in
+    /// BranchPoint.branched_at_message for UI display only.
+    pub fn fork(&mut self, at_message: usize, label: &str) -> Result<BranchPoint> {
+        // 1. Require an active session
+        let parent_session_id = self.state.current_id.as_ref()
+            .ok_or_else(|| anyhow::anyhow!("cannot fork: no active session"))?;
+
+        // 2. Persist via archon_session fork primitive
+        let new_session_id = fork::fork_session(
+            self.store.as_ref(),
+            parent_session_id,
+            Some(label),
+        ).map_err(|e| anyhow::anyhow!("fork failed: {}", e))?;
+
+        // 3. Build BranchPoint with correct fields
+        let branch_point = BranchPoint {
+            id: new_session_id,
+            parent_session: parent_session_id.clone(),
+            branched_at_message: at_message,
+            label: label.to_string(),
+            created_at: Utc::now(),
+        };
+
+        // 4. Push onto visible_branches only on success
+        self.visible_branches.push(branch_point.clone());
+
+        Ok(branch_point)
+    }
+
     /// Returns a reference to the current session state.
     pub fn state(&self) -> &SessionState {
         &self.state
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SessionBranching fork tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod session_branching_tests {
+    use super::*;
+
+    /// Wrapper that keeps temp_dir alive alongside the store.
+    struct TestEnv {
+        _temp_dir: tempfile::TempDir,
+        store: Arc<SessionStore>,
+    }
+
+    impl TestEnv {
+        fn new() -> Self {
+            let temp_dir = tempfile::tempdir().expect("temp dir");
+            let store = Arc::new(
+                archon_session::storage::SessionStore::open(
+                    &temp_dir.path().join("test.db"),
+                )
+                .expect("test store"),
+            );
+            Self { _temp_dir: temp_dir, store }
+        }
+    }
+
+    fn make_state(current_id: Option<String>) -> SessionState {
+        SessionState {
+            current_id,
+            branches: Vec::new(),
+            history_cursor: 0,
+        }
+    }
+
+    #[test]
+    fn test_fork_without_active_session_errs() {
+        let env = TestEnv::new();
+        let state = make_state(None);
+        let mut branching = SessionBranching::new(env.store.clone(), state);
+
+        let result = branching.fork(5, "test-branch");
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("no active session"));
+    }
+
+    #[test]
+    fn test_fork_appends_branch_point_on_success() {
+        let env = TestEnv::new();
+
+        // Create a parent session first so fork has something to fork from
+        let parent_meta = env.store
+            .create_session("/tmp", None, "gpt-4")
+            .expect("parent session");
+        let state = make_state(Some(parent_meta.id.clone()));
+        let mut branching = SessionBranching::new(env.store.clone(), state);
+
+        let initial_len = branching.branches().len();
+
+        let result = branching.fork(3, "my-branch");
+        assert!(result.is_ok());
+
+        assert_eq!(branching.branches().len(), initial_len + 1);
+    }
+
+    #[test]
+    fn test_fork_returned_branchpoint_has_correct_parent_and_offset() {
+        let env = TestEnv::new();
+
+        // Create a parent session
+        let parent_meta = env.store
+            .create_session("/tmp", None, "gpt-4")
+            .expect("parent session");
+        let parent_id = parent_meta.id.clone();
+        let state = make_state(Some(parent_id.clone()));
+        let mut branching = SessionBranching::new(env.store.clone(), state);
+
+        let result = branching.fork(7, "offset-test");
+        assert!(result.is_ok());
+
+        let bp = result.unwrap();
+        assert_eq!(bp.parent_session, parent_id);
+        assert_eq!(bp.branched_at_message, 7);
+        assert_eq!(bp.label, "offset-test");
     }
 }
