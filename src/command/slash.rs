@@ -354,37 +354,21 @@ pub(crate) async fn handle_slash_command(
         // short-circuiting skill-fallback. See
         // .gates/TASK-AGS-POST-6-BODIES-B07-RELEASE-NOTES/ for the full
         // gate trail.
-        // ── /reload ───────────────────────────────────────────
-        "/reload" => {
-            // Force config reload from disk
-            match archon_core::config_watcher::force_reload(
-                std::slice::from_ref(&ctx.config_path),
-                &archon_core::config::ArchonConfig::default(),
-            ) {
-                Ok((_new_cfg, changed)) => {
-                    if changed.is_empty() {
-                        let _ = tui_tx
-                            .send(TuiEvent::TextDelta(
-                                "\nConfig reloaded. No changes detected.\n".into(),
-                            ))
-                            .await;
-                    } else {
-                        let _ = tui_tx
-                            .send(TuiEvent::TextDelta(format!(
-                                "\nConfig reloaded. Changed: {}\n",
-                                changed.join(", ")
-                            )))
-                            .await;
-                    }
-                }
-                Err(e) => {
-                    let _ = tui_tx
-                        .send(TuiEvent::Error(format!("Config reload failed: {e}")))
-                        .await;
-                }
-            }
-            true
-        }
+        // ── /reload body-migrated to `crate::command::reload::ReloadHandler`
+        //    (TASK-AGS-POST-6-BODIES-B20-RELOAD). Pattern: DIRECT
+        //    (NOT EFFECT-SLOT as task tag suggested — recon proved
+        //    `archon_core::config_watcher::force_reload` is sync).
+        //    Handler consumes the new `CommandContext::config_path:
+        //    Option<PathBuf>` field populated unconditionally at
+        //    context.rs:166 with `Some(slash_ctx.config_path.clone())`
+        //    — AGS-815 session_id precedent. All 3 TuiEvent branches
+        //    (no-change TextDelta / with-change TextDelta / Err Error)
+        //    preserved byte-identical. Registry wiring:
+        //    registry.rs:209 import, :770 field, :1311 breadcrumb
+        //    replacing declare_handler! stub, :1458 insert_primary
+        //    with ReloadHandler::new(). See
+        //    .gates/TASK-AGS-POST-6-BODIES-B20-RELOAD/ for the full
+        //    gate trail. ─────────────────────────────────────────
         // ── /logout ───────────────────────────────────────────
         "/logout" => {
             // Clear OAuth credentials file

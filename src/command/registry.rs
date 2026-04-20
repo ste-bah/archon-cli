@@ -198,6 +198,15 @@ use crate::command::help::HelpHandler;
 // at registry.rs:787 is REPLACED by this import + the insert_primary
 // call below. No aliases — shipped stub had none and spec lists none.
 use crate::command::release_notes::ReleaseNotesHandler;
+// TASK-AGS-POST-6-BODIES-B20-RELOAD: real /reload handler lives in
+// `crate::command::reload`. DIRECT-pattern body-migrate —
+// `archon_core::config_watcher::force_reload(config_paths: &[PathBuf],
+// current: &ArchonConfig) -> Result<(ArchonConfig, Vec<String>),
+// ConfigError>` is sync; no snapshot/effect-slot needed. A new
+// cross-cutting `CommandContext::config_path: Option<PathBuf>` field
+// is populated UNCONDITIONALLY by `build_command_context` per the
+// AGS-815 session_id / AGS-817 memory precedent.
+use crate::command::reload::ReloadHandler;
 // TASK-AGS-POST-6-BODIES-B17-RENAME: real /rename handler lives in
 // `crate::command::rename`. DIRECT-pattern body-migrate — both
 // `archon_session::storage::SessionStore::open` and
@@ -737,6 +746,28 @@ pub(crate) struct CommandContext {
     /// computed costs) plus an owned `cache_stats_line: String` so the
     /// sync handler emits via `try_send` without holding any lock.
     pub(crate) usage_snapshot: Option<UsageSnapshot>,
+    /// TASK-AGS-POST-6-BODIES-B20-RELOAD DIRECT-pattern field (/reload).
+    ///
+    /// Clone of `SlashCommandContext::config_path` populated
+    /// UNCONDITIONALLY by `build_command_context` (mirrors the AGS-815
+    /// `session_id`, AGS-817 `memory`, B01-FAST `fast_mode_shared`,
+    /// B02-THINKING `show_thinking`, B04-DIFF `working_dir`, B06-HELP
+    /// `skill_registry`, and B13-GARDEN `garden_config` cross-cutting
+    /// precedent — not gated on the primary name). `/reload` reads it
+    /// to pass `&[PathBuf]` into the sync
+    /// `archon_core::config_watcher::force_reload(config_paths:
+    /// &[PathBuf], current: &ArchonConfig)` entry point via
+    /// `std::slice::from_ref(config_path)`. `PathBuf` clone per
+    /// dispatch is cheap (one Vec<u8> alloc). `None` sentinel reserved
+    /// for test fixtures that construct `CommandContext` directly
+    /// without standing up a full `SlashCommandContext`; in those
+    /// tests the handler observes `None` and returns an
+    /// Err-with-message describing the missing-config_path condition
+    /// rather than panicking. `archon_core::config_watcher::force_reload`
+    /// is fully sync (no `async fn`, no `.await`) so no matching
+    /// `CommandEffect` variant is required — `/reload` performs its
+    /// read-and-diff synchronously inside `execute`.
+    pub(crate) config_path: Option<std::path::PathBuf>,
     /// TASK-AGS-808 effect-slot field (WRITE side of /model and future
     /// write-tickets).
     ///
@@ -1277,7 +1308,20 @@ declare_handler!(LoginHandler, "Authenticate against the configured backend");
 // the top of this file. No aliases — shipped stub had none and spec
 // lists none. See .gates/TASK-AGS-POST-6-BODIES-B07-RELEASE-NOTES/
 // for the full gate trail.
-declare_handler!(ReloadHandler, "Reload configuration from disk");
+// TASK-AGS-POST-6-BODIES-B20-RELOAD: ReloadHandler moved to
+// `crate::command::reload` (real impl with body-migrated execute via
+// DIRECT pattern — `archon_core::config_watcher::force_reload(
+// config_paths: &[PathBuf], current: &ArchonConfig)` is sync; no
+// snapshot/effect-slot needed). A new cross-cutting
+// `CommandContext::config_path: Option<PathBuf>` field is populated
+// UNCONDITIONALLY by `build_command_context` per the AGS-815 session_id
+// / AGS-817 memory precedent. Shipped stub
+// `declare_handler!(ReloadHandler, "Reload configuration from disk")`
+// at this line is REPLACED by this breadcrumb + the import at the top
+// of this file. No aliases — shipped stub had none and spec lists
+// none. See `src/command/reload.rs` module rustdoc for the full
+// R1-R7 invariant list, and the B17 /rename precedent for the
+// DIRECT-pattern template.
 declare_handler!(LogoutHandler, "Clear stored credentials");
 // TASK-AGS-POST-6-BODIES-B06-HELP: HelpHandler moved to
 // `crate::command::help` (real impl with body-migrated execute via
@@ -1411,7 +1455,7 @@ pub(crate) fn default_registry() -> Registry {
     b.insert_primary("usage", Arc::new(UsageHandler::new()));
     b.insert_primary("tasks", Arc::new(TasksHandler));
     b.insert_primary("release-notes", Arc::new(ReleaseNotesHandler));
-    b.insert_primary("reload", Arc::new(ReloadHandler));
+    b.insert_primary("reload", Arc::new(ReloadHandler::new()));
     b.insert_primary("logout", Arc::new(LogoutHandler));
     b.insert_primary("help", Arc::new(HelpHandler));
     b.insert_primary("rename", Arc::new(RenameHandler::new()));

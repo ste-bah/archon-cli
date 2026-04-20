@@ -153,6 +153,17 @@ pub(crate) async fn build_command_context(
         // B08 denials / B11 effort / B12 permissions / B14 copy / B15
         // doctor snapshot gating rule.
         usage_snapshot: None,
+        // TASK-AGS-POST-6-BODIES-B20-RELOAD: /reload DIRECT-pattern
+        // consumer. Populated UNCONDITIONALLY here (not gated on the
+        // primary name, same as AGS-815 session_id, AGS-817 memory,
+        // B01-FAST fast_mode_shared, B02-THINKING show_thinking,
+        // B04-DIFF working_dir, B06-HELP skill_registry, and B13-GARDEN
+        // garden_config). `PathBuf` clone is cheap (one Vec<u8> alloc);
+        // the handler passes `&[PathBuf]` into the sync
+        // `archon_core::config_watcher::force_reload(config_paths:
+        // &[PathBuf], current: &ArchonConfig)` entry point via
+        // `std::slice::from_ref(config_path)`.
+        config_path: Some(slash_ctx.config_path.clone()),
         pending_effect: None,
         // TASK-AGS-POST-6-BODIES-B11-EFFORT: SIDECAR slot for the
         // session-local `&mut EffortState` write. Initialised to

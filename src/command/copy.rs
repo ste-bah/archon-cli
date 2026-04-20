@@ -529,6 +529,7 @@ mod tests {
                 copy_snapshot: snapshot,
                 doctor_snapshot: None,
                 usage_snapshot: None,
+                config_path: None,
                 pending_effect: None,
                 pending_effort_set: None,
             },

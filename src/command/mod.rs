@@ -43,6 +43,7 @@ pub(crate) mod plugin;
 pub(crate) mod recall;
 pub(crate) mod registry;
 pub(crate) mod release_notes;
+pub(crate) mod reload;
 pub(crate) mod rename;
 pub(crate) mod resume;
 pub(crate) mod rules;
