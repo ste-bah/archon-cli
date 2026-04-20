@@ -345,15 +345,13 @@ pub(crate) async fn handle_slash_command(
             handle_doctor_command(tui_tx, ctx).await;
             true
         }
-        // ── /bug ───────────────────────────────────────────────
-        "/bug" => {
-            let _ = tui_tx
-                .send(TuiEvent::TextDelta(
-                    "\nReport bugs at https://github.com/anthropics/archon/issues\n".into(),
-                ))
-                .await;
-            true
-        }
+        // ── /bug ── migrated to src/command/bug.rs (TASK-AGS-POST-6-BODIES-B03-BUG) ──
+        // DIRECT pattern trivial variant (no state, no args, single TextDelta emission).
+        // The registry dispatch at the top of handle_slash_command reaches BugHandler
+        // before this match block evaluates; `recognizes("/bug")` short-circuits true
+        // so `/bug` inputs never fall through to this region. Arrival here would
+        // indicate a dispatch ordering regression — preserve the breadcrumb as a
+        // forensic marker rather than deleting silently.
         // ── /diff ──────────────────────────────────────────────
         "/diff" => {
             handle_diff_command(tui_tx, &ctx.working_dir).await;
