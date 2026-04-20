@@ -292,48 +292,22 @@ pub(crate) async fn handle_slash_command(
         // collision-free subset is all we apply. See cost.rs rustdoc
         // for the CONFIRM R-item. Do not re-add the legacy arm — see
         // TUI-410 lesson.
-        // ── /permissions ───────────────────────────────────────
-        s if s.starts_with("/permissions") => {
-            let arg = s.strip_prefix("/permissions").unwrap_or("").trim();
-            if arg.is_empty() {
-                let mode = ctx.permission_mode.lock().await;
-                let _ = tui_tx
-                    .send(TuiEvent::TextDelta(format!(
-                        "\nCurrent permission mode: {mode}\n\
-                         Usage: /permissions <mode>\n\
-                         Modes: default, acceptEdits, plan, auto, dontAsk, bypassPermissions\n\
-                         Legacy aliases: ask -> default, yolo -> bypassPermissions\n"
-                    )))
-                    .await;
-            } else {
-                match archon_tools::validation::validate_permission_mode(arg) {
-                    Ok(resolved)
-                        if resolved == "bypassPermissions" && !ctx.allow_bypass_permissions =>
-                    {
-                        let _ = tui_tx
-                            .send(TuiEvent::Error(
-                                "bypassPermissions requires --allow-dangerously-skip-permissions flag".into(),
-                            ))
-                            .await;
-                    }
-                    Ok(resolved) => {
-                        *ctx.permission_mode.lock().await = resolved.clone();
-                        let _ = tui_tx
-                            .send(TuiEvent::PermissionModeChanged(resolved.clone()))
-                            .await;
-                        let _ = tui_tx
-                            .send(TuiEvent::TextDelta(format!(
-                                "\nPermission mode set to {resolved}.\n"
-                            )))
-                            .await;
-                    }
-                    Err(msg) => {
-                        let _ = tui_tx.send(TuiEvent::Error(msg)).await;
-                    }
-                }
-            }
-            true
-        }
+        // ── /permissions: body migrated to src/command/permissions.rs
+        //    (TASK-AGS-POST-6-BODIES-B12-PERMISSIONS, HYBRID = SNAPSHOT
+        //    + EFFECT-SLOT pattern). Dispatcher PATH A at slash.rs:40
+        //    fires PermissionsHandler::execute via the registry BEFORE
+        //    this arm; Option 3 default `_ => true,` at slash.rs:884
+        //    short-circuits handle_slash_command to prevent the former
+        //    arm from being re-entered. Handler stashes
+        //    CommandEffect::SetPermissionMode(resolved) on
+        //    ctx.pending_effect and try_send's byte-identical TextDelta.
+        //    The drain at slash.rs:51-60 awaits
+        //    crate::command::context::apply_effect which performs the
+        //    async lock-write on slash_ctx.permission_mode FIRST, then
+        //    emits TuiEvent::PermissionModeChanged. Registry wiring:
+        //    registry.rs:1136 insert_primary("permissions", ...).
+        //    Legacy arm deleted per POST-6-FALLTHROUGH precedent
+        //    (B01-B04, B09, B10, B11).
         // ── /config [key] [value] ──────────────────────────────
         s if s == "/config" || s.starts_with("/config ") => {
             handle_config_command(s, tui_tx, ctx).await;
