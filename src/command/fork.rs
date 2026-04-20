@@ -198,6 +198,8 @@ mod tests {
                 working_dir: None,
                 // TASK-AGS-POST-6-BODIES-B06-HELP: /fork tests never exercise /help paths — None.
                 skill_registry: None,
+                // TASK-AGS-POST-6-BODIES-B08-DENIALS: /fork tests never exercise /denials paths — None.
+                denial_snapshot: None,
                 pending_effect: None,
             },
             rx,

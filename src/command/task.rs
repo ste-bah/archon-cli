@@ -250,6 +250,9 @@ mod tests {
                 // TASK-AGS-POST-6-BODIES-B06-HELP: /tasks tests never
                 // read the /help skill_registry — None is correct.
                 skill_registry: None,
+                // TASK-AGS-POST-6-BODIES-B08-DENIALS: /tasks tests never
+                // read the /denials DenialSnapshot — None is correct.
+                denial_snapshot: None,
                 pending_effect: None,
             },
             rx,

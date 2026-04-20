@@ -92,6 +92,9 @@ pub(crate) fn make_status_ctx(
             // TASK-AGS-POST-6-BODIES-B06-HELP: /status tests never
             // exercise /help paths — None.
             skill_registry: None,
+            // TASK-AGS-POST-6-BODIES-B08-DENIALS: peer fixtures never
+            // exercise /denials paths — None.
+            denial_snapshot: None,
             pending_effect: None,
         },
         rx,
@@ -123,6 +126,9 @@ pub(crate) fn make_model_ctx(
             // TASK-AGS-POST-6-BODIES-B06-HELP: /model tests never
             // exercise /help paths — None.
             skill_registry: None,
+            // TASK-AGS-POST-6-BODIES-B08-DENIALS: peer fixtures never
+            // exercise /denials paths — None.
+            denial_snapshot: None,
             pending_effect: None,
         },
         rx,
@@ -154,6 +160,9 @@ pub(crate) fn make_cost_ctx(
             // TASK-AGS-POST-6-BODIES-B06-HELP: /cost tests never
             // exercise /help paths — None.
             skill_registry: None,
+            // TASK-AGS-POST-6-BODIES-B08-DENIALS: peer fixtures never
+            // exercise /denials paths — None.
+            denial_snapshot: None,
             pending_effect: None,
         },
         rx,
@@ -192,6 +201,9 @@ pub(crate) fn make_fast_ctx(
             // TASK-AGS-POST-6-BODIES-B06-HELP: /fast tests never
             // exercise /help paths — None.
             skill_registry: None,
+            // TASK-AGS-POST-6-BODIES-B08-DENIALS: peer fixtures never
+            // exercise /denials paths — None.
+            denial_snapshot: None,
             pending_effect: None,
         },
         rx,
@@ -227,6 +239,9 @@ pub(crate) fn make_bug_ctx() -> (CommandContext, mpsc::Receiver<TuiEvent>) {
             // TASK-AGS-POST-6-BODIES-B06-HELP: /bug tests never
             // exercise /help paths — None.
             skill_registry: None,
+            // TASK-AGS-POST-6-BODIES-B08-DENIALS: peer fixtures never
+            // exercise /denials paths — None.
+            denial_snapshot: None,
             pending_effect: None,
         },
         rx,
@@ -267,6 +282,9 @@ pub(crate) fn make_thinking_ctx(
             // TASK-AGS-POST-6-BODIES-B06-HELP: /thinking tests never
             // exercise /help paths — None.
             skill_registry: None,
+            // TASK-AGS-POST-6-BODIES-B08-DENIALS: peer fixtures never
+            // exercise /denials paths — None.
+            denial_snapshot: None,
             pending_effect: None,
         },
         rx,
@@ -306,6 +324,9 @@ pub(crate) fn make_diff_ctx(
             // TASK-AGS-POST-6-BODIES-B06-HELP: /diff tests never
             // exercise /help paths — None.
             skill_registry: None,
+            // TASK-AGS-POST-6-BODIES-B08-DENIALS: peer fixtures never
+            // exercise /denials paths — None.
+            denial_snapshot: None,
             pending_effect: None,
         },
         rx,
@@ -351,6 +372,46 @@ pub(crate) fn make_help_ctx() -> (CommandContext, mpsc::Receiver<TuiEvent>) {
             show_thinking: None,
             working_dir: None,
             skill_registry: Some(Arc::new(registry)),
+            // TASK-AGS-POST-6-BODIES-B08-DENIALS: /help tests never
+            // exercise /denials paths — None.
+            denial_snapshot: None,
+            pending_effect: None,
+        },
+        rx,
+    )
+}
+
+/// Build a CommandContext for DenialsHandler tests.
+///
+/// TASK-AGS-POST-6-BODIES-B08-DENIALS — SNAPSHOT-ONLY variant. The
+/// `/denials` handler reads `denial_snapshot` to emit the pre-computed
+/// `DenialLog::format_display(20)` text wrapped with `\n{text}\n`.
+/// Helper signature takes an `Option<DenialSnapshot>` so a single helper
+/// covers both the Some-path (happy, emit TextDelta) and
+/// None-defensive-panic cases without a second constructor. Mirrors
+/// `make_status_ctx` / `make_cost_ctx` / `make_mcp_ctx` snapshot-helper
+/// shape.
+pub(crate) fn make_denials_ctx(
+    snapshot: Option<crate::command::denials::DenialSnapshot>,
+) -> (CommandContext, mpsc::Receiver<TuiEvent>) {
+    let (tx, rx) = mock_tui_channel();
+    (
+        CommandContext {
+            tui_tx: tx,
+            status_snapshot: None,
+            model_snapshot: None,
+            cost_snapshot: None,
+            mcp_snapshot: None,
+            context_snapshot: None,
+            session_id: None,
+            memory: None,
+            fast_mode_shared: None,
+            show_thinking: None,
+            working_dir: None,
+            // TASK-AGS-POST-6-BODIES-B06-HELP: /denials tests never
+            // exercise /help paths — None.
+            skill_registry: None,
+            denial_snapshot: snapshot,
             pending_effect: None,
         },
         rx,

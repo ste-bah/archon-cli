@@ -198,6 +198,22 @@ use crate::command::help::HelpHandler;
 // at registry.rs:787 is REPLACED by this import + the insert_primary
 // call below. No aliases — shipped stub had none and spec lists none.
 use crate::command::release_notes::ReleaseNotesHandler;
+// TASK-AGS-POST-6-BODIES-B08-DENIALS: real /denials handler lives in
+// `crate::command::denials`. SNAPSHOT-ONLY body-migrate (async
+// `denial_log.lock().await` + sync `DenialLog::format_display(20)` move
+// to the builder; no effect slot required — /denials is read-only).
+// The handler reads `Option<DenialSnapshot>` from a new
+// `CommandContext::denial_snapshot` field populated BY build_command_context
+// ONLY when the primary resolves to `/denials` (mirrors AGS-807 status,
+// AGS-809 cost, AGS-811 mcp, AGS-814 context SNAPSHOT precedent —
+// not the unconditional DIRECT-field pattern of B01-FAST etc.).
+// EIGHTH Batch-A body-migrate (after B01-FAST, B02-THINKING, B03-BUG,
+// B04-DIFF, B05-VIM, B06-HELP, B07-RELEASE-NOTES). Shipped stub
+// `declare_handler!(DenialsHandler, "List tool-use denials recorded
+// this session")` at registry.rs:786 is REPLACED by this import + the
+// insert_primary call below. No aliases — shipped stub used the
+// two-arg declare_handler! form (no aliases slice) and spec lists none.
+use crate::command::denials::{DenialSnapshot, DenialsHandler};
 // TASK-AGS-819: real /theme handler lives in `crate::command::theme`.
 // DIRECT-pattern body-migrate (sync theme helpers — `theme_by_name` +
 // `available_themes` are both plain `fn` lookups; no snapshot/effect-
@@ -418,6 +434,19 @@ pub(crate) struct CommandContext {
     /// pattern read (no async mutex writes back to shared state).
     pub(crate) skill_registry:
         Option<Arc<archon_core::skills::SkillRegistry>>,
+    /// TASK-AGS-POST-6-BODIES-B08-DENIALS SNAPSHOT-pattern field
+    /// (READ-only /denials).
+    ///
+    /// Populated by `build_command_context` for `/denials` ONLY (no
+    /// aliases — the shipped stub at registry.rs:786 used the two-arg
+    /// declare_handler! form). Every other command observes `None`
+    /// and pays zero additional lock traffic on
+    /// `SlashCommandContext::denial_log`. Per the AGS-822 Rule 5
+    /// extension pattern: each body-migrate ticket that needs an
+    /// async-locked snapshot appends one typed snapshot field —
+    /// /denials is READ-only so there is NO matching `CommandEffect`
+    /// variant (mirrors AGS-811 /mcp and AGS-814 /context).
+    pub(crate) denial_snapshot: Option<DenialSnapshot>,
     /// TASK-AGS-808 effect-slot field (WRITE side of /model and future
     /// write-tickets).
     ///
@@ -783,7 +812,16 @@ declare_handler!(DoctorHandler, "Run environment health checks");
 // PathBuf) and apply_effect awaits the existing LIVE
 // `crate::command::slash::handle_diff_command` helper). Imported at
 // the top of this file.
-declare_handler!(DenialsHandler, "List tool-use denials recorded this session");
+// TASK-AGS-POST-6-BODIES-B08-DENIALS: DenialsHandler moved to
+// `crate::command::denials` (real impl with body-migrated execute via
+// SNAPSHOT-ONLY pattern — async `denial_log.lock().await` + sync
+// `DenialLog::format_display(20)` move to the builder; handler consumes
+// `ctx.denial_snapshot` and emits `TuiEvent::TextDelta(format!("\\n{text}\\n"))`).
+// EIGHTH Batch-A body-migrate (after B01-FAST, B02-THINKING, B03-BUG,
+// B04-DIFF, B05-VIM, B06-HELP, B07-RELEASE-NOTES). No aliases — shipped
+// stub used the two-arg declare_handler! form (no aliases slice) and
+// spec lists none. See .gates/TASK-AGS-POST-6-BODIES-B08-DENIALS/ for
+// the full gate trail.
 declare_handler!(LoginHandler, "Authenticate against the configured backend");
 // TASK-AGS-POST-6-BODIES-B05-VIM: VimHandler moved to
 // `crate::command::vim` (real impl with body-migrated execute via

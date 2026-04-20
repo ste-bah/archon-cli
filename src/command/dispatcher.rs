@@ -216,6 +216,10 @@ mod tests {
                 // /help skill_registry Arc — dispatcher tests only
                 // exercise routing/parsing, not handler bodies.
                 skill_registry: None,
+                // TASK-AGS-POST-6-BODIES-B08-DENIALS: same rationale
+                // for /denials DenialSnapshot — dispatcher tests only
+                // exercise routing/parsing, not handler bodies.
+                denial_snapshot: None,
                 pending_effect: None,
             },
             rx,

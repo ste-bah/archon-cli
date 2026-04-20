@@ -493,6 +493,8 @@ mod tests {
                 working_dir: None,
                 // TASK-AGS-POST-6-BODIES-B06-HELP: /memory tests never exercise /help paths — None.
                 skill_registry: None,
+                // TASK-AGS-POST-6-BODIES-B08-DENIALS: /memory tests never exercise /denials paths — None.
+                denial_snapshot: None,
                 pending_effect: None,
             },
             rx,

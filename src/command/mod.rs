@@ -15,6 +15,7 @@ pub(crate) mod config;
 pub(crate) mod context;
 pub(crate) mod context_cmd;
 pub(crate) mod cost;
+pub(crate) mod denials;
 pub(crate) mod diff;
 pub(crate) mod dispatcher;
 pub(crate) mod doctor;

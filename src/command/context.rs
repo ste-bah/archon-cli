@@ -19,7 +19,7 @@ use std::sync::Arc;
 use archon_tui::app::TuiEvent;
 
 use crate::command::registry::{CommandContext, CommandEffect, Registry};
-use crate::command::{context_cmd, cost, mcp, model, status};
+use crate::command::{context_cmd, cost, denials, mcp, model, status};
 use crate::slash_context::SlashCommandContext;
 
 /// Build the per-dispatch [`CommandContext`] for the supplied slash
@@ -96,6 +96,16 @@ pub(crate) async fn build_command_context(
         // + atomic refcount increment); the handler reads it via
         // `SkillRegistry::format_help()` / `format_skill_help()`.
         skill_registry: Some(Arc::clone(&slash_ctx.skill_registry)),
+        // TASK-AGS-POST-6-BODIES-B08-DENIALS: SNAPSHOT-pattern field
+        // (READ-only /denials). Initialised to `None` here; populated
+        // BELOW in the `match primary.as_deref()` block only when the
+        // primary resolves to `/denials`. Unlike DIRECT-pattern fields
+        // (session_id/memory/fast_mode_shared/show_thinking/
+        // working_dir/skill_registry) which populate unconditionally,
+        // SNAPSHOT fields gate on the primary to avoid unnecessary
+        // lock traffic on `denial_log` when the command is not
+        // /denials.
+        denial_snapshot: None,
         pending_effect: None,
     };
 
@@ -144,6 +154,18 @@ pub(crate) async fn build_command_context(
             // the sync handler consumes pre-captured owned counters.
             ctx.context_snapshot =
                 Some(context_cmd::build_context_snapshot(slash_ctx).await);
+        }
+        Some("denials") => {
+            // TASK-AGS-POST-6-BODIES-B08-DENIALS snapshot population.
+            // /denials is read-only, so there is no paired
+            // `apply_effect` branch. No aliases — the shipped stub at
+            // registry.rs:786 used the two-arg declare_handler! form
+            // (no aliases slice) and spec lists none. The builder
+            // awaits a single `denial_log.lock()` + calls
+            // `DenialLog::format_display(20)` here so the sync handler
+            // consumes a pre-computed owned `String`.
+            ctx.denial_snapshot =
+                Some(denials::build_denial_snapshot(slash_ctx).await);
         }
         _ => {}
     }
