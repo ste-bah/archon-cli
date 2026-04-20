@@ -236,16 +236,21 @@ mod tests {
 
     #[test]
     fn dispatch_recognized_command_returns_ok() {
-        // Uses the real default registry — `/fast` resolves to the
-        // TASK-AGS-622 stub handler which returns `Ok(())` without
-        // doing any work. We assert: (a) dispatch returns Ok, and
-        // (b) no `TuiEvent::Error` is emitted (i.e. we did NOT take
-        // the "Unknown command" branch).
+        // Uses the real default registry — `/copy` resolves to the
+        // TASK-AGS-622 `declare_handler!(CopyHandler, ...)` stub which
+        // returns `Ok(())` without doing any work or emitting events.
+        // (Previously used `/fast` — swapped to `/copy` by
+        // TASK-AGS-POST-6-BODIES-B01-FAST when FastHandler became a
+        // real impl with side effects. Any still-stub command works;
+        // this will need another swap when /copy is migrated.)
+        // We assert: (a) dispatch returns Ok, and (b) no
+        // `TuiEvent::Error` is emitted (i.e. we did NOT take the
+        // "Unknown command" branch).
         let registry = Arc::new(default_registry());
         let dispatcher = Dispatcher::new(registry);
         let (mut ctx, mut rx) = make_ctx();
 
-        let result = dispatcher.dispatch(&mut ctx, "/fast");
+        let result = dispatcher.dispatch(&mut ctx, "/copy");
         assert!(result.is_ok(), "recognized command must return Ok");
 
         // Ensure no error event was emitted.
