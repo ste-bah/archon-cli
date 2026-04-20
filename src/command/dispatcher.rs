@@ -224,6 +224,7 @@ mod tests {
                 // for /effort EffortSnapshot — dispatcher tests only
                 // exercise routing/parsing, not handler bodies.
                 effort_snapshot: None,
+                permissions_snapshot: None,
                 pending_effect: None,
                 // TASK-AGS-POST-6-BODIES-B11-EFFORT: same rationale
                 // for the /effort sidecar slot — dispatcher tests only

@@ -278,6 +278,35 @@ use crate::command::add_dir::AddDirHandler;
 // AGS-808 /model snapshot/effect-slot pattern and B10-ADDDIR's
 // effect-slot mutex-write deferral; the sidecar is new in B11.
 use crate::command::effort::EffortHandler;
+// TASK-AGS-POST-6-BODIES-B12-PERMISSIONS: real /permissions handler lives
+// in `crate::command::permissions`. HYBRID body-migrate (SNAPSHOT +
+// EFFECT-SLOT, NO sidecar) — the shipped body at slash.rs:295-336
+// performs THREE actions that cannot all run inside a sync
+// `CommandHandler::execute`:
+//
+//   1. Async read `ctx.permission_mode.lock().await` — SNAPSHOT pattern
+//      (builder pre-populates `CommandContext::permissions_snapshot` by
+//      awaiting `slash_ctx.permission_mode.lock().await` and also
+//      capturing the sync `bool allow_bypass_permissions`).
+//   2. Sync read `ctx.allow_bypass_permissions` — bundled into the
+//      snapshot above to minimise the extension surface (one snapshot
+//      field rather than a DIRECT-pattern cross-cutting field).
+//   3. Async write `*ctx.permission_mode.lock().await = resolved` plus
+//      `TuiEvent::PermissionModeChanged(resolved)` emission —
+//      EFFECT-SLOT pattern via new `CommandEffect::SetPermissionMode`
+//      variant; `apply_effect` awaits the mutex write AND sends the
+//      state-change event (using `.send().await` since apply_effect is
+//      already async — the event MUST be awaited to match shipped
+//      emission-after-write ordering).
+//
+// Shipped stub `declare_handler!(PermissionsHandler, "Show or update
+// tool permissions")` at registry.rs:914 is REPLACED by this import +
+// the insert_primary call below. No aliases (shipped stub used the
+// two-arg form; AGS-817 shipped-wins rule preserves zero aliases).
+// Mirrors AGS-808 /model snapshot/effect-slot pattern and B11-EFFORT's
+// HYBRID split (minus the sidecar, since /permissions has no session-
+// local stack state to mutate).
+use crate::command::permissions::PermissionsHandler;
 
 /// Execution context threaded through every command handler.
 ///
@@ -509,6 +538,23 @@ pub(crate) struct CommandContext {
     /// `denial_snapshot` convention. Carries an owned `EffortLevel`
     /// (Copy) so the sync handler reads without any lock.
     pub(crate) effort_snapshot: Option<crate::command::effort::EffortSnapshot>,
+    /// TASK-AGS-POST-6-BODIES-B12-PERMISSIONS SNAPSHOT-pattern field
+    /// (HYBRID — READ side + bypass-allow guard for /permissions).
+    ///
+    /// Populated by `build_command_context` for `/permissions` ONLY (no
+    /// aliases — shipped stub at registry.rs:914 used the two-arg
+    /// declare_handler! form). Every other command observes `None` and
+    /// pays zero additional lock traffic on `permission_mode`. Carries
+    /// BOTH `current_mode: String` (captured via
+    /// `slash_ctx.permission_mode.lock().await`) AND
+    /// `allow_bypass_permissions: bool` (copied from the sync field on
+    /// `SlashCommandContext`). Bundling both into one snapshot
+    /// minimises the extension surface — one snapshot per primary, no
+    /// second DIRECT-pattern cross-cutting field. Mirrors AGS-807
+    /// `status_snapshot`, AGS-808 `model_snapshot`, B08 `denial_snapshot`,
+    /// and B11 `effort_snapshot` snapshot gating rule.
+    pub(crate) permissions_snapshot:
+        Option<crate::command::permissions::PermissionsSnapshot>,
     /// TASK-AGS-808 effect-slot field (WRITE side of /model and future
     /// write-tickets).
     ///
@@ -616,6 +662,23 @@ pub(crate) enum CommandEffect {
     /// and the sidecar. Mirrors AGS-808 `SetModelOverride` + B10
     /// `AddExtraDir` effect-slot precedent.
     SetEffortLevelShared(archon_llm::effort::EffortLevel),
+    /// TASK-AGS-POST-6-BODIES-B12-PERMISSIONS: overwrite
+    /// `SlashCommandContext::permission_mode` (`Arc<tokio::sync::
+    /// Mutex<String>>`) with the validated permission mode. Produced by
+    /// `PermissionsHandler::execute` (sync stash). Applied by
+    /// `command::context::apply_effect`, which awaits the mutex write
+    /// AND emits `TuiEvent::PermissionModeChanged(resolved)` via
+    /// `tui_tx.send(..).await` AFTER the write — the event MUST be
+    /// awaited to preserve shipped emission-after-write ordering at
+    /// slash.rs:320-323. Carries an owned `String` (the validated mode
+    /// name) so no borrow on `SlashCommandContext` leaks through the
+    /// effect-slot. HYBRID pattern pair with
+    /// `CommandContext::permissions_snapshot` (READ side) — see
+    /// `src/command/permissions.rs` module rustdoc R1 for the full
+    /// split rationale. Mirrors AGS-808 `SetModelOverride`, B10
+    /// `AddExtraDir`, and B11 `SetEffortLevelShared` effect-slot
+    /// precedent.
+    SetPermissionMode(String),
 }
 
 /// Trait every registered slash command handler implements.
@@ -911,7 +974,21 @@ declare_handler!(CopyHandler, "Copy the last assistant message to the clipboard"
 // with body-migrated execute via snapshot pattern, READ-only, aliases
 // migrated from [] to [usage, billing] per spec REQ-FOR-D7 validation
 // criterion 2). Imported at the top of this file.
-declare_handler!(PermissionsHandler, "Show or update tool permissions");
+// TASK-AGS-POST-6-BODIES-B12-PERMISSIONS: PermissionsHandler moved to
+// `crate::command::permissions` (real impl with body-migrated execute
+// via HYBRID pattern — SNAPSHOT (`permissions_snapshot` carries
+// `current_mode: String` AND `allow_bypass_permissions: bool`) for the
+// READ + bypass-guard branches + EFFECT-SLOT via new
+// `CommandEffect::SetPermissionMode(String)` for the async mutex write
+// and PermissionModeChanged emission). NO sidecar — /permissions has
+// no session-local stack state to mutate (unlike /effort's
+// EffortState). Shipped stub
+// `declare_handler!(PermissionsHandler, "Show or update tool permissions")`
+// at registry.rs:914 is REPLACED by this breadcrumb + the import at the
+// top of this file. No aliases (shipped stub used the two-arg form;
+// AGS-817 shipped-wins rule preserves zero aliases). See
+// .gates/TASK-AGS-POST-6-BODIES-B12-PERMISSIONS/ for the full gate
+// trail.
 // TASK-AGS-813: ConfigHandler gains aliases [settings, prefs] via
 // alias-only drift-reconcile (shipped-wins). Spec called for /settings
 // as a primary — body-migrate deferred to a post-Stage-6 ticket.
@@ -1869,6 +1946,15 @@ mod tests {
             // drift if a future variant is added without updating this
             // pin.
             CommandEffect::SetEffortLevelShared(_) => {
+                unreachable!("this test only constructs SetModelOverride")
+            }
+            // TASK-AGS-POST-6-BODIES-B12-PERMISSIONS: SetPermissionMode is
+            // the fifth variant, added by the /permissions migration. This
+            // test only constructs SetModelOverride, so SetPermissionMode
+            // is unreachable here; the arm exists solely to satisfy
+            // exhaustiveness and guard against silent drift if a future
+            // variant is added without updating this pin.
+            CommandEffect::SetPermissionMode(_) => {
                 unreachable!("this test only constructs SetModelOverride")
             }
         }

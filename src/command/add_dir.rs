@@ -268,6 +268,7 @@ mod tests {
                 // TASK-AGS-POST-6-BODIES-B11-EFFORT: /add-dir tests
                 // never exercise /effort paths — None.
                 effort_snapshot: None,
+                permissions_snapshot: None,
                 pending_effect: None,
                 pending_effort_set: None,
             },

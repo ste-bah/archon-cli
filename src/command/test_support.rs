@@ -98,6 +98,7 @@ pub(crate) fn make_status_ctx(
             // TASK-AGS-POST-6-BODIES-B11-EFFORT: peer fixtures never
             // exercise /effort paths — None.
             effort_snapshot: None,
+            permissions_snapshot: None,
             pending_effect: None,
             // TASK-AGS-POST-6-BODIES-B11-EFFORT: peer fixtures never
             // exercise /effort paths — None.
@@ -138,6 +139,7 @@ pub(crate) fn make_model_ctx(
             // TASK-AGS-POST-6-BODIES-B11-EFFORT: peer fixtures never
             // exercise /effort paths — None.
             effort_snapshot: None,
+            permissions_snapshot: None,
             pending_effect: None,
             // TASK-AGS-POST-6-BODIES-B11-EFFORT: peer fixtures never
             // exercise /effort paths — None.
@@ -178,6 +180,7 @@ pub(crate) fn make_cost_ctx(
             // TASK-AGS-POST-6-BODIES-B11-EFFORT: peer fixtures never
             // exercise /effort paths — None.
             effort_snapshot: None,
+            permissions_snapshot: None,
             pending_effect: None,
             // TASK-AGS-POST-6-BODIES-B11-EFFORT: peer fixtures never
             // exercise /effort paths — None.
@@ -225,6 +228,7 @@ pub(crate) fn make_fast_ctx(
             // TASK-AGS-POST-6-BODIES-B11-EFFORT: peer fixtures never
             // exercise /effort paths — None.
             effort_snapshot: None,
+            permissions_snapshot: None,
             pending_effect: None,
             // TASK-AGS-POST-6-BODIES-B11-EFFORT: peer fixtures never
             // exercise /effort paths — None.
@@ -269,6 +273,7 @@ pub(crate) fn make_bug_ctx() -> (CommandContext, mpsc::Receiver<TuiEvent>) {
             // TASK-AGS-POST-6-BODIES-B11-EFFORT: peer fixtures never
             // exercise /effort paths — None.
             effort_snapshot: None,
+            permissions_snapshot: None,
             pending_effect: None,
             // TASK-AGS-POST-6-BODIES-B11-EFFORT: peer fixtures never
             // exercise /effort paths — None.
@@ -318,6 +323,7 @@ pub(crate) fn make_thinking_ctx(
             // TASK-AGS-POST-6-BODIES-B11-EFFORT: peer fixtures never
             // exercise /effort paths — None.
             effort_snapshot: None,
+            permissions_snapshot: None,
             pending_effect: None,
             // TASK-AGS-POST-6-BODIES-B11-EFFORT: peer fixtures never
             // exercise /effort paths — None.
@@ -366,6 +372,7 @@ pub(crate) fn make_diff_ctx(
             // TASK-AGS-POST-6-BODIES-B11-EFFORT: peer fixtures never
             // exercise /effort paths — None.
             effort_snapshot: None,
+            permissions_snapshot: None,
             pending_effect: None,
             // TASK-AGS-POST-6-BODIES-B11-EFFORT: peer fixtures never
             // exercise /effort paths — None.
@@ -420,6 +427,7 @@ pub(crate) fn make_help_ctx() -> (CommandContext, mpsc::Receiver<TuiEvent>) {
             // TASK-AGS-POST-6-BODIES-B11-EFFORT: peer fixtures never
             // exercise /effort paths — None.
             effort_snapshot: None,
+            permissions_snapshot: None,
             pending_effect: None,
             // TASK-AGS-POST-6-BODIES-B11-EFFORT: peer fixtures never
             // exercise /effort paths — None.
@@ -463,6 +471,7 @@ pub(crate) fn make_denials_ctx(
             // TASK-AGS-POST-6-BODIES-B11-EFFORT: peer fixtures never
             // exercise /effort paths — None.
             effort_snapshot: None,
+            permissions_snapshot: None,
             pending_effect: None,
             // TASK-AGS-POST-6-BODIES-B11-EFFORT: peer fixtures never
             // exercise /effort paths — None.

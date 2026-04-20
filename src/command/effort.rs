@@ -351,6 +351,7 @@ mod tests {
                 skill_registry: None,
                 denial_snapshot: None,
                 effort_snapshot: snapshot,
+                permissions_snapshot: None,
                 pending_effect: None,
                 pending_effort_set: None,
             },

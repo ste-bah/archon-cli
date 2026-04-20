@@ -34,6 +34,7 @@ pub(crate) mod mcp;
 pub(crate) mod memory;
 pub(crate) mod model;
 pub(crate) mod parser;
+pub(crate) mod permissions;
 pub(crate) mod pipeline;
 pub(crate) mod remote;
 pub(crate) mod plugin;

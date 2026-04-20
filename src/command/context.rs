@@ -19,7 +19,9 @@ use std::sync::Arc;
 use archon_tui::app::TuiEvent;
 
 use crate::command::registry::{CommandContext, CommandEffect, Registry};
-use crate::command::{context_cmd, cost, denials, effort, mcp, model, status};
+use crate::command::{
+    context_cmd, cost, denials, effort, mcp, model, permissions, status,
+};
 use crate::slash_context::SlashCommandContext;
 
 /// Build the per-dispatch [`CommandContext`] for the supplied slash
@@ -112,6 +114,13 @@ pub(crate) async fn build_command_context(
         // primary resolves to `/effort`. Mirrors AGS-807 status /
         // AGS-808 model / B08 denials snapshot gating rule.
         effort_snapshot: None,
+        // TASK-AGS-POST-6-BODIES-B12-PERMISSIONS: SNAPSHOT-pattern field
+        // (HYBRID — READ side + bypass-allow guard for /permissions).
+        // Initialised to `None` here; populated BELOW in the
+        // `match primary.as_deref()` block only when the primary
+        // resolves to `/permissions`. Mirrors AGS-807 status /
+        // AGS-808 model / B08 denials / B11 effort snapshot gating rule.
+        permissions_snapshot: None,
         pending_effect: None,
         // TASK-AGS-POST-6-BODIES-B11-EFFORT: SIDECAR slot for the
         // session-local `&mut EffortState` write. Initialised to
@@ -192,6 +201,25 @@ pub(crate) async fn build_command_context(
             ctx.effort_snapshot =
                 Some(effort::build_effort_snapshot(slash_ctx).await);
         }
+        Some("permissions") => {
+            // TASK-AGS-POST-6-BODIES-B12-PERMISSIONS snapshot population.
+            // /permissions has both READ and WRITE sides; the READ side
+            // consumes `ctx.permissions_snapshot.current_mode`, the
+            // bypass-allow guard consumes
+            // `ctx.permissions_snapshot.allow_bypass_permissions`, and
+            // the WRITE side goes through the new
+            // `CommandEffect::SetPermissionMode(String)` variant (no
+            // sidecar — /permissions has no session-local stack state).
+            // No aliases (shipped stub at registry.rs:914 used the
+            // two-arg declare_handler! form; spec lists none). The
+            // builder awaits a single `permission_mode.lock()` here AND
+            // copies the sync `allow_bypass_permissions: bool` so the
+            // sync handler consumes a pre-captured snapshot without
+            // locking. Mirrors AGS-808 /model and B11 /effort snapshot
+            // gating.
+            ctx.permissions_snapshot =
+                Some(permissions::build_permissions_snapshot(slash_ctx).await);
+        }
         _ => {}
     }
 
@@ -268,6 +296,30 @@ pub(crate) async fn apply_effect(
             let _ = tui_tx;
             *slash_ctx.effort_level_shared.lock().await = level;
             tracing::info!(level = %level, "set effort level via /effort");
+        }
+        // TASK-AGS-POST-6-BODIES-B12-PERMISSIONS: await the mutex write
+        // on `slash_ctx.permission_mode` AND emit
+        // `TuiEvent::PermissionModeChanged(resolved)` via
+        // `tui_tx.send(..).await` (apply_effect is async, so .await is
+        // legal — the event MUST be awaited to match shipped
+        // emission-after-write ordering at slash.rs:320-323). Byte-
+        // identity with shipped slash.rs:319-323 preserved
+        // (`*ctx.permission_mode.lock().await = resolved.clone();
+        // tui_tx.send(TuiEvent::PermissionModeChanged(resolved.clone()))
+        // .await;`). The confirmation TextDelta
+        // ("\nPermission mode set to {resolved}.\n") is emitted by
+        // the handler via `try_send` BEFORE apply_effect runs (see
+        // src/command/permissions.rs R6 order-semantics-swap note for
+        // rationale — matches B10/B11 precedent). The tracing::info!
+        // record is an additive observability line — shipped code had
+        // no /permissions tracing, so this is new but invariant-
+        // preserving.
+        CommandEffect::SetPermissionMode(resolved) => {
+            *slash_ctx.permission_mode.lock().await = resolved.clone();
+            let _ = tui_tx
+                .send(TuiEvent::PermissionModeChanged(resolved.clone()))
+                .await;
+            tracing::info!(mode = %resolved, "set permission mode via /permissions");
         }
         // Future variants (AGS-819 /theme, etc.): add a match arm here
         // with the appropriate awaited mutex write. No fallback arm —
@@ -455,6 +507,14 @@ mod tests {
             // unreachable here. Arm exists to keep the match exhaustive
             // and guard against silent drift on future variants.
             CommandEffect::SetEffortLevelShared(_) => {
+                unreachable!("narrow apply_effect harness only exercises SetModelOverride")
+            }
+            // TASK-AGS-POST-6-BODIES-B12-PERMISSIONS: SetPermissionMode
+            // belongs to /permissions. This narrow harness only
+            // constructs SetModelOverride above; SetPermissionMode is
+            // unreachable here. Arm exists to keep the match exhaustive
+            // and guard against silent drift on future variants.
+            CommandEffect::SetPermissionMode(_) => {
                 unreachable!("narrow apply_effect harness only exercises SetModelOverride")
             }
         }

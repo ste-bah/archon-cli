@@ -200,6 +200,7 @@ mod tests {
                 // TASK-AGS-POST-6-BODIES-B08-DENIALS: /theme tests never exercise /denials paths — None.
                 denial_snapshot: None,
                 effort_snapshot: None,
+                permissions_snapshot: None,
                 pending_effect: None,
                 pending_effort_set: None,
             },

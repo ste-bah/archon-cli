@@ -254,6 +254,7 @@ mod tests {
                 // read the /denials DenialSnapshot — None is correct.
                 denial_snapshot: None,
                 effort_snapshot: None,
+                permissions_snapshot: None,
                 pending_effect: None,
                 pending_effort_set: None,
             },
