@@ -241,6 +241,19 @@ use crate::command::color::ColorHandler;
 // — the speculative AGS-819 "write" extension turned out to be DIRECT
 // pattern, not effect-slot).
 use crate::command::theme::ThemeHandler;
+// TASK-AGS-POST-6-BODIES-B10-ADDDIR: real /add-dir handler lives in
+// `crate::command::add_dir`. EFFECT-SLOT body-migrate (Path B
+// reclassification — shipped body at slash.rs:679 contains
+// `ctx.extra_dirs.lock().await.push(..)` on a `tokio::sync::Mutex`,
+// forcing the deferred async mutation via
+// `CommandEffect::AddExtraDir(PathBuf)`). Shipped stub
+// `declare_handler!(AddDirHandler, "Add a directory to the working
+// context")` at registry.rs:886 is REPLACED by this import + the
+// insert_primary call below. No aliases (shipped stub had none; AGS-817
+// shipped-wins rule preserves zero aliases). `apply_effect` in
+// `src/command/context.rs` awaits the push and emits the tracing::info!
+// record byte-identical to shipped slash.rs:679 + 683.
+use crate::command::add_dir::AddDirHandler;
 
 /// Execution context threaded through every command handler.
 ///
@@ -523,6 +536,13 @@ pub(crate) enum CommandEffect {
     /// `SlashCommandContext::working_dir`) to avoid any borrow on
     /// `SlashCommandContext` lifetime through the effect-slot.
     RunGitDiffStat(PathBuf),
+    /// TASK-AGS-POST-6-BODIES-B10-ADDDIR: push the validated directory
+    /// onto `SlashCommandContext::extra_dirs` (Arc<tokio::sync::Mutex<...>>).
+    /// Produced by `AddDirHandler::execute` (sync stash). Applied by
+    /// `command::context::apply_effect`, which awaits the mutex push and
+    /// emits the tracing::info! record. Carries an owned `PathBuf` so
+    /// no borrow on `SlashCommandContext` leaks through the effect-slot.
+    AddExtraDir(PathBuf),
 }
 
 /// Trait every registered slash command handler implements.
@@ -883,7 +903,17 @@ declare_handler!(RenameHandler, "Rename the current session");
 // CommandContext::session_id populated unconditionally by
 // build_command_context). No aliases. Imported at the top of this file.
 declare_handler!(CheckpointHandler, "Create or restore a session checkpoint");
-declare_handler!(AddDirHandler, "Add a directory to the working context");
+// TASK-AGS-POST-6-BODIES-B10-ADDDIR: AddDirHandler moved to
+// `crate::command::add_dir` (real impl with body-migrated execute via
+// EFFECT-SLOT pattern — shipped body at slash.rs:679 contained
+// `ctx.extra_dirs.lock().await.push(..)` on a `tokio::sync::Mutex`
+// forcing the deferred async mutation via the new
+// `CommandEffect::AddExtraDir(PathBuf)` variant; `apply_effect` in
+// `src/command/context.rs` awaits the push and emits the
+// tracing::info! record). Mirrors AGS-808 /model and B04-DIFF effect-
+// slot precedent. No aliases (shipped stub had none; AGS-817
+// shipped-wins rule preserves zero aliases). Imported at the top of
+// this file.
 // TASK-AGS-POST-6-BODIES-B09-COLOR: ColorHandler moved to
 // `crate::command::color` (real impl with body-migrated execute via
 // DIRECT pattern — sync `archon_tui::theme::parse_color`, no
@@ -1727,6 +1757,15 @@ mod tests {
             // exhaustiveness and guard against silent drift if a future
             // variant is added without updating this pin.
             CommandEffect::RunGitDiffStat(_) => {
+                unreachable!("this test only constructs SetModelOverride")
+            }
+            // TASK-AGS-POST-6-BODIES-B10-ADDDIR: AddExtraDir is the third
+            // variant, added by the /add-dir migration. This test only
+            // constructs SetModelOverride, so AddExtraDir is unreachable
+            // here; the arm exists solely to satisfy exhaustiveness and
+            // guard against silent drift if a future variant is added
+            // without updating this pin.
+            CommandEffect::AddExtraDir(_) => {
                 unreachable!("this test only constructs SetModelOverride")
             }
         }

@@ -211,6 +211,23 @@ pub(crate) async fn apply_effect(
             let _ = slash_ctx;
             crate::command::slash::handle_diff_command(tui_tx, &path).await;
         }
+        // TASK-AGS-POST-6-BODIES-B10-ADDDIR: await the mutex push on
+        // slash_ctx.extra_dirs and emit the tracing::info! record. Byte-
+        // identity with shipped slash.rs:679-683 preserved — same tracing
+        // call, same log fields (`dir` kv pair with `%path.display()`
+        // formatter; same message literal "added working directory via
+        // /add-dir"). `tui_tx` is unused in this arm — the confirmation
+        // TextDelta is emitted by the handler via try_send BEFORE
+        // apply_effect runs (see src/command/add_dir.rs R6 order-
+        // semantics-swap note for rationale).
+        CommandEffect::AddExtraDir(path) => {
+            let _ = tui_tx;
+            // Clone so the tracing::info! after the push can still
+            // borrow the path. Order preserves shipped slash.rs:679-683
+            // exactly — push FIRST, log SECOND.
+            slash_ctx.extra_dirs.lock().await.push(path.clone());
+            tracing::info!(dir = %path.display(), "added working directory via /add-dir");
+        }
         // Future variants (AGS-819 /theme, etc.): add a match arm here
         // with the appropriate awaited mutex write. No fallback arm —
         // enum exhaustiveness forces new tickets to wire their effects
@@ -381,6 +398,14 @@ mod tests {
             // here. Arm exists to keep the match exhaustive and guard
             // against silent drift on future variants.
             CommandEffect::RunGitDiffStat(_) => {
+                unreachable!("narrow apply_effect harness only exercises SetModelOverride")
+            }
+            // TASK-AGS-POST-6-BODIES-B10-ADDDIR: AddExtraDir belongs to
+            // /add-dir. This narrow harness only constructs
+            // SetModelOverride above; AddExtraDir is unreachable here.
+            // Arm exists to keep the match exhaustive and guard against
+            // silent drift on future variants.
+            CommandEffect::AddExtraDir(_) => {
                 unreachable!("narrow apply_effect harness only exercises SetModelOverride")
             }
         }

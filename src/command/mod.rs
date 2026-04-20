@@ -8,6 +8,7 @@
 //! Declared as `mod command;` from `main.rs` so that `pub(crate)`
 //! visibility scopes to the binary crate (not the library target).
 
+pub(crate) mod add_dir;
 pub(crate) mod agent;
 pub(crate) mod background;
 pub(crate) mod bug;
