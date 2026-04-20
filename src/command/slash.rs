@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 use anyhow::anyhow;
 use archon_consciousness::rules::RulesEngine;
-use archon_llm::effort::{self, EffortLevel, EffortState};
+use archon_llm::effort::EffortState;
 use archon_llm::fast_mode::FastModeState;
 use archon_tools::task_manager;
 use archon_tui::app::TuiEvent;
@@ -103,36 +103,23 @@ pub(crate) async fn handle_slash_command(
         // falling into this match. Arrival at a `/thinking` arm here
         // would indicate a dispatch ordering regression.
         // ── /effort ────────────────────────────────────────────
-        s if s.starts_with("/effort") => {
-            let level_str = s.strip_prefix("/effort").unwrap_or("").trim();
-            if level_str.is_empty() {
-                let _ = tui_tx
-                    .send(TuiEvent::TextDelta(format!(
-                        "\nCurrent effort level: {}\nUsage: /effort <high|medium|low>\n",
-                        effort_state.level()
-                    )))
-                    .await;
-            } else {
-                match archon_tools::validation::validate_effort_level(level_str) {
-                    Ok(validated) => {
-                        // Safe: validated is always one of "high", "medium", "low"
-                        let level = effort::parse_level(&validated)
-                            .expect("validated effort level must parse");
-                        effort_state.set_level(level);
-                        *ctx.effort_level_shared.lock().await = level;
-                        let _ = tui_tx
-                            .send(TuiEvent::TextDelta(format!(
-                                "\nEffort level set to {level}.\n"
-                            )))
-                            .await;
-                    }
-                    Err(msg) => {
-                        let _ = tui_tx.send(TuiEvent::Error(msg)).await;
-                    }
-                }
-            }
-            true
-        }
+        // TASK-AGS-POST-6-BODIES-B11-EFFORT: shipped arm DELETED.
+        // Handler: crate::command::effort::EffortHandler (HYBRID pattern —
+        // SNAPSHOT + EFFECT-SLOT + SIDECAR). READ side consumes the
+        // `effort_snapshot: Option<EffortSnapshot>` field on
+        // CommandContext populated by build_command_context (mirrors
+        // AGS-807 StatusSnapshot). ASYNC WRITE side stashes
+        // CommandEffect::SetEffortLevelShared(EffortLevel) drained by
+        // apply_effect at slash.rs:59. LOCAL WRITE side stashes
+        // ctx.pending_effort_set (SIDECAR slot) drained at slash.rs:71
+        // where the `&mut effort_state` stack variable is in scope.
+        // Wired at crate::command::registry::default_registry
+        // insert_primary "effort". Option 3 default arm at
+        // slash.rs:~909 (`_ => true,`) returns true for every
+        // dispatcher-routed command; session.rs:2491
+        // `if handled { continue; }` prevents any dispatcher-driven
+        // double-fire. Mirrors the B10-ADDDIR breadcrumb shape at
+        // slash.rs:681-692.
         // ── /garden ────────────────────────────────────────────
         s if s == "/garden" || s.starts_with("/garden ") => {
             let sub = s.strip_prefix("/garden").unwrap_or("").trim();

@@ -615,4 +615,177 @@ mod tests {
              event; got: {events:?}"
         );
     }
+
+    // -------------------------------------------------------------------
+    // Gate 5 dispatcher-integration tests — TASK-AGS-POST-6-BODIES-B11-EFFORT
+    // -------------------------------------------------------------------
+    //
+    // These tests drive the real `Dispatcher` + `default_registry()` +
+    // `EffortHandler` end-to-end, replacing the unit-level `h.execute(...)`
+    // harness with the same dispatch path the TUI input loop uses. They
+    // pin the fact that (a) registry routing for "/effort" lands on
+    // `EffortHandler`, (b) parser tokenization delivers args correctly
+    // for both bare and trailing-args forms, (c) byte-framing of shipped
+    // strings survives the full dispatch chain, and (d) the HYBRID
+    // pattern's three slots (effort_snapshot READ, pending_effect
+    // ASYNC-WRITE, pending_effort_set SIDECAR) wire correctly through
+    // the dispatcher.
+    //
+    // Reference template: src/command/add_dir.rs dispatcher tests
+    // (B10-ADDDIR Gate 5) — same structure. Zero mocks: Arc<Registry>
+    // from `default_registry()` + `Dispatcher::new` exactly as the live
+    // harness builds them in session.rs.
+
+    #[test]
+    fn dispatcher_routes_slash_effort_to_handler_end_to_end() {
+        use crate::command::dispatcher::Dispatcher;
+        use crate::command::registry::default_registry;
+        use std::sync::Arc;
+
+        let registry = Arc::new(default_registry());
+        let dispatcher = Dispatcher::new(registry);
+
+        // Bare "/effort" → READ branch → TextDelta with snapshot level.
+        // The handler reads `effort_snapshot` (populated here inline —
+        // in production the builder fills it before dispatch). Use
+        // Medium as the harness default.
+        let snap = EffortSnapshot {
+            current_level: EffortLevel::Medium,
+        };
+        let (mut ctx, mut rx) = make_ctx(Some(snap));
+
+        let result = dispatcher.dispatch(&mut ctx, "/effort");
+        assert!(
+            result.is_ok(),
+            "dispatcher.dispatch(\"/effort\") must return Ok; got: {result:?}"
+        );
+
+        // 1. NO pending_effect (empty-arg branch is READ-only).
+        assert!(
+            ctx.pending_effect.is_none(),
+            "end-to-end bare `/effort` must NOT stash a CommandEffect; \
+             got: {:?}",
+            ctx.pending_effect
+        );
+        // 2. NO pending_effort_set sidecar (empty-arg branch is READ-only).
+        assert!(
+            ctx.pending_effort_set.is_none(),
+            "end-to-end bare `/effort` must NOT stash a pending_effort_set \
+             sidecar; got: {:?}",
+            ctx.pending_effort_set
+        );
+
+        // 3. Exactly one TextDelta whose payload is byte-identical to
+        //    the shipped format!() output for the snapshot level.
+        let events = drain(&mut rx);
+        assert_eq!(
+            events.len(),
+            1,
+            "end-to-end bare `/effort` must emit exactly one event; got: \
+             {events:?}"
+        );
+        let expected = format!(
+            "\nCurrent effort level: {}\nUsage: /effort <high|medium|low>\n",
+            EffortLevel::Medium
+        );
+        match &events[0] {
+            TuiEvent::TextDelta(text) => {
+                assert_eq!(
+                    text, &expected,
+                    "end-to-end bare `/effort` TextDelta must match shipped \
+                     format! byte-for-byte"
+                );
+            }
+            other => panic!(
+                "end-to-end bare `/effort` must emit TuiEvent::TextDelta, \
+                 got: {other:?}"
+            ),
+        }
+
+        // 4. NO Error event.
+        let has_error = events.iter().any(|e| matches!(e, TuiEvent::Error(_)));
+        assert!(
+            !has_error,
+            "end-to-end bare `/effort` must emit NO TuiEvent::Error; got: \
+             {events:?}"
+        );
+    }
+
+    #[test]
+    fn dispatcher_routes_slash_effort_with_high_arg_end_to_end() {
+        use crate::command::dispatcher::Dispatcher;
+        use crate::command::registry::default_registry;
+        use crate::command::registry::CommandEffect;
+        use std::sync::Arc;
+
+        let registry = Arc::new(default_registry());
+        let dispatcher = Dispatcher::new(registry);
+        // snapshot not needed for WRITE branch, pass None.
+        let (mut ctx, mut rx) = make_ctx(None);
+
+        // "/effort high" → WRITE branch → effect stash + sidecar stash +
+        // TextDelta confirmation.
+        let result = dispatcher.dispatch(&mut ctx, "/effort high");
+        assert!(
+            result.is_ok(),
+            "dispatcher.dispatch(\"/effort high\") must return Ok; got: \
+             {result:?}"
+        );
+
+        // 1. pending_effect MUST be Some(SetEffortLevelShared(High)).
+        match ctx.pending_effect.as_ref() {
+            Some(CommandEffect::SetEffortLevelShared(level)) => {
+                assert_eq!(
+                    *level,
+                    EffortLevel::High,
+                    "SetEffortLevelShared must carry the parsed EffortLevel \
+                     from the dispatched arg"
+                );
+            }
+            other => panic!(
+                "expected Some(CommandEffect::SetEffortLevelShared(High)), \
+                 got: {other:?}"
+            ),
+        }
+
+        // 2. pending_effort_set SIDECAR MUST be Some(High).
+        assert_eq!(
+            ctx.pending_effort_set,
+            Some(EffortLevel::High),
+            "pending_effort_set sidecar must carry the parsed EffortLevel \
+             from the dispatched arg"
+        );
+
+        // 3. Exactly one TextDelta whose payload is byte-identical to
+        //    the shipped success format!() output.
+        let events = drain(&mut rx);
+        assert_eq!(
+            events.len(),
+            1,
+            "end-to-end `/effort high` must emit exactly one event; got: \
+             {events:?}"
+        );
+        let expected = format!("\nEffort level set to {}.\n", EffortLevel::High);
+        match &events[0] {
+            TuiEvent::TextDelta(text) => {
+                assert_eq!(
+                    text, &expected,
+                    "end-to-end `/effort high` TextDelta must match shipped \
+                     format! byte-for-byte"
+                );
+            }
+            other => panic!(
+                "end-to-end `/effort high` must emit TuiEvent::TextDelta, \
+                 got: {other:?}"
+            ),
+        }
+
+        // 4. NO Error event.
+        let has_error = events.iter().any(|e| matches!(e, TuiEvent::Error(_)));
+        assert!(
+            !has_error,
+            "end-to-end `/effort high` must emit NO TuiEvent::Error; got: \
+             {events:?}"
+        );
+    }
 }
