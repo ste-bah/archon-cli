@@ -149,108 +149,28 @@ pub(crate) async fn handle_slash_command(
         // slash_ctx.model_override_shared. Aliases: [m, switch-model].
         // Do not re-add the legacy arm — TUI-410 lesson.
         // ── /copy ───────────────────────────────────────────────
-        "/copy" => {
-            // Find the last assistant message content
-            let last_response = ctx.last_assistant_response.lock().await;
-            if last_response.is_empty() {
-                let _ = tui_tx
-                    .send(TuiEvent::TextDelta(
-                        "\nNo assistant response to copy.\n".into(),
-                    ))
-                    .await;
-            } else {
-                // Detect clipboard tool by trying each directly
-                let tool = if std::process::Command::new("which")
-                    .arg("xclip")
-                    .output()
-                    .map(|o| o.status.success())
-                    .unwrap_or(false)
-                {
-                    "xclip"
-                } else if std::process::Command::new("which")
-                    .arg("clip.exe")
-                    .output()
-                    .map(|o| o.status.success())
-                    .unwrap_or(false)
-                {
-                    "clip.exe"
-                } else if std::process::Command::new("which")
-                    .arg("pbcopy")
-                    .output()
-                    .map(|o| o.status.success())
-                    .unwrap_or(false)
-                {
-                    "pbcopy"
-                } else {
-                    "none"
-                };
-
-                let copied = match tool {
-                    "xclip" => {
-                        let mut child = std::process::Command::new("xclip")
-                            .arg("-selection")
-                            .arg("clipboard")
-                            .stdin(std::process::Stdio::piped())
-                            .spawn();
-                        if let Ok(ref mut c) = child {
-                            use std::io::Write;
-                            if let Some(ref mut stdin) = c.stdin {
-                                let _ = stdin.write_all(last_response.as_bytes());
-                            }
-                            let _ = c.wait();
-                            true
-                        } else {
-                            false
-                        }
-                    }
-                    "clip.exe" => {
-                        let mut child = std::process::Command::new("clip.exe")
-                            .stdin(std::process::Stdio::piped())
-                            .spawn();
-                        if let Ok(ref mut c) = child {
-                            use std::io::Write;
-                            if let Some(ref mut stdin) = c.stdin {
-                                let _ = stdin.write_all(last_response.as_bytes());
-                            }
-                            let _ = c.wait();
-                            true
-                        } else {
-                            false
-                        }
-                    }
-                    "pbcopy" => {
-                        let mut child = std::process::Command::new("pbcopy")
-                            .stdin(std::process::Stdio::piped())
-                            .spawn();
-                        if let Ok(ref mut c) = child {
-                            use std::io::Write;
-                            if let Some(ref mut stdin) = c.stdin {
-                                let _ = stdin.write_all(last_response.as_bytes());
-                            }
-                            let _ = c.wait();
-                            true
-                        } else {
-                            false
-                        }
-                    }
-                    _ => false,
-                };
-
-                if copied {
-                    let chars = last_response.len();
-                    let _ = tui_tx
-                        .send(TuiEvent::TextDelta(format!(
-                            "\nCopied {chars} characters to clipboard.\n"
-                        )))
-                        .await;
-                } else {
-                    let _ = tui_tx.send(TuiEvent::Error(
-                        "No clipboard tool found. Install xclip (Linux), or use clip.exe (WSL) / pbcopy (macOS).".into()
-                    )).await;
-                }
-            }
-            true
-        }
+        // Body migrated to src/command/copy.rs (TASK-AGS-POST-6-BODIES-
+        // B14-COPY). Dispatcher at slash.rs:40-45 (PATH A hybrid) fires
+        // CopyHandler via registry lookup. CopySnapshot is populated by
+        // build_command_context before dispatch (single
+        // `last_assistant_response.lock().await` in the builder — see
+        // context.rs:240-253 for the gated match arm). The handler
+        // delegates xclip/clip.exe/pbcopy detection + spawn to an
+        // internal `ClipboardRunner` trait; production wires
+        // `SystemClipboardRunner` which preserves the shipped
+        // subprocess work BYTE-FOR-BYTE (same `which` detection order,
+        // same Command::new spawn with stdin piped + write_all + wait).
+        // Tests inject `MockClipboardRunner` for deterministic Ok/NoTool/
+        // SpawnFailed coverage. No aliases (shipped stub used two-arg
+        // declare_handler! form). Option 3 default arm at slash.rs:854
+        // (drifted from :844 pre-delta due to this arm deletion —
+        // functionally identical) short-circuits handle_slash_command to
+        // return true for every dispatcher-routed command. Do not re-add
+        // the legacy arm — TUI-410 lesson. See registry.rs:621 for the
+        // CopySnapshot field, registry.rs:1048-1060 for the breadcrumb
+        // replacing the former declare_handler!(CopyHandler, ...) stub,
+        // and registry.rs:1222 for the insert_primary call using
+        // `CopyHandler::new()` (which wires SystemClipboardRunner).
         // ── /context ────────────────────────────────────────────
         // Body migrated to src/command/context_cmd.rs (TASK-AGS-814).
         // Dispatcher at slash.rs:40-45 (PATH A hybrid) fires

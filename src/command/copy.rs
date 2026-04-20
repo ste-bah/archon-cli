@@ -790,4 +790,180 @@ mod tests {
              copy_to_clipboard (shipped invokes spawn before wait)"
         );
     }
+
+    // ---- Gate 5: Dispatcher-integration tests ------------------------
+    //
+    // Mirror B13-GARDEN / B12-PERMISSIONS Gate 5 precedent. Build a
+    // REAL `Arc<Registry>` + `Dispatcher::new` — not `default_registry()`
+    // (which hard-wires `SystemClipboardRunner` at registry.rs:1222
+    // and would hit a real xclip / clip.exe / pbcopy binary). Instead,
+    // construct a narrow `RegistryBuilder` with a `CopyHandler` wired
+    // to `MockClipboardRunner` so the subprocess outcome is
+    // deterministic. This verifies:
+    //   1. Dispatcher routes "/copy" to CopyHandler (registry key
+    //      resolution working — i.e., insert_primary at registry.rs:1222
+    //      is alive and the alias map is wired through build()).
+    //   2. CopySnapshot threading from context wiring is observed by
+    //      the handler (test supplies snapshot via make_ctx — the
+    //      `build_command_context` path is exercised in live smoke).
+    //   3. Empty-response short-circuit fires BEFORE subprocess
+    //      detection (first test).
+    //   4. Ok-tool success emits the shipped-format TextDelta via the
+    //      dispatcher round-trip (second test).
+    //   5. NO CommandEffect stashed (SNAPSHOT pattern — write side is
+    //      out-of-process, not a CommandEffect mutex write).
+    //   6. NO TuiEvent::Error on the happy paths.
+
+    #[test]
+    fn dispatcher_routes_slash_copy_with_empty_response_end_to_end() {
+        use crate::command::dispatcher::Dispatcher;
+        use crate::command::registry::RegistryBuilder;
+
+        // Build a narrow registry with ONLY the /copy primary wired
+        // to a mock runner. Default_registry is intentionally NOT
+        // used — it would wire SystemClipboardRunner which hits real
+        // clipboard binaries on the test host.
+        let runner = Arc::new(MockClipboardRunner::new("none", false));
+        let mut builder = RegistryBuilder::new();
+        builder.insert_primary(
+            "copy",
+            Arc::new(CopyHandler::with_runner(runner.clone())),
+        );
+        let registry = Arc::new(builder.build());
+        let dispatcher = Dispatcher::new(registry);
+
+        // Empty last_response → handler short-circuits BEFORE tool
+        // detection. This is a deterministic route.
+        let snap = CopySnapshot {
+            last_response: String::new(),
+        };
+        let (mut ctx, mut rx) = make_ctx(Some(snap));
+        let result = dispatcher.dispatch(&mut ctx, "/copy");
+        assert!(
+            result.is_ok(),
+            "dispatcher.dispatch(\"/copy\") with empty snapshot must \
+             return Ok; got: {result:?}"
+        );
+
+        // 1. NO pending_effect (SNAPSHOT pattern — write side is out-
+        //    of-process subprocess spawn, not a mutex write).
+        assert!(
+            ctx.pending_effect.is_none(),
+            "end-to-end `/copy` must NOT stash a CommandEffect \
+             (SNAPSHOT-pattern invariant); got: {:?}",
+            ctx.pending_effect
+        );
+
+        // 2. Exactly one TextDelta byte-identical to shipped
+        //    slash.rs:156-160 (pre-arm-delete reference).
+        let mut got: Option<String> = None;
+        let mut has_error = false;
+        while let Ok(ev) = rx.try_recv() {
+            match ev {
+                TuiEvent::TextDelta(text) => got = Some(text),
+                TuiEvent::Error(_) => has_error = true,
+                _ => {}
+            }
+        }
+        let text = got.expect(
+            "end-to-end `/copy` with empty snapshot must emit a \
+             TuiEvent::TextDelta",
+        );
+        assert_eq!(
+            text, "\nNo assistant response to copy.\n",
+            "end-to-end `/copy` empty-response TextDelta must match \
+             shipped byte-for-byte"
+        );
+
+        // 3. NO Error event on the happy path.
+        assert!(
+            !has_error,
+            "end-to-end `/copy` with empty snapshot must emit NO \
+             TuiEvent::Error"
+        );
+
+        // 4. Mock runner NEVER invoked — empty branch short-circuits.
+        assert!(
+            runner.last_content.lock().unwrap().is_none(),
+            "end-to-end `/copy` empty-response branch must NOT invoke \
+             copy_to_clipboard on the runner"
+        );
+    }
+
+    #[test]
+    fn dispatcher_routes_slash_copy_with_ok_tool_end_to_end() {
+        use crate::command::dispatcher::Dispatcher;
+        use crate::command::registry::RegistryBuilder;
+
+        let response = "dispatcher-integration content".to_string();
+        let chars = response.len();
+        let runner = Arc::new(MockClipboardRunner::new("xclip", true));
+        let mut builder = RegistryBuilder::new();
+        builder.insert_primary(
+            "copy",
+            Arc::new(CopyHandler::with_runner(runner.clone())),
+        );
+        let registry = Arc::new(builder.build());
+        let dispatcher = Dispatcher::new(registry);
+
+        let snap = CopySnapshot {
+            last_response: response.clone(),
+        };
+        let (mut ctx, mut rx) = make_ctx(Some(snap));
+        let result = dispatcher.dispatch(&mut ctx, "/copy");
+        assert!(
+            result.is_ok(),
+            "dispatcher.dispatch(\"/copy\") with ok-tool snapshot must \
+             return Ok; got: {result:?}"
+        );
+
+        // 1. NO pending_effect (SNAPSHOT pattern).
+        assert!(
+            ctx.pending_effect.is_none(),
+            "end-to-end `/copy` must NOT stash a CommandEffect; got: {:?}",
+            ctx.pending_effect
+        );
+
+        // 2. Exactly one TextDelta byte-identical to shipped
+        //    slash.rs:241-245 format!("\nCopied {chars} characters to
+        //    clipboard.\n").
+        let mut got: Option<String> = None;
+        let mut has_error = false;
+        while let Ok(ev) = rx.try_recv() {
+            match ev {
+                TuiEvent::TextDelta(text) => got = Some(text),
+                TuiEvent::Error(_) => has_error = true,
+                _ => {}
+            }
+        }
+        let text = got.expect(
+            "end-to-end `/copy` with ok-tool snapshot must emit a \
+             TuiEvent::TextDelta",
+        );
+        let expected =
+            format!("\nCopied {chars} characters to clipboard.\n");
+        assert_eq!(
+            text, expected,
+            "end-to-end `/copy` ok-tool TextDelta must match shipped \
+             format!(\"\\nCopied {{chars}} characters to clipboard.\\n\") \
+             byte-for-byte"
+        );
+
+        // 3. NO Error event.
+        assert!(
+            !has_error,
+            "end-to-end `/copy` with ok-tool snapshot must emit NO \
+             TuiEvent::Error"
+        );
+
+        // 4. Mock runner received the exact response bytes — proves
+        //    CopySnapshot::last_response threads through the handler
+        //    into the subprocess call.
+        assert_eq!(
+            runner.last_content.lock().unwrap().as_deref(),
+            Some(response.as_str()),
+            "end-to-end `/copy` must pass CopySnapshot::last_response \
+             to copy_to_clipboard byte-for-byte"
+        );
+    }
 }
