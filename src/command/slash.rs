@@ -16,7 +16,7 @@ use crate::slash_context::SlashCommandContext;
 /// Handle slash commands. Returns `true` if the command was recognized and handled.
 pub(crate) async fn handle_slash_command(
     input: &str,
-    fast_mode: &mut FastModeState,
+    _fast_mode: &mut FastModeState,
     effort_state: &mut EffortState,
     tui_tx: &tokio::sync::mpsc::Sender<TuiEvent>,
     ctx: &mut SlashCommandContext,
@@ -57,17 +57,13 @@ pub(crate) async fn handle_slash_command(
     }
 
     match input {
-        "/fast" => {
-            let new_state = fast_mode.toggle();
-            ctx.fast_mode_shared.store(new_state, Ordering::Relaxed);
-            let msg = if new_state {
-                "Fast mode ENABLED. Responses will be faster but lower quality."
-            } else {
-                "Fast mode DISABLED. Back to normal quality."
-            };
-            let _ = tui_tx.send(TuiEvent::TextDelta(format!("\n{msg}\n"))).await;
-            true
-        }
+        // TASK-AGS-POST-6-BODIES-B01-FAST: /fast match arm deleted. Real
+        // body now lives in `src/command/fast.rs` as
+        // `impl CommandHandler for FastHandler` (DIRECT pattern —
+        // sync atomic toggle on CommandContext.fast_mode_shared).
+        // Registry dispatch at the top of this function reaches
+        // FastHandler before this match block; arrival at a `/fast`
+        // arm here would indicate a dispatch ordering regression.
         // /compact and /clear are handled inline in the input processor (need agent access)
         "/compact" | "/clear" => true,
         // TASK-AGS-818: /export body lives in session.rs:2409-2480 — the
