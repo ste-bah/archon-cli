@@ -240,6 +240,10 @@ mod tests {
                 // TASK-AGS-POST-6-BODIES-B01-FAST: /tasks tests never
                 // read the /fast shared atomic — None is correct.
                 fast_mode_shared: None,
+                // TASK-AGS-POST-6-BODIES-B02-THINKING: /tasks tests
+                // never read the /thinking shared atomic — None is
+                // correct.
+                show_thinking: None,
                 pending_effect: None,
             },
             rx,

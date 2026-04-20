@@ -83,6 +83,9 @@ pub(crate) fn make_status_ctx(
             session_id: None,
             memory: None,
             fast_mode_shared: None,
+            // TASK-AGS-POST-6-BODIES-B02-THINKING: /status tests never
+            // exercise /thinking paths — None.
+            show_thinking: None,
             pending_effect: None,
         },
         rx,
@@ -105,6 +108,9 @@ pub(crate) fn make_model_ctx(
             session_id: None,
             memory: None,
             fast_mode_shared: None,
+            // TASK-AGS-POST-6-BODIES-B02-THINKING: /model tests never
+            // exercise /thinking paths — None.
+            show_thinking: None,
             pending_effect: None,
         },
         rx,
@@ -127,6 +133,9 @@ pub(crate) fn make_cost_ctx(
             session_id: None,
             memory: None,
             fast_mode_shared: None,
+            // TASK-AGS-POST-6-BODIES-B02-THINKING: /cost tests never
+            // exercise /thinking paths — None.
+            show_thinking: None,
             pending_effect: None,
         },
         rx,
@@ -156,6 +165,43 @@ pub(crate) fn make_fast_ctx(
             session_id: None,
             memory: None,
             fast_mode_shared: Some(Arc::new(AtomicBool::new(initial))),
+            // TASK-AGS-POST-6-BODIES-B02-THINKING: /fast tests never
+            // exercise /thinking paths — None.
+            show_thinking: None,
+            pending_effect: None,
+        },
+        rx,
+    )
+}
+
+/// Build a CommandContext for ThinkingHandler tests.
+///
+/// TASK-AGS-POST-6-BODIES-B02-THINKING — mirrors `make_fast_ctx` shape
+/// exactly but populates `show_thinking` (instead of
+/// `fast_mode_shared`) with a freshly-allocated
+/// `Arc<AtomicBool>::new(initial)` so the handler's sync
+/// store-on-parsed-subcommand sees a real shared atomic. All other
+/// optional fields — including `fast_mode_shared` — are left at
+/// `None`, mirroring peer helpers.
+///
+/// Suppress warning: `Ordering` from atomic is held by the inner
+/// `Arc<AtomicBool>`; the helper itself never reads or stores.
+pub(crate) fn make_thinking_ctx(
+    initial: bool,
+) -> (CommandContext, mpsc::Receiver<TuiEvent>) {
+    let (tx, rx) = mock_tui_channel();
+    (
+        CommandContext {
+            tui_tx: tx,
+            status_snapshot: None,
+            model_snapshot: None,
+            cost_snapshot: None,
+            mcp_snapshot: None,
+            context_snapshot: None,
+            session_id: None,
+            memory: None,
+            fast_mode_shared: None,
+            show_thinking: Some(Arc::new(AtomicBool::new(initial))),
             pending_effect: None,
         },
         rx,

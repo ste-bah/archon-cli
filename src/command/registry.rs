@@ -120,6 +120,20 @@ use crate::command::memory::MemoryHandler;
 // + the insert_primary call below. No aliases — shipped stub had
 // none and spec lists none.
 use crate::command::fast::FastHandler;
+// TASK-AGS-POST-6-BODIES-B02-THINKING: real /thinking handler lives in
+// `crate::command::thinking`. DIRECT-pattern body-migrate (sync atomic
+// store on `Arc<AtomicBool>` + ThinkingToggle/TextDelta TuiEvent
+// emissions; no snapshot/effect-slot needed). The handler reads
+// `Option<Arc<AtomicBool>>` from a new `CommandContext::show_thinking`
+// field populated UNCONDITIONALLY by `build_command_context` (mirrors
+// AGS-815 session_id, AGS-817 memory, and B01-FAST fast_mode_shared
+// cross-cutting precedent). Shipped stub
+// `declare_handler!(ThinkingHandler, "Toggle extended thinking display
+// on/off")` at registry.rs:587 is REPLACED by this import + the
+// insert_primary call below. No aliases — shipped stub had none and
+// spec lists none. Subcommands `on`/`off`/empty are positional args
+// dispatched through the same primary, NOT aliases.
+use crate::command::thinking::ThinkingHandler;
 // TASK-AGS-819: real /theme handler lives in `crate::command::theme`.
 // DIRECT-pattern body-migrate (sync theme helpers — `theme_by_name` +
 // `available_themes` are both plain `fn` lookups; no snapshot/effect-
@@ -281,6 +295,22 @@ pub(crate) struct CommandContext {
     /// rather than panicking. No matching `CommandEffect` variant — the
     /// mutation is a sync atomic store.
     pub(crate) fast_mode_shared: Option<Arc<AtomicBool>>,
+    /// TASK-AGS-POST-6-BODIES-B02-THINKING DIRECT-pattern field
+    /// (/thinking).
+    ///
+    /// Clone of `SlashCommandContext::show_thinking` populated
+    /// UNCONDITIONALLY by `build_command_context` (mirrors the AGS-815
+    /// `session_id`, AGS-817 `memory`, and B01-FAST `fast_mode_shared`
+    /// cross-cutting precedent — not gated on the primary name).
+    /// `/thinking` reads it (to log a no-op?) and atomically stores
+    /// the new state from the parsed `on`/`off`/empty subcommand.
+    /// `Option<Arc<AtomicBool>>` so the handler test fixtures can
+    /// construct a `CommandContext` without standing up a full
+    /// `SlashCommandContext`; when `None` the handler returns an
+    /// Err-with-message describing the missing-shared-state condition
+    /// rather than panicking. No matching `CommandEffect` variant — the
+    /// mutation is a sync atomic store.
+    pub(crate) show_thinking: Option<Arc<AtomicBool>>,
     /// TASK-AGS-808 effect-slot field (WRITE side of /model and future
     /// write-tickets).
     ///
@@ -584,7 +614,12 @@ declare_handler!(ClearHandler, "Clear the current conversation", &["cls"]);
 // wins drift-reconcile (AGS-817 /memory precedent). Imported at the
 // top of this file. Real body-migrate deferred to POST-STAGE-6
 // (ticket AGS-POST-6-EXPORT).
-declare_handler!(ThinkingHandler, "Toggle extended thinking display on/off");
+// TASK-AGS-POST-6-BODIES-B02-THINKING: ThinkingHandler moved to
+// `src/command/thinking.rs` (DIRECT pattern — sync atomic store on
+// CommandContext.show_thinking + TuiEvent::ThinkingToggle + TextDelta
+// emissions, subcommand-parsed from args.first()). Real impl and
+// tests live in the dedicated module; stub replaced by registry
+// import at the top of this file.
 declare_handler!(EffortHandler, "Show or set reasoning effort (high|medium|low)");
 declare_handler!(GardenHandler, "Run memory garden consolidation or show stats");
 // TASK-AGS-808: ModelHandler moved to `crate::command::model` (real

@@ -191,6 +191,8 @@ mod tests {
                 session_id: None,
                 memory: None,
                 fast_mode_shared: None,
+                // TASK-AGS-POST-6-BODIES-B02-THINKING: /theme tests never exercise /thinking paths — None.
+                show_thinking: None,
                 pending_effect: None,
             },
             rx,

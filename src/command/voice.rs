@@ -203,6 +203,8 @@ mod tests {
                 memory: None,
                 // TASK-AGS-POST-6-BODIES-B01-FAST: /voice tests never exercise /fast paths — None.
                 fast_mode_shared: None,
+                // TASK-AGS-POST-6-BODIES-B02-THINKING: /voice tests never exercise /thinking paths — None.
+                show_thinking: None,
                 pending_effect: None,
             },
             rx,

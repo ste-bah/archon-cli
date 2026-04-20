@@ -204,6 +204,10 @@ mod tests {
                 // /fast Arc<AtomicBool> — dispatcher tests only
                 // exercise routing/parsing, not handler bodies.
                 fast_mode_shared: None,
+                // TASK-AGS-POST-6-BODIES-B02-THINKING: same rationale
+                // for /thinking Arc<AtomicBool> — dispatcher tests
+                // only exercise routing/parsing, not handler bodies.
+                show_thinking: None,
                 pending_effect: None,
             },
             rx,

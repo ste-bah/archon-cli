@@ -71,6 +71,14 @@ pub(crate) async fn build_command_context(
         // refcount increment); the handler reads + atomically stores
         // through it to toggle fast mode.
         fast_mode_shared: Some(Arc::clone(&slash_ctx.fast_mode_shared)),
+        // TASK-AGS-POST-6-BODIES-B02-THINKING: /thinking DIRECT-pattern
+        // consumer. Populated UNCONDITIONALLY here (not gated on the
+        // primary name, same as AGS-815 session_id, AGS-817 memory,
+        // and B01-FAST fast_mode_shared). `Arc<AtomicBool>` is cheap
+        // to clone (~8 bytes + atomic refcount increment); the handler
+        // atomically stores the new state from the parsed
+        // on/off/empty subcommand.
+        show_thinking: Some(Arc::clone(&slash_ctx.show_thinking)),
         pending_effect: None,
     };
 
