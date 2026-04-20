@@ -16,6 +16,7 @@ pub(crate) mod color;
 pub(crate) mod config;
 pub(crate) mod context;
 pub(crate) mod context_cmd;
+pub(crate) mod copy;
 pub(crate) mod cost;
 pub(crate) mod denials;
 pub(crate) mod diff;

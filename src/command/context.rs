@@ -20,7 +20,7 @@ use archon_tui::app::TuiEvent;
 
 use crate::command::registry::{CommandContext, CommandEffect, Registry};
 use crate::command::{
-    context_cmd, cost, denials, effort, mcp, model, permissions, status,
+    context_cmd, copy, cost, denials, effort, mcp, model, permissions, status,
 };
 use crate::slash_context::SlashCommandContext;
 
@@ -131,6 +131,13 @@ pub(crate) async fn build_command_context(
         // resolves to `/permissions`. Mirrors AGS-807 status /
         // AGS-808 model / B08 denials / B11 effort snapshot gating rule.
         permissions_snapshot: None,
+        // TASK-AGS-POST-6-BODIES-B14-COPY: SNAPSHOT-pattern field
+        // (READ-only /copy). Initialised to `None` here; populated
+        // BELOW in the `match primary.as_deref()` block only when the
+        // primary resolves to `/copy`. Mirrors AGS-807 status /
+        // AGS-808 model / B08 denials / B11 effort / B12 permissions
+        // snapshot gating rule.
+        copy_snapshot: None,
         pending_effect: None,
         // TASK-AGS-POST-6-BODIES-B11-EFFORT: SIDECAR slot for the
         // session-local `&mut EffortState` write. Initialised to
@@ -229,6 +236,20 @@ pub(crate) async fn build_command_context(
             // gating.
             ctx.permissions_snapshot =
                 Some(permissions::build_permissions_snapshot(slash_ctx).await);
+        }
+        Some("copy") => {
+            // TASK-AGS-POST-6-BODIES-B14-COPY snapshot population.
+            // /copy is read-only (the write side is out-of-process —
+            // spawning xclip/clip.exe/pbcopy — and is performed
+            // synchronously by the handler via the internal
+            // `ClipboardRunner` trait, NOT via a CommandEffect).
+            // No aliases (shipped stub at registry.rs:1014 used the
+            // two-arg declare_handler! form; spec lists none). The
+            // builder awaits a single `last_assistant_response.lock()`
+            // here and clones the content into an owned String so the
+            // sync handler holds no lock during subprocess spawn.
+            ctx.copy_snapshot =
+                Some(copy::build_copy_snapshot(slash_ctx).await);
         }
         _ => {}
     }

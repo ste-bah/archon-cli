@@ -323,6 +323,19 @@ use crate::command::permissions::PermissionsHandler;
 // (shipped stub used the two-arg declare_handler! form; AGS-817
 // shipped-wins rule preserves zero aliases).
 use crate::command::garden::GardenHandler;
+// TASK-AGS-POST-6-BODIES-B14-COPY: real /copy handler lives in
+// `crate::command::copy`. SNAPSHOT-pattern body-migrate — the handler
+// reads `ctx.copy_snapshot: Option<CopySnapshot>` (pre-captured clone
+// of `slash_ctx.last_assistant_response.lock().await`) and delegates
+// subprocess work to an internal `ClipboardRunner` trait (production
+// `SystemClipboardRunner` preserves shipped xclip/clip.exe/pbcopy
+// detection + spawn byte-for-byte; tests inject `MockClipboardRunner`).
+// Shipped stub `declare_handler!(CopyHandler, "Copy the last assistant
+// message to the clipboard")` at registry.rs:1014 is REPLACED by this
+// import + the insert_primary call below. No aliases (shipped stub
+// used the two-arg declare_handler! form; shipped-wins rule preserves
+// zero aliases).
+use crate::command::copy::CopyHandler;
 
 /// Execution context threaded through every command handler.
 ///
@@ -592,6 +605,20 @@ pub(crate) struct CommandContext {
     /// and B11 `effort_snapshot` snapshot gating rule.
     pub(crate) permissions_snapshot:
         Option<crate::command::permissions::PermissionsSnapshot>,
+    /// TASK-AGS-POST-6-BODIES-B14-COPY SNAPSHOT-pattern field (READ-only
+    /// /copy).
+    ///
+    /// Populated by `build_command_context` for `/copy` ONLY (no
+    /// aliases — shipped stub at registry.rs:1014 used the two-arg
+    /// declare_handler! form). Every other command observes `None`
+    /// and pays zero additional lock traffic on
+    /// `SlashCommandContext::last_assistant_response`. Mirrors AGS-807
+    /// `status_snapshot`, AGS-808 `model_snapshot`, B08 `denial_snapshot`,
+    /// B11 `effort_snapshot`, and B12 `permissions_snapshot` gating rule.
+    /// Carries an owned `String` (clone of the current last-assistant-
+    /// response) so the sync handler reads without holding a lock across
+    /// the potentially-blocking clipboard subprocess spawn.
+    pub(crate) copy_snapshot: Option<crate::command::copy::CopySnapshot>,
     /// TASK-AGS-808 effect-slot field (WRITE side of /model and future
     /// write-tickets).
     ///
@@ -1011,7 +1038,19 @@ declare_handler!(ClearHandler, "Clear the current conversation", &["cls"]);
 // impl with body-migrated execute via snapshot pattern for READ +
 // effect-slot pattern for WRITE, aliases migrated from [models] to
 // [m, switch-model] per spec). Imported at the top of this file.
-declare_handler!(CopyHandler, "Copy the last assistant message to the clipboard");
+// TASK-AGS-POST-6-BODIES-B14-COPY: CopyHandler moved to
+// `crate::command::copy` (real impl with body-migrated execute via
+// SNAPSHOT-pattern — `ctx.copy_snapshot` carries a pre-captured clone
+// of `slash_ctx.last_assistant_response.lock().await`; the handler
+// delegates xclip/clip.exe/pbcopy detection + spawn to an internal
+// `ClipboardRunner` trait for testability — production
+// `SystemClipboardRunner` preserves shipped slash.rs:163-237 byte-for-
+// byte). Shipped stub `declare_handler!(CopyHandler, "Copy the last
+// assistant message to the clipboard")` at registry.rs:1014 is
+// REPLACED by this breadcrumb + the import at the top of this file.
+// No aliases (shipped stub used the two-arg declare_handler! form;
+// shipped-wins rule preserves zero aliases). Mirrors B13-GARDEN /
+// B12-PERMISSIONS breadcrumb style.
 // TASK-AGS-814: ContextHandler moved to `crate::command::context_cmd`
 // (real impl with body-migrated execute via SNAPSHOT-ONLY pattern,
 // aliases dropped from stub's [ctx] to []). Imported at the top of
@@ -1180,7 +1219,7 @@ pub(crate) fn default_registry() -> Registry {
     b.insert_primary("effort", Arc::new(EffortHandler));
     b.insert_primary("garden", Arc::new(GardenHandler));
     b.insert_primary("model", Arc::new(ModelHandler));
-    b.insert_primary("copy", Arc::new(CopyHandler));
+    b.insert_primary("copy", Arc::new(CopyHandler::new()));
     b.insert_primary("context", Arc::new(ContextHandler));
     b.insert_primary("status", Arc::new(StatusHandler));
     b.insert_primary("cost", Arc::new(CostHandler));

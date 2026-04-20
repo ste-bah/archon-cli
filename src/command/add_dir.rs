@@ -270,6 +270,7 @@ mod tests {
                 // never exercise /effort paths — None.
                 effort_snapshot: None,
                 permissions_snapshot: None,
+                copy_snapshot: None,
                 pending_effect: None,
                 pending_effort_set: None,
             },
