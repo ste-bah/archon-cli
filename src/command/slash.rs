@@ -359,11 +359,19 @@ pub(crate) async fn handle_slash_command(
         // so `/bug` inputs never fall through to this region. Arrival here would
         // indicate a dispatch ordering regression — preserve the breadcrumb as a
         // forensic marker rather than deleting silently.
-        // ── /diff ──────────────────────────────────────────────
-        "/diff" => {
-            handle_diff_command(tui_tx, &ctx.working_dir).await;
-            true
-        }
+        // ── /diff ── migrated to src/command/diff.rs (TASK-AGS-POST-6-BODIES-B04-DIFF) ──
+        // DIRECT with-effect pattern: DiffHandler stashes
+        // CommandEffect::RunGitDiffStat(PathBuf); apply_effect drains
+        // the slot at slash.rs:51-60 and calls the live
+        // handle_diff_command(tui_tx, &path) subprocess helper at
+        // slash.rs:930 BEFORE this match block executes. The
+        // dispatcher.recognizes("/diff") short-circuit at line 61
+        // does NOT early-return (it recognizes the command, so the
+        // negation is false), but the effect has already been
+        // drained, so reaching this region with a /diff input would
+        // re-fire the subprocess and double-emit output — a
+        // regression forensic marker. Preserved as a breadcrumb
+        // per the B01/B02/B03 precedent.
         // ── /denials ──────────────────────────────────────────
         "/denials" => {
             let log = ctx.denial_log.lock().await;
