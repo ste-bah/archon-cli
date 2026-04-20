@@ -190,6 +190,7 @@ mod tests {
                 context_snapshot: None,
                 session_id: None,
                 memory: None,
+                garden_config: None,
                 fast_mode_shared: None,
                 // TASK-AGS-POST-6-BODIES-B02-THINKING: /theme tests never exercise /thinking paths — None.
                 show_thinking: None,

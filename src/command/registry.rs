@@ -307,6 +307,22 @@ use crate::command::effort::EffortHandler;
 // HYBRID split (minus the sidecar, since /permissions has no session-
 // local stack state to mutate).
 use crate::command::permissions::PermissionsHandler;
+// TASK-AGS-POST-6-BODIES-B13-GARDEN: real /garden handler lives in
+// `crate::command::garden`. DIRECT-sync-via-MemoryTrait body-migrate —
+// both `archon_memory::garden::format_garden_stats(&dyn MemoryTrait,
+// usize)` and `archon_memory::garden::consolidate(&dyn MemoryTrait,
+// &GardenConfig)` are fully SYNC (no async fn, no .await), matching the
+// AGS-817 /memory DIRECT-pattern precedent. The handler reads
+// `Arc<dyn MemoryTrait>` from the existing `CommandContext::memory`
+// field (added in AGS-817) and the new `CommandContext::garden_config`
+// field populated UNCONDITIONALLY by `build_command_context` (mirrors
+// the AGS-817 `memory` cross-cutting precedent — not gated on the
+// primary name). Shipped stub `declare_handler!(GardenHandler, "Run
+// memory garden consolidation or show stats")` at registry.rs:958 is
+// REPLACED by this import + the insert_primary call below. No aliases
+// (shipped stub used the two-arg declare_handler! form; AGS-817
+// shipped-wins rule preserves zero aliases).
+use crate::command::garden::GardenHandler;
 
 /// Execution context threaded through every command handler.
 ///
@@ -441,6 +457,27 @@ pub(crate) struct CommandContext {
     /// required — `/memory clear` performs the `clear_all()` mutation
     /// via a direct sync call inside `execute`, not an async write-back.
     pub(crate) memory: Option<Arc<dyn archon_memory::MemoryTrait>>,
+    /// TASK-AGS-POST-6-BODIES-B13-GARDEN DIRECT-pattern field (/garden).
+    ///
+    /// Clone of `SlashCommandContext::garden_config` populated
+    /// UNCONDITIONALLY by `build_command_context` (mirrors the AGS-815
+    /// `session_id` and AGS-817 `memory` cross-cutting precedent — not
+    /// gated on the primary name). `/garden` (default branch) reads it
+    /// to pass `&GardenConfig` into the sync
+    /// `archon_memory::garden::consolidate(&dyn MemoryTrait,
+    /// &GardenConfig)` entry point; `/garden stats` does not read it.
+    /// `GardenConfig` derives `Clone` so cloning it per dispatch is
+    /// cheap (small fixed-size struct of numeric thresholds — no Arc,
+    /// no heap allocation beyond the struct itself). `None` sentinel
+    /// reserved for test fixtures that construct `CommandContext`
+    /// directly without standing up a full `SlashCommandContext`; in
+    /// those tests the consolidate branch observes `None` and returns
+    /// an Err-with-message describing the missing-config condition
+    /// rather than panicking. Both `format_garden_stats` and
+    /// `consolidate` are fully sync (all 12 MemoryTrait methods are
+    /// plain `fn`) so no matching `CommandEffect` variant is required.
+    pub(crate) garden_config:
+        Option<archon_memory::garden::GardenConfig>,
     /// TASK-AGS-POST-6-BODIES-B01-FAST DIRECT-pattern field (/fast).
     ///
     /// Clone of `SlashCommandContext::fast_mode_shared` populated
@@ -955,7 +992,21 @@ declare_handler!(ClearHandler, "Clear the current conversation", &["cls"]);
 //   * `CommandEffect::SetEffortLevelShared` (registry.rs above) —
 //     the effect variant for the shared-mutex write applied by
 //     `command::context::apply_effect`.
-declare_handler!(GardenHandler, "Run memory garden consolidation or show stats");
+// TASK-AGS-POST-6-BODIES-B13-GARDEN: GardenHandler moved to
+// `crate::command::garden` (real impl with body-migrated execute via
+// DIRECT-sync-via-MemoryTrait pattern — both
+// `archon_memory::garden::format_garden_stats` and
+// `archon_memory::garden::consolidate` are fully SYNC, matching the
+// AGS-817 /memory DIRECT-pattern precedent exactly; no snapshot/effect-
+// slot needed). Reads `Arc<dyn MemoryTrait>` from the existing
+// `CommandContext::memory` field (AGS-817) plus the new
+// `CommandContext::garden_config` DIRECT field populated
+// UNCONDITIONALLY by `build_command_context`. Shipped stub
+// `declare_handler!(GardenHandler, "Run memory garden consolidation or
+// show stats")` at registry.rs:958 is REPLACED by this breadcrumb + the
+// import at the top of this file. No aliases (shipped stub used the
+// two-arg declare_handler! form; AGS-817 shipped-wins rule preserves
+// zero aliases). Mirrors B10-ADDDIR/B09-COLOR breadcrumb style.
 // TASK-AGS-808: ModelHandler moved to `crate::command::model` (real
 // impl with body-migrated execute via snapshot pattern for READ +
 // effect-slot pattern for WRITE, aliases migrated from [models] to

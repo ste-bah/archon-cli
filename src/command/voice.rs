@@ -201,6 +201,8 @@ mod tests {
                 session_id: None,
                 // TASK-AGS-817: /voice tests never exercise /memory paths — None.
                 memory: None,
+                // TASK-AGS-POST-6-BODIES-B13-GARDEN: /voice tests never exercise /garden paths — None.
+                garden_config: None,
                 // TASK-AGS-POST-6-BODIES-B01-FAST: /voice tests never exercise /fast paths — None.
                 fast_mode_shared: None,
                 // TASK-AGS-POST-6-BODIES-B02-THINKING: /voice tests never exercise /thinking paths — None.

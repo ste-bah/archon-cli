@@ -273,6 +273,8 @@ mod tests {
                 session_id: None,
                 // TASK-AGS-817: /context tests never exercise /memory paths — None.
                 memory: None,
+                // TASK-AGS-POST-6-BODIES-B13-GARDEN: /context tests never exercise /garden paths — None.
+                garden_config: None,
                 // TASK-AGS-POST-6-BODIES-B01-FAST: /context tests never exercise /fast paths — None.
                 fast_mode_shared: None,
                 // TASK-AGS-POST-6-BODIES-B02-THINKING: /context tests never exercise /thinking paths — None.

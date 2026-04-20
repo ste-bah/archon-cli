@@ -485,6 +485,8 @@ mod tests {
                 context_snapshot: None,
                 session_id: None,
                 memory,
+                // TASK-AGS-POST-6-BODIES-B13-GARDEN: /memory tests never exercise /garden paths — None.
+                garden_config: None,
                 // TASK-AGS-POST-6-BODIES-B01-FAST: /memory tests never exercise /fast paths — None.
                 fast_mode_shared: None,
                 // TASK-AGS-POST-6-BODIES-B02-THINKING: /memory tests never exercise /thinking paths — None.

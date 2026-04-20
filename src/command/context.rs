@@ -66,6 +66,16 @@ pub(crate) async fn build_command_context(
         // handler that needs a memory handle inherits this field for
         // free without a per-command builder match arm.
         memory: Some(Arc::clone(&slash_ctx.memory)),
+        // TASK-AGS-POST-6-BODIES-B13-GARDEN: /garden DIRECT-pattern
+        // consumer. Populated UNCONDITIONALLY here (not gated on the
+        // primary name, same as AGS-815 session_id and AGS-817 memory
+        // — GardenConfig is cheap to clone, small fixed-size struct
+        // of numeric thresholds with no Arc/heap beyond the struct
+        // itself). `/garden` (default branch) reads it to pass
+        // `&GardenConfig` into the sync
+        // `archon_memory::garden::consolidate(&dyn MemoryTrait,
+        // &GardenConfig)` entry point; `/garden stats` does not read it.
+        garden_config: Some(slash_ctx.garden_config.clone()),
         // TASK-AGS-POST-6-BODIES-B01-FAST: /fast DIRECT-pattern
         // consumer. Populated UNCONDITIONALLY here (not gated on the
         // primary name, same as AGS-815 session_id and AGS-817 memory).

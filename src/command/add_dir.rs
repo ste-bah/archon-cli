@@ -260,6 +260,7 @@ mod tests {
                 context_snapshot: None,
                 session_id: None,
                 memory: None,
+                garden_config: None,
                 fast_mode_shared: None,
                 show_thinking: None,
                 working_dir: None,

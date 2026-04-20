@@ -26,6 +26,7 @@ pub(crate) mod errors;
 pub(crate) mod export;
 pub(crate) mod fast;
 pub(crate) mod fork;
+pub(crate) mod garden;
 pub(crate) mod help;
 pub(crate) mod hooks;
 pub(crate) mod ide_stdio;

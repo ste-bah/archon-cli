@@ -82,6 +82,7 @@ pub(crate) fn make_status_ctx(
             context_snapshot: None,
             session_id: None,
             memory: None,
+            garden_config: None,
             fast_mode_shared: None,
             // TASK-AGS-POST-6-BODIES-B02-THINKING: /status tests never
             // exercise /thinking paths — None.
@@ -123,6 +124,7 @@ pub(crate) fn make_model_ctx(
             context_snapshot: None,
             session_id: None,
             memory: None,
+            garden_config: None,
             fast_mode_shared: None,
             // TASK-AGS-POST-6-BODIES-B02-THINKING: /model tests never
             // exercise /thinking paths — None.
@@ -164,6 +166,7 @@ pub(crate) fn make_cost_ctx(
             context_snapshot: None,
             session_id: None,
             memory: None,
+            garden_config: None,
             fast_mode_shared: None,
             // TASK-AGS-POST-6-BODIES-B02-THINKING: /cost tests never
             // exercise /thinking paths — None.
@@ -212,6 +215,7 @@ pub(crate) fn make_fast_ctx(
             context_snapshot: None,
             session_id: None,
             memory: None,
+            garden_config: None,
             fast_mode_shared: Some(Arc::new(AtomicBool::new(initial))),
             // TASK-AGS-POST-6-BODIES-B02-THINKING: /fast tests never
             // exercise /thinking paths — None.
@@ -259,6 +263,7 @@ pub(crate) fn make_bug_ctx() -> (CommandContext, mpsc::Receiver<TuiEvent>) {
             context_snapshot: None,
             session_id: None,
             memory: None,
+            garden_config: None,
             fast_mode_shared: None,
             show_thinking: None,
             // TASK-AGS-POST-6-BODIES-B04-DIFF: /bug tests never
@@ -309,6 +314,7 @@ pub(crate) fn make_thinking_ctx(
             context_snapshot: None,
             session_id: None,
             memory: None,
+            garden_config: None,
             fast_mode_shared: None,
             show_thinking: Some(Arc::new(AtomicBool::new(initial))),
             // TASK-AGS-POST-6-BODIES-B04-DIFF: /thinking tests never
@@ -360,6 +366,7 @@ pub(crate) fn make_diff_ctx(
             context_snapshot: None,
             session_id: None,
             memory: None,
+            garden_config: None,
             fast_mode_shared: None,
             show_thinking: None,
             working_dir,
@@ -417,6 +424,7 @@ pub(crate) fn make_help_ctx() -> (CommandContext, mpsc::Receiver<TuiEvent>) {
             context_snapshot: None,
             session_id: None,
             memory: None,
+            garden_config: None,
             fast_mode_shared: None,
             show_thinking: None,
             working_dir: None,
@@ -461,6 +469,7 @@ pub(crate) fn make_denials_ctx(
             context_snapshot: None,
             session_id: None,
             memory: None,
+            garden_config: None,
             fast_mode_shared: None,
             show_thinking: None,
             working_dir: None,
