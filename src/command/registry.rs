@@ -212,6 +212,24 @@ use crate::command::release_notes::ReleaseNotesHandler;
 // lists none. See `src/command/rename.rs` module rustdoc for the
 // full R1-R7 invariant list.
 use crate::command::rename::RenameHandler;
+// TASK-AGS-POST-6-BODIES-B18-RECALL: real /recall handler lives in
+// `crate::command::recall`. DIRECT-sync-via-MemoryTrait body-migrate —
+// `archon_memory::MemoryTrait::recall_memories(query, limit)` is a
+// plain sync method on the object-safe trait and
+// `CommandContext::memory: Option<Arc<dyn MemoryTrait>>` is already
+// populated unconditionally by `build_command_context` per the
+// AGS-817 /memory precedent (context.rs:69 —
+// `memory: Some(Arc::clone(&slash_ctx.memory))`). No snapshot/effect-
+// slot needed, no new CommandContext field added. Shipped stub
+// `declare_handler!(RecallHandler, "Recall memories matching a
+// query")` at registry.rs:1305 is REPLACED by this import + the
+// insert_primary call at registry.rs:1363 below. No aliases — Steven
+// directive at registry.rs:1302-1304 forbids aliasing `recall` onto
+// any other handler. R7 double-fire: the legacy match arm at
+// slash.rs:569-615 stays live through Gates 1-4; Gate 5 deletes it
+// in a separate subagent run. See `src/command/recall.rs` module
+// rustdoc for the full R1-R7 invariant list.
+use crate::command::recall::RecallHandler;
 // TASK-AGS-POST-6-BODIES-B08-DENIALS: real /denials handler lives in
 // `crate::command::denials`. SNAPSHOT-ONLY body-migrate (async
 // `denial_log.lock().await` + sync `DenialLog::format_display(20)` move
@@ -1302,7 +1320,19 @@ declare_handler!(CheckpointHandler, "Create or restore a session checkpoint");
 // /recall stays a standalone primary command and has NO aliases —
 // Steven directive. Do NOT add "recall" as an alias on /memory or any
 // other handler.
-declare_handler!(RecallHandler, "Recall memories matching a query");
+// TASK-AGS-POST-6-BODIES-B18-RECALL: RecallHandler moved to
+// `crate::command::recall` (real impl with body-migrated execute via
+// DIRECT-sync-via-MemoryTrait pattern — sync
+// `archon_memory::MemoryTrait::recall_memories`, no snapshot/effect-
+// slot needed, no new CommandContext field added — REUSES the
+// AGS-817 `memory` field). No aliases (Steven directive at
+// registry.rs:1320-1322; shipped stub used the 2-arg declare_handler!
+// form). Imported at the top of this file. See insert_primary site
+// at registry.rs:1363 below. R7 double-fire: legacy match arm at
+// slash.rs:569-615 stays live through Gates 1-4; Gate 5 deletes it
+// in a separate subagent run — do NOT touch slash.rs in this
+// ticket. See `src/command/recall.rs` module rustdoc for the full
+// R1-R7 invariant list.
 declare_handler!(RulesHandler, "List, edit, or remove behavioral rules");
 // TASK-AGS-805: /cancel thin wrapper. Body-migrate deferred (shipped
 // CommandContext does not expose `task_service`; the stub returns
@@ -1360,7 +1390,7 @@ pub(crate) fn default_registry() -> Registry {
     b.insert_primary("add-dir", Arc::new(AddDirHandler));
     b.insert_primary("color", Arc::new(ColorHandler));
     b.insert_primary("theme", Arc::new(ThemeHandler));
-    b.insert_primary("recall", Arc::new(RecallHandler));
+    b.insert_primary("recall", Arc::new(RecallHandler::new()));
     b.insert_primary("rules", Arc::new(RulesHandler));
     // TASK-AGS-805: /cancel primary (aliases: stop, abort).
     b.insert_primary("cancel", Arc::new(CancelHandler));

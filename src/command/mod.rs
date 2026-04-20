@@ -40,6 +40,7 @@ pub(crate) mod permissions;
 pub(crate) mod pipeline;
 pub(crate) mod remote;
 pub(crate) mod plugin;
+pub(crate) mod recall;
 pub(crate) mod registry;
 pub(crate) mod release_notes;
 pub(crate) mod rename;

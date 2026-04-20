@@ -566,53 +566,28 @@ pub(crate) async fn handle_slash_command(
         //    effect slot, no new CommandContext field. Arm deleted per
         //    TUI-410 dead-code rule. Do NOT re-add — see TUI-410 lesson.
         //    ──────────────────────────────────────────────────────
-        // ── /recall ────────────────────────────────────────────
-        s if s.starts_with("/recall") => {
-            let query = s.strip_prefix("/recall").unwrap_or("").trim();
-            if query.is_empty() {
-                let _ = tui_tx
-                    .send(TuiEvent::Error(
-                        "Usage: /recall <query> — search memories by keyword".into(),
-                    ))
-                    .await;
-            } else {
-                // Search the memory graph
-                let results = ctx.memory.recall_memories(query, 10);
-                match results {
-                    Ok(memories) => {
-                        if memories.is_empty() {
-                            let _ = tui_tx
-                                .send(TuiEvent::TextDelta(format!(
-                                    "\nNo memories found for '{query}'.\n"
-                                )))
-                                .await;
-                        } else {
-                            let mut out =
-                                format!("\n{} memories matching '{query}':\n\n", memories.len());
-                            for m in &memories {
-                                let title = if m.title.is_empty() {
-                                    "(untitled)"
-                                } else {
-                                    &m.title
-                                };
-                                let snippet: String = m.content.chars().take(100).collect();
-                                let id_short = &m.id[..8.min(m.id.len())];
-                                out.push_str(&format!(
-                                    "  [{id_short}] {title}\n    {snippet}...\n\n"
-                                ));
-                            }
-                            let _ = tui_tx.send(TuiEvent::TextDelta(out)).await;
-                        }
-                    }
-                    Err(e) => {
-                        let _ = tui_tx
-                            .send(TuiEvent::Error(format!("Memory search failed: {e}")))
-                            .await;
-                    }
-                }
-            }
-            true
-        }
+        // ── /recall: body migrated to src/command/recall.rs
+        //    (TASK-AGS-POST-6-BODIES-B18-RECALL, DIRECT-sync-via-
+        //    MemoryTrait pattern). Dispatcher PATH A at slash.rs:46
+        //    fires RecallHandler::execute via the registry BEFORE
+        //    this arm; Gate 5 (this commit) deleted the shipped
+        //    legacy /recall arm at this position. The new handler
+        //    is a sync impl that reuses the AGS-817 cross-cutting
+        //    CommandContext::memory: Option<Arc<dyn MemoryTrait>>
+        //    field (populated unconditionally by
+        //    build_command_context in context.rs — no snapshot/
+        //    effect-slot needed because MemoryTrait::recall_memories
+        //    is sync on the object-safe trait). Byte-identity of all
+        //    four event branches (empty-query Error with U+2014
+        //    em-dash, no-match TextDelta, multi-match TextDelta with
+        //    "{count} memories matching '{query}':" header +
+        //    "  [{id_short}] {title}\n    {snippet}...\n\n" entries,
+        //    Err TextDelta "Memory search failed: {e}") preserved
+        //    verbatim. Registry wiring: registry.rs:232 import,
+        //    :1323 breadcrumb replacing the shipped declare_handler!
+        //    stub, :1393 insert_primary with RecallHandler::new().
+        //    See .gates/TASK-AGS-POST-6-BODIES-B18-RECALL/ for the
+        //    full gate trail. ─────────────────────────────────────
         // ── /rules — list, edit, remove behavioral rules (CRIT-14 ITEM 4) ──
         s if s == "/rules" || s.starts_with("/rules ") => {
             let args_str = s.strip_prefix("/rules").unwrap_or("").trim();
