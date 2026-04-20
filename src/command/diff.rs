@@ -2,7 +2,7 @@
 //! (Option C, DIRECT with-effect pattern body-migrate).
 //!
 //! Reference: docs/stage-7.5/tickets/TASK-AGS-POST-6-BODIES-B04-DIFF.md
-//! Based on: src/command/slash.rs:923 (live `handle_diff_command` helper)
+//! Based on: src/command/slash.rs:961 (live `handle_diff_command` helper)
 //! Source: src/command/registry.rs:673 (`declare_handler!(DiffHandler, ...)`
 //!   no-op stub being replaced)
 //! Derived from: src/command/model.rs (TASK-AGS-808 effect-slot precedent —
@@ -18,7 +18,8 @@
 //!
 //! # Why DIRECT with-effect (not trivial, not snapshot)
 //!
-//! The shipped `/diff` body at slash.rs:357 is:
+//! The pre-migration `/diff` body (deleted by Gate 3; see
+//! slash.rs:362-374 breadcrumb) was:
 //!
 //! ```ignore
 //! "/diff" => {
@@ -27,7 +28,7 @@
 //! }
 //! ```
 //!
-//! where `handle_diff_command` (slash.rs:923) spawns `git diff --stat`
+//! where `handle_diff_command` (slash.rs:961) spawns `git diff --stat`
 //! via `tokio::process::Command::new("git")` and emits up to five
 //! different `TuiEvent` variants depending on exit status and stdout
 //! content (not-a-repo TextDelta, git-error Error, spawn-error Error,
@@ -55,7 +56,7 @@
 //! The handler itself emits NOTHING in the happy path — it only stashes
 //! the effect. All user-visible output (5 emission branches) continues
 //! to be produced by the existing `handle_diff_command` helper at
-//! slash.rs:923, which `apply_effect` calls unchanged. Byte-identity of
+//! slash.rs:961, which `apply_effect` calls unchanged. Byte-identity of
 //! the emitted TextDelta / Error strings is therefore preserved by
 //! CALL-SITE REUSE, not by literal duplication in this module.
 //!
@@ -66,9 +67,10 @@
 //!
 //! # Trailing-args policy (decision rationale)
 //!
-//! The shipped arm at slash.rs:356 matches exactly `"/diff"` and would
-//! fall through for `"/diff foo"` to the default "unknown command"
-//! handler. Post-migration, ALL `/diff*` inputs route to `DiffHandler`
+//! The pre-migration arm (at former slash.rs:356, deleted by Gate 3)
+//! matched exactly `"/diff"` and would have fallen through for
+//! `"/diff foo"` to the default "unknown command" handler.
+//! Post-migration, ALL `/diff*` inputs route to `DiffHandler`
 //! via the registry. Chosen preservation strategy: **ignore trailing
 //! args and always stash the RunGitDiffStat effect** — mirrors the
 //! B03-BUG trailing-args promotion. Simpler code, better UX. The
@@ -109,7 +111,7 @@ impl CommandHandler for DiffHandler {
         // Happy path: working_dir populated by build_command_context.
         // Stash the effect synchronously; apply_effect will await the
         // subprocess call via the existing LIVE handle_diff_command
-        // helper at slash.rs:923 (byte-identical TextDelta/Error
+        // helper at slash.rs:961 (byte-identical TextDelta/Error
         // strings preserved by call-site reuse).
         //
         // Trailing args intentionally ignored (see module rustdoc):

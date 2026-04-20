@@ -149,7 +149,7 @@ use crate::command::bug::BugHandler;
 // `crate::command::diff`. DIRECT with-effect body-migrate (sync handler
 // stashes `CommandEffect::RunGitDiffStat(PathBuf)`; dispatch-site
 // `apply_effect` awaits the existing `handle_diff_command` helper at
-// slash.rs:923 which spawns `git diff --stat` via tokio::process).
+// slash.rs:961 which spawns `git diff --stat` via tokio::process).
 // Subprocess await requires the effect-slot indirection — cannot run
 // inside sync `CommandHandler::execute`. The handler reads
 // `Option<PathBuf>` from a new `CommandContext::working_dir` field

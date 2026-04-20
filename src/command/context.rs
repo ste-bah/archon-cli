@@ -167,7 +167,7 @@ pub(crate) async fn apply_effect(
             *slash_ctx.model_override_shared.lock().await = resolved;
         }
         // TASK-AGS-POST-6-BODIES-B04-DIFF: spawn `git diff --stat` via
-        // the existing LIVE `handle_diff_command` helper at slash.rs:923.
+        // the existing LIVE `handle_diff_command` helper at slash.rs:961.
         // Byte-identity of emitted TuiEvent strings (TextDelta for
         // "Not in a git repository.", "No uncommitted changes.",
         // stdout wrap; Error for spawn failures and git-failure

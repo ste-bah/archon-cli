@@ -1,10 +1,5 @@
 //! Helper utilities extracted from main.rs to reduce main.rs from 1349 to < 500 lines.
 
-use std::path::PathBuf;
-use std::sync::Arc;
-
-use archon_memory::MemoryTrait;
-use archon_tui::app::TuiEvent;
 
 // ---------------------------------------------------------------------------
 // Date/time helpers
@@ -109,53 +104,6 @@ pub fn truncate_str(s: &str, max: usize) -> String {
             end -= 1;
         }
         format!("{}...", &trimmed[..end])
-    }
-}
-
-// ---------------------------------------------------------------------------
-// /diff handler
-// ---------------------------------------------------------------------------
-
-/// Handle `/diff` — show git diff stat.
-pub async fn handle_diff_command(tui_tx: &tokio::sync::mpsc::Sender<TuiEvent>, working_dir: &PathBuf) {
-    let result = tokio::process::Command::new("git")
-        .arg("diff")
-        .arg("--stat")
-        .current_dir(working_dir)
-        .output()
-        .await;
-
-    match result {
-        Ok(output) => {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            if !output.status.success() {
-                if stderr.contains("not a git repository") {
-                    let _ = tui_tx
-                        .send(TuiEvent::TextDelta("\nNot in a git repository.\n".into()))
-                        .await;
-                } else {
-                    let _ = tui_tx
-                        .send(TuiEvent::Error(format!("git diff failed: {stderr}")))
-                        .await;
-                }
-                return;
-            }
-            if stdout.is_empty() {
-                let _ = tui_tx
-                    .send(TuiEvent::TextDelta("\nNo uncommitted changes.\n".into()))
-                    .await;
-            } else {
-                let _ = tui_tx
-                    .send(TuiEvent::TextDelta(format!("\n{stdout}")))
-                    .await;
-            }
-        }
-        Err(e) => {
-            let _ = tui_tx
-                .send(TuiEvent::Error(format!("Failed to run git: {e}")))
-                .await;
-        }
     }
 }
 
