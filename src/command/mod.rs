@@ -41,6 +41,7 @@ pub(crate) mod team;
 pub(crate) mod task;
 pub(crate) mod theme;
 pub(crate) mod thinking;
+pub(crate) mod vim;
 pub(crate) mod tui_helpers;
 #[cfg(test)]
 pub(crate) mod test_support;
