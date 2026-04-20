@@ -162,6 +162,7 @@ mod tests {
                 context_snapshot: None,
                 session_id: None,
                 memory: None,
+                fast_mode_shared: None,
                 pending_effect: None,
             },
             rx,

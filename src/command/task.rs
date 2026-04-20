@@ -237,6 +237,9 @@ mod tests {
                 // TASK-AGS-817: /tasks tests never read the /memory
                 // handle — None is correct.
                 memory: None,
+                // TASK-AGS-POST-6-BODIES-B01-FAST: /tasks tests never
+                // read the /fast shared atomic — None is correct.
+                fast_mode_shared: None,
                 pending_effect: None,
             },
             rx,

@@ -15,6 +15,7 @@
 //! see this module).
 
 use std::collections::HashMap;
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 use archon_tui::app::TuiEvent;
@@ -107,6 +108,18 @@ use crate::command::export::ExportHandler;
 // insert_primary call below. Aliases `["mem"]` are PRESERVED per
 // shipped-wins drift-reconcile (see command/memory.rs Aliases rustdoc).
 use crate::command::memory::MemoryHandler;
+// TASK-AGS-POST-6-BODIES-B01-FAST: real /fast handler lives in
+// `crate::command::fast`. DIRECT-pattern body-migrate (sync atomic
+// toggle on `Arc<AtomicBool>`; no snapshot/effect-slot needed). The
+// handler reads `Option<Arc<AtomicBool>>` from a new
+// `CommandContext::fast_mode_shared` field populated UNCONDITIONALLY
+// by `build_command_context` (mirrors AGS-815 session_id and AGS-817
+// memory cross-cutting precedent). Shipped stub
+// `declare_handler!(FastHandler, "Toggle fast mode (lower quality,
+// faster responses)")` at registry.rs:546 is REPLACED by this import
+// + the insert_primary call below. No aliases — shipped stub had
+// none and spec lists none.
+use crate::command::fast::FastHandler;
 // TASK-AGS-819: real /theme handler lives in `crate::command::theme`.
 // DIRECT-pattern body-migrate (sync theme helpers — `theme_by_name` +
 // `available_themes` are both plain `fn` lookups; no snapshot/effect-
@@ -255,6 +268,19 @@ pub(crate) struct CommandContext {
     /// required — `/memory clear` performs the `clear_all()` mutation
     /// via a direct sync call inside `execute`, not an async write-back.
     pub(crate) memory: Option<Arc<dyn archon_memory::MemoryTrait>>,
+    /// TASK-AGS-POST-6-BODIES-B01-FAST DIRECT-pattern field (/fast).
+    ///
+    /// Clone of `SlashCommandContext::fast_mode_shared` populated
+    /// UNCONDITIONALLY by `build_command_context` (mirrors the AGS-815
+    /// `session_id` and AGS-817 `memory` cross-cutting precedent — not
+    /// gated on the primary name). `/fast` reads and atomically mutates
+    /// it. `Option<Arc<AtomicBool>>` so the handler test fixtures can
+    /// construct a `CommandContext` without standing up a full
+    /// `SlashCommandContext`; when `None` the handler returns an
+    /// Err-with-message describing the missing-shared-state condition
+    /// rather than panicking. No matching `CommandEffect` variant — the
+    /// mutation is a sync atomic store.
+    pub(crate) fast_mode_shared: Option<Arc<AtomicBool>>,
     /// TASK-AGS-808 effect-slot field (WRITE side of /model and future
     /// write-tickets).
     ///
@@ -543,7 +569,11 @@ macro_rules! declare_handler {
     };
 }
 
-declare_handler!(FastHandler, "Toggle fast mode (lower quality, faster responses)");
+// TASK-AGS-POST-6-BODIES-B01-FAST: FastHandler moved to
+// `crate::command::fast` (real impl with body-migrated execute via
+// DIRECT pattern — sync atomic store on Option<Arc<AtomicBool>>
+// from CommandContext, no snapshot/effect-slot needed). Imported at
+// the top of this file.
 declare_handler!(CompactHandler, "Compact the current conversation history");
 declare_handler!(ClearHandler, "Clear the current conversation", &["cls"]);
 // TASK-AGS-818: ExportHandler moved to `crate::command::export` (real

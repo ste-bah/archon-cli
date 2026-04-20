@@ -190,6 +190,8 @@ mod tests {
                 session_id,
                 // TASK-AGS-817: /fork tests never exercise /memory paths — None.
                 memory: None,
+                // TASK-AGS-POST-6-BODIES-B01-FAST: /fork tests never exercise /fast paths — None.
+                fast_mode_shared: None,
                 pending_effect: None,
             },
             rx,

@@ -200,6 +200,10 @@ mod tests {
                 // MemoryTrait> — dispatcher tests only exercise
                 // routing/parsing, not handler bodies.
                 memory: None,
+                // TASK-AGS-POST-6-BODIES-B01-FAST: same rationale for
+                // /fast Arc<AtomicBool> — dispatcher tests only
+                // exercise routing/parsing, not handler bodies.
+                fast_mode_shared: None,
                 pending_effect: None,
             },
             rx,

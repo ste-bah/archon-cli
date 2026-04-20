@@ -64,6 +64,13 @@ pub(crate) async fn build_command_context(
         // handler that needs a memory handle inherits this field for
         // free without a per-command builder match arm.
         memory: Some(Arc::clone(&slash_ctx.memory)),
+        // TASK-AGS-POST-6-BODIES-B01-FAST: /fast DIRECT-pattern
+        // consumer. Populated UNCONDITIONALLY here (not gated on the
+        // primary name, same as AGS-815 session_id and AGS-817 memory).
+        // `Arc<AtomicBool>` is cheap to clone (~8 bytes + atomic
+        // refcount increment); the handler reads + atomically stores
+        // through it to toggle fast mode.
+        fast_mode_shared: Some(Arc::clone(&slash_ctx.fast_mode_shared)),
         pending_effect: None,
     };
 

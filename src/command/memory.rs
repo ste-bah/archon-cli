@@ -485,6 +485,8 @@ mod tests {
                 context_snapshot: None,
                 session_id: None,
                 memory,
+                // TASK-AGS-POST-6-BODIES-B01-FAST: /memory tests never exercise /fast paths — None.
+                fast_mode_shared: None,
                 pending_effect: None,
             },
             rx,

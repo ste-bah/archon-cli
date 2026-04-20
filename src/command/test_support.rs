@@ -1,7 +1,8 @@
 //! Shared test fixtures for command handler tests.
 //! Extracted from Stage 6 body-migrate handlers (AGS-805..819) per Sherlock AGS-820 observation.
 
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use tokio::sync::mpsc;
 
 use archon_llm::effort::EffortLevel;
@@ -81,6 +82,7 @@ pub(crate) fn make_status_ctx(
             context_snapshot: None,
             session_id: None,
             memory: None,
+            fast_mode_shared: None,
             pending_effect: None,
         },
         rx,
@@ -102,6 +104,7 @@ pub(crate) fn make_model_ctx(
             context_snapshot: None,
             session_id: None,
             memory: None,
+            fast_mode_shared: None,
             pending_effect: None,
         },
         rx,
@@ -123,6 +126,36 @@ pub(crate) fn make_cost_ctx(
             context_snapshot: None,
             session_id: None,
             memory: None,
+            fast_mode_shared: None,
+            pending_effect: None,
+        },
+        rx,
+    )
+}
+
+/// Build a CommandContext for FastHandler tests.
+///
+/// TASK-AGS-POST-6-BODIES-B01-FAST — mirrors `make_status_ctx` /
+/// `make_model_ctx` / `make_cost_ctx` but populates
+/// `fast_mode_shared` with a freshly-allocated
+/// `Arc<AtomicBool>::new(initial)` so the handler's sync
+/// load-invert-store toggle sees a real shared atomic. All other
+/// optional fields are left at `None` — mirroring peer helpers.
+pub(crate) fn make_fast_ctx(
+    initial: bool,
+) -> (CommandContext, mpsc::Receiver<TuiEvent>) {
+    let (tx, rx) = mock_tui_channel();
+    (
+        CommandContext {
+            tui_tx: tx,
+            status_snapshot: None,
+            model_snapshot: None,
+            cost_snapshot: None,
+            mcp_snapshot: None,
+            context_snapshot: None,
+            session_id: None,
+            memory: None,
+            fast_mode_shared: Some(Arc::new(AtomicBool::new(initial))),
             pending_effect: None,
         },
         rx,

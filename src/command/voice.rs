@@ -201,6 +201,8 @@ mod tests {
                 session_id: None,
                 // TASK-AGS-817: /voice tests never exercise /memory paths — None.
                 memory: None,
+                // TASK-AGS-POST-6-BODIES-B01-FAST: /voice tests never exercise /fast paths — None.
+                fast_mode_shared: None,
                 pending_effect: None,
             },
             rx,

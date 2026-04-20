@@ -1,111 +1,205 @@
-//! TASK-AGS-POST-6-BODIES-B01-FAST: /fast slash-command handler (body-migrate target).
+//! TASK-AGS-POST-6-BODIES-B01-FAST: /fast slash-command handler
+//! (Option C, DIRECT pattern body-migrate).
 //!
-//! This file is created in Gate 1 (tests-written-first) with the test
-//! module ONLY. The production `impl CommandHandler for FastHandler` is
-//! intentionally deferred to Gate 2 (implementation-complete), which
-//! will:
-//!   1. Lift the body verbatim from `src/command/slash.rs:60-70`
-//!      (legacy `/fast` match arm).
-//!   2. Remove `declare_handler!(FastHandler, ...)` from
-//!      `src/command/registry.rs:546` and replace it with a
-//!      `pub(crate) use crate::command::fast::FastHandler;` import.
-//!   3. Add a `fast_mode_shared: Option<Arc<AtomicBool>>` field (or
-//!      equivalent) to [`crate::command::registry::CommandContext`] and
-//!      a `make_fast_ctx()` helper to
-//!      `src/command/test_support.rs`.
-//!   4. Remove the `#[ignore]` markers below and replace the `todo!()`
-//!      bodies with real assertions that call
-//!      `FastHandler.execute(&mut ctx, &[])`.
+//! Real `CommandHandler` impl moved here from the `declare_handler!`
+//! stub at `src/command/registry.rs:546` and the legacy match arm at
+//! `src/command/slash.rs:60-70`. The legacy body's `FastModeState`
+//! helper is no longer threaded through the handler — the
+//! `Arc<AtomicBool>` shared atomic (already owned by
+//! `SlashCommandContext::fast_mode_shared`) is the single source of
+//! truth, and the handler toggles it directly via load/invert/store.
 //!
-//! Pattern: DIRECT (sync atomic write + TuiEvent send). No snapshot,
-//! no effect-slot required (see ticket "Pattern Verification" section).
+//! # Why DIRECT (no snapshot, no effect slot)?
 //!
-//! Format strings (lifted from slash.rs:60-70, preserved byte-for-byte
-//! in Gate 2):
-//!   ENABLED : `"Fast mode ENABLED. Responses will be faster but lower quality."`
-//!   DISABLED: `"Fast mode DISABLED. Back to normal quality."`
-//!   Emission: `TuiEvent::TextDelta(format!("\n{msg}\n"))`
+//! The shipped `/fast` body performed:
+//!   1. `fast_mode.toggle()` — sync (inverts + stores on a local
+//!      `FastModeState`, returns the new bool).
+//!   2. `ctx.fast_mode_shared.store(new_state, Ordering::Relaxed)` —
+//!      sync atomic write.
+//!   3. `tui_tx.send(TuiEvent::TextDelta(...)).await` — emission only.
+//!
+//! Step (1) is redundant with step (2): both end up writing
+//! `new_state` to the shared atomic (the local `FastModeState` is
+//! discarded after the match arm). The body-migrate collapses them
+//! into a single load/invert/store on the shared atomic, preserving
+//! observable behavior. Consequently:
+//!
+//! - NO `FastSnapshot` type (nothing to pre-compute inside an async
+//!   guard — reads are sync atomic loads).
+//! - NO `CommandEffect` variant (the mutation is a sync atomic store,
+//!   not a write-back through `tokio::sync::Mutex`).
+//! - A new `CommandContext::fast_mode_shared: Option<Arc<AtomicBool>>`
+//!   field populated UNCONDITIONALLY by `build_command_context`,
+//!   mirroring the AGS-815 `session_id` and AGS-817 `memory`
+//!   cross-cutting precedent.
+//!
+//! The sole side effect besides the atomic store is
+//! `ctx.tui_tx.try_send(TuiEvent::TextDelta(..))` — sync and legal
+//! inside `CommandHandler::execute`. Matches AGS-810/815/817
+//! DIRECT-pattern precedent.
+//!
+//! # Byte-for-byte output preservation
+//!
+//! Every emitted string is faithful to the deleted slash.rs:60-70
+//! body:
+//! - ENABLED -> `"Fast mode ENABLED. Responses will be faster but lower quality."`
+//! - DISABLED -> `"Fast mode DISABLED. Back to normal quality."`
+//! - Emission wrapper: `TuiEvent::TextDelta(format!("\n{msg}\n"))`
+//!
+//! The one emission-primitive change is `tui_tx.send(..).await`
+//! (async) -> `ctx.tui_tx.try_send(..)` (sync), matching every peer
+//! migrated handler (AGS-806..819). `/fast` output is best-effort
+//! informational UI — dropping a message under 16-cap channel
+//! backpressure is preferable to stalling the dispatcher.
+//!
+//! # Aliases
+//!
+//! Shipped pre-B01-FAST: none. Spec lists none. No aliases added.
 
-// NOTE: No production items live in this file at Gate 1. The
-// `FastHandler` struct remains at `registry.rs:546` via the
-// `declare_handler!` macro until Gate 2 performs the lift. This keeps
-// the binary crate compiling: removing the macro line without also
-// landing a real `impl CommandHandler` would break
-// `b.insert_primary("fast", Arc::new(FastHandler))` at registry.rs:661.
+use std::sync::atomic::Ordering;
+
+use archon_tui::app::TuiEvent;
+
+use crate::command::registry::{CommandContext, CommandHandler};
+
+/// Zero-sized handler registered as the primary `/fast` command.
+///
+/// No aliases. Shipped pre-B01-FAST stub carried none; spec lists
+/// none.
+pub(crate) struct FastHandler;
+
+impl CommandHandler for FastHandler {
+    fn execute(
+        &self,
+        ctx: &mut CommandContext,
+        _args: &[String],
+    ) -> anyhow::Result<()> {
+        // 1. Require fast_mode_shared handle. `build_command_context`
+        //    populates this unconditionally from
+        //    `SlashCommandContext::fast_mode_shared` so at the real
+        //    dispatch site this branch never fires. Test fixtures that
+        //    construct `CommandContext` directly with
+        //    `fast_mode_shared: None` will hit this branch and observe
+        //    an Err — mirroring the AGS-815/817 DIRECT-pattern
+        //    missing-shared-state precedent.
+        let shared = ctx
+            .fast_mode_shared
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!(
+                "FastHandler: fast_mode_shared not populated in CommandContext"
+            ))?;
+
+        // 2. DIRECT pattern: sync atomic toggle. Load prev, invert,
+        //    store new. Preserves observable behavior of the shipped
+        //    body (which performed the same effective transition via
+        //    a redundant `FastModeState::toggle` + atomic store).
+        let prev = shared.load(Ordering::Relaxed);
+        let new_state = !prev;
+        shared.store(new_state, Ordering::Relaxed);
+
+        // 3. Byte-for-byte preserved format strings from slash.rs:63-67.
+        let msg = if new_state {
+            "Fast mode ENABLED. Responses will be faster but lower quality."
+        } else {
+            "Fast mode DISABLED. Back to normal quality."
+        };
+        let _ = ctx.tui_tx.try_send(TuiEvent::TextDelta(format!("\n{msg}\n")));
+        Ok(())
+    }
+
+    fn description(&self) -> &str {
+        "Toggle fast mode (lower quality, faster responses)"
+    }
+}
 
 #[cfg(test)]
 mod tests {
-    // Gate 1 skeleton tests (Path A-variant per ticket — #[ignore] markers
-    // documented in Gate 1 body). Gate 2 lands impl, removes #[ignore],
-    // replaces todo!() bodies with real assertions that reference
-    // FastHandler::execute and the Gate-2-added fast_mode_shared field on
-    // CommandContext.
-    //
-    // The tests compile today because todo!() satisfies any return type
-    // and #[ignore] prevents them from running under `cargo test` (Gate 4
-    // target count stays at the 174 + N with N = 3 declared, and the
-    // tests appear in the `ok` list as `IGNORED`).
-    //
-    // Once Gate 2 lands, the standard inline-test fixture import appears:
-    //     use super::*;
-    //     use crate::command::test_support::*;
-    // Keeping them commented here so the imports don't trigger
-    // `unused_import` warnings at Gate 1.
+    // Gate 2 real tests. Replace the Gate 1 `#[ignore]` + `todo!()`
+    // skeleton with real assertions against the landed FastHandler impl
+    // and the new `CommandContext::fast_mode_shared` field. Uses the
+    // `make_fast_ctx` helper added to `test_support.rs` in this gate.
+
+    use super::*;
+    use crate::command::registry::CommandHandler;
+    use crate::command::test_support::*;
+    use archon_tui::app::TuiEvent;
+    use std::sync::atomic::Ordering;
 
     #[test]
-    #[ignore = "Gate 2 (TASK-AGS-POST-6-BODIES-B01-FAST) lands FastHandler impl; \
-                this test will call FastHandler.execute(&mut ctx, &[]) with \
-                fast_mode_shared initialised to false, then assert \
-                (a) the shared AtomicBool transitions to true, and \
-                (b) a TuiEvent::TextDelta is emitted whose payload contains \
-                the exact substring \"Fast mode ENABLED\" (from slash.rs:64)."]
     fn fast_handler_toggle_enables_when_initial_disabled() {
-        todo!(
-            "Gate 2: build CommandContext via make_fast_ctx with \
-             fast_mode_shared=false; invoke FastHandler.execute(&mut ctx, &[]); \
-             assert ctx.fast_mode_shared.load(Ordering::Relaxed) == true AND \
-             a TuiEvent::TextDelta was received whose payload contains \
-             \"Fast mode ENABLED\" (full expected literal: \
-             \"Fast mode ENABLED. Responses will be faster but lower quality.\" \
-             wrapped in `\\n{{msg}}\\n`, per slash.rs:60-70)."
-        )
+        let (mut ctx, mut rx) = make_fast_ctx(false);
+        FastHandler.execute(&mut ctx, &[]).unwrap();
+        let shared = ctx.fast_mode_shared.as_ref().unwrap();
+        assert!(
+            shared.load(Ordering::Relaxed),
+            "fast_mode_shared must transition false -> true after one \
+             FastHandler::execute call"
+        );
+        let events = drain_tui_events(&mut rx);
+        let matched = events.iter().any(|e| {
+            matches!(e, TuiEvent::TextDelta(s) if s.contains("Fast mode ENABLED"))
+        });
+        assert!(
+            matched,
+            "expected TuiEvent::TextDelta containing 'Fast mode ENABLED', \
+             got: {:?}",
+            events
+        );
     }
 
     #[test]
-    #[ignore = "Gate 2 (TASK-AGS-POST-6-BODIES-B01-FAST) lands FastHandler impl; \
-                this test will call FastHandler.execute(&mut ctx, &[]) with \
-                fast_mode_shared initialised to true, then assert \
-                (a) the shared AtomicBool transitions to false, and \
-                (b) a TuiEvent::TextDelta is emitted whose payload contains \
-                the exact substring \"Fast mode DISABLED\" (from slash.rs:66)."]
     fn fast_handler_toggle_disables_when_initial_enabled() {
-        todo!(
-            "Gate 2: build CommandContext via make_fast_ctx with \
-             fast_mode_shared=true; invoke FastHandler.execute(&mut ctx, &[]); \
-             assert ctx.fast_mode_shared.load(Ordering::Relaxed) == false AND \
-             a TuiEvent::TextDelta was received whose payload contains \
-             \"Fast mode DISABLED\" (full expected literal: \
-             \"Fast mode DISABLED. Back to normal quality.\" \
-             wrapped in `\\n{{msg}}\\n`, per slash.rs:60-70)."
-        )
+        let (mut ctx, mut rx) = make_fast_ctx(true);
+        FastHandler.execute(&mut ctx, &[]).unwrap();
+        let shared = ctx.fast_mode_shared.as_ref().unwrap();
+        assert!(
+            !shared.load(Ordering::Relaxed),
+            "fast_mode_shared must transition true -> false after one \
+             FastHandler::execute call"
+        );
+        let events = drain_tui_events(&mut rx);
+        let matched = events.iter().any(|e| {
+            matches!(e, TuiEvent::TextDelta(s) if s.contains("Fast mode DISABLED"))
+        });
+        assert!(
+            matched,
+            "expected TuiEvent::TextDelta containing 'Fast mode DISABLED', \
+             got: {:?}",
+            events
+        );
     }
 
     #[test]
-    #[ignore = "Gate 2 (TASK-AGS-POST-6-BODIES-B01-FAST) lands FastHandler impl; \
-                this test will invoke FastHandler.execute twice sequentially \
-                starting from an arbitrary initial state (say false), then \
-                assert the shared AtomicBool returns to the original value \
-                (toggle idempotence over two calls: A -> !A -> A)."]
     fn fast_handler_second_invocation_returns_opposite_state() {
-        todo!(
-            "Gate 2: build CommandContext via make_fast_ctx with \
-             fast_mode_shared=false; invoke FastHandler.execute(&mut ctx, &[]) \
-             twice sequentially; assert after first call \
-             ctx.fast_mode_shared.load(Ordering::Relaxed) == true and after \
-             second call it returns to false. Also drain the TuiEvent \
-             receiver and assert both events are TuiEvent::TextDelta — the \
-             first containing \"Fast mode ENABLED\", the second containing \
-             \"Fast mode DISABLED\"."
-        )
+        let (mut ctx, mut rx) = make_fast_ctx(false);
+        // First call: false -> true.
+        FastHandler.execute(&mut ctx, &[]).unwrap();
+        let shared = ctx.fast_mode_shared.as_ref().unwrap();
+        assert!(
+            shared.load(Ordering::Relaxed),
+            "after first toggle the shared atomic must be true"
+        );
+        // Second call: true -> false (round-trip back to initial).
+        FastHandler.execute(&mut ctx, &[]).unwrap();
+        let shared = ctx.fast_mode_shared.as_ref().unwrap();
+        assert!(
+            !shared.load(Ordering::Relaxed),
+            "after second toggle the shared atomic must return to false \
+             (toggle idempotence over two calls: A -> !A -> A)"
+        );
+        // Both events emitted: ENABLED then DISABLED.
+        let events = drain_tui_events(&mut rx);
+        let enabled = events.iter().any(|e| {
+            matches!(e, TuiEvent::TextDelta(s) if s.contains("Fast mode ENABLED"))
+        });
+        let disabled = events.iter().any(|e| {
+            matches!(e, TuiEvent::TextDelta(s) if s.contains("Fast mode DISABLED"))
+        });
+        assert!(
+            enabled && disabled,
+            "expected both 'Fast mode ENABLED' and 'Fast mode DISABLED' \
+             TextDelta events across the two toggles, got: {:?}",
+            events
+        );
     }
 }
