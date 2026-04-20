@@ -209,4 +209,76 @@ mod tests {
             result
         );
     }
+
+    // -----------------------------------------------------------------
+    // Gate 5 live-smoke: end-to-end via real Dispatcher + default
+    // Registry (proves routing: dispatcher -> registry ->
+    // ReleaseNotesHandler -> channel emission) for literal user input
+    // "/release-notes" and the trailing-args promotion case
+    // "/release-notes foo". Mirrors the B05-VIM / B06-HELP dispatcher-
+    // integration harness but exercises the real registered handler.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn dispatcher_routes_slash_release_notes_to_handler_end_to_end() {
+        use crate::command::dispatcher::Dispatcher;
+        use crate::command::registry::default_registry;
+        use std::sync::Arc;
+
+        let registry = Arc::new(default_registry());
+        let dispatcher = Dispatcher::new(registry);
+        let (mut ctx, mut rx) = make_release_notes_ctx();
+
+        let result = dispatcher.dispatch(&mut ctx, "/release-notes");
+        assert!(
+            result.is_ok(),
+            "dispatcher.dispatch(\"/release-notes\") must return Ok"
+        );
+
+        let events = drain_tui_events(&mut rx);
+        let has_text_delta = events.iter().any(|e| {
+            matches!(e, TuiEvent::TextDelta(s) if s == EXPECTED_RELEASE_NOTES_BODY)
+        });
+        let has_error = events.iter().any(|e| matches!(e, TuiEvent::Error(_)));
+        assert!(
+            has_text_delta && !has_error,
+            "end-to-end `/release-notes` must emit byte-identical TextDelta \
+             AND NO Error (i.e. not routed to the unknown-command branch); \
+             got: {:?}",
+            events
+        );
+    }
+
+    #[test]
+    fn dispatcher_routes_slash_release_notes_with_trailing_args_end_to_end() {
+        use crate::command::dispatcher::Dispatcher;
+        use crate::command::registry::default_registry;
+        use std::sync::Arc;
+
+        let registry = Arc::new(default_registry());
+        let dispatcher = Dispatcher::new(registry);
+        let (mut ctx, mut rx) = make_release_notes_ctx();
+
+        // Trailing-args policy: `/release-notes foo` ignores `foo` and
+        // emits the static body (mirrors B03/B04/B05/B06 promotion).
+        // Pre-migration this would have fallen through to
+        // unknown-command; post-migration it routes to the handler.
+        let result = dispatcher.dispatch(&mut ctx, "/release-notes foo");
+        assert!(
+            result.is_ok(),
+            "dispatcher.dispatch(\"/release-notes foo\") must return Ok"
+        );
+
+        let events = drain_tui_events(&mut rx);
+        let has_text_delta = events.iter().any(|e| {
+            matches!(e, TuiEvent::TextDelta(s) if s == EXPECTED_RELEASE_NOTES_BODY)
+        });
+        let has_error = events.iter().any(|e| matches!(e, TuiEvent::Error(_)));
+        assert!(
+            has_text_delta && !has_error,
+            "end-to-end `/release-notes foo` must emit byte-identical \
+             TextDelta (trailing-args ignored) AND NO Error; got: {:?}",
+            events
+        );
+    }
 }

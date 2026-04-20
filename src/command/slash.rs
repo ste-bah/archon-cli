@@ -445,25 +445,14 @@ pub(crate) async fn handle_slash_command(
         // dispatcher routes /tasks (and aliases todo/ps/jobs)
         // through the registry path.
         // ── /release-notes ────────────────────────────────────
-        "/release-notes" => {
-            let _ = tui_tx
-                .send(TuiEvent::TextDelta(
-                    "\nArchon CLI v0.1.0 (Phase 3)\n\n\
-                 - 33 tasks implemented across 7 batches\n\
-                 - TUI with markdown rendering, syntax highlighting, vim mode\n\
-                 - MCP stdio + HTTP transports with lifecycle management\n\
-                 - Memory graph with HNSW vector search\n\
-                 - 46 slash commands, hook system, config hot-reload\n\
-                 - Background sessions, task tools, worktree support\n\
-                 - Permission model with 6 modes\n\
-                 - Print mode (-p) for scripting\n\
-                 - /btw side questions with parallel API calls\n\n\
-                 Full changelog: https://github.com/archon-cli/archon/releases\n"
-                        .into(),
-                ))
-                .await;
-            true
-        }
+        // TASK-AGS-POST-6-BODIES-B07-RELEASE-NOTES: body migrated to
+        // `crate::command::release_notes::ReleaseNotesHandler` (registered
+        // as a primary in registry.rs:890). Legacy match arm removed;
+        // the dispatcher routes /release-notes through the registry path
+        // with the Option 3 default arm at slash.rs:920 (`_ => true,`)
+        // short-circuiting skill-fallback. See
+        // .gates/TASK-AGS-POST-6-BODIES-B07-RELEASE-NOTES/ for the full
+        // gate trail.
         // ── /reload ───────────────────────────────────────────
         "/reload" => {
             // Force config reload from disk
