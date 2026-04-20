@@ -380,4 +380,213 @@ mod tests {
              set verbatim — `?` and `h` both route to /help"
         );
     }
+
+    /// Byte-identity guard for the 19-line column-aligned core-commands
+    /// header literal. Sherlock Gate 3 Gap 1: the original
+    /// `help_handler_empty_args_emits_core_commands_list` test uses
+    /// substring checks (`contains("Core commands:")` etc.) which do not
+    /// enforce column alignment, exact whitespace, `\n\n` boundaries, or
+    /// the terminating `"Extended commands:\n"` separator. After Gate 5
+    /// deletes the shipped arm at slash.rs:531-549 the suite alone must
+    /// catch header regressions. This test asserts byte-identity against
+    /// the verbatim 19-line header by exercising the empty-args path with
+    /// an `skill_registry: None` context (so no format_help() suffix is
+    /// appended) and comparing the TextDelta payload exactly.
+    #[test]
+    fn help_handler_empty_args_header_byte_identical() {
+        // Build a CommandContext WITHOUT a skill registry so the handler
+        // emits the core-commands header alone (no suffix). `make_status_ctx`
+        // already sets skill_registry: None.
+        let (mut ctx, mut rx) = make_status_ctx(None);
+        HelpHandler.execute(&mut ctx, &[]).unwrap();
+        let events = drain_tui_events(&mut rx);
+        assert_eq!(
+            events.len(),
+            1,
+            "empty-args path with skill_registry=None must emit exactly \
+             one TextDelta; got: {:?}",
+            events
+        );
+        let expected = "\n\
+            Core commands:\n\
+            /model <name>        - Switch model (opus, sonnet, haiku, or full name)\n\
+            /fast                - Toggle fast mode\n\
+            /effort <level>      - Set effort (high, medium, low)\n\
+            /thinking on|off     - Show/hide thinking output\n\
+            /compact             - Trigger context compaction\n\
+            /clear               - Clear conversation history\n\
+            /status              - Show current session info\n\
+            /cost                - Show session cost breakdown\n\
+            /permissions [mode]  - Show/set permission mode (6 modes + aliases)\n\
+            /config [key] [val]  - List, get, or set runtime config values\n\
+            /memory [subcmd]     - List, search, or clear memories\n\
+            /doctor              - Run diagnostics on all subsystems\n\
+            /export              - Export conversation as JSON\n\
+            /diff                - Show git diff --stat for the working directory\n\
+            /help                - Show this help\n\
+            /help <command>      - Show detailed help for a command\n\n\
+            Extended commands:\n";
+        match &events[0] {
+            TuiEvent::TextDelta(body) => {
+                assert_eq!(
+                    body, expected,
+                    "TextDelta payload must be BYTE-IDENTICAL to the \
+                     shipped slash.rs:531-549 core-commands header. \
+                     Column alignment, every \\n, every \\n\\n boundary, \
+                     and the 'Extended commands:' separator MUST match."
+                );
+            }
+            other => panic!(
+                "expected TuiEvent::TextDelta for empty-args path, got: {:?}",
+                other
+            ),
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // Gate 5 live-smoke: end-to-end via real Dispatcher + default
+    // Registry (proves routing: dispatcher -> registry -> HelpHandler
+    // -> channel emission) for literal user inputs "/help", "/help help",
+    // "/help bogus", and the two aliases "/?" and "/h". Mirrors the
+    // B05-VIM dispatcher-integration harness but exercises the real
+    // registered HelpHandler with the real skill_registry populated.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn dispatcher_routes_slash_help_to_help_handler_end_to_end() {
+        use crate::command::dispatcher::Dispatcher;
+        use crate::command::registry::default_registry;
+        use std::sync::Arc;
+
+        let registry = Arc::new(default_registry());
+        let dispatcher = Dispatcher::new(registry);
+        let (mut ctx, mut rx) = make_help_ctx();
+
+        let result = dispatcher.dispatch(&mut ctx, "/help");
+        assert!(result.is_ok(), "dispatcher.dispatch(\"/help\") must return Ok");
+
+        let events = drain_tui_events(&mut rx);
+        let has_text_delta = events
+            .iter()
+            .any(|e| matches!(e, TuiEvent::TextDelta(s) if s.contains("Core commands:")));
+        let has_error = events.iter().any(|e| matches!(e, TuiEvent::Error(_)));
+        assert!(
+            has_text_delta && !has_error,
+            "end-to-end `/help` must emit TextDelta containing 'Core commands:' \
+             AND NO Error (i.e. not routed to the unknown-command branch); \
+             got: {:?}",
+            events
+        );
+    }
+
+    #[test]
+    fn dispatcher_routes_slash_help_with_known_command_end_to_end() {
+        use crate::command::dispatcher::Dispatcher;
+        use crate::command::registry::default_registry;
+        use std::sync::Arc;
+
+        let registry = Arc::new(default_registry());
+        let dispatcher = Dispatcher::new(registry);
+        let (mut ctx, mut rx) = make_help_ctx();
+
+        // `make_help_ctx` registers HelpSkill (name="help") so
+        // /help help resolves via format_skill_help to Some(_).
+        let result = dispatcher.dispatch(&mut ctx, "/help help");
+        assert!(
+            result.is_ok(),
+            "dispatcher.dispatch(\"/help help\") must return Ok"
+        );
+
+        let events = drain_tui_events(&mut rx);
+        let has_text_delta = events.iter().any(|e| matches!(e, TuiEvent::TextDelta(_)));
+        let has_error = events.iter().any(|e| matches!(e, TuiEvent::Error(_)));
+        assert!(
+            has_text_delta && !has_error,
+            "end-to-end `/help help` must emit TextDelta (skill detail) \
+             and NO Error; got: {:?}",
+            events
+        );
+    }
+
+    #[test]
+    fn dispatcher_routes_slash_help_with_unknown_command_end_to_end() {
+        use crate::command::dispatcher::Dispatcher;
+        use crate::command::registry::default_registry;
+        use std::sync::Arc;
+
+        let registry = Arc::new(default_registry());
+        let dispatcher = Dispatcher::new(registry);
+        let (mut ctx, mut rx) = make_help_ctx();
+
+        let result = dispatcher.dispatch(&mut ctx, "/help bogusname");
+        assert!(
+            result.is_ok(),
+            "dispatcher.dispatch(\"/help bogusname\") must return Ok"
+        );
+
+        let events = drain_tui_events(&mut rx);
+        let has_error = events.iter().any(|e| {
+            matches!(e, TuiEvent::Error(msg) if msg == "Unknown command: /bogusname")
+        });
+        assert!(
+            has_error,
+            "end-to-end `/help bogusname` must emit TuiEvent::Error with \
+             byte-identical 'Unknown command: /bogusname' payload; got: {:?}",
+            events
+        );
+    }
+
+    #[test]
+    fn dispatcher_routes_slash_question_mark_alias_end_to_end() {
+        use crate::command::dispatcher::Dispatcher;
+        use crate::command::registry::default_registry;
+        use std::sync::Arc;
+
+        let registry = Arc::new(default_registry());
+        let dispatcher = Dispatcher::new(registry);
+        let (mut ctx, mut rx) = make_help_ctx();
+
+        // `/?` MUST alias to /help and emit the core-commands header.
+        let result = dispatcher.dispatch(&mut ctx, "/?");
+        assert!(result.is_ok(), "dispatcher.dispatch(\"/?\") must return Ok");
+
+        let events = drain_tui_events(&mut rx);
+        let has_text_delta = events
+            .iter()
+            .any(|e| matches!(e, TuiEvent::TextDelta(s) if s.contains("Core commands:")));
+        let has_error = events.iter().any(|e| matches!(e, TuiEvent::Error(_)));
+        assert!(
+            has_text_delta && !has_error,
+            "end-to-end `/?` (alias) must route to HelpHandler and emit \
+             TextDelta containing 'Core commands:'; got: {:?}",
+            events
+        );
+    }
+
+    #[test]
+    fn dispatcher_routes_slash_h_alias_end_to_end() {
+        use crate::command::dispatcher::Dispatcher;
+        use crate::command::registry::default_registry;
+        use std::sync::Arc;
+
+        let registry = Arc::new(default_registry());
+        let dispatcher = Dispatcher::new(registry);
+        let (mut ctx, mut rx) = make_help_ctx();
+
+        // `/h` MUST alias to /help and emit the core-commands header.
+        let result = dispatcher.dispatch(&mut ctx, "/h");
+        assert!(result.is_ok(), "dispatcher.dispatch(\"/h\") must return Ok");
+
+        let events = drain_tui_events(&mut rx);
+        let has_text_delta = events
+            .iter()
+            .any(|e| matches!(e, TuiEvent::TextDelta(s) if s.contains("Core commands:")));
+        let has_error = events.iter().any(|e| matches!(e, TuiEvent::Error(_)));
+        assert!(
+            has_text_delta && !has_error,
+            "end-to-end `/h` (alias) must route to HelpHandler and emit \
+             TextDelta containing 'Core commands:'; got: {:?}",
+            events
+        );
+    }
 }

@@ -525,47 +525,14 @@ pub(crate) async fn handle_slash_command(
             true
         }
         // ── /help ──────────────────────────────────────────────
-        s if s == "/help" || s.starts_with("/help ") => {
-            let arg = s.strip_prefix("/help").unwrap_or("").trim();
-            if arg.is_empty() {
-                let mut help_text = "\n\
-                    Core commands:\n\
-                    /model <name>        - Switch model (opus, sonnet, haiku, or full name)\n\
-                    /fast                - Toggle fast mode\n\
-                    /effort <level>      - Set effort (high, medium, low)\n\
-                    /thinking on|off     - Show/hide thinking output\n\
-                    /compact             - Trigger context compaction\n\
-                    /clear               - Clear conversation history\n\
-                    /status              - Show current session info\n\
-                    /cost                - Show session cost breakdown\n\
-                    /permissions [mode]  - Show/set permission mode (6 modes + aliases)\n\
-                    /config [key] [val]  - List, get, or set runtime config values\n\
-                    /memory [subcmd]     - List, search, or clear memories\n\
-                    /doctor              - Run diagnostics on all subsystems\n\
-                    /export              - Export conversation as JSON\n\
-                    /diff                - Show git diff --stat for the working directory\n\
-                    /help                - Show this help\n\
-                    /help <command>      - Show detailed help for a command\n\n\
-                    Extended commands:\n"
-                    .to_string();
-                let skill_help = ctx.skill_registry.format_help();
-                help_text.push_str(&skill_help);
-                let _ = tui_tx.send(TuiEvent::TextDelta(help_text)).await;
-            } else {
-                // Strip leading '/' from the argument if present
-                let name = arg.strip_prefix('/').unwrap_or(arg);
-                if let Some(detail) = ctx.skill_registry.format_skill_help(name) {
-                    let _ = tui_tx
-                        .send(TuiEvent::TextDelta(format!("\n{detail}\n")))
-                        .await;
-                } else {
-                    let _ = tui_tx
-                        .send(TuiEvent::Error(format!("Unknown command: /{name}")))
-                        .await;
-                }
-            }
-            true
-        }
+        // TASK-AGS-POST-6-BODIES-B06-HELP Gate 5: shipped `/help` match
+        // arm DELETED. Routing now owned by the dispatcher + registry:
+        //   - crate::command::help::HelpHandler (impl)
+        //   - crate::command::registry::default_registry (registration)
+        //   - Option 3 default arm at slash.rs ~953 (`_ => true`) prevents
+        //     skill-registry fallback double-fire (HelpSkill exists in
+        //     archon-core builtin.rs:270 but is short-circuited).
+        // See .gates/TASK-AGS-POST-6-BODIES-B06-HELP/ for the gate trail.
         // ── /rename ─────────────────────────────────────────────
         s if s.starts_with("/rename") => {
             let name_arg = s.strip_prefix("/rename").unwrap_or("").trim();
