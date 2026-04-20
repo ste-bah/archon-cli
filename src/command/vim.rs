@@ -3,14 +3,12 @@
 //!
 //! Reference: src/command/slash.rs:407 (shipped `/vim` match body —
 //!   arm deletion is Gate 3 scope)
-//! Based on: src/command/registry.rs:728 (`declare_handler!(VimHandler,
-//!   "Toggle vim-style modal input")` no-op stub being replaced)
-//! Source: src/command/fast.rs (B01-FAST DIRECT precedent — emit-only
+//! Based on: src/command/fast.rs (B01-FAST DIRECT precedent — emit-only
 //!   sync handler returning `Ok(())` via `ctx.tui_tx.try_send`).
-//!
-//! Gate 1 test skeleton — 5 `#[ignore]` + `todo!()` stubs. Real
-//! `impl CommandHandler for VimHandler` (moved out of registry.rs's
-//! `declare_handler!` macro) and de-ignored tests land at Gate 2.
+//! Source: Shipped stub `declare_handler!(VimHandler, "Toggle vim-
+//!   style modal input")` at registry.rs:728 is REPLACED by the impl
+//!   in this file + the matching `insert_primary("vim", ...)` flip at
+//!   registry.rs:812 (which now imports `crate::command::vim::VimHandler`).
 //!
 //! # Why DIRECT (no snapshot, no effect slot)
 //!
@@ -47,85 +45,133 @@
 //!
 //! Shipped pre-B05-VIM: none. Spec lists none. No aliases added.
 
+use archon_tui::app::TuiEvent;
+
+use crate::command::registry::{CommandContext, CommandHandler};
+
+/// Zero-sized handler registered as the primary `/vim` command.
+///
+/// No aliases. Shipped pre-B05-VIM stub carried none; spec lists
+/// none.
+pub(crate) struct VimHandler;
+
+impl CommandHandler for VimHandler {
+    fn execute(
+        &self,
+        ctx: &mut CommandContext,
+        _args: &[String],
+    ) -> anyhow::Result<()> {
+        // DIRECT pattern: two sequential sync `try_send` emissions
+        // replace the shipped `.send().await` pair at slash.rs:408-412.
+        //
+        // 1. Canonical toggle signal — TUI owns the vim-mode bool and
+        //    flips it on receipt of VimToggle.
+        let _ = ctx.tui_tx.try_send(TuiEvent::VimToggle);
+
+        // 2. Persist-hint TextDelta — byte-identical to the shipped
+        //    literal at slash.rs:411.
+        let _ = ctx.tui_tx.try_send(TuiEvent::TextDelta(
+            "\nVim mode toggled. To persist: set vim_mode = true under [tui] in config.toml\n"
+                .to_string(),
+        ));
+
+        Ok(())
+    }
+
+    fn description(&self) -> &str {
+        "Toggle vim-style modal input"
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    // Gate 1 skeleton — 5 `#[ignore]` + `todo!()` stubs. Real
-    // assertions land at Gate 2 once the `declare_handler!(VimHandler,
-    // ...)` macro stub at `registry.rs:728` is replaced by a real
-    // `impl CommandHandler for VimHandler` block moved into THIS file,
-    // alongside the `insert_primary("vim", ...)` wiring at
-    // `registry.rs:812` (which flips from the macro-exported stub to
-    // `crate::command::vim::VimHandler`).
-    //
-    // N=5 tests — covers the DIRECT emit matrix plus byte-identity
-    // pins:
-    //   1. args=[]          → TuiEvent::VimToggle emitted
-    //   2. args=[]          → TuiEvent::TextDelta with persist-hint emitted
-    //   3. args=["on"]      → same two events emitted (trailing args ignored)
-    //   4. VimHandler.description() byte-identical to shipped literal
-    //      "Toggle vim-style modal input"
-    //   5. execute(&mut ctx, &[]) returns Ok(())
+    use super::*;
+    use crate::command::registry::CommandHandler;
+    use crate::command::test_support::*;
+    use archon_tui::app::TuiEvent;
+
+    /// Build a minimal CommandContext for /vim tests. /vim is pure
+    /// emit-only — no new CommandContext field required, so reuse the
+    /// existing `make_status_ctx` helper with a `None` snapshot
+    /// (VimHandler never reads status_snapshot).
+    fn make_vim_ctx() -> (
+        crate::command::registry::CommandContext,
+        tokio::sync::mpsc::Receiver<TuiEvent>,
+    ) {
+        make_status_ctx(None)
+    }
 
     #[test]
-    #[ignore = "Gate 2: args=[] must emit TuiEvent::VimToggle as the first \
-                event on ctx.tui_tx (canonical toggle signal consumed by \
-                the TUI)"]
     fn vim_handler_emits_vim_toggle_event() {
-        todo!(
-            "Gate 2: VimHandler.execute(&mut ctx, &[]) -> Ok(()); \
-             drain_tui_events(&mut rx) must include TuiEvent::VimToggle \
-             (first event emitted)"
-        )
+        let (mut ctx, mut rx) = make_vim_ctx();
+        VimHandler.execute(&mut ctx, &[]).unwrap();
+        let events = drain_tui_events(&mut rx);
+        assert!(
+            events.iter().any(|e| matches!(e, TuiEvent::VimToggle)),
+            "expected TuiEvent::VimToggle in emitted events, got: {:?}",
+            events
+        );
     }
 
     #[test]
-    #[ignore = "Gate 2: args=[] must emit TuiEvent::TextDelta with payload \
-                byte-identical to the shipped slash.rs:411 literal \
-                '\\nVim mode toggled. To persist: set vim_mode = true \
-                under [tui] in config.toml\\n'"]
     fn vim_handler_emits_text_delta_with_persist_message() {
-        todo!(
-            "Gate 2: VimHandler.execute(&mut ctx, &[]) -> Ok(()); \
-             drain_tui_events must include exactly one TuiEvent::TextDelta \
-             whose payload equals \"\\nVim mode toggled. To persist: set \
-             vim_mode = true under [tui] in config.toml\\n\""
-        )
+        let (mut ctx, mut rx) = make_vim_ctx();
+        VimHandler.execute(&mut ctx, &[]).unwrap();
+        let events = drain_tui_events(&mut rx);
+        let expected =
+            "\nVim mode toggled. To persist: set vim_mode = true under [tui] in config.toml\n";
+        let matched = events.iter().any(|e| {
+            matches!(e, TuiEvent::TextDelta(s) if s == expected)
+        });
+        assert!(
+            matched,
+            "expected TuiEvent::TextDelta with byte-identical persist-hint \
+             payload, got: {:?}",
+            events
+        );
     }
 
     #[test]
-    #[ignore = "Gate 2: args=[\"on\"] must emit the SAME two events as \
-                args=[] case (VimToggle + TextDelta). Trailing-args \
-                ignored; B03-BUG / B04-DIFF promotion policy."]
     fn vim_handler_ignores_trailing_args() {
-        todo!(
-            "Gate 2: VimHandler.execute(&mut ctx, &[String::from(\"on\")]) \
-             -> Ok(()); drain_tui_events must contain both VimToggle AND \
-             the byte-identical TextDelta payload (same emission sequence \
-             as args=[] case)"
-        )
+        let (mut ctx, mut rx) = make_vim_ctx();
+        VimHandler
+            .execute(&mut ctx, &[String::from("on")])
+            .unwrap();
+        let events = drain_tui_events(&mut rx);
+        let has_toggle = events.iter().any(|e| matches!(e, TuiEvent::VimToggle));
+        let expected =
+            "\nVim mode toggled. To persist: set vim_mode = true under [tui] in config.toml\n";
+        let has_delta = events.iter().any(|e| {
+            matches!(e, TuiEvent::TextDelta(s) if s == expected)
+        });
+        assert!(
+            has_toggle && has_delta,
+            "args=[\"on\"] must emit BOTH VimToggle and byte-identical \
+             TextDelta (trailing-args ignored per B03-BUG/B04-DIFF \
+             promotion policy), got: {:?}",
+            events
+        );
     }
 
     #[test]
-    #[ignore = "Gate 2: VimHandler.description() must return the \
-                byte-identical shipped string \"Toggle vim-style modal \
-                input\"; replaces the declare_handler! macro arg at \
-                registry.rs:728"]
     fn vim_handler_description_byte_identical_to_shipped() {
-        todo!(
-            "Gate 2: VimHandler.description() -> \
-             \"Toggle vim-style modal input\" (byte-identical to shipped \
-             declare_handler! arg at registry.rs:728)"
-        )
+        assert_eq!(
+            VimHandler.description(),
+            "Toggle vim-style modal input",
+            "VimHandler.description() must be byte-identical to the \
+             shipped declare_handler! arg at registry.rs:728"
+        );
     }
 
     #[test]
-    #[ignore = "Gate 2: execute(&mut ctx, &[]) must return Ok(()) \
-                unconditionally — /vim has no error path (no shared \
-                state required, no validation, no args parsing)"]
     fn vim_handler_execute_returns_ok() {
-        todo!(
-            "Gate 2: VimHandler.execute(&mut ctx, &[]) returns Ok(()) \
-             (no Err branch; unconditional emit-only handler)"
-        )
+        let (mut ctx, _rx) = make_vim_ctx();
+        let result = VimHandler.execute(&mut ctx, &[]);
+        assert!(
+            result.is_ok(),
+            "VimHandler.execute must return Ok(()) unconditionally \
+             (no Err branch; emit-only handler), got: {:?}",
+            result
+        );
     }
 }

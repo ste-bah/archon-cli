@@ -162,6 +162,16 @@ use crate::command::bug::BugHandler;
 // spec lists none. FOURTH Batch-A body-migrate (after B01-FAST,
 // B02-THINKING, B03-BUG).
 use crate::command::diff::DiffHandler;
+// TASK-AGS-POST-6-BODIES-B05-VIM: real /vim handler lives in
+// `crate::command::vim`. DIRECT-pattern body-migrate (emit-only sync
+// handler — two `try_send` calls replace the shipped
+// `tui_tx.send().await` pair at slash.rs:407-413; no state mutation,
+// no new CommandContext field). FIFTH Batch-A body-migrate (after
+// B01-FAST, B02-THINKING, B03-BUG, B04-DIFF). Shipped stub
+// `declare_handler!(VimHandler, "Toggle vim-style modal input")` at
+// registry.rs:728 is REPLACED by this import + the insert_primary
+// call below. No aliases — shipped stub had none and spec lists none.
+use crate::command::vim::VimHandler;
 // TASK-AGS-819: real /theme handler lives in `crate::command::theme`.
 // DIRECT-pattern body-migrate (sync theme helpers — `theme_by_name` +
 // `available_themes` are both plain `fn` lookups; no snapshot/effect-
@@ -725,7 +735,10 @@ declare_handler!(DoctorHandler, "Run environment health checks");
 // the top of this file.
 declare_handler!(DenialsHandler, "List tool-use denials recorded this session");
 declare_handler!(LoginHandler, "Authenticate against the configured backend");
-declare_handler!(VimHandler, "Toggle vim-style modal input");
+// TASK-AGS-POST-6-BODIES-B05-VIM: VimHandler moved to
+// `crate::command::vim` (real impl with body-migrated execute via
+// DIRECT pattern — emit-only sync handler). Imported at the top of
+// this file.
 declare_handler!(UsageHandler, "Show aggregate API usage for the session");
 // TASK-AGS-806: TasksHandler moved to `crate::command::task` (real
 // impl with body-migrated execute, alias set extended to
