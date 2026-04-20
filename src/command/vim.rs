@@ -174,4 +174,79 @@ mod tests {
             result
         );
     }
+
+    // -----------------------------------------------------------------
+    // Gate 5 live-smoke: end-to-end via real Dispatcher + default
+    // Registry (proves routing: dispatcher -> registry -> VimHandler
+    // -> channel emission) for the literal user inputs "/vim" and
+    // "/vim on". Mirrors the dispatcher-level harness in
+    // `src/command/dispatcher.rs::tests` but exercises the real
+    // registered VimHandler (no recording fake).
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn dispatcher_routes_slash_vim_to_vim_handler_end_to_end() {
+        use crate::command::dispatcher::Dispatcher;
+        use crate::command::registry::default_registry;
+        use std::sync::Arc;
+
+        let registry = Arc::new(default_registry());
+        let dispatcher = Dispatcher::new(registry);
+        let (mut ctx, mut rx) = make_vim_ctx();
+
+        let result = dispatcher.dispatch(&mut ctx, "/vim");
+        assert!(result.is_ok(), "dispatcher.dispatch(\"/vim\") must return Ok");
+
+        let events = drain_tui_events(&mut rx);
+        let expected =
+            "\nVim mode toggled. To persist: set vim_mode = true under [tui] in config.toml\n";
+        let has_toggle = events.iter().any(|e| matches!(e, TuiEvent::VimToggle));
+        let has_delta = events.iter().any(|e| {
+            matches!(e, TuiEvent::TextDelta(s) if s == expected)
+        });
+        let has_error = events.iter().any(|e| matches!(e, TuiEvent::Error(_)));
+        assert!(
+            has_toggle && has_delta && !has_error,
+            "end-to-end `/vim` must emit VimToggle AND byte-identical \
+             TextDelta and NO Error (i.e. not routed to the unknown-command \
+             branch); got: {:?}",
+            events
+        );
+    }
+
+    #[test]
+    fn dispatcher_routes_slash_vim_on_to_vim_handler_end_to_end() {
+        use crate::command::dispatcher::Dispatcher;
+        use crate::command::registry::default_registry;
+        use std::sync::Arc;
+
+        let registry = Arc::new(default_registry());
+        let dispatcher = Dispatcher::new(registry);
+        let (mut ctx, mut rx) = make_vim_ctx();
+
+        // "/vim on" — pre-migration this fell through to the default
+        // "unknown command" handler. Post-migration, trailing args are
+        // ignored and BOTH events must be emitted.
+        let result = dispatcher.dispatch(&mut ctx, "/vim on");
+        assert!(
+            result.is_ok(),
+            "dispatcher.dispatch(\"/vim on\") must return Ok"
+        );
+
+        let events = drain_tui_events(&mut rx);
+        let expected =
+            "\nVim mode toggled. To persist: set vim_mode = true under [tui] in config.toml\n";
+        let has_toggle = events.iter().any(|e| matches!(e, TuiEvent::VimToggle));
+        let has_delta = events.iter().any(|e| {
+            matches!(e, TuiEvent::TextDelta(s) if s == expected)
+        });
+        let has_error = events.iter().any(|e| matches!(e, TuiEvent::Error(_)));
+        assert!(
+            has_toggle && has_delta && !has_error,
+            "end-to-end `/vim on` must emit VimToggle AND byte-identical \
+             TextDelta (trailing args ignored per B03-BUG/B04-DIFF promotion) \
+             and NO Error; got: {:?}",
+            events
+        );
+    }
 }

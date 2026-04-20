@@ -407,15 +407,15 @@ pub(crate) async fn handle_slash_command(
             true
         }
         // ── /vim ───────────────────────────────────────────────
-        "/vim" => {
-            let _ = tui_tx.send(TuiEvent::VimToggle).await;
-            let _ = tui_tx
-                .send(TuiEvent::TextDelta(
-                    "\nVim mode toggled. To persist: set vim_mode = true under [tui] in config.toml\n".into(),
-                ))
-                .await;
-            true
-        }
+        // TASK-AGS-POST-6-BODIES-B05-VIM: body migrated to
+        // `crate::command::vim::VimHandler` (Option C DIRECT pattern —
+        // emit-only sync handler, two `ctx.tui_tx.try_send(...)` calls
+        // replace the two `tui_tx.send(..).await` emissions that lived
+        // here. Dispatcher recognizes `/vim` via registry.rs
+        // insert_primary and routes through CommandHandler::execute
+        // before this match block is reached; this arm is now
+        // unreachable and removed. See .gates/TASK-AGS-POST-6-BODIES-
+        // B05-VIM/gate-6.md for the sherlock final review.
         // ── /usage ────────────────────────────────────────────
         "/usage" => {
             // Same as /cost but with more detail — redirect
