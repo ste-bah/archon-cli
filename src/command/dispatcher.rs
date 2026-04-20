@@ -208,6 +208,10 @@ mod tests {
                 // for /thinking Arc<AtomicBool> — dispatcher tests
                 // only exercise routing/parsing, not handler bodies.
                 show_thinking: None,
+                // TASK-AGS-POST-6-BODIES-B04-DIFF: same rationale for
+                // /diff working_dir PathBuf — dispatcher tests only
+                // exercise routing/parsing, not handler bodies.
+                working_dir: None,
                 pending_effect: None,
             },
             rx,

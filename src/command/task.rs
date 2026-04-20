@@ -244,6 +244,9 @@ mod tests {
                 // never read the /thinking shared atomic — None is
                 // correct.
                 show_thinking: None,
+                // TASK-AGS-POST-6-BODIES-B04-DIFF: /tasks tests never
+                // read the /diff working_dir PathBuf — None is correct.
+                working_dir: None,
                 pending_effect: None,
             },
             rx,

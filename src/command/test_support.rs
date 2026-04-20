@@ -86,6 +86,9 @@ pub(crate) fn make_status_ctx(
             // TASK-AGS-POST-6-BODIES-B02-THINKING: /status tests never
             // exercise /thinking paths — None.
             show_thinking: None,
+            // TASK-AGS-POST-6-BODIES-B04-DIFF: /status tests never
+            // exercise /diff paths — None.
+            working_dir: None,
             pending_effect: None,
         },
         rx,
@@ -111,6 +114,9 @@ pub(crate) fn make_model_ctx(
             // TASK-AGS-POST-6-BODIES-B02-THINKING: /model tests never
             // exercise /thinking paths — None.
             show_thinking: None,
+            // TASK-AGS-POST-6-BODIES-B04-DIFF: /model tests never
+            // exercise /diff paths — None.
+            working_dir: None,
             pending_effect: None,
         },
         rx,
@@ -136,6 +142,9 @@ pub(crate) fn make_cost_ctx(
             // TASK-AGS-POST-6-BODIES-B02-THINKING: /cost tests never
             // exercise /thinking paths — None.
             show_thinking: None,
+            // TASK-AGS-POST-6-BODIES-B04-DIFF: /cost tests never
+            // exercise /diff paths — None.
+            working_dir: None,
             pending_effect: None,
         },
         rx,
@@ -168,6 +177,9 @@ pub(crate) fn make_fast_ctx(
             // TASK-AGS-POST-6-BODIES-B02-THINKING: /fast tests never
             // exercise /thinking paths — None.
             show_thinking: None,
+            // TASK-AGS-POST-6-BODIES-B04-DIFF: /fast tests never
+            // exercise /diff paths — None.
+            working_dir: None,
             pending_effect: None,
         },
         rx,
@@ -197,6 +209,9 @@ pub(crate) fn make_bug_ctx() -> (CommandContext, mpsc::Receiver<TuiEvent>) {
             memory: None,
             fast_mode_shared: None,
             show_thinking: None,
+            // TASK-AGS-POST-6-BODIES-B04-DIFF: /bug tests never
+            // exercise /diff paths — None.
+            working_dir: None,
             pending_effect: None,
         },
         rx,
@@ -231,6 +246,45 @@ pub(crate) fn make_thinking_ctx(
             memory: None,
             fast_mode_shared: None,
             show_thinking: Some(Arc::new(AtomicBool::new(initial))),
+            // TASK-AGS-POST-6-BODIES-B04-DIFF: /thinking tests never
+            // exercise /diff paths — None.
+            working_dir: None,
+            pending_effect: None,
+        },
+        rx,
+    )
+}
+
+/// Build a CommandContext for DiffHandler tests.
+///
+/// TASK-AGS-POST-6-BODIES-B04-DIFF — DIRECT with-effect variant. The
+/// `/diff` handler reads `working_dir` to stash a
+/// `CommandEffect::RunGitDiffStat(PathBuf)`. Helper signature takes an
+/// `Option<PathBuf>` so a single helper covers both the Some-path and
+/// None-sentinel test cases without a second constructor.
+///
+/// When `working_dir` is `Some(path)` the handler must stash the
+/// effect and emit zero events directly. When `working_dir` is `None`
+/// the handler must emit exactly one `TuiEvent::Error` describing the
+/// missing-shared-state condition and leave `pending_effect` at `None`
+/// (mirroring B01-FAST's `fast_mode_shared=None` handling pattern).
+pub(crate) fn make_diff_ctx(
+    working_dir: Option<std::path::PathBuf>,
+) -> (CommandContext, mpsc::Receiver<TuiEvent>) {
+    let (tx, rx) = mock_tui_channel();
+    (
+        CommandContext {
+            tui_tx: tx,
+            status_snapshot: None,
+            model_snapshot: None,
+            cost_snapshot: None,
+            mcp_snapshot: None,
+            context_snapshot: None,
+            session_id: None,
+            memory: None,
+            fast_mode_shared: None,
+            show_thinking: None,
+            working_dir,
             pending_effect: None,
         },
         rx,

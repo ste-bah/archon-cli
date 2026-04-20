@@ -15,6 +15,7 @@
 //! see this module).
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
@@ -144,6 +145,23 @@ use crate::command::thinking::ThinkingHandler;
 // insert_primary call below. No aliases — shipped stub had none and
 // spec lists none. Simpler than B01-FAST and B02-THINKING.
 use crate::command::bug::BugHandler;
+// TASK-AGS-POST-6-BODIES-B04-DIFF: real /diff handler lives in
+// `crate::command::diff`. DIRECT with-effect body-migrate (sync handler
+// stashes `CommandEffect::RunGitDiffStat(PathBuf)`; dispatch-site
+// `apply_effect` awaits the existing `handle_diff_command` helper at
+// slash.rs:923 which spawns `git diff --stat` via tokio::process).
+// Subprocess await requires the effect-slot indirection — cannot run
+// inside sync `CommandHandler::execute`. The handler reads
+// `Option<PathBuf>` from a new `CommandContext::working_dir` field
+// populated UNCONDITIONALLY by `build_command_context` (mirrors AGS-815
+// session_id, AGS-817 memory, B01-FAST fast_mode_shared, B02-THINKING
+// show_thinking cross-cutting precedent). Shipped stub
+// `declare_handler!(DiffHandler, "Show a diff of recent file
+// modifications")` at registry.rs:673 is REPLACED by this import + the
+// insert_primary call below. No aliases — shipped stub had none and
+// spec lists none. FOURTH Batch-A body-migrate (after B01-FAST,
+// B02-THINKING, B03-BUG).
+use crate::command::diff::DiffHandler;
 // TASK-AGS-819: real /theme handler lives in `crate::command::theme`.
 // DIRECT-pattern body-migrate (sync theme helpers — `theme_by_name` +
 // `available_themes` are both plain `fn` lookups; no snapshot/effect-
@@ -321,6 +339,25 @@ pub(crate) struct CommandContext {
     /// rather than panicking. No matching `CommandEffect` variant — the
     /// mutation is a sync atomic store.
     pub(crate) show_thinking: Option<Arc<AtomicBool>>,
+    /// TASK-AGS-POST-6-BODIES-B04-DIFF DIRECT-with-effect-pattern field
+    /// (/diff).
+    ///
+    /// Clone of `SlashCommandContext::working_dir` populated
+    /// UNCONDITIONALLY by `build_command_context` (mirrors the AGS-815
+    /// `session_id`, AGS-817 `memory`, B01-FAST `fast_mode_shared`, and
+    /// B02-THINKING `show_thinking` cross-cutting precedent — not gated
+    /// on the primary name). `/diff` reads it to produce the
+    /// `CommandEffect::RunGitDiffStat(PathBuf)` effect; apply_effect
+    /// passes the cloned path to `crate::command::slash::handle_diff_command`
+    /// which spawns `git diff --stat` via `tokio::process::Command`.
+    /// `Option<PathBuf>` so the handler test fixtures can construct a
+    /// `CommandContext` without standing up a full `SlashCommandContext`;
+    /// when `None` the handler emits a `TuiEvent::Error` describing the
+    /// missing-shared-state condition (mirroring B01-FAST's
+    /// fast_mode_shared=None Err-with-message pattern, adapted for an
+    /// event emission path since /diff must stay Ok(()) to keep the
+    /// dispatcher contract uniform).
+    pub(crate) working_dir: Option<PathBuf>,
     /// TASK-AGS-808 effect-slot field (WRITE side of /model and future
     /// write-tickets).
     ///
@@ -375,6 +412,15 @@ pub(crate) enum CommandEffect {
     /// `command::context::apply_effect`, which awaits the mutex write
     /// at the dispatch site in `slash.rs`.
     SetModelOverride(String),
+    /// TASK-AGS-POST-6-BODIES-B04-DIFF: spawn `git diff --stat` against
+    /// the supplied working directory. Produced by `DiffHandler::execute`
+    /// (sync stash). Applied by `command::context::apply_effect`, which
+    /// awaits the subprocess call via the existing LIVE
+    /// `crate::command::slash::handle_diff_command(&tui_tx, &path)`
+    /// helper. Carries an owned `PathBuf` (clone of
+    /// `SlashCommandContext::working_dir`) to avoid any borrow on
+    /// `SlashCommandContext` lifetime through the effect-slot.
+    RunGitDiffStat(PathBuf),
 }
 
 /// Trait every registered slash command handler implements.
@@ -670,7 +716,13 @@ declare_handler!(DoctorHandler, "Run environment health checks");
 // DIRECT pattern — trivial variant, no state, no args, no snapshot/
 // effect-slot, no new CommandContext field). Single TextDelta emission
 // of the bug-report URL. Imported at the top of this file.
-declare_handler!(DiffHandler, "Show a diff of recent file modifications");
+// TASK-AGS-POST-6-BODIES-B04-DIFF: DiffHandler moved to
+// `crate::command::diff` (real impl with body-migrated execute via
+// DIRECT with-effect pattern — subprocess `git diff --stat` await
+// requires effect-slot; handler stashes CommandEffect::RunGitDiffStat(
+// PathBuf) and apply_effect awaits the existing LIVE
+// `crate::command::slash::handle_diff_command` helper). Imported at
+// the top of this file.
 declare_handler!(DenialsHandler, "List tool-use denials recorded this session");
 declare_handler!(LoginHandler, "Authenticate against the configured backend");
 declare_handler!(VimHandler, "Toggle vim-style modal input");
@@ -1535,6 +1587,15 @@ mod tests {
         match cloned {
             CommandEffect::SetModelOverride(s) => {
                 assert_eq!(s, "claude-sonnet-4-6");
+            }
+            // TASK-AGS-POST-6-BODIES-B04-DIFF: RunGitDiffStat is the
+            // second variant, added by the /diff migration. This test
+            // only constructs SetModelOverride, so RunGitDiffStat is
+            // unreachable here; the arm exists solely to satisfy
+            // exhaustiveness and guard against silent drift if a future
+            // variant is added without updating this pin.
+            CommandEffect::RunGitDiffStat(_) => {
+                unreachable!("this test only constructs SetModelOverride")
             }
         }
         // Debug impl must not panic — format! exercises it.

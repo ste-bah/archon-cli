@@ -49,7 +49,14 @@ pub(crate) async fn handle_slash_command(
     // here — where `.await` is legal — and apply the mutation via
     // `command::context::apply_effect`. Single-shot by construction.
     if let Some(effect) = __cmd_ctx.pending_effect.take() {
-        crate::command::context::apply_effect(effect, ctx).await;
+        // TASK-AGS-POST-6-BODIES-B04-DIFF: `tui_tx` threaded into
+        // `apply_effect` so the RunGitDiffStat variant can call the
+        // existing LIVE `handle_diff_command(tui_tx, &path)` helper
+        // at slash.rs:923 without having to clone the sender into the
+        // effect variant itself. Prior signature `(effect, slash_ctx)`
+        // stays wire-compatible for SetModelOverride (which ignores
+        // `tui_tx`).
+        crate::command::context::apply_effect(effect, ctx, tui_tx).await;
     }
     if !ctx.dispatcher.recognizes(input) {
         return false;

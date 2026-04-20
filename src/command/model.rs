@@ -243,6 +243,13 @@ mod tests {
                     "pending_effect must carry the resolved full model id"
                 );
             }
+            // TASK-AGS-POST-6-BODIES-B04-DIFF: RunGitDiffStat belongs to
+            // /diff. The /model WRITE path must never stash it; this
+            // arm pins that boundary and keeps the match exhaustive.
+            Some(other) => panic!(
+                "unexpected CommandEffect variant for /model WRITE path: {:?}",
+                other
+            ),
             None => panic!("WRITE path must stash a CommandEffect::SetModelOverride"),
         }
 

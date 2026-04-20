@@ -79,6 +79,15 @@ pub(crate) async fn build_command_context(
         // atomically stores the new state from the parsed
         // on/off/empty subcommand.
         show_thinking: Some(Arc::clone(&slash_ctx.show_thinking)),
+        // TASK-AGS-POST-6-BODIES-B04-DIFF: /diff DIRECT-with-effect-
+        // pattern consumer. Populated UNCONDITIONALLY here (not gated
+        // on the primary name, same as AGS-815 session_id, AGS-817
+        // memory, B01-FAST fast_mode_shared, and B02-THINKING
+        // show_thinking). Cloning a `PathBuf` is cheap; the handler
+        // clones it again into `CommandEffect::RunGitDiffStat` so the
+        // effect carries owned data (no borrow on `SlashCommandContext`
+        // across the effect-slot boundary).
+        working_dir: Some(slash_ctx.working_dir.clone()),
         pending_effect: None,
     };
 
@@ -151,10 +160,26 @@ pub(crate) async fn build_command_context(
 pub(crate) async fn apply_effect(
     effect: CommandEffect,
     slash_ctx: &SlashCommandContext,
+    tui_tx: &tokio::sync::mpsc::Sender<TuiEvent>,
 ) {
     match effect {
         CommandEffect::SetModelOverride(resolved) => {
             *slash_ctx.model_override_shared.lock().await = resolved;
+        }
+        // TASK-AGS-POST-6-BODIES-B04-DIFF: spawn `git diff --stat` via
+        // the existing LIVE `handle_diff_command` helper at slash.rs:923.
+        // Byte-identity of emitted TuiEvent strings (TextDelta for
+        // "Not in a git repository.", "No uncommitted changes.",
+        // stdout wrap; Error for spawn failures and git-failure
+        // exit codes) is preserved by call-site reuse — this match
+        // arm does not duplicate any of the five emission branches.
+        // The `_` discard on `slash_ctx` is intentional — /diff does
+        // not read or mutate SlashCommandContext state; the working
+        // directory was already captured at build-time in the effect
+        // variant.
+        CommandEffect::RunGitDiffStat(path) => {
+            let _ = slash_ctx;
+            crate::command::slash::handle_diff_command(tui_tx, &path).await;
         }
         // Future variants (AGS-819 /theme, etc.): add a match arm here
         // with the appropriate awaited mutex write. No fallback arm —
@@ -319,6 +344,14 @@ mod tests {
         match effect {
             CommandEffect::SetModelOverride(resolved) => {
                 *model_override_shared.lock().await = resolved;
+            }
+            // TASK-AGS-POST-6-BODIES-B04-DIFF: RunGitDiffStat belongs
+            // to /diff. This narrow harness only constructs
+            // SetModelOverride above; RunGitDiffStat is unreachable
+            // here. Arm exists to keep the match exhaustive and guard
+            // against silent drift on future variants.
+            CommandEffect::RunGitDiffStat(_) => {
+                unreachable!("narrow apply_effect harness only exercises SetModelOverride")
             }
         }
 

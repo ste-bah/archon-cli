@@ -257,6 +257,8 @@ mod tests {
                 fast_mode_shared: None,
                 // TASK-AGS-POST-6-BODIES-B02-THINKING: /mcp tests never exercise /thinking paths — None.
                 show_thinking: None,
+                // TASK-AGS-POST-6-BODIES-B04-DIFF: /mcp tests never exercise /diff paths — None.
+                working_dir: None,
                 pending_effect: None,
             },
             rx,
