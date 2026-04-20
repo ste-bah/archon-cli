@@ -423,4 +423,93 @@ mod tests {
              event, got: {event_count}"
         );
     }
+
+    // -----------------------------------------------------------------
+    // Gate 5 live-smoke: end-to-end via real Dispatcher + default
+    // Registry (proves routing: dispatcher -> registry -> ColorHandler
+    // -> channel emission) for literal user input "/color" and the
+    // trailing-args case "/color cyan". Mirrors B05-VIM / B06-HELP /
+    // B07-RELEASE-NOTES / B08-DENIALS dispatcher-integration harness
+    // but exercises the real registered handler.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn dispatcher_routes_slash_color_to_handler_end_to_end() {
+        use crate::command::dispatcher::Dispatcher;
+        use crate::command::registry::default_registry;
+        use std::sync::Arc;
+
+        let registry = Arc::new(default_registry());
+        let dispatcher = Dispatcher::new(registry);
+        let (mut ctx, mut rx) = make_ctx();
+
+        // Bare "/color" → help branch → TextDelta with byte-identical
+        // compiled help string.
+        let result = dispatcher.dispatch(&mut ctx, "/color");
+        assert!(
+            result.is_ok(),
+            "dispatcher.dispatch(\"/color\") must return Ok"
+        );
+
+        let expected_help = "\nAvailable accent colors: red, green, yellow, blue, magenta, cyan, white, default\nUsage: /color <name>\n";
+        let mut events = Vec::new();
+        while let Ok(ev) = rx.try_recv() {
+            events.push(ev);
+        }
+        let has_text_delta = events.iter().any(|e| {
+            matches!(e, TuiEvent::TextDelta(s) if s == expected_help)
+        });
+        let has_error = events.iter().any(|e| matches!(e, TuiEvent::Error(_)));
+        assert!(
+            has_text_delta && !has_error,
+            "end-to-end `/color` must emit byte-identical help TextDelta \
+             AND NO Error (i.e. not routed to the unknown-command \
+             branch); got: {:?}",
+            events
+        );
+    }
+
+    #[test]
+    fn dispatcher_routes_slash_color_with_trailing_args_end_to_end() {
+        use crate::command::dispatcher::Dispatcher;
+        use crate::command::registry::default_registry;
+        use std::sync::Arc;
+
+        let registry = Arc::new(default_registry());
+        let dispatcher = Dispatcher::new(registry);
+        let (mut ctx, mut rx) = make_ctx();
+
+        // "/color cyan" → valid-arg branch → SetAccentColor + TextDelta
+        // confirmation. Pre-migration this was a single async body in
+        // slash.rs:692-713; post-migration it routes to the handler via
+        // dispatcher + parser tokenization ("color" primary + ["cyan"]
+        // args). This exercises the arg-consumption path (as opposed to
+        // the trailing-args-ignored pattern in B07/B08 where the shipped
+        // arm matched exactly on the bare command string).
+        let result = dispatcher.dispatch(&mut ctx, "/color cyan");
+        assert!(
+            result.is_ok(),
+            "dispatcher.dispatch(\"/color cyan\") must return Ok"
+        );
+
+        let expected_confirmation = "\nAccent color set to 'cyan'.\n";
+        let mut events = Vec::new();
+        while let Ok(ev) = rx.try_recv() {
+            events.push(ev);
+        }
+        let has_set_accent = events
+            .iter()
+            .any(|e| matches!(e, TuiEvent::SetAccentColor(_)));
+        let has_text_delta = events.iter().any(|e| {
+            matches!(e, TuiEvent::TextDelta(s) if s == expected_confirmation)
+        });
+        let has_error = events.iter().any(|e| matches!(e, TuiEvent::Error(_)));
+        assert!(
+            has_set_accent && has_text_delta && !has_error,
+            "end-to-end `/color cyan` must emit BOTH SetAccentColor AND \
+             byte-identical confirmation TextDelta AND NO Error; got: \
+             {:?}",
+            events
+        );
+    }
 }

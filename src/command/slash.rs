@@ -690,27 +690,13 @@ pub(crate) async fn handle_slash_command(
             true
         }
         // ── /color ─────────────────────────────────────────────
-        s if s.starts_with("/color") => {
-            let color_arg = s.strip_prefix("/color").unwrap_or("").trim();
-            if color_arg.is_empty() {
-                let _ = tui_tx.send(TuiEvent::TextDelta(
-                    "\nAvailable accent colors: red, green, yellow, blue, magenta, cyan, white, default\n\
-                     Usage: /color <name>\n".into()
-                )).await;
-            } else if let Some(color) = archon_tui::theme::parse_color(color_arg) {
-                let _ = tui_tx.send(TuiEvent::SetAccentColor(color)).await;
-                let _ = tui_tx
-                    .send(TuiEvent::TextDelta(format!(
-                        "\nAccent color set to '{color_arg}'.\n"
-                    )))
-                    .await;
-            } else {
-                let _ = tui_tx.send(TuiEvent::Error(
-                    format!("Unknown color '{color_arg}'. Available: red, green, yellow, blue, magenta, cyan, white, default")
-                )).await;
-            }
-            true
-        }
+        // TASK-AGS-POST-6-BODIES-B09-COLOR: shipped arm DELETED.
+        // Handler: crate::command::color::ColorHandler (DIRECT pattern
+        // mirroring AGS-819 /theme — sync `archon_tui::theme::parse_color`,
+        // no snapshot, no effect slot, no new CommandContext field).
+        // Wired at crate::command::registry::default_registry
+        // insert_primary "color". Option 3 default arm at slash.rs:909
+        // returns true for every dispatcher-routed command.
         // ── /theme: body migrated to src/command/theme.rs (AGS-819,
         //    DIRECT pattern, export.rs-style breadcrumb). Dispatcher
         //    PATH A at slash.rs:46 fires ThemeHandler::execute via the
