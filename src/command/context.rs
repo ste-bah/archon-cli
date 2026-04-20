@@ -20,7 +20,8 @@ use archon_tui::app::TuiEvent;
 
 use crate::command::registry::{CommandContext, CommandEffect, Registry};
 use crate::command::{
-    context_cmd, copy, cost, denials, effort, mcp, model, permissions, status,
+    context_cmd, copy, cost, denials, doctor, effort, mcp, model, permissions,
+    status,
 };
 use crate::slash_context::SlashCommandContext;
 
@@ -138,6 +139,13 @@ pub(crate) async fn build_command_context(
         // AGS-808 model / B08 denials / B11 effort / B12 permissions
         // snapshot gating rule.
         copy_snapshot: None,
+        // TASK-AGS-POST-6-BODIES-B15-DOCTOR: SNAPSHOT-DELEGATE field
+        // (READ-only /doctor). Initialised to `None` here; populated
+        // BELOW in the `match primary.as_deref()` block only when the
+        // primary resolves to `/doctor`. Mirrors AGS-807 status /
+        // AGS-808 model / B08 denials / B11 effort / B12 permissions /
+        // B14 copy snapshot gating rule.
+        doctor_snapshot: None,
         pending_effect: None,
         // TASK-AGS-POST-6-BODIES-B11-EFFORT: SIDECAR slot for the
         // session-local `&mut EffortState` write. Initialised to
@@ -250,6 +258,21 @@ pub(crate) async fn build_command_context(
             // sync handler holds no lock during subprocess spawn.
             ctx.copy_snapshot =
                 Some(copy::build_copy_snapshot(slash_ctx).await);
+        }
+        Some("doctor") => {
+            // TASK-AGS-POST-6-BODIES-B15-DOCTOR snapshot population.
+            // /doctor is read-only (pure diagnostic display). No aliases
+            // (shipped stub at registry.rs:1095 used the two-arg
+            // declare_handler! form; spec lists none). The builder
+            // awaits `build_doctor_text(slash_ctx)` here (which in turn
+            // awaits `mcp_manager.get_server_states().await` and
+            // `model_override_shared.lock().await`) and stores the
+            // composed String on the snapshot so the sync handler emits
+            // via `try_send` with no locks held. Mirrors AGS-807 status
+            // / AGS-808 model / B08 denials / B11 effort / B12
+            // permissions / B14 copy snapshot gating.
+            ctx.doctor_snapshot =
+                Some(doctor::build_doctor_snapshot(slash_ctx).await);
         }
         _ => {}
     }

@@ -336,6 +336,23 @@ use crate::command::garden::GardenHandler;
 // used the two-arg declare_handler! form; shipped-wins rule preserves
 // zero aliases).
 use crate::command::copy::CopyHandler;
+// TASK-AGS-POST-6-BODIES-B15-DOCTOR: real /doctor handler lives in
+// `crate::command::doctor`. SNAPSHOT-DELEGATE body-migrate — the
+// shipped delegate `handle_doctor_command` at src/command/doctor.rs
+// already composed the diagnostic text asynchronously; this ticket
+// extracts the composition into `build_doctor_text(&SlashCommandContext)
+// -> String` and wires a new `build_doctor_snapshot` into
+// `build_command_context`. The sync handler reads
+// `ctx.doctor_snapshot: Option<DoctorSnapshot>` and emits the composed
+// text as a single `TuiEvent::TextDelta` via `try_send`. Mirrors B14
+// /copy SNAPSHOT precedent (the pre-existing `handle_doctor_command`
+// delegate stays live during the Gates 1-4 double-fire window per R7;
+// Gate 5 removes the legacy match arm at slash.rs:230-234). Shipped
+// stub `declare_handler!(DoctorHandler, "Run environment health checks")`
+// at registry.rs:1095 is REPLACED by this import + the insert_primary
+// call below. No aliases (shipped stub used the two-arg
+// declare_handler! form; shipped-wins rule preserves zero aliases).
+use crate::command::doctor::DoctorHandler;
 
 /// Execution context threaded through every command handler.
 ///
@@ -619,6 +636,22 @@ pub(crate) struct CommandContext {
     /// response) so the sync handler reads without holding a lock across
     /// the potentially-blocking clipboard subprocess spawn.
     pub(crate) copy_snapshot: Option<crate::command::copy::CopySnapshot>,
+    /// TASK-AGS-POST-6-BODIES-B15-DOCTOR SNAPSHOT-DELEGATE field
+    /// (READ-only /doctor).
+    ///
+    /// Populated by `build_command_context` for `/doctor` ONLY (no
+    /// aliases — shipped stub at registry.rs:1095 used the two-arg
+    /// declare_handler! form). Every other command observes `None` and
+    /// pays zero additional lock traffic on
+    /// `SlashCommandContext::mcp_manager` +
+    /// `SlashCommandContext::model_override_shared`. Mirrors AGS-807
+    /// `status_snapshot`, AGS-808 `model_snapshot`, B08 `denial_snapshot`,
+    /// B11 `effort_snapshot`, B12 `permissions_snapshot`, and B14
+    /// `copy_snapshot` gating rule. Carries a single owned `String` —
+    /// the fully-composed diagnostic text produced by
+    /// `doctor::build_doctor_text` — so the sync handler emits via
+    /// `try_send` without holding any lock.
+    pub(crate) doctor_snapshot: Option<crate::command::doctor::DoctorSnapshot>,
     /// TASK-AGS-808 effect-slot field (WRITE side of /model and future
     /// write-tickets).
     ///
@@ -1092,7 +1125,17 @@ declare_handler!(
 // `archon_memory::MemoryTrait`, no snapshot/effect-slot needed). The
 // real handler preserves the shipped `["mem"]` alias set per
 // shipped-wins drift-reconcile. Imported at the top of this file.
-declare_handler!(DoctorHandler, "Run environment health checks");
+// TASK-AGS-POST-6-BODIES-B15-DOCTOR: DoctorHandler moved to
+// `crate::command::doctor` (real impl with body-migrated execute via
+// SNAPSHOT-DELEGATE pattern — the shipped async delegate
+// `handle_doctor_command` composed the diagnostic text in-place; this
+// ticket extracts the composition into `build_doctor_text` and
+// threads the owned String through `CommandContext::doctor_snapshot`).
+// Shipped stub `declare_handler!(DoctorHandler, "Run environment
+// health checks")` at registry.rs:1095 is REPLACED by this breadcrumb
+// + the import at the top of this file. No aliases — shipped stub
+// had none and spec lists none. See .gates/TASK-AGS-POST-6-BODIES-B15-DOCTOR/
+// for the full gate trail.
 // TASK-AGS-POST-6-BODIES-B03-BUG: BugHandler moved to
 // `crate::command::bug` (real impl with body-migrated execute via
 // DIRECT pattern — trivial variant, no state, no args, no snapshot/
@@ -1226,7 +1269,7 @@ pub(crate) fn default_registry() -> Registry {
     b.insert_primary("permissions", Arc::new(PermissionsHandler));
     b.insert_primary("config", Arc::new(ConfigHandler));
     b.insert_primary("memory", Arc::new(MemoryHandler));
-    b.insert_primary("doctor", Arc::new(DoctorHandler));
+    b.insert_primary("doctor", Arc::new(DoctorHandler::new()));
     b.insert_primary("bug", Arc::new(BugHandler));
     b.insert_primary("diff", Arc::new(DiffHandler));
     b.insert_primary("denials", Arc::new(DenialsHandler));

@@ -8,7 +8,13 @@ use archon_llm::fast_mode::FastModeState;
 use archon_tools::task_manager;
 use archon_tui::app::TuiEvent;
 use crate::command::config::handle_config_command;
-use crate::command::doctor::handle_doctor_command;
+// TASK-AGS-POST-6-BODIES-B15-DOCTOR: /doctor body migrated to
+// src/command/doctor.rs (SNAPSHOT-DELEGATE pattern). The shipped
+// `use crate::command::doctor::handle_doctor_command;` import is
+// removed — the delegate has been deleted, all composition runs
+// through `build_doctor_text` from `build_doctor_snapshot` at
+// dispatch time, and the sync `DoctorHandler::execute` consumes the
+// pre-built `DoctorSnapshot`.
 use crate::command::registry::CommandContext;
 use crate::slash_context::SlashCommandContext;
 
@@ -227,11 +233,20 @@ pub(crate) async fn handle_slash_command(
         //    MemoryTrait> is cheap to clone). Arm deleted per TUI-410
         //    dead-code rule. Do NOT re-add — see TUI-410 lesson.
         //    ──────────────────────────────────────────────────────
-        // ── /doctor ────────────────────────────────────────────
-        "/doctor" => {
-            handle_doctor_command(tui_tx, ctx).await;
-            true
-        }
+        // ── /doctor ── migrated to src/command/doctor.rs (TASK-AGS-POST-6-BODIES-B15-DOCTOR) ──
+        // SNAPSHOT-DELEGATE pattern: `build_command_context` awaits
+        // `doctor::build_doctor_snapshot(slash_ctx)` when the primary
+        // name resolves to `/doctor` and populates
+        // `CommandContext::doctor_snapshot`. The registered
+        // DoctorHandler (registry.rs:1272) consumes that snapshot
+        // synchronously and emits a single TextDelta via try_send.
+        // The legacy shipped delegate `handle_doctor_command` was
+        // DELETED along with this match arm — see
+        // `src/command/doctor.rs` for the current implementation and
+        // 7 tests (5 unit + 2 dispatcher-integration) pinning
+        // byte-identity with the shipped composition. Default arm
+        // `_ => true,` at slash.rs:764 short-circuits any accidental
+        // re-entry.
         // ── /bug ── migrated to src/command/bug.rs (TASK-AGS-POST-6-BODIES-B03-BUG) ──
         // DIRECT pattern trivial variant (no state, no args, single TextDelta emission).
         // The registry dispatch at the top of handle_slash_command reaches BugHandler
