@@ -449,82 +449,24 @@ pub(crate) async fn handle_slash_command(
         //    per-command match arm in the builder. Arm deleted per
         //    TUI-410 dead-code rule. Do NOT re-add — see TUI-410 lesson.
         //    ──────────────────────────────────────────────────────
-        // ── /checkpoint list | /checkpoint restore <file> ──────
-        s if s == "/checkpoint" || s.starts_with("/checkpoint ") => {
-            let arg = s.strip_prefix("/checkpoint").unwrap_or("").trim();
-            let ckpt_path = dirs::data_dir()
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join("archon")
-                .join("checkpoints.db");
-            if arg == "list" || arg.is_empty() {
-                match archon_session::checkpoint::CheckpointStore::open(&ckpt_path) {
-                    Ok(store) => match store.list_modified(&ctx.session_id) {
-                        Ok(snapshots) if snapshots.is_empty() => {
-                            let _ = tui_tx
-                                .send(TuiEvent::TextDelta(
-                                    "\nNo checkpoints for this session.\n".into(),
-                                ))
-                                .await;
-                        }
-                        Ok(snapshots) => {
-                            let mut out = String::from("\nCheckpoints:\n");
-                            for s in &snapshots {
-                                out.push_str(&format!(
-                                    "  turn {} | {} | {} | {}\n",
-                                    s.turn_number, s.tool_name, s.file_path, s.timestamp
-                                ));
-                            }
-                            let _ = tui_tx.send(TuiEvent::TextDelta(out)).await;
-                        }
-                        Err(e) => {
-                            let _ = tui_tx
-                                .send(TuiEvent::Error(format!("Checkpoint list error: {e}")))
-                                .await;
-                        }
-                    },
-                    Err(e) => {
-                        let _ = tui_tx
-                            .send(TuiEvent::Error(format!("Checkpoint store error: {e}")))
-                            .await;
-                    }
-                }
-            } else if let Some(file_path) = arg.strip_prefix("restore").map(|s| s.trim()) {
-                if file_path.is_empty() {
-                    let _ = tui_tx
-                        .send(TuiEvent::Error(
-                            "Usage: /checkpoint restore <file_path>".into(),
-                        ))
-                        .await;
-                } else {
-                    match archon_session::checkpoint::CheckpointStore::open(&ckpt_path) {
-                        Ok(store) => match store.restore(&ctx.session_id, file_path) {
-                            Ok(()) => {
-                                let _ = tui_tx
-                                    .send(TuiEvent::TextDelta(format!("\nRestored: {file_path}\n")))
-                                    .await;
-                            }
-                            Err(e) => {
-                                let _ = tui_tx
-                                    .send(TuiEvent::Error(format!("Restore failed: {e}")))
-                                    .await;
-                            }
-                        },
-                        Err(e) => {
-                            let _ = tui_tx
-                                .send(TuiEvent::Error(format!("Checkpoint store error: {e}")))
-                                .await;
-                        }
-                    }
-                }
-            } else {
-                let _ = tui_tx
-                    .send(TuiEvent::TextDelta(
-                        "\nUsage: /checkpoint list | /checkpoint restore <file_path>\n".into(),
-                    ))
-                    .await;
-            }
-            true
-        }
+        // ── /checkpoint body-migrated to `crate::command::checkpoint::
+        //    CheckpointHandler` (TASK-AGS-POST-6-BODIES-B21-CHECKPOINT).
+        //    Pattern: DIRECT (NOT EFFECT-SLOT async as the task tag
+        //    originally suggested — recon of
+        //    `crates/archon-session/src/checkpoint.rs` proved all three
+        //    methods (open :83, list_modified :244, restore :198) are
+        //    sync). Handler consumes existing
+        //    `CommandContext::session_id: Option<String>` field
+        //    (AGS-815, already populated unconditionally by
+        //    build_command_context — no new field needed). All 8
+        //    byte-identical TuiEvent branches preserved (list-empty /
+        //    list non-empty / list Err / restore usage-error / restore
+        //    Ok / restore Err / store-open Err / catch-all TextDelta).
+        //    Registry wiring: registry.rs:259 import, :1379 breadcrumb
+        //    replacing declare_handler! stub, :1497 insert_primary
+        //    with CheckpointHandler::new(). See .gates/
+        //    TASK-AGS-POST-6-BODIES-B21-CHECKPOINT/ for the full
+        //    gate trail. ─────────────────────────────────────────
         // ── /add-dir ───────────────────────────────────────────
         // TASK-AGS-POST-6-BODIES-B10-ADDDIR: shipped arm DELETED.
         // Handler: crate::command::add_dir::AddDirHandler (EFFECT-SLOT

@@ -239,6 +239,24 @@ use crate::command::rename::RenameHandler;
 // in a separate subagent run. See `src/command/recall.rs` module
 // rustdoc for the full R1-R7 invariant list.
 use crate::command::recall::RecallHandler;
+// TASK-AGS-POST-6-BODIES-B21-CHECKPOINT: real /checkpoint handler lives
+// in `crate::command::checkpoint`. DIRECT-pattern body-migrate (not
+// EFFECT-SLOT as the B21 task tag suggested — recon proved every
+// touched archon-session entry point is sync:
+// `CheckpointStore::open`, `list_modified`, and `restore` are plain
+// `fn`). Reuses the AGS-815 unconditional
+// `CommandContext::session_id: Option<String>` field — no new
+// context.rs wiring, no snapshot/effect-slot, no new CommandContext
+// field added. Shipped stub `declare_handler!(CheckpointHandler,
+// "Create or restore a session checkpoint")` at registry.rs:1361 is
+// REPLACED by this import + the insert_primary call at registry.rs:1467
+// below. No aliases — shipped stub used the 2-arg declare_handler!
+// form and spec lists none. R7 double-fire: legacy match arm at
+// slash.rs:452-527 stays live through Gates 1-4; Gate 5 deletes it
+// in a separate subagent run. See `src/command/checkpoint.rs` module
+// rustdoc for the full R1-R7 invariant list, and the B17 /rename
+// precedent at `src/command/rename.rs`.
+use crate::command::checkpoint::CheckpointHandler;
 // TASK-AGS-POST-6-BODIES-B19-RULES: real /rules handler lives in
 // `crate::command::rules`. DIRECT-sync-via-MemoryTrait body-migrate
 // (not SNAPSHOT as the B19 task tag suggests — recon proved
@@ -1358,7 +1376,19 @@ declare_handler!(LogoutHandler, "Clear stored credentials");
 // snapshot/effect-slot needed; session_id threads through
 // CommandContext::session_id populated unconditionally by
 // build_command_context). No aliases. Imported at the top of this file.
-declare_handler!(CheckpointHandler, "Create or restore a session checkpoint");
+// TASK-AGS-POST-6-BODIES-B21-CHECKPOINT: CheckpointHandler moved to
+// `crate::command::checkpoint` (real impl with body-migrated execute
+// via DIRECT pattern — sync
+// `archon_session::checkpoint::CheckpointStore::open` / `list_modified`
+// / `restore`, no snapshot/effect-slot needed, no new CommandContext
+// field added — REUSES the AGS-815 `session_id` field). No aliases
+// (shipped stub used the 2-arg declare_handler! form). Imported at the
+// top of this file. See insert_primary site at registry.rs:1467 below.
+// R7 double-fire: legacy match arm at slash.rs:452-527 stays live
+// through Gates 1-4; Gate 5 deletes it in a separate subagent run —
+// do NOT touch slash.rs in this ticket. See `src/command/checkpoint.rs`
+// module rustdoc for the full R1-R7 invariant list, and the B17 /rename
+// precedent at `src/command/rename.rs`.
 // TASK-AGS-POST-6-BODIES-B10-ADDDIR: AddDirHandler moved to
 // `crate::command::add_dir` (real impl with body-migrated execute via
 // EFFECT-SLOT pattern — shipped body at slash.rs:679 contained
@@ -1464,7 +1494,7 @@ pub(crate) fn default_registry() -> Registry {
     // TASK-AGS-812: NEW /hooks primary (gap-fix Q4=A, no aliases).
     b.insert_primary("hooks", Arc::new(HooksHandler));
     b.insert_primary("fork", Arc::new(ForkHandler));
-    b.insert_primary("checkpoint", Arc::new(CheckpointHandler));
+    b.insert_primary("checkpoint", Arc::new(CheckpointHandler::new()));
     b.insert_primary("add-dir", Arc::new(AddDirHandler));
     b.insert_primary("color", Arc::new(ColorHandler));
     b.insert_primary("theme", Arc::new(ThemeHandler));
