@@ -21,6 +21,7 @@ pub(crate) mod denials;
 pub(crate) mod diff;
 pub(crate) mod dispatcher;
 pub(crate) mod doctor;
+pub(crate) mod effort;
 pub(crate) mod errors;
 pub(crate) mod export;
 pub(crate) mod fast;

@@ -19,7 +19,7 @@ use std::sync::Arc;
 use archon_tui::app::TuiEvent;
 
 use crate::command::registry::{CommandContext, CommandEffect, Registry};
-use crate::command::{context_cmd, cost, denials, mcp, model, status};
+use crate::command::{context_cmd, cost, denials, effort, mcp, model, status};
 use crate::slash_context::SlashCommandContext;
 
 /// Build the per-dispatch [`CommandContext`] for the supplied slash
@@ -106,7 +106,19 @@ pub(crate) async fn build_command_context(
         // lock traffic on `denial_log` when the command is not
         // /denials.
         denial_snapshot: None,
+        // TASK-AGS-POST-6-BODIES-B11-EFFORT: SNAPSHOT-pattern field
+        // (READ-only /effort). Initialised to `None` here; populated
+        // BELOW in the `match primary.as_deref()` block only when the
+        // primary resolves to `/effort`. Mirrors AGS-807 status /
+        // AGS-808 model / B08 denials snapshot gating rule.
+        effort_snapshot: None,
         pending_effect: None,
+        // TASK-AGS-POST-6-BODIES-B11-EFFORT: SIDECAR slot for the
+        // session-local `&mut EffortState` write. Initialised to
+        // `None` here; populated (in lockstep with `pending_effect`)
+        // by `EffortHandler::execute` on the WRITE branch; drained at
+        // the slash.rs dispatch site AFTER `apply_effect` returns.
+        pending_effort_set: None,
     };
 
     // Resolve the primary command name (alias-aware) so "/info" routes
@@ -166,6 +178,19 @@ pub(crate) async fn build_command_context(
             // consumes a pre-computed owned `String`.
             ctx.denial_snapshot =
                 Some(denials::build_denial_snapshot(slash_ctx).await);
+        }
+        Some("effort") => {
+            // TASK-AGS-POST-6-BODIES-B11-EFFORT snapshot population.
+            // /effort has both READ and WRITE sides; the READ side
+            // consumes `ctx.effort_snapshot`, the WRITE side goes
+            // through the new `CommandEffect::SetEffortLevelShared`
+            // + `pending_effort_set` sidecar. No aliases (shipped
+            // stub had none and spec lists none). The builder awaits
+            // a single `effort_level_shared.lock()` here so the sync
+            // handler consumes a pre-captured owned `EffortLevel`.
+            // Mirrors AGS-808 /model snapshot gating.
+            ctx.effort_snapshot =
+                Some(effort::build_effort_snapshot(slash_ctx).await);
         }
         _ => {}
     }
@@ -227,6 +252,22 @@ pub(crate) async fn apply_effect(
             // exactly — push FIRST, log SECOND.
             slash_ctx.extra_dirs.lock().await.push(path.clone());
             tracing::info!(dir = %path.display(), "added working directory via /add-dir");
+        }
+        // TASK-AGS-POST-6-BODIES-B11-EFFORT: await the mutex write on
+        // `slash_ctx.effort_level_shared`. Byte-identity with shipped
+        // slash.rs:109 preserved (`*ctx.effort_level_shared.lock().await =
+        // level;`). `tui_tx` is unused in this arm — the confirmation
+        // TextDelta is emitted by the handler via `try_send` BEFORE
+        // apply_effect runs. The companion session-local write to
+        // `&mut EffortState` is NOT applied here; the slash.rs dispatch
+        // site drains `CommandContext::pending_effort_set` AFTER this
+        // call returns. The tracing::info! record is an additive
+        // observability line — shipped code had no /effort tracing, so
+        // this is new but invariant-preserving.
+        CommandEffect::SetEffortLevelShared(level) => {
+            let _ = tui_tx;
+            *slash_ctx.effort_level_shared.lock().await = level;
+            tracing::info!(level = %level, "set effort level via /effort");
         }
         // Future variants (AGS-819 /theme, etc.): add a match arm here
         // with the appropriate awaited mutex write. No fallback arm —
@@ -406,6 +447,14 @@ mod tests {
             // Arm exists to keep the match exhaustive and guard against
             // silent drift on future variants.
             CommandEffect::AddExtraDir(_) => {
+                unreachable!("narrow apply_effect harness only exercises SetModelOverride")
+            }
+            // TASK-AGS-POST-6-BODIES-B11-EFFORT: SetEffortLevelShared
+            // belongs to /effort. This narrow harness only constructs
+            // SetModelOverride above; SetEffortLevelShared is
+            // unreachable here. Arm exists to keep the match exhaustive
+            // and guard against silent drift on future variants.
+            CommandEffect::SetEffortLevelShared(_) => {
                 unreachable!("narrow apply_effect harness only exercises SetModelOverride")
             }
         }

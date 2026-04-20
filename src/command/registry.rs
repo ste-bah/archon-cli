@@ -254,6 +254,30 @@ use crate::command::theme::ThemeHandler;
 // `src/command/context.rs` awaits the push and emits the tracing::info!
 // record byte-identical to shipped slash.rs:679 + 683.
 use crate::command::add_dir::AddDirHandler;
+// TASK-AGS-POST-6-BODIES-B11-EFFORT: real /effort handler lives in
+// `crate::command::effort`. HYBRID body-migrate (SNAPSHOT + EFFECT-SLOT
+// + SIDECAR) — the shipped body at slash.rs:92-122 performs THREE
+// actions that cannot all run inside a sync `CommandHandler::execute`:
+//
+//   1. Read `effort_state.level()` — SNAPSHOT pattern (builder
+//      pre-populates `CommandContext::effort_snapshot` by awaiting
+//      `slash_ctx.effort_level_shared.lock().await`).
+//   2. Write `*ctx.effort_level_shared.lock().await = level` —
+//      EFFECT-SLOT pattern via new `CommandEffect::SetEffortLevelShared`
+//      variant; `apply_effect` awaits the mutex write.
+//   3. Write `effort_state.set_level(level)` on the session-local
+//      `&mut EffortState` — NEW SIDECAR slot
+//      (`CommandContext::pending_effort_set`) drained at the slash.rs
+//      dispatch site where the `&mut effort_state` parameter is in
+//      scope.
+//
+// Shipped stub `declare_handler!(EffortHandler, "Show or set reasoning
+// effort (high|medium|low)")` at registry.rs:801 is REPLACED by this
+// import + the insert_primary call below. No aliases (shipped stub had
+// none; AGS-817 shipped-wins rule preserves zero aliases). Mirrors
+// AGS-808 /model snapshot/effect-slot pattern and B10-ADDDIR's
+// effect-slot mutex-write deferral; the sidecar is new in B11.
+use crate::command::effort::EffortHandler;
 
 /// Execution context threaded through every command handler.
 ///
@@ -473,6 +497,18 @@ pub(crate) struct CommandContext {
     /// /denials is READ-only so there is NO matching `CommandEffect`
     /// variant (mirrors AGS-811 /mcp and AGS-814 /context).
     pub(crate) denial_snapshot: Option<DenialSnapshot>,
+    /// TASK-AGS-POST-6-BODIES-B11-EFFORT SNAPSHOT-pattern field (READ
+    /// side of /effort).
+    ///
+    /// Populated by `build_command_context` for `/effort` ONLY (no
+    /// aliases — shipped stub at registry.rs:801 used the two-arg
+    /// declare_handler! form). Every other command observes `None`
+    /// and pays zero additional lock traffic on
+    /// `SlashCommandContext::effort_level_shared`. Mirrors AGS-807
+    /// `status_snapshot`, AGS-808 `model_snapshot`, and B08
+    /// `denial_snapshot` convention. Carries an owned `EffortLevel`
+    /// (Copy) so the sync handler reads without any lock.
+    pub(crate) effort_snapshot: Option<crate::command::effort::EffortSnapshot>,
     /// TASK-AGS-808 effect-slot field (WRITE side of /model and future
     /// write-tickets).
     ///
@@ -485,6 +521,24 @@ pub(crate) struct CommandContext {
     /// single-shot `Option` guarantees exactly-once application even
     /// if the dispatcher were to re-fire on the same context.
     pub(crate) pending_effect: Option<CommandEffect>,
+    /// TASK-AGS-POST-6-BODIES-B11-EFFORT SIDECAR field (LOCAL write
+    /// side of /effort).
+    ///
+    /// The /effort body-migrate is the first handler that needs to
+    /// mutate session-local stack state (`&mut EffortState`) in
+    /// addition to the shared-mutex state covered by the effect-slot.
+    /// `pending_effect` handles the shared-mutex write via
+    /// `CommandEffect::SetEffortLevelShared`; this sidecar slot
+    /// carries the same `EffortLevel` to the slash.rs dispatch site,
+    /// where the caller's `&mut effort_state` parameter is drained
+    /// AFTER `apply_effect` returns by calling
+    /// `effort_state.set_level(level)`. Single-shot (`.take()` on
+    /// drain) just like `pending_effect`.
+    ///
+    /// Initialised to `None` by `build_command_context`; populated in
+    /// lockstep with `pending_effect` by `EffortHandler::execute` so
+    /// the two slots are never out of sync.
+    pub(crate) pending_effort_set: Option<archon_llm::effort::EffortLevel>,
 }
 
 /// Side-effect descriptors produced synchronously by
@@ -543,6 +597,25 @@ pub(crate) enum CommandEffect {
     /// emits the tracing::info! record. Carries an owned `PathBuf` so
     /// no borrow on `SlashCommandContext` leaks through the effect-slot.
     AddExtraDir(PathBuf),
+    /// TASK-AGS-POST-6-BODIES-B11-EFFORT: overwrite
+    /// `SlashCommandContext::effort_level_shared` (`Arc<tokio::sync::
+    /// Mutex<EffortLevel>>`) with the validated level. Produced by
+    /// `EffortHandler::execute` (sync stash). Applied by
+    /// `command::context::apply_effect`, which awaits the mutex write.
+    /// Carries an owned `EffortLevel` (Copy) so no borrow on
+    /// `SlashCommandContext` leaks through the effect-slot.
+    ///
+    /// HYBRID pattern — the handler ALSO stashes
+    /// `CommandContext::pending_effort_set` (SIDECAR) for the session-
+    /// local `&mut EffortState` write that the slash.rs dispatch site
+    /// performs after `apply_effect` returns. The effect here only
+    /// covers the shared-mutex half of the mutation. Byte-identity
+    /// claim versus shipped slash.rs:108-109 (paired
+    /// `effort_state.set_level(level); *ctx.effort_level_shared.
+    /// lock().await = level;`) is preserved jointly by this variant
+    /// and the sidecar. Mirrors AGS-808 `SetModelOverride` + B10
+    /// `AddExtraDir` effect-slot precedent.
+    SetEffortLevelShared(archon_llm::effort::EffortLevel),
 }
 
 /// Trait every registered slash command handler implements.
@@ -798,7 +871,27 @@ declare_handler!(ClearHandler, "Clear the current conversation", &["cls"]);
 // emissions, subcommand-parsed from args.first()). Real impl and
 // tests live in the dedicated module; stub replaced by registry
 // import at the top of this file.
-declare_handler!(EffortHandler, "Show or set reasoning effort (high|medium|low)");
+// TASK-AGS-POST-6-BODIES-B11-EFFORT: EffortHandler moved to
+// `src/command/effort.rs` (real impl with body-migrated execute via
+// HYBRID pattern — SNAPSHOT for READ, EFFECT-SLOT for shared mutex
+// write, SIDECAR for session-local EffortState write). Shipped stub
+// `declare_handler!(EffortHandler, "Show or set reasoning effort
+// (high|medium|low)")` at registry.rs:801 is REPLACED by this
+// breadcrumb + the import at the top of this file. No aliases —
+// shipped stub had none and AGS-817 shipped-wins rule preserves zero
+// aliases. Readers looking for the real type should jump to:
+//
+//   * `crate::command::effort::EffortHandler` — the zero-sized
+//     handler struct + `CommandHandler` impl.
+//   * `CommandContext::effort_snapshot` (registry.rs above) — the
+//     SNAPSHOT field populated by `build_command_context` for
+//     `/effort`.
+//   * `CommandContext::pending_effort_set` (registry.rs above) — the
+//     SIDECAR slot for the local `&mut EffortState` write drained at
+//     slash.rs after `apply_effect`.
+//   * `CommandEffect::SetEffortLevelShared` (registry.rs above) —
+//     the effect variant for the shared-mutex write applied by
+//     `command::context::apply_effect`.
 declare_handler!(GardenHandler, "Run memory garden consolidation or show stats");
 // TASK-AGS-808: ModelHandler moved to `crate::command::model` (real
 // impl with body-migrated execute via snapshot pattern for READ +
@@ -1766,6 +1859,16 @@ mod tests {
             // guard against silent drift if a future variant is added
             // without updating this pin.
             CommandEffect::AddExtraDir(_) => {
+                unreachable!("this test only constructs SetModelOverride")
+            }
+            // TASK-AGS-POST-6-BODIES-B11-EFFORT: SetEffortLevelShared is
+            // the fourth variant, added by the /effort migration. This
+            // test only constructs SetModelOverride, so
+            // SetEffortLevelShared is unreachable here; the arm exists
+            // solely to satisfy exhaustiveness and guard against silent
+            // drift if a future variant is added without updating this
+            // pin.
+            CommandEffect::SetEffortLevelShared(_) => {
                 unreachable!("this test only constructs SetModelOverride")
             }
         }

@@ -200,7 +200,9 @@ mod tests {
                 working_dir: None,
                 skill_registry: None,
                 denial_snapshot: None,
+                effort_snapshot: None,
                 pending_effect: None,
+                pending_effort_set: None,
             },
             rx,
         )

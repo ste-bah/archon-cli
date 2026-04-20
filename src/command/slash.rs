@@ -58,6 +58,19 @@ pub(crate) async fn handle_slash_command(
         // `tui_tx`).
         crate::command::context::apply_effect(effect, ctx, tui_tx).await;
     }
+    // TASK-AGS-POST-6-BODIES-B11-EFFORT: sidecar drain for the local
+    // `effort_state: &mut EffortState` parameter. `EffortHandler::execute`
+    // stashes BOTH the shared-mutex effect (drained above via
+    // `CommandEffect::SetEffortLevelShared` + apply_effect) AND this
+    // sidecar slot. The shared-mutex path covers
+    // `SlashCommandContext::effort_level_shared`; this drain covers the
+    // session-local `EffortState` stack variable that only exists in
+    // this function's scope and cannot be written from inside the
+    // handler. Single-shot (.take()) by construction; a None here means
+    // the handler did not hit the WRITE branch.
+    if let Some(level) = __cmd_ctx.pending_effort_set.take() {
+        effort_state.set_level(level);
+    }
     if !ctx.dispatcher.recognizes(input) {
         return false;
     }

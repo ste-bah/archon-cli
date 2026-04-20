@@ -211,7 +211,9 @@ mod tests {
                 skill_registry: None,
                 // TASK-AGS-POST-6-BODIES-B08-DENIALS: /voice tests never exercise /denials paths — None.
                 denial_snapshot: None,
+                effort_snapshot: None,
                 pending_effect: None,
+                pending_effort_set: None,
             },
             rx,
         )
