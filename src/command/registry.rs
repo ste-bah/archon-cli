@@ -188,6 +188,16 @@ use crate::command::vim::VimHandler;
 // shipped-wins drift-reconcile, carried on the handler via the
 // `CommandHandler::aliases()` trait method.
 use crate::command::help::HelpHandler;
+// TASK-AGS-POST-6-BODIES-B07-RELEASE-NOTES: real /release-notes handler
+// lives in `crate::command::release_notes`. DIRECT-pattern body-migrate
+// (emit-only sync handler — single `ctx.tui_tx.try_send(TuiEvent::TextDelta(..))`
+// with byte-identical static literal; no snapshot/effect-slot needed,
+// no new CommandContext field added). SEVENTH Batch-A body-migrate
+// (after B01-FAST, B02-THINKING, B03-BUG, B04-DIFF, B05-VIM, B06-HELP).
+// Shipped stub `declare_handler!(ReleaseNotesHandler, "Show release notes for the current build")`
+// at registry.rs:787 is REPLACED by this import + the insert_primary
+// call below. No aliases — shipped stub had none and spec lists none.
+use crate::command::release_notes::ReleaseNotesHandler;
 // TASK-AGS-819: real /theme handler lives in `crate::command::theme`.
 // DIRECT-pattern body-migrate (sync theme helpers — `theme_by_name` +
 // `available_themes` are both plain `fn` lookups; no snapshot/effect-
@@ -784,7 +794,18 @@ declare_handler!(UsageHandler, "Show aggregate API usage for the session");
 // impl with body-migrated execute, alias set extended to
 // [todo, ps, jobs], and TuiEvent::OpenView(ViewId::Tasks) forward-
 // compat per AGS-822). Imported at the top of this file.
-declare_handler!(ReleaseNotesHandler, "Show release notes for the current build");
+// TASK-AGS-POST-6-BODIES-B07-RELEASE-NOTES: ReleaseNotesHandler moved to
+// `crate::command::release_notes` (real impl with body-migrated execute
+// via DIRECT pattern — single sync `ctx.tui_tx.try_send(TuiEvent::TextDelta(..))`
+// with byte-identical static literal from slash.rs:451-461, no
+// snapshot/effect-slot/new CommandContext field needed). SEVENTH
+// Batch-A body-migrate (after B01-FAST, B02-THINKING, B03-BUG, B04-DIFF,
+// B05-VIM, B06-HELP). Shipped stub
+// `declare_handler!(ReleaseNotesHandler, "Show release notes for the current build")`
+// at registry.rs:787 is REPLACED by this breadcrumb + the import at
+// the top of this file. No aliases — shipped stub had none and spec
+// lists none. See .gates/TASK-AGS-POST-6-BODIES-B07-RELEASE-NOTES/
+// for the full gate trail.
 declare_handler!(ReloadHandler, "Reload configuration from disk");
 declare_handler!(LogoutHandler, "Clear stored credentials");
 // TASK-AGS-POST-6-BODIES-B06-HELP: HelpHandler moved to

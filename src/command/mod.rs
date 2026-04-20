@@ -34,6 +34,7 @@ pub(crate) mod pipeline;
 pub(crate) mod remote;
 pub(crate) mod plugin;
 pub(crate) mod registry;
+pub(crate) mod release_notes;
 pub(crate) mod resume;
 pub(crate) mod sessions;
 pub(crate) mod slash;
