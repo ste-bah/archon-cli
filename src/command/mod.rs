@@ -18,6 +18,7 @@ pub(crate) mod dispatcher;
 pub(crate) mod doctor;
 pub(crate) mod errors;
 pub(crate) mod export;
+pub(crate) mod fast;
 pub(crate) mod fork;
 pub(crate) mod hooks;
 pub(crate) mod ide_stdio;
