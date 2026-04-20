@@ -247,6 +247,9 @@ mod tests {
                 // TASK-AGS-POST-6-BODIES-B04-DIFF: /tasks tests never
                 // read the /diff working_dir PathBuf — None is correct.
                 working_dir: None,
+                // TASK-AGS-POST-6-BODIES-B06-HELP: /tasks tests never
+                // read the /help skill_registry — None is correct.
+                skill_registry: None,
                 pending_effect: None,
             },
             rx,

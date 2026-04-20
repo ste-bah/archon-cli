@@ -233,6 +233,8 @@ mod tests {
                 show_thinking: None,
                 // TASK-AGS-POST-6-BODIES-B04-DIFF: /resume tests never exercise /diff paths — None.
                 working_dir: None,
+                // TASK-AGS-POST-6-BODIES-B06-HELP: /resume tests never exercise /help paths — None.
+                skill_registry: None,
                 pending_effect: None,
             },
             rx,

@@ -89,6 +89,9 @@ pub(crate) fn make_status_ctx(
             // TASK-AGS-POST-6-BODIES-B04-DIFF: /status tests never
             // exercise /diff paths — None.
             working_dir: None,
+            // TASK-AGS-POST-6-BODIES-B06-HELP: /status tests never
+            // exercise /help paths — None.
+            skill_registry: None,
             pending_effect: None,
         },
         rx,
@@ -117,6 +120,9 @@ pub(crate) fn make_model_ctx(
             // TASK-AGS-POST-6-BODIES-B04-DIFF: /model tests never
             // exercise /diff paths — None.
             working_dir: None,
+            // TASK-AGS-POST-6-BODIES-B06-HELP: /model tests never
+            // exercise /help paths — None.
+            skill_registry: None,
             pending_effect: None,
         },
         rx,
@@ -145,6 +151,9 @@ pub(crate) fn make_cost_ctx(
             // TASK-AGS-POST-6-BODIES-B04-DIFF: /cost tests never
             // exercise /diff paths — None.
             working_dir: None,
+            // TASK-AGS-POST-6-BODIES-B06-HELP: /cost tests never
+            // exercise /help paths — None.
+            skill_registry: None,
             pending_effect: None,
         },
         rx,
@@ -180,6 +189,9 @@ pub(crate) fn make_fast_ctx(
             // TASK-AGS-POST-6-BODIES-B04-DIFF: /fast tests never
             // exercise /diff paths — None.
             working_dir: None,
+            // TASK-AGS-POST-6-BODIES-B06-HELP: /fast tests never
+            // exercise /help paths — None.
+            skill_registry: None,
             pending_effect: None,
         },
         rx,
@@ -212,6 +224,9 @@ pub(crate) fn make_bug_ctx() -> (CommandContext, mpsc::Receiver<TuiEvent>) {
             // TASK-AGS-POST-6-BODIES-B04-DIFF: /bug tests never
             // exercise /diff paths — None.
             working_dir: None,
+            // TASK-AGS-POST-6-BODIES-B06-HELP: /bug tests never
+            // exercise /help paths — None.
+            skill_registry: None,
             pending_effect: None,
         },
         rx,
@@ -249,6 +264,9 @@ pub(crate) fn make_thinking_ctx(
             // TASK-AGS-POST-6-BODIES-B04-DIFF: /thinking tests never
             // exercise /diff paths — None.
             working_dir: None,
+            // TASK-AGS-POST-6-BODIES-B06-HELP: /thinking tests never
+            // exercise /help paths — None.
+            skill_registry: None,
             pending_effect: None,
         },
         rx,
@@ -285,6 +303,54 @@ pub(crate) fn make_diff_ctx(
             fast_mode_shared: None,
             show_thinking: None,
             working_dir,
+            // TASK-AGS-POST-6-BODIES-B06-HELP: /diff tests never
+            // exercise /help paths — None.
+            skill_registry: None,
+            pending_effect: None,
+        },
+        rx,
+    )
+}
+
+/// Build a CommandContext for HelpHandler tests.
+///
+/// TASK-AGS-POST-6-BODIES-B06-HELP — DIRECT-with-field variant. The
+/// `/help` handler reads `skill_registry` to call sync
+/// `SkillRegistry::format_help()` (empty-args suffix) or
+/// `format_skill_help(name)` (single-command detail). Helper populates
+/// `skill_registry` with a freshly-built `Arc<SkillRegistry>` containing
+/// one known skill (`help`) so:
+///
+///   - `format_help()` output contains the `Available commands:` header
+///     plus the registered `/help` entry — observable from the
+///     handler's empty-args TextDelta.
+///   - `format_skill_help("help")` returns `Some(...)` — observable
+///     from the single-command TextDelta path.
+///   - `format_skill_help("bogusname")` returns `None` — observable
+///     from the unknown-command Error path.
+///
+/// All other optional fields are left at `None`, mirroring peer
+/// helpers.
+pub(crate) fn make_help_ctx() -> (CommandContext, mpsc::Receiver<TuiEvent>) {
+    use archon_core::skills::builtin::HelpSkill;
+    use archon_core::skills::SkillRegistry;
+    let (tx, rx) = mock_tui_channel();
+    let mut registry = SkillRegistry::new();
+    registry.register(Box::new(HelpSkill));
+    (
+        CommandContext {
+            tui_tx: tx,
+            status_snapshot: None,
+            model_snapshot: None,
+            cost_snapshot: None,
+            mcp_snapshot: None,
+            context_snapshot: None,
+            session_id: None,
+            memory: None,
+            fast_mode_shared: None,
+            show_thinking: None,
+            working_dir: None,
+            skill_registry: Some(Arc::new(registry)),
             pending_effect: None,
         },
         rx,

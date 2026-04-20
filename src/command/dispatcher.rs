@@ -212,6 +212,10 @@ mod tests {
                 // /diff working_dir PathBuf — dispatcher tests only
                 // exercise routing/parsing, not handler bodies.
                 working_dir: None,
+                // TASK-AGS-POST-6-BODIES-B06-HELP: same rationale for
+                // /help skill_registry Arc — dispatcher tests only
+                // exercise routing/parsing, not handler bodies.
+                skill_registry: None,
                 pending_effect: None,
             },
             rx,
@@ -416,7 +420,12 @@ mod tests {
         // "h" is registered as an alias for "help" in the default
         // registry (see `HelpHandler::aliases`). Dispatching "/h" must
         // land on the help handler (via Registry::get's alias fallback)
-        // and NOT emit an "Unknown command" error.
+        // and NOT emit an "Unknown command" error. Post-B06-HELP the
+        // real HelpHandler now emits a TextDelta with the core-commands
+        // header (skill_registry is None in the dispatcher test fixture,
+        // so no extended-commands suffix is appended); any non-Error
+        // event is acceptable — the alias-fallback contract only
+        // forbids the "Unknown command" Error.
         let registry = Arc::new(default_registry());
         let dispatcher = Dispatcher::new(registry);
         let (mut ctx, mut rx) = make_ctx();
@@ -424,13 +433,19 @@ mod tests {
         let result = dispatcher.dispatch(&mut ctx, "/h");
         assert!(result.is_ok(), "alias dispatch must return Ok");
 
-        match rx.try_recv() {
-            Err(mpsc::error::TryRecvError::Empty) => {}
-            Ok(TuiEvent::Error(msg)) => panic!(
-                "alias dispatch must not emit TuiEvent::Error, got: {msg}"
-            ),
-            Ok(ev) => panic!("unexpected event emitted: {ev:?}"),
-            Err(e) => panic!("unexpected channel error: {e:?}"),
+        // Drain all events; assert none is an Error variant.
+        loop {
+            match rx.try_recv() {
+                Err(mpsc::error::TryRecvError::Empty) => break,
+                Ok(TuiEvent::Error(msg)) => panic!(
+                    "alias dispatch must not emit TuiEvent::Error, got: {msg}"
+                ),
+                Ok(_ev) => {
+                    // TextDelta from HelpHandler is expected post-B06-HELP.
+                    continue;
+                }
+                Err(e) => panic!("unexpected channel error: {e:?}"),
+            }
         }
     }
 

@@ -172,6 +172,22 @@ use crate::command::diff::DiffHandler;
 // registry.rs:728 is REPLACED by this import + the insert_primary
 // call below. No aliases — shipped stub had none and spec lists none.
 use crate::command::vim::VimHandler;
+// TASK-AGS-POST-6-BODIES-B06-HELP: real /help handler lives in
+// `crate::command::help`. DIRECT-with-field body-migrate (sync
+// `SkillRegistry::format_help` / `format_skill_help` — both plain `fn`;
+// no snapshot/effect-slot needed). The handler reads
+// `Option<Arc<SkillRegistry>>` from a new `CommandContext::skill_registry`
+// field populated UNCONDITIONALLY by `build_command_context` (mirrors
+// AGS-815 session_id, AGS-817 memory, B01-FAST fast_mode_shared,
+// B02-THINKING show_thinking, B04-DIFF working_dir cross-cutting
+// precedent). SIXTH Batch-A body-migrate (after B01-FAST, B02-THINKING,
+// B03-BUG, B04-DIFF, B05-VIM). Shipped stub
+// `declare_handler!(HelpHandler, "Show help for commands and shortcuts",
+// &["?", "h"])` at registry.rs:749 is REPLACED by this import + the
+// insert_primary call below. Aliases `["?", "h"]` are PRESERVED per
+// shipped-wins drift-reconcile, carried on the handler via the
+// `CommandHandler::aliases()` trait method.
+use crate::command::help::HelpHandler;
 // TASK-AGS-819: real /theme handler lives in `crate::command::theme`.
 // DIRECT-pattern body-migrate (sync theme helpers — `theme_by_name` +
 // `available_themes` are both plain `fn` lookups; no snapshot/effect-
@@ -368,6 +384,30 @@ pub(crate) struct CommandContext {
     /// event emission path since /diff must stay Ok(()) to keep the
     /// dispatcher contract uniform).
     pub(crate) working_dir: Option<PathBuf>,
+    /// TASK-AGS-POST-6-BODIES-B06-HELP DIRECT-pattern field (/help).
+    ///
+    /// Clone of `SlashCommandContext::skill_registry` populated
+    /// UNCONDITIONALLY by `build_command_context` (mirrors the AGS-815
+    /// `session_id`, AGS-817 `memory`, B01-FAST `fast_mode_shared`,
+    /// B02-THINKING `show_thinking`, and B04-DIFF `working_dir` cross-
+    /// cutting precedent — not gated on the primary name). `/help` reads
+    /// it to call the sync `SkillRegistry::format_help()` /
+    /// `format_skill_help()` methods for the extended-commands suffix
+    /// and per-skill detail output.
+    ///
+    /// `Option<Arc<SkillRegistry>>` so the handler test fixtures can
+    /// construct a `CommandContext` without standing up a full
+    /// `SlashCommandContext`; when `None` the handler still emits the
+    /// static core-commands header (it does not depend on the registry)
+    /// but skips the skill-registry-sourced suffix, and the single-
+    /// command arg path falls through to the unknown-command Error
+    /// branch. Production always populates
+    /// `Some(Arc::clone(&slash_ctx.skill_registry))`.
+    ///
+    /// No matching `CommandEffect` variant — `/help` is a pure DIRECT-
+    /// pattern read (no async mutex writes back to shared state).
+    pub(crate) skill_registry:
+        Option<Arc<archon_core::skills::SkillRegistry>>,
     /// TASK-AGS-808 effect-slot field (WRITE side of /model and future
     /// write-tickets).
     ///
@@ -747,11 +787,12 @@ declare_handler!(UsageHandler, "Show aggregate API usage for the session");
 declare_handler!(ReleaseNotesHandler, "Show release notes for the current build");
 declare_handler!(ReloadHandler, "Reload configuration from disk");
 declare_handler!(LogoutHandler, "Clear stored credentials");
-declare_handler!(
-    HelpHandler,
-    "Show help for commands and shortcuts",
-    &["?", "h"]
-);
+// TASK-AGS-POST-6-BODIES-B06-HELP: HelpHandler moved to
+// `crate::command::help` (real impl with body-migrated execute via
+// DIRECT-with-field pattern — sync SkillRegistry::format_help /
+// format_skill_help, no snapshot/effect-slot needed; aliases ["?", "h"]
+// preserved via CommandHandler::aliases() trait method). Imported at
+// the top of this file.
 declare_handler!(RenameHandler, "Rename the current session");
 // TASK-AGS-810: ResumeHandler moved to `crate::command::resume` (real
 // impl with body-migrated execute via DIRECT pattern — sync

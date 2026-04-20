@@ -167,6 +167,8 @@ mod tests {
                 show_thinking: None,
                 // TASK-AGS-POST-6-BODIES-B04-DIFF: /export tests never exercise /diff paths — None.
                 working_dir: None,
+                // TASK-AGS-POST-6-BODIES-B06-HELP: /export tests never exercise /help paths — None.
+                skill_registry: None,
                 pending_effect: None,
             },
             rx,

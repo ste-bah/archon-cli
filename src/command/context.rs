@@ -88,6 +88,14 @@ pub(crate) async fn build_command_context(
         // effect carries owned data (no borrow on `SlashCommandContext`
         // across the effect-slot boundary).
         working_dir: Some(slash_ctx.working_dir.clone()),
+        // TASK-AGS-POST-6-BODIES-B06-HELP: /help DIRECT-pattern consumer.
+        // Populated UNCONDITIONALLY here (not gated on the primary name,
+        // same as AGS-815 session_id, AGS-817 memory, B01-FAST
+        // fast_mode_shared, B02-THINKING show_thinking, and B04-DIFF
+        // working_dir). `Arc<SkillRegistry>` is cheap to clone (~8 bytes
+        // + atomic refcount increment); the handler reads it via
+        // `SkillRegistry::format_help()` / `format_skill_help()`.
+        skill_registry: Some(Arc::clone(&slash_ctx.skill_registry)),
         pending_effect: None,
     };
 
