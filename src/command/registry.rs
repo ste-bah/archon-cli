@@ -198,6 +198,20 @@ use crate::command::help::HelpHandler;
 // at registry.rs:787 is REPLACED by this import + the insert_primary
 // call below. No aliases — shipped stub had none and spec lists none.
 use crate::command::release_notes::ReleaseNotesHandler;
+// TASK-AGS-POST-6-BODIES-B17-RENAME: real /rename handler lives in
+// `crate::command::rename`. DIRECT-pattern body-migrate — both
+// `archon_session::storage::SessionStore::open` and
+// `archon_session::naming::set_session_name` are sync, and
+// `CommandContext::session_id: Option<String>` is already populated
+// unconditionally by `build_command_context` per the AGS-815 /fork
+// precedent. No snapshot/effect-slot needed, no new CommandContext
+// field added. Shipped stub `declare_handler!(RenameHandler, "Rename
+// the current session")` at registry.rs:1234 is REPLACED by this
+// import + the insert_primary call below. No aliases — shipped stub
+// used the two-arg declare_handler! form (no aliases slice) and spec
+// lists none. See `src/command/rename.rs` module rustdoc for the
+// full R1-R7 invariant list.
+use crate::command::rename::RenameHandler;
 // TASK-AGS-POST-6-BODIES-B08-DENIALS: real /denials handler lives in
 // `crate::command::denials`. SNAPSHOT-ONLY body-migrate (async
 // `denial_log.lock().await` + sync `DenialLog::format_display(20)` move
@@ -1231,7 +1245,19 @@ declare_handler!(LogoutHandler, "Clear stored credentials");
 // format_skill_help, no snapshot/effect-slot needed; aliases ["?", "h"]
 // preserved via CommandHandler::aliases() trait method). Imported at
 // the top of this file.
-declare_handler!(RenameHandler, "Rename the current session");
+// TASK-AGS-POST-6-BODIES-B17-RENAME: RenameHandler moved to
+// `crate::command::rename` (real impl with body-migrated execute via
+// DIRECT pattern — both archon_session::storage::SessionStore::open
+// and archon_session::naming::set_session_name are sync; no
+// snapshot/effect-slot needed). Reuses the AGS-815 unconditional
+// `CommandContext::session_id: Option<String>` field — no new
+// context.rs wiring. Shipped stub `declare_handler!(RenameHandler,
+// "Rename the current session")` at this line is REPLACED; the real
+// impl is imported at the top of this file and registered via
+// `insert_primary("rename", Arc::new(RenameHandler::new()))` at the
+// insert-block below (line ~1342). Legacy match arm at
+// slash.rs:422-462 stays live through Gates 1-4 (double-fire) per
+// R7; Gate 5 deletes it in a separate subagent run.
 // TASK-AGS-810: ResumeHandler moved to `crate::command::resume` (real
 // impl with body-migrated execute via DIRECT pattern — sync
 // archon_session API reads, no snapshot/effect-slot needed). Aliases
@@ -1324,7 +1350,7 @@ pub(crate) fn default_registry() -> Registry {
     b.insert_primary("reload", Arc::new(ReloadHandler));
     b.insert_primary("logout", Arc::new(LogoutHandler));
     b.insert_primary("help", Arc::new(HelpHandler));
-    b.insert_primary("rename", Arc::new(RenameHandler));
+    b.insert_primary("rename", Arc::new(RenameHandler::new()));
     b.insert_primary("resume", Arc::new(ResumeHandler));
     b.insert_primary("mcp", Arc::new(McpHandler));
     // TASK-AGS-812: NEW /hooks primary (gap-fix Q4=A, no aliases).

@@ -418,48 +418,24 @@ pub(crate) async fn handle_slash_command(
         //     skill-registry fallback double-fire (HelpSkill exists in
         //     archon-core builtin.rs:270 but is short-circuited).
         // See .gates/TASK-AGS-POST-6-BODIES-B06-HELP/ for the gate trail.
-        // ── /rename ─────────────────────────────────────────────
-        s if s.starts_with("/rename") => {
-            let name_arg = s.strip_prefix("/rename").unwrap_or("").trim();
-            if name_arg.is_empty() {
-                let _ = tui_tx
-                    .send(TuiEvent::Error("Usage: /rename <name>".into()))
-                    .await;
-            } else {
-                let db_path = archon_session::storage::default_db_path();
-                match archon_session::storage::SessionStore::open(&db_path) {
-                    Ok(store) => {
-                        match archon_session::naming::set_session_name(
-                            &store,
-                            &ctx.session_id,
-                            name_arg,
-                        ) {
-                            Ok(()) => {
-                                let _ = tui_tx
-                                    .send(TuiEvent::SessionRenamed(name_arg.to_string()))
-                                    .await;
-                                let _ = tui_tx
-                                    .send(TuiEvent::TextDelta(format!(
-                                        "\nSession renamed to: {name_arg}\n"
-                                    )))
-                                    .await;
-                            }
-                            Err(e) => {
-                                let _ = tui_tx
-                                    .send(TuiEvent::Error(format!("Rename failed: {e}")))
-                                    .await;
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        let _ = tui_tx
-                            .send(TuiEvent::Error(format!("Session store error: {e}")))
-                            .await;
-                    }
-                }
-            }
-            true
-        }
+        // ── /rename: body migrated to src/command/rename.rs
+        //    (TASK-AGS-POST-6-BODIES-B17-RENAME, DIRECT pattern).
+        //    Dispatcher PATH A at slash.rs:46 fires
+        //    RenameHandler::execute via the registry BEFORE this arm;
+        //    Gate 5 (this commit) deleted the shipped legacy /rename
+        //    arm at this position. The new handler is a sync impl
+        //    that reuses the AGS-815 CommandContext::session_id:
+        //    Option<String> field (populated unconditionally by
+        //    build_command_context in context.rs — no snapshot/
+        //    effect-slot needed because both SessionStore::open and
+        //    naming::set_session_name are sync). Registry wiring:
+        //    registry.rs:214 import, :1248-1260 breadcrumb replacing
+        //    the shipped declare_handler! stub, :1353 insert_primary
+        //    with RenameHandler::new(). See
+        //    .gates/TASK-AGS-POST-6-BODIES-B17-RENAME/ for the full
+        //    gate trail. Option 3 default arm `_ => true,` below
+        //    preserves the dispatcher's "command consumed" return
+        //    for any stray legacy callsite. ──────────────────────
         // ── /resume: body migrated to src/command/resume.rs (AGS-810,
         //    DIRECT pattern). Dispatcher PATH A at slash.rs:46 fires
         //    ResumeHandler::execute via the registry BEFORE this arm;
