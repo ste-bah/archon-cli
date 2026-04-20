@@ -45,6 +45,7 @@ pub(crate) mod registry;
 pub(crate) mod release_notes;
 pub(crate) mod rename;
 pub(crate) mod resume;
+pub(crate) mod rules;
 pub(crate) mod sessions;
 pub(crate) mod slash;
 pub(crate) mod status;

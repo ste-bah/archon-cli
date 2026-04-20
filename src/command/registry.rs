@@ -230,6 +230,28 @@ use crate::command::rename::RenameHandler;
 // in a separate subagent run. See `src/command/recall.rs` module
 // rustdoc for the full R1-R7 invariant list.
 use crate::command::recall::RecallHandler;
+// TASK-AGS-POST-6-BODIES-B19-RULES: real /rules handler lives in
+// `crate::command::rules`. DIRECT-sync-via-MemoryTrait body-migrate
+// (not SNAPSHOT as the B19 task tag suggests — recon proved
+// `archon_consciousness::rules::RulesEngine::new(&dyn MemoryTrait)`
+// and every method exercised by /rules (`get_rules_sorted`,
+// `update_rule`, `remove_rule`) are sync on the object-safe
+// `MemoryTrait`). `CommandContext::memory: Option<Arc<dyn
+// MemoryTrait>>` is already populated unconditionally by
+// `build_command_context` per the AGS-817 /memory precedent
+// (context.rs:69 — `memory: Some(Arc::clone(&slash_ctx.memory))`),
+// so no new context.rs wiring, no snapshot/effect-slot, no new
+// CommandContext field added. Shipped stub `declare_handler!(
+// RulesHandler, "List, edit, or remove behavioral rules")` at
+// registry.rs:1336 is REPLACED by this import + the insert_primary
+// call at registry.rs:1394 below. No aliases — shipped stub used
+// the 2-arg declare_handler! form. R7 double-fire: the legacy
+// match arm at slash.rs:591-706 stays live through Gates 1-4;
+// Gate 5 deletes it in a separate subagent run. See
+// `src/command/rules.rs` module rustdoc for the full R1-R7
+// invariant list, and the B18 /recall precedent at
+// `src/command/recall.rs`.
+use crate::command::rules::RulesHandler;
 // TASK-AGS-POST-6-BODIES-B08-DENIALS: real /denials handler lives in
 // `crate::command::denials`. SNAPSHOT-ONLY body-migrate (async
 // `denial_log.lock().await` + sync `DenialLog::format_display(20)` move
@@ -1333,7 +1355,19 @@ declare_handler!(CheckpointHandler, "Create or restore a session checkpoint");
 // in a separate subagent run — do NOT touch slash.rs in this
 // ticket. See `src/command/recall.rs` module rustdoc for the full
 // R1-R7 invariant list.
-declare_handler!(RulesHandler, "List, edit, or remove behavioral rules");
+// TASK-AGS-POST-6-BODIES-B19-RULES: RulesHandler moved to
+// `crate::command::rules` (real impl with body-migrated execute via
+// DIRECT-sync-via-MemoryTrait pattern — sync `RulesEngine` methods
+// on `&dyn MemoryTrait`, no snapshot/effect-slot needed, no new
+// CommandContext field added — REUSES the AGS-817 `memory` field).
+// No aliases (shipped stub used the 2-arg declare_handler! form).
+// Imported at the top of this file. See insert_primary site at
+// registry.rs:1394 below. R7 double-fire: legacy match arm at
+// slash.rs:591-706 stays live through Gates 1-4; Gate 5 deletes
+// it in a separate subagent run — do NOT touch slash.rs in this
+// ticket. See `src/command/rules.rs` module rustdoc for the full
+// R1-R7 invariant list, and the B18 /recall precedent at
+// `src/command/recall.rs`.
 // TASK-AGS-805: /cancel thin wrapper. Body-migrate deferred (shipped
 // CommandContext does not expose `task_service`; the stub returns
 // `Ok(())` consistent with the 37 peer handlers). Aliases `stop` and
@@ -1391,7 +1425,7 @@ pub(crate) fn default_registry() -> Registry {
     b.insert_primary("color", Arc::new(ColorHandler));
     b.insert_primary("theme", Arc::new(ThemeHandler));
     b.insert_primary("recall", Arc::new(RecallHandler::new()));
-    b.insert_primary("rules", Arc::new(RulesHandler));
+    b.insert_primary("rules", Arc::new(RulesHandler::new()));
     // TASK-AGS-805: /cancel primary (aliases: stop, abort).
     b.insert_primary("cancel", Arc::new(CancelHandler));
     // TASK-AGS-816: NEW /voice primary (gap-fix Q4=A, no aliases).

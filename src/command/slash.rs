@@ -2,7 +2,12 @@
 
 use std::path::PathBuf;
 use anyhow::anyhow;
-use archon_consciousness::rules::RulesEngine;
+// TASK-AGS-POST-6-BODIES-B19-RULES: /rules body migrated to
+// src/command/rules.rs (DIRECT-sync-via-MemoryTrait pattern). The
+// shipped `use archon_consciousness::rules::RulesEngine;` import is
+// removed — the legacy arm at previously :591-706 has been replaced
+// with a breadcrumb, and the new RulesHandler constructs
+// `RulesEngine::new(memory.as_ref())` inside its own module.
 use archon_llm::effort::EffortState;
 use archon_llm::fast_mode::FastModeState;
 use archon_tools::task_manager;
@@ -588,122 +593,28 @@ pub(crate) async fn handle_slash_command(
         //    stub, :1393 insert_primary with RecallHandler::new().
         //    See .gates/TASK-AGS-POST-6-BODIES-B18-RECALL/ for the
         //    full gate trail. ─────────────────────────────────────
-        // ── /rules — list, edit, remove behavioral rules (CRIT-14 ITEM 4) ──
-        s if s == "/rules" || s.starts_with("/rules ") => {
-            let args_str = s.strip_prefix("/rules").unwrap_or("").trim();
-            let engine = RulesEngine::new(ctx.memory.as_ref());
-            if args_str.is_empty() || args_str == "list" {
-                match engine.get_rules_sorted() {
-                    Ok(rules) if rules.is_empty() => {
-                        let _ = tui_tx
-                            .send(TuiEvent::TextDelta("\nNo behavioral rules.\n".into()))
-                            .await;
-                    }
-                    Ok(rules) => {
-                        let mut out = format!("\n{} behavioral rules:\n\n", rules.len());
-                        for r in &rules {
-                            let id_short = &r.id[..8.min(r.id.len())];
-                            out.push_str(&format!(
-                                "  [{id_short}] (score: {:.1}) {}\n",
-                                r.score, r.text
-                            ));
-                        }
-                        let _ = tui_tx.send(TuiEvent::TextDelta(out)).await;
-                    }
-                    Err(e) => {
-                        let _ = tui_tx
-                            .send(TuiEvent::Error(format!("rules list failed: {e}")))
-                            .await;
-                    }
-                }
-            } else if let Some(rest) = args_str.strip_prefix("edit ") {
-                // /rules edit <id> <new text>
-                let parts: Vec<&str> = rest.splitn(2, ' ').collect();
-                if parts.len() < 2 {
-                    let _ = tui_tx
-                        .send(TuiEvent::Error("Usage: /rules edit <id> <new text>".into()))
-                        .await;
-                } else {
-                    let id_prefix = parts[0];
-                    let new_text = parts[1];
-                    // Resolve full ID from prefix
-                    match engine.get_rules_sorted() {
-                        Ok(rules) => {
-                            if let Some(rule) = rules.iter().find(|r| r.id.starts_with(id_prefix)) {
-                                match engine.update_rule(&rule.id, new_text) {
-                                    Ok(()) => {
-                                        let _ = tui_tx
-                                            .send(TuiEvent::TextDelta(format!(
-                                                "\nRule updated: {new_text}\n"
-                                            )))
-                                            .await;
-                                    }
-                                    Err(e) => {
-                                        let _ = tui_tx
-                                            .send(TuiEvent::Error(format!(
-                                                "update_rule failed: {e}"
-                                            )))
-                                            .await;
-                                    }
-                                }
-                            } else {
-                                let _ = tui_tx
-                                    .send(TuiEvent::Error(format!(
-                                        "No rule matching ID prefix '{id_prefix}'"
-                                    )))
-                                    .await;
-                            }
-                        }
-                        Err(e) => {
-                            let _ = tui_tx
-                                .send(TuiEvent::Error(format!("rules lookup failed: {e}")))
-                                .await;
-                        }
-                    }
-                }
-            } else if let Some(id_prefix) = args_str.strip_prefix("remove ") {
-                let id_prefix = id_prefix.trim();
-                match engine.get_rules_sorted() {
-                    Ok(rules) => {
-                        if let Some(rule) = rules.iter().find(|r| r.id.starts_with(id_prefix)) {
-                            match engine.remove_rule(&rule.id) {
-                                Ok(()) => {
-                                    let _ = tui_tx
-                                        .send(TuiEvent::TextDelta(format!(
-                                            "\nRule removed: {}\n",
-                                            rule.text
-                                        )))
-                                        .await;
-                                }
-                                Err(e) => {
-                                    let _ = tui_tx
-                                        .send(TuiEvent::Error(format!("remove_rule failed: {e}")))
-                                        .await;
-                                }
-                            }
-                        } else {
-                            let _ = tui_tx
-                                .send(TuiEvent::Error(format!(
-                                    "No rule matching ID prefix '{id_prefix}'"
-                                )))
-                                .await;
-                        }
-                    }
-                    Err(e) => {
-                        let _ = tui_tx
-                            .send(TuiEvent::Error(format!("rules lookup failed: {e}")))
-                            .await;
-                    }
-                }
-            } else {
-                let _ = tui_tx
-                    .send(TuiEvent::Error(
-                        "Usage: /rules [list | edit <id> <text> | remove <id>]".into(),
-                    ))
-                    .await;
-            }
-            true
-        }
+        // ── /rules body-migrated to `crate::command::rules::RulesHandler`
+        //    (TASK-AGS-POST-6-BODIES-B19-RULES). Pattern:
+        //    DIRECT-sync-via-MemoryTrait (identical to B18 /recall) —
+        //    the shipped `RulesEngine::new(&dyn MemoryTrait)` constructor
+        //    and its `get_rules_sorted` / `update_rule` / `remove_rule`
+        //    methods are all sync, so `impl CommandHandler for
+        //    RulesHandler` consumes `ctx.memory.as_ref()` directly
+        //    inside the sync execute body — no SNAPSHOT/EFFECT-SLOT
+        //    threading needed. Reuses the AGS-817 cross-cutting
+        //    `CommandContext::memory: Option<Arc<dyn MemoryTrait>>`
+        //    field already populated unconditionally by
+        //    `build_command_context` at context.rs:69; no new builder
+        //    match arm added. All 14 TuiEvent branches (list-empty /
+        //    list-header / list-per-rule / list-Err / edit-short /
+        //    edit-success / edit-Err / edit-no-match / edit-lookup-Err
+        //    / remove-Ok (positional rule.text) / remove-Err /
+        //    remove-no-match / remove-lookup-Err / catch-all) preserved
+        //    byte-identical. Registry wiring: registry.rs:254 import,
+        //    :1358 breadcrumb replacing the shipped declare_handler!
+        //    stub, :1428 insert_primary with RulesHandler::new().
+        //    See .gates/TASK-AGS-POST-6-BODIES-B19-RULES/ for the full
+        //    gate trail. ─────────────────────────────────────────────
         // TASK-AGS-POST-6-BODIES-B04-DIFF (Option 3 — handler-owns-recognition):
         // Default arm returns `true` for any input that survived the
         // `!ctx.dispatcher.recognizes(input)` guard at the top of this match
