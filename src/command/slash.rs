@@ -1,7 +1,6 @@
 //! Slash command handler. Extracted from main.rs.
 
 use std::path::PathBuf;
-use std::sync::atomic::Ordering;
 use anyhow::anyhow;
 use archon_consciousness::rules::RulesEngine;
 use archon_llm::effort::{self, EffortLevel, EffortState};
@@ -72,22 +71,17 @@ pub(crate) async fn handle_slash_command(
         // state. The Option D canary in `crate::command::export` only
         // fires if that intercept regresses. Real body-migrate deferred
         // to POST-STAGE-6 (ticket AGS-POST-6-EXPORT).
-        "/thinking on" | "/thinking" => {
-            ctx.show_thinking.store(true, Ordering::Relaxed);
-            let _ = tui_tx.send(TuiEvent::ThinkingToggle(true)).await;
-            let _ = tui_tx
-                .send(TuiEvent::TextDelta("\nThinking display enabled.\n".into()))
-                .await;
-            true
-        }
-        "/thinking off" => {
-            ctx.show_thinking.store(false, Ordering::Relaxed);
-            let _ = tui_tx.send(TuiEvent::ThinkingToggle(false)).await;
-            let _ = tui_tx
-                .send(TuiEvent::TextDelta("\nThinking display disabled.\n".into()))
-                .await;
-            true
-        }
+        // TASK-AGS-POST-6-BODIES-B02-THINKING: /thinking match arms
+        // deleted. Real body now lives in `src/command/thinking.rs`
+        // as `impl CommandHandler for ThinkingHandler` (DIRECT pattern
+        // — sync atomic store on CommandContext.show_thinking +
+        // TuiEvent::ThinkingToggle + TextDelta emissions, subcommand-
+        // parsed from args.first()). Registry dispatch at the top of
+        // this function reaches ThinkingHandler BEFORE this match
+        // block fires — dispatcher.dispatch() runs first, then the
+        // dispatcher.recognizes() short-circuit returns true before
+        // falling into this match. Arrival at a `/thinking` arm here
+        // would indicate a dispatch ordering regression.
         // ── /effort ────────────────────────────────────────────
         s if s.starts_with("/effort") => {
             let level_str = s.strip_prefix("/effort").unwrap_or("").trim();
