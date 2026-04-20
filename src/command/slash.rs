@@ -927,7 +927,30 @@ pub(crate) async fn handle_slash_command(
             }
             true
         }
-        _ => false,
+        // TASK-AGS-POST-6-BODIES-B04-DIFF (Option 3 — handler-owns-recognition):
+        // Default arm returns `true` for any input that survived the
+        // `!ctx.dispatcher.recognizes(input)` guard at the top of this match
+        // block. `recognizes` returns true iff the input parses as a slash
+        // command whose name is registered in the dispatcher (see
+        // dispatcher.rs:143). Reaching this default means:
+        //   (a) the command IS recognized (registered), AND
+        //   (b) no legacy match arm above claimed it.
+        // Which implies the command has already been fully handled by the
+        // dispatcher's CommandHandler at line 44 (migrated DIRECT /
+        // DIRECT-with-effect / snapshot pattern). Returning `true` prevents
+        // session.rs:2491 from falling through to the skill-registry
+        // fallback at session.rs:2503 and double-firing the command via a
+        // colliding skill (e.g. DiffSkill at builtin.rs:82, FastSkill at
+        // builtin.rs:34, ThinkingSkill / BugSkill in expanded.rs). Before
+        // this change, every migrated command whose match arm had been
+        // deleted (B01-FAST, B02-THINKING, B03-BUG, B04-DIFF — all four
+        // had colliding skills) returned `false` and was double-executed
+        // by the skill registry.
+        //
+        // Unrecognized inputs still short-circuit to `return false` at
+        // line 62, preserving skill-fallback behaviour for commands that
+        // ONLY exist as skills (no primary handler).
+        _ => true,
     }
 }
 
