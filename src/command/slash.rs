@@ -121,38 +121,24 @@ pub(crate) async fn handle_slash_command(
         // double-fire. Mirrors the B10-ADDDIR breadcrumb shape at
         // slash.rs:681-692.
         // ── /garden ────────────────────────────────────────────
-        s if s == "/garden" || s.starts_with("/garden ") => {
-            let sub = s.strip_prefix("/garden").unwrap_or("").trim();
-            if sub == "stats" {
-                match archon_memory::garden::format_garden_stats(ctx.memory.as_ref(), 10) {
-                    Ok(stats) => {
-                        let _ = tui_tx
-                            .send(TuiEvent::TextDelta(format!("\n{stats}\n")))
-                            .await;
-                    }
-                    Err(e) => {
-                        let _ = tui_tx
-                            .send(TuiEvent::Error(format!("Garden stats failed: {e}")))
-                            .await;
-                    }
-                }
-            } else {
-                match archon_memory::garden::consolidate(ctx.memory.as_ref(), &ctx.garden_config) {
-                    Ok(report) => {
-                        let formatted = report.format();
-                        let _ = tui_tx
-                            .send(TuiEvent::TextDelta(format!("\n{formatted}\n")))
-                            .await;
-                    }
-                    Err(e) => {
-                        let _ = tui_tx
-                            .send(TuiEvent::Error(format!("Garden consolidation failed: {e}")))
-                            .await;
-                    }
-                }
-            }
-            true
-        }
+        // TASK-AGS-POST-6-BODIES-B13-GARDEN: shipped arm DELETED.
+        // Handler: crate::command::garden::GardenHandler (DIRECT-sync-via-
+        // MemoryTrait pattern — no SNAPSHOT, no EFFECT-SLOT, no SIDECAR).
+        // GardenHandler.execute is a sync fn that calls
+        // archon_memory::garden::{format_garden_stats, consolidate}
+        // directly via `ctx.memory.as_ref()` and `&ctx.garden_config`,
+        // emitting TuiEvent via `try_send`. Mirrors the B17 MemoryHandler
+        // precedent (src/command/memory.rs). The `garden_config` field on
+        // CommandContext (registry.rs:479-480) is populated unconditionally
+        // by build_command_context (context.rs:78). No pre-dispatch
+        // side-effects: consolidate mutates memory across phase passes,
+        // so it MUST run on dispatch (not snapshot-time). Registry
+        // dispatch at the top of this function reaches GardenHandler
+        // before this match block. Option 3 default arm at slash.rs:858
+        // (`_ => true,`) returns true for every dispatcher-routed command;
+        // session.rs:2491 `if handled { continue; }` prevents any
+        // dispatcher-driven double-fire. Mirrors the B10-ADDDIR /
+        // B11-EFFORT / B12-PERMISSIONS breadcrumb shape.
         // ── /model ─────────────────────────────────────────────
         // Body migrated to src/command/model.rs (TASK-AGS-808).
         // Read side (no-args): ModelSnapshot populated by
