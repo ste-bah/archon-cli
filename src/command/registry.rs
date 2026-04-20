@@ -214,6 +214,19 @@ use crate::command::release_notes::ReleaseNotesHandler;
 // insert_primary call below. No aliases — shipped stub used the
 // two-arg declare_handler! form (no aliases slice) and spec lists none.
 use crate::command::denials::{DenialSnapshot, DenialsHandler};
+// TASK-AGS-POST-6-BODIES-B09-COLOR: real /color handler lives in
+// `crate::command::color`. DIRECT-pattern body-migrate (sync
+// `archon_tui::theme::parse_color` — plain `fn` match on the arg
+// string; no snapshot/effect-slot needed, no new CommandContext field
+// added). Mirrors AGS-819 /theme precedent exactly. Shipped stub
+// `declare_handler!(ColorHandler, "Show or change the UI color scheme")`
+// at registry.rs:874 is REPLACED by this import + the insert_primary
+// call below. No aliases — shipped stub had none and AGS-817 shipped-
+// wins rule preserves zero aliases. Accent-color mutation is signalled
+// via `TuiEvent::SetAccentColor(Color)` to the TUI event loop; the
+// handler does NOT write to SlashCommandContext, so no `CommandEffect`
+// variant is required (mirrors AGS-819 /theme's DIRECT pattern).
+use crate::command::color::ColorHandler;
 // TASK-AGS-819: real /theme handler lives in `crate::command::theme`.
 // DIRECT-pattern body-migrate (sync theme helpers — `theme_by_name` +
 // `available_themes` are both plain `fn` lookups; no snapshot/effect-
@@ -871,7 +884,13 @@ declare_handler!(RenameHandler, "Rename the current session");
 // build_command_context). No aliases. Imported at the top of this file.
 declare_handler!(CheckpointHandler, "Create or restore a session checkpoint");
 declare_handler!(AddDirHandler, "Add a directory to the working context");
-declare_handler!(ColorHandler, "Show or change the UI color scheme");
+// TASK-AGS-POST-6-BODIES-B09-COLOR: ColorHandler moved to
+// `crate::command::color` (real impl with body-migrated execute via
+// DIRECT pattern — sync `archon_tui::theme::parse_color`, no
+// snapshot/effect-slot needed, no new CommandContext field added).
+// Mirrors AGS-819 /theme precedent. No aliases (shipped stub had none;
+// AGS-817 shipped-wins rule preserves zero aliases). Imported at the
+// top of this file.
 // TASK-AGS-819: ThemeHandler moved to `crate::command::theme` (real
 // impl with body-migrated execute via DIRECT pattern — sync theme
 // helpers `theme_by_name` + `available_themes`, no snapshot/effect-

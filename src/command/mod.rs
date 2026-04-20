@@ -11,6 +11,7 @@
 pub(crate) mod agent;
 pub(crate) mod background;
 pub(crate) mod bug;
+pub(crate) mod color;
 pub(crate) mod config;
 pub(crate) mod context;
 pub(crate) mod context_cmd;
