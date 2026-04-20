@@ -373,14 +373,15 @@ pub(crate) async fn handle_slash_command(
         // regression forensic marker. Preserved as a breadcrumb
         // per the B01/B02/B03 precedent.
         // ── /denials ──────────────────────────────────────────
-        "/denials" => {
-            let log = ctx.denial_log.lock().await;
-            let text = log.format_display(20);
-            let _ = tui_tx
-                .send(TuiEvent::TextDelta(format!("\n{text}\n")))
-                .await;
-            true
-        }
+        // TASK-AGS-POST-6-BODIES-B08-DENIALS: shipped arm DELETED.
+        // Handler: crate::command::denials::DenialsHandler (SNAPSHOT
+        // pattern — builder pre-computes formatted String from
+        // denial_log.lock().await + format_display(20) and stores it
+        // on CommandContext.denial_snapshot; sync handler emits
+        // TextDelta via try_send). Wired at
+        // crate::command::registry::default_registry (insert_primary
+        // "denials"). Option 3 default arm at slash.rs:909 returns
+        // true for every dispatcher-routed command.
         // ── /login ─────────────────────────────────────────────
         "/login" => {
             let cred_path = dirs::home_dir()
