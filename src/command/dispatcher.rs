@@ -231,6 +231,7 @@ mod tests {
                 permissions_snapshot: None,
                 copy_snapshot: None,
                 doctor_snapshot: None,
+                usage_snapshot: None,
                 pending_effect: None,
                 // TASK-AGS-POST-6-BODIES-B11-EFFORT: same rationale
                 // for the /effort sidecar slot — dispatcher tests only

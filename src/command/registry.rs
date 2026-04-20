@@ -336,6 +336,22 @@ use crate::command::garden::GardenHandler;
 // used the two-arg declare_handler! form; shipped-wins rule preserves
 // zero aliases).
 use crate::command::copy::CopyHandler;
+// TASK-AGS-POST-6-BODIES-B16-USAGE: real /usage handler lives in
+// `crate::command::usage`. SNAPSHOT-pattern body-migrate (single
+// `session_stats.lock().await` moves to the builder; no effect slot
+// required — /usage is read-only). The handler reads
+// `Option<UsageSnapshot>` from a new `CommandContext::usage_snapshot`
+// field populated BY `build_command_context` ONLY when the primary
+// resolves to `/usage` (mirrors AGS-807 status, AGS-809 cost, AGS-811
+// mcp, AGS-814 context, B08 denials, B15 doctor SNAPSHOT precedent —
+// not the unconditional DIRECT-field pattern of B01-FAST etc.).
+// Shipped stub `declare_handler!(UsageHandler, "Show aggregate API
+// usage for the session")` at registry.rs:1166 is REPLACED by this
+// import + the insert_primary call below. No aliases — shipped stub
+// used the two-arg declare_handler! form (no aliases slice) and spec
+// lists none. /usage is the reason /cost (AGS-809) cannot register
+// `usage` as an alias: /usage is already a shipped primary.
+use crate::command::usage::{UsageHandler, UsageSnapshot};
 // TASK-AGS-POST-6-BODIES-B15-DOCTOR: real /doctor handler lives in
 // `crate::command::doctor`. SNAPSHOT-DELEGATE body-migrate — the
 // shipped delegate `handle_doctor_command` at src/command/doctor.rs
@@ -652,6 +668,21 @@ pub(crate) struct CommandContext {
     /// `doctor::build_doctor_text` — so the sync handler emits via
     /// `try_send` without holding any lock.
     pub(crate) doctor_snapshot: Option<crate::command::doctor::DoctorSnapshot>,
+    /// TASK-AGS-POST-6-BODIES-B16-USAGE SNAPSHOT-pattern field
+    /// (READ-only /usage).
+    ///
+    /// Populated by `build_command_context` for `/usage` ONLY (no
+    /// aliases — shipped stub at registry.rs:1166 used the two-arg
+    /// declare_handler! form). Every other command observes `None` and
+    /// pays zero additional lock traffic on
+    /// `SlashCommandContext::session_stats`. Mirrors AGS-807
+    /// `status_snapshot`, AGS-809 `cost_snapshot`, B08 `denial_snapshot`,
+    /// B11 `effort_snapshot`, B12 `permissions_snapshot`, B14
+    /// `copy_snapshot`, and B15 `doctor_snapshot` gating rule. Carries
+    /// owned scalar fields (input/output tokens, turn count, pre-
+    /// computed costs) plus an owned `cache_stats_line: String` so the
+    /// sync handler emits via `try_send` without holding any lock.
+    pub(crate) usage_snapshot: Option<UsageSnapshot>,
     /// TASK-AGS-808 effect-slot field (WRITE side of /model and future
     /// write-tickets).
     ///
@@ -1163,7 +1194,19 @@ declare_handler!(LoginHandler, "Authenticate against the configured backend");
 // `crate::command::vim` (real impl with body-migrated execute via
 // DIRECT pattern — emit-only sync handler). Imported at the top of
 // this file.
-declare_handler!(UsageHandler, "Show aggregate API usage for the session");
+// TASK-AGS-POST-6-BODIES-B16-USAGE: UsageHandler moved to
+// `crate::command::usage` (real impl with body-migrated execute via
+// SNAPSHOT pattern — single `session_stats.lock().await` moves to the
+// builder; handler consumes `ctx.usage_snapshot` and emits
+// `TuiEvent::TextDelta(format!(..))` using the shipped byte-identical
+// format string with `.4` precision and aligned labels). Shipped stub
+// `declare_handler!(UsageHandler, "Show aggregate API usage for the
+// session")` at registry.rs:1166 is REPLACED by this breadcrumb + the
+// import at the top of this file. No aliases — shipped stub used the
+// two-arg declare_handler! form (no aliases slice) and spec lists none.
+// /usage is the reason /cost (AGS-809) cannot register `usage` as an
+// alias: /usage is already a shipped primary. See
+// .gates/TASK-AGS-POST-6-BODIES-B16-USAGE/ for the full gate trail.
 // TASK-AGS-806: TasksHandler moved to `crate::command::task` (real
 // impl with body-migrated execute, alias set extended to
 // [todo, ps, jobs], and TuiEvent::OpenView(ViewId::Tasks) forward-
@@ -1275,7 +1318,7 @@ pub(crate) fn default_registry() -> Registry {
     b.insert_primary("denials", Arc::new(DenialsHandler));
     b.insert_primary("login", Arc::new(LoginHandler));
     b.insert_primary("vim", Arc::new(VimHandler));
-    b.insert_primary("usage", Arc::new(UsageHandler));
+    b.insert_primary("usage", Arc::new(UsageHandler::new()));
     b.insert_primary("tasks", Arc::new(TasksHandler));
     b.insert_primary("release-notes", Arc::new(ReleaseNotesHandler));
     b.insert_primary("reload", Arc::new(ReloadHandler));

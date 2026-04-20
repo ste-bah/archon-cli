@@ -313,27 +313,27 @@ pub(crate) async fn handle_slash_command(
         // unreachable and removed. See .gates/TASK-AGS-POST-6-BODIES-
         // B05-VIM/gate-6.md for the sherlock final review.
         // ── /usage ────────────────────────────────────────────
-        "/usage" => {
-            // Same as /cost but with more detail — redirect
-            let stats = ctx.session_stats.lock().await;
-            let input_cost = stats.input_tokens as f64 * 3.0 / 1_000_000.0;
-            let output_cost = stats.output_tokens as f64 * 15.0 / 1_000_000.0;
-            let total = input_cost + output_cost;
-            let cache_line = stats.cache_stats.format_for_cost();
-            let msg = format!(
-                "\nUsage summary:\n\
-                 Turns:         {turns}\n\
-                 Input tokens:  {inp} (${input_cost:.4})\n\
-                 Output tokens: {out} (${output_cost:.4})\n\
-                 {cache_line}\n\
-                 Total cost:    ${total:.4}\n",
-                turns = stats.turn_count,
-                inp = stats.input_tokens,
-                out = stats.output_tokens,
-            );
-            let _ = tui_tx.send(TuiEvent::TextDelta(msg)).await;
-            true
-        }
+        // TASK-AGS-POST-6-BODIES-B16-USAGE Gate 5: shipped `/usage`
+        // match arm DELETED. Routing now owned by the dispatcher +
+        // registry:
+        //   - crate::command::usage::UsageHandler (impl — SNAPSHOT
+        //     pattern; description preserved byte-for-byte)
+        //   - crate::command::usage::{UsageSnapshot, build_usage_snapshot}
+        //     (builder awaits session_stats.lock() BEFORE dispatch;
+        //     handler consumes ctx.usage_snapshot via try_send TextDelta)
+        //   - crate::command::registry::CommandContext::usage_snapshot
+        //     (field at registry.rs:685)
+        //   - crate::command::registry::default_registry (registration
+        //     via insert_primary at registry.rs:1321; breadcrumb
+        //     replacing the prior declare_handler! stub at
+        //     registry.rs:1197)
+        //   - crate::command::context::build_command_context at the
+        //     Some("usage") arm (context.rs:284) populates the snapshot
+        //     only when the primary resolves to /usage
+        //   - Option 3 default arm at slash.rs ~`_ => true,` prevents
+        //     skill-registry fallback double-fire.
+        // See .gates/TASK-AGS-POST-6-BODIES-B16-USAGE/ for the gate
+        // trail and sherlock verdicts.
         // ── /tasks ────────────────────────────────────────────
         // TASK-AGS-806: body migrated to
         // `crate::command::task::TasksHandler` (registered as a

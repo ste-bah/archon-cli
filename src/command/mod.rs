@@ -55,6 +55,7 @@ pub(crate) mod tui_helpers;
 #[cfg(test)]
 pub(crate) mod test_support;
 pub(crate) mod update;
+pub(crate) mod usage;
 pub(crate) mod utils;
 pub(crate) mod voice;
 pub(crate) mod web;

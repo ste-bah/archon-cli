@@ -384,6 +384,7 @@ mod tests {
                 permissions_snapshot: None,
                 copy_snapshot: None,
                 doctor_snapshot: snapshot,
+                usage_snapshot: None,
                 pending_effect: None,
                 pending_effort_set: None,
             },

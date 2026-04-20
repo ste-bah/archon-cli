@@ -102,6 +102,7 @@ pub(crate) fn make_status_ctx(
             permissions_snapshot: None,
             copy_snapshot: None,
             doctor_snapshot: None,
+            usage_snapshot: None,
             pending_effect: None,
             // TASK-AGS-POST-6-BODIES-B11-EFFORT: peer fixtures never
             // exercise /effort paths — None.
@@ -146,6 +147,7 @@ pub(crate) fn make_model_ctx(
             permissions_snapshot: None,
             copy_snapshot: None,
             doctor_snapshot: None,
+            usage_snapshot: None,
             pending_effect: None,
             // TASK-AGS-POST-6-BODIES-B11-EFFORT: peer fixtures never
             // exercise /effort paths — None.
@@ -190,6 +192,7 @@ pub(crate) fn make_cost_ctx(
             permissions_snapshot: None,
             copy_snapshot: None,
             doctor_snapshot: None,
+            usage_snapshot: None,
             pending_effect: None,
             // TASK-AGS-POST-6-BODIES-B11-EFFORT: peer fixtures never
             // exercise /effort paths — None.
@@ -241,6 +244,7 @@ pub(crate) fn make_fast_ctx(
             permissions_snapshot: None,
             copy_snapshot: None,
             doctor_snapshot: None,
+            usage_snapshot: None,
             pending_effect: None,
             // TASK-AGS-POST-6-BODIES-B11-EFFORT: peer fixtures never
             // exercise /effort paths — None.
@@ -289,6 +293,7 @@ pub(crate) fn make_bug_ctx() -> (CommandContext, mpsc::Receiver<TuiEvent>) {
             permissions_snapshot: None,
             copy_snapshot: None,
             doctor_snapshot: None,
+            usage_snapshot: None,
             pending_effect: None,
             // TASK-AGS-POST-6-BODIES-B11-EFFORT: peer fixtures never
             // exercise /effort paths — None.
@@ -342,6 +347,7 @@ pub(crate) fn make_thinking_ctx(
             permissions_snapshot: None,
             copy_snapshot: None,
             doctor_snapshot: None,
+            usage_snapshot: None,
             pending_effect: None,
             // TASK-AGS-POST-6-BODIES-B11-EFFORT: peer fixtures never
             // exercise /effort paths — None.
@@ -394,6 +400,7 @@ pub(crate) fn make_diff_ctx(
             permissions_snapshot: None,
             copy_snapshot: None,
             doctor_snapshot: None,
+            usage_snapshot: None,
             pending_effect: None,
             // TASK-AGS-POST-6-BODIES-B11-EFFORT: peer fixtures never
             // exercise /effort paths — None.
@@ -452,6 +459,7 @@ pub(crate) fn make_help_ctx() -> (CommandContext, mpsc::Receiver<TuiEvent>) {
             permissions_snapshot: None,
             copy_snapshot: None,
             doctor_snapshot: None,
+            usage_snapshot: None,
             pending_effect: None,
             // TASK-AGS-POST-6-BODIES-B11-EFFORT: peer fixtures never
             // exercise /effort paths — None.
@@ -499,9 +507,76 @@ pub(crate) fn make_denials_ctx(
             permissions_snapshot: None,
             copy_snapshot: None,
             doctor_snapshot: None,
+            usage_snapshot: None,
             pending_effect: None,
             // TASK-AGS-POST-6-BODIES-B11-EFFORT: peer fixtures never
             // exercise /effort paths — None.
+            pending_effort_set: None,
+        },
+        rx,
+    )
+}
+
+/// Minimal test-only UsageSnapshot. Values chosen so format
+/// substitutions are obvious: 1_000_000 input tokens @ $3/Mtok =
+/// $3.00, 500_000 output tokens @ $15/Mtok = $7.50, total = $10.50,
+/// 3 turns. `cache_stats_line` matches the canonical zero-activity
+/// output of `CacheStats::format_for_cost()`.
+///
+/// TASK-AGS-POST-6-BODIES-B16-USAGE — mirrors `fixture_cost_snapshot`
+/// above but drops `warn_threshold` and `hard_label` (/usage uses the
+/// `.4`-precision byte-identical shipped format at slash.rs:315-336
+/// which has no Warn/Hard lines) and adds `turn_count` (/usage is the
+/// only command that surfaces turn count).
+pub(crate) fn fixture_usage_snapshot() -> crate::command::usage::UsageSnapshot {
+    crate::command::usage::UsageSnapshot {
+        input_tokens: 1_000_000,
+        output_tokens: 500_000,
+        turn_count: 3,
+        input_cost: 3.00,
+        output_cost: 7.50,
+        total_cost: 10.50,
+        cache_stats_line:
+            "Cache hit rate: 0.0% (0 reads / 0 total)\n\
+             Cache creation: 0 tokens\n\
+             Estimated savings: 0 token-equivalents"
+                .to_string(),
+    }
+}
+
+/// Build a CommandContext for UsageHandler tests.
+///
+/// TASK-AGS-POST-6-BODIES-B16-USAGE — mirrors `make_cost_ctx` shape
+/// exactly but populates `usage_snapshot` (instead of `cost_snapshot`)
+/// with the supplied `Option<UsageSnapshot>`. When `None` the handler
+/// must return `Err` describing the missing-snapshot wiring regression;
+/// when `Some(_)` the handler emits a single byte-identical TextDelta.
+pub(crate) fn make_usage_ctx(
+    snapshot: Option<crate::command::usage::UsageSnapshot>,
+) -> (CommandContext, mpsc::Receiver<TuiEvent>) {
+    let (tx, rx) = mock_tui_channel();
+    (
+        CommandContext {
+            tui_tx: tx,
+            status_snapshot: None,
+            model_snapshot: None,
+            cost_snapshot: None,
+            mcp_snapshot: None,
+            context_snapshot: None,
+            session_id: None,
+            memory: None,
+            garden_config: None,
+            fast_mode_shared: None,
+            show_thinking: None,
+            working_dir: None,
+            skill_registry: None,
+            denial_snapshot: None,
+            effort_snapshot: None,
+            permissions_snapshot: None,
+            copy_snapshot: None,
+            doctor_snapshot: None,
+            usage_snapshot: snapshot,
+            pending_effect: None,
             pending_effort_set: None,
         },
         rx,

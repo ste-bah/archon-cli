@@ -21,7 +21,7 @@ use archon_tui::app::TuiEvent;
 use crate::command::registry::{CommandContext, CommandEffect, Registry};
 use crate::command::{
     context_cmd, copy, cost, denials, doctor, effort, mcp, model, permissions,
-    status,
+    status, usage,
 };
 use crate::slash_context::SlashCommandContext;
 
@@ -146,6 +146,13 @@ pub(crate) async fn build_command_context(
         // AGS-808 model / B08 denials / B11 effort / B12 permissions /
         // B14 copy snapshot gating rule.
         doctor_snapshot: None,
+        // TASK-AGS-POST-6-BODIES-B16-USAGE: SNAPSHOT field (READ-only
+        // /usage). Initialised to `None` here; populated BELOW in the
+        // `match primary.as_deref()` block only when the primary
+        // resolves to `/usage`. Mirrors AGS-807 status / AGS-809 cost /
+        // B08 denials / B11 effort / B12 permissions / B14 copy / B15
+        // doctor snapshot gating rule.
+        usage_snapshot: None,
         pending_effect: None,
         // TASK-AGS-POST-6-BODIES-B11-EFFORT: SIDECAR slot for the
         // session-local `&mut EffortState` write. Initialised to
@@ -273,6 +280,25 @@ pub(crate) async fn build_command_context(
             // permissions / B14 copy snapshot gating.
             ctx.doctor_snapshot =
                 Some(doctor::build_doctor_snapshot(slash_ctx).await);
+        }
+        Some("usage") => {
+            // TASK-AGS-POST-6-BODIES-B16-USAGE snapshot population.
+            // /usage is read-only (shipped slash.rs:315-336 emits a
+            // single TextDelta with aggregate session counters, costs,
+            // and the cache-stats line — no mutation). No aliases
+            // (shipped stub at registry.rs:1166 used the two-arg
+            // declare_handler! form; spec lists none). /usage is
+            // distinct from /cost (AGS-809): same underlying
+            // `session_stats` source but different format — /usage uses
+            // `.4` precision + aligned labels + a Turns line, /cost uses
+            // `.2` precision + Warn/Hard threshold lines. The builder
+            // awaits a single `session_stats.lock()` here so the sync
+            // handler consumes pre-captured owned counters + a pre-
+            // computed cache_stats_line. Mirrors AGS-807 status /
+            // AGS-809 cost / B08 denials / B11 effort / B12 permissions
+            // / B14 copy / B15 doctor SNAPSHOT gating.
+            ctx.usage_snapshot =
+                Some(usage::build_usage_snapshot(slash_ctx).await);
         }
         _ => {}
     }
