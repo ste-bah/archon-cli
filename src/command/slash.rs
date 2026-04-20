@@ -666,29 +666,17 @@ pub(crate) async fn handle_slash_command(
             true
         }
         // ── /add-dir ───────────────────────────────────────────
-        s if s.starts_with("/add-dir") => {
-            let path_arg = s.strip_prefix("/add-dir").unwrap_or("").trim();
-            if path_arg.is_empty() {
-                let _ = tui_tx
-                    .send(TuiEvent::Error("Usage: /add-dir <path>".into()))
-                    .await;
-            } else {
-                let path = std::path::PathBuf::from(path_arg);
-                if path.is_dir() {
-                    // Add to the shared extra directories list (visible to agent tool context)
-                    ctx.extra_dirs.lock().await.push(path.clone());
-                    let _ = tui_tx.send(TuiEvent::TextDelta(
-                        format!("\nAdded '{}' to working directories for this session.\nFiles in this directory are now accessible.\n", path.display())
-                    )).await;
-                    tracing::info!(dir = %path.display(), "added working directory via /add-dir");
-                } else {
-                    let _ = tui_tx
-                        .send(TuiEvent::Error(format!("Directory not found: {path_arg}")))
-                        .await;
-                }
-            }
-            true
-        }
+        // TASK-AGS-POST-6-BODIES-B10-ADDDIR: shipped arm DELETED.
+        // Handler: crate::command::add_dir::AddDirHandler (EFFECT-SLOT
+        // pattern mirroring B04-DIFF — sync validation + stash of
+        // CommandEffect::AddExtraDir(PathBuf); apply_effect in
+        // crate::command::context awaits the extra_dirs.lock().push
+        // and emits the tracing::info! record).
+        // Wired at crate::command::registry::default_registry
+        // insert_primary "add-dir". Option 3 default arm at
+        // slash.rs:~896 (`_ => true,`) returns true for every
+        // dispatcher-routed command; session.rs:2491
+        // `if handled { continue; }` prevents AddDirSkill double-fire.
         // ── /color ─────────────────────────────────────────────
         // TASK-AGS-POST-6-BODIES-B09-COLOR: shipped arm DELETED.
         // Handler: crate::command::color::ColorHandler (DIRECT pattern

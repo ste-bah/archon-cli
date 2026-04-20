@@ -558,4 +558,131 @@ mod tests {
             events
         );
     }
+
+    // -------------------------------------------------------------------
+    // Gate 5 dispatcher-integration tests — TASK-AGS-POST-6-BODIES-B10-ADDDIR
+    // -------------------------------------------------------------------
+    //
+    // These tests drive the real `Dispatcher` + `default_registry()` +
+    // `AddDirHandler` end-to-end, replacing the unit-level `h.execute(...)`
+    // harness with the same dispatch path the TUI input loop uses. They
+    // pin the fact that (a) registry routing for "/add-dir" lands on
+    // `AddDirHandler`, (b) parser tokenization delivers args correctly
+    // for both bare and trailing-args forms, and (c) byte-framing of
+    // shipped strings survives the full dispatch chain.
+    //
+    // Reference template: src/command/color.rs dispatcher tests (B09-COLOR
+    // Gate 5) — same structure, adjusted for EFFECT-SLOT semantics
+    // (pending_effect stash + TextDelta vs DIRECT event emission).
+
+    #[test]
+    fn dispatcher_routes_slash_add_dir_to_handler_end_to_end() {
+        use crate::command::dispatcher::Dispatcher;
+        use crate::command::registry::default_registry;
+        use std::sync::Arc;
+
+        let registry = Arc::new(default_registry());
+        let dispatcher = Dispatcher::new(registry);
+        let (mut ctx, mut rx) = make_ctx();
+
+        // Bare "/add-dir" → empty-arg branch → Error "Usage: /add-dir <path>".
+        // Effect slot MUST remain None on empty-arg.
+        let result = dispatcher.dispatch(&mut ctx, "/add-dir");
+        assert!(
+            result.is_ok(),
+            "dispatcher.dispatch(\"/add-dir\") must return Ok"
+        );
+
+        let expected_error = "Usage: /add-dir <path>";
+        let mut events = Vec::new();
+        while let Ok(ev) = rx.try_recv() {
+            events.push(ev);
+        }
+        let has_error = events.iter().any(|e| {
+            matches!(e, TuiEvent::Error(msg) if msg == expected_error)
+        });
+        let has_text_delta = events
+            .iter()
+            .any(|e| matches!(e, TuiEvent::TextDelta(_)));
+        assert!(
+            has_error && !has_text_delta,
+            "end-to-end bare `/add-dir` must emit byte-identical \
+             Usage Error AND NO TextDelta; got: {:?}",
+            events
+        );
+        assert!(
+            ctx.pending_effect.is_none(),
+            "empty-arg branch must NOT stash a CommandEffect; \
+             got: {:?}",
+            ctx.pending_effect
+        );
+    }
+
+    #[test]
+    fn dispatcher_routes_slash_add_dir_with_valid_dir_end_to_end() {
+        use crate::command::dispatcher::Dispatcher;
+        use crate::command::registry::default_registry;
+        use crate::command::registry::CommandEffect;
+        use std::sync::Arc;
+
+        let registry = Arc::new(default_registry());
+        let dispatcher = Dispatcher::new(registry);
+        let (mut ctx, mut rx) = make_ctx();
+
+        // Pick a definitely-existing directory. std::env::temp_dir() is
+        // guaranteed to return an existing path on every supported host.
+        let temp_dir = std::env::temp_dir();
+        assert!(
+            temp_dir.is_dir(),
+            "std::env::temp_dir() precondition: must be an existing \
+             directory on the test host; got: {temp_dir:?}"
+        );
+        let temp_dir_str = temp_dir.display().to_string();
+        let input = format!("/add-dir {temp_dir_str}");
+
+        // "/add-dir <valid>" → valid-dir branch → effect stash +
+        // TextDelta confirmation. Exercises arg-consumption path.
+        let result = dispatcher.dispatch(&mut ctx, &input);
+        assert!(
+            result.is_ok(),
+            "dispatcher.dispatch(\"/add-dir <valid>\") must return Ok; \
+             got: {result:?}"
+        );
+
+        // Effect stash MUST carry the PathBuf constructed from the path_arg.
+        match ctx.pending_effect.as_ref() {
+            Some(CommandEffect::AddExtraDir(p)) => {
+                assert_eq!(
+                    p,
+                    &PathBuf::from(&temp_dir_str),
+                    "AddExtraDir must carry the PathBuf from the \
+                     reconciled path_arg; got: {p:?}"
+                );
+            }
+            other => panic!(
+                "expected Some(CommandEffect::AddExtraDir(path)), got: \
+                 {other:?}"
+            ),
+        }
+
+        let expected_confirmation = format!(
+            "\nAdded '{}' to working directories for this session.\n\
+             Files in this directory are now accessible.\n",
+            temp_dir.display()
+        );
+        let mut events = Vec::new();
+        while let Ok(ev) = rx.try_recv() {
+            events.push(ev);
+        }
+        let has_text_delta = events.iter().any(|e| {
+            matches!(e, TuiEvent::TextDelta(s) if s == &expected_confirmation)
+        });
+        let has_error = events.iter().any(|e| matches!(e, TuiEvent::Error(_)));
+        assert!(
+            has_text_delta && !has_error,
+            "end-to-end `/add-dir <valid>` must emit byte-identical \
+             confirmation TextDelta AND NO Error; got: {:?}",
+            events
+        );
+    }
 }
