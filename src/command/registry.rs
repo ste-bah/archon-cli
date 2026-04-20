@@ -134,6 +134,16 @@ use crate::command::fast::FastHandler;
 // spec lists none. Subcommands `on`/`off`/empty are positional args
 // dispatched through the same primary, NOT aliases.
 use crate::command::thinking::ThinkingHandler;
+// TASK-AGS-POST-6-BODIES-B03-BUG: real /bug handler lives in
+// `crate::command::bug`. DIRECT-pattern body-migrate (TRIVIAL variant —
+// no state, no args, no subcommand, no snapshot/effect-slot, no new
+// CommandContext field). Single TextDelta emission of the bug-report
+// URL; trailing args ignored (always emit). Shipped stub
+// `declare_handler!(BugHandler, "Report a bug with current session
+// context")` at registry.rs:658 is REPLACED by this import + the
+// insert_primary call below. No aliases — shipped stub had none and
+// spec lists none. Simpler than B01-FAST and B02-THINKING.
+use crate::command::bug::BugHandler;
 // TASK-AGS-819: real /theme handler lives in `crate::command::theme`.
 // DIRECT-pattern body-migrate (sync theme helpers — `theme_by_name` +
 // `available_themes` are both plain `fn` lookups; no snapshot/effect-
@@ -655,7 +665,11 @@ declare_handler!(
 // real handler preserves the shipped `["mem"]` alias set per
 // shipped-wins drift-reconcile. Imported at the top of this file.
 declare_handler!(DoctorHandler, "Run environment health checks");
-declare_handler!(BugHandler, "Report a bug with current session context");
+// TASK-AGS-POST-6-BODIES-B03-BUG: BugHandler moved to
+// `crate::command::bug` (real impl with body-migrated execute via
+// DIRECT pattern — trivial variant, no state, no args, no snapshot/
+// effect-slot, no new CommandContext field). Single TextDelta emission
+// of the bug-report URL. Imported at the top of this file.
 declare_handler!(DiffHandler, "Show a diff of recent file modifications");
 declare_handler!(DenialsHandler, "List tool-use denials recorded this session");
 declare_handler!(LoginHandler, "Authenticate against the configured backend");

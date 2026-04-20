@@ -174,6 +174,35 @@ pub(crate) fn make_fast_ctx(
     )
 }
 
+/// Build a CommandContext for BugHandler tests.
+///
+/// TASK-AGS-POST-6-BODIES-B03-BUG — trivial-variant DIRECT helper. The
+/// `/bug` handler adds NO new CommandContext field (no shared atomic,
+/// no snapshot, no memory handle), so every optional field is left at
+/// `None`. The helper mirrors the `make_status_ctx`-with-`None`-snapshot
+/// shape: wire a mock TuiEvent channel and nothing else. No
+/// peer-fixture rollout was needed because no new struct field was
+/// added for this ticket.
+pub(crate) fn make_bug_ctx() -> (CommandContext, mpsc::Receiver<TuiEvent>) {
+    let (tx, rx) = mock_tui_channel();
+    (
+        CommandContext {
+            tui_tx: tx,
+            status_snapshot: None,
+            model_snapshot: None,
+            cost_snapshot: None,
+            mcp_snapshot: None,
+            context_snapshot: None,
+            session_id: None,
+            memory: None,
+            fast_mode_shared: None,
+            show_thinking: None,
+            pending_effect: None,
+        },
+        rx,
+    )
+}
+
 /// Build a CommandContext for ThinkingHandler tests.
 ///
 /// TASK-AGS-POST-6-BODIES-B02-THINKING — mirrors `make_fast_ctx` shape
