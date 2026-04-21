@@ -212,63 +212,8 @@ mod tests {
     /// return both the context and the receiver so tests can drain
     /// emitted events.
     fn make_ctx() -> (CommandContext, mpsc::Receiver<TuiEvent>) {
-        let (tx, rx) = mpsc::channel::<TuiEvent>(16);
-        (
-            CommandContext {
-                tui_tx: tx,
-                // TASK-AGS-807: snapshot-pattern field. /tasks tests
-                // never read the /status snapshot, so None is correct.
-                status_snapshot: None,
-                // TASK-AGS-808: /tasks tests never read the /model
-                // snapshot or stash a CommandEffect — None on both.
-                model_snapshot: None,
-                // TASK-AGS-809: /tasks tests never read the /cost
-                // snapshot — None is correct.
-                cost_snapshot: None,
-                // TASK-AGS-811: /tasks tests never read the /mcp
-                // snapshot — None is correct.
-                mcp_snapshot: None,
-                // TASK-AGS-814: /tasks tests never read the /context
-                // snapshot — None is correct.
-                context_snapshot: None,
-                // TASK-AGS-815: /tasks tests never read the /fork
-                // session_id field — None is correct.
-                session_id: None,
-                // TASK-AGS-817: /tasks tests never read the /memory
-                // handle — None is correct.
-                memory: None,
-                // TASK-AGS-POST-6-BODIES-B13-GARDEN: /tasks tests never
-                // read the /garden config — None is correct.
-                garden_config: None,
-                // TASK-AGS-POST-6-BODIES-B01-FAST: /tasks tests never
-                // read the /fast shared atomic — None is correct.
-                fast_mode_shared: None,
-                // TASK-AGS-POST-6-BODIES-B02-THINKING: /tasks tests
-                // never read the /thinking shared atomic — None is
-                // correct.
-                show_thinking: None,
-                // TASK-AGS-POST-6-BODIES-B04-DIFF: /tasks tests never
-                // read the /diff working_dir PathBuf — None is correct.
-                working_dir: None,
-                // TASK-AGS-POST-6-BODIES-B06-HELP: /tasks tests never
-                // read the /help skill_registry — None is correct.
-                skill_registry: None,
-                // TASK-AGS-POST-6-BODIES-B08-DENIALS: /tasks tests never
-                // read the /denials DenialSnapshot — None is correct.
-                denial_snapshot: None,
-                effort_snapshot: None,
-                permissions_snapshot: None,
-                copy_snapshot: None,
-                doctor_snapshot: None,
-                usage_snapshot: None,
-                config_path: None,
-                auth_label: None,
-                pending_effect: None,
-                pending_effort_set: None,
-                pending_export: None,
-            },
-            rx,
-        )
+        // TASK-AGS-POST-6-SHARED-FIXTURES-V2: migrated to CtxBuilder.
+        crate::command::test_support::CtxBuilder::new().build()
     }
 
     #[test]

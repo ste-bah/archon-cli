@@ -168,81 +168,11 @@ mod tests {
     /// test can drain via `try_recv`. Capacity of 8 matches the real
     /// input pipeline order of magnitude while leaving headroom.
     fn make_ctx() -> (CommandContext, mpsc::Receiver<TuiEvent>) {
-        let (tx, rx) = mpsc::channel::<TuiEvent>(8);
-        (
-            CommandContext {
-                tui_tx: tx,
-                // TASK-AGS-807: snapshot-pattern field. Dispatcher-level
-                // tests never exercise the /status body, so None is the
-                // correct default here.
-                status_snapshot: None,
-                // TASK-AGS-808: same rationale for /model snapshot +
-                // the effect slot — dispatcher tests only exercise
-                // routing/parsing, not handler bodies.
-                model_snapshot: None,
-                // TASK-AGS-809: same rationale for /cost snapshot —
-                // dispatcher tests only exercise routing/parsing, not
-                // handler bodies.
-                cost_snapshot: None,
-                // TASK-AGS-811: same rationale for /mcp snapshot —
-                // dispatcher tests only exercise routing/parsing, not
-                // handler bodies.
-                mcp_snapshot: None,
-                // TASK-AGS-814: same rationale for /context snapshot —
-                // dispatcher tests only exercise routing/parsing, not
-                // handler bodies.
-                context_snapshot: None,
-                // TASK-AGS-815: same rationale for /fork session_id —
-                // dispatcher tests only exercise routing/parsing, not
-                // handler bodies.
-                session_id: None,
-                // TASK-AGS-817: same rationale for /memory Arc<dyn
-                // MemoryTrait> — dispatcher tests only exercise
-                // routing/parsing, not handler bodies.
-                memory: None,
-                // TASK-AGS-POST-6-BODIES-B13-GARDEN: same rationale for
-                // /garden GardenConfig — dispatcher tests only exercise
-                // routing/parsing, not handler bodies.
-                garden_config: None,
-                // TASK-AGS-POST-6-BODIES-B01-FAST: same rationale for
-                // /fast Arc<AtomicBool> — dispatcher tests only
-                // exercise routing/parsing, not handler bodies.
-                fast_mode_shared: None,
-                // TASK-AGS-POST-6-BODIES-B02-THINKING: same rationale
-                // for /thinking Arc<AtomicBool> — dispatcher tests
-                // only exercise routing/parsing, not handler bodies.
-                show_thinking: None,
-                // TASK-AGS-POST-6-BODIES-B04-DIFF: same rationale for
-                // /diff working_dir PathBuf — dispatcher tests only
-                // exercise routing/parsing, not handler bodies.
-                working_dir: None,
-                // TASK-AGS-POST-6-BODIES-B06-HELP: same rationale for
-                // /help skill_registry Arc — dispatcher tests only
-                // exercise routing/parsing, not handler bodies.
-                skill_registry: None,
-                // TASK-AGS-POST-6-BODIES-B08-DENIALS: same rationale
-                // for /denials DenialSnapshot — dispatcher tests only
-                // exercise routing/parsing, not handler bodies.
-                denial_snapshot: None,
-                // TASK-AGS-POST-6-BODIES-B11-EFFORT: same rationale
-                // for /effort EffortSnapshot — dispatcher tests only
-                // exercise routing/parsing, not handler bodies.
-                effort_snapshot: None,
-                permissions_snapshot: None,
-                copy_snapshot: None,
-                doctor_snapshot: None,
-                usage_snapshot: None,
-                config_path: None,
-                auth_label: None,
-                pending_effect: None,
-                // TASK-AGS-POST-6-BODIES-B11-EFFORT: same rationale
-                // for the /effort sidecar slot — dispatcher tests only
-                // exercise routing/parsing, not handler bodies.
-                pending_effort_set: None,
-                pending_export: None,
-            },
-            rx,
-        )
+        // TASK-AGS-POST-6-SHARED-FIXTURES-V2: migrated to CtxBuilder.
+        // The builder uses capacity 16 (was 8); dispatcher tests emit
+        // at most a handful of events, so observational behavior is
+        // unchanged.
+        crate::command::test_support::CtxBuilder::new().build()
     }
 
     /// A test-only handler that records every `execute` invocation so

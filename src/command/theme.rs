@@ -179,40 +179,8 @@ mod tests {
     /// slot, no extra context field — so every optional field stays
     /// `None`. Mirrors the make_ctx fixtures in voice.rs / export.rs.
     fn make_ctx() -> (CommandContext, mpsc::Receiver<TuiEvent>) {
-        let (tx, rx) = mpsc::channel::<TuiEvent>(16);
-        (
-            CommandContext {
-                tui_tx: tx,
-                status_snapshot: None,
-                model_snapshot: None,
-                cost_snapshot: None,
-                mcp_snapshot: None,
-                context_snapshot: None,
-                session_id: None,
-                memory: None,
-                garden_config: None,
-                fast_mode_shared: None,
-                // TASK-AGS-POST-6-BODIES-B02-THINKING: /theme tests never exercise /thinking paths — None.
-                show_thinking: None,
-                // TASK-AGS-POST-6-BODIES-B04-DIFF: /theme tests never exercise /diff paths — None.
-                working_dir: None,
-                // TASK-AGS-POST-6-BODIES-B06-HELP: /theme tests never exercise /help paths — None.
-                skill_registry: None,
-                // TASK-AGS-POST-6-BODIES-B08-DENIALS: /theme tests never exercise /denials paths — None.
-                denial_snapshot: None,
-                effort_snapshot: None,
-                permissions_snapshot: None,
-                copy_snapshot: None,
-                doctor_snapshot: None,
-                usage_snapshot: None,
-                config_path: None,
-                auth_label: None,
-                pending_effect: None,
-                pending_effort_set: None,
-                pending_export: None,
-            },
-            rx,
-        )
+        // TASK-AGS-POST-6-SHARED-FIXTURES-V2: migrated to CtxBuilder.
+        crate::command::test_support::CtxBuilder::new().build()
     }
 
     #[test]

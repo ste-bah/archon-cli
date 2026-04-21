@@ -199,39 +199,13 @@ mod tests {
         mpsc::Receiver<TuiEvent>,
         Arc<Mutex<Option<ExportDescriptor>>>,
     ) {
-        let (tx, rx) = mpsc::channel::<TuiEvent>(16);
+        // TASK-AGS-POST-6-SHARED-FIXTURES-V2: migrated to CtxBuilder.
         let slot: Arc<Mutex<Option<ExportDescriptor>>> =
             Arc::new(Mutex::new(None));
-        (
-            CommandContext {
-                tui_tx: tx,
-                status_snapshot: None,
-                model_snapshot: None,
-                cost_snapshot: None,
-                mcp_snapshot: None,
-                context_snapshot: None,
-                session_id: None,
-                memory: None,
-                garden_config: None,
-                fast_mode_shared: None,
-                show_thinking: None,
-                working_dir: None,
-                skill_registry: None,
-                denial_snapshot: None,
-                effort_snapshot: None,
-                permissions_snapshot: None,
-                copy_snapshot: None,
-                doctor_snapshot: None,
-                usage_snapshot: None,
-                config_path: None,
-                auth_label: None,
-                pending_effect: None,
-                pending_effort_set: None,
-                pending_export: Some(Arc::clone(&slot)),
-            },
-            rx,
-            slot,
-        )
+        let (ctx, rx) = crate::command::test_support::CtxBuilder::new()
+            .with_pending_export(Arc::clone(&slot))
+            .build();
+        (ctx, rx, slot)
     }
 
     #[test]
@@ -346,33 +320,12 @@ mod tests {
         // shared slot via build_command_context. If the slot is None
         // the handler must emit a loud error rather than silently
         // drop the export.
-        let (tx, mut rx) = mpsc::channel::<TuiEvent>(16);
-        let mut ctx = CommandContext {
-            tui_tx: tx,
-            status_snapshot: None,
-            model_snapshot: None,
-            cost_snapshot: None,
-            mcp_snapshot: None,
-            context_snapshot: None,
-            session_id: None,
-            memory: None,
-            garden_config: None,
-            fast_mode_shared: None,
-            show_thinking: None,
-            working_dir: None,
-            skill_registry: None,
-            denial_snapshot: None,
-            effort_snapshot: None,
-            permissions_snapshot: None,
-            copy_snapshot: None,
-            doctor_snapshot: None,
-            usage_snapshot: None,
-            config_path: None,
-            auth_label: None,
-            pending_effect: None,
-            pending_effort_set: None,
-            pending_export: None,
-        };
+        //
+        // TASK-AGS-POST-6-SHARED-FIXTURES-V2: migrated to CtxBuilder.
+        // `pending_export` is left at the builder default (None) to
+        // exercise the wiring-regression branch.
+        let (mut ctx, mut rx) =
+            crate::command::test_support::CtxBuilder::new().build();
         ExportHandler.execute(&mut ctx, &[]).unwrap();
         match rx.try_recv().expect("error event emitted") {
             TuiEvent::Error(msg) => {

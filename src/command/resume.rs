@@ -212,46 +212,8 @@ mod tests {
     /// slot — so every optional field stays `None`. Mirrors the
     /// make_ctx fixtures in task.rs / cost.rs / model.rs / status.rs.
     fn make_ctx() -> (CommandContext, mpsc::Receiver<TuiEvent>) {
-        let (tx, rx) = mpsc::channel::<TuiEvent>(16);
-        (
-            CommandContext {
-                tui_tx: tx,
-                status_snapshot: None,
-                model_snapshot: None,
-                cost_snapshot: None,
-                // TASK-AGS-811: /resume tests never exercise /mcp paths — None.
-                mcp_snapshot: None,
-                // TASK-AGS-814: /resume tests never exercise /context paths — None.
-                context_snapshot: None,
-                // TASK-AGS-815: /resume tests never exercise /fork paths — None.
-                session_id: None,
-                // TASK-AGS-817: /resume tests never exercise /memory paths — None.
-                memory: None,
-                // TASK-AGS-POST-6-BODIES-B13-GARDEN: /resume tests never exercise /garden paths — None.
-                garden_config: None,
-                // TASK-AGS-POST-6-BODIES-B01-FAST: /resume tests never exercise /fast paths — None.
-                fast_mode_shared: None,
-                // TASK-AGS-POST-6-BODIES-B02-THINKING: /resume tests never exercise /thinking paths — None.
-                show_thinking: None,
-                // TASK-AGS-POST-6-BODIES-B04-DIFF: /resume tests never exercise /diff paths — None.
-                working_dir: None,
-                // TASK-AGS-POST-6-BODIES-B06-HELP: /resume tests never exercise /help paths — None.
-                skill_registry: None,
-                // TASK-AGS-POST-6-BODIES-B08-DENIALS: /resume tests never exercise /denials paths — None.
-                denial_snapshot: None,
-                effort_snapshot: None,
-                permissions_snapshot: None,
-                copy_snapshot: None,
-                doctor_snapshot: None,
-                usage_snapshot: None,
-                config_path: None,
-                auth_label: None,
-                pending_effect: None,
-                pending_effort_set: None,
-                pending_export: None,
-            },
-            rx,
-        )
+        // TASK-AGS-POST-6-SHARED-FIXTURES-V2: migrated to CtxBuilder.
+        crate::command::test_support::CtxBuilder::new().build()
     }
 
     #[test]

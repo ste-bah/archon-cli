@@ -1,8 +1,19 @@
 //! Shared test fixtures for command handler tests.
 //! Extracted from Stage 6 body-migrate handlers (AGS-805..819) per Sherlock AGS-820 observation.
+//!
+//! TASK-AGS-POST-6-SHARED-FIXTURES-V2 (2026-04-21): introduces `CtxBuilder`
+//! as the single source of truth for every `CommandContext` field. Handler
+//! test modules now call `CtxBuilder::new().with_*(...).build()` instead of
+//! inlining a 24-field struct literal. V1 helpers (`make_status_ctx`,
+//! `make_model_ctx`, ...) are retained as thin wrappers that delegate to
+//! the builder — removing them is deferred to a follow-up.
+//!
+//! Future CommandContext field additions therefore require editing exactly
+//! ONE file (this one) — the builder's `new()` pre-populates every field,
+//! and any new `.with_*` setters live alongside the existing ones.
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 
 use archon_llm::effort::EffortLevel;
@@ -13,6 +24,434 @@ use crate::command::registry::CommandContext;
 /// Create a bounded mpsc channel with capacity 16.
 pub(crate) fn mock_tui_channel() -> (mpsc::Sender<TuiEvent>, mpsc::Receiver<TuiEvent>) {
     mpsc::channel::<TuiEvent>(16)
+}
+
+// ===========================================================================
+// CtxBuilder — composable CommandContext fixture
+// ===========================================================================
+
+/// Composable builder for `CommandContext` test fixtures.
+///
+/// `CtxBuilder::new()` pre-populates every `CommandContext` field with a
+/// test-safe default (`None` for every `Option`, a fresh bounded
+/// `mpsc::channel::<TuiEvent>(16)` for `tui_tx`). `.with_*` setters replace
+/// individual fields; `.build()` consumes the builder and returns the
+/// `(CommandContext, mpsc::Receiver<TuiEvent>)` tuple that every handler
+/// test expects.
+///
+/// All setters are byte-equivalent to the previous inline `CommandContext
+/// { ... }` literals — no behavioural drift.
+///
+/// Channel capacity `16` matches the existing `mock_tui_channel()` and
+/// every V1 `make_*_ctx` helper so V1 call sites can migrate without
+/// observing a different buffer size.
+pub(crate) struct CtxBuilder {
+    tui_tx: mpsc::Sender<TuiEvent>,
+    tui_rx: mpsc::Receiver<TuiEvent>,
+    status_snapshot: Option<crate::command::status::StatusSnapshot>,
+    model_snapshot: Option<crate::command::model::ModelSnapshot>,
+    cost_snapshot: Option<crate::command::cost::CostSnapshot>,
+    mcp_snapshot: Option<crate::command::mcp::McpSnapshot>,
+    context_snapshot: Option<crate::command::context_cmd::ContextSnapshot>,
+    session_id: Option<String>,
+    memory: Option<Arc<dyn archon_memory::MemoryTrait>>,
+    garden_config: Option<archon_memory::garden::GardenConfig>,
+    fast_mode_shared: Option<Arc<AtomicBool>>,
+    show_thinking: Option<Arc<AtomicBool>>,
+    working_dir: Option<std::path::PathBuf>,
+    skill_registry: Option<Arc<archon_core::skills::SkillRegistry>>,
+    denial_snapshot: Option<crate::command::denials::DenialSnapshot>,
+    effort_snapshot: Option<crate::command::effort::EffortSnapshot>,
+    permissions_snapshot: Option<crate::command::permissions::PermissionsSnapshot>,
+    copy_snapshot: Option<crate::command::copy::CopySnapshot>,
+    doctor_snapshot: Option<crate::command::doctor::DoctorSnapshot>,
+    usage_snapshot: Option<crate::command::usage::UsageSnapshot>,
+    config_path: Option<std::path::PathBuf>,
+    auth_label: Option<String>,
+    pending_effect: Option<crate::command::registry::CommandEffect>,
+    pending_effort_set: Option<EffortLevel>,
+    pending_export: Option<
+        Arc<Mutex<Option<crate::command::export::ExportDescriptor>>>,
+    >,
+}
+
+impl CtxBuilder {
+    /// Create a new builder with every field set to its test-safe default
+    /// and a fresh bounded mpsc channel (capacity 16, matching V1).
+    pub(crate) fn new() -> Self {
+        let (tx, rx) = mock_tui_channel();
+        Self {
+            tui_tx: tx,
+            tui_rx: rx,
+            status_snapshot: None,
+            model_snapshot: None,
+            cost_snapshot: None,
+            mcp_snapshot: None,
+            context_snapshot: None,
+            session_id: None,
+            memory: None,
+            garden_config: None,
+            fast_mode_shared: None,
+            show_thinking: None,
+            working_dir: None,
+            skill_registry: None,
+            denial_snapshot: None,
+            effort_snapshot: None,
+            permissions_snapshot: None,
+            copy_snapshot: None,
+            doctor_snapshot: None,
+            usage_snapshot: None,
+            config_path: None,
+            auth_label: None,
+            pending_effect: None,
+            pending_effort_set: None,
+            pending_export: None,
+        }
+    }
+
+    pub(crate) fn with_status_snapshot(
+        mut self,
+        s: crate::command::status::StatusSnapshot,
+    ) -> Self {
+        self.status_snapshot = Some(s);
+        self
+    }
+
+    pub(crate) fn with_status_snapshot_opt(
+        mut self,
+        s: Option<crate::command::status::StatusSnapshot>,
+    ) -> Self {
+        self.status_snapshot = s;
+        self
+    }
+
+    pub(crate) fn with_model_snapshot(
+        mut self,
+        s: crate::command::model::ModelSnapshot,
+    ) -> Self {
+        self.model_snapshot = Some(s);
+        self
+    }
+
+    pub(crate) fn with_model_snapshot_opt(
+        mut self,
+        s: Option<crate::command::model::ModelSnapshot>,
+    ) -> Self {
+        self.model_snapshot = s;
+        self
+    }
+
+    pub(crate) fn with_cost_snapshot(
+        mut self,
+        s: crate::command::cost::CostSnapshot,
+    ) -> Self {
+        self.cost_snapshot = Some(s);
+        self
+    }
+
+    pub(crate) fn with_cost_snapshot_opt(
+        mut self,
+        s: Option<crate::command::cost::CostSnapshot>,
+    ) -> Self {
+        self.cost_snapshot = s;
+        self
+    }
+
+    pub(crate) fn with_mcp_snapshot(
+        mut self,
+        s: crate::command::mcp::McpSnapshot,
+    ) -> Self {
+        self.mcp_snapshot = Some(s);
+        self
+    }
+
+    pub(crate) fn with_mcp_snapshot_opt(
+        mut self,
+        s: Option<crate::command::mcp::McpSnapshot>,
+    ) -> Self {
+        self.mcp_snapshot = s;
+        self
+    }
+
+    pub(crate) fn with_context_snapshot(
+        mut self,
+        s: crate::command::context_cmd::ContextSnapshot,
+    ) -> Self {
+        self.context_snapshot = Some(s);
+        self
+    }
+
+    pub(crate) fn with_context_snapshot_opt(
+        mut self,
+        s: Option<crate::command::context_cmd::ContextSnapshot>,
+    ) -> Self {
+        self.context_snapshot = s;
+        self
+    }
+
+    pub(crate) fn with_session_id(mut self, id: String) -> Self {
+        self.session_id = Some(id);
+        self
+    }
+
+    pub(crate) fn with_session_id_opt(mut self, id: Option<String>) -> Self {
+        self.session_id = id;
+        self
+    }
+
+    pub(crate) fn with_memory(
+        mut self,
+        memory: Arc<dyn archon_memory::MemoryTrait>,
+    ) -> Self {
+        self.memory = Some(memory);
+        self
+    }
+
+    pub(crate) fn with_memory_opt(
+        mut self,
+        memory: Option<Arc<dyn archon_memory::MemoryTrait>>,
+    ) -> Self {
+        self.memory = memory;
+        self
+    }
+
+    pub(crate) fn with_garden_config(
+        mut self,
+        c: archon_memory::garden::GardenConfig,
+    ) -> Self {
+        self.garden_config = Some(c);
+        self
+    }
+
+    pub(crate) fn with_garden_config_opt(
+        mut self,
+        c: Option<archon_memory::garden::GardenConfig>,
+    ) -> Self {
+        self.garden_config = c;
+        self
+    }
+
+    pub(crate) fn with_fast_mode_shared(
+        mut self,
+        shared: Arc<AtomicBool>,
+    ) -> Self {
+        self.fast_mode_shared = Some(shared);
+        self
+    }
+
+    pub(crate) fn with_show_thinking(
+        mut self,
+        shared: Arc<AtomicBool>,
+    ) -> Self {
+        self.show_thinking = Some(shared);
+        self
+    }
+
+    pub(crate) fn with_working_dir(
+        mut self,
+        path: std::path::PathBuf,
+    ) -> Self {
+        self.working_dir = Some(path);
+        self
+    }
+
+    pub(crate) fn with_working_dir_opt(
+        mut self,
+        path: Option<std::path::PathBuf>,
+    ) -> Self {
+        self.working_dir = path;
+        self
+    }
+
+    pub(crate) fn with_skill_registry(
+        mut self,
+        reg: Arc<archon_core::skills::SkillRegistry>,
+    ) -> Self {
+        self.skill_registry = Some(reg);
+        self
+    }
+
+    pub(crate) fn with_denial_snapshot(
+        mut self,
+        s: crate::command::denials::DenialSnapshot,
+    ) -> Self {
+        self.denial_snapshot = Some(s);
+        self
+    }
+
+    pub(crate) fn with_denial_snapshot_opt(
+        mut self,
+        s: Option<crate::command::denials::DenialSnapshot>,
+    ) -> Self {
+        self.denial_snapshot = s;
+        self
+    }
+
+    pub(crate) fn with_effort_snapshot(
+        mut self,
+        s: crate::command::effort::EffortSnapshot,
+    ) -> Self {
+        self.effort_snapshot = Some(s);
+        self
+    }
+
+    pub(crate) fn with_effort_snapshot_opt(
+        mut self,
+        s: Option<crate::command::effort::EffortSnapshot>,
+    ) -> Self {
+        self.effort_snapshot = s;
+        self
+    }
+
+    pub(crate) fn with_permissions_snapshot(
+        mut self,
+        s: crate::command::permissions::PermissionsSnapshot,
+    ) -> Self {
+        self.permissions_snapshot = Some(s);
+        self
+    }
+
+    pub(crate) fn with_permissions_snapshot_opt(
+        mut self,
+        s: Option<crate::command::permissions::PermissionsSnapshot>,
+    ) -> Self {
+        self.permissions_snapshot = s;
+        self
+    }
+
+    pub(crate) fn with_copy_snapshot(
+        mut self,
+        s: crate::command::copy::CopySnapshot,
+    ) -> Self {
+        self.copy_snapshot = Some(s);
+        self
+    }
+
+    pub(crate) fn with_copy_snapshot_opt(
+        mut self,
+        s: Option<crate::command::copy::CopySnapshot>,
+    ) -> Self {
+        self.copy_snapshot = s;
+        self
+    }
+
+    pub(crate) fn with_doctor_snapshot(
+        mut self,
+        s: crate::command::doctor::DoctorSnapshot,
+    ) -> Self {
+        self.doctor_snapshot = Some(s);
+        self
+    }
+
+    pub(crate) fn with_doctor_snapshot_opt(
+        mut self,
+        s: Option<crate::command::doctor::DoctorSnapshot>,
+    ) -> Self {
+        self.doctor_snapshot = s;
+        self
+    }
+
+    pub(crate) fn with_usage_snapshot(
+        mut self,
+        s: crate::command::usage::UsageSnapshot,
+    ) -> Self {
+        self.usage_snapshot = Some(s);
+        self
+    }
+
+    pub(crate) fn with_usage_snapshot_opt(
+        mut self,
+        s: Option<crate::command::usage::UsageSnapshot>,
+    ) -> Self {
+        self.usage_snapshot = s;
+        self
+    }
+
+    pub(crate) fn with_config_path(
+        mut self,
+        path: std::path::PathBuf,
+    ) -> Self {
+        self.config_path = Some(path);
+        self
+    }
+
+    pub(crate) fn with_config_path_opt(
+        mut self,
+        path: Option<std::path::PathBuf>,
+    ) -> Self {
+        self.config_path = path;
+        self
+    }
+
+    pub(crate) fn with_auth_label(mut self, label: String) -> Self {
+        self.auth_label = Some(label);
+        self
+    }
+
+    pub(crate) fn with_auth_label_opt(
+        mut self,
+        label: Option<String>,
+    ) -> Self {
+        self.auth_label = label;
+        self
+    }
+
+    pub(crate) fn with_pending_effect(
+        mut self,
+        e: crate::command::registry::CommandEffect,
+    ) -> Self {
+        self.pending_effect = Some(e);
+        self
+    }
+
+    pub(crate) fn with_pending_effort_set(
+        mut self,
+        level: EffortLevel,
+    ) -> Self {
+        self.pending_effort_set = Some(level);
+        self
+    }
+
+    pub(crate) fn with_pending_export(
+        mut self,
+        slot: Arc<Mutex<Option<crate::command::export::ExportDescriptor>>>,
+    ) -> Self {
+        self.pending_export = Some(slot);
+        self
+    }
+
+    /// Consume the builder and return `(CommandContext, Receiver)`.
+    pub(crate) fn build(self) -> (CommandContext, mpsc::Receiver<TuiEvent>) {
+        (
+            CommandContext {
+                tui_tx: self.tui_tx,
+                status_snapshot: self.status_snapshot,
+                model_snapshot: self.model_snapshot,
+                cost_snapshot: self.cost_snapshot,
+                mcp_snapshot: self.mcp_snapshot,
+                context_snapshot: self.context_snapshot,
+                session_id: self.session_id,
+                memory: self.memory,
+                garden_config: self.garden_config,
+                fast_mode_shared: self.fast_mode_shared,
+                show_thinking: self.show_thinking,
+                working_dir: self.working_dir,
+                skill_registry: self.skill_registry,
+                denial_snapshot: self.denial_snapshot,
+                effort_snapshot: self.effort_snapshot,
+                permissions_snapshot: self.permissions_snapshot,
+                copy_snapshot: self.copy_snapshot,
+                doctor_snapshot: self.doctor_snapshot,
+                usage_snapshot: self.usage_snapshot,
+                config_path: self.config_path,
+                auth_label: self.auth_label,
+                pending_effect: self.pending_effect,
+                pending_effort_set: self.pending_effort_set,
+                pending_export: self.pending_export,
+            },
+            self.tui_rx,
+        )
+    }
 }
 
 /// Drain all available events from the receiver.
@@ -68,147 +507,30 @@ pub(crate) fn fixture_cost_snapshot() -> crate::command::cost::CostSnapshot {
 }
 
 /// Build a CommandContext for StatusHandler tests.
+///
+/// V2: thin wrapper over `CtxBuilder` (deferred cleanup).
 pub(crate) fn make_status_ctx(
     snapshot: Option<crate::command::status::StatusSnapshot>,
 ) -> (CommandContext, mpsc::Receiver<TuiEvent>) {
-    let (tx, rx) = mock_tui_channel();
-    (
-        CommandContext {
-            tui_tx: tx,
-            status_snapshot: snapshot,
-            model_snapshot: None,
-            cost_snapshot: None,
-            mcp_snapshot: None,
-            context_snapshot: None,
-            session_id: None,
-            memory: None,
-            garden_config: None,
-            fast_mode_shared: None,
-            // TASK-AGS-POST-6-BODIES-B02-THINKING: /status tests never
-            // exercise /thinking paths — None.
-            show_thinking: None,
-            // TASK-AGS-POST-6-BODIES-B04-DIFF: /status tests never
-            // exercise /diff paths — None.
-            working_dir: None,
-            // TASK-AGS-POST-6-BODIES-B06-HELP: /status tests never
-            // exercise /help paths — None.
-            skill_registry: None,
-            // TASK-AGS-POST-6-BODIES-B08-DENIALS: peer fixtures never
-            // exercise /denials paths — None.
-            denial_snapshot: None,
-            // TASK-AGS-POST-6-BODIES-B11-EFFORT: peer fixtures never
-            // exercise /effort paths — None.
-            effort_snapshot: None,
-            permissions_snapshot: None,
-            copy_snapshot: None,
-            doctor_snapshot: None,
-            usage_snapshot: None,
-            config_path: None,
-            auth_label: None,
-            pending_effect: None,
-            // TASK-AGS-POST-6-BODIES-B11-EFFORT: peer fixtures never
-            // exercise /effort paths — None.
-            pending_effort_set: None,
-            pending_export: None,
-        },
-        rx,
-    )
+    CtxBuilder::new().with_status_snapshot_opt(snapshot).build()
 }
 
 /// Build a CommandContext for ModelHandler tests.
+///
+/// V2: thin wrapper over `CtxBuilder` (deferred cleanup).
 pub(crate) fn make_model_ctx(
     snapshot: Option<crate::command::model::ModelSnapshot>,
 ) -> (CommandContext, mpsc::Receiver<TuiEvent>) {
-    let (tx, rx) = mock_tui_channel();
-    (
-        CommandContext {
-            tui_tx: tx,
-            status_snapshot: None,
-            model_snapshot: snapshot,
-            cost_snapshot: None,
-            mcp_snapshot: None,
-            context_snapshot: None,
-            session_id: None,
-            memory: None,
-            garden_config: None,
-            fast_mode_shared: None,
-            // TASK-AGS-POST-6-BODIES-B02-THINKING: /model tests never
-            // exercise /thinking paths — None.
-            show_thinking: None,
-            // TASK-AGS-POST-6-BODIES-B04-DIFF: /model tests never
-            // exercise /diff paths — None.
-            working_dir: None,
-            // TASK-AGS-POST-6-BODIES-B06-HELP: /model tests never
-            // exercise /help paths — None.
-            skill_registry: None,
-            // TASK-AGS-POST-6-BODIES-B08-DENIALS: peer fixtures never
-            // exercise /denials paths — None.
-            denial_snapshot: None,
-            // TASK-AGS-POST-6-BODIES-B11-EFFORT: peer fixtures never
-            // exercise /effort paths — None.
-            effort_snapshot: None,
-            permissions_snapshot: None,
-            copy_snapshot: None,
-            doctor_snapshot: None,
-            usage_snapshot: None,
-            config_path: None,
-            auth_label: None,
-            pending_effect: None,
-            // TASK-AGS-POST-6-BODIES-B11-EFFORT: peer fixtures never
-            // exercise /effort paths — None.
-            pending_effort_set: None,
-            pending_export: None,
-        },
-        rx,
-    )
+    CtxBuilder::new().with_model_snapshot_opt(snapshot).build()
 }
 
 /// Build a CommandContext for CostHandler tests.
+///
+/// V2: thin wrapper over `CtxBuilder` (deferred cleanup).
 pub(crate) fn make_cost_ctx(
     snapshot: Option<crate::command::cost::CostSnapshot>,
 ) -> (CommandContext, mpsc::Receiver<TuiEvent>) {
-    let (tx, rx) = mock_tui_channel();
-    (
-        CommandContext {
-            tui_tx: tx,
-            status_snapshot: None,
-            model_snapshot: None,
-            cost_snapshot: snapshot,
-            mcp_snapshot: None,
-            context_snapshot: None,
-            session_id: None,
-            memory: None,
-            garden_config: None,
-            fast_mode_shared: None,
-            // TASK-AGS-POST-6-BODIES-B02-THINKING: /cost tests never
-            // exercise /thinking paths — None.
-            show_thinking: None,
-            // TASK-AGS-POST-6-BODIES-B04-DIFF: /cost tests never
-            // exercise /diff paths — None.
-            working_dir: None,
-            // TASK-AGS-POST-6-BODIES-B06-HELP: /cost tests never
-            // exercise /help paths — None.
-            skill_registry: None,
-            // TASK-AGS-POST-6-BODIES-B08-DENIALS: peer fixtures never
-            // exercise /denials paths — None.
-            denial_snapshot: None,
-            // TASK-AGS-POST-6-BODIES-B11-EFFORT: peer fixtures never
-            // exercise /effort paths — None.
-            effort_snapshot: None,
-            permissions_snapshot: None,
-            copy_snapshot: None,
-            doctor_snapshot: None,
-            usage_snapshot: None,
-            config_path: None,
-            auth_label: None,
-            pending_effect: None,
-            // TASK-AGS-POST-6-BODIES-B11-EFFORT: peer fixtures never
-            // exercise /effort paths — None.
-            pending_effort_set: None,
-            pending_export: None,
-        },
-        rx,
-    )
+    CtxBuilder::new().with_cost_snapshot_opt(snapshot).build()
 }
 
 /// Build a CommandContext for FastHandler tests.
@@ -219,51 +541,14 @@ pub(crate) fn make_cost_ctx(
 /// `Arc<AtomicBool>::new(initial)` so the handler's sync
 /// load-invert-store toggle sees a real shared atomic. All other
 /// optional fields are left at `None` — mirroring peer helpers.
+///
+/// V2: thin wrapper over `CtxBuilder` (deferred cleanup).
 pub(crate) fn make_fast_ctx(
     initial: bool,
 ) -> (CommandContext, mpsc::Receiver<TuiEvent>) {
-    let (tx, rx) = mock_tui_channel();
-    (
-        CommandContext {
-            tui_tx: tx,
-            status_snapshot: None,
-            model_snapshot: None,
-            cost_snapshot: None,
-            mcp_snapshot: None,
-            context_snapshot: None,
-            session_id: None,
-            memory: None,
-            garden_config: None,
-            fast_mode_shared: Some(Arc::new(AtomicBool::new(initial))),
-            // TASK-AGS-POST-6-BODIES-B02-THINKING: /fast tests never
-            // exercise /thinking paths — None.
-            show_thinking: None,
-            // TASK-AGS-POST-6-BODIES-B04-DIFF: /fast tests never
-            // exercise /diff paths — None.
-            working_dir: None,
-            // TASK-AGS-POST-6-BODIES-B06-HELP: /fast tests never
-            // exercise /help paths — None.
-            skill_registry: None,
-            // TASK-AGS-POST-6-BODIES-B08-DENIALS: peer fixtures never
-            // exercise /denials paths — None.
-            denial_snapshot: None,
-            // TASK-AGS-POST-6-BODIES-B11-EFFORT: peer fixtures never
-            // exercise /effort paths — None.
-            effort_snapshot: None,
-            permissions_snapshot: None,
-            copy_snapshot: None,
-            doctor_snapshot: None,
-            usage_snapshot: None,
-            config_path: None,
-            auth_label: None,
-            pending_effect: None,
-            // TASK-AGS-POST-6-BODIES-B11-EFFORT: peer fixtures never
-            // exercise /effort paths — None.
-            pending_effort_set: None,
-            pending_export: None,
-        },
-        rx,
-    )
+    CtxBuilder::new()
+        .with_fast_mode_shared(Arc::new(AtomicBool::new(initial)))
+        .build()
 }
 
 /// Build a CommandContext for BugHandler tests.
@@ -276,46 +561,7 @@ pub(crate) fn make_fast_ctx(
 /// peer-fixture rollout was needed because no new struct field was
 /// added for this ticket.
 pub(crate) fn make_bug_ctx() -> (CommandContext, mpsc::Receiver<TuiEvent>) {
-    let (tx, rx) = mock_tui_channel();
-    (
-        CommandContext {
-            tui_tx: tx,
-            status_snapshot: None,
-            model_snapshot: None,
-            cost_snapshot: None,
-            mcp_snapshot: None,
-            context_snapshot: None,
-            session_id: None,
-            memory: None,
-            garden_config: None,
-            fast_mode_shared: None,
-            show_thinking: None,
-            // TASK-AGS-POST-6-BODIES-B04-DIFF: /bug tests never
-            // exercise /diff paths — None.
-            working_dir: None,
-            // TASK-AGS-POST-6-BODIES-B06-HELP: /bug tests never
-            // exercise /help paths — None.
-            skill_registry: None,
-            // TASK-AGS-POST-6-BODIES-B08-DENIALS: peer fixtures never
-            // exercise /denials paths — None.
-            denial_snapshot: None,
-            // TASK-AGS-POST-6-BODIES-B11-EFFORT: peer fixtures never
-            // exercise /effort paths — None.
-            effort_snapshot: None,
-            permissions_snapshot: None,
-            copy_snapshot: None,
-            doctor_snapshot: None,
-            usage_snapshot: None,
-            config_path: None,
-            auth_label: None,
-            pending_effect: None,
-            // TASK-AGS-POST-6-BODIES-B11-EFFORT: peer fixtures never
-            // exercise /effort paths — None.
-            pending_effort_set: None,
-            pending_export: None,
-        },
-        rx,
-    )
+    CtxBuilder::new().build()
 }
 
 /// Build a CommandContext for ThinkingHandler tests.
@@ -330,49 +576,14 @@ pub(crate) fn make_bug_ctx() -> (CommandContext, mpsc::Receiver<TuiEvent>) {
 ///
 /// Suppress warning: `Ordering` from atomic is held by the inner
 /// `Arc<AtomicBool>`; the helper itself never reads or stores.
+///
+/// V2: thin wrapper over `CtxBuilder` (deferred cleanup).
 pub(crate) fn make_thinking_ctx(
     initial: bool,
 ) -> (CommandContext, mpsc::Receiver<TuiEvent>) {
-    let (tx, rx) = mock_tui_channel();
-    (
-        CommandContext {
-            tui_tx: tx,
-            status_snapshot: None,
-            model_snapshot: None,
-            cost_snapshot: None,
-            mcp_snapshot: None,
-            context_snapshot: None,
-            session_id: None,
-            memory: None,
-            garden_config: None,
-            fast_mode_shared: None,
-            show_thinking: Some(Arc::new(AtomicBool::new(initial))),
-            // TASK-AGS-POST-6-BODIES-B04-DIFF: /thinking tests never
-            // exercise /diff paths — None.
-            working_dir: None,
-            // TASK-AGS-POST-6-BODIES-B06-HELP: /thinking tests never
-            // exercise /help paths — None.
-            skill_registry: None,
-            // TASK-AGS-POST-6-BODIES-B08-DENIALS: peer fixtures never
-            // exercise /denials paths — None.
-            denial_snapshot: None,
-            // TASK-AGS-POST-6-BODIES-B11-EFFORT: peer fixtures never
-            // exercise /effort paths — None.
-            effort_snapshot: None,
-            permissions_snapshot: None,
-            copy_snapshot: None,
-            doctor_snapshot: None,
-            usage_snapshot: None,
-            config_path: None,
-            auth_label: None,
-            pending_effect: None,
-            // TASK-AGS-POST-6-BODIES-B11-EFFORT: peer fixtures never
-            // exercise /effort paths — None.
-            pending_effort_set: None,
-            pending_export: None,
-        },
-        rx,
-    )
+    CtxBuilder::new()
+        .with_show_thinking(Arc::new(AtomicBool::new(initial)))
+        .build()
 }
 
 /// Build a CommandContext for DiffHandler tests.
@@ -391,44 +602,7 @@ pub(crate) fn make_thinking_ctx(
 pub(crate) fn make_diff_ctx(
     working_dir: Option<std::path::PathBuf>,
 ) -> (CommandContext, mpsc::Receiver<TuiEvent>) {
-    let (tx, rx) = mock_tui_channel();
-    (
-        CommandContext {
-            tui_tx: tx,
-            status_snapshot: None,
-            model_snapshot: None,
-            cost_snapshot: None,
-            mcp_snapshot: None,
-            context_snapshot: None,
-            session_id: None,
-            memory: None,
-            garden_config: None,
-            fast_mode_shared: None,
-            show_thinking: None,
-            working_dir,
-            // TASK-AGS-POST-6-BODIES-B06-HELP: /diff tests never
-            // exercise /help paths — None.
-            skill_registry: None,
-            // TASK-AGS-POST-6-BODIES-B08-DENIALS: peer fixtures never
-            // exercise /denials paths — None.
-            denial_snapshot: None,
-            // TASK-AGS-POST-6-BODIES-B11-EFFORT: peer fixtures never
-            // exercise /effort paths — None.
-            effort_snapshot: None,
-            permissions_snapshot: None,
-            copy_snapshot: None,
-            doctor_snapshot: None,
-            usage_snapshot: None,
-            config_path: None,
-            auth_label: None,
-            pending_effect: None,
-            // TASK-AGS-POST-6-BODIES-B11-EFFORT: peer fixtures never
-            // exercise /effort paths — None.
-            pending_effort_set: None,
-            pending_export: None,
-        },
-        rx,
-    )
+    CtxBuilder::new().with_working_dir_opt(working_dir).build()
 }
 
 /// Build a CommandContext for HelpHandler tests.
@@ -453,44 +627,11 @@ pub(crate) fn make_diff_ctx(
 pub(crate) fn make_help_ctx() -> (CommandContext, mpsc::Receiver<TuiEvent>) {
     use archon_core::skills::builtin::HelpSkill;
     use archon_core::skills::SkillRegistry;
-    let (tx, rx) = mock_tui_channel();
     let mut registry = SkillRegistry::new();
     registry.register(Box::new(HelpSkill));
-    (
-        CommandContext {
-            tui_tx: tx,
-            status_snapshot: None,
-            model_snapshot: None,
-            cost_snapshot: None,
-            mcp_snapshot: None,
-            context_snapshot: None,
-            session_id: None,
-            memory: None,
-            garden_config: None,
-            fast_mode_shared: None,
-            show_thinking: None,
-            working_dir: None,
-            skill_registry: Some(Arc::new(registry)),
-            // TASK-AGS-POST-6-BODIES-B08-DENIALS: /help tests never
-            // exercise /denials paths — None.
-            denial_snapshot: None,
-            // TASK-AGS-POST-6-BODIES-B11-EFFORT: peer fixtures never
-            // exercise /effort paths — None.
-            effort_snapshot: None,
-            permissions_snapshot: None,
-            copy_snapshot: None,
-            doctor_snapshot: None,
-            usage_snapshot: None,
-            config_path: None,
-            auth_label: None,
-            pending_effect: None,
-            // TASK-AGS-POST-6-BODIES-B11-EFFORT: peer fixtures never
-            // exercise /effort paths — None.
-            pending_effort_set: None,
-            pending_export: None,
-        },
-        rx,
-    )
+    CtxBuilder::new()
+        .with_skill_registry(Arc::new(registry))
+        .build()
 }
 
 /// Build a CommandContext for DenialsHandler tests.
@@ -506,42 +647,7 @@ pub(crate) fn make_help_ctx() -> (CommandContext, mpsc::Receiver<TuiEvent>) {
 pub(crate) fn make_denials_ctx(
     snapshot: Option<crate::command::denials::DenialSnapshot>,
 ) -> (CommandContext, mpsc::Receiver<TuiEvent>) {
-    let (tx, rx) = mock_tui_channel();
-    (
-        CommandContext {
-            tui_tx: tx,
-            status_snapshot: None,
-            model_snapshot: None,
-            cost_snapshot: None,
-            mcp_snapshot: None,
-            context_snapshot: None,
-            session_id: None,
-            memory: None,
-            garden_config: None,
-            fast_mode_shared: None,
-            show_thinking: None,
-            working_dir: None,
-            // TASK-AGS-POST-6-BODIES-B06-HELP: /denials tests never
-            // exercise /help paths — None.
-            skill_registry: None,
-            denial_snapshot: snapshot,
-            // TASK-AGS-POST-6-BODIES-B11-EFFORT: peer fixtures never
-            // exercise /effort paths — None.
-            effort_snapshot: None,
-            permissions_snapshot: None,
-            copy_snapshot: None,
-            doctor_snapshot: None,
-            usage_snapshot: None,
-            config_path: None,
-            auth_label: None,
-            pending_effect: None,
-            // TASK-AGS-POST-6-BODIES-B11-EFFORT: peer fixtures never
-            // exercise /effort paths — None.
-            pending_effort_set: None,
-            pending_export: None,
-        },
-        rx,
-    )
+    CtxBuilder::new().with_denial_snapshot_opt(snapshot).build()
 }
 
 /// Minimal test-only UsageSnapshot. Values chosen so format
@@ -581,34 +687,5 @@ pub(crate) fn fixture_usage_snapshot() -> crate::command::usage::UsageSnapshot {
 pub(crate) fn make_usage_ctx(
     snapshot: Option<crate::command::usage::UsageSnapshot>,
 ) -> (CommandContext, mpsc::Receiver<TuiEvent>) {
-    let (tx, rx) = mock_tui_channel();
-    (
-        CommandContext {
-            tui_tx: tx,
-            status_snapshot: None,
-            model_snapshot: None,
-            cost_snapshot: None,
-            mcp_snapshot: None,
-            context_snapshot: None,
-            session_id: None,
-            memory: None,
-            garden_config: None,
-            fast_mode_shared: None,
-            show_thinking: None,
-            working_dir: None,
-            skill_registry: None,
-            denial_snapshot: None,
-            effort_snapshot: None,
-            permissions_snapshot: None,
-            copy_snapshot: None,
-            doctor_snapshot: None,
-            usage_snapshot: snapshot,
-            config_path: None,
-            auth_label: None,
-            pending_effect: None,
-            pending_effort_set: None,
-            pending_export: None,
-        },
-        rx,
-    )
+    CtxBuilder::new().with_usage_snapshot_opt(snapshot).build()
 }

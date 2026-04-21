@@ -327,36 +327,10 @@ mod tests {
     fn make_ckpt_ctx(
         session_id: Option<String>,
     ) -> (CommandContext, mpsc::Receiver<TuiEvent>) {
-        let (tx, rx) = mpsc::channel::<TuiEvent>(16);
-        (
-            CommandContext {
-                tui_tx: tx,
-                status_snapshot: None,
-                model_snapshot: None,
-                cost_snapshot: None,
-                mcp_snapshot: None,
-                context_snapshot: None,
-                session_id,
-                memory: None,
-                garden_config: None,
-                fast_mode_shared: None,
-                show_thinking: None,
-                working_dir: None,
-                skill_registry: None,
-                denial_snapshot: None,
-                effort_snapshot: None,
-                permissions_snapshot: None,
-                copy_snapshot: None,
-                doctor_snapshot: None,
-                usage_snapshot: None,
-                config_path: None,
-                auth_label: None,
-                pending_effect: None,
-                pending_effort_set: None,
-                pending_export: None,
-            },
-            rx,
-        )
+        // TASK-AGS-POST-6-SHARED-FIXTURES-V2: migrated to CtxBuilder.
+        crate::command::test_support::CtxBuilder::new()
+            .with_session_id_opt(session_id)
+            .build()
     }
 
     /// R4: description is byte-identical to the `declare_handler!`

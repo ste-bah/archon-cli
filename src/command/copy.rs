@@ -507,36 +507,10 @@ mod tests {
     fn make_ctx(
         snapshot: Option<CopySnapshot>,
     ) -> (CommandContext, mpsc::Receiver<TuiEvent>) {
-        let (tx, rx) = mpsc::channel::<TuiEvent>(16);
-        (
-            CommandContext {
-                tui_tx: tx,
-                status_snapshot: None,
-                model_snapshot: None,
-                cost_snapshot: None,
-                mcp_snapshot: None,
-                context_snapshot: None,
-                session_id: None,
-                memory: None,
-                garden_config: None,
-                fast_mode_shared: None,
-                show_thinking: None,
-                working_dir: None,
-                skill_registry: None,
-                denial_snapshot: None,
-                effort_snapshot: None,
-                permissions_snapshot: None,
-                copy_snapshot: snapshot,
-                doctor_snapshot: None,
-                usage_snapshot: None,
-                config_path: None,
-                auth_label: None,
-                pending_effect: None,
-                pending_effort_set: None,
-                pending_export: None,
-            },
-            rx,
-        )
+        // TASK-AGS-POST-6-SHARED-FIXTURES-V2: migrated to CtxBuilder.
+        crate::command::test_support::CtxBuilder::new()
+            .with_copy_snapshot_opt(snapshot)
+            .build()
     }
 
     /// Drain `rx` non-blockingly into a Vec — matches the `drain`
