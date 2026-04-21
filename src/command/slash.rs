@@ -362,34 +362,22 @@ pub(crate) async fn handle_slash_command(
         //    .gates/TASK-AGS-POST-6-BODIES-B20-RELOAD/ for the full
         //    gate trail. ─────────────────────────────────────────
         // ── /logout ───────────────────────────────────────────
-        "/logout" => {
-            // Clear OAuth credentials file
-            let cred_path = dirs::home_dir()
-                .unwrap_or_default()
-                .join(".archon")
-                .join(".credentials.json");
-            if cred_path.exists() {
-                match std::fs::remove_file(&cred_path) {
-                    Ok(()) => {
-                        let _ = tui_tx.send(TuiEvent::TextDelta(
-                            "\nLogged out. Credentials cleared.\nRestart and run /login to re-authenticate.\n".into()
-                        )).await;
-                    }
-                    Err(e) => {
-                        let _ = tui_tx
-                            .send(TuiEvent::Error(format!("Failed to clear credentials: {e}")))
-                            .await;
-                    }
-                }
-            } else {
-                let _ = tui_tx
-                    .send(TuiEvent::TextDelta(
-                        "\nNo stored credentials found. Using API key auth.\n".into(),
-                    ))
-                    .await;
-            }
-            true
-        }
+        // TASK-AGS-POST-6-BODIES-B23-LOGOUT: body migrated to
+        // `crate::command::logout::LogoutHandler` (DIRECT pattern —
+        // sync `impl CommandHandler` operating on stateless fs ops:
+        // `dirs::home_dir()` + `.exists()` + `std::fs::remove_file`
+        // all sync; no new CommandContext field needed, no
+        // context.rs edits, no fixture churn). 3 TuiEvent branches
+        // (remove Ok `Logged out. Credentials cleared.\nRestart…` /
+        // remove Err `Failed to clear credentials: {e}` / !exists
+        // `No stored credentials found. Using API key auth.`)
+        // preserved byte-identical via `try_send`. Dispatcher
+        // routes `/logout` through Registry at registry.rs:1571
+        // (`insert_primary("logout", Arc::new(LogoutHandler::new()))`);
+        // import at :314, breadcrumb at :1410. `dirs::home_dir()`
+        // still used by /login has MOVED to login.rs (B22); no
+        // remaining uses in slash.rs top-level.
+        // See .gates/TASK-AGS-POST-6-BODIES-B23-LOGOUT/.
         // ── /help ──────────────────────────────────────────────
         // TASK-AGS-POST-6-BODIES-B06-HELP Gate 5: shipped `/help` match
         // arm DELETED. Routing now owned by the dispatcher + registry:

@@ -33,6 +33,7 @@ pub(crate) mod help;
 pub(crate) mod hooks;
 pub(crate) mod ide_stdio;
 pub(crate) mod login;
+pub(crate) mod logout;
 pub(crate) mod mcp;
 pub(crate) mod memory;
 pub(crate) mod model;

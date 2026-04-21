@@ -295,6 +295,23 @@ use crate::command::rules::RulesHandler;
 // existing `handle_login` async fn in `crate::command::login` (TUI-325
 // OAuth CLI entry point) is unrelated and untouched.
 use crate::command::login::LoginHandler;
+// TASK-AGS-POST-6-BODIES-B23-LOGOUT: real /logout handler lives in
+// `crate::command::logout` (real impl with body-migrated execute via
+// DIRECT pattern — sync filesystem probe `dirs::home_dir().join(".archon")
+// .join(".credentials.json").exists()` + sync `std::fs::remove_file` +
+// three branches emitting `TuiEvent` via `ctx.tui_tx.try_send(..)`
+// replaces the `tui_tx.send(..).await` calls that lived in the legacy
+// slash.rs:365-392 match arm). Shipped stub `declare_handler!(
+// LogoutHandler, "Clear stored credentials")` at registry.rs:1393 is
+// REPLACED by this import + the breadcrumb comment at the old site.
+// No aliases — shipped stub used the 2-arg declare_handler! form (no
+// aliases slice) and spec lists none. NO new CommandContext field
+// required — /logout reads no cross-cutting state; filesystem probe
+// resolves against `dirs::home_dir()` inline. R7 double-fire: the
+// legacy match arm at slash.rs:365-392 stays live through Gates 1-4;
+// Gate 5 deletes it in a separate parent-context run. See
+// .gates/TASK-AGS-POST-6-BODIES-B23-LOGOUT/ for the full gate trail.
+use crate::command::logout::LogoutHandler;
 // TASK-AGS-POST-6-BODIES-B08-DENIALS: real /denials handler lives in
 // `crate::command::denials`. SNAPSHOT-ONLY body-migrate (async
 // `denial_log.lock().await` + sync `DenialLog::format_display(20)` move
@@ -1390,7 +1407,22 @@ declare_handler!(
 // none. See `src/command/reload.rs` module rustdoc for the full
 // R1-R7 invariant list, and the B17 /rename precedent for the
 // DIRECT-pattern template.
-declare_handler!(LogoutHandler, "Clear stored credentials");
+// TASK-AGS-POST-6-BODIES-B23-LOGOUT: LogoutHandler moved to
+// `crate::command::logout` (real impl with body-migrated execute via
+// DIRECT pattern — sync `dirs::home_dir().join(".archon")
+// .join(".credentials.json")` probe + sync `std::fs::remove_file` +
+// three `ctx.tui_tx.try_send(TuiEvent::..)` branches replace the
+// `tui_tx.send(..).await` calls that lived in the legacy
+// slash.rs:365-392 match arm). Imported at the top of this file. No
+// aliases — shipped stub used the 2-arg declare_handler! form (no
+// aliases slice) and spec lists none. NO new CommandContext field
+// (/logout reads no cross-cutting state — filesystem probe resolves
+// against `dirs::home_dir()` inline). insert_primary call below now
+// uses `LogoutHandler::new()` matching peer body-migrated handlers.
+// See `src/command/logout.rs` module rustdoc for the full R1-R7
+// invariant list, and the B22 /login precedent for the DIRECT-pattern
+// template. See .gates/TASK-AGS-POST-6-BODIES-B23-LOGOUT/ for the
+// full gate trail.
 // TASK-AGS-POST-6-BODIES-B06-HELP: HelpHandler moved to
 // `crate::command::help` (real impl with body-migrated execute via
 // DIRECT-with-field pattern — sync SkillRegistry::format_help /
@@ -1536,7 +1568,7 @@ pub(crate) fn default_registry() -> Registry {
     b.insert_primary("tasks", Arc::new(TasksHandler));
     b.insert_primary("release-notes", Arc::new(ReleaseNotesHandler));
     b.insert_primary("reload", Arc::new(ReloadHandler::new()));
-    b.insert_primary("logout", Arc::new(LogoutHandler));
+    b.insert_primary("logout", Arc::new(LogoutHandler::new()));
     b.insert_primary("help", Arc::new(HelpHandler));
     b.insert_primary("rename", Arc::new(RenameHandler::new()));
     b.insert_primary("resume", Arc::new(ResumeHandler));
