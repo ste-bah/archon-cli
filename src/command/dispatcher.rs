@@ -159,7 +159,7 @@ impl Dispatcher {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::command::registry::{default_registry, CommandHandler};
+    use crate::command::registry::{default_registry, CommandHandler, RegistryBuilder};
     use archon_tui::app::TuiEvent;
     use std::sync::Mutex;
     use tokio::sync::mpsc;
@@ -268,33 +268,65 @@ mod tests {
     // Recognized / unknown / non-slash paths
     // -----------------------------------------------------------------
 
+    /// Test-local handler that mirrors the THIN-WRAPPER no-op contract:
+    /// `execute` returns `Ok(())` WITHOUT emitting any `TuiEvent`. Used
+    /// by `dispatch_recognized_command_returns_ok` below so the witness
+    /// test is INDEPENDENT of any specific production command stub —
+    /// TASK-AGS-POST-6-NO-STUB has removed the last `declare_handler!`
+    /// stubs from the registry, so every previous swap target is now a
+    /// real (or byte-identically-wrapped) handler with observable
+    /// behavior we must not cargo-cult into this generic witness. Shape
+    /// mirrors `RecordingHandler` above (test-local) and
+    /// `registry::tests::NoAliasHandler`.
+    struct SilentOkHandler;
+    impl CommandHandler for SilentOkHandler {
+        fn execute(
+            &self,
+            _ctx: &mut CommandContext,
+            _args: &[String],
+        ) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn description(&self) -> &str {
+            "silent ok handler (test only)"
+        }
+    }
+
     #[test]
     fn dispatch_recognized_command_returns_ok() {
-        // Uses the real default registry — `/cancel` resolves to the
-        // `declare_handler!(CancelHandler, ...)` stub at registry.rs:1531
-        // which returns `Ok(())` without doing any work or emitting
-        // events. (Previously used `/fast` → swapped to `/copy` by
-        // TASK-AGS-POST-6-BODIES-B01-FAST; swapped to `/clear` by
-        // TASK-AGS-POST-6-BODIES-B14-COPY when CopyHandler became a real
-        // impl that returns Err on missing copy_snapshot; swapped to
-        // `/cancel` by TASK-AGS-POST-6-BODIES-B24-COMPACT-CLEAR when
-        // ClearHandler became a real (THIN-WRAPPER no-op) impl — the
-        // pre-announced follow-up swap promised in the prior rustdoc.
-        // `/cancel` is still a declare_handler! stub with aliases
-        // &["stop", "abort"]; the primary name is used here so alias
-        // routing is independent. Any still-stub command works; another
-        // swap will be needed when /cancel is migrated in a later batch.)
-        // We assert: (a) dispatch returns Ok, and (b) no
-        // `TuiEvent::Error` is emitted (i.e. we did NOT take the
-        // "Unknown command" branch).
-        let registry = Arc::new(default_registry());
+        // WITNESS: a recognized command must (a) return Ok, and (b)
+        // emit no `TuiEvent::Error` — i.e. we did NOT take the
+        // "Unknown command" branch in `Dispatcher::dispatch`.
+        //
+        // Independence from production handlers:
+        //
+        // TASK-AGS-POST-6-NO-STUB eliminates the final `declare_handler!`
+        // invocations (ConfigHandler, CancelHandler) and the macro
+        // itself, so no production command is still a pure no-op stub.
+        // B24 (/compact, /clear) already established that every
+        // migrated command has observable behavior we must not rely on
+        // here — and the previously-announced "next swap" target
+        // /cancel is now migrated too. Rather than chase another
+        // production swap target, this witness now uses an in-test
+        // `SilentOkHandler` registered on a fresh `RegistryBuilder::new()`
+        // under a test-only primary name (`witness-silent`). Result:
+        // the witness exercises the real `Dispatcher → Registry →
+        // Handler` path end-to-end WITHOUT depending on any specific
+        // production registry entry — so it will not need another
+        // swap when future tickets migrate or rename commands.
+        let mut b = RegistryBuilder::new();
+        b.insert_primary("witness-silent", Arc::new(SilentOkHandler));
+        let registry = Arc::new(b.build());
         let dispatcher = Dispatcher::new(registry);
         let (mut ctx, mut rx) = make_ctx();
 
-        let result = dispatcher.dispatch(&mut ctx, "/cancel");
+        let result = dispatcher.dispatch(&mut ctx, "/witness-silent");
         assert!(result.is_ok(), "recognized command must return Ok");
 
-        // Ensure no error event was emitted.
+        // Ensure no event at all was emitted — both the absence of
+        // `TuiEvent::Error` (we are NOT in the unknown-command branch)
+        // and the absence of any other variant (the test-local
+        // handler is a no-op).
         match rx.try_recv() {
             Err(mpsc::error::TryRecvError::Empty) => {}
             Ok(TuiEvent::Error(msg)) => panic!(

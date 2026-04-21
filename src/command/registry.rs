@@ -508,6 +508,22 @@ use crate::command::usage::{UsageHandler, UsageSnapshot};
 // declare_handler! form; shipped-wins rule preserves zero aliases).
 use crate::command::doctor::DoctorHandler;
 
+// TASK-AGS-POST-6-NO-STUB: ConfigHandler moved to
+// `crate::command::config::ConfigHandler` as a THIN-WRAPPER (same
+// pattern as B24 /compact, /clear). Real async work still lives at
+// `src/command/slash.rs:247`. Byte-identical no-op `Ok(())` with
+// zero emissions. Aliases `&["settings", "prefs"]` PRESERVED per
+// AGS-813 + AGS-817 shipped-wins.
+use crate::command::config::ConfigHandler;
+
+// TASK-AGS-POST-6-NO-STUB: CancelHandler moved to
+// `crate::command::cancel::CancelHandler` as a THIN-WRAPPER (same
+// pattern as B24 /compact, /clear). Byte-identical no-op `Ok(())`
+// with zero emissions. Aliases `&["stop", "abort"]` PRESERVED per
+// AGS-805 + AGS-817 shipped-wins. Silent-no-op UX gap tracked by
+// ticket #91 POST-6-CANCEL-AUDIT (separate follow-up).
+use crate::command::cancel::CancelHandler;
+
 /// Execution context threaded through every command handler.
 ///
 /// Kept deliberately minimal for TASK-AGS-622: the registry's job is
@@ -1184,44 +1200,19 @@ impl RegistryBuilder {
 // The macro below keeps each declaration to a single line so the file
 // stays well under the 500-line budget.
 
-macro_rules! declare_handler {
-    ($struct_name:ident, $description:literal) => {
-        struct $struct_name;
-        impl CommandHandler for $struct_name {
-            fn execute(
-                &self,
-                _ctx: &mut CommandContext,
-                _args: &[String],
-            ) -> anyhow::Result<()> {
-                // TASK-AGS-624 will migrate the real handler body here
-                // from main.rs::handle_slash_command.
-                Ok(())
-            }
-            fn description(&self) -> &str {
-                $description
-            }
-        }
-    };
-    // TASK-AGS-802 arm: handler declared with a static alias slice.
-    ($struct_name:ident, $description:literal, $aliases:expr) => {
-        struct $struct_name;
-        impl CommandHandler for $struct_name {
-            fn execute(
-                &self,
-                _ctx: &mut CommandContext,
-                _args: &[String],
-            ) -> anyhow::Result<()> {
-                Ok(())
-            }
-            fn description(&self) -> &str {
-                $description
-            }
-            fn aliases(&self) -> &'static [&'static str] {
-                $aliases
-            }
-        }
-    };
-}
+// TASK-AGS-POST-6-NO-STUB: `macro_rules! declare_handler` DELETED.
+//
+// The macro-generated no-op stub pattern previously occupied this
+// block (two arms: 2-arg form `[$struct, $description]` and 3-arg form
+// `[$struct, $description, $aliases]`). Its two final residual
+// invocations — ConfigHandler and CancelHandler — have been migrated
+// to THIN-WRAPPER modules (`src/command/config.rs::ConfigHandler` and
+// `src/command/cancel.rs::CancelHandler`) that preserve the exact
+// shipped description + aliases + no-op `Ok(())` execute body. With
+// the macro's callers gone the macro itself is removed to eliminate
+// the "stub handler" concept from the registry entirely. Every
+// registered command now has a real (or byte-identically-wrapped)
+// module under `src/command/`.
 
 // TASK-AGS-POST-6-BODIES-B01-FAST: FastHandler moved to
 // `crate::command::fast` (real impl with body-migrated execute via
@@ -1343,11 +1334,15 @@ macro_rules! declare_handler {
 // TASK-AGS-813: ConfigHandler gains aliases [settings, prefs] via
 // alias-only drift-reconcile (shipped-wins). Spec called for /settings
 // as a primary — body-migrate deferred to a post-Stage-6 ticket.
-declare_handler!(
-    ConfigHandler,
-    "Show or update Archon configuration",
-    &["settings", "prefs"]
-);
+// TASK-AGS-POST-6-NO-STUB: ConfigHandler moved to
+// `crate::command::config::ConfigHandler` as a THIN-WRAPPER (same
+// pattern as B24 /compact and /clear). Real async work still lives at
+// `src/command/slash.rs:247`; this handler's `execute` returns Ok(())
+// WITHOUT emitting any TuiEvent, byte-identical to the deleted
+// `declare_handler!` macro stub. Aliases `&["settings", "prefs"]`
+// PRESERVED per AGS-813 + AGS-817 shipped-wins precedent. Imported at
+// the top of this file. See the insert_primary site below for the
+// `Arc::new(ConfigHandler::new())` wiring.
 // TASK-AGS-817: MemoryHandler moved to `crate::command::memory` (real
 // impl with body-migrated execute via DIRECT pattern — sync
 // `archon_memory::MemoryTrait`, no snapshot/effect-slot needed). The
@@ -1567,11 +1562,16 @@ declare_handler!(
 // CommandContext does not expose `task_service`; the stub returns
 // `Ok(())` consistent with the 37 peer handlers). Aliases `stop` and
 // `abort` route to this handler via the registry alias map.
-declare_handler!(
-    CancelHandler,
-    "Cancel the currently running task",
-    &["stop", "abort"]
-);
+// TASK-AGS-POST-6-NO-STUB: CancelHandler moved to
+// `crate::command::cancel::CancelHandler` as a THIN-WRAPPER (same
+// pattern as B24 /compact and /clear + config.rs ConfigHandler).
+// Byte-identical no-op: `execute` returns `Ok(())` WITHOUT emitting
+// any TuiEvent. The silent-no-op UX gap (no "Cancel requested" / "No
+// task running" feedback) is INTENTIONALLY preserved here — fixing
+// it is ticket #91 POST-6-CANCEL-AUDIT. Aliases `&["stop", "abort"]`
+// PRESERVED per AGS-805 + AGS-817 shipped-wins precedent. Imported at
+// the top of this file. See the insert_primary site below for the
+// `Arc::new(CancelHandler::new())` wiring.
 
 /// Build the default command registry containing every slash command
 /// currently dispatched from `main.rs::handle_slash_command`.
@@ -1595,7 +1595,7 @@ pub(crate) fn default_registry() -> Registry {
     b.insert_primary("status", Arc::new(StatusHandler));
     b.insert_primary("cost", Arc::new(CostHandler));
     b.insert_primary("permissions", Arc::new(PermissionsHandler));
-    b.insert_primary("config", Arc::new(ConfigHandler));
+    b.insert_primary("config", Arc::new(ConfigHandler::new()));
     b.insert_primary("memory", Arc::new(MemoryHandler));
     b.insert_primary("doctor", Arc::new(DoctorHandler::new()));
     b.insert_primary("bug", Arc::new(BugHandler));
@@ -1622,7 +1622,7 @@ pub(crate) fn default_registry() -> Registry {
     b.insert_primary("recall", Arc::new(RecallHandler::new()));
     b.insert_primary("rules", Arc::new(RulesHandler::new()));
     // TASK-AGS-805: /cancel primary (aliases: stop, abort).
-    b.insert_primary("cancel", Arc::new(CancelHandler));
+    b.insert_primary("cancel", Arc::new(CancelHandler::new()));
     // TASK-AGS-816: NEW /voice primary (gap-fix Q4=A, no aliases).
     b.insert_primary("voice", Arc::new(VoiceHandler));
     // Aliases are collected from each handler's aliases() method

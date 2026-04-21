@@ -12,6 +12,7 @@ pub(crate) mod add_dir;
 pub(crate) mod agent;
 pub(crate) mod background;
 pub(crate) mod bug;
+pub(crate) mod cancel;
 pub(crate) mod checkpoint;
 pub(crate) mod clear;
 pub(crate) mod color;
