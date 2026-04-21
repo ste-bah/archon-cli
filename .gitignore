@@ -59,3 +59,11 @@ hello.txt
 !/docs/tui-coverage-baseline.json
 # Exception: phase-3 modularization final report (TUI-329).
 !/docs/tui-modularization-report.md
+# Exception: stage-7.5 audit artifacts (POST-6-METRICS-SWEEP et al.) —
+# permanent Sherlock-verified audit records backing POST-STAGE-6 close.
+# Parent dir must be negated first (git cannot re-include children of an
+# excluded parent); stage-7.5/tickets/ remains ignored via /docs/* above.
+!/docs/stage-7.5/
+/docs/stage-7.5/*
+!/docs/stage-7.5/audits/
+!/docs/stage-7.5/audits/**
