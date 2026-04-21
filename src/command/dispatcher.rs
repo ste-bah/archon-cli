@@ -270,15 +270,20 @@ mod tests {
 
     #[test]
     fn dispatch_recognized_command_returns_ok() {
-        // Uses the real default registry — `/clear` resolves to the
-        // `declare_handler!(ClearHandler, ...)` stub (registry.rs:986)
+        // Uses the real default registry — `/cancel` resolves to the
+        // `declare_handler!(CancelHandler, ...)` stub at registry.rs:1531
         // which returns `Ok(())` without doing any work or emitting
         // events. (Previously used `/fast` → swapped to `/copy` by
-        // TASK-AGS-POST-6-BODIES-B01-FAST; swapped again to `/clear` by
-        // TASK-AGS-POST-6-BODIES-B14-COPY when CopyHandler became a
-        // real impl that returns Err on missing copy_snapshot. Any
-        // still-stub command works; this will need another swap when
-        // /clear is migrated at B24.)
+        // TASK-AGS-POST-6-BODIES-B01-FAST; swapped to `/clear` by
+        // TASK-AGS-POST-6-BODIES-B14-COPY when CopyHandler became a real
+        // impl that returns Err on missing copy_snapshot; swapped to
+        // `/cancel` by TASK-AGS-POST-6-BODIES-B24-COMPACT-CLEAR when
+        // ClearHandler became a real (THIN-WRAPPER no-op) impl — the
+        // pre-announced follow-up swap promised in the prior rustdoc.
+        // `/cancel` is still a declare_handler! stub with aliases
+        // &["stop", "abort"]; the primary name is used here so alias
+        // routing is independent. Any still-stub command works; another
+        // swap will be needed when /cancel is migrated in a later batch.)
         // We assert: (a) dispatch returns Ok, and (b) no
         // `TuiEvent::Error` is emitted (i.e. we did NOT take the
         // "Unknown command" branch).
@@ -286,7 +291,7 @@ mod tests {
         let dispatcher = Dispatcher::new(registry);
         let (mut ctx, mut rx) = make_ctx();
 
-        let result = dispatcher.dispatch(&mut ctx, "/clear");
+        let result = dispatcher.dispatch(&mut ctx, "/cancel");
         assert!(result.is_ok(), "recognized command must return Ok");
 
         // Ensure no error event was emitted.

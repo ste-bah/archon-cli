@@ -257,6 +257,30 @@ use crate::command::recall::RecallHandler;
 // rustdoc for the full R1-R7 invariant list, and the B17 /rename
 // precedent at `src/command/rename.rs`.
 use crate::command::checkpoint::CheckpointHandler;
+// TASK-AGS-POST-6-BODIES-B24-COMPACT-CLEAR: real /clear handler lives
+// in `crate::command::clear` (THIN-WRAPPER body-migrate — byte-identical
+// no-op `Ok(())` with zero emissions, matching the shipped
+// `declare_handler!` stub at registry.rs:1208 pre-B24). Real clear
+// behavior lives UPSTREAM at `src/session.rs:2257`, which intercepts
+// `/clear` before the dispatcher runs because it needs
+// `agent.lock().await` for `clear_conversation` + personality snapshot.
+// Real body-migrate deferred to POST-STAGE-6 (same deferral pattern as
+// AGS-818 /export). Aliases `&["cls"]` PRESERVED per AGS-817 /memory
+// and AGS-818 /export shipped-wins precedent. See `src/command/clear.rs`
+// module rustdoc for full R1..R4 invariant list.
+use crate::command::clear::ClearHandler;
+// TASK-AGS-POST-6-BODIES-B24-COMPACT-CLEAR: real /compact handler lives
+// in `crate::command::compact` (THIN-WRAPPER body-migrate — byte-
+// identical no-op `Ok(())` with zero emissions, matching the shipped
+// `declare_handler!` stub at registry.rs:1207 pre-B24). Real compact
+// behavior lives UPSTREAM at `src/session.rs:2241`, which intercepts
+// `/compact` (and `/compact <sub>`) before the dispatcher runs because
+// it needs `agent.lock().await` for the async `Agent::compact(..)` call.
+// Real body-migrate deferred to POST-STAGE-6 (same deferral pattern as
+// AGS-818 /export). No aliases — shipped stub used the two-arg
+// declare_handler! form. See `src/command/compact.rs` module rustdoc
+// for full R1..R4 invariant list.
+use crate::command::compact::CompactHandler;
 // TASK-AGS-POST-6-BODIES-B19-RULES: real /rules handler lives in
 // `crate::command::rules`. DIRECT-sync-via-MemoryTrait body-migrate
 // (not SNAPSHOT as the B19 task tag suggests — recon proved
@@ -1204,8 +1228,23 @@ macro_rules! declare_handler {
 // DIRECT pattern — sync atomic store on Option<Arc<AtomicBool>>
 // from CommandContext, no snapshot/effect-slot needed). Imported at
 // the top of this file.
-declare_handler!(CompactHandler, "Compact the current conversation history");
-declare_handler!(ClearHandler, "Clear the current conversation", &["cls"]);
+// TASK-AGS-POST-6-BODIES-B24-COMPACT-CLEAR: CompactHandler moved to
+// `crate::command::compact` (THIN-WRAPPER pattern — byte-identical
+// no-op `Ok(())` with zero emissions). Real /compact body lives
+// UPSTREAM at `src/session.rs:2241` which intercepts before the
+// dispatcher runs because it needs `agent.lock().await` for the async
+// `Agent::compact(..)` call. Real body-migrate deferred to
+// POST-STAGE-6 (same deferral as AGS-818 /export). No aliases (shipped
+// stub used the two-arg form). Imported at the top of this file.
+// TASK-AGS-POST-6-BODIES-B24-COMPACT-CLEAR: ClearHandler moved to
+// `crate::command::clear` (THIN-WRAPPER pattern — byte-identical
+// no-op `Ok(())` with zero emissions). Real /clear body lives
+// UPSTREAM at `src/session.rs:2257` which intercepts before the
+// dispatcher runs because it needs `agent.lock().await` for
+// `clear_conversation` + personality snapshot. Real body-migrate
+// deferred to POST-STAGE-6. Aliases `&["cls"]` PRESERVED per AGS-817
+// /memory and AGS-818 /export shipped-wins precedent. Imported at the
+// top of this file.
 // TASK-AGS-818: ExportHandler moved to `crate::command::export` (real
 // impl with CANARY-pattern execute body — session.rs:2409-2480
 // intercepts /export before the handler is reachable, so arrival at
@@ -1544,8 +1583,8 @@ pub(crate) fn default_registry() -> Registry {
     let mut b = RegistryBuilder::new();
     // Primaries FIRST — builder panics on duplicate primary names.
     b.insert_primary("fast", Arc::new(FastHandler));
-    b.insert_primary("compact", Arc::new(CompactHandler));
-    b.insert_primary("clear", Arc::new(ClearHandler));
+    b.insert_primary("compact", Arc::new(CompactHandler::new()));
+    b.insert_primary("clear", Arc::new(ClearHandler::new()));
     b.insert_primary("export", Arc::new(ExportHandler));
     b.insert_primary("thinking", Arc::new(ThinkingHandler));
     b.insert_primary("effort", Arc::new(EffortHandler));

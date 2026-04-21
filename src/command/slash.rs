@@ -94,8 +94,26 @@ pub(crate) async fn handle_slash_command(
         // Registry dispatch at the top of this function reaches
         // FastHandler before this match block; arrival at a `/fast`
         // arm here would indicate a dispatch ordering regression.
-        // /compact and /clear are handled inline in the input processor (need agent access)
-        "/compact" | "/clear" => true,
+        // TASK-AGS-POST-6-BODIES-B24-COMPACT-CLEAR: /compact and /clear
+        // sentinel arm DELETED. Real handler bodies live in
+        // `crate::command::compact::CompactHandler` and
+        // `crate::command::clear::ClearHandler` (THIN-WRAPPER pattern —
+        // both are sync no-ops returning `Ok(())` with zero emissions,
+        // byte-identical to the deleted `declare_handler!` stubs at
+        // registry.rs:1207-1208). The REAL /compact and /clear
+        // conversation-state mutation bodies remain intercepted
+        // UPSTREAM at `src/session.rs:2241` (/compact) and :2257
+        // (/clear) because they need `agent.lock().await` which is
+        // not available in the handler scope — same POST-STAGE-6
+        // deferral pattern as /export (AGS-818). Registry dispatch
+        // at the top of this function reaches Compact/Clear handlers
+        // before this match block; arrival at a /compact or /clear
+        // arm here would indicate a dispatch ordering regression.
+        // Wired at registry.rs:1586 insert_primary("compact",
+        // Arc::new(CompactHandler::new())) and :1587 insert_primary(
+        // "clear", Arc::new(ClearHandler::new())) with `&["cls"]`
+        // alias preserved via the real handler's aliases() method.
+        // See .gates/TASK-AGS-POST-6-BODIES-B24-COMPACT-CLEAR/.
         // TASK-AGS-818: /export body lives in session.rs:2409-2480 — the
         // TUI input loop intercepts /export before reaching this match
         // block because it needs agent.lock().await for conversation
