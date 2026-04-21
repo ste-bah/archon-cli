@@ -654,4 +654,326 @@ mod tests {
             "whitespace input must not emit any event"
         );
     }
+
+    // -----------------------------------------------------------------
+    // TASK-AGS-POST-6-DISPATCH-SMOKE: end-to-end dispatcher coverage.
+    //
+    // The body-migrate stream (B01..B24) finished with 40 primaries
+    // routed through `Dispatcher::dispatch`. The AGS-POST-6-FALLTHROUGH
+    // ticket then deleted the legacy 477-line slash.rs match, leaving
+    // the dispatcher as the single routing authority. What we were
+    // missing up to this point was a loop-the-registry smoke covering
+    // EVERY primary + EVERY alias in one pass. Unit-per-handler tests
+    // (one per command body file) each prove their own slice, but
+    // nothing in the suite pinned "iterate the whole catalog, confirm
+    // none of them hit the dispatch-layer 'Unknown command' branch".
+    //
+    // The four tests below close that gap:
+    //
+    //   * `dispatch_smoke_all_primaries_route_without_unknown_error`
+    //     — loops every registered primary name, dispatches `/{name}`
+    //       with a fresh channel per iteration, and asserts that the
+    //       emitted-event stream contains NO `TuiEvent::Error(msg)`
+    //       whose `msg` begins with `"Unknown command"`. Handler-level
+    //       Err is tolerated (most handlers need populated context
+    //       fields this fixture deliberately leaves at `None`); the
+    //       smoke is strictly a DISPATCH-LAYER miss detector.
+    //
+    //   * `dispatch_smoke_all_aliases_route_without_unknown_error`
+    //     — walks the (primary, alias) space using the same strategy
+    //       as `registry_integration_all_commands_wired` (registry.rs
+    //       :2587) — `registry.names()` + `handler.aliases()` — and
+    //       asserts the same "no dispatch-layer Unknown command" for
+    //       every alias. Closes the contract that the alias map is
+    //       exhaustively reachable via the dispatcher.
+    //
+    //   * `recognizes_smoke_all_primaries_return_true`
+    //     — cheap: for every primary `/{name}`, `recognizes` must be
+    //       true. Pairs with `recognizes_returns_true_for_registered_name`
+    //       (single-sample witness) and lifts it to FULL coverage.
+    //
+    //   * `registry_primary_count_matches_expected_forty`
+    //     — defensive regression guard. If a future refactor silently
+    //       drops or doubles a primary, this fails IMMEDIATELY without
+    //       needing a full dispatch loop. Numeric witness pinned to
+    //       the registry-side `EXPECTED_COMMAND_COUNT = 40` constant
+    //       (registry.rs:1655); changes must land in both places.
+    //
+    // Failure-report strategy mirrors `registry_integration_all_commands_wired`
+    // (registry.rs:2564) — collect-and-report, so a single run surfaces
+    // every broken command/alias simultaneously instead of panicking at
+    // the first failure.
+    // -----------------------------------------------------------------
+
+    /// Canonical primary-count invariant. Mirrors
+    /// `registry::tests::EXPECTED_COMMAND_COUNT` (registry.rs:1655).
+    /// That constant lives behind `#[cfg(test)]` inside `registry.rs`
+    /// and is not re-exported, so we pin the same integer here. If
+    /// either constant moves, BOTH must be updated in lockstep.
+    const EXPECTED_PRIMARY_COUNT: usize = 40;
+
+    /// Drain every currently-queued event from `rx` using `try_recv`
+    /// until the channel reports empty, returning the drained events
+    /// in FIFO order. The smoke tests below call this once per
+    /// dispatch so handler-emitted events do not leak into the next
+    /// iteration.
+    fn drain_events(
+        rx: &mut mpsc::Receiver<archon_tui::app::TuiEvent>,
+    ) -> Vec<archon_tui::app::TuiEvent> {
+        let mut out = Vec::new();
+        loop {
+            match rx.try_recv() {
+                Ok(ev) => out.push(ev),
+                Err(mpsc::error::TryRecvError::Empty) => return out,
+                Err(mpsc::error::TryRecvError::Disconnected) => return out,
+            }
+        }
+    }
+
+    /// Return the first `TuiEvent::Error(msg)` whose `msg` begins with
+    /// `"Unknown command"` — the exact prefix the dispatcher's
+    /// unknown-command branch emits via
+    /// `errors::format_unknown_command` (TASK-AGS-804). Returns `None`
+    /// when the event stream has no dispatch-layer miss, which is the
+    /// smoke-test pass condition.
+    fn first_unknown_command_error(
+        events: &[archon_tui::app::TuiEvent],
+    ) -> Option<String> {
+        events.iter().find_map(|ev| match ev {
+            archon_tui::app::TuiEvent::Error(msg)
+                if msg.starts_with("Unknown command") =>
+            {
+                Some(msg.clone())
+            }
+            _ => None,
+        })
+    }
+
+    /// Drive one `(primary_or_alias, input)` through the dispatcher
+    /// with a fresh channel, wrap the call in `catch_unwind` so
+    /// handler-internal panics (e.g. DenialsHandler's
+    /// `.expect("denial_snapshot populated")` on a stripped fixture —
+    /// denials.rs:151) do NOT abort the whole smoke sweep, and
+    /// return any drained `TuiEvent::Error("Unknown command…")` as a
+    /// failure candidate.
+    ///
+    /// Why `catch_unwind` is sound here:
+    ///   * Several handlers (`DenialsHandler`, `McpHandler`,
+    ///     `CopyHandler`, …) explicitly `.expect()` on missing
+    ///     context fields — the author's stated intent is "panic to
+    ///     surface wiring bugs LOUDLY at test-time". Our dispatcher
+    ///     test fixture deliberately leaves those fields at `None`,
+    ///     so those handlers WILL panic under this smoke. That is
+    ///     out-of-scope for a DISPATCH-LAYER smoke — we only care
+    ///     whether `Dispatcher::dispatch` routed the input to a
+    ///     handler at all (versus emitting the dispatch-layer
+    ///     "Unknown command" error). `catch_unwind` lets us treat
+    ///     "handler ran, then panicked" as SUCCESS for routing —
+    ///     which is what we want.
+    ///   * We pass `AssertUnwindSafe` because `CommandContext` holds
+    ///     a `tokio::sync::mpsc::Sender` which is not
+    ///     `UnwindSafe`. That is fine: the ctx is about to be
+    ///     dropped, and any handler-level panic leaves it in a
+    ///     well-defined state (same-or-fewer events in the channel).
+    ///
+    /// Returns `Some(msg)` if the dispatcher emitted an
+    /// "Unknown command" error (the real failure mode we are
+    /// hunting), otherwise `None` — regardless of whether the
+    /// handler succeeded, returned Err, or panicked.
+    fn smoke_dispatch_detect_unknown_error(
+        dispatcher: &Dispatcher,
+        input: &str,
+    ) -> Option<String> {
+        use std::panic::{catch_unwind, AssertUnwindSafe};
+        let (mut ctx, mut rx) = make_ctx();
+        // NOTE: `catch_unwind` lets a handler panic without aborting
+        // the smoke sweep, but the process-wide panic hook still
+        // runs — so each trapped panic prints a stack header to
+        // stderr. That is acceptable (the output is still a PASS
+        // for cargo) and preferable to `set_hook`/`take_hook` here:
+        // the panic hook is PROCESS-wide, and with `--test-threads=2`
+        // swapping it under the primaries smoke would race the
+        // aliases smoke (or any other concurrently-running test
+        // whose panic output we would then lose). Keeping the
+        // default hook means correctness trumps output quietness.
+        let _result = catch_unwind(AssertUnwindSafe(|| {
+            let _ = dispatcher.dispatch(&mut ctx, input);
+        }));
+        let events = drain_events(&mut rx);
+        first_unknown_command_error(&events)
+    }
+
+    #[test]
+    fn dispatch_smoke_all_primaries_route_without_unknown_error() {
+        // For every primary P registered in `default_registry()`:
+        //   1. Build a fresh `(ctx, rx)` — each iteration needs its
+        //      own channel so event backlog does not leak.
+        //   2. Dispatch `/{P}` with no args, tolerating both
+        //      handler-level `Err` AND handler-level panic (see
+        //      `smoke_dispatch_detect_unknown_error` doc for
+        //      rationale — the dispatcher fixture deliberately
+        //      leaves several context fields `None` so handlers
+        //      that `.expect()` on them will panic, which is OUT
+        //      of scope for a dispatch-layer smoke).
+        //   3. Drain `rx` and record any `TuiEvent::Error(msg)`
+        //      whose `msg` begins with "Unknown command".
+        //
+        // Handler-level `Err` return values (e.g. "FastHandler:
+        // fast_mode_shared not populated" from fast.rs:88 when the
+        // fixture leaves `fast_mode_shared` at None) and handler
+        // panics (e.g. DenialsHandler at denials.rs:151) are both
+        // TOLERATED — the smoke only asserts the dispatcher's
+        // routing layer, not handler preconditions. Neither an Err
+        // return nor a panic emits a `TuiEvent::Error`, so they
+        // cannot trip the check below.
+        let registry = Arc::new(default_registry());
+        let dispatcher = Dispatcher::new(Arc::clone(&registry));
+
+        let mut failures: Vec<String> = Vec::new();
+        for primary_name in registry.names() {
+            let input = format!("/{primary_name}");
+            if let Some(err_msg) =
+                smoke_dispatch_detect_unknown_error(&dispatcher, &input)
+            {
+                failures.push(format!(
+                    "primary '/{primary_name}' produced dispatch-layer \
+                     Unknown command error: {err_msg:?}"
+                ));
+            }
+        }
+
+        assert!(
+            failures.is_empty(),
+            "dispatch_smoke_all_primaries_route_without_unknown_error: \
+             {} primary/primaries failed routing:\n{}",
+            failures.len(),
+            failures.join("\n")
+        );
+    }
+
+    #[test]
+    fn dispatch_smoke_all_aliases_route_without_unknown_error() {
+        // Walk the (primary, alias) space via registry.names() +
+        // handler.aliases() (the same iteration strategy used by
+        // `registry_integration_all_commands_wired` in registry.rs
+        // :2587 — there is no public alias iterator on Registry, so
+        // we reach aliases through their owning primary handler).
+        //
+        // For every alias A on every primary P, dispatch `/{A}` and
+        // assert the dispatch layer did NOT emit an "Unknown command"
+        // TuiEvent::Error. Handler Err and handler panics are both
+        // tolerated (same rationale as the primaries smoke above).
+        let registry = Arc::new(default_registry());
+        let dispatcher = Dispatcher::new(Arc::clone(&registry));
+
+        let mut failures: Vec<String> = Vec::new();
+        let mut alias_total: usize = 0;
+        for primary_name in registry.names() {
+            let handler = match registry.get(primary_name) {
+                Some(h) => h,
+                None => {
+                    failures.push(format!(
+                        "primary '{primary_name}' enumerated via names() \
+                         but missing from registry.get() — should be \
+                         unreachable"
+                    ));
+                    continue;
+                }
+            };
+            for alias in handler.aliases() {
+                alias_total += 1;
+                let input = format!("/{alias}");
+                if let Some(err_msg) =
+                    smoke_dispatch_detect_unknown_error(&dispatcher, &input)
+                {
+                    failures.push(format!(
+                        "alias '/{alias}' (primary '/{primary_name}') \
+                         produced dispatch-layer Unknown command \
+                         error: {err_msg:?}"
+                    ));
+                }
+            }
+        }
+
+        assert!(
+            failures.is_empty(),
+            "dispatch_smoke_all_aliases_route_without_unknown_error: \
+             {} alias(es) failed routing across {} total alias(es) \
+             inspected:\n{}",
+            failures.len(),
+            alias_total,
+            failures.join("\n")
+        );
+    }
+
+    #[test]
+    fn recognizes_smoke_all_primaries_return_true() {
+        // `Dispatcher::recognizes("/{name}")` must return `true` for
+        // every primary registered in `default_registry()`. This
+        // lifts the single-sample `recognizes_returns_true_for_registered_name`
+        // witness to full-catalog coverage without duplicating its
+        // `/fast` assertion.
+        let registry = Arc::new(default_registry());
+        let dispatcher = Dispatcher::new(Arc::clone(&registry));
+
+        let mut failures: Vec<String> = Vec::new();
+        for primary_name in registry.names() {
+            let input = format!("/{primary_name}");
+            if !dispatcher.recognizes(&input) {
+                failures.push(format!(
+                    "recognizes('{input}') returned false — primary \
+                     '/{primary_name}' is registered but the \
+                     dispatcher does not recognise it"
+                ));
+            }
+        }
+
+        assert!(
+            failures.is_empty(),
+            "recognizes_smoke_all_primaries_return_true: \
+             {} primary/primaries failed the recognises check:\n{}",
+            failures.len(),
+            failures.join("\n")
+        );
+    }
+
+    #[test]
+    fn registry_primary_count_matches_expected_forty() {
+        // Defensive regression guard: the registered primary count
+        // MUST equal `EXPECTED_PRIMARY_COUNT` (=40), and the iterator
+        // produced by `Registry::names()` MUST yield exactly that many
+        // distinct names. If a future refactor silently drops or
+        // double-registers a primary this test fails immediately
+        // without a full dispatch sweep. Mirrors
+        // `default_registry_contains_all_commands` in registry.rs
+        // :1658 but lives in the dispatcher test module so the
+        // dispatcher-side coverage guarantee is self-contained.
+        let registry = default_registry();
+        let names: Vec<&'static str> = registry.names();
+
+        assert_eq!(
+            names.len(),
+            EXPECTED_PRIMARY_COUNT,
+            "registry.names().len() = {}, expected \
+             EXPECTED_PRIMARY_COUNT = {} (=40 per registry.rs:1655). \
+             A primary was added or removed without updating this \
+             constant.",
+            names.len(),
+            EXPECTED_PRIMARY_COUNT,
+        );
+
+        // Cross-check: `Registry::len()` and `Registry::names().len()`
+        // must agree. They read the same underlying HashMap but via
+        // different APIs, so a divergence would indicate a map/view
+        // bug introduced by a future refactor.
+        assert_eq!(
+            registry.len(),
+            names.len(),
+            "registry.len() = {} disagrees with registry.names().len() \
+             = {} — the HashMap and its view iterator must report the \
+             same cardinality",
+            registry.len(),
+            names.len(),
+        );
+    }
 }
