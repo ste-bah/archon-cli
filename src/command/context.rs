@@ -164,6 +164,15 @@ pub(crate) async fn build_command_context(
         // &[PathBuf], current: &ArchonConfig)` entry point via
         // `std::slice::from_ref(config_path)`.
         config_path: Some(slash_ctx.config_path.clone()),
+        // TASK-AGS-POST-6-BODIES-B22-LOGIN: /login DIRECT-pattern
+        // consumer. Populated UNCONDITIONALLY here (not gated on the
+        // primary name, same as AGS-815 session_id, AGS-817 memory,
+        // B01-FAST fast_mode_shared, B02-THINKING show_thinking,
+        // B04-DIFF working_dir, B06-HELP skill_registry, B13-GARDEN
+        // garden_config, and B20-RELOAD config_path). `String` clone
+        // is cheap (one heap alloc); the handler includes the label
+        // in the emitted `TuiEvent::TextDelta` message.
+        auth_label: Some(slash_ctx.auth_label.clone()),
         pending_effect: None,
         // TASK-AGS-POST-6-BODIES-B11-EFFORT: SIDECAR slot for the
         // session-local `&mut EffortState` write. Initialised to

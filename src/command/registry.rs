@@ -279,6 +279,22 @@ use crate::command::checkpoint::CheckpointHandler;
 // invariant list, and the B18 /recall precedent at
 // `src/command/recall.rs`.
 use crate::command::rules::RulesHandler;
+// TASK-AGS-POST-6-BODIES-B22-LOGIN: real /login slash-command handler
+// lives in `crate::command::login` (DIRECT body-migrate — sync
+// `dirs::home_dir()` / `.exists()` filesystem probe + string-format +
+// single `ctx.tui_tx.try_send(TuiEvent::TextDelta(msg))` emission; no
+// snapshot, no effect slot). The handler reads a new
+// `CommandContext::auth_label: Option<String>` populated UNCONDITIONALLY
+// by `build_command_context` (AGS-815 / AGS-817 / B20 cross-cutting
+// precedent). Shipped stub `declare_handler!(LoginHandler, "Authenticate
+// against the configured backend")` at registry.rs:1295 is REPLACED by
+// this import + the breadcrumb comment at the old site. No aliases —
+// shipped stub used the 2-arg declare_handler! form. R7 double-fire:
+// the legacy match arm at slash.rs:285-309 stays live through Gates
+// 1-4; Gate 5 deletes it in a separate subagent run. Note: the pre-
+// existing `handle_login` async fn in `crate::command::login` (TUI-325
+// OAuth CLI entry point) is unrelated and untouched.
+use crate::command::login::LoginHandler;
 // TASK-AGS-POST-6-BODIES-B08-DENIALS: real /denials handler lives in
 // `crate::command::denials`. SNAPSHOT-ONLY body-migrate (async
 // `denial_log.lock().await` + sync `DenialLog::format_display(20)` move
@@ -786,6 +802,28 @@ pub(crate) struct CommandContext {
     /// `CommandEffect` variant is required — `/reload` performs its
     /// read-and-diff synchronously inside `execute`.
     pub(crate) config_path: Option<std::path::PathBuf>,
+    /// TASK-AGS-POST-6-BODIES-B22-LOGIN DIRECT-pattern field (/login).
+    ///
+    /// Clone of `SlashCommandContext::auth_label` populated
+    /// UNCONDITIONALLY by `build_command_context` (mirrors the AGS-815
+    /// `session_id`, AGS-817 `memory`, B01-FAST `fast_mode_shared`,
+    /// B02-THINKING `show_thinking`, B04-DIFF `working_dir`, B06-HELP
+    /// `skill_registry`, B13-GARDEN `garden_config`, and B20-RELOAD
+    /// `config_path` cross-cutting precedent — not gated on the
+    /// primary name). `/login` reads it to include the active auth
+    /// method in the emitted `TuiEvent::TextDelta` message (see
+    /// `crate::command::login::LoginHandler::execute`). `String` clone
+    /// per dispatch is cheap (one heap alloc). `None` sentinel
+    /// reserved for test fixtures that construct `CommandContext`
+    /// directly without standing up a full `SlashCommandContext`; in
+    /// those tests the handler observes `None` and returns an
+    /// Err-with-message describing the missing-auth_label condition
+    /// rather than panicking. Matches the AGS-815
+    /// `fork_handler_execute_without_session_id_returns_err` and B20
+    /// `execute_without_config_path_returns_err` pattern. No matching
+    /// `CommandEffect` variant — `/login` is a pure DIRECT-pattern
+    /// read (no async mutex writes back to shared state).
+    pub(crate) auth_label: Option<String>,
     /// TASK-AGS-808 effect-slot field (WRITE side of /model and future
     /// write-tickets).
     ///
@@ -1292,7 +1330,19 @@ declare_handler!(
 // stub used the two-arg declare_handler! form (no aliases slice) and
 // spec lists none. See .gates/TASK-AGS-POST-6-BODIES-B08-DENIALS/ for
 // the full gate trail.
-declare_handler!(LoginHandler, "Authenticate against the configured backend");
+// TASK-AGS-POST-6-BODIES-B22-LOGIN: LoginHandler moved to
+// `crate::command::login` (real impl with body-migrated execute via
+// DIRECT pattern — sync filesystem probe `dirs::home_dir().join(".archon")
+// .join(".credentials.json").exists()` + byte-identical message build
+// + single `ctx.tui_tx.try_send(TuiEvent::TextDelta(msg))` emission
+// replaces the `tui_tx.send(..).await` call that lived in the legacy
+// slash.rs:285-309 match arm). Imported at the top of this file. No
+// aliases — shipped stub used the 2-arg declare_handler! form (no
+// aliases slice) and spec lists none. Adds a new
+// `CommandContext::auth_label: Option<String>` field populated
+// UNCONDITIONALLY by `build_command_context` (AGS-815 session_id /
+// AGS-817 memory / B20 config_path cross-cutting precedent). See
+// .gates/TASK-AGS-POST-6-BODIES-B22-LOGIN/ for the full gate trail.
 // TASK-AGS-POST-6-BODIES-B05-VIM: VimHandler moved to
 // `crate::command::vim` (real impl with body-migrated execute via
 // DIRECT pattern — emit-only sync handler). Imported at the top of
@@ -1480,7 +1530,7 @@ pub(crate) fn default_registry() -> Registry {
     b.insert_primary("bug", Arc::new(BugHandler));
     b.insert_primary("diff", Arc::new(DiffHandler));
     b.insert_primary("denials", Arc::new(DenialsHandler));
-    b.insert_primary("login", Arc::new(LoginHandler));
+    b.insert_primary("login", Arc::new(LoginHandler::new()));
     b.insert_primary("vim", Arc::new(VimHandler));
     b.insert_primary("usage", Arc::new(UsageHandler::new()));
     b.insert_primary("tasks", Arc::new(TasksHandler));

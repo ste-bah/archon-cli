@@ -386,6 +386,7 @@ mod tests {
                 doctor_snapshot: snapshot,
                 usage_snapshot: None,
                 config_path: None,
+                auth_label: None,
                 pending_effect: None,
                 pending_effort_set: None,
             },

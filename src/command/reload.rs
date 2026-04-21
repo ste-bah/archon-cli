@@ -259,6 +259,7 @@ mod tests {
                 doctor_snapshot: None,
                 usage_snapshot: None,
                 config_path,
+                auth_label: None,
                 pending_effect: None,
                 pending_effort_set: None,
             },

@@ -283,30 +283,22 @@ pub(crate) async fn handle_slash_command(
         // "denials"). Option 3 default arm at slash.rs:909 returns
         // true for every dispatcher-routed command.
         // ── /login ─────────────────────────────────────────────
-        "/login" => {
-            let cred_path = dirs::home_dir()
-                .unwrap_or_default()
-                .join(".archon")
-                .join(".credentials.json");
-            let mut msg = String::from("\nAuthentication status:\n");
-            msg.push_str(&format!("  Method: {}\n", ctx.auth_label));
-            if cred_path.exists() {
-                msg.push_str(&format!("  Credentials: {}\n", cred_path.display()));
-                msg.push_str("  Status: authenticated\n\n");
-                msg.push_str("  To re-authenticate, run in another terminal:\n");
-                msg.push_str("    archon login\n");
-            } else {
-                msg.push_str("  Credentials: not found\n");
-                msg.push_str("  Status: using API key or not authenticated\n\n");
-                msg.push_str("  To authenticate with OAuth:\n");
-                msg.push_str("    1. Exit this session (Ctrl+D)\n");
-                msg.push_str("    2. Run: archon login\n");
-                msg.push_str("    3. Follow the browser flow\n");
-                msg.push_str("    4. Restart archon\n");
-            }
-            let _ = tui_tx.send(TuiEvent::TextDelta(msg)).await;
-            true
-        }
+        // TASK-AGS-POST-6-BODIES-B22-LOGIN: body migrated to
+        // `crate::command::login::LoginHandler` (DIRECT pattern — sync
+        // `impl CommandHandler` consumes new
+        // `CommandContext::auth_label: Option<String>` field added at
+        // registry.rs:826 and unconditionally populated at
+        // context.rs:175 per AGS-815 /fork session_id precedent; no
+        // credential I/O needed — recon of legacy arm here proved it
+        // was a pure `dirs::home_dir()`+`.exists()` status display.
+        // 8 push_str branches (4 authenticated + 4 not-authenticated,
+        // including header + Method line) emitted byte-identical as a
+        // single `TuiEvent::TextDelta` via `try_send`. Dispatcher
+        // routes `/login` through Registry at registry.rs:1533
+        // (`insert_primary("login", Arc::new(LoginHandler::new()))`);
+        // import at :297, breadcrumb at :1333. Default arm at
+        // slash.rs (drifted position) still returns `true`.
+        // See .gates/TASK-AGS-POST-6-BODIES-B22-LOGIN/.
         // ── /vim ───────────────────────────────────────────────
         // TASK-AGS-POST-6-BODIES-B05-VIM: body migrated to
         // `crate::command::vim::VimHandler` (Option C DIRECT pattern —
