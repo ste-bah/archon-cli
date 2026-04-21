@@ -1,5 +1,16 @@
 //! Slash command registry.
 //!
+//! # Breadcrumb line-number conventions (POST-STAGE-6)
+//!
+//! Comment-level `registry.rs:NNN` and `slash.rs:NNN` references
+//! throughout the command/ module are historical — they cite the
+//! SHIPPED line of a declare_handler! stub (pre-POST-6-NO-STUB) or
+//! a shipped match-arm body in slash.rs (pre-POST-6-FALLTHROUGH).
+//! The cited content has been deleted/relocated by the
+//! POST-STAGE-6 migration stream (B01-B24 + POST-6-NO-STUB +
+//! POST-6-FALLTHROUGH + POST-6-DISPATCH-SMOKE). For current
+//! locations, grep by symbol name rather than line number.
+//!
 //! TASK-AGS-622: typed command table. Replaces the implicit mapping
 //! embedded in `handle_slash_command`'s monolithic `match` block with
 //! an explicit `HashMap<&'static str, Arc<dyn CommandHandler>>`.
@@ -149,7 +160,7 @@ use crate::command::bug::BugHandler;
 // `crate::command::diff`. DIRECT with-effect body-migrate (sync handler
 // stashes `CommandEffect::RunGitDiffStat(PathBuf)`; dispatch-site
 // `apply_effect` awaits the existing `handle_diff_command` helper at
-// slash.rs:961 which spawns `git diff --stat` via tokio::process).
+// slash.rs:120 which spawns `git diff --stat` via tokio::process).
 // Subprocess await requires the effect-slot indirection — cannot run
 // inside sync `CommandHandler::execute`. The handler reads
 // `Option<PathBuf>` from a new `CommandContext::working_dir` field

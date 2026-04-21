@@ -84,7 +84,7 @@ pub(crate) async fn handle_slash_command(
         // TASK-AGS-POST-6-BODIES-B04-DIFF: `tui_tx` threaded into
         // `apply_effect` so the RunGitDiffStat variant can call the
         // existing LIVE `handle_diff_command(tui_tx, &path)` helper
-        // at slash.rs:961 without having to clone the sender into the
+        // at slash.rs:120 without having to clone the sender into the
         // effect variant itself. Prior signature `(effect, slash_ctx)`
         // stays wire-compatible for SetModelOverride (which ignores
         // `tui_tx`).

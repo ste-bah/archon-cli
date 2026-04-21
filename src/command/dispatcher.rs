@@ -682,7 +682,7 @@ mod tests {
     //   * `dispatch_smoke_all_aliases_route_without_unknown_error`
     //     — walks the (primary, alias) space using the same strategy
     //       as `registry_integration_all_commands_wired` (registry.rs
-    //       :2587) — `registry.names()` + `handler.aliases()` — and
+    //       :2597) — `registry.names()` + `handler.aliases()` — and
     //       asserts the same "no dispatch-layer Unknown command" for
     //       every alias. Closes the contract that the alias map is
     //       exhaustively reachable via the dispatcher.
@@ -856,7 +856,7 @@ mod tests {
         // Walk the (primary, alias) space via registry.names() +
         // handler.aliases() (the same iteration strategy used by
         // `registry_integration_all_commands_wired` in registry.rs
-        // :2587 — there is no public alias iterator on Registry, so
+        // :2597 — there is no public alias iterator on Registry, so
         // we reach aliases through their owning primary handler).
         //
         // For every alias A on every primary P, dispatch `/{A}` and
