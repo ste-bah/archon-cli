@@ -126,7 +126,7 @@ impl CommandHandler for ExportHandler {
                     // Byte-identical to former session.rs:2417 —
                     // the parse error surfaces the archon_session
                     // error string directly.
-                    let _ = ctx.tui_tx.try_send(TuiEvent::Error(e));
+                    ctx.emit(TuiEvent::Error(e));
                     return Ok(());
                 }
             }
@@ -154,7 +154,7 @@ impl CommandHandler for ExportHandler {
                 *slot.lock().unwrap() = Some(desc);
             }
             None => {
-                let _ = ctx.tui_tx.try_send(TuiEvent::Error(
+                ctx.emit(TuiEvent::Error(
                     "export slot not wired on CommandContext; \
                      this is a dispatcher wiring regression — report it"
                         .to_string(),

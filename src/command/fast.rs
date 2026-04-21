@@ -103,7 +103,7 @@ impl CommandHandler for FastHandler {
         } else {
             "Fast mode DISABLED. Back to normal quality."
         };
-        let _ = ctx.tui_tx.try_send(TuiEvent::TextDelta(format!("\n{msg}\n")));
+        ctx.emit(TuiEvent::TextDelta(format!("\n{msg}\n")));
         Ok(())
     }
 

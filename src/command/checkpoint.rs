@@ -172,7 +172,7 @@ impl CommandHandler for CheckpointHandler {
             match archon_session::checkpoint::CheckpointStore::open(&ckpt_path) {
                 Ok(store) => match store.list_modified(session_id) {
                     Ok(snapshots) if snapshots.is_empty() => {
-                        let _ = ctx.tui_tx.try_send(TuiEvent::TextDelta(
+                        ctx.emit(TuiEvent::TextDelta(
                             "\nNo checkpoints for this session.\n".into(),
                         ));
                     }
@@ -187,16 +187,16 @@ impl CommandHandler for CheckpointHandler {
                                 s.timestamp
                             ));
                         }
-                        let _ = ctx.tui_tx.try_send(TuiEvent::TextDelta(out));
+                        ctx.emit(TuiEvent::TextDelta(out));
                     }
                     Err(e) => {
-                        let _ = ctx.tui_tx.try_send(TuiEvent::Error(format!(
+                        ctx.emit(TuiEvent::Error(format!(
                             "Checkpoint list error: {e}"
                         )));
                     }
                 },
                 Err(e) => {
-                    let _ = ctx.tui_tx.try_send(TuiEvent::Error(format!(
+                    ctx.emit(TuiEvent::Error(format!(
                         "Checkpoint store error: {e}"
                     )));
                 }
@@ -205,32 +205,32 @@ impl CommandHandler for CheckpointHandler {
             arg.strip_prefix("restore").map(|s| s.trim())
         {
             if file_path.is_empty() {
-                let _ = ctx.tui_tx.try_send(TuiEvent::Error(
+                ctx.emit(TuiEvent::Error(
                     "Usage: /checkpoint restore <file_path>".into(),
                 ));
             } else {
                 match archon_session::checkpoint::CheckpointStore::open(&ckpt_path) {
                     Ok(store) => match store.restore(session_id, file_path) {
                         Ok(()) => {
-                            let _ = ctx.tui_tx.try_send(TuiEvent::TextDelta(
+                            ctx.emit(TuiEvent::TextDelta(
                                 format!("\nRestored: {file_path}\n"),
                             ));
                         }
                         Err(e) => {
-                            let _ = ctx.tui_tx.try_send(TuiEvent::Error(
+                            ctx.emit(TuiEvent::Error(
                                 format!("Restore failed: {e}"),
                             ));
                         }
                     },
                     Err(e) => {
-                        let _ = ctx.tui_tx.try_send(TuiEvent::Error(format!(
+                        ctx.emit(TuiEvent::Error(format!(
                             "Checkpoint store error: {e}"
                         )));
                     }
                 }
             }
         } else {
-            let _ = ctx.tui_tx.try_send(TuiEvent::TextDelta(
+            ctx.emit(TuiEvent::TextDelta(
                 "\nUsage: /checkpoint list | /checkpoint restore <file_path>\n"
                     .into(),
             ));

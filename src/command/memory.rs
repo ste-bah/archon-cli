@@ -181,7 +181,7 @@ impl CommandHandler for MemoryHandler {
         match subcmd {
             "" | "list" => match memory.list_recent(10) {
                 Ok(memories) if memories.is_empty() => {
-                    let _ = ctx.tui_tx.try_send(TuiEvent::TextDelta(
+                    ctx.emit(TuiEvent::TextDelta(
                         "\nNo memories stored.\n".into(),
                     ));
                 }
@@ -197,24 +197,24 @@ impl CommandHandler for MemoryHandler {
                             mtype = m.memory_type,
                         ));
                     }
-                    let _ = ctx.tui_tx.try_send(TuiEvent::TextDelta(out));
+                    ctx.emit(TuiEvent::TextDelta(out));
                 }
                 Err(e) => {
-                    let _ = ctx.tui_tx.try_send(TuiEvent::Error(format!(
+                    ctx.emit(TuiEvent::Error(format!(
                         "Memory graph error: {e}"
                     )));
                 }
             },
             "search" => {
                 if arg.is_empty() {
-                    let _ = ctx.tui_tx.try_send(TuiEvent::Error(
+                    ctx.emit(TuiEvent::Error(
                         "Usage: /memory search <query>".into(),
                     ));
                     return Ok(());
                 }
                 match memory.recall_memories(arg, 10) {
                     Ok(results) if results.is_empty() => {
-                        let _ = ctx.tui_tx.try_send(TuiEvent::TextDelta(
+                        ctx.emit(TuiEvent::TextDelta(
                             format!("\nNo memories matching \"{arg}\".\n"),
                         ));
                     }
@@ -231,10 +231,10 @@ impl CommandHandler for MemoryHandler {
                                 snippet = truncate_str(&m.content, 80),
                             ));
                         }
-                        let _ = ctx.tui_tx.try_send(TuiEvent::TextDelta(out));
+                        ctx.emit(TuiEvent::TextDelta(out));
                     }
                     Err(e) => {
-                        let _ = ctx.tui_tx.try_send(TuiEvent::Error(
+                        ctx.emit(TuiEvent::Error(
                             format!("Memory search error: {e}"),
                         ));
                     }
@@ -242,18 +242,18 @@ impl CommandHandler for MemoryHandler {
             }
             "clear" => match memory.clear_all() {
                 Ok(n) => {
-                    let _ = ctx.tui_tx.try_send(TuiEvent::TextDelta(format!(
+                    ctx.emit(TuiEvent::TextDelta(format!(
                         "\nCleared {n} memories from the graph.\n"
                     )));
                 }
                 Err(e) => {
-                    let _ = ctx.tui_tx.try_send(TuiEvent::Error(format!(
+                    ctx.emit(TuiEvent::Error(format!(
                         "Failed to clear memories: {e}"
                     )));
                 }
             },
             other => {
-                let _ = ctx.tui_tx.try_send(TuiEvent::Error(format!(
+                ctx.emit(TuiEvent::Error(format!(
                     "Unknown memory subcommand: {other}. Use list, \
                      search, or clear."
                 )));

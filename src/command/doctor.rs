@@ -328,7 +328,7 @@ impl CommandHandler for DoctorHandler {
             )
         })?;
 
-        let _ = ctx.tui_tx.try_send(TuiEvent::TextDelta(snap.text.clone()));
+        ctx.emit(TuiEvent::TextDelta(snap.text.clone()));
         Ok(())
     }
 

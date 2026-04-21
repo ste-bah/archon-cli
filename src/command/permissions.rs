@@ -282,7 +282,7 @@ impl CommandHandler for PermissionsHandler {
             let msg = format!(
                 "\nCurrent permission mode: {mode}\nUsage: /permissions <mode>\nModes: default, acceptEdits, plan, auto, dontAsk, bypassPermissions\nLegacy aliases: ask -> default, yolo -> bypassPermissions\n"
             );
-            let _ = ctx.tui_tx.try_send(TuiEvent::TextDelta(msg));
+            ctx.emit(TuiEvent::TextDelta(msg));
             return Ok(());
         }
 
@@ -307,7 +307,7 @@ impl CommandHandler for PermissionsHandler {
                 if resolved == "bypassPermissions" && !snap.allow_bypass_permissions {
                     // Bypass-blocked branch — byte-identical error
                     // string from shipped slash.rs:315.
-                    let _ = ctx.tui_tx.try_send(TuiEvent::Error(
+                    ctx.emit(TuiEvent::Error(
                         "bypassPermissions requires --allow-dangerously-skip-permissions flag"
                             .into(),
                     ));
@@ -317,7 +317,7 @@ impl CommandHandler for PermissionsHandler {
                 // Emit confirmation TextDelta BEFORE stashing the
                 // effect (matches B10/B11 emission-order swap — see R6
                 // in module rustdoc).
-                let _ = ctx.tui_tx.try_send(TuiEvent::TextDelta(format!(
+                ctx.emit(TuiEvent::TextDelta(format!(
                     "\nPermission mode set to {resolved}.\n"
                 )));
 
@@ -329,7 +329,7 @@ impl CommandHandler for PermissionsHandler {
             }
             Err(msg) => {
                 // Pass the validator's error string through unchanged.
-                let _ = ctx.tui_tx.try_send(TuiEvent::Error(msg));
+                ctx.emit(TuiEvent::Error(msg));
             }
         }
         Ok(())

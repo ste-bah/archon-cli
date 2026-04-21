@@ -956,6 +956,46 @@ pub(crate) struct CommandContext {
     >,
 }
 
+// TASK-AGS-POST-6-TRY-SEND: wraps `tui_tx.try_send` at every handler
+// call site so the copy-paste `let _ = ctx.tui_tx.try_send(...)` pattern
+// collapses to `ctx.emit(...)` while also distinguishing `Full` (warn —
+// benign backpressure on the 256-slot prod buffer) from `Closed`
+// (error — the TUI receiver task has died). Happy-path delivery is
+// byte-identical to the shipped `let _ = try_send(...)` behavior.
+impl CommandContext {
+    /// Deliver a [`TuiEvent`] to the TUI channel. Logs on failure;
+    /// never panics.
+    ///
+    /// Semantics match [`tokio::sync::mpsc::Sender::try_send`]: success
+    /// is best-effort delivery to a 256-slot bounded channel (prod
+    /// buffer in `session.rs`). NO retry, NO `.await` — this is called
+    /// from sync [`CommandHandler::execute`] bodies where any blocking
+    /// wait would deadlock the tokio runtime that owns the calling
+    /// task. [`TrySendError::Full`](tokio::sync::mpsc::error::TrySendError::Full)
+    /// emits a `tracing::warn!` and drops the event (matches the
+    /// shipped silent-drop); [`TrySendError::Closed`](tokio::sync::mpsc::error::TrySendError::Closed)
+    /// emits a `tracing::error!` and drops the event (TUI receiver
+    /// task is dead — operator-visible terminal state).
+    pub(crate) fn emit(&self, event: TuiEvent) {
+        use tokio::sync::mpsc::error::TrySendError;
+        match self.tui_tx.try_send(event) {
+            Ok(()) => {}
+            Err(TrySendError::Full(_)) => {
+                tracing::warn!(
+                    target: "archon_cli::command::tui",
+                    "tui_tx full (256-slot buffer saturated) — event dropped"
+                );
+            }
+            Err(TrySendError::Closed(_)) => {
+                tracing::error!(
+                    target: "archon_cli::command::tui",
+                    "tui_tx closed — TUI receiver task is dead"
+                );
+            }
+        }
+    }
+}
+
 /// Side-effect descriptors produced synchronously by
 /// [`CommandHandler::execute`] and applied asynchronously after
 /// dispatch returns.
@@ -2716,5 +2756,115 @@ mod tests {
             failures.len(),
             failures.join("\n")
         );
+    }
+
+    // -----------------------------------------------------------------
+    // TASK-AGS-POST-6-TRY-SEND — CommandContext::emit helper tests.
+    //
+    // The `emit` helper wraps `tui_tx.try_send` at 105 call sites across
+    // 34 files under src/command/, trading the copy-paste `let _ =
+    // tui_tx.try_send(...)` pattern for a single method that
+    // distinguishes `TrySendError::Full` (warn — benign backpressure on
+    // the 256-slot prod buffer) from `TrySendError::Closed` (error —
+    // the TUI receiver task is dead).
+    //
+    // Three tests cover the three match arms: Ok, Full, Closed. None
+    // use `CtxBuilder` directly — the Full branch needs a buffer-1
+    // channel (builder uses 16), and every test wants the full
+    // `CommandContext` literal so that any future field addition causes
+    // a localized compile error here rather than a silent drop.
+    // -----------------------------------------------------------------
+
+    /// Construct a minimal `CommandContext` with a caller-supplied
+    /// `(Sender, Receiver)` pair. Every snapshot / shared-state field
+    /// is `None` — emit() only touches `tui_tx`, so the other fields
+    /// are irrelevant and kept uninitialized to avoid dragging in
+    /// archon-memory / archon-core fixture deps.
+    fn make_emit_test_ctx(
+        tui_tx: tokio::sync::mpsc::Sender<TuiEvent>,
+    ) -> CommandContext {
+        CommandContext {
+            tui_tx,
+            status_snapshot: None,
+            model_snapshot: None,
+            cost_snapshot: None,
+            mcp_snapshot: None,
+            context_snapshot: None,
+            session_id: None,
+            memory: None,
+            garden_config: None,
+            fast_mode_shared: None,
+            show_thinking: None,
+            working_dir: None,
+            skill_registry: None,
+            denial_snapshot: None,
+            effort_snapshot: None,
+            permissions_snapshot: None,
+            copy_snapshot: None,
+            doctor_snapshot: None,
+            usage_snapshot: None,
+            config_path: None,
+            auth_label: None,
+            pending_effect: None,
+            pending_effort_set: None,
+            pending_export: None,
+        }
+    }
+
+    /// Happy path — emit pushes the event into the channel and a
+    /// subsequent `try_recv` observes it byte-equivalent.
+    #[test]
+    fn emit_happy_path_delivers_event() {
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<TuiEvent>(4);
+        let ctx = make_emit_test_ctx(tx);
+
+        ctx.emit(TuiEvent::TextDelta("hello".to_string()));
+
+        match rx.try_recv() {
+            Ok(TuiEvent::TextDelta(s)) => assert_eq!(s, "hello"),
+            other => panic!(
+                "expected Ok(TextDelta(\"hello\")), got {other:?}"
+            ),
+        }
+    }
+
+    /// Full-channel branch — construct a buffer-1 channel, fill it,
+    /// then call `emit` again. Must not panic; second event is
+    /// silently dropped (production behavior matches shipped `let _ =
+    /// try_send`). The `tracing::warn!` call is fire-and-forget; we
+    /// only assert the no-panic + drop-semantics contract.
+    #[test]
+    fn emit_full_channel_warns_and_does_not_panic() {
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<TuiEvent>(1);
+        let ctx = make_emit_test_ctx(tx);
+
+        // Fill the 1-slot buffer.
+        ctx.emit(TuiEvent::TextDelta("first".to_string()));
+        // Second emit hits Full — must return without panicking.
+        ctx.emit(TuiEvent::TextDelta("second (dropped)".to_string()));
+
+        // The first event is still sitting in the buffer; the second
+        // was dropped. Drain and verify.
+        match rx.try_recv() {
+            Ok(TuiEvent::TextDelta(s)) => assert_eq!(s, "first"),
+            other => panic!("expected first event buffered, got {other:?}"),
+        }
+        assert!(
+            rx.try_recv().is_err(),
+            "second event should have been dropped on Full"
+        );
+    }
+
+    /// Closed-channel branch — drop the receiver before calling emit.
+    /// Must not panic; event is silently dropped.
+    #[test]
+    fn emit_closed_channel_errors_and_does_not_panic() {
+        let (tx, rx) = tokio::sync::mpsc::channel::<TuiEvent>(4);
+        drop(rx);
+        let ctx = make_emit_test_ctx(tx);
+
+        // Receiver is gone — try_send returns Closed. emit must not
+        // panic and must not propagate the error.
+        ctx.emit(TuiEvent::TextDelta("orphaned".to_string()));
     }
 }

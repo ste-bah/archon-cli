@@ -116,7 +116,7 @@ impl CommandHandler for ResumeHandler {
                     {
                         Ok(results) => {
                             if results.is_empty() {
-                                let _ = ctx.tui_tx.try_send(TuiEvent::TextDelta(
+                                ctx.emit(TuiEvent::TextDelta(
                                     "\nNo previous sessions found.\n".into(),
                                 ));
                             } else {
@@ -145,7 +145,7 @@ impl CommandHandler for ResumeHandler {
                             }
                         }
                         Err(e) => {
-                            let _ = ctx.tui_tx.try_send(TuiEvent::Error(
+                            ctx.emit(TuiEvent::Error(
                                 format!("Search failed: {e}"),
                             ));
                         }
@@ -155,7 +155,7 @@ impl CommandHandler for ResumeHandler {
                     //     Shipped behaviour at slash.rs:694-716.
                     match archon_session::naming::resolve_by_name(&store, arg) {
                         Ok(Some(meta)) => {
-                            let _ = ctx.tui_tx.try_send(TuiEvent::TextDelta(
+                            ctx.emit(TuiEvent::TextDelta(
                                 format!(
                                     "\nSession found: {}\nRestart with: \
                                      archon --resume {}\n",
@@ -164,7 +164,7 @@ impl CommandHandler for ResumeHandler {
                             ));
                         }
                         Ok(None) => {
-                            let _ = ctx.tui_tx.try_send(TuiEvent::TextDelta(
+                            ctx.emit(TuiEvent::TextDelta(
                                 format!(
                                     "\nNo session matching '{arg}'. Use \
                                      /sessions to list.\n"
@@ -172,7 +172,7 @@ impl CommandHandler for ResumeHandler {
                             ));
                         }
                         Err(e) => {
-                            let _ = ctx.tui_tx.try_send(TuiEvent::Error(
+                            ctx.emit(TuiEvent::Error(
                                 format!("Lookup failed: {e}"),
                             ));
                         }
@@ -180,7 +180,7 @@ impl CommandHandler for ResumeHandler {
                 }
             }
             Err(e) => {
-                let _ = ctx.tui_tx.try_send(TuiEvent::Error(format!(
+                ctx.emit(TuiEvent::Error(format!(
                     "Session store error: {e}"
                 )));
             }

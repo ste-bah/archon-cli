@@ -196,7 +196,7 @@ impl CommandHandler for AddDirHandler {
                 // at slash.rs — no borrow on ctx lifetime.
                 ctx.pending_effect =
                     Some(CommandEffect::AddExtraDir(path.clone()));
-                let _ = ctx.tui_tx.try_send(TuiEvent::TextDelta(format!(
+                ctx.emit(TuiEvent::TextDelta(format!(
                     "\nAdded '{}' to working directories for this session.\nFiles in this directory are now accessible.\n",
                     path.display()
                 )));
@@ -204,7 +204,7 @@ impl CommandHandler for AddDirHandler {
                 // Invalid directory — emit Error with byte-identical
                 // shipped format at slash.rs:685-687. NO effect stashed
                 // so `apply_effect` is never invoked for this branch.
-                let _ = ctx.tui_tx.try_send(TuiEvent::Error(format!(
+                ctx.emit(TuiEvent::Error(format!(
                     "Directory not found: {path_arg}"
                 )));
             }

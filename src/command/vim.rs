@@ -66,11 +66,11 @@ impl CommandHandler for VimHandler {
         //
         // 1. Canonical toggle signal — TUI owns the vim-mode bool and
         //    flips it on receipt of VimToggle.
-        let _ = ctx.tui_tx.try_send(TuiEvent::VimToggle);
+        ctx.emit(TuiEvent::VimToggle);
 
         // 2. Persist-hint TextDelta — byte-identical to the shipped
         //    literal at slash.rs:411.
-        let _ = ctx.tui_tx.try_send(TuiEvent::TextDelta(
+        ctx.emit(TuiEvent::TextDelta(
             "\nVim mode toggled. To persist: set vim_mode = true under [tui] in config.toml\n"
                 .to_string(),
         ));

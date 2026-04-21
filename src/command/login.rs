@@ -223,7 +223,7 @@ impl CommandHandler for LoginHandler {
         // methods; best-effort `try_send` matches B17 /rename + B20
         // /reload precedent (dropping a UI message under channel
         // backpressure is preferable to stalling the dispatcher).
-        let _ = ctx.tui_tx.try_send(TuiEvent::TextDelta(msg));
+        ctx.emit(TuiEvent::TextDelta(msg));
         Ok(())
     }
 

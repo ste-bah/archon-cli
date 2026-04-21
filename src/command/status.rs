@@ -139,7 +139,7 @@ impl CommandHandler for StatusHandler {
         // Sync try_send analogous to /tasks precedent (AGS-806). Channel
         // full/closed is best-effort — dropping a status line under
         // backpressure is preferable to stalling the input pipeline.
-        let _ = ctx.tui_tx.try_send(TuiEvent::TextDelta(msg));
+        ctx.emit(TuiEvent::TextDelta(msg));
         Ok(())
     }
 

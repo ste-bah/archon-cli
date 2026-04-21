@@ -270,7 +270,7 @@ impl CommandHandler for UsageHandler {
         // Sync try_send analogous to /cost, /status, /model, /doctor
         // precedent. Dropping a /usage line under backpressure is
         // preferable to stalling the input pipeline.
-        let _ = ctx.tui_tx.try_send(TuiEvent::TextDelta(msg));
+        ctx.emit(TuiEvent::TextDelta(msg));
         Ok(())
     }
 

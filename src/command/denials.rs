@@ -154,7 +154,7 @@ impl CommandHandler for DenialsHandler {
             );
 
         // Byte-identical to shipped slash.rs:379-381: `format!("\n{text}\n")`.
-        let _ = ctx.tui_tx.try_send(TuiEvent::TextDelta(format!(
+        ctx.emit(TuiEvent::TextDelta(format!(
             "\n{text}\n",
             text = snapshot.formatted
         )));

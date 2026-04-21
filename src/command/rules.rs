@@ -204,7 +204,7 @@ impl CommandHandler for RulesHandler {
             // slash.rs:595-618.
             match engine.get_rules_sorted() {
                 Ok(rules) if rules.is_empty() => {
-                    let _ = ctx.tui_tx.try_send(TuiEvent::TextDelta(
+                    ctx.emit(TuiEvent::TextDelta(
                         "\nNo behavioral rules.\n".into(),
                     ));
                 }
@@ -218,11 +218,10 @@ impl CommandHandler for RulesHandler {
                             r.score, r.text
                         ));
                     }
-                    let _ =
-                        ctx.tui_tx.try_send(TuiEvent::TextDelta(out));
+                    ctx.emit(TuiEvent::TextDelta(out));
                 }
                 Err(e) => {
-                    let _ = ctx.tui_tx.try_send(TuiEvent::Error(
+                    ctx.emit(TuiEvent::Error(
                         format!("rules list failed: {e}"),
                     ));
                 }
@@ -233,7 +232,7 @@ impl CommandHandler for RulesHandler {
             // of shipped format strings at slash.rs:619-663.
             let parts: Vec<&str> = rest.splitn(2, ' ').collect();
             if parts.len() < 2 {
-                let _ = ctx.tui_tx.try_send(TuiEvent::Error(
+                ctx.emit(TuiEvent::Error(
                     "Usage: /rules edit <id> <new text>".into(),
                 ));
             } else {
@@ -247,14 +246,14 @@ impl CommandHandler for RulesHandler {
                         {
                             match engine.update_rule(&rule.id, new_text) {
                                 Ok(()) => {
-                                    let _ = ctx.tui_tx.try_send(
+                                    ctx.emit(
                                         TuiEvent::TextDelta(format!(
                                             "\nRule updated: {new_text}\n"
                                         )),
                                     );
                                 }
                                 Err(e) => {
-                                    let _ = ctx.tui_tx.try_send(
+                                    ctx.emit(
                                         TuiEvent::Error(format!(
                                             "update_rule failed: {e}"
                                         )),
@@ -262,7 +261,7 @@ impl CommandHandler for RulesHandler {
                                 }
                             }
                         } else {
-                            let _ = ctx.tui_tx.try_send(TuiEvent::Error(
+                            ctx.emit(TuiEvent::Error(
                                 format!(
                                     "No rule matching ID prefix '{id_prefix}'"
                                 ),
@@ -270,7 +269,7 @@ impl CommandHandler for RulesHandler {
                         }
                     }
                     Err(e) => {
-                        let _ = ctx.tui_tx.try_send(TuiEvent::Error(
+                        ctx.emit(TuiEvent::Error(
                             format!("rules lookup failed: {e}"),
                         ));
                     }
@@ -289,7 +288,7 @@ impl CommandHandler for RulesHandler {
                     {
                         match engine.remove_rule(&rule.id) {
                             Ok(()) => {
-                                let _ = ctx.tui_tx.try_send(
+                                ctx.emit(
                                     TuiEvent::TextDelta(format!(
                                         "\nRule removed: {}\n",
                                         rule.text
@@ -297,7 +296,7 @@ impl CommandHandler for RulesHandler {
                                 );
                             }
                             Err(e) => {
-                                let _ = ctx.tui_tx.try_send(
+                                ctx.emit(
                                     TuiEvent::Error(format!(
                                         "remove_rule failed: {e}"
                                     )),
@@ -305,7 +304,7 @@ impl CommandHandler for RulesHandler {
                             }
                         }
                     } else {
-                        let _ = ctx.tui_tx.try_send(TuiEvent::Error(
+                        ctx.emit(TuiEvent::Error(
                             format!(
                                 "No rule matching ID prefix '{id_prefix}'"
                             ),
@@ -313,7 +312,7 @@ impl CommandHandler for RulesHandler {
                     }
                 }
                 Err(e) => {
-                    let _ = ctx.tui_tx.try_send(TuiEvent::Error(
+                    ctx.emit(TuiEvent::Error(
                         format!("rules lookup failed: {e}"),
                     ));
                 }
@@ -322,7 +321,7 @@ impl CommandHandler for RulesHandler {
             // ── catch-all usage ────────────────────────────────────
             // Byte-for-byte preservation of shipped format string at
             // slash.rs:699-703.
-            let _ = ctx.tui_tx.try_send(TuiEvent::Error(
+            ctx.emit(TuiEvent::Error(
                 "Usage: /rules [list | edit <id> <text> | remove <id>]"
                     .into(),
             ));

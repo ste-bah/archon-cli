@@ -104,7 +104,7 @@ impl CommandHandler for ModelHandler {
                  Shortcuts: opus, sonnet, haiku\n",
                 current = snap.current_model,
             );
-            let _ = ctx.tui_tx.try_send(TuiEvent::TextDelta(msg));
+            ctx.emit(TuiEvent::TextDelta(msg));
             return Ok(());
         }
 
@@ -122,12 +122,12 @@ impl CommandHandler for ModelHandler {
                 let _ = ctx
                     .tui_tx
                     .try_send(TuiEvent::ModelChanged(resolved.clone()));
-                let _ = ctx.tui_tx.try_send(TuiEvent::TextDelta(format!(
+                ctx.emit(TuiEvent::TextDelta(format!(
                     "\nModel switched to {resolved}.\n"
                 )));
             }
             Err(msg) => {
-                let _ = ctx.tui_tx.try_send(TuiEvent::Error(msg));
+                ctx.emit(TuiEvent::Error(msg));
             }
         }
         Ok(())

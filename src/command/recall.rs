@@ -180,7 +180,7 @@ impl CommandHandler for RecallHandler {
             // shipped format string at slash.rs:574-576. The `—`
             // between `<query>` and `search` is Unicode EM DASH
             // (U+2014), NOT a hyphen-minus. Do NOT ASCII-ify.
-            let _ = ctx.tui_tx.try_send(TuiEvent::Error(
+            ctx.emit(TuiEvent::Error(
                 "Usage: /recall <query> — search memories by keyword"
                     .into(),
             ));
@@ -208,7 +208,7 @@ impl CommandHandler for RecallHandler {
                 if memories.is_empty() {
                     // No-match branch — byte-for-byte preservation of
                     // shipped format string at slash.rs:585-587.
-                    let _ = ctx.tui_tx.try_send(TuiEvent::TextDelta(
+                    ctx.emit(TuiEvent::TextDelta(
                         format!("\nNo memories found for '{query}'.\n"),
                     ));
                 } else {
@@ -234,14 +234,13 @@ impl CommandHandler for RecallHandler {
                             "  [{id_short}] {title}\n    {snippet}...\n\n"
                         ));
                     }
-                    let _ =
-                        ctx.tui_tx.try_send(TuiEvent::TextDelta(out));
+                    ctx.emit(TuiEvent::TextDelta(out));
                 }
             }
             Err(e) => {
                 // Search-failure branch — byte-for-byte preservation
                 // of shipped format string at slash.rs:608-610.
-                let _ = ctx.tui_tx.try_send(TuiEvent::Error(format!(
+                ctx.emit(TuiEvent::Error(format!(
                     "Memory search failed: {e}"
                 )));
             }

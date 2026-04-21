@@ -185,7 +185,7 @@ impl CommandHandler for CostHandler {
         // Sync try_send analogous to /tasks, /status, /model precedent.
         // Dropping a /cost line under backpressure is preferable to
         // stalling the input pipeline.
-        let _ = ctx.tui_tx.try_send(TuiEvent::TextDelta(msg));
+        ctx.emit(TuiEvent::TextDelta(msg));
         Ok(())
     }
 

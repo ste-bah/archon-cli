@@ -101,14 +101,14 @@ impl CommandHandler for VoiceHandler {
                     "Voice {sub} command not yet implemented — edit \
                      ~/.archon/settings.json directly"
                 );
-                let _ = ctx.tui_tx.try_send(TuiEvent::TextDelta(msg));
+                ctx.emit(TuiEvent::TextDelta(msg));
             }
             other => {
                 let msg = format!(
                     "Unknown /voice subcommand: {other}. Valid: list, \
                      enable, disable, switch"
                 );
-                let _ = ctx.tui_tx.try_send(TuiEvent::TextDelta(msg));
+                ctx.emit(TuiEvent::TextDelta(msg));
             }
         }
         Ok(())
@@ -137,14 +137,14 @@ impl VoiceHandler {
         let config = match archon_core::config::load_config() {
             Ok(c) => c,
             Err(e) => {
-                let _ = ctx.tui_tx.try_send(TuiEvent::Error(format!(
+                ctx.emit(TuiEvent::Error(format!(
                     "Failed to load config for /voice: {e}"
                 )));
                 return;
             }
         };
         let text = render_list(&config.voice);
-        let _ = ctx.tui_tx.try_send(TuiEvent::TextDelta(text));
+        ctx.emit(TuiEvent::TextDelta(text));
     }
 }
 

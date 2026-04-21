@@ -179,22 +179,22 @@ impl CommandHandler for RenameHandler {
                         // state), then the human-readable TextDelta.
                         // Byte-identical to shipped slash.rs:437-445
                         // order.
-                        let _ = ctx.tui_tx.try_send(
+                        ctx.emit(
                             TuiEvent::SessionRenamed(name_arg.to_string()),
                         );
-                        let _ = ctx.tui_tx.try_send(TuiEvent::TextDelta(
+                        ctx.emit(TuiEvent::TextDelta(
                             format!("\nSession renamed to: {name_arg}\n"),
                         ));
                     }
                     Err(e) => {
-                        let _ = ctx.tui_tx.try_send(TuiEvent::Error(
+                        ctx.emit(TuiEvent::Error(
                             format!("Rename failed: {e}"),
                         ));
                     }
                 }
             }
             Err(e) => {
-                let _ = ctx.tui_tx.try_send(TuiEvent::Error(format!(
+                ctx.emit(TuiEvent::Error(format!(
                     "Session store error: {e}"
                 )));
             }

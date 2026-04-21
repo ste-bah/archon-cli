@@ -395,7 +395,7 @@ impl CommandHandler for CopyHandler {
         if snap.last_response.is_empty() {
             // Empty-response branch — byte-identical TextDelta from
             // shipped slash.rs:156-160.
-            let _ = ctx.tui_tx.try_send(TuiEvent::TextDelta(
+            ctx.emit(TuiEvent::TextDelta(
                 "\nNo assistant response to copy.\n".to_string(),
             ));
             return Ok(());
@@ -417,12 +417,12 @@ impl CommandHandler for CopyHandler {
 
         if copied {
             let chars = snap.last_response.len();
-            let _ = ctx.tui_tx.try_send(TuiEvent::TextDelta(format!(
+            ctx.emit(TuiEvent::TextDelta(format!(
                 "\nCopied {chars} characters to clipboard.\n"
             )));
         } else {
             // Byte-identical to shipped slash.rs:247-249.
-            let _ = ctx.tui_tx.try_send(TuiEvent::Error(
+            ctx.emit(TuiEvent::Error(
                 "No clipboard tool found. Install xclip (Linux), or use clip.exe (WSL) / pbcopy (macOS)."
                     .to_string(),
             ));

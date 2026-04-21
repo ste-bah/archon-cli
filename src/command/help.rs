@@ -133,7 +133,7 @@ impl CommandHandler for HelpHandler {
                 if let Some(reg) = ctx.skill_registry.as_ref() {
                     help_text.push_str(&reg.format_help());
                 }
-                let _ = ctx.tui_tx.try_send(TuiEvent::TextDelta(help_text));
+                ctx.emit(TuiEvent::TextDelta(help_text));
             }
             Some(raw) => {
                 // Strip leading `/` from the single-command arg — shipped
@@ -150,14 +150,14 @@ impl CommandHandler for HelpHandler {
                     Some(body) => {
                         // Byte-identical to shipped slash.rs:559:
                         // `format!("\n{detail}\n")`.
-                        let _ = ctx.tui_tx.try_send(TuiEvent::TextDelta(
+                        ctx.emit(TuiEvent::TextDelta(
                             format!("\n{body}\n"),
                         ));
                     }
                     None => {
                         // Byte-identical to shipped slash.rs:563:
                         // `format!("Unknown command: /{name}")`.
-                        let _ = ctx.tui_tx.try_send(TuiEvent::Error(
+                        ctx.emit(TuiEvent::Error(
                             format!("Unknown command: /{name}"),
                         ));
                     }

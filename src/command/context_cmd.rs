@@ -226,7 +226,7 @@ impl CommandHandler for ContextHandler {
         // best-effort UI so dropping under channel backpressure (16-cap)
         // is preferable to stalling the dispatcher. Mirrors
         // AGS-806..811 emission primitive.
-        let _ = ctx.tui_tx.try_send(TuiEvent::TextDelta(msg));
+        ctx.emit(TuiEvent::TextDelta(msg));
         Ok(())
     }
 

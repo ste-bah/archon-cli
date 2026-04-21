@@ -127,7 +127,7 @@ impl CommandHandler for ThemeHandler {
             // List branch — byte-for-byte preservation of shipped
             // format string at slash.rs:760-762.
             let names = archon_tui::theme::available_themes().join(", ");
-            let _ = ctx.tui_tx.try_send(TuiEvent::TextDelta(format!(
+            ctx.emit(TuiEvent::TextDelta(format!(
                 "\nAvailable themes: {names}\nUsage: /theme <name>\n"
             )));
         } else if archon_tui::theme::theme_by_name(theme_arg).is_some() {
@@ -137,14 +137,14 @@ impl CommandHandler for ThemeHandler {
             let _ = ctx
                 .tui_tx
                 .try_send(TuiEvent::SetTheme(theme_arg.to_string()));
-            let _ = ctx.tui_tx.try_send(TuiEvent::TextDelta(format!(
+            ctx.emit(TuiEvent::TextDelta(format!(
                 "\nTheme set to '{theme_arg}'.\n"
             )));
         } else {
             // Invalid theme — error branch byte-for-byte from shipped
             // slash.rs:773-776.
             let names = archon_tui::theme::available_themes().join(", ");
-            let _ = ctx.tui_tx.try_send(TuiEvent::Error(format!(
+            ctx.emit(TuiEvent::Error(format!(
                 "Unknown theme '{theme_arg}'. Available: {names}"
             )));
         }

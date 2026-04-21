@@ -88,7 +88,7 @@ impl CommandHandler for ReleaseNotesHandler {
         // at slash.rs:451-461. The `\`-continuation idiom is reproduced
         // verbatim so both source-level `grep` equivalence and
         // compiled-string equivalence hold.
-        let _ = ctx.tui_tx.try_send(TuiEvent::TextDelta(
+        ctx.emit(TuiEvent::TextDelta(
             "\nArchon CLI v0.1.0 (Phase 3)\n\n\
          - 33 tasks implemented across 7 batches\n\
          - TUI with markdown rendering, syntax highlighting, vim mode\n\

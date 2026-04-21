@@ -131,7 +131,7 @@ impl CommandHandler for DiffHandler {
                 // missing-shared-state condition. `execute` stays
                 // `Ok(())` so the dispatcher contract is uniform
                 // across all DIRECT handlers.
-                let _ = ctx.tui_tx.try_send(TuiEvent::Error(
+                ctx.emit(TuiEvent::Error(
                     "DiffHandler: working_dir not populated in CommandContext".to_string(),
                 ));
             }

@@ -44,11 +44,11 @@ impl CommandHandler for TasksHandler {
         // `let _ = tui_tx.send(...).await` in slash.rs:546-561 — both
         // ignore send failures (channel closed/full). Acceptable here
         // because /tasks output is best-effort UI.
-        let _ = ctx.tui_tx.try_send(TuiEvent::TextDelta(text));
+        ctx.emit(TuiEvent::TextDelta(text));
         // AGS-822 forward-compat primitive. View-rendering is
         // placeholder-handled by run_inner until the Stage 7+ overlay
         // ticket lands; the OpenView emission is the contract.
-        let _ = ctx.tui_tx.try_send(TuiEvent::OpenView(ViewId::Tasks));
+        ctx.emit(TuiEvent::OpenView(ViewId::Tasks));
         Ok(())
     }
 

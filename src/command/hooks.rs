@@ -100,14 +100,14 @@ impl CommandHandler for HooksHandler {
                     "Hook {sub} command not yet implemented — edit \
                      ~/.archon/settings.json directly"
                 );
-                let _ = ctx.tui_tx.try_send(TuiEvent::TextDelta(msg));
+                ctx.emit(TuiEvent::TextDelta(msg));
             }
             other => {
                 let msg = format!(
                     "Unknown /hooks subcommand: {other}. Valid: list, \
                      enable, disable, reload"
                 );
-                let _ = ctx.tui_tx.try_send(TuiEvent::TextDelta(msg));
+                ctx.emit(TuiEvent::TextDelta(msg));
             }
         }
         Ok(())
@@ -146,7 +146,7 @@ impl HooksHandler {
         let summaries = registry.summaries();
 
         let text = render_list(&summaries);
-        let _ = ctx.tui_tx.try_send(TuiEvent::TextDelta(text));
+        ctx.emit(TuiEvent::TextDelta(text));
     }
 }
 

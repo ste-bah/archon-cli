@@ -99,7 +99,7 @@ impl CommandHandler for BugHandler {
         //
         // Trailing args intentionally ignored (see module rustdoc):
         // `_args` underscore-prefixed to signal the unused binding.
-        let _ = ctx.tui_tx.try_send(TuiEvent::TextDelta(
+        ctx.emit(TuiEvent::TextDelta(
             "\nReport bugs at https://github.com/anthropics/archon/issues\n".to_string(),
         ));
         Ok(())

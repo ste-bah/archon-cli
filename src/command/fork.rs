@@ -130,18 +130,17 @@ impl CommandHandler for ForkHandler {
                              Resume with: archon --resume {new_id}\n\
                              Original session: {session_id}\n"
                         );
-                        let _ =
-                            ctx.tui_tx.try_send(TuiEvent::TextDelta(msg));
+                        ctx.emit(TuiEvent::TextDelta(msg));
                     }
                     Err(e) => {
-                        let _ = ctx.tui_tx.try_send(TuiEvent::Error(
+                        ctx.emit(TuiEvent::Error(
                             format!("Fork failed: {e}"),
                         ));
                     }
                 }
             }
             Err(e) => {
-                let _ = ctx.tui_tx.try_send(TuiEvent::Error(format!(
+                ctx.emit(TuiEvent::Error(format!(
                     "Session store error: {e}"
                 )));
             }

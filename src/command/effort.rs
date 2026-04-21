@@ -256,7 +256,7 @@ impl CommandHandler for EffortHandler {
                 "\nCurrent effort level: {}\nUsage: /effort <high|medium|low>\n",
                 snap.current_level
             );
-            let _ = ctx.tui_tx.try_send(TuiEvent::TextDelta(msg));
+            ctx.emit(TuiEvent::TextDelta(msg));
             return Ok(());
         }
 
@@ -285,13 +285,13 @@ impl CommandHandler for EffortHandler {
                 // `&mut effort_state` is in scope).
                 ctx.pending_effort_set = Some(level);
 
-                let _ = ctx.tui_tx.try_send(TuiEvent::TextDelta(format!(
+                ctx.emit(TuiEvent::TextDelta(format!(
                     "\nEffort level set to {level}.\n"
                 )));
             }
             Err(msg) => {
                 // Pass the validator's error string through unchanged.
-                let _ = ctx.tui_tx.try_send(TuiEvent::Error(msg));
+                ctx.emit(TuiEvent::Error(msg));
             }
         }
         Ok(())

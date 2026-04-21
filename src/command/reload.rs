@@ -177,14 +177,14 @@ impl CommandHandler for ReloadHandler {
             Ok((_new_cfg, changed)) if changed.is_empty() => {
                 // R4 no-change branch — byte-for-byte preservation of
                 // shipped format string at slash.rs:368.
-                let _ = ctx.tui_tx.try_send(TuiEvent::TextDelta(
+                ctx.emit(TuiEvent::TextDelta(
                     "\nConfig reloaded. No changes detected.\n".into(),
                 ));
             }
             Ok((_new_cfg, changed)) => {
                 // R4 with-change branch — byte-for-byte preservation of
                 // shipped format string at slash.rs:374-376.
-                let _ = ctx.tui_tx.try_send(TuiEvent::TextDelta(format!(
+                ctx.emit(TuiEvent::TextDelta(format!(
                     "\nConfig reloaded. Changed: {}\n",
                     changed.join(", ")
                 )));

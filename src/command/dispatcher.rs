@@ -93,13 +93,13 @@ impl Dispatcher {
                 return Ok(());
             }
             Err(ParseError::UnclosedQuote) => {
-                let _ = ctx.tui_tx.try_send(archon_tui::app::TuiEvent::Error(
+                ctx.emit(archon_tui::app::TuiEvent::Error(
                     "Parse error: unclosed quote".to_string(),
                 ));
                 return Ok(());
             }
             Err(ParseError::MalformedFlag(tok)) => {
-                let _ = ctx.tui_tx.try_send(archon_tui::app::TuiEvent::Error(
+                ctx.emit(archon_tui::app::TuiEvent::Error(
                     format!("Parse error: malformed flag '{tok}'"),
                 ));
                 return Ok(());

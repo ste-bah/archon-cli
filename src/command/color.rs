@@ -130,21 +130,21 @@ impl CommandHandler for ColorHandler {
             // used a `\<newline>[spaces]` string-continuation; the
             // compiled bytes are a single string with no embedded
             // indentation).
-            let _ = ctx.tui_tx.try_send(TuiEvent::TextDelta(
+            ctx.emit(TuiEvent::TextDelta(
                 "\nAvailable accent colors: red, green, yellow, blue, magenta, cyan, white, default\nUsage: /color <name>\n".to_string()
             ));
         } else if let Some(color) = archon_tui::theme::parse_color(color_arg) {
             // Valid color — emit SetAccentColor first (the actual
             // mutation signal), then the confirmation TextDelta. Order
             // matches shipped slash.rs:700-706.
-            let _ = ctx.tui_tx.try_send(TuiEvent::SetAccentColor(color));
-            let _ = ctx.tui_tx.try_send(TuiEvent::TextDelta(format!(
+            ctx.emit(TuiEvent::SetAccentColor(color));
+            ctx.emit(TuiEvent::TextDelta(format!(
                 "\nAccent color set to '{color_arg}'.\n"
             )));
         } else {
             // Invalid color — error branch byte-for-byte from shipped
             // slash.rs:707-710.
-            let _ = ctx.tui_tx.try_send(TuiEvent::Error(format!(
+            ctx.emit(TuiEvent::Error(format!(
                 "Unknown color '{color_arg}'. Available: red, green, yellow, blue, magenta, cyan, white, default"
             )));
         }

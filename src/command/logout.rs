@@ -152,20 +152,20 @@ impl CommandHandler for LogoutHandler {
                     // used `tui_tx.send(..).await` which is forbidden in
                     // sync trait methods; best-effort `try_send` matches
                     // B17 /rename + B20 /reload + B22 /login precedent.
-                    let _ = ctx.tui_tx.try_send(TuiEvent::TextDelta(
+                    ctx.emit(TuiEvent::TextDelta(
                         "\nLogged out. Credentials cleared.\n\
                          Restart and run /login to re-authenticate.\n"
                             .into(),
                     ));
                 }
                 Err(e) => {
-                    let _ = ctx.tui_tx.try_send(TuiEvent::Error(format!(
+                    ctx.emit(TuiEvent::Error(format!(
                         "Failed to clear credentials: {e}"
                     )));
                 }
             }
         } else {
-            let _ = ctx.tui_tx.try_send(TuiEvent::TextDelta(
+            ctx.emit(TuiEvent::TextDelta(
                 "\nNo stored credentials found. Using API key auth.\n"
                     .into(),
             ));
