@@ -922,6 +922,38 @@ pub(crate) struct CommandContext {
     /// lockstep with `pending_effect` by `EffortHandler::execute` so
     /// the two slots are never out of sync.
     pub(crate) pending_effort_set: Option<archon_llm::effort::EffortLevel>,
+    /// TASK-AGS-POST-6-EXPORT-MIGRATE SIDECAR-SLOT field (WRITE side of
+    /// /export; drain lives in session.rs).
+    ///
+    /// `Option<Arc<std::sync::Mutex<Option<ExportDescriptor>>>>`.
+    /// Populated UNCONDITIONALLY by `build_command_context` (cloned
+    /// `Arc` from `SlashCommandContext::pending_export_shared`). The
+    /// outer `Option` is `None` only in test fixtures that construct
+    /// `CommandContext` directly without a full `SlashCommandContext`;
+    /// in that case `ExportHandler::execute` emits a wiring-regression
+    /// error instead of stashing the descriptor. Production always
+    /// observes `Some(Arc::clone(...))`.
+    ///
+    /// The handler writes `*slot.lock().unwrap() = Some(desc)` synchronously;
+    /// session.rs's drain block (inside the `if handled {` branch of
+    /// the input-processor task) calls `.take()` on the same shared
+    /// `std::sync::Mutex`, obtains the `Agent` mutex guard via
+    /// `agent.lock().await`, reads `conversation_state().messages`,
+    /// and runs the file-write I/O. `std::sync::Mutex` (not
+    /// `tokio::sync::Mutex`) because the handler is sync and the drain
+    /// site holds the lock only across a single `.take()` call —
+    /// zero `.await` is held across either lock acquisition.
+    ///
+    /// Why NOT a plain `Option<ExportDescriptor>` like
+    /// `pending_effort_set`: the drain must run in session.rs where
+    /// `__cmd_ctx` (the dispatch-local `CommandContext`) does not
+    /// exist. A shared `Arc<Mutex<...>>` is the one mechanism that
+    /// lets the sync handler write and session.rs drain without
+    /// forcing an edit to `slash.rs` (which is a hard scope guard for
+    /// this ticket).
+    pub(crate) pending_export: Option<
+        Arc<std::sync::Mutex<Option<crate::command::export::ExportDescriptor>>>,
+    >,
 }
 
 /// Side-effect descriptors produced synchronously by

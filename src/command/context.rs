@@ -180,6 +180,17 @@ pub(crate) async fn build_command_context(
         // by `EffortHandler::execute` on the WRITE branch; drained at
         // the slash.rs dispatch site AFTER `apply_effect` returns.
         pending_effort_set: None,
+        // TASK-AGS-POST-6-EXPORT-MIGRATE: SIDECAR-SLOT shared slot
+        // cloned from `SlashCommandContext::pending_export_shared`.
+        // Populated UNCONDITIONALLY (not gated on the primary name) —
+        // `Arc::clone` is cheap (~8 bytes + atomic refcount) and the
+        // field is read only by `ExportHandler::execute`; other
+        // handlers see the Arc but never acquire the inner Mutex.
+        // The drain runs in session.rs, NOT in slash.rs / apply_effect,
+        // because it needs `agent.lock().await` on a mutex that only
+        // session.rs has in scope. See src/command/export.rs module
+        // rustdoc for the full SIDECAR-SLOT rationale.
+        pending_export: Some(Arc::clone(&slash_ctx.pending_export_shared)),
     };
 
     // Resolve the primary command name (alias-aware) so "/info" routes

@@ -335,6 +335,7 @@ mod tests {
                 auth_label,
                 pending_effect: None,
                 pending_effort_set: None,
+                pending_export: None,
             },
             rx,
         )

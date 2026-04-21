@@ -109,6 +109,7 @@ pub(crate) fn make_status_ctx(
             // TASK-AGS-POST-6-BODIES-B11-EFFORT: peer fixtures never
             // exercise /effort paths — None.
             pending_effort_set: None,
+            pending_export: None,
         },
         rx,
     )
@@ -156,6 +157,7 @@ pub(crate) fn make_model_ctx(
             // TASK-AGS-POST-6-BODIES-B11-EFFORT: peer fixtures never
             // exercise /effort paths — None.
             pending_effort_set: None,
+            pending_export: None,
         },
         rx,
     )
@@ -203,6 +205,7 @@ pub(crate) fn make_cost_ctx(
             // TASK-AGS-POST-6-BODIES-B11-EFFORT: peer fixtures never
             // exercise /effort paths — None.
             pending_effort_set: None,
+            pending_export: None,
         },
         rx,
     )
@@ -257,6 +260,7 @@ pub(crate) fn make_fast_ctx(
             // TASK-AGS-POST-6-BODIES-B11-EFFORT: peer fixtures never
             // exercise /effort paths — None.
             pending_effort_set: None,
+            pending_export: None,
         },
         rx,
     )
@@ -308,6 +312,7 @@ pub(crate) fn make_bug_ctx() -> (CommandContext, mpsc::Receiver<TuiEvent>) {
             // TASK-AGS-POST-6-BODIES-B11-EFFORT: peer fixtures never
             // exercise /effort paths — None.
             pending_effort_set: None,
+            pending_export: None,
         },
         rx,
     )
@@ -364,6 +369,7 @@ pub(crate) fn make_thinking_ctx(
             // TASK-AGS-POST-6-BODIES-B11-EFFORT: peer fixtures never
             // exercise /effort paths — None.
             pending_effort_set: None,
+            pending_export: None,
         },
         rx,
     )
@@ -419,6 +425,7 @@ pub(crate) fn make_diff_ctx(
             // TASK-AGS-POST-6-BODIES-B11-EFFORT: peer fixtures never
             // exercise /effort paths — None.
             pending_effort_set: None,
+            pending_export: None,
         },
         rx,
     )
@@ -480,6 +487,7 @@ pub(crate) fn make_help_ctx() -> (CommandContext, mpsc::Receiver<TuiEvent>) {
             // TASK-AGS-POST-6-BODIES-B11-EFFORT: peer fixtures never
             // exercise /effort paths — None.
             pending_effort_set: None,
+            pending_export: None,
         },
         rx,
     )
@@ -530,6 +538,7 @@ pub(crate) fn make_denials_ctx(
             // TASK-AGS-POST-6-BODIES-B11-EFFORT: peer fixtures never
             // exercise /effort paths — None.
             pending_effort_set: None,
+            pending_export: None,
         },
         rx,
     )
@@ -598,6 +607,7 @@ pub(crate) fn make_usage_ctx(
             auth_label: None,
             pending_effect: None,
             pending_effort_set: None,
+            pending_export: None,
         },
         rx,
     )

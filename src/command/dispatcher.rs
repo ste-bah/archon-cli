@@ -239,6 +239,7 @@ mod tests {
                 // for the /effort sidecar slot — dispatcher tests only
                 // exercise routing/parsing, not handler bodies.
                 pending_effort_set: None,
+                pending_export: None,
             },
             rx,
         )

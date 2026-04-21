@@ -1871,6 +1871,14 @@ pub(crate) async fn run_interactive_session(
         agent_registry: Arc::clone(&agent_registry_for_skills),
         registry: std::sync::Arc::clone(&registry),
         dispatcher: std::sync::Arc::clone(&dispatcher),
+        // TASK-AGS-POST-6-EXPORT-MIGRATE: SIDECAR-SLOT shared slot for
+        // /export. The sync handler writes an ExportDescriptor here;
+        // the drain block inside the `if handled {` branch of the
+        // input-processor task reads it back out and performs the
+        // mutex-requiring conversation-state read + file-write I/O.
+        // Initial value is None — no export queued until the handler
+        // stashes one.
+        pending_export_shared: Arc::new(std::sync::Mutex::new(None)),
     };
 
     // Spawn agent input processor with slash command dispatch
@@ -2405,80 +2413,15 @@ pub(crate) async fn run_interactive_session(
                     continue;
                 }
 
-                // /export needs access to conversation messages
-                if input.trim() == "/export" || input.trim().starts_with("/export ") {
-                    let format_arg = input.trim().strip_prefix("/export").unwrap_or("").trim();
-                    let format = if format_arg.is_empty() {
-                        archon_session::export::ExportFormat::Markdown
-                    } else {
-                        match archon_session::export::ExportFormat::from_str(format_arg) {
-                            Ok(f) => f,
-                            Err(e) => {
-                                let _ = input_tui_tx.send(TuiEvent::Error(e)).await;
-                                let _ = input_tui_tx.send(TuiEvent::SlashCommandComplete).await;
-                                continue;
-                            }
-                        }
-                    };
-                    let export_result = {
-                        let guard = agent.lock().await;
-                        let messages = &guard.conversation_state().messages;
-                        archon_session::export::export_session(
-                            messages,
-                            &cmd_ctx.session_id,
-                            format,
-                        )
-                    };
-                    match export_result {
-                        Ok(content) => {
-                            let export_dir = dirs::data_dir()
-                                .unwrap_or_else(|| PathBuf::from("."))
-                                .join("archon")
-                                .join("exports");
-                            if let Err(e) = std::fs::create_dir_all(&export_dir) {
-                                let _ = input_tui_tx
-                                    .send(TuiEvent::Error(format!(
-                                        "Failed to create export dir: {e}"
-                                    )))
-                                    .await;
-                                let _ = input_tui_tx.send(TuiEvent::SlashCommandComplete).await;
-                                continue;
-                            }
-                            let filename = archon_session::export::default_export_filename(
-                                &cmd_ctx.session_id,
-                                format,
-                            );
-                            let path = export_dir.join(&filename);
-                            match archon_session::export::write_export(&content, &path) {
-                                Ok(()) => {
-                                    let _ = input_tui_tx
-                                        .send(TuiEvent::TextDelta(format!(
-                                            "\nExported ({format_arg_display}) to {}\n",
-                                            path.display(),
-                                            format_arg_display = if format_arg.is_empty() {
-                                                "markdown"
-                                            } else {
-                                                format_arg
-                                            }
-                                        )))
-                                        .await;
-                                }
-                                Err(e) => {
-                                    let _ = input_tui_tx
-                                        .send(TuiEvent::Error(format!("Export failed: {e}")))
-                                        .await;
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            let _ = input_tui_tx
-                                .send(TuiEvent::Error(format!("Export failed: {e}")))
-                                .await;
-                        }
-                    }
-                    let _ = input_tui_tx.send(TuiEvent::SlashCommandComplete).await;
-                    continue;
-                }
+                // TASK-AGS-POST-6-EXPORT-MIGRATE: upstream /export
+                // intercept DELETED. Parse + validate logic moved into
+                // `ExportHandler::execute` (src/command/export.rs); the
+                // mutex-requiring file-write I/O moved into the drain
+                // block below inside the `if handled {` branch where
+                // `agent` (Arc<tokio::sync::Mutex<Agent>>) and
+                // `cmd_ctx.session_id` are in scope. See
+                // src/command/export.rs module rustdoc for the full
+                // SIDECAR-SLOT rationale.
 
                 let handled = handle_slash_command(
                     input.trim(),
@@ -2489,6 +2432,87 @@ pub(crate) async fn run_interactive_session(
                 )
                 .await;
                 if handled {
+                    // TASK-AGS-POST-6-EXPORT-MIGRATE drain. The sync
+                    // `ExportHandler::execute` (src/command/export.rs)
+                    // stashes an `ExportDescriptor` in the shared
+                    // `cmd_ctx.pending_export_shared` slot when the
+                    // format arg parses; we `.take()` it here — where
+                    // the `agent` mutex and `cmd_ctx.session_id` are
+                    // in scope — and perform the async I/O verbatim
+                    // against the pre-migration intercept (former
+                    // :2431-2486). The handler cannot do this itself
+                    // because `CommandHandler::execute` is sync and
+                    // `apply_effect` in slash.rs runs with only
+                    // `SlashCommandContext` (no Agent mutex).
+                    // Single-shot by `.take()`; a None here means
+                    // either the command wasn't /export, or the
+                    // handler hit the parse-error branch (which
+                    // already emitted TuiEvent::Error directly).
+                    let export_desc = cmd_ctx
+                        .pending_export_shared
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .take();
+                    if let Some(desc) = export_desc {
+                        let format = desc.format;
+                        let format_arg = desc.format_arg_display;
+                        let export_result = {
+                            let guard = agent.lock().await;
+                            let messages = &guard.conversation_state().messages;
+                            archon_session::export::export_session(
+                                messages,
+                                &cmd_ctx.session_id,
+                                format,
+                            )
+                        };
+                        match export_result {
+                            Ok(content) => {
+                                let export_dir = dirs::data_dir()
+                                    .unwrap_or_else(|| PathBuf::from("."))
+                                    .join("archon")
+                                    .join("exports");
+                                if let Err(e) = std::fs::create_dir_all(&export_dir) {
+                                    let _ = input_tui_tx
+                                        .send(TuiEvent::Error(format!(
+                                            "Failed to create export dir: {e}"
+                                        )))
+                                        .await;
+                                    let _ = input_tui_tx.send(TuiEvent::SlashCommandComplete).await;
+                                    continue;
+                                }
+                                let filename = archon_session::export::default_export_filename(
+                                    &cmd_ctx.session_id,
+                                    format,
+                                );
+                                let path = export_dir.join(&filename);
+                                match archon_session::export::write_export(&content, &path) {
+                                    Ok(()) => {
+                                        let _ = input_tui_tx
+                                            .send(TuiEvent::TextDelta(format!(
+                                                "\nExported ({format_arg_display}) to {}\n",
+                                                path.display(),
+                                                format_arg_display = if format_arg.is_empty() {
+                                                    "markdown"
+                                                } else {
+                                                    format_arg.as_str()
+                                                }
+                                            )))
+                                            .await;
+                                    }
+                                    Err(e) => {
+                                        let _ = input_tui_tx
+                                            .send(TuiEvent::Error(format!("Export failed: {e}")))
+                                            .await;
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                let _ = input_tui_tx
+                                    .send(TuiEvent::Error(format!("Export failed: {e}")))
+                                    .await;
+                            }
+                        }
+                    }
                     let _ = input_tui_tx.send(TuiEvent::SlashCommandComplete).await;
                     continue;
                 }

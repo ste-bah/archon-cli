@@ -53,4 +53,27 @@ pub(crate) struct SlashCommandContext {
     pub(crate) registry: Arc<Registry>,
     #[allow(dead_code)]
     pub(crate) dispatcher: Arc<Dispatcher>,
+    /// TASK-AGS-POST-6-EXPORT-MIGRATE SIDECAR-SLOT shared slot.
+    ///
+    /// `/export` moved from the upstream session.rs intercept into
+    /// `ExportHandler::execute` via the SIDECAR-SLOT pattern.
+    /// EFFECT-SLOT was rejected because `command::context::apply_effect`
+    /// runs with only `SlashCommandContext` access and `apply_effect`
+    /// is invoked from inside slash.rs (which MUST stay zero-diff for
+    /// this ticket). /export needs `agent.lock().await` on the tokio
+    /// Mutex-guarded `Agent` that only session.rs has in scope.
+    ///
+    /// The sync handler parses and validates the format arg, then
+    /// writes the parsed `ExportDescriptor` into this shared
+    /// `std::sync::Mutex`. After `handle_slash_command` returns
+    /// (inside session.rs's `if handled {` branch), the drain takes
+    /// the descriptor back out and performs the full mutex-requiring
+    /// export I/O where `agent` and `session_id` are in scope.
+    ///
+    /// `std::sync::Mutex` (not `tokio::sync::Mutex`) because the
+    /// handler is sync (no `.await`) and the drain site acquires
+    /// briefly only to `.take()` the descriptor — no `.await` held
+    /// across any lock. Single-shot per dispatch by construction.
+    pub(crate) pending_export_shared:
+        Arc<std::sync::Mutex<Option<crate::command::export::ExportDescriptor>>>,
 }

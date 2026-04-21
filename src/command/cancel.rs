@@ -140,6 +140,7 @@ mod tests {
                 auth_label: None,
                 pending_effect: None,
                 pending_effort_set: None,
+                pending_export: None,
             },
             rx,
         )
