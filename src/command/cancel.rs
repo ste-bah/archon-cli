@@ -1,57 +1,52 @@
-//! TASK-AGS-POST-6-NO-STUB: /cancel slash-command handler
-//! (THIN-WRAPPER pattern, declare_handler!-macro eliminator).
+//! TASK-AGS-POST-6-CANCEL-AUDIT: /cancel slash-command handler with
+//! user-visible feedback UX (Option A — feedback-only).
 //!
-//! # R1 PURPOSE (THIN-WRAPPER elimination of declare_handler!)
+//! # R1 PURPOSE (user-visible /cancel feedback)
 //!
-//! This module exists solely to delete the final two `declare_handler!`
-//! macro invocations in `src/command/registry.rs` (ConfigHandler at
-//! registry.rs:1346-1350 and CancelHandler at registry.rs:1570-1574)
-//! and the macro definition itself (registry.rs:1187-1224). Together
-//! with `src/command/config.rs`'s ConfigHandler extension, this module
-//! lets us remove the `macro_rules! declare_handler` entirely.
+//! This handler emits a visible `TuiEvent::TextDelta` on every invocation
+//! so users who type `/cancel` (or its aliases `/stop` / `/abort`) see
+//! explicit feedback instead of the prior silent no-op. The ACTUAL
+//! in-flight cancel path is `__cancel__` (Ctrl+C) at session.rs:2126-2138
+//! — that pathway calls `adapter.fire_cancel()` and
+//! `dispatcher.cancel_current()` to abort the running turn. Because the
+//! session input loop processes slash commands serially, by the time a
+//! typed `/cancel` reaches this handler the preceding turn has already
+//! completed, so we report the idle state and point the user at Ctrl+C
+//! for in-flight cancellation.
 //!
-//! Mirrors the THIN-WRAPPER precedent set by `src/command/compact.rs`
-//! and `src/command/clear.rs` (TASK-AGS-POST-6-BODIES-B24-COMPACT-CLEAR):
-//! a zero-sized struct with a sync `execute` body that returns `Ok(())`
-//! WITHOUT emitting any `TuiEvent`. Byte-identical to the shipped
-//! `declare_handler!(CancelHandler, "Cancel the currently running
-//! task", &["stop", "abort"])` stub at registry.rs:1570-1574.
+//! # R2 Option A (feedback-only) — deliberate scope choice
 //!
-//! # R2 NO-OP (behavior) + follow-up ticket #91 POST-6-CANCEL-AUDIT
-//!
-//! Under normal operation /cancel today is a silent no-op: the handler
-//! returns `Ok(())` with zero emissions, providing no user feedback
-//! about whether a task was actually cancelled. That is a known UX gap
-//! but is INTENTIONALLY out of scope for POST-6-NO-STUB — fixing the
-//! silent-no-op requires surfacing the task service / cancellation
-//! channel through `CommandContext` and writing a real "Cancel
-//! requested / no task running" feedback UX. That work is tracked by
-//! ticket #91 POST-6-CANCEL-AUDIT. This handler is the byte-identical
-//! wrapper around the prior macro stub; it does NOT fix #91, only
-//! preserves the exact same observable behavior so the macro can be
-//! deleted without regressing shipped semantics.
+//! This ticket implements Option A per the spec:
+//! an unconditional `TuiEvent::TextDelta("No task is currently running.\n")`
+//! emission that satisfies AC #1's "either X or Y" requirement by picking
+//! one of the two documented strings. Option B (feedback + real
+//! cancellation propagation via a SIDECAR-SLOT `Arc<AtomicBool>` plumbed
+//! through `CommandContext` into the session turn loop) is deferred —
+//! `archon_tui::AgentDispatcher::cancel_current()` CONSUMES the in-flight
+//! state rather than probing it, and no sync `is_idle()`/`in_flight()`
+//! probe exists on that dispatcher. Surfacing such a probe is a separate
+//! ticket if Option B ever ships.
 //!
 //! # R3 ALIASES `&["stop", "abort"]` (preserved)
 //!
-//! Shipped stub used the three-arg `declare_handler!` form with
-//! `&["stop", "abort"]`. Per AGS-817 shipped-wins drift-reconcile,
-//! this handler preserves both aliases verbatim. Dropping either would
-//! regress operator workflows depending on `/stop` or `/abort` today.
-//! The aliases resolve through the PATH A dispatcher's alias map
-//! (see `Registry::get`).
+//! The shipped stub used the three-arg `declare_handler!` form with
+//! `&["stop", "abort"]`. Both aliases are PRESERVED here per AGS-817
+//! shipped-wins drift-reconcile — dropping either would regress operator
+//! workflows that rely on `/stop` or `/abort`. Aliases resolve through
+//! the PATH A dispatcher's alias map (see `Registry::get`).
 
 use crate::command::registry::{CommandContext, CommandHandler};
+use archon_tui::app::TuiEvent;
 
 /// Zero-sized handler registered as the primary `/cancel` command.
 ///
-/// Aliases: `["stop", "abort"]` — PRESERVED from the shipped
-/// declare_handler! stub (shipped-wins drift-reconcile; see R3 in
-/// module rustdoc).
+/// Aliases: `["stop", "abort"]` — preserved from the shipped
+/// `declare_handler!` stub.
 ///
-/// Behavior is the shipped no-op `Ok(())` — byte-identical to the
-/// pre-POST-6-NO-STUB `declare_handler!` macro body. The silent-no-op
-/// UX gap is tracked by ticket #91 POST-6-CANCEL-AUDIT and is NOT
-/// fixed here.
+/// Emits an unconditional `TuiEvent::TextDelta("No task is currently
+/// running.\n")` via `CommandContext::emit` (POST-6-TRY-SEND) so users
+/// see explicit feedback. For in-flight task cancellation, users press
+/// Ctrl+C — the `__cancel__` pathway in session.rs handles that.
 pub(crate) struct CancelHandler;
 
 impl CancelHandler {
@@ -70,33 +65,44 @@ impl Default for CancelHandler {
 impl CommandHandler for CancelHandler {
     fn execute(
         &self,
-        _ctx: &mut CommandContext,
+        ctx: &mut CommandContext,
         _args: &[String],
     ) -> anyhow::Result<()> {
-        // THIN-WRAPPER no-op. Byte-identical to the shipped
-        // `declare_handler!` macro body: return `Ok(())` WITHOUT
-        // emitting any TuiEvent. The silent-no-op UX gap (no "Cancel
-        // requested" / "No task running" feedback) is INTENTIONALLY
-        // preserved — fixing it is ticket #91 POST-6-CANCEL-AUDIT.
+        // Option A (feedback-only): unconditional user-visible message.
+        // The session input loop is serial — by the time this handler
+        // runs, the previous turn has completed, so the idle-state
+        // message is correct. In-flight cancel is Ctrl+C (__cancel__
+        // at session.rs:2126-2138).
+        ctx.emit(TuiEvent::TextDelta(
+            "No task is currently running.\n".to_string(),
+        ));
         Ok(())
     }
 
     fn description(&self) -> &'static str {
         // Byte-for-byte preservation of the shipped declare_handler!
-        // stub at registry.rs:1570-1574 (shipped-wins drift-reconcile).
+        // description at registry.rs:1570-1574.
         "Cancel the currently running task"
     }
 
     fn aliases(&self) -> &'static [&'static str] {
-        // Shipped stub used the three-arg declare_handler! form with
-        // `&["stop", "abort"]`. Preserved per AGS-817 shipped-wins
-        // precedent (see module rustdoc R3).
+        // Shipped stub used `&["stop", "abort"]`. PRESERVED per AGS-817
+        // shipped-wins precedent (see module rustdoc R3).
         &["stop", "abort"]
     }
 }
 
 // ---------------------------------------------------------------------------
-// TASK-AGS-POST-6-NO-STUB: tests for /cancel
+// TASK-AGS-POST-6-CANCEL-AUDIT: tests for /cancel user-visible feedback.
+// ---------------------------------------------------------------------------
+// Prior POST-6-NO-STUB tests asserted ZERO emission; this ticket REPLACES
+// them with emission-asserting tests that verify the user-visible message.
+// Deleted tests (from pre-CANCEL-AUDIT cancel.rs):
+//   - cancel_handler_execute_returns_ok_without_emission
+//   - dispatcher_routes_slash_cancel_returns_ok_without_emission
+//   - dispatcher_routes_alias_stop_returns_ok_without_emission
+// The description + aliases tests are retained verbatim (shipped-wins
+// invariants unchanged).
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
@@ -110,11 +116,8 @@ mod tests {
     use crate::command::registry::RegistryBuilder;
 
     /// Build a minimal `CommandContext` with a freshly-created channel.
-    /// /cancel is a THIN-WRAPPER handler — no snapshot, no effect slot,
-    /// no extra context field — so every optional field stays `None`.
-    /// Mirrors the `make_ctx` fixtures in compact.rs / clear.rs.
+    /// /cancel is a feedback-only handler — no snapshot field required.
     fn make_ctx() -> (CommandContext, mpsc::Receiver<TuiEvent>) {
-        // TASK-AGS-POST-6-SHARED-FIXTURES-V2: migrated to CtxBuilder.
         crate::command::test_support::CtxBuilder::new().build()
     }
 
@@ -142,7 +145,7 @@ mod tests {
     }
 
     #[test]
-    fn cancel_handler_execute_returns_ok_without_emission() {
+    fn cancel_handler_execute_emits_no_task_running_feedback() {
         let (mut ctx, mut rx) = make_ctx();
         let h = CancelHandler::new();
         let res = h.execute(&mut ctx, &[]);
@@ -150,25 +153,39 @@ mod tests {
             res.is_ok(),
             "CancelHandler::execute must return Ok(()), got: {res:?}"
         );
-        // No TuiEvent must be emitted — THIN-WRAPPER is byte-identical
-        // to the shipped declare_handler! no-op stub. The silent-no-op
-        // UX gap is tracked by ticket #91 POST-6-CANCEL-AUDIT.
+        // POST-6-CANCEL-AUDIT: handler now emits a user-visible
+        // TextDelta with the idle-state message (Option A feedback-only).
+        match rx.try_recv() {
+            Ok(TuiEvent::TextDelta(msg)) => {
+                assert_eq!(
+                    msg, "No task is currently running.\n",
+                    "CancelHandler::execute must emit the Option A \
+                     idle-state feedback string verbatim"
+                );
+            }
+            Ok(other) => panic!(
+                "CancelHandler::execute must emit TextDelta, got: {other:?}"
+            ),
+            Err(e) => panic!(
+                "CancelHandler::execute must emit a TuiEvent, channel \
+                 returned: {e:?}"
+            ),
+        }
+        // No trailing events.
         match rx.try_recv() {
             Err(mpsc::error::TryRecvError::Empty) => {}
             Ok(ev) => panic!(
-                "CancelHandler::execute must NOT emit any TuiEvent, \
-                 got: {ev:?}"
+                "CancelHandler::execute emitted exactly one event; \
+                 unexpected trailing event: {ev:?}"
             ),
             Err(e) => panic!("unexpected channel error: {e:?}"),
         }
     }
 
     #[test]
-    fn dispatcher_routes_slash_cancel_returns_ok_without_emission() {
+    fn dispatcher_routes_slash_cancel_emits_feedback() {
         // Narrow `RegistryBuilder::new()` (not `default_registry`) so
-        // this test exercises ONLY the CancelHandler wiring — no other
-        // handlers are registered. Asserts the real Dispatcher routes
-        // `/cancel` to `CancelHandler::execute` and emits no event.
+        // this test exercises ONLY the CancelHandler wiring.
         let mut b = RegistryBuilder::new();
         b.insert_primary("cancel", Arc::new(CancelHandler::new()));
         let registry = Arc::new(b.build());
@@ -182,22 +199,25 @@ mod tests {
              got: {res:?}"
         );
         match rx.try_recv() {
-            Err(mpsc::error::TryRecvError::Empty) => {}
-            Ok(ev) => panic!(
-                "Dispatcher route to CancelHandler must NOT emit any \
-                 TuiEvent, got: {ev:?}"
+            Ok(TuiEvent::TextDelta(msg)) => assert_eq!(
+                msg, "No task is currently running.\n",
+                "Dispatcher route to CancelHandler must emit the Option \
+                 A idle-state feedback string verbatim"
             ),
-            Err(e) => panic!("unexpected channel error: {e:?}"),
+            Ok(other) => panic!(
+                "Dispatcher route must emit TextDelta, got: {other:?}"
+            ),
+            Err(e) => panic!(
+                "Dispatcher route must emit a TuiEvent, channel \
+                 returned: {e:?}"
+            ),
         }
     }
 
     #[test]
-    fn dispatcher_routes_alias_stop_returns_ok_without_emission() {
-        // Verify the `stop` alias resolves to CancelHandler through
-        // the Registry's alias map (TASK-AGS-802). This pins the
-        // shipped-wins alias-preservation invariant: `/stop` must
-        // reach CancelHandler::execute and return Ok(()) with no
-        // emission — byte-identical to `/cancel`.
+    fn dispatcher_routes_alias_stop_emits_feedback() {
+        // Verify `stop` alias resolves to CancelHandler through the
+        // Registry's alias map and emits the same feedback string.
         let mut b = RegistryBuilder::new();
         b.insert_primary("cancel", Arc::new(CancelHandler::new()));
         let registry = Arc::new(b.build());
@@ -211,12 +231,19 @@ mod tests {
              the CancelHandler alias, got: {res:?}"
         );
         match rx.try_recv() {
-            Err(mpsc::error::TryRecvError::Empty) => {}
-            Ok(ev) => panic!(
-                "Dispatcher route via /stop alias to CancelHandler \
-                 must NOT emit any TuiEvent, got: {ev:?}"
+            Ok(TuiEvent::TextDelta(msg)) => assert_eq!(
+                msg, "No task is currently running.\n",
+                "Dispatcher route via /stop alias must emit the Option \
+                 A idle-state feedback string verbatim"
             ),
-            Err(e) => panic!("unexpected channel error: {e:?}"),
+            Ok(other) => panic!(
+                "Dispatcher route via /stop alias must emit TextDelta, \
+                 got: {other:?}"
+            ),
+            Err(e) => panic!(
+                "Dispatcher route via /stop alias must emit a TuiEvent, \
+                 channel returned: {e:?}"
+            ),
         }
     }
 }
