@@ -570,9 +570,12 @@ dependencies = [
  "once_cell",
  "parking_lot",
  "regex",
+ "tempfile",
+ "thiserror 2.0.18",
  "tokio",
  "tower",
  "tracing",
+ "tracing-appender",
  "tracing-subscriber",
 ]
 

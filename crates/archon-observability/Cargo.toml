@@ -48,6 +48,13 @@ parking_lot = { workspace = true }
 axum = { workspace = true }
 tower = { workspace = true }
 tokio = { workspace = true }
+# OBS-901-WIRE: init_tracing_file — file-backed session logging with
+# RedactionLayer as the sole emitter. tracing-appender provides the
+# non-blocking worker + WorkerGuard; thiserror carries the LoggingError
+# enum that the call site already matches on (back-compat with the
+# pre-LIFT archon_core::logging::LoggingError surface).
+tracing-appender = { workspace = true }
+thiserror = { workspace = true }
 
 [dev-dependencies]
 # tests/tracing_smoke.rs installs a local subscriber via
@@ -58,3 +65,7 @@ tokio = { workspace = true }
 # workspace to stay version-aligned with the prod dependency above.
 tracing-subscriber = { workspace = true }
 tracing = { workspace = true }
+# OBS-901-WIRE: tests/init_tracing_file_smoke.rs drives the production
+# global-install path against a scratch dir. tempfile gives us a
+# hermetic `log_dir` per test run.
+tempfile = { workspace = true }

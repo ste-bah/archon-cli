@@ -45,10 +45,17 @@
 //!     `ChannelMetricSink` from here so every existing `archon_core::
 //!     ChannelMetricSink` call site stays byte-identical.
 //!
+//! Post-LIFT wiring (OBS-901-WIRE):
+//!
+//!   * [`file_init`] — `init_tracing_file(session_id, log_level, log_dir)`
+//!     + `LogGuard` + `LoggingError`. File-backed session logging with
+//!     `RedactionLayer` as the sole emitter — closes the dead-wire.
+//!     `archon-core::logging` re-exports this as `init_logging` so every
+//!     existing caller routes through the redaction path without a
+//!     signature change.
+//!
 //! Still to land (follow-up tickets):
 //!
-//!   * (wiring) — `main.rs`/`session.rs`/`archon-core::logging` switch to
-//!     this crate, closing the dead-wire so production logs are redacted.
 //!   * [`OBS-907`] — gate-walk the `json` arg on `init_tracing`.
 //!
 //! ## Public re-exports
@@ -69,10 +76,12 @@
 #![deny(missing_docs)]
 #![deny(unsafe_code)]
 
+pub mod file_init;
 pub mod metrics;
 pub mod redaction;
 pub mod tracing;
 
+pub use file_init::{init_tracing_file, LogGuard, LoggingError};
 pub use metrics::{
     format_prometheus, serve_metrics, serve_metrics_on, ChannelMetricSink, ChannelMetrics,
     ChannelMetricsSnapshot,
