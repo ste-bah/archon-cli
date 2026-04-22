@@ -40,6 +40,45 @@ use crate::slash_context::SlashCommandContext;
 use crate::runtime::llm::build_llm_provider;
 use crate::setup::strip_cache_control_if_disabled;
 
+/// Spawn the Prometheus `/metrics` exporter when `--metrics-port PORT` is
+/// both present and non-zero. Port 0 is treated as "disabled" per the
+/// documented CLI contract (otherwise `--metrics-port 0` would bind to an
+/// OS-chosen ephemeral port, which is useless for scraping).
+///
+/// Bind failures are validated synchronously: we call `TcpListener::bind`
+/// *before* spawning the serve task so a "permission denied" / "address in
+/// use" error propagates as `Err` to the caller rather than disappearing
+/// into a `tokio::spawn` closure where the TUI swallows stderr. Post-bind
+/// serve failures (peer reset, listener EOF) still warn-and-exit in the
+/// background because the listener is live at that point.
+fn spawn_metrics_exporter(
+    port: Option<u16>,
+    metrics: Arc<observability::ChannelMetrics>,
+) -> Result<()> {
+    let Some(port) = port else { return Ok(()) };
+    if port == 0 {
+        // Contract: 0 = disabled. Skip bind entirely.
+        return Ok(());
+    }
+    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+    let listener = std::net::TcpListener::bind(addr)
+        .map_err(|e| anyhow::anyhow!("--metrics-port {port}: bind failed: {e}"))?;
+    listener
+        .set_nonblocking(true)
+        .map_err(|e| anyhow::anyhow!("--metrics-port {port}: set_nonblocking failed: {e}"))?;
+    // Hand the bound listener to tokio — this converts a std listener into a
+    // tokio one so serve_metrics can accept connections from the runtime.
+    let tokio_listener = tokio::net::TcpListener::from_std(listener)
+        .map_err(|e| anyhow::anyhow!("--metrics-port {port}: tokio adapt failed: {e}"))?;
+    tokio::spawn(async move {
+        if let Err(e) = observability::serve_metrics_on(tokio_listener, metrics).await {
+            tracing::warn!(%e, port, "metrics exporter terminated");
+        }
+    });
+    tracing::info!(port, "Prometheus /metrics exporter bound on 127.0.0.1");
+    Ok(())
+}
+
 /// Parse `--setting-sources` names into [`ConfigLayer`] variants, warning on
 /// unrecognised values.
 pub(crate) fn parse_layer_filter(sources: &[String]) -> Vec<ConfigLayer> {
@@ -459,19 +498,15 @@ pub(crate) async fn run_print_mode_session(
     agent.set_channel_metrics(metrics_for_agent);
 
     // TASK-TUI-803: spawn Prometheus /metrics exporter on loopback when
-    // `--metrics-port <PORT>` is set. The exporter shares the SAME Arc as
-    // the agent so every scrape reflects the live counters rather than a
-    // detached copy. Print-mode processes are short-lived, but operators
-    // running long print-mode batches (CI, harness runs) still benefit.
-    if let Some(port) = cli.metrics_port {
-        let metrics_for_exporter = Arc::clone(&metrics);
-        tokio::spawn(async move {
-            if let Err(e) =
-                archon_tui::observability::serve_metrics(port, metrics_for_exporter).await
-            {
-                tracing::warn!(%e, port, "metrics exporter terminated");
-            }
-        });
+    // `--metrics-port <PORT>` is set (non-zero). Shares the metrics Arc
+    // with the agent so every scrape reflects live counter state. Bind
+    // errors surface synchronously so an unusable `--metrics-port 80`
+    // fails the session rather than silently lying. Print-mode returns
+    // i32 (not Result), so the bind error is rendered to stderr and
+    // EXIT_ERROR is returned directly instead of `?`-propagating.
+    if let Err(e) = spawn_metrics_exporter(cli.metrics_port, Arc::clone(&metrics)) {
+        eprintln!("Metrics exporter failed: {e}");
+        return archon_core::print_mode::EXIT_ERROR;
     }
 
     // Wire hook system for print mode — load hooks then register agent-specific hooks
@@ -1407,18 +1442,9 @@ pub(crate) async fn run_interactive_session(
     agent.set_channel_metrics(metrics_for_agent);
 
     // TASK-TUI-803: spawn Prometheus /metrics exporter on loopback when
-    // `--metrics-port <PORT>` is set. The exporter clones the same Arc
-    // wired into the agent so scrapes see live counter values.
-    if let Some(port) = cli.metrics_port {
-        let metrics_for_exporter = Arc::clone(&metrics);
-        tokio::spawn(async move {
-            if let Err(e) =
-                archon_tui::observability::serve_metrics(port, metrics_for_exporter).await
-            {
-                tracing::warn!(%e, port, "metrics exporter terminated");
-            }
-        });
-    }
+    // `--metrics-port <PORT>` is set (non-zero). Same Arc + synchronous
+    // bind-error propagation as the print-mode path.
+    spawn_metrics_exporter(cli.metrics_port, Arc::clone(&metrics))?;
 
     // Wire checkpoint store into agent (CLI-116)
     if let Some(store) = checkpoint_store {

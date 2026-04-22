@@ -23,7 +23,7 @@ use archon_tui::observability::ChannelMetrics;
 use tokio::sync::mpsc;
 
 mod common;
-use common::memory::{assert_linear_memory_growth, rss_bytes};
+use common::memory::{assert_linear_memory_growth_at, rss_bytes};
 
 /// Total sustained load — the harness produces this many events and drains
 /// to zero backlog between checkpoints so RSS samples reflect only retained
@@ -146,8 +146,14 @@ async fn channel_memory_linear_growth_under_sustained_load() {
         snap.backlog_depth,
     );
 
-    // 3) Linear-growth bound — sample-based shape check.
-    assert_linear_memory_growth(&samples, MAX_MB_PER_1K_EVENTS, TOTAL_EVENTS);
+    // 3) Linear-growth bound — sample-based shape check. Feed the ACTUAL
+    //    checkpoint event counts (0 for baseline, then 1k/2k/5k/10k) so the
+    //    slope analysis reflects real load rather than the equal-spacing
+    //    default in the legacy helper.
+    let mut event_counts: Vec<usize> = Vec::with_capacity(CHECKPOINTS.len() + 1);
+    event_counts.push(0);
+    event_counts.extend_from_slice(&CHECKPOINTS);
+    assert_linear_memory_growth_at(&samples, &event_counts, MAX_MB_PER_1K_EVENTS);
 
     eprintln!(
         "[channel_memory_linear] PASS total_sent={} total_drained={} \

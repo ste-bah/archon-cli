@@ -271,9 +271,14 @@ pub struct Cli {
     pub debug_file: Option<PathBuf>,
 
     // ── Observability (TASK-TUI-803) ───────────────────────────
-    /// Prometheus /metrics exporter port (0 = disabled). When set, spawns a
+    /// Prometheus /metrics exporter port. When set (non-zero), spawns a
     /// loopback-only HTTP server at 127.0.0.1:<PORT>/metrics exposing the
     /// ChannelMetrics counters (backlog, throughput, p95 latency).
+    ///
+    /// Absent flag OR `--metrics-port 0` disables the exporter. Values below
+    /// 1024 (privileged ports) are rejected at bind time — we deliberately
+    /// do not pre-validate here so clap error messages match bind errors
+    /// and avoid duplicating OS-specific rules.
     #[arg(long, value_name = "PORT")]
     pub metrics_port: Option<u16>,
 }

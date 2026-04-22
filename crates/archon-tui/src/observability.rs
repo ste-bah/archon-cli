@@ -183,9 +183,16 @@ const METRIC_P95_LATENCY_MS: &str = "archon_tui_channel_p95_send_to_render_ms";
 
 /// Format a `ChannelMetricsSnapshot` as Prometheus text exposition v0.0.4.
 ///
-/// Each metric gets `# HELP`, `# TYPE`, and a single sample line. `backlog_depth`
-/// and the p95 latency gauge are `gauge`; the running totals and max-batch-size
-/// are `counter` (monotonic since process start).
+/// Each metric gets `# HELP`, `# TYPE`, and a single sample line.
+/// Type selection (per https://prometheus.io/docs/concepts/metric_types/):
+///   * `backlog_depth` — gauge (instantaneous, bidirectional).
+///   * `total_sent` / `total_drained` — counter (monotonic cumulative; `_total`
+///     suffix is the Prometheus convention for counters).
+///   * `max_batch_size` — GAUGE, not counter. It is a `fetch_max` high-water
+///     mark — scraper `rate()` on it is meaningless because the value does
+///     not represent additive events. Counters require the value to be an
+///     additive sum since process start. High-water marks are gauges.
+///   * `p95_send_to_render_ms` — gauge (sampled quantile from histogram).
 pub fn format_prometheus(snapshot: &ChannelMetricsSnapshot) -> String {
     let mut out = String::with_capacity(1024);
     // backlog_depth — instantaneous in-flight, so it is a gauge.
@@ -212,11 +219,11 @@ pub fn format_prometheus(snapshot: &ChannelMetricsSnapshot) -> String {
         "{METRIC_TOTAL_DRAINED} {}\n",
         snapshot.total_drained
     ));
-    // max_batch_size — high-water mark; counter (monotonic via fetch_max).
+    // max_batch_size — high-water mark; GAUGE (not counter — not additive).
     out.push_str(&format!(
         "# HELP {METRIC_MAX_BATCH_SIZE} Largest drain batch observed since process start.\n"
     ));
-    out.push_str(&format!("# TYPE {METRIC_MAX_BATCH_SIZE} counter\n"));
+    out.push_str(&format!("# TYPE {METRIC_MAX_BATCH_SIZE} gauge\n"));
     out.push_str(&format!(
         "{METRIC_MAX_BATCH_SIZE} {}\n",
         snapshot.max_batch_size
@@ -233,18 +240,58 @@ pub fn format_prometheus(snapshot: &ChannelMetricsSnapshot) -> String {
     out
 }
 
-/// Spawnable /metrics HTTP server.
+/// Minimal Prometheus text-format structural parser used by tests to validate
+/// the exposition shape rather than accepting any substring hit. Returns, per
+/// metric name, the declared type and the sample line suffix (value).
 ///
-/// Binds to `127.0.0.1:<port>` (local-only — no 0.0.0.0) and serves a single
-/// `GET /metrics` route returning Prometheus text exposition. Intended to be
-/// launched via `tokio::spawn` from the CLI startup path when the operator
-/// passes `--metrics-port`.
-pub async fn serve_metrics(port: u16, metrics: Arc<ChannelMetrics>) -> anyhow::Result<()> {
+/// Rejects missing `# HELP`, missing `# TYPE`, orphan samples, and type
+/// mismatches. Not a full Prometheus parser — only what `format_prometheus`
+/// emits. Kept in-module so tests can treat it as an internal invariant.
+#[cfg(test)]
+fn parse_prometheus_exposition(
+    body: &str,
+) -> std::collections::HashMap<String, (String, String)> {
+    use std::collections::HashMap;
+    let mut help: HashMap<String, String> = HashMap::new();
+    let mut types: HashMap<String, String> = HashMap::new();
+    let mut samples: HashMap<String, String> = HashMap::new();
+    for line in body.lines() {
+        if let Some(rest) = line.strip_prefix("# HELP ") {
+            if let Some((name, txt)) = rest.split_once(' ') {
+                help.insert(name.to_string(), txt.to_string());
+            }
+        } else if let Some(rest) = line.strip_prefix("# TYPE ") {
+            if let Some((name, ty)) = rest.split_once(' ') {
+                types.insert(name.to_string(), ty.to_string());
+            }
+        } else if !line.is_empty() && !line.starts_with('#') {
+            // Sample line: `<name> <value>` (no labels in our emitter).
+            if let Some((name, value)) = line.split_once(' ') {
+                samples.insert(name.to_string(), value.to_string());
+            }
+        }
+    }
+    // Build (type, value) map; assert HELP existence as a side check.
+    let mut out: HashMap<String, (String, String)> = HashMap::new();
+    for (name, ty) in types {
+        assert!(help.contains_key(&name), "metric {name} missing # HELP");
+        let value = samples
+            .remove(&name)
+            .unwrap_or_else(|| panic!("metric {name} missing sample line"));
+        out.insert(name, (ty, value));
+    }
+    assert!(
+        samples.is_empty(),
+        "orphan sample lines without # TYPE: {:?}",
+        samples.keys().collect::<Vec<_>>(),
+    );
+    out
+}
+
+/// Build the `/metrics` router over a snapshot-per-scrape handler.
+fn build_metrics_router(metrics: Arc<ChannelMetrics>) -> axum::Router {
     use axum::{Router, response::IntoResponse, routing::get};
 
-    // Handler closure captures the shared metrics Arc and re-snapshots on
-    // every request so the exporter reflects the current counter state
-    // (not stale values from server startup).
     let metrics_for_handler = Arc::clone(&metrics);
     let handler = move || {
         let metrics = Arc::clone(&metrics_for_handler);
@@ -252,20 +299,48 @@ pub async fn serve_metrics(port: u16, metrics: Arc<ChannelMetrics>) -> anyhow::R
             let snapshot = metrics.snapshot();
             let body = format_prometheus(&snapshot);
             (
-                [("content-type", "text/plain; version=0.0.4")],
+                // Idiomatic mixed-case `Content-Type` — HTTP header names are
+                // case-insensitive per RFC 7230 §3.2, but mixed-case matches
+                // the rest of the codebase and the form Prometheus itself
+                // emits in request headers.
+                [("Content-Type", "text/plain; version=0.0.4; charset=utf-8")],
                 body,
             )
                 .into_response()
         }
     };
+    Router::new().route("/metrics", get(handler))
+}
 
-    let app: Router = Router::new().route("/metrics", get(handler));
-
-    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
-    let listener = tokio::net::TcpListener::bind(addr).await?;
-    tracing::info!(%addr, "Prometheus /metrics exporter listening");
+/// Serve `/metrics` over an **already bound** listener.
+///
+/// This is the preferred entrypoint when bind errors must be observable by
+/// the caller — the CLI binds synchronously to turn "permission denied" or
+/// "address in use" into `Err` before a task is spawned. Runtime failures
+/// during serve (peer reset, listener EOF) still bubble out via the
+/// returned future.
+pub async fn serve_metrics_on(
+    listener: tokio::net::TcpListener,
+    metrics: Arc<ChannelMetrics>,
+) -> anyhow::Result<()> {
+    let app = build_metrics_router(metrics);
+    match listener.local_addr() {
+        Ok(addr) => tracing::info!(%addr, "Prometheus /metrics exporter listening"),
+        Err(e) => tracing::warn!(%e, "metrics exporter local_addr unavailable"),
+    }
     axum::serve(listener, app).await?;
     Ok(())
+}
+
+/// Convenience wrapper: bind + serve in one future. Retained for callers
+/// that do not need synchronous bind-error observation (tests, adhoc uses).
+/// Production CLI path uses `serve_metrics_on` with pre-bound listener.
+pub async fn serve_metrics(port: u16, metrics: Arc<ChannelMetrics>) -> anyhow::Result<()> {
+    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+    let listener = tokio::net::TcpListener::bind(addr).await.map_err(|e| {
+        anyhow::anyhow!("failed to bind metrics exporter on {addr}: {e}")
+    })?;
+    serve_metrics_on(listener, metrics).await
 }
 
 #[cfg(test)]
@@ -321,11 +396,13 @@ mod tests {
         assert_eq!(snap.max_batch_size, 2);
     }
 
-    /// TASK-TUI-803 Gate 1: Prometheus exposition must contain all five
-    /// metric names AND their `# HELP` / `# TYPE` header lines so scrapers
-    /// (prom, victoria, mimir) can parse the body without heuristics.
+    /// TASK-TUI-803 Gate 1: Prometheus exposition must parse as well-formed
+    /// text-format (v0.0.4) — every metric has `# HELP`, `# TYPE`, a single
+    /// sample line, and the declared type matches the spec's semantic role.
+    /// Uses a structural parser rather than substring matching so malformed
+    /// bodies (orphan samples, missing headers, duplicated types) FAIL here.
     #[test]
-    fn format_prometheus_contains_all_five_metrics() {
+    fn format_prometheus_parses_and_types_match_semantics() {
         let m = make_fresh();
         m.record_sent();
         m.record_sent();
@@ -333,36 +410,56 @@ mod tests {
         m.record_drained(2);
         m.record_latency_ms(7);
 
-        let body = format_prometheus(&m.snapshot());
+        let snap = m.snapshot();
+        let body = format_prometheus(&snap);
+        let parsed = parse_prometheus_exposition(&body);
 
-        // All 5 metric names appear on a sample line.
-        for name in [
-            "archon_tui_channel_backlog_depth",
-            "archon_tui_channel_total_sent",
-            "archon_tui_channel_total_drained",
-            "archon_tui_channel_max_batch_size",
-            "archon_tui_channel_p95_send_to_render_ms",
-        ] {
-            assert!(
-                body.contains(name),
-                "expected metric name {name} in prometheus output, body was: {body}"
-            );
-            // `# HELP <name>` and `# TYPE <name>` headers must be present.
-            assert!(
-                body.contains(&format!("# HELP {name}")),
-                "missing # HELP for {name}"
-            );
-            assert!(
-                body.contains(&format!("# TYPE {name}")),
-                "missing # TYPE for {name}"
-            );
+        // Exactly 5 metrics expected — no more, no less.
+        assert_eq!(
+            parsed.len(),
+            5,
+            "expected 5 metrics, parsed {}: {:?}",
+            parsed.len(),
+            parsed.keys().collect::<Vec<_>>(),
+        );
+
+        // Each metric: declared type must match the Prometheus semantic role.
+        let expected = [
+            ("archon_tui_channel_backlog_depth", "gauge", snap.backlog_depth.to_string()),
+            ("archon_tui_channel_total_sent", "counter", snap.total_sent.to_string()),
+            ("archon_tui_channel_total_drained", "counter", snap.total_drained.to_string()),
+            // max_batch_size is a high-water mark → GAUGE, not counter.
+            ("archon_tui_channel_max_batch_size", "gauge", snap.max_batch_size.to_string()),
+            (
+                "archon_tui_channel_p95_send_to_render_ms",
+                "gauge",
+                snap.p95_send_to_render_ms.to_string(),
+            ),
+        ];
+        for (name, want_ty, want_val) in expected {
+            let (ty, val) = parsed
+                .get(name)
+                .unwrap_or_else(|| panic!("metric {name} missing from exposition; body=\n{body}"));
+            assert_eq!(ty, want_ty, "{name} has type {ty}, want {want_ty}");
+            assert_eq!(val, &want_val, "{name} sample value {val} != snapshot {want_val}");
         }
+    }
 
-        // The gauge/counter types must match the spec.
-        assert!(body.contains("# TYPE archon_tui_channel_backlog_depth gauge"));
-        assert!(body.contains("# TYPE archon_tui_channel_total_sent counter"));
-        assert!(body.contains("# TYPE archon_tui_channel_total_drained counter"));
-        assert!(body.contains("# TYPE archon_tui_channel_max_batch_size counter"));
-        assert!(body.contains("# TYPE archon_tui_channel_p95_send_to_render_ms gauge"));
+    /// Regression guard: max_batch_size must NOT be declared `counter`. A
+    /// scraper running `rate(archon_tui_channel_max_batch_size[5m])` on a
+    /// counter-typed high-water gauge produces meaningless negative rates
+    /// whenever the mark resets or holds flat. If anyone re-types this to
+    /// `counter` the test fails loudly.
+    #[test]
+    fn max_batch_size_is_gauge_not_counter() {
+        let body = format_prometheus(&make_fresh().snapshot());
+        assert!(
+            body.contains("# TYPE archon_tui_channel_max_batch_size gauge"),
+            "max_batch_size must be gauge (high-water mark); body=\n{body}"
+        );
+        assert!(
+            !body.contains("# TYPE archon_tui_channel_max_batch_size counter"),
+            "max_batch_size must NOT be counter; body=\n{body}"
+        );
     }
 }
