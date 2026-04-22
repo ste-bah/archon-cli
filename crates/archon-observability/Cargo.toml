@@ -7,18 +7,35 @@ description = "Shared observability primitives (tracing layers, redaction, metri
 
 # ---------------------------------------------------------------------------
 # Staging crate for AGS-OBS-9xx (Stage 10) — LIFT sequence:
-#   OBS-900 (this ticket): crate shell + workspace registration + hello-world
-#   OBS-901: move archon-tui/src/observability.rs -> src/metrics.rs
-#   OBS-905: move archon-tui/src/observability_tracing.rs -> src/tracing.rs
-#   OBS-906: extract RedactionLayer + SECRET_REGEX -> src/redaction.rs
+#   OBS-900 (shell): crate registration + hello-world const
+#   OBS-905 (this ticket): move archon-tui/src/observability_tracing.rs
+#                          -> src/tracing.rs (init_tracing + RedactionLayer
+#                          + span_* + redaction regex).
+#   OBS-906: carve RedactionLayer + SECRET_REGEX into src/redaction.rs
+#            and narrow src/tracing.rs to Layer glue only.
+#   OBS-901: lift archon-tui/src/observability.rs -> src/metrics.rs
 #   (wiring): main.rs/session.rs/archon-core::logging switch to this crate
 #   OBS-907: add json arg to init_tracing; gate-walk JSON log output
 #
-# Dependencies are declared minimally here and grow as content lifts in.
-# Every new dep MUST come from [workspace.dependencies] — no floating
-# versions, so the workspace dep graph stays consistent.
+# Dependency discipline: every new dep MUST come from [workspace.dependencies]
+# so the workspace dep graph stays consistent. OBS-905 pulls in tracing,
+# tracing-subscriber (env-filter + json features), regex, once_cell, anyhow
+# — each one already pinned at the workspace root.
 # ---------------------------------------------------------------------------
 
 [dependencies]
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+regex = { workspace = true }
+once_cell = { workspace = true }
+anyhow = { workspace = true }
 
 [dev-dependencies]
+# tests/tracing_smoke.rs installs a local subscriber via
+# tracing_subscriber::registry().with(RedactionLayer::...) so it can
+# exercise the span_* constructors with an active subscriber on the
+# current thread (integration tests run in parallel, so we cannot rely
+# on another test having installed a global one first). Pulled from the
+# workspace to stay version-aligned with the prod dependency above.
+tracing-subscriber = { workspace = true }
+tracing = { workspace = true }

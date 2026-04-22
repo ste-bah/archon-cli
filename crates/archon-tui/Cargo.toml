@@ -24,6 +24,10 @@ serde_json.workspace = true
 archon-core = { path = "../archon-core" }
 archon-llm = { path = "../archon-llm" }
 archon-session = { path = "../archon-session" }
+# TASK-AGS-OBS-905: observability_tracing.rs lifted to archon-observability.
+# The in-tree src/observability_tracing.rs now re-exports from here so the
+# archon_tui::observability public surface stays byte-identical for callers.
+archon-observability = { path = "../archon-observability" }
 cpal = { workspace = true, optional = true }
 futures-util = { workspace = true }
 parking_lot = "0.12"

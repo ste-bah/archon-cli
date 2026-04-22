@@ -562,6 +562,13 @@ dependencies = [
 [[package]]
 name = "archon-observability"
 version = "0.1.4"
+dependencies = [
+ "anyhow",
+ "once_cell",
+ "regex",
+ "tracing",
+ "tracing-subscriber",
+]
 
 [[package]]
 name = "archon-permissions"
@@ -728,6 +735,7 @@ dependencies = [
  "archon-core",
  "archon-llm",
  "archon-memory",
+ "archon-observability",
  "archon-session",
  "archon-tools",
  "async-trait",

@@ -23,23 +23,44 @@
 //! observability primitives into this single crate and swaps `main.rs` to
 //! call into here, closing the dead-wire for good.
 //!
-//! ## Current shape (OBS-900)
+//! ## Current shape (after OBS-905)
 //!
-//! This file is a **shell**. It exposes a single [`VERSION`] constant so
-//! downstream crates can take a trivial dependency today and start updating
-//! their `use` imports ahead of the content lifts. Real modules land in
-//! follow-up tickets:
+//! Modules landed so far:
+//!
+//!   * [`tracing`] — `init_tracing`, `RedactionLayer`, `span_*` constructors,
+//!     lifted from `archon-tui/src/observability_tracing.rs` in OBS-905.
+//!     Includes the full secret-shape redaction matrix (OpenAI, Anthropic,
+//!     AWS, GitHub, Stripe, JWT, bearer, sensitive field names).
+//!
+//! Still to land (follow-up tickets):
 //!
 //!   * [`OBS-901`] — `metrics` module (Prometheus exposition, `ChannelMetrics`).
-//!   * [`OBS-905`] — `tracing` module (`init_tracing`, formatting).
-//!   * [`OBS-906`] — `redaction` module (`RedactionLayer`, `SECRET_REGEX`).
+//!   * [`OBS-906`] — carve `RedactionLayer` + `SECRET_REGEX` out of `tracing`
+//!     into a dedicated `redaction` module.
+//!   * (wiring) — `main.rs`/`session.rs`/`archon-core::logging` switch to
+//!     this crate, closing the dead-wire so production logs are redacted.
+//!   * [`OBS-907`] — gate-walk the `json` arg on `init_tracing`.
+//!
+//! ## Public re-exports
+//!
+//! The [`tracing`] module's surface is also re-exported at the crate root
+//! so downstream callers can write `use archon_observability::init_tracing`
+//! instead of the longer `archon_observability::tracing::init_tracing`. The
+//! shorter path stays stable across future internal refactors (e.g. when
+//! OBS-906 splits `redaction` out of `tracing`).
 //!
 //! [`OBS-901`]: https://example.internal/task/AGS-OBS-901
-//! [`OBS-905`]: https://example.internal/task/AGS-OBS-905
 //! [`OBS-906`]: https://example.internal/task/AGS-OBS-906
+//! [`OBS-907`]: https://example.internal/task/AGS-OBS-907
 
 #![deny(missing_docs)]
 #![deny(unsafe_code)]
+
+pub mod tracing;
+
+pub use tracing::{
+    RedactionLayer, init_tracing, span_agent_turn, span_channel_send, span_slash_dispatch,
+};
 
 /// Workspace version string — pinned to `CARGO_PKG_VERSION` at build time so
 /// downstream crates can surface the active archon-observability version
