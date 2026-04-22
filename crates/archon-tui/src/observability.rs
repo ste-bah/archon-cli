@@ -1,10 +1,24 @@
 //! Channel observability instrumentation for AgentEvent channel.
 //!
-//! Provides backlog depth, throughput, and P95 send-to-render latency tracking.
+//! Provides backlog depth, throughput, and P95 send-to-render latency tracking,
+//! plus the TASK-TUI-803 Prometheus `/metrics` exporter. The TASK-TUI-802
+//! tracing plumbing (spans, redaction, `init_tracing`) lives in
+//! `observability_tracing.rs` to keep this file under the 500-LoC ceiling
+//! required by NFR-TUI-QUAL-001; it is re-exported below so the external API
+//! (`archon_tui::observability::{init_tracing, span_agent_turn,
+//! span_slash_dispatch, span_channel_send}`) is unchanged.
 
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use parking_lot::Mutex;
+
 use hdrhistogram::Histogram;
+use parking_lot::Mutex;
+
+// Re-export TASK-TUI-802 tracing surface so existing callers keep importing
+// from `archon_tui::observability::…`. See `observability_tracing.rs`.
+pub use crate::observability_tracing::{
+    RedactionLayer, init_tracing, span_agent_turn, span_channel_send, span_slash_dispatch,
+};
 
 /// Channel instrumentation metrics.
 ///
@@ -141,6 +155,119 @@ pub struct ChannelMetricsSnapshot {
     pub p95_send_to_render_ms: u64,
 }
 
+impl archon_core::ChannelMetricSink for ChannelMetrics {
+    #[inline]
+    fn record_sent(&self) {
+        self.record_sent();
+    }
+    #[inline]
+    fn record_drained(&self, batch_size: u64) {
+        self.record_drained(batch_size);
+    }
+}
+
+// ── TASK-TUI-803: Prometheus /metrics exporter ──────────────────────────────
+//
+// Renders a `ChannelMetricsSnapshot` into Prometheus text-format
+// (`text/plain; version=0.0.4`) and serves it on a local HTTP endpoint when
+// the operator passes `archon --metrics-port <PORT>`. Binds to `127.0.0.1`
+// only — no 0.0.0.0, no TLS, no auth (per spec §Out of Scope).
+
+/// Prometheus metric names. Kept together so `format_prometheus` and the
+/// unit test stay in lock-step on renames.
+const METRIC_BACKLOG_DEPTH: &str = "archon_tui_channel_backlog_depth";
+const METRIC_TOTAL_SENT: &str = "archon_tui_channel_total_sent";
+const METRIC_TOTAL_DRAINED: &str = "archon_tui_channel_total_drained";
+const METRIC_MAX_BATCH_SIZE: &str = "archon_tui_channel_max_batch_size";
+const METRIC_P95_LATENCY_MS: &str = "archon_tui_channel_p95_send_to_render_ms";
+
+/// Format a `ChannelMetricsSnapshot` as Prometheus text exposition v0.0.4.
+///
+/// Each metric gets `# HELP`, `# TYPE`, and a single sample line. `backlog_depth`
+/// and the p95 latency gauge are `gauge`; the running totals and max-batch-size
+/// are `counter` (monotonic since process start).
+pub fn format_prometheus(snapshot: &ChannelMetricsSnapshot) -> String {
+    let mut out = String::with_capacity(1024);
+    // backlog_depth — instantaneous in-flight, so it is a gauge.
+    out.push_str(&format!(
+        "# HELP {METRIC_BACKLOG_DEPTH} Current AgentEvent channel backlog (sent - drained).\n"
+    ));
+    out.push_str(&format!("# TYPE {METRIC_BACKLOG_DEPTH} gauge\n"));
+    out.push_str(&format!(
+        "{METRIC_BACKLOG_DEPTH} {}\n",
+        snapshot.backlog_depth
+    ));
+    // total_sent — monotonic since startup.
+    out.push_str(&format!(
+        "# HELP {METRIC_TOTAL_SENT} Total AgentEvents sent since process start.\n"
+    ));
+    out.push_str(&format!("# TYPE {METRIC_TOTAL_SENT} counter\n"));
+    out.push_str(&format!("{METRIC_TOTAL_SENT} {}\n", snapshot.total_sent));
+    // total_drained — monotonic since startup.
+    out.push_str(&format!(
+        "# HELP {METRIC_TOTAL_DRAINED} Total AgentEvents drained since process start.\n"
+    ));
+    out.push_str(&format!("# TYPE {METRIC_TOTAL_DRAINED} counter\n"));
+    out.push_str(&format!(
+        "{METRIC_TOTAL_DRAINED} {}\n",
+        snapshot.total_drained
+    ));
+    // max_batch_size — high-water mark; counter (monotonic via fetch_max).
+    out.push_str(&format!(
+        "# HELP {METRIC_MAX_BATCH_SIZE} Largest drain batch observed since process start.\n"
+    ));
+    out.push_str(&format!("# TYPE {METRIC_MAX_BATCH_SIZE} counter\n"));
+    out.push_str(&format!(
+        "{METRIC_MAX_BATCH_SIZE} {}\n",
+        snapshot.max_batch_size
+    ));
+    // p95 — sampled gauge derived from the HDR histogram at snapshot time.
+    out.push_str(&format!(
+        "# HELP {METRIC_P95_LATENCY_MS} P95 send-to-render latency (milliseconds).\n"
+    ));
+    out.push_str(&format!("# TYPE {METRIC_P95_LATENCY_MS} gauge\n"));
+    out.push_str(&format!(
+        "{METRIC_P95_LATENCY_MS} {}\n",
+        snapshot.p95_send_to_render_ms
+    ));
+    out
+}
+
+/// Spawnable /metrics HTTP server.
+///
+/// Binds to `127.0.0.1:<port>` (local-only — no 0.0.0.0) and serves a single
+/// `GET /metrics` route returning Prometheus text exposition. Intended to be
+/// launched via `tokio::spawn` from the CLI startup path when the operator
+/// passes `--metrics-port`.
+pub async fn serve_metrics(port: u16, metrics: Arc<ChannelMetrics>) -> anyhow::Result<()> {
+    use axum::{Router, response::IntoResponse, routing::get};
+
+    // Handler closure captures the shared metrics Arc and re-snapshots on
+    // every request so the exporter reflects the current counter state
+    // (not stale values from server startup).
+    let metrics_for_handler = Arc::clone(&metrics);
+    let handler = move || {
+        let metrics = Arc::clone(&metrics_for_handler);
+        async move {
+            let snapshot = metrics.snapshot();
+            let body = format_prometheus(&snapshot);
+            (
+                [("content-type", "text/plain; version=0.0.4")],
+                body,
+            )
+                .into_response()
+        }
+    };
+
+    let app: Router = Router::new().route("/metrics", get(handler));
+
+    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    tracing::info!(%addr, "Prometheus /metrics exporter listening");
+    axum::serve(listener, app).await?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -193,15 +320,49 @@ mod tests {
         assert_eq!(snap.total_drained, 2);
         assert_eq!(snap.max_batch_size, 2);
     }
-}
 
-impl archon_core::ChannelMetricSink for ChannelMetrics {
-    #[inline]
-    fn record_sent(&self) {
-        self.record_sent();
-    }
-    #[inline]
-    fn record_drained(&self, batch_size: u64) {
-        self.record_drained(batch_size);
+    /// TASK-TUI-803 Gate 1: Prometheus exposition must contain all five
+    /// metric names AND their `# HELP` / `# TYPE` header lines so scrapers
+    /// (prom, victoria, mimir) can parse the body without heuristics.
+    #[test]
+    fn format_prometheus_contains_all_five_metrics() {
+        let m = make_fresh();
+        m.record_sent();
+        m.record_sent();
+        m.record_sent();
+        m.record_drained(2);
+        m.record_latency_ms(7);
+
+        let body = format_prometheus(&m.snapshot());
+
+        // All 5 metric names appear on a sample line.
+        for name in [
+            "archon_tui_channel_backlog_depth",
+            "archon_tui_channel_total_sent",
+            "archon_tui_channel_total_drained",
+            "archon_tui_channel_max_batch_size",
+            "archon_tui_channel_p95_send_to_render_ms",
+        ] {
+            assert!(
+                body.contains(name),
+                "expected metric name {name} in prometheus output, body was: {body}"
+            );
+            // `# HELP <name>` and `# TYPE <name>` headers must be present.
+            assert!(
+                body.contains(&format!("# HELP {name}")),
+                "missing # HELP for {name}"
+            );
+            assert!(
+                body.contains(&format!("# TYPE {name}")),
+                "missing # TYPE for {name}"
+            );
+        }
+
+        // The gauge/counter types must match the spec.
+        assert!(body.contains("# TYPE archon_tui_channel_backlog_depth gauge"));
+        assert!(body.contains("# TYPE archon_tui_channel_total_sent counter"));
+        assert!(body.contains("# TYPE archon_tui_channel_total_drained counter"));
+        assert!(body.contains("# TYPE archon_tui_channel_max_batch_size counter"));
+        assert!(body.contains("# TYPE archon_tui_channel_p95_send_to_render_ms gauge"));
     }
 }

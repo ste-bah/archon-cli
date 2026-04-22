@@ -269,6 +269,13 @@ pub struct Cli {
     /// Write debug logs to specific file
     #[arg(long, value_name = "PATH")]
     pub debug_file: Option<PathBuf>,
+
+    // ── Observability (TASK-TUI-803) ───────────────────────────
+    /// Prometheus /metrics exporter port (0 = disabled). When set, spawns a
+    /// loopback-only HTTP server at 127.0.0.1:<PORT>/metrics exposing the
+    /// ChannelMetrics counters (backlog, throughput, p95 latency).
+    #[arg(long, value_name = "PORT")]
+    pub metrics_port: Option<u16>,
 }
 
 #[derive(Subcommand, Debug)]

@@ -32,6 +32,7 @@ pub mod split_pane;
 
 pub mod task_dispatch;
 pub mod observability;
+pub mod observability_tracing;
 pub use task_dispatch::{
     AgentDispatcher, AgentRouter, CancelOutcome, DispatchResult, QueuedPrompt, TurnOutcome,
     TurnRunner,

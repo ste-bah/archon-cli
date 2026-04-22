@@ -458,6 +458,22 @@ pub(crate) async fn run_print_mode_session(
     let metrics_for_agent = Arc::clone(&metrics);
     agent.set_channel_metrics(metrics_for_agent);
 
+    // TASK-TUI-803: spawn Prometheus /metrics exporter on loopback when
+    // `--metrics-port <PORT>` is set. The exporter shares the SAME Arc as
+    // the agent so every scrape reflects the live counters rather than a
+    // detached copy. Print-mode processes are short-lived, but operators
+    // running long print-mode batches (CI, harness runs) still benefit.
+    if let Some(port) = cli.metrics_port {
+        let metrics_for_exporter = Arc::clone(&metrics);
+        tokio::spawn(async move {
+            if let Err(e) =
+                archon_tui::observability::serve_metrics(port, metrics_for_exporter).await
+            {
+                tracing::warn!(%e, port, "metrics exporter terminated");
+            }
+        });
+    }
+
     // Wire hook system for print mode — load hooks then register agent-specific hooks
     {
         let home_dir = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
@@ -1389,6 +1405,20 @@ pub(crate) async fn run_interactive_session(
     let metrics = Arc::new(archon_tui::observability::ChannelMetrics::default());
     let metrics_for_agent = Arc::clone(&metrics);
     agent.set_channel_metrics(metrics_for_agent);
+
+    // TASK-TUI-803: spawn Prometheus /metrics exporter on loopback when
+    // `--metrics-port <PORT>` is set. The exporter clones the same Arc
+    // wired into the agent so scrapes see live counter values.
+    if let Some(port) = cli.metrics_port {
+        let metrics_for_exporter = Arc::clone(&metrics);
+        tokio::spawn(async move {
+            if let Err(e) =
+                archon_tui::observability::serve_metrics(port, metrics_for_exporter).await
+            {
+                tracing::warn!(%e, port, "metrics exporter terminated");
+            }
+        });
+    }
 
     // Wire checkpoint store into agent (CLI-116)
     if let Some(store) = checkpoint_store {

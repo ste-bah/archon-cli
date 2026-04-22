@@ -29,6 +29,23 @@ futures-util = { workspace = true }
 parking_lot = "0.12"
 hdrhistogram = "7.5"
 tempfile = "3.12"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+regex = "1"
+once_cell = "1"
+# TASK-TUI-803: Prometheus /metrics exporter served on loopback via --metrics-port.
+# axum 0.8 + tower 0.5 are already pinned at the workspace root; we opt in here
+# so the serve_metrics() helper can live alongside ChannelMetrics instead of
+# leaking the dependency into the top-level binary.
+axum = { workspace = true }
+tower = { workspace = true }
+
+# jemalloc-ctl is used by TASK-TUI-809 (memory probe). jemalloc is not
+# available on musl targets, so we gate the dependency via target cfg.
+# This is cleaner than an optional feature because it's a platform
+# constraint, not a user-facing toggle — consumers on glibc get it
+# automatically, musl builds skip it without any feature flag dance.
+[target.'cfg(not(target_env = "musl"))'.dependencies]
+jemalloc-ctl = "0.5"
 
 [dev-dependencies]
 insta = { workspace = true }
@@ -42,6 +59,12 @@ procfs = "0.16"
 archon-tools = { path = "../archon-tools" }
 uuid = { workspace = true }
 tokio-util = { workspace = true }
+# TASK-TUI-905: Stage 9 preserve gate — REQ-FOR-PRESERVE-D8 regression guard
+# for the embedded CozoDB memory store across in-process restart. Dev-only
+# dep because the gate lives in tests/preserve_cozodb_memory_persist_gate.rs
+# and no production archon-tui code touches archon-memory directly. Required
+# by the TASK-TUI-905 Wiring Check (§Wiring Check line 94).
+archon-memory = { path = "../archon-memory" }
 
 [[bench]]
 name = "eventchannel_load"
@@ -57,3 +80,6 @@ harness = false
 default = []
 terminal-panel = []
 audio-capture = ["cpal"]
+# TASK-TUI-810: gates the 100-agents x 1000-events load test so default
+# `cargo test -p archon-tui` stays fast. CI enables via --features load-tests.
+load-tests = []

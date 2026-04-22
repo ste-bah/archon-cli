@@ -723,9 +723,11 @@ dependencies = [
  "anyhow",
  "archon-core",
  "archon-llm",
+ "archon-memory",
  "archon-session",
  "archon-tools",
  "async-trait",
+ "axum",
  "chrono",
  "cpal",
  "criterion",
@@ -736,11 +738,14 @@ dependencies = [
  "hdrhistogram",
  "hound",
  "insta",
+ "jemalloc-ctl",
  "libloading",
+ "once_cell",
  "parking_lot",
  "procfs",
  "pulldown-cmark",
  "ratatui",
+ "regex",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
@@ -748,7 +753,9 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tokio-util",
+ "tower",
  "tracing",
+ "tracing-subscriber",
  "tree-sitter",
  "tree-sitter-highlight",
  "uuid",
@@ -4098,6 +4105,27 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "52f5385394064fa2c886205dba02598013ce83d3e92d33dbdc0c52fe0e7bf4fc"
 dependencies = [
  "cc",
+]
+
+[[package]]
+name = "jemalloc-ctl"
+version = "0.5.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7cffc705424a344c054e135d12ee591402f4539245e8bbd64e6c9eaa9458b63c"
+dependencies = [
+ "jemalloc-sys",
+ "libc",
+ "paste",
+]
+
+[[package]]
+name = "jemalloc-sys"
+version = "0.5.4+5.3.0-patched"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ac6c1946e1cea1788cbfde01c993b52a10e2da07f4bac608228d1bed20bfebf2"
+dependencies = [
+ "cc",
+ "libc",
 ]
 
 [[package]]
