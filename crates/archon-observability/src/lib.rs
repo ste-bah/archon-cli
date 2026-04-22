@@ -23,31 +23,36 @@
 //! observability primitives into this single crate and swaps `main.rs` to
 //! call into here, closing the dead-wire for good.
 //!
-//! ## Current shape (after OBS-905)
+//! ## Current shape (after OBS-906)
 //!
 //! Modules landed so far:
 //!
-//!   * [`tracing`] — `init_tracing`, `RedactionLayer`, `span_*` constructors,
-//!     lifted from `archon-tui/src/observability_tracing.rs` in OBS-905.
-//!     Includes the full secret-shape redaction matrix (OpenAI, Anthropic,
-//!     AWS, GitHub, Stripe, JWT, bearer, sensitive field names).
+//!   * [`tracing`] — `init_tracing` + `span_*` constructors. Narrowed in
+//!     OBS-906 to only hold the tracing-glue surface; redaction carved into
+//!     the sibling module below.
+//!   * [`redaction`] — `RedactionLayer`, `REDACTION_RE`, `RedactingVisitor`,
+//!     `json_escape`, and the `Layer<S> for RedactionLayer` impl. Dedicated
+//!     home for the security-critical surface so future work on `tracing.rs`
+//!     cannot touch the redaction contract by accident. Full secret-shape
+//!     matrix (OpenAI, Anthropic, AWS, GitHub, Stripe, JWT, bearer,
+//!     sensitive field names) lives here.
 //!
 //! Still to land (follow-up tickets):
 //!
 //!   * [`OBS-901`] — `metrics` module (Prometheus exposition, `ChannelMetrics`).
-//!   * [`OBS-906`] — carve `RedactionLayer` + `SECRET_REGEX` out of `tracing`
-//!     into a dedicated `redaction` module.
 //!   * (wiring) — `main.rs`/`session.rs`/`archon-core::logging` switch to
 //!     this crate, closing the dead-wire so production logs are redacted.
 //!   * [`OBS-907`] — gate-walk the `json` arg on `init_tracing`.
 //!
 //! ## Public re-exports
 //!
-//! The [`tracing`] module's surface is also re-exported at the crate root
-//! so downstream callers can write `use archon_observability::init_tracing`
-//! instead of the longer `archon_observability::tracing::init_tracing`. The
-//! shorter path stays stable across future internal refactors (e.g. when
-//! OBS-906 splits `redaction` out of `tracing`).
+//! Both modules' primary surfaces are re-exported at the crate root so
+//! downstream callers can write `use archon_observability::init_tracing` and
+//! `use archon_observability::RedactionLayer` — the short paths stay stable
+//! across future internal refactors. The archon-tui re-export shim depends
+//! on this: it imports from the crate root, not from either submodule, so
+//! a future module reshuffle inside `archon-observability` doesn't leak
+//! out to downstream crates.
 //!
 //! [`OBS-901`]: https://example.internal/task/AGS-OBS-901
 //! [`OBS-906`]: https://example.internal/task/AGS-OBS-906
@@ -56,11 +61,11 @@
 #![deny(missing_docs)]
 #![deny(unsafe_code)]
 
+pub mod redaction;
 pub mod tracing;
 
-pub use tracing::{
-    RedactionLayer, init_tracing, span_agent_turn, span_channel_send, span_slash_dispatch,
-};
+pub use redaction::RedactionLayer;
+pub use tracing::{init_tracing, span_agent_turn, span_channel_send, span_slash_dispatch};
 
 /// Workspace version string — pinned to `CARGO_PKG_VERSION` at build time so
 /// downstream crates can surface the active archon-observability version

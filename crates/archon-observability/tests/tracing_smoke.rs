@@ -17,8 +17,14 @@
 //! layer stacking) remains covered by the unit tests that lift alongside
 //! the impl in `src/tracing.rs`.
 
+// OBS-906 carve: RedactionLayer now lives in the `redaction` submodule. The
+// remaining tracing-glue surface (init_tracing + span_*) stays in `tracing`.
+// Both are also available at the crate root via `pub use`, but this smoke
+// test pins the submodule paths explicitly so a future silent rearrangement
+// triggers a compile error here instead of silently relocating the API.
+use archon_observability::redaction::RedactionLayer;
 use archon_observability::tracing::{
-    RedactionLayer, init_tracing, span_agent_turn, span_channel_send, span_slash_dispatch,
+    init_tracing, span_agent_turn, span_channel_send, span_slash_dispatch,
 };
 use tracing_subscriber::layer::SubscriberExt;
 
