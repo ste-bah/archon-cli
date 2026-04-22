@@ -11,6 +11,7 @@ Lint and validation scripts invoked by `.github/workflows/*.yml` (wired in TASK-
 | `grep-await-send.sh` | Fail if any `agent_event_tx.send(...).await` exists | TECH-TUI-OBSERVABILITY line 1132 |
 | `check-complexity.sh` | Fail on any function with clippy cognitive_complexity >= 60 in `crates/archon-tui` | TECH-TUI-OBSERVABILITY line 1128, AC-OBSERVABILITY-02, NFR-TUI-QUAL-002 |
 | `check-coverage.sh` | Fail if `cargo llvm-cov --package archon-tui` line coverage < `$COVERAGE_THRESHOLD` (default 80) | TECH-TUI-OBSERVABILITY line 1134, AC-OBSERVABILITY-04, NFR-TUI-QUAL-003 |
+| `check-coverage-observability.sh` | Fail if `cargo llvm-cov --package archon-observability` line coverage < `$COVERAGE_THRESHOLD` (default 80) | TASK-AGS-OBS-913 |
 
 ## Prerequisites
 
@@ -40,6 +41,7 @@ bash scripts/ci/tests/test-grep-gates.sh
 bash scripts/ci/tests/test-check-complexity.sh
 bash scripts/ci/tests/test-check-cycles.sh
 bash scripts/ci/tests/test-check-coverage.sh
+bash scripts/ci/tests/test-check-coverage-observability.sh
 bash scripts/ci/tests/test-workflow-syntax.sh
 ```
 
@@ -58,6 +60,7 @@ paths under `crates/archon-tui/**` or `scripts/ci/**` change.
 | `grep-bounded-channel.sh` | `tui-lint-bounded-channel` | **required** |
 | `grep-await-send.sh` | `tui-lint-await-send` | **required** |
 | `check-coverage.sh` | `tui-coverage` | allowed-to-fail |
+| `check-coverage-observability.sh` | `observability-coverage` | allowed-to-fail |
 | `cargo test -p archon-tui --features load-tests ...` | `tui-load-tests` | allowed-to-fail |
 | `cargo test -p archon-tui --lib` | `tui-unit` | **required** |
 
