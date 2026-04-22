@@ -1,0 +1,24 @@
+[package]
+name = "archon-observability"
+version.workspace = true
+edition.workspace = true
+publish = false
+description = "Shared observability primitives (tracing layers, redaction, metrics) for archon-cli. Owning crate for structured logging, secret redaction, and Prometheus exposition. Replaces the ad-hoc copies that previously lived in archon-tui and archon-core."
+
+# ---------------------------------------------------------------------------
+# Staging crate for AGS-OBS-9xx (Stage 10) — LIFT sequence:
+#   OBS-900 (this ticket): crate shell + workspace registration + hello-world
+#   OBS-901: move archon-tui/src/observability.rs -> src/metrics.rs
+#   OBS-905: move archon-tui/src/observability_tracing.rs -> src/tracing.rs
+#   OBS-906: extract RedactionLayer + SECRET_REGEX -> src/redaction.rs
+#   (wiring): main.rs/session.rs/archon-core::logging switch to this crate
+#   OBS-907: add json arg to init_tracing; gate-walk JSON log output
+#
+# Dependencies are declared minimally here and grow as content lifts in.
+# Every new dep MUST come from [workspace.dependencies] — no floating
+# versions, so the workspace dep graph stays consistent.
+# ---------------------------------------------------------------------------
+
+[dependencies]
+
+[dev-dependencies]

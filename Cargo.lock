@@ -560,6 +560,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "archon-observability"
+version = "0.1.4"
+
+[[package]]
 name = "archon-permissions"
 version = "0.1.4"
 dependencies = [
