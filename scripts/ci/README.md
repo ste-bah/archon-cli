@@ -38,6 +38,7 @@ bash scripts/ci/tests/test-file-size-lint.sh
 bash scripts/ci/tests/test-check-duplicate-code.sh
 bash scripts/ci/tests/test-grep-gates.sh
 bash scripts/ci/tests/test-check-complexity.sh
+bash scripts/ci/tests/test-check-cycles.sh
 bash scripts/ci/tests/test-check-coverage.sh
 bash scripts/ci/tests/test-workflow-syntax.sh
 ```
