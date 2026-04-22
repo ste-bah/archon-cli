@@ -30,8 +30,11 @@ archon-session = { path = "../archon-session" }
 archon-observability = { path = "../archon-observability" }
 cpal = { workspace = true, optional = true }
 futures-util = { workspace = true }
-parking_lot = "0.12"
-hdrhistogram = "7.5"
+# OBS-901 (Stage 10): promoted to workspace.dependencies so
+# archon-observability (new owning crate for ChannelMetrics) and archon-tui
+# stay version-aligned. Pins unchanged — parking_lot = 0.12, hdrhistogram = 7.5.
+parking_lot = { workspace = true }
+hdrhistogram = { workspace = true }
 tempfile = "3.12"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 regex = "1"

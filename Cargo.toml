@@ -98,6 +98,12 @@ moka = { version = "0.12", features = ["sync"] }
 strsim = "0.11"
 globset = "0.4"
 rayon = "1"
+# TASK-AGS-OBS-901 (Stage 10): promoted from archon-tui/Cargo.toml direct pins
+# so archon-observability (new owning crate for ChannelMetrics) and archon-tui
+# stay version-aligned per the OBS-900 dependency-discipline rule. Values match
+# the pre-LIFT archon-tui pins bit-for-bit — no version bump hidden in this LIFT.
+hdrhistogram = "7.5"
+parking_lot = "0.12"
 
 # TASK-AGS-006: dev-only test/bench deps (not opted into by any crate yet).
 # - insta:            snapshot testing (REQ-FOR-PRESERVE-D8)

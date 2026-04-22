@@ -391,6 +391,7 @@ dependencies = [
  "archon-llm",
  "archon-mcp",
  "archon-memory",
+ "archon-observability",
  "archon-permissions",
  "archon-session",
  "archon-test-support",
@@ -564,8 +565,13 @@ name = "archon-observability"
 version = "0.1.4"
 dependencies = [
  "anyhow",
+ "axum",
+ "hdrhistogram",
  "once_cell",
+ "parking_lot",
  "regex",
+ "tokio",
+ "tower",
  "tracing",
  "tracing-subscriber",
 ]

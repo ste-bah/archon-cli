@@ -13,6 +13,11 @@ archon-session = { path = "../archon-session" }
 archon-consciousness = { path = "../archon-consciousness" }
 archon-memory = { path = "../archon-memory" }
 archon-mcp = { path = "../archon-mcp" }
+# TASK-AGS-OBS-901: `src/metrics.rs` now re-exports `ChannelMetricSink` from
+# archon-observability (trait was moved there in OBS-901 so the trait + type
+# + impl all live in one crate — orphan-rule constraint). No cycle:
+# archon-observability has zero archon-* deps.
+archon-observability = { path = "../archon-observability" }
 
 # Workspace dependencies
 clap.workspace = true
