@@ -51,9 +51,9 @@ while IFS= read -r f; do
     fi
   fi
 done < <(find . -type f -name '*.rs' \
-  -not -path './target/*' \
-  -not -path './.cargo/*' \
-  -not -path './tests/fixtures/*' \
+  -not -path '*/target/*' \
+  -not -path '*/.cargo/*' \
+  -not -path '*/tests/fixtures/*' \
   | LC_ALL=C sort)
 
 if [ -n "$OFFENDERS_OUT" ]; then

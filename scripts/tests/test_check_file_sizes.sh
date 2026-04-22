@@ -9,7 +9,7 @@
 # fully hermetic and never touch the real tree.
 #
 # Usage: bash scripts/tests/test_check_file_sizes.sh
-# Exit:  0 iff all 11 sandbox/helper tests pass. Test (l) is informational only.
+# Exit:  0 iff all 11 sandbox/helper tests pass.
 
 set -uo pipefail
 
@@ -393,29 +393,6 @@ test_install_hooks_force_overwrites_with_backup() {
 }
 
 # ============================================================================
-# Test (l): real_tree_status (informational only)
-# ============================================================================
-test_real_tree_status() {
-  local name="l. real_tree_status (informational)"
-  local out rc
-  out="$( cd "$REPO_ROOT" && bash scripts/check-file-sizes.sh 2>&1 )"
-  rc=$?
-  if [ "$rc" -eq 0 ]; then
-    info "$name -- REAL TREE STATUS: OK (exit=0)"
-  else
-    info "$name -- REAL TREE STATUS: FAIL (exit=$rc)"
-  fi
-  # Print the trailer line for visibility.
-  local trailer
-  trailer="$(printf '%s' "$out" | grep '^FileSizeGuard:' | tail -n1 || true)"
-  if [ -n "$trailer" ]; then
-    printf '      %s\n' "$trailer"
-  fi
-  # Always return success: this is informational.
-  return 0
-}
-
-# ============================================================================
 # Run everything
 # ============================================================================
 main() {
@@ -432,7 +409,6 @@ main() {
   test_install_hooks_fresh
   test_install_hooks_refuses_overwrite_without_force
   test_install_hooks_force_overwrites_with_backup
-  test_real_tree_status
 
   printf '\n'
   printf '%d passed, %d failed\n' "$PASS_COUNT" "$FAIL_COUNT"
