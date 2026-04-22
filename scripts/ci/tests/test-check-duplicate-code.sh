@@ -22,11 +22,11 @@ OUT=$(JSCPD_TARGET_DIR="$FIXTURE_DUP" JSCPD_REPORT_DIR="/tmp/jscpd-report-dup" b
 RC=$?
 set -e
 echo "$OUT"
-if [ "$RC" -eq 0 ]; then
-    echo "TEST FAIL: duplicated fixtures accepted (should have failed)"
+if [ "$RC" -ne 1 ]; then
+    echo "TEST FAIL: duplicated fixtures exit=$RC, expected 1"
     exit 1
 fi
-echo "PASS: duplicated case rejected with exit $RC"
+echo "PASS: duplicated case rejected with exit 1"
 
 # --- Case 2: unique fixture must pass ---
 echo "--- Case 2: unique fixture (expect exit 0) ---"
@@ -40,4 +40,29 @@ if [ "$RC" -ne 0 ]; then
     exit 1
 fi
 echo "PASS: unique case accepted with exit 0"
+
+# --- Case 3: missing target dir must exit 2 ---
+echo "--- Case 3: missing target dir (expect exit 2) ---"
+set +e
+OUT=$(JSCPD_TARGET_DIR="/tmp/nonexistent-jscpd-target-$$" bash "$CHECKER" 2>&1)
+RC=$?
+set -e
+if [ "$RC" -ne 2 ]; then
+    echo "TEST FAIL: missing target dir exit=$RC, expected 2"
+    exit 1
+fi
+echo "PASS: missing target dir exit 2"
+
+# --- Case 4: missing npx must exit 2 ---
+echo "--- Case 4: missing npx (expect exit 2) ---"
+set +e
+OUT=$(PATH="/usr/bin:/bin" bash "$CHECKER" 2>&1)
+RC=$?
+set -e
+if [ "$RC" -ne 2 ]; then
+    echo "TEST FAIL: missing npx exit=$RC, expected 2"
+    exit 1
+fi
+echo "PASS: missing npx exit 2"
+
 echo "ALL TESTS PASSED"

@@ -18,6 +18,11 @@ if ! command -v npx >/dev/null 2>&1; then
     exit 2
 fi
 
+if ! command -v python3 >/dev/null 2>&1; then
+    echo "ERROR: python3 not found on PATH" >&2
+    exit 2
+fi
+
 rm -rf "$REPORT_DIR"
 mkdir -p "$REPORT_DIR"
 
@@ -51,14 +56,21 @@ try:
     pct = d.get('statistics', {}).get('total', {}).get('percentage', 0.0)
     print(pct)
 except Exception as e:
-    print(0.0)
-    sys.stderr.write(f'parse error: {e}\n')
+    sys.stderr.write(f'ERROR: failed to parse jscpd report: {e}\n')
+    sys.exit(2)
 ")
 
 printf 'jscpd: %s%% duplication (threshold %s%%)\n' "$PERCENT" "$THRESHOLD"
 
 # Compare using python for float correctness.
-EXCEEDS=$(python3 -c "print(1 if float('$PERCENT') >= float('$THRESHOLD') else 0)")
+EXCEEDS=$(python3 -c "
+import sys
+try:
+    print(1 if float('$PERCENT') >= float('$THRESHOLD') else 0)
+except Exception as e:
+    sys.stderr.write(f'ERROR: failed to compare threshold: {e}\n')
+    sys.exit(2)
+")
 
 if [[ "$EXCEEDS" == "1" ]]; then
     echo "FAIL: duplication exceeds threshold"
