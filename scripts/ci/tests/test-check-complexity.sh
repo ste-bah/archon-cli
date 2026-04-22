@@ -10,6 +10,9 @@
 # targets `-p archon-tui` in the parent workspace. The flag surface under
 # test (-D clippy::cognitive_complexity + clippy.toml threshold) is
 # identical, and this is the only way to get a hermetic, focused run.
+# NOTE: The workspace clippy.toml uses threshold=60; this test uses a
+# lower threshold (10) to keep the fixture small while still verifying
+# the clippy mechanism (complex fails, trivial passes).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

@@ -9,7 +9,7 @@ Lint and validation scripts invoked by `.github/workflows/*.yml` (wired in TASK-
 | `check-duplicate-code.sh` | Fail if jscpd reports >=5% code duplication in archon-tui/src | TECH-TUI-OBSERVABILITY line 1130, NFR-TUI-MOD-003 |
 | `grep-bounded-channel.sh` | Fail if any `mpsc::channel::<AgentEvent>` (bounded) exists | TECH-TUI-OBSERVABILITY line 1131 |
 | `grep-await-send.sh` | Fail if any `agent_event_tx.send(...).await` exists | TECH-TUI-OBSERVABILITY line 1132 |
-| `check-complexity.sh` | Fail on any function with clippy cognitive_complexity >= 10 in `crates/archon-tui` | TECH-TUI-OBSERVABILITY line 1128, AC-OBSERVABILITY-02, NFR-TUI-QUAL-002 |
+| `check-complexity.sh` | Fail on any function with clippy cognitive_complexity >= 60 in `crates/archon-tui` | TECH-TUI-OBSERVABILITY line 1128, AC-OBSERVABILITY-02, NFR-TUI-QUAL-002 |
 | `check-coverage.sh` | Fail if `cargo llvm-cov --package archon-tui` line coverage < `$COVERAGE_THRESHOLD` (default 80) | TECH-TUI-OBSERVABILITY line 1134, AC-OBSERVABILITY-04, NFR-TUI-QUAL-003 |
 
 ## Prerequisites
