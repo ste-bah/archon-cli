@@ -376,7 +376,3 @@ impl AgentDispatcher {
         self.current_query.is_some()
     }
 }
-
-#[cfg(test)]
-#[path = "task_dispatch_tests.rs"]
-mod tests;

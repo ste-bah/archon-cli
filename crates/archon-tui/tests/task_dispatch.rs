@@ -1,11 +1,14 @@
-//! Unit tests for [`crate::task_dispatch`]. Split from `task_dispatch.rs`
-//! via `#[cfg(test)] #[path = ...] mod tests;` to keep the implementation
-//! file under its <300 line budget (see TASK-TUI-100 scaffold header).
-//!
-//! This file is included as a nested `mod tests` from within
-//! `task_dispatch.rs`, so `super::*` resolves to items in `task_dispatch`.
+//! Integration tests for [`archon_tui::task_dispatch`]. Previously lived as a
+//! nested `#[cfg(test)] #[path = "task_dispatch_tests.rs"] mod tests;` inside
+//! `src/task_dispatch.rs`; relocated to `tests/` (REM-2f) so the
+//! implementation file stays under its <300 line budget and test code is
+//! compiled only for integration builds. All symbols referenced here are
+//! public re-exports of `task_dispatch`.
 
-use super::*;
+use archon_tui::task_dispatch::{
+    AgentDispatcher, AgentRouter, CancelOutcome, DispatchResult, QueuedPrompt, TurnOutcome,
+    TurnRunner,
+};
 use archon_core::agent::{AgentEvent, TimestampedEvent};
 use std::sync::Arc;
 

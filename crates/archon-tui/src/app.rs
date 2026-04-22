@@ -27,6 +27,12 @@ use crate::vim::VimState;
 // reach the enum via `archon_tui::app::ViewId`.
 pub use crate::events::{McpServerEntry, SessionPickerEntry, ViewId};
 
+// REM-2d: Modal overlay state types relocated to sibling module
+// `crate::app_modals` (docs/rem-2-split-plan.md §7, Option 7A). The
+// `archon_tui::app::{SessionPicker, McpManager, McpManagerView, SplashConfig}`
+// path is preserved via this re-export so downstream callers are untouched.
+pub use crate::app_modals::{McpManager, McpManagerView, SessionPicker, SplashConfig};
+
 /// Message from the agent loop to the TUI.
 #[derive(Debug, Clone)]
 pub enum TuiEvent {
@@ -444,49 +450,11 @@ impl App {
 // (`archon_tui::app::SessionPickerEntry` / `archon_tui::app::McpServerEntry`)
 // is preserved for `src/session.rs`, `src/command/slash.rs`, and existing
 // integration tests.
-
-/// Interactive session picker state (shown as modal overlay on /resume).
-#[derive(Debug, Clone)]
-pub struct SessionPicker {
-    pub sessions: Vec<SessionPickerEntry>,
-    pub selected: usize,
-}
-
-/// Which sub-view is active inside the MCP manager overlay.
-#[derive(Debug, Clone)]
-pub enum McpManagerView {
-    ServerList {
-        selected: usize,
-    },
-    ServerMenu {
-        server_idx: usize,
-        action_idx: usize,
-    },
-    /// Scrollable list of tool names for a specific server.
-    ToolList {
-        server_name: String,
-        tools: Vec<String>,
-        scroll: usize,
-    },
-}
-
-/// Interactive MCP server manager state (shown as modal overlay on /mcp).
-#[derive(Debug, Clone)]
-pub struct McpManager {
-    pub servers: Vec<McpServerEntry>,
-    pub view: McpManagerView,
-}
-
-/// Configuration for the splash screen passed in from main.
-#[derive(Debug, Clone, Default)]
-pub struct SplashConfig {
-    /// Model name to display.
-    pub model: String,
-    /// Working directory to display.
-    pub working_dir: String,
-    /// Recent session activity.
-    pub activity: Vec<ActivityEntry>,
-}
+//
+// REM-2d: `SessionPicker`, `McpManagerView`, `McpManager`, `SplashConfig`
+// relocated to sibling module `crate::app_modals` to keep `app.rs` under
+// the 500-line ceiling. See the `pub use crate::app_modals::{...}` at the
+// top of this file.
 
 /// Returns `true` when a [`KeyEvent`] should be processed.
 ///
