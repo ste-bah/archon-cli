@@ -74,6 +74,10 @@ pub fn all_commands() -> Vec<CommandInfo> {
             description: "Review a pull request (no arg = list open PRs)",
         },
         CommandInfo {
+            name: "/commit",
+            description: "Create a git commit with AI assistance",
+        },
+        CommandInfo {
             name: "/login",
             description: "Re-authenticate",
         },

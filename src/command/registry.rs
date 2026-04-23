@@ -1700,6 +1700,8 @@ pub(crate) fn default_registry() -> Registry {
     b.insert_primary("resume", Arc::new(ResumeHandler));
     // TASK-TUI-622: /review PR code-review prompt builder.
     b.insert_primary("review", Arc::new(crate::command::review::ReviewHandler::new()));
+    // TASK-TUI-624: /commit AI git-commit prompt builder.
+    b.insert_primary("commit", Arc::new(crate::command::commit::CommitHandler::new()));
     b.insert_primary("mcp", Arc::new(McpHandler));
     // TASK-AGS-812: NEW /hooks primary (gap-fix Q4=A, no aliases).
     b.insert_primary("hooks", Arc::new(HooksHandler));

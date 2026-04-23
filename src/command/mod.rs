@@ -16,6 +16,8 @@ pub(crate) mod cancel;
 pub(crate) mod checkpoint;
 pub(crate) mod clear;
 pub(crate) mod color;
+// TASK-TUI-624: /commit AI git-commit prompt builder.
+pub(crate) mod commit;
 pub(crate) mod compact;
 pub(crate) mod config;
 pub(crate) mod context;
