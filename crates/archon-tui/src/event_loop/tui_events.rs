@@ -108,6 +108,14 @@ pub(super) async fn handle_tui_event(
                 crate::screens::message_selector::MessageSelector::new(messages),
             );
         }
+        TuiEvent::ShowSkillsMenu(skills) => {
+            // TASK-TUI-627: open the skills-menu overlay. TODO(TUI-627-
+            // followup): input routing (inject /skill-name on Enter) + render
+            // wiring are deferred.
+            app.skills_menu = Some(
+                crate::screens::skills_menu::SkillsMenu::new(skills),
+            );
+        }
         TuiEvent::OpenView(view_id) => {
             // TASK-AGS-822: placeholder handler. Full view rendering
             // deferred to Stage 7+ UI tickets. Log the open request

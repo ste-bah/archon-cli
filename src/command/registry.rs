@@ -1708,6 +1708,8 @@ pub(crate) fn default_registry() -> Registry {
     b.insert_primary("sandbox", Arc::new(crate::command::sandbox::SandboxHandler::new()));
     // TASK-TUI-620: /rewind message-selector overlay launcher.
     b.insert_primary("rewind", Arc::new(crate::command::rewind::RewindHandler::new()));
+    // TASK-TUI-627: /skills skills-menu overlay launcher.
+    b.insert_primary("skills", Arc::new(crate::command::skills::SkillsHandler::new()));
     b.insert_primary("mcp", Arc::new(McpHandler));
     // TASK-AGS-812: NEW /hooks primary (gap-fix Q4=A, no aliases).
     b.insert_primary("hooks", Arc::new(HooksHandler));

@@ -65,6 +65,15 @@ pub struct MessageSummary {
     pub preview: String,
 }
 
+/// TASK-TUI-627: summary of a registered skill for the /skills overlay list.
+#[derive(Debug, Clone)]
+pub struct SkillEntry {
+    /// Canonical skill name (no leading `/`).
+    pub name: String,
+    /// One-line human description.
+    pub description: String,
+}
+
 /// An MCP server entry shown in the MCP manager overlay.
 ///
 /// Defined here (layer 0) so that `TuiEvent::ShowMcpManager` and
@@ -121,6 +130,9 @@ pub enum TuiEvent {
     /// list of MessageSummary entries. Follow-up ticket wires input/render;
     /// for now the event only sets `app.message_selector`.
     ShowMessageSelector(Vec<MessageSummary>),
+    /// TASK-TUI-627: open the skills-menu overlay with a pre-computed
+    /// list of SkillEntry. Input/render routing deferred to TUI-627-followup.
+    ShowSkillsMenu(Vec<SkillEntry>),
     /// TASK-AGS-822: open an overlay view identified by `ViewId`.
     /// Emitted by the slash-command dispatcher in response to
     /// view-opening commands (`/tasks`, `/settings`, `/context`,

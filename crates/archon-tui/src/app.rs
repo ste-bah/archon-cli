@@ -25,7 +25,7 @@ use crate::vim::VimState;
 // layer-0 reasoning as `McpServerEntry` / `SessionPickerEntry` —
 // external consumers (bin-crate command handlers, integration tests)
 // reach the enum via `archon_tui::app::ViewId`.
-pub use crate::events::{McpServerEntry, MessageSummary, SessionPickerEntry, ViewId};
+pub use crate::events::{McpServerEntry, MessageSummary, SessionPickerEntry, SkillEntry, ViewId};
 
 // REM-2d: Modal overlay state types relocated to sibling module
 // `crate::app_modals` (docs/rem-2-split-plan.md §7, Option 7A). The
@@ -92,6 +92,9 @@ pub enum TuiEvent {
     /// input routing + render — for now the overlay is reachable but not
     /// interactive.
     ShowMessageSelector(Vec<MessageSummary>),
+    /// TASK-TUI-627: open the skills-menu overlay with a pre-computed
+    /// list of SkillEntry. Input/render routing deferred to TUI-627-followup.
+    ShowSkillsMenu(Vec<SkillEntry>),
     /// TASK-AGS-822: open an overlay view identified by `ViewId`.
     /// Emitted by the slash-command dispatcher in response to
     /// view-opening commands (`/tasks`, `/settings`, `/context`,
@@ -227,6 +230,9 @@ pub struct App {
     /// TASK-TUI-620: active message-selector modal (shown by /rewind).
     /// TODO(TUI-620-followup): input routing + render wiring deferred.
     pub message_selector: Option<crate::screens::message_selector::MessageSelector>,
+    /// TASK-TUI-627: active skills-menu modal (shown by /skills).
+    /// TODO(TUI-627-followup): input routing + render wiring deferred.
+    pub skills_menu: Option<crate::screens::skills_menu::SkillsMenu>,
     /// Vim keybinding state — Some when vim mode is active, None otherwise.
     pub vim_state: Option<VimState>,
     /// Split pane layout and state manager.
@@ -258,6 +264,7 @@ impl Default for App {
             session_picker: None,
             mcp_manager: None,
             message_selector: None,
+            skills_menu: None,
             vim_state: None,
             panes: SplitPaneManager::new(),
         }

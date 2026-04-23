@@ -90,6 +90,10 @@ pub fn all_commands() -> Vec<CommandInfo> {
             description: "Open message selector to rewind conversation",
         },
         CommandInfo {
+            name: "/skills",
+            description: "Browse and invoke available skills",
+        },
+        CommandInfo {
             name: "/login",
             description: "Re-authenticate",
         },

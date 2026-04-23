@@ -61,6 +61,8 @@ pub(crate) mod rules;
 // TASK-TUI-628: /sandbox handler — Bubble-mode flag flipper.
 pub(crate) mod sandbox;
 pub(crate) mod sessions;
+// TASK-TUI-627: /skills skills-menu overlay launcher.
+pub(crate) mod skills;
 pub(crate) mod slash;
 pub(crate) mod status;
 pub(crate) mod team;
