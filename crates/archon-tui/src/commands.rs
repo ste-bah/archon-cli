@@ -94,6 +94,10 @@ pub fn all_commands() -> Vec<CommandInfo> {
             description: "Browse and invoke available skills",
         },
         CommandInfo {
+            name: "/session",
+            description: "Show remote session QR code and URL",
+        },
+        CommandInfo {
             name: "/plan",
             description: "Enable Plan Mode (approve each tool call individually)",
         },

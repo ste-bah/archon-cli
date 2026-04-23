@@ -45,6 +45,7 @@ once_cell = "1"
 # leaking the dependency into the top-level binary.
 axum = { workspace = true }
 tower = { workspace = true }
+qrcode = { version = "0.14.1", default-features = false }
 
 # jemalloc-ctl is used by TASK-TUI-809 (memory probe). jemalloc is not
 # available on musl targets, so we gate the dependency via target cfg.

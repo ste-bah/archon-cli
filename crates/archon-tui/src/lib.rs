@@ -22,6 +22,9 @@ pub mod voice;
 
 pub mod syntax;
 
+// TASK-TUI-625: QR rendering helper, encapsulates the `qrcode` crate.
+pub mod qr;
+
 pub mod diff_view;
 pub mod theme_registry;
 pub mod verbosity;

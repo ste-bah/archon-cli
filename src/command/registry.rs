@@ -1712,6 +1712,8 @@ pub(crate) fn default_registry() -> Registry {
     b.insert_primary("rewind", Arc::new(crate::command::rewind::RewindHandler::new()));
     // TASK-TUI-627: /skills skills-menu overlay launcher.
     b.insert_primary("skills", Arc::new(crate::command::skills::SkillsHandler::new()));
+    // TASK-TUI-625: /session remote-URL + QR code display.
+    b.insert_primary("session", Arc::new(crate::command::session::SessionHandler::new()));
     b.insert_primary("mcp", Arc::new(McpHandler));
     // TASK-AGS-812: NEW /hooks primary (gap-fix Q4=A, no aliases).
     b.insert_primary("hooks", Arc::new(HooksHandler));

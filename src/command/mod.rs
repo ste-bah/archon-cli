@@ -63,6 +63,8 @@ pub(crate) mod rules;
 // TASK-TUI-628: /sandbox handler — Bubble-mode flag flipper.
 pub(crate) mod sandbox;
 pub(crate) mod sessions;
+// TASK-TUI-625: /session remote-URL + QR code handler.
+pub(crate) mod session;
 // TASK-TUI-627: /skills skills-menu overlay launcher.
 pub(crate) mod skills;
 pub(crate) mod slash;
