@@ -78,6 +78,10 @@ pub fn all_commands() -> Vec<CommandInfo> {
             description: "Create a git commit with AI assistance",
         },
         CommandInfo {
+            name: "/tag",
+            description: "Toggle a searchable tag on the current session",
+        },
+        CommandInfo {
             name: "/login",
             description: "Re-authenticate",
         },

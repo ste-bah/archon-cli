@@ -61,6 +61,8 @@ pub(crate) mod slash;
 pub(crate) mod status;
 pub(crate) mod team;
 pub(crate) mod task;
+// TASK-TUI-623: /tag session tag toggle.
+pub(crate) mod tag;
 // TASK-TUI-621: hidden stub `/teleport` command (no is_visible() on
 // trait — visibility handled by omission from archon-tui commands.rs).
 pub(crate) mod teleport;

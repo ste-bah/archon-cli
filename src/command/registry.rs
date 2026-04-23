@@ -1688,6 +1688,8 @@ pub(crate) fn default_registry() -> Registry {
     b.insert_primary("vim", Arc::new(VimHandler));
     b.insert_primary("usage", Arc::new(UsageHandler::new()));
     b.insert_primary("tasks", Arc::new(TasksHandler));
+    // TASK-TUI-623: /tag session tag toggle.
+    b.insert_primary("tag", Arc::new(crate::command::tag::TagHandler::new()));
     // TASK-TUI-621: hidden stub — dispatchable when typed explicitly,
     // but OMITTED from archon-tui::commands::all_commands() so the
     // autocomplete / command picker never surfaces it.
