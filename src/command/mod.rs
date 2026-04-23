@@ -56,6 +56,8 @@ pub(crate) mod resume;
 // TASK-TUI-622: /review PR code-review prompt builder.
 pub(crate) mod review;
 pub(crate) mod rules;
+// TASK-TUI-628: /sandbox handler — Bubble-mode flag flipper.
+pub(crate) mod sandbox;
 pub(crate) mod sessions;
 pub(crate) mod slash;
 pub(crate) mod status;

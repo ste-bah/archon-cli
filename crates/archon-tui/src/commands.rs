@@ -82,6 +82,10 @@ pub fn all_commands() -> Vec<CommandInfo> {
             description: "Toggle a searchable tag on the current session",
         },
         CommandInfo {
+            name: "/sandbox",
+            description: "Toggle sandbox restrictions (on|off|status)",
+        },
+        CommandInfo {
             name: "/login",
             description: "Re-authenticate",
         },

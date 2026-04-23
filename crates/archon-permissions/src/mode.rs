@@ -17,6 +17,9 @@ pub enum PermissionMode {
     Auto,
     /// Auto-allow everything except always_deny rules.
     DontAsk,
+    /// Auto-approve ONLY within sandbox limits (see `archon_tui::sandbox`).
+    /// Stricter than `DontAsk`, looser than `BypassPermissions`.
+    Bubble,
     /// Skip all permission checks entirely (legacy: Yolo).
     BypassPermissions,
 }
@@ -30,7 +33,8 @@ impl PermissionMode {
             Self::AcceptEdits => Self::Plan,
             Self::Plan => Self::Auto,
             Self::Auto => Self::DontAsk,
-            Self::DontAsk => {
+            Self::DontAsk => Self::Bubble,
+            Self::Bubble => {
                 if allow_bypass {
                     Self::BypassPermissions
                 } else {
@@ -49,6 +53,7 @@ impl PermissionMode {
             Self::Plan => "plan",
             Self::Auto => "auto",
             Self::DontAsk => "dontAsk",
+            Self::Bubble => "bubble",
             Self::BypassPermissions => "bypassPermissions",
         }
     }
@@ -71,13 +76,14 @@ impl FromStr for PermissionMode {
             "plan" => Ok(Self::Plan),
             "auto" => Ok(Self::Auto),
             "dontAsk" => Ok(Self::DontAsk),
+            "bubble" => Ok(Self::Bubble),
             "bypassPermissions" => Ok(Self::BypassPermissions),
             // Legacy aliases
             "ask" => Ok(Self::Default),
             "yolo" => Ok(Self::BypassPermissions),
             other => Err(format!(
                 "unknown permission mode '{other}'; valid modes: \
-                 default, acceptEdits, plan, auto, dontAsk, bypassPermissions \
+                 default, acceptEdits, plan, auto, dontAsk, bubble, bypassPermissions \
                  (aliases: ask, yolo)"
             )),
         }

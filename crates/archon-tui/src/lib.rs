@@ -11,6 +11,8 @@ pub mod input;
 pub mod markdown;
 pub mod output;
 pub mod permissions;
+// TASK-TUI-628: sandbox module — logical Bubble-mode permission check.
+pub mod sandbox;
 pub mod splash;
 pub mod status;
 pub mod theme;

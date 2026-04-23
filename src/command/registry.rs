@@ -1704,6 +1704,8 @@ pub(crate) fn default_registry() -> Registry {
     b.insert_primary("review", Arc::new(crate::command::review::ReviewHandler::new()));
     // TASK-TUI-624: /commit AI git-commit prompt builder.
     b.insert_primary("commit", Arc::new(crate::command::commit::CommitHandler::new()));
+    // TASK-TUI-628: /sandbox Bubble-mode toggle.
+    b.insert_primary("sandbox", Arc::new(crate::command::sandbox::SandboxHandler::new()));
     b.insert_primary("mcp", Arc::new(McpHandler));
     // TASK-AGS-812: NEW /hooks primary (gap-fix Q4=A, no aliases).
     b.insert_primary("hooks", Arc::new(HooksHandler));

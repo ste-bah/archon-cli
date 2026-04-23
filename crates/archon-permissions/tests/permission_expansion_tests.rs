@@ -288,12 +288,16 @@ fn mode_cycle_without_bypass() {
     mode = mode.next_mode(false);
     assert_eq!(mode, PermissionMode::DontAsk);
     mode = mode.next_mode(false);
+    assert_eq!(mode, PermissionMode::Bubble); // TUI-628: Bubble inserted in rotation
+    mode = mode.next_mode(false);
     assert_eq!(mode, PermissionMode::Default); // wraps around, skipping bypass
 }
 
 #[test]
 fn mode_cycle_with_bypass() {
     let mut mode = PermissionMode::DontAsk;
+    mode = mode.next_mode(true);
+    assert_eq!(mode, PermissionMode::Bubble); // TUI-628: Bubble inserted before BypassPermissions
     mode = mode.next_mode(true);
     assert_eq!(mode, PermissionMode::BypassPermissions);
     mode = mode.next_mode(true);
