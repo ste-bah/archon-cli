@@ -95,6 +95,8 @@ pub struct SessionBrowser {
     cursor: usize,
     /// Current session state.
     state: SessionState,
+    /// Name of the last successfully restored session (for badge display).
+    last_restored_name: Option<String>,
     /// Keep temp directory alive for test stores (None for normal use).
     #[allow(dead_code)]
     temp_dir: Option<tempfile::TempDir>,
@@ -106,6 +108,7 @@ impl std::fmt::Debug for SessionBrowser {
             .field("sessions", &self.sessions)
             .field("cursor", &self.cursor)
             .field("state", &self.state)
+            .field("last_restored_name", &self.last_restored_name)
             .finish()
     }
 }
@@ -118,6 +121,7 @@ impl SessionBrowser {
             sessions: Vec::new(),
             cursor: 0,
             state: SessionState::new(),
+            last_restored_name: None,
             temp_dir: None,
         }
     }
@@ -135,6 +139,11 @@ impl SessionBrowser {
     /// Returns a reference to the current session state.
     pub fn state(&self) -> &SessionState {
         &self.state
+    }
+
+    /// Returns the name of the last successfully restored session, if any.
+    pub fn last_restored_name(&self) -> Option<&str> {
+        self.last_restored_name.as_deref()
     }
 
     /// Refresh sessions from the store.
@@ -232,9 +241,10 @@ impl SessionBrowser {
         current_model_ctx: u64,
     ) -> Result<ResumeOutcome, archon_session::storage::SessionError> {
         // Attempt to get the session - NotFound maps to ResumeOutcome::NotFound
-        let _session_meta = match self.store.get_session(session_id) {
+        let session_meta = match self.store.get_session(session_id) {
             Ok(meta) => meta,
             Err(archon_session::storage::SessionError::NotFound(_)) => {
+                self.last_restored_name = None;
                 return Ok(ResumeOutcome::NotFound);
             }
             Err(e) => return Err(e),
@@ -250,12 +260,14 @@ impl SessionBrowser {
         if total_tokens <= current_model_ctx {
             // Fits within context - restore it
             self.state.current_id = Some(session_id.to_string());
+            self.last_restored_name = session_meta.name;
             Ok(ResumeOutcome::Restored {
                 session_id: session_id.to_string(),
                 messages_loaded: messages.len(),
             })
         } else {
-            // Context overflow - compute truncation count to get under 90% of limit
+            // Context overflow - clear last_restored_name and report overflow
+            self.last_restored_name = None;
             let limit = current_model_ctx;
             let n = Self::compute_truncate_count(&messages, limit);
             Ok(ResumeOutcome::ContextOverflow {
@@ -373,6 +385,7 @@ impl SessionBrowser {
             sessions: Vec::new(),
             cursor: 0,
             state: SessionState::new(),
+            last_restored_name: None,
             temp_dir: Some(temp_dir),
         }
     }
@@ -474,6 +487,77 @@ mod tests {
         browser.move_up();
         // Should be bounded at 0
         assert_eq!(browser.selected_index(), 0);
+    }
+
+    /// Regression test: last_restored_name is set after a successful restore.
+    #[tokio::test]
+    async fn test_last_restored_name_set_on_restored() {
+        let browser = SessionBrowser::new_for_tests();
+        let store = Arc::clone(&browser.store);
+
+        let session_id = "test-session-name";
+        store
+            .register_session(session_id, "/tmp", None, "claude-3-5-sonnet")
+            .expect("register session");
+        store
+            .set_name(session_id, "My Session")
+            .expect("set name");
+        for i in 0..3 {
+            store
+                .save_message(session_id, i, &format!("Message {}", i))
+                .expect("save message");
+        }
+
+        let mut browser = SessionBrowser::new(Arc::clone(&store));
+        assert_eq!(browser.last_restored_name(), None);
+
+        let outcome = browser.restore(session_id, 100_000).await.expect("restore");
+        match outcome {
+            ResumeOutcome::Restored { .. } => {
+                assert_eq!(
+                    browser.last_restored_name(),
+                    Some("My Session"),
+                    "last_restored_name must be set after successful restore"
+                );
+            }
+            other => panic!("Expected Restored, got {:?}", other),
+        }
+    }
+
+    /// Regression test: last_restored_name is cleared when restore fails.
+    #[tokio::test]
+    async fn test_last_restored_name_cleared_on_notfound() {
+        let browser = SessionBrowser::new_for_tests();
+        let store = Arc::clone(&browser.store);
+
+        // First restore a valid session to set the field
+        let session_id = "valid-session";
+        store
+            .register_session(session_id, "/tmp", None, "claude-3-5-sonnet")
+            .expect("register session");
+        store
+            .set_name(session_id, "Valid Session")
+            .expect("set name");
+        store
+            .save_message(session_id, 0, "hello")
+            .expect("save message");
+
+        let mut browser = SessionBrowser::new(Arc::clone(&store));
+        let _ = browser.restore(session_id, 100_000).await.expect("restore");
+        assert_eq!(browser.last_restored_name(), Some("Valid Session"));
+
+        // Now try to restore a non-existent session — field should be cleared
+        let outcome = browser.restore("nonexistent", 100_000).await.expect("restore");
+        match outcome {
+            ResumeOutcome::NotFound => {
+                assert_eq!(
+                    browser.last_restored_name(),
+                    None,
+                    "last_restored_name must be cleared on NotFound"
+                );
+            }
+            other => panic!("Expected NotFound, got {:?}", other),
+        }
     }
 
     #[tokio::test]
