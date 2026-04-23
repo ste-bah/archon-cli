@@ -86,6 +86,10 @@ pub fn all_commands() -> Vec<CommandInfo> {
             description: "Toggle sandbox restrictions (on|off|status)",
         },
         CommandInfo {
+            name: "/rewind",
+            description: "Open message selector to rewind conversation",
+        },
+        CommandInfo {
             name: "/login",
             description: "Re-authenticate",
         },

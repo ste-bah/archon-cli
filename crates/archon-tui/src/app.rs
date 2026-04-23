@@ -25,7 +25,7 @@ use crate::vim::VimState;
 // layer-0 reasoning as `McpServerEntry` / `SessionPickerEntry` —
 // external consumers (bin-crate command handlers, integration tests)
 // reach the enum via `archon_tui::app::ViewId`.
-pub use crate::events::{McpServerEntry, SessionPickerEntry, ViewId};
+pub use crate::events::{McpServerEntry, MessageSummary, SessionPickerEntry, ViewId};
 
 // REM-2d: Modal overlay state types relocated to sibling module
 // `crate::app_modals` (docs/rem-2-split-plan.md §7, Option 7A). The
@@ -85,6 +85,13 @@ pub enum TuiEvent {
     ShowMcpManager(Vec<McpServerEntry>),
     /// Update MCP server manager with fresh state (after reconnect/disable).
     UpdateMcpManager(Vec<McpServerEntry>),
+    /// TASK-TUI-620: open the message-selector overlay with a pre-computed
+    /// list of MessageSummary entries. The `/rewind` slash command builds
+    /// the list from session history and emits this event; the event-loop
+    /// arm sets `app.message_selector = Some(...)`. Follow-up ticket wires
+    /// input routing + render — for now the overlay is reachable but not
+    /// interactive.
+    ShowMessageSelector(Vec<MessageSummary>),
     /// TASK-AGS-822: open an overlay view identified by `ViewId`.
     /// Emitted by the slash-command dispatcher in response to
     /// view-opening commands (`/tasks`, `/settings`, `/context`,
@@ -217,6 +224,9 @@ pub struct App {
     pub session_picker: Option<SessionPicker>,
     /// Active MCP server manager modal (shown by /mcp).
     pub mcp_manager: Option<McpManager>,
+    /// TASK-TUI-620: active message-selector modal (shown by /rewind).
+    /// TODO(TUI-620-followup): input routing + render wiring deferred.
+    pub message_selector: Option<crate::screens::message_selector::MessageSelector>,
     /// Vim keybinding state — Some when vim mode is active, None otherwise.
     pub vim_state: Option<VimState>,
     /// Split pane layout and state manager.
@@ -247,6 +257,7 @@ impl Default for App {
             session_name: None,
             session_picker: None,
             mcp_manager: None,
+            message_selector: None,
             vim_state: None,
             panes: SplitPaneManager::new(),
         }

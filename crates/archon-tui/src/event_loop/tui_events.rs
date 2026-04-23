@@ -99,6 +99,15 @@ pub(super) async fn handle_tui_event(
                 mgr.servers = servers;
             }
         }
+        TuiEvent::ShowMessageSelector(messages) => {
+            // TASK-TUI-620: open the message-selector overlay. TODO(TUI-620-
+            // followup): input routing (priority branch in event_loop/input.rs)
+            // + render wiring (render/body.rs) are deferred — for now the
+            // overlay is reachable but not interactive.
+            app.message_selector = Some(
+                crate::screens::message_selector::MessageSelector::new(messages),
+            );
+        }
         TuiEvent::OpenView(view_id) => {
             // TASK-AGS-822: placeholder handler. Full view rendering
             // deferred to Stage 7+ UI tickets. Log the open request

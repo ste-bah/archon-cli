@@ -49,6 +49,22 @@ pub enum ViewId {
     Status,
 }
 
+/// Summary of a conversation message for the /rewind overlay list (TASK-TUI-620).
+///
+/// Defined at layer 0 (events.rs) so that `TuiEvent::ShowMessageSelector` can
+/// reference it without events.rs having to import from crate::app. Re-exported
+/// from `crate::app` for external/public-API stability (matches
+/// `SessionPickerEntry` / `McpServerEntry` pattern).
+#[derive(Debug, Clone)]
+pub struct MessageSummary {
+    /// Stable message identifier from the session store.
+    pub id: String,
+    /// Wall-clock timestamp of when the message was recorded.
+    pub timestamp: chrono::DateTime<chrono::Utc>,
+    /// First N characters of the message body (N=60 per spec).
+    pub preview: String,
+}
+
 /// An MCP server entry shown in the MCP manager overlay.
 ///
 /// Defined here (layer 0) so that `TuiEvent::ShowMcpManager` and
@@ -101,6 +117,10 @@ pub enum TuiEvent {
     SetTheme(String),
     ShowMcpManager(Vec<McpServerEntry>),
     UpdateMcpManager(Vec<McpServerEntry>),
+    /// TASK-TUI-620: open the message-selector overlay with a pre-computed
+    /// list of MessageSummary entries. Follow-up ticket wires input/render;
+    /// for now the event only sets `app.message_selector`.
+    ShowMessageSelector(Vec<MessageSummary>),
     /// TASK-AGS-822: open an overlay view identified by `ViewId`.
     /// Emitted by the slash-command dispatcher in response to
     /// view-opening commands (`/tasks`, `/settings`, `/context`,

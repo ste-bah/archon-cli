@@ -55,6 +55,8 @@ pub(crate) mod rename;
 pub(crate) mod resume;
 // TASK-TUI-622: /review PR code-review prompt builder.
 pub(crate) mod review;
+// TASK-TUI-620: /rewind message-selector overlay launcher.
+pub(crate) mod rewind;
 pub(crate) mod rules;
 // TASK-TUI-628: /sandbox handler — Bubble-mode flag flipper.
 pub(crate) mod sandbox;
