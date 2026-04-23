@@ -70,6 +70,10 @@ pub fn all_commands() -> Vec<CommandInfo> {
             description: "Report a bug",
         },
         CommandInfo {
+            name: "/review",
+            description: "Review a pull request (no arg = list open PRs)",
+        },
+        CommandInfo {
             name: "/login",
             description: "Re-authenticate",
         },

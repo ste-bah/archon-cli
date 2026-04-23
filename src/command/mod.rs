@@ -51,6 +51,8 @@ pub(crate) mod release_notes;
 pub(crate) mod reload;
 pub(crate) mod rename;
 pub(crate) mod resume;
+// TASK-TUI-622: /review PR code-review prompt builder.
+pub(crate) mod review;
 pub(crate) mod rules;
 pub(crate) mod sessions;
 pub(crate) mod slash;
