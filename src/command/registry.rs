@@ -1688,6 +1688,10 @@ pub(crate) fn default_registry() -> Registry {
     b.insert_primary("vim", Arc::new(VimHandler));
     b.insert_primary("usage", Arc::new(UsageHandler::new()));
     b.insert_primary("tasks", Arc::new(TasksHandler));
+    // TASK-TUI-621: hidden stub — dispatchable when typed explicitly,
+    // but OMITTED from archon-tui::commands::all_commands() so the
+    // autocomplete / command picker never surfaces it.
+    b.insert_primary("teleport", Arc::new(crate::command::teleport::TeleportHandler));
     b.insert_primary("release-notes", Arc::new(ReleaseNotesHandler));
     b.insert_primary("reload", Arc::new(ReloadHandler::new()));
     b.insert_primary("logout", Arc::new(LogoutHandler::new()));
