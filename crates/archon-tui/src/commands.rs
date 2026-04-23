@@ -94,6 +94,10 @@ pub fn all_commands() -> Vec<CommandInfo> {
             description: "Browse and invoke available skills",
         },
         CommandInfo {
+            name: "/plan",
+            description: "Enable Plan Mode (approve each tool call individually)",
+        },
+        CommandInfo {
             name: "/login",
             description: "Re-authenticate",
         },

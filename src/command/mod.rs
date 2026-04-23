@@ -45,6 +45,8 @@ pub(crate) mod model;
 pub(crate) mod parser;
 pub(crate) mod permissions;
 pub(crate) mod pipeline;
+// TASK-TUI-626: /plan Plan Mode toggle via SNAPSHOT+EFFECT pattern.
+pub(crate) mod plan;
 pub(crate) mod remote;
 pub(crate) mod plugin;
 pub(crate) mod recall;

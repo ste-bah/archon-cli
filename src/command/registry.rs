@@ -1678,6 +1678,8 @@ pub(crate) fn default_registry() -> Registry {
     b.insert_primary("status", Arc::new(StatusHandler));
     b.insert_primary("cost", Arc::new(CostHandler));
     b.insert_primary("permissions", Arc::new(PermissionsHandler));
+    // TASK-TUI-626: /plan Plan Mode toggle (SNAPSHOT+EFFECT via SetPermissionMode("plan")).
+    b.insert_primary("plan", Arc::new(crate::command::plan::PlanHandler));
     b.insert_primary("config", Arc::new(ConfigHandler::new()));
     b.insert_primary("memory", Arc::new(MemoryHandler));
     b.insert_primary("doctor", Arc::new(DoctorHandler::new()));
