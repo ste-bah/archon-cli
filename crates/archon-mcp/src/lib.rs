@@ -7,6 +7,7 @@ pub mod client;
 pub mod config;
 pub mod http_transport;
 pub mod lifecycle;
+pub mod sse_transport;
 pub mod tool_bridge;
 pub mod transport;
 pub mod transport_ws;
