@@ -28,12 +28,15 @@
 //! transports (`stdio`, `http`, `ws`) dispatched by
 //! [`crate::lifecycle::connect_server`].
 //!
-//! # Scope (#197 MINIMAL VIABLE)
+//! # Scope
 //!
 //! Ships the happy path: endpoint discovery, frame parse, POST, JSON-RPC
-//! roundtrip. These are **deferred to follow-up tickets** and NOT implemented:
+//! roundtrip. Since #202 MCP-SSE-HARDEN-RETRY landed, the inbound SSE pump
+//! also auto-reconnects on stream drop with `Last-Event-ID` replay and
+//! bounded exponential backoff (see [`crate::sse_reconnect`]).
 //!
-//! * retry / reconnect / Last-Event-ID resume — #202 MCP-SSE-HARDEN-RETRY
+//! Still deferred to follow-up tickets:
+//!
 //! * `Mcp-Session-Id` header coordination — #203 MCP-SSE-SESSION-ID
 //!
 //! POST failures are logged at `tracing::warn!` but do not fail the transport;
@@ -50,7 +53,8 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use url::Url;
 
-use crate::sse_transport::{SseFrame, pump_sse_stream};
+use crate::sse_reconnect::{ReconnectConfig, pump_sse_stream_with_reconnect};
+use crate::sse_transport::SseFrame;
 use crate::types::McpError;
 
 /// Boxed, pinned MCP SSE inbound stream — yields deserialized JSON-RPC messages.
@@ -116,26 +120,18 @@ pub(crate) async fn setup_sse_inbound(
 
     let header_map = convert_headers(headers)?;
 
-    // 3. Open SSE GET.
-    let mut req = http_client.get(sse_url);
-    req = req.header(http::header::ACCEPT, "text/event-stream");
-    for (name, value) in &header_map {
-        req = req.header(name.clone(), value.clone());
-    }
-    let resp = req
-        .send()
-        .await
-        .map_err(|e| McpError::Transport(format!("sse: GET {sse_url} failed: {e}")))?;
-    if !resp.status().is_success() {
-        return Err(McpError::Transport(format!(
-            "sse: GET {sse_url} returned status {}",
-            resp.status()
-        )));
-    }
-
-    // 4. Spawn frame parser pump.
+    // 3. Spawn the reconnecting SSE pump. It opens the initial GET internally
+    //    AND transparently handles Last-Event-ID replay on stream drop
+    //    (#202 MCP-SSE-HARDEN-RETRY). If the initial connect + all retries
+    //    fail, the endpoint-frame timeout below will surface the error.
     let (frame_tx, mut frame_rx) = mpsc::channel::<SseFrame>(SSE_CHANNEL_BUFFER);
-    tokio::spawn(pump_sse_stream(resp, frame_tx));
+    tokio::spawn(pump_sse_stream_with_reconnect(
+        http_client.clone(),
+        sse_url.to_string(),
+        header_map.clone(),
+        frame_tx,
+        ReconnectConfig::default(),
+    ));
 
     // 5. Consume frames until `event: endpoint` arrives.
     let endpoint_frame = tokio::time::timeout(ENDPOINT_HANDSHAKE_TIMEOUT, async {

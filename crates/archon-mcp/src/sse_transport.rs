@@ -168,8 +168,11 @@ pub(crate) async fn pump_sse_stream(resp: reqwest::Response, tx: mpsc::Sender<Ss
 }
 
 /// Incremental builder for a single SSE frame.
+///
+/// Exposed to the crate so [`crate::sse_reconnect`] can reuse the exact
+/// same line-parsing semantics without duplicating them.
 #[derive(Default)]
-struct SseFrameBuilder {
+pub(crate) struct SseFrameBuilder {
     event: Option<String>,
     data: Vec<String>,
     id: Option<String>,
@@ -178,7 +181,7 @@ struct SseFrameBuilder {
 }
 
 impl SseFrameBuilder {
-    fn ingest_line(&mut self, line: &str) {
+    pub(crate) fn ingest_line(&mut self, line: &str) {
         // Field / value split: first ':', then optional single space.
         let (field, value) = match line.find(':') {
             Some(idx) => {
@@ -205,7 +208,7 @@ impl SseFrameBuilder {
         }
     }
 
-    fn take_frame(&mut self) -> Option<SseFrame> {
+    pub(crate) fn take_frame(&mut self) -> Option<SseFrame> {
         if !self.dirty {
             return None;
         }

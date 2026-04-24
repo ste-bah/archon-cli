@@ -14,11 +14,16 @@
 //!   with a `tracing::warn!`; rmcp observes the missing response as a request
 //!   timeout. **There is no infinite retry.**
 //!
-//! Deliberately out-of-scope for this ticket (consistent with #197 D2):
-//!   * Reconnecting the SSE GET stream if the server drops it after token
-//!     expiry — deferred to #202 MCP-SSE-HARDEN-RETRY.
-//!   * Proactive token-expiry prediction (refresh before server rejects) —
-//!     tracked under #202.
+//! SSE reconnect + Last-Event-ID replay landed in #202 — the underlying
+//! `setup_sse_inbound` transparently reconnects on stream drop. However,
+//! the INITIAL bearer seeded on the GET /sse header is preserved across
+//! reconnect attempts (the reconnect pump doesn't call back into the
+//! OAuth client). So if the bearer expires mid-session AND the server
+//! drops the SSE connection, reconnect GETs will carry the stale bearer
+//! and eventually exhaust `max_retries`. POST-side refresh (via 401) still
+//! works correctly. Out-of-scope for this ticket (follow-up):
+//!   * OAuth token refresh on SSE GET reconnect.
+//!   * Proactive token-expiry prediction (refresh before server rejects).
 
 use std::collections::HashMap;
 use std::time::Duration;
