@@ -7,6 +7,8 @@ pub mod config;
 pub mod effort;
 pub mod fast_mode;
 pub mod identity;
+// TASK-P0-B.1a (#178): Multi-modal content helpers (image, future PDF/audio).
+pub mod multimodal;
 pub mod oauth;
 pub mod provider;
 pub mod providers;
