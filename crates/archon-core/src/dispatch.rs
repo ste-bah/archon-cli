@@ -133,6 +133,7 @@ pub fn create_default_registry(working_dir: PathBuf) -> ToolRegistry {
     registry.register(Box::new(archon_tools::todo_write::TodoWriteTool));
     registry.register(Box::new(archon_tools::plan_mode::EnterPlanModeTool));
     registry.register(Box::new(archon_tools::plan_mode::ExitPlanModeTool));
+    registry.register(Box::new(crate::skills::skill_tool::SkillTool));
     registry.register(Box::new(archon_tools::webfetch::WebFetchTool));
     registry.register(Box::new(archon_tools::config_tool::ConfigTool));
     registry.register(Box::new(archon_tools::agent_tool::AgentTool::new()));

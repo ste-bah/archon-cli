@@ -3,6 +3,7 @@ pub mod builtin;
 pub mod discovery;
 pub mod expanded;
 pub mod parser;
+pub mod skill_tool;
 
 use std::collections::HashMap;
 
