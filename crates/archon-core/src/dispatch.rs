@@ -149,6 +149,10 @@ pub fn create_default_registry(working_dir: PathBuf) -> ToolRegistry {
     registry.register(Box::new(archon_tools::glob_tool::GlobTool));
     registry.register(Box::new(archon_tools::grep::GrepTool));
     registry.register(Box::new(archon_tools::bash::BashTool::default()));
+    // TASK-P0-B.6a (#184): Monitor registered next to Bash for topical
+    // locality — both spawn shell commands; Monitor differs by returning
+    // bounded-time stdout events instead of blocking until exit.
+    registry.register(Box::new(archon_tools::monitor::MonitorTool));
     registry.register(Box::new(archon_tools::powershell::PowerShellTool::default()));
     registry.register(Box::new(archon_tools::sleep::SleepTool));
     registry.register(Box::new(archon_tools::ask_user::AskUserTool));
