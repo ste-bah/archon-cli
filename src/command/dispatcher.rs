@@ -623,11 +623,11 @@ mod tests {
     //       true. Pairs with `recognizes_returns_true_for_registered_name`
     //       (single-sample witness) and lifts it to FULL coverage.
     //
-    //   * `registry_primary_count_matches_expected_forty`
+    //   * `registry_primary_count_matches_expected_count`
     //     — defensive regression guard. If a future refactor silently
     //       drops or doubles a primary, this fails IMMEDIATELY without
     //       needing a full dispatch loop. Numeric witness pinned to
-    //       the registry-side `EXPECTED_COMMAND_COUNT = 40` constant
+    //       the registry-side `EXPECTED_COMMAND_COUNT = 49` constant
     //       (registry.rs:1655); changes must land in both places.
     //
     // Failure-report strategy mirrors `registry_integration_all_commands_wired`
@@ -641,7 +641,7 @@ mod tests {
     /// That constant lives behind `#[cfg(test)]` inside `registry.rs`
     /// and is not re-exported, so we pin the same integer here. If
     /// either constant moves, BOTH must be updated in lockstep.
-    const EXPECTED_PRIMARY_COUNT: usize = 40;
+    const EXPECTED_PRIMARY_COUNT: usize = 49;
 
     /// Drain every currently-queued event from `rx` using `try_recv`
     /// until the channel reports empty, returning the drained events
@@ -869,9 +869,9 @@ mod tests {
     }
 
     #[test]
-    fn registry_primary_count_matches_expected_forty() {
+    fn registry_primary_count_matches_expected_count() {
         // Defensive regression guard: the registered primary count
-        // MUST equal `EXPECTED_PRIMARY_COUNT` (=40), and the iterator
+        // MUST equal `EXPECTED_PRIMARY_COUNT` (=49), and the iterator
         // produced by `Registry::names()` MUST yield exactly that many
         // distinct names. If a future refactor silently drops or
         // double-registers a primary this test fails immediately
@@ -886,7 +886,7 @@ mod tests {
             names.len(),
             EXPECTED_PRIMARY_COUNT,
             "registry.names().len() = {}, expected \
-             EXPECTED_PRIMARY_COUNT = {} (=40 per registry.rs:1655). \
+             EXPECTED_PRIMARY_COUNT = {} (=49 per registry.rs:1655). \
              A primary was added or removed without updating this \
              constant.",
             names.len(),

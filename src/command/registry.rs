@@ -1755,7 +1755,7 @@ mod tests {
     ///
     /// TASK-AGS-816 adds `/voice` (gap-fix Q4=A, SECOND Batch-3 NEW
     /// primary) as a new primary, bringing the total to 40.
-    const EXPECTED_COMMAND_COUNT: usize = 40;
+    const EXPECTED_COMMAND_COUNT: usize = 49;
 
     #[test]
     fn default_registry_contains_all_commands() {
