@@ -1,3 +1,4 @@
+pub mod apply_patch;
 pub mod ask_user;
 // TASK-AGS-104: relocated from archon-core to break the
 // archon-core <-> archon-tools dependency cycle. archon-core

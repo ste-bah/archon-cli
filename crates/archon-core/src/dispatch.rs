@@ -143,6 +143,9 @@ pub fn create_default_registry(working_dir: PathBuf) -> ToolRegistry {
     registry.register(Box::new(archon_tools::file_read::ReadTool));
     registry.register(Box::new(archon_tools::file_write::WriteTool));
     registry.register(Box::new(archon_tools::file_edit::EditTool));
+    // TASK-P0-B.5 (#183): ApplyPatch registered next to EditTool for
+    // topical locality — both are filesystem-mutating edit tools.
+    registry.register(Box::new(archon_tools::apply_patch::ApplyPatchTool));
     registry.register(Box::new(archon_tools::glob_tool::GlobTool));
     registry.register(Box::new(archon_tools::grep::GrepTool));
     registry.register(Box::new(archon_tools::bash::BashTool::default()));
