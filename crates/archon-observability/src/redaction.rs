@@ -55,11 +55,23 @@ use tracing_subscriber::Layer;
 ///   * Stripe live/test secret+publishable `sk_live_`, `sk_test_`, `pk_live_`, `pk_test_`
 ///   * JWT `eyJ...<header>.<payload>.<sig>`
 ///   * `bearer <token>` authorization values
+///   * GCP service-account JSON blob (TASK-201) — whole `{...}` containing the
+///     `"type":"service_account"` marker. Non-greedy to the next `}`, so
+///     standard-shaped GCP SA keys (flat object, no nested braces) are fully
+///     scrubbed. Over-redaction on nested JSON is an acceptable secrets-first
+///     trade-off.
+///   * PEM private key block (TASK-201) — `-----BEGIN [RSA |EC ]PRIVATE KEY-----
+///     ... -----END ...-----`, standalone or embedded in a larger value.
 ///   * Sensitive field names (`password`, `api_key`, `api-key`, `authorization`,
-///     `secret`, `token`) — masked so the identifier itself never leaks into
-///     log lines even when the value happens to parse clean.
+///     `credentials` [TASK-201], `secret`, `token`) — masked so the identifier
+///     itself never leaks into log lines even when the value happens to parse
+///     clean.
 ///
-/// Compiled once at first use; pattern is spec-constant and cannot fail.
+/// Compiled once at first use; pattern is spec-constant and cannot fail. The
+/// `regex` crate guarantees linear-time matching (no catastrophic
+/// backtracking), so pathological inputs cannot DoS this layer — the
+/// `*_no_catastrophic_backtracking_*` tests below are regression gates
+/// against that property.
 pub(crate) static REDACTION_RE: Lazy<Regex> = Lazy::new(|| {
     Regex::new(
         r#"(?ix)
@@ -72,9 +84,22 @@ pub(crate) static REDACTION_RE: Lazy<Regex> = Lazy::new(|| {
           | (?:sk|pk)_(?:live|test)_[A-Za-z0-9]{24,}    # Stripe secret/publishable
           | eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}  # JWT
           | bearer\s+[A-Za-z0-9._\-]+                   # Authorization: bearer ...
+          # TASK-201 GCP service-account JSON: redact the WHOLE blob containing
+          # the `"type":"service_account"` marker. Non-greedy to the next `}`.
+          # Standard GCP SA shape is a flat object (private_key contains `\n`
+          # but no braces), so `[^{}]` before the marker + `[\s\S]*?` after
+          # catches the full object. Over-redaction on atypical nested shapes
+          # is the acceptable secrets-first posture.
+          | \{[^{}]*"type"\s*:\s*"service_account"[\s\S]*?\}
+          # TASK-201 PEM private key block (standalone or embedded). `(?:RSA |EC |)?`
+          # covers `BEGIN PRIVATE KEY`, `BEGIN RSA PRIVATE KEY`, `BEGIN EC PRIVATE KEY`.
+          # Literal spaces are needed (pattern uses `\s` because (?x) ignores
+          # inline whitespace).
+          | -----BEGIN\s(?:RSA\s|EC\s|)?PRIVATE\sKEY-----[\s\S]*?-----END\s(?:RSA\s|EC\s|)?PRIVATE\sKEY-----
           | password
           | api[_\-]?key
           | authorization
+          | credentials                               # TASK-201 GCP field name
           | secret
           | token
         )
@@ -465,6 +490,114 @@ mod redaction_tests {
         assert!(
             elapsed.as_millis() < 1000,
             "redact() on 10k-byte input took {}ms — suspected catastrophic backtracking",
+            elapsed.as_millis()
+        );
+    }
+
+    // ---- TASK-201 SEC-REDACTION-GCP ---------------------------------------
+    // New coverage: GCP service-account JSON blob, PEM private key shapes,
+    // `credentials` sensitive field name, and ReDoS guards on the two new
+    // multi-line patterns.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn redacts_gcp_service_account_json_blob() {
+        // Realistic GCP service-account key shape. All sensitive fields
+        // (private_key body, private_key_id, client_email, project_id) MUST
+        // be scrubbed — the design call on #201 chose whole-blob redaction
+        // over field-selective redaction for secrets-first safety.
+        let raw = r#"{"type":"service_account","project_id":"my-project","private_key_id":"abc123","private_key":"-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDexample\n-----END PRIVATE KEY-----\n","client_email":"sa@my-project.iam.gserviceaccount.com"}"#;
+        let wrapped = format!("credentials = {}", raw);
+        let out = redact(&wrapped);
+        assert!(
+            out.contains(REDACTED),
+            "expected REDACTED marker, got: {out:?}"
+        );
+        // Sensitive fields must NOT leak. Private key body and private_key_id
+        // would be catastrophic; project_id + client_email are PII-adjacent
+        // and scrubbed per the whole-blob design call.
+        assert!(
+            !out.contains("MIIEvQIBADANBgkqhkiG"),
+            "private_key body leaked: {out:?}"
+        );
+        assert!(
+            !out.contains("sa@my-project.iam.gserviceaccount.com"),
+            "client_email leaked: {out:?}"
+        );
+        assert!(
+            !out.contains("abc123"),
+            "private_key_id leaked: {out:?}"
+        );
+    }
+
+    #[test]
+    fn redacts_pem_private_key_standalone() {
+        // Bare PEM block embedded in a log line — no JSON wrapper.
+        let raw = "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG\n-----END PRIVATE KEY-----";
+        let out = redact(&format!("key_material = {raw}"));
+        assert!(out.contains(REDACTED));
+        assert!(
+            !out.contains("MIIEvQIBADANBgkqhkiG"),
+            "PEM body leaked: {out:?}"
+        );
+    }
+
+    #[test]
+    fn redacts_pem_rsa_private_key() {
+        // RSA-specific variant (`BEGIN RSA PRIVATE KEY`). The pattern also
+        // covers `EC PRIVATE KEY` via the `(?:RSA |EC |)?` alternation.
+        let raw = "-----BEGIN RSA PRIVATE KEY-----\nSECRETBYTES\n-----END RSA PRIVATE KEY-----";
+        let out = redact(raw);
+        assert!(out.contains(REDACTED));
+        assert!(
+            !out.contains("SECRETBYTES"),
+            "RSA PEM body leaked: {out:?}"
+        );
+    }
+
+    #[test]
+    fn redacts_credentials_field_name() {
+        // `credentials` as a sensitive field name — the WORD itself is masked,
+        // not the value. Mirrors the treatment of `password`, `api_key`, etc.
+        let out = redact("credentials foo bar");
+        assert!(
+            out.contains(REDACTED),
+            "expected REDACTED marker on 'credentials' word, got: {out:?}"
+        );
+        assert!(
+            !out.contains("credentials"),
+            "word 'credentials' itself should be redacted: {out:?}"
+        );
+    }
+
+    #[test]
+    fn redaction_regex_gcp_no_catastrophic_backtracking_on_pathological_input() {
+        // Pathological: open brace + long near-match of the GCP marker, with
+        // no closing `}`. The `regex` crate uses linear-time matching so this
+        // is a regression gate against a future maintainer swapping in a
+        // backtracking engine or adding a `.*` alternation.
+        let pathological = format!("{{\"type\":\"{}\"", "a".repeat(10_000));
+        let start = std::time::Instant::now();
+        let _ = redact(&pathological);
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed.as_millis() < 1000,
+            "GCP pattern caused catastrophic backtracking: {}ms on 10k input",
+            elapsed.as_millis()
+        );
+    }
+
+    #[test]
+    fn redaction_regex_pem_no_catastrophic_backtracking_on_near_match() {
+        // Pathological: `-----BEGIN PRIVATE KEY-----` header followed by a
+        // long body but NO matching `-----END ... PRIVATE KEY-----` footer.
+        let pathological = format!("-----BEGIN PRIVATE KEY-----{}", "A".repeat(10_000));
+        let start = std::time::Instant::now();
+        let _ = redact(&pathological);
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed.as_millis() < 1000,
+            "PEM pattern caused catastrophic backtracking: {}ms on 10k input",
             elapsed.as_millis()
         );
     }

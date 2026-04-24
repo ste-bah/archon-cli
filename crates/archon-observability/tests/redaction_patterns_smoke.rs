@@ -68,20 +68,40 @@ fn aws_access_key_pattern_scrubbed() {
 }
 
 #[test]
-#[ignore = "GCP service-account JSON redaction coverage deferred to #201 SEC-REDACTION-GCP — REDACTION_RE has no pattern for PEM PRIVATE KEY blocks or service_account JSON shapes, and the 'credentials' field name is not in the sensitive-names list. Run with --ignored after #201 lands."]
 fn gcp_service_account_json_scrubbed() {
-    // GCP service-account key file shape — private_key is the sensitive bit.
-    let raw = r#"{"type":"service_account","private_key":"-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG\n-----END PRIVATE KEY-----"}"#;
+    // GCP service-account key file shape — private_key is the sensitive bit,
+    // but #201 design call redacts the WHOLE blob (project_id, client_email,
+    // private_key_id are PII-adjacent and auditors prefer belt-and-braces).
+    let raw = r#"{"type":"service_account","project_id":"my-project","private_key_id":"abc123","private_key":"-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG\n-----END PRIVATE KEY-----","client_email":"sa@my-project.iam.gserviceaccount.com"}"#;
     let captured = capture_one(|| {
         ::tracing::info!(credentials = raw, "gcp-sa test");
     });
-    // When #201 lands, either the whole private_key substring is redacted,
-    // OR the captured output does not contain the BEGIN PRIVATE KEY header.
-    let has_marker = captured.contains(REDACTED);
-    let key_leaked = captured.contains("BEGIN PRIVATE KEY");
+    // Strict post-#201 contract: REDACTED marker MUST be present AND none of
+    // the sensitive substrings may leak. The previous `has_marker OR !leak`
+    // logic was a pre-fix placeholder.
     assert!(
-        has_marker || !key_leaked,
-        "gcp service-account: expected REDACTED marker OR no BEGIN PRIVATE KEY leak, got: {captured:?}"
+        captured.contains(REDACTED),
+        "gcp service-account: expected REDACTED marker, got: {captured:?}"
+    );
+    assert!(
+        !captured.contains("BEGIN PRIVATE KEY"),
+        "gcp service-account: BEGIN PRIVATE KEY leaked: {captured:?}"
+    );
+    assert!(
+        !captured.contains("MIIEvQIBADANBgkqhkiG"),
+        "gcp service-account: PEM body leaked: {captured:?}"
+    );
+    assert!(
+        !captured.contains("abc123"),
+        "gcp service-account: private_key_id leaked: {captured:?}"
+    );
+    assert!(
+        !captured.contains("my-project"),
+        "gcp service-account: project_id leaked: {captured:?}"
+    );
+    assert!(
+        !captured.contains("sa@my-project.iam.gserviceaccount.com"),
+        "gcp service-account: client_email leaked: {captured:?}"
     );
 }
 
