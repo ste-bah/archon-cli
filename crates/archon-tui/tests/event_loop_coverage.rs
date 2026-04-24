@@ -275,6 +275,14 @@ impl TurnRunner for StreamRunner {
 }
 
 /// Verifies Resize updates last_known_size and 20 stream frames are recorded.
+///
+/// TASK-200: `#[serial]` because this test both WRITES to the process-
+/// global `LAST_KNOWN_SIZE` (via TuiEvent::Resize → run_event_loop →
+/// handle_resize) and READS it back. Races against any other resize-
+/// dispatching test under --test-threads=2. Coordinated with the
+/// default-key `#[serial]` tests in src/layout_tests.rs and
+/// event_loop_inner_coverage.rs within their respective binaries.
+#[serial_test::serial]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_tc_06_sigwinch_reflow_no_frame_drop() {
     let frames: Arc<Mutex<Vec<usize>>> = Arc::new(Mutex::new(Vec::new()));

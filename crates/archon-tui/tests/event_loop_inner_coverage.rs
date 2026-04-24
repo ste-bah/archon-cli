@@ -44,6 +44,13 @@ fn buffer_nonempty(terminal: &Terminal<TestBackend>) -> bool {
 /// Drive `run_with_backend` through a wide event surface and verify the
 /// loop exits cleanly on `TuiEvent::Done`. Each `send` below hits a
 /// distinct arm of the event dispatch match inside `run_inner`.
+///
+/// TASK-200: `#[serial]` because this test dispatches `TuiEvent::Resize
+/// { cols: 100, rows: 30 }` which writes to the process-global
+/// `LAST_KNOWN_SIZE`. It does not read back, but it still races against
+/// any in-binary test that does. Coordinated with the default-key
+/// `#[serial]` tests elsewhere in the crate's test graph.
+#[serial_test::serial]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn run_with_backend_walks_wide_event_surface() {
     let (event_tx, event_rx) = mpsc::channel::<TuiEvent>(128);

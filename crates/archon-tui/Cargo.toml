@@ -73,6 +73,14 @@ tokio-util = { workspace = true }
 # and no production archon-tui code touches archon-memory directly. Required
 # by the TASK-TUI-905 Wiring Check (§Wiring Check line 94).
 archon-memory = { path = "../archon-memory" }
+# TASK-200 HYGIENE-LAYOUT-RACE: the layout module holds a process-global
+# `LAST_KNOWN_SIZE` (OnceLock<Mutex<(u16,u16)>>) by production design —
+# the render thread needs a shared view of the last resize. Unit tests
+# that exercise this global race under --test-threads=2. The absolute
+# rule forbids --test-threads=1, and thread_local would break the
+# production contract, so we serialize the 3 layout tests with
+# serial_test. Already workspace-pinned (archon-core, archon-tools).
+serial_test.workspace = true
 
 [[bench]]
 name = "eventchannel_load"

@@ -13,10 +13,35 @@
 //! sleeping JoinHandle must still be !is_finished() afterwards. This
 //! gives a 2000x signal/noise ratio vs the 10s sleep and proves the
 //! handler is fully synchronous (AC-EVENTLOOP-03: resize never blocks).
+//!
+//! TASK-200 HYGIENE-LAYOUT-RACE: all three tests below mutate the
+//! process-global `LAST_KNOWN_SIZE` and read it back. Under
+//! `--test-threads=2` (mandatory — the absolute workspace rule forbids
+//! `--test-threads=1` because single-threaded mode masks real
+//! concurrency bugs elsewhere), a sibling test's write can interleave
+//! between a test's own write and its `last_known_size()` read.
+//!
+//! The fix is `#[serial]` (serial_test crate, default key). The same
+//! `LAST_KNOWN_SIZE` global is also written/read by integration tests
+//! that drive `run_event_loop` with `TuiEvent::Resize` — specifically
+//! `tests/event_loop_coverage.rs::test_tc_06_sigwinch_reflow_no_frame_drop`
+//! (writer + reader) and `tests/event_loop_inner_coverage.rs::
+//! run_with_backend_walks_wide_event_surface` (writer). Those tests
+//! are ALSO `#[serial]`-annotated in their own binaries. Cross-binary
+//! safety under plain `cargo test` relies on the default one-binary-
+//! at-a-time harness behavior; within each binary the `#[serial]`
+//! default-key group serializes every resize-touching test.
+//!
+//! `thread_local` was considered and rejected: production code shares
+//! `LAST_KNOWN_SIZE` across render/input threads. A `thread_local`
+//! global would silently diverge from the production contract and
+//! move the race from tests into runtime.
 
 use super::{handle_resize, last_known_size};
+use serial_test::serial;
 use std::time::{Duration, Instant};
 
+#[serial]
 #[test]
 fn test_handle_resize_records_dimensions() {
     // First call — dimensions should be recorded exactly as passed.
@@ -32,6 +57,7 @@ fn test_handle_resize_records_dimensions() {
     assert_eq!(last_known_size(), (80, 24));
 }
 
+#[serial]
 #[test]
 fn test_handle_resize_sets_dirty_flag() {
     // `dirty` is a design-constant true: every resize invalidates the
@@ -44,6 +70,7 @@ fn test_handle_resize_sets_dirty_flag() {
     );
 }
 
+#[serial]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_resize_does_not_block_on_inflight_turn() {
     // Simulate an in-flight agent turn with a REAL async sleep. If
