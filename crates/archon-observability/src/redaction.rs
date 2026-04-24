@@ -65,7 +65,8 @@ pub(crate) static REDACTION_RE: Lazy<Regex> = Lazy::new(|| {
         r#"(?ix)
         (
             sk-ant-[A-Za-z0-9_\-]{20,}                 # Anthropic
-          | sk-[A-Za-z0-9]{20,}                         # OpenAI
+          | sk-(?:proj|svcacct)-[A-Za-z0-9_\-]{20,}    # OpenAI modern (2024+, sk-proj- / sk-svcacct-)
+          | sk-[A-Za-z0-9]{20,}                         # OpenAI legacy
           | AKIA[0-9A-Z]{16}                            # AWS access key id
           | gh[pousr]_[A-Za-z0-9]{36}                   # GitHub tokens
           | (?:sk|pk)_(?:live|test)_[A-Za-z0-9]{24,}    # Stripe secret/publishable
@@ -423,5 +424,48 @@ mod redaction_tests {
         assert!(captured.contains("\"level\":\"INFO\""), "json missing level: {captured:?}");
         assert!(captured.contains("\"target\":"), "json missing target: {captured:?}");
         assert!(captured.contains("\"fields\":{"), "json missing fields obj: {captured:?}");
+    }
+
+    #[test]
+    fn redacts_modern_openai_sk_proj_key() {
+        let raw = "sk-proj-abc123def456ghi789jkl012mno345pqr678stu901vwx234yz56";
+        let out = redact(&format!("key={raw}"));
+        assert!(
+            out.contains("***REDACTED***"),
+            "expected REDACTED marker, got: {out:?}"
+        );
+        assert!(
+            !out.contains(raw),
+            "raw sk-proj- key leaked: {out:?}"
+        );
+    }
+
+    #[test]
+    fn redacts_modern_openai_sk_svcacct_key() {
+        let raw = "sk-svcacct-abc123def456ghi789jkl012mno345pqr678stu901vwx234yz56";
+        let out = redact(&format!("key={raw}"));
+        assert!(
+            out.contains("***REDACTED***"),
+            "expected REDACTED marker, got: {out:?}"
+        );
+        assert!(
+            !out.contains(raw),
+            "raw sk-svcacct- key leaked: {out:?}"
+        );
+    }
+
+    #[test]
+    fn redaction_regex_no_catastrophic_backtracking_on_long_input() {
+        // Pathological-shape input: long alphanumeric without any secret
+        // pattern. If regex had exponential backtracking, this would time out.
+        let long_input = "a".repeat(10_000);
+        let start = std::time::Instant::now();
+        let _ = redact(&long_input);
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed.as_millis() < 1000,
+            "redact() on 10k-byte input took {}ms — suspected catastrophic backtracking",
+            elapsed.as_millis()
+        );
     }
 }
