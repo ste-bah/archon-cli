@@ -43,3 +43,6 @@ tempfile.workspace = true
 # TASK-AGS-105: serialize tests that rely on process-global
 # subagent executor state installed via OnceLock.
 serial_test.workspace = true
+# TASK-P1-6 (#191): sha256 byte-for-byte equality check for the
+# apply_patch round-trip verification test.
+sha2.workspace = true
