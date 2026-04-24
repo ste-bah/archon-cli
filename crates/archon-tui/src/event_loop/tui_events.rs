@@ -109,9 +109,10 @@ pub(super) async fn handle_tui_event(
             );
         }
         TuiEvent::ShowSkillsMenu(skills) => {
-            // TASK-TUI-627: open the skills-menu overlay. TODO(TUI-627-
-            // followup): input routing (inject /skill-name on Enter) + render
-            // wiring are deferred.
+            // TASK-TUI-627 + followup: /skills opens this overlay; input
+            // priority branch (event_loop/input.rs) routes Up/Down/Enter/Esc
+            // and render dispatch (render/body.rs draw_skills_menu) draws
+            // it. Enter injects `/{skill-name} ` into the input buffer.
             app.skills_menu = Some(
                 crate::screens::skills_menu::SkillsMenu::new(skills),
             );

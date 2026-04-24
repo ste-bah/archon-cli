@@ -299,6 +299,39 @@ pub(super) async fn handle_key_event(
                     _ => return, // swallow other keys while overlay is up
                 }
             }
+            // Handle skills menu overlay — Up/Down/Enter/Esc
+            // (TASK-TUI-627-followup). Enter injects `/{skill-name} `
+            // into the input buffer via InputHandler::set_text, then
+            // closes the overlay so the user can finish typing args.
+            if app.skills_menu.is_some() {
+                match key.code {
+                    KeyCode::Up => {
+                        if let Some(ref mut menu) = app.skills_menu {
+                            menu.select_prev();
+                        }
+                        return;
+                    }
+                    KeyCode::Down => {
+                        if let Some(ref mut menu) = app.skills_menu {
+                            menu.select_next();
+                        }
+                        return;
+                    }
+                    KeyCode::Enter => {
+                        if let Some(menu) = app.skills_menu.take() {
+                            if let Some(skill) = menu.selected() {
+                                app.input.set_text(&format!("/{} ", skill.name));
+                            }
+                        }
+                        return;
+                    }
+                    KeyCode::Esc => {
+                        app.skills_menu = None;
+                        return;
+                    }
+                    _ => return, // swallow other keys while overlay is up
+                }
+            }
             // Vim mode key routing — Ctrl+D / Ctrl+C fall through to normal handling
             let is_ctrl_quit = key.modifiers == KeyModifiers::CONTROL
                 && matches!(key.code, KeyCode::Char('d') | KeyCode::Char('c'));

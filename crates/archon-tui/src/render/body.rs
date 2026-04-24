@@ -288,6 +288,20 @@ pub fn draw_message_selector(frame: &mut Frame, app: &App) {
     sel.render(frame, area, &app.theme);
 }
 
+/// Render the skills-menu overlay (TASK-TUI-627 /skills).
+///
+/// Delegates to `SkillsMenu::render` with the full frame area so the
+/// overlay sizes itself (centered, ~9/10 wide) identically to
+/// `draw_message_selector` above.
+pub fn draw_skills_menu(frame: &mut Frame, app: &App) {
+    let menu = match &app.skills_menu {
+        Some(m) => m,
+        None => return,
+    };
+    let area = frame.area();
+    menu.render(frame, area, &app.theme);
+}
+
 /// Render the MCP manager overlay.
 pub fn draw_mcp_manager(frame: &mut Frame, app: &App) {
     let mcp_mgr = match &app.mcp_manager {

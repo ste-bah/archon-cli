@@ -120,6 +120,16 @@ impl InputHandler {
         }
     }
 
+    /// Replace the current input text and place the cursor at the end.
+    /// Used by overlays (e.g. `/skills` Enter-to-inject, TUI-627-followup)
+    /// to write a command template directly into the input buffer.
+    pub fn set_text(&mut self, text: &str) {
+        self.current = text.to_string();
+        self.cursor_pos = self.current.len();
+        self.refresh_suggestions();
+        self.ultrathink.scan_input(&self.current);
+    }
+
     /// Update suggestion state based on current input text.
     fn refresh_suggestions(&mut self) {
         if self.current.starts_with('/') {
@@ -363,6 +373,26 @@ mod tests {
                 .iter()
                 .any(|c| c.name == "/model")
         );
+    }
+
+    #[test]
+    fn set_text_replaces_buffer_and_places_cursor_at_end() {
+        let mut input = InputHandler::new();
+        input.set_text("/skills ");
+        assert_eq!(input.text(), "/skills ");
+        assert_eq!(input.cursor(), "/skills ".len());
+    }
+
+    #[test]
+    fn set_text_after_existing_text_overwrites() {
+        let mut input = InputHandler::new();
+        for ch in "hello".chars() {
+            input.insert(ch);
+        }
+        assert_eq!(input.text(), "hello");
+        input.set_text("/foo ");
+        assert_eq!(input.text(), "/foo ");
+        assert_eq!(input.cursor(), "/foo ".len());
     }
 
     #[test]

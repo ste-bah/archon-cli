@@ -67,4 +67,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
 
     // Overlays: message selector (TASK-TUI-620 /rewind)
     body::draw_message_selector(frame, app);
+
+    // Overlays: skills menu (TASK-TUI-627 /skills)
+    body::draw_skills_menu(frame, app);
 }
