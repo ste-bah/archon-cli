@@ -12,7 +12,6 @@ archon-context = { path = "../archon-context" }
 archon-session = { path = "../archon-session" }
 archon-consciousness = { path = "../archon-consciousness" }
 archon-memory = { path = "../archon-memory" }
-archon-mcp = { path = "../archon-mcp" }
 # TASK-AGS-OBS-901: `src/metrics.rs` now re-exports `ChannelMetricSink` from
 # archon-observability (trait was moved there in OBS-901 so the trait + type
 # + impl all live in one crate — orphan-rule constraint). No cycle:
@@ -20,7 +19,6 @@ archon-mcp = { path = "../archon-mcp" }
 archon-observability = { path = "../archon-observability" }
 
 # Workspace dependencies
-clap.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
@@ -28,8 +26,6 @@ tracing.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
 toml.workspace = true
-tracing-appender.workspace = true
-tracing-subscriber.workspace = true
 dirs.workspace = true
 uuid.workspace = true
 chrono.workspace = true
@@ -47,7 +43,6 @@ dashmap.workspace = true
 tokio-stream.workspace = true
 russh.workspace = true
 axum.workspace = true
-tower-http.workspace = true
 tokio-tungstenite.workspace = true
 futures-util.workspace = true
 url.workspace = true
