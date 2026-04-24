@@ -69,3 +69,8 @@ tracing = { workspace = true }
 # global-install path against a scratch dir. tempfile gives us a
 # hermetic `log_dir` per test run.
 tempfile = { workspace = true }
+# TASK-P1-4 (#189): tests/metrics_endpoint_e2e.rs scrapes the live
+# Prometheus `/metrics` endpoint served by serve_metrics_on() over
+# a real localhost TCP listener. reqwest provides the HTTP client;
+# workspace-declared feature set already includes rustls-tls + json.
+reqwest = { workspace = true }
