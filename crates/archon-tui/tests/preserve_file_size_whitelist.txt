@@ -13,13 +13,13 @@ crates/archon-tui/src/app.rs                       # expires 2026-05-15 (REM-2d)
 crates/archon-tui/src/event_loop.rs                # expires 2026-05-15 (REM-2g)
 crates/archon-tui/src/markdown.rs                  # expires 2026-05-15 (REM-2c)
 crates/archon-tui/src/output.rs                    # expires 2026-05-15 (REM-2h)
-crates/archon-tui/src/screens/session_browser.rs   # expires 2026-05-15 (REM-2x unfiled)
 crates/archon-tui/src/task_dispatch_tests.rs       # expires 2026-05-15 (REM-2f)
 crates/archon-tui/src/theme.rs                     # expires 2026-05-15 (REM-2i)
 crates/archon-tui/src/vim.rs                       # expires 2026-05-15 (REM-2e)
 
-# --- legacy worktree-root src/ (21) — Stage 7.5 command crate dispatcher files ---
+# --- legacy worktree-root src/ (22) — Stage 7.5 command crate dispatcher files ---
 src/cli_args.rs                                    # expires 2026-05-15
+src/main.rs                                        # expires 2026-05-15 (fmt-inflated 482->511, commit 6adc1d6)
 src/session.rs                                     # expires 2026-05-15
 src/command/add_dir.rs                             # expires 2026-05-15
 src/command/checkpoint.rs                          # expires 2026-05-15
