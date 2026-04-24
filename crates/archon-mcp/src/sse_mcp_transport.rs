@@ -31,31 +31,51 @@
 //! # Scope
 //!
 //! Ships the happy path: endpoint discovery, frame parse, POST, JSON-RPC
-//! roundtrip. Since #202 MCP-SSE-HARDEN-RETRY landed, the inbound SSE pump
-//! also auto-reconnects on stream drop with `Last-Event-ID` replay and
-//! bounded exponential backoff (see [`crate::sse_reconnect`]).
+//! roundtrip. Enhanced post-#197 with:
 //!
-//! Still deferred to follow-up tickets:
-//!
-//! * `Mcp-Session-Id` header coordination — #203 MCP-SSE-SESSION-ID
+//! * #202 MCP-SSE-HARDEN-RETRY — inbound SSE pump auto-reconnects on stream
+//!   drop with `Last-Event-ID` replay and bounded exponential backoff
+//!   (see [`crate::sse_reconnect`]).
+//! * #203 MCP-SSE-SESSION-ID — `Mcp-Session-Id` header captured from POST
+//!   responses and injected on every subsequent POST; 404 responses drop
+//!   the message (rmcp surfaces a bounded request timeout). Full
+//!   session re-initialization on 404 is a follow-up.
 //!
 //! POST failures are logged at `tracing::warn!` but do not fail the transport;
 //! rmcp observes request timeouts for any messages that fail to deliver.
 
 use std::collections::HashMap;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::time::Duration;
 
 use futures_util::{Sink, Stream, StreamExt};
 use http::{HeaderName, HeaderValue};
 use rmcp::service::{RoleClient, RxJsonRpcMessage, TxJsonRpcMessage};
-use tokio::sync::mpsc;
+use tokio::sync::{RwLock, mpsc};
 use tokio_stream::wrappers::ReceiverStream;
 use url::Url;
 
 use crate::sse_reconnect::{ReconnectConfig, pump_sse_stream_with_reconnect};
 use crate::sse_transport::SseFrame;
 use crate::types::McpError;
+
+/// Header name that carries the MCP session identifier (#203).
+///
+/// Spec: servers that support session-coordinated streaming HTTP include
+/// `Mcp-Session-Id: <opaque-id>` in the response to the first POST
+/// (typically the `initialize` request); the client then echoes that
+/// header on every subsequent POST so the server can route messages
+/// to the correct session. Classic SSE servers that encode session in
+/// the endpoint-URL query string simply never emit this header; the
+/// transport handles both cases transparently.
+const MCP_SESSION_ID_HEADER: &str = "mcp-session-id";
+
+/// Shared per-client session state. `None` until the server issues an id.
+///
+/// Created fresh inside [`connect_mcp`] — two concurrent connect calls
+/// therefore have fully independent session state.
+pub(crate) type SessionIdHandle = Arc<RwLock<Option<String>>>;
 
 /// Boxed, pinned MCP SSE inbound stream — yields deserialized JSON-RPC messages.
 pub type SseMcpStream =
@@ -249,7 +269,19 @@ pub async fn connect_mcp(
     // Sender; `Box::pin` gives it `Unpin + Send + 'static` so rmcp's
     // `IntoTransport` blanket impl accepts it.
     let (tx_chan, tx_rx) = mpsc::channel::<TxJsonRpcMessage<RoleClient>>(SSE_CHANNEL_BUFFER);
-    tokio::spawn(post_pump_task(http_client, post_url, header_map, tx_rx));
+    // Per-client session-id state — #203 MCP-SSE-SESSION-ID. Starts empty;
+    // the POST pump fills it from the first response header that carries
+    // `Mcp-Session-Id` and injects it on every subsequent POST. Each
+    // `connect_mcp` call gets its own `Arc<RwLock<...>>` so concurrent
+    // clients never share state.
+    let session_id: SessionIdHandle = Arc::new(RwLock::new(None));
+    tokio::spawn(post_pump_task(
+        http_client,
+        post_url,
+        header_map,
+        session_id,
+        tx_rx,
+    ));
 
     let sink = futures_util::sink::unfold(
         tx_chan,
@@ -268,12 +300,20 @@ pub async fn connect_mcp(
 /// Background task that drains the outbound channel and POSTs each message
 /// to the MCP endpoint URL.
 ///
+/// Session-id coordination (#203): if `session_id` holds a value, it is
+/// injected as `Mcp-Session-Id: <id>` on each POST. After every response,
+/// if the server returned an `Mcp-Session-Id` header, it replaces the
+/// cached value. A `404` response is logged + dropped — rmcp observes the
+/// missing JSON-RPC response as a request-level timeout, bounded by rmcp's
+/// own tunables. Full session re-initialization on 404 is a follow-up.
+///
 /// Errors are logged but do not stop the pump: the rmcp runtime will observe
 /// request timeouts for messages whose responses never arrive.
 pub(crate) async fn post_pump_task(
     client: reqwest::Client,
     url: Url,
     headers: HashMap<HeaderName, HeaderValue>,
+    session_id: SessionIdHandle,
     mut rx: mpsc::Receiver<TxJsonRpcMessage<RoleClient>>,
 ) {
     while let Some(msg) = rx.recv().await {
@@ -291,9 +331,37 @@ pub(crate) async fn post_pump_task(
         for (name, value) in &headers {
             post = post.header(name.clone(), value.clone());
         }
+        // Inject cached Mcp-Session-Id if present.
+        if let Some(id) = session_id.read().await.clone() {
+            if let Ok(v) = HeaderValue::from_str(&id) {
+                post = post.header(MCP_SESSION_ID_HEADER, v);
+            }
+        }
+
         match post.send().await {
             Ok(resp) if resp.status().is_success() => {
+                // Capture any session-id the server hands back.
+                if let Some(sid) = resp
+                    .headers()
+                    .get(MCP_SESSION_ID_HEADER)
+                    .and_then(|v| v.to_str().ok())
+                    .map(|s| s.to_string())
+                {
+                    let mut guard = session_id.write().await;
+                    if guard.as_deref() != Some(sid.as_str()) {
+                        tracing::debug!(session_id = %sid, "sse: captured Mcp-Session-Id");
+                        *guard = Some(sid);
+                    }
+                }
                 tracing::trace!(status = %resp.status(), "sse: POST ok");
+            }
+            Ok(resp) if resp.status() == reqwest::StatusCode::NOT_FOUND => {
+                // Session expired / unknown. Drop the message; rmcp will
+                // observe a request timeout. Full re-init is a follow-up.
+                tracing::warn!(
+                    status = %resp.status(),
+                    "sse: POST returned 404 — session likely invalid, dropping message"
+                );
             }
             Ok(resp) => {
                 tracing::warn!(status = %resp.status(), "sse: POST non-2xx");
