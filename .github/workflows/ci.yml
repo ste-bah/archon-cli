@@ -5,6 +5,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
@@ -77,6 +78,17 @@ jobs:
         run: bash scripts/lint/arch-lint.sh
       - name: check-file-sizes (NFR-FOR-D4-MAINTAINABILITY)
         run: bash scripts/check-file-sizes.sh
+
+  preserve-invariants:
+    name: preserve-invariants (TASK-AGS-OBS-918)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: check-preserve-invariants (fraud detection)
+        run: bash scripts/check-preserve-invariants.sh
+      - name: preserve-invariants self-test (fraud-detection-of-the-fraud-detector)
+        run: bash scripts/tests/preserve-invariants-self-test.sh
 
   tui-file-size-lint:
     name: tui-file-size-lint (NFR-TUI-QUAL-001)
