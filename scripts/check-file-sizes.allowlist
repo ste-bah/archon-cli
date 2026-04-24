@@ -146,7 +146,6 @@ crates/archon-llm/src/providers/openai_compat.rs
 crates/archon-llm/src/providers/registry.rs
 
 # --- archon-observability ---
-crates/archon-observability/src/metrics.rs
 
 # --- archon-tui ---
 crates/archon-tui/src/screens/session_browser.rs
