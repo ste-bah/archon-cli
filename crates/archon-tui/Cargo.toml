@@ -47,19 +47,19 @@ axum = { workspace = true }
 tower = { workspace = true }
 qrcode = { version = "0.14.1", default-features = false }
 
-# jemalloc-ctl is used by TASK-TUI-809 (memory probe). jemalloc is not
-# available on musl targets, so we gate the dependency via target cfg.
-# This is cleaner than an optional feature because it's a platform
-# constraint, not a user-facing toggle — consumers on glibc get it
-# automatically, musl builds skip it without any feature flag dance.
-[target.'cfg(not(target_env = "musl"))'.dependencies]
+# jemalloc-ctl is used by TASK-TUI-809 (memory probe). jemalloc-sys'
+# build script fails on Windows + macOS + musl, so we gate to Linux only
+# (matching jemalloc-ctl's actual support footprint). The previous
+# `cfg(not(target_env = "musl"))` gate still pulled the dep in on
+# Windows/macOS where the build script broke. (TASK-CI-PORTABILITY-HOTFIX
+# / closes #221.)
+[target.'cfg(target_os = "linux")'.dependencies]
 jemalloc-ctl = "0.5"
 
 [dev-dependencies]
 insta = { workspace = true }
 criterion.workspace = true
 futures = "0.3"
-procfs = "0.16"
 # TASK-TUI-410: load test drives archon-tools directly (AgentTool,
 # poll_background_agent, cancel_background_agent) per TECH-TUI-SUBAGENT
 # implementation_notes. uuid + tokio-util needed for the test-local
@@ -81,6 +81,17 @@ archon-memory = { path = "../archon-memory" }
 # production contract, so we serialize the 3 layout tests with
 # serial_test. Already workspace-pinned (archon-core, archon-tools).
 serial_test.workspace = true
+
+# procfs reads /proc/ — Linux-only. Gated to avoid macOS/Windows build
+# failures in `cargo check --tests`. (TASK-CI-PORTABILITY-HOTFIX /
+# closes #220.) The eventchannel_memory test that consumes this dep is
+# itself gated with #[cfg(target_os = "linux")]. Placed AFTER the plain
+# [dev-dependencies] table on purpose: TOML target-table sections claim
+# all subsequent keys until the next [...] header, so this MUST stay last
+# in the dev-dep cluster (or be followed by another header) to avoid
+# accidentally Linux-gating the deps above it.
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+procfs = "0.16"
 
 [[bench]]
 name = "eventchannel_load"

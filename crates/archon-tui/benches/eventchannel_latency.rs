@@ -84,14 +84,12 @@ fn bench_eventchannel_latency(_c: &mut Criterion) {
 
         let snapshot = metrics.snapshot();
 
-        // Fixed workspace root for archonfixes worktree
-        const WORKSPACE_ROOT: &str =
-            "/home/unixdude/Archon-projects/archon-cli-worktrees/archonfixes";
-        let target_dir = std::path::Path::new(WORKSPACE_ROOT).join("target/tui-fixes");
-
-        // Create directory and write JSON — BEFORE assertion so JSON persists on failure
-        std::fs::create_dir_all(&target_dir).expect("create target/tui-fixes dir");
-        let json_path = target_dir.join("eventchannel-latency.json");
+        // Per-bench tempdir for the JSON artifact. Previously hardcoded to a
+        // developer-local absolute path which broke under cargo-llvm-cov's
+        // sandbox and on any CI runner. (TASK-CI-PORTABILITY-HOTFIX.)
+        let tmp = tempfile::TempDir::new().expect("create tempdir");
+        // Write JSON BEFORE assertion so the artifact persists on failure.
+        let json_path = tmp.path().join("eventchannel-latency.json");
         let json = serde_json::json!({
             "task_id": "TASK-TUI-211",
             "producers": producers,

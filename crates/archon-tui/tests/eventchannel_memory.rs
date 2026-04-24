@@ -5,6 +5,13 @@
 //! AgentEvent variant: TextDelta("x") — same cheapest/cheapest variant as TUI-209.
 //! Using inline synthetic generator (Path B) per spec — no shared helper module.
 
+// The whole test is fundamentally Linux-specific: it reads VmRSS from
+// /proc/self/status via the `procfs` crate. On macOS/Windows there is no
+// /proc and procfs is not buildable, so the file is gated end-to-end with
+// `#[cfg(target_os = "linux")]`. The Cargo.toml gate on the `procfs`
+// dev-dep mirrors this. (TASK-CI-PORTABILITY-HOTFIX / closes #220.)
+#![cfg(target_os = "linux")]
+
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -166,12 +173,12 @@ async fn eventchannel_memory_growth_test() {
         "timestamp_utc": chrono::Utc::now().to_rfc3339()
     });
 
-    // Create target/tui-fixes/ directory and write JSON
-    let target_dir =
-        std::path::Path::new("/home/unixdude/Archon-projects/archon-cli-worktrees/archonfixes")
-            .join("target/tui-fixes");
-    std::fs::create_dir_all(&target_dir).expect("create target/tui-fixes dir");
-    let json_path = target_dir.join("eventchannel-memory.json");
+    // Write JSON artifact to a per-test tempdir. Previously hardcoded to a
+    // developer-local absolute path which broke under cargo-llvm-cov's
+    // sandbox and on any CI runner. (TASK-CI-PORTABILITY-HOTFIX / closes
+    // #222.)
+    let tmp = tempfile::TempDir::new().expect("create tempdir");
+    let json_path = tmp.path().join("eventchannel-memory.json");
     let json_str = serde_json::to_string_pretty(&json).expect("serialize JSON");
     std::fs::write(&json_path, &json_str).expect("write JSON file");
 
