@@ -75,33 +75,40 @@ pub const ENDPOINT_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 ///
 /// 64 is generous for MCP request/response traffic — a `tools/list` response
 /// with 100+ tools fits in a single frame.
-const SSE_CHANNEL_BUFFER: usize = 64;
+pub(crate) const SSE_CHANNEL_BUFFER: usize = 64;
 
-/// Open a bidirectional MCP transport over classic Server-Sent Events.
+/// Successful output of [`setup_sse_inbound`] — the pieces needed to build
+/// the inbound stream and any outbound sink (default or auth-wrapping).
 ///
-/// Steps:
-///   1. `GET sse_url` with `Accept: text/event-stream` — opens persistent stream.
-///   2. Waits for the first `event: endpoint` frame (bounded by
-///      [`ENDPOINT_HANDSHAKE_TIMEOUT`]). The `data` field is the URL the
-///      client POSTs JSON-RPC requests to (absolute or relative to `sse_url`).
-///   3. Returns a `(Sink, Stream)` tuple that rmcp's blanket `IntoTransport`
-///      impl consumes as a client transport.
+/// Exposed `pub(crate)` so the OAuth wrapper in [`crate::sse_oauth_transport`]
+/// can reuse the SSE handshake logic without duplicating it.
+pub(crate) struct SseInboundSetup {
+    /// HTTP client used to open the SSE stream (reused for POSTs by callers).
+    pub http_client: reqwest::Client,
+    /// Absolute POST URL discovered via `event: endpoint`.
+    pub post_url: Url,
+    /// Parsed custom headers (already validated) — caller-supplied.
+    pub header_map: HashMap<HeaderName, HeaderValue>,
+    /// Receiver that yields SSE frames AFTER the endpoint frame has been consumed.
+    pub frame_rx: mpsc::Receiver<SseFrame>,
+}
+
+/// Open the SSE GET stream, wait for the `event: endpoint` frame, and return
+/// the pieces both the vanilla and OAuth-wrapped transports need.
 ///
-/// Frame filtering on the inbound stream:
-///   * `event: endpoint` (only at init) — consumed, never reaches the caller
-///   * `event: message` or default (no event field) — parsed as JSON-RPC
-///   * any other named event (e.g. `ping`) — skipped
-///   * comment lines (`:`) — already skipped by the frame parser
-pub async fn connect_mcp(
+/// This is the steps-1-through-6 portion of [`connect_mcp`] extracted so the
+/// OAuth wrapper can reuse it — the OAuth wrapper differs only in the POST
+/// pump (auth header + 401 refresh), not in the SSE handshake.
+pub(crate) async fn setup_sse_inbound(
     sse_url: &str,
     headers: Option<&HashMap<String, String>>,
     connect_timeout: Duration,
-) -> Result<(SseMcpSink, SseMcpStream), McpError> {
-    // 1. Validate and parse the SSE URL (needed later for relative endpoint resolution).
+) -> Result<SseInboundSetup, McpError> {
+    // 1. Validate + parse the SSE URL.
     let sse_url_parsed = Url::parse(sse_url)
         .map_err(|e| McpError::Transport(format!("sse: invalid URL '{sse_url}': {e}")))?;
 
-    // 2. Build the reqwest client with timeout + user headers.
+    // 2. Build HTTP client.
     let http_client = reqwest::Client::builder()
         .connect_timeout(connect_timeout)
         .build()
@@ -109,7 +116,7 @@ pub async fn connect_mcp(
 
     let header_map = convert_headers(headers)?;
 
-    // 3. Open the SSE GET stream.
+    // 3. Open SSE GET.
     let mut req = http_client.get(sse_url);
     req = req.header(http::header::ACCEPT, "text/event-stream");
     for (name, value) in &header_map {
@@ -126,11 +133,11 @@ pub async fn connect_mcp(
         )));
     }
 
-    // 4. Spawn the SSE frame parser pump — frames flow into `frame_rx`.
+    // 4. Spawn frame parser pump.
     let (frame_tx, mut frame_rx) = mpsc::channel::<SseFrame>(SSE_CHANNEL_BUFFER);
     tokio::spawn(pump_sse_stream(resp, frame_tx));
 
-    // 5. Consume frames until the endpoint-discovery frame arrives.
+    // 5. Consume frames until `event: endpoint` arrives.
     let endpoint_frame = tokio::time::timeout(ENDPOINT_HANDSHAKE_TIMEOUT, async {
         loop {
             match frame_rx.recv().await {
@@ -155,7 +162,7 @@ pub async fn connect_mcp(
         ))
     })??;
 
-    // 6. Resolve POST URL (absolute or relative-to-sse_url).
+    // 6. Resolve POST URL.
     let post_url_str = endpoint_frame.data.trim().to_string();
     if post_url_str.is_empty() {
         return Err(McpError::Transport(
@@ -172,10 +179,22 @@ pub async fn connect_mcp(
         "sse: MCP transport ready"
     );
 
-    // 7. Build the inbound Stream — filter data frames → parse as JSON-RPC.
-    let rx_stream = ReceiverStream::new(frame_rx).filter_map(|frame: SseFrame| async move {
+    Ok(SseInboundSetup {
+        http_client,
+        post_url,
+        header_map,
+        frame_rx,
+    })
+}
+
+/// Wrap a post-handshake SSE frame receiver into the boxed inbound JSON-RPC
+/// message stream consumed by rmcp.
+///
+/// Exposed `pub(crate)` so the OAuth wrapper can build the same stream shape
+/// without duplicating the filter/parse logic.
+pub(crate) fn build_inbound_stream(frame_rx: mpsc::Receiver<SseFrame>) -> SseMcpStream {
+    let stream = ReceiverStream::new(frame_rx).filter_map(|frame: SseFrame| async move {
         match frame.event.as_deref() {
-            // Default event (unnamed) or explicit "message" carries JSON-RPC.
             None | Some("message") => {}
             Some(other) => {
                 tracing::trace!(event = %other, "sse: non-message frame skipped");
@@ -197,26 +216,51 @@ pub async fn connect_mcp(
             }
         }
     });
-    let rx_stream_boxed: SseMcpStream = Box::pin(rx_stream);
+    Box::pin(stream)
+}
 
-    // 8. Build the outbound Sink — POST each message to the endpoint URL via a
-    //    background task. The Sink side is a `futures_util::sink::unfold` over
-    //    a tokio mpsc Sender; `Box::pin` gives it `Unpin + Send + 'static` so
-    //    rmcp's `IntoTransport` blanket impl accepts it.
-    let (tx_chan, tx_rx) = mpsc::channel::<TxJsonRpcMessage<RoleClient>>(SSE_CHANNEL_BUFFER);
-    tokio::spawn(post_pump_task(
-        http_client.clone(),
+/// Open a bidirectional MCP transport over classic Server-Sent Events.
+///
+/// Steps:
+///   1. `GET sse_url` with `Accept: text/event-stream` — opens persistent stream.
+///   2. Waits for the first `event: endpoint` frame (bounded by
+///      [`ENDPOINT_HANDSHAKE_TIMEOUT`]). The `data` field is the URL the
+///      client POSTs JSON-RPC requests to (absolute or relative to `sse_url`).
+///   3. Returns a `(Sink, Stream)` tuple that rmcp's blanket `IntoTransport`
+///      impl consumes as a client transport.
+///
+/// Frame filtering on the inbound stream:
+///   * `event: endpoint` (only at init) — consumed, never reaches the caller
+///   * `event: message` or default (no event field) — parsed as JSON-RPC
+///   * any other named event (e.g. `ping`) — skipped
+///   * comment lines (`:`) — already skipped by the frame parser
+pub async fn connect_mcp(
+    sse_url: &str,
+    headers: Option<&HashMap<String, String>>,
+    connect_timeout: Duration,
+) -> Result<(SseMcpSink, SseMcpStream), McpError> {
+    let SseInboundSetup {
+        http_client,
         post_url,
         header_map,
-        tx_rx,
-    ));
+        frame_rx,
+    } = setup_sse_inbound(sse_url, headers, connect_timeout).await?;
+
+    let rx_stream_boxed = build_inbound_stream(frame_rx);
+
+    // Outbound Sink: POST each message to the endpoint URL via a background
+    // task. The Sink side is a `futures_util::sink::unfold` over a tokio mpsc
+    // Sender; `Box::pin` gives it `Unpin + Send + 'static` so rmcp's
+    // `IntoTransport` blanket impl accepts it.
+    let (tx_chan, tx_rx) = mpsc::channel::<TxJsonRpcMessage<RoleClient>>(SSE_CHANNEL_BUFFER);
+    tokio::spawn(post_pump_task(http_client, post_url, header_map, tx_rx));
 
     let sink = futures_util::sink::unfold(
         tx_chan,
         |tx, msg: TxJsonRpcMessage<RoleClient>| async move {
-            tx.send(msg).await.map_err(|e| {
-                McpError::Transport(format!("sse: outbound channel closed: {e}"))
-            })?;
+            tx.send(msg)
+                .await
+                .map_err(|e| McpError::Transport(format!("sse: outbound channel closed: {e}")))?;
             Ok::<_, McpError>(tx)
         },
     );
@@ -230,7 +274,7 @@ pub async fn connect_mcp(
 ///
 /// Errors are logged but do not stop the pump: the rmcp runtime will observe
 /// request timeouts for messages whose responses never arrive.
-async fn post_pump_task(
+pub(crate) async fn post_pump_task(
     client: reqwest::Client,
     url: Url,
     headers: HashMap<HeaderName, HeaderValue>,
@@ -268,7 +312,7 @@ async fn post_pump_task(
 
 /// Convert the user-supplied header map into validated
 /// `http::HeaderName`/`HeaderValue` pairs.
-fn convert_headers(
+pub(crate) fn convert_headers(
     headers: Option<&HashMap<String, String>>,
 ) -> Result<HashMap<HeaderName, HeaderValue>, McpError> {
     let mut out = HashMap::new();
