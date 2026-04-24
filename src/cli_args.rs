@@ -37,6 +37,12 @@ pub struct Cli {
     #[arg(long)]
     pub identity_spoof: bool,
 
+    /// Remote session URL (for /session slash command QR display).
+    /// Sets ARCHON_REMOTE_URL at startup so /session can render the QR.
+    /// Format: any URL string (https://…, ws://…, archon://…).
+    #[arg(long = "remote-url", value_name = "URL")]
+    pub remote_url: Option<String>,
+
     /// Path to additional TOML settings file (overlay)
     #[arg(long, value_name = "PATH")]
     pub settings: Option<PathBuf>,
@@ -633,5 +639,29 @@ mod metrics_port_parse_tests {
             "unexpected clap error kind for -1: {:?}",
             err.kind()
         );
+    }
+}
+
+#[cfg(test)]
+mod remote_url_parse_tests {
+    //! TASK-TUI-625-FOLLOWUP Gate 4 coverage — pin `--remote-url` clap parsing
+    //! contract. These tests guarantee that the long flag spelling stays
+    //! `--remote-url` (hyphen, not underscore) and does NOT collide with the
+    //! existing `Commands::Remote { action }` subcommand.
+    use super::Cli;
+    use clap::Parser;
+
+    #[test]
+    fn remote_url_parses_from_long_flag() {
+        let cli = Cli::try_parse_from(["archon", "--remote-url", "https://archon.example/sess/xyz"])
+            .expect("--remote-url <URL> must parse");
+        assert_eq!(cli.remote_url.as_deref(), Some("https://archon.example/sess/xyz"));
+    }
+
+    #[test]
+    fn remote_url_absent_when_not_supplied() {
+        let cli = Cli::try_parse_from(["archon"])
+            .expect("archon with no flags must parse");
+        assert!(cli.remote_url.is_none());
     }
 }

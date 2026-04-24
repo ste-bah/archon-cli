@@ -24,6 +24,15 @@ use cli_args::{Cli, Commands};
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
+    // TASK-TUI-625-FOLLOWUP: wire --remote-url to ARCHON_REMOTE_URL so
+    // the /session slash command's EnvRemoteUrlProvider can see the URL
+    // supplied at startup. SAFETY: set_var is unsafe on Rust 1.77+ — this
+    // call runs before any other thread is spawned, so concurrent env-var
+    // access cannot occur.
+    if let Some(ref url) = cli.remote_url {
+        unsafe { std::env::set_var("ARCHON_REMOTE_URL", url); }
+    }
+
     // Load environment variables first (determines config path)
     let env_vars = env_vars::load_env_vars();
 

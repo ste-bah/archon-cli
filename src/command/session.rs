@@ -34,18 +34,19 @@
 //!    Adapted to a `RemoteUrlProvider` trait seam (like `GhRunner` /
 //!    `TagStore` / `MessageLoader`) — production reads the env var
 //!    `ARCHON_REMOTE_URL`, tests inject `MockRemoteUrlProvider`. Avoids
-//!    adding a new AppState field during the sweep; remote-session
-//!    URL plumbing can be wired to the real startup path in a
-//!    TUI-625-followup ticket.
+//!    adding a new AppState field during the sweep; the real startup
+//!    wiring has landed — `main.rs` sets `ARCHON_REMOTE_URL` from the
+//!    `--remote-url <URL>` CLI flag before any tokio task is spawned,
+//!    so `EnvRemoteUrlProvider` sees the value supplied at launch.
 
 use archon_tui::app::TuiEvent;
 
 use crate::command::registry::{CommandContext, CommandHandler};
 
 /// Seam — tests inject `MockRemoteUrlProvider`. Production reads the
-/// `ARCHON_REMOTE_URL` environment variable (set by the CLI entrypoint
-/// when `--remote` is active). Real-AppState wiring deferred to a
-/// TUI-625-followup ticket.
+/// `ARCHON_REMOTE_URL` environment variable, which `main.rs` sets from
+/// the `--remote-url <URL>` CLI flag at startup (the TUI-625-followup
+/// wiring has landed — see `src/main.rs` just after `Cli::parse()`).
 pub(crate) trait RemoteUrlProvider: Send + Sync {
     fn url(&self) -> Option<String>;
 }
@@ -176,6 +177,23 @@ mod tests {
             }
             other => panic!("expected TextDelta, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn env_provider_reads_set_var() {
+        // Save prior value, set a test URL, read via EnvRemoteUrlProvider.
+        let prior = std::env::var("ARCHON_REMOTE_URL").ok();
+        unsafe {
+            std::env::set_var("ARCHON_REMOTE_URL", "https://archon.example/sess/env-test");
+        }
+        let provider = EnvRemoteUrlProvider;
+        let got = provider.url();
+        // Restore prior — best-effort.
+        match prior {
+            Some(v) => unsafe { std::env::set_var("ARCHON_REMOTE_URL", v); },
+            None => unsafe { std::env::remove_var("ARCHON_REMOTE_URL"); },
+        }
+        assert_eq!(got.as_deref(), Some("https://archon.example/sess/env-test"));
     }
 
     #[test]
