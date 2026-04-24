@@ -362,7 +362,7 @@ mod tests {
     /// add_dir.rs.
     fn make_ctx(
         snapshot: Option<PermissionsSnapshot>,
-    ) -> (CommandContext, mpsc::Receiver<TuiEvent>) {
+    ) -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
         // TASK-AGS-POST-6-SHARED-FIXTURES-V2: migrated to CtxBuilder.
         crate::command::test_support::CtxBuilder::new()
             .with_permissions_snapshot_opt(snapshot)
@@ -370,7 +370,7 @@ mod tests {
     }
 
     /// Drain every event currently pending in the channel.
-    fn drain(rx: &mut mpsc::Receiver<TuiEvent>) -> Vec<TuiEvent> {
+    fn drain(rx: &mut mpsc::UnboundedReceiver<TuiEvent>) -> Vec<TuiEvent> {
         let mut events = Vec::new();
         while let Ok(ev) = rx.try_recv() {
             events.push(ev);

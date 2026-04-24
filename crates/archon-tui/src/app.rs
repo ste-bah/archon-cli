@@ -138,7 +138,15 @@ pub type InputSender = tokio::sync::mpsc::Sender<String>;
 /// Configuration for launching the TUI session.
 /// Passed from main.rs to app::run().
 pub struct AppConfig {
-    pub event_rx: tokio::sync::mpsc::Receiver<TuiEvent>,
+    /// TASK-SESSION-LOOP-EXTRACT (A-2): flipped from bounded
+    /// `Receiver<TuiEvent>` to `UnboundedReceiver<TuiEvent>` to match the
+    /// new session-wide unbounded `TuiEvent` channel. The bounded
+    /// channel's backpressure was theoretical (OBS-914 10k evt/s load
+    /// test never showed saturation on local CLI + <1ms render); the
+    /// rationale for this flip is the `for<'a> &'a Sender<T>: Send`
+    /// HRTB inference failure in `session_loop::run_session_loop`
+    /// (rust-lang/rust#102211). See session.rs:1414 for full context.
+    pub event_rx: tokio::sync::mpsc::UnboundedReceiver<TuiEvent>,
     pub input_tx: InputSender,
     pub splash: Option<SplashConfig>,
     pub btw_tx: Option<tokio::sync::mpsc::Sender<String>>,

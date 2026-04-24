@@ -146,14 +146,12 @@ impl CommandHandler for GardenHandler {
         if sub == "stats" {
             match archon_memory::garden::format_garden_stats(memory, 10) {
                 Ok(stats) => {
-                    let _ = ctx
-                        .tui_tx
-                        .try_send(TuiEvent::TextDelta(format!("\n{stats}\n")));
+                    let _ = ctx.tui_tx.send(TuiEvent::TextDelta(format!("\n{stats}\n")));
                 }
                 Err(e) => {
                     let _ = ctx
                         .tui_tx
-                        .try_send(TuiEvent::Error(format!("Garden stats failed: {e}")));
+                        .send(TuiEvent::Error(format!("Garden stats failed: {e}")));
                 }
             }
         } else {
@@ -172,12 +170,12 @@ impl CommandHandler for GardenHandler {
                     let formatted = report.format();
                     let _ = ctx
                         .tui_tx
-                        .try_send(TuiEvent::TextDelta(format!("\n{formatted}\n")));
+                        .send(TuiEvent::TextDelta(format!("\n{formatted}\n")));
                 }
                 Err(e) => {
                     let _ = ctx
                         .tui_tx
-                        .try_send(TuiEvent::Error(format!("Garden consolidation failed: {e}")));
+                        .send(TuiEvent::Error(format!("Garden consolidation failed: {e}")));
                 }
             }
         }
@@ -353,7 +351,7 @@ mod tests {
     fn make_ctx(
         memory: Option<Arc<dyn MemoryTrait>>,
         garden_config: Option<GardenConfig>,
-    ) -> (CommandContext, mpsc::Receiver<TuiEvent>) {
+    ) -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
         // TASK-AGS-POST-6-SHARED-FIXTURES-V2: migrated to CtxBuilder.
         crate::command::test_support::CtxBuilder::new()
             .with_memory_opt(memory)

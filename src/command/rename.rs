@@ -140,7 +140,7 @@ impl CommandHandler for RenameHandler {
             // format string at slash.rs:426.
             let _ = ctx
                 .tui_tx
-                .try_send(TuiEvent::Error("Usage: /rename <name>".into()));
+                .send(TuiEvent::Error("Usage: /rename <name>".into()));
             return Ok(());
         }
 
@@ -274,7 +274,9 @@ mod tests {
     /// supplied `session_id`. Mirrors the `make_ctx(session_id)`
     /// fixture in `src/command/fork.rs` — DIRECT pattern, no
     /// snapshot, no effect slot.
-    fn make_rename_ctx(session_id: Option<String>) -> (CommandContext, mpsc::Receiver<TuiEvent>) {
+    fn make_rename_ctx(
+        session_id: Option<String>,
+    ) -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
         // TASK-AGS-POST-6-SHARED-FIXTURES-V2: migrated to CtxBuilder.
         crate::command::test_support::CtxBuilder::new()
             .with_session_id_opt(session_id)

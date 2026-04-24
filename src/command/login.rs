@@ -302,7 +302,9 @@ mod tests {
     /// / B17 `make_rename_ctx(session_id)` / B19 `make_rules_ctx(memory)`
     /// / B20 `make_reload_ctx(config_path)` shape — DIRECT pattern, no
     /// snapshot, no effect slot.
-    fn make_login_ctx(auth_label: Option<String>) -> (CommandContext, mpsc::Receiver<TuiEvent>) {
+    fn make_login_ctx(
+        auth_label: Option<String>,
+    ) -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
         // TASK-AGS-POST-6-SHARED-FIXTURES-V2: migrated to CtxBuilder.
         crate::command::test_support::CtxBuilder::new()
             .with_auth_label_opt(auth_label)

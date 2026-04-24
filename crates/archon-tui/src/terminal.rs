@@ -61,10 +61,10 @@ impl Drop for TerminalGuard {
 ///
 /// # Example
 /// ```ignore
-/// let (tx, rx) = tokio::sync::mpsc::channel(16);
+/// let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
 /// install_sigwinch(tx);
 /// ```
-pub fn install_sigwinch(tx: tokio::sync::mpsc::Sender<TuiEvent>) {
+pub fn install_sigwinch(tx: tokio::sync::mpsc::UnboundedSender<TuiEvent>) {
     tokio::spawn(async move {
         use tokio::signal::unix::Signal;
         use tokio::signal::unix::{SignalKind, signal};
@@ -87,7 +87,7 @@ pub fn install_sigwinch(tx: tokio::sync::mpsc::Sender<TuiEvent>) {
                         .map(|(c, r)| (c as u16, r as u16))
                         .unwrap_or((80, 24));
 
-                    if tx.send(TuiEvent::Resize { cols, rows }).await.is_err() {
+                    if tx.send(TuiEvent::Resize { cols, rows }).is_err() {
                         // Receiver dropped - the TUI is shutting down
                         break;
                     }

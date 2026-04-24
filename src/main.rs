@@ -3,6 +3,7 @@ pub(crate) mod cli_args;
 mod command;
 mod runtime;
 pub(crate) mod session;
+pub(crate) mod session_loop;
 pub(crate) mod setup;
 mod slash_context;
 

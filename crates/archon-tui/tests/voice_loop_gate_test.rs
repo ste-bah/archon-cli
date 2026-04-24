@@ -20,7 +20,7 @@ use tokio::sync::mpsc;
 #[tokio::test]
 async fn voice_loop_toggle_emits_voice_text_event() {
     let (trig_tx, trig_rx) = mpsc::channel::<VoiceTrigger>(4);
-    let (evt_tx, mut evt_rx) = mpsc::channel::<TuiEvent>(4);
+    let (evt_tx, mut evt_rx) = mpsc::unbounded_channel::<TuiEvent>();
 
     let audio: Arc<dyn AudioSource> = Arc::new(MockAudioSource::with_samples(vec![0.1_f32; 16000])); // 1 sec
     let stt: Arc<dyn SttProvider> = Arc::new(MockStt {
@@ -57,7 +57,7 @@ async fn voice_loop_toggle_emits_voice_text_event() {
 #[tokio::test]
 async fn voice_loop_second_toggle_starts_new_session() {
     let (trig_tx, trig_rx) = mpsc::channel::<VoiceTrigger>(4);
-    let (evt_tx, mut evt_rx) = mpsc::channel::<TuiEvent>(4);
+    let (evt_tx, mut evt_rx) = mpsc::unbounded_channel::<TuiEvent>();
 
     let audio: Arc<dyn AudioSource> = Arc::new(MockAudioSource::with_samples(vec![0.2_f32; 8000]));
     let stt: Arc<dyn SttProvider> = Arc::new(MockStt {
@@ -96,7 +96,7 @@ async fn voice_loop_second_toggle_starts_new_session() {
 #[tokio::test]
 async fn voice_loop_vad_rejects_silent_audio() {
     let (trig_tx, trig_rx) = mpsc::channel::<VoiceTrigger>(4);
-    let (evt_tx, mut evt_rx) = mpsc::channel::<TuiEvent>(4);
+    let (evt_tx, mut evt_rx) = mpsc::unbounded_channel::<TuiEvent>();
 
     // Silent samples (below VAD threshold)
     let audio: Arc<dyn AudioSource> =

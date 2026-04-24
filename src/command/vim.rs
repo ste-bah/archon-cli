@@ -92,7 +92,7 @@ mod tests {
     /// (VimHandler never reads status_snapshot).
     fn make_vim_ctx() -> (
         crate::command::registry::CommandContext,
-        tokio::sync::mpsc::Receiver<TuiEvent>,
+        tokio::sync::mpsc::UnboundedReceiver<TuiEvent>,
     ) {
         make_status_ctx(None)
     }

@@ -117,7 +117,7 @@ impl Dispatcher {
                 // the input pipeline. `TuiEvent::Error` is the correct
                 // text-emitting variant for user-visible diagnostics
                 // (see `crates/archon-tui/src/app.rs::TuiEvent`).
-                let _ = ctx.tui_tx.try_send(archon_tui::app::TuiEvent::Error(msg));
+                let _ = ctx.tui_tx.send(archon_tui::app::TuiEvent::Error(msg));
                 Ok(())
             }
         }
@@ -158,7 +158,7 @@ mod tests {
     /// Build a fresh `CommandContext` backed by a bounded channel the
     /// test can drain via `try_recv`. Capacity of 8 matches the real
     /// input pipeline order of magnitude while leaving headroom.
-    fn make_ctx() -> (CommandContext, mpsc::Receiver<TuiEvent>) {
+    fn make_ctx() -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
         // TASK-AGS-POST-6-SHARED-FIXTURES-V2: migrated to CtxBuilder.
         // The builder uses capacity 16 (was 8); dispatcher tests emit
         // at most a handful of events, so observational behavior is
@@ -626,7 +626,7 @@ mod tests {
     /// dispatch so handler-emitted events do not leak into the next
     /// iteration.
     fn drain_events(
-        rx: &mut mpsc::Receiver<archon_tui::app::TuiEvent>,
+        rx: &mut mpsc::UnboundedReceiver<archon_tui::app::TuiEvent>,
     ) -> Vec<archon_tui::app::TuiEvent> {
         let mut out = Vec::new();
         loop {

@@ -174,7 +174,7 @@ impl CommandHandler for McpHandler {
         // server counts in practice).
         let _ = ctx
             .tui_tx
-            .try_send(TuiEvent::ShowMcpManager(snap.entries.clone()));
+            .send(TuiEvent::ShowMcpManager(snap.entries.clone()));
         Ok(())
     }
 
@@ -229,7 +229,9 @@ mod tests {
     /// supplied optional mcp snapshot. Tests exercising the defensive
     /// None branch pass `None`; tests exercising the happy path pass
     /// `Some(McpSnapshot { .. })`.
-    fn make_ctx(snapshot: Option<McpSnapshot>) -> (CommandContext, mpsc::Receiver<TuiEvent>) {
+    fn make_ctx(
+        snapshot: Option<McpSnapshot>,
+    ) -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
         // TASK-AGS-POST-6-SHARED-FIXTURES-V2: migrated to CtxBuilder.
         crate::command::test_support::CtxBuilder::new()
             .with_mcp_snapshot_opt(snapshot)

@@ -21,6 +21,7 @@ crates/archon-tui/src/vim.rs                       # expires 2026-05-15 (REM-2e)
 src/cli_args.rs                                    # expires 2026-05-15
 src/main.rs                                        # expires 2026-05-15 (fmt-inflated 482->511, commit 6adc1d6)
 src/session.rs                                     # expires 2026-05-15
+src/session_loop/mod.rs                            # expires 2026-05-15 (TASK-SESSION-LOOP-EXTRACT — post-extract of 915-line tokio::spawn body from session.rs; follow-up TASK-SESSION-LOOP-SPLIT will split into per-event-category helpers)
 src/command/add_dir.rs                             # expires 2026-05-15
 src/command/checkpoint.rs                          # expires 2026-05-15
 src/command/context.rs                             # expires 2026-05-15

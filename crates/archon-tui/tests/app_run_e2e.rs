@@ -63,7 +63,7 @@ async fn app_run_drives_session_end_to_end() {
     // events from event_rx and forwards user input on input_tx.
     // We don't drive input_tx in this test — the legacy run_tui path
     // doesn't process UserInput from the channel.
-    let (event_tx, event_rx) = mpsc::channel::<TuiEvent>(64);
+    let (event_tx, event_rx) = mpsc::unbounded_channel::<TuiEvent>();
     let (input_tx, _input_rx) = mpsc::channel::<String>(16);
 
     // The assistant response the TUI will render. Shape matches
@@ -112,20 +112,16 @@ async fn app_run_drives_session_end_to_end() {
     // `SendError`). We would rather surface the `run_with_backend`
     // error on the main assertion than mask it with a scripter panic.
     let scripter = tokio::spawn(async move {
-        let _ = event_tx.send(TuiEvent::GenerationStarted).await;
-        let _ = event_tx
-            .send(TuiEvent::TextDelta(String::from("mock:hello")))
-            .await;
-        let _ = event_tx
-            .send(TuiEvent::TurnComplete {
-                input_tokens: 0,
-                output_tokens: 0,
-            })
-            .await;
+        let _ = event_tx.send(TuiEvent::GenerationStarted);
+        let _ = event_tx.send(TuiEvent::TextDelta(String::from("mock:hello")));
+        let _ = event_tx.send(TuiEvent::TurnComplete {
+            input_tokens: 0,
+            output_tokens: 0,
+        });
         // Give the loop >= one full poll cycle (250ms) to draw the
         // post-TurnComplete frame before shutting down.
         tokio::time::sleep(Duration::from_millis(400)).await;
-        let _ = event_tx.send(TuiEvent::Done).await;
+        let _ = event_tx.send(TuiEvent::Done);
     });
 
     let result = tokio::time::timeout(

@@ -251,7 +251,9 @@ mod tests {
     /// supplied optional context snapshot. Tests exercising the
     /// defensive None branch pass `None`; tests exercising the happy
     /// path pass `Some(ContextSnapshot { .. })`.
-    fn make_ctx(snapshot: Option<ContextSnapshot>) -> (CommandContext, mpsc::Receiver<TuiEvent>) {
+    fn make_ctx(
+        snapshot: Option<ContextSnapshot>,
+    ) -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
         // TASK-AGS-POST-6-SHARED-FIXTURES-V2: migrated to CtxBuilder.
         crate::command::test_support::CtxBuilder::new()
             .with_context_snapshot_opt(snapshot)

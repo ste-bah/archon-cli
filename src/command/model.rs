@@ -112,9 +112,7 @@ impl CommandHandler for ModelHandler {
                 // `command::context` after dispatch returns. That is
                 // where `.await` is legal.
                 ctx.pending_effect = Some(CommandEffect::SetModelOverride(resolved.clone()));
-                let _ = ctx
-                    .tui_tx
-                    .try_send(TuiEvent::ModelChanged(resolved.clone()));
+                let _ = ctx.tui_tx.send(TuiEvent::ModelChanged(resolved.clone()));
                 ctx.emit(TuiEvent::TextDelta(format!(
                     "\nModel switched to {resolved}.\n"
                 )));

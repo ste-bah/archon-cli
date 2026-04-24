@@ -27,7 +27,7 @@
 //!   future handler that needs a memory handle inherits this field for
 //!   free without proliferating per-command builder match arms.
 //!
-//! The sole side effect is `ctx.tui_tx.try_send(TuiEvent::…)` — sync
+//! The sole side effect is `ctx.tui_tx.send(TuiEvent::…)` — sync
 //! and legal inside `CommandHandler::execute`. Matches
 //! AGS-810/812/815/816 DIRECT-pattern precedent.
 //!
@@ -421,7 +421,7 @@ mod tests {
     /// typed snapshots.
     fn make_ctx(
         memory: Option<Arc<dyn MemoryTrait>>,
-    ) -> (CommandContext, mpsc::Receiver<TuiEvent>) {
+    ) -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
         // TASK-AGS-POST-6-SHARED-FIXTURES-V2: migrated to CtxBuilder.
         crate::command::test_support::CtxBuilder::new()
             .with_memory_opt(memory)

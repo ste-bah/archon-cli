@@ -151,7 +151,7 @@ impl CommandHandler for ThinkingHandler {
         //    TextDelta. Mirrors legacy slash.rs:77-80 and :85-88
         //    sequence byte-for-byte. The TUI consumes ThinkingToggle
         //    to flip a renderer flag before the TextDelta lands.
-        let _ = ctx.tui_tx.try_send(TuiEvent::ThinkingToggle(enable));
+        let _ = ctx.tui_tx.send(TuiEvent::ThinkingToggle(enable));
 
         // 5. Byte-for-byte preserved format strings from slash.rs:79
         //    and slash.rs:87. The leading and trailing `\n` wrap is
@@ -162,7 +162,7 @@ impl CommandHandler for ThinkingHandler {
         } else {
             "\nThinking display disabled.\n"
         };
-        let _ = ctx.tui_tx.try_send(TuiEvent::TextDelta(msg.to_string()));
+        let _ = ctx.tui_tx.send(TuiEvent::TextDelta(msg.to_string()));
 
         Ok(())
     }

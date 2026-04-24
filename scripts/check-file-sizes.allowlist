@@ -183,6 +183,12 @@ src/session.rs
 # formatting, zero semantic change). Follow-up hygiene: either split
 # main.rs or hand-tighten fmt output to drop back under 500.
 src/main.rs
+# src/session_loop/mod.rs — post-extract of 915-line tokio::spawn body from
+# session.rs (TASK-SESSION-LOOP-EXTRACT, 2026-04-24). Resolves CI Send-bound
+# errors blocking archon-cli-workspace bin builds. Follow-up ticket
+# TASK-SESSION-LOOP-SPLIT will split into per-event-category helpers
+# (hooks.rs, tui_events.rs, slash_commands.rs, mcp_events.rs).
+src/session_loop/mod.rs
 
 # --- archon-core tests ---
 # task_executor.rs inflated 482 -> 513 by `cargo fmt --all` (commit 6adc1d6,

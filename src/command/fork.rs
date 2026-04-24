@@ -30,7 +30,7 @@
 //!   (AGS-818 /export, AGS-819 /theme, future /checkpoint migrations)
 //!   may also want to read.
 //!
-//! The sole side effect is `ctx.tui_tx.try_send(TuiEvent::…)` — sync
+//! The sole side effect is `ctx.tui_tx.send(TuiEvent::…)` — sync
 //! and legal inside `CommandHandler::execute`. Matches AGS-810
 //! /resume DIRECT-pattern precedent.
 //!
@@ -160,7 +160,7 @@ mod tests {
     /// Every optional field other than `session_id` stays `None`:
     /// `/fork` is a DIRECT-pattern handler and does not consume any
     /// of the typed snapshots.
-    fn make_ctx(session_id: Option<String>) -> (CommandContext, mpsc::Receiver<TuiEvent>) {
+    fn make_ctx(session_id: Option<String>) -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
         // TASK-AGS-POST-6-SHARED-FIXTURES-V2: migrated to CtxBuilder.
         crate::command::test_support::CtxBuilder::new()
             .with_session_id_opt(session_id)

@@ -187,7 +187,10 @@ mod tests {
         }
     }
 
-    fn ctx_with_session() -> (CommandContext, tokio::sync::mpsc::Receiver<TuiEvent>) {
+    fn ctx_with_session() -> (
+        CommandContext,
+        tokio::sync::mpsc::UnboundedReceiver<TuiEvent>,
+    ) {
         let (mut ctx, rx) = make_bug_ctx();
         ctx.session_id = Some("test-session-abc".to_string());
         (ctx, rx)

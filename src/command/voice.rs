@@ -26,7 +26,7 @@
 //!   subcommands — enable / disable / switch — are SCOPE-HELD with a
 //!   placeholder TextDelta emit, no actual state mutation).
 //!
-//! The sole side effect is `ctx.tui_tx.try_send(TuiEvent::TextDelta(..))`
+//! The sole side effect is `ctx.tui_tx.send(TuiEvent::TextDelta(..))`
 //! — which is sync and legal inside `CommandHandler::execute`. Matches
 //! AGS-812 /hooks DIRECT-pattern precedent verbatim.
 //!
@@ -180,7 +180,7 @@ mod tests {
     /// — so every optional field stays `None`. Mirrors the make_ctx
     /// fixtures in hooks.rs / resume.rs / task.rs / cost.rs / model.rs /
     /// status.rs.
-    fn make_ctx() -> (CommandContext, mpsc::Receiver<TuiEvent>) {
+    fn make_ctx() -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
         // TASK-AGS-POST-6-SHARED-FIXTURES-V2: migrated to CtxBuilder.
         crate::command::test_support::CtxBuilder::new().build()
     }

@@ -304,7 +304,9 @@ mod tests {
     /// supplied `session_id`. Mirrors the `make_rename_ctx(session_id)`
     /// fixture in `src/command/rename.rs` — DIRECT pattern, no
     /// snapshot, no effect slot.
-    fn make_ckpt_ctx(session_id: Option<String>) -> (CommandContext, mpsc::Receiver<TuiEvent>) {
+    fn make_ckpt_ctx(
+        session_id: Option<String>,
+    ) -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
         // TASK-AGS-POST-6-SHARED-FIXTURES-V2: migrated to CtxBuilder.
         crate::command::test_support::CtxBuilder::new()
             .with_session_id_opt(session_id)

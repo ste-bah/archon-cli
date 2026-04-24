@@ -34,7 +34,7 @@
 //!   cross-cutting precedent.
 //!
 //! The sole side effect besides the atomic store is
-//! `ctx.tui_tx.try_send(TuiEvent::TextDelta(..))` — sync and legal
+//! `ctx.tui_tx.send(TuiEvent::TextDelta(..))` — sync and legal
 //! inside `CommandHandler::execute`. Matches AGS-810/815/817
 //! DIRECT-pattern precedent.
 //!

@@ -27,7 +27,7 @@
 //!   every optional field `None` for /resume and /continue /open-session
 //!   and that's correct).
 //!
-//! The sole side effect is `ctx.tui_tx.try_send(TuiEvent::…)` — which is
+//! The sole side effect is `ctx.tui_tx.send(TuiEvent::…)` — which is
 //! sync and legal inside `CommandHandler::execute`.
 //!
 //! # Byte-for-byte output preservation
@@ -122,7 +122,7 @@ impl CommandHandler for ResumeHandler {
                                         last_active: m.last_active.chars().take(10).collect(),
                                     })
                                     .collect();
-                                let _ = ctx.tui_tx.try_send(TuiEvent::ShowSessionPicker(entries));
+                                let _ = ctx.tui_tx.send(TuiEvent::ShowSessionPicker(entries));
                             }
                         }
                         Err(e) => {
@@ -182,7 +182,7 @@ mod tests {
     /// /resume is a DIRECT-pattern handler — no snapshot, no effect
     /// slot — so every optional field stays `None`. Mirrors the
     /// make_ctx fixtures in task.rs / cost.rs / model.rs / status.rs.
-    fn make_ctx() -> (CommandContext, mpsc::Receiver<TuiEvent>) {
+    fn make_ctx() -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
         // TASK-AGS-POST-6-SHARED-FIXTURES-V2: migrated to CtxBuilder.
         crate::command::test_support::CtxBuilder::new().build()
     }

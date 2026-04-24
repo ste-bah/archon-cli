@@ -202,7 +202,7 @@ mod tests {
     /// Build a `CommandContext` with a freshly-created channel and
     /// return both the context and the receiver so tests can drain
     /// emitted events.
-    fn make_ctx() -> (CommandContext, mpsc::Receiver<TuiEvent>) {
+    fn make_ctx() -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
         // TASK-AGS-POST-6-SHARED-FIXTURES-V2: migrated to CtxBuilder.
         crate::command::test_support::CtxBuilder::new().build()
     }

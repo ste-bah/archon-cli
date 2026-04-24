@@ -324,7 +324,9 @@ mod tests {
     /// `effort_snapshot`; the WRITE branch stashes BOTH `pending_effect`
     /// AND `pending_effort_set`. Every other optional field stays
     /// `None`. Mirrors the make_ctx fixtures in color.rs / add_dir.rs.
-    fn make_ctx(snapshot: Option<EffortSnapshot>) -> (CommandContext, mpsc::Receiver<TuiEvent>) {
+    fn make_ctx(
+        snapshot: Option<EffortSnapshot>,
+    ) -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
         // TASK-AGS-POST-6-SHARED-FIXTURES-V2: migrated to CtxBuilder.
         crate::command::test_support::CtxBuilder::new()
             .with_effort_snapshot_opt(snapshot)
@@ -332,7 +334,7 @@ mod tests {
     }
 
     /// Drain every event currently pending in the channel.
-    fn drain(rx: &mut mpsc::Receiver<TuiEvent>) -> Vec<TuiEvent> {
+    fn drain(rx: &mut mpsc::UnboundedReceiver<TuiEvent>) -> Vec<TuiEvent> {
         let mut events = Vec::new();
         while let Ok(ev) = rx.try_recv() {
             events.push(ev);

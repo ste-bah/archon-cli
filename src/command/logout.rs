@@ -244,7 +244,7 @@ mod tests {
     /// adds no new CommandContext field, so every optional field is
     /// `None` — mirroring `make_bug_ctx` (the other new-field-free
     /// handler). No `auth_label` argument needed.
-    fn make_logout_ctx() -> (CommandContext, mpsc::Receiver<TuiEvent>) {
+    fn make_logout_ctx() -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
         // TASK-AGS-POST-6-SHARED-FIXTURES-V2: migrated to CtxBuilder.
         crate::command::test_support::CtxBuilder::new().build()
     }

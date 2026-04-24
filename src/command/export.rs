@@ -196,7 +196,7 @@ mod tests {
     /// `None` — /export does not read any other CommandContext field.
     fn make_ctx() -> (
         CommandContext,
-        mpsc::Receiver<TuiEvent>,
+        mpsc::UnboundedReceiver<TuiEvent>,
         Arc<Mutex<Option<ExportDescriptor>>>,
     ) {
         // TASK-AGS-POST-6-SHARED-FIXTURES-V2: migrated to CtxBuilder.

@@ -113,7 +113,7 @@ mod tests {
 
     /// Build a minimal `CommandContext` with a freshly-created channel.
     /// /cancel is a feedback-only handler — no snapshot field required.
-    fn make_ctx() -> (CommandContext, mpsc::Receiver<TuiEvent>) {
+    fn make_ctx() -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
         crate::command::test_support::CtxBuilder::new().build()
     }
 

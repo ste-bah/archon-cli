@@ -190,7 +190,7 @@ impl CommandHandler for ReloadHandler {
                 // shipped format string at slash.rs:382.
                 let _ = ctx
                     .tui_tx
-                    .try_send(TuiEvent::Error(format!("Config reload failed: {e}")));
+                    .send(TuiEvent::Error(format!("Config reload failed: {e}")));
             }
         }
         Ok(())
@@ -229,7 +229,9 @@ mod tests {
     /// supplied `config_path`. Mirrors the AGS-815 `make_ctx(session_id)`
     /// / B17 `make_rename_ctx(session_id)` / B19 `make_rules_ctx(memory)`
     /// shape — DIRECT pattern, no snapshot, no effect slot.
-    fn make_reload_ctx(config_path: Option<PathBuf>) -> (CommandContext, mpsc::Receiver<TuiEvent>) {
+    fn make_reload_ctx(
+        config_path: Option<PathBuf>,
+    ) -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
         // TASK-AGS-POST-6-SHARED-FIXTURES-V2: migrated to CtxBuilder.
         crate::command::test_support::CtxBuilder::new()
             .with_config_path_opt(config_path)

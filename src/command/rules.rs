@@ -328,7 +328,7 @@ mod tests {
     /// snapshot, no effect slot.
     fn make_rules_ctx(
         memory: Option<Arc<dyn MemoryTrait>>,
-    ) -> (CommandContext, mpsc::Receiver<TuiEvent>) {
+    ) -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
         // TASK-AGS-POST-6-SHARED-FIXTURES-V2: migrated to CtxBuilder.
         crate::command::test_support::CtxBuilder::new()
             .with_memory_opt(memory)

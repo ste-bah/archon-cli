@@ -213,7 +213,7 @@ impl VoicePipeline {
 #[allow(clippy::cognitive_complexity)]
 pub async fn voice_loop(
     mut trigger_rx: mpsc::Receiver<VoiceTrigger>,
-    tui_event_tx: mpsc::Sender<TuiEvent>,
+    tui_event_tx: mpsc::UnboundedSender<TuiEvent>,
     pipeline: VoicePipeline,
 ) {
     tracing::info!("voice: pipeline started");
@@ -224,9 +224,7 @@ pub async fn voice_loop(
             VoiceTrigger::Toggle if !recording => {
                 if let Err(e) = pipeline.audio.start().await {
                     tracing::warn!("voice: start failed: {e}");
-                    let _ = tui_event_tx
-                        .send(TuiEvent::VoiceText(format!("[voice error: {e}]")))
-                        .await;
+                    let _ = tui_event_tx.send(TuiEvent::VoiceText(format!("[voice error: {e}]")));
                     continue;
                 }
                 recording = true;
@@ -253,16 +251,14 @@ pub async fn voice_loop(
                 match pipeline.stt.transcribe(&wav).await {
                     Ok(text) => {
                         tracing::info!("voice: transcribed {} chars", text.len());
-                        if tui_event_tx.send(TuiEvent::VoiceText(text)).await.is_err() {
+                        if tui_event_tx.send(TuiEvent::VoiceText(text)).is_err() {
                             tracing::warn!("voice: tui event channel closed; exiting loop");
                             return;
                         }
                     }
                     Err(e) => {
                         tracing::warn!("voice: transcribe failed: {e}");
-                        let _ = tui_event_tx
-                            .send(TuiEvent::VoiceText(format!("[stt error: {e}]")))
-                            .await;
+                        let _ = tui_event_tx.send(TuiEvent::VoiceText(format!("[stt error: {e}]")));
                     }
                 }
             }

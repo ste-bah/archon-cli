@@ -497,6 +497,36 @@ impl Agent {
         }
     }
 
+    /// Fire a hook without holding `&self` across the returned future.
+    ///
+    /// Clones `hook_registry` (`Arc<HookRegistry>`) and the required
+    /// config fields up-front so the returned future is
+    /// `Send + 'static` and can outlive a `MutexGuard<Agent>`. Call
+    /// sites drop the guard before `.await`ing the future, avoiding
+    /// the non-`Send` compile error when `tokio::spawn`ing a block
+    /// that locks an `Arc<Mutex<Agent>>` and then awaits hook work.
+    ///
+    /// Semantically identical to [`Agent::fire_hook`].
+    pub fn fire_hook_detached(
+        &self,
+        event: crate::hooks::HookEvent,
+        payload: serde_json::Value,
+    ) -> impl std::future::Future<Output = crate::hooks::AggregatedHookResult> + Send + 'static
+    {
+        let registry = self.hook_registry.clone();
+        let working_dir = self.config.working_dir.clone();
+        let session_id = self.config.session_id.clone();
+        async move {
+            if let Some(registry) = registry {
+                registry
+                    .execute_hooks(event, payload, &working_dir, &session_id)
+                    .await
+            } else {
+                crate::hooks::AggregatedHookResult::new()
+            }
+        }
+    }
+
     /// Set the checkpoint store for file snapshots before Write/Edit operations.
     pub fn set_checkpoint_store(&mut self, store: CheckpointStore) {
         self.checkpoint_store = Some(Arc::new(Mutex::new(store)));
@@ -1983,6 +2013,32 @@ impl Agent {
         {
             let mut stats = self.session_stats.lock().await;
             *stats = SessionStats::default();
+        }
+    }
+
+    /// Clear conversation history without holding `&mut self` across the
+    /// returned future. Performs the synchronous `&mut self` work
+    /// up-front and returns an owned `Send + 'static` future that
+    /// completes the async work (resetting shared `session_stats`).
+    ///
+    /// Call sites drop the `MutexGuard<Agent>` before `.await`ing the
+    /// returned future, so the guard is not held across await. Needed
+    /// inside `tokio::spawn` blocks where rustc's HRTB inference
+    /// otherwise rejects the spawn's `Send` bound.
+    ///
+    /// Semantically identical to [`Agent::clear_conversation`].
+    pub fn clear_conversation_detached(
+        &mut self,
+    ) -> impl std::future::Future<Output = ()> + Send + 'static {
+        self.state.messages.clear();
+        self.state.total_input_tokens = 0;
+        self.state.total_output_tokens = 0;
+        self.turn_number = 0;
+        self.memory_injector.invalidate_cache();
+        let stats = self.session_stats.clone();
+        async move {
+            let mut guard = stats.lock().await;
+            *guard = SessionStats::default();
         }
     }
 

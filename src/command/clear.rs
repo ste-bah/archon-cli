@@ -133,7 +133,7 @@ mod tests {
     /// /clear is a THIN-WRAPPER handler — no snapshot, no effect
     /// slot, no extra context field — so every optional field stays
     /// `None`. Mirrors the `make_ctx` fixtures in export.rs / compact.rs.
-    fn make_ctx() -> (CommandContext, mpsc::Receiver<TuiEvent>) {
+    fn make_ctx() -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
         // TASK-AGS-POST-6-SHARED-FIXTURES-V2: migrated to CtxBuilder.
         crate::command::test_support::CtxBuilder::new().build()
     }

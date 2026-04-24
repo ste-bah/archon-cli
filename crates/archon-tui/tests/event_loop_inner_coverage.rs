@@ -51,7 +51,7 @@ fn buffer_nonempty(terminal: &Terminal<TestBackend>) -> bool {
 #[serial_test::serial]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn run_with_backend_walks_wide_event_surface() {
-    let (event_tx, event_rx) = mpsc::channel::<TuiEvent>(128);
+    let (event_tx, event_rx) = mpsc::unbounded_channel::<TuiEvent>();
     let (input_tx, _input_rx) = mpsc::channel::<String>(16);
 
     let config = AppConfig {
@@ -69,135 +69,95 @@ async fn run_with_backend_walks_wide_event_surface() {
     // gets multiple draw cycles between them.
     let scripter = tokio::spawn(async move {
         // Session rename + permission mode change
-        let _ = event_tx
-            .send(TuiEvent::SessionRenamed("my-session".into()))
-            .await;
-        let _ = event_tx
-            .send(TuiEvent::PermissionModeChanged("acceptEdits".into()))
-            .await;
+        let _ = event_tx.send(TuiEvent::SessionRenamed("my-session".into()));
+        let _ = event_tx.send(TuiEvent::PermissionModeChanged("acceptEdits".into()));
         // Model change
-        let _ = event_tx
-            .send(TuiEvent::ModelChanged("claude-sonnet-4-9".into()))
-            .await;
+        let _ = event_tx.send(TuiEvent::ModelChanged("claude-sonnet-4-9".into()));
         // Generation + text + thinking
-        let _ = event_tx.send(TuiEvent::GenerationStarted).await;
-        let _ = event_tx
-            .send(TuiEvent::ThinkingDelta("pondering...".into()))
-            .await;
-        let _ = event_tx.send(TuiEvent::ThinkingToggle(true)).await;
-        let _ = event_tx
-            .send(TuiEvent::TextDelta("hello world".into()))
-            .await;
+        let _ = event_tx.send(TuiEvent::GenerationStarted);
+        let _ = event_tx.send(TuiEvent::ThinkingDelta("pondering...".into()));
+        let _ = event_tx.send(TuiEvent::ThinkingToggle(true));
+        let _ = event_tx.send(TuiEvent::TextDelta("hello world".into()));
         // Tool lifecycle
-        let _ = event_tx
-            .send(TuiEvent::ToolStart {
-                name: "Bash".into(),
-                id: "tool-1".into(),
-            })
-            .await;
-        let _ = event_tx
-            .send(TuiEvent::ToolComplete {
-                name: "Bash".into(),
-                id: "tool-1".into(),
-                success: true,
-                output: "ok".into(),
-            })
-            .await;
-        let _ = event_tx
-            .send(TuiEvent::ToolStart {
-                name: "Edit".into(),
-                id: "tool-2".into(),
-            })
-            .await;
-        let _ = event_tx
-            .send(TuiEvent::ToolComplete {
-                name: "Edit".into(),
-                id: "tool-2".into(),
-                success: false,
-                output: "permission denied".into(),
-            })
-            .await;
+        let _ = event_tx.send(TuiEvent::ToolStart {
+            name: "Bash".into(),
+            id: "tool-1".into(),
+        });
+        let _ = event_tx.send(TuiEvent::ToolComplete {
+            name: "Bash".into(),
+            id: "tool-1".into(),
+            success: true,
+            output: "ok".into(),
+        });
+        let _ = event_tx.send(TuiEvent::ToolStart {
+            name: "Edit".into(),
+            id: "tool-2".into(),
+        });
+        let _ = event_tx.send(TuiEvent::ToolComplete {
+            name: "Edit".into(),
+            id: "tool-2".into(),
+            success: false,
+            output: "permission denied".into(),
+        });
         // Turn complete — triggers pending_input drain path.
-        let _ = event_tx
-            .send(TuiEvent::TurnComplete {
-                input_tokens: 50,
-                output_tokens: 120,
-            })
-            .await;
+        let _ = event_tx.send(TuiEvent::TurnComplete {
+            input_tokens: 50,
+            output_tokens: 120,
+        });
         // Theme + accent color + vim + voice + agent info
-        let _ = event_tx
-            .send(TuiEvent::SetAccentColor(ratatui::style::Color::Cyan))
-            .await;
-        let _ = event_tx.send(TuiEvent::SetTheme("intj".into())).await;
-        let _ = event_tx.send(TuiEvent::SetVimMode(true)).await;
-        let _ = event_tx.send(TuiEvent::VimToggle).await; // turns it off
-        let _ = event_tx.send(TuiEvent::VimToggle).await; // turns it on
-        let _ = event_tx
-            .send(TuiEvent::VoiceText("typed from voice".into()))
-            .await;
-        let _ = event_tx
-            .send(TuiEvent::SetAgentInfo {
-                name: "reviewer".into(),
-                color: Some("#ff00ff".into()),
-            })
-            .await;
+        let _ = event_tx.send(TuiEvent::SetAccentColor(ratatui::style::Color::Cyan));
+        let _ = event_tx.send(TuiEvent::SetTheme("intj".into()));
+        let _ = event_tx.send(TuiEvent::SetVimMode(true));
+        let _ = event_tx.send(TuiEvent::VimToggle); // turns it off
+        let _ = event_tx.send(TuiEvent::VimToggle); // turns it on
+        let _ = event_tx.send(TuiEvent::VoiceText("typed from voice".into()));
+        let _ = event_tx.send(TuiEvent::SetAgentInfo {
+            name: "reviewer".into(),
+            color: Some("#ff00ff".into()),
+        });
         // Permission prompt
-        let _ = event_tx
-            .send(TuiEvent::PermissionPrompt {
-                tool: "Write".into(),
-                description: "writing a file".into(),
-            })
-            .await;
+        let _ = event_tx.send(TuiEvent::PermissionPrompt {
+            tool: "Write".into(),
+            description: "writing a file".into(),
+        });
         // Session picker + MCP manager ShowMcpManager + UpdateMcpManager
-        let _ = event_tx
-            .send(TuiEvent::ShowSessionPicker(vec![SessionPickerEntry {
-                id: "sid-1".into(),
-                name: "first".into(),
-                turns: 3,
-                cost: 0.05,
-                last_active: "2m".into(),
-            }]))
-            .await;
-        let _ = event_tx
-            .send(TuiEvent::ShowMcpManager(vec![McpServerEntry {
-                name: "srv-a".into(),
-                state: "ready".into(),
-                tool_count: 1,
-                disabled: false,
-                tools: vec!["t".into()],
-            }]))
-            .await;
-        let _ = event_tx
-            .send(TuiEvent::UpdateMcpManager(vec![McpServerEntry {
-                name: "srv-a".into(),
-                state: "crashed".into(),
-                tool_count: 0,
-                disabled: false,
-                tools: vec![],
-            }]))
-            .await;
+        let _ = event_tx.send(TuiEvent::ShowSessionPicker(vec![SessionPickerEntry {
+            id: "sid-1".into(),
+            name: "first".into(),
+            turns: 3,
+            cost: 0.05,
+            last_active: "2m".into(),
+        }]));
+        let _ = event_tx.send(TuiEvent::ShowMcpManager(vec![McpServerEntry {
+            name: "srv-a".into(),
+            state: "ready".into(),
+            tool_count: 1,
+            disabled: false,
+            tools: vec!["t".into()],
+        }]));
+        let _ = event_tx.send(TuiEvent::UpdateMcpManager(vec![McpServerEntry {
+            name: "srv-a".into(),
+            state: "crashed".into(),
+            tool_count: 0,
+            disabled: false,
+            tools: vec![],
+        }]));
         // Error + slash-command complete + resize + btw response
-        let _ = event_tx
-            .send(TuiEvent::BtwResponse("side note".into()))
-            .await;
-        let _ = event_tx.send(TuiEvent::Error("boom".into())).await;
-        let _ = event_tx.send(TuiEvent::SlashCommandComplete).await;
-        let _ = event_tx
-            .send(TuiEvent::Resize {
-                cols: 100,
-                rows: 30,
-            })
-            .await;
+        let _ = event_tx.send(TuiEvent::BtwResponse("side note".into()));
+        let _ = event_tx.send(TuiEvent::Error("boom".into()));
+        let _ = event_tx.send(TuiEvent::SlashCommandComplete);
+        let _ = event_tx.send(TuiEvent::Resize {
+            cols: 100,
+            rows: 30,
+        });
         // TUI-106 no-op arms (run_tui path just drops these) — still needs
         // to hit the match arms.
-        let _ = event_tx
-            .send(TuiEvent::UserInput("ignored in this loop".into()))
-            .await;
-        let _ = event_tx.send(TuiEvent::SlashCancel).await;
-        let _ = event_tx.send(TuiEvent::SlashAgent("reviewer".into())).await;
+        let _ = event_tx.send(TuiEvent::UserInput("ignored in this loop".into()));
+        let _ = event_tx.send(TuiEvent::SlashCancel);
+        let _ = event_tx.send(TuiEvent::SlashAgent("reviewer".into()));
         // Let the TUI settle, then terminate.
         tokio::time::sleep(Duration::from_millis(500)).await;
-        let _ = event_tx.send(TuiEvent::Done).await;
+        let _ = event_tx.send(TuiEvent::Done);
     });
 
     let result = tokio::time::timeout(

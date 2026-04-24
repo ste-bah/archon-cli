@@ -130,9 +130,7 @@ impl CommandHandler for ThemeHandler {
             // Valid theme — emit SetTheme first (the actual mutation
             // signal), then the confirmation TextDelta. Order matches
             // shipped slash.rs:765-770.
-            let _ = ctx
-                .tui_tx
-                .try_send(TuiEvent::SetTheme(theme_arg.to_string()));
+            let _ = ctx.tui_tx.send(TuiEvent::SetTheme(theme_arg.to_string()));
             ctx.emit(TuiEvent::TextDelta(format!(
                 "\nTheme set to '{theme_arg}'.\n"
             )));
@@ -174,7 +172,7 @@ mod tests {
     /// /theme is a DIRECT-pattern handler — no snapshot, no effect
     /// slot, no extra context field — so every optional field stays
     /// `None`. Mirrors the make_ctx fixtures in voice.rs / export.rs.
-    fn make_ctx() -> (CommandContext, mpsc::Receiver<TuiEvent>) {
+    fn make_ctx() -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
         // TASK-AGS-POST-6-SHARED-FIXTURES-V2: migrated to CtxBuilder.
         crate::command::test_support::CtxBuilder::new().build()
     }

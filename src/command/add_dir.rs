@@ -177,7 +177,7 @@ impl CommandHandler for AddDirHandler {
             // format string at slash.rs:672-674.
             let _ = ctx
                 .tui_tx
-                .try_send(TuiEvent::Error("Usage: /add-dir <path>".into()));
+                .send(TuiEvent::Error("Usage: /add-dir <path>".into()));
         } else {
             let path = PathBuf::from(path_arg);
             if path.is_dir() {
@@ -241,7 +241,7 @@ mod tests {
     /// field beyond `tui_tx` and `pending_effect`. Every other optional
     /// field stays `None`. Mirrors the make_ctx fixtures in color.rs /
     /// theme.rs / voice.rs / export.rs.
-    fn make_ctx() -> (CommandContext, mpsc::Receiver<TuiEvent>) {
+    fn make_ctx() -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
         // TASK-AGS-POST-6-SHARED-FIXTURES-V2: migrated to CtxBuilder.
         // /add-dir is an EFFECT-SLOT handler — every optional field stays
         // at its test-safe default.
@@ -249,7 +249,7 @@ mod tests {
     }
 
     /// Drain every event currently pending in the channel.
-    fn drain(rx: &mut mpsc::Receiver<TuiEvent>) -> Vec<TuiEvent> {
+    fn drain(rx: &mut mpsc::UnboundedReceiver<TuiEvent>) -> Vec<TuiEvent> {
         let mut events = Vec::new();
         while let Ok(ev) = rx.try_recv() {
             events.push(ev);
