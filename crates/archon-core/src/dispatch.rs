@@ -153,6 +153,14 @@ pub fn create_default_registry(working_dir: PathBuf) -> ToolRegistry {
     // locality — both spawn shell commands; Monitor differs by returning
     // bounded-time stdout events instead of blocking until exit.
     registry.register(Box::new(archon_tools::monitor::MonitorTool));
+    // TASK-P0-B.6b (#185): PushNotification emits a structured
+    // tracing event on the `archon::notification` target. Registered
+    // alongside Monitor because both are "observability" tools —
+    // Monitor observes external commands, PushNotification lets the
+    // LLM surface events of its own.
+    registry.register(Box::new(
+        archon_tools::push_notification::PushNotificationTool,
+    ));
     registry.register(Box::new(archon_tools::powershell::PowerShellTool::default()));
     registry.register(Box::new(archon_tools::sleep::SleepTool));
     registry.register(Box::new(archon_tools::ask_user::AskUserTool));

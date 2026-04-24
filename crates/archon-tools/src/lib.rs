@@ -19,6 +19,7 @@ pub mod grep;
 pub mod monitor;
 pub mod plan_mode;
 pub mod powershell;
+pub mod push_notification;
 pub mod registry;
 pub mod sleep;
 pub mod todo_write;
