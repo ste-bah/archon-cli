@@ -1,9 +1,10 @@
-//! TASK-P0-B.1a (#178) + TASK-P0-B.1b (#179) Multi-modal content helpers.
+//! TASK-P0-B.1a (#178) + TASK-P0-B.1b (#179) + TASK-P0-B.1c (#180)
+//! Multi-modal content helpers.
 //!
-//! Validates image and document bytes against format-specific magic
-//! numbers and produces Anthropic-compatible [`ContentBlock::Image`] /
-//! [`ContentBlock::Document`] blocks. Future tickets (#180 audio) extend
-//! this module further.
+//! Validates image, document, and audio bytes against format-specific
+//! magic numbers and produces Anthropic-compatible
+//! [`ContentBlock::Image`] / [`ContentBlock::Document`] /
+//! [`ContentBlock::Audio`] blocks.
 //!
 //! # Image formats
 //!
@@ -15,6 +16,15 @@
 //!
 //! Supported media types: `application/pdf` (Anthropic currently only
 //! accepts PDF). Validated by the `%PDF` magic bytes.
+//!
+//! # Audio formats (schema-forward)
+//!
+//! The audio block shape mirrors image/document; Anthropic does not
+//! currently accept audio on the Messages API — this lands the
+//! type-level surface so callers can construct audio blocks for
+//! future-compatibility. Supported media types:
+//! `audio/wav` (and aliases `audio/wave`, `audio/x-wav`),
+//! `audio/mp3` (alias `audio/mpeg`), `audio/ogg`, `audio/flac`.
 //!
 //! # Anthropic shape
 //!
@@ -35,6 +45,17 @@
 //!   "source": {
 //!     "type": "base64",
 //!     "media_type": "application/pdf",
+//!     "data": "<base64>"
+//!   }
+//! }
+//! ```
+//!
+//! ```json
+//! {
+//!   "type": "audio",
+//!   "source": {
+//!     "type": "base64",
+//!     "media_type": "audio/wav",
 //!     "data": "<base64>"
 //!   }
 //! }
@@ -72,13 +93,22 @@ pub struct DocumentSource {
     pub data: String,
 }
 
+/// Source of an audio content block (schema-forward — mirrors image/doc shape).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AudioSource {
+    #[serde(rename = "type")]
+    pub source_type: String,
+    pub media_type: String,
+    pub data: String,
+}
+
 /// Errors from multimodal content conversion.
 #[derive(Debug, thiserror::Error)]
 pub enum MultimodalError {
     #[error("empty input bytes")]
     EmptyInput,
     #[error(
-        "unsupported media_type '{0}' (expected image/png, image/jpeg, image/gif, image/webp, or application/pdf)"
+        "unsupported media_type '{0}' (expected image/png, image/jpeg, image/gif, image/webp, application/pdf, audio/wav, audio/mp3, audio/ogg, or audio/flac)"
     )]
     UnsupportedMediaType(String),
     #[error("bytes do not match media_type '{0}' magic signature")]
@@ -99,6 +129,17 @@ pub(crate) const WEBP_RIFF: &[u8] = b"RIFF";
 pub(crate) const WEBP_TAG: &[u8] = b"WEBP";
 /// PDF magic bytes: "%PDF".
 pub(crate) const PDF_MAGIC: &[u8] = &[0x25, 0x50, 0x44, 0x46]; // "%PDF"
+/// WAV (RIFF/WAVE) magic bytes.
+/// Layout: offset 0-3 = "RIFF", offset 4-7 = 4-byte little-endian length,
+/// offset 8-11 = "WAVE". Check magic at both offsets to reject RIFF-but-not-WAVE.
+pub(crate) const WAV_RIFF: &[u8] = b"RIFF";
+pub(crate) const WAV_TAG: &[u8] = b"WAVE";
+/// MP3 magic: first 2 bytes either "ID3" (tag) or 0xFF 0xFB/0xFA/0xF2/0xF3 (frame sync).
+pub(crate) const MP3_ID3: &[u8] = b"ID3";
+/// OGG magic: "OggS" at offset 0.
+pub(crate) const OGG_MAGIC: &[u8] = b"OggS";
+/// FLAC magic: "fLaC" at offset 0.
+pub(crate) const FLAC_MAGIC: &[u8] = b"fLaC";
 
 /// Build a [`ContentBlock::Image`] from raw bytes + a declared
 /// `media_type`.
@@ -187,6 +228,55 @@ pub fn document_block_from_bytes(
     })
 }
 
+/// Build a [`ContentBlock::Audio`] from raw bytes + media_type.
+/// Validates magic signatures. Supported: audio/wav, audio/mp3 (audio/mpeg),
+/// audio/ogg, audio/flac.
+///
+/// Schema-forward: Anthropic's Messages API does not currently document
+/// audio content blocks; the wire shape mirrors image/document so the
+/// type-level surface is ready if/when audio lands.
+///
+/// # Errors
+///
+/// - [`MultimodalError::EmptyInput`] if `bytes` is empty.
+/// - [`MultimodalError::UnsupportedMediaType`] if `media_type` is not one
+///   of the supported audio types.
+/// - [`MultimodalError::MagicMismatch`] if `bytes` does not start with the
+///   expected magic for `media_type`.
+pub fn audio_block_from_bytes(
+    bytes: &[u8],
+    media_type: &str,
+) -> Result<ContentBlock, MultimodalError> {
+    if bytes.is_empty() {
+        return Err(MultimodalError::EmptyInput);
+    }
+    let ok = match media_type {
+        "audio/wav" | "audio/wave" | "audio/x-wav" => {
+            bytes.len() >= 12 && &bytes[0..4] == WAV_RIFF && &bytes[8..12] == WAV_TAG
+        }
+        "audio/mp3" | "audio/mpeg" => {
+            bytes.starts_with(MP3_ID3)
+                || (bytes.len() >= 2
+                    && bytes[0] == 0xFF
+                    && matches!(bytes[1], 0xFB | 0xFA | 0xF2 | 0xF3))
+        }
+        "audio/ogg" => bytes.starts_with(OGG_MAGIC),
+        "audio/flac" => bytes.starts_with(FLAC_MAGIC),
+        other => return Err(MultimodalError::UnsupportedMediaType(other.to_string())),
+    };
+    if !ok {
+        return Err(MultimodalError::MagicMismatch(media_type.to_string()));
+    }
+    let data = base64::engine::general_purpose::STANDARD.encode(bytes);
+    Ok(ContentBlock::Audio {
+        source: AudioSource {
+            source_type: "base64".to_string(),
+            media_type: media_type.to_string(),
+            data,
+        },
+    })
+}
+
 /// Deterministic minimal 1x1 black PNG for tests (67 bytes).
 ///
 /// Used by #178 Gate-5 smoke + by follow-up tickets as a reference
@@ -231,140 +321,28 @@ startxref\n\
 164\n\
 %%EOF\n";
 
+/// Minimal 44-byte silent WAV header (zero samples). Valid per RIFF/WAVE spec:
+///   "RIFF" + 36 (u32 LE) + "WAVE" + "fmt " + 16 (u32 LE) + PCM params + "data" + 0 (u32 LE)
 #[cfg(test)]
-mod tests {
-    use super::*;
+pub(crate) const MINIMAL_WAV_SILENT: &[u8] = &[
+    // RIFF header
+    0x52, 0x49, 0x46, 0x46, // "RIFF"
+    0x24, 0x00, 0x00, 0x00, // file size - 8 = 36 bytes
+    0x57, 0x41, 0x56, 0x45, // "WAVE"
+    // fmt subchunk
+    0x66, 0x6D, 0x74, 0x20, // "fmt "
+    0x10, 0x00, 0x00, 0x00, // subchunk1 size = 16
+    0x01, 0x00, // audio format = PCM
+    0x01, 0x00, // num channels = 1 (mono)
+    0x44, 0xAC, 0x00, 0x00, // sample rate = 44100
+    0x88, 0x58, 0x01, 0x00, // byte rate = 88200
+    0x02, 0x00, // block align = 2
+    0x10, 0x00, // bits per sample = 16
+    // data subchunk (empty)
+    0x64, 0x61, 0x74, 0x61, // "data"
+    0x00, 0x00, 0x00, 0x00, // data size = 0
+];
 
-    #[test]
-    fn image_block_from_minimal_png_ok() {
-        let block = image_block_from_bytes(MINIMAL_PNG_1X1, "image/png")
-            .expect("1x1 PNG must be accepted");
-        match block {
-            ContentBlock::Image { source } => {
-                assert_eq!(source.media_type, "image/png");
-                assert_eq!(source.source_type, "base64");
-                assert!(!source.data.is_empty());
-            }
-            other => panic!("expected Image, got {:?}", other),
-        }
-    }
+#[cfg(test)]
+mod tests;
 
-    #[test]
-    fn image_block_empty_bytes_errors() {
-        let err = image_block_from_bytes(&[], "image/png").unwrap_err();
-        assert!(matches!(err, MultimodalError::EmptyInput));
-    }
-
-    #[test]
-    fn image_block_unsupported_media_type_errors() {
-        let err = image_block_from_bytes(MINIMAL_PNG_1X1, "image/bmp").unwrap_err();
-        assert!(matches!(err, MultimodalError::UnsupportedMediaType(_)));
-    }
-
-    #[test]
-    fn image_block_magic_mismatch_errors() {
-        // PNG bytes but declared as JPEG -> magic signature check fails.
-        let err = image_block_from_bytes(MINIMAL_PNG_1X1, "image/jpeg").unwrap_err();
-        assert!(matches!(err, MultimodalError::MagicMismatch(_)));
-    }
-
-    #[test]
-    fn image_block_roundtrip_serde() {
-        let block = image_block_from_bytes(MINIMAL_PNG_1X1, "image/png").unwrap();
-        let json = serde_json::to_value(&block).unwrap();
-        assert_eq!(json["type"], "image");
-        assert_eq!(json["source"]["type"], "base64");
-        assert_eq!(json["source"]["media_type"], "image/png");
-        let data = json["source"]["data"].as_str().unwrap();
-        // Base64 decode -> must match original bytes exactly.
-        let decoded = base64::engine::general_purpose::STANDARD
-            .decode(data)
-            .unwrap();
-        assert_eq!(decoded.as_slice(), MINIMAL_PNG_1X1);
-    }
-
-    #[test]
-    fn image_block_jpeg_magic_accepted() {
-        // Minimal JPEG APP0 header: FF D8 FF E0 00 10 ...
-        let jpeg_stub = [0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10];
-        let block = image_block_from_bytes(&jpeg_stub, "image/jpeg").unwrap();
-        assert!(matches!(block, ContentBlock::Image { .. }));
-    }
-
-    #[test]
-    fn image_block_gif_both_variants_accepted() {
-        let gif87 = b"GIF87a\x01\x00";
-        let gif89 = b"GIF89a\x01\x00";
-        assert!(image_block_from_bytes(gif87, "image/gif").is_ok());
-        assert!(image_block_from_bytes(gif89, "image/gif").is_ok());
-    }
-
-    #[test]
-    fn image_block_webp_accepted() {
-        // RIFF <4-byte size> WEBP <fourcc> ...
-        let webp = b"RIFF\x00\x00\x00\x08WEBPVP8 ";
-        let block = image_block_from_bytes(webp, "image/webp").unwrap();
-        assert!(matches!(block, ContentBlock::Image { .. }));
-    }
-
-    // -----------------------------------------------------------------
-    // TASK-P0-B.1b (#179) PDF document tests
-    // -----------------------------------------------------------------
-
-    #[test]
-    fn document_block_from_minimal_pdf_ok() {
-        let block = document_block_from_bytes(MINIMAL_PDF_EMPTY_PAGE, "application/pdf")
-            .expect("minimal PDF must be accepted");
-        match block {
-            ContentBlock::Document { source } => {
-                assert_eq!(source.media_type, "application/pdf");
-                assert_eq!(source.source_type, "base64");
-                assert!(!source.data.is_empty());
-            }
-            other => panic!("expected Document, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn document_block_empty_bytes_errors() {
-        let err = document_block_from_bytes(&[], "application/pdf").unwrap_err();
-        assert!(matches!(err, MultimodalError::EmptyInput));
-    }
-
-    #[test]
-    fn document_block_unsupported_media_type_errors() {
-        // Even a well-formed PDF declared as `text/plain` must be rejected.
-        let err = document_block_from_bytes(MINIMAL_PDF_EMPTY_PAGE, "text/plain").unwrap_err();
-        assert!(matches!(err, MultimodalError::UnsupportedMediaType(_)));
-    }
-
-    #[test]
-    fn document_block_magic_mismatch_errors() {
-        // Non-PDF bytes declared as PDF -> magic signature check fails.
-        let not_pdf = b"not a pdf, just ASCII";
-        let err = document_block_from_bytes(not_pdf, "application/pdf").unwrap_err();
-        assert!(matches!(err, MultimodalError::MagicMismatch(_)));
-    }
-
-    #[test]
-    fn document_block_roundtrip_serde() {
-        let block =
-            document_block_from_bytes(MINIMAL_PDF_EMPTY_PAGE, "application/pdf").unwrap();
-        let json = serde_json::to_value(&block).unwrap();
-        assert_eq!(json["type"], "document");
-        assert_eq!(json["source"]["type"], "base64");
-        assert_eq!(json["source"]["media_type"], "application/pdf");
-        let data = json["source"]["data"].as_str().unwrap();
-        // Base64 decode -> must match original bytes exactly.
-        let decoded = base64::engine::general_purpose::STANDARD
-            .decode(data)
-            .unwrap();
-        assert_eq!(decoded.as_slice(), MINIMAL_PDF_EMPTY_PAGE);
-    }
-
-    #[test]
-    fn document_block_pdf_magic_constant_matches_header() {
-        // Sanity: the PDF_MAGIC constant must agree with the fixture header.
-        assert!(MINIMAL_PDF_EMPTY_PAGE.starts_with(PDF_MAGIC));
-    }
-}

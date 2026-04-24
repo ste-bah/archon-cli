@@ -73,14 +73,16 @@ pub enum ContentBlockType {
     Image,
     // TASK-P0-B.1b (#179): multi-modal PDF document input.
     Document,
+    // TASK-P0-B.1c (#180): multi-modal audio input (schema-forward).
+    Audio,
 }
 
-// TASK-P0-B.1a (#178) + TASK-P0-B.1b (#179): ImageSource and
-// DocumentSource live in the `multimodal` module (Gate-1 requires their
-// definitions there) and are re-exported here so the
-// ContentBlock::{Image,Document} variants can reference them without a
-// cross-module visibility rename.
-pub use crate::multimodal::{DocumentSource, ImageSource};
+// TASK-P0-B.1a (#178) + TASK-P0-B.1b (#179) + TASK-P0-B.1c (#180):
+// ImageSource, DocumentSource, AudioSource live in the `multimodal`
+// module (Gate-1 requires their definitions there) and are re-exported
+// here so the ContentBlock::{Image,Document,Audio} variants can
+// reference them without a cross-module visibility rename.
+pub use crate::multimodal::{AudioSource, DocumentSource, ImageSource};
 
 /// A message in the conversation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -116,4 +118,8 @@ pub enum ContentBlock {
     // TASK-P0-B.1b (#179): document content block (Anthropic schema).
     #[serde(rename = "document")]
     Document { source: DocumentSource },
+    // TASK-P0-B.1c (#180): audio content block (schema-forward; mirrors
+    // image/document shape — Anthropic does not currently accept audio).
+    #[serde(rename = "audio")]
+    Audio { source: AudioSource },
 }
