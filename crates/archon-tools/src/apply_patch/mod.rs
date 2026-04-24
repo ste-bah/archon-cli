@@ -38,9 +38,9 @@ use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
 // working byte-for-byte without per-test path edits. These are
 // `use`-imports (not `pub use`); the items remain module-private.
 use applier::apply_hunks;
-use parser::parse_hunks;
 #[cfg(test)]
 use parser::HunkLine;
+use parser::parse_hunks;
 
 // ---------------------------------------------------------------------------
 // Tool impl
@@ -160,10 +160,7 @@ mod tests {
         // Has hunk but no `---`/`+++` file headers.
         let patch = "@@ -1,1 +1,1 @@\n-foo\n+bar\n";
         let err = parse_hunks(patch).unwrap_err();
-        assert!(
-            err.contains("file headers"),
-            "unexpected error: {err}"
-        );
+        assert!(err.contains("file headers"), "unexpected error: {err}");
     }
 
     #[test]
@@ -371,9 +368,6 @@ mod tests {
     #[test]
     fn permission_level_is_risky() {
         let tool = ApplyPatchTool;
-        assert_eq!(
-            tool.permission_level(&json!({})),
-            PermissionLevel::Risky
-        );
+        assert_eq!(tool.permission_level(&json!({})), PermissionLevel::Risky);
     }
 }

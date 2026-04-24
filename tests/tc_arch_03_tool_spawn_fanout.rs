@@ -37,12 +37,7 @@ impl SubagentExecutor for InstantExecutor {
         Ok("instant".to_string())
     }
 
-    async fn on_inner_complete(
-        &self,
-        _subagent_id: String,
-        _result: Result<String, String>,
-    ) {
-    }
+    async fn on_inner_complete(&self, _subagent_id: String, _result: Result<String, String>) {}
 
     async fn on_visible_complete(
         &self,

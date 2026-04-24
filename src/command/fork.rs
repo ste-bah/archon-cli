@@ -79,11 +79,7 @@ use crate::command::registry::{CommandContext, CommandHandler};
 pub(crate) struct ForkHandler;
 
 impl CommandHandler for ForkHandler {
-    fn execute(
-        &self,
-        ctx: &mut CommandContext,
-        args: &[String],
-    ) -> anyhow::Result<()> {
+    fn execute(&self, ctx: &mut CommandContext, args: &[String]) -> anyhow::Result<()> {
         // 1. Require session_id. `build_command_context` populates this
         //    unconditionally from `SlashCommandContext::session_id` so
         //    at the real dispatch site this branch never fires. Test
@@ -118,31 +114,21 @@ impl CommandHandler for ForkHandler {
         //    arm at slash.rs:638-641.
         let db_path = archon_session::storage::default_db_path();
         match archon_session::storage::SessionStore::open(&db_path) {
-            Ok(store) => {
-                match archon_session::fork::fork_session(
-                    &store,
-                    session_id,
-                    fork_name,
-                ) {
-                    Ok(new_id) => {
-                        let msg = format!(
-                            "\nConversation forked as: {new_id}\n\
+            Ok(store) => match archon_session::fork::fork_session(&store, session_id, fork_name) {
+                Ok(new_id) => {
+                    let msg = format!(
+                        "\nConversation forked as: {new_id}\n\
                              Resume with: archon --resume {new_id}\n\
                              Original session: {session_id}\n"
-                        );
-                        ctx.emit(TuiEvent::TextDelta(msg));
-                    }
-                    Err(e) => {
-                        ctx.emit(TuiEvent::Error(
-                            format!("Fork failed: {e}"),
-                        ));
-                    }
+                    );
+                    ctx.emit(TuiEvent::TextDelta(msg));
                 }
-            }
+                Err(e) => {
+                    ctx.emit(TuiEvent::Error(format!("Fork failed: {e}")));
+                }
+            },
             Err(e) => {
-                ctx.emit(TuiEvent::Error(format!(
-                    "Session store error: {e}"
-                )));
+                ctx.emit(TuiEvent::Error(format!("Session store error: {e}")));
             }
         }
         Ok(())
@@ -174,9 +160,7 @@ mod tests {
     /// Every optional field other than `session_id` stays `None`:
     /// `/fork` is a DIRECT-pattern handler and does not consume any
     /// of the typed snapshots.
-    fn make_ctx(
-        session_id: Option<String>,
-    ) -> (CommandContext, mpsc::Receiver<TuiEvent>) {
+    fn make_ctx(session_id: Option<String>) -> (CommandContext, mpsc::Receiver<TuiEvent>) {
         // TASK-AGS-POST-6-SHARED-FIXTURES-V2: migrated to CtxBuilder.
         crate::command::test_support::CtxBuilder::new()
             .with_session_id_opt(session_id)
@@ -243,8 +227,7 @@ mod tests {
     /// operator's `~/.archon/sessions.db`.
     #[test]
     fn fork_handler_execute_with_session_id_returns_ok_regardless_of_db_state() {
-        let (mut ctx, _rx) =
-            make_ctx(Some("fake-session-id-for-ags-815-test".to_string()));
+        let (mut ctx, _rx) = make_ctx(Some("fake-session-id-for-ags-815-test".to_string()));
         let h = ForkHandler;
         let res = h.execute(&mut ctx, &[]);
         assert!(
@@ -263,8 +246,7 @@ mod tests {
     /// TextDelta. All three variants are valid.
     #[test]
     fn fork_handler_execute_with_session_id_emits_text_delta_or_error() {
-        let (mut ctx, mut rx) =
-            make_ctx(Some("fake-session-id-for-ags-815-test".to_string()));
+        let (mut ctx, mut rx) = make_ctx(Some("fake-session-id-for-ags-815-test".to_string()));
         let h = ForkHandler;
         let res = h.execute(&mut ctx, &[]);
         assert!(

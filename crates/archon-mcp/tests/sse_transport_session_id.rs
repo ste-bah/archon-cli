@@ -89,7 +89,11 @@ async fn session_message(
         .get("mcp-session-id")
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string());
-    state.observed_session_headers.lock().await.push(observed.clone());
+    state
+        .observed_session_headers
+        .lock()
+        .await
+        .push(observed.clone());
 
     if state.always_404 {
         return (StatusCode::NOT_FOUND, HeaderMap::new());
@@ -99,9 +103,7 @@ async fn session_message(
 
     // First POST is initialize. Respond with Mcp-Session-Id header in the
     // 202 response. Later POSTs must carry that header or 404.
-    if post_n > 0
-        && observed.as_deref() != Some(state.issued_session.as_str())
-    {
+    if post_n > 0 && observed.as_deref() != Some(state.issued_session.as_str()) {
         return (StatusCode::NOT_FOUND, HeaderMap::new());
     }
 
@@ -162,11 +164,7 @@ async fn session_message(
 async fn spawn_session_mock(
     issued: &str,
     always_404: bool,
-) -> (
-    SocketAddr,
-    tokio::task::JoinHandle<()>,
-    SessionMockState,
-) {
+) -> (SocketAddr, tokio::task::JoinHandle<()>, SessionMockState) {
     let (tx, rx) = mpsc::unbounded_channel::<String>();
     let state = SessionMockState {
         tx,
@@ -211,13 +209,10 @@ async fn session_id_parsed_from_initialize_and_injected_on_next_post() {
     let (addr, server, state) = spawn_session_mock("sess-abc-123", false).await;
 
     let config = sse_config("session-mock", addr);
-    let client = tokio::time::timeout(
-        Duration::from_secs(10),
-        connect_server_for_test(&config),
-    )
-    .await
-    .expect("connect within 10s")
-    .expect("initialize succeeded");
+    let client = tokio::time::timeout(Duration::from_secs(10), connect_server_for_test(&config))
+        .await
+        .expect("connect within 10s")
+        .expect("initialize succeeded");
 
     // tools/list — second POST. Must carry Mcp-Session-Id: sess-abc-123.
     let tools = tokio::time::timeout(Duration::from_secs(5), client.list_tools())
@@ -231,7 +226,11 @@ async fn session_id_parsed_from_initialize_and_injected_on_next_post() {
     //   POST #2 (notifications/initialized): header present.
     //   POST #3 (tools/list): header present.
     let observed = state.observed_session_headers.lock().await.clone();
-    assert!(observed.len() >= 2, "expected ≥2 POSTs, saw {}", observed.len());
+    assert!(
+        observed.len() >= 2,
+        "expected ≥2 POSTs, saw {}",
+        observed.len()
+    );
     assert_eq!(
         observed[0], None,
         "initialize POST should not carry a session header yet"
@@ -262,15 +261,14 @@ async fn persistent_404_surfaces_bounded_error() {
     // Bound the whole call at 40s — slightly above rmcp's INIT_TIMEOUT (30s)
     // so the transport's own bounded error surfaces first. If the transport
     // were to infinite-loop on 404s, this outer timeout catches it.
-    let result = tokio::time::timeout(
-        Duration::from_secs(40),
-        connect_server_for_test(&config),
-    )
-    .await;
+    let result =
+        tokio::time::timeout(Duration::from_secs(40), connect_server_for_test(&config)).await;
 
     match result {
         Err(_) => panic!("connect should have bounded-errored, not timed out the test harness"),
-        Ok(Ok(_client)) => panic!("connect should have errored — server returns 404 for everything"),
+        Ok(Ok(_client)) => {
+            panic!("connect should have errored — server returns 404 for everything")
+        }
         Ok(Err(e)) => {
             // Any McpError is acceptable; the point is bounded time.
             let _e: McpError = e;

@@ -153,11 +153,7 @@ pub trait SubagentExecutor: Send + Sync {
     /// Called from the TAIL of `run_to_completion` UNCONDITIONALLY.
     /// Collapse map: M1 (explicit-bg) + M2 (auto-bg spawn) + M3
     /// (foreground) → this single call.
-    async fn on_inner_complete(
-        &self,
-        subagent_id: String,
-        result: Result<String, String>,
-    );
+    async fn on_inner_complete(&self, subagent_id: String, result: Result<String, String>);
 
     /// Visible terminal side effects: hooks (TeammateIdle,
     /// SubagentStop, TaskCompleted) + worktree cleanup.

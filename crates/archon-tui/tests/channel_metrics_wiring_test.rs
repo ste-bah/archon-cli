@@ -46,7 +46,10 @@ fn record_drained_cumulative_across_calls() {
     metrics.record_drained(3);
 
     let snapshot1 = metrics.snapshot();
-    assert_eq!(snapshot1.total_drained, 3, "first call: total_drained should be 3");
+    assert_eq!(
+        snapshot1.total_drained, 3,
+        "first call: total_drained should be 3"
+    );
 
     // Record second drain event: 5 messages
     for _ in 0..5 {
@@ -55,5 +58,8 @@ fn record_drained_cumulative_across_calls() {
     metrics.record_drained(5);
 
     let snapshot2 = metrics.snapshot();
-    assert_eq!(snapshot2.total_drained, 8, "second call: total_drained should be cumulative 8");
+    assert_eq!(
+        snapshot2.total_drained, 8,
+        "second call: total_drained should be cumulative 8"
+    );
 }

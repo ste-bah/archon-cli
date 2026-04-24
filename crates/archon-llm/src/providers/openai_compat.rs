@@ -14,19 +14,17 @@
 
 use std::sync::Arc;
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tokio::sync::mpsc::Receiver;
 
-use crate::provider::{
-    LlmError, LlmProvider, LlmRequest, LlmResponse, ModelInfo, ProviderFeature,
-};
+use crate::provider::{LlmError, LlmProvider, LlmRequest, LlmResponse, ModelInfo, ProviderFeature};
 use crate::secrets::ApiKey;
 use crate::streaming::StreamEvent;
 use crate::types::Usage;
 
 use super::descriptor::{AuthFlavor, ProviderDescriptor};
 use super::quirks::{ProviderQuirks, StreamDelimiter, ToolCallFormat};
-use super::stream_decode::{decode_ndjson_line, decode_sse_line, FrameOutcome};
+use super::stream_decode::{FrameOutcome, decode_ndjson_line, decode_sse_line};
 
 /// OpenAI-compatible provider driven by a static `ProviderDescriptor`.
 ///
@@ -267,9 +265,7 @@ impl OpenAiCompatProvider {
     /// Retry-after parsing for 429 is deferred to TASK-AGS-708.
     fn map_http_error(status: reqwest::StatusCode, body: String, provider: &str) -> LlmError {
         let code = status.as_u16();
-        if status == reqwest::StatusCode::UNAUTHORIZED
-            || status == reqwest::StatusCode::FORBIDDEN
-        {
+        if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
             return LlmError::Auth(format!("{provider}: {body}"));
         }
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
@@ -298,11 +294,7 @@ impl OpenAiCompatProvider {
     /// need it. TASK-AGS-711 acceptance tests may exercise this via a
     /// downcast helper. Minimal implementation using the same auth / URL
     /// / error patterns as `complete()`.
-    pub async fn embed(
-        &self,
-        model: &str,
-        input: Vec<String>,
-    ) -> Result<Vec<Vec<f32>>, LlmError> {
+    pub async fn embed(&self, model: &str, input: Vec<String>) -> Result<Vec<Vec<f32>>, LlmError> {
         let url = self.build_embeddings_url();
         let body = json!({
             "model": if model.is_empty() { self.descriptor.default_model.as_str() } else { model },
@@ -310,10 +302,7 @@ impl OpenAiCompatProvider {
         });
         let rb = self.http.post(&url).json(&body);
         let rb = self.apply_auth(rb);
-        let resp = rb
-            .send()
-            .await
-            .map_err(|e| LlmError::Http(e.to_string()))?;
+        let resp = rb.send().await.map_err(|e| LlmError::Http(e.to_string()))?;
         let status = resp.status();
         if !status.is_success() {
             let text = resp.text().await.unwrap_or_default();
@@ -324,24 +313,22 @@ impl OpenAiCompatProvider {
             .await
             .map_err(|e| LlmError::Serialize(format!("invalid JSON body: {e}")))?;
 
-        let data = json
-            .get("data")
-            .and_then(|d| d.as_array())
-            .ok_or_else(|| LlmError::Serialize("missing `data` array in embeddings response".into()))?;
+        let data = json.get("data").and_then(|d| d.as_array()).ok_or_else(|| {
+            LlmError::Serialize("missing `data` array in embeddings response".into())
+        })?;
 
         let mut out: Vec<Vec<f32>> = Vec::with_capacity(data.len());
         for entry in data {
             let emb = entry
                 .get("embedding")
                 .and_then(|e| e.as_array())
-                .ok_or_else(|| {
-                    LlmError::Serialize("missing `data[].embedding` array".into())
-                })?;
+                .ok_or_else(|| LlmError::Serialize("missing `data[].embedding` array".into()))?;
             let mut vec: Vec<f32> = Vec::with_capacity(emb.len());
             for v in emb {
-                let f = v.as_f64().ok_or_else(|| {
-                    LlmError::Serialize("embedding entry was not a number".into())
-                })? as f32;
+                let f = v
+                    .as_f64()
+                    .ok_or_else(|| LlmError::Serialize("embedding entry was not a number".into()))?
+                    as f32;
                 vec.push(f);
             }
             out.push(vec);
@@ -369,10 +356,7 @@ impl LlmProvider for OpenAiCompatProvider {
         let body = self.to_openai_wire(&request);
         let rb = self.http.post(&url).json(&body);
         let rb = self.apply_auth(rb);
-        let resp = rb
-            .send()
-            .await
-            .map_err(|e| LlmError::Http(e.to_string()))?;
+        let resp = rb.send().await.map_err(|e| LlmError::Http(e.to_string()))?;
         let status = resp.status();
         if !status.is_success() {
             let text = resp.text().await.unwrap_or_default();
@@ -401,10 +385,7 @@ impl LlmProvider for OpenAiCompatProvider {
     /// rather than as an `Err` on the channel. This matches the existing
     /// `OpenAiProvider::do_stream` pattern and the Anthropic-style
     /// `StreamEvent` enum the rest of the codebase consumes.
-    async fn stream(
-        &self,
-        request: LlmRequest,
-    ) -> Result<Receiver<StreamEvent>, LlmError> {
+    async fn stream(&self, request: LlmRequest) -> Result<Receiver<StreamEvent>, LlmError> {
         // Feature gate FIRST — never touch the network if streaming is off.
         // Validation Criterion 6.
         if !self.descriptor.supports.streaming {
@@ -425,10 +406,7 @@ impl LlmProvider for OpenAiCompatProvider {
 
         let rb = self.http.post(&url).json(&body);
         let rb = self.apply_auth(rb);
-        let resp = rb
-            .send()
-            .await
-            .map_err(|e| LlmError::Http(e.to_string()))?;
+        let resp = rb.send().await.map_err(|e| LlmError::Http(e.to_string()))?;
 
         let status = resp.status();
         if !status.is_success() {

@@ -5,15 +5,25 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::widgets::{Block, Borders, List, ListItem};
 
-use crate::virtual_list::VirtualList;
 use crate::theme::Theme;
+use crate::virtual_list::VirtualList;
 
 /// A setting field with type tag.
 #[derive(Debug, Clone)]
 pub enum SettingField {
-    Toggle { key: String, value: bool },
-    Text { key: String, value: String },
-    Enum { key: String, value: String, options: Vec<String> },
+    Toggle {
+        key: String,
+        value: bool,
+    },
+    Text {
+        key: String,
+        value: String,
+    },
+    Enum {
+        key: String,
+        value: String,
+        options: Vec<String>,
+    },
 }
 
 /// Trait for settings persistence.
@@ -89,24 +99,27 @@ impl SettingsScreen {
 
     /// Render settings screen into area.
     pub fn render(&self, f: &mut Frame, area: Rect, _theme: &Theme) {
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title("Settings");
+        let block = Block::default().borders(Borders::ALL).title("Settings");
 
-        let items: Vec<ListItem> = self.list.visible_items().iter().map(|field| {
-            let label = match field {
-                SettingField::Toggle { key, value } => {
-                    format!("{} [{}]", key, if *value { "on" } else { "off" })
-                }
-                SettingField::Text { key, value } => {
-                    format!("{}: {}", key, value)
-                }
-                SettingField::Enum { key, value, .. } => {
-                    format!("{}: {}", key, value)
-                }
-            };
-            ListItem::new(label)
-        }).collect();
+        let items: Vec<ListItem> = self
+            .list
+            .visible_items()
+            .iter()
+            .map(|field| {
+                let label = match field {
+                    SettingField::Toggle { key, value } => {
+                        format!("{} [{}]", key, if *value { "on" } else { "off" })
+                    }
+                    SettingField::Text { key, value } => {
+                        format!("{}: {}", key, value)
+                    }
+                    SettingField::Enum { key, value, .. } => {
+                        format!("{}: {}", key, value)
+                    }
+                };
+                ListItem::new(label)
+            })
+            .collect();
 
         let list = List::new(items).block(block);
         f.render_widget(list, area);
@@ -133,8 +146,14 @@ mod tests {
     fn set_fields_updates_list() {
         let mut screen = SettingsScreen::new();
         screen.set_fields(vec![
-            SettingField::Toggle { key: "dark".into(), value: true },
-            SettingField::Text { key: "name".into(), value: "test".into() },
+            SettingField::Toggle {
+                key: "dark".into(),
+                value: true,
+            },
+            SettingField::Text {
+                key: "name".into(),
+                value: "test".into(),
+            },
         ]);
         assert_eq!(screen.len(), 2);
     }
@@ -142,20 +161,33 @@ mod tests {
     #[test]
     fn toggle_selected_changes_toggle() {
         let mut screen = SettingsScreen::new();
-        screen.set_fields(vec![
-            SettingField::Toggle { key: "debug".into(), value: false },
-        ]);
-        assert!(!matches!(screen.selected(), Some(SettingField::Toggle { value: true, .. })));
+        screen.set_fields(vec![SettingField::Toggle {
+            key: "debug".into(),
+            value: false,
+        }]);
+        assert!(!matches!(
+            screen.selected(),
+            Some(SettingField::Toggle { value: true, .. })
+        ));
         screen.toggle_selected();
-        assert!(matches!(screen.selected(), Some(SettingField::Toggle { value: true, .. })));
+        assert!(matches!(
+            screen.selected(),
+            Some(SettingField::Toggle { value: true, .. })
+        ));
     }
 
     #[test]
     fn cursor_wraps() {
         let mut screen = SettingsScreen::new();
         screen.set_fields(vec![
-            SettingField::Text { key: "a".into(), value: "1".into() },
-            SettingField::Text { key: "b".into(), value: "2".into() },
+            SettingField::Text {
+                key: "a".into(),
+                value: "1".into(),
+            },
+            SettingField::Text {
+                key: "b".into(),
+                value: "2".into(),
+            },
         ]);
         screen.move_down();
         assert_eq!(screen.selected_index(), 1);

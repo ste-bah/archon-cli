@@ -81,10 +81,10 @@ pub mod metrics;
 pub mod redaction;
 pub mod tracing;
 
-pub use file_init::{init_tracing_file, LogGuard, LoggingError};
+pub use file_init::{LogGuard, LoggingError, init_tracing_file};
 pub use metrics::{
-    format_prometheus, serve_metrics, serve_metrics_on, ChannelMetricSink, ChannelMetrics,
-    ChannelMetricsSnapshot,
+    ChannelMetricSink, ChannelMetrics, ChannelMetricsSnapshot, format_prometheus, serve_metrics,
+    serve_metrics_on,
 };
 pub use redaction::RedactionLayer;
 pub use tracing::{init_tracing, span_agent_turn, span_channel_send, span_slash_dispatch};

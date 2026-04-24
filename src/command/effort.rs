@@ -190,9 +190,7 @@ pub(crate) struct EffortSnapshot {
 /// Called from `build_command_context` ONLY when the primary command
 /// resolves to `/effort`. All other commands leave
 /// `effort_snapshot = None` to avoid unnecessary lock traffic.
-pub(crate) async fn build_effort_snapshot(
-    slash_ctx: &SlashCommandContext,
-) -> EffortSnapshot {
+pub(crate) async fn build_effort_snapshot(slash_ctx: &SlashCommandContext) -> EffortSnapshot {
     let guard = slash_ctx.effort_level_shared.lock().await;
     let current_level = *guard;
     EffortSnapshot { current_level }
@@ -219,11 +217,7 @@ pub(crate) async fn build_effort_snapshot(
 pub(crate) struct EffortHandler;
 
 impl CommandHandler for EffortHandler {
-    fn execute(
-        &self,
-        ctx: &mut CommandContext,
-        args: &[String],
-    ) -> anyhow::Result<()> {
+    fn execute(&self, ctx: &mut CommandContext, args: &[String]) -> anyhow::Result<()> {
         // R4: join multi-token args with " " and trim. Byte-equivalent
         // to the shipped `s.strip_prefix("/effort").unwrap_or("").trim()`
         // for all inputs — single-token levels collapse to the same
@@ -278,8 +272,7 @@ impl CommandHandler for EffortHandler {
 
                 // Stash the shared-mutex write (drained by apply_effect
                 // at the dispatch site).
-                ctx.pending_effect =
-                    Some(CommandEffect::SetEffortLevelShared(level));
+                ctx.pending_effect = Some(CommandEffect::SetEffortLevelShared(level));
                 // Stash the local EffortState write (drained at the
                 // dispatch site AFTER apply_effect, where
                 // `&mut effort_state` is in scope).
@@ -331,9 +324,7 @@ mod tests {
     /// `effort_snapshot`; the WRITE branch stashes BOTH `pending_effect`
     /// AND `pending_effort_set`. Every other optional field stays
     /// `None`. Mirrors the make_ctx fixtures in color.rs / add_dir.rs.
-    fn make_ctx(
-        snapshot: Option<EffortSnapshot>,
-    ) -> (CommandContext, mpsc::Receiver<TuiEvent>) {
+    fn make_ctx(snapshot: Option<EffortSnapshot>) -> (CommandContext, mpsc::Receiver<TuiEvent>) {
         // TASK-AGS-POST-6-SHARED-FIXTURES-V2: migrated to CtxBuilder.
         crate::command::test_support::CtxBuilder::new()
             .with_effort_snapshot_opt(snapshot)
@@ -425,9 +416,7 @@ mod tests {
                      byte-for-byte"
                 );
             }
-            other => panic!(
-                "empty-arg branch must emit TuiEvent::TextDelta, got: {other:?}"
-            ),
+            other => panic!("empty-arg branch must emit TuiEvent::TextDelta, got: {other:?}"),
         }
     }
 
@@ -488,15 +477,11 @@ mod tests {
                      format! byte-for-byte"
                 );
             }
-            other => panic!(
-                "valid-arg branch must emit TuiEvent::TextDelta, got: {other:?}"
-            ),
+            other => panic!("valid-arg branch must emit TuiEvent::TextDelta, got: {other:?}"),
         }
 
         // 4. NO Error event.
-        let has_error = events
-            .iter()
-            .any(|e| matches!(e, TuiEvent::Error(_)));
+        let has_error = events.iter().any(|e| matches!(e, TuiEvent::Error(_)));
         assert!(
             !has_error,
             "valid-arg branch must emit NO TuiEvent::Error; got: {events:?}"
@@ -556,14 +541,10 @@ mod tests {
                      output byte-for-byte (pass-through)"
                 );
             }
-            other => panic!(
-                "invalid-arg branch must emit TuiEvent::Error, got: {other:?}"
-            ),
+            other => panic!("invalid-arg branch must emit TuiEvent::Error, got: {other:?}"),
         }
         // 4. NO TextDelta.
-        let has_delta = events
-            .iter()
-            .any(|e| matches!(e, TuiEvent::TextDelta(_)));
+        let has_delta = events.iter().any(|e| matches!(e, TuiEvent::TextDelta(_)));
         assert!(
             !has_delta,
             "invalid-arg branch must emit NO TuiEvent::TextDelta; got: {events:?}"
@@ -696,8 +677,8 @@ mod tests {
     #[test]
     fn dispatcher_routes_slash_effort_with_high_arg_end_to_end() {
         use crate::command::dispatcher::Dispatcher;
-        use crate::command::registry::default_registry;
         use crate::command::registry::CommandEffect;
+        use crate::command::registry::default_registry;
         use std::sync::Arc;
 
         let registry = Arc::new(default_registry());

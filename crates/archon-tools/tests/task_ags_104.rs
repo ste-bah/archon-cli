@@ -13,13 +13,13 @@ use std::sync::Arc;
 use std::sync::Once;
 use std::time::Instant;
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use archon_tools::agent_tool::{AgentTool, SubagentRequest};
 use archon_tools::background_agents::{AgentStatus, BACKGROUND_AGENTS};
 use archon_tools::subagent_executor::{
-    install_subagent_executor, ExecutorError, OutcomeSideEffects, SubagentClassification,
-    SubagentExecutor,
+    ExecutorError, OutcomeSideEffects, SubagentClassification, SubagentExecutor,
+    install_subagent_executor,
 };
 use archon_tools::tool::{AgentMode, Tool, ToolContext};
 use async_trait::async_trait;
@@ -47,12 +47,7 @@ impl SubagentExecutor for StubExecutor {
         Ok(String::new())
     }
 
-    async fn on_inner_complete(
-        &self,
-        _subagent_id: String,
-        _result: Result<String, String>,
-    ) {
-    }
+    async fn on_inner_complete(&self, _subagent_id: String, _result: Result<String, String>) {}
 
     async fn on_visible_complete(
         &self,
@@ -161,9 +156,7 @@ async fn execute_registers_running_handle() {
     assert!(
         matches!(
             status,
-            Some(AgentStatus::Running)
-                | Some(AgentStatus::Finished)
-                | Some(AgentStatus::Failed)
+            Some(AgentStatus::Running) | Some(AgentStatus::Finished) | Some(AgentStatus::Failed)
         ),
         "registered handle must exist post-execute; got {status:?}"
     );

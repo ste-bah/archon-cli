@@ -272,6 +272,9 @@ mod helpers {
             &PathBuf::from("crates/foo/src/x.rs"),
             "#!/usr/bin/env rustc\n// @generated\nmod y;\n"
         ));
-        assert!(!is_excluded(&PathBuf::from("crates/foo/src/x.rs"), "mod y;\n"));
+        assert!(!is_excluded(
+            &PathBuf::from("crates/foo/src/x.rs"),
+            "mod y;\n"
+        ));
     }
 }

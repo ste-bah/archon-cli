@@ -62,13 +62,13 @@ use std::sync::Arc;
 use std::sync::Once;
 use std::time::{Duration, Instant};
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use archon_tools::agent_tool::{AgentTool, SubagentRequest};
 use archon_tools::background_agents::{AgentStatus, BACKGROUND_AGENTS};
 use archon_tools::subagent_executor::{
-    install_subagent_executor, ExecutorError, OutcomeSideEffects, SubagentClassification,
-    SubagentExecutor,
+    ExecutorError, OutcomeSideEffects, SubagentClassification, SubagentExecutor,
+    install_subagent_executor,
 };
 use archon_tools::tool::{AgentMode, Tool, ToolContext};
 use async_trait::async_trait;
@@ -95,12 +95,7 @@ impl SubagentExecutor for StubExecutor {
         Ok(String::new())
     }
 
-    async fn on_inner_complete(
-        &self,
-        _subagent_id: String,
-        _result: Result<String, String>,
-    ) {
-    }
+    async fn on_inner_complete(&self, _subagent_id: String, _result: Result<String, String>) {}
 
     async fn on_visible_complete(
         &self,
@@ -231,8 +226,7 @@ async fn tc_tui_subagent_02_execute_sync_under_10ms() {
         !id_str.is_empty(),
         "agent_id string must be non-empty; got payload: {v:?}"
     );
-    let agent_id = uuid::Uuid::parse_str(id_str)
-        .expect("agent_id must be a valid uuid-v4 string");
+    let agent_id = uuid::Uuid::parse_str(id_str).expect("agent_id must be a valid uuid-v4 string");
 
     // Assertion 5 — synchronous registration: the registry must already
     // contain the agent_id by the time `execute` has returned (R4: registry
@@ -244,9 +238,7 @@ async fn tc_tui_subagent_02_execute_sync_under_10ms() {
     assert!(
         matches!(
             status,
-            Some(AgentStatus::Running)
-                | Some(AgentStatus::Finished)
-                | Some(AgentStatus::Failed)
+            Some(AgentStatus::Running) | Some(AgentStatus::Finished) | Some(AgentStatus::Failed)
         ),
         "BACKGROUND_AGENTS must contain {agent_id} synchronously after execute; \
          got {status:?}"

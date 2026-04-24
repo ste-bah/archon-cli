@@ -19,13 +19,13 @@ impl PipelineParser {
                     msg: e.to_string(),
                 })?
             }
-            PipelineFormat::Json => {
-                serde_json::from_str::<PipelineSpec>(src).map_err(|e| PipelineError::ParseError {
+            PipelineFormat::Json => serde_json::from_str::<PipelineSpec>(src).map_err(|e| {
+                PipelineError::ParseError {
                     path: "<string>".to_string(),
                     line: Some(e.line()),
                     msg: e.to_string(),
-                })?
-            }
+                }
+            })?,
         };
         Self::validate_structure(&spec)?;
         Ok(spec)
@@ -36,20 +36,20 @@ impl PipelineParser {
         let src = std::fs::read_to_string(path).map_err(PipelineError::Io)?;
         let fmt = Self::detect_format(path, &src);
         let spec = match fmt {
-            PipelineFormat::Yaml => {
-                serde_yml::from_str::<PipelineSpec>(&src).map_err(|e| PipelineError::ParseError {
+            PipelineFormat::Yaml => serde_yml::from_str::<PipelineSpec>(&src).map_err(|e| {
+                PipelineError::ParseError {
                     path: path.display().to_string(),
                     line: e.location().map(|l| l.line()),
                     msg: e.to_string(),
-                })?
-            }
-            PipelineFormat::Json => {
-                serde_json::from_str::<PipelineSpec>(&src).map_err(|e| PipelineError::ParseError {
+                }
+            })?,
+            PipelineFormat::Json => serde_json::from_str::<PipelineSpec>(&src).map_err(|e| {
+                PipelineError::ParseError {
                     path: path.display().to_string(),
                     line: Some(e.line()),
                     msg: e.to_string(),
-                })?
-            }
+                }
+            })?,
         };
         Self::validate_structure(&spec)?;
         Ok(spec)
@@ -111,15 +111,11 @@ mod tests {
 
     #[test]
     fn yaml_and_json_parse_to_equivalent_spec() {
-        let yaml_path =
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/example.yaml");
-        let json_path =
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/example.json");
+        let yaml_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/example.yaml");
+        let json_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/example.json");
 
-        let yaml_spec = PipelineParser::parse_file(&yaml_path)
-            .expect("YAML fixture should parse");
-        let json_spec = PipelineParser::parse_file(&json_path)
-            .expect("JSON fixture should parse");
+        let yaml_spec = PipelineParser::parse_file(&yaml_path).expect("YAML fixture should parse");
+        let json_spec = PipelineParser::parse_file(&json_path).expect("JSON fixture should parse");
 
         assert_eq!(yaml_spec, json_spec);
     }
@@ -162,7 +158,10 @@ mod tests {
             .expect_err("malformed YAML should fail");
         match err {
             PipelineError::ParseError { line, .. } => {
-                assert!(line.is_some(), "YAML parse error should include a line number");
+                assert!(
+                    line.is_some(),
+                    "YAML parse error should include a line number"
+                );
             }
             other => panic!("expected ParseError, got: {other:?}"),
         }
@@ -175,7 +174,10 @@ mod tests {
             .expect_err("malformed JSON should fail");
         match err {
             PipelineError::ParseError { line, .. } => {
-                assert!(line.is_some(), "JSON parse error should include a line number");
+                assert!(
+                    line.is_some(),
+                    "JSON parse error should include a line number"
+                );
             }
             other => panic!("expected ParseError, got: {other:?}"),
         }
@@ -188,8 +190,7 @@ mod tests {
         let tmp = tempfile::NamedTempFile::new().expect("create temp file");
         std::fs::write(tmp.path(), json_content).expect("write temp");
 
-        let spec = PipelineParser::parse_file(tmp.path())
-            .expect("auto-detected JSON should parse");
+        let spec = PipelineParser::parse_file(tmp.path()).expect("auto-detected JSON should parse");
         assert_eq!(spec.name, "sniff-test");
     }
 

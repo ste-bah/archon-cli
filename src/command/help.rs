@@ -95,11 +95,7 @@ use crate::command::registry::{CommandContext, CommandHandler};
 pub(crate) struct HelpHandler;
 
 impl CommandHandler for HelpHandler {
-    fn execute(
-        &self,
-        ctx: &mut CommandContext,
-        args: &[String],
-    ) -> anyhow::Result<()> {
+    fn execute(&self, ctx: &mut CommandContext, args: &[String]) -> anyhow::Result<()> {
         match args.first() {
             None => {
                 // Empty-args path — byte-identical reproduction of the
@@ -150,16 +146,12 @@ impl CommandHandler for HelpHandler {
                     Some(body) => {
                         // Byte-identical to shipped slash.rs:559:
                         // `format!("\n{detail}\n")`.
-                        ctx.emit(TuiEvent::TextDelta(
-                            format!("\n{body}\n"),
-                        ));
+                        ctx.emit(TuiEvent::TextDelta(format!("\n{body}\n")));
                     }
                     None => {
                         // Byte-identical to shipped slash.rs:563:
                         // `format!("Unknown command: /{name}")`.
-                        ctx.emit(TuiEvent::Error(
-                            format!("Unknown command: /{name}"),
-                        ));
+                        ctx.emit(TuiEvent::Error(format!("Unknown command: /{name}")));
                     }
                 }
             }
@@ -463,7 +455,10 @@ mod tests {
         let (mut ctx, mut rx) = make_help_ctx();
 
         let result = dispatcher.dispatch(&mut ctx, "/help");
-        assert!(result.is_ok(), "dispatcher.dispatch(\"/help\") must return Ok");
+        assert!(
+            result.is_ok(),
+            "dispatcher.dispatch(\"/help\") must return Ok"
+        );
 
         let events = drain_tui_events(&mut rx);
         let has_text_delta = events
@@ -525,9 +520,9 @@ mod tests {
         );
 
         let events = drain_tui_events(&mut rx);
-        let has_error = events.iter().any(|e| {
-            matches!(e, TuiEvent::Error(msg) if msg == "Unknown command: /bogusname")
-        });
+        let has_error = events
+            .iter()
+            .any(|e| matches!(e, TuiEvent::Error(msg) if msg == "Unknown command: /bogusname"));
         assert!(
             has_error,
             "end-to-end `/help bogusname` must emit TuiEvent::Error with \

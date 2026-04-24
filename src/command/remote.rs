@@ -15,7 +15,12 @@ pub async fn handle_remote_command(
     // Remote
     if let Some(Commands::Remote { action }) = &cli.command {
         match action {
-            RemoteAction::Ssh { target, command, port, key } => {
+            RemoteAction::Ssh {
+                target,
+                command,
+                port,
+                key,
+            } => {
                 use archon_core::remote::{
                     RemoteTransport, SshConnectionConfig, SyncMode, protocol::AgentMessage,
                     ssh::SshTransport,
@@ -59,7 +64,9 @@ pub async fn handle_remote_command(
                 };
                 println!("Connected. Session: {}", session.session_id);
                 if let Some(cmd) = command {
-                    let msg = AgentMessage::UserMessage { content: cmd.clone() };
+                    let msg = AgentMessage::UserMessage {
+                        content: cmd.clone(),
+                    };
                     if let Err(e) = session.send(&msg).await {
                         eprintln!("SSH send failed: {e}");
                         let _ = session.disconnect().await;
@@ -69,11 +76,11 @@ pub async fn handle_remote_command(
                         Ok(AgentMessage::AssistantMessage { content }) => println!("{content}"),
                         Ok(AgentMessage::Error { message }) => {
                             eprintln!("remote error: {message}");
-                            let _ = tokio::time::timeout(
-                                std::time::Duration::from_secs(2),
-                                async { session.disconnect().await },
-                            )
-                            .await;
+                            let _ =
+                                tokio::time::timeout(std::time::Duration::from_secs(2), async {
+                                    session.disconnect().await
+                                })
+                                .await;
                             std::process::exit(1);
                         }
                         Ok(other) => println!("{other:?}"),

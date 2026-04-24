@@ -5,8 +5,8 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::widgets::{Block, Borders, List, ListItem};
 
-use crate::virtual_list::VirtualList;
 use crate::theme::Theme;
+use crate::virtual_list::VirtualList;
 
 /// Provider identifier (placeholder).
 pub type ProviderId = String;
@@ -77,7 +77,8 @@ impl ModelPicker {
             self.providers.clone()
         } else {
             let q = self.query.to_lowercase();
-            self.providers.iter()
+            self.providers
+                .iter()
                 .filter(|p| p.label.to_lowercase().contains(&q))
                 .cloned()
                 .collect()
@@ -103,16 +104,22 @@ impl ModelPicker {
 
     /// Render model picker into area.
     pub fn render(&self, f: &mut Frame, area: Rect, _theme: &Theme) {
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title(format!("Model Picker{}{}",
-                if self.query.is_empty() { "" } else { " — " },
-                if self.query.is_empty() { "" } else { &self.query }
-            ));
+        let block = Block::default().borders(Borders::ALL).title(format!(
+            "Model Picker{}{}",
+            if self.query.is_empty() { "" } else { " — " },
+            if self.query.is_empty() {
+                ""
+            } else {
+                &self.query
+            }
+        ));
 
-        let items: Vec<ListItem> = self.list.visible_items().iter().map(|p| {
-            ListItem::new(format!("{} / {}", p.provider_id, p.model_id))
-        }).collect();
+        let items: Vec<ListItem> = self
+            .list
+            .visible_items()
+            .iter()
+            .map(|p| ListItem::new(format!("{} / {}", p.provider_id, p.model_id)))
+            .collect();
 
         let list = List::new(items).block(block);
         f.render_widget(list, area);
@@ -171,10 +178,7 @@ mod tests {
     #[test]
     fn cursor_wraps() {
         let mut picker = ModelPicker::new();
-        picker.set_providers(vec![
-            entry("a", "b"),
-            entry("c", "d"),
-        ]);
+        picker.set_providers(vec![entry("a", "b"), entry("c", "d")]);
         picker.move_down();
         assert_eq!(picker.selected_index(), 1);
         picker.move_down();

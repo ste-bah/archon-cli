@@ -88,7 +88,11 @@ async fn apply_patch_forward_then_reverse_byte_identical() {
             &ctx,
         )
         .await;
-    assert!(!fwd_result.is_error, "forward apply failed: {}", fwd_result.content);
+    assert!(
+        !fwd_result.is_error,
+        "forward apply failed: {}",
+        fwd_result.content
+    );
 
     // Post-forward hash — MUST differ from original.
     let after_fwd = std::fs::read(&path).unwrap();
@@ -108,7 +112,11 @@ async fn apply_patch_forward_then_reverse_byte_identical() {
             &ctx,
         )
         .await;
-    assert!(!rev_result.is_error, "reverse apply failed: {}", rev_result.content);
+    assert!(
+        !rev_result.is_error,
+        "reverse apply failed: {}",
+        rev_result.content
+    );
 
     // Post-reverse hash — MUST equal original.
     let after_rev = std::fs::read(&path).unwrap();

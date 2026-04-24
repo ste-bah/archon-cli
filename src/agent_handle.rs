@@ -86,9 +86,7 @@ impl AgentHandle {
         if let Ok(guard) = self.cancel_slot.try_lock() {
             if let Some(ref token) = *guard {
                 token.cancel();
-                tracing::info!(
-                    "AgentHandle: fired CancellationToken on current turn"
-                );
+                tracing::info!("AgentHandle: fired CancellationToken on current turn");
             }
         }
     }
@@ -98,8 +96,7 @@ impl TurnRunner for AgentHandle {
     fn run_turn<'a>(
         &'a self,
         prompt: String,
-    ) -> Pin<Box<dyn std::future::Future<Output = anyhow::Result<()>> + Send + 'a>>
-    {
+    ) -> Pin<Box<dyn std::future::Future<Output = anyhow::Result<()>> + Send + 'a>> {
         let agent = self.agent.clone();
         let cancel_slot = self.cancel_slot.clone();
         Box::pin(async move {

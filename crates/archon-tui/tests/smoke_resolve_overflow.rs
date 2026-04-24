@@ -25,7 +25,10 @@ fn smoke_resolve_overflow_truncate_oldest_100_of_5() {
     let result = SessionBrowser::resolve_overflow(messages, &action);
     assert!(result.is_some(), "TruncateOldest should return Some");
     let remaining = result.unwrap();
-    assert!(remaining.is_empty(), "should return empty vec when n >= messages.len()");
+    assert!(
+        remaining.is_empty(),
+        "should return empty vec when n >= messages.len()"
+    );
 }
 
 /// Test: resolve_overflow SwitchModel -> None
@@ -66,7 +69,11 @@ fn smoke_default_overflow_action_over_limit() {
     let action = SessionBrowser::default_overflow_action(1100, 1000);
     match action {
         OverflowAction::TruncateOldest(n) => {
-            assert!(n > 0, "over limit should return TruncateOldest(n>0), got {}", n);
+            assert!(
+                n > 0,
+                "over limit should return TruncateOldest(n>0), got {}",
+                n
+            );
         }
         other => panic!("expected TruncateOldest(n>0), got {:?}", other),
     }

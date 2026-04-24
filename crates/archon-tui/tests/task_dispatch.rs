@@ -5,11 +5,11 @@
 //! compiled only for integration builds. All symbols referenced here are
 //! public re-exports of `task_dispatch`.
 
+use archon_core::agent::{AgentEvent, TimestampedEvent};
 use archon_tui::task_dispatch::{
     AgentDispatcher, AgentRouter, CancelOutcome, DispatchResult, QueuedPrompt, TurnOutcome,
     TurnRunner,
 };
-use archon_core::agent::{AgentEvent, TimestampedEvent};
 use std::sync::Arc;
 
 #[test]
@@ -42,7 +42,9 @@ fn cancel_outcome_variants_are_exhaustive() {
 #[test]
 fn dispatch_result_variants_are_exhaustive() {
     let r1 = DispatchResult::Queued;
-    let r2 = DispatchResult::Running { spawned_at: std::time::Instant::now() };
+    let r2 = DispatchResult::Running {
+        spawned_at: std::time::Instant::now(),
+    };
     let r3 = DispatchResult::Rejected("nope".into());
     for v in [r1, r2, r3] {
         match v {
@@ -397,8 +399,7 @@ async fn test_poll_completion_cancelled_branch() {
     // Give tokio a tick to mark the handle finished.
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
     while std::time::Instant::now() < deadline {
-        if d
-            .current_query
+        if d.current_query
             .as_ref()
             .map(|h| h.is_finished())
             .unwrap_or(false)
@@ -575,10 +576,7 @@ struct MarkingRunner {
 }
 
 impl MarkingRunner {
-    fn new(
-        marker: &'static str,
-        log: Arc<std::sync::Mutex<Vec<(String, &'static str)>>>,
-    ) -> Self {
+    fn new(marker: &'static str, log: Arc<std::sync::Mutex<Vec<(String, &'static str)>>>) -> Self {
         Self { marker, log }
     }
 }
@@ -808,10 +806,7 @@ async fn test_capture_at_enqueue_holds_across_switch() {
     let log_snapshot = log.lock().unwrap().clone();
     assert_eq!(
         log_snapshot,
-        vec![
-            ("prompt-1".to_string(), "A"),
-            ("prompt-2".to_string(), "B"),
-        ],
+        vec![("prompt-1".to_string(), "A"), ("prompt-2".to_string(), "B"),],
         "capture-at-enqueue broken: queued prompts must run on their originally-captured runners across a switch boundary"
     );
 }

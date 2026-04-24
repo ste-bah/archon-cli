@@ -147,11 +147,7 @@ impl RewindHandler {
 }
 
 impl CommandHandler for RewindHandler {
-    fn execute(
-        &self,
-        ctx: &mut CommandContext,
-        _args: &[String],
-    ) -> anyhow::Result<()> {
+    fn execute(&self, ctx: &mut CommandContext, _args: &[String]) -> anyhow::Result<()> {
         let session_id = ctx.session_id.clone().ok_or_else(|| {
             anyhow::anyhow!("no active session — start a session before using /rewind")
         })?;

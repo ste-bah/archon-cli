@@ -38,21 +38,59 @@ pub fn handle_key(app: &mut App, key: KeyEvent, keymap: &KeyMap) -> KeyResult {
             }
         }
         // Grouped single-mutation actions — each calls a no-arg method and returns Nothing
-        Action::ToggleThinking => { app.thinking.toggle_expand(); KeyResult::Nothing }
-        Action::VoiceHotkey => { crate::voice::pipeline::fire_trigger_for_hotkey(); KeyResult::Nothing }
-        Action::ToggleSplit => { app.panes.toggle_split(); KeyResult::Nothing }
-        Action::SwitchPane => { app.panes.switch_focus(); KeyResult::Nothing }
-        Action::TabComplete => { app.input.accept_suggestion(); KeyResult::Nothing }
-        Action::Backspace => { app.input.backspace(); KeyResult::Nothing }
-        Action::MoveLeft => { app.input.move_left(); KeyResult::Nothing }
-        Action::MoveRight => { app.input.move_right(); KeyResult::Nothing }
-        Action::ScrollUp => { app.output.scroll_up(10); KeyResult::Nothing }
-        Action::ScrollDown => { app.output.scroll_down(10); KeyResult::Nothing }
-        Action::ScrollTop => { app.output.scroll_offset = u16::MAX; app.output.scroll_locked = true; KeyResult::Nothing }
-        Action::ScrollBottom => { app.output.scroll_to_bottom(); KeyResult::Nothing }
+        Action::ToggleThinking => {
+            app.thinking.toggle_expand();
+            KeyResult::Nothing
+        }
+        Action::VoiceHotkey => {
+            crate::voice::pipeline::fire_trigger_for_hotkey();
+            KeyResult::Nothing
+        }
+        Action::ToggleSplit => {
+            app.panes.toggle_split();
+            KeyResult::Nothing
+        }
+        Action::SwitchPane => {
+            app.panes.switch_focus();
+            KeyResult::Nothing
+        }
+        Action::TabComplete => {
+            app.input.accept_suggestion();
+            KeyResult::Nothing
+        }
+        Action::Backspace => {
+            app.input.backspace();
+            KeyResult::Nothing
+        }
+        Action::MoveLeft => {
+            app.input.move_left();
+            KeyResult::Nothing
+        }
+        Action::MoveRight => {
+            app.input.move_right();
+            KeyResult::Nothing
+        }
+        Action::ScrollUp => {
+            app.output.scroll_up(10);
+            KeyResult::Nothing
+        }
+        Action::ScrollDown => {
+            app.output.scroll_down(10);
+            KeyResult::Nothing
+        }
+        Action::ScrollTop => {
+            app.output.scroll_offset = u16::MAX;
+            app.output.scroll_locked = true;
+            KeyResult::Nothing
+        }
+        Action::ScrollBottom => {
+            app.output.scroll_to_bottom();
+            KeyResult::Nothing
+        }
         Action::Escape => {
             let now = std::time::Instant::now();
-            let double_esc = app.last_esc()
+            let double_esc = app
+                .last_esc()
                 .map(|last| now.duration_since(last).as_millis() < 500)
                 .unwrap_or(false);
             if double_esc {
@@ -67,7 +105,14 @@ pub fn handle_key(app: &mut App, key: KeyEvent, keymap: &KeyMap) -> KeyResult {
         }
         Action::CyclePermissionMode => {
             let current = &app.status.permission_mode;
-            let modes = ["default", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions"];
+            let modes = [
+                "default",
+                "acceptEdits",
+                "plan",
+                "auto",
+                "dontAsk",
+                "bypassPermissions",
+            ];
             let idx = modes.iter().position(|m| m == current).unwrap_or(0);
             let next = modes[(idx + 1) % modes.len()];
             app.status.permission_mode = next.to_string();
@@ -94,7 +139,13 @@ pub fn handle_key(app: &mut App, key: KeyEvent, keymap: &KeyMap) -> KeyResult {
         Action::Submit => {
             // Suggestion popup: exact match → dismiss, else → accept+return
             if app.input.suggestions.active {
-                if app.input.suggestions.suggestions.iter().any(|cmd| cmd.name == app.input.text()) {
+                if app
+                    .input
+                    .suggestions
+                    .suggestions
+                    .iter()
+                    .any(|cmd| cmd.name == app.input.text())
+                {
                     app.input.dismiss_suggestions();
                 } else {
                     app.input.accept_suggestion();
@@ -102,14 +153,17 @@ pub fn handle_key(app: &mut App, key: KeyEvent, keymap: &KeyMap) -> KeyResult {
                 }
             }
             let text = app.submit_input();
-            if text.is_empty() { return KeyResult::Nothing; }
+            if text.is_empty() {
+                return KeyResult::Nothing;
+            }
             // /btw is always immediate
             if let Some(q) = text.strip_prefix("/btw ").filter(|q| !q.trim().is_empty()) {
                 return KeyResult::SendBtw(q.trim().to_string());
             }
             if app.is_generating {
                 app.pending_input.push(text);
-                app.output.append_line("[queued — will send after current turn]");
+                app.output
+                    .append_line("[queued — will send after current turn]");
                 return KeyResult::Nothing;
             }
             KeyResult::SendInput(text)

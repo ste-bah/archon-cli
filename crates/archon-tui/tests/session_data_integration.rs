@@ -11,15 +11,16 @@
 use archon_session::storage::SessionStore;
 use archon_tui::screens::session_branching::SessionBranching;
 use archon_tui::screens::session_browser::{OverflowAction, ResumeOutcome, SessionBrowser};
-use archon_tui::screens::session_stats::{compute_stats, NullStats};
+use archon_tui::screens::session_stats::{NullStats, compute_stats};
 use std::sync::Arc;
 
 /// Seed an in-memory store with sessions and messages.
-fn seed_store(sessions: usize, messages_per_session: usize) -> (tempfile::TempDir, Arc<SessionStore>) {
+fn seed_store(
+    sessions: usize,
+    messages_per_session: usize,
+) -> (tempfile::TempDir, Arc<SessionStore>) {
     let temp_dir = tempfile::tempdir().expect("temp dir");
-    let store = Arc::new(
-        SessionStore::open(&temp_dir.path().join("test.db")).expect("test store"),
-    );
+    let store = Arc::new(SessionStore::open(&temp_dir.path().join("test.db")).expect("test store"));
     for s in 0..sessions {
         let session_id = format!("session-{s}");
         store
@@ -29,7 +30,11 @@ fn seed_store(sessions: usize, messages_per_session: usize) -> (tempfile::TempDi
             .set_name(&session_id, &format!("Session {s}"))
             .expect("set name");
         for m in 0..messages_per_session {
-            let content = format!(r#"{{"role":"assistant","agent":"agent{}","message":"msg{}"}}"#, m % 2, m);
+            let content = format!(
+                r#"{{"role":"assistant","agent":"agent{}","message":"msg{}"}}"#,
+                m % 2,
+                m
+            );
             store
                 .save_message(&session_id, m as u64, &content)
                 .expect("save message");
@@ -58,7 +63,11 @@ async fn tc_session_01_browser_lists_and_selects() {
 
     // Bounded at end
     browser.move_down();
-    assert_eq!(browser.selected_index(), 2, "cursor should stay at last index");
+    assert_eq!(
+        browser.selected_index(),
+        2,
+        "cursor should stay at last index"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -123,7 +132,10 @@ async fn tc_session_03_overflow_triggers_context_overflow() {
             assert!(n > 0, "truncation count should be > 0");
             n
         }
-        other => panic!("Expected ContextOverflow with TruncateOldest, got {:?}", other),
+        other => panic!(
+            "Expected ContextOverflow with TruncateOldest, got {:?}",
+            other
+        ),
     };
 
     // Resolve the overflow and assert message count is reduced
@@ -145,22 +157,21 @@ async fn tc_session_03_overflow_triggers_context_overflow() {
 #[test]
 fn tc_session_04_branch_creation_yields_switchable_list() {
     let temp_dir = tempfile::tempdir().expect("temp dir");
-    let store = Arc::new(
-        SessionStore::open(&temp_dir.path().join("test.db")).expect("test store"),
-    );
+    let store = Arc::new(SessionStore::open(&temp_dir.path().join("test.db")).expect("test store"));
 
     let parent_id = "parent-session";
     store
         .register_session(parent_id, "/tmp", None, "claude-3-5-sonnet")
         .expect("register");
-    store
-        .set_name(parent_id, "Parent")
-        .expect("set name");
+    store.set_name(parent_id, "Parent").expect("set name");
 
-    let state = archon_tui::screens::session_browser::SessionState::with_session(parent_id.to_string());
+    let state =
+        archon_tui::screens::session_browser::SessionState::with_session(parent_id.to_string());
     let mut branching = SessionBranching::new(store, state);
 
-    let bp = branching.fork(5, "experiment-a").expect("fork should succeed");
+    let bp = branching
+        .fork(5, "experiment-a")
+        .expect("fork should succeed");
     assert_eq!(branching.branches().len(), 1, "should have 1 branch");
 
     branching.switch(&bp.id).expect("switch should succeed");
@@ -178,19 +189,16 @@ fn tc_session_04_branch_creation_yields_switchable_list() {
 #[test]
 fn tc_session_05_fork_creates_and_switches_between_branches() {
     let temp_dir = tempfile::tempdir().expect("temp dir");
-    let store = Arc::new(
-        SessionStore::open(&temp_dir.path().join("test.db")).expect("test store"),
-    );
+    let store = Arc::new(SessionStore::open(&temp_dir.path().join("test.db")).expect("test store"));
 
     let parent_id = "parent-session";
     store
         .register_session(parent_id, "/tmp", None, "claude-3-5-sonnet")
         .expect("register");
-    store
-        .set_name(parent_id, "Parent")
-        .expect("set name");
+    store.set_name(parent_id, "Parent").expect("set name");
 
-    let state = archon_tui::screens::session_browser::SessionState::with_session(parent_id.to_string());
+    let state =
+        archon_tui::screens::session_browser::SessionState::with_session(parent_id.to_string());
     let mut branching = SessionBranching::new(store, state);
 
     let bp1 = branching.fork(3, "branch-alpha").expect("fork1");
@@ -229,20 +237,40 @@ fn tc_session_06_compute_stats_populated_session() {
         .expect("create session");
 
     // 7 messages across 2 agents and 3 tool invocations
-    store.save_message(&session.id, 0, r#"{"role":"user","agent":"user"}"#).unwrap();
+    store
+        .save_message(&session.id, 0, r#"{"role":"user","agent":"user"}"#)
+        .unwrap();
     store.save_message(&session.id, 1, r#"{"role":"assistant","agent":"coder","tool":"grep","token_usage":{"input_tokens":10,"output_tokens":5}}"#).unwrap();
-    store.save_message(&session.id, 2, r#"{"role":"user","agent":"user"}"#).unwrap();
+    store
+        .save_message(&session.id, 2, r#"{"role":"user","agent":"user"}"#)
+        .unwrap();
     store.save_message(&session.id, 3, r#"{"role":"assistant","agent":"reviewer","tool":"sed","token_usage":{"input_tokens":15,"output_tokens":8}}"#).unwrap();
-    store.save_message(&session.id, 4, r#"{"role":"user","agent":"user"}"#).unwrap();
+    store
+        .save_message(&session.id, 4, r#"{"role":"user","agent":"user"}"#)
+        .unwrap();
     store.save_message(&session.id, 5, r#"{"role":"assistant","agent":"coder","tool":"awk","token_usage":{"input_tokens":20,"output_tokens":10}}"#).unwrap();
-    store.save_message(&session.id, 6, r#"{"role":"user","agent":"user"}"#).unwrap();
+    store
+        .save_message(&session.id, 6, r#"{"role":"user","agent":"user"}"#)
+        .unwrap();
 
     let metrics = NullStats;
     let stats = compute_stats(&store, &session.id, &metrics);
 
     assert_eq!(stats.message_count, 7, "message_count should be 7");
-    assert_eq!(stats.agent_count, 3, "agent_count: user + coder + reviewer = 3");
-    assert!(stats.recent_tools.len() <= 10, "recent_tools should be capped at 10");
-    assert!(stats.estimated_cost_usd.is_none(), "estimated_cost_usd is None (pricing table follow-up)");
-    assert!(stats.elapsed >= std::time::Duration::ZERO, "elapsed should be >= 0");
+    assert_eq!(
+        stats.agent_count, 3,
+        "agent_count: user + coder + reviewer = 3"
+    );
+    assert!(
+        stats.recent_tools.len() <= 10,
+        "recent_tools should be capped at 10"
+    );
+    assert!(
+        stats.estimated_cost_usd.is_none(),
+        "estimated_cost_usd is None (pricing table follow-up)"
+    );
+    assert!(
+        stats.elapsed >= std::time::Duration::ZERO,
+        "elapsed should be >= 0"
+    );
 }

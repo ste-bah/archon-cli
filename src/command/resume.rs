@@ -83,22 +83,14 @@ use crate::command::registry::{CommandContext, CommandHandler};
 pub(crate) struct ResumeHandler;
 
 impl CommandHandler for ResumeHandler {
-    fn execute(
-        &self,
-        ctx: &mut CommandContext,
-        args: &[String],
-    ) -> anyhow::Result<()> {
+    fn execute(&self, ctx: &mut CommandContext, args: &[String]) -> anyhow::Result<()> {
         // Shipped body used `s.strip_prefix("/resume").trim()` which
         // consumed the entire remainder as a single string. Since
         // `resolve_by_name` expects a session name or ID prefix (no
         // embedded whitespace by contract), `args.first()` is a
         // semantically equivalent, parser-friendly input. Preserves
         // behaviour for every shipped call site (single-token arg).
-        let arg = args
-            .first()
-            .map(|s| s.as_str())
-            .unwrap_or("")
-            .trim();
+        let arg = args.first().map(|s| s.as_str()).unwrap_or("").trim();
 
         // 1. Open the session store. Every downstream branch depends on
         //    a valid `SessionStore`; a failure here surfaces as a user-
@@ -110,10 +102,8 @@ impl CommandHandler for ResumeHandler {
                 if arg.is_empty() {
                     // 2a. No-arg path: show interactive session picker.
                     //     Shipped behaviour at slash.rs:662-692.
-                    let query =
-                        archon_session::search::SessionSearchQuery::default();
-                    match archon_session::search::search_sessions(&store, &query)
-                    {
+                    let query = archon_session::search::SessionSearchQuery::default();
+                    match archon_session::search::search_sessions(&store, &query) {
                         Ok(results) => {
                             if results.is_empty() {
                                 ctx.emit(TuiEvent::TextDelta(
@@ -126,28 +116,17 @@ impl CommandHandler for ResumeHandler {
                                     .iter()
                                     .map(|m| SessionPickerEntry {
                                         id: m.id.clone(),
-                                        name: m
-                                            .name
-                                            .clone()
-                                            .unwrap_or_default(),
+                                        name: m.name.clone().unwrap_or_default(),
                                         turns: m.message_count / 2,
                                         cost: m.total_cost,
-                                        last_active: m
-                                            .last_active
-                                            .chars()
-                                            .take(10)
-                                            .collect(),
+                                        last_active: m.last_active.chars().take(10).collect(),
                                     })
                                     .collect();
-                                let _ = ctx
-                                    .tui_tx
-                                    .try_send(TuiEvent::ShowSessionPicker(entries));
+                                let _ = ctx.tui_tx.try_send(TuiEvent::ShowSessionPicker(entries));
                             }
                         }
                         Err(e) => {
-                            ctx.emit(TuiEvent::Error(
-                                format!("Search failed: {e}"),
-                            ));
+                            ctx.emit(TuiEvent::Error(format!("Search failed: {e}")));
                         }
                     }
                 } else {
@@ -155,34 +134,26 @@ impl CommandHandler for ResumeHandler {
                     //     Shipped behaviour at slash.rs:694-716.
                     match archon_session::naming::resolve_by_name(&store, arg) {
                         Ok(Some(meta)) => {
-                            ctx.emit(TuiEvent::TextDelta(
-                                format!(
-                                    "\nSession found: {}\nRestart with: \
+                            ctx.emit(TuiEvent::TextDelta(format!(
+                                "\nSession found: {}\nRestart with: \
                                      archon --resume {}\n",
-                                    meta.id, meta.id
-                                ),
-                            ));
+                                meta.id, meta.id
+                            )));
                         }
                         Ok(None) => {
-                            ctx.emit(TuiEvent::TextDelta(
-                                format!(
-                                    "\nNo session matching '{arg}'. Use \
+                            ctx.emit(TuiEvent::TextDelta(format!(
+                                "\nNo session matching '{arg}'. Use \
                                      /sessions to list.\n"
-                                ),
-                            ));
+                            )));
                         }
                         Err(e) => {
-                            ctx.emit(TuiEvent::Error(
-                                format!("Lookup failed: {e}"),
-                            ));
+                            ctx.emit(TuiEvent::Error(format!("Lookup failed: {e}")));
                         }
                     }
                 }
             }
             Err(e) => {
-                ctx.emit(TuiEvent::Error(format!(
-                    "Session store error: {e}"
-                )));
+                ctx.emit(TuiEvent::Error(format!("Session store error: {e}")));
             }
         }
         Ok(())

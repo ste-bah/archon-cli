@@ -5,8 +5,8 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::widgets::{Block, Borders, List, ListItem};
 
-use crate::virtual_list::VirtualList;
 use crate::theme::Theme;
+use crate::virtual_list::VirtualList;
 
 /// MCP server row for display.
 #[derive(Debug, Clone)]
@@ -113,7 +113,10 @@ impl McpView {
     /// Returns server name if reconnect is possible.
     pub fn key_r_reconnect(&self) -> Option<String> {
         self.list.selected().and_then(|s| {
-            if matches!(s.status, McpServerStatus::Disconnected | McpServerStatus::Connecting) {
+            if matches!(
+                s.status,
+                McpServerStatus::Disconnected | McpServerStatus::Connecting
+            ) {
                 Some(s.name.clone())
             } else {
                 None
@@ -152,14 +155,12 @@ impl McpView {
             .title("MCP Servers")
             .title_style(theme.header);
 
-        let items: Vec<ListItem> = self.list.visible_items().iter().map(|s| {
-            ListItem::new(format!(
-                "{} [{}] — {}",
-                s.name,
-                s.status.label(),
-                s.url
-            ))
-        }).collect();
+        let items: Vec<ListItem> = self
+            .list
+            .visible_items()
+            .iter()
+            .map(|s| ListItem::new(format!("{} [{}] — {}", s.name, s.status.label(), s.url)))
+            .collect();
 
         let list = List::new(items).block(block);
         f.render_widget(list, area);
@@ -216,14 +217,20 @@ mod tests {
     #[test]
     fn key_r_reconnect_disconnected() {
         let mut view = McpView::new();
-        view.set_servers(vec![make_row("test-reconnect", McpServerStatus::Disconnected)]);
+        view.set_servers(vec![make_row(
+            "test-reconnect",
+            McpServerStatus::Disconnected,
+        )]);
         assert_eq!(view.key_r_reconnect(), Some("test-reconnect".to_string()));
     }
 
     #[test]
     fn key_r_reconnect_connected_no_op() {
         let mut view = McpView::new();
-        view.set_servers(vec![make_row("already-connected", McpServerStatus::Connected)]);
+        view.set_servers(vec![make_row(
+            "already-connected",
+            McpServerStatus::Connected,
+        )]);
         assert_eq!(view.key_r_reconnect(), None);
     }
 
@@ -237,7 +244,10 @@ mod tests {
     #[test]
     fn key_d_disconnect_disconnected_no_op() {
         let mut view = McpView::new();
-        view.set_servers(vec![make_row("not-connected", McpServerStatus::Disconnected)]);
+        view.set_servers(vec![make_row(
+            "not-connected",
+            McpServerStatus::Disconnected,
+        )]);
         assert_eq!(view.key_d_disconnect(), None);
     }
 

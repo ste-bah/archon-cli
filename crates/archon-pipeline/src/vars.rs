@@ -119,11 +119,7 @@ pub fn validate_refs(spec: &PipelineSpec, dag: &Dag) -> Result<(), PipelineError
 
     for step in &spec.steps {
         let refs = extract_refs(&step.input);
-        let current_level = dag
-            .step_index
-            .get(&step.id)
-            .copied()
-            .unwrap_or(usize::MAX);
+        let current_level = dag.step_index.get(&step.id).copied().unwrap_or(usize::MAX);
 
         for var_ref in &refs {
             // 1. Referenced step must exist.
@@ -164,10 +160,7 @@ pub fn validate_refs(spec: &PipelineSpec, dag: &Dag) -> Result<(), PipelineError
 /// # Errors
 /// * [`PipelineError::ValidationError`] — a referenced step has no output yet,
 ///   or a path segment cannot be resolved.
-pub fn substitute(
-    input: &Value,
-    outputs: &HashMap<String, Value>,
-) -> Result<Value, PipelineError> {
+pub fn substitute(input: &Value, outputs: &HashMap<String, Value>) -> Result<Value, PipelineError> {
     let re = var_regex();
     substitute_value(input, outputs, &re)
 }
@@ -295,9 +288,7 @@ mod tests {
     use serde_json::json;
 
     /// Helper to build a [`PipelineSpec`] from `(id, agent, depends_on, input)` tuples.
-    fn make_spec_with_input(
-        steps: Vec<(&str, &str, Vec<&str>, Value)>,
-    ) -> PipelineSpec {
+    fn make_spec_with_input(steps: Vec<(&str, &str, Vec<&str>, Value)>) -> PipelineSpec {
         PipelineSpec {
             name: "test".to_string(),
             version: "1.0".to_string(),
@@ -381,7 +372,10 @@ mod tests {
 
         let result = substitute(&input, &outputs).unwrap();
         assert_eq!(result, json!(42));
-        assert!(result.is_number(), "result should be a number, not a string");
+        assert!(
+            result.is_number(),
+            "result should be a number, not a string"
+        );
     }
 
     // 5. substitute_interpolation
@@ -447,7 +441,10 @@ mod tests {
         let result = substitute(&input, &outputs).unwrap();
         assert_eq!(result, file_ref);
         assert!(
-            result.as_object().unwrap().contains_key("__archon_file_ref__"),
+            result
+                .as_object()
+                .unwrap()
+                .contains_key("__archon_file_ref__"),
             "file ref wrapper should be preserved"
         );
     }

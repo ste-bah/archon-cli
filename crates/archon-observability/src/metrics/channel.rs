@@ -67,8 +67,10 @@ impl ChannelMetrics {
         let current_backlog = self.backlog_depth.load(Ordering::Relaxed);
         let actual_drained = batch_size.min(current_backlog);
         if actual_drained > 0 {
-            self.total_drained.fetch_add(actual_drained, Ordering::Relaxed);
-            self.backlog_depth.fetch_sub(actual_drained, Ordering::Relaxed);
+            self.total_drained
+                .fetch_add(actual_drained, Ordering::Relaxed);
+            self.backlog_depth
+                .fetch_sub(actual_drained, Ordering::Relaxed);
         }
         self.max_batch_size.fetch_max(batch_size, Ordering::Relaxed);
     }
@@ -102,7 +104,8 @@ impl ChannelMetrics {
             return false;
         }
         // compare_exchange to avoid double-fire under race
-        if self.last_warn_unix_ms
+        if self
+            .last_warn_unix_ms
             .compare_exchange(last, now_ms, Ordering::Relaxed, Ordering::Relaxed)
             .is_err()
         {
@@ -251,9 +254,7 @@ pub fn format_prometheus(snapshot: &ChannelMetricsSnapshot) -> String {
 /// mismatches. Not a full Prometheus parser — only what `format_prometheus`
 /// emits. Kept in-module so tests can treat it as an internal invariant.
 #[cfg(test)]
-fn parse_prometheus_exposition(
-    body: &str,
-) -> std::collections::HashMap<String, (String, String)> {
+fn parse_prometheus_exposition(body: &str) -> std::collections::HashMap<String, (String, String)> {
     use std::collections::HashMap;
     let mut help: HashMap<String, String> = HashMap::new();
     let mut types: HashMap<String, String> = HashMap::new();
@@ -373,11 +374,27 @@ mod tests {
 
         // Each metric: declared type must match the Prometheus semantic role.
         let expected = [
-            ("archon_tui_channel_backlog_depth", "gauge", snap.backlog_depth.to_string()),
-            ("archon_tui_channel_total_sent", "counter", snap.total_sent.to_string()),
-            ("archon_tui_channel_total_drained", "counter", snap.total_drained.to_string()),
+            (
+                "archon_tui_channel_backlog_depth",
+                "gauge",
+                snap.backlog_depth.to_string(),
+            ),
+            (
+                "archon_tui_channel_total_sent",
+                "counter",
+                snap.total_sent.to_string(),
+            ),
+            (
+                "archon_tui_channel_total_drained",
+                "counter",
+                snap.total_drained.to_string(),
+            ),
             // max_batch_size is a high-water mark → GAUGE, not counter.
-            ("archon_tui_channel_max_batch_size", "gauge", snap.max_batch_size.to_string()),
+            (
+                "archon_tui_channel_max_batch_size",
+                "gauge",
+                snap.max_batch_size.to_string(),
+            ),
             (
                 "archon_tui_channel_p95_send_to_render_ms",
                 "gauge",
@@ -389,7 +406,10 @@ mod tests {
                 .get(name)
                 .unwrap_or_else(|| panic!("metric {name} missing from exposition; body=\n{body}"));
             assert_eq!(ty, want_ty, "{name} has type {ty}, want {want_ty}");
-            assert_eq!(val, &want_val, "{name} sample value {val} != snapshot {want_val}");
+            assert_eq!(
+                val, &want_val,
+                "{name} sample value {val} != snapshot {want_val}"
+            );
         }
     }
 

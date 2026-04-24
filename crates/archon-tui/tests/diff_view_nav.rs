@@ -7,9 +7,7 @@
 //! - `s` — toggle side-by-side / unified layout
 //! - `/` — search within diff
 
-use archon_tui::diff_view::{
-    DiffView, LayoutMode, DiffState, Hunk, DiffLine,
-};
+use archon_tui::diff_view::{DiffLine, DiffState, DiffView, Hunk, LayoutMode};
 
 fn sample_diff_state() -> DiffState {
     DiffState {
@@ -53,7 +51,10 @@ fn test_n_key_advances_hunk() {
 
     view.handle_key('n');
 
-    assert_eq!(view.state.current_hunk, 1, "n key should advance to next hunk");
+    assert_eq!(
+        view.state.current_hunk, 1,
+        "n key should advance to next hunk"
+    );
 }
 
 #[test]
@@ -73,7 +74,10 @@ fn test_p_key_goes_to_previous_hunk() {
 
     view.handle_key('p');
 
-    assert_eq!(view.state.current_hunk, 0, "p key should go to previous hunk");
+    assert_eq!(
+        view.state.current_hunk, 0,
+        "p key should go to previous hunk"
+    );
 }
 
 #[test]
@@ -83,21 +87,33 @@ fn test_p_key_at_first_hunk_stays() {
 
     view.handle_key('p');
 
-    assert_eq!(view.state.current_hunk, 0, "p key at first hunk should stay");
+    assert_eq!(
+        view.state.current_hunk, 0,
+        "p key at first hunk should stay"
+    );
 }
 
 #[test]
 fn test_w_key_toggles_whitespace() {
     let mut view = sample_diff_view();
-    assert!(!view.state.show_whitespace, "whitespace should be hidden by default");
+    assert!(
+        !view.state.show_whitespace,
+        "whitespace should be hidden by default"
+    );
 
     view.handle_key('w');
 
-    assert!(view.state.show_whitespace, "w key should toggle whitespace visibility on");
+    assert!(
+        view.state.show_whitespace,
+        "w key should toggle whitespace visibility on"
+    );
 
     view.handle_key('w');
 
-    assert!(!view.state.show_whitespace, "w key should toggle whitespace visibility off");
+    assert!(
+        !view.state.show_whitespace,
+        "w key should toggle whitespace visibility off"
+    );
 }
 
 #[test]
@@ -107,11 +123,19 @@ fn test_s_key_toggles_layout_mode() {
 
     view.handle_key('s');
 
-    assert_eq!(view.state.layout_mode, LayoutMode::SideBySide, "s key should toggle to side-by-side");
+    assert_eq!(
+        view.state.layout_mode,
+        LayoutMode::SideBySide,
+        "s key should toggle to side-by-side"
+    );
 
     view.handle_key('s');
 
-    assert_eq!(view.state.layout_mode, LayoutMode::Unified, "s key should toggle back to unified");
+    assert_eq!(
+        view.state.layout_mode,
+        LayoutMode::Unified,
+        "s key should toggle back to unified"
+    );
 }
 
 #[test]
@@ -121,7 +145,10 @@ fn test_slash_key_activates_search() {
 
     view.handle_key('/');
 
-    assert!(view.state.search_active, "/ key should activate search mode");
+    assert!(
+        view.state.search_active,
+        "/ key should activate search mode"
+    );
 }
 
 #[test]
@@ -133,7 +160,10 @@ fn test_search_query_accumulates_chars() {
     view.handle_key('o');
     view.handle_key('o');
 
-    assert_eq!(view.state.search_query, "foo", "search should accumulate characters");
+    assert_eq!(
+        view.state.search_query, "foo",
+        "search should accumulate characters"
+    );
 }
 
 #[test]

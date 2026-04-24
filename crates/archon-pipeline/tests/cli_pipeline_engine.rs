@@ -45,7 +45,10 @@ impl TaskService for AlwaysSucceedMock {
 
     async fn status(&self, id: TaskId) -> Result<TaskSnapshot, TaskError> {
         let subs = self.submissions.lock().unwrap();
-        let (agent, _) = subs.iter().find(|(_, tid)| *tid == id).ok_or(TaskError::NotFound(id))?;
+        let (agent, _) = subs
+            .iter()
+            .find(|(_, tid)| *tid == id)
+            .ok_or(TaskError::NotFound(id))?;
         Ok(TaskSnapshot {
             id,
             agent_name: agent.clone(),
@@ -67,7 +70,9 @@ impl TaskService for AlwaysSucceedMock {
     }
 
     async fn subscribe_events(
-        &self, _id: TaskId, _from_seq: u64,
+        &self,
+        _id: TaskId,
+        _from_seq: u64,
     ) -> Result<Pin<Box<dyn Stream<Item = TaskEvent> + Send>>, TaskError> {
         Err(TaskError::Unimplemented)
     }
@@ -89,7 +94,8 @@ async fn parse_and_validate_linear_yaml() {
 
     let yaml = std::fs::read_to_string(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/linear.yaml"),
-    ).unwrap();
+    )
+    .unwrap();
 
     let spec = engine.parse(&yaml, PipelineFormat::Yaml).unwrap();
     assert_eq!(spec.name, "linear-test");
@@ -109,7 +115,8 @@ async fn cyclic_yaml_fails_validation() {
 
     let yaml = std::fs::read_to_string(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/cyclic.yaml"),
-    ).unwrap();
+    )
+    .unwrap();
 
     let spec = engine.parse(&yaml, PipelineFormat::Yaml).unwrap();
     let err = engine.validate(&spec).expect_err("cyclic should fail");
@@ -132,7 +139,8 @@ async fn missing_ref_yaml_fails_validation() {
 
     let yaml = std::fs::read_to_string(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/missing_ref.yaml"),
-    ).unwrap();
+    )
+    .unwrap();
 
     let spec = engine.parse(&yaml, PipelineFormat::Yaml).unwrap();
     let err = engine.validate(&spec).expect_err("missing ref should fail");
@@ -155,18 +163,20 @@ async fn run_status_list_lifecycle() {
         version: "1.0".to_string(),
         global_timeout_secs: 30,
         max_parallelism: 1,
-        steps: vec![
-            StepSpec {
-                id: "A".to_string(),
-                agent: "agent-a".to_string(),
-                input: json!({}),
-                depends_on: vec![],
-                retry: RetrySpec { max_attempts: 1, backoff: BackoffKind::Exponential, base_delay_ms: 100 },
-                timeout_secs: 10,
-                condition: None,
-                on_failure: OnFailurePolicy::Fail,
+        steps: vec![StepSpec {
+            id: "A".to_string(),
+            agent: "agent-a".to_string(),
+            input: json!({}),
+            depends_on: vec![],
+            retry: RetrySpec {
+                max_attempts: 1,
+                backoff: BackoffKind::Exponential,
+                base_delay_ms: 100,
             },
-        ],
+            timeout_secs: 10,
+            condition: None,
+            on_failure: OnFailurePolicy::Fail,
+        }],
     };
 
     // Run
@@ -175,7 +185,10 @@ async fn run_status_list_lifecycle() {
     // Status
     let run = engine.status(id).await.expect("status should succeed");
     assert_eq!(run.state, PipelineState::Finished);
-    assert_eq!(run.steps["A"].state, archon_pipeline::StepRunState::Finished);
+    assert_eq!(
+        run.steps["A"].state,
+        archon_pipeline::StepRunState::Finished
+    );
 
     // List
     let ids = engine.list().await.expect("list should succeed");
@@ -207,9 +220,7 @@ async fn trait_object_constructable() {
     let store = Arc::new(PipelineStateStore::new(tmp.path()));
     let mock: Arc<dyn TaskService> = Arc::new(AlwaysSucceedMock::new());
 
-    let engine: Box<dyn PipelineEngine> = Box::new(
-        DefaultPipelineEngine::new(store, mock),
-    );
+    let engine: Box<dyn PipelineEngine> = Box::new(DefaultPipelineEngine::new(store, mock));
 
     let json_src = r#"{"name":"obj-test","steps":[{"id":"X","agent":"a"}]}"#;
     let spec = engine.parse(json_src, PipelineFormat::Json).unwrap();

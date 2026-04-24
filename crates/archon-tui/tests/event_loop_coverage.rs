@@ -25,7 +25,10 @@ impl RecordingRunner {
 }
 
 impl TurnRunner for RecordingRunner {
-    fn run_turn<'a>(&'a self, prompt: String) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + 'a>> {
+    fn run_turn<'a>(
+        &'a self,
+        prompt: String,
+    ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + 'a>> {
         let log = self.log.clone();
         let delay = self.delay_ms;
         Box::pin(async move {
@@ -36,12 +39,21 @@ impl TurnRunner for RecordingRunner {
     }
 }
 
-struct SlowRunner { delay_ms: u64 }
+struct SlowRunner {
+    delay_ms: u64,
+}
 
-impl SlowRunner { fn new(delay_ms: u64) -> Self { Self { delay_ms } } }
+impl SlowRunner {
+    fn new(delay_ms: u64) -> Self {
+        Self { delay_ms }
+    }
+}
 
 impl TurnRunner for SlowRunner {
-    fn run_turn<'a>(&'a self, _prompt: String) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + 'a>> {
+    fn run_turn<'a>(
+        &'a self,
+        _prompt: String,
+    ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + 'a>> {
         let delay = self.delay_ms;
         Box::pin(async move {
             sleep(Duration::from_millis(delay)).await;
@@ -52,16 +64,25 @@ impl TurnRunner for SlowRunner {
 
 struct NoopRouter;
 impl AgentRouter for NoopRouter {
-    fn switch(&self, _agent_id: &str) -> anyhow::Result<()> { Ok(()) }
+    fn switch(&self, _agent_id: &str) -> anyhow::Result<()> {
+        Ok(())
+    }
 }
 
 /// Records every `switch` call (D2: local fake implementing AgentRouter trait).
-struct RecordingRouter { calls: Arc<Mutex<Vec<String>>> }
+struct RecordingRouter {
+    calls: Arc<Mutex<Vec<String>>>,
+}
 
 impl RecordingRouter {
     fn new() -> (Self, Arc<Mutex<Vec<String>>>) {
         let calls = Arc::new(Mutex::new(Vec::new()));
-        (Self { calls: Arc::clone(&calls) }, calls)
+        (
+            Self {
+                calls: Arc::clone(&calls),
+            },
+            calls,
+        )
     }
 }
 
@@ -106,10 +127,23 @@ async fn test_tc_01_input_handler_spawns_without_await() {
     let result = dispatcher.spawn_turn("long".into(), runner);
     let elapsed = start.elapsed();
 
-    assert!(matches!(result, archon_tui::DispatchResult::Running { .. }), "spawn_turn should return Running");
-    assert!(elapsed < Duration::from_millis(50), "spawn_turn blocked for {} ms", elapsed.as_millis());
-    assert!(dispatcher.is_busy(), "dispatcher should be busy immediately after spawn_turn");
-    assert!(dispatcher.current_handle_is_inflight(), "current_handle_is_inflight should be true after spawn");
+    assert!(
+        matches!(result, archon_tui::DispatchResult::Running { .. }),
+        "spawn_turn should return Running"
+    );
+    assert!(
+        elapsed < Duration::from_millis(50),
+        "spawn_turn blocked for {} ms",
+        elapsed.as_millis()
+    );
+    assert!(
+        dispatcher.is_busy(),
+        "dispatcher should be busy immediately after spawn_turn"
+    );
+    assert!(
+        dispatcher.current_handle_is_inflight(),
+        "current_handle_is_inflight should be true after spawn"
+    );
 
     let _ = dispatcher.cancel_current(); // cleanup
 }
@@ -129,31 +163,55 @@ async fn test_tc_02_current_query_tracking() {
 
     // Phase 1: natural completion
     let _ = dispatcher.spawn_turn("first".into(), runner.clone());
-    assert!(dispatcher.current_handle_is_inflight(), "handle should be in-flight just after spawn");
+    assert!(
+        dispatcher.current_handle_is_inflight(),
+        "handle should be in-flight just after spawn"
+    );
 
     let outcomes = drain_until_idle(&mut dispatcher).await;
     assert_eq!(outcomes.len(), 1, "expected exactly one TurnOutcome");
     assert!(matches!(outcomes[0], TurnOutcome::Completed));
-    assert!(!dispatcher.current_handle_is_inflight(), "handle should NOT be in-flight after completion");
-    assert!(!dispatcher.is_busy(), "dispatcher should not be busy after completion");
+    assert!(
+        !dispatcher.current_handle_is_inflight(),
+        "handle should NOT be in-flight after completion"
+    );
+    assert!(
+        !dispatcher.is_busy(),
+        "dispatcher should not be busy after completion"
+    );
 
     // Phase 2: cancel
     let slow_runner: Arc<dyn TurnRunner> = Arc::new(SlowRunner::new(10_000));
     let _ = dispatcher.spawn_turn("second".into(), slow_runner);
-    assert!(dispatcher.current_handle_is_inflight(), "handle should be in-flight before cancel");
+    assert!(
+        dispatcher.current_handle_is_inflight(),
+        "handle should be in-flight before cancel"
+    );
 
     let cancel_result = dispatcher.cancel_current();
-    assert!(matches!(cancel_result, archon_tui::CancelOutcome::Aborted { .. }), "cancel should return Aborted");
+    assert!(
+        matches!(cancel_result, archon_tui::CancelOutcome::Aborted { .. }),
+        "cancel should return Aborted"
+    );
 
     tokio::task::yield_now().await; // Guardrail D1: let abort land before checking state
-    assert!(!dispatcher.current_handle_is_inflight(), "handle should NOT be in-flight after cancel");
-    assert!(!dispatcher.is_busy(), "dispatcher should not be busy after cancel");
+    assert!(
+        !dispatcher.current_handle_is_inflight(),
+        "handle should NOT be in-flight after cancel"
+    );
+    assert!(
+        !dispatcher.is_busy(),
+        "dispatcher should not be busy after cancel"
+    );
 }
 
 // --- TC-04: Burst 10 messages FIFO no loss (REQ-TUI-LOOP-004 / EC-TUI-003) ---
 
 #[derive(Clone)]
-enum BurstOutcome { Success, SleepForever }
+enum BurstOutcome {
+    Success,
+    SleepForever,
+}
 
 struct BurstRunner {
     outcomes: Arc<Mutex<VecDeque<BurstOutcome>>>,
@@ -162,22 +220,43 @@ struct BurstRunner {
 }
 
 impl BurstRunner {
-    fn new(outcomes: Vec<BurstOutcome>, recorded: Arc<Mutex<Vec<String>>>, run_delay_ms: u64) -> Self {
-        Self { outcomes: Arc::new(Mutex::new(outcomes.into())), recorded, run_delay_ms }
+    fn new(
+        outcomes: Vec<BurstOutcome>,
+        recorded: Arc<Mutex<Vec<String>>>,
+        run_delay_ms: u64,
+    ) -> Self {
+        Self {
+            outcomes: Arc::new(Mutex::new(outcomes.into())),
+            recorded,
+            run_delay_ms,
+        }
     }
 }
 
 impl TurnRunner for BurstRunner {
-    fn run_turn<'a>(&'a self, prompt: String) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + 'a>> {
-        let outcome = self.outcomes.lock().unwrap().pop_front().unwrap_or(BurstOutcome::Success);
+    fn run_turn<'a>(
+        &'a self,
+        prompt: String,
+    ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + 'a>> {
+        let outcome = self
+            .outcomes
+            .lock()
+            .unwrap()
+            .pop_front()
+            .unwrap_or(BurstOutcome::Success);
         let recorded = Arc::clone(&self.recorded);
         let delay = self.run_delay_ms;
         Box::pin(async move {
-            if delay > 0 { sleep(Duration::from_millis(delay)).await; }
+            if delay > 0 {
+                sleep(Duration::from_millis(delay)).await;
+            }
             recorded.lock().unwrap().push(prompt.clone());
             match outcome {
                 BurstOutcome::Success => Ok(()),
-                BurstOutcome::SleepForever => { sleep(Duration::from_secs(3600)).await; Ok(()) }
+                BurstOutcome::SleepForever => {
+                    sleep(Duration::from_secs(3600)).await;
+                    Ok(())
+                }
             }
         })
     }
@@ -192,16 +271,26 @@ async fn test_tc_04_burst_10_messages_fifo_no_loss() {
 
     let recorded: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
     let outcomes: Vec<BurstOutcome> = std::iter::once(BurstOutcome::Success)
-        .chain(std::iter::repeat(BurstOutcome::Success).take(10)).collect();
-    let runner: Arc<dyn TurnRunner> = Arc::new(BurstRunner::new(outcomes, Arc::clone(&recorded), 200));
+        .chain(std::iter::repeat(BurstOutcome::Success).take(10))
+        .collect();
+    let runner: Arc<dyn TurnRunner> =
+        Arc::new(BurstRunner::new(outcomes, Arc::clone(&recorded), 200));
 
     let _ = dispatcher.spawn_turn("m0".into(), Arc::clone(&runner));
     for i in 1..=10 {
         let label = format!("m{}", i);
         let q = dispatcher.spawn_turn(label.clone(), Arc::clone(&runner));
-        assert!(matches!(q, archon_tui::DispatchResult::Queued), "prompt {} should be queued", label);
+        assert!(
+            matches!(q, archon_tui::DispatchResult::Queued),
+            "prompt {} should be queued",
+            label
+        );
     }
-    assert_eq!(dispatcher.queue_len(), 10, "exactly 10 prompts should be queued");
+    assert_eq!(
+        dispatcher.queue_len(),
+        10,
+        "exactly 10 prompts should be queued"
+    );
 
     sleep(Duration::from_secs(3)).await;
     let deadline = Instant::now() + Duration::from_secs(5);
@@ -229,17 +318,37 @@ async fn test_tc_05_agent_switch_mid_flight() {
 
     let recorded: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
     let sleeper: Arc<dyn TurnRunner> = Arc::new(BurstRunner::new(
-        vec![BurstOutcome::SleepForever], recorded, 0,
+        vec![BurstOutcome::SleepForever],
+        recorded,
+        0,
     ));
     let _ = dispatcher.spawn_turn("prompt-A".into(), sleeper);
 
-    assert!(dispatcher.is_busy(), "dispatcher should be busy with prompt-A in-flight");
-    assert!(dispatcher.current_handle_is_inflight(), "handle should be in-flight before switch");
+    assert!(
+        dispatcher.is_busy(),
+        "dispatcher should be busy with prompt-A in-flight"
+    );
+    assert!(
+        dispatcher.current_handle_is_inflight(),
+        "handle should be in-flight before switch"
+    );
 
-    dispatcher.switch_agent("agent-B").expect("switch_agent should succeed");
-    assert_eq!(calls.lock().unwrap().as_slice(), &["agent-B".to_string()], "router should have received agent-B");
-    assert!(dispatcher.current_handle_is_inflight(), "handle must still be in-flight after switch_agent");
-    assert!(dispatcher.is_busy(), "dispatcher should still be busy after switch");
+    dispatcher
+        .switch_agent("agent-B")
+        .expect("switch_agent should succeed");
+    assert_eq!(
+        calls.lock().unwrap().as_slice(),
+        &["agent-B".to_string()],
+        "router should have received agent-B"
+    );
+    assert!(
+        dispatcher.current_handle_is_inflight(),
+        "handle must still be in-flight after switch_agent"
+    );
+    assert!(
+        dispatcher.is_busy(),
+        "dispatcher should still be busy after switch"
+    );
 
     let _ = dispatcher.cancel_current(); // cleanup
 }
@@ -254,12 +363,19 @@ struct StreamRunner {
 
 impl StreamRunner {
     fn new(frames: Arc<Mutex<Vec<usize>>>, frame_count: usize, interval_ms: u64) -> Self {
-        Self { frames, frame_count, interval_ms }
+        Self {
+            frames,
+            frame_count,
+            interval_ms,
+        }
     }
 }
 
 impl TurnRunner for StreamRunner {
-    fn run_turn<'a>(&'a self, _prompt: String) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + 'a>> {
+    fn run_turn<'a>(
+        &'a self,
+        _prompt: String,
+    ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + 'a>> {
         let frames = Arc::clone(&self.frames);
         let count = self.frame_count;
         let interval = self.interval_ms;
@@ -293,19 +409,45 @@ async fn test_tc_06_sigwinch_reflow_no_frame_drop() {
     let runner: Arc<dyn TurnRunner> = Arc::new(StreamRunner::new(frames_clone, 20, 10));
     let router: Arc<dyn AgentRouter> = Arc::new(NoopRouter);
 
-    let cfg = EventLoopConfig { tui_event_rx, agent_event_tx, runner, router };
+    let cfg = EventLoopConfig {
+        tui_event_rx,
+        agent_event_tx,
+        runner,
+        router,
+    };
     let handle = tokio::spawn(async move { archon_tui::run_event_loop(cfg).await });
 
-    tui_event_tx.send(archon_tui::app::TuiEvent::UserInput("stream".into())).expect("send UserInput(stream)");
-    tui_event_tx.send(archon_tui::app::TuiEvent::Resize { cols: 200, rows: 60 }).expect("send first Resize");
-    tui_event_tx.send(archon_tui::app::TuiEvent::Resize { cols: 200, rows: 60 }).expect("send second Resize");
+    tui_event_tx
+        .send(archon_tui::app::TuiEvent::UserInput("stream".into()))
+        .expect("send UserInput(stream)");
+    tui_event_tx
+        .send(archon_tui::app::TuiEvent::Resize {
+            cols: 200,
+            rows: 60,
+        })
+        .expect("send first Resize");
+    tui_event_tx
+        .send(archon_tui::app::TuiEvent::Resize {
+            cols: 200,
+            rows: 60,
+        })
+        .expect("send second Resize");
 
     sleep(Duration::from_millis(500)).await;
-    tui_event_tx.send(archon_tui::app::TuiEvent::Done).expect("send Done");
-    handle.await.expect("join run_event_loop").expect("run_event_loop Ok");
+    tui_event_tx
+        .send(archon_tui::app::TuiEvent::Done)
+        .expect("send Done");
+    handle
+        .await
+        .expect("join run_event_loop")
+        .expect("run_event_loop Ok");
 
     let (cols, rows) = archon_tui::last_known_size();
-    assert_eq!((cols, rows), (200, 60), "last_known_size() should be (200, 60)");
+    assert_eq!(
+        (cols, rows),
+        (200, 60),
+        "last_known_size() should be (200, 60)"
+    );
 
     let recorded = frames.lock().unwrap().clone();
     assert_eq!(recorded.len(), 20, "expected exactly 20 frames recorded");

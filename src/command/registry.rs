@@ -27,8 +27,8 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use archon_tui::app::TuiEvent;
 
@@ -687,8 +687,7 @@ pub(crate) struct CommandContext {
     /// rather than panicking. Both `format_garden_stats` and
     /// `consolidate` are fully sync (all 12 MemoryTrait methods are
     /// plain `fn`) so no matching `CommandEffect` variant is required.
-    pub(crate) garden_config:
-        Option<archon_memory::garden::GardenConfig>,
+    pub(crate) garden_config: Option<archon_memory::garden::GardenConfig>,
     /// TASK-AGS-POST-6-BODIES-B01-FAST DIRECT-pattern field (/fast).
     ///
     /// Clone of `SlashCommandContext::fast_mode_shared` populated
@@ -759,8 +758,7 @@ pub(crate) struct CommandContext {
     ///
     /// No matching `CommandEffect` variant — `/help` is a pure DIRECT-
     /// pattern read (no async mutex writes back to shared state).
-    pub(crate) skill_registry:
-        Option<Arc<archon_core::skills::SkillRegistry>>,
+    pub(crate) skill_registry: Option<Arc<archon_core::skills::SkillRegistry>>,
     /// TASK-AGS-POST-6-BODIES-B08-DENIALS SNAPSHOT-pattern field
     /// (READ-only /denials).
     ///
@@ -801,8 +799,7 @@ pub(crate) struct CommandContext {
     /// second DIRECT-pattern cross-cutting field. Mirrors AGS-807
     /// `status_snapshot`, AGS-808 `model_snapshot`, B08 `denial_snapshot`,
     /// and B11 `effort_snapshot` snapshot gating rule.
-    pub(crate) permissions_snapshot:
-        Option<crate::command::permissions::PermissionsSnapshot>,
+    pub(crate) permissions_snapshot: Option<crate::command::permissions::PermissionsSnapshot>,
     /// TASK-AGS-POST-6-BODIES-B14-COPY SNAPSHOT-pattern field (READ-only
     /// /copy).
     ///
@@ -951,9 +948,8 @@ pub(crate) struct CommandContext {
     /// lets the sync handler write and session.rs drain without
     /// forcing an edit to `slash.rs` (which is a hard scope guard for
     /// this ticket).
-    pub(crate) pending_export: Option<
-        Arc<std::sync::Mutex<Option<crate::command::export::ExportDescriptor>>>,
-    >,
+    pub(crate) pending_export:
+        Option<Arc<std::sync::Mutex<Option<crate::command::export::ExportDescriptor>>>>,
 }
 
 // TASK-AGS-POST-6-TRY-SEND: wraps `tui_tx.try_send` at every handler
@@ -1228,15 +1224,9 @@ impl RegistryBuilder {
 
     /// Insert a primary command. Panics if the name is already
     /// registered.
-    pub(crate) fn insert_primary(
-        &mut self,
-        name: &'static str,
-        handler: Arc<dyn CommandHandler>,
-    ) {
+    pub(crate) fn insert_primary(&mut self, name: &'static str, handler: Arc<dyn CommandHandler>) {
         if self.commands.contains_key(name) {
-            panic!(
-                "duplicate primary slash command: /{name} registered twice"
-            );
+            panic!("duplicate primary slash command: /{name} registered twice");
         }
         self.commands.insert(name, handler);
         self.primary_order.push(name);
@@ -1262,9 +1252,7 @@ impl RegistryBuilder {
                     );
                 }
                 if let Some(prior) = aliases.get(alias) {
-                    panic!(
-                        "duplicate alias: '{alias}' registered by both /{prior} and /{primary}"
-                    );
+                    panic!("duplicate alias: '{alias}' registered by both /{prior} and /{primary}");
                 }
                 aliases.insert(alias, primary);
             }
@@ -1695,7 +1683,10 @@ pub(crate) fn default_registry() -> Registry {
     // TASK-TUI-621: hidden stub — dispatchable when typed explicitly,
     // but OMITTED from archon-tui::commands::all_commands() so the
     // autocomplete / command picker never surfaces it.
-    b.insert_primary("teleport", Arc::new(crate::command::teleport::TeleportHandler));
+    b.insert_primary(
+        "teleport",
+        Arc::new(crate::command::teleport::TeleportHandler),
+    );
     b.insert_primary("release-notes", Arc::new(ReleaseNotesHandler));
     b.insert_primary("reload", Arc::new(ReloadHandler::new()));
     b.insert_primary("logout", Arc::new(LogoutHandler::new()));
@@ -1703,17 +1694,35 @@ pub(crate) fn default_registry() -> Registry {
     b.insert_primary("rename", Arc::new(RenameHandler::new()));
     b.insert_primary("resume", Arc::new(ResumeHandler));
     // TASK-TUI-622: /review PR code-review prompt builder.
-    b.insert_primary("review", Arc::new(crate::command::review::ReviewHandler::new()));
+    b.insert_primary(
+        "review",
+        Arc::new(crate::command::review::ReviewHandler::new()),
+    );
     // TASK-TUI-624: /commit AI git-commit prompt builder.
-    b.insert_primary("commit", Arc::new(crate::command::commit::CommitHandler::new()));
+    b.insert_primary(
+        "commit",
+        Arc::new(crate::command::commit::CommitHandler::new()),
+    );
     // TASK-TUI-628: /sandbox Bubble-mode toggle.
-    b.insert_primary("sandbox", Arc::new(crate::command::sandbox::SandboxHandler::new()));
+    b.insert_primary(
+        "sandbox",
+        Arc::new(crate::command::sandbox::SandboxHandler::new()),
+    );
     // TASK-TUI-620: /rewind message-selector overlay launcher.
-    b.insert_primary("rewind", Arc::new(crate::command::rewind::RewindHandler::new()));
+    b.insert_primary(
+        "rewind",
+        Arc::new(crate::command::rewind::RewindHandler::new()),
+    );
     // TASK-TUI-627: /skills skills-menu overlay launcher.
-    b.insert_primary("skills", Arc::new(crate::command::skills::SkillsHandler::new()));
+    b.insert_primary(
+        "skills",
+        Arc::new(crate::command::skills::SkillsHandler::new()),
+    );
     // TASK-TUI-625: /session remote-URL + QR code display.
-    b.insert_primary("session", Arc::new(crate::command::session::SessionHandler::new()));
+    b.insert_primary(
+        "session",
+        Arc::new(crate::command::session::SessionHandler::new()),
+    );
     b.insert_primary("mcp", Arc::new(McpHandler));
     // TASK-AGS-812: NEW /hooks primary (gap-fix Q4=A, no aliases).
     b.insert_primary("hooks", Arc::new(HooksHandler));
@@ -1830,11 +1839,7 @@ mod tests {
         aliases: &'static [&'static str],
     }
     impl CommandHandler for TestHandler {
-        fn execute(
-            &self,
-            _ctx: &mut CommandContext,
-            _args: &[String],
-        ) -> anyhow::Result<()> {
+        fn execute(&self, _ctx: &mut CommandContext, _args: &[String]) -> anyhow::Result<()> {
             Ok(())
         }
         fn description(&self) -> &str {
@@ -1849,11 +1854,7 @@ mod tests {
     /// implementation on the trait.
     struct NoAliasHandler;
     impl CommandHandler for NoAliasHandler {
-        fn execute(
-            &self,
-            _ctx: &mut CommandContext,
-            _args: &[String],
-        ) -> anyhow::Result<()> {
+        fn execute(&self, _ctx: &mut CommandContext, _args: &[String]) -> anyhow::Result<()> {
             Ok(())
         }
         fn description(&self) -> &str {
@@ -2027,9 +2028,7 @@ mod tests {
     #[test]
     fn cancel_aliases_resolve_to_cancel_handler() {
         let registry = default_registry();
-        let primary = registry
-            .get("cancel")
-            .expect("cancel primary registered");
+        let primary = registry.get("cancel").expect("cancel primary registered");
         let via_stop = registry
             .get("stop")
             .expect("alias 'stop' must resolve to cancel");
@@ -2057,9 +2056,7 @@ mod tests {
     #[test]
     fn registry_resolves_model_aliases_m_and_switch_model() {
         let reg = default_registry();
-        let primary = reg
-            .get("model")
-            .expect("model primary must be registered");
+        let primary = reg.get("model").expect("model primary must be registered");
         let via_m = reg
             .get("m")
             .expect("'m' alias must resolve to /model per AGS-808");
@@ -2095,9 +2092,7 @@ mod tests {
     #[test]
     fn registry_resolves_cost_aliases_usage_and_billing() {
         let reg = default_registry();
-        let primary = reg
-            .get("cost")
-            .expect("cost primary must be registered");
+        let primary = reg.get("cost").expect("cost primary must be registered");
         let via_billing = reg
             .get("billing")
             .expect("'billing' alias must resolve to /cost per AGS-809");
@@ -2146,9 +2141,7 @@ mod tests {
             .expect("'continue' alias must resolve to /resume");
         let via_open_session = reg
             .get("open-session")
-            .expect(
-                "'open-session' alias must resolve to /resume per AGS-810",
-            );
+            .expect("'open-session' alias must resolve to /resume per AGS-810");
         assert_eq!(
             primary.description(),
             via_continue.description(),
@@ -2312,9 +2305,7 @@ mod tests {
             .expect("context primary must be registered post AGS-814");
         let desc = primary.description().to_lowercase();
         assert!(
-            desc.contains("context")
-                || desc.contains("window")
-                || desc.contains("usage"),
+            desc.contains("context") || desc.contains("window") || desc.contains("usage"),
             "ContextHandler description should reference \
              context/window/usage, got: {}",
             primary.description()
@@ -2800,9 +2791,7 @@ mod tests {
     /// is `None` — emit() only touches `tui_tx`, so the other fields
     /// are irrelevant and kept uninitialized to avoid dragging in
     /// archon-memory / archon-core fixture deps.
-    fn make_emit_test_ctx(
-        tui_tx: tokio::sync::mpsc::Sender<TuiEvent>,
-    ) -> CommandContext {
+    fn make_emit_test_ctx(tui_tx: tokio::sync::mpsc::Sender<TuiEvent>) -> CommandContext {
         CommandContext {
             tui_tx,
             status_snapshot: None,
@@ -2842,9 +2831,7 @@ mod tests {
 
         match rx.try_recv() {
             Ok(TuiEvent::TextDelta(s)) => assert_eq!(s, "hello"),
-            other => panic!(
-                "expected Ok(TextDelta(\"hello\")), got {other:?}"
-            ),
+            other => panic!("expected Ok(TextDelta(\"hello\")), got {other:?}"),
         }
     }
 

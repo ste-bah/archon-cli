@@ -78,9 +78,8 @@ async fn sse_handler(
         Ok(Event::default().event("endpoint").data(endpoint_data))
     });
 
-    let response_frames = UnboundedReceiverStream::new(rx).map(|body| {
-        Ok::<Event, Infallible>(Event::default().event("message").data(body))
-    });
+    let response_frames = UnboundedReceiverStream::new(rx)
+        .map(|body| Ok::<Event, Infallible>(Event::default().event("message").data(body)));
 
     let combined = endpoint_frame.chain(response_frames);
 
@@ -207,10 +206,7 @@ async fn sse_transport_full_initialize_and_tools_list_roundtrip() {
 
     assert_eq!(tools.len(), 1, "expected exactly the one mock tool");
     assert_eq!(tools[0].name, "echo");
-    assert_eq!(
-        tools[0].description.as_deref(),
-        Some("Echoes its input")
-    );
+    assert_eq!(tools[0].description.as_deref(), Some("Echoes its input"));
 
     // Schema should be surfaced through to the caller.
     let schema = &tools[0].input_schema;

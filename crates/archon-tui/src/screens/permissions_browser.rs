@@ -5,8 +5,8 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::widgets::{Block, Borders, List, ListItem};
 
-use crate::virtual_list::VirtualList;
 use crate::theme::Theme;
+use crate::virtual_list::VirtualList;
 
 /// A tool permission entry.
 #[derive(Debug, Clone)]
@@ -68,18 +68,21 @@ impl PermissionsBrowser {
 
     /// Render permissions browser into area.
     pub fn render(&self, f: &mut Frame, area: Rect, _theme: &Theme) {
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title("Permissions");
+        let block = Block::default().borders(Borders::ALL).title("Permissions");
 
-        let items: Vec<ListItem> = self.list.visible_items().iter().map(|p| {
-            let label = match p {
-                ToolPermission::Allow(name) => format!("[ALLOW]  {}", name),
-                ToolPermission::Deny(name) => format!("[DENY]   {}", name),
-                ToolPermission::Prompt(name) => format!("[PROMPT] {}", name),
-            };
-            ListItem::new(label)
-        }).collect();
+        let items: Vec<ListItem> = self
+            .list
+            .visible_items()
+            .iter()
+            .map(|p| {
+                let label = match p {
+                    ToolPermission::Allow(name) => format!("[ALLOW]  {}", name),
+                    ToolPermission::Deny(name) => format!("[DENY]   {}", name),
+                    ToolPermission::Prompt(name) => format!("[PROMPT] {}", name),
+                };
+                ListItem::new(label)
+            })
+            .collect();
 
         let list = List::new(items).block(block);
         f.render_widget(list, area);
@@ -105,22 +108,20 @@ mod tests {
     #[test]
     fn cycle_permissions() {
         let mut b = PermissionsBrowser::new();
-        b.set_permissions(vec![
-            ToolPermission::Allow("tool_a".into()),
-        ]);
+        b.set_permissions(vec![ToolPermission::Allow("tool_a".into())]);
         b.cycle_selected();
         match b.selected() {
-            Some(ToolPermission::Deny(_)) => {},
+            Some(ToolPermission::Deny(_)) => {}
             _ => panic!("should be Deny after one cycle"),
         }
         b.cycle_selected();
         match b.selected() {
-            Some(ToolPermission::Prompt(_)) => {},
+            Some(ToolPermission::Prompt(_)) => {}
             _ => panic!("should be Prompt after two cycles"),
         }
         b.cycle_selected();
         match b.selected() {
-            Some(ToolPermission::Allow(_)) => {},
+            Some(ToolPermission::Allow(_)) => {}
             _ => panic!("should wrap back to Allow"),
         }
     }
@@ -128,9 +129,7 @@ mod tests {
     #[test]
     fn move_down_wraps() {
         let mut b = PermissionsBrowser::new();
-        b.set_permissions(vec![
-            ToolPermission::Deny("x".into()),
-        ]);
+        b.set_permissions(vec![ToolPermission::Deny("x".into())]);
         b.move_down();
         assert_eq!(b.selected_index(), 0);
     }

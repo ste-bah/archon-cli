@@ -98,10 +98,8 @@ impl CompositeAgentPattern {
         }
 
         // Topological sort.
-        let order = algo::toposort(&graph, None).map_err(|e| {
-            PatternError::CompositeCycle {
-                path: vec![graph[e.node_id()].clone()],
-            }
+        let order = algo::toposort(&graph, None).map_err(|e| PatternError::CompositeCycle {
+            path: vec![graph[e.node_id()].clone()],
         })?;
 
         // Build node->agent map.
@@ -122,7 +120,7 @@ impl CompositeAgentPattern {
 
 /// Find a cycle path in a directed graph using DFS.
 fn find_cycle_path(graph: &DiGraph<String, Option<String>>) -> Vec<String> {
-    use petgraph::visit::{depth_first_search, DfsEvent, Control};
+    use petgraph::visit::{Control, DfsEvent, depth_first_search};
 
     let mut path: Vec<NodeIndex> = Vec::new();
     let mut on_stack: Vec<bool> = vec![false; graph.node_count()];
@@ -186,19 +184,13 @@ impl Pattern for CompiledComposite {
         PatternKind::Composite
     }
 
-    async fn execute(
-        &self,
-        input: Value,
-        ctx: PatternCtx,
-    ) -> Result<Value, PatternError> {
+    async fn execute(&self, input: Value, ctx: PatternCtx) -> Result<Value, PatternError> {
         let mut outputs: HashMap<NodeIndex, Value> = HashMap::new();
 
         for &node_idx in &self.order {
             let node_name = &self.graph[node_idx];
             let agent = self.node_agents.get(node_name).ok_or_else(|| {
-                PatternError::Execution(format!(
-                    "no agent mapped for node '{node_name}'"
-                ))
+                PatternError::Execution(format!("no agent mapped for node '{node_name}'"))
             })?;
 
             // Gather input from predecessors or use composite input.
@@ -213,20 +205,15 @@ impl Pattern for CompiledComposite {
                     input.clone()
                 } else if predecessors.len() == 1 {
                     let pred = predecessors[0];
-                    let pred_output = outputs
-                        .get(&pred.source())
-                        .cloned()
-                        .unwrap_or(Value::Null);
+                    let pred_output = outputs.get(&pred.source()).cloned().unwrap_or(Value::Null);
                     extract_path(&pred_output, pred.weight())
                 } else {
                     // Multiple predecessors — merge their outputs.
                     let mut merged = serde_json::Map::new();
                     for pred in predecessors {
                         let pred_name = &self.graph[pred.source()];
-                        let pred_output = outputs
-                            .get(&pred.source())
-                            .cloned()
-                            .unwrap_or(Value::Null);
+                        let pred_output =
+                            outputs.get(&pred.source()).cloned().unwrap_or(Value::Null);
                         let extracted = extract_path(&pred_output, pred.weight());
                         merged.insert(pred_name.clone(), extracted);
                     }
@@ -240,17 +227,12 @@ impl Pattern for CompiledComposite {
 
         // Return the root-sink node's output.
         let root_idx = self.name_to_idx.get(&self.root).ok_or_else(|| {
-            PatternError::Execution(format!(
-                "root node '{}' not found in composite",
-                self.root
-            ))
+            PatternError::Execution(format!("root node '{}' not found in composite", self.root))
         })?;
 
         outputs
             .remove(root_idx)
-            .ok_or_else(|| {
-                PatternError::Execution("root node produced no output".into())
-            })
+            .ok_or_else(|| PatternError::Execution("root node produced no output".into()))
     }
 }
 
@@ -284,11 +266,7 @@ pub fn register(reg: &PatternRegistry) {
             PatternKind::Composite
         }
 
-        async fn execute(
-            &self,
-            input: Value,
-            _ctx: PatternCtx,
-        ) -> Result<Value, PatternError> {
+        async fn execute(&self, input: Value, _ctx: PatternCtx) -> Result<Value, PatternError> {
             Err(PatternError::Execution(
                 "composite factory: use CompositeAgentPattern::build() to create instances".into(),
             ))
@@ -331,11 +309,7 @@ mod tests {
 
     #[async_trait]
     impl TaskServiceHandle for RecordingTaskService {
-        async fn submit(
-            &self,
-            agent: &str,
-            input: Value,
-        ) -> Result<Value, PatternError> {
+        async fn submit(&self, agent: &str, input: Value) -> Result<Value, PatternError> {
             self.calls.lock().unwrap().push(agent.to_string());
             Ok(json!({"from": agent, "input": input}))
         }
@@ -355,12 +329,26 @@ mod tests {
         // TC-PAT-05, EC-ARCH-005: 2-node cycle A->B->A.
         let cfg = CompositeConfig {
             nodes: vec![
-                CompositeNode { name: "A".into(), agent: "agent-a".into() },
-                CompositeNode { name: "B".into(), agent: "agent-b".into() },
+                CompositeNode {
+                    name: "A".into(),
+                    agent: "agent-a".into(),
+                },
+                CompositeNode {
+                    name: "B".into(),
+                    agent: "agent-b".into(),
+                },
             ],
             edges: vec![
-                CompositeEdge { from: "A".into(), to: "B".into(), input_path: None },
-                CompositeEdge { from: "B".into(), to: "A".into(), input_path: None },
+                CompositeEdge {
+                    from: "A".into(),
+                    to: "B".into(),
+                    input_path: None,
+                },
+                CompositeEdge {
+                    from: "B".into(),
+                    to: "A".into(),
+                    input_path: None,
+                },
             ],
             root: "B".into(),
         };
@@ -388,14 +376,35 @@ mod tests {
         // 3-node cycle A->B->C->A.
         let cfg = CompositeConfig {
             nodes: vec![
-                CompositeNode { name: "A".into(), agent: "a".into() },
-                CompositeNode { name: "B".into(), agent: "b".into() },
-                CompositeNode { name: "C".into(), agent: "c".into() },
+                CompositeNode {
+                    name: "A".into(),
+                    agent: "a".into(),
+                },
+                CompositeNode {
+                    name: "B".into(),
+                    agent: "b".into(),
+                },
+                CompositeNode {
+                    name: "C".into(),
+                    agent: "c".into(),
+                },
             ],
             edges: vec![
-                CompositeEdge { from: "A".into(), to: "B".into(), input_path: None },
-                CompositeEdge { from: "B".into(), to: "C".into(), input_path: None },
-                CompositeEdge { from: "C".into(), to: "A".into(), input_path: None },
+                CompositeEdge {
+                    from: "A".into(),
+                    to: "B".into(),
+                    input_path: None,
+                },
+                CompositeEdge {
+                    from: "B".into(),
+                    to: "C".into(),
+                    input_path: None,
+                },
+                CompositeEdge {
+                    from: "C".into(),
+                    to: "A".into(),
+                    input_path: None,
+                },
             ],
             root: "C".into(),
         };
@@ -409,16 +418,44 @@ mod tests {
         // DAG: A->B, A->C, B->D, C->D. Valid topo: A before B,C; B,C before D.
         let cfg = CompositeConfig {
             nodes: vec![
-                CompositeNode { name: "A".into(), agent: "agent-a".into() },
-                CompositeNode { name: "B".into(), agent: "agent-b".into() },
-                CompositeNode { name: "C".into(), agent: "agent-c".into() },
-                CompositeNode { name: "D".into(), agent: "agent-d".into() },
+                CompositeNode {
+                    name: "A".into(),
+                    agent: "agent-a".into(),
+                },
+                CompositeNode {
+                    name: "B".into(),
+                    agent: "agent-b".into(),
+                },
+                CompositeNode {
+                    name: "C".into(),
+                    agent: "agent-c".into(),
+                },
+                CompositeNode {
+                    name: "D".into(),
+                    agent: "agent-d".into(),
+                },
             ],
             edges: vec![
-                CompositeEdge { from: "A".into(), to: "B".into(), input_path: None },
-                CompositeEdge { from: "A".into(), to: "C".into(), input_path: None },
-                CompositeEdge { from: "B".into(), to: "D".into(), input_path: None },
-                CompositeEdge { from: "C".into(), to: "D".into(), input_path: None },
+                CompositeEdge {
+                    from: "A".into(),
+                    to: "B".into(),
+                    input_path: None,
+                },
+                CompositeEdge {
+                    from: "A".into(),
+                    to: "C".into(),
+                    input_path: None,
+                },
+                CompositeEdge {
+                    from: "B".into(),
+                    to: "D".into(),
+                    input_path: None,
+                },
+                CompositeEdge {
+                    from: "C".into(),
+                    to: "D".into(),
+                    input_path: None,
+                },
             ],
             root: "D".into(),
         };
@@ -449,16 +486,44 @@ mod tests {
         // Diamond: A->B, A->C, B->D, C->D. D receives merged B+C outputs.
         let cfg = CompositeConfig {
             nodes: vec![
-                CompositeNode { name: "A".into(), agent: "a".into() },
-                CompositeNode { name: "B".into(), agent: "b".into() },
-                CompositeNode { name: "C".into(), agent: "c".into() },
-                CompositeNode { name: "D".into(), agent: "d".into() },
+                CompositeNode {
+                    name: "A".into(),
+                    agent: "a".into(),
+                },
+                CompositeNode {
+                    name: "B".into(),
+                    agent: "b".into(),
+                },
+                CompositeNode {
+                    name: "C".into(),
+                    agent: "c".into(),
+                },
+                CompositeNode {
+                    name: "D".into(),
+                    agent: "d".into(),
+                },
             ],
             edges: vec![
-                CompositeEdge { from: "A".into(), to: "B".into(), input_path: None },
-                CompositeEdge { from: "A".into(), to: "C".into(), input_path: None },
-                CompositeEdge { from: "B".into(), to: "D".into(), input_path: None },
-                CompositeEdge { from: "C".into(), to: "D".into(), input_path: None },
+                CompositeEdge {
+                    from: "A".into(),
+                    to: "B".into(),
+                    input_path: None,
+                },
+                CompositeEdge {
+                    from: "A".into(),
+                    to: "C".into(),
+                    input_path: None,
+                },
+                CompositeEdge {
+                    from: "B".into(),
+                    to: "D".into(),
+                    input_path: None,
+                },
+                CompositeEdge {
+                    from: "C".into(),
+                    to: "D".into(),
+                    input_path: None,
+                },
             ],
             root: "D".into(),
         };
@@ -483,9 +548,10 @@ mod tests {
         // With no nodes, build should still succeed but execute would fail
         // on missing root. Use a single-node graph as the minimal case.
         let cfg = CompositeConfig {
-            nodes: vec![
-                CompositeNode { name: "A".into(), agent: "a".into() },
-            ],
+            nodes: vec![CompositeNode {
+                name: "A".into(),
+                agent: "a".into(),
+            }],
             edges: vec![],
             root: "A".into(),
         };
@@ -494,7 +560,10 @@ mod tests {
         let svc = Arc::new(RecordingTaskService::new());
         let ctx = make_ctx(svc.clone());
 
-        let result = compiled.execute(json!({"passthrough": true}), ctx).await.unwrap();
+        let result = compiled
+            .execute(json!({"passthrough": true}), ctx)
+            .await
+            .unwrap();
 
         // Single node receives input directly and returns its output.
         assert_eq!(result["input"], json!({"passthrough": true}));

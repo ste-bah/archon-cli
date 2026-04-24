@@ -61,7 +61,7 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use archon_tools::background_agents::{
-    self, AgentStatus, BackgroundAgentHandle, BACKGROUND_AGENTS,
+    self, AgentStatus, BACKGROUND_AGENTS, BackgroundAgentHandle,
 };
 
 /// Construct a minimal `BackgroundAgentHandle` whose spawned task
@@ -107,7 +107,8 @@ async fn tc_tui_subagent_01_concurrent_insert() {
         set.spawn(async move {
             let handle = dummy_background_handle();
             let id = handle.agent_id;
-            reg.register(handle).expect("concurrent register must succeed");
+            reg.register(handle)
+                .expect("concurrent register must succeed");
             id
         });
     }
@@ -125,7 +126,11 @@ async fn tc_tui_subagent_01_concurrent_insert() {
     // uuid-v4 entropy guarantee no collision in practice; catching a
     // collision here would indicate a DashMap regression).
     let unique: HashSet<Uuid> = ids.iter().copied().collect();
-    assert_eq!(unique.len(), 100, "every concurrent insert must produce a unique AgentId");
+    assert_eq!(
+        unique.len(),
+        100,
+        "every concurrent insert must produce a unique AgentId"
+    );
 
     // Assertion 3 — every id is retrievable via the registry API.
     // This is the key TC-TUI-SUBAGENT-01 invariant: DashMap did not

@@ -49,12 +49,12 @@ pub(crate) mod pipeline;
 pub(crate) mod plan;
 // TASK-P0-B.3 (#174): plan-file I/O shim (re-exports from archon_core).
 pub(crate) mod plan_file;
-pub(crate) mod remote;
 pub(crate) mod plugin;
 pub(crate) mod recall;
 pub(crate) mod registry;
 pub(crate) mod release_notes;
 pub(crate) mod reload;
+pub(crate) mod remote;
 pub(crate) mod rename;
 pub(crate) mod resume;
 // TASK-TUI-622: /review PR code-review prompt builder.
@@ -71,22 +71,22 @@ pub(crate) mod session;
 pub(crate) mod skills;
 pub(crate) mod slash;
 pub(crate) mod status;
-pub(crate) mod team;
 pub(crate) mod task;
+pub(crate) mod team;
 // TASK-TUI-623: /tag session tag toggle.
 pub(crate) mod tag;
 // TASK-TUI-621: hidden stub `/teleport` command (no is_visible() on
 // trait — visibility handled by omission from archon-tui commands.rs).
 pub(crate) mod teleport;
-pub(crate) mod theme;
-pub(crate) mod thinking;
-pub(crate) mod vim;
-pub(crate) mod tui_helpers;
 #[cfg(test)]
 pub(crate) mod test_support;
+pub(crate) mod theme;
+pub(crate) mod thinking;
+pub(crate) mod tui_helpers;
 pub(crate) mod update;
 pub(crate) mod usage;
 pub(crate) mod utils;
+pub(crate) mod vim;
 pub(crate) mod voice;
 pub(crate) mod web;
 
@@ -118,4 +118,4 @@ pub(crate) use registry::CommandHandler as SlashCommand;
 // from dispatcher.rs; the re-export just widens the surface to match
 // the spec's "mod.rs re-exports the 5 parser types" wiring check.
 #[allow(unused_imports)]
-pub(crate) use parser::{suggest, Arg, CommandParser, ParseError, ParsedCommand};
+pub(crate) use parser::{Arg, CommandParser, ParseError, ParsedCommand, suggest};

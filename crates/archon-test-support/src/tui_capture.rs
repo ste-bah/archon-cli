@@ -55,14 +55,20 @@ pub struct FrameBuffer {
 
 impl FrameBuffer {
     pub fn new(width: u16, height: u16) -> Self {
-        let cells = (0..height)
-            .map(|_| vec![' '; width as usize])
-            .collect();
-        Self { width, height, cells }
+        let cells = (0..height).map(|_| vec![' '; width as usize]).collect();
+        Self {
+            width,
+            height,
+            cells,
+        }
     }
 
-    pub fn width(&self) -> u16 { self.width }
-    pub fn height(&self) -> u16 { self.height }
+    pub fn width(&self) -> u16 {
+        self.width
+    }
+    pub fn height(&self) -> u16 {
+        self.height
+    }
 
     /// Write a single char at `(x, y)`. Out-of-bounds writes are
     /// silently dropped — matches ratatui semantics.
@@ -78,7 +84,11 @@ impl FrameBuffer {
     /// locales. Truncates at row end.
     pub fn write_str(&mut self, x: u16, y: u16, s: &str) {
         for (i, ch) in s.chars().enumerate() {
-            let c = if ch.is_ascii() && !ch.is_control() { ch } else { '?' };
+            let c = if ch.is_ascii() && !ch.is_control() {
+                ch
+            } else {
+                '?'
+            };
             self.set(x + i as u16, y, c);
         }
     }
@@ -86,9 +96,7 @@ impl FrameBuffer {
     /// Serialize to a normalized, insta-safe string: each row joined
     /// with `\n`, trailing whitespace stripped per row, final `\n`.
     pub fn to_normalized_string(&self) -> String {
-        let mut out = String::with_capacity(
-            (self.width as usize + 1) * self.height as usize,
-        );
+        let mut out = String::with_capacity((self.width as usize + 1) * self.height as usize);
         for row in &self.cells {
             let line: String = row.iter().collect();
             let _ = write!(out, "{}\n", line.trim_end());
@@ -100,11 +108,7 @@ impl FrameBuffer {
 /// Drive one tick + render cycle and return the normalized frame
 /// string. This is the entry point every phase-4 snapshot test will
 /// call.
-pub fn render_frame_to_string<A: AppLike>(
-    app: &mut A,
-    width: u16,
-    height: u16,
-) -> String {
+pub fn render_frame_to_string<A: AppLike>(app: &mut A, width: u16, height: u16) -> String {
     let mut buf = FrameBuffer::new(width, height);
     app.tick();
     app.render_to_buffer(&mut buf);

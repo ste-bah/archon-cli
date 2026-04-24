@@ -176,9 +176,7 @@ pub(crate) struct CopySnapshot {
 /// resolves to `/copy`. All other commands leave
 /// `copy_snapshot = None` to avoid unnecessary lock traffic on
 /// `last_assistant_response`.
-pub(crate) async fn build_copy_snapshot(
-    slash_ctx: &SlashCommandContext,
-) -> CopySnapshot {
+pub(crate) async fn build_copy_snapshot(slash_ctx: &SlashCommandContext) -> CopySnapshot {
     let guard = slash_ctx.last_assistant_response.lock().await;
     let last_response = guard.clone();
     drop(guard); // Guard dropped before return (explicit for clarity).
@@ -369,11 +367,7 @@ impl Default for CopyHandler {
 }
 
 impl CommandHandler for CopyHandler {
-    fn execute(
-        &self,
-        ctx: &mut CommandContext,
-        _args: &[String],
-    ) -> anyhow::Result<()> {
+    fn execute(&self, ctx: &mut CommandContext, _args: &[String]) -> anyhow::Result<()> {
         // R4: args are IGNORED. The shipped arm matched `/copy`
         // literally with no strip_prefix — trailing tokens were
         // silently discarded. Preserved here via the `_args`
@@ -504,9 +498,7 @@ mod tests {
     /// optional [`CopySnapshot`]. All other optional fields stay
     /// `None`. Mirrors the make_ctx fixtures in permissions.rs /
     /// effort.rs / add_dir.rs.
-    fn make_ctx(
-        snapshot: Option<CopySnapshot>,
-    ) -> (CommandContext, mpsc::Receiver<TuiEvent>) {
+    fn make_ctx(snapshot: Option<CopySnapshot>) -> (CommandContext, mpsc::Receiver<TuiEvent>) {
         // TASK-AGS-POST-6-SHARED-FIXTURES-V2: migrated to CtxBuilder.
         crate::command::test_support::CtxBuilder::new()
             .with_copy_snapshot_opt(snapshot)
@@ -644,8 +636,7 @@ mod tests {
             1,
             "ok-tool branch must emit exactly one event; got: {events:?}"
         );
-        let expected =
-            format!("\nCopied {chars} characters to clipboard.\n");
+        let expected = format!("\nCopied {chars} characters to clipboard.\n");
         match &events[0] {
             TuiEvent::TextDelta(text) => {
                 assert_eq!(
@@ -655,9 +646,7 @@ mod tests {
                      byte-for-byte"
                 );
             }
-            other => panic!(
-                "ok-tool must emit TuiEvent::TextDelta, got: {other:?}"
-            ),
+            other => panic!("ok-tool must emit TuiEvent::TextDelta, got: {other:?}"),
         }
 
         // Runner received the exact response bytes.
@@ -702,9 +691,7 @@ mod tests {
                      byte-for-byte"
                 );
             }
-            other => panic!(
-                "no-tool must emit TuiEvent::Error, got: {other:?}"
-            ),
+            other => panic!("no-tool must emit TuiEvent::Error, got: {other:?}"),
         }
 
         // Runner must NOT have been asked to copy — handler skips
@@ -755,9 +742,7 @@ mod tests {
                      string via `copied == false`)"
                 );
             }
-            other => panic!(
-                "spawn-failed must emit TuiEvent::Error, got: {other:?}"
-            ),
+            other => panic!("spawn-failed must emit TuiEvent::Error, got: {other:?}"),
         }
 
         // Runner SHOULD have been asked (detect_tool returned real
@@ -804,10 +789,7 @@ mod tests {
         // clipboard binaries on the test host.
         let runner = Arc::new(MockClipboardRunner::new("none", false));
         let mut builder = RegistryBuilder::new();
-        builder.insert_primary(
-            "copy",
-            Arc::new(CopyHandler::with_runner(runner.clone())),
-        );
+        builder.insert_primary("copy", Arc::new(CopyHandler::with_runner(runner.clone())));
         let registry = Arc::new(builder.build());
         let dispatcher = Dispatcher::new(registry);
 
@@ -878,10 +860,7 @@ mod tests {
         let chars = response.len();
         let runner = Arc::new(MockClipboardRunner::new("xclip", true));
         let mut builder = RegistryBuilder::new();
-        builder.insert_primary(
-            "copy",
-            Arc::new(CopyHandler::with_runner(runner.clone())),
-        );
+        builder.insert_primary("copy", Arc::new(CopyHandler::with_runner(runner.clone())));
         let registry = Arc::new(builder.build());
         let dispatcher = Dispatcher::new(registry);
 
@@ -919,8 +898,7 @@ mod tests {
             "end-to-end `/copy` with ok-tool snapshot must emit a \
              TuiEvent::TextDelta",
         );
-        let expected =
-            format!("\nCopied {chars} characters to clipboard.\n");
+        let expected = format!("\nCopied {chars} characters to clipboard.\n");
         assert_eq!(
             text, expected,
             "end-to-end `/copy` ok-tool TextDelta must match shipped \

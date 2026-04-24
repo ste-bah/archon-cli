@@ -262,9 +262,7 @@ pub(crate) struct DoctorSnapshot {
 /// resolves to `/doctor`. All other commands leave
 /// `doctor_snapshot = None` to avoid unnecessary lock traffic on
 /// `mcp_manager` / `model_override_shared`.
-pub(crate) async fn build_doctor_snapshot(
-    slash_ctx: &SlashCommandContext,
-) -> DoctorSnapshot {
+pub(crate) async fn build_doctor_snapshot(slash_ctx: &SlashCommandContext) -> DoctorSnapshot {
     DoctorSnapshot {
         text: build_doctor_text(slash_ctx).await,
     }
@@ -304,11 +302,7 @@ impl Default for DoctorHandler {
 }
 
 impl CommandHandler for DoctorHandler {
-    fn execute(
-        &self,
-        ctx: &mut CommandContext,
-        _args: &[String],
-    ) -> anyhow::Result<()> {
+    fn execute(&self, ctx: &mut CommandContext, _args: &[String]) -> anyhow::Result<()> {
         // R4: args are IGNORED. The shipped delegate took `ctx` but no
         // args; the legacy match arm at slash.rs:230-234 matched
         // `/doctor` literally with no strip_prefix — trailing tokens
@@ -360,9 +354,7 @@ mod tests {
     /// optional [`DoctorSnapshot`]. All other optional fields stay
     /// `None`. Mirrors the make_ctx fixtures in copy.rs / permissions.rs /
     /// effort.rs / add_dir.rs.
-    fn make_ctx(
-        snapshot: Option<DoctorSnapshot>,
-    ) -> (CommandContext, mpsc::Receiver<TuiEvent>) {
+    fn make_ctx(snapshot: Option<DoctorSnapshot>) -> (CommandContext, mpsc::Receiver<TuiEvent>) {
         // TASK-AGS-POST-6-SHARED-FIXTURES-V2: migrated to CtxBuilder.
         crate::command::test_support::CtxBuilder::new()
             .with_doctor_snapshot_opt(snapshot)
@@ -463,9 +455,7 @@ mod tests {
                      byte-for-byte"
                 );
             }
-            other => panic!(
-                "happy path must emit TuiEvent::TextDelta, got: {other:?}"
-            ),
+            other => panic!("happy path must emit TuiEvent::TextDelta, got: {other:?}"),
         }
     }
 

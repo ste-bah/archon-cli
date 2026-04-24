@@ -2,9 +2,9 @@
 
 use std::collections::HashMap;
 
+use petgraph::Direction;
 use petgraph::algo::{tarjan_scc, toposort};
 use petgraph::graphmap::DiGraphMap;
-use petgraph::Direction;
 
 use crate::error::PipelineError;
 use crate::spec::PipelineSpec;
@@ -32,11 +32,7 @@ impl DagBuilder {
     ///   cycle (including self-loops).
     pub fn build(spec: &PipelineSpec) -> Result<Dag, PipelineError> {
         // Collect all known step IDs for fast lookup.
-        let known_ids: HashMap<&str, ()> = spec
-            .steps
-            .iter()
-            .map(|s| (s.id.as_str(), ()))
-            .collect();
+        let known_ids: HashMap<&str, ()> = spec.steps.iter().map(|s| (s.id.as_str(), ())).collect();
 
         // ----- 1. Build the directed graph -----
         let mut graph = DiGraphMap::<&str, ()>::new();
@@ -95,10 +91,7 @@ impl DagBuilder {
             }
         }
 
-        Ok(Dag {
-            levels,
-            step_index,
-        })
+        Ok(Dag { levels, step_index })
     }
 
     /// Assign levels using Kahn's algorithm.
@@ -153,9 +146,7 @@ impl DagBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::spec::{
-        BackoffKind, OnFailurePolicy, PipelineSpec, RetrySpec, StepSpec,
-    };
+    use crate::spec::{BackoffKind, OnFailurePolicy, PipelineSpec, RetrySpec, StepSpec};
 
     /// Helper to build a [`PipelineSpec`] from `(id, agent, depends_on)` triples.
     fn make_spec(steps: Vec<(&str, &str, Vec<&str>)>) -> PipelineSpec {
@@ -193,10 +184,7 @@ mod tests {
             ("C", "agent", vec!["B"]),
         ]);
         let dag = DagBuilder::build(&spec).expect("should succeed");
-        assert_eq!(
-            dag.levels,
-            vec![vec!["A"], vec!["B"], vec!["C"]],
-        );
+        assert_eq!(dag.levels, vec![vec!["A"], vec!["B"], vec!["C"]],);
         assert_eq!(dag.step_index["A"], 0);
         assert_eq!(dag.step_index["B"], 1);
         assert_eq!(dag.step_index["C"], 2);
@@ -216,10 +204,7 @@ mod tests {
             ("D", "agent", vec!["B", "C"]),
         ]);
         let dag = DagBuilder::build(&spec).expect("should succeed");
-        assert_eq!(
-            dag.levels,
-            vec![vec!["A"], vec!["B", "C"], vec!["D"]],
-        );
+        assert_eq!(dag.levels, vec![vec!["A"], vec!["B", "C"], vec!["D"]],);
         assert_eq!(dag.step_index["A"], 0);
         assert_eq!(dag.step_index["B"], 1);
         assert_eq!(dag.step_index["C"], 1);
@@ -243,10 +228,7 @@ mod tests {
     #[test]
     fn cycle_rejected() {
         // A depends_on B, B depends_on A
-        let spec = make_spec(vec![
-            ("A", "agent", vec!["B"]),
-            ("B", "agent", vec!["A"]),
-        ]);
+        let spec = make_spec(vec![("A", "agent", vec!["B"]), ("B", "agent", vec!["A"])]);
         let err = DagBuilder::build(&spec).expect_err("should detect cycle");
         match err {
             PipelineError::CycleDetected(ids) => {

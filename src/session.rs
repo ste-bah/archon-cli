@@ -1,9 +1,12 @@
 //! Print-mode session runner. Extracted from main.rs.
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
+use crate::cli_args::Cli;
+use crate::command::slash::{handle_diff_command, handle_slash_command};
+use crate::slash_context::SlashCommandContext;
 use anyhow::Result;
 use archon_consciousness::assembler::{AssemblyInput, BudgetConfig, SystemPromptAssembler};
 use archon_consciousness::defaults::load_configured_defaults;
@@ -26,16 +29,14 @@ use archon_llm::auth::resolve_auth_with_keys;
 use archon_llm::effort::{self, EffortLevel, EffortState};
 use archon_llm::fast_mode::FastModeState;
 use archon_llm::identity::{
-    get_or_create_device_id, resolve_and_validate_betas, resolve_betas, IdentityMode, IdentityProvider,
+    IdentityMode, IdentityProvider, get_or_create_device_id, resolve_and_validate_betas,
+    resolve_betas,
 };
 use archon_mcp::lifecycle::McpServerManager;
 use archon_memory::{MemoryAccess, MemoryGraph, MemoryTrait};
 use archon_permissions::auto::{AutoModeConfig, AutoModeEvaluator};
 use archon_tui::app::TuiEvent;
 use archon_tui::observability;
-use crate::cli_args::Cli;
-use crate::command::slash::{handle_slash_command, handle_diff_command};
-use crate::slash_context::SlashCommandContext;
 
 use crate::runtime::llm::build_llm_provider;
 use crate::setup::strip_cache_control_if_disabled;
@@ -471,7 +472,8 @@ pub(crate) async fn run_print_mode_session(
         }
     }
 
-    let (agent_event_tx, agent_event_rx) = tokio::sync::mpsc::unbounded_channel::<TimestampedEvent>();
+    let (agent_event_tx, agent_event_rx) =
+        tokio::sync::mpsc::unbounded_channel::<TimestampedEvent>();
     let provider = build_llm_provider(&config.llm, api_client);
     tracing::info!("LLM provider: {}", provider.name());
 
@@ -1775,79 +1777,79 @@ pub(crate) async fn run_interactive_session(
             let _ = metrics.warn_if_backlog_over(10_000);
             // Forward coalesced events to the TUI.
             while let Some(event) = coalescer.pop() {
-            let tui_event = match event {
-                AgentEvent::TextDelta(text) => {
-                    // Track last assistant response for /copy
-                    let mut resp = last_response_for_fwd.lock().await;
-                    resp.push_str(&text);
-                    TuiEvent::TextDelta(text)
-                }
-                // Always forward thinking deltas so the timer is accurate.
-                // The TUI decides whether to display or accumulate the text.
-                AgentEvent::ThinkingDelta(text) => TuiEvent::ThinkingDelta(text),
-                AgentEvent::ToolCallStarted { name, id } => TuiEvent::ToolStart { name, id },
-                AgentEvent::ToolCallComplete { name, id, result } => TuiEvent::ToolComplete {
-                    name,
-                    id,
-                    success: !result.is_error,
-                    output: result.content,
-                },
-                AgentEvent::TurnComplete {
-                    input_tokens,
-                    output_tokens,
-                } => {
-                    // Freeze last_assistant_response (new turn will start fresh)
-                    // Don't clear here — /copy should get the completed response
-                    // Read cumulative tokens from shared session_stats (resets on /clear)
-                    let estimated_cost = {
-                        let stats = session_stats_for_fwd.lock().await;
-                        (stats.input_tokens as f64 * 3.0 + stats.output_tokens as f64 * 15.0)
-                            / 1_000_000.0
-                    };
-
-                    // Check cost alerts (CLI-122)
-                    match cost_alert_state.check_cost(estimated_cost, &config_cost) {
-                        CostAlertAction::Warn(msg) => {
-                            let _ = tui_tx
-                                .send(TuiEvent::Error(format!("COST WARNING: {msg}")))
-                                .await;
-                        }
-                        CostAlertAction::HardLimitPause(msg) => {
-                            let _ = tui_tx
-                                .send(TuiEvent::Error(format!("COST LIMIT: {msg}")))
-                                .await;
-                        }
-                        CostAlertAction::None => {}
+                let tui_event = match event {
+                    AgentEvent::TextDelta(text) => {
+                        // Track last assistant response for /copy
+                        let mut resp = last_response_for_fwd.lock().await;
+                        resp.push_str(&text);
+                        TuiEvent::TextDelta(text)
                     }
-
-                    // Update session store with cumulative usage
-                    {
-                        let stats = session_stats_for_fwd.lock().await;
-                        let _ = session_store_for_fwd.update_usage(
-                            &session_id_fwd,
-                            stats.input_tokens + stats.output_tokens,
-                            estimated_cost,
-                        );
-                    }
-
-                    TuiEvent::TurnComplete {
+                    // Always forward thinking deltas so the timer is accurate.
+                    // The TUI decides whether to display or accumulate the text.
+                    AgentEvent::ThinkingDelta(text) => TuiEvent::ThinkingDelta(text),
+                    AgentEvent::ToolCallStarted { name, id } => TuiEvent::ToolStart { name, id },
+                    AgentEvent::ToolCallComplete { name, id, result } => TuiEvent::ToolComplete {
+                        name,
+                        id,
+                        success: !result.is_error,
+                        output: result.content,
+                    },
+                    AgentEvent::TurnComplete {
                         input_tokens,
                         output_tokens,
+                    } => {
+                        // Freeze last_assistant_response (new turn will start fresh)
+                        // Don't clear here — /copy should get the completed response
+                        // Read cumulative tokens from shared session_stats (resets on /clear)
+                        let estimated_cost = {
+                            let stats = session_stats_for_fwd.lock().await;
+                            (stats.input_tokens as f64 * 3.0 + stats.output_tokens as f64 * 15.0)
+                                / 1_000_000.0
+                        };
+
+                        // Check cost alerts (CLI-122)
+                        match cost_alert_state.check_cost(estimated_cost, &config_cost) {
+                            CostAlertAction::Warn(msg) => {
+                                let _ = tui_tx
+                                    .send(TuiEvent::Error(format!("COST WARNING: {msg}")))
+                                    .await;
+                            }
+                            CostAlertAction::HardLimitPause(msg) => {
+                                let _ = tui_tx
+                                    .send(TuiEvent::Error(format!("COST LIMIT: {msg}")))
+                                    .await;
+                            }
+                            CostAlertAction::None => {}
+                        }
+
+                        // Update session store with cumulative usage
+                        {
+                            let stats = session_stats_for_fwd.lock().await;
+                            let _ = session_store_for_fwd.update_usage(
+                                &session_id_fwd,
+                                stats.input_tokens + stats.output_tokens,
+                                estimated_cost,
+                            );
+                        }
+
+                        TuiEvent::TurnComplete {
+                            input_tokens,
+                            output_tokens,
+                        }
                     }
+                    AgentEvent::Error(msg) => TuiEvent::Error(msg),
+                    AgentEvent::SessionComplete => TuiEvent::Done,
+                    AgentEvent::PermissionRequired { tool, description } => {
+                        TuiEvent::PermissionPrompt { tool, description }
+                    }
+                    AgentEvent::PermissionGranted { .. } | AgentEvent::PermissionDenied { .. } => {
+                        continue;
+                    }
+                    _ => continue,
+                };
+                if tui_tx.send(tui_event).await.is_err() {
+                    return;
                 }
-                AgentEvent::Error(msg) => TuiEvent::Error(msg),
-                AgentEvent::SessionComplete => TuiEvent::Done,
-                AgentEvent::PermissionRequired { tool, description } => {
-                    TuiEvent::PermissionPrompt { tool, description }
-                }
-                AgentEvent::PermissionGranted { .. } | AgentEvent::PermissionDenied { .. } => {
-                    continue;
-                }
-                _ => continue,
-            };
-            if tui_tx.send(tui_event).await.is_err() {
-                return;
-            }
             }
         }
     });
@@ -1877,10 +1879,9 @@ pub(crate) async fn run_interactive_session(
     // PATH A hybrid — dispatcher runs as a gate at the top of
     // `handle_slash_command` while the legacy inline match continues to
     // execute the actual command bodies.
-    let dispatcher: std::sync::Arc<crate::command::dispatcher::Dispatcher> =
-        std::sync::Arc::new(crate::command::dispatcher::Dispatcher::new(
-            std::sync::Arc::clone(&registry),
-        ));
+    let dispatcher: std::sync::Arc<crate::command::dispatcher::Dispatcher> = std::sync::Arc::new(
+        crate::command::dispatcher::Dispatcher::new(std::sync::Arc::clone(&registry)),
+    );
 
     let mut cmd_ctx = SlashCommandContext {
         fast_mode_shared: Arc::clone(&fast_mode_shared),
@@ -1988,7 +1989,10 @@ pub(crate) async fn run_interactive_session(
                 "SessionStart hook returned {} watch paths",
                 session_start_agg.watch_paths.len()
             );
-            agent.lock().await.add_watch_paths(session_start_agg.watch_paths);
+            agent
+                .lock()
+                .await
+                .add_watch_paths(session_start_agg.watch_paths);
         }
 
         // CRIT-06: Fire InstructionsLoaded hook after session starts and instructions are loaded
@@ -2188,9 +2192,7 @@ pub(crate) async fn run_interactive_session(
                                 "\n[rewind: invalid index '{idx_str}']\n"
                             )))
                             .await;
-                        let _ = input_tui_tx
-                            .send(TuiEvent::SlashCommandComplete)
-                            .await;
+                        let _ = input_tui_tx.send(TuiEvent::SlashCommandComplete).await;
                         continue;
                     }
                 };
@@ -2199,17 +2201,11 @@ pub(crate) async fn run_interactive_session(
                 let db_path = archon_session::storage::default_db_path();
                 match archon_session::storage::SessionStore::open(&db_path) {
                     Ok(store) => {
-                        if let Err(e) =
-                            store.truncate_messages_after(&target_session_id, idx)
-                        {
+                        if let Err(e) = store.truncate_messages_after(&target_session_id, idx) {
                             let _ = input_tui_tx
-                                .send(TuiEvent::Error(format!(
-                                    "Failed to truncate session: {e}"
-                                )))
+                                .send(TuiEvent::Error(format!("Failed to truncate session: {e}")))
                                 .await;
-                            let _ = input_tui_tx
-                                .send(TuiEvent::SlashCommandComplete)
-                                .await;
+                            let _ = input_tui_tx.send(TuiEvent::SlashCommandComplete).await;
                             continue;
                         }
 
@@ -2252,9 +2248,7 @@ pub(crate) async fn run_interactive_session(
                                         _ => "",
                                     };
                                     let _ = input_tui_tx
-                                        .send(TuiEvent::TextDelta(format!(
-                                            "{label}{content}\n\n"
-                                        )))
+                                        .send(TuiEvent::TextDelta(format!("{label}{content}\n\n")))
                                         .await;
                                 }
                                 let _ = input_tui_tx
@@ -2299,9 +2293,7 @@ pub(crate) async fn run_interactive_session(
                         tracing::debug!("Ctrl+C: no in-flight turn to cancel");
                     }
                     archon_tui::CancelOutcome::Aborted { elapsed_ms } => {
-                        tracing::info!(
-                            "Ctrl+C: aborted in-flight turn (elapsed_ms={elapsed_ms})"
-                        );
+                        tracing::info!("Ctrl+C: aborted in-flight turn (elapsed_ms={elapsed_ms})");
                     }
                 }
                 continue;
@@ -2505,7 +2497,10 @@ pub(crate) async fn run_interactive_session(
                             "SessionStart hook returned {} watch paths",
                             clear_start_agg.watch_paths.len()
                         );
-                        agent.lock().await.add_watch_paths(clear_start_agg.watch_paths);
+                        agent
+                            .lock()
+                            .await
+                            .add_watch_paths(clear_start_agg.watch_paths);
                     }
                     let _ = input_tui_tx
                         .send(TuiEvent::TextDelta(
@@ -2534,7 +2529,10 @@ pub(crate) async fn run_interactive_session(
                     // Spawn background re-discovery using a temporary client
                     let (refresh_auth, refresh_identity) = {
                         let guard = agent.lock().await;
-                        match (guard.auth_provider().cloned(), guard.identity_provider().cloned()) {
+                        match (
+                            guard.auth_provider().cloned(),
+                            guard.identity_provider().cloned(),
+                        ) {
                             (Some(a), Some(i)) => (a, i),
                             _ => {
                                 drop(guard);

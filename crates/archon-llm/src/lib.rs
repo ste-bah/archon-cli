@@ -26,9 +26,7 @@ pub use config::LlmConfig;
 
 // TASK-AGS-700: crate-root re-exports for the Phase 7 descriptor scaffolding.
 // Kept next to `pub mod providers;` so the surface stays discoverable.
-pub use providers::{
-    AuthFlavor, CompatKind, ProviderDescriptor, ProviderFeatures, ProviderQuirks,
-};
+pub use providers::{AuthFlavor, CompatKind, ProviderDescriptor, ProviderFeatures, ProviderQuirks};
 
 // TASK-AGS-701: re-export ApiKey at crate root so every Phase 7 provider
 // impl can `use archon_llm::ApiKey` without reaching into `secrets::`.
@@ -36,7 +34,7 @@ pub use secrets::ApiKey;
 
 // TASK-AGS-708: surface RetryProvider/RetryPolicy at the crate root so
 // `build_llm_provider` consumers don't need to reach into `retry::`.
-pub use retry::{classify as classify_retry, RetryDecision, RetryPolicy, RetryProvider};
+pub use retry::{RetryDecision, RetryPolicy, RetryProvider, classify as classify_retry};
 
 // TASK-AGS-709: surface ActiveProvider so all new call sites (and
 // TASK-AGS-710's archon-cli main.rs rework) can `use archon_llm::ActiveProvider`.

@@ -1,5 +1,5 @@
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -11,8 +11,7 @@ use tracing::instrument;
 use crate::tasks::events::EventBus;
 use crate::tasks::metrics::MetricsRegistry;
 use crate::tasks::models::{
-    ResourceSample, Task, TaskError, TaskEvent, TaskEventKind, TaskId,
-    TaskResultRef, TaskState,
+    ResourceSample, Task, TaskError, TaskEvent, TaskEventKind, TaskId, TaskResultRef, TaskState,
 };
 use crate::tasks::queue::TaskQueue;
 use crate::tasks::store::TaskStateStore;
@@ -258,16 +257,12 @@ impl TaskExecutor {
                 // Get current process stats.
                 let pid = sysinfo::get_current_pid();
                 if let Ok(pid) = pid {
-                    sys.refresh_processes(
-                        sysinfo::ProcessesToUpdate::Some(&[pid]),
-                        true,
-                    );
+                    sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[pid]), true);
                     if let Some(proc_info) = sys.process(pid) {
                         let cpu_ms = (proc_info.cpu_usage() * 10.0) as u64;
                         let rss_bytes = proc_info.memory();
                         if let Some(mut task) = sampler_tasks.get_mut(&sampler_task_id) {
-                            task.resource_usage =
-                                Some(ResourceSample { cpu_ms, rss_bytes });
+                            task.resource_usage = Some(ResourceSample { cpu_ms, rss_bytes });
                         }
                     }
                 }

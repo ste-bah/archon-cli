@@ -167,11 +167,7 @@ impl Default for RulesHandler {
 }
 
 impl CommandHandler for RulesHandler {
-    fn execute(
-        &self,
-        ctx: &mut CommandContext,
-        args: &[String],
-    ) -> anyhow::Result<()> {
+    fn execute(&self, ctx: &mut CommandContext, args: &[String]) -> anyhow::Result<()> {
         // R3: join multi-token args with " " and trim. Byte-equivalent
         // to the shipped `s.strip_prefix("/rules").unwrap_or("").trim()`
         // for all inputs — zero-arg `/rules` collapses to "" (list
@@ -204,13 +200,10 @@ impl CommandHandler for RulesHandler {
             // slash.rs:595-618.
             match engine.get_rules_sorted() {
                 Ok(rules) if rules.is_empty() => {
-                    ctx.emit(TuiEvent::TextDelta(
-                        "\nNo behavioral rules.\n".into(),
-                    ));
+                    ctx.emit(TuiEvent::TextDelta("\nNo behavioral rules.\n".into()));
                 }
                 Ok(rules) => {
-                    let mut out =
-                        format!("\n{} behavioral rules:\n\n", rules.len());
+                    let mut out = format!("\n{} behavioral rules:\n\n", rules.len());
                     for r in &rules {
                         let id_short = &r.id[..8.min(r.id.len())];
                         out.push_str(&format!(
@@ -221,9 +214,7 @@ impl CommandHandler for RulesHandler {
                     ctx.emit(TuiEvent::TextDelta(out));
                 }
                 Err(e) => {
-                    ctx.emit(TuiEvent::Error(
-                        format!("rules list failed: {e}"),
-                    ));
+                    ctx.emit(TuiEvent::Error(format!("rules list failed: {e}")));
                 }
             }
         } else if let Some(rest) = args_str.strip_prefix("edit ") {
@@ -232,46 +223,31 @@ impl CommandHandler for RulesHandler {
             // of shipped format strings at slash.rs:619-663.
             let parts: Vec<&str> = rest.splitn(2, ' ').collect();
             if parts.len() < 2 {
-                ctx.emit(TuiEvent::Error(
-                    "Usage: /rules edit <id> <new text>".into(),
-                ));
+                ctx.emit(TuiEvent::Error("Usage: /rules edit <id> <new text>".into()));
             } else {
                 let id_prefix = parts[0];
                 let new_text = parts[1];
                 match engine.get_rules_sorted() {
                     Ok(rules) => {
-                        if let Some(rule) = rules
-                            .iter()
-                            .find(|r| r.id.starts_with(id_prefix))
-                        {
+                        if let Some(rule) = rules.iter().find(|r| r.id.starts_with(id_prefix)) {
                             match engine.update_rule(&rule.id, new_text) {
                                 Ok(()) => {
-                                    ctx.emit(
-                                        TuiEvent::TextDelta(format!(
-                                            "\nRule updated: {new_text}\n"
-                                        )),
-                                    );
+                                    ctx.emit(TuiEvent::TextDelta(format!(
+                                        "\nRule updated: {new_text}\n"
+                                    )));
                                 }
                                 Err(e) => {
-                                    ctx.emit(
-                                        TuiEvent::Error(format!(
-                                            "update_rule failed: {e}"
-                                        )),
-                                    );
+                                    ctx.emit(TuiEvent::Error(format!("update_rule failed: {e}")));
                                 }
                             }
                         } else {
-                            ctx.emit(TuiEvent::Error(
-                                format!(
-                                    "No rule matching ID prefix '{id_prefix}'"
-                                ),
-                            ));
+                            ctx.emit(TuiEvent::Error(format!(
+                                "No rule matching ID prefix '{id_prefix}'"
+                            )));
                         }
                     }
                     Err(e) => {
-                        ctx.emit(TuiEvent::Error(
-                            format!("rules lookup failed: {e}"),
-                        ));
+                        ctx.emit(TuiEvent::Error(format!("rules lookup failed: {e}")));
                     }
                 }
             }
@@ -282,39 +258,26 @@ impl CommandHandler for RulesHandler {
             let id_prefix = id_prefix.trim();
             match engine.get_rules_sorted() {
                 Ok(rules) => {
-                    if let Some(rule) = rules
-                        .iter()
-                        .find(|r| r.id.starts_with(id_prefix))
-                    {
+                    if let Some(rule) = rules.iter().find(|r| r.id.starts_with(id_prefix)) {
                         match engine.remove_rule(&rule.id) {
                             Ok(()) => {
-                                ctx.emit(
-                                    TuiEvent::TextDelta(format!(
-                                        "\nRule removed: {}\n",
-                                        rule.text
-                                    )),
-                                );
+                                ctx.emit(TuiEvent::TextDelta(format!(
+                                    "\nRule removed: {}\n",
+                                    rule.text
+                                )));
                             }
                             Err(e) => {
-                                ctx.emit(
-                                    TuiEvent::Error(format!(
-                                        "remove_rule failed: {e}"
-                                    )),
-                                );
+                                ctx.emit(TuiEvent::Error(format!("remove_rule failed: {e}")));
                             }
                         }
                     } else {
-                        ctx.emit(TuiEvent::Error(
-                            format!(
-                                "No rule matching ID prefix '{id_prefix}'"
-                            ),
-                        ));
+                        ctx.emit(TuiEvent::Error(format!(
+                            "No rule matching ID prefix '{id_prefix}'"
+                        )));
                     }
                 }
                 Err(e) => {
-                    ctx.emit(TuiEvent::Error(
-                        format!("rules lookup failed: {e}"),
-                    ));
+                    ctx.emit(TuiEvent::Error(format!("rules lookup failed: {e}")));
                 }
             }
         } else {
@@ -322,8 +285,7 @@ impl CommandHandler for RulesHandler {
             // Byte-for-byte preservation of shipped format string at
             // slash.rs:699-703.
             ctx.emit(TuiEvent::Error(
-                "Usage: /rules [list | edit <id> <text> | remove <id>]"
-                    .into(),
+                "Usage: /rules [list | edit <id> <text> | remove <id>]".into(),
             ));
         }
         Ok(())
@@ -380,10 +342,7 @@ mod tests {
     /// `crates/archon-consciousness/src/rules.rs:334-337`
     /// (`make_engine` helper) for the upstream pattern.
     fn make_graph() -> Arc<MemoryGraph> {
-        Arc::new(
-            MemoryGraph::in_memory()
-                .expect("in-memory graph should succeed"),
-        )
+        Arc::new(MemoryGraph::in_memory().expect("in-memory graph should succeed"))
     }
 
     /// R4: description is byte-identical to the `declare_handler!`
@@ -476,12 +435,8 @@ mod tests {
             let r_b = engine
                 .add_rule("rule beta", RuleSource::SystemDefault)
                 .expect("seed rule b");
-            graph
-                .update_importance(&r_a.id, 80.0)
-                .expect("set score a");
-            graph
-                .update_importance(&r_b.id, 30.0)
-                .expect("set score b");
+            graph.update_importance(&r_a.id, 80.0).expect("set score a");
+            graph.update_importance(&r_b.id, 30.0).expect("set score b");
         }
         // Snapshot the sorted rules for byte-exact assertion.
         let sorted = RulesEngine::new(graph.as_ref())
@@ -489,8 +444,7 @@ mod tests {
             .expect("sorted list");
         assert_eq!(sorted.len(), 2, "seeded 2 rules");
         let expected = {
-            let mut out =
-                format!("\n{} behavioral rules:\n\n", sorted.len());
+            let mut out = format!("\n{} behavioral rules:\n\n", sorted.len());
             for r in &sorted {
                 let id_short = &r.id[..8.min(r.id.len())];
                 out.push_str(&format!(
@@ -510,8 +464,7 @@ mod tests {
             "list non-empty must return Ok(()), got: {res:?}"
         );
 
-        let ev =
-            rx.try_recv().expect("formatted TextDelta must be emitted");
+        let ev = rx.try_recv().expect("formatted TextDelta must be emitted");
         match ev {
             TuiEvent::TextDelta(text) => {
                 assert_eq!(
@@ -564,10 +517,7 @@ mod tests {
             "text".to_string(),
         ];
         let res = h.execute(&mut ctx, &args);
-        assert!(
-            res.is_ok(),
-            "edit success must return Ok(()), got: {res:?}"
-        );
+        assert!(res.is_ok(), "edit success must return Ok(()), got: {res:?}");
 
         let ev = rx.try_recv().expect("TextDelta must be emitted");
         match ev {

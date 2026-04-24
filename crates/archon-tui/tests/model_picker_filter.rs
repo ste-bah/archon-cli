@@ -44,10 +44,7 @@ fn set_query_filters_list() {
 #[test]
 fn cursor_wraps() {
     let mut picker = ModelPicker::new();
-    picker.set_providers(vec![
-        entry("a", "b"),
-        entry("c", "d"),
-    ]);
+    picker.set_providers(vec![entry("a", "b"), entry("c", "d")]);
     picker.move_down();
     assert_eq!(picker.selected_index(), 1);
     picker.move_down();

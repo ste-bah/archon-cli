@@ -1,5 +1,5 @@
 use archon_tui_test_support::fake_registry::{
-    spawn_fake_subagent, spawn_n_fake_subagents, FakeRegistry, PollStatus,
+    FakeRegistry, PollStatus, spawn_fake_subagent, spawn_n_fake_subagents,
 };
 use std::time::Duration;
 use tokio::sync::oneshot;
@@ -94,22 +94,26 @@ fn await_all_times_out_when_task_stuck() {
 
 #[test]
 fn shutdown_all_aborts_pending_handles() {
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     let rt = rt_multi();
     rt.block_on(async {
         let reg = FakeRegistry::new();
         let completed = Arc::new(AtomicUsize::new(0));
         for i in 0..10 {
             let completed_clone = Arc::clone(&completed);
-            spawn_fake_subagent(&reg, format!("long-{i}"), move |_tx: oneshot::Sender<String>| {
-                Box::pin(async move {
-                    // Short enough that a no-op shutdown_all would let the task finish
-                    // naturally within the post-shutdown wait window, exposing the bug.
-                    tokio::time::sleep(Duration::from_millis(30)).await;
-                    completed_clone.fetch_add(1, Ordering::SeqCst);
-                })
-            });
+            spawn_fake_subagent(
+                &reg,
+                format!("long-{i}"),
+                move |_tx: oneshot::Sender<String>| {
+                    Box::pin(async move {
+                        // Short enough that a no-op shutdown_all would let the task finish
+                        // naturally within the post-shutdown wait window, exposing the bug.
+                        tokio::time::sleep(Duration::from_millis(30)).await;
+                        completed_clone.fetch_add(1, Ordering::SeqCst);
+                    })
+                },
+            );
         }
         assert_eq!(reg.len(), 10);
         reg.shutdown_all();

@@ -134,11 +134,7 @@ impl AgentDispatcher {
     /// This function MUST NOT `.await` the spawned handle — that would
     /// re-introduce the exact input-loop blockage this subsystem exists to
     /// remove (see REQ-TUI-LOOP-001 / AC-EVENTLOOP-02).
-    pub fn spawn_turn(
-        &mut self,
-        prompt: String,
-        runner: Arc<dyn TurnRunner>,
-    ) -> DispatchResult {
+    pub fn spawn_turn(&mut self, prompt: String, runner: Arc<dyn TurnRunner>) -> DispatchResult {
         if self.current_query.is_some() {
             let qp = QueuedPrompt {
                 prompt,
@@ -167,9 +163,7 @@ impl AgentDispatcher {
         // runner. The `&self` borrow in `TurnRunner::run_turn` is tied to
         // the Arc's lifetime; tokio::spawn requires 'static, hence the clone.
         let runner_clone = Arc::clone(&runner);
-        let handle = tokio::spawn(async move {
-            runner_clone.run_turn(prompt).await
-        });
+        let handle = tokio::spawn(async move { runner_clone.run_turn(prompt).await });
         self.current_query = Some(handle);
         DispatchResult::Running { spawned_at }
     }
@@ -254,10 +248,7 @@ impl AgentDispatcher {
         let handle = match self.current_query.as_ref() {
             None => return None,
             Some(h) if !h.is_finished() => return None,
-            Some(_) => self
-                .current_query
-                .take()
-                .expect("just checked Some above"),
+            Some(_) => self.current_query.take().expect("just checked Some above"),
         };
 
         // Step 2 (outcome-extract): the handle is finished, so polling it
@@ -297,8 +288,7 @@ impl AgentDispatcher {
                 // so we cannot put it back. Surface as Failed to keep the
                 // state machine advancing rather than wedging the loop.
                 TurnOutcome::Failed(
-                    "poll_completion: is_finished=true but now_or_never returned None"
-                        .to_string(),
+                    "poll_completion: is_finished=true but now_or_never returned None".to_string(),
                 )
             }
         };

@@ -107,11 +107,7 @@ use crate::command::registry::{CommandContext, CommandHandler};
 pub(crate) struct ThemeHandler;
 
 impl CommandHandler for ThemeHandler {
-    fn execute(
-        &self,
-        ctx: &mut CommandContext,
-        args: &[String],
-    ) -> anyhow::Result<()> {
+    fn execute(&self, ctx: &mut CommandContext, args: &[String]) -> anyhow::Result<()> {
         // R4: join multi-token args with " " and trim. For all current
         // single-token theme names this collapses to the same value as
         // `args.first().unwrap_or("").as_str()`; for any future
@@ -235,9 +231,7 @@ mod tests {
                      'Usage: /theme <name>' hint, got: {text}"
                 );
             }
-            other => panic!(
-                "no-args branch must emit TextDelta, got: {other:?}"
-            ),
+            other => panic!("no-args branch must emit TextDelta, got: {other:?}"),
         }
     }
 
@@ -360,9 +354,7 @@ mod tests {
                      known themes, got: {text}"
                 );
             }
-            other => panic!(
-                "unknown-theme branch must emit Error, got: {other:?}"
-            ),
+            other => panic!("unknown-theme branch must emit Error, got: {other:?}"),
         }
     }
 

@@ -57,9 +57,8 @@ pub fn setup_logging(session_id: &str, log_level: &str) -> Result<PathBuf> {
         .map(PathBuf::from)
         .unwrap_or_else(default_log_dir);
 
-    init_logging(session_id, log_level, &log_dir).map_err(|e| {
-        anyhow::anyhow!("logging init failed: {e}")
-    })?;
+    init_logging(session_id, log_level, &log_dir)
+        .map_err(|e| anyhow::anyhow!("logging init failed: {e}"))?;
 
     Ok(log_dir)
 }
@@ -153,7 +152,8 @@ pub fn setup_voice_pipeline(
         );
         StdArc::new(MockAudioSource::with_samples(vec![
             0.0_f32;
-            audio_capture.sample_rate as usize
+            audio_capture.sample_rate
+                as usize
         ]))
     } else {
         tracing::warn!("voice: no audio device available, using mock audio source");

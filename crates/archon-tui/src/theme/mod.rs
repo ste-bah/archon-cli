@@ -15,12 +15,11 @@ mod classic;
 mod mbti;
 
 pub use classic::{
-    dark_theme, daltonized_theme, fire_theme, forest_theme, light_theme, mono_theme, ocean_theme,
+    daltonized_theme, dark_theme, fire_theme, forest_theme, light_theme, mono_theme, ocean_theme,
 };
 pub use mbti::{
-    enfj_theme, enfp_theme, entj_theme, entp_theme, esfj_theme, esfp_theme, estj_theme,
-    estp_theme, infj_theme, infp_theme, intj_theme, intp_theme, isfj_theme, isfp_theme,
-    istj_theme, istp_theme,
+    enfj_theme, enfp_theme, entj_theme, entp_theme, esfj_theme, esfp_theme, estj_theme, estp_theme,
+    infj_theme, infp_theme, intj_theme, intp_theme, isfj_theme, isfp_theme, istj_theme, istp_theme,
 };
 
 // ---------------------------------------------------------------------------

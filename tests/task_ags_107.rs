@@ -23,8 +23,7 @@ type CurrentAgentTask = Arc<Mutex<Option<(CancellationToken, tokio::task::JoinHa
 /// when `is_generating` is true.
 #[test]
 fn tui_ctrl_c_sends_cancel_control_message() {
-    let src = std::fs::read_to_string("crates/archon-tui/src/app.rs")
-        .expect("cannot read app.rs");
+    let src = std::fs::read_to_string("crates/archon-tui/src/app.rs").expect("cannot read app.rs");
 
     // Find the Ctrl+C handler block
     let has_ctrl_c_cancel = src.contains("__cancel__");
@@ -64,8 +63,7 @@ fn tui_ctrl_c_sends_cancel_control_message() {
 /// control message and calls `.cancel()` on the stored CancellationToken.
 #[test]
 fn handler_recognizes_cancel_control_message() {
-    let src = std::fs::read_to_string("src/main.rs")
-        .expect("cannot read src/main.rs");
+    let src = std::fs::read_to_string("src/main.rs").expect("cannot read src/main.rs");
     let lines: Vec<&str> = src.lines().collect();
 
     // Find the input handler loop
@@ -111,8 +109,8 @@ fn handler_recognizes_cancel_control_message() {
 /// Verify that ToolContext has a `cancel_parent` field.
 #[test]
 fn tool_context_has_cancel_parent_field() {
-    let src = std::fs::read_to_string("crates/archon-tools/src/tool.rs")
-        .expect("cannot read tool.rs");
+    let src =
+        std::fs::read_to_string("crates/archon-tools/src/tool.rs").expect("cannot read tool.rs");
 
     assert!(
         src.contains("cancel_parent"),
@@ -275,9 +273,18 @@ async fn cancel_propagates_through_three_levels() {
         .await
         .expect("joins timed out — cancel did not propagate");
 
-    assert!(l1_cancelled.load(std::sync::atomic::Ordering::SeqCst), "level 1 not cancelled");
-    assert!(l2_cancelled.load(std::sync::atomic::Ordering::SeqCst), "level 2 not cancelled");
-    assert!(l3_cancelled.load(std::sync::atomic::Ordering::SeqCst), "level 3 not cancelled");
+    assert!(
+        l1_cancelled.load(std::sync::atomic::Ordering::SeqCst),
+        "level 1 not cancelled"
+    );
+    assert!(
+        l2_cancelled.load(std::sync::atomic::Ordering::SeqCst),
+        "level 2 not cancelled"
+    );
+    assert!(
+        l3_cancelled.load(std::sync::atomic::Ordering::SeqCst),
+        "level 3 not cancelled"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -289,8 +296,8 @@ async fn cancel_propagates_through_three_levels() {
 #[tokio::test]
 async fn background_agents_cancel_flips_status() {
     use archon_core::background_agents::{
-        AgentStatus, BackgroundAgentHandle, BackgroundAgentRegistryApi,
-        BackgroundAgentRegistry, new_result_slot,
+        AgentStatus, BackgroundAgentHandle, BackgroundAgentRegistry, BackgroundAgentRegistryApi,
+        new_result_slot,
     };
 
     let registry = BackgroundAgentRegistry::new();

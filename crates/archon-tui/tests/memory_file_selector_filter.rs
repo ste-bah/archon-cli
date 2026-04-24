@@ -88,10 +88,7 @@ fn test_store_filter_entries_method() {
 #[test]
 fn test_browser_cursor_wrapping() {
     let mut browser = MemoryBrowser::new();
-    browser.set_entries(vec![
-        make_entry("/a", 1),
-        make_entry("/b", 2),
-    ]);
+    browser.set_entries(vec![make_entry("/a", 1), make_entry("/b", 2)]);
 
     assert_eq!(browser.selected_index(), 0);
     browser.move_down();

@@ -65,8 +65,8 @@ pub async fn handle_config_command(
         let keys = archon_tools::config_tool::all_keys();
         let mut lines = String::from("\nRuntime configuration:\n");
         for k in &keys {
-            let val =
-                archon_tools::config_tool::get_config_value(k).unwrap_or_else(|| "(unknown)".into());
+            let val = archon_tools::config_tool::get_config_value(k)
+                .unwrap_or_else(|| "(unknown)".into());
             lines.push_str(&format!("  {k} = {val}\n"));
         }
         let _ = tui_tx.send(TuiEvent::TextDelta(lines)).await;
@@ -144,11 +144,7 @@ impl Default for ConfigHandler {
 }
 
 impl CommandHandler for ConfigHandler {
-    fn execute(
-        &self,
-        _ctx: &mut CommandContext,
-        _args: &[String],
-    ) -> anyhow::Result<()> {
+    fn execute(&self, _ctx: &mut CommandContext, _args: &[String]) -> anyhow::Result<()> {
         // THIN-WRAPPER no-op. Byte-identical to the shipped
         // `declare_handler!` macro body: return `Ok(())` WITHOUT
         // emitting any TuiEvent. Real async work happens UPSTREAM at

@@ -157,9 +157,7 @@ pub(crate) struct UsageSnapshot {
 /// builder. The spec variant with `provider_registry.price_table()` +
 /// multi-model breakdown is SCOPE-HELD per orchestrator "shipped wins"
 /// rule.
-pub(crate) async fn build_usage_snapshot(
-    slash_ctx: &SlashCommandContext,
-) -> UsageSnapshot {
+pub(crate) async fn build_usage_snapshot(slash_ctx: &SlashCommandContext) -> UsageSnapshot {
     // Single mutex acquisition. Every derived value is computed INSIDE
     // this scope so the guard drops before the builder returns.
     let stats = slash_ctx.session_stats.lock().await;
@@ -221,11 +219,7 @@ impl Default for UsageHandler {
 }
 
 impl CommandHandler for UsageHandler {
-    fn execute(
-        &self,
-        ctx: &mut CommandContext,
-        _args: &[String],
-    ) -> anyhow::Result<()> {
+    fn execute(&self, ctx: &mut CommandContext, _args: &[String]) -> anyhow::Result<()> {
         // R4: args are IGNORED. The shipped legacy arm at
         // slash.rs:315-336 matched `/usage` literally with no
         // strip_prefix — trailing tokens were silently discarded.
@@ -333,8 +327,7 @@ mod tests {
         );
         let err_msg = format!("{}", result.unwrap_err());
         assert!(
-            err_msg.contains("usage_snapshot")
-                || err_msg.contains("build_command_context"),
+            err_msg.contains("usage_snapshot") || err_msg.contains("build_command_context"),
             "error must describe the missing snapshot, got: {err_msg}"
         );
     }

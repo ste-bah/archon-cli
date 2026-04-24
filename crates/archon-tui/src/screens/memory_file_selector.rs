@@ -5,8 +5,8 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::widgets::{Block, Borders, List, ListItem};
 
-use crate::virtual_list::VirtualList;
 use crate::theme::Theme;
+use crate::virtual_list::VirtualList;
 
 /// MemoryStore is the abstract interface for loading memory entries.
 /// Implementors can fetch from filesystem, network, or in-memory store.
@@ -20,7 +20,8 @@ pub trait MemoryStore: Send + Sync {
             entries.to_vec()
         } else {
             let q = query.to_lowercase();
-            entries.iter()
+            entries
+                .iter()
                 .filter(|e| e.path.to_lowercase().contains(&q))
                 .cloned()
                 .collect()
@@ -91,7 +92,8 @@ impl MemoryBrowser {
             self.entries.clone()
         } else {
             let q = self.query.to_lowercase();
-            self.entries.iter()
+            self.entries
+                .iter()
                 .filter(|e| e.path.to_lowercase().contains(&q))
                 .cloned()
                 .collect()
@@ -117,16 +119,22 @@ impl MemoryBrowser {
 
     /// Render memory browser into area.
     pub fn render(&self, f: &mut Frame, area: Rect, _theme: &Theme) {
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title(format!("Memory Files{}{}",
-                if self.query.is_empty() { "" } else { " — " },
-                if self.query.is_empty() { "" } else { &self.query }
-            ));
+        let block = Block::default().borders(Borders::ALL).title(format!(
+            "Memory Files{}{}",
+            if self.query.is_empty() { "" } else { " — " },
+            if self.query.is_empty() {
+                ""
+            } else {
+                &self.query
+            }
+        ));
 
-        let items: Vec<ListItem> = self.list.visible_items().iter().map(|e| {
-            ListItem::new(format!("{} ({} KB)", e.path, e.size_kb))
-        }).collect();
+        let items: Vec<ListItem> = self
+            .list
+            .visible_items()
+            .iter()
+            .map(|e| ListItem::new(format!("{} ({} KB)", e.path, e.size_kb)))
+            .collect();
 
         let list = List::new(items).block(block);
         f.render_widget(list, area);
@@ -154,8 +162,16 @@ mod tests {
     fn set_entries_updates_list() {
         let mut browser = MemoryBrowser::new();
         browser.set_entries(vec![
-            MemoryEntry { path: "/a/b.txt".into(), size_kb: 10, modified: "2m ago".into() },
-            MemoryEntry { path: "/c/d.txt".into(), size_kb: 20, modified: "5m ago".into() },
+            MemoryEntry {
+                path: "/a/b.txt".into(),
+                size_kb: 10,
+                modified: "2m ago".into(),
+            },
+            MemoryEntry {
+                path: "/c/d.txt".into(),
+                size_kb: 20,
+                modified: "5m ago".into(),
+            },
         ]);
         assert_eq!(browser.len(), 2);
     }
@@ -164,9 +180,21 @@ mod tests {
     fn set_query_filters_list() {
         let mut browser = MemoryBrowser::new();
         browser.set_entries(vec![
-            MemoryEntry { path: "/foo/bar.txt".into(), size_kb: 10, modified: "1m".into() },
-            MemoryEntry { path: "/baz/bar.txt".into(), size_kb: 20, modified: "2m".into() },
-            MemoryEntry { path: "/foo/baz.txt".into(), size_kb: 30, modified: "3m".into() },
+            MemoryEntry {
+                path: "/foo/bar.txt".into(),
+                size_kb: 10,
+                modified: "1m".into(),
+            },
+            MemoryEntry {
+                path: "/baz/bar.txt".into(),
+                size_kb: 20,
+                modified: "2m".into(),
+            },
+            MemoryEntry {
+                path: "/foo/baz.txt".into(),
+                size_kb: 30,
+                modified: "3m".into(),
+            },
         ]);
         browser.set_query("foo");
         assert_eq!(browser.len(), 2); // two entries with "foo" in path
@@ -178,8 +206,16 @@ mod tests {
     fn cursor_wraps() {
         let mut browser = MemoryBrowser::new();
         browser.set_entries(vec![
-            MemoryEntry { path: "/a".into(), size_kb: 1, modified: "1m".into() },
-            MemoryEntry { path: "/b".into(), size_kb: 2, modified: "2m".into() },
+            MemoryEntry {
+                path: "/a".into(),
+                size_kb: 1,
+                modified: "1m".into(),
+            },
+            MemoryEntry {
+                path: "/b".into(),
+                size_kb: 2,
+                modified: "2m".into(),
+            },
         ]);
         browser.move_down();
         assert_eq!(browser.selected_index(), 1);

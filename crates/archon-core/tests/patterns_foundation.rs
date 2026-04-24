@@ -7,14 +7,14 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
-use archon_core::patterns::{
-    Pattern, PatternCtx, PatternError, PatternKind, PatternRegistry, TaskServiceHandle,
-};
 use archon_core::patterns::spec::{
     BrokerConfig, BrokerSelector, CircuitBreakerConfig, FanOutConfig, PatternSpec,
     RemoteAgentConfig, RemoteTransport,
+};
+use archon_core::patterns::{
+    Pattern, PatternCtx, PatternError, PatternKind, PatternRegistry, TaskServiceHandle,
 };
 
 // ---------------------------------------------------------------------------
@@ -29,11 +29,7 @@ impl Pattern for NoopPattern {
         PatternKind::Custom("noop".into())
     }
 
-    async fn execute(
-        &self,
-        input: Value,
-        _ctx: PatternCtx,
-    ) -> Result<Value, PatternError> {
+    async fn execute(&self, input: Value, _ctx: PatternCtx) -> Result<Value, PatternError> {
         Ok(input)
     }
 }
@@ -46,11 +42,7 @@ struct StubTaskService;
 
 #[async_trait]
 impl TaskServiceHandle for StubTaskService {
-    async fn submit(
-        &self,
-        _agent: &str,
-        input: Value,
-    ) -> Result<Value, PatternError> {
+    async fn submit(&self, _agent: &str, input: Value) -> Result<Value, PatternError> {
         Ok(input)
     }
 }

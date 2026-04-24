@@ -38,19 +38,13 @@ impl SandboxHandler {
     }
 
     #[cfg(test)]
-    pub(crate) fn with_flag(
-        enabled: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    ) -> Self {
+    pub(crate) fn with_flag(enabled: std::sync::Arc<std::sync::atomic::AtomicBool>) -> Self {
         Self { enabled }
     }
 }
 
 impl CommandHandler for SandboxHandler {
-    fn execute(
-        &self,
-        ctx: &mut CommandContext,
-        args: &[String],
-    ) -> anyhow::Result<()> {
+    fn execute(&self, ctx: &mut CommandContext, args: &[String]) -> anyhow::Result<()> {
         use std::sync::atomic::Ordering;
 
         let cmd = args.first().map(|s| s.as_str().trim()).unwrap_or("status");
@@ -95,8 +89,8 @@ impl CommandHandler for SandboxHandler {
 mod tests {
     use super::*;
     use crate::command::test_support::*;
-    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     #[test]
     fn sandbox_on_enables_restrictions() {
@@ -152,12 +146,11 @@ mod tests {
         let flag = Arc::new(AtomicBool::new(true));
         let handler = SandboxHandler::with_flag(flag.clone());
         let (mut ctx, mut rx) = make_bug_ctx();
-        handler.execute(&mut ctx, &[String::from("status")]).unwrap();
+        handler
+            .execute(&mut ctx, &[String::from("status")])
+            .unwrap();
         // Status must NOT flip the flag.
-        assert!(
-            flag.load(Ordering::SeqCst),
-            "status must not change flag"
-        );
+        assert!(flag.load(Ordering::SeqCst), "status must not change flag");
         let events = drain_tui_events(&mut rx);
         match &events[0] {
             TuiEvent::TextDelta(s) => {
@@ -215,17 +208,14 @@ mod tests {
             .execute(&mut ctx, &[String::from("status")])
             .expect("dispatched /sandbox status must not error");
         let events = drain_tui_events(&mut rx);
-        assert_eq!(
-            events.len(),
-            1,
-            "expected one TextDelta; got: {:?}",
-            events
-        );
+        assert_eq!(events.len(), 1, "expected one TextDelta; got: {:?}", events);
         match &events[0] {
             TuiEvent::TextDelta(s) => {
                 let lower = s.to_lowercase();
                 assert!(
-                    lower.contains("status") || lower.contains("disabled") || lower.contains("enabled"),
+                    lower.contains("status")
+                        || lower.contains("disabled")
+                        || lower.contains("enabled"),
                     "status TextDelta must contain 'status'/'disabled'/'enabled'; got: {}",
                     s
                 );

@@ -7,11 +7,9 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::background_agents::{
-    new_result_slot, AgentStatus, BackgroundAgentHandle, RegistryError, BACKGROUND_AGENTS,
+    AgentStatus, BACKGROUND_AGENTS, BackgroundAgentHandle, RegistryError, new_result_slot,
 };
-use crate::subagent_executor::{
-    get_subagent_executor, SubagentClassification, SubagentOutcome,
-};
+use crate::subagent_executor::{SubagentClassification, SubagentOutcome, get_subagent_executor};
 use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
 
 // ---------------------------------------------------------------------------
@@ -313,15 +311,10 @@ impl Tool for AgentTool {
         let sid_spawn = subagent_id.clone();
 
         let join = tokio::spawn(async move {
-            let outcome =
-                run_subagent(sid_spawn.clone(), request, cancel_child, ctx_clone).await;
+            let outcome = run_subagent(sid_spawn.clone(), request, cancel_child, ctx_clone).await;
             let (final_status, payload) = match &outcome {
-                SubagentOutcome::Completed(text) => {
-                    (AgentStatus::Finished, Ok(text.clone()))
-                }
-                SubagentOutcome::Failed(err) => {
-                    (AgentStatus::Failed, Err(err.clone()))
-                }
+                SubagentOutcome::Completed(text) => (AgentStatus::Finished, Ok(text.clone())),
+                SubagentOutcome::Failed(err) => (AgentStatus::Failed, Err(err.clone())),
                 SubagentOutcome::AutoBackgrounded => {
                     // The runner is still executing — mark Running here
                     // so registry watchers don't see a premature
@@ -395,9 +388,7 @@ impl Tool for AgentTool {
                 }
                 Err(e) => {
                     cancel_for_failure.cancel();
-                    return ToolResult::error(format!(
-                        "background registry register failed: {e}"
-                    ));
+                    return ToolResult::error(format!("background registry register failed: {e}"));
                 }
             }
             drop(cancel_for_failure);
@@ -511,9 +502,7 @@ pub async fn run_subagent(
     let exec = match get_subagent_executor() {
         Some(e) => e,
         None => {
-            return SubagentOutcome::Failed(
-                "subagent executor not installed".to_string(),
-            );
+            return SubagentOutcome::Failed("subagent executor not installed".to_string());
         }
     };
     let auto_bg_ms = exec.auto_background_ms();
@@ -572,11 +561,7 @@ pub async fn run_subagent(
         }
         SubagentOutcome::Failed(err) => {
             let _ = exec
-                .on_visible_complete(
-                    subagent_id.clone(),
-                    Err(err.clone()),
-                    nested,
-                )
+                .on_visible_complete(subagent_id.clone(), Err(err.clone()), nested)
                 .await;
         }
         SubagentOutcome::AutoBackgrounded => {

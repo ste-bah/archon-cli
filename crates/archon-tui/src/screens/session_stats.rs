@@ -166,10 +166,22 @@ pub fn compute_stats(
 
             // Extract token usage if present
             if let Some(token_obj) = json.get("token_usage") {
-                total_input_tokens += token_obj.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
-                total_output_tokens += token_obj.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
-                total_cache_creation_input_tokens += token_obj.get("cache_creation_input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
-                total_cache_read_input_tokens += token_obj.get("cache_read_input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+                total_input_tokens += token_obj
+                    .get("input_tokens")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                total_output_tokens += token_obj
+                    .get("output_tokens")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                total_cache_creation_input_tokens += token_obj
+                    .get("cache_creation_input_tokens")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                total_cache_read_input_tokens += token_obj
+                    .get("cache_read_input_tokens")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
             }
         }
     }
@@ -178,11 +190,9 @@ pub fn compute_stats(
     let created_at = chrono::DateTime::parse_from_rfc3339(&session.created_at)
         .map(|dt| dt.with_timezone(&chrono::Utc))
         .unwrap_or_else(|_| chrono::Utc::now());
-    let elapsed = chrono::Utc::now()
-        .signed_duration_since(created_at);
-    let elapsed = std::time::Duration::from_secs(
-        elapsed.num_seconds().try_into().unwrap_or(0).max(0)
-    );
+    let elapsed = chrono::Utc::now().signed_duration_since(created_at);
+    let elapsed =
+        std::time::Duration::from_secs(elapsed.num_seconds().try_into().unwrap_or(0).max(0));
 
     SessionStats {
         message_count,
@@ -215,7 +225,9 @@ mod tests {
         let store = SessionStore::open(&db_path).unwrap();
 
         // Create a session with no messages
-        let session = store.create_session("/tmp", None, "claude-3-5-sonnet-4b").unwrap();
+        let session = store
+            .create_session("/tmp", None, "claude-3-5-sonnet-4b")
+            .unwrap();
         let metrics = NullStats;
 
         let stats = compute_stats(&store, &session.id, &metrics);
@@ -245,13 +257,23 @@ mod tests {
         let store = SessionStore::open(&db_path).unwrap();
 
         // Create a session
-        let session = store.create_session("/tmp", None, "claude-3-5-sonnet-4b").unwrap();
+        let session = store
+            .create_session("/tmp", None, "claude-3-5-sonnet-4b")
+            .unwrap();
 
         // Add messages with agent metadata (stored as JSON content)
-        store.save_message(&session.id, 0, r#"{"role":"user","agent":"user"}"#).unwrap();
-        store.save_message(&session.id, 1, r#"{"role":"assistant","agent":"coder"}"#).unwrap();
-        store.save_message(&session.id, 2, r#"{"role":"user","agent":"user"}"#).unwrap();
-        store.save_message(&session.id, 3, r#"{"role":"assistant","agent":"reviewer"}"#).unwrap();
+        store
+            .save_message(&session.id, 0, r#"{"role":"user","agent":"user"}"#)
+            .unwrap();
+        store
+            .save_message(&session.id, 1, r#"{"role":"assistant","agent":"coder"}"#)
+            .unwrap();
+        store
+            .save_message(&session.id, 2, r#"{"role":"user","agent":"user"}"#)
+            .unwrap();
+        store
+            .save_message(&session.id, 3, r#"{"role":"assistant","agent":"reviewer"}"#)
+            .unwrap();
 
         let metrics = NullStats;
         let stats = compute_stats(&store, &session.id, &metrics);
@@ -272,11 +294,16 @@ mod tests {
         let db_path = temp_dir.join("test_compute_stats_capped.db");
         let store = SessionStore::open(&db_path).unwrap();
 
-        let session = store.create_session("/tmp", None, "claude-3-5-sonnet-4b").unwrap();
+        let session = store
+            .create_session("/tmp", None, "claude-3-5-sonnet-4b")
+            .unwrap();
 
         // Add 15 messages to exceed the N=10 cap
         for i in 0..15 {
-            let content = format!(r#"{{"role":"assistant","agent":"agent{}", "command":"/cmd{}", "tool":"tool{}"}}"#, i, i, i);
+            let content = format!(
+                r#"{{"role":"assistant","agent":"agent{}", "command":"/cmd{}", "tool":"tool{}"}}"#,
+                i, i, i
+            );
             store.save_message(&session.id, i as u64, &content).unwrap();
         }
 

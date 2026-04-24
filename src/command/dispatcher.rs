@@ -59,11 +59,7 @@ impl Dispatcher {
     ///
     /// Registry lookup uses `Registry::get`, which is alias-aware after
     /// TASK-AGS-802 — no extra alias code lives here.
-    pub(crate) fn dispatch(
-        &self,
-        ctx: &mut CommandContext,
-        input: &str,
-    ) -> anyhow::Result<()> {
+    pub(crate) fn dispatch(&self, ctx: &mut CommandContext, input: &str) -> anyhow::Result<()> {
         let trimmed = input.trim();
 
         // PATH A hybrid gate: the dispatcher MUST NOT consume non-slash
@@ -99,9 +95,9 @@ impl Dispatcher {
                 return Ok(());
             }
             Err(ParseError::MalformedFlag(tok)) => {
-                ctx.emit(archon_tui::app::TuiEvent::Error(
-                    format!("Parse error: malformed flag '{tok}'"),
-                ));
+                ctx.emit(archon_tui::app::TuiEvent::Error(format!(
+                    "Parse error: malformed flag '{tok}'"
+                )));
                 return Ok(());
             }
         };
@@ -114,19 +110,14 @@ impl Dispatcher {
                 // many branching, the case-insensitive exact-match
                 // fallback, and the defensive 3-suggestion cap. The
                 // dispatcher is only responsible for emission.
-                let msg = errors::format_unknown_command(
-                    &parsed.name,
-                    &self.registry,
-                );
+                let msg = errors::format_unknown_command(&parsed.name, &self.registry);
                 // Emit via the TUI event channel. `try_send` so the
                 // dispatcher cannot block on a full channel; dropping a
                 // diagnostic under backpressure is preferable to stalling
                 // the input pipeline. `TuiEvent::Error` is the correct
                 // text-emitting variant for user-visible diagnostics
                 // (see `crates/archon-tui/src/app.rs::TuiEvent`).
-                let _ = ctx
-                    .tui_tx
-                    .try_send(archon_tui::app::TuiEvent::Error(msg));
+                let _ = ctx.tui_tx.try_send(archon_tui::app::TuiEvent::Error(msg));
                 Ok(())
             }
         }
@@ -159,7 +150,7 @@ impl Dispatcher {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::command::registry::{default_registry, CommandHandler, RegistryBuilder};
+    use crate::command::registry::{CommandHandler, RegistryBuilder, default_registry};
     use archon_tui::app::TuiEvent;
     use std::sync::Mutex;
     use tokio::sync::mpsc;
@@ -182,11 +173,7 @@ mod tests {
     }
 
     impl CommandHandler for RecordingHandler {
-        fn execute(
-            &self,
-            _ctx: &mut CommandContext,
-            args: &[String],
-        ) -> anyhow::Result<()> {
+        fn execute(&self, _ctx: &mut CommandContext, args: &[String]) -> anyhow::Result<()> {
             self.calls.lock().unwrap().push(args.to_vec());
             Ok(())
         }
@@ -211,11 +198,7 @@ mod tests {
     /// `registry::tests::NoAliasHandler`.
     struct SilentOkHandler;
     impl CommandHandler for SilentOkHandler {
-        fn execute(
-            &self,
-            _ctx: &mut CommandContext,
-            _args: &[String],
-        ) -> anyhow::Result<()> {
+        fn execute(&self, _ctx: &mut CommandContext, _args: &[String]) -> anyhow::Result<()> {
             Ok(())
         }
         fn description(&self) -> &str {
@@ -260,9 +243,9 @@ mod tests {
         // handler is a no-op).
         match rx.try_recv() {
             Err(mpsc::error::TryRecvError::Empty) => {}
-            Ok(TuiEvent::Error(msg)) => panic!(
-                "recognized command must not emit TuiEvent::Error, got: {msg}"
-            ),
+            Ok(TuiEvent::Error(msg)) => {
+                panic!("recognized command must not emit TuiEvent::Error, got: {msg}")
+            }
             Ok(ev) => panic!("unexpected event emitted: {ev:?}"),
             Err(e) => panic!("unexpected channel error: {e:?}"),
         }
@@ -350,12 +333,8 @@ mod tests {
     // forwarded to handler.execute — which is the contract under test.
     // -----------------------------------------------------------------
 
-    fn invoke_handler_via_parse(
-        handler: &dyn CommandHandler,
-        input: &str,
-    ) -> anyhow::Result<()> {
-        let parsed = crate::command::parser::parse(input)
-            .expect("parser must accept input");
+    fn invoke_handler_via_parse(handler: &dyn CommandHandler, input: &str) -> anyhow::Result<()> {
+        let parsed = crate::command::parser::parse(input).expect("parser must accept input");
         let (mut ctx, _rx) = make_ctx();
         handler.execute(&mut ctx, &parsed.args)
     }
@@ -429,9 +408,9 @@ mod tests {
         loop {
             match rx.try_recv() {
                 Err(mpsc::error::TryRecvError::Empty) => break,
-                Ok(TuiEvent::Error(msg)) => panic!(
-                    "alias dispatch must not emit TuiEvent::Error, got: {msg}"
-                ),
+                Ok(TuiEvent::Error(msg)) => {
+                    panic!("alias dispatch must not emit TuiEvent::Error, got: {msg}")
+                }
                 Ok(_ev) => {
                     // TextDelta from HelpHandler is expected post-B06-HELP.
                     continue;
@@ -479,8 +458,7 @@ mod tests {
         match ev {
             TuiEvent::Error(msg) => {
                 assert_eq!(
-                    msg,
-                    "Unknown command '/hel'. Did you mean '/help'?",
+                    msg, "Unknown command '/hel'. Did you mean '/help'?",
                     "single-match form must match the AGS-804 spec verbatim"
                 );
             }
@@ -504,8 +482,7 @@ mod tests {
         match ev {
             TuiEvent::Error(msg) => {
                 assert_eq!(
-                    msg,
-                    "Unknown command '/zzzqqq'. Type /help for the full list.",
+                    msg, "Unknown command '/zzzqqq'. Type /help for the full list.",
                     "zero-suggestion form must match the AGS-804 spec verbatim"
                 );
             }
@@ -667,13 +644,9 @@ mod tests {
     /// `errors::format_unknown_command` (TASK-AGS-804). Returns `None`
     /// when the event stream has no dispatch-layer miss, which is the
     /// smoke-test pass condition.
-    fn first_unknown_command_error(
-        events: &[archon_tui::app::TuiEvent],
-    ) -> Option<String> {
+    fn first_unknown_command_error(events: &[archon_tui::app::TuiEvent]) -> Option<String> {
         events.iter().find_map(|ev| match ev {
-            archon_tui::app::TuiEvent::Error(msg)
-                if msg.starts_with("Unknown command") =>
-            {
+            archon_tui::app::TuiEvent::Error(msg) if msg.starts_with("Unknown command") => {
                 Some(msg.clone())
             }
             _ => None,
@@ -711,11 +684,8 @@ mod tests {
     /// "Unknown command" error (the real failure mode we are
     /// hunting), otherwise `None` — regardless of whether the
     /// handler succeeded, returned Err, or panicked.
-    fn smoke_dispatch_detect_unknown_error(
-        dispatcher: &Dispatcher,
-        input: &str,
-    ) -> Option<String> {
-        use std::panic::{catch_unwind, AssertUnwindSafe};
+    fn smoke_dispatch_detect_unknown_error(dispatcher: &Dispatcher, input: &str) -> Option<String> {
+        use std::panic::{AssertUnwindSafe, catch_unwind};
         let (mut ctx, mut rx) = make_ctx();
         // NOTE: `catch_unwind` lets a handler panic without aborting
         // the smoke sweep, but the process-wide panic hook still
@@ -763,9 +733,7 @@ mod tests {
         let mut failures: Vec<String> = Vec::new();
         for primary_name in registry.names() {
             let input = format!("/{primary_name}");
-            if let Some(err_msg) =
-                smoke_dispatch_detect_unknown_error(&dispatcher, &input)
-            {
+            if let Some(err_msg) = smoke_dispatch_detect_unknown_error(&dispatcher, &input) {
                 failures.push(format!(
                     "primary '/{primary_name}' produced dispatch-layer \
                      Unknown command error: {err_msg:?}"
@@ -814,9 +782,7 @@ mod tests {
             for alias in handler.aliases() {
                 alias_total += 1;
                 let input = format!("/{alias}");
-                if let Some(err_msg) =
-                    smoke_dispatch_detect_unknown_error(&dispatcher, &input)
-                {
+                if let Some(err_msg) = smoke_dispatch_detect_unknown_error(&dispatcher, &input) {
                     failures.push(format!(
                         "alias '/{alias}' (primary '/{primary_name}') \
                          produced dispatch-layer Unknown command \

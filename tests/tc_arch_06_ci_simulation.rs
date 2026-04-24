@@ -14,8 +14,7 @@ fn lint_catches_injected_violation() {
     let main_rs_path = repo_root.join("src/main.rs");
     let lint_script = repo_root.join("scripts/lint/arch-lint.sh");
 
-    let original = std::fs::read_to_string(&main_rs_path)
-        .expect("failed to read src/main.rs");
+    let original = std::fs::read_to_string(&main_rs_path).expect("failed to read src/main.rs");
 
     // Find the BEGIN INPUT_HANDLER marker line
     let begin_marker = "BEGIN INPUT_HANDLER";
@@ -56,8 +55,7 @@ fn lint_catches_injected_violation() {
     if agent_src.exists() {
         let dst_dir = tmp_dir.path().join("crates/archon-core/src");
         std::fs::create_dir_all(&dst_dir).expect("failed to create agent.rs dir");
-        std::fs::copy(&agent_src, dst_dir.join("agent.rs"))
-            .expect("failed to copy agent.rs");
+        std::fs::copy(&agent_src, dst_dir.join("agent.rs")).expect("failed to copy agent.rs");
     }
 
     // Copy the lint script and philosophy doc
@@ -70,8 +68,11 @@ fn lint_catches_injected_violation() {
     if philosophy_doc.exists() {
         let dst_doc_dir = tmp_dir.path().join("docs/architecture");
         std::fs::create_dir_all(&dst_doc_dir).expect("failed to create docs dir");
-        std::fs::copy(&philosophy_doc, dst_doc_dir.join("spawn-everything-philosophy.md"))
-            .expect("failed to copy philosophy doc");
+        std::fs::copy(
+            &philosophy_doc,
+            dst_doc_dir.join("spawn-everything-philosophy.md"),
+        )
+        .expect("failed to copy philosophy doc");
     }
 
     // Also copy tui app.rs for Rule 3 (it checks this file)
@@ -79,8 +80,7 @@ fn lint_catches_injected_violation() {
     if tui_app.exists() {
         let dst_dir = tmp_dir.path().join("crates/archon-tui/src");
         std::fs::create_dir_all(&dst_dir).expect("failed to create tui dir");
-        std::fs::copy(&tui_app, dst_dir.join("app.rs"))
-            .expect("failed to copy app.rs");
+        std::fs::copy(&tui_app, dst_dir.join("app.rs")).expect("failed to copy app.rs");
     }
 
     // Run arch-lint.sh from the temp dir

@@ -635,7 +635,10 @@ mod metrics_port_parse_tests {
         // to reread this note rather than silently accepting `-1`.
         let err = parse(&["archon", "--metrics-port", "-1"]).expect_err("negative must fail");
         assert!(
-            matches!(err.kind(), ErrorKind::UnknownArgument | ErrorKind::ValueValidation),
+            matches!(
+                err.kind(),
+                ErrorKind::UnknownArgument | ErrorKind::ValueValidation
+            ),
             "unexpected clap error kind for -1: {:?}",
             err.kind()
         );
@@ -653,15 +656,18 @@ mod remote_url_parse_tests {
 
     #[test]
     fn remote_url_parses_from_long_flag() {
-        let cli = Cli::try_parse_from(["archon", "--remote-url", "https://archon.example/sess/xyz"])
-            .expect("--remote-url <URL> must parse");
-        assert_eq!(cli.remote_url.as_deref(), Some("https://archon.example/sess/xyz"));
+        let cli =
+            Cli::try_parse_from(["archon", "--remote-url", "https://archon.example/sess/xyz"])
+                .expect("--remote-url <URL> must parse");
+        assert_eq!(
+            cli.remote_url.as_deref(),
+            Some("https://archon.example/sess/xyz")
+        );
     }
 
     #[test]
     fn remote_url_absent_when_not_supplied() {
-        let cli = Cli::try_parse_from(["archon"])
-            .expect("archon with no flags must parse");
+        let cli = Cli::try_parse_from(["archon"]).expect("archon with no flags must parse");
         assert!(cli.remote_url.is_none());
     }
 }

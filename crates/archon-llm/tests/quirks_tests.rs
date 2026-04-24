@@ -28,12 +28,12 @@ use url::Url;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
+use archon_llm::ApiKey;
 use archon_llm::provider::{LlmProvider, LlmRequest};
 use archon_llm::providers::{
-    get_compat, OpenAiCompatProvider, ProviderQuirks, StreamDelimiter, ToolCallFormat,
-    OPENAI_COMPAT_REGISTRY,
+    OPENAI_COMPAT_REGISTRY, OpenAiCompatProvider, ProviderQuirks, StreamDelimiter, ToolCallFormat,
+    get_compat,
 };
-use archon_llm::ApiKey;
 
 // ---------------------------------------------------------------------------
 // Per-provider quirk assignment tests (validation criteria 2-5)
@@ -265,8 +265,7 @@ fn openai_compat_has_no_string_based_provider_branching() {
     // Locate the source file at compile time via CARGO_MANIFEST_DIR.
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
     let src = format!("{manifest_dir}/src/providers/openai_compat.rs");
-    let content = std::fs::read_to_string(&src)
-        .unwrap_or_else(|e| panic!("must read {src}: {e}"));
+    let content = std::fs::read_to_string(&src).unwrap_or_else(|e| panic!("must read {src}: {e}"));
 
     // Strip comments and string literals inside doc blocks are not
     // branching logic. But a simple substring scan for `== "groq"` etc.

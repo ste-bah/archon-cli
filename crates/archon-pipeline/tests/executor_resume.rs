@@ -6,8 +6,8 @@
 
 use std::collections::HashMap;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use async_trait::async_trait;
 use chrono::Utc;
@@ -51,10 +51,7 @@ struct ResumeMockTaskService {
 }
 
 impl ResumeMockTaskService {
-    fn new(
-        outputs: HashMap<String, serde_json::Value>,
-        fail_until: HashMap<String, u32>,
-    ) -> Self {
+    fn new(outputs: HashMap<String, serde_json::Value>, fail_until: HashMap<String, u32>) -> Self {
         Self {
             outputs: std::sync::Mutex::new(outputs),
             submissions: std::sync::Mutex::new(Vec::new()),
@@ -281,7 +278,10 @@ async fn resume_after_failure_skips_finished_steps() {
     let spec = make_three_step_spec(OnFailurePolicy::Fail);
 
     // First run: should fail at B.
-    let err = engine.run(spec).await.expect_err("first run should fail at B");
+    let err = engine
+        .run(spec)
+        .await
+        .expect_err("first run should fail at B");
     assert!(
         matches!(err, PipelineError::StepFailed { ref step, .. } if step == "B"),
         "expected StepFailed at B, got: {err:?}"

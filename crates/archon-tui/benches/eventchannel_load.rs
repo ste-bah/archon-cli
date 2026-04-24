@@ -4,7 +4,7 @@
 //!
 //! AgentEvent variant: TextDelta("x") — smallest/cheapest variant, isolates channel throughput.
 
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::runtime::Runtime;

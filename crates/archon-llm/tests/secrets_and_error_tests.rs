@@ -6,8 +6,8 @@
 //! re-export paths so downstream Phase 7 tasks (702..706) can `use` them
 //! without fighting module privacy.
 
-use archon_llm::providers::error::ProviderError;
 use archon_llm::ApiKey;
+use archon_llm::providers::error::ProviderError;
 
 // ---------------------------------------------------------------------------
 // ApiKey: redaction invariants
@@ -18,8 +18,14 @@ fn api_key_debug_never_exposes_secret() {
     let key = ApiKey::new("sk-super-secret-abc123".to_string());
     let s = format!("{:?}", key);
     assert!(!s.contains("sk-super-secret"));
-    assert!(s.contains("***redacted***"), "Debug must contain redaction token: {s}");
-    assert!(s.starts_with("ApiKey("), "Debug must prefix with ApiKey(...): {s}");
+    assert!(
+        s.contains("***redacted***"),
+        "Debug must contain redaction token: {s}"
+    );
+    assert!(
+        s.starts_with("ApiKey("),
+        "Debug must prefix with ApiKey(...): {s}"
+    );
 }
 
 #[test]
@@ -27,7 +33,10 @@ fn api_key_display_never_exposes_secret() {
     let key = ApiKey::new("sk-super-secret-abc123".to_string());
     let s = format!("{}", key);
     assert!(!s.contains("sk-super-secret"));
-    assert!(s.contains("***redacted***"), "Display must contain redaction token: {s}");
+    assert!(
+        s.contains("***redacted***"),
+        "Display must contain redaction token: {s}"
+    );
 }
 
 #[test]

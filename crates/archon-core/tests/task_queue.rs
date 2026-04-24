@@ -2,8 +2,8 @@
 
 use std::time::Duration;
 
-use archon_core::tasks::queue::{PerAgentTaskQueue, QueueConfig, TaskQueue};
 use archon_core::tasks::models::{TaskError, TaskId};
+use archon_core::tasks::queue::{PerAgentTaskQueue, QueueConfig, TaskQueue};
 
 fn make_queue(max_concurrent: usize, capacity: usize) -> PerAgentTaskQueue {
     PerAgentTaskQueue::new(QueueConfig {
@@ -134,9 +134,18 @@ fn test_remove_pending_cancels_before_execution() {
         dequeued_ids.push(tid);
     }
 
-    assert!(!dequeued_ids.contains(&ids[3]), "removed task should not be dequeued");
-    assert!(dequeued_ids.contains(&ids[2]), "ids[2] should still be present");
-    assert!(dequeued_ids.contains(&ids[4]), "ids[4] should still be present");
+    assert!(
+        !dequeued_ids.contains(&ids[3]),
+        "removed task should not be dequeued"
+    );
+    assert!(
+        dequeued_ids.contains(&ids[2]),
+        "ids[2] should still be present"
+    );
+    assert!(
+        dequeued_ids.contains(&ids[4]),
+        "ids[4] should still be present"
+    );
 }
 
 #[test]
@@ -162,13 +171,22 @@ fn test_burst_mode_activates_after_threshold() {
 
     // Now burst permits should be available for the remaining 3 pending tasks.
     let b1 = queue.try_dequeue("agent-a");
-    assert!(b1.is_some(), "burst permit 1 should be available after threshold");
+    assert!(
+        b1.is_some(),
+        "burst permit 1 should be available after threshold"
+    );
 
     let b2 = queue.try_dequeue("agent-a");
-    assert!(b2.is_some(), "burst permit 2 should be available after threshold");
+    assert!(
+        b2.is_some(),
+        "burst permit 2 should be available after threshold"
+    );
 
     let b3 = queue.try_dequeue("agent-a");
-    assert!(b3.is_some(), "burst permit 3 should be available after threshold");
+    assert!(
+        b3.is_some(),
+        "burst permit 3 should be available after threshold"
+    );
 
     // All burst permits used, should be none left.
     assert!(

@@ -17,8 +17,7 @@
 
 /// Pinned snapshot of the upstream D5 guard via compile-time include_str!.
 /// If the file is deleted/moved, this fails to compile.
-const UPSTREAM_GUARD_SOURCE: &str =
-    include_str!("../../archon-core/tests/preserve_d5_agt025.rs");
+const UPSTREAM_GUARD_SOURCE: &str = include_str!("../../archon-core/tests/preserve_d5_agt025.rs");
 
 /// The 4 invariant test functions required by REQ-FOR-PRESERVE-D5.
 const REQUIRED_TEST_FUNCTIONS: &[&str] = &[

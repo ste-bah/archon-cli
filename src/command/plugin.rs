@@ -49,10 +49,7 @@ pub fn handle_plugin_command(action: PluginAction) -> anyhow::Result<()> {
             for (id, err) in &result.errors {
                 println!("{:<30} {:<12} error: {err}", id, "?");
             }
-            if result.enabled.is_empty()
-                && result.disabled.is_empty()
-                && result.errors.is_empty()
-            {
+            if result.enabled.is_empty() && result.disabled.is_empty() && result.errors.is_empty() {
                 println!("No plugins found.");
             }
         }

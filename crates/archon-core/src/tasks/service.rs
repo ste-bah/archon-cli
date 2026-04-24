@@ -1,6 +1,6 @@
 use std::pin::Pin;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -12,8 +12,8 @@ use crate::agents::registry::AgentRegistry;
 use crate::tasks::events::EventBus;
 use crate::tasks::executor::CancelHandle;
 use crate::tasks::models::{
-    SubmitRequest, Task, TaskError, TaskEvent, TaskEventKind, TaskFilter,
-    TaskId, TaskResultStream, TaskSnapshot, TaskState,
+    SubmitRequest, Task, TaskError, TaskEvent, TaskEventKind, TaskFilter, TaskId, TaskResultStream,
+    TaskSnapshot, TaskState,
 };
 use crate::tasks::queue::TaskQueue;
 use crate::tasks::store::{InMemoryTaskStateStore, TaskStateStore};

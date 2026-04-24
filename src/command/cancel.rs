@@ -63,11 +63,7 @@ impl Default for CancelHandler {
 }
 
 impl CommandHandler for CancelHandler {
-    fn execute(
-        &self,
-        ctx: &mut CommandContext,
-        _args: &[String],
-    ) -> anyhow::Result<()> {
+    fn execute(&self, ctx: &mut CommandContext, _args: &[String]) -> anyhow::Result<()> {
         // Option A (feedback-only): unconditional user-visible message.
         // The session input loop is serial — by the time this handler
         // runs, the previous turn has completed, so the idle-state
@@ -163,9 +159,7 @@ mod tests {
                      idle-state feedback string verbatim"
                 );
             }
-            Ok(other) => panic!(
-                "CancelHandler::execute must emit TextDelta, got: {other:?}"
-            ),
+            Ok(other) => panic!("CancelHandler::execute must emit TextDelta, got: {other:?}"),
             Err(e) => panic!(
                 "CancelHandler::execute must emit a TuiEvent, channel \
                  returned: {e:?}"
@@ -204,9 +198,7 @@ mod tests {
                 "Dispatcher route to CancelHandler must emit the Option \
                  A idle-state feedback string verbatim"
             ),
-            Ok(other) => panic!(
-                "Dispatcher route must emit TextDelta, got: {other:?}"
-            ),
+            Ok(other) => panic!("Dispatcher route must emit TextDelta, got: {other:?}"),
             Err(e) => panic!(
                 "Dispatcher route must emit a TuiEvent, channel \
                  returned: {e:?}"

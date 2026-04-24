@@ -32,9 +32,7 @@ pub struct RemoteDiscoverySource {
 impl RemoteDiscoverySource {
     pub fn new(url: String, ttl_secs: u64, validator: Arc<AgentSchemaValidator>) -> Self {
         let ttl = Duration::from_secs(ttl_secs);
-        let cache = Cache::builder()
-            .time_to_live(ttl)
-            .build();
+        let cache = Cache::builder().time_to_live(ttl).build();
         Self {
             url,
             ttl,
@@ -51,18 +49,15 @@ impl RemoteDiscoverySource {
     ) -> Result<RemoteLoadReport, DiscoveryError> {
         let (bytes, fresh) = self.fetch_with_cache().await?;
 
-        let value: serde_json::Value = serde_json::from_slice(&bytes)
-            .map_err(|e| {
-                warn!(url = %self.url, "malformed JSON from remote registry");
-                DiscoveryError::Parse(format!("JSON parse error from {}: {e}", self.url))
-            })?;
+        let value: serde_json::Value = serde_json::from_slice(&bytes).map_err(|e| {
+            warn!(url = %self.url, "malformed JSON from remote registry");
+            DiscoveryError::Parse(format!("JSON parse error from {}: {e}", self.url))
+        })?;
 
-        let arr = value
-            .as_array()
-            .ok_or_else(|| {
-                warn!(url = %self.url, "remote registry response is not a JSON array");
-                DiscoveryError::Parse(format!("expected JSON array from {}", self.url))
-            })?;
+        let arr = value.as_array().ok_or_else(|| {
+            warn!(url = %self.url, "remote registry response is not a JSON array");
+            DiscoveryError::Parse(format!("expected JSON array from {}", self.url))
+        })?;
 
         let mut loaded = 0;
         let mut invalid = 0;
@@ -157,26 +152,28 @@ impl RemoteDiscoverySource {
             .and_then(|s| semver::Version::parse(s).ok())
             .unwrap_or(semver::Version::new(0, 0, 0));
 
-        let category = element["category"]
-            .as_str()
-            .unwrap_or("remote")
-            .to_string();
+        let category = element["category"].as_str().unwrap_or("remote").to_string();
 
         AgentMetadata {
             name,
             version,
-            description: element["description"]
-                .as_str()
-                .unwrap_or("")
-                .to_string(),
+            description: element["description"].as_str().unwrap_or("").to_string(),
             category,
             tags: element["tags"]
                 .as_array()
-                .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
                 .unwrap_or_default(),
             capabilities: element["capabilities"]
                 .as_array()
-                .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
                 .unwrap_or_default(),
             input_schema: element
                 .get("input_schema")

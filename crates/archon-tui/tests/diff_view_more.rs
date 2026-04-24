@@ -4,7 +4,7 @@
 //! unified + side-by-side + empty + no-hunks paths, and `render_no_changes`.
 
 use archon_tui::diff_view::{
-    render_current_hunk, render_no_changes, DiffLine, DiffState, DiffView, Hunk, LayoutMode,
+    DiffLine, DiffState, DiffView, Hunk, LayoutMode, render_current_hunk, render_no_changes,
 };
 
 fn mk_state(hunks: Vec<Hunk>) -> DiffState {
@@ -120,11 +120,7 @@ fn render_current_hunk_empty_shows_placeholder() {
     let view = DiffView::new(state);
     let lines = render_current_hunk(&view);
     assert_eq!(lines.len(), 1);
-    let text: String = lines[0]
-        .spans
-        .iter()
-        .map(|s| s.content.as_ref())
-        .collect();
+    let text: String = lines[0].spans.iter().map(|s| s.content.as_ref()).collect();
     assert!(text.contains("No hunks"));
 }
 
@@ -158,10 +154,7 @@ fn render_current_hunk_side_by_side_pure_context_no_pairs() {
     let state = DiffState {
         hunks: vec![Hunk {
             start_line: 1,
-            lines: vec![
-                DiffLine::context("a".into()),
-                DiffLine::context("b".into()),
-            ],
+            lines: vec![DiffLine::context("a".into()), DiffLine::context("b".into())],
         }],
         current_hunk: 0,
         show_whitespace: true,
@@ -192,11 +185,7 @@ fn render_current_hunk_side_by_side_all_empty_shows_placeholder() {
     let view = DiffView::new(state);
     let lines = render_current_hunk(&view);
     assert_eq!(lines.len(), 1);
-    let text: String = lines[0]
-        .spans
-        .iter()
-        .map(|s| s.content.as_ref())
-        .collect();
+    let text: String = lines[0].spans.iter().map(|s| s.content.as_ref()).collect();
     assert!(text.contains("empty hunk"));
 }
 
@@ -208,11 +197,7 @@ fn render_current_hunk_side_by_side_all_empty_shows_placeholder() {
 fn render_no_changes_embeds_filename() {
     let lines = render_no_changes("src/foo.rs");
     assert_eq!(lines.len(), 1);
-    let text: String = lines[0]
-        .spans
-        .iter()
-        .map(|s| s.content.as_ref())
-        .collect();
+    let text: String = lines[0].spans.iter().map(|s| s.content.as_ref()).collect();
     assert!(text.contains("src/foo.rs"));
     assert!(text.contains("No changes"));
 }

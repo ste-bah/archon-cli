@@ -6,7 +6,7 @@
 //! Producers: 10 parallel producers × 5000 events each = 50k total.
 //! Each producer yields every 100us to maintain precise rate.
 
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::runtime::Runtime;
@@ -22,7 +22,8 @@ fn bench_eventchannel_latency(_c: &mut Criterion) {
         let pace_us: u64 = 100; // 10k/sec = 1 event per 100us
 
         let metrics = Arc::new(archon_tui::observability::ChannelMetrics::new());
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<archon_core::agent::TimestampedEvent>();
+        let (tx, mut rx) =
+            tokio::sync::mpsc::unbounded_channel::<archon_core::agent::TimestampedEvent>();
 
         // Single-channel producer: paced 10k events/sec
         let producer_metrics = Arc::clone(&metrics);
@@ -84,7 +85,8 @@ fn bench_eventchannel_latency(_c: &mut Criterion) {
         let snapshot = metrics.snapshot();
 
         // Fixed workspace root for archonfixes worktree
-        const WORKSPACE_ROOT: &str = "/home/unixdude/Archon-projects/archon-cli-worktrees/archonfixes";
+        const WORKSPACE_ROOT: &str =
+            "/home/unixdude/Archon-projects/archon-cli-worktrees/archonfixes";
         let target_dir = std::path::Path::new(WORKSPACE_ROOT).join("target/tui-fixes");
 
         // Create directory and write JSON — BEFORE assertion so JSON persists on failure

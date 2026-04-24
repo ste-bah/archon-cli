@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use archon_tui_test_support::mock_agent::{
-    spawn_n_mock_agents, EventScript, MockAgent, MockEventKind,
+    EventScript, MockAgent, MockEventKind, spawn_n_mock_agents,
 };
 use tokio::sync::mpsc;
 
@@ -37,9 +37,18 @@ fn scripted_events_are_emitted_in_order() {
         assert_eq!(report.events_dropped, 0);
         assert!(!report.cancelled);
 
-        assert_eq!(rx.recv().await, Some(MockEventKind::ToolCall("bash".into())));
-        assert_eq!(rx.recv().await, Some(MockEventKind::MessageDelta("hello".into())));
-        assert_eq!(rx.recv().await, Some(MockEventKind::MessageDelta("world".into())));
+        assert_eq!(
+            rx.recv().await,
+            Some(MockEventKind::ToolCall("bash".into()))
+        );
+        assert_eq!(
+            rx.recv().await,
+            Some(MockEventKind::MessageDelta("hello".into()))
+        );
+        assert_eq!(
+            rx.recv().await,
+            Some(MockEventKind::MessageDelta("world".into()))
+        );
         assert_eq!(rx.recv().await, Some(MockEventKind::Finish));
     });
 }
@@ -113,8 +122,7 @@ fn unbounded_sink_never_drops() {
     let rt = rt_multi();
     rt.block_on(async {
         let (tx, mut rx) = mpsc::unbounded_channel::<MockEventKind>();
-        let script = EventScript::new()
-            .burst_of(5000, MockEventKind::MessageDelta("y".into()));
+        let script = EventScript::new().burst_of(5000, MockEventKind::MessageDelta("y".into()));
         let agent = MockAgent::new("flood", script);
         let report = agent.run(tx).await;
         assert_eq!(report.events_sent, 5000);
@@ -135,8 +143,7 @@ fn bounded_sink_reports_drops_on_full() {
         // Capacity-1 bounded channel. We never consume, so the very first
         // try_send fills it and every subsequent send reports a drop.
         let (tx, _rx) = mpsc::channel::<MockEventKind>(1);
-        let script = EventScript::new()
-            .burst_of(10, MockEventKind::MessageDelta("z".into()));
+        let script = EventScript::new().burst_of(10, MockEventKind::MessageDelta("z".into()));
         let agent = MockAgent::new("bounded", script);
         let report = agent.run(tx).await;
         // First send succeeds (fills the channel). Next 9 must report drops.

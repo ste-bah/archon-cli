@@ -4,8 +4,8 @@
 // type is defined in archon-core or archon-tui. This is expected and correct
 // behavior at Gate 1 (tests-written-first).
 
-use archon_tui::observability::ChannelMetrics;
 use archon_core::agent::{AgentEvent, TimestampedEvent};
+use archon_tui::observability::ChannelMetrics;
 use std::time::Instant;
 
 /// Verify that a TimestampedEvent carries a `sent_at` timestamp close to Instant::now.
@@ -17,7 +17,10 @@ fn sent_at_populated_at_producer() {
     // TimestampedEvent wraps AgentEvent with a sent_at timestamp.
     // Verify sent_at is populated (within 10ms of creation).
     let event = AgentEvent::TextDelta("test".to_string());
-    let ts_event = TimestampedEvent { sent_at: Instant::now(), inner: event };
+    let ts_event = TimestampedEvent {
+        sent_at: Instant::now(),
+        inner: event,
+    };
     let now = Instant::now();
     // Should be within 10ms
     assert!(

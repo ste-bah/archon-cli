@@ -66,7 +66,9 @@ pub(crate) struct SkillsHandler {
 
 impl SkillsHandler {
     pub(crate) fn new() -> Self {
-        Self { lister: std::sync::Arc::new(RealSkillLister) }
+        Self {
+            lister: std::sync::Arc::new(RealSkillLister),
+        }
     }
 
     #[cfg(test)]
@@ -76,11 +78,7 @@ impl SkillsHandler {
 }
 
 impl CommandHandler for SkillsHandler {
-    fn execute(
-        &self,
-        ctx: &mut CommandContext,
-        _args: &[String],
-    ) -> anyhow::Result<()> {
+    fn execute(&self, ctx: &mut CommandContext, _args: &[String]) -> anyhow::Result<()> {
         let skills = self.lister.list();
         if skills.is_empty() {
             return Err(anyhow::anyhow!("no skills available"));
@@ -104,14 +102,18 @@ mod tests {
         entries: Vec<SkillEntry>,
     }
     impl SkillLister for MockSkillLister {
-        fn list(&self) -> Vec<SkillEntry> { self.entries.clone() }
+        fn list(&self) -> Vec<SkillEntry> {
+            self.entries.clone()
+        }
     }
 
     fn fixture_entries(n: usize) -> Vec<SkillEntry> {
-        (0..n).map(|i| SkillEntry {
-            name: format!("skill-{}", i),
-            description: format!("desc-{}", i),
-        }).collect()
+        (0..n)
+            .map(|i| SkillEntry {
+                name: format!("skill-{}", i),
+                description: format!("desc-{}", i),
+            })
+            .collect()
     }
 
     #[test]
@@ -122,13 +124,18 @@ mod tests {
         let result = handler.execute(&mut ctx, &[]);
         assert!(result.is_err());
         let msg = format!("{:#}", result.unwrap_err()).to_lowercase();
-        assert!(msg.contains("no skills") || msg.contains("empty"),
-            "expected 'no skills' or 'empty'; got: {}", msg);
+        assert!(
+            msg.contains("no skills") || msg.contains("empty"),
+            "expected 'no skills' or 'empty'; got: {}",
+            msg
+        );
     }
 
     #[test]
     fn with_skills_emits_show_skills_menu() {
-        let lister = Arc::new(MockSkillLister { entries: fixture_entries(3) });
+        let lister = Arc::new(MockSkillLister {
+            entries: fixture_entries(3),
+        });
         let handler = SkillsHandler::with_lister(lister);
         let (mut ctx, mut rx) = make_bug_ctx();
         handler.execute(&mut ctx, &[]).unwrap();
@@ -144,7 +151,9 @@ mod tests {
 
     #[test]
     fn skills_entries_carry_name_and_description() {
-        let lister = Arc::new(MockSkillLister { entries: fixture_entries(2) });
+        let lister = Arc::new(MockSkillLister {
+            entries: fixture_entries(2),
+        });
         let handler = SkillsHandler::with_lister(lister);
         let (mut ctx, mut rx) = make_bug_ctx();
         handler.execute(&mut ctx, &[]).unwrap();

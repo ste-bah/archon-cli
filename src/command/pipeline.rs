@@ -25,8 +25,12 @@ pub async fn handle_pipeline_command(
                 println!("=== Coding Pipeline Dry Run ===");
                 println!("Task: {task}");
                 println!("\nAgent Sequence (48 agents):");
-                println!("  Phase 1: task-analyzer, requirement-extractor, requirement-prioritizer");
-                println!("  Phase 2: pattern-explorer, technology-scout, feasibility-analyzer, codebase-analyzer");
+                println!(
+                    "  Phase 1: task-analyzer, requirement-extractor, requirement-prioritizer"
+                );
+                println!(
+                    "  Phase 2: pattern-explorer, technology-scout, feasibility-analyzer, codebase-analyzer"
+                );
                 println!("  Phase 3: system-designer, component-designer, interface-designer, ...");
                 println!("  Phase 4: code-generator, unit-implementer, api-implementer, ...");
                 println!("  Phase 5: test-generator, integration-tester, security-tester, ...");
@@ -49,24 +53,23 @@ pub async fn handle_pipeline_command(
                 let api_url = std::env::var("ANTHROPIC_BASE_URL")
                     .ok()
                     .or_else(|| config.api.base_url.clone());
-                let pipe_client = archon_llm::anthropic::AnthropicClient::new(
-                    pipe_auth,
-                    identity,
-                    api_url,
+                let pipe_client =
+                    archon_llm::anthropic::AnthropicClient::new(pipe_auth, identity, api_url);
+                let adapter = archon_pipeline::llm_adapter::AnthropicLlmAdapter::new(
+                    std::sync::Arc::new(pipe_client),
                 );
-                let adapter = archon_pipeline::llm_adapter::AnthropicLlmAdapter::new(std::sync::Arc::new(pipe_client));
-                let learning = archon_pipeline::learning::integration::LearningIntegration::new(None, None, Default::default());
+                let learning = archon_pipeline::learning::integration::LearningIntegration::new(
+                    None,
+                    None,
+                    Default::default(),
+                );
                 let facade = archon_pipeline::coding::facade::CodingFacade::with_learning(learning);
                 let leann = init_leann(&cwd).await;
                 println!("Starting coding pipeline...");
                 println!("Task: {task}");
-                let result = archon_pipeline::runner::run_pipeline(
-                    &facade,
-                    &adapter,
-                    task,
-                    leann.as_ref(),
-                )
-                .await?;
+                let result =
+                    archon_pipeline::runner::run_pipeline(&facade, &adapter, task, leann.as_ref())
+                        .await?;
                 print_pipeline_result(&result);
             }
         }
@@ -96,28 +99,36 @@ pub async fn handle_pipeline_command(
                 let api_url = std::env::var("ANTHROPIC_BASE_URL")
                     .ok()
                     .or_else(|| config.api.base_url.clone());
-                let pipe_client = archon_llm::anthropic::AnthropicClient::new(
-                    pipe_auth,
-                    identity,
-                    api_url,
+                let pipe_client =
+                    archon_llm::anthropic::AnthropicClient::new(pipe_auth, identity, api_url);
+                let adapter = archon_pipeline::llm_adapter::AnthropicLlmAdapter::new(
+                    std::sync::Arc::new(pipe_client),
                 );
-                let adapter = archon_pipeline::llm_adapter::AnthropicLlmAdapter::new(std::sync::Arc::new(pipe_client));
-                let phd_learning = archon_pipeline::learning::integration::PhDLearningIntegration::new();
-                let facade = archon_pipeline::research::facade::ResearchFacade::with_learning(None, phd_learning);
+                let phd_learning =
+                    archon_pipeline::learning::integration::PhDLearningIntegration::new();
+                let facade = archon_pipeline::research::facade::ResearchFacade::with_learning(
+                    None,
+                    phd_learning,
+                );
                 println!("Starting research pipeline...");
                 println!("Topic: {topic}");
-                let result = archon_pipeline::runner::run_pipeline(&facade, &adapter, topic, None).await?;
+                let result =
+                    archon_pipeline::runner::run_pipeline(&facade, &adapter, topic, None).await?;
                 print_pipeline_result(&result);
             }
         }
         PipelineAction::Status { session_id } => {
-            let cp_path = cwd.join(".pipeline-state").join(session_id).join("checkpoint.json");
+            let cp_path = cwd
+                .join(".pipeline-state")
+                .join(session_id)
+                .join("checkpoint.json");
             match std::fs::read_to_string(&cp_path) {
                 Ok(data) => {
-                    let session: archon_pipeline::session::PipelineCheckpoint = serde_json::from_str(&data).unwrap_or_else(|e| {
-                        eprintln!("Failed to parse checkpoint: {e}");
-                        std::process::exit(1);
-                    });
+                    let session: archon_pipeline::session::PipelineCheckpoint =
+                        serde_json::from_str(&data).unwrap_or_else(|e| {
+                            eprintln!("Failed to parse checkpoint: {e}");
+                            std::process::exit(1);
+                        });
                     println!("Session: {}", session.session_id);
                     println!("Type: {:?}", session.pipeline_type);
                     println!("Task: {}", session.task);
@@ -127,7 +138,10 @@ pub async fn handle_pipeline_command(
                     println!("Started: {}", session.started_at);
                     println!("Updated: {}", session.updated_at);
                     for agent in &session.completed_agents {
-                        println!("  {} (quality: {:.2}, cost: ${:.4})", agent.agent_key, agent.quality_score, agent.cost_usd);
+                        println!(
+                            "  {} (quality: {:.2}, cost: ${:.4})",
+                            agent.agent_key, agent.quality_score, agent.cost_usd
+                        );
                     }
                 }
                 Err(e) => {
@@ -157,17 +171,24 @@ pub async fn handle_pipeline_command(
                     let api_url = std::env::var("ANTHROPIC_BASE_URL")
                         .ok()
                         .or_else(|| config.api.base_url.clone());
-                    let pipe_client = archon_llm::anthropic::AnthropicClient::new(
-                        pipe_auth,
-                        identity,
-                        api_url,
+                    let pipe_client =
+                        archon_llm::anthropic::AnthropicClient::new(pipe_auth, identity, api_url);
+                    let adapter = archon_pipeline::llm_adapter::AnthropicLlmAdapter::new(
+                        std::sync::Arc::new(pipe_client),
                     );
-                    let adapter = archon_pipeline::llm_adapter::AnthropicLlmAdapter::new(std::sync::Arc::new(pipe_client));
                     let facade_type = &session.pipeline_type;
                     match format!("{:?}", facade_type).as_str() {
                         "Coding" => {
-                            let learning = archon_pipeline::learning::integration::LearningIntegration::new(None, None, Default::default());
-                            let facade = archon_pipeline::coding::facade::CodingFacade::with_learning(learning);
+                            let learning =
+                                archon_pipeline::learning::integration::LearningIntegration::new(
+                                    None,
+                                    None,
+                                    Default::default(),
+                                );
+                            let facade =
+                                archon_pipeline::coding::facade::CodingFacade::with_learning(
+                                    learning,
+                                );
                             println!("Resuming coding pipeline...");
                             let result = archon_pipeline::runner::run_pipeline(
                                 &facade,
@@ -179,8 +200,14 @@ pub async fn handle_pipeline_command(
                             print_pipeline_result(&result);
                         }
                         "Research" => {
-                            let phd_learning = archon_pipeline::learning::integration::PhDLearningIntegration::new();
-                            let facade = archon_pipeline::research::facade::ResearchFacade::with_learning(None, phd_learning);
+                            let phd_learning =
+                                archon_pipeline::learning::integration::PhDLearningIntegration::new(
+                                );
+                            let facade =
+                                archon_pipeline::research::facade::ResearchFacade::with_learning(
+                                    None,
+                                    phd_learning,
+                                );
                             println!("Resuming research pipeline...");
                             let result = archon_pipeline::runner::run_pipeline(
                                 &facade,
@@ -203,33 +230,34 @@ pub async fn handle_pipeline_command(
                 }
             }
         }
-        PipelineAction::List => {
-            match archon_pipeline::session::list_sessions(&cwd) {
-                Ok(sessions) if sessions.is_empty() => {
-                    println!("No pipeline sessions found.");
-                }
-                Ok(sessions) => {
-                    println!("{:<38} {:<10} {:<10} {:>6} {:>10}  {}", "SESSION ID", "TYPE", "STATUS", "AGENTS", "COST", "TASK");
-                    println!("{}", "-".repeat(100));
-                    for s in &sessions {
-                        let truncated: String = s.task.chars().take(30).collect();
-                        println!(
-                            "{:<38} {:<10} {:<10} {:>6} ${:>9.4}  {}",
-                            s.session_id,
-                            format!("{:?}", s.pipeline_type),
-                            format!("{:?}", s.status),
-                            s.completed_count,
-                            s.total_cost_usd,
-                            truncated,
-                        );
-                    }
-                }
-                Err(e) => {
-                    eprintln!("Failed to list sessions: {e}");
-                    std::process::exit(1);
+        PipelineAction::List => match archon_pipeline::session::list_sessions(&cwd) {
+            Ok(sessions) if sessions.is_empty() => {
+                println!("No pipeline sessions found.");
+            }
+            Ok(sessions) => {
+                println!(
+                    "{:<38} {:<10} {:<10} {:>6} {:>10}  {}",
+                    "SESSION ID", "TYPE", "STATUS", "AGENTS", "COST", "TASK"
+                );
+                println!("{}", "-".repeat(100));
+                for s in &sessions {
+                    let truncated: String = s.task.chars().take(30).collect();
+                    println!(
+                        "{:<38} {:<10} {:<10} {:>6} ${:>9.4}  {}",
+                        s.session_id,
+                        format!("{:?}", s.pipeline_type),
+                        format!("{:?}", s.status),
+                        s.completed_count,
+                        s.total_cost_usd,
+                        truncated,
+                    );
                 }
             }
-        }
+            Err(e) => {
+                eprintln!("Failed to list sessions: {e}");
+                std::process::exit(1);
+            }
+        },
         PipelineAction::Abort { session_id } => {
             match archon_pipeline::session::abort(session_id, &cwd) {
                 Ok(()) => println!("Session {session_id} aborted."),
@@ -239,7 +267,11 @@ pub async fn handle_pipeline_command(
                 }
             }
         }
-        PipelineAction::Run { file, format, detach } => {
+        PipelineAction::Run {
+            file,
+            format,
+            detach,
+        } => {
             let src = match std::fs::read_to_string(file) {
                 Ok(s) => s,
                 Err(e) => {
@@ -339,19 +371,17 @@ fn detect_format(
             eprintln!("Unknown format: {other} (expected yaml or json)");
             std::process::exit(3);
         }
-        None => {
-            match file.extension().and_then(|e| e.to_str()) {
-                Some("json") => Ok(archon_pipeline::PipelineFormat::Json),
-                Some("yaml" | "yml") => Ok(archon_pipeline::PipelineFormat::Yaml),
-                _ => {
-                    if src.trim_start().starts_with('{') || src.trim_start().starts_with('[') {
-                        Ok(archon_pipeline::PipelineFormat::Json)
-                    } else {
-                        Ok(archon_pipeline::PipelineFormat::Yaml)
-                    }
+        None => match file.extension().and_then(|e| e.to_str()) {
+            Some("json") => Ok(archon_pipeline::PipelineFormat::Json),
+            Some("yaml" | "yml") => Ok(archon_pipeline::PipelineFormat::Yaml),
+            _ => {
+                if src.trim_start().starts_with('{') || src.trim_start().starts_with('[') {
+                    Ok(archon_pipeline::PipelineFormat::Json)
+                } else {
+                    Ok(archon_pipeline::PipelineFormat::Yaml)
                 }
             }
-        }
+        },
     }
 }
 
@@ -363,7 +393,9 @@ async fn poll_pipeline_status<E: archon_pipeline::PipelineEngine>(
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         match engine.status(id).await {
             Ok(run) => {
-                let finished_count = run.steps.values()
+                let finished_count = run
+                    .steps
+                    .values()
                     .filter(|s| s.state == archon_pipeline::StepRunState::Finished)
                     .count();
                 let total = run.steps.len();

@@ -96,7 +96,10 @@ impl ValidationReport {
     pub fn reason(&self) -> String {
         let mut parts = Vec::new();
         if !self.missing_fields.is_empty() {
-            parts.push(format!("missing fields: {}", self.missing_fields.join(", ")));
+            parts.push(format!(
+                "missing fields: {}",
+                self.missing_fields.join(", ")
+            ));
         }
         if !self.errors.is_empty() {
             parts.push(format!("errors: {}", self.errors.join("; ")));
@@ -235,7 +238,8 @@ mod tests {
         doc.as_object_mut().unwrap().remove("resource_requirements");
         let err = validator.validate(&doc).unwrap_err();
         assert!(
-            err.missing_fields.contains(&"resource_requirements".to_string()),
+            err.missing_fields
+                .contains(&"resource_requirements".to_string()),
             "expected 'resource_requirements' in missing_fields, got: {:?}",
             err.missing_fields
         );

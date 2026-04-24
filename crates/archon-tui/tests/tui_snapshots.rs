@@ -17,7 +17,7 @@
 use archon_tui::diff_view::{render_diff, render_no_changes};
 use archon_tui::markdown::{render_markdown, render_markdown_line};
 use archon_tui::output::{OutputBuffer, ThinkingState, ToolOutputState};
-use archon_tui::splash::{render_splash, ActivityEntry};
+use archon_tui::splash::{ActivityEntry, render_splash};
 use archon_tui::status::StatusBar;
 use archon_tui::syntax::{highlight_code, render_plain_code};
 use archon_tui::theme::{available_themes, theme_by_name};
@@ -101,11 +101,7 @@ fn snapshot_output_buffer_mixed_entries() {
     buf.append_line("[thinking] Let me consider...");
     buf.append_line("assistant: here is the answer");
     let joined = buf.all_lines().join("\n");
-    let repr = format!(
-        "line_count={}\n---\n{}",
-        buf.line_count(),
-        joined
-    );
+    let repr = format!("line_count={}\n---\n{}", buf.line_count(), joined);
     insta::assert_snapshot!("output_buffer_mixed_entries", repr);
 }
 
@@ -114,7 +110,10 @@ fn snapshot_output_buffer_wrapped_rows_count() {
     // Check count_wrapped_rows with a fixture so that wrapping math is
     // locked in — this is the only non-widget rendering surface of
     // OutputBuffer that's currently exposed.
-    let lines = ["short", "a longer line that will wrap around a narrow width"];
+    let lines = [
+        "short",
+        "a longer line that will wrap around a narrow width",
+    ];
     let refs: Vec<&str> = lines.iter().copied().collect();
     let rows = OutputBuffer::count_wrapped_rows(&refs, 20);
     insta::assert_snapshot!("output_buffer_wrapped_rows_width20", format!("{}", rows));
@@ -183,8 +182,8 @@ fn snapshot_render_no_changes() {
 fn snapshot_theme_palettes_all_22() {
     let mut all = String::new();
     for name in available_themes() {
-        let theme = theme_by_name(name)
-            .unwrap_or_else(|| panic!("theme_by_name({name}) returned None"));
+        let theme =
+            theme_by_name(name).unwrap_or_else(|| panic!("theme_by_name({name}) returned None"));
         all.push_str(&format!("=== {name} ===\n{:#?}\n\n", theme));
     }
     insta::assert_snapshot!("theme_palettes_all_22", all);
@@ -311,10 +310,7 @@ fn snapshot_tool_output_state_success_expanded_header() {
 fn snapshot_tool_output_state_success_brief_line() {
     let mut state = ToolOutputState::new("read_file", "tool_123");
     state.complete("file contents here\nline 2", false);
-    insta::assert_snapshot!(
-        "tool_output_state_success_brief_line",
-        state.brief_line()
-    );
+    insta::assert_snapshot!("tool_output_state_success_brief_line", state.brief_line());
 }
 
 // ---------------------------------------------------------------------------
@@ -345,10 +341,7 @@ fn snapshot_tool_output_state_error_expanded_header() {
 fn snapshot_tool_output_state_error_brief_line() {
     let mut state = ToolOutputState::new("read_file", "tool_123");
     state.complete("ENOENT", true);
-    insta::assert_snapshot!(
-        "tool_output_state_error_brief_line",
-        state.brief_line()
-    );
+    insta::assert_snapshot!("tool_output_state_error_brief_line", state.brief_line());
 }
 
 // ---------------------------------------------------------------------------

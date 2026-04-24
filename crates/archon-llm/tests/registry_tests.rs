@@ -60,10 +60,7 @@ fn registry_has_31_entries() {
 #[test]
 fn all_spec_ids_present() {
     for id in EXPECTED_IDS {
-        assert!(
-            get_compat(id).is_some(),
-            "registry missing spec id: {id}"
-        );
+        assert!(get_compat(id).is_some(), "registry missing spec id: {id}");
     }
 }
 
@@ -160,11 +157,7 @@ fn local_base_urls_point_to_localhost() {
     ];
     for (id, url) in cases {
         let d = get_compat(id).unwrap();
-        assert_eq!(
-            d.base_url.as_str(),
-            *url,
-            "{id} base_url drifted from spec"
-        );
+        assert_eq!(d.base_url.as_str(), *url, "{id} base_url drifted from spec");
     }
 }
 

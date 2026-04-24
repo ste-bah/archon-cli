@@ -1,4 +1,4 @@
-use archon_tui::notifications::{NotificationQueue, Level};
+use archon_tui::notifications::{Level, NotificationQueue};
 use std::time::{Duration, Instant};
 
 #[test]

@@ -1507,12 +1507,7 @@ mod tests {
     /// `<plugins_root>/<plugin>/agents/<agent>/` with the 6-file structure.
     /// `agent_md_body` allows tests to distinguish two otherwise-identical
     /// agents (used by the priority collision test).
-    fn create_plugin_agent(
-        plugins_root: &Path,
-        plugin: &str,
-        agent: &str,
-        agent_md_body: &str,
-    ) {
+    fn create_plugin_agent(plugins_root: &Path, plugin: &str, agent: &str, agent_md_body: &str) {
         let agent_dir = plugins_root.join(plugin).join("agents").join(agent);
         fs::create_dir_all(&agent_dir).unwrap();
         fs::write(
@@ -1546,11 +1541,7 @@ mod tests {
 
         let agents = load_plugin_agents(tmp.path()).unwrap();
 
-        assert_eq!(
-            agents.len(),
-            1,
-            "should discover exactly one plugin agent"
-        );
+        assert_eq!(agents.len(), 1, "should discover exactly one plugin agent");
         let bar = &agents[0];
         assert_eq!(
             bar.agent_type, "foo:bar",
@@ -1575,11 +1566,7 @@ mod tests {
 
         let agents = load_plugin_agents(tmp.path()).unwrap();
 
-        assert_eq!(
-            agents.len(),
-            1,
-            "_-prefixed plugin dirs must be skipped"
-        );
+        assert_eq!(agents.len(), 1, "_-prefixed plugin dirs must be skipped");
         assert_eq!(agents[0].agent_type, "real:bar");
     }
 

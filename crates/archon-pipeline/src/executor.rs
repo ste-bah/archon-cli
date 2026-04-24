@@ -449,8 +449,7 @@ impl PipelineExecutor {
 
         // 2b. Check condition BEFORE entering retry loop.
         if let Some(ref cond_expr) = step.condition {
-            let should_run =
-                condition::ConditionEvaluator::evaluate(cond_expr, &outputs_snapshot)?;
+            let should_run = condition::ConditionEvaluator::evaluate(cond_expr, &outputs_snapshot)?;
             if !should_run {
                 // Mark step as Skipped.
                 {
@@ -520,14 +519,12 @@ impl PipelineExecutor {
             // 3e. Poll until terminal (NO lock held), wrapped in per-step timeout.
             let poll_result = tokio::time::timeout(step.timeout(), async {
                 loop {
-                    let snap = self
-                        .task_service
-                        .status(task_id)
-                        .await
-                        .map_err(|e| PipelineError::StepFailed {
+                    let snap = self.task_service.status(task_id).await.map_err(|e| {
+                        PipelineError::StepFailed {
                             step: step_id.to_string(),
                             msg: e.to_string(),
-                        })?;
+                        }
+                    })?;
                     if snap.state.is_terminal() {
                         break Ok::<_, PipelineError>(snap);
                     }
@@ -551,14 +548,14 @@ impl PipelineExecutor {
             match snapshot.state {
                 archon_core::tasks::TaskState::Finished => {
                     // Get result from task service (NO lock held).
-                    let result_stream = self
-                        .task_service
-                        .result(task_id, false)
-                        .await
-                        .map_err(|e| PipelineError::StepFailed {
-                            step: step_id.to_string(),
-                            msg: e.to_string(),
-                        })?;
+                    let result_stream =
+                        self.task_service
+                            .result(task_id, false)
+                            .await
+                            .map_err(|e| PipelineError::StepFailed {
+                                step: step_id.to_string(),
+                                msg: e.to_string(),
+                            })?;
 
                     let output = match result_stream {
                         archon_core::tasks::TaskResultStream::Inline(s) => {
@@ -571,11 +568,8 @@ impl PipelineExecutor {
                     };
 
                     // Write checkpoint (thread-safe atomic file op).
-                    let output_len = serde_json::to_string(&output)
-                        .map(|s| s.len())
-                        .unwrap_or(0);
-                    self.store
-                        .write_checkpoint(pipeline_id, step_id, &output)?;
+                    let output_len = serde_json::to_string(&output).map(|s| s.len()).unwrap_or(0);
+                    self.store.write_checkpoint(pipeline_id, step_id, &output)?;
 
                     // Lock briefly: update StepRun state + save.
                     {
@@ -626,11 +620,8 @@ impl PipelineExecutor {
                         self.store.delete_checkpoint(pipeline_id, step_id)?;
 
                         // Compute backoff delay.
-                        let delay = backoff::delay(
-                            step.retry.backoff,
-                            attempt,
-                            step.retry.base_delay_ms,
-                        );
+                        let delay =
+                            backoff::delay(step.retry.backoff, attempt, step.retry.base_delay_ms);
 
                         // Audit retry scheduled.
                         self.store.append_audit(
@@ -716,13 +707,13 @@ mod tests {
     use super::*;
 
     use std::pin::Pin;
-    use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::Mutex;
+    use std::sync::atomic::{AtomicU32, Ordering};
 
     use async_trait::async_trait;
+    use futures_util::Stream;
     use serde_json::json;
     use tempfile::TempDir;
-    use futures_util::Stream;
 
     use archon_core::tasks::{
         SubmitRequest, TaskError, TaskEvent, TaskFilter, TaskId, TaskResultStream, TaskService,
@@ -937,7 +928,10 @@ mod tests {
         for step_id in ["A", "B", "C"] {
             let step_run = run.steps.get(step_id).expect("step should exist");
             assert_eq!(step_run.state, StepRunState::Finished, "step {step_id}");
-            assert!(step_run.output.is_some(), "step {step_id} should have output");
+            assert!(
+                step_run.output.is_some(),
+                "step {step_id} should have output"
+            );
         }
 
         // 3 checkpoints should exist.
@@ -950,7 +944,12 @@ mod tests {
 
         // Audit log: Started + 3x(StepStarted + StepFinished) + Finished = 8 lines.
         let audit = read_audit_lines(tmp.path(), id);
-        assert_eq!(audit.len(), 8, "expected 8 audit lines, got {}", audit.len());
+        assert_eq!(
+            audit.len(),
+            8,
+            "expected 8 audit lines, got {}",
+            audit.len()
+        );
 
         // First event is Started, last is Finished.
         assert_eq!(audit[0]["type"], "started");

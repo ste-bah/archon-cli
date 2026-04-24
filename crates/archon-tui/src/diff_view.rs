@@ -231,8 +231,14 @@ fn render_hunk_side_by_side(hunk: &Hunk, show_whitespace: bool) -> Vec<Line<'sta
     // Interleave deletions and additions
     let max_len = del_lines.len().max(add_lines.len());
     for i in 0..max_len {
-        let left = del_lines.get(i).cloned().unwrap_or_else(|| Span::raw(" ".to_string()));
-        let right = add_lines.get(i).cloned().unwrap_or_else(|| Span::raw(" ".to_string()));
+        let left = del_lines
+            .get(i)
+            .cloned()
+            .unwrap_or_else(|| Span::raw(" ".to_string()));
+        let right = add_lines
+            .get(i)
+            .cloned()
+            .unwrap_or_else(|| Span::raw(" ".to_string()));
         lines.push(Line::from(vec![
             Span::styled("-".to_string(), Style::default().fg(Color::Red)),
             left,
@@ -369,8 +375,14 @@ mod tests {
     fn diff_view_n_key_advances_hunk() {
         let state = DiffState {
             hunks: vec![
-                Hunk { start_line: 1, lines: vec![DiffLine::context("line1".into())] },
-                Hunk { start_line: 10, lines: vec![DiffLine::context("line2".into())] },
+                Hunk {
+                    start_line: 1,
+                    lines: vec![DiffLine::context("line1".into())],
+                },
+                Hunk {
+                    start_line: 10,
+                    lines: vec![DiffLine::context("line2".into())],
+                },
             ],
             current_hunk: 0,
             show_whitespace: false,
@@ -387,8 +399,14 @@ mod tests {
     fn diff_view_n_at_last_hunk_stays() {
         let state = DiffState {
             hunks: vec![
-                Hunk { start_line: 1, lines: vec![DiffLine::context("line1".into())] },
-                Hunk { start_line: 10, lines: vec![DiffLine::context("line2".into())] },
+                Hunk {
+                    start_line: 1,
+                    lines: vec![DiffLine::context("line1".into())],
+                },
+                Hunk {
+                    start_line: 10,
+                    lines: vec![DiffLine::context("line2".into())],
+                },
             ],
             current_hunk: 1,
             show_whitespace: false,
@@ -405,8 +423,14 @@ mod tests {
     fn diff_view_p_at_first_hunk_stays() {
         let state = DiffState {
             hunks: vec![
-                Hunk { start_line: 1, lines: vec![DiffLine::context("line1".into())] },
-                Hunk { start_line: 10, lines: vec![DiffLine::context("line2".into())] },
+                Hunk {
+                    start_line: 1,
+                    lines: vec![DiffLine::context("line1".into())],
+                },
+                Hunk {
+                    start_line: 10,
+                    lines: vec![DiffLine::context("line2".into())],
+                },
             ],
             current_hunk: 0,
             show_whitespace: false,

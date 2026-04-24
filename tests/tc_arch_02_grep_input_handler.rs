@@ -36,8 +36,8 @@ fn arch_lint_passes_on_clean_tree() {
 #[test]
 fn input_handler_markers_exist() {
     let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-    let main_rs = std::fs::read_to_string(repo_root.join("src/main.rs"))
-        .expect("failed to read src/main.rs");
+    let main_rs =
+        std::fs::read_to_string(repo_root.join("src/main.rs")).expect("failed to read src/main.rs");
 
     assert!(
         main_rs.contains("BEGIN INPUT_HANDLER"),

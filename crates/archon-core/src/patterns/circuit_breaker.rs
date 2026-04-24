@@ -9,8 +9,8 @@
 //!   HalfOpen -> (probe succeeds)      -> Closed
 //!   HalfOpen -> (probe fails)         -> Open
 
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -164,11 +164,7 @@ impl Pattern for CircuitBreaker {
         self.inner.kind()
     }
 
-    async fn execute(
-        &self,
-        input: Value,
-        ctx: PatternCtx,
-    ) -> Result<Value, PatternError> {
+    async fn execute(&self, input: Value, ctx: PatternCtx) -> Result<Value, PatternError> {
         // 1. Gate: reject immediately if Open (and not yet ready to probe).
         self.check_state().await?;
 
@@ -226,14 +222,16 @@ pub fn wrap_with_breaker(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
     use std::time::Duration;
 
     use async_trait::async_trait;
     use serde_json::json;
 
-    use crate::patterns::{PatternCtx, PatternError, PatternKind, PatternRegistry, TaskServiceHandle};
+    use crate::patterns::{
+        PatternCtx, PatternError, PatternKind, PatternRegistry, TaskServiceHandle,
+    };
 
     // -- Configurable stub pattern ------------------------------------------
 
@@ -275,11 +273,7 @@ mod tests {
             PatternKind::Custom("stub".into())
         }
 
-        async fn execute(
-            &self,
-            _input: Value,
-            _ctx: PatternCtx,
-        ) -> Result<Value, PatternError> {
+        async fn execute(&self, _input: Value, _ctx: PatternCtx) -> Result<Value, PatternError> {
             self.call_count.fetch_add(1, Ordering::SeqCst);
 
             if self.should_hang.load(Ordering::SeqCst) {
@@ -302,11 +296,7 @@ mod tests {
 
         #[async_trait]
         impl TaskServiceHandle for DummyTaskService {
-            async fn submit(
-                &self,
-                _agent: &str,
-                input: Value,
-            ) -> Result<Value, PatternError> {
+            async fn submit(&self, _agent: &str, input: Value) -> Result<Value, PatternError> {
                 Ok(input)
             }
         }
@@ -340,12 +330,7 @@ mod tests {
         let stub = StubPattern::new();
         stub.set_fail(true);
 
-        let cb = CircuitBreaker::wrap(
-            "agent-x",
-            stub.clone(),
-            default_cfg(),
-            default_timeout(),
-        );
+        let cb = CircuitBreaker::wrap("agent-x", stub.clone(), default_cfg(), default_timeout());
 
         // Calls 1-3: should each hit the inner and get errors back.
         // The third failure trips the breaker.
@@ -354,7 +339,11 @@ mod tests {
             assert!(result.is_err(), "call {} should fail", i + 1);
         }
 
-        assert_eq!(stub.calls(), 3, "inner must have been called exactly 3 times");
+        assert_eq!(
+            stub.calls(),
+            3,
+            "inner must have been called exactly 3 times"
+        );
 
         // Call 4: breaker is Open, inner must NOT be called.
         let result = cb.execute(json!(null), make_ctx()).await;
@@ -378,12 +367,7 @@ mod tests {
         let stub = StubPattern::new();
         stub.set_hang(true);
 
-        let cb = CircuitBreaker::wrap(
-            "slow-agent",
-            stub.clone(),
-            default_cfg(),
-            default_timeout(),
-        );
+        let cb = CircuitBreaker::wrap("slow-agent", stub.clone(), default_cfg(), default_timeout());
 
         let handle = tokio::spawn({
             let cb = cb.clone();
@@ -408,12 +392,7 @@ mod tests {
         let stub = StubPattern::new();
         stub.set_fail(true);
 
-        let cb = CircuitBreaker::wrap(
-            "resettable",
-            stub.clone(),
-            default_cfg(),
-            default_timeout(),
-        );
+        let cb = CircuitBreaker::wrap("resettable", stub.clone(), default_cfg(), default_timeout());
 
         // Two failures.
         let _ = cb.execute(json!(null), make_ctx()).await;
@@ -541,7 +520,11 @@ mod tests {
         // Next call should go through (configure stub to succeed).
         stub.set_fail(false);
         let result = cb.execute(json!(null), make_ctx()).await;
-        assert!(result.is_ok(), "call after reset should succeed: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "call after reset should succeed: {:?}",
+            result
+        );
     }
 
     /// The `CircuitOpen` error display includes the agent name and the

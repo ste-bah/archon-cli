@@ -40,7 +40,8 @@ async fn eventchannel_memory_growth_test() {
         let producer = tokio::spawn(async move {
             for i in 0..100 {
                 // TextDelta("x") — same variant as TUI-209 (line 31 in eventchannel_load.rs)
-                let event = archon_core::agent::AgentEvent::TextDelta(format!("warmup-{}-{}", cycle, i));
+                let event =
+                    archon_core::agent::AgentEvent::TextDelta(format!("warmup-{}-{}", cycle, i));
                 metrics_clone.record_sent();
                 let timestamped = archon_core::agent::TimestampedEvent {
                     sent_at: Instant::now(),
@@ -115,7 +116,11 @@ async fn eventchannel_memory_growth_test() {
 
         producer.await.expect("producer panicked");
         let drained_count = consumer.await.expect("consumer panicked");
-        assert_eq!(drained_count, burst_size, "drain count mismatch for burst {}", burst_size);
+        assert_eq!(
+            drained_count, burst_size,
+            "drain count mismatch for burst {}",
+            burst_size
+        );
 
         // Sample peak RSS IMMEDIATELY AFTER drain
         let peak_rss = read_rss_bytes();

@@ -37,13 +37,11 @@ pub(crate) async fn handle_team_command(
                 "team-device".to_string(),
                 String::new(),
             );
-            let team_api_url =
-                std::env::var("ANTHROPIC_BASE_URL").ok().or_else(|| config.api.base_url.clone());
-            let team_client = archon_llm::anthropic::AnthropicClient::new(
-                team_auth,
-                team_identity,
-                team_api_url,
-            );
+            let team_api_url = std::env::var("ANTHROPIC_BASE_URL")
+                .ok()
+                .or_else(|| config.api.base_url.clone());
+            let team_client =
+                archon_llm::anthropic::AnthropicClient::new(team_auth, team_identity, team_api_url);
             let team_provider = build_llm_provider(&config.llm, team_client);
             let cwd = std::env::current_dir().unwrap_or_default();
             let team_agent_registry = Arc::new(std::sync::RwLock::new(AgentRegistry::load(&cwd)));
@@ -91,8 +89,7 @@ pub(crate) async fn handle_team_command(
         }
         TeamAction::List => {
             use archon_core::team::TeamManager;
-            let cwd =
-                std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+            let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
             let manager = TeamManager::new(cwd.clone());
             match manager.list_teams() {
                 Ok(ids) if ids.is_empty() => {

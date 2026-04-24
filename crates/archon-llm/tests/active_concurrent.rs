@@ -15,8 +15,8 @@ use std::time::Duration;
 use archon_llm::active::ActiveProvider;
 use archon_llm::provider::{LlmProvider, LlmRequest};
 use archon_llm::providers::{
-    AuthFlavor, CompatKind, OpenAiCompatProvider, ProviderDescriptor,
-    ProviderFeatures, ProviderQuirks,
+    AuthFlavor, CompatKind, OpenAiCompatProvider, ProviderDescriptor, ProviderFeatures,
+    ProviderQuirks,
 };
 use archon_llm::retry::RetryPolicy;
 use archon_llm::secrets::ApiKey;

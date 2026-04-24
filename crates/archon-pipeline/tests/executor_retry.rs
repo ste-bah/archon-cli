@@ -6,8 +6,8 @@
 
 use std::collections::HashMap;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
@@ -292,7 +292,10 @@ async fn retries_then_succeeds() {
         50,
     )]);
 
-    let id = executor.run(spec).await.expect("pipeline should succeed after retries");
+    let id = executor
+        .run(spec)
+        .await
+        .expect("pipeline should succeed after retries");
 
     // Verify final pipeline state.
     let run = store.load_state(id).expect("state should load");
@@ -312,14 +315,23 @@ async fn retries_then_succeeds() {
     let step_started_count = audit.iter().filter(|e| e["type"] == "step_started").count();
     assert_eq!(step_started_count, 3, "expected 3 StepStarted audit events");
 
-    let retry_scheduled_count = audit.iter().filter(|e| e["type"] == "retry_scheduled").count();
+    let retry_scheduled_count = audit
+        .iter()
+        .filter(|e| e["type"] == "retry_scheduled")
+        .count();
     assert_eq!(
         retry_scheduled_count, 2,
         "expected 2 RetryScheduled audit events"
     );
 
-    let step_finished_count = audit.iter().filter(|e| e["type"] == "step_finished").count();
-    assert_eq!(step_finished_count, 1, "expected 1 StepFinished audit event");
+    let step_finished_count = audit
+        .iter()
+        .filter(|e| e["type"] == "step_finished")
+        .count();
+    assert_eq!(
+        step_finished_count, 1,
+        "expected 1 StepFinished audit event"
+    );
 }
 
 /// Step fails all 3 attempts — retries exhausted.
@@ -376,7 +388,10 @@ async fn retries_exhausted_then_fails() {
     let step_started_count = audit.iter().filter(|e| e["type"] == "step_started").count();
     assert_eq!(step_started_count, 3, "expected 3 StepStarted");
 
-    let retry_scheduled_count = audit.iter().filter(|e| e["type"] == "retry_scheduled").count();
+    let retry_scheduled_count = audit
+        .iter()
+        .filter(|e| e["type"] == "retry_scheduled")
+        .count();
     assert_eq!(retry_scheduled_count, 2, "expected 2 RetryScheduled");
 
     let step_failed_count = audit.iter().filter(|e| e["type"] == "step_failed").count();
@@ -428,7 +443,10 @@ async fn no_retry_on_default() {
     let step_started_count = audit.iter().filter(|e| e["type"] == "step_started").count();
     assert_eq!(step_started_count, 1, "expected 1 StepStarted");
 
-    let retry_scheduled_count = audit.iter().filter(|e| e["type"] == "retry_scheduled").count();
+    let retry_scheduled_count = audit
+        .iter()
+        .filter(|e| e["type"] == "retry_scheduled")
+        .count();
     assert_eq!(retry_scheduled_count, 0, "expected 0 RetryScheduled");
 
     let step_failed_count = audit.iter().filter(|e| e["type"] == "step_failed").count();
@@ -464,7 +482,10 @@ async fn exponential_delays_increase() {
     )]);
 
     let start = Instant::now();
-    let id = executor.run(spec).await.expect("pipeline should succeed on 4th attempt");
+    let id = executor
+        .run(spec)
+        .await
+        .expect("pipeline should succeed on 4th attempt");
     let total_elapsed = start.elapsed();
 
     // Verify success.

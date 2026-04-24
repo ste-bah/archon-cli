@@ -96,7 +96,10 @@ pub struct McpServerEntry {
 pub enum TuiEvent {
     TextDelta(String),
     ThinkingDelta(String),
-    ToolStart { name: String, id: String },
+    ToolStart {
+        name: String,
+        id: String,
+    },
     ToolComplete {
         name: String,
         id: String,
@@ -147,7 +150,10 @@ pub enum TuiEvent {
         name: String,
         color: Option<String>,
     },
-    Resize { cols: u16, rows: u16 },
+    Resize {
+        cols: u16,
+        rows: u16,
+    },
     UserInput(String),
     SlashCancel,
     SlashAgent(String),

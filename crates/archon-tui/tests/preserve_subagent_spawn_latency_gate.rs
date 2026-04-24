@@ -96,15 +96,15 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Once};
 use std::time::{Duration, Instant};
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use archon_tools::agent_tool::{AgentTool, SubagentRequest};
+use archon_tools::cancel_background_agent;
 use archon_tools::subagent_executor::{
-    install_subagent_executor, ExecutorError, OutcomeSideEffects, SubagentClassification,
-    SubagentExecutor,
+    ExecutorError, OutcomeSideEffects, SubagentClassification, SubagentExecutor,
+    install_subagent_executor,
 };
 use archon_tools::tool::{AgentMode, Tool, ToolContext};
-use archon_tools::cancel_background_agent;
 use async_trait::async_trait;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
@@ -147,12 +147,7 @@ impl SubagentExecutor for StubExecutor {
         Ok(String::new())
     }
 
-    async fn on_inner_complete(
-        &self,
-        _subagent_id: String,
-        _result: Result<String, String>,
-    ) {
-    }
+    async fn on_inner_complete(&self, _subagent_id: String, _result: Result<String, String>) {}
 
     async fn on_visible_complete(
         &self,
@@ -235,7 +230,9 @@ fn quantile_micros(sorted: &[Duration], q: f64) -> u128 {
     }
     // Nearest-rank: index = ceil(q * n) - 1, clamped to [0, n-1].
     let n = sorted.len();
-    let idx = ((q * n as f64).ceil() as usize).saturating_sub(1).min(n - 1);
+    let idx = ((q * n as f64).ceil() as usize)
+        .saturating_sub(1)
+        .min(n - 1);
     sorted[idx].as_micros()
 }
 
@@ -282,9 +279,7 @@ async fn preserve_subagent_spawn_latency_gate() {
     let entered = Arc::new(AtomicBool::new(false));
     let parent_entered = Arc::clone(&entered);
     let parent_handle =
-        tokio::spawn(
-            async move { stub_blocked_parent_process_message(parent_entered).await },
-        );
+        tokio::spawn(async move { stub_blocked_parent_process_message(parent_entered).await });
 
     // Busy-wait (bounded) for the parent to enter its block. Max 500ms of
     // real wallclock — if the parent hasn't been polled by then something
@@ -303,8 +298,7 @@ async fn preserve_subagent_spawn_latency_gate() {
     }
 
     // --- 10 measurement iterations ---------------------------------------
-    let samples: Arc<Mutex<Vec<Duration>>> =
-        Arc::new(Mutex::new(Vec::with_capacity(ITERATIONS)));
+    let samples: Arc<Mutex<Vec<Duration>>> = Arc::new(Mutex::new(Vec::with_capacity(ITERATIONS)));
     let mut spawned_ids: Vec<Uuid> = Vec::with_capacity(ITERATIONS);
 
     for i in 0..ITERATIONS {
@@ -337,11 +331,13 @@ async fn preserve_subagent_spawn_latency_gate() {
         let id_str = v["agent_id"]
             .as_str()
             .unwrap_or_else(|| panic!("iter {i}: agent_id missing from result: {v:?}"));
-        let id = Uuid::parse_str(id_str).unwrap_or_else(|e| {
-            panic!("iter {i}: agent_id not a valid UUID: {id_str}: {e}")
-        });
+        let id = Uuid::parse_str(id_str)
+            .unwrap_or_else(|e| panic!("iter {i}: agent_id not a valid UUID: {id_str}: {e}"));
         spawned_ids.push(id);
-        samples.lock().expect("samples mutex poisoned").push(elapsed);
+        samples
+            .lock()
+            .expect("samples mutex poisoned")
+            .push(elapsed);
 
         // Sanity assert per-iteration (spec line 37-39: "assert elapsed <
         // Duration::from_millis(10)"; failure MUST mention ERR-TUI-003 and
@@ -369,8 +365,8 @@ async fn preserve_subagent_spawn_latency_gate() {
     let p95 = quantile_micros(&sorted, 0.95);
     let p99 = quantile_micros(&sorted, 0.99);
     let max = sorted.last().copied().unwrap_or_default();
-    let avg_us: u128 = samples_vec.iter().map(|d| d.as_micros()).sum::<u128>()
-        / samples_vec.len() as u128;
+    let avg_us: u128 =
+        samples_vec.iter().map(|d| d.as_micros()).sum::<u128>() / samples_vec.len() as u128;
 
     // Spec Validation #2: average measured latency reported in test output <5ms.
     // (We print it; the hard gate is the per-sample <10ms bound above.)

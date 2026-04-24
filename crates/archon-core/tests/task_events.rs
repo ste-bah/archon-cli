@@ -3,8 +3,8 @@
 use archon_core::tasks::events::{EventBus, EventLog};
 use archon_core::tasks::models::{TaskEvent, TaskEventKind, TaskId};
 use chrono::Utc;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tempfile::TempDir;
 use tokio_stream::StreamExt;
 
@@ -66,13 +66,10 @@ async fn test_events_live_subscription_receives_new() {
     let evt = make_event(task_id, 0, TaskEventKind::Started);
     bus.broadcast(task_id, evt.clone());
 
-    let received = tokio::time::timeout(
-        std::time::Duration::from_millis(100),
-        rx.next(),
-    )
-    .await
-    .unwrap()
-    .unwrap();
+    let received = tokio::time::timeout(std::time::Duration::from_millis(100), rx.next())
+        .await
+        .unwrap()
+        .unwrap();
 
     assert_eq!(received.seq, 0);
     assert_eq!(received.kind, TaskEventKind::Started);
@@ -148,13 +145,10 @@ async fn test_events_replay_then_live_contiguous() {
     let evt5 = make_event(task_id, 5, TaskEventKind::Finished);
     bus.broadcast(task_id, evt5);
 
-    let live = tokio::time::timeout(
-        std::time::Duration::from_millis(100),
-        rx.next(),
-    )
-    .await
-    .unwrap()
-    .unwrap();
+    let live = tokio::time::timeout(std::time::Duration::from_millis(100), rx.next())
+        .await
+        .unwrap()
+        .unwrap();
 
     assert_eq!(live.seq, 5); // contiguous with replay end
 }

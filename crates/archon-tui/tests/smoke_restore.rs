@@ -77,7 +77,10 @@ async fn smoke_restore_exceeds_context_truncates() {
         .register_session(session_id, "/tmp", None, "claude-3-5-sonnet")
         .expect("register session");
     for i in 0..100 {
-        let content = format!("Message number {} with some additional text to make it longer", i);
+        let content = format!(
+            "Message number {} with some additional text to make it longer",
+            i
+        );
         store
             .save_message(session_id, i, &content)
             .expect("save message");

@@ -108,11 +108,7 @@ use crate::command::registry::{CommandContext, CommandHandler};
 pub(crate) struct ColorHandler;
 
 impl CommandHandler for ColorHandler {
-    fn execute(
-        &self,
-        ctx: &mut CommandContext,
-        args: &[String],
-    ) -> anyhow::Result<()> {
+    fn execute(&self, ctx: &mut CommandContext, args: &[String]) -> anyhow::Result<()> {
         // R4: join multi-token args with " " and trim. For all current
         // single-token color names this collapses to the same value as
         // `args.first().unwrap_or("").as_str()`; for any future
@@ -248,9 +244,7 @@ mod tests {
                      have no embedded indentation)"
                 );
             }
-            other => panic!(
-                "no-args branch must emit TextDelta, got: {other:?}"
-            ),
+            other => panic!("no-args branch must emit TextDelta, got: {other:?}"),
         }
     }
 
@@ -284,8 +278,8 @@ mod tests {
         // because the bin crate does not depend on `ratatui` directly —
         // the Color type lives in archon_tui's TuiEvent variant and the
         // canonical source of truth is `parse_color` itself.
-        let expected_color = archon_tui::theme::parse_color(name)
-            .expect("parse_color('cyan') must return Some");
+        let expected_color =
+            archon_tui::theme::parse_color(name).expect("parse_color('cyan') must return Some");
         let first = rx
             .try_recv()
             .expect("valid-color branch must emit at least one event");
@@ -361,9 +355,7 @@ mod tests {
                      format byte-for-byte"
                 );
             }
-            other => panic!(
-                "unknown-color branch must emit Error, got: {other:?}"
-            ),
+            other => panic!("unknown-color branch must emit Error, got: {other:?}"),
         }
     }
 
@@ -438,9 +430,9 @@ mod tests {
         while let Ok(ev) = rx.try_recv() {
             events.push(ev);
         }
-        let has_text_delta = events.iter().any(|e| {
-            matches!(e, TuiEvent::TextDelta(s) if s == expected_help)
-        });
+        let has_text_delta = events
+            .iter()
+            .any(|e| matches!(e, TuiEvent::TextDelta(s) if s == expected_help));
         let has_error = events.iter().any(|e| matches!(e, TuiEvent::Error(_)));
         assert!(
             has_text_delta && !has_error,
@@ -482,9 +474,9 @@ mod tests {
         let has_set_accent = events
             .iter()
             .any(|e| matches!(e, TuiEvent::SetAccentColor(_)));
-        let has_text_delta = events.iter().any(|e| {
-            matches!(e, TuiEvent::TextDelta(s) if s == expected_confirmation)
-        });
+        let has_text_delta = events
+            .iter()
+            .any(|e| matches!(e, TuiEvent::TextDelta(s) if s == expected_confirmation));
         let has_error = events.iter().any(|e| matches!(e, TuiEvent::Error(_)));
         assert!(
             has_set_accent && has_text_delta && !has_error,

@@ -9,10 +9,10 @@
 //! full render/input/truncate wiring in `render/body.rs`,
 //! `event_loop/input.rs`, and `src/session.rs`.
 
+use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem};
-use ratatui::Frame;
 
 use crate::events::MessageSummary;
 use crate::theme::Theme;
@@ -111,9 +111,7 @@ impl MessageSelector {
         let list = List::new(items).block(
             Block::default()
                 .borders(Borders::ALL)
-                .title(
-                    " /rewind — pick message to rewind to (Up/Down, Enter select, Esc cancel) ",
-                )
+                .title(" /rewind — pick message to rewind to (Up/Down, Enter select, Esc cancel) ")
                 .border_style(Style::default().fg(theme.accent)),
         );
         f.render_widget(list, overlay_area);

@@ -7,9 +7,8 @@ use crate::command::utils::parse_datetime;
 /// Handle `--sessions` flag: search, stats, or delete sessions.
 pub fn handle_sessions(cli: &Cli) -> anyhow::Result<()> {
     let db_path = archon_session::storage::default_db_path();
-    let store =
-        archon_session::storage::SessionStore::open(&db_path)
-            .map_err(|e| anyhow::anyhow!("failed to open session database: {e}"))?;
+    let store = archon_session::storage::SessionStore::open(&db_path)
+        .map_err(|e| anyhow::anyhow!("failed to open session database: {e}"))?;
 
     // --sessions --delete <ID>
     if let Some(ref id) = cli.delete {
@@ -22,9 +21,8 @@ pub fn handle_sessions(cli: &Cli) -> anyhow::Result<()> {
 
     // --sessions --stats
     if cli.stats {
-        let stats =
-            archon_session::search::session_stats(&store)
-                .map_err(|e| anyhow::anyhow!("failed to compute stats: {e}"))?;
+        let stats = archon_session::search::session_stats(&store)
+            .map_err(|e| anyhow::anyhow!("failed to compute stats: {e}"))?;
         println!("Sessions:  {}", stats.total_sessions);
         println!("Tokens:    {}", stats.total_tokens);
         println!("Messages:  {}", stats.total_messages);
@@ -46,9 +44,8 @@ pub fn handle_sessions(cli: &Cli) -> anyhow::Result<()> {
         ..Default::default()
     };
 
-    let results =
-        archon_session::search::search_sessions(&store, &query)
-            .map_err(|e| anyhow::anyhow!("search failed: {e}"))?;
+    let results = archon_session::search::search_sessions(&store, &query)
+        .map_err(|e| anyhow::anyhow!("search failed: {e}"))?;
 
     if results.is_empty() {
         eprintln!("No matching sessions found.");

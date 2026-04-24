@@ -117,11 +117,7 @@ use crate::command::registry::{CommandContext, CommandHandler};
 pub(crate) struct GardenHandler;
 
 impl CommandHandler for GardenHandler {
-    fn execute(
-        &self,
-        ctx: &mut CommandContext,
-        args: &[String],
-    ) -> anyhow::Result<()> {
+    fn execute(&self, ctx: &mut CommandContext, args: &[String]) -> anyhow::Result<()> {
         // 1. Require memory handle. `build_command_context` populates
         //    this unconditionally from `SlashCommandContext::memory` so
         //    at the real dispatch site this branch never fires. Test
@@ -145,11 +141,7 @@ impl CommandHandler for GardenHandler {
         //    `args.first()` as the subcommand (trimmed) — missing token
         //    defaults to `""`, which falls into the default consolidate
         //    branch below. See module rustdoc R4.
-        let sub = args
-            .first()
-            .map(|s| s.as_str())
-            .unwrap_or("")
-            .trim();
+        let sub = args.first().map(|s| s.as_str()).unwrap_or("").trim();
 
         if sub == "stats" {
             match archon_memory::garden::format_garden_stats(memory, 10) {
@@ -161,9 +153,7 @@ impl CommandHandler for GardenHandler {
                 Err(e) => {
                     let _ = ctx
                         .tui_tx
-                        .try_send(TuiEvent::Error(format!(
-                            "Garden stats failed: {e}"
-                        )));
+                        .try_send(TuiEvent::Error(format!("Garden stats failed: {e}")));
                 }
             }
         } else {
@@ -182,16 +172,12 @@ impl CommandHandler for GardenHandler {
                     let formatted = report.format();
                     let _ = ctx
                         .tui_tx
-                        .try_send(TuiEvent::TextDelta(format!(
-                            "\n{formatted}\n"
-                        )));
+                        .try_send(TuiEvent::TextDelta(format!("\n{formatted}\n")));
                 }
                 Err(e) => {
                     let _ = ctx
                         .tui_tx
-                        .try_send(TuiEvent::Error(format!(
-                            "Garden consolidation failed: {e}"
-                        )));
+                        .try_send(TuiEvent::Error(format!("Garden consolidation failed: {e}")));
                 }
             }
         }
@@ -219,9 +205,7 @@ impl CommandHandler for GardenHandler {
 mod tests {
     use super::*;
     use archon_memory::garden::GardenConfig;
-    use archon_memory::types::{
-        Memory, MemoryError, MemoryType, RelType, SearchFilter,
-    };
+    use archon_memory::types::{Memory, MemoryError, MemoryType, RelType, SearchFilter};
     use archon_tui::app::TuiEvent;
     use std::sync::Mutex;
     use tokio::sync::mpsc;
@@ -267,15 +251,12 @@ mod tests {
         /// also calls `memory_count` first for `total_before`, so the
         /// same slot covers both paths.
         fn with_count_error(self, msg: &str) -> Self {
-            *self.count_result.lock().unwrap() =
-                Err(MemoryError::Database(msg.to_string()));
+            *self.count_result.lock().unwrap() = Err(MemoryError::Database(msg.to_string()));
             self
         }
     }
 
-    fn clone_result<T: Clone>(
-        r: &Result<T, MemoryError>,
-    ) -> Result<T, MemoryError> {
+    fn clone_result<T: Clone>(r: &Result<T, MemoryError>) -> Result<T, MemoryError> {
         match r {
             Ok(v) => Ok(v.clone()),
             Err(e) => Err(MemoryError::Database(format!("{e}"))),
@@ -309,11 +290,7 @@ mod tests {
             Ok(())
         }
 
-        fn update_importance(
-            &self,
-            _id: &str,
-            _importance: f64,
-        ) -> Result<(), MemoryError> {
+        fn update_importance(&self, _id: &str, _importance: f64) -> Result<(), MemoryError> {
             Ok(())
         }
 
@@ -332,25 +309,15 @@ mod tests {
             Ok(())
         }
 
-        fn recall_memories(
-            &self,
-            _query: &str,
-            _limit: usize,
-        ) -> Result<Vec<Memory>, MemoryError> {
+        fn recall_memories(&self, _query: &str, _limit: usize) -> Result<Vec<Memory>, MemoryError> {
             Ok(Vec::new())
         }
 
-        fn search_memories(
-            &self,
-            _filter: &SearchFilter,
-        ) -> Result<Vec<Memory>, MemoryError> {
+        fn search_memories(&self, _filter: &SearchFilter) -> Result<Vec<Memory>, MemoryError> {
             clone_result(&self.search_result.lock().unwrap())
         }
 
-        fn list_recent(
-            &self,
-            _limit: usize,
-        ) -> Result<Vec<Memory>, MemoryError> {
+        fn list_recent(&self, _limit: usize) -> Result<Vec<Memory>, MemoryError> {
             clone_result(&self.list_recent_result.lock().unwrap())
         }
 
@@ -363,9 +330,7 @@ mod tests {
                 // so naively round-tripping through Display and
                 // re-wrapping would double-prefix and break the
                 // byte-identity assertions.
-                Err(MemoryError::Database(msg)) => {
-                    Err(MemoryError::Database(msg.clone()))
-                }
+                Err(MemoryError::Database(msg)) => Err(MemoryError::Database(msg.clone())),
                 Err(other) => Err(MemoryError::Database(format!("{other}"))),
             }
         }
@@ -374,11 +339,7 @@ mod tests {
             Ok(0)
         }
 
-        fn get_related_memories(
-            &self,
-            _id: &str,
-            _depth: u32,
-        ) -> Result<Vec<Memory>, MemoryError> {
+        fn get_related_memories(&self, _id: &str, _depth: u32) -> Result<Vec<Memory>, MemoryError> {
             Ok(Vec::new())
         }
     }
@@ -474,13 +435,11 @@ mod tests {
         // directly on the same memory double. This guarantees the
         // assertion stays in lockstep with the archon-memory formatter
         // across future changes without hard-coding its exact output.
-        let expected_inner =
-            archon_memory::garden::format_garden_stats(mem.as_ref(), 10)
-                .expect("format_garden_stats on empty TestMemory must succeed");
+        let expected_inner = archon_memory::garden::format_garden_stats(mem.as_ref(), 10)
+            .expect("format_garden_stats on empty TestMemory must succeed");
         let expected = format!("\n{expected_inner}\n");
 
-        let (mut ctx, mut rx) =
-            make_ctx(Some(mem), Some(GardenConfig::default()));
+        let (mut ctx, mut rx) = make_ctx(Some(mem), Some(GardenConfig::default()));
         let h = GardenHandler;
         let res = h.execute(&mut ctx, &["stats".to_string()]);
         assert!(res.is_ok(), "stats Ok must return Ok, got: {res:?}");
@@ -509,8 +468,7 @@ mod tests {
     fn garden_handler_execute_stats_with_err_memory_emits_error() {
         let tm = TestMemory::new_empty().with_count_error("boom-stats");
         let mem: Arc<dyn MemoryTrait> = Arc::new(tm);
-        let (mut ctx, mut rx) =
-            make_ctx(Some(mem), Some(GardenConfig::default()));
+        let (mut ctx, mut rx) = make_ctx(Some(mem), Some(GardenConfig::default()));
         let h = GardenHandler;
         let res = h.execute(&mut ctx, &["stats".to_string()]);
         assert!(
@@ -615,8 +573,7 @@ mod tests {
     fn garden_handler_execute_consolidate_with_err_memory_emits_error() {
         let tm = TestMemory::new_empty().with_count_error("boom-consolidate");
         let mem: Arc<dyn MemoryTrait> = Arc::new(tm);
-        let (mut ctx, mut rx) =
-            make_ctx(Some(mem), Some(GardenConfig::default()));
+        let (mut ctx, mut rx) = make_ctx(Some(mem), Some(GardenConfig::default()));
         let h = GardenHandler;
         let res = h.execute(&mut ctx, &[]);
         assert!(
@@ -637,8 +594,7 @@ mod tests {
              'Garden consolidation failed' prefix",
         );
         assert_eq!(
-            text,
-            "Garden consolidation failed: database error: boom-consolidate",
+            text, "Garden consolidation failed: database error: boom-consolidate",
             "consolidate Err payload must equal format!(\"Garden \
              consolidation failed: {{e}}\") byte-for-byte (shipped \
              legacy arm semantics)"
@@ -674,13 +630,11 @@ mod tests {
         // Pre-compute expected payload via the same memory double so
         // this assertion stays in lockstep with the archon-memory
         // formatter across future changes.
-        let expected_inner =
-            archon_memory::garden::format_garden_stats(mem.as_ref(), 10)
-                .expect("format_garden_stats on empty TestMemory must succeed");
+        let expected_inner = archon_memory::garden::format_garden_stats(mem.as_ref(), 10)
+            .expect("format_garden_stats on empty TestMemory must succeed");
         let expected = format!("\n{expected_inner}\n");
 
-        let (mut ctx, mut rx) =
-            make_ctx(Some(mem), Some(GardenConfig::default()));
+        let (mut ctx, mut rx) = make_ctx(Some(mem), Some(GardenConfig::default()));
         let result = dispatcher.dispatch(&mut ctx, "/garden stats");
         assert!(
             result.is_ok(),
@@ -706,9 +660,7 @@ mod tests {
                 _ => {}
             }
         }
-        let text = got.expect(
-            "end-to-end `/garden stats` must emit a TuiEvent::TextDelta",
-        );
+        let text = got.expect("end-to-end `/garden stats` must emit a TuiEvent::TextDelta");
         assert_eq!(
             text, expected,
             "end-to-end `/garden stats` TextDelta must match shipped \

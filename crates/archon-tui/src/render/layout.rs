@@ -39,10 +39,10 @@ pub fn compute_layout(size: Rect) -> Layout {
     let chunks = ratatui::layout::Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Min(3),       // output area
-            Constraint::Length(3),   // input area
-            Constraint::Length(1),   // permission indicator
-            Constraint::Length(1),   // status bar
+            Constraint::Min(3),    // output area
+            Constraint::Length(3), // input area
+            Constraint::Length(1), // permission indicator
+            Constraint::Length(1), // status bar
         ])
         .split(size);
 

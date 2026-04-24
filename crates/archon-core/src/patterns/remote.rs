@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use url::Url;
 
 use super::{Pattern, PatternCtx, PatternError, PatternKind, PatternRegistry, RemoteAgentConfig};
@@ -51,12 +51,13 @@ impl StaticResolver {
 #[async_trait]
 impl DiscoveryResolver for StaticResolver {
     async fn resolve(&self, service: &str) -> Result<Url, PatternError> {
-        self.map.get(service).cloned().ok_or_else(|| {
-            PatternError::RemoteUnreachable {
+        self.map
+            .get(service)
+            .cloned()
+            .ok_or_else(|| PatternError::RemoteUnreachable {
                 url: service.to_string(),
                 cause: format!("service '{service}' not found in static resolver"),
-            }
-        })
+            })
     }
 }
 
@@ -100,8 +101,7 @@ impl RemoteAgentPattern {
     /// present and `service_discovery` is configured, otherwise fall back to
     /// the direct `config.endpoint`.
     async fn resolve_endpoint(&self) -> Result<Url, PatternError> {
-        if let (Some(resolver), Some(discovery)) =
-            (&self.resolver, &self.config.service_discovery)
+        if let (Some(resolver), Some(discovery)) = (&self.resolver, &self.config.service_discovery)
         {
             // Use the discovery backend's identifying string as the service key.
             let service_key = match discovery {
@@ -119,7 +119,10 @@ impl RemoteAgentPattern {
 
     /// Execute the HTTP POST to `{endpoint}/invoke` and map errors.
     async fn http_invoke(&self, endpoint: Url, input: Value) -> Result<Value, PatternError> {
-        let invoke_url = format!("{}invoke", endpoint.as_str().trim_end_matches('/').to_owned() + "/");
+        let invoke_url = format!(
+            "{}invoke",
+            endpoint.as_str().trim_end_matches('/').to_owned() + "/"
+        );
 
         let mut request = self
             .http_client
@@ -174,11 +177,7 @@ impl Pattern for RemoteAgentPattern {
         PatternKind::Remote
     }
 
-    async fn execute(
-        &self,
-        input: Value,
-        _ctx: PatternCtx,
-    ) -> Result<Value, PatternError> {
+    async fn execute(&self, input: Value, _ctx: PatternCtx) -> Result<Value, PatternError> {
         let endpoint = self.resolve_endpoint().await?;
 
         // Wrap the entire call in a timeout.
@@ -199,7 +198,12 @@ pub fn register(
 ) {
     reg.register(
         "remote",
-        Arc::new(RemoteAgentPattern::new(http_client, config, resolver, timeout)),
+        Arc::new(RemoteAgentPattern::new(
+            http_client,
+            config,
+            resolver,
+            timeout,
+        )),
     );
 }
 
@@ -238,11 +242,7 @@ mod tests {
 
         #[async_trait]
         impl TaskServiceHandle for DummyTaskService {
-            async fn submit(
-                &self,
-                _agent: &str,
-                input: Value,
-            ) -> Result<Value, PatternError> {
+            async fn submit(&self, _agent: &str, input: Value) -> Result<Value, PatternError> {
                 Ok(input)
             }
         }
@@ -263,20 +263,13 @@ mod tests {
 
         Mock::given(method("POST"))
             .and(path("/invoke"))
-            .respond_with(
-                ResponseTemplate::new(200)
-                    .set_body_json(json!({"output": {"ok": true}})),
-            )
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"output": {"ok": true}})))
             .mount(&server)
             .await;
 
         let config = make_config(&server.uri());
-        let pattern = RemoteAgentPattern::new(
-            reqwest::Client::new(),
-            config,
-            None,
-            Duration::from_secs(5),
-        );
+        let pattern =
+            RemoteAgentPattern::new(reqwest::Client::new(), config, None, Duration::from_secs(5));
 
         let result = pattern
             .execute(json!({"question": "hello"}), make_ctx())
@@ -299,17 +292,10 @@ mod tests {
             .await;
 
         let config = make_config(&server.uri());
-        let pattern = RemoteAgentPattern::new(
-            reqwest::Client::new(),
-            config,
-            None,
-            Duration::from_secs(5),
-        );
+        let pattern =
+            RemoteAgentPattern::new(reqwest::Client::new(), config, None, Duration::from_secs(5));
 
-        let err = pattern
-            .execute(json!({}), make_ctx())
-            .await
-            .unwrap_err();
+        let err = pattern.execute(json!({}), make_ctx()).await.unwrap_err();
 
         match err {
             PatternError::RemoteUnreachable { url, cause } => {
@@ -331,24 +317,15 @@ mod tests {
 
         Mock::given(method("POST"))
             .and(path("/invoke"))
-            .respond_with(
-                ResponseTemplate::new(400).set_body_string("bad request body"),
-            )
+            .respond_with(ResponseTemplate::new(400).set_body_string("bad request body"))
             .mount(&server)
             .await;
 
         let config = make_config(&server.uri());
-        let pattern = RemoteAgentPattern::new(
-            reqwest::Client::new(),
-            config,
-            None,
-            Duration::from_secs(5),
-        );
+        let pattern =
+            RemoteAgentPattern::new(reqwest::Client::new(), config, None, Duration::from_secs(5));
 
-        let err = pattern
-            .execute(json!({}), make_ctx())
-            .await
-            .unwrap_err();
+        let err = pattern.execute(json!({}), make_ctx()).await.unwrap_err();
 
         match err {
             PatternError::Execution(msg) => {
@@ -387,10 +364,7 @@ mod tests {
             Duration::from_millis(50), // very short timeout
         );
 
-        let err = pattern
-            .execute(json!({}), make_ctx())
-            .await
-            .unwrap_err();
+        let err = pattern.execute(json!({}), make_ctx()).await.unwrap_err();
 
         assert!(
             matches!(err, PatternError::Timeout),
@@ -426,17 +400,10 @@ mod tests {
     async fn test_remote_http_unreachable_returns_remote_unreachable() {
         // Point at a port that is almost certainly not listening.
         let config = make_config("http://127.0.0.1:1");
-        let pattern = RemoteAgentPattern::new(
-            reqwest::Client::new(),
-            config,
-            None,
-            Duration::from_secs(5),
-        );
+        let pattern =
+            RemoteAgentPattern::new(reqwest::Client::new(), config, None, Duration::from_secs(5));
 
-        let err = pattern
-            .execute(json!({}), make_ctx())
-            .await
-            .unwrap_err();
+        let err = pattern.execute(json!({}), make_ctx()).await.unwrap_err();
 
         assert!(
             matches!(err, PatternError::RemoteUnreachable { .. }),

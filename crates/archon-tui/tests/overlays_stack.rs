@@ -1,12 +1,14 @@
 use archon_tui::overlays::{OverlayRenderer, OverlayStack};
-use ratatui::{Frame, layout::Rect, buffer::Buffer};
 use ratatui::widgets::Widget;
+use ratatui::{Frame, buffer::Buffer, layout::Rect};
 
 struct DummyOverlay(&'static str);
 
 impl OverlayRenderer for DummyOverlay {
     fn render(&self, _f: &mut Frame, _area: Rect) {}
-    fn name(&self) -> &str { self.0 }
+    fn name(&self) -> &str {
+        self.0
+    }
 }
 
 #[test]

@@ -76,11 +76,7 @@ use crate::command::registry::{CommandContext, CommandHandler};
 pub(crate) struct ReleaseNotesHandler;
 
 impl CommandHandler for ReleaseNotesHandler {
-    fn execute(
-        &self,
-        ctx: &mut CommandContext,
-        _args: &[String],
-    ) -> anyhow::Result<()> {
+    fn execute(&self, ctx: &mut CommandContext, _args: &[String]) -> anyhow::Result<()> {
         // DIRECT pattern: single sync `try_send` emission replaces the
         // shipped `.send().await` at slash.rs:449-464.
         //
@@ -122,8 +118,7 @@ mod tests {
     /// shipped string literal at slash.rs:451-461 using the same
     /// `\`-continuation idiom. `assert_eq!` against this constant
     /// proves the handler emits the shipped bytes without drift.
-    const EXPECTED_RELEASE_NOTES_BODY: &str =
-        "\nArchon CLI v0.1.0 (Phase 3)\n\n\
+    const EXPECTED_RELEASE_NOTES_BODY: &str = "\nArchon CLI v0.1.0 (Phase 3)\n\n\
          - 33 tasks implemented across 7 batches\n\
          - TUI with markdown rendering, syntax highlighting, vim mode\n\
          - MCP stdio + HTTP transports with lifecycle management\n\
@@ -165,10 +160,7 @@ mod tests {
             events[0]
         );
         if let TuiEvent::TextDelta(ref body) = events[0] {
-            assert!(
-                !body.is_empty(),
-                "TextDelta body must be non-empty"
-            );
+            assert!(!body.is_empty(), "TextDelta body must be non-empty");
         }
     }
 
@@ -177,9 +169,9 @@ mod tests {
         let (mut ctx, mut rx) = make_release_notes_ctx();
         ReleaseNotesHandler.execute(&mut ctx, &[]).unwrap();
         let events = drain_tui_events(&mut rx);
-        let matched = events.iter().any(|e| {
-            matches!(e, TuiEvent::TextDelta(s) if s == EXPECTED_RELEASE_NOTES_BODY)
-        });
+        let matched = events
+            .iter()
+            .any(|e| matches!(e, TuiEvent::TextDelta(s) if s == EXPECTED_RELEASE_NOTES_BODY));
         assert!(
             matched,
             "expected TuiEvent::TextDelta with byte-identical release-notes \
@@ -236,9 +228,9 @@ mod tests {
         );
 
         let events = drain_tui_events(&mut rx);
-        let has_text_delta = events.iter().any(|e| {
-            matches!(e, TuiEvent::TextDelta(s) if s == EXPECTED_RELEASE_NOTES_BODY)
-        });
+        let has_text_delta = events
+            .iter()
+            .any(|e| matches!(e, TuiEvent::TextDelta(s) if s == EXPECTED_RELEASE_NOTES_BODY));
         let has_error = events.iter().any(|e| matches!(e, TuiEvent::Error(_)));
         assert!(
             has_text_delta && !has_error,
@@ -270,9 +262,9 @@ mod tests {
         );
 
         let events = drain_tui_events(&mut rx);
-        let has_text_delta = events.iter().any(|e| {
-            matches!(e, TuiEvent::TextDelta(s) if s == EXPECTED_RELEASE_NOTES_BODY)
-        });
+        let has_text_delta = events
+            .iter()
+            .any(|e| matches!(e, TuiEvent::TextDelta(s) if s == EXPECTED_RELEASE_NOTES_BODY));
         let has_error = events.iter().any(|e| matches!(e, TuiEvent::Error(_)));
         assert!(
             has_text_delta && !has_error,

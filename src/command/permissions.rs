@@ -242,11 +242,7 @@ pub(crate) async fn build_permissions_snapshot(
 pub(crate) struct PermissionsHandler;
 
 impl CommandHandler for PermissionsHandler {
-    fn execute(
-        &self,
-        ctx: &mut CommandContext,
-        args: &[String],
-    ) -> anyhow::Result<()> {
+    fn execute(&self, ctx: &mut CommandContext, args: &[String]) -> anyhow::Result<()> {
         // R4: join multi-token args with " " and trim. Byte-equivalent
         // to the shipped `s.strip_prefix("/permissions").unwrap_or("").trim()`
         // for all inputs — single-token modes collapse to the same
@@ -324,8 +320,7 @@ impl CommandHandler for PermissionsHandler {
                 // Stash the shared-mutex write (drained by apply_effect
                 // at the dispatch site). apply_effect ALSO emits the
                 // PermissionModeChanged event AFTER the write.
-                ctx.pending_effect =
-                    Some(CommandEffect::SetPermissionMode(resolved));
+                ctx.pending_effect = Some(CommandEffect::SetPermissionMode(resolved));
             }
             Err(msg) => {
                 // Pass the validator's error string through unchanged.
@@ -452,9 +447,7 @@ mod tests {
                      byte-for-byte"
                 );
             }
-            other => panic!(
-                "empty-arg branch must emit TuiEvent::TextDelta, got: {other:?}"
-            ),
+            other => panic!("empty-arg branch must emit TuiEvent::TextDelta, got: {other:?}"),
         }
     }
 
@@ -512,9 +505,7 @@ mod tests {
                      format! byte-for-byte"
                 );
             }
-            other => panic!(
-                "valid-arg branch must emit TuiEvent::TextDelta, got: {other:?}"
-            ),
+            other => panic!("valid-arg branch must emit TuiEvent::TextDelta, got: {other:?}"),
         }
     }
 
@@ -556,14 +547,11 @@ mod tests {
         match &events[0] {
             TuiEvent::Error(msg) => {
                 assert_eq!(
-                    msg,
-                    "bypassPermissions requires --allow-dangerously-skip-permissions flag",
+                    msg, "bypassPermissions requires --allow-dangerously-skip-permissions flag",
                     "bypass-blocked Error must be byte-identical to shipped"
                 );
             }
-            other => panic!(
-                "bypass-blocked branch must emit TuiEvent::Error, got: {other:?}"
-            ),
+            other => panic!("bypass-blocked branch must emit TuiEvent::Error, got: {other:?}"),
         }
         // 3. NO TextDelta.
         let has_delta = events.iter().any(|e| matches!(e, TuiEvent::TextDelta(_)));
@@ -630,9 +618,8 @@ mod tests {
         let (mut ctx, mut rx) = make_ctx(Some(snap));
         let h = PermissionsHandler;
         let bogus = "bogus-mode-xyz";
-        let expected_msg =
-            archon_tools::validation::validate_permission_mode(bogus)
-                .expect_err("'bogus-mode-xyz' must NOT be a valid permission mode");
+        let expected_msg = archon_tools::validation::validate_permission_mode(bogus)
+            .expect_err("'bogus-mode-xyz' must NOT be a valid permission mode");
 
         let res = h.execute(&mut ctx, &[bogus.to_string()]);
         assert!(
@@ -662,9 +649,7 @@ mod tests {
                      output byte-for-byte (pass-through)"
                 );
             }
-            other => panic!(
-                "invalid-arg branch must emit TuiEvent::Error, got: {other:?}"
-            ),
+            other => panic!("invalid-arg branch must emit TuiEvent::Error, got: {other:?}"),
         }
         // 3. NO TextDelta.
         let has_delta = events.iter().any(|e| matches!(e, TuiEvent::TextDelta(_)));
@@ -690,8 +675,7 @@ mod tests {
         );
         let err_msg = format!("{}", result.unwrap_err());
         assert!(
-            err_msg.contains("permissions_snapshot")
-                || err_msg.contains("build_command_context"),
+            err_msg.contains("permissions_snapshot") || err_msg.contains("build_command_context"),
             "error must describe the missing snapshot, got: {err_msg}"
         );
     }
@@ -788,8 +772,8 @@ mod tests {
     #[test]
     fn dispatcher_routes_slash_permissions_with_plan_arg_end_to_end() {
         use crate::command::dispatcher::Dispatcher;
-        use crate::command::registry::default_registry;
         use crate::command::registry::CommandEffect;
+        use crate::command::registry::default_registry;
         use std::sync::Arc;
 
         let registry = Arc::new(default_registry());

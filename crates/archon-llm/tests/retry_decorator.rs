@@ -27,7 +27,7 @@ use tokio::sync::mpsc::Receiver;
 use archon_llm::provider::{
     LlmError, LlmProvider, LlmRequest, LlmResponse, ModelInfo, ProviderFeature,
 };
-use archon_llm::retry::{classify, RetryDecision, RetryPolicy, RetryProvider};
+use archon_llm::retry::{RetryDecision, RetryPolicy, RetryProvider, classify};
 use archon_llm::streaming::StreamEvent;
 use archon_llm::types::Usage;
 
@@ -76,10 +76,7 @@ impl LlmProvider for MockProvider {
             .unwrap_or_else(|| Err(LlmError::Http("script exhausted".into())))
     }
 
-    async fn stream(
-        &self,
-        _request: LlmRequest,
-    ) -> Result<Receiver<StreamEvent>, LlmError> {
+    async fn stream(&self, _request: LlmRequest) -> Result<Receiver<StreamEvent>, LlmError> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         // Every test in this file drives complete(); stream() isn't exercised.
         Err(LlmError::Unsupported("mock-stream".into()))
@@ -144,7 +141,9 @@ async fn retries_three_times_on_http_error() {
         "ERR-PROV-02: inner must be called exactly max_attempts=3 times (not 4)"
     );
     match err {
-        LlmError::Http(msg) => assert!(msg.contains("boom 3"), "must surface last error, got {msg}"),
+        LlmError::Http(msg) => {
+            assert!(msg.contains("boom 3"), "must surface last error, got {msg}")
+        }
         other => panic!("expected LlmError::Http, got {other:?}"),
     }
 }
@@ -155,7 +154,9 @@ async fn retries_three_times_on_http_error() {
 
 #[tokio::test]
 async fn fails_fast_on_auth_error() {
-    let inner = Arc::new(MockProvider::new(vec![Err(LlmError::Auth("bad key".into()))]));
+    let inner = Arc::new(MockProvider::new(vec![Err(LlmError::Auth(
+        "bad key".into(),
+    ))]));
     let inner_for_count = inner.clone();
     let provider = RetryProvider::new(Arc::new(ArcDelegate(inner)), tight_policy());
 
@@ -179,7 +180,10 @@ async fn fails_fast_on_unsupported_error() {
     let inner_for_count = inner.clone();
     let provider = RetryProvider::new(Arc::new(ArcDelegate(inner)), tight_policy());
 
-    let _err = provider.complete(base_request()).await.expect_err("unsupported");
+    let _err = provider
+        .complete(base_request())
+        .await
+        .expect_err("unsupported");
     assert_eq!(inner_for_count.calls(), 1, "Unsupported must fail fast");
 }
 
@@ -338,7 +342,9 @@ fn classify_retry_variants() {
         "Http -> Retry"
     );
     assert_eq!(
-        classify(&LlmError::RateLimited { retry_after_secs: 1 }),
+        classify(&LlmError::RateLimited {
+            retry_after_secs: 1
+        }),
         RetryDecision::Retry,
         "RateLimited -> Retry"
     );
@@ -348,12 +354,18 @@ fn classify_retry_variants() {
         "Overloaded -> Retry"
     );
     assert_eq!(
-        classify(&LlmError::Server { status: 500, message: "x".into() }),
+        classify(&LlmError::Server {
+            status: 500,
+            message: "x".into()
+        }),
         RetryDecision::Retry,
         "Server 500 -> Retry"
     );
     assert_eq!(
-        classify(&LlmError::Server { status: 503, message: "x".into() }),
+        classify(&LlmError::Server {
+            status: 503,
+            message: "x".into()
+        }),
         RetryDecision::Retry,
         "Server 503 -> Retry"
     );
@@ -377,12 +389,18 @@ fn classify_fail_fast_variants() {
         "Unsupported -> FailFast"
     );
     assert_eq!(
-        classify(&LlmError::Server { status: 400, message: "x".into() }),
+        classify(&LlmError::Server {
+            status: 400,
+            message: "x".into()
+        }),
         RetryDecision::FailFast,
         "Server 4xx -> FailFast"
     );
     assert_eq!(
-        classify(&LlmError::Server { status: 404, message: "x".into() }),
+        classify(&LlmError::Server {
+            status: 404,
+            message: "x".into()
+        }),
         RetryDecision::FailFast,
         "Server 404 -> FailFast"
     );
@@ -410,7 +428,10 @@ fn default_policy_matches_err_prov_02() {
     assert_eq!(p.initial_backoff, Duration::from_millis(500));
     assert_eq!(p.max_backoff, Duration::from_secs(8));
     assert_eq!(p.multiplier, 2.0);
-    assert!(p.jitter, "default policy must apply jitter to avoid thundering herd");
+    assert!(
+        p.jitter,
+        "default policy must apply jitter to avoid thundering herd"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -427,13 +448,18 @@ async fn rate_limited_sleeps_for_retry_after() {
         jitter: false,
     };
     let inner = Arc::new(MockProvider::new(vec![
-        Err(LlmError::RateLimited { retry_after_secs: 2 }),
+        Err(LlmError::RateLimited {
+            retry_after_secs: 2,
+        }),
         Ok(ok_response()),
     ]));
     let provider = RetryProvider::new(Arc::new(ArcDelegate(inner)), policy);
 
     let start = tokio::time::Instant::now();
-    let resp = provider.complete(base_request()).await.expect("retry succeeds");
+    let resp = provider
+        .complete(base_request())
+        .await
+        .expect("retry succeeds");
     let elapsed = start.elapsed();
     assert_eq!(resp.stop_reason, "stop");
     assert_eq!(
@@ -465,10 +491,7 @@ impl LlmProvider for ArcDelegate {
     async fn complete(&self, request: LlmRequest) -> Result<LlmResponse, LlmError> {
         self.0.complete(request).await
     }
-    async fn stream(
-        &self,
-        request: LlmRequest,
-    ) -> Result<Receiver<StreamEvent>, LlmError> {
+    async fn stream(&self, request: LlmRequest) -> Result<Receiver<StreamEvent>, LlmError> {
         self.0.stream(request).await
     }
 }

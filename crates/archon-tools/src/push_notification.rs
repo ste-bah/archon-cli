@@ -91,7 +91,7 @@ impl Tool for PushNotificationTool {
             None => {
                 return ToolResult::error(format!(
                     "level must be one of 'info', 'warn', 'error' (got '{level_str}')"
-                ))
+                ));
             }
         };
 
@@ -213,7 +213,8 @@ mod tests {
             struct Collector<'a>(&'a mut Vec<(String, String)>);
             impl<'a> Visit for Collector<'a> {
                 fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
-                    self.0.push((field.name().to_string(), format!("{value:?}")));
+                    self.0
+                        .push((field.name().to_string(), format!("{value:?}")));
                 }
                 fn record_str(&mut self, field: &Field, value: &str) {
                     self.0.push((field.name().to_string(), value.to_string()));
@@ -231,7 +232,9 @@ mod tests {
         F: FnOnce() -> R,
     {
         let events = Arc::new(Mutex::new(Vec::new()));
-        let sub = CaptureSubscriber { events: events.clone() };
+        let sub = CaptureSubscriber {
+            events: events.clone(),
+        };
         let result = tracing::subscriber::with_default(sub, f);
         let captured = events.lock().unwrap().clone();
         (result, captured)
@@ -246,7 +249,10 @@ mod tests {
     }
 
     fn field_value<'a>(evt: &'a CapturedEvent, name: &str) -> Option<&'a str> {
-        evt.fields.iter().find(|(k, _)| k == name).map(|(_, v)| v.as_str())
+        evt.fields
+            .iter()
+            .find(|(k, _)| k == name)
+            .map(|(_, v)| v.as_str())
     }
 
     /// Build a fresh current-thread runtime for a single test. We do
@@ -279,7 +285,11 @@ mod tests {
         });
         let _ = tool; // silence unused warning; tool only used for type
         assert!(!result.is_error, "expected success: {}", result.content);
-        assert!(result.content.contains("[info]"), "content: {}", result.content);
+        assert!(
+            result.content.contains("[info]"),
+            "content: {}",
+            result.content
+        );
         assert!(result.content.contains("hello"));
         assert_eq!(events.len(), 1, "expected exactly one event");
         assert_eq!(events[0].target, NOTIFICATION_TARGET);
@@ -349,10 +359,7 @@ mod tests {
     async fn push_notification_rejects_bad_level() {
         let tool = PushNotificationTool;
         let result = tool
-            .execute(
-                json!({ "title": "hi", "level": "debug" }),
-                &ctx(),
-            )
+            .execute(json!({ "title": "hi", "level": "debug" }), &ctx())
             .await;
         assert!(result.is_error);
         assert!(result.content.contains("level"));
@@ -361,9 +368,7 @@ mod tests {
     #[tokio::test]
     async fn push_notification_rejects_non_string_title() {
         let tool = PushNotificationTool;
-        let result = tool
-            .execute(json!({ "title": 42 }), &ctx())
-            .await;
+        let result = tool.execute(json!({ "title": 42 }), &ctx()).await;
         assert!(result.is_error);
     }
 
@@ -398,9 +403,18 @@ mod tests {
 
     #[test]
     fn notification_level_parse_round_trip() {
-        assert_eq!(NotificationLevel::parse("info"), Some(NotificationLevel::Info));
-        assert_eq!(NotificationLevel::parse("warn"), Some(NotificationLevel::Warn));
-        assert_eq!(NotificationLevel::parse("error"), Some(NotificationLevel::Error));
+        assert_eq!(
+            NotificationLevel::parse("info"),
+            Some(NotificationLevel::Info)
+        );
+        assert_eq!(
+            NotificationLevel::parse("warn"),
+            Some(NotificationLevel::Warn)
+        );
+        assert_eq!(
+            NotificationLevel::parse("error"),
+            Some(NotificationLevel::Error)
+        );
         assert_eq!(NotificationLevel::parse("trace"), None);
         assert_eq!(NotificationLevel::Info.as_str(), "info");
         assert_eq!(NotificationLevel::Warn.as_str(), "warn");

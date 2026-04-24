@@ -21,10 +21,10 @@ pub mod body;
 pub mod chrome;
 pub mod layout;
 
-pub use layout::{compute_layout, Layout};
+pub use layout::{Layout, compute_layout};
 
-use ratatui::Frame;
 use crate::app::App;
+use ratatui::Frame;
 
 /// Main draw entry point — renders the entire TUI frame.
 ///

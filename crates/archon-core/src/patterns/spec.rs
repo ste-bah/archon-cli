@@ -41,8 +41,7 @@ impl PatternSpec {
     /// Returns true if this spec's version is compatible with `current`.
     /// Accepts N and N-1 (NFR-ARCH-002).
     pub fn is_supported(&self, current: u32) -> bool {
-        self.pattern_version == current
-            || (current > 0 && self.pattern_version == current - 1)
+        self.pattern_version == current || (current > 0 && self.pattern_version == current - 1)
     }
 }
 
@@ -125,10 +124,7 @@ pub enum AuthConfig {
     /// Bearer token.
     Bearer(String),
     /// Mutual TLS (placeholder — cert paths).
-    Mtls {
-        cert_path: String,
-        key_path: String,
-    },
+    Mtls { cert_path: String, key_path: String },
 }
 
 /// Service discovery backend (placeholder).

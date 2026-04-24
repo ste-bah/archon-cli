@@ -24,14 +24,14 @@ async fn metrics_endpoint_serves_five_metrics_over_real_http() {
     // Bind an ephemeral loopback port synchronously so the OS assigns a free
     // one; mirror the production `spawn_metrics_exporter` path that does
     // `std::net::TcpListener::bind` + `set_nonblocking(true)` + `from_std`.
-    let std_listener = std::net::TcpListener::bind("127.0.0.1:0")
-        .expect("bind ephemeral loopback port");
+    let std_listener =
+        std::net::TcpListener::bind("127.0.0.1:0").expect("bind ephemeral loopback port");
     std_listener
         .set_nonblocking(true)
         .expect("set_nonblocking on listener");
     let addr = std_listener.local_addr().expect("local_addr");
-    let listener = tokio::net::TcpListener::from_std(std_listener)
-        .expect("promote std listener to tokio");
+    let listener =
+        tokio::net::TcpListener::from_std(std_listener).expect("promote std listener to tokio");
 
     let metrics = Arc::new(ChannelMetrics::new());
     // Seed the gauges/counters so the body has non-zero samples to assert on.
@@ -41,9 +41,7 @@ async fn metrics_endpoint_serves_five_metrics_over_real_http() {
     metrics.record_latency_ms(42);
 
     let serve_metrics = Arc::clone(&metrics);
-    let serve_handle = tokio::spawn(async move {
-        serve_metrics_on(listener, serve_metrics).await
-    });
+    let serve_handle = tokio::spawn(async move { serve_metrics_on(listener, serve_metrics).await });
 
     // Give the server a beat to accept on the new listener. Poll a few times
     // rather than sleep-blindly so we don't race on loaded CI.

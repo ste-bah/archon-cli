@@ -36,9 +36,7 @@
 //! isolation. Phase-1..9 CI runs will set the env var with a
 //! dedicated `CARGO_TARGET_DIR` override.
 
-const FIXTURE: &str = include_str!(
-    "../../../tests/fixtures/baseline/agents_memory_api.txt"
-);
+const FIXTURE: &str = include_str!("../../../tests/fixtures/baseline/agents_memory_api.txt");
 
 /// Must be present in the snapshot — `save_agent_memory` is the
 /// documented preserve-D8 anchor (REQ-FOR-PRESERVE-D8 §entry-point).
@@ -78,9 +76,11 @@ fn test_public_api_drift() {
         .arg("--version")
         .output()
     {
-        Ok(o) if o.status.success() => {
-            String::from_utf8_lossy(&o.stdout).lines().next().unwrap_or("").to_string()
-        }
+        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout)
+            .lines()
+            .next()
+            .unwrap_or("")
+            .to_string(),
         _ => {
             eprintln!("SKIP: cargo-public-api not on PATH");
             return;
@@ -88,12 +88,7 @@ fn test_public_api_drift() {
     };
 
     let output = std::process::Command::new("cargo")
-        .args([
-            "public-api",
-            "--package",
-            "archon-core",
-            "--simplified",
-        ])
+        .args(["public-api", "--package", "archon-core", "--simplified"])
         .env("CARGO_BUILD_JOBS", "1")
         .output()
         .expect("failed to invoke cargo public-api");

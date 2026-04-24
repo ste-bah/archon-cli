@@ -1,7 +1,7 @@
-use std::sync::Arc;
 use archon_tui::state::AppState;
 use archon_tui::task_dispatch::AgentRouter;
 use archon_tui::theme::intj_theme;
+use std::sync::Arc;
 
 /// A no-op router for testing AppState construction.
 struct MockRouter;

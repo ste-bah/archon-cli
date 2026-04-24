@@ -114,13 +114,8 @@ impl CommitHandler {
 }
 
 impl CommandHandler for CommitHandler {
-    fn execute(
-        &self,
-        ctx: &mut CommandContext,
-        _args: &[String],
-    ) -> anyhow::Result<()> {
-        let prompt = build_commit_prompt(&*self.runner)
-            .map_err(|e| anyhow::anyhow!(e))?;
+    fn execute(&self, ctx: &mut CommandContext, _args: &[String]) -> anyhow::Result<()> {
+        let prompt = build_commit_prompt(&*self.runner).map_err(|e| anyhow::anyhow!(e))?;
         ctx.emit(TuiEvent::TextDelta(prompt));
         Ok(())
     }
@@ -142,9 +137,9 @@ SAFETY PROTOCOL — follow strictly:
   - Present the commit message for user review BEFORE running `git commit`.";
 
     // Verify git repo first — short-circuit on non-repo.
-    runner.rev_parse_git_dir().map_err(|_| {
-        "not a git repository (run /commit inside a git repo)".to_string()
-    })?;
+    runner
+        .rev_parse_git_dir()
+        .map_err(|_| "not a git repository (run /commit inside a git repo)".to_string())?;
 
     // Verify changes exist — clean tree short-circuits with clear Err.
     let porcelain = runner.status_porcelain()?;
@@ -219,13 +214,8 @@ mod tests {
             porcelain_out: Ok(" M src/foo.rs\n?? new.rs".to_string()),
             branch_out: Ok("archonfixes".to_string()),
             log_out: Ok("abc1234 prior commit\ndef5678 another".to_string()),
-            status_out: Ok(
-                "On branch archonfixes\nChanges not staged".to_string(),
-            ),
-            diff_out: Ok(
-                "--- a/src/foo.rs\n+++ b/src/foo.rs\n@@ -1 +1 @@\n-old\n+new"
-                    .to_string(),
-            ),
+            status_out: Ok("On branch archonfixes\nChanges not staged".to_string()),
+            diff_out: Ok("--- a/src/foo.rs\n+++ b/src/foo.rs\n@@ -1 +1 @@\n-old\n+new".to_string()),
         }
     }
 
@@ -267,12 +257,7 @@ mod tests {
         let (mut ctx, mut rx) = make_bug_ctx();
         handler.execute(&mut ctx, &[]).unwrap();
         let events = drain_tui_events(&mut rx);
-        assert_eq!(
-            events.len(),
-            1,
-            "expected one TextDelta; got: {:?}",
-            events
-        );
+        assert_eq!(events.len(), 1, "expected one TextDelta; got: {:?}", events);
         match &events[0] {
             TuiEvent::TextDelta(s) => {
                 assert!(

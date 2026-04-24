@@ -16,8 +16,8 @@ use archon_tui::app::{
     App, McpManager, McpManagerView, McpServerEntry, SessionPicker, SessionPickerEntry,
 };
 use archon_tui::render;
-use ratatui::backend::TestBackend;
 use ratatui::Terminal;
+use ratatui::backend::TestBackend;
 
 /// Flatten a `TestBackend` buffer into a single `String` with `\n` row
 /// separators. Used for substring assertions on rendered output.
@@ -196,11 +196,10 @@ fn suggestions_popup_renders_when_active() {
     app.input.suggestions.active = true;
     if app.input.suggestions.suggestions.is_empty() {
         // Inject a synthetic suggestion via the commands registry.
-        app.input.suggestions.suggestions =
-            vec![archon_tui::commands::CommandInfo {
-                name: "/help",
-                description: "show help",
-            }];
+        app.input.suggestions.suggestions = vec![archon_tui::commands::CommandInfo {
+            name: "/help",
+            description: "show help",
+        }];
     }
     let rendered = render_once(&mut app);
     assert!(rendered.contains("Commands"), "buffer:\n{rendered}");
@@ -212,11 +211,10 @@ fn suggestions_popup_suppressed_while_generating() {
     app.show_splash = false;
     app.is_generating = true;
     app.input.suggestions.active = true;
-    app.input.suggestions.suggestions =
-        vec![archon_tui::commands::CommandInfo {
-            name: "/help",
-            description: "show help",
-        }];
+    app.input.suggestions.suggestions = vec![archon_tui::commands::CommandInfo {
+        name: "/help",
+        description: "show help",
+    }];
     let rendered = render_once(&mut app);
     // Popup box must not be drawn while generating — "Commands" title should
     // not appear.
@@ -298,12 +296,7 @@ fn mcp_manager_server_menu_renders_actions_for_ready() {
     let mut app = App::new();
     app.show_splash = false;
     app.mcp_manager = Some(McpManager {
-        servers: vec![mcp_entry(
-            "web",
-            "ready",
-            vec!["web__search".into()],
-            false,
-        )],
+        servers: vec![mcp_entry("web", "ready", vec!["web__search".into()], false)],
         view: McpManagerView::ServerMenu {
             server_idx: 0,
             action_idx: 0,
@@ -431,7 +424,10 @@ fn status_bar_renders_default_fields() {
     app.status.cost = 1.234;
     let rendered = render_once(&mut app);
     assert!(rendered.contains("the-model"), "buffer:\n{rendered}");
-    assert!(rendered.contains("$1.23"), "cost missing, buffer:\n{rendered}");
+    assert!(
+        rendered.contains("$1.23"),
+        "cost missing, buffer:\n{rendered}"
+    );
 }
 
 #[test]

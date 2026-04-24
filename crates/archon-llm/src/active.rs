@@ -37,12 +37,8 @@ use tokio::sync::mpsc::Receiver;
 
 use crate::anthropic::AnthropicClient;
 use crate::config::LlmConfig;
-use crate::provider::{
-    LlmError, LlmProvider, LlmRequest, LlmResponse, ModelInfo, ProviderFeature,
-};
-use crate::providers::{
-    build_llm_provider_with_policy, ProviderDescriptor, ProviderError,
-};
+use crate::provider::{LlmError, LlmProvider, LlmRequest, LlmResponse, ModelInfo, ProviderFeature};
+use crate::providers::{ProviderDescriptor, ProviderError, build_llm_provider_with_policy};
 use crate::retry::RetryPolicy;
 use crate::streaming::StreamEvent;
 
@@ -91,18 +87,10 @@ impl ActiveProvider {
     ///   unknown or the required env var is absent.
     /// - `ProviderError::InvalidResponse` if a native provider's
     ///   hand-rolled constructor fails.
-    pub fn new(
-        cfg: &LlmConfig,
-        http: Arc<reqwest::Client>,
-    ) -> Result<Self, ProviderError> {
-        let retry_policy = cfg
-            .retry
-            .clone()
-            .map(RetryPolicy::from)
-            .unwrap_or_default();
+    pub fn new(cfg: &LlmConfig, http: Arc<reqwest::Client>) -> Result<Self, ProviderError> {
+        let retry_policy = cfg.retry.clone().map(RetryPolicy::from).unwrap_or_default();
         let descriptor = cfg.resolve_descriptor()?;
-        let provider =
-            build_llm_provider_with_policy(cfg, http.clone(), retry_policy.clone())?;
+        let provider = build_llm_provider_with_policy(cfg, http.clone(), retry_policy.clone())?;
         Ok(Self {
             state: ArcSwap::from_pointee(ProviderState {
                 provider,
@@ -164,16 +152,10 @@ impl ActiveProvider {
     /// for unknown providers / missing env vars, `InvalidResponse` for
     /// hand-rolled native constructor failures. On `Err`, the old
     /// provider remains active and callers may retry.
-    pub fn swap(
-        &self,
-        new_cfg: &LlmConfig,
-    ) -> Result<&'static ProviderDescriptor, ProviderError> {
+    pub fn swap(&self, new_cfg: &LlmConfig) -> Result<&'static ProviderDescriptor, ProviderError> {
         let descriptor = new_cfg.resolve_descriptor()?;
-        let provider = build_llm_provider_with_policy(
-            new_cfg,
-            self.http.clone(),
-            self.retry_policy.clone(),
-        )?;
+        let provider =
+            build_llm_provider_with_policy(new_cfg, self.http.clone(), self.retry_policy.clone())?;
         self.state.store(Arc::new(ProviderState {
             provider,
             descriptor,
@@ -211,8 +193,7 @@ impl LlmProvider for ActiveProvider {
     fn name(&self) -> &str {
         // Copy the &'static descriptor out of the guard so the returned
         // &str is not tied to the guard's short lifetime.
-        let descriptor: &'static ProviderDescriptor =
-            self.state.load().descriptor;
+        let descriptor: &'static ProviderDescriptor = self.state.load().descriptor;
         descriptor.display_name.as_str()
     }
 
@@ -234,17 +215,11 @@ impl LlmProvider for ActiveProvider {
         None
     }
 
-    async fn complete(
-        &self,
-        request: LlmRequest,
-    ) -> Result<LlmResponse, LlmError> {
+    async fn complete(&self, request: LlmRequest) -> Result<LlmResponse, LlmError> {
         self.current().complete(request).await
     }
 
-    async fn stream(
-        &self,
-        request: LlmRequest,
-    ) -> Result<Receiver<StreamEvent>, LlmError> {
+    async fn stream(&self, request: LlmRequest) -> Result<Receiver<StreamEvent>, LlmError> {
         self.current().stream(request).await
     }
 }

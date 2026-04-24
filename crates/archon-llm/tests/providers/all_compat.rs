@@ -11,11 +11,11 @@ use url::Url;
 use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
+use archon_llm::ApiKey;
 use archon_llm::provider::{LlmProvider, LlmRequest};
 use archon_llm::providers::{
-    list_compat, AuthFlavor, CompatKind, OpenAiCompatProvider, ProviderDescriptor,
+    AuthFlavor, CompatKind, OpenAiCompatProvider, ProviderDescriptor, list_compat,
 };
-use archon_llm::ApiKey;
 
 fn canned_response() -> serde_json::Value {
     json!({
@@ -96,11 +96,18 @@ async fn test_all_compat_providers_roundtrip() {
             Arc::clone(&http),
             ApiKey::new("acceptance-test-key".into()),
         );
-        let resp = provider.complete(simple_request()).await.unwrap_or_else(|e| {
-            panic!("provider {} must roundtrip; got error: {e:?}", original.id)
-        });
+        let resp = provider
+            .complete(simple_request())
+            .await
+            .unwrap_or_else(|e| {
+                panic!("provider {} must roundtrip; got error: {e:?}", original.id)
+            });
         // Basic sanity on the canned body
-        assert_eq!(resp.stop_reason, "stop", "provider {} stop_reason", original.id);
+        assert_eq!(
+            resp.stop_reason, "stop",
+            "provider {} stop_reason",
+            original.id
+        );
         successes += 1;
     }
 

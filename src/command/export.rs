@@ -200,8 +200,7 @@ mod tests {
         Arc<Mutex<Option<ExportDescriptor>>>,
     ) {
         // TASK-AGS-POST-6-SHARED-FIXTURES-V2: migrated to CtxBuilder.
-        let slot: Arc<Mutex<Option<ExportDescriptor>>> =
-            Arc::new(Mutex::new(None));
+        let slot: Arc<Mutex<Option<ExportDescriptor>>> = Arc::new(Mutex::new(None));
         let (ctx, rx) = crate::command::test_support::CtxBuilder::new()
             .with_pending_export(Arc::clone(&slot))
             .build();
@@ -241,9 +240,9 @@ mod tests {
         );
 
         let guard = slot.lock().unwrap();
-        let desc = guard.as_ref().expect(
-            "bare /export must stash an ExportDescriptor in the shared slot",
-        );
+        let desc = guard
+            .as_ref()
+            .expect("bare /export must stash an ExportDescriptor in the shared slot");
         assert!(
             matches!(desc.format, ExportFormat::Markdown),
             "bare /export must default to Markdown; got {:?}",
@@ -324,8 +323,7 @@ mod tests {
         // TASK-AGS-POST-6-SHARED-FIXTURES-V2: migrated to CtxBuilder.
         // `pending_export` is left at the builder default (None) to
         // exercise the wiring-regression branch.
-        let (mut ctx, mut rx) =
-            crate::command::test_support::CtxBuilder::new().build();
+        let (mut ctx, mut rx) = crate::command::test_support::CtxBuilder::new().build();
         ExportHandler.execute(&mut ctx, &[]).unwrap();
         match rx.try_recv().expect("error event emitted") {
             TuiEvent::Error(msg) => {

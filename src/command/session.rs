@@ -55,7 +55,9 @@ pub(crate) struct EnvRemoteUrlProvider;
 
 impl RemoteUrlProvider for EnvRemoteUrlProvider {
     fn url(&self) -> Option<String> {
-        std::env::var("ARCHON_REMOTE_URL").ok().filter(|s| !s.is_empty())
+        std::env::var("ARCHON_REMOTE_URL")
+            .ok()
+            .filter(|s| !s.is_empty())
     }
 }
 
@@ -66,7 +68,9 @@ pub(crate) struct SessionHandler {
 
 impl SessionHandler {
     pub(crate) fn new() -> Self {
-        Self { provider: std::sync::Arc::new(EnvRemoteUrlProvider) }
+        Self {
+            provider: std::sync::Arc::new(EnvRemoteUrlProvider),
+        }
     }
 
     #[cfg(test)]
@@ -76,15 +80,9 @@ impl SessionHandler {
 }
 
 impl CommandHandler for SessionHandler {
-    fn execute(
-        &self,
-        ctx: &mut CommandContext,
-        _args: &[String],
-    ) -> anyhow::Result<()> {
+    fn execute(&self, ctx: &mut CommandContext, _args: &[String]) -> anyhow::Result<()> {
         let url = self.provider.url().ok_or_else(|| {
-            anyhow::anyhow!(
-                "not in remote mode — start archon with --remote to use /session"
-            )
+            anyhow::anyhow!("not in remote mode — start archon with --remote to use /session")
         })?;
 
         let qr_art = archon_tui::qr::render_url_as_qr(&url)
@@ -92,8 +90,7 @@ impl CommandHandler for SessionHandler {
 
         let message = format!(
             "\n/session — remote session\n\n{}\n\nOpen in browser: {}\n(press q to dismiss)\n",
-            qr_art,
-            url,
+            qr_art, url,
         );
         ctx.emit(TuiEvent::TextDelta(message));
         Ok(())
@@ -137,7 +134,9 @@ mod tests {
     #[test]
     fn with_remote_url_emits_textdelta_with_url() {
         let url = "https://archon.example.test/sess/abc123".to_string();
-        let provider = Arc::new(MockRemoteUrlProvider { url: Some(url.clone()) });
+        let provider = Arc::new(MockRemoteUrlProvider {
+            url: Some(url.clone()),
+        });
         let handler = SessionHandler::with_provider(provider);
         let (mut ctx, mut rx) = make_bug_ctx();
         handler.execute(&mut ctx, &[]).unwrap();
@@ -190,8 +189,12 @@ mod tests {
         let got = provider.url();
         // Restore prior — best-effort.
         match prior {
-            Some(v) => unsafe { std::env::set_var("ARCHON_REMOTE_URL", v); },
-            None => unsafe { std::env::remove_var("ARCHON_REMOTE_URL"); },
+            Some(v) => unsafe {
+                std::env::set_var("ARCHON_REMOTE_URL", v);
+            },
+            None => unsafe {
+                std::env::remove_var("ARCHON_REMOTE_URL");
+            },
         }
         assert_eq!(got.as_deref(), Some("https://archon.example/sess/env-test"));
     }
@@ -217,14 +220,18 @@ mod tests {
         // concerns; this test is single-threaded within its test-threads=2
         // allocation and the var is not read by other tests.
         let prior = std::env::var("ARCHON_REMOTE_URL").ok();
-        unsafe { std::env::remove_var("ARCHON_REMOTE_URL"); }
+        unsafe {
+            std::env::remove_var("ARCHON_REMOTE_URL");
+        }
 
         let (mut ctx, mut rx) = make_bug_ctx();
         let result = handler.execute(&mut ctx, &[]);
 
         // Restore prior env value (best-effort).
         if let Some(v) = prior {
-            unsafe { std::env::set_var("ARCHON_REMOTE_URL", v); }
+            unsafe {
+                std::env::set_var("ARCHON_REMOTE_URL", v);
+            }
         }
 
         match result {

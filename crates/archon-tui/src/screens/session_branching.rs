@@ -10,12 +10,12 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::widgets::{Block, Borders, List, ListItem};
 
-use crate::virtual_list::VirtualList;
 use crate::theme::Theme;
+use crate::virtual_list::VirtualList;
 
 use super::session_browser::{BranchPoint, SessionState};
-use archon_session::storage::SessionStore;
 use archon_session::fork;
+use archon_session::storage::SessionStore;
 
 /// Reference to a message / branch point.
 #[derive(Debug, Clone)]
@@ -34,7 +34,10 @@ pub struct BranchPicker {
 
 impl BranchPicker {
     pub fn new(parent_id: String) -> Self {
-        Self { parent_id, list: VirtualList::new(Vec::new(), 10) }
+        Self {
+            parent_id,
+            list: VirtualList::new(Vec::new(), 10),
+        }
     }
 
     pub fn parent_id(&self) -> &str {
@@ -83,9 +86,12 @@ impl BranchPicker {
             .borders(Borders::ALL)
             .title(format!("Branch from {}", self.parent_id));
 
-        let items: Vec<ListItem> = self.list.visible_items().iter().map(|m| {
-            ListItem::new(format!("{} — {}", m.summary, m.timestamp))
-        }).collect();
+        let items: Vec<ListItem> = self
+            .list
+            .visible_items()
+            .iter()
+            .map(|m| ListItem::new(format!("{} — {}", m.summary, m.timestamp)))
+            .collect();
 
         let list = List::new(items).block(block);
         f.render_widget(list, area);
@@ -107,8 +113,16 @@ mod tests {
     fn set_candidates_updates_list() {
         let mut picker = BranchPicker::new("p".to_string());
         let refs = vec![
-            MessageRef { id: "1".into(), summary: "A".into(), timestamp: "10:00".into() },
-            MessageRef { id: "2".into(), summary: "B".into(), timestamp: "10:05".into() },
+            MessageRef {
+                id: "1".into(),
+                summary: "A".into(),
+                timestamp: "10:00".into(),
+            },
+            MessageRef {
+                id: "2".into(),
+                summary: "B".into(),
+                timestamp: "10:05".into(),
+            },
         ];
         picker.set_candidates(refs);
         assert_eq!(picker.len(), 2);
@@ -118,9 +132,21 @@ mod tests {
     fn cursor_wraps() {
         let mut picker = BranchPicker::new("p".to_string());
         picker.set_candidates(vec![
-            MessageRef { id: "0".into(), summary: "A".into(), timestamp: "10:00".into() },
-            MessageRef { id: "1".into(), summary: "B".into(), timestamp: "10:05".into() },
-            MessageRef { id: "2".into(), summary: "C".into(), timestamp: "10:10".into() },
+            MessageRef {
+                id: "0".into(),
+                summary: "A".into(),
+                timestamp: "10:00".into(),
+            },
+            MessageRef {
+                id: "1".into(),
+                summary: "B".into(),
+                timestamp: "10:05".into(),
+            },
+            MessageRef {
+                id: "2".into(),
+                summary: "C".into(),
+                timestamp: "10:10".into(),
+            },
         ]);
         picker.move_down();
         assert_eq!(picker.selected_index(), 1);
@@ -133,9 +159,11 @@ mod tests {
     #[test]
     fn single_candidate_wraps() {
         let mut picker = BranchPicker::new("p".to_string());
-        picker.set_candidates(vec![
-            MessageRef { id: "0".into(), summary: "A".into(), timestamp: "10:00".into() },
-        ]);
+        picker.set_candidates(vec![MessageRef {
+            id: "0".into(),
+            summary: "A".into(),
+            timestamp: "10:00".into(),
+        }]);
         picker.move_down();
         assert_eq!(picker.selected_index(), 0); // wrap
         picker.move_up();
@@ -214,15 +242,16 @@ impl SessionBranching {
     /// BranchPoint.branched_at_message for UI display only.
     pub fn fork(&mut self, at_message: usize, label: &str) -> Result<BranchPoint> {
         // 1. Require an active session
-        let parent_session_id = self.state.current_id.as_ref()
+        let parent_session_id = self
+            .state
+            .current_id
+            .as_ref()
             .ok_or_else(|| anyhow::anyhow!("cannot fork: no active session"))?;
 
         // 2. Persist via archon_session fork primitive
-        let new_session_id = fork::fork_session(
-            self.store.as_ref(),
-            parent_session_id,
-            Some(label),
-        ).map_err(|e| anyhow::anyhow!("fork failed: {}", e))?;
+        let new_session_id =
+            fork::fork_session(self.store.as_ref(), parent_session_id, Some(label))
+                .map_err(|e| anyhow::anyhow!("fork failed: {}", e))?;
 
         // 3. Build BranchPoint with correct fields
         let branch_point = BranchPoint {
@@ -263,12 +292,13 @@ mod session_branching_tests {
         fn new() -> Self {
             let temp_dir = tempfile::tempdir().expect("temp dir");
             let store = Arc::new(
-                archon_session::storage::SessionStore::open(
-                    &temp_dir.path().join("test.db"),
-                )
-                .expect("test store"),
+                archon_session::storage::SessionStore::open(&temp_dir.path().join("test.db"))
+                    .expect("test store"),
             );
-            Self { _temp_dir: temp_dir, store }
+            Self {
+                _temp_dir: temp_dir,
+                store,
+            }
         }
     }
 
@@ -297,7 +327,8 @@ mod session_branching_tests {
         let env = TestEnv::new();
 
         // Create a parent session first so fork has something to fork from
-        let parent_meta = env.store
+        let parent_meta = env
+            .store
             .create_session("/tmp", None, "gpt-4")
             .expect("parent session");
         let state = make_state(Some(parent_meta.id.clone()));
@@ -316,7 +347,8 @@ mod session_branching_tests {
         let env = TestEnv::new();
 
         // Create a parent session
-        let parent_meta = env.store
+        let parent_meta = env
+            .store
             .create_session("/tmp", None, "gpt-4")
             .expect("parent session");
         let parent_id = parent_meta.id.clone();

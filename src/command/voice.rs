@@ -77,20 +77,12 @@ use crate::command::registry::{CommandContext, CommandHandler};
 pub(crate) struct VoiceHandler;
 
 impl CommandHandler for VoiceHandler {
-    fn execute(
-        &self,
-        ctx: &mut CommandContext,
-        args: &[String],
-    ) -> anyhow::Result<()> {
+    fn execute(&self, ctx: &mut CommandContext, args: &[String]) -> anyhow::Result<()> {
         // `args.first()` is the first positional token after the command
         // name. Empty args (bare `/voice`) and explicit `list` both map
         // to the list branch. Every other token goes through the
         // three-way match below.
-        let sub = args
-            .first()
-            .map(|s| s.as_str())
-            .unwrap_or("list")
-            .trim();
+        let sub = args.first().map(|s| s.as_str()).unwrap_or("list").trim();
 
         match sub {
             "list" | "" => {
@@ -309,9 +301,8 @@ mod tests {
             let mut saw_placeholder = false;
             while let Ok(ev) = rx.try_recv() {
                 if let TuiEvent::TextDelta(text) = ev {
-                    if text.contains(&format!(
-                        "Voice {sub} command not yet implemented"
-                    )) && text.contains("~/.archon/settings.json")
+                    if text.contains(&format!("Voice {sub} command not yet implemented"))
+                        && text.contains("~/.archon/settings.json")
                     {
                         saw_placeholder = true;
                     }

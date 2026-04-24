@@ -24,12 +24,12 @@
 
 use std::sync::Arc;
 
+use archon_llm::ApiKey;
 use archon_llm::provider::{LlmError, LlmProvider, LlmRequest};
 use archon_llm::providers::{
-    count_compat, count_native, list_native, AzureProvider, CohereProvider, CompatKind,
-    CopilotProvider, MinimaxProvider, NATIVE_REGISTRY,
+    AzureProvider, CohereProvider, CompatKind, CopilotProvider, MinimaxProvider, NATIVE_REGISTRY,
+    count_compat, count_native, list_native,
 };
-use archon_llm::ApiKey;
 
 // ---------------------------------------------------------------------------
 // Expected native ids from TASK-AGS-704 spec (line 25)
@@ -164,9 +164,7 @@ fn assert_open_question_3(err: &LlmError, provider: &str) {
                 "{provider} stub must mention 'Open Question #3' sentinel; got: {msg}"
             );
         }
-        other => panic!(
-            "{provider} stub must return LlmError::Unsupported(..); got: {other:?}"
-        ),
+        other => panic!("{provider} stub must return LlmError::Unsupported(..); got: {other:?}"),
     }
 }
 

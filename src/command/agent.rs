@@ -1,5 +1,5 @@
-use std::sync::Arc;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use archon_core::agents::catalog::{AgentFilter, DiscoveryCatalog, FilterLogic};
 use archon_core::agents::discovery::local::LocalDiscoverySource;
@@ -13,7 +13,11 @@ fn build_catalog(working_dir: &PathBuf) -> DiscoveryCatalog {
     if agents_dir.is_dir() {
         let source = LocalDiscoverySource::new(agents_dir, validator);
         if let Ok(report) = source.load_all(&catalog) {
-            tracing::debug!(loaded = report.loaded, invalid = report.invalid, "agent scan");
+            tracing::debug!(
+                loaded = report.loaded,
+                invalid = report.invalid,
+                "agent scan"
+            );
         }
     }
     catalog
@@ -29,12 +33,18 @@ pub(crate) async fn handle_agent_list(
         ..Default::default()
     };
     let results = catalog.list(&filter);
-    println!("{:<30} {:<10} {:<15} {}", "NAME", "VERSION", "CATEGORY", "DESCRIPTION");
+    println!(
+        "{:<30} {:<10} {:<15} {}",
+        "NAME", "VERSION", "CATEGORY", "DESCRIPTION"
+    );
     println!("{}", "-".repeat(80));
     for meta in &results {
         let desc = meta.description.lines().next().unwrap_or("");
         let desc_trunc: String = desc.chars().take(40).collect();
-        println!("{:<30} {:<10} {:<15} {}", meta.name, meta.version, meta.category, desc_trunc);
+        println!(
+            "{:<30} {:<10} {:<15} {}",
+            meta.name, meta.version, meta.category, desc_trunc
+        );
     }
     println!("\n{} agents", results.len());
     Ok(())
@@ -56,7 +66,11 @@ pub(crate) async fn handle_agent_search(
     if agents_dir.is_dir() {
         let source = LocalDiscoverySource::new(agents_dir, validator.clone());
         if let Ok(report) = source.load_all(&catalog) {
-            tracing::debug!(loaded = report.loaded, invalid = report.invalid, "local scan");
+            tracing::debug!(
+                loaded = report.loaded,
+                invalid = report.invalid,
+                "local scan"
+            );
         }
     }
 
@@ -99,12 +113,18 @@ pub(crate) async fn handle_agent_search(
         include_invalid,
     };
     let results = catalog.list(&filter);
-    println!("{:<30} {:<10} {:<15} {}", "NAME", "VERSION", "CATEGORY", "DESCRIPTION");
+    println!(
+        "{:<30} {:<10} {:<15} {}",
+        "NAME", "VERSION", "CATEGORY", "DESCRIPTION"
+    );
     println!("{}", "-".repeat(80));
     for meta in &results {
         let desc = meta.description.lines().next().unwrap_or("");
         let desc_trunc: String = desc.chars().take(40).collect();
-        println!("{:<30} {:<10} {:<15} {}", meta.name, meta.version, meta.category, desc_trunc);
+        println!(
+            "{:<30} {:<10} {:<15} {}",
+            meta.name, meta.version, meta.category, desc_trunc
+        );
     }
     println!("\n{} agents (filtered from {})", results.len(), total);
     Ok(())
@@ -152,11 +172,18 @@ pub(crate) async fn handle_agent_info(
     };
 
     if json {
-        println!("{}", serde_json::to_string_pretty(&info).unwrap_or_default());
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&info).unwrap_or_default()
+        );
     } else {
         let all_versions: Vec<String> = info.all_versions.iter().map(|v| v.to_string()).collect();
         println!("Name:         {}", info.selected.name);
-        println!("Version:      {} (of: {})", info.selected.version, all_versions.join(", "));
+        println!(
+            "Version:      {} (of: {})",
+            info.selected.version,
+            all_versions.join(", ")
+        );
         println!("Category:     {}", info.selected.category);
         println!("Description:  {}", info.selected.description);
         println!("Tags:         {}", info.selected.tags.join(", "));
@@ -167,7 +194,10 @@ pub(crate) async fn handle_agent_info(
             info.selected.resource_requirements.memory_mb,
             info.selected.resource_requirements.timeout_sec
         );
-        println!("Source:       {:?} @ {:?}", info.selected.source_kind, info.selected.source_path);
+        println!(
+            "Source:       {:?} @ {:?}",
+            info.selected.source_kind, info.selected.source_path
+        );
         println!("State:        {:?}", info.selected.state);
         if !info.dependency_graph.is_empty() {
             println!("Dependencies:");

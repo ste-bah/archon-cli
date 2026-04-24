@@ -1,5 +1,5 @@
-use std::sync::atomic::{AtomicU64, Ordering};
 use dashmap::DashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Atomic counters for task execution metrics.
 /// Thread-safe, lock-free reads. Prometheus text format export.
@@ -94,10 +94,7 @@ impl MetricsRegistry {
         agents.sort_by(|a, b| a.0.cmp(&b.0));
 
         for (agent, depth) in agents {
-            out.push_str(&format!(
-                "queue_depth{{agent=\"{}\"}} {}\n",
-                agent, depth
-            ));
+            out.push_str(&format!("queue_depth{{agent=\"{}\"}} {}\n", agent, depth));
         }
 
         out

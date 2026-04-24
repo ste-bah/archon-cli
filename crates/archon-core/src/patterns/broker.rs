@@ -4,14 +4,16 @@
 //! capabilities, cost, or a custom selector function, then delegates
 //! to `TaskServiceHandle`.
 
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use async_trait::async_trait;
 use dashmap::DashMap;
 use serde_json::Value;
 
-use super::{BrokerConfig, BrokerSelector, Pattern, PatternCtx, PatternError, PatternKind, PatternRegistry};
+use super::{
+    BrokerConfig, BrokerSelector, Pattern, PatternCtx, PatternError, PatternKind, PatternRegistry,
+};
 
 // ---------------------------------------------------------------------------
 // AgentRegistryHandle — slim trait wrapping phase-3 AgentRegistry
@@ -32,8 +34,7 @@ pub struct Candidate {
 }
 
 /// Type alias for custom selector functions.
-pub type CustomSelectorFn =
-    Arc<dyn Fn(&[Candidate], &Value) -> Option<usize> + Send + Sync>;
+pub type CustomSelectorFn = Arc<dyn Fn(&[Candidate], &Value) -> Option<usize> + Send + Sync>;
 
 // ---------------------------------------------------------------------------
 // BrokerPattern
@@ -48,10 +49,7 @@ pub struct BrokerPattern {
 }
 
 impl BrokerPattern {
-    pub fn new(
-        registry: Arc<dyn AgentRegistryHandle>,
-        config: BrokerConfig,
-    ) -> Self {
+    pub fn new(registry: Arc<dyn AgentRegistryHandle>, config: BrokerConfig) -> Self {
         Self {
             registry,
             selectors: DashMap::new(),
@@ -65,11 +63,7 @@ impl BrokerPattern {
         self.selectors.insert(name.to_owned(), f);
     }
 
-    fn select_candidate(
-        &self,
-        alive: &[Candidate],
-        input: &Value,
-    ) -> Result<usize, PatternError> {
+    fn select_candidate(&self, alive: &[Candidate], input: &Value) -> Result<usize, PatternError> {
         match &self.config.selector {
             BrokerSelector::RoundRobin => {
                 if alive.is_empty() {
@@ -77,8 +71,7 @@ impl BrokerPattern {
                         reasons: vec!["no alive candidates".into()],
                     });
                 }
-                let idx = self.round_robin_counter.fetch_add(1, Ordering::SeqCst)
-                    % alive.len();
+                let idx = self.round_robin_counter.fetch_add(1, Ordering::SeqCst) % alive.len();
                 Ok(idx)
             }
             BrokerSelector::Capability => {
@@ -88,9 +81,7 @@ impl BrokerPattern {
                     .unwrap_or_default();
 
                 for (i, c) in alive.iter().enumerate() {
-                    let has_all = required
-                        .iter()
-                        .all(|req| c.capabilities.contains(req));
+                    let has_all = required.iter().all(|req| c.capabilities.contains(req));
                     if has_all {
                         return Ok(i);
                     }
@@ -109,28 +100,20 @@ impl BrokerPattern {
 
                 Err(PatternError::BrokerNoCandidate { reasons })
             }
-            BrokerSelector::Cost => {
-                alive
-                    .iter()
-                    .enumerate()
-                    .min_by(|(_, a), (_, b)| a.cost.total_cmp(&b.cost))
-                    .map(|(i, _)| i)
-                    .ok_or_else(|| PatternError::BrokerNoCandidate {
-                        reasons: vec!["no alive candidates for cost selection".into()],
-                    })
-            }
+            BrokerSelector::Cost => alive
+                .iter()
+                .enumerate()
+                .min_by(|(_, a), (_, b)| a.cost.total_cmp(&b.cost))
+                .map(|(i, _)| i)
+                .ok_or_else(|| PatternError::BrokerNoCandidate {
+                    reasons: vec!["no alive candidates for cost selection".into()],
+                }),
             BrokerSelector::Custom(name) => {
                 let selector = self.selectors.get(name).ok_or_else(|| {
-                    PatternError::Execution(format!(
-                        "custom selector '{name}' not registered"
-                    ))
+                    PatternError::Execution(format!("custom selector '{name}' not registered"))
                 })?;
-                selector(alive, input).ok_or_else(|| {
-                    PatternError::BrokerNoCandidate {
-                        reasons: vec![format!(
-                            "custom selector '{name}' returned None"
-                        )],
-                    }
+                selector(alive, input).ok_or_else(|| PatternError::BrokerNoCandidate {
+                    reasons: vec![format!("custom selector '{name}' returned None")],
                 })
             }
         }
@@ -143,14 +126,8 @@ impl Pattern for BrokerPattern {
         PatternKind::Broker
     }
 
-    async fn execute(
-        &self,
-        input: Value,
-        ctx: PatternCtx,
-    ) -> Result<Value, PatternError> {
-        let all_candidates = self
-            .registry
-            .lookup_candidates(&self.config.candidates);
+    async fn execute(&self, input: Value, ctx: PatternCtx) -> Result<Value, PatternError> {
+        let all_candidates = self.registry.lookup_candidates(&self.config.candidates);
 
         // Filter available, collecting rejection reasons for unavailable.
         let mut alive: Vec<Candidate> = Vec::new();
@@ -221,11 +198,7 @@ mod tests {
 
     #[async_trait]
     impl TaskServiceHandle for StubTaskService {
-        async fn submit(
-            &self,
-            agent: &str,
-            _input: Value,
-        ) -> Result<Value, PatternError> {
+        async fn submit(&self, agent: &str, _input: Value) -> Result<Value, PatternError> {
             Ok(json!({"chosen": agent}))
         }
     }
@@ -277,9 +250,7 @@ mod tests {
         for _ in 0..6 {
             let ctx = make_ctx();
             let result = pattern.execute(json!({}), ctx).await.unwrap();
-            chosen_names.push(
-                result["chosen"].as_str().unwrap().to_string(),
-            );
+            chosen_names.push(result["chosen"].as_str().unwrap().to_string());
         }
 
         // Each of the 3 candidates should be hit exactly twice.
@@ -362,10 +333,7 @@ mod tests {
             PatternError::BrokerNoCandidate { reasons } => {
                 assert_eq!(reasons.len(), 3, "one reason per candidate");
                 for r in &reasons {
-                    assert!(
-                        r.contains("unavailable"),
-                        "reason must explain why: {r}"
-                    );
+                    assert!(r.contains("unavailable"), "reason must explain why: {r}");
                 }
             }
             other => panic!("expected BrokerNoCandidate, got: {other}"),
@@ -384,10 +352,7 @@ mod tests {
         let pattern = BrokerPattern::new(reg, config);
 
         // Register custom selector that always picks index 2 ("c").
-        pattern.register_custom_selector(
-            "weighted",
-            Arc::new(|_candidates, _input| Some(2)),
-        );
+        pattern.register_custom_selector("weighted", Arc::new(|_candidates, _input| Some(2)));
 
         let ctx = make_ctx();
         let result = pattern.execute(json!({}), ctx).await.unwrap();

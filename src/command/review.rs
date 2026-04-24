@@ -114,13 +114,8 @@ impl ReviewHandler {
 }
 
 impl CommandHandler for ReviewHandler {
-    fn execute(
-        &self,
-        ctx: &mut CommandContext,
-        args: &[String],
-    ) -> anyhow::Result<()> {
-        let prompt = build_review_prompt(&*self.runner, args)
-            .map_err(|e| anyhow::anyhow!(e))?;
+    fn execute(&self, ctx: &mut CommandContext, args: &[String]) -> anyhow::Result<()> {
+        let prompt = build_review_prompt(&*self.runner, args).map_err(|e| anyhow::anyhow!(e))?;
         ctx.emit(TuiEvent::TextDelta(prompt));
         Ok(())
     }
@@ -130,10 +125,7 @@ impl CommandHandler for ReviewHandler {
     }
 }
 
-fn build_review_prompt(
-    runner: &dyn GhRunner,
-    args: &[String],
-) -> Result<String, String> {
+fn build_review_prompt(runner: &dyn GhRunner, args: &[String]) -> Result<String, String> {
     const GUARDRAIL: &str = "SAFETY: Do not post the review automatically. Present the review to the user for confirmation before any action.";
 
     match args.first().map(|s| s.as_str()) {
@@ -194,9 +186,7 @@ mod tests {
     #[test]
     fn no_args_prompt_lists_prs() {
         let mock = Arc::new(MockGh {
-            pr_list_out: Ok(
-                "#42  Fix authentication bug\n#43  Add telemetry".to_string()
-            ),
+            pr_list_out: Ok("#42  Fix authentication bug\n#43  Add telemetry".to_string()),
             pr_view_out: Err("should not be called".to_string()),
             pr_diff_out: Err("should not be called".to_string()),
         });
@@ -204,24 +194,11 @@ mod tests {
         let (mut ctx, mut rx) = make_bug_ctx();
         handler.execute(&mut ctx, &[]).unwrap();
         let events = drain_tui_events(&mut rx);
-        assert_eq!(
-            events.len(),
-            1,
-            "expected one TextDelta; got: {:?}",
-            events
-        );
+        assert_eq!(events.len(), 1, "expected one TextDelta; got: {:?}", events);
         match &events[0] {
             TuiEvent::TextDelta(s) => {
-                assert!(
-                    s.contains("#42"),
-                    "prompt must list PR #42; got: {}",
-                    s
-                );
-                assert!(
-                    s.contains("#43"),
-                    "prompt must list PR #43; got: {}",
-                    s
-                );
+                assert!(s.contains("#42"), "prompt must list PR #42; got: {}", s);
+                assert!(s.contains("#43"), "prompt must list PR #43; got: {}", s);
                 assert!(
                     s.to_lowercase().contains("do not post"),
                     "prompt must carry safety guardrail; got: {}",
@@ -236,26 +213,16 @@ mod tests {
     fn with_pr_number_prompt_contains_diff() {
         let mock = Arc::new(MockGh {
             pr_list_out: Err("should not be called".to_string()),
-            pr_view_out: Ok(
-                "title: Fix auth\nauthor: octocat\nstate: OPEN".to_string(),
-            ),
+            pr_view_out: Ok("title: Fix auth\nauthor: octocat\nstate: OPEN".to_string()),
             pr_diff_out: Ok(
-                "--- a/src/auth.rs\n+++ b/src/auth.rs\n@@ -1 +1 @@\n-old\n+new"
-                    .to_string(),
+                "--- a/src/auth.rs\n+++ b/src/auth.rs\n@@ -1 +1 @@\n-old\n+new".to_string(),
             ),
         });
         let handler = ReviewHandler::with_runner(mock);
         let (mut ctx, mut rx) = make_bug_ctx();
-        handler
-            .execute(&mut ctx, &[String::from("42")])
-            .unwrap();
+        handler.execute(&mut ctx, &[String::from("42")]).unwrap();
         let events = drain_tui_events(&mut rx);
-        assert_eq!(
-            events.len(),
-            1,
-            "expected one TextDelta; got: {:?}",
-            events
-        );
+        assert_eq!(events.len(), 1, "expected one TextDelta; got: {:?}", events);
         match &events[0] {
             TuiEvent::TextDelta(s) => {
                 assert!(
@@ -281,9 +248,7 @@ mod tests {
     #[test]
     fn gh_not_available_returns_err() {
         let mock = Arc::new(MockGh {
-            pr_list_out: Err(
-                "gh CLI not available: No such file or directory".to_string(),
-            ),
+            pr_list_out: Err("gh CLI not available: No such file or directory".to_string()),
             pr_view_out: Err("unused".to_string()),
             pr_diff_out: Err("unused".to_string()),
         });

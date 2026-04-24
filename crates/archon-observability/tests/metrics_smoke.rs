@@ -91,8 +91,14 @@ fn format_prometheus_emits_five_metrics_at_external_boundary() {
     // Five metric families, each with `# HELP` + `# TYPE`.
     let help_count = body.matches("# HELP ").count();
     let type_count = body.matches("# TYPE ").count();
-    assert_eq!(help_count, 5, "expected 5 HELP lines, got {help_count}:\n{body}");
-    assert_eq!(type_count, 5, "expected 5 TYPE lines, got {type_count}:\n{body}");
+    assert_eq!(
+        help_count, 5,
+        "expected 5 HELP lines, got {help_count}:\n{body}"
+    );
+    assert_eq!(
+        type_count, 5,
+        "expected 5 TYPE lines, got {type_count}:\n{body}"
+    );
 
     // max_batch_size must be `gauge`, not `counter` (regression guard —
     // high-water marks are gauges; `rate()` on them is nonsense).

@@ -159,11 +159,7 @@ impl Default for RecallHandler {
 }
 
 impl CommandHandler for RecallHandler {
-    fn execute(
-        &self,
-        ctx: &mut CommandContext,
-        args: &[String],
-    ) -> anyhow::Result<()> {
+    fn execute(&self, ctx: &mut CommandContext, args: &[String]) -> anyhow::Result<()> {
         // R3: join multi-token args with " " and trim. Byte-equivalent
         // to the shipped `s.strip_prefix("/recall").unwrap_or("").trim()`
         // for all inputs — single-token queries collapse to the same
@@ -181,8 +177,7 @@ impl CommandHandler for RecallHandler {
             // between `<query>` and `search` is Unicode EM DASH
             // (U+2014), NOT a hyphen-minus. Do NOT ASCII-ify.
             ctx.emit(TuiEvent::Error(
-                "Usage: /recall <query> — search memories by keyword"
-                    .into(),
+                "Usage: /recall <query> — search memories by keyword".into(),
             ));
             return Ok(());
         }
@@ -208,16 +203,13 @@ impl CommandHandler for RecallHandler {
                 if memories.is_empty() {
                     // No-match branch — byte-for-byte preservation of
                     // shipped format string at slash.rs:585-587.
-                    ctx.emit(TuiEvent::TextDelta(
-                        format!("\nNo memories found for '{query}'.\n"),
-                    ));
+                    ctx.emit(TuiEvent::TextDelta(format!(
+                        "\nNo memories found for '{query}'.\n"
+                    )));
                 } else {
                     // Match branch — byte-for-byte preservation of
                     // shipped format loop at slash.rs:590-604.
-                    let mut out = format!(
-                        "\n{} memories matching '{query}':\n\n",
-                        memories.len()
-                    );
+                    let mut out = format!("\n{} memories matching '{query}':\n\n", memories.len());
                     for m in &memories {
                         let title = if m.title.is_empty() {
                             "(untitled)"
@@ -227,12 +219,9 @@ impl CommandHandler for RecallHandler {
                         // Snippet: char-based take(100) is UTF-8
                         // safe (byte slice `&m.content[..100]` would
                         // panic on a non-char-boundary split).
-                        let snippet: String =
-                            m.content.chars().take(100).collect();
+                        let snippet: String = m.content.chars().take(100).collect();
                         let id_short = &m.id[..8.min(m.id.len())];
-                        out.push_str(&format!(
-                            "  [{id_short}] {title}\n    {snippet}...\n\n"
-                        ));
+                        out.push_str(&format!("  [{id_short}] {title}\n    {snippet}...\n\n"));
                     }
                     ctx.emit(TuiEvent::TextDelta(out));
                 }
@@ -240,9 +229,7 @@ impl CommandHandler for RecallHandler {
             Err(e) => {
                 // Search-failure branch — byte-for-byte preservation
                 // of shipped format string at slash.rs:608-610.
-                ctx.emit(TuiEvent::Error(format!(
-                    "Memory search failed: {e}"
-                )));
+                ctx.emit(TuiEvent::Error(format!("Memory search failed: {e}")));
             }
         }
         Ok(())
@@ -272,9 +259,7 @@ mod tests {
     use super::*;
     use std::sync::{Arc, Mutex};
 
-    use archon_memory::types::{
-        Memory, MemoryError, MemoryType, RelType, SearchFilter,
-    };
+    use archon_memory::types::{Memory, MemoryError, MemoryType, RelType, SearchFilter};
     use archon_tui::app::TuiEvent;
     use chrono::{TimeZone, Utc};
     use tokio::sync::mpsc;
@@ -310,9 +295,7 @@ mod tests {
     /// Clone a `Result<Vec<Memory>, MemoryError>` by round-tripping
     /// the error variant through Display (MemoryError doesn't derive
     /// Clone). Mirrors the AGS-817 /memory `clone_result` helper.
-    fn clone_result(
-        r: &Result<Vec<Memory>, MemoryError>,
-    ) -> Result<Vec<Memory>, MemoryError> {
+    fn clone_result(r: &Result<Vec<Memory>, MemoryError>) -> Result<Vec<Memory>, MemoryError> {
         match r {
             Ok(v) => Ok(v.clone()),
             Err(e) => Err(MemoryError::Database(format!("{e}"))),
@@ -346,14 +329,8 @@ mod tests {
             unimplemented!("StubMemory: update_memory not used by B18 tests")
         }
 
-        fn update_importance(
-            &self,
-            _id: &str,
-            _importance: f64,
-        ) -> Result<(), MemoryError> {
-            unimplemented!(
-                "StubMemory: update_importance not used by B18 tests"
-            )
+        fn update_importance(&self, _id: &str, _importance: f64) -> Result<(), MemoryError> {
+            unimplemented!("StubMemory: update_importance not used by B18 tests")
         }
 
         fn delete_memory(&self, _id: &str) -> Result<(), MemoryError> {
@@ -368,55 +345,32 @@ mod tests {
             _context: Option<&str>,
             _strength: f64,
         ) -> Result<(), MemoryError> {
-            unimplemented!(
-                "StubMemory: create_relationship not used by B18 tests"
-            )
+            unimplemented!("StubMemory: create_relationship not used by B18 tests")
         }
 
-        fn recall_memories(
-            &self,
-            query: &str,
-            _limit: usize,
-        ) -> Result<Vec<Memory>, MemoryError> {
-            *self.recall_captured_query.lock().unwrap() =
-                Some(query.to_string());
+        fn recall_memories(&self, query: &str, _limit: usize) -> Result<Vec<Memory>, MemoryError> {
+            *self.recall_captured_query.lock().unwrap() = Some(query.to_string());
             clone_result(&self.recall_result.lock().unwrap())
         }
 
-        fn search_memories(
-            &self,
-            _filter: &SearchFilter,
-        ) -> Result<Vec<Memory>, MemoryError> {
-            unimplemented!(
-                "StubMemory: search_memories not used by B18 tests"
-            )
+        fn search_memories(&self, _filter: &SearchFilter) -> Result<Vec<Memory>, MemoryError> {
+            unimplemented!("StubMemory: search_memories not used by B18 tests")
         }
 
-        fn list_recent(
-            &self,
-            _limit: usize,
-        ) -> Result<Vec<Memory>, MemoryError> {
+        fn list_recent(&self, _limit: usize) -> Result<Vec<Memory>, MemoryError> {
             unimplemented!("StubMemory: list_recent not used by B18 tests")
         }
 
         fn memory_count(&self) -> Result<usize, MemoryError> {
-            unimplemented!(
-                "StubMemory: memory_count not used by B18 tests"
-            )
+            unimplemented!("StubMemory: memory_count not used by B18 tests")
         }
 
         fn clear_all(&self) -> Result<usize, MemoryError> {
             unimplemented!("StubMemory: clear_all not used by B18 tests")
         }
 
-        fn get_related_memories(
-            &self,
-            _id: &str,
-            _depth: u32,
-        ) -> Result<Vec<Memory>, MemoryError> {
-            unimplemented!(
-                "StubMemory: get_related_memories not used by B18 tests"
-            )
+        fn get_related_memories(&self, _id: &str, _depth: u32) -> Result<Vec<Memory>, MemoryError> {
+            unimplemented!("StubMemory: get_related_memories not used by B18 tests")
         }
     }
 
@@ -431,9 +385,7 @@ mod tests {
             tags: Vec::new(),
             source_type: "test".to_string(),
             project_path: "/tmp/test".to_string(),
-            created_at: Utc
-                .with_ymd_and_hms(2026, 4, 20, 12, 0, 0)
-                .unwrap(),
+            created_at: Utc.with_ymd_and_hms(2026, 4, 20, 12, 0, 0).unwrap(),
             updated_at: None,
             access_count: 0,
             last_accessed: None,
@@ -495,8 +447,7 @@ mod tests {
         match ev {
             TuiEvent::Error(msg) => {
                 assert_eq!(
-                    msg,
-                    "Usage: /recall <query> — search memories by keyword",
+                    msg, "Usage: /recall <query> — search memories by keyword",
                     "Usage error must be byte-identical to the shipped \
                      slash.rs:574-576 literal, INCLUDING the em-dash \
                      (U+2014) between '<query>' and 'search'. A \
@@ -561,10 +512,7 @@ mod tests {
         let (mut ctx, mut rx) = make_recall_ctx(Some(memory));
         let h = RecallHandler::new();
         let res = h.execute(&mut ctx, &["foo".to_string()]);
-        assert!(
-            res.is_ok(),
-            "success path must return Ok(()), got: {res:?}"
-        );
+        assert!(res.is_ok(), "success path must return Ok(()), got: {res:?}");
 
         // Args-reconciliation assertion: the handler must have
         // forwarded `"foo"` verbatim to `recall_memories`.
@@ -626,8 +574,7 @@ mod tests {
         match ev {
             TuiEvent::Error(msg) => {
                 assert_eq!(
-                    msg,
-                    "Usage: /recall <query> — search memories by keyword",
+                    msg, "Usage: /recall <query> — search memories by keyword",
                     "dispatcher must deliver the byte-identical \
                      em-dash usage error through the full parser → \
                      registry → handler pipeline"

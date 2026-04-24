@@ -141,10 +141,7 @@ pub fn assert_linear_memory_growth(
     }
     let abs_mean_slope: f64 =
         cons_slopes.iter().map(|s| s.abs()).sum::<f64>() / cons_slopes.len() as f64;
-    let abs_max_slope: f64 = cons_slopes
-        .iter()
-        .map(|s| s.abs())
-        .fold(0.0_f64, f64::max);
+    let abs_max_slope: f64 = cons_slopes.iter().map(|s| s.abs()).fold(0.0_f64, f64::max);
 
     // Primary budget gate: end-to-end ratio must respect the MB-per-1k bound.
     assert!(
@@ -228,9 +225,7 @@ pub fn assert_linear_memory_growth_at(
         return;
     }
     if samples.iter().all(|(_, rss)| *rss == 0) {
-        eprintln!(
-            "[assert_linear_memory_growth_at] RSS unavailable on this platform; skipping"
-        );
+        eprintln!("[assert_linear_memory_growth_at] RSS unavailable on this platform; skipping");
         return;
     }
 

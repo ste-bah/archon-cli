@@ -137,10 +137,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
+use archon_memory::MemoryGraph;
 use archon_memory::MemoryTrait;
 use archon_memory::embedding::EmbeddingProvider;
 use archon_memory::types::{MemoryError, MemoryType};
-use archon_memory::MemoryGraph;
 use tempfile::TempDir;
 
 /// Deterministic test-local embedding provider.
@@ -211,9 +211,7 @@ const PAYLOAD_TITLE: &str = "preserve-d8 regression marker";
 /// Helper to build the panic message in the spec-mandated form:
 /// contains BOTH `REQ-FOR-PRESERVE-D8` and `CozoDB`.
 fn fail_msg(what: &str) -> String {
-    format!(
-        "REQ-FOR-PRESERVE-D8 violated: CozoDB persistence gate failed — {what}"
-    )
+    format!("REQ-FOR-PRESERVE-D8 violated: CozoDB persistence gate failed — {what}")
 }
 
 /// Open a `MemoryGraph` at `path` with the deterministic provider
@@ -222,14 +220,12 @@ fn open_with_provider(path: &std::path::Path) -> MemoryGraph {
     let graph = MemoryGraph::open(path)
         .unwrap_or_else(|e| panic!("{}", fail_msg(&format!("MemoryGraph::open failed: {e}"))));
     let provider: Arc<dyn EmbeddingProvider> = Arc::new(HashEmbedProvider::new());
-    graph
-        .set_embedding_provider(provider)
-        .unwrap_or_else(|e| {
-            panic!(
-                "{}",
-                fail_msg(&format!("set_embedding_provider (HNSW init) failed: {e}"))
-            )
-        });
+    graph.set_embedding_provider(provider).unwrap_or_else(|e| {
+        panic!(
+            "{}",
+            fail_msg(&format!("set_embedding_provider (HNSW init) failed: {e}"))
+        )
+    });
     graph
 }
 
@@ -278,12 +274,7 @@ fn cozodb_memory_persists_across_in_process_restart() {
         let count = mem
             .memory_count()
             .unwrap_or_else(|e| panic!("{}", fail_msg(&format!("memory_count failed: {e}"))));
-        assert_eq!(
-            count,
-            1,
-            "{}",
-            fail_msg("phase-1 memory_count expected 1")
-        );
+        assert_eq!(count, 1, "{}", fail_msg("phase-1 memory_count expected 1"));
 
         id
         // `graph` dropped here — sqlite fd inside cozo::DbInstance
@@ -316,14 +307,16 @@ fn cozodb_memory_persists_across_in_process_restart() {
     // Reattach the same deterministic provider so HNSW queries use
     // the same embedding space as the stored vectors.
     let provider2: Arc<dyn EmbeddingProvider> = Arc::new(HashEmbedProvider::new());
-    graph2.set_embedding_provider(provider2).unwrap_or_else(|e| {
-        panic!(
-            "{}",
-            fail_msg(&format!(
-                "phase-2 set_embedding_provider (HNSW re-init) failed: {e}"
-            ))
-        )
-    });
+    graph2
+        .set_embedding_provider(provider2)
+        .unwrap_or_else(|e| {
+            panic!(
+                "{}",
+                fail_msg(&format!(
+                    "phase-2 set_embedding_provider (HNSW re-init) failed: {e}"
+                ))
+            )
+        });
 
     // Phase-2 contract surface: `&dyn MemoryTrait` again — same
     // rationale as phase-1. REQ-FOR-PRESERVE-D8 is a trait-level
@@ -335,7 +328,8 @@ fn cozodb_memory_persists_across_in_process_restart() {
         .memory_count()
         .unwrap_or_else(|e| panic!("{}", fail_msg(&format!("phase-2 memory_count failed: {e}"))));
     assert_eq!(
-        post_count, 1,
+        post_count,
+        1,
         "{}",
         fail_msg("memory not retrievable after restart (count mismatch)")
     );
@@ -351,12 +345,14 @@ fn cozodb_memory_persists_across_in_process_restart() {
         )
     });
     assert_eq!(
-        recovered.content, PAYLOAD_CONTENT,
+        recovered.content,
+        PAYLOAD_CONTENT,
         "{}",
         fail_msg("memory content mismatch after restart (byte-for-byte)")
     );
     assert_eq!(
-        recovered.title, PAYLOAD_TITLE,
+        recovered.title,
+        PAYLOAD_TITLE,
         "{}",
         fail_msg("memory title mismatch after restart")
     );
@@ -401,9 +397,7 @@ fn cozodb_memory_persists_across_in_process_restart() {
     assert!(
         recalled_vec.iter().any(|m| m.id == stored_id),
         "{}",
-        fail_msg(
-            "memory not retrievable after restart (HNSW vector recall missed stored memory)"
-        )
+        fail_msg("memory not retrievable after restart (HNSW vector recall missed stored memory)")
     );
 
     // ── Budget check ──────────────────────────────────────────

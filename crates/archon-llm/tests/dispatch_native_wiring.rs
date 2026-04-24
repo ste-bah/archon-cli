@@ -27,7 +27,7 @@
 use std::sync::Arc;
 
 use archon_llm::config::LlmConfig;
-use archon_llm::providers::{build_llm_provider, ProviderError};
+use archon_llm::providers::{ProviderError, build_llm_provider};
 
 fn http() -> Arc<reqwest::Client> {
     Arc::new(reqwest::Client::new())

@@ -76,20 +76,12 @@ use crate::command::registry::{CommandContext, CommandHandler};
 pub(crate) struct HooksHandler;
 
 impl CommandHandler for HooksHandler {
-    fn execute(
-        &self,
-        ctx: &mut CommandContext,
-        args: &[String],
-    ) -> anyhow::Result<()> {
+    fn execute(&self, ctx: &mut CommandContext, args: &[String]) -> anyhow::Result<()> {
         // `args.first()` is the first positional token after the command
         // name. Empty args (bare `/hooks`) and explicit `list` both map
         // to the list branch. Every other token goes through the
         // three-way match below.
-        let sub = args
-            .first()
-            .map(|s| s.as_str())
-            .unwrap_or("list")
-            .trim();
+        let sub = args.first().map(|s| s.as_str()).unwrap_or("list").trim();
 
         match sub {
             "list" | "" => {
@@ -137,10 +129,9 @@ impl HooksHandler {
     /// comes from `dirs::home_dir()` — same crate `doctor`, `plugin`,
     /// and `slash.rs` already use at several sites.
     fn emit_list(&self, ctx: &mut CommandContext) {
-        let project_root = std::env::current_dir()
-            .unwrap_or_else(|_| std::path::PathBuf::from("."));
-        let home_dir =
-            dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
+        let project_root =
+            std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let home_dir = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
 
         let registry = HookRegistry::load_all(&project_root, &home_dir);
         let summaries = registry.summaries();

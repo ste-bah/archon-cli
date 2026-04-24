@@ -35,12 +35,8 @@ fn init_tracing_file_redacts_secrets_and_writes_session_log() {
     // so the non-blocking worker is flushed on drop (below) — without
     // the drop the file contents can race the assertion on the writer's
     // internal channel.
-    let guard = archon_observability::init_tracing_file(
-        session_id,
-        "info",
-        &log_dir,
-    )
-    .expect("init_tracing_file must succeed on a writable temp dir");
+    let guard = archon_observability::init_tracing_file(session_id, "info", &log_dir)
+        .expect("init_tracing_file must succeed on a writable temp dir");
 
     // Emit an event carrying a real-shape OpenAI secret. The redaction
     // layer MUST scrub it before the line lands in the file.

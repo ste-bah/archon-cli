@@ -52,9 +52,7 @@ fn sample_request() -> LlmRequest {
     }
 }
 
-async fn drain_stream(
-    mut rx: tokio::sync::mpsc::Receiver<StreamEvent>,
-) -> Vec<StreamEvent> {
+async fn drain_stream(mut rx: tokio::sync::mpsc::Receiver<StreamEvent>) -> Vec<StreamEvent> {
     let mut out = Vec::new();
     for _ in 0..256 {
         match tokio::time::timeout(std::time::Duration::from_secs(3), rx.recv()).await {

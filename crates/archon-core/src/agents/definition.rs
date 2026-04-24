@@ -361,11 +361,7 @@ mod tests {
 
         assert_eq!(foo, foo_also, "same plugin name must compare equal");
         assert_ne!(foo, bar, "different plugin names must compare unequal");
-        assert_ne!(
-            foo,
-            AgentSource::BuiltIn,
-            "Plugin must not equal BuiltIn"
-        );
+        assert_ne!(foo, AgentSource::BuiltIn, "Plugin must not equal BuiltIn");
         assert_ne!(foo, AgentSource::Project);
         assert_ne!(foo, AgentSource::User);
     }

@@ -45,11 +45,7 @@ use crate::command::registry::{CommandContext, CommandHandler};
 pub(crate) struct TeleportHandler;
 
 impl CommandHandler for TeleportHandler {
-    fn execute(
-        &self,
-        ctx: &mut CommandContext,
-        _args: &[String],
-    ) -> anyhow::Result<()> {
+    fn execute(&self, ctx: &mut CommandContext, _args: &[String]) -> anyhow::Result<()> {
         // Gate 2: single TextDelta emission. Leading + trailing `\n`
         // wrap matches the BugHandler pattern at src/command/bug.rs:103.
         // Trailing args intentionally ignored — `_args` underscored.

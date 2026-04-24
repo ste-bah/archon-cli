@@ -50,16 +50,16 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, Once};
 use std::time::{Duration, Instant};
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use archon_tools::agent_tool::{AgentTool, SubagentRequest};
 use archon_tools::background_agents::{AgentStatus, BACKGROUND_AGENTS};
 use archon_tools::subagent_executor::{
-    install_subagent_executor, ExecutorError, OutcomeSideEffects, SubagentClassification,
-    SubagentExecutor,
+    ExecutorError, OutcomeSideEffects, SubagentClassification, SubagentExecutor,
+    install_subagent_executor,
 };
 use archon_tools::tool::{AgentMode, Tool, ToolContext};
-use archon_tools::{cancel_background_agent, poll_background_agent, PollOutcome};
+use archon_tools::{PollOutcome, cancel_background_agent, poll_background_agent};
 use async_trait::async_trait;
 use futures::future::join_all;
 use tokio_util::sync::CancellationToken;
@@ -87,12 +87,7 @@ impl SubagentExecutor for StubExecutor {
         Ok(String::new())
     }
 
-    async fn on_inner_complete(
-        &self,
-        _subagent_id: String,
-        _result: Result<String, String>,
-    ) {
-    }
+    async fn on_inner_complete(&self, _subagent_id: String, _result: Result<String, String>) {}
 
     async fn on_visible_complete(
         &self,
@@ -207,7 +202,10 @@ async fn tc_tui_observability_08_100_concurrent() {
             // spec's "BACKGROUND_AGENTS insert returns" instant.
             let t1 = Instant::now();
             let elapsed = t1 - t0;
-            samples.lock().expect("samples mutex poisoned").push(elapsed);
+            samples
+                .lock()
+                .expect("samples mutex poisoned")
+                .push(elapsed);
             if !result.is_error {
                 spawned_count.fetch_add(1, Ordering::Relaxed);
             }
@@ -346,8 +344,11 @@ async fn tc_tui_observability_08_100_concurrent() {
             break;
         }
         if Instant::now() >= deadline {
-            let still_running: Vec<Uuid> =
-                ids.iter().copied().filter(|id| !done.contains(id)).collect();
+            let still_running: Vec<Uuid> = ids
+                .iter()
+                .copied()
+                .filter(|id| !done.contains(id))
+                .collect();
             panic!(
                 "AC-OBSERVABILITY-07 completion timeout: only {}/100 reached terminal \
                  observation within 30s. {} still Running. first 5 stuck: {:?}",

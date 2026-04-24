@@ -9,7 +9,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use archon_observability::metrics::{serve_metrics_on, ChannelMetrics};
+use archon_observability::metrics::{ChannelMetrics, serve_metrics_on};
 
 #[tokio::test]
 async fn metrics_endpoint_serves_prometheus_shape_with_live_values() {
@@ -63,8 +63,14 @@ async fn metrics_endpoint_serves_prometheus_shape_with_live_values() {
     let body = resp.text().await.expect("body");
 
     // Basic Prometheus text-format shape.
-    assert!(body.contains("# HELP"), "response must contain # HELP lines");
-    assert!(body.contains("# TYPE"), "response must contain # TYPE lines");
+    assert!(
+        body.contains("# HELP"),
+        "response must contain # HELP lines"
+    );
+    assert!(
+        body.contains("# TYPE"),
+        "response must contain # TYPE lines"
+    );
 
     // At least one "<name> <value>" sample line present and the value is
     // numeric.
@@ -79,9 +85,10 @@ async fn metrics_endpoint_serves_prometheus_shape_with_live_values() {
             2,
             "sample line '{line}' must have '<name> <value>' shape"
         );
-        let _: f64 = parts[1].parse().expect(
-            &format!("sample value '{}' must parse as f64 (line='{line}')", parts[1]),
-        );
+        let _: f64 = parts[1].parse().expect(&format!(
+            "sample value '{}' must parse as f64 (line='{line}')",
+            parts[1]
+        ));
         sample_count += 1;
     }
     assert!(sample_count >= 1, "expected at least one metric sample");

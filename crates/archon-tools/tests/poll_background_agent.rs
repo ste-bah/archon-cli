@@ -35,16 +35,16 @@ use std::sync::Arc;
 use std::sync::Once;
 use std::time::Duration;
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use archon_tools::agent_tool::{AgentTool, SubagentRequest};
 use archon_tools::background_agents::AgentStatus;
 use archon_tools::subagent_executor::{
-    install_subagent_executor, ExecutorError, OutcomeSideEffects, SubagentClassification,
-    SubagentExecutor,
+    ExecutorError, OutcomeSideEffects, SubagentClassification, SubagentExecutor,
+    install_subagent_executor,
 };
 use archon_tools::tool::{AgentMode, Tool, ToolContext};
-use archon_tools::{cancel_background_agent, poll_background_agent, PollOutcome};
+use archon_tools::{PollOutcome, cancel_background_agent, poll_background_agent};
 use async_trait::async_trait;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
@@ -70,12 +70,7 @@ impl SubagentExecutor for StubExecutor {
         Ok(String::new())
     }
 
-    async fn on_inner_complete(
-        &self,
-        _subagent_id: String,
-        _result: Result<String, String>,
-    ) {
-    }
+    async fn on_inner_complete(&self, _subagent_id: String, _result: Result<String, String>) {}
 
     async fn on_visible_complete(
         &self,

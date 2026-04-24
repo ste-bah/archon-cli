@@ -25,12 +25,12 @@ use url::Url;
 use wiremock::matchers::{header, header_exists, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
+use archon_llm::ApiKey;
+use archon_llm::provider::{LlmError, LlmProvider, LlmRequest};
 use archon_llm::providers::{
     AuthFlavor, CompatKind, OpenAiCompatProvider, ProviderDescriptor, ProviderFeatures,
     ProviderQuirks,
 };
-use archon_llm::provider::{LlmError, LlmProvider, LlmRequest};
-use archon_llm::ApiKey;
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -106,7 +106,8 @@ async fn chat_roundtrip_happy_path() {
     Mock::given(method("POST"))
         .and(path("/chat/completions"))
         .respond_with(
-            ResponseTemplate::new(200).set_body_json(canned_chat_completion_body("hello from mock")),
+            ResponseTemplate::new(200)
+                .set_body_json(canned_chat_completion_body("hello from mock")),
         )
         .mount(&server)
         .await;
@@ -119,7 +120,10 @@ async fn chat_roundtrip_happy_path() {
         .await
         .expect("happy path must succeed");
 
-    assert!(!resp.content.is_empty(), "response content must be non-empty");
+    assert!(
+        !resp.content.is_empty(),
+        "response content must be non-empty"
+    );
     let text = resp.content[0]["text"]
         .as_str()
         .expect("content[0].text must be a string");

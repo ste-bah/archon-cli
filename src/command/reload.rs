@@ -139,11 +139,7 @@ impl Default for ReloadHandler {
 }
 
 impl CommandHandler for ReloadHandler {
-    fn execute(
-        &self,
-        ctx: &mut CommandContext,
-        _args: &[String],
-    ) -> anyhow::Result<()> {
+    fn execute(&self, ctx: &mut CommandContext, _args: &[String]) -> anyhow::Result<()> {
         // R6: require config_path. `build_command_context` populates
         // this unconditionally from `SlashCommandContext::config_path`
         // per the AGS-815 session_id / AGS-817 memory cross-cutting
@@ -233,9 +229,7 @@ mod tests {
     /// supplied `config_path`. Mirrors the AGS-815 `make_ctx(session_id)`
     /// / B17 `make_rename_ctx(session_id)` / B19 `make_rules_ctx(memory)`
     /// shape — DIRECT pattern, no snapshot, no effect slot.
-    fn make_reload_ctx(
-        config_path: Option<PathBuf>,
-    ) -> (CommandContext, mpsc::Receiver<TuiEvent>) {
+    fn make_reload_ctx(config_path: Option<PathBuf>) -> (CommandContext, mpsc::Receiver<TuiEvent>) {
         // TASK-AGS-POST-6-SHARED-FIXTURES-V2: migrated to CtxBuilder.
         crate::command::test_support::CtxBuilder::new()
             .with_config_path_opt(config_path)
@@ -434,8 +428,7 @@ mod tests {
         );
         let msg = format!("{:#}", res.unwrap_err());
         assert!(
-            msg.contains("config_path")
-                && msg.contains("build_command_context"),
+            msg.contains("config_path") && msg.contains("build_command_context"),
             "Err message must mention both 'config_path' and \
              'build_command_context', got: {msg}"
         );

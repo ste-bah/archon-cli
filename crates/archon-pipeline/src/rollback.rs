@@ -39,11 +39,7 @@ impl RollbackEngine {
     /// Roll back a pipeline run: delete checkpoints for completed steps
     /// in reverse topological order, emit RolledBack audit events, then
     /// delete the run's state files (preserving audit.log).
-    pub fn rollback(
-        &self,
-        run: &mut PipelineRun,
-        dag: &Dag,
-    ) -> Result<(), PipelineError> {
+    pub fn rollback(&self, run: &mut PipelineRun, dag: &Dag) -> Result<(), PipelineError> {
         // Collect finished step IDs in reverse topological order.
         let finished_steps: Vec<String> = dag
             .levels

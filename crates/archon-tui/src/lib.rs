@@ -35,9 +35,9 @@ pub mod terminal_panel;
 
 pub mod split_pane;
 
-pub mod task_dispatch;
 pub mod observability;
 pub mod observability_tracing;
+pub mod task_dispatch;
 pub use task_dispatch::{
     AgentDispatcher, AgentRouter, CancelOutcome, DispatchResult, QueuedPrompt, TurnOutcome,
     TurnRunner,
@@ -52,21 +52,20 @@ pub use event_loop::{EventLoopConfig, run_event_loop};
 pub mod cancel;
 pub use cancel::YieldGate;
 
-
 pub mod events;
 pub use events::TuiEvent;
 pub mod state;
 pub use state::AppState;
-pub mod terminal;
+pub mod context_viz;
 pub mod keybindings;
-pub mod render;
-pub mod prompt_input;
-pub mod overlays;
-pub mod virtual_list;
 pub mod message_renderer;
 pub mod notifications;
-pub mod context_viz;
+pub mod overlays;
+pub mod prompt_input;
+pub mod render;
 pub mod screens;
+pub mod terminal;
+pub mod virtual_list;
 
 // Stubs for later phases
 pub mod scroll {}

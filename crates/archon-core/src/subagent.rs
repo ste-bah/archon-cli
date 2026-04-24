@@ -698,8 +698,7 @@ pub mod runner {
                                     g.cumulative_output_tokens += usage.output_tokens;
                                     g.cumulative_cache_creation_tokens +=
                                         usage.cache_creation_input_tokens;
-                                    g.cumulative_cache_read_tokens +=
-                                        usage.cache_read_input_tokens;
+                                    g.cumulative_cache_read_tokens += usage.cache_read_input_tokens;
                                     g.last_update = chrono::Utc::now();
                                 }
                             }
@@ -714,8 +713,7 @@ pub mod runner {
                                     g.cumulative_output_tokens += u.output_tokens;
                                     g.cumulative_cache_creation_tokens +=
                                         u.cache_creation_input_tokens;
-                                    g.cumulative_cache_read_tokens +=
-                                        u.cache_read_input_tokens;
+                                    g.cumulative_cache_read_tokens += u.cache_read_input_tokens;
                                     g.last_update = chrono::Utc::now();
                                 }
                             }
@@ -1601,7 +1599,7 @@ mod tests {
 
     #[test]
     fn structured_envelope_delivers_through_queue() {
-        use archon_tools::send_message::{build_structured_envelope, SendMessageRequest};
+        use archon_tools::send_message::{SendMessageRequest, build_structured_envelope};
 
         let mut mgr = SubagentManager::new(4);
         let id_a = mgr.register(sample_request()).unwrap();
@@ -1715,7 +1713,9 @@ mod tests {
         let mut mgr = SubagentManager::default();
         let id = mgr.register(sample_request()).unwrap();
 
-        let snap = mgr.get_progress(&id).expect("snapshot exists for live agent");
+        let snap = mgr
+            .get_progress(&id)
+            .expect("snapshot exists for live agent");
         assert_eq!(snap.tool_use_count, 0);
         assert_eq!(snap.cumulative_input_tokens, 0);
         assert_eq!(snap.cumulative_output_tokens, 0);

@@ -79,9 +79,7 @@ pub fn compute_backoff(retry_ms: u64, attempt: u32, jitter_ratio: f64) -> Durati
         return Duration::from_millis(retry_ms.min(BACKOFF_CAP_MS));
     }
     let shift = attempt.saturating_sub(1).min(SHIFT_CAP);
-    let base_ms = retry_ms
-        .saturating_mul(1u64 << shift)
-        .min(BACKOFF_CAP_MS);
+    let base_ms = retry_ms.saturating_mul(1u64 << shift).min(BACKOFF_CAP_MS);
 
     if jitter_ratio <= 0.0 || base_ms == 0 {
         return Duration::from_millis(base_ms);

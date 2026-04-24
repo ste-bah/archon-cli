@@ -110,7 +110,10 @@ mod tests {
                 let has_text = events
                     .iter()
                     .any(|e| matches!(e, StreamEvent::TextDelta { text, .. } if text == "hi"));
-                assert!(has_text, "expected TextDelta{{text:\"hi\"}}, got {events:?}");
+                assert!(
+                    has_text,
+                    "expected TextDelta{{text:\"hi\"}}, got {events:?}"
+                );
             }
             other => panic!("expected Events, got {other:?}"),
         }
@@ -119,7 +122,8 @@ mod tests {
     #[test]
     fn decode_sse_tolerates_unknown_fields() {
         // EC-PROV-01: unknown fields must not cause errors.
-        let line = br#"data: {"choices":[{"delta":{"content":"hi","unknown":42}}],"xyz":"ignored"}"#;
+        let line =
+            br#"data: {"choices":[{"delta":{"content":"hi","unknown":42}}],"xyz":"ignored"}"#;
         assert!(matches!(
             decode_sse_line(line),
             Some(FrameOutcome::Events(_))
@@ -157,9 +161,9 @@ mod tests {
         match decode_ndjson_line(line) {
             Some(FrameOutcome::Events(events)) => {
                 assert!(!events.is_empty());
-                let has_text = events.iter().any(
-                    |e| matches!(e, StreamEvent::TextDelta { text, .. } if text == "bonjour"),
-                );
+                let has_text = events
+                    .iter()
+                    .any(|e| matches!(e, StreamEvent::TextDelta { text, .. } if text == "bonjour"));
                 assert!(has_text, "expected TextDelta{{text:\"bonjour\"}}");
             }
             other => panic!("expected Events, got {other:?}"),

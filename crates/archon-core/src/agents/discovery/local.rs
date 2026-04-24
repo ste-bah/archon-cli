@@ -41,10 +41,7 @@ impl LocalDiscoverySource {
         let files = walk_agents_dir(&self.root)?;
         debug!(count = files.len(), root = ?self.root, "discovered agent files");
 
-        let parsed: Vec<AgentMetadata> = files
-            .par_iter()
-            .map(|f| self.parse_one(f))
-            .collect();
+        let parsed: Vec<AgentMetadata> = files.par_iter().map(|f| self.parse_one(f)).collect();
 
         let mut loaded = 0;
         let mut invalid = 0;
@@ -102,23 +99,21 @@ impl LocalDiscoverySource {
     }
 
     fn try_parse(&self, file: &DiscoveredFile) -> Result<AgentMetadata, String> {
-        let content = std::fs::read_to_string(&file.path)
-            .map_err(|e| format!("read error: {e}"))?;
+        let content =
+            std::fs::read_to_string(&file.path).map_err(|e| format!("read error: {e}"))?;
 
-        let ext = file
-            .path
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("");
+        let ext = file.path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
         let value: serde_json::Value = match ext {
-            "json" => serde_json::from_str(&content)
-                .map_err(|e| format!("JSON parse error: {e}"))?,
-            "yaml" | "yml" => serde_yml::from_str(&content)
-                .map_err(|e| format!("YAML parse error: {e}"))?,
+            "json" => {
+                serde_json::from_str(&content).map_err(|e| format!("JSON parse error: {e}"))?
+            }
+            "yaml" | "yml" => {
+                serde_yml::from_str(&content).map_err(|e| format!("YAML parse error: {e}"))?
+            }
             "toml" => {
-                let toml_val: toml::Value = toml::from_str(&content)
-                    .map_err(|e| format!("TOML parse error: {e}"))?;
+                let toml_val: toml::Value =
+                    toml::from_str(&content).map_err(|e| format!("TOML parse error: {e}"))?;
                 serde_json::to_value(toml_val)
                     .map_err(|e| format!("TOML->JSON conversion error: {e}"))?
             }
@@ -131,11 +126,9 @@ impl LocalDiscoverySource {
         }
 
         // Parse version string as SemVer
-        let version_str = value["version"]
-            .as_str()
-            .ok_or("version is not a string")?;
-        let version = semver::Version::parse(version_str)
-            .map_err(|e| format!("invalid SemVer: {e}"))?;
+        let version_str = value["version"].as_str().ok_or("version is not a string")?;
+        let version =
+            semver::Version::parse(version_str).map_err(|e| format!("invalid SemVer: {e}"))?;
 
         Ok(AgentMetadata {
             name: value["name"].as_str().unwrap_or("").to_string(),
@@ -144,16 +137,33 @@ impl LocalDiscoverySource {
             category: file.category.clone(),
             tags: value["tags"]
                 .as_array()
-                .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
                 .unwrap_or_default(),
             capabilities: value["capabilities"]
                 .as_array()
-                .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
                 .unwrap_or_default(),
-            input_schema: value.get("input_schema").cloned().unwrap_or(serde_json::json!({})),
-            output_schema: value.get("output_schema").cloned().unwrap_or(serde_json::json!({})),
+            input_schema: value
+                .get("input_schema")
+                .cloned()
+                .unwrap_or(serde_json::json!({})),
+            output_schema: value
+                .get("output_schema")
+                .cloned()
+                .unwrap_or(serde_json::json!({})),
             resource_requirements: serde_json::from_value(
-                value.get("resource_requirements").cloned().unwrap_or(serde_json::json!({})),
+                value
+                    .get("resource_requirements")
+                    .cloned()
+                    .unwrap_or(serde_json::json!({})),
             )
             .unwrap_or_default(),
             dependencies: value

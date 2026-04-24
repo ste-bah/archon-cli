@@ -1,6 +1,4 @@
-use archon_tui_test_support::metrics::{
-    assert_linear_memory_growth, MetricsRecorder,
-};
+use archon_tui_test_support::metrics::{MetricsRecorder, assert_linear_memory_growth};
 use std::time::{Duration, Instant};
 
 #[test]
@@ -13,8 +11,16 @@ fn recorder_new_then_observe_drain_nonzero_snapshot() {
     r.observe_drain(5, ts);
     let snap = r.snapshot();
     assert_eq!(snap.total_events, 15);
-    assert!(snap.p50_us > 0, "p50 should be nonzero, got {}", snap.p50_us);
-    assert!(snap.p95_us > 0, "p95 should be nonzero, got {}", snap.p95_us);
+    assert!(
+        snap.p50_us > 0,
+        "p50 should be nonzero, got {}",
+        snap.p50_us
+    );
+    assert!(
+        snap.p95_us > 0,
+        "p95 should be nonzero, got {}",
+        snap.p95_us
+    );
     assert!(snap.throughput_eps >= 0.0);
 }
 
@@ -49,10 +55,8 @@ fn assert_linear_memory_growth_fail_on_1mb_per_10() {
     // we instead drive failure by passing a 20 MB jump between two samples.
     let base = Instant::now();
     let mb = 1024 * 1024;
-    let samples: Vec<(Instant, usize)> = vec![
-        (base, 0),
-        (base + Duration::from_millis(10), 100 * mb),
-    ];
+    let samples: Vec<(Instant, usize)> =
+        vec![(base, 0), (base + Duration::from_millis(10), 100 * mb)];
     let result = assert_linear_memory_growth(&samples, 2.0);
     assert!(result.is_err(), "expected fail, got Ok");
 }

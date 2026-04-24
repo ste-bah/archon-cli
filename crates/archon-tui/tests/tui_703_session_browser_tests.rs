@@ -80,7 +80,11 @@ fn test_move_cursor_down_bounded() {
 
     // Move down again - should be bounded at len() - 1 = 2
     browser.move_cursor_down();
-    assert_eq!(browser.cursor(), 2, "cursor should not exceed sessions.len() - 1");
+    assert_eq!(
+        browser.cursor(),
+        2,
+        "cursor should not exceed sessions.len() - 1"
+    );
 }
 
 /// Gate 1: Verify move_cursor_up does not go below 0.
@@ -248,14 +252,12 @@ fn test_set_sessions_updates_list() {
     assert_eq!(browser.cursor(), 0);
 
     // Set sessions
-    let sessions = vec![
-        SessionSummary {
-            id: "0".to_string(),
-            name: "Alpha".to_string(),
-            last_updated: Utc::now(),
-            message_count: 5,
-        },
-    ];
+    let sessions = vec![SessionSummary {
+        id: "0".to_string(),
+        name: "Alpha".to_string(),
+        last_updated: Utc::now(),
+        message_count: 5,
+    }];
     browser.set_sessions(sessions);
 
     assert_eq!(browser.len(), 1);

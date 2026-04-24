@@ -5,8 +5,8 @@
 
 use std::collections::HashMap;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use async_trait::async_trait;
 use futures_util::Stream;
@@ -256,10 +256,7 @@ async fn condition_true_step_runs() {
 
     // No StepSkipped events in audit.
     let audit = read_audit_lines(tmp.path(), id);
-    let skip_count = audit
-        .iter()
-        .filter(|e| e["type"] == "step_skipped")
-        .count();
+    let skip_count = audit.iter().filter(|e| e["type"] == "step_skipped").count();
     assert_eq!(skip_count, 0, "no steps should be skipped");
 }
 

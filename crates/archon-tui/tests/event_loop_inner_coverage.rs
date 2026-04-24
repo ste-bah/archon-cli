@@ -20,9 +20,7 @@
 
 use std::time::Duration;
 
-use archon_tui::app::{
-    AppConfig, McpServerEntry, SessionPickerEntry, TuiEvent, run_with_backend,
-};
+use archon_tui::app::{AppConfig, McpServerEntry, SessionPickerEntry, TuiEvent, run_with_backend};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use tokio::sync::mpsc;
@@ -86,9 +84,7 @@ async fn run_with_backend_walks_wide_event_surface() {
         let _ = event_tx
             .send(TuiEvent::ThinkingDelta("pondering...".into()))
             .await;
-        let _ = event_tx
-            .send(TuiEvent::ThinkingToggle(true))
-            .await;
+        let _ = event_tx.send(TuiEvent::ThinkingToggle(true)).await;
         let _ = event_tx
             .send(TuiEvent::TextDelta("hello world".into()))
             .await;
@@ -198,9 +194,7 @@ async fn run_with_backend_walks_wide_event_surface() {
             .send(TuiEvent::UserInput("ignored in this loop".into()))
             .await;
         let _ = event_tx.send(TuiEvent::SlashCancel).await;
-        let _ = event_tx
-            .send(TuiEvent::SlashAgent("reviewer".into()))
-            .await;
+        let _ = event_tx.send(TuiEvent::SlashAgent("reviewer".into())).await;
         // Let the TUI settle, then terminate.
         tokio::time::sleep(Duration::from_millis(500)).await;
         let _ = event_tx.send(TuiEvent::Done).await;

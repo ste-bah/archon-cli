@@ -22,11 +22,7 @@ use super::{Pattern, PatternCtx, PatternError, PatternKind, PatternRegistry};
 pub trait PipelineEngineHandle: Send + Sync {
     /// Run a sequential pipeline of the given steps with the given input.
     /// Each step's output feeds into the next step's input.
-    async fn run_steps(
-        &self,
-        steps: &[String],
-        input: Value,
-    ) -> Result<Value, String>;
+    async fn run_steps(&self, steps: &[String], input: Value) -> Result<Value, String>;
 }
 
 // ---------------------------------------------------------------------------
@@ -72,11 +68,7 @@ impl Pattern for PipelinePattern {
         PatternKind::Pipeline
     }
 
-    async fn execute(
-        &self,
-        input: Value,
-        _ctx: PatternCtx,
-    ) -> Result<Value, PatternError> {
+    async fn execute(&self, input: Value, _ctx: PatternCtx) -> Result<Value, PatternError> {
         self.engine
             .run_steps(&self.config.steps, input)
             .await
@@ -110,11 +102,7 @@ mod tests {
 
     #[async_trait]
     impl PipelineEngineHandle for StubEngine {
-        async fn run_steps(
-            &self,
-            steps: &[String],
-            input: Value,
-        ) -> Result<Value, String> {
+        async fn run_steps(&self, steps: &[String], input: Value) -> Result<Value, String> {
             let mut current = input;
             for step in steps {
                 current = json!({ step.as_str(): current });
@@ -130,11 +118,7 @@ mod tests {
 
         #[async_trait]
         impl TaskServiceHandle for DummyTaskService {
-            async fn submit(
-                &self,
-                _agent: &str,
-                input: Value,
-            ) -> Result<Value, PatternError> {
+            async fn submit(&self, _agent: &str, input: Value) -> Result<Value, PatternError> {
                 Ok(input)
             }
         }
@@ -188,8 +172,7 @@ mod tests {
         };
 
         let json_str = serde_json::to_string(&cfg).unwrap();
-        let deserialized: PipelineAdapterConfig =
-            serde_json::from_str(&json_str).unwrap();
+        let deserialized: PipelineAdapterConfig = serde_json::from_str(&json_str).unwrap();
 
         assert_eq!(deserialized.steps, vec!["a", "b", "c"]);
         assert!(!deserialized.propagate_errors);

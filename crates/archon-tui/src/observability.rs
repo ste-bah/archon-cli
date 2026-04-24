@@ -24,12 +24,12 @@
 //! `archon-observability`.
 
 pub use archon_observability::metrics::{
-    format_prometheus, serve_metrics, serve_metrics_on, ChannelMetrics, ChannelMetricsSnapshot,
+    ChannelMetrics, ChannelMetricsSnapshot, format_prometheus, serve_metrics, serve_metrics_on,
 };
 
 // OBS-905 / OBS-906 tracing surface. Re-exported from the in-tree
 // observability_tracing shim so `archon_tui::observability::{init_tracing,
 // span_*, RedactionLayer}` keeps resolving for every existing caller.
 pub use crate::observability_tracing::{
-    init_tracing, span_agent_turn, span_channel_send, span_slash_dispatch, RedactionLayer,
+    RedactionLayer, init_tracing, span_agent_turn, span_channel_send, span_slash_dispatch,
 };

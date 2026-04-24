@@ -129,11 +129,7 @@ impl Default for LogoutHandler {
 }
 
 impl CommandHandler for LogoutHandler {
-    fn execute(
-        &self,
-        ctx: &mut CommandContext,
-        _args: &[String],
-    ) -> anyhow::Result<()> {
+    fn execute(&self, ctx: &mut CommandContext, _args: &[String]) -> anyhow::Result<()> {
         // R4: byte-for-byte preservation of slash.rs:365-370 `cred_path`
         // construction.
         let cred_path = dirs::home_dir()
@@ -159,15 +155,12 @@ impl CommandHandler for LogoutHandler {
                     ));
                 }
                 Err(e) => {
-                    ctx.emit(TuiEvent::Error(format!(
-                        "Failed to clear credentials: {e}"
-                    )));
+                    ctx.emit(TuiEvent::Error(format!("Failed to clear credentials: {e}")));
                 }
             }
         } else {
             ctx.emit(TuiEvent::TextDelta(
-                "\nNo stored credentials found. Using API key auth.\n"
-                    .into(),
+                "\nNo stored credentials found. Using API key auth.\n".into(),
             ));
         }
         Ok(())
@@ -287,8 +280,7 @@ mod tests {
         let _guard = EnvGuard::set("HOME", tmp.path());
 
         // Sanity: confirm HOME override propagates to dirs::home_dir().
-        let observed = dirs::home_dir()
-            .expect("dirs::home_dir returns Some under HOME=tmp");
+        let observed = dirs::home_dir().expect("dirs::home_dir returns Some under HOME=tmp");
         assert_eq!(
             observed,
             tmp.path(),
@@ -311,15 +303,12 @@ mod tests {
         match ev {
             TuiEvent::TextDelta(text) => {
                 assert_eq!(
-                    text,
-                    "\nNo stored credentials found. Using API key auth.\n",
+                    text, "\nNo stored credentials found. Using API key auth.\n",
                     "no-creds-branch TextDelta must be byte-identical \
                      to shipped slash.rs:385-389 format"
                 );
             }
-            other => panic!(
-                "expected TuiEvent::TextDelta(..), got: {other:?}"
-            ),
+            other => panic!("expected TuiEvent::TextDelta(..), got: {other:?}"),
         }
     }
 
@@ -360,9 +349,7 @@ mod tests {
                      to shipped slash.rs:373-376 format"
                 );
             }
-            other => panic!(
-                "expected TuiEvent::TextDelta(..), got: {other:?}"
-            ),
+            other => panic!("expected TuiEvent::TextDelta(..), got: {other:?}"),
         }
 
         // Post-execute: the file must be gone.
@@ -391,8 +378,7 @@ mod tests {
         // fails at runtime. `cred_path.exists()` still returns true
         // (it's a directory entry).
         let cred_path = archon_dir.join(".credentials.json");
-        std::fs::create_dir_all(&cred_path)
-            .expect("create .credentials.json as dir");
+        std::fs::create_dir_all(&cred_path).expect("create .credentials.json as dir");
 
         let _guard = EnvGuard::set("HOME", tmp.path());
 
@@ -432,9 +418,7 @@ mod tests {
                      rendering of the std::io::Error, got: {msg}"
                 );
             }
-            other => panic!(
-                "expected TuiEvent::Error(..), got: {other:?}"
-            ),
+            other => panic!("expected TuiEvent::Error(..), got: {other:?}"),
         }
     }
 
@@ -467,15 +451,12 @@ mod tests {
         match ev {
             TuiEvent::TextDelta(text) => {
                 assert_eq!(
-                    text,
-                    "\nNo stored credentials found. Using API key auth.\n",
+                    text, "\nNo stored credentials found. Using API key auth.\n",
                     "dispatcher-routed TextDelta must be byte-identical \
                      to shipped slash.rs:385-389 format"
                 );
             }
-            other => panic!(
-                "expected TuiEvent::TextDelta(..), got: {other:?}"
-            ),
+            other => panic!("expected TuiEvent::TextDelta(..), got: {other:?}"),
         }
     }
 
@@ -518,9 +499,7 @@ mod tests {
                      to shipped slash.rs:373-376 format"
                 );
             }
-            other => panic!(
-                "expected TuiEvent::TextDelta(..), got: {other:?}"
-            ),
+            other => panic!("expected TuiEvent::TextDelta(..), got: {other:?}"),
         }
 
         // Post-dispatch: file must be gone.

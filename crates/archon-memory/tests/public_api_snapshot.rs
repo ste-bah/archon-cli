@@ -13,9 +13,7 @@
 //! `archon-core::agents::memory` and cannot gain or lose items
 //! without an approved regen.
 
-const FIXTURE: &str = include_str!(
-    "../../../tests/fixtures/baseline/archon_memory_api.txt"
-);
+const FIXTURE: &str = include_str!("../../../tests/fixtures/baseline/archon_memory_api.txt");
 
 /// MemoryTrait is the preserve-D8 anchor for archon-memory —
 /// REQ-FOR-PRESERVE-D8 asserts `save_agent_memory` uses
@@ -57,9 +55,11 @@ fn test_public_api_drift() {
         .arg("--version")
         .output()
     {
-        Ok(o) if o.status.success() => {
-            String::from_utf8_lossy(&o.stdout).lines().next().unwrap_or("").to_string()
-        }
+        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout)
+            .lines()
+            .next()
+            .unwrap_or("")
+            .to_string(),
         _ => {
             eprintln!("SKIP: cargo-public-api not on PATH");
             return;
@@ -67,12 +67,7 @@ fn test_public_api_drift() {
     };
 
     let output = std::process::Command::new("cargo")
-        .args([
-            "public-api",
-            "--package",
-            "archon-memory",
-            "--simplified",
-        ])
+        .args(["public-api", "--package", "archon-memory", "--simplified"])
         .env("CARGO_BUILD_JOBS", "1")
         .output()
         .expect("failed to invoke cargo public-api");

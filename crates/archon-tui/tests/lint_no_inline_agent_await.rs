@@ -39,7 +39,9 @@ fn worktree_root_path(relative: &str) -> PathBuf {
     // A test binary compiled from `crates/archon-tui/tests/*.rs` has
     // CARGO_MANIFEST_DIR = `<worktree>/crates/archon-tui`. Jump up
     // two levels to reach the worktree root, then append.
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..").join(relative)
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join(relative)
 }
 
 #[test]
@@ -81,7 +83,12 @@ fn test_no_inline_await_on_process_message_in_input_loop() {
              Offending lines:\n",
         );
         for (lineno, content) in &pattern_a_hits {
-            msg.push_str(&format!("  {}:{}: {}\n", main_rs_path.display(), lineno, content.trim_end()));
+            msg.push_str(&format!(
+                "  {}:{}: {}\n",
+                main_rs_path.display(),
+                lineno,
+                content.trim_end()
+            ));
         }
         panic!("{}", msg);
     }

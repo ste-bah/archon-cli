@@ -115,7 +115,9 @@ impl FakeRegistry {
             }
             // Try to observe completion within remaining budget
             let rx_opt = {
-                let Some(entry) = self.inner.get(&id) else { continue };
+                let Some(entry) = self.inner.get(&id) else {
+                    continue;
+                };
                 let mut slot = entry.done_rx.lock().expect("done_rx mutex");
                 slot.take()
             };
@@ -139,11 +141,7 @@ impl Default for FakeRegistry {
 
 /// Spawn a fake subagent with a user-supplied closure that produces the body future.
 /// Closure receives the oneshot sender and MUST signal completion via `tx.send(msg)`.
-pub fn spawn_fake_subagent<F>(
-    registry: &FakeRegistry,
-    id: impl Into<String>,
-    script: F,
-) -> Duration
+pub fn spawn_fake_subagent<F>(registry: &FakeRegistry, id: impl Into<String>, script: F) -> Duration
 where
     F: FnOnce(oneshot::Sender<String>) -> BoxFuture<'static, ()> + Send + 'static,
 {

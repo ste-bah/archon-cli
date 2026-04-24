@@ -4,11 +4,11 @@
 //!
 //! Gate 1: tests-written-first — test file exists BEFORE implementation.
 
-use std::sync::Arc;
 use archon_session::storage::SessionStore;
-use archon_tui::screens::session_browser::{BranchPoint, SessionState};
 use archon_tui::screens::session_branching::SessionBranching;
+use archon_tui::screens::session_browser::{BranchPoint, SessionState};
 use chrono::{DateTime, Utc};
+use std::sync::Arc;
 use tempfile::TempDir;
 
 /// Gate 1: Verify SessionBranching::new(store, state) constructs correctly.
@@ -21,7 +21,10 @@ fn test_new_with_store_and_state() {
     let state = SessionState::with_session("test-session".to_string());
     let branching = SessionBranching::new(Arc::new(store), state.clone());
 
-    assert_eq!(branching.state().current_id, Some("test-session".to_string()));
+    assert_eq!(
+        branching.state().current_id,
+        Some("test-session".to_string())
+    );
 }
 
 /// Gate 1: Verify switch("known_id") returns Ok and updates state.current_id.

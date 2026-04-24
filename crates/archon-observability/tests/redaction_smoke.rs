@@ -75,10 +75,7 @@ fn redaction_layer_scrubs_secret_via_public_surface() {
     let subscriber = tracing_subscriber::registry().with(layer);
 
     ::tracing::subscriber::with_default(subscriber, || {
-        ::tracing::info!(
-            payload = "sk-abcdefghijklmnopqrst0000",
-            "post-carve smoke"
-        );
+        ::tracing::info!(payload = "sk-abcdefghijklmnopqrst0000", "post-carve smoke");
     });
 
     let captured = String::from_utf8(sink.lock().unwrap().clone()).unwrap_or_default();

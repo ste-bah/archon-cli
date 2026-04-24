@@ -5,8 +5,8 @@
 //! 2. Rate-limited: at most one warn per 1000ms while over threshold
 //! 3. Monotonic: last_warn_unix_ms only increases, never decreases
 
-use std::time::Duration;
 use archon_tui::observability::ChannelMetrics;
+use std::time::Duration;
 
 // --- Test 1: warn suppressed below threshold ---
 
@@ -24,7 +24,9 @@ async fn warn_suppressed_below_threshold() {
     assert!(
         !fired,
         "warn should NOT fire when backlog={} <= threshold=10000",
-        metrics.backlog_depth.load(std::sync::atomic::Ordering::Relaxed)
+        metrics
+            .backlog_depth
+            .load(std::sync::atomic::Ordering::Relaxed)
     );
 }
 
@@ -73,7 +75,9 @@ fn warn_fires_once_per_second_over_threshold() {
     assert!(
         after_sleep,
         "after 1.1s sleep, warn should fire again (backlog={})",
-        metrics.backlog_depth.load(std::sync::atomic::Ordering::Relaxed)
+        metrics
+            .backlog_depth
+            .load(std::sync::atomic::Ordering::Relaxed)
     );
 }
 
@@ -84,7 +88,9 @@ fn warn_rate_limit_is_monotonic() {
     let metrics = ChannelMetrics::new();
 
     // last_warn_unix_ms starts at 0
-    let initial = metrics.last_warn_unix_ms.load(std::sync::atomic::Ordering::Relaxed);
+    let initial = metrics
+        .last_warn_unix_ms
+        .load(std::sync::atomic::Ordering::Relaxed);
     assert_eq!(initial, 0, "last_warn_unix_ms should initialize to 0");
 
     // Fill over threshold and fire
@@ -93,8 +99,13 @@ fn warn_rate_limit_is_monotonic() {
     }
     let first_fire = metrics.warn_if_backlog_over(10_000);
     assert!(first_fire, "first fire should succeed");
-    let first_ts = metrics.last_warn_unix_ms.load(std::sync::atomic::Ordering::Relaxed);
-    assert!(first_ts > 0, "last_warn_unix_ms should be set after first fire");
+    let first_ts = metrics
+        .last_warn_unix_ms
+        .load(std::sync::atomic::Ordering::Relaxed);
+    assert!(
+        first_ts > 0,
+        "last_warn_unix_ms should be set after first fire"
+    );
 
     // Drain and wait
     for _ in 0..15_000 {
@@ -108,7 +119,9 @@ fn warn_rate_limit_is_monotonic() {
     }
     let second_fire = metrics.warn_if_backlog_over(10_000);
     assert!(second_fire, "second fire after 1.1s should succeed");
-    let second_ts = metrics.last_warn_unix_ms.load(std::sync::atomic::Ordering::Relaxed);
+    let second_ts = metrics
+        .last_warn_unix_ms
+        .load(std::sync::atomic::Ordering::Relaxed);
     assert!(
         second_ts >= first_ts,
         "last_warn_unix_ms must be monotonic: {} >= {}",

@@ -137,11 +137,7 @@ fn truncate_str(s: &str, max: usize) -> String {
 pub(crate) struct MemoryHandler;
 
 impl CommandHandler for MemoryHandler {
-    fn execute(
-        &self,
-        ctx: &mut CommandContext,
-        args: &[String],
-    ) -> anyhow::Result<()> {
+    fn execute(&self, ctx: &mut CommandContext, args: &[String]) -> anyhow::Result<()> {
         // 1. Require memory handle. `build_command_context` populates
         //    this unconditionally from `SlashCommandContext::memory` so
         //    at the real dispatch site this branch never fires. Test
@@ -167,27 +163,17 @@ impl CommandHandler for MemoryHandler {
         //    parser instead hands us a tokenized args vec. Rebuild the
         //    shipped single-string arg by joining tokens with ' '.
         //    See module rustdoc "Args-path reconciliation" section.
-        let subcmd = args
-            .first()
-            .map(|s| s.as_str())
-            .unwrap_or("")
-            .trim();
-        let arg_joined = args
-            .get(1..)
-            .map(|rest| rest.join(" "))
-            .unwrap_or_default();
+        let subcmd = args.first().map(|s| s.as_str()).unwrap_or("").trim();
+        let arg_joined = args.get(1..).map(|rest| rest.join(" ")).unwrap_or_default();
         let arg = arg_joined.trim();
 
         match subcmd {
             "" | "list" => match memory.list_recent(10) {
                 Ok(memories) if memories.is_empty() => {
-                    ctx.emit(TuiEvent::TextDelta(
-                        "\nNo memories stored.\n".into(),
-                    ));
+                    ctx.emit(TuiEvent::TextDelta("\nNo memories stored.\n".into()));
                 }
                 Ok(memories) => {
-                    let mut out =
-                        format!("\nRecent memories ({}):\n", memories.len());
+                    let mut out = format!("\nRecent memories ({}):\n", memories.len());
                     for m in &memories {
                         let short_id = &m.id[..8.min(m.id.len())];
                         let date = m.created_at.format("%Y-%m-%d %H:%M");
@@ -200,29 +186,23 @@ impl CommandHandler for MemoryHandler {
                     ctx.emit(TuiEvent::TextDelta(out));
                 }
                 Err(e) => {
-                    ctx.emit(TuiEvent::Error(format!(
-                        "Memory graph error: {e}"
-                    )));
+                    ctx.emit(TuiEvent::Error(format!("Memory graph error: {e}")));
                 }
             },
             "search" => {
                 if arg.is_empty() {
-                    ctx.emit(TuiEvent::Error(
-                        "Usage: /memory search <query>".into(),
-                    ));
+                    ctx.emit(TuiEvent::Error("Usage: /memory search <query>".into()));
                     return Ok(());
                 }
                 match memory.recall_memories(arg, 10) {
                     Ok(results) if results.is_empty() => {
-                        ctx.emit(TuiEvent::TextDelta(
-                            format!("\nNo memories matching \"{arg}\".\n"),
-                        ));
+                        ctx.emit(TuiEvent::TextDelta(format!(
+                            "\nNo memories matching \"{arg}\".\n"
+                        )));
                     }
                     Ok(results) => {
-                        let mut out = format!(
-                            "\nMemories matching \"{arg}\" ({}):\n",
-                            results.len()
-                        );
+                        let mut out =
+                            format!("\nMemories matching \"{arg}\" ({}):\n", results.len());
                         for m in &results {
                             let short_id = &m.id[..8.min(m.id.len())];
                             out.push_str(&format!(
@@ -234,9 +214,7 @@ impl CommandHandler for MemoryHandler {
                         ctx.emit(TuiEvent::TextDelta(out));
                     }
                     Err(e) => {
-                        ctx.emit(TuiEvent::Error(
-                            format!("Memory search error: {e}"),
-                        ));
+                        ctx.emit(TuiEvent::Error(format!("Memory search error: {e}")));
                     }
                 }
             }
@@ -247,9 +225,7 @@ impl CommandHandler for MemoryHandler {
                     )));
                 }
                 Err(e) => {
-                    ctx.emit(TuiEvent::Error(format!(
-                        "Failed to clear memories: {e}"
-                    )));
+                    ctx.emit(TuiEvent::Error(format!("Failed to clear memories: {e}")));
                 }
             },
             other => {
@@ -313,10 +289,7 @@ mod tests {
             }
         }
 
-        fn with_list_recent(
-            self,
-            r: Result<Vec<Memory>, MemoryError>,
-        ) -> Self {
+        fn with_list_recent(self, r: Result<Vec<Memory>, MemoryError>) -> Self {
             *self.list_recent_result.lock().unwrap() = r;
             self
         }
@@ -342,9 +315,7 @@ mod tests {
     // form into the Database variant (arbitrarily chosen since AGS-817
     // tests don't exercise the error-variant-distinguishing path). Only
     // used internally to this test module.
-    fn clone_result<T: Clone>(
-        r: &Result<T, MemoryError>,
-    ) -> Result<T, MemoryError> {
+    fn clone_result<T: Clone>(r: &Result<T, MemoryError>) -> Result<T, MemoryError> {
         match r {
             Ok(v) => Ok(v.clone()),
             Err(e) => Err(MemoryError::Database(format!("{e}"))),
@@ -378,11 +349,7 @@ mod tests {
             unimplemented!("TestMemory: update_memory not used by AGS-817 tests")
         }
 
-        fn update_importance(
-            &self,
-            _id: &str,
-            _importance: f64,
-        ) -> Result<(), MemoryError> {
+        fn update_importance(&self, _id: &str, _importance: f64) -> Result<(), MemoryError> {
             unimplemented!("TestMemory: update_importance not used by AGS-817 tests")
         }
 
@@ -398,32 +365,19 @@ mod tests {
             _context: Option<&str>,
             _strength: f64,
         ) -> Result<(), MemoryError> {
-            unimplemented!(
-                "TestMemory: create_relationship not used by AGS-817 tests"
-            )
+            unimplemented!("TestMemory: create_relationship not used by AGS-817 tests")
         }
 
-        fn recall_memories(
-            &self,
-            query: &str,
-            _limit: usize,
-        ) -> Result<Vec<Memory>, MemoryError> {
-            *self.recall_captured_query.lock().unwrap() =
-                Some(query.to_string());
+        fn recall_memories(&self, query: &str, _limit: usize) -> Result<Vec<Memory>, MemoryError> {
+            *self.recall_captured_query.lock().unwrap() = Some(query.to_string());
             clone_result(&self.recall_result.lock().unwrap())
         }
 
-        fn search_memories(
-            &self,
-            _filter: &SearchFilter,
-        ) -> Result<Vec<Memory>, MemoryError> {
+        fn search_memories(&self, _filter: &SearchFilter) -> Result<Vec<Memory>, MemoryError> {
             unimplemented!("TestMemory: search_memories not used by AGS-817 tests")
         }
 
-        fn list_recent(
-            &self,
-            _limit: usize,
-        ) -> Result<Vec<Memory>, MemoryError> {
+        fn list_recent(&self, _limit: usize) -> Result<Vec<Memory>, MemoryError> {
             clone_result(&self.list_recent_result.lock().unwrap())
         }
 
@@ -435,14 +389,8 @@ mod tests {
             clone_result(&self.clear_result.lock().unwrap())
         }
 
-        fn get_related_memories(
-            &self,
-            _id: &str,
-            _depth: u32,
-        ) -> Result<Vec<Memory>, MemoryError> {
-            unimplemented!(
-                "TestMemory: get_related_memories not used by AGS-817 tests"
-            )
+        fn get_related_memories(&self, _id: &str, _depth: u32) -> Result<Vec<Memory>, MemoryError> {
+            unimplemented!("TestMemory: get_related_memories not used by AGS-817 tests")
         }
     }
 
@@ -553,13 +501,15 @@ mod tests {
     fn memory_handler_execute_list_with_results_emits_recent_memories() {
         let m1 = make_mem("abcd1234-aaaa", "first title", "first content");
         let m2 = make_mem("efgh5678-bbbb", "second title", "second content");
-        let mem: Arc<dyn MemoryTrait> = Arc::new(
-            TestMemory::new().with_list_recent(Ok(vec![m1, m2])),
-        );
+        let mem: Arc<dyn MemoryTrait> =
+            Arc::new(TestMemory::new().with_list_recent(Ok(vec![m1, m2])));
         let (mut ctx, mut rx) = make_ctx(Some(mem));
         let h = MemoryHandler;
         let res = h.execute(&mut ctx, &["list".to_string()]);
-        assert!(res.is_ok(), "list(with results) must return Ok, got: {res:?}");
+        assert!(
+            res.is_ok(),
+            "list(with results) must return Ok, got: {res:?}"
+        );
 
         let mut got_delta: Option<String> = None;
         while let Ok(ev) = rx.try_recv() {
@@ -621,12 +571,11 @@ mod tests {
 
     #[test]
     fn memory_handler_execute_search_with_query_joins_multi_token_args() {
-        let tm =
-            TestMemory::new().with_recall(Ok(vec![make_mem(
-                "fff11111-gggg",
-                "hello-world-memory",
-                "a matching content snippet",
-            )]));
+        let tm = TestMemory::new().with_recall(Ok(vec![make_mem(
+            "fff11111-gggg",
+            "hello-world-memory",
+            "a matching content snippet",
+        )]));
         let tm_arc = Arc::new(tm);
         let mem: Arc<dyn MemoryTrait> = tm_arc.clone();
         let (mut ctx, mut rx) = make_ctx(Some(mem));
@@ -660,8 +609,7 @@ mod tests {
                 got_delta = Some(text);
             }
         }
-        let text = got_delta
-            .expect("search(with results) must emit a TextDelta event");
+        let text = got_delta.expect("search(with results) must emit a TextDelta event");
         assert!(
             text.contains("Memories matching \"hello world\" (1):"),
             "TextDelta must contain the result-count header, got: {text}"
@@ -678,8 +626,7 @@ mod tests {
 
     #[test]
     fn memory_handler_execute_search_empty_results_emits_no_match() {
-        let mem: Arc<dyn MemoryTrait> =
-            Arc::new(TestMemory::new().with_recall(Ok(Vec::new())));
+        let mem: Arc<dyn MemoryTrait> = Arc::new(TestMemory::new().with_recall(Ok(Vec::new())));
         let (mut ctx, mut rx) = make_ctx(Some(mem));
         let h = MemoryHandler;
         let res = h.execute(
@@ -693,9 +640,7 @@ mod tests {
         let mut saw_no_match = false;
         while let Ok(ev) = rx.try_recv() {
             if let TuiEvent::TextDelta(text) = ev {
-                if text
-                    == "\nNo memories matching \"missing-token\".\n"
-                {
+                if text == "\nNo memories matching \"missing-token\".\n" {
                     saw_no_match = true;
                 }
             }
@@ -709,8 +654,7 @@ mod tests {
 
     #[test]
     fn memory_handler_execute_clear_emits_cleared_count() {
-        let mem: Arc<dyn MemoryTrait> =
-            Arc::new(TestMemory::new().with_clear(Ok(7)));
+        let mem: Arc<dyn MemoryTrait> = Arc::new(TestMemory::new().with_clear(Ok(7)));
         let (mut ctx, mut rx) = make_ctx(Some(mem));
         let h = MemoryHandler;
         let res = h.execute(&mut ctx, &["clear".to_string()]);

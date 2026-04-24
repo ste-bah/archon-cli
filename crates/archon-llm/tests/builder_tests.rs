@@ -12,9 +12,7 @@
 use std::sync::Arc;
 
 use archon_llm::config::LlmConfig;
-use archon_llm::providers::{
-    build_llm_provider, CompatKind, ProviderError,
-};
+use archon_llm::providers::{CompatKind, ProviderError, build_llm_provider};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -102,9 +100,7 @@ fn unknown_provider_returns_missing_credential_with_message() {
         base_url: None,
         api_key_env: None,
     };
-    let err = cfg
-        .resolve_descriptor()
-        .expect_err("unknown id must Err");
+    let err = cfg.resolve_descriptor().expect_err("unknown id must Err");
     match err {
         ProviderError::MissingCredential { var } => {
             assert!(
@@ -130,8 +126,8 @@ fn build_llm_provider_with_groq_api_key_returns_compat_provider() {
             api_key_env: None,
             retry: None,
         };
-        let provider = build_llm_provider(&cfg, http())
-            .expect("groq must build when GROQ_API_KEY is set");
+        let provider =
+            build_llm_provider(&cfg, http()).expect("groq must build when GROQ_API_KEY is set");
         assert_eq!(
             provider.name(),
             "Groq",
@@ -191,8 +187,7 @@ fn build_llm_provider_auth_flavor_none_requires_no_env_var() {
 fn builder_has_exactly_one_match_on_descriptor_id() {
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
     let path = format!("{manifest_dir}/src/providers/builder.rs");
-    let src = std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("must read {path}: {e}"));
+    let src = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("must read {path}: {e}"));
 
     // Count occurrences of `match` followed by anything and `descriptor.id`.
     let mut count = 0usize;

@@ -1,10 +1,8 @@
 use serde_json::json;
 use tokio_util::sync::CancellationToken;
 
-use crate::agent_tool::{run_subagent, SubagentRequest};
-use crate::subagent_executor::{
-    get_subagent_executor, SubagentClassification, SubagentOutcome,
-};
+use crate::agent_tool::{SubagentRequest, run_subagent};
+use crate::subagent_executor::{SubagentClassification, SubagentOutcome, get_subagent_executor};
 use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
 
 /// Tool that creates a new tracked task in the global TaskManager.
@@ -191,8 +189,7 @@ impl Tool for TaskCreateTool {
             }
             SubagentClassification::Foreground => {
                 let cancel = CancellationToken::new();
-                let outcome =
-                    run_subagent(subagent_id.clone(), request, cancel, nested_ctx).await;
+                let outcome = run_subagent(subagent_id.clone(), request, cancel, nested_ctx).await;
                 match outcome {
                     SubagentOutcome::Completed(text) => {
                         let response = json!({ "task_id": task_id, "result": text });

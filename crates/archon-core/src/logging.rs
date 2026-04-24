@@ -28,7 +28,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-pub use archon_observability::{init_tracing_file as init_logging, LogGuard, LoggingError};
+pub use archon_observability::{LogGuard, LoggingError, init_tracing_file as init_logging};
 
 /// Default log directory: `~/.local/share/archon/logs/`.
 pub fn default_log_dir() -> PathBuf {

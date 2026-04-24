@@ -1,8 +1,8 @@
 use archon_tui_test_support::metrics::MetricsRecorder;
 use archon_tui_test_support::mock_agent::{
-    spawn_n_mock_agents, EventScript, MockAgent, MockEventKind,
+    EventScript, MockAgent, MockEventKind, spawn_n_mock_agents,
 };
-use criterion::{criterion_group, criterion_main, Criterion, Throughput};
+use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use std::time::Instant;
 use tokio::sync::mpsc;
 
@@ -22,8 +22,8 @@ fn unbounded_single_producer_single_consumer(c: &mut Criterion) {
         b.iter(|| {
             rt.block_on(async {
                 let (tx, mut rx) = mpsc::unbounded_channel::<MockEventKind>();
-                let script = EventScript::new()
-                    .burst_of(10_000, MockEventKind::MessageDelta("e".into()));
+                let script =
+                    EventScript::new().burst_of(10_000, MockEventKind::MessageDelta("e".into()));
                 let agent = MockAgent::new("bench", script);
                 let producer = tokio::spawn(async move { agent.run(tx).await });
                 let mut recorder = MetricsRecorder::new();
@@ -78,8 +78,8 @@ fn p95_event_latency_under_10k_eps(c: &mut Criterion) {
         b.iter(|| {
             rt.block_on(async {
                 let (tx, mut rx) = mpsc::unbounded_channel::<MockEventKind>();
-                let script = EventScript::new()
-                    .burst_of(10_000, MockEventKind::MessageDelta("l".into()));
+                let script =
+                    EventScript::new().burst_of(10_000, MockEventKind::MessageDelta("l".into()));
                 let agent = MockAgent::new("latency", script);
                 let send_ts = Instant::now();
                 let producer = tokio::spawn(async move { agent.run(tx).await });

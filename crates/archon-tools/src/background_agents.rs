@@ -318,9 +318,7 @@ pub fn cancel_background_agent(id: &AgentId) -> Result<(), RegistryError> {
 /// the task. The task runs for the lifetime of the tokio runtime.
 pub fn spawn_gc_task() -> tokio::task::JoinHandle<()> {
     tokio::spawn(async {
-        let mut interval = tokio::time::interval(
-            std::time::Duration::from_secs(60)
-        );
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
         // First tick fires immediately; skip it so we don't reap before
         // any agent has had time to complete.
         interval.tick().await;
@@ -379,10 +377,7 @@ mod tests {
     // the global BACKGROUND_AGENTS singleton across unit-test runs.
     #[test]
     fn poll_unknown_id_returns_unknown() {
-        assert_eq!(
-            poll_background_agent(&Uuid::new_v4()),
-            PollOutcome::Unknown
-        );
+        assert_eq!(poll_background_agent(&Uuid::new_v4()), PollOutcome::Unknown);
     }
 
     #[test]

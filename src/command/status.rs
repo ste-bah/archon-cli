@@ -49,9 +49,7 @@ pub(crate) struct StatusSnapshot {
 /// Called from `build_command_context` ONLY when the primary command
 /// resolves to `/status` (or its alias `/info`). All other commands leave
 /// `status_snapshot = None` to avoid unnecessary lock traffic.
-pub(crate) async fn build_status_snapshot(
-    slash_ctx: &SlashCommandContext,
-) -> StatusSnapshot {
+pub(crate) async fn build_status_snapshot(slash_ctx: &SlashCommandContext) -> StatusSnapshot {
     // Lock order preserved from shipped body at slash.rs:342-380.
     let stats = slash_ctx.session_stats.lock().await;
     let current_model = {
@@ -89,11 +87,7 @@ pub(crate) async fn build_status_snapshot(
 pub(crate) struct StatusHandler;
 
 impl CommandHandler for StatusHandler {
-    fn execute(
-        &self,
-        ctx: &mut CommandContext,
-        _args: &[String],
-    ) -> anyhow::Result<()> {
+    fn execute(&self, ctx: &mut CommandContext, _args: &[String]) -> anyhow::Result<()> {
         // Defensive: build_command_context is responsible for populating
         // status_snapshot when the primary resolves to /status. A None
         // here indicates a wiring regression (e.g. the builder was
@@ -166,9 +160,7 @@ mod tests {
         let h = StatusHandler;
         let desc = h.description().to_lowercase();
         assert!(
-            desc.contains("status")
-                || desc.contains("session")
-                || desc.contains("model"),
+            desc.contains("status") || desc.contains("session") || desc.contains("model"),
             "StatusHandler description should reference session/status/model, got: {}",
             h.description()
         );
@@ -236,8 +228,7 @@ mod tests {
         );
         let err_msg = format!("{}", result.unwrap_err());
         assert!(
-            err_msg.contains("status_snapshot")
-                || err_msg.contains("build_command_context"),
+            err_msg.contains("status_snapshot") || err_msg.contains("build_command_context"),
             "error must describe the missing snapshot, got: {err_msg}"
         );
     }

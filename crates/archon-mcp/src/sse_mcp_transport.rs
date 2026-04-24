@@ -78,14 +78,12 @@ const MCP_SESSION_ID_HEADER: &str = "mcp-session-id";
 pub(crate) type SessionIdHandle = Arc<RwLock<Option<String>>>;
 
 /// Boxed, pinned MCP SSE inbound stream — yields deserialized JSON-RPC messages.
-pub type SseMcpStream =
-    Pin<Box<dyn Stream<Item = RxJsonRpcMessage<RoleClient>> + Send + 'static>>;
+pub type SseMcpStream = Pin<Box<dyn Stream<Item = RxJsonRpcMessage<RoleClient>> + Send + 'static>>;
 
 /// Boxed, pinned MCP SSE outbound sink — POSTs each JSON-RPC message to the
 /// endpoint URL discovered during the `event: endpoint` handshake.
-pub type SseMcpSink = Pin<
-    Box<dyn Sink<TxJsonRpcMessage<RoleClient>, Error = McpError> + Send + 'static>,
->;
+pub type SseMcpSink =
+    Pin<Box<dyn Sink<TxJsonRpcMessage<RoleClient>, Error = McpError> + Send + 'static>>;
 
 /// Default timeout for the `event: endpoint` discovery handshake.
 ///
@@ -382,9 +380,9 @@ pub(crate) fn convert_headers(
     let mut out = HashMap::new();
     if let Some(h) = headers {
         for (n, v) in h {
-            let name: HeaderName = n.parse().map_err(|e| {
-                McpError::Transport(format!("sse: invalid header name '{n}': {e}"))
-            })?;
+            let name: HeaderName = n
+                .parse()
+                .map_err(|e| McpError::Transport(format!("sse: invalid header name '{n}': {e}")))?;
             let value: HeaderValue = v.parse().map_err(|e| {
                 McpError::Transport(format!("sse: invalid header value for '{n}': {e}"))
             })?;

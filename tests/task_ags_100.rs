@@ -112,8 +112,7 @@ fn arch_lint_script_has_pattern_scaffold() {
     // the scaffold structure exists so the later task is a pure uncomment.
     let body = read("scripts/lint/arch-lint.sh");
     assert!(
-        body.contains("agent.process_message")
-            || body.contains("agent\\.process_message"),
+        body.contains("agent.process_message") || body.contains("agent\\.process_message"),
         "arch-lint.sh must contain the forbidden-pattern scaffold for TASK-AGS-110"
     );
     assert!(

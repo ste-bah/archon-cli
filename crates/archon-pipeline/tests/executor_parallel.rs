@@ -5,8 +5,8 @@
 
 use std::collections::HashMap;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
@@ -78,8 +78,7 @@ impl TaskService for MockTaskService {
         // Increment in-flight counter and update high-water mark.
         let prev = self.in_flight.fetch_add(1, Ordering::SeqCst);
         let current = prev + 1;
-        self.max_concurrent
-            .fetch_max(current, Ordering::SeqCst);
+        self.max_concurrent.fetch_max(current, Ordering::SeqCst);
         Ok(task_id)
     }
 

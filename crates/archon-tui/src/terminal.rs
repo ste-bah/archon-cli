@@ -3,8 +3,8 @@
 //! Extracts terminal setup/cleanup from `app.rs` into a dedicated guard struct
 //! that automatically restores the terminal on drop.
 
-use std::io::stdout;
 use std::io::Result as IoResult;
+use std::io::stdout;
 
 pub use crate::events::TuiEvent;
 
@@ -66,8 +66,8 @@ impl Drop for TerminalGuard {
 /// ```
 pub fn install_sigwinch(tx: tokio::sync::mpsc::Sender<TuiEvent>) {
     tokio::spawn(async move {
-        use tokio::signal::unix::{signal, SignalKind};
         use tokio::signal::unix::Signal;
+        use tokio::signal::unix::{SignalKind, signal};
 
         // SIGWINCH is not available on all Unix systems, but most notably
         // missing on macOS in some configurations. We handle the error gracefully.

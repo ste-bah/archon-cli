@@ -119,25 +119,16 @@ impl TagHandler {
 }
 
 impl CommandHandler for TagHandler {
-    fn execute(
-        &self,
-        ctx: &mut CommandContext,
-        args: &[String],
-    ) -> anyhow::Result<()> {
+    fn execute(&self, ctx: &mut CommandContext, args: &[String]) -> anyhow::Result<()> {
         let raw = args.join(" ");
         let tag = sanitize_tag(&raw);
         if tag.is_empty() {
             return Err(anyhow::anyhow!("tag name cannot be empty"));
         }
 
-        let session_id = ctx
-            .session_id
-            .clone()
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "no active session — start a session before using /tag"
-                )
-            })?;
+        let session_id = ctx.session_id.clone().ok_or_else(|| {
+            anyhow::anyhow!("no active session — start a session before using /tag")
+        })?;
 
         let existing = self
             .store
@@ -244,10 +235,7 @@ mod tests {
             "err must indicate empty tag; got: {}",
             msg
         );
-        assert!(
-            store.calls().is_empty(),
-            "no store call on empty-tag Err"
-        );
+        assert!(store.calls().is_empty(), "no store call on empty-tag Err");
     }
 
     #[test]
@@ -274,7 +262,9 @@ mod tests {
         let store = MockTagStore::new(vec![]); // no existing tags
         let handler = TagHandler::with_store(store.clone());
         let (mut ctx, mut rx) = ctx_with_session();
-        handler.execute(&mut ctx, &[String::from("bugfix")]).unwrap();
+        handler
+            .execute(&mut ctx, &[String::from("bugfix")])
+            .unwrap();
         let calls = store.calls();
         assert!(calls.iter().any(|c| c == "list:test-session-123"));
         assert!(
@@ -301,7 +291,9 @@ mod tests {
         let store = MockTagStore::new(vec!["bugfix".to_string()]);
         let handler = TagHandler::with_store(store.clone());
         let (mut ctx, mut rx) = ctx_with_session();
-        handler.execute(&mut ctx, &[String::from("bugfix")]).unwrap();
+        handler
+            .execute(&mut ctx, &[String::from("bugfix")])
+            .unwrap();
         let calls = store.calls();
         assert!(
             calls.iter().any(|c| c == "delete:test-session-123:bugfix"),

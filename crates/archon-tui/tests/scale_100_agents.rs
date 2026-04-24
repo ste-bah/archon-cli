@@ -13,8 +13,8 @@
 //! D-RandMissing: `rand` is NOT in archon-tui dev-deps. Use inline LCG seeded
 //!     deterministically (seed 42) if jitter needed.
 
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use archon_core::agent::{AgentEvent, TimestampedEvent};
@@ -37,7 +37,10 @@ impl Lcg {
         Self(seed)
     }
     fn next(&mut self) -> u64 {
-        self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        self.0 = self
+            .0
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         self.0
     }
     fn gen_range(&mut self, max: u64) -> u64 {
@@ -70,10 +73,11 @@ impl TurnRunner for FakeTurnRunner {
             // Emit EVENTS_PER_TURN events
             let mut counter = 0usize;
             while counter < EVENTS_PER_TURN {
-                let event = AgentEvent::TextDelta(format!(
-                    "event-{counter} from agent-{id}"
-                ));
-                let timestamped = TimestampedEvent { sent_at: Instant::now(), inner: event };
+                let event = AgentEvent::TextDelta(format!("event-{counter} from agent-{id}"));
+                let timestamped = TimestampedEvent {
+                    sent_at: Instant::now(),
+                    inner: event,
+                };
                 let _ = tx.send(timestamped);
                 counter += 1;
             }
@@ -161,10 +165,7 @@ async fn run_concurrent_test(n: usize, wall_budget_ms: u64, p99_budget_ms: u64) 
     // Measure per-spawn dispatch latency (spawn_turn call time, not turn completion).
     let mut latencies_ms: Vec<u64> = Vec::with_capacity(n);
     for i in 0..n {
-        let prompt = format!(
-            "prompt-{:04}",
-            TURN_COUNTER.fetch_add(1, Ordering::SeqCst)
-        );
+        let prompt = format!("prompt-{:04}", TURN_COUNTER.fetch_add(1, Ordering::SeqCst));
         let t_spawn = Instant::now();
         let _ = dispatcher.spawn_turn(prompt, runners[i].clone());
         latencies_ms.push(t_spawn.elapsed().as_millis() as u64);
@@ -195,9 +196,7 @@ async fn run_concurrent_test(n: usize, wall_budget_ms: u64, p99_budget_ms: u64) 
     let p50 = latencies_ms[n / 2];
     let p_max = latencies_ms[n - 1];
 
-    println!(
-        "[TASK-TUI-111] n={n}  wall={wall_ms}ms  p50={p50}ms  p99={p99}ms  max={p_max}ms"
-    );
+    println!("[TASK-TUI-111] n={n}  wall={wall_ms}ms  p50={p50}ms  p99={p99}ms  max={p_max}ms");
 
     assert!(
         p99 < p99_budget_ms,
@@ -206,7 +205,11 @@ async fn run_concurrent_test(n: usize, wall_budget_ms: u64, p99_budget_ms: u64) 
 
     // 3. Dispatcher fully idle
     assert!(!dispatcher.is_busy(), "dispatcher still busy after drain");
-    assert_eq!(dispatcher.queue_len(), 0, "pending queue not empty after drain");
+    assert_eq!(
+        dispatcher.queue_len(),
+        0,
+        "pending queue not empty after drain"
+    );
 
     println!("[TASK-TUI-111] PASS  n={n}  wall={wall_ms}ms  p99={p99}ms");
 }

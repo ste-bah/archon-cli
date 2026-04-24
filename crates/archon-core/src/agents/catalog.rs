@@ -75,16 +75,20 @@ impl Clone for CatalogSnapshot {
     fn clone(&self) -> Self {
         let new = Self::default();
         for entry in self.entries.iter() {
-            new.entries.insert(entry.key().clone(), entry.value().clone());
+            new.entries
+                .insert(entry.key().clone(), entry.value().clone());
         }
         for entry in self.name_index.iter() {
-            new.name_index.insert(entry.key().clone(), entry.value().clone());
+            new.name_index
+                .insert(entry.key().clone(), entry.value().clone());
         }
         for entry in self.tag_index.iter() {
-            new.tag_index.insert(entry.key().clone(), entry.value().clone());
+            new.tag_index
+                .insert(entry.key().clone(), entry.value().clone());
         }
         for entry in self.capability_index.iter() {
-            new.capability_index.insert(entry.key().clone(), entry.value().clone());
+            new.capability_index
+                .insert(entry.key().clone(), entry.value().clone());
         }
         new
     }
@@ -115,8 +119,8 @@ impl DiscoveryCatalog {
     /// first entry and logs WARN (per TECH-AGS-DISCOVERY versioning note).
     pub fn insert(&self, meta: AgentMetadata) -> Result<(), DiscoveryError> {
         // EC-DISCOVERY-006: size cap
-        let serialized = serde_json::to_vec(&meta)
-            .map_err(|e| DiscoveryError::Parse(e.to_string()))?;
+        let serialized =
+            serde_json::to_vec(&meta).map_err(|e| DiscoveryError::Parse(e.to_string()))?;
         if serialized.len() > 10 * 1024 * 1024 {
             return Err(DiscoveryError::MetadataTooLarge {
                 path: meta.source_path.clone(),
@@ -241,10 +245,7 @@ impl DiscoveryCatalog {
 
     /// Resolve transitive dependencies via DFS.
     /// Returns `CircularDependency` on cycle detection.
-    pub fn resolve_dependencies(
-        &self,
-        root_name: &str,
-    ) -> Result<Vec<AgentKey>, DiscoveryError> {
+    pub fn resolve_dependencies(&self, root_name: &str) -> Result<Vec<AgentKey>, DiscoveryError> {
         let mut resolved = Vec::new();
         let mut visiting = HashSet::new();
         let mut path = Vec::new();
@@ -304,12 +305,8 @@ impl DiscoveryCatalog {
     ///
     /// Returns sorted by (name asc, version desc).
     pub fn list(&self, filter: &AgentFilter) -> Vec<AgentMetadata> {
-        let all_keys: HashSet<AgentKey> = self
-            .live
-            .entries
-            .iter()
-            .map(|e| e.key().clone())
-            .collect();
+        let all_keys: HashSet<AgentKey> =
+            self.live.entries.iter().map(|e| e.key().clone()).collect();
 
         // Start with all keys if no tag/capability filters
         let mut tag_keys: Option<HashSet<AgentKey>> = None;
@@ -382,11 +379,7 @@ impl DiscoveryCatalog {
             .collect();
 
         // Sort by (name asc, version desc)
-        results.sort_by(|a, b| {
-            a.name
-                .cmp(&b.name)
-                .then(b.version.cmp(&a.version))
-        });
+        results.sort_by(|a, b| a.name.cmp(&b.name).then(b.version.cmp(&a.version)));
 
         results
     }
@@ -399,9 +392,7 @@ impl DiscoveryCatalog {
     ) -> Result<AgentInfoView, DiscoveryError> {
         let selected = self.resolve(name, version_req)?;
         let all_versions = self.versions(name);
-        let dependency_graph = self
-            .resolve_dependencies(name)
-            .unwrap_or_default();
+        let dependency_graph = self.resolve_dependencies(name).unwrap_or_default();
         Ok(AgentInfoView {
             selected,
             all_versions,
@@ -421,7 +412,11 @@ impl DiscoveryCatalog {
             .filter(|(_, dist)| *dist <= 3)
             .collect();
         candidates.sort_by_key(|(_, dist)| *dist);
-        candidates.into_iter().take(3).map(|(name, _)| name).collect()
+        candidates
+            .into_iter()
+            .take(3)
+            .map(|(name, _)| name)
+            .collect()
     }
 }
 
@@ -677,7 +672,9 @@ mod tests {
 
         // Only 1 entry (collision ignored)
         assert_eq!(catalog.len(), 1);
-        let entry = catalog.get(&("foo".to_string(), semver::Version::new(1, 0, 0))).unwrap();
+        let entry = catalog
+            .get(&("foo".to_string(), semver::Version::new(1, 0, 0)))
+            .unwrap();
         assert_eq!(entry.source_path, PathBuf::from("/path/A"));
     }
 

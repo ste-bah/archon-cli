@@ -146,13 +146,10 @@ async fn cancel_token_reachable_from_outside_spawn() {
     token.cancel();
 
     // The inner task should complete
-    tokio::time::timeout(
-        std::time::Duration::from_secs(2),
-        join_handle,
-    )
-    .await
-    .expect("join timed out")
-    .expect("join panicked");
+    tokio::time::timeout(std::time::Duration::from_secs(2), join_handle)
+        .await
+        .expect("join timed out")
+        .expect("join panicked");
 
     assert!(
         was_cancelled.load(std::sync::atomic::Ordering::SeqCst),
@@ -185,10 +182,7 @@ async fn sequential_join_handle_serializes_tasks() {
         let max_clone = Arc::clone(&max_concurrent);
         let cancel = CancellationToken::new();
         let handle = tokio::spawn(async move {
-            let current = counter_clone.fetch_add(
-                1,
-                std::sync::atomic::Ordering::SeqCst,
-            ) + 1;
+            let current = counter_clone.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
             // Record max concurrent
             max_clone.fetch_max(current, std::sync::atomic::Ordering::SeqCst);
             // Simulate work

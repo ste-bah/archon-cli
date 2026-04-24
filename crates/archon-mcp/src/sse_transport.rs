@@ -85,9 +85,10 @@ impl SseTransport {
             req = req.header(name.clone(), value.clone());
         }
 
-        let resp = req.send().await.map_err(|e| {
-            McpError::Transport(format!("SSE GET {} failed: {e}", self.url))
-        })?;
+        let resp = req
+            .send()
+            .await
+            .map_err(|e| McpError::Transport(format!("SSE GET {} failed: {e}", self.url)))?;
 
         if !resp.status().is_success() {
             return Err(McpError::Transport(format!(
@@ -281,12 +282,9 @@ mod tests {
 
     #[tokio::test]
     async fn create_sse_transport_with_url_succeeds() {
-        let transport = create_sse_transport(
-            "http://localhost:9/events",
-            None,
-            Duration::from_secs(5),
-        )
-        .expect("construct SSE transport");
+        let transport =
+            create_sse_transport("http://localhost:9/events", None, Duration::from_secs(5))
+                .expect("construct SSE transport");
         assert_eq!(transport.url(), "http://localhost:9/events");
     }
 
@@ -378,9 +376,9 @@ mod tests {
 
     #[tokio::test]
     async fn sse_transport_e2e_handshake_mock() {
+        use axum::Router;
         use axum::response::sse::{Event, Sse as AxumSse};
         use axum::routing::get;
-        use axum::Router;
         use futures_util::stream;
         use std::convert::Infallible;
         use std::net::SocketAddr;
@@ -396,9 +394,8 @@ mod tests {
             "/events",
             get(|| async {
                 let payload = r#"{"jsonrpc":"2.0","method":"ping"}"#;
-                let events = stream::iter(vec![Ok::<_, Infallible>(
-                    Event::default().data(payload),
-                )]);
+                let events =
+                    stream::iter(vec![Ok::<_, Infallible>(Event::default().data(payload))]);
                 AxumSse::new(events)
             }),
         );
@@ -413,8 +410,8 @@ mod tests {
 
         // 2. Real client — create_sse_transport + connect_sse_stream + recv.
         let url = format!("http://{}/events", addr);
-        let transport = create_sse_transport(&url, None, Duration::from_secs(5))
-            .expect("construct transport");
+        let transport =
+            create_sse_transport(&url, None, Duration::from_secs(5)).expect("construct transport");
 
         let mut rx = transport
             .connect_sse_stream()
@@ -438,8 +435,7 @@ mod tests {
         assert_eq!(parsed["method"], "ping");
 
         // 4. Stream closes; further recvs return None.
-        let trailing =
-            tokio::time::timeout(Duration::from_secs(2), rx.recv()).await;
+        let trailing = tokio::time::timeout(Duration::from_secs(2), rx.recv()).await;
         // We don't strictly require None here (server may keep SSE alive);
         // a timeout or None both indicate the single-frame exchange is done.
         match trailing {

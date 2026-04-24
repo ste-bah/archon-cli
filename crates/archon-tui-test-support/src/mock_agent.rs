@@ -7,8 +7,8 @@
 //!
 //! See TASK-TUI-008 spec for usage contracts.
 
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use tokio::sync::mpsc;
@@ -223,10 +223,8 @@ where
         .map(|i| {
             let _ = counter.fetch_add(1, Ordering::Relaxed);
             let id = format!("mock-{}", i);
-            let script = EventScript::new().burst_of(
-                per_agent_events,
-                MockEventKind::MessageDelta("tick".into()),
-            );
+            let script = EventScript::new()
+                .burst_of(per_agent_events, MockEventKind::MessageDelta("tick".into()));
             let agent = MockAgent::new(id, script);
             let sink = tx.clone();
             tokio::spawn(async move { agent.run(sink).await })

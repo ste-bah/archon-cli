@@ -13,9 +13,7 @@
 
 use std::collections::HashMap;
 
-use archon_llm::{
-    AuthFlavor, CompatKind, ProviderDescriptor, ProviderFeatures, ProviderQuirks,
-};
+use archon_llm::{AuthFlavor, CompatKind, ProviderDescriptor, ProviderFeatures, ProviderQuirks};
 
 // ---------------------------------------------------------------------------
 // ProviderFeatures: shape + const helpers

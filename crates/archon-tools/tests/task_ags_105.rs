@@ -51,18 +51,15 @@ impl SubagentExecutor for RecordingExecutor {
         self.ran.store(true, Ordering::SeqCst);
         // Fire the inner-complete side effect unconditionally, as the
         // trait contract demands.
-        self.on_inner_complete(String::new(), Ok(String::new())).await;
+        self.on_inner_complete(String::new(), Ok(String::new()))
+            .await;
         tokio::select! {
             _ = cancel.cancelled() => Err(ExecutorError::Internal("cancelled".into())),
             _ = std::future::ready(()) => Ok("recorded".into()),
         }
     }
 
-    async fn on_inner_complete(
-        &self,
-        _subagent_id: String,
-        _result: Result<String, String>,
-    ) {
+    async fn on_inner_complete(&self, _subagent_id: String, _result: Result<String, String>) {
         self.inner_completed.store(true, Ordering::SeqCst);
     }
 

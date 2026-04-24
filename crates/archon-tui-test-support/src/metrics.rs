@@ -35,8 +35,8 @@ pub struct MetricsRecorder {
 impl MetricsRecorder {
     pub fn new() -> Self {
         // hdrhistogram: 1us..60s range, 3 sig figs
-        let hist = Histogram::<u64>::new_with_bounds(1, 60_000_000, 3)
-            .expect("histogram bounds valid");
+        let hist =
+            Histogram::<u64>::new_with_bounds(1, 60_000_000, 3).expect("histogram bounds valid");
         Self {
             hist,
             drain_samples: Vec::new(),

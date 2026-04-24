@@ -16,7 +16,12 @@ pub struct VirtualList<T> {
 impl<T> VirtualList<T> {
     pub fn new(items: Vec<T>, viewport_height: usize) -> Self {
         let selected = if items.is_empty() { 0 } else { 0 };
-        Self { items, selected, viewport_offset: 0, viewport_height }
+        Self {
+            items,
+            selected,
+            viewport_offset: 0,
+            viewport_height,
+        }
     }
 
     pub fn with_selected(mut self, selected: usize) -> Self {
@@ -78,7 +83,8 @@ impl<T> VirtualList<T> {
     }
 
     pub fn page_down(&mut self) {
-        let new_selected = (self.selected + self.viewport_height).min(self.items.len().saturating_sub(1));
+        let new_selected =
+            (self.selected + self.viewport_height).min(self.items.len().saturating_sub(1));
         self.selected = new_selected;
         self.scroll_to_selected();
     }
@@ -98,7 +104,9 @@ impl<T> VirtualList<T> {
         }
         let bottom = self.viewport_offset + self.viewport_height;
         if self.selected >= bottom {
-            self.viewport_offset = self.selected.saturating_sub(self.viewport_height.saturating_sub(1));
+            self.viewport_offset = self
+                .selected
+                .saturating_sub(self.viewport_height.saturating_sub(1));
         }
     }
 
@@ -118,13 +126,20 @@ impl<T> VirtualList<T> {
         // If selected is below viewport, scroll down
         let bottom = self.viewport_offset + self.viewport_height;
         if self.selected >= bottom {
-            self.viewport_offset = self.selected.saturating_sub(self.viewport_height.saturating_sub(1));
+            self.viewport_offset = self
+                .selected
+                .saturating_sub(self.viewport_height.saturating_sub(1));
         }
     }
 }
 
 impl<T> Default for VirtualList<T> {
     fn default() -> Self {
-        Self { items: Vec::new(), selected: 0, viewport_offset: 0, viewport_height: 10 }
+        Self {
+            items: Vec::new(),
+            selected: 0,
+            viewport_offset: 0,
+            viewport_height: 10,
+        }
     }
 }

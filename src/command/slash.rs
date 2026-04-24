@@ -7,10 +7,10 @@ use std::path::PathBuf;
 // removed — the legacy arm at previously :591-706 has been replaced
 // with a breadcrumb, and the new RulesHandler constructs
 // `RulesEngine::new(memory.as_ref())` inside its own module.
+use crate::command::config::handle_config_command;
 use archon_llm::effort::EffortState;
 use archon_llm::fast_mode::FastModeState;
 use archon_tui::app::TuiEvent;
-use crate::command::config::handle_config_command;
 // TASK-AGS-POST-6-BODIES-B15-DOCTOR: /doctor body migrated to
 // src/command/doctor.rs (SNAPSHOT-DELEGATE pattern). The shipped
 // `use crate::command::doctor::handle_doctor_command;` import is
@@ -67,12 +67,8 @@ pub(crate) async fn handle_slash_command(
     // the primary command resolves to /status or its alias /info.
     // Sync CommandHandler::execute cannot await; the builder bridges
     // that gap here at the dispatch site where .await is legal.
-    let mut __cmd_ctx = crate::command::context::build_command_context(
-        input,
-        tui_tx.clone(),
-        ctx,
-    )
-    .await;
+    let mut __cmd_ctx =
+        crate::command::context::build_command_context(input, tui_tx.clone(), ctx).await;
     let _ = ctx.dispatcher.dispatch(&mut __cmd_ctx, input);
     // TASK-AGS-808 effect-slot drain. Handlers that need to write to
     // async-guarded shared state (e.g. /model mutating
@@ -117,7 +113,10 @@ pub(crate) async fn handle_slash_command(
 // /diff handler
 // ---------------------------------------------------------------------------
 
-pub(crate) async fn handle_diff_command(tui_tx: &tokio::sync::mpsc::Sender<TuiEvent>, working_dir: &PathBuf) {
+pub(crate) async fn handle_diff_command(
+    tui_tx: &tokio::sync::mpsc::Sender<TuiEvent>,
+    working_dir: &PathBuf,
+) {
     let result = tokio::process::Command::new("git")
         .arg("diff")
         .arg("--stat")

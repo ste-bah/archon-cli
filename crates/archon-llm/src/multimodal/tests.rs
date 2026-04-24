@@ -9,8 +9,8 @@ use base64::Engine;
 
 #[test]
 fn image_block_from_minimal_png_ok() {
-    let block = image_block_from_bytes(MINIMAL_PNG_1X1, "image/png")
-        .expect("1x1 PNG must be accepted");
+    let block =
+        image_block_from_bytes(MINIMAL_PNG_1X1, "image/png").expect("1x1 PNG must be accepted");
     match block {
         ContentBlock::Image { source } => {
             assert_eq!(source.media_type, "image/png");
@@ -120,8 +120,7 @@ fn document_block_magic_mismatch_errors() {
 
 #[test]
 fn document_block_roundtrip_serde() {
-    let block =
-        document_block_from_bytes(MINIMAL_PDF_EMPTY_PAGE, "application/pdf").unwrap();
+    let block = document_block_from_bytes(MINIMAL_PDF_EMPTY_PAGE, "application/pdf").unwrap();
     let json = serde_json::to_value(&block).unwrap();
     assert_eq!(json["type"], "document");
     assert_eq!(json["source"]["type"], "base64");

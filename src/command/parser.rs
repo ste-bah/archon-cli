@@ -431,8 +431,7 @@ mod tests {
 
     #[test]
     fn parses_flag_with_value() {
-        let parsed = parse("/model claude-4.5 --temperature=0.2")
-            .expect("parse should succeed");
+        let parsed = parse("/model claude-4.5 --temperature=0.2").expect("parse should succeed");
         assert_eq!(parsed.name, "model");
         assert_eq!(parsed.args, vec!["claude-4.5".to_string()]);
         assert_eq!(parsed.flag("temperature"), Some("0.2"));
@@ -455,8 +454,7 @@ mod tests {
 
     #[test]
     fn parses_quoted_arg_with_flag() {
-        let parsed = parse("/export --format=json \"my session\"")
-            .expect("parse should succeed");
+        let parsed = parse("/export --format=json \"my session\"").expect("parse should succeed");
         assert_eq!(parsed.name, "export");
         assert_eq!(parsed.args, vec!["my session".to_string()]);
         assert_eq!(parsed.flag("format"), Some("json"));
@@ -541,8 +539,7 @@ mod tests {
 
     #[test]
     fn parses_multiple_flags_and_args() {
-        let parsed =
-            parse("/run foo --verbose --retries=3 bar").expect("parse should succeed");
+        let parsed = parse("/run foo --verbose --retries=3 bar").expect("parse should succeed");
         assert_eq!(parsed.name, "run");
         assert_eq!(parsed.args, vec!["foo".to_string(), "bar".to_string()]);
         assert_eq!(parsed.flag("verbose"), Some("true"));

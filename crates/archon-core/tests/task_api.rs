@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use archon_core::agents::registry::AgentRegistry;
-use archon_core::tasks::api::{parse_duration_ago, CliTaskApi};
+use archon_core::tasks::api::{CliTaskApi, parse_duration_ago};
 use archon_core::tasks::metrics::MetricsRegistry;
 use archon_core::tasks::models::TaskError;
 use archon_core::tasks::service::{DefaultTaskService, TaskService};
@@ -12,8 +12,7 @@ use tempfile::TempDir;
 fn make_api() -> CliTaskApi {
     let tmp = TempDir::new().unwrap();
     let registry = Arc::new(AgentRegistry::load(tmp.path()));
-    let service: Arc<dyn TaskService> =
-        Arc::new(DefaultTaskService::new(registry, 10000));
+    let service: Arc<dyn TaskService> = Arc::new(DefaultTaskService::new(registry, 10000));
     let metrics = Arc::new(MetricsRegistry::new());
     CliTaskApi::new(service, metrics)
 }
@@ -22,12 +21,7 @@ fn make_api() -> CliTaskApi {
 async fn test_api_submit_returns_task_id() {
     let api = make_api();
     let result = api
-        .submit(
-            "general-purpose".to_string(),
-            None,
-            None,
-            false,
-        )
+        .submit("general-purpose".to_string(), None, None, false)
         .await;
     assert!(result.is_ok(), "submit should succeed: {:?}", result.err());
     let json_str = result.unwrap();
@@ -60,8 +54,7 @@ async fn test_api_status_returns_snapshot() {
         "status should succeed: {:?}",
         status_result.err()
     );
-    let status_json: serde_json::Value =
-        serde_json::from_str(&status_result.unwrap()).unwrap();
+    let status_json: serde_json::Value = serde_json::from_str(&status_result.unwrap()).unwrap();
     assert!(
         status_json.get("state").is_some(),
         "status response should contain state field"
@@ -89,8 +82,7 @@ async fn test_api_list_returns_array() {
         "list should succeed: {:?}",
         list_result.err()
     );
-    let list_json: serde_json::Value =
-        serde_json::from_str(&list_result.unwrap()).unwrap();
+    let list_json: serde_json::Value = serde_json::from_str(&list_result.unwrap()).unwrap();
     assert!(list_json.is_array(), "list response should be a JSON array");
     assert_eq!(
         list_json.as_array().unwrap().len(),
@@ -133,8 +125,7 @@ async fn test_api_cancel_returns_cancelled() {
         "cancel should succeed: {:?}",
         cancel_result.err()
     );
-    let cancel_json: serde_json::Value =
-        serde_json::from_str(&cancel_result.unwrap()).unwrap();
+    let cancel_json: serde_json::Value = serde_json::from_str(&cancel_result.unwrap()).unwrap();
     assert_eq!(
         cancel_json["status"].as_str().unwrap(),
         "cancelled",

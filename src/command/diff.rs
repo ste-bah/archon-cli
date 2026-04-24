@@ -103,11 +103,7 @@ use crate::command::registry::{CommandContext, CommandEffect, CommandHandler};
 pub(crate) struct DiffHandler;
 
 impl CommandHandler for DiffHandler {
-    fn execute(
-        &self,
-        ctx: &mut CommandContext,
-        _args: &[String],
-    ) -> anyhow::Result<()> {
+    fn execute(&self, ctx: &mut CommandContext, _args: &[String]) -> anyhow::Result<()> {
         // Happy path: working_dir populated by build_command_context.
         // Stash the effect synchronously; apply_effect will await the
         // subprocess call via the existing LIVE handle_diff_command
@@ -122,8 +118,7 @@ impl CommandHandler for DiffHandler {
                 // Clone the PathBuf into the effect variant so the
                 // effect carries owned data across the .take() boundary
                 // at slash.rs:51 — no borrow on ctx lifetime.
-                ctx.pending_effect =
-                    Some(CommandEffect::RunGitDiffStat(PathBuf::from(path)));
+                ctx.pending_effect = Some(CommandEffect::RunGitDiffStat(PathBuf::from(path)));
             }
             None => {
                 // Adapts the B01-FAST / B02-THINKING `None`-sentinel
@@ -234,10 +229,7 @@ mod tests {
         // Both must stash RunGitDiffStat with the same PathBuf —
         // trailing arg has no effect on the stashed variant.
         match (&ctx_a.pending_effect, &ctx_b.pending_effect) {
-            (
-                Some(CommandEffect::RunGitDiffStat(pa)),
-                Some(CommandEffect::RunGitDiffStat(pb)),
-            ) => {
+            (Some(CommandEffect::RunGitDiffStat(pa)), Some(CommandEffect::RunGitDiffStat(pb))) => {
                 assert_eq!(
                     pa, pb,
                     "trailing args must not change the stashed PathBuf — \

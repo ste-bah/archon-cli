@@ -20,8 +20,7 @@ use archon_tui::app::TuiEvent;
 
 use crate::command::registry::{CommandContext, CommandEffect, Registry};
 use crate::command::{
-    context_cmd, copy, cost, denials, doctor, effort, mcp, model, permissions,
-    status, usage,
+    context_cmd, copy, cost, denials, doctor, effort, mcp, model, permissions, status, usage,
 };
 use crate::slash_context::SlashCommandContext;
 
@@ -202,20 +201,17 @@ pub(crate) async fn build_command_context(
 
     match primary.as_deref() {
         Some("status") => {
-            ctx.status_snapshot =
-                Some(status::build_status_snapshot(slash_ctx).await);
+            ctx.status_snapshot = Some(status::build_status_snapshot(slash_ctx).await);
         }
         Some("model") => {
-            ctx.model_snapshot =
-                Some(model::build_model_snapshot(slash_ctx).await);
+            ctx.model_snapshot = Some(model::build_model_snapshot(slash_ctx).await);
         }
         Some("cost") => {
             // TASK-AGS-809 snapshot population. /cost is read-only,
             // so there is no paired `apply_effect` branch. The alias
             // `billing` also routes here via the registry alias map;
             // `usage` remains a separate primary (UsageHandler).
-            ctx.cost_snapshot =
-                Some(cost::build_cost_snapshot(slash_ctx).await);
+            ctx.cost_snapshot = Some(cost::build_cost_snapshot(slash_ctx).await);
         }
         Some("mcp") => {
             // TASK-AGS-811 snapshot population. /mcp is read-only, so
@@ -225,8 +221,7 @@ pub(crate) async fn build_command_context(
             // `McpServerManager::get_server_info` + N per-server
             // `list_tools_for` calls here so the sync handler
             // consumes pre-computed owned `McpServerEntry` values.
-            ctx.mcp_snapshot =
-                Some(mcp::build_mcp_snapshot(slash_ctx).await);
+            ctx.mcp_snapshot = Some(mcp::build_mcp_snapshot(slash_ctx).await);
         }
         Some("context") => {
             // TASK-AGS-814 snapshot population. /context is read-only,
@@ -236,8 +231,7 @@ pub(crate) async fn build_command_context(
             // cosmetic (see context_cmd.rs module rustdoc). The
             // builder awaits a single `session_stats.lock()` here so
             // the sync handler consumes pre-captured owned counters.
-            ctx.context_snapshot =
-                Some(context_cmd::build_context_snapshot(slash_ctx).await);
+            ctx.context_snapshot = Some(context_cmd::build_context_snapshot(slash_ctx).await);
         }
         Some("denials") => {
             // TASK-AGS-POST-6-BODIES-B08-DENIALS snapshot population.
@@ -248,8 +242,7 @@ pub(crate) async fn build_command_context(
             // awaits a single `denial_log.lock()` + calls
             // `DenialLog::format_display(20)` here so the sync handler
             // consumes a pre-computed owned `String`.
-            ctx.denial_snapshot =
-                Some(denials::build_denial_snapshot(slash_ctx).await);
+            ctx.denial_snapshot = Some(denials::build_denial_snapshot(slash_ctx).await);
         }
         Some("effort") => {
             // TASK-AGS-POST-6-BODIES-B11-EFFORT snapshot population.
@@ -261,8 +254,7 @@ pub(crate) async fn build_command_context(
             // a single `effort_level_shared.lock()` here so the sync
             // handler consumes a pre-captured owned `EffortLevel`.
             // Mirrors AGS-808 /model snapshot gating.
-            ctx.effort_snapshot =
-                Some(effort::build_effort_snapshot(slash_ctx).await);
+            ctx.effort_snapshot = Some(effort::build_effort_snapshot(slash_ctx).await);
         }
         Some("permissions") => {
             // TASK-AGS-POST-6-BODIES-B12-PERMISSIONS snapshot population.
@@ -294,8 +286,7 @@ pub(crate) async fn build_command_context(
             // builder awaits a single `last_assistant_response.lock()`
             // here and clones the content into an owned String so the
             // sync handler holds no lock during subprocess spawn.
-            ctx.copy_snapshot =
-                Some(copy::build_copy_snapshot(slash_ctx).await);
+            ctx.copy_snapshot = Some(copy::build_copy_snapshot(slash_ctx).await);
         }
         Some("doctor") => {
             // TASK-AGS-POST-6-BODIES-B15-DOCTOR snapshot population.
@@ -309,8 +300,7 @@ pub(crate) async fn build_command_context(
             // via `try_send` with no locks held. Mirrors AGS-807 status
             // / AGS-808 model / B08 denials / B11 effort / B12
             // permissions / B14 copy snapshot gating.
-            ctx.doctor_snapshot =
-                Some(doctor::build_doctor_snapshot(slash_ctx).await);
+            ctx.doctor_snapshot = Some(doctor::build_doctor_snapshot(slash_ctx).await);
         }
         Some("usage") => {
             // TASK-AGS-POST-6-BODIES-B16-USAGE snapshot population.
@@ -328,8 +318,7 @@ pub(crate) async fn build_command_context(
             // computed cache_stats_line. Mirrors AGS-807 status /
             // AGS-809 cost / B08 denials / B11 effort / B12 permissions
             // / B14 copy / B15 doctor SNAPSHOT gating.
-            ctx.usage_snapshot =
-                Some(usage::build_usage_snapshot(slash_ctx).await);
+            ctx.usage_snapshot = Some(usage::build_usage_snapshot(slash_ctx).await);
         }
         _ => {}
     }
@@ -431,11 +420,10 @@ pub(crate) async fn apply_effect(
                 .send(TuiEvent::PermissionModeChanged(resolved.clone()))
                 .await;
             tracing::info!(mode = %resolved, "set permission mode via /permissions");
-        }
-        // Future variants (AGS-819 /theme, etc.): add a match arm here
-        // with the appropriate awaited mutex write. No fallback arm —
-        // enum exhaustiveness forces new tickets to wire their effects
-        // through this single point of truth.
+        } // Future variants (AGS-819 /theme, etc.): add a match arm here
+          // with the appropriate awaited mutex write. No fallback arm —
+          // enum exhaustiveness forces new tickets to wire their effects
+          // through this single point of truth.
     }
 }
 
@@ -446,10 +434,7 @@ pub(crate) async fn apply_effect(
 /// Private to this module: builder tests exercise it directly against
 /// `default_registry()` because stubbing the full `SlashCommandContext`
 /// is out of scope for this ticket (see AGS-807 executor report).
-pub(crate) fn resolve_primary_from_input(
-    input: &str,
-    registry: &Registry,
-) -> Option<String> {
+pub(crate) fn resolve_primary_from_input(input: &str, registry: &Registry) -> Option<String> {
     // Reuse the shared tokenizer so we inherit its leading-`/` handling,
     // quoted-arg rules, and flag tolerance.
     let parsed = crate::command::parser::CommandParser::parse(input).ok()?;
@@ -493,7 +478,7 @@ pub(crate) fn resolve_primary_from_input(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::command::registry::{default_registry, CommandEffect};
+    use crate::command::registry::{CommandEffect, default_registry};
     use std::sync::Arc;
     use tokio::sync::Mutex;
 
@@ -580,8 +565,7 @@ mod tests {
     /// invariant (`*mutex.lock().await = resolved`) directly.
     #[tokio::test]
     async fn apply_effect_set_model_override_writes_to_mutex() {
-        let model_override_shared: Arc<Mutex<String>> =
-            Arc::new(Mutex::new(String::new()));
+        let model_override_shared: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));
         assert!(
             model_override_shared.lock().await.is_empty(),
             "pre-condition: override must start empty"

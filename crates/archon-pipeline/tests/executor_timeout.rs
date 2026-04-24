@@ -6,8 +6,8 @@
 
 use std::collections::HashMap;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -75,10 +75,7 @@ struct DelayMockTaskService {
 }
 
 impl DelayMockTaskService {
-    fn new(
-        responses: HashMap<String, MockResponse>,
-        polls_before_terminal: u32,
-    ) -> Self {
+    fn new(responses: HashMap<String, MockResponse>, polls_before_terminal: u32) -> Self {
         Self {
             responses: std::sync::Mutex::new(responses),
             submissions: std::sync::Mutex::new(Vec::new()),
@@ -132,8 +129,8 @@ impl TaskService for DelayMockTaskService {
         let poll_count = self.poll_tracker.increment(id);
 
         // Decide whether this poll returns a terminal state.
-        let is_terminal = self.polls_before_terminal > 0
-            && poll_count >= self.polls_before_terminal;
+        let is_terminal =
+            self.polls_before_terminal > 0 && poll_count >= self.polls_before_terminal;
 
         if !is_terminal {
             // Return Running — the executor will poll again.
@@ -216,7 +213,10 @@ impl TaskService for DelayMockTaskService {
 // ---------------------------------------------------------------------------
 
 /// Read the audit log lines from disk for a given pipeline run.
-fn read_audit_lines(store_root: &std::path::Path, id: archon_pipeline::PipelineId) -> Vec<serde_json::Value> {
+fn read_audit_lines(
+    store_root: &std::path::Path,
+    id: archon_pipeline::PipelineId,
+) -> Vec<serde_json::Value> {
     let audit_path = store_root.join(id.to_string()).join("audit.log");
     let raw = std::fs::read_to_string(&audit_path).unwrap_or_default();
     raw.lines()
@@ -275,7 +275,10 @@ async fn per_step_timeout_triggers_cancel() {
         }],
     };
 
-    let err = executor.run(spec).await.expect_err("pipeline should fail with timeout");
+    let err = executor
+        .run(spec)
+        .await
+        .expect_err("pipeline should fail with timeout");
 
     // Verify it's a Timeout error on step "A".
     match &err {
@@ -339,7 +342,10 @@ async fn global_timeout_cancels_pipeline() {
         }],
     };
 
-    let err = executor.run(spec).await.expect_err("pipeline should fail with timeout");
+    let err = executor
+        .run(spec)
+        .await
+        .expect_err("pipeline should fail with timeout");
 
     // Global timeout yields Timeout { step: None }.
     match &err {
@@ -443,9 +449,7 @@ async fn user_cancel_mid_execution() {
     let store_clone = store.clone();
 
     // Spawn the pipeline execution in a background task.
-    let handle = tokio::spawn(async move {
-        executor_clone.run(spec).await
-    });
+    let handle = tokio::spawn(async move { executor_clone.run(spec).await });
 
     // Wait a moment for the run to be created and registered.
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -456,10 +460,7 @@ async fn user_cancel_mid_execution() {
     let id = runs[0];
 
     // Cancel it.
-    executor
-        .cancel(id)
-        .await
-        .expect("cancel should succeed");
+    executor.cancel(id).await.expect("cancel should succeed");
 
     // Wait for the spawned task to finish.
     let result = handle.await.expect("task should not panic");

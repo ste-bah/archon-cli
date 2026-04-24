@@ -400,12 +400,7 @@ mod tests {
     /// `<root>/<plugin>/agents/<agent>/` with the 6-file structure. The
     /// `marker` string is embedded in the INTENT body so tests can assert
     /// which version (project vs user vs custom) won a priority collision.
-    fn create_plugin_fixture(
-        plugins_root: &Path,
-        plugin: &str,
-        agent: &str,
-        marker: &str,
-    ) {
+    fn create_plugin_fixture(plugins_root: &Path, plugin: &str, agent: &str, marker: &str) {
         let dir = plugins_root.join(plugin).join("agents").join(agent);
         fs::create_dir_all(&dir).unwrap();
         fs::write(

@@ -17,9 +17,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use url::Url;
 
-use crate::providers::{
-    get_compat, get_native, ProviderDescriptor, ProviderError,
-};
+use crate::providers::{ProviderDescriptor, ProviderError, get_compat, get_native};
 use crate::retry::RetryPolicy;
 
 /// Runtime configuration for the chosen LLM provider.

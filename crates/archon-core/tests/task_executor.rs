@@ -116,7 +116,11 @@ fn make_task(agent_name: &str) -> Task {
 
 /// Setup harness. Must be called from `spawn_blocking` or outside a tokio
 /// runtime because `PerAgentTaskQueue::enqueue` uses `blocking_lock`.
-async fn setup_harness(config: QueueConfig, agent: &str, count: usize) -> (TestHarness, Vec<TaskId>) {
+async fn setup_harness(
+    config: QueueConfig,
+    agent: &str,
+    count: usize,
+) -> (TestHarness, Vec<TaskId>) {
     let queue = Arc::new(PerAgentTaskQueue::new(config));
     let store = Arc::new(InMemoryTaskStateStore::new());
     let event_bus = Arc::new(EventBus::new());
@@ -192,7 +196,12 @@ async fn test_executor_dequeues_and_invokes_agent() {
     let _ = tokio::time::timeout(Duration::from_secs(5), handle).await;
 
     let invocations = mock.invocations.lock().unwrap();
-    assert_eq!(invocations.len(), 5, "expected 5 invocations, got {}", invocations.len());
+    assert_eq!(
+        invocations.len(),
+        5,
+        "expected 5 invocations, got {}",
+        invocations.len()
+    );
     assert!(invocations.iter().all(|name| name == "test-agent"));
 }
 
@@ -237,7 +246,12 @@ async fn test_executor_respects_semaphore() {
     );
 
     let invocations = mock.invocations.lock().unwrap();
-    assert_eq!(invocations.len(), 10, "expected 10 invocations, got {}", invocations.len());
+    assert_eq!(
+        invocations.len(),
+        10,
+        "expected 10 invocations, got {}",
+        invocations.len()
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -291,12 +305,20 @@ async fn test_executor_forwards_events_with_monotonic_seq() {
     shutdown.cancel();
     let _ = tokio::time::timeout(Duration::from_secs(5), handle).await;
 
-    assert_eq!(events.len(), 2, "expected 2 events (Started, Finished), got {}", events.len());
+    assert_eq!(
+        events.len(),
+        2,
+        "expected 2 events (Started, Finished), got {}",
+        events.len()
+    );
     assert_eq!(events[0].kind, TaskEventKind::Started);
     assert_eq!(events[1].kind, TaskEventKind::Finished);
     assert_eq!(events[0].seq, 0);
     assert_eq!(events[1].seq, 1);
-    assert!(events[0].seq < events[1].seq, "seq must be monotonically increasing");
+    assert!(
+        events[0].seq < events[1].seq,
+        "seq must be monotonically increasing"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -380,8 +402,14 @@ async fn test_executor_samples_resource_usage() {
     let _ = tokio::time::timeout(Duration::from_secs(5), handle).await;
 
     // Check that resource_usage was populated.
-    let task = harness.tasks.get(&task_id).expect("task should still be in map");
-    let usage = task.resource_usage.as_ref().expect("resource_usage should be Some");
+    let task = harness
+        .tasks
+        .get(&task_id)
+        .expect("task should still be in map");
+    let usage = task
+        .resource_usage
+        .as_ref()
+        .expect("resource_usage should be Some");
     assert!(
         usage.rss_bytes > 0,
         "expected rss_bytes > 0, got {}",
@@ -463,7 +491,10 @@ async fn test_executor_100_concurrent_tasks() {
     shutdown.cancel();
     let _ = tokio::time::timeout(Duration::from_secs(5), handle).await;
 
-    assert!(result.is_ok(), "100 tasks should complete within 30 seconds (deadlock?)");
+    assert!(
+        result.is_ok(),
+        "100 tasks should complete within 30 seconds (deadlock?)"
+    );
 
     let invocations = mock.invocations.lock().unwrap();
     assert_eq!(

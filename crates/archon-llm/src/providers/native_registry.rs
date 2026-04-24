@@ -212,7 +212,11 @@ pub static NATIVE_REGISTRY: Lazy<HashMap<&'static str, ProviderDescriptor>> = La
         },
     );
 
-    debug_assert_eq!(m.len(), 9, "TASK-AGS-704: NATIVE_REGISTRY must have 9 entries");
+    debug_assert_eq!(
+        m.len(),
+        9,
+        "TASK-AGS-704: NATIVE_REGISTRY must have 9 entries"
+    );
     m
 });
 

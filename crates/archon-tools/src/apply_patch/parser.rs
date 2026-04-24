@@ -98,7 +98,9 @@ pub(super) fn parse_hunks(patch: &str) -> Result<Vec<Hunk>, String> {
 
         let Some(h) = current.as_mut() else {
             // Body line before any `@@` header — malformed.
-            return Err(format!("unexpected line before first hunk header: {line:?}"));
+            return Err(format!(
+                "unexpected line before first hunk header: {line:?}"
+            ));
         };
 
         // Classify body line by leading byte. An empty line in the diff

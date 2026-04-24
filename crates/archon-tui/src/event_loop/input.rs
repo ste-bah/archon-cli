@@ -109,8 +109,7 @@ pub(super) async fn handle_key_event(
                                     action_idx,
                                     server_idx,
                                 } => {
-                                    let count =
-                                        mcp_action_count(mgr.servers.get(*server_idx));
+                                    let count = mcp_action_count(mgr.servers.get(*server_idx));
                                     if *action_idx > 0 {
                                         *action_idx -= 1;
                                     } else {
@@ -286,9 +285,7 @@ pub(super) async fn handle_key_event(
                     KeyCode::Enter => {
                         if let Some(sel) = app.message_selector.take() {
                             let idx = sel.selected_index;
-                            let _ = input_tx
-                                .send(format!("__truncate_session__ {}", idx))
-                                .await;
+                            let _ = input_tx.send(format!("__truncate_session__ {}", idx)).await;
                         }
                         return;
                     }

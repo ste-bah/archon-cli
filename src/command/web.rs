@@ -10,17 +10,18 @@ pub(crate) async fn handle_web_command(
     // CLI args override config-file values; config.web provides defaults.
     let effective_port = port.unwrap_or(config.web.port);
     let effective_bind = bind_address.unwrap_or_else(|| config.web.bind_address.clone());
-    let effective_open = if no_open { false } else { config.web.open_browser };
+    let effective_open = if no_open {
+        false
+    } else {
+        config.web.open_browser
+    };
 
     // Bearer token: required for non-localhost to prevent unauthenticated access.
     let is_local = matches!(effective_bind.as_str(), "127.0.0.1" | "::1" | "localhost");
     let token = if is_local {
         None
     } else {
-        Some(
-            archon_core::remote::auth::load_or_create_token()
-                .unwrap_or_else(|_| String::new()),
-        )
+        Some(archon_core::remote::auth::load_or_create_token().unwrap_or_else(|_| String::new()))
     };
 
     let web_cfg = WebConfig {

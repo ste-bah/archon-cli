@@ -3,14 +3,14 @@
 //! This is the core of the TUI draw pipeline.
 
 use ratatui::{
-    layout::{Rect, Constraint, Direction, Layout},
+    Frame,
+    layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::Line,
     widgets::{
-        Block, Borders, List, ListItem, Paragraph, Scrollbar, ScrollbarOrientation,
-        ScrollbarState, Wrap,
+        Block, Borders, List, ListItem, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
+        Wrap,
     },
-    Frame,
 };
 
 use crate::app::{App, McpManagerView};
@@ -45,7 +45,12 @@ pub fn draw_output_area(frame: &mut Frame, app: &App, area: Rect) {
     let output_width = area.width.saturating_sub(1); // -1 for scrollbar
     let raw_strings: Vec<String> = output_lines
         .iter()
-        .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect::<String>())
+        .map(|l| {
+            l.spans
+                .iter()
+                .map(|s| s.content.as_ref())
+                .collect::<String>()
+        })
         .collect();
     let raw_refs: Vec<&str> = raw_strings.iter().map(|s| s.as_str()).collect();
     let total_wrapped = OutputBuffer::count_wrapped_rows(&raw_refs, output_width);
@@ -74,8 +79,8 @@ pub fn draw_output_area(frame: &mut Frame, app: &App, area: Rect) {
         let mut scrollbar_state =
             ScrollbarState::new(total_wrapped.saturating_sub(visible_height) as usize)
                 .position(scroll_y as usize);
-        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
-            .style(Style::default().fg(t.muted));
+        let scrollbar =
+            Scrollbar::new(ScrollbarOrientation::VerticalRight).style(Style::default().fg(t.muted));
         frame.render_stateful_widget(scrollbar, area, &mut scrollbar_state);
     }
 }
@@ -104,12 +109,11 @@ pub fn draw_input_area(frame: &mut Frame, app: &App, area: Rect) {
                 spans.push(ratatui::text::Span::raw(String::from(ch)));
             }
         }
-        Paragraph::new(Line::from(spans))
-            .block(
-                Block::default()
-                    .borders(Borders::TOP)
-                    .border_style(input_border_style),
-            )
+        Paragraph::new(Line::from(spans)).block(
+            Block::default()
+                .borders(Borders::TOP)
+                .border_style(input_border_style),
+        )
     } else if let Some(ref tool) = app.permission_prompt {
         Paragraph::new(format!("Allow {tool}? [y/n]"))
             .block(
@@ -212,14 +216,13 @@ pub fn draw_suggestions_popup(frame: &mut Frame, app: &App, input_area: Rect) {
     let popup_width = input_area.width.min(60);
     let popup_area = Rect::new(input_area.x, popup_y, popup_width, popup_height);
 
-    let popup = List::new(items)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(" Commands ")
-                .border_style(Style::default().fg(t.border_active))
-                .style(Style::default().fg(t.fg)),
-        );
+    let popup = List::new(items).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" Commands ")
+            .border_style(Style::default().fg(t.border_active))
+            .style(Style::default().fg(t.fg)),
+    );
     frame.render_widget(popup, popup_area);
 }
 
@@ -233,7 +236,9 @@ pub fn draw_session_picker(frame: &mut Frame, app: &App) {
     let t = &app.theme;
     let area = frame.area();
     let overlay_width = (area.width * 9 / 10).max(70).min(area.width - 2);
-    let overlay_height = (picker.sessions.len() as u16 + 3).min(area.height - 4).max(8);
+    let overlay_height = (picker.sessions.len() as u16 + 3)
+        .min(area.height - 4)
+        .max(8);
     let x = (area.width.saturating_sub(overlay_width)) / 2;
     let y = (area.height.saturating_sub(overlay_height)) / 2;
     let overlay_area = Rect::new(x, y, overlay_width, overlay_height);
@@ -266,9 +271,7 @@ pub fn draw_session_picker(frame: &mut Frame, app: &App) {
     let list = List::new(items).block(
         Block::default()
             .borders(Borders::ALL)
-            .title(
-                " /resume — select session (Up/Down navigate, Enter select, Esc cancel) ",
-            )
+            .title(" /resume — select session (Up/Down navigate, Enter select, Esc cancel) ")
             .border_style(Style::default().fg(t.accent)),
     );
     frame.render_widget(list, overlay_area);
@@ -323,7 +326,8 @@ pub fn draw_mcp_manager(frame: &mut Frame, app: &App) {
             let overlay_area = Rect::new(x, y, overlay_width, overlay_height);
             frame.render_widget(ratatui::widgets::Clear, overlay_area);
 
-            let items: Vec<ListItem<'_>> = mcp_mgr.servers
+            let items: Vec<ListItem<'_>> = mcp_mgr
+                .servers
                 .iter()
                 .enumerate()
                 .map(|(i, s)| {
@@ -355,10 +359,7 @@ pub fn draw_mcp_manager(frame: &mut Frame, app: &App) {
                     };
                     let line = Line::from(vec![
                         ratatui::text::Span::styled(format!(" {} ", icon), icon_style),
-                        ratatui::text::Span::styled(
-                            format!("{}{}", s.name, tool_str),
-                            row_style,
-                        ),
+                        ratatui::text::Span::styled(format!("{}{}", s.name, tool_str), row_style),
                         ratatui::text::Span::styled(
                             format!("  [{}]", s.state),
                             Style::default().fg(t.muted),
@@ -376,7 +377,10 @@ pub fn draw_mcp_manager(frame: &mut Frame, app: &App) {
             );
             frame.render_widget(list, overlay_area);
         }
-        McpManagerView::ServerMenu { server_idx, action_idx } => {
+        McpManagerView::ServerMenu {
+            server_idx,
+            action_idx,
+        } => {
             if let Some(server) = mcp_mgr.servers.get(*server_idx) {
                 let actions = crate::event_loop::mcp_actions_for(server);
                 let overlay_height = (actions.len() as u16 + 4)
@@ -388,10 +392,7 @@ pub fn draw_mcp_manager(frame: &mut Frame, app: &App) {
 
                 let status_line = Line::from(vec![
                     ratatui::text::Span::styled("  State: ", Style::default().fg(t.muted)),
-                    ratatui::text::Span::styled(
-                        server.state.clone(),
-                        Style::default().fg(t.fg),
-                    ),
+                    ratatui::text::Span::styled(server.state.clone(), Style::default().fg(t.fg)),
                 ]);
 
                 let action_items: Vec<ListItem<'_>> = actions
@@ -418,10 +419,7 @@ pub fn draw_mcp_manager(frame: &mut Frame, app: &App) {
                     })
                     .collect();
 
-                let mut all_items = vec![
-                    ListItem::new(status_line),
-                    ListItem::new(Line::from("")),
-                ];
+                let mut all_items = vec![ListItem::new(status_line), ListItem::new(Line::from(""))];
                 all_items.extend(action_items);
 
                 let list = List::new(all_items).block(
@@ -458,14 +456,8 @@ pub fn draw_mcp_manager(frame: &mut Frame, app: &App) {
                     .take(visible)
                     .map(|name| {
                         ListItem::new(Line::from(vec![
-                            ratatui::text::Span::styled(
-                                "  • ",
-                                Style::default().fg(t.accent),
-                            ),
-                            ratatui::text::Span::styled(
-                                name.clone(),
-                                Style::default().fg(t.fg),
-                            ),
+                            ratatui::text::Span::styled("  • ", Style::default().fg(t.accent)),
+                            ratatui::text::Span::styled(name.clone(), Style::default().fg(t.fg)),
                         ]))
                     })
                     .collect()

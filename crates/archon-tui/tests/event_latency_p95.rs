@@ -166,10 +166,7 @@ async fn event_latency_p95() {
     );
 
     // Emit quantiles for CI log capture / humans reviewing runs.
-    println!(
-        "p50={} p95={} p99={}",
-        p50, p95, p99,
-    );
+    println!("p50={} p95={} p99={}", p50, p95, p99,);
     println!(
         "[event_latency_p95] samples={} sent={} p50_us={} p95_us={} p99_us={}",
         local_hist.len(),

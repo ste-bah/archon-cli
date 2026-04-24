@@ -3,7 +3,6 @@
 //! Displays a horizontal gauge + sparkline of model context usage,
 //! with a warn color band when usage >= 90%.
 
-use std::collections::VecDeque;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -11,6 +10,7 @@ use ratatui::{
     symbols::block,
     widgets::Widget,
 };
+use std::collections::VecDeque;
 
 const HISTORY_MAX: usize = 60;
 
@@ -133,7 +133,12 @@ impl Widget for ContextViz {
             let badge_x = area.x + area.width.saturating_sub(badge.len() as u16 + 1);
             for (i, c) in badge.chars().enumerate() {
                 let badge_str = c.to_string();
-                buf.set_string(badge_x + i as u16, area.y, &badge_str, Style::default().fg(Color::Red));
+                buf.set_string(
+                    badge_x + i as u16,
+                    area.y,
+                    &badge_str,
+                    Style::default().fg(Color::Red),
+                );
             }
         }
 
@@ -142,11 +147,7 @@ impl Widget for ContextViz {
             let spark_chars = ['░', '▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
             let spark_len = (area.width - 1) as usize;
             let history_vec: Vec<usize> = self.history.iter().copied().collect();
-            let base = if self.max == 0 {
-                0
-            } else {
-                self.max
-            };
+            let base = if self.max == 0 { 0 } else { self.max };
 
             for (i, cell_x) in (0..spark_len as u16).enumerate() {
                 let bucket = if !history_vec.is_empty() {
@@ -159,7 +160,8 @@ impl Widget for ContextViz {
                     0
                 } else {
                     ((bucket as f64 / base as f64) * 8.0).round() as usize
-                }.min(spark_chars.len() - 1);
+                }
+                .min(spark_chars.len() - 1);
 
                 let spark_char = spark_chars[level];
                 let spark_style = if warn {

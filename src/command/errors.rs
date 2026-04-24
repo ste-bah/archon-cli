@@ -83,14 +83,8 @@ pub(crate) fn format_unknown_command(name: &str, registry: &Registry) -> String 
     // correctly-cased "/model" primary rather than offering a fuzzy
     // list that may or may not include it.
     let names = registry.names();
-    if let Some(actual) = names
-        .iter()
-        .find(|n| n.eq_ignore_ascii_case(name))
-        .copied()
-    {
-        return format!(
-            "Did you mean '/{actual}'? (commands are case-sensitive)"
-        );
+    if let Some(actual) = names.iter().find(|n| n.eq_ignore_ascii_case(name)).copied() {
+        return format!("Did you mean '/{actual}'? (commands are case-sensitive)");
     }
 
     // Step 2: fuzzy match. `suggest(.., 3)` caps at 3 internally; the
@@ -116,9 +110,7 @@ pub(crate) fn format_from_suggestions(name: &str, suggestions: &[String]) -> Str
     };
 
     match effective.len() {
-        0 => format!(
-            "Unknown command '/{name}'. Type /help for the full list."
-        ),
+        0 => format!("Unknown command '/{name}'. Type /help for the full list."),
         1 => format!(
             "Unknown command '/{name}'. Did you mean '/{}'?",
             effective[0]
@@ -129,9 +121,7 @@ pub(crate) fn format_from_suggestions(name: &str, suggestions: &[String]) -> Str
                 .map(|s| format!("/{s}"))
                 .collect::<Vec<_>>()
                 .join(", ");
-            format!(
-                "Unknown command '/{name}'. Did you mean one of: {joined}?"
-            )
+            format!("Unknown command '/{name}'. Did you mean one of: {joined}?")
         }
     }
 }
@@ -172,8 +162,7 @@ mod tests {
         let registry = default_registry();
         let msg = format_unknown_command("zzzqqq", &registry);
         assert_eq!(
-            msg,
-            "Unknown command '/zzzqqq'. Type /help for the full list.",
+            msg, "Unknown command '/zzzqqq'. Type /help for the full list.",
             "zero-suggestion path must emit the /help hint verbatim"
         );
     }
@@ -191,8 +180,7 @@ mod tests {
         let registry = default_registry();
         let msg = format_unknown_command("hel", &registry);
         assert_eq!(
-            msg,
-            "Unknown command '/hel'. Did you mean '/help'?",
+            msg, "Unknown command '/hel'. Did you mean '/help'?",
             "one-suggestion path must emit the singular 'Did you mean' form"
         );
     }
@@ -209,8 +197,7 @@ mod tests {
         let suggestions = vec!["help".to_string(), "fast".to_string()];
         let msg = format_from_suggestions("hep", &suggestions);
         assert_eq!(
-            msg,
-            "Unknown command '/hep'. Did you mean one of: /help, /fast?",
+            msg, "Unknown command '/hep'. Did you mean one of: /help, /fast?",
             "two-suggestion path must use the 'one of' plural form"
         );
     }
@@ -221,15 +208,10 @@ mod tests {
 
     #[test]
     fn format_unknown_three_suggestions_returns_one_of_list() {
-        let suggestions = vec![
-            "help".to_string(),
-            "fast".to_string(),
-            "fork".to_string(),
-        ];
+        let suggestions = vec!["help".to_string(), "fast".to_string(), "fork".to_string()];
         let msg = format_from_suggestions("helf", &suggestions);
         assert_eq!(
-            msg,
-            "Unknown command '/helf'. Did you mean one of: /help, /fast, /fork?",
+            msg, "Unknown command '/helf'. Did you mean one of: /help, /fast, /fork?",
             "three-suggestion path must emit three comma-separated /name entries"
         );
     }
@@ -257,8 +239,7 @@ mod tests {
         );
         // Must include exactly the first three.
         assert_eq!(
-            msg,
-            "Unknown command '/helf'. Did you mean one of: /help, /fast, /fork?",
+            msg, "Unknown command '/helf'. Did you mean one of: /help, /fast, /fork?",
             "formatter must truncate to the first MAX_SUGGESTIONS entries"
         );
     }
@@ -276,8 +257,7 @@ mod tests {
         let registry = default_registry();
         let msg = format_unknown_command("Help", &registry);
         assert_eq!(
-            msg,
-            "Did you mean '/help'? (commands are case-sensitive)",
+            msg, "Did you mean '/help'? (commands are case-sensitive)",
             "case-diff path must point at the correctly-cased primary"
         );
     }

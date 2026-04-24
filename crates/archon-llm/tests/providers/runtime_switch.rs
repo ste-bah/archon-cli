@@ -22,6 +22,7 @@ use url::Url;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
+use archon_llm::ApiKey;
 use archon_llm::active::ActiveProvider;
 use archon_llm::provider::{LlmProvider, LlmRequest};
 use archon_llm::providers::{
@@ -29,7 +30,6 @@ use archon_llm::providers::{
     ProviderQuirks,
 };
 use archon_llm::retry::RetryPolicy;
-use archon_llm::ApiKey;
 
 fn canned_body(content: &str) -> serde_json::Value {
     json!({

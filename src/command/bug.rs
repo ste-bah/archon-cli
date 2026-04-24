@@ -87,11 +87,7 @@ use crate::command::registry::{CommandContext, CommandHandler};
 pub(crate) struct BugHandler;
 
 impl CommandHandler for BugHandler {
-    fn execute(
-        &self,
-        ctx: &mut CommandContext,
-        _args: &[String],
-    ) -> anyhow::Result<()> {
+    fn execute(&self, ctx: &mut CommandContext, _args: &[String]) -> anyhow::Result<()> {
         // Single TextDelta emission. Byte-for-byte preserved from
         // slash.rs:351-353 — leading and trailing `\n` wrap PRESERVED.
         // Sherlock Gate 3 will MD5 this literal against the shipped

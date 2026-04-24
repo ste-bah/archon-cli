@@ -70,9 +70,7 @@ pub(crate) struct CtxBuilder {
     auth_label: Option<String>,
     pending_effect: Option<crate::command::registry::CommandEffect>,
     pending_effort_set: Option<EffortLevel>,
-    pending_export: Option<
-        Arc<Mutex<Option<crate::command::export::ExportDescriptor>>>,
-    >,
+    pending_export: Option<Arc<Mutex<Option<crate::command::export::ExportDescriptor>>>>,
 }
 
 impl CtxBuilder {
@@ -125,10 +123,7 @@ impl CtxBuilder {
         self
     }
 
-    pub(crate) fn with_model_snapshot(
-        mut self,
-        s: crate::command::model::ModelSnapshot,
-    ) -> Self {
+    pub(crate) fn with_model_snapshot(mut self, s: crate::command::model::ModelSnapshot) -> Self {
         self.model_snapshot = Some(s);
         self
     }
@@ -141,10 +136,7 @@ impl CtxBuilder {
         self
     }
 
-    pub(crate) fn with_cost_snapshot(
-        mut self,
-        s: crate::command::cost::CostSnapshot,
-    ) -> Self {
+    pub(crate) fn with_cost_snapshot(mut self, s: crate::command::cost::CostSnapshot) -> Self {
         self.cost_snapshot = Some(s);
         self
     }
@@ -157,10 +149,7 @@ impl CtxBuilder {
         self
     }
 
-    pub(crate) fn with_mcp_snapshot(
-        mut self,
-        s: crate::command::mcp::McpSnapshot,
-    ) -> Self {
+    pub(crate) fn with_mcp_snapshot(mut self, s: crate::command::mcp::McpSnapshot) -> Self {
         self.mcp_snapshot = Some(s);
         self
     }
@@ -199,10 +188,7 @@ impl CtxBuilder {
         self
     }
 
-    pub(crate) fn with_memory(
-        mut self,
-        memory: Arc<dyn archon_memory::MemoryTrait>,
-    ) -> Self {
+    pub(crate) fn with_memory(mut self, memory: Arc<dyn archon_memory::MemoryTrait>) -> Self {
         self.memory = Some(memory);
         self
     }
@@ -215,10 +201,7 @@ impl CtxBuilder {
         self
     }
 
-    pub(crate) fn with_garden_config(
-        mut self,
-        c: archon_memory::garden::GardenConfig,
-    ) -> Self {
+    pub(crate) fn with_garden_config(mut self, c: archon_memory::garden::GardenConfig) -> Self {
         self.garden_config = Some(c);
         self
     }
@@ -231,34 +214,22 @@ impl CtxBuilder {
         self
     }
 
-    pub(crate) fn with_fast_mode_shared(
-        mut self,
-        shared: Arc<AtomicBool>,
-    ) -> Self {
+    pub(crate) fn with_fast_mode_shared(mut self, shared: Arc<AtomicBool>) -> Self {
         self.fast_mode_shared = Some(shared);
         self
     }
 
-    pub(crate) fn with_show_thinking(
-        mut self,
-        shared: Arc<AtomicBool>,
-    ) -> Self {
+    pub(crate) fn with_show_thinking(mut self, shared: Arc<AtomicBool>) -> Self {
         self.show_thinking = Some(shared);
         self
     }
 
-    pub(crate) fn with_working_dir(
-        mut self,
-        path: std::path::PathBuf,
-    ) -> Self {
+    pub(crate) fn with_working_dir(mut self, path: std::path::PathBuf) -> Self {
         self.working_dir = Some(path);
         self
     }
 
-    pub(crate) fn with_working_dir_opt(
-        mut self,
-        path: Option<std::path::PathBuf>,
-    ) -> Self {
+    pub(crate) fn with_working_dir_opt(mut self, path: Option<std::path::PathBuf>) -> Self {
         self.working_dir = path;
         self
     }
@@ -319,10 +290,7 @@ impl CtxBuilder {
         self
     }
 
-    pub(crate) fn with_copy_snapshot(
-        mut self,
-        s: crate::command::copy::CopySnapshot,
-    ) -> Self {
+    pub(crate) fn with_copy_snapshot(mut self, s: crate::command::copy::CopySnapshot) -> Self {
         self.copy_snapshot = Some(s);
         self
     }
@@ -351,10 +319,7 @@ impl CtxBuilder {
         self
     }
 
-    pub(crate) fn with_usage_snapshot(
-        mut self,
-        s: crate::command::usage::UsageSnapshot,
-    ) -> Self {
+    pub(crate) fn with_usage_snapshot(mut self, s: crate::command::usage::UsageSnapshot) -> Self {
         self.usage_snapshot = Some(s);
         self
     }
@@ -367,18 +332,12 @@ impl CtxBuilder {
         self
     }
 
-    pub(crate) fn with_config_path(
-        mut self,
-        path: std::path::PathBuf,
-    ) -> Self {
+    pub(crate) fn with_config_path(mut self, path: std::path::PathBuf) -> Self {
         self.config_path = Some(path);
         self
     }
 
-    pub(crate) fn with_config_path_opt(
-        mut self,
-        path: Option<std::path::PathBuf>,
-    ) -> Self {
+    pub(crate) fn with_config_path_opt(mut self, path: Option<std::path::PathBuf>) -> Self {
         self.config_path = path;
         self
     }
@@ -388,10 +347,7 @@ impl CtxBuilder {
         self
     }
 
-    pub(crate) fn with_auth_label_opt(
-        mut self,
-        label: Option<String>,
-    ) -> Self {
+    pub(crate) fn with_auth_label_opt(mut self, label: Option<String>) -> Self {
         self.auth_label = label;
         self
     }
@@ -404,10 +360,7 @@ impl CtxBuilder {
         self
     }
 
-    pub(crate) fn with_pending_effort_set(
-        mut self,
-        level: EffortLevel,
-    ) -> Self {
+    pub(crate) fn with_pending_effort_set(mut self, level: EffortLevel) -> Self {
         self.pending_effort_set = Some(level);
         self
     }
@@ -496,11 +449,10 @@ pub(crate) fn fixture_cost_snapshot() -> crate::command::cost::CostSnapshot {
         input_cost: 3.00,
         output_cost: 7.50,
         total_cost: 10.50,
-        cache_stats_line:
-            "Cache hit rate: 0.0% (0 reads / 0 total)\n\
+        cache_stats_line: "Cache hit rate: 0.0% (0 reads / 0 total)\n\
              Cache creation: 0 tokens\n\
              Estimated savings: 0 token-equivalents"
-                .to_string(),
+            .to_string(),
         warn_threshold: 5.0,
         hard_label: "$0.00 (disabled)".to_string(),
     }
@@ -543,9 +495,7 @@ pub(crate) fn make_cost_ctx(
 /// optional fields are left at `None` — mirroring peer helpers.
 ///
 /// V2: thin wrapper over `CtxBuilder` (deferred cleanup).
-pub(crate) fn make_fast_ctx(
-    initial: bool,
-) -> (CommandContext, mpsc::Receiver<TuiEvent>) {
+pub(crate) fn make_fast_ctx(initial: bool) -> (CommandContext, mpsc::Receiver<TuiEvent>) {
     CtxBuilder::new()
         .with_fast_mode_shared(Arc::new(AtomicBool::new(initial)))
         .build()
@@ -578,9 +528,7 @@ pub(crate) fn make_bug_ctx() -> (CommandContext, mpsc::Receiver<TuiEvent>) {
 /// `Arc<AtomicBool>`; the helper itself never reads or stores.
 ///
 /// V2: thin wrapper over `CtxBuilder` (deferred cleanup).
-pub(crate) fn make_thinking_ctx(
-    initial: bool,
-) -> (CommandContext, mpsc::Receiver<TuiEvent>) {
+pub(crate) fn make_thinking_ctx(initial: bool) -> (CommandContext, mpsc::Receiver<TuiEvent>) {
     CtxBuilder::new()
         .with_show_thinking(Arc::new(AtomicBool::new(initial)))
         .build()
@@ -625,8 +573,8 @@ pub(crate) fn make_diff_ctx(
 /// All other optional fields are left at `None`, mirroring peer
 /// helpers.
 pub(crate) fn make_help_ctx() -> (CommandContext, mpsc::Receiver<TuiEvent>) {
-    use archon_core::skills::builtin::HelpSkill;
     use archon_core::skills::SkillRegistry;
+    use archon_core::skills::builtin::HelpSkill;
     let mut registry = SkillRegistry::new();
     registry.register(Box::new(HelpSkill));
     CtxBuilder::new()
@@ -669,11 +617,10 @@ pub(crate) fn fixture_usage_snapshot() -> crate::command::usage::UsageSnapshot {
         input_cost: 3.00,
         output_cost: 7.50,
         total_cost: 10.50,
-        cache_stats_line:
-            "Cache hit rate: 0.0% (0 reads / 0 total)\n\
+        cache_stats_line: "Cache hit rate: 0.0% (0 reads / 0 total)\n\
              Cache creation: 0 tokens\n\
              Estimated savings: 0 token-equivalents"
-                .to_string(),
+            .to_string(),
     }
 }
 

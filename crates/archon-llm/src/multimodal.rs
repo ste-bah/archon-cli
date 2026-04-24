@@ -167,9 +167,7 @@ pub fn image_block_from_bytes(
         "image/png" => bytes.starts_with(PNG_MAGIC),
         "image/jpeg" => bytes.starts_with(JPEG_MAGIC),
         "image/gif" => bytes.starts_with(GIF87_MAGIC) || bytes.starts_with(GIF89_MAGIC),
-        "image/webp" => {
-            bytes.len() >= 12 && &bytes[0..4] == WEBP_RIFF && &bytes[8..12] == WEBP_TAG
-        }
+        "image/webp" => bytes.len() >= 12 && &bytes[0..4] == WEBP_RIFF && &bytes[8..12] == WEBP_TAG,
         other => return Err(MultimodalError::UnsupportedMediaType(other.to_string())),
     };
     if !ok {
@@ -345,4 +343,3 @@ pub(crate) const MINIMAL_WAV_SILENT: &[u8] = &[
 
 #[cfg(test)]
 mod tests;
-

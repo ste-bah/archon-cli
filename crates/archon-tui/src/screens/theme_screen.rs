@@ -5,8 +5,8 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::widgets::{Block, Borders, List, ListItem};
 
-use crate::virtual_list::VirtualList;
 use crate::theme::Theme;
+use crate::virtual_list::VirtualList;
 
 /// A theme entry for the picker.
 #[derive(Debug, Clone)]
@@ -78,14 +78,17 @@ impl ThemeScreen {
 
     /// Render theme screen into area.
     pub fn render(&self, f: &mut Frame, area: Rect, _theme: &Theme) {
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title("Theme");
+        let block = Block::default().borders(Borders::ALL).title("Theme");
 
-        let items: Vec<ListItem> = self.list.visible_items().iter().map(|t| {
-            let flag = if t.is_active { "*" } else { " " };
-            ListItem::new(format!("[{}] {}", flag, t.name))
-        }).collect();
+        let items: Vec<ListItem> = self
+            .list
+            .visible_items()
+            .iter()
+            .map(|t| {
+                let flag = if t.is_active { "*" } else { " " };
+                ListItem::new(format!("[{}] {}", flag, t.name))
+            })
+            .collect();
 
         let list = List::new(items).block(block);
         f.render_widget(list, area);
@@ -112,8 +115,14 @@ mod tests {
     fn set_themes_updates_list() {
         let mut screen = ThemeScreen::new();
         screen.set_themes(vec![
-            ThemeEntry { name: "dark".into(), is_active: true },
-            ThemeEntry { name: "light".into(), is_active: false },
+            ThemeEntry {
+                name: "dark".into(),
+                is_active: true,
+            },
+            ThemeEntry {
+                name: "light".into(),
+                is_active: false,
+            },
         ]);
         assert_eq!(screen.len(), 2);
     }
@@ -122,9 +131,18 @@ mod tests {
     fn select_theme_marks_active() {
         let mut screen = ThemeScreen::new();
         screen.set_themes(vec![
-            ThemeEntry { name: "dark".into(), is_active: true },
-            ThemeEntry { name: "light".into(), is_active: false },
-            ThemeEntry { name: "nord".into(), is_active: false },
+            ThemeEntry {
+                name: "dark".into(),
+                is_active: true,
+            },
+            ThemeEntry {
+                name: "light".into(),
+                is_active: false,
+            },
+            ThemeEntry {
+                name: "nord".into(),
+                is_active: false,
+            },
         ]);
         screen.select_theme("light");
         let light = screen.themes.iter().find(|t| t.name == "light").unwrap();
@@ -137,8 +155,14 @@ mod tests {
     fn cursor_wraps() {
         let mut screen = ThemeScreen::new();
         screen.set_themes(vec![
-            ThemeEntry { name: "a".into(), is_active: false },
-            ThemeEntry { name: "b".into(), is_active: false },
+            ThemeEntry {
+                name: "a".into(),
+                is_active: false,
+            },
+            ThemeEntry {
+                name: "b".into(),
+                is_active: false,
+            },
         ]);
         screen.move_down();
         assert_eq!(screen.selected_index(), 1);

@@ -28,24 +28,54 @@ mod tests {
 
     #[test]
     fn exponential_doubles() {
-        assert_eq!(delay(BackoffKind::Exponential, 1, 100), Duration::from_millis(100));
-        assert_eq!(delay(BackoffKind::Exponential, 2, 100), Duration::from_millis(200));
-        assert_eq!(delay(BackoffKind::Exponential, 3, 100), Duration::from_millis(400));
-        assert_eq!(delay(BackoffKind::Exponential, 4, 100), Duration::from_millis(800));
+        assert_eq!(
+            delay(BackoffKind::Exponential, 1, 100),
+            Duration::from_millis(100)
+        );
+        assert_eq!(
+            delay(BackoffKind::Exponential, 2, 100),
+            Duration::from_millis(200)
+        );
+        assert_eq!(
+            delay(BackoffKind::Exponential, 3, 100),
+            Duration::from_millis(400)
+        );
+        assert_eq!(
+            delay(BackoffKind::Exponential, 4, 100),
+            Duration::from_millis(800)
+        );
     }
 
     #[test]
     fn linear_scales() {
-        assert_eq!(delay(BackoffKind::Linear, 1, 100), Duration::from_millis(100));
-        assert_eq!(delay(BackoffKind::Linear, 2, 100), Duration::from_millis(200));
-        assert_eq!(delay(BackoffKind::Linear, 3, 100), Duration::from_millis(300));
+        assert_eq!(
+            delay(BackoffKind::Linear, 1, 100),
+            Duration::from_millis(100)
+        );
+        assert_eq!(
+            delay(BackoffKind::Linear, 2, 100),
+            Duration::from_millis(200)
+        );
+        assert_eq!(
+            delay(BackoffKind::Linear, 3, 100),
+            Duration::from_millis(300)
+        );
     }
 
     #[test]
     fn fixed_constant() {
-        assert_eq!(delay(BackoffKind::Fixed, 1, 100), Duration::from_millis(100));
-        assert_eq!(delay(BackoffKind::Fixed, 2, 100), Duration::from_millis(100));
-        assert_eq!(delay(BackoffKind::Fixed, 5, 100), Duration::from_millis(100));
+        assert_eq!(
+            delay(BackoffKind::Fixed, 1, 100),
+            Duration::from_millis(100)
+        );
+        assert_eq!(
+            delay(BackoffKind::Fixed, 2, 100),
+            Duration::from_millis(100)
+        );
+        assert_eq!(
+            delay(BackoffKind::Fixed, 5, 100),
+            Duration::from_millis(100)
+        );
     }
 
     #[test]

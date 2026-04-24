@@ -10,7 +10,11 @@ fn restored_outcome_construction_and_debug() {
         messages_loaded: 42,
     };
     let debug_str = format!("{:?}", outcome);
-    assert!(debug_str.contains("Restored"), "Debug output should contain 'Restored': {}", debug_str);
+    assert!(
+        debug_str.contains("Restored"),
+        "Debug output should contain 'Restored': {}",
+        debug_str
+    );
 }
 
 #[test]
@@ -21,35 +25,55 @@ fn context_overflow_outcome_construction_and_debug() {
         action: OverflowAction::TruncateOldest(50),
     };
     let debug_str = format!("{:?}", outcome);
-    assert!(debug_str.contains("ContextOverflow"), "Debug output should contain 'ContextOverflow': {}", debug_str);
+    assert!(
+        debug_str.contains("ContextOverflow"),
+        "Debug output should contain 'ContextOverflow': {}",
+        debug_str
+    );
 }
 
 #[test]
 fn not_found_outcome_construction_and_debug() {
     let outcome = ResumeOutcome::NotFound;
     let debug_str = format!("{:?}", outcome);
-    assert!(debug_str.contains("NotFound"), "Debug output should contain 'NotFound': {}", debug_str);
+    assert!(
+        debug_str.contains("NotFound"),
+        "Debug output should contain 'NotFound': {}",
+        debug_str
+    );
 }
 
 #[test]
 fn truncate_oldest_action_construction_and_debug() {
     let action = OverflowAction::TruncateOldest(100);
     let debug_str = format!("{:?}", action);
-    assert!(debug_str.contains("TruncateOldest"), "Debug output should contain 'TruncateOldest': {}", debug_str);
+    assert!(
+        debug_str.contains("TruncateOldest"),
+        "Debug output should contain 'TruncateOldest': {}",
+        debug_str
+    );
 }
 
 #[test]
 fn switch_model_action_construction_and_debug() {
     let action = OverflowAction::SwitchModel("gpt-5".into());
     let debug_str = format!("{:?}", action);
-    assert!(debug_str.contains("SwitchModel"), "Debug output should contain 'SwitchModel': {}", debug_str);
+    assert!(
+        debug_str.contains("SwitchModel"),
+        "Debug output should contain 'SwitchModel': {}",
+        debug_str
+    );
 }
 
 #[test]
 fn cancelled_action_construction_and_debug() {
     let action = OverflowAction::Cancelled;
     let debug_str = format!("{:?}", action);
-    assert!(debug_str.contains("Cancelled"), "Debug output should contain 'Cancelled': {}", debug_str);
+    assert!(
+        debug_str.contains("Cancelled"),
+        "Debug output should contain 'Cancelled': {}",
+        debug_str
+    );
 }
 
 #[test]

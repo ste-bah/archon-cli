@@ -31,16 +31,15 @@ impl FsWatcher {
     ) -> Result<Self, notify::Error> {
         let (tx, rx) = std::sync::mpsc::channel();
 
-        let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
-            match res {
+        let mut watcher =
+            notify::recommended_watcher(move |res: notify::Result<notify::Event>| match res {
                 Ok(event) => {
                     let _ = tx.send(event);
                 }
                 Err(e) => {
                     warn!("watcher error: {e}");
                 }
-            }
-        })?;
+            })?;
 
         watcher.watch(root, RecursiveMode::Recursive)?;
 

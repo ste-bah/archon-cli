@@ -12,8 +12,8 @@ use std::sync::Arc;
 
 use archon_session::storage::SessionStore;
 
-use crate::virtual_list::VirtualList;
 use crate::theme::Theme;
+use crate::virtual_list::VirtualList;
 
 /// Branch point in session history.
 /// Tracks a forked session with metadata about when the fork occurred.
@@ -316,10 +316,7 @@ impl SessionBrowser {
     ///   if `n >= messages.len()`, returns `Some(vec![])`.
     /// - `OverflowAction::SwitchModel(_)`: returns `None` (caller handles model swap).
     /// - `OverflowAction::Cancelled`: returns `None`.
-    pub fn resolve_overflow(
-        messages: Vec<String>,
-        action: &OverflowAction,
-    ) -> Option<Vec<String>> {
+    pub fn resolve_overflow(messages: Vec<String>, action: &OverflowAction) -> Option<Vec<String>> {
         match action {
             OverflowAction::TruncateOldest(n) => {
                 if *n >= messages.len() {
@@ -362,9 +359,11 @@ impl SessionBrowser {
             .borders(Borders::ALL)
             .title("Session Browser");
 
-        let items: Vec<ListItem> = self.sessions.iter().map(|s| {
-            ListItem::new(format!("{} [{} msgs]", s.name, s.message_count))
-        }).collect();
+        let items: Vec<ListItem> = self
+            .sessions
+            .iter()
+            .map(|s| ListItem::new(format!("{} [{} msgs]", s.name, s.message_count)))
+            .collect();
 
         let list = List::new(items).block(block);
         f.render_widget(list, area);
@@ -378,8 +377,7 @@ impl SessionBrowser {
         use archon_session::storage::SessionStore;
         // Create an in-memory store for testing
         let temp_dir = tempfile::tempdir().expect("temp dir");
-        let store = SessionStore::open(&temp_dir.path().join("test.db"))
-            .expect("test store");
+        let store = SessionStore::open(&temp_dir.path().join("test.db")).expect("test store");
         Self {
             store: Arc::new(store),
             sessions: Vec::new(),
@@ -450,8 +448,18 @@ mod tests {
     fn set_sessions_updates_list() {
         let mut browser = SessionBrowser::new_for_tests();
         let sessions = vec![
-            SessionSummary { id: "1".into(), name: "A".into(), last_updated: Utc::now(), message_count: 5 },
-            SessionSummary { id: "2".into(), name: "B".into(), last_updated: Utc::now(), message_count: 10 },
+            SessionSummary {
+                id: "1".into(),
+                name: "A".into(),
+                last_updated: Utc::now(),
+                message_count: 5,
+            },
+            SessionSummary {
+                id: "2".into(),
+                name: "B".into(),
+                last_updated: Utc::now(),
+                message_count: 10,
+            },
         ];
         browser.set_sessions(sessions);
         assert_eq!(browser.len(), 2);
@@ -462,9 +470,24 @@ mod tests {
     fn cursor_bounded_at_end() {
         let mut browser = SessionBrowser::new_for_tests();
         let sessions = vec![
-            SessionSummary { id: "0".into(), name: "A".into(), last_updated: Utc::now(), message_count: 1 },
-            SessionSummary { id: "1".into(), name: "B".into(), last_updated: Utc::now(), message_count: 2 },
-            SessionSummary { id: "2".into(), name: "C".into(), last_updated: Utc::now(), message_count: 3 },
+            SessionSummary {
+                id: "0".into(),
+                name: "A".into(),
+                last_updated: Utc::now(),
+                message_count: 1,
+            },
+            SessionSummary {
+                id: "1".into(),
+                name: "B".into(),
+                last_updated: Utc::now(),
+                message_count: 2,
+            },
+            SessionSummary {
+                id: "2".into(),
+                name: "C".into(),
+                last_updated: Utc::now(),
+                message_count: 3,
+            },
         ];
         browser.set_sessions(sessions);
         browser.move_down();
@@ -480,8 +503,18 @@ mod tests {
     fn move_up_bounded_at_zero() {
         let mut browser = SessionBrowser::new_for_tests();
         let sessions = vec![
-            SessionSummary { id: "0".into(), name: "A".into(), last_updated: Utc::now(), message_count: 1 },
-            SessionSummary { id: "1".into(), name: "B".into(), last_updated: Utc::now(), message_count: 2 },
+            SessionSummary {
+                id: "0".into(),
+                name: "A".into(),
+                last_updated: Utc::now(),
+                message_count: 1,
+            },
+            SessionSummary {
+                id: "1".into(),
+                name: "B".into(),
+                last_updated: Utc::now(),
+                message_count: 2,
+            },
         ];
         browser.set_sessions(sessions);
         browser.move_up();
@@ -499,9 +532,7 @@ mod tests {
         store
             .register_session(session_id, "/tmp", None, "claude-3-5-sonnet")
             .expect("register session");
-        store
-            .set_name(session_id, "My Session")
-            .expect("set name");
+        store.set_name(session_id, "My Session").expect("set name");
         for i in 0..3 {
             store
                 .save_message(session_id, i, &format!("Message {}", i))
@@ -547,7 +578,10 @@ mod tests {
         assert_eq!(browser.last_restored_name(), Some("Valid Session"));
 
         // Now try to restore a non-existent session — field should be cleared
-        let outcome = browser.restore("nonexistent", 100_000).await.expect("restore");
+        let outcome = browser
+            .restore("nonexistent", 100_000)
+            .await
+            .expect("restore");
         match outcome {
             ResumeOutcome::NotFound => {
                 assert_eq!(
@@ -579,7 +613,10 @@ mod tests {
 
         // Create a fresh browser and restore
         let mut browser2 = SessionBrowser::new(Arc::clone(&store));
-        let outcome = browser2.restore(session_id, 100_000).await.expect("restore");
+        let outcome = browser2
+            .restore(session_id, 100_000)
+            .await
+            .expect("restore");
 
         match outcome {
             ResumeOutcome::Restored {
@@ -608,7 +645,10 @@ mod tests {
         // Create 100 messages with ~50 chars each (each ~12-13 tokens via chars/4)
         // Total: 100 * 12 = ~1200 tokens, way over limit of 100
         for i in 0..100 {
-            let content = format!("Message number {} with some additional text to make it longer", i);
+            let content = format!(
+                "Message number {} with some additional text to make it longer",
+                i
+            );
             store
                 .save_message(session_id, i, &content)
                 .expect("save message");
@@ -643,7 +683,10 @@ mod tests {
 
         // Create a fresh browser and try to restore a non-existent session
         let mut browser2 = SessionBrowser::new(Arc::clone(&store));
-        let outcome = browser2.restore("nonexistent-session-id", 100_000).await.expect("restore");
+        let outcome = browser2
+            .restore("nonexistent-session-id", 100_000)
+            .await
+            .expect("restore");
 
         match outcome {
             ResumeOutcome::NotFound => {}

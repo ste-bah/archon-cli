@@ -25,7 +25,7 @@
 //!   AUTO_BACKGROUND_MS becomes injectable.
 
 use archon_core::subagent::{
-    is_auto_background_enabled, SubagentManager, SubagentStatus, AUTO_BACKGROUND_MS,
+    AUTO_BACKGROUND_MS, SubagentManager, SubagentStatus, is_auto_background_enabled,
 };
 use archon_tools::agent_tool::SubagentRequest;
 
@@ -166,9 +166,7 @@ fn test_timeout_branch_does_not_reawait_join_handle() {
             _ => {}
         }
         if arm_body.len() > 4000 {
-            panic!(
-                "REQ-FOR-PRESERVE-D5 (c): could not locate end of AutoBackgrounded arm body"
-            );
+            panic!("REQ-FOR-PRESERVE-D5 (c): could not locate end of AutoBackgrounded arm body");
         }
     }
 

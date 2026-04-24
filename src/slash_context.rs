@@ -2,15 +2,15 @@
 //! Extracted from main.rs to enable modular handler extraction.
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use archon_core::agent::SessionStats;
 use archon_core::skills::SkillRegistry;
 use archon_llm::effort::EffortLevel;
-use archon_memory::garden::GardenConfig;
-use archon_memory::MemoryTrait;
 use archon_mcp::lifecycle::McpServerManager;
+use archon_memory::MemoryTrait;
+use archon_memory::garden::GardenConfig;
 
 use crate::command::dispatcher::Dispatcher;
 use crate::command::registry::Registry;

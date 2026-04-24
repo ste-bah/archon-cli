@@ -1,9 +1,9 @@
 use std::path::{Path, PathBuf};
 
 use dashmap::DashMap;
-use tokio::sync::{broadcast, Mutex};
-use tokio_stream::wrappers::BroadcastStream;
+use tokio::sync::{Mutex, broadcast};
 use tokio_stream::StreamExt;
+use tokio_stream::wrappers::BroadcastStream;
 
 use crate::tasks::models::{TaskError, TaskEvent, TaskId};
 
@@ -78,9 +78,7 @@ impl EventLog {
                 break; // truncated record — stop here
             }
 
-            if let Ok(event) =
-                serde_json::from_slice::<TaskEvent>(&data[cursor..cursor + len])
-            {
+            if let Ok(event) = serde_json::from_slice::<TaskEvent>(&data[cursor..cursor + len]) {
                 if event.seq >= from_seq {
                     events.push(event);
                 }

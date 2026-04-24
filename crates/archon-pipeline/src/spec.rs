@@ -219,7 +219,10 @@ mod tests {
         let step = &spec.steps[0];
         assert_eq!(step.id, "a");
         assert_eq!(step.agent, "x");
-        assert_eq!(step.input, serde_json::Value::Object(serde_json::Map::new()));
+        assert_eq!(
+            step.input,
+            serde_json::Value::Object(serde_json::Map::new())
+        );
         assert!(step.depends_on.is_empty());
         assert_eq!(step.timeout_secs, 1800);
         assert_eq!(step.on_failure, OnFailurePolicy::Rollback);
@@ -245,7 +248,11 @@ mod tests {
 
     #[test]
     fn backoff_variants() {
-        for variant in [BackoffKind::Fixed, BackoffKind::Linear, BackoffKind::Exponential] {
+        for variant in [
+            BackoffKind::Fixed,
+            BackoffKind::Linear,
+            BackoffKind::Exponential,
+        ] {
             let json = serde_json::to_string(&variant).expect("serialize");
             let deserialized: BackoffKind = serde_json::from_str(&json).expect("deserialize");
             assert_eq!(variant, deserialized);

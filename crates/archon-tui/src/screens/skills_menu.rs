@@ -5,10 +5,10 @@
 //! injects `/{skill-name} ` into the input buffer. Render + input
 //! routing landed in TUI-627-followup.
 
+use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem};
-use ratatui::Frame;
 
 use crate::events::SkillEntry;
 use crate::theme::Theme;
@@ -20,16 +20,23 @@ pub struct SkillsMenu {
 
 impl SkillsMenu {
     pub fn new(skills: Vec<SkillEntry>) -> Self {
-        Self { skills, selected_index: 0 }
+        Self {
+            skills,
+            selected_index: 0,
+        }
     }
 
     pub fn select_next(&mut self) {
-        if self.skills.is_empty() { return; }
+        if self.skills.is_empty() {
+            return;
+        }
         self.selected_index = (self.selected_index + 1) % self.skills.len();
     }
 
     pub fn select_prev(&mut self) {
-        if self.skills.is_empty() { return; }
+        if self.skills.is_empty() {
+            return;
+        }
         self.selected_index = if self.selected_index == 0 {
             self.skills.len() - 1
         } else {
@@ -99,9 +106,7 @@ impl SkillsMenu {
         let list = List::new(items).block(
             Block::default()
                 .borders(Borders::ALL)
-                .title(
-                    " /skills — pick skill to inject (Up/Down, Enter select, Esc cancel) ",
-                )
+                .title(" /skills — pick skill to inject (Up/Down, Enter select, Esc cancel) ")
                 .border_style(Style::default().fg(theme.accent)),
         );
         f.render_widget(list, overlay_area);
@@ -125,10 +130,12 @@ mod tests {
     use super::*;
 
     fn fixture(n: usize) -> Vec<SkillEntry> {
-        (0..n).map(|i| SkillEntry {
-            name: format!("skill-{}", i),
-            description: format!("desc-{}", i),
-        }).collect()
+        (0..n)
+            .map(|i| SkillEntry {
+                name: format!("skill-{}", i),
+                description: format!("desc-{}", i),
+            })
+            .collect()
     }
 
     #[test]

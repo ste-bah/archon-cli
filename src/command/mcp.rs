@@ -97,16 +97,13 @@ pub(crate) struct McpSnapshot {
 /// The state-string mapping and the `state_str == "ready"` conditional
 /// are preserved exactly — future readers should consult the shipped
 /// body's diff-history if the mapping needs to change.
-pub(crate) async fn build_mcp_snapshot(
-    slash_ctx: &SlashCommandContext,
-) -> McpSnapshot {
+pub(crate) async fn build_mcp_snapshot(slash_ctx: &SlashCommandContext) -> McpSnapshot {
     // Single `get_server_info` call, matching the shipped one-shot read.
     // Returns `Vec<(String, ServerState, bool)>` — (name, state,
     // is_disabled).
     let info = slash_ctx.mcp_manager.get_server_info().await;
 
-    let mut entries: Vec<archon_tui::app::McpServerEntry> =
-        Vec::with_capacity(info.len());
+    let mut entries: Vec<archon_tui::app::McpServerEntry> = Vec::with_capacity(info.len());
 
     for (name, state, disabled) in info {
         // State-string mapping — byte-for-byte from shipped body.
@@ -157,11 +154,7 @@ pub(crate) async fn build_mcp_snapshot(
 pub(crate) struct McpHandler;
 
 impl CommandHandler for McpHandler {
-    fn execute(
-        &self,
-        ctx: &mut CommandContext,
-        _args: &[String],
-    ) -> anyhow::Result<()> {
+    fn execute(&self, ctx: &mut CommandContext, _args: &[String]) -> anyhow::Result<()> {
         // Defensive: build_command_context is responsible for populating
         // mcp_snapshot when the primary resolves to /mcp. A None here
         // indicates a wiring regression (e.g. the builder was bypassed
@@ -236,9 +229,7 @@ mod tests {
     /// supplied optional mcp snapshot. Tests exercising the defensive
     /// None branch pass `None`; tests exercising the happy path pass
     /// `Some(McpSnapshot { .. })`.
-    fn make_ctx(
-        snapshot: Option<McpSnapshot>,
-    ) -> (CommandContext, mpsc::Receiver<TuiEvent>) {
+    fn make_ctx(snapshot: Option<McpSnapshot>) -> (CommandContext, mpsc::Receiver<TuiEvent>) {
         // TASK-AGS-POST-6-SHARED-FIXTURES-V2: migrated to CtxBuilder.
         crate::command::test_support::CtxBuilder::new()
             .with_mcp_snapshot_opt(snapshot)
@@ -280,8 +271,7 @@ mod tests {
         );
         let err_msg = format!("{}", result.unwrap_err());
         assert!(
-            err_msg.contains("mcp_snapshot")
-                || err_msg.contains("build_command_context"),
+            err_msg.contains("mcp_snapshot") || err_msg.contains("build_command_context"),
             "error must describe the missing snapshot, got: {err_msg}"
         );
     }
@@ -317,9 +307,7 @@ mod tests {
                 assert!(disabled.disabled);
                 assert!(disabled.tools.is_empty());
             }
-            other => panic!(
-                "expected TuiEvent::ShowMcpManager, got {other:?}"
-            ),
+            other => panic!("expected TuiEvent::ShowMcpManager, got {other:?}"),
         }
     }
 

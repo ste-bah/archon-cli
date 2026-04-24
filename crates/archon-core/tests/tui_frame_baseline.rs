@@ -23,7 +23,7 @@
 //! good snapshot file on disk and a working cargo-insta integration;
 //! it deliberately does NOT test the real `App`.
 
-use archon_test_support::tui_capture::{render_frame_to_string, DummyApp};
+use archon_test_support::tui_capture::{DummyApp, render_frame_to_string};
 use insta::{assert_snapshot, with_settings};
 
 #[test]

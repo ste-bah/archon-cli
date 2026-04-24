@@ -41,7 +41,9 @@ fn register_duplicate_returns_error() {
     let id = uuid::Uuid::new_v4();
 
     // First register succeeds
-    registry.register(make_handle(id)).expect("first register should succeed");
+    registry
+        .register(make_handle(id))
+        .expect("first register should succeed");
 
     // Second register with same id fails
     let err = registry.register(make_handle(id)).unwrap_err();
@@ -77,8 +79,8 @@ fn duplicate_error_message_matches_spec() {
 /// closed channel errors matching the ERR-ARCH-02 spec message.
 #[test]
 fn send_event_uses_warn_for_closed_channel() {
-    let src = std::fs::read_to_string("crates/archon-core/src/agent.rs")
-        .expect("cannot read agent.rs");
+    let src =
+        std::fs::read_to_string("crates/archon-core/src/agent.rs").expect("cannot read agent.rs");
 
     // Must contain the spec message
     assert!(
@@ -108,8 +110,8 @@ fn send_event_uses_warn_for_closed_channel() {
 /// Verify AgentEvent has an event_name() or similar accessor for the WARN message.
 #[test]
 fn agent_event_has_name_accessor() {
-    let src = std::fs::read_to_string("crates/archon-core/src/agent.rs")
-        .expect("cannot read agent.rs");
+    let src =
+        std::fs::read_to_string("crates/archon-core/src/agent.rs").expect("cannot read agent.rs");
 
     assert!(
         src.contains("fn event_name") || src.contains("fn id("),

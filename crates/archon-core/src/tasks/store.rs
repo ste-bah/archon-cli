@@ -119,7 +119,8 @@ impl SqliteTaskStateStore {
         let conn = sqlite::Connection::open_thread_safe(&db_path).map_err(sqlite_err)?;
 
         // Enable WAL mode for concurrent reads.
-        conn.execute("PRAGMA journal_mode=WAL").map_err(sqlite_err)?;
+        conn.execute("PRAGMA journal_mode=WAL")
+            .map_err(sqlite_err)?;
 
         conn.execute(
             "CREATE TABLE IF NOT EXISTS task_index (
@@ -201,8 +202,7 @@ impl SqliteTaskStateStore {
         if content.len() < 4 {
             return Err(TaskError::Corrupted);
         }
-        let stored_crc =
-            u32::from_le_bytes([content[0], content[1], content[2], content[3]]);
+        let stored_crc = u32::from_le_bytes([content[0], content[1], content[2], content[3]]);
         let json_bytes = &content[4..];
 
         let mut hasher = Hasher::new();
@@ -219,7 +219,10 @@ impl SqliteTaskStateStore {
     fn write_snapshot_to_disk(&self, task: &Task) -> Result<(), TaskError> {
         let snapshot = TaskSnapshot::from(task);
         let json_bytes = serde_json::to_vec_pretty(&snapshot).map_err(|e| {
-            TaskError::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+            TaskError::Io(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                e.to_string(),
+            ))
         })?;
 
         // CRC32 header.
@@ -258,7 +261,8 @@ impl SqliteTaskStateStore {
             .map_err(sqlite_err)?;
 
         stmt.bind((1, task_id_str.as_str())).map_err(sqlite_err)?;
-        stmt.bind((2, task.agent_name.as_str())).map_err(sqlite_err)?;
+        stmt.bind((2, task.agent_name.as_str()))
+            .map_err(sqlite_err)?;
         stmt.bind((3, state_str.as_str())).map_err(sqlite_err)?;
         stmt.bind((4, created_str.as_str())).map_err(sqlite_err)?;
 
@@ -276,7 +280,10 @@ impl SqliteTaskStateStore {
 
 /// Helper to convert a `sqlite::Error` into a `TaskError::Io`.
 fn sqlite_err(e: sqlite::Error) -> TaskError {
-    TaskError::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+    TaskError::Io(std::io::Error::new(
+        std::io::ErrorKind::Other,
+        e.to_string(),
+    ))
 }
 
 impl TaskStateStore for SqliteTaskStateStore {

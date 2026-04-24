@@ -59,8 +59,7 @@ fn test_save_agent_memory_invoked_at_all_three_call_sites() {
         .lines()
         .filter(|line| {
             let trimmed = line.trim_start();
-            if trimmed.starts_with("//") || trimmed.starts_with("*") || trimmed.starts_with("///")
-            {
+            if trimmed.starts_with("//") || trimmed.starts_with("*") || trimmed.starts_with("///") {
                 return false;
             }
             trimmed.contains("save_agent_memory(")
@@ -80,8 +79,7 @@ fn test_save_agent_memory_invoked_at_all_three_call_sites() {
         .lines()
         .filter(|line| {
             let trimmed = line.trim_start();
-            if trimmed.starts_with("//") || trimmed.starts_with("*") || trimmed.starts_with("///")
-            {
+            if trimmed.starts_with("//") || trimmed.starts_with("*") || trimmed.starts_with("///") {
                 return false;
             }
             trimmed.contains("save_agent_memory(")

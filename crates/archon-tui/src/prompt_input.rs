@@ -11,7 +11,11 @@ pub struct PromptBuffer {
 
 impl PromptBuffer {
     pub fn new() -> Self {
-        Self { lines: vec![String::new()], cursor_row: 0, cursor_col: 0 }
+        Self {
+            lines: vec![String::new()],
+            cursor_row: 0,
+            cursor_col: 0,
+        }
     }
 
     pub fn is_empty(&self) -> bool {

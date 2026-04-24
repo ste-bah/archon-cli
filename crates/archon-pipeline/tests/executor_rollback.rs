@@ -5,8 +5,8 @@
 
 use std::collections::HashMap;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use async_trait::async_trait;
 use futures_util::Stream;
@@ -211,10 +211,7 @@ struct CheckpointWritingMockService {
 }
 
 impl CheckpointWritingMockService {
-    fn new(
-        store: Arc<PipelineStateStore>,
-        responses: HashMap<String, MockResponse>,
-    ) -> Self {
+    fn new(store: Arc<PipelineStateStore>, responses: HashMap<String, MockResponse>) -> Self {
         Self {
             store,
             responses: std::sync::Mutex::new(responses),
@@ -280,11 +277,9 @@ impl TaskService for CheckpointWritingMockService {
             // We need the pipeline ID. Look it up from the store.
             let runs = self.store.list_runs().unwrap_or_default();
             if let Some(pid) = runs.first() {
-                let _ = self.store.write_checkpoint(
-                    *pid,
-                    &agent_name,
-                    &json!({"partial": true}),
-                );
+                let _ = self
+                    .store
+                    .write_checkpoint(*pid, &agent_name, &json!({"partial": true}));
             }
         }
 
@@ -384,7 +379,11 @@ fn read_audit_lines(
 }
 
 /// Check whether a checkpoint file exists for a given step.
-fn checkpoint_exists(store_root: &std::path::Path, id: archon_pipeline::PipelineId, step_id: &str) -> bool {
+fn checkpoint_exists(
+    store_root: &std::path::Path,
+    id: archon_pipeline::PipelineId,
+    step_id: &str,
+) -> bool {
     store_root
         .join(id.to_string())
         .join("checkpoints")
@@ -577,7 +576,9 @@ async fn fail_preserves_state() {
     let id = runs[0];
 
     // state.json should be preserved.
-    let run = store.load_state(id).expect("state should still be loadable");
+    let run = store
+        .load_state(id)
+        .expect("state should still be loadable");
     assert_eq!(run.state, PipelineState::Failed);
 
     // A should be Finished, B Failed, C Pending.
@@ -593,10 +594,7 @@ async fn fail_preserves_state() {
 
     // No RolledBack events in audit log.
     let audit = read_audit_lines(tmp.path(), id);
-    let rolled_back_count = audit
-        .iter()
-        .filter(|e| e["type"] == "rolled_back")
-        .count();
+    let rolled_back_count = audit.iter().filter(|e| e["type"] == "rolled_back").count();
     assert_eq!(
         rolled_back_count, 0,
         "should have NO RolledBack events under Fail policy"
@@ -698,10 +696,7 @@ async fn partial_output_cleaned_between_retries() {
         },
     );
 
-    let mock = Arc::new(CheckpointWritingMockService::new(
-        store.clone(),
-        responses,
-    ));
+    let mock = Arc::new(CheckpointWritingMockService::new(store.clone(), responses));
     let executor = PipelineExecutor::new(store.clone(), mock);
 
     let spec = make_pipeline(

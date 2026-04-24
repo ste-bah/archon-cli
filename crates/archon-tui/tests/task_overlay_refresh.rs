@@ -1,6 +1,6 @@
 //! Tests for task_overlay refresh.
 
-use archon_tui::screens::task_overlay::{TaskOverlay, TaskStore, TaskRow, TaskAction};
+use archon_tui::screens::task_overlay::{TaskAction, TaskOverlay, TaskRow, TaskStore};
 
 struct MockTaskStore {
     tasks: Vec<TaskRow>,
@@ -55,7 +55,10 @@ fn task_overlay_cancel_selected_emits_action() {
     let mut overlay = TaskOverlay::new(store.list_tasks());
     overlay.move_down();
     overlay.cancel_selected();
-    assert_eq!(overlay.last_action(), TaskAction::CancelRequested("task-2".to_string()));
+    assert_eq!(
+        overlay.last_action(),
+        TaskAction::CancelRequested("task-2".to_string())
+    );
 }
 
 #[test]
@@ -65,7 +68,10 @@ fn task_overlay_inspect_selected_emits_action() {
     };
     let mut overlay = TaskOverlay::new(store.list_tasks());
     overlay.inspect_selected();
-    assert_eq!(overlay.last_action(), TaskAction::InspectRequested("task-1".to_string()));
+    assert_eq!(
+        overlay.last_action(),
+        TaskAction::InspectRequested("task-1".to_string())
+    );
 }
 
 #[test]

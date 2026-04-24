@@ -5,8 +5,8 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::widgets::{Block, Borders, List, ListItem};
 
-use crate::virtual_list::VirtualList;
 use crate::theme::Theme;
+use crate::virtual_list::VirtualList;
 
 /// HookStore is the abstract interface for hook specification persistence.
 /// Space bar toggles the enabled state of the selected hook.
@@ -90,14 +90,17 @@ impl HooksMenu {
 
     /// Render hooks menu into area.
     pub fn render(&self, f: &mut Frame, area: Rect, _theme: &Theme) {
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title("Hooks");
+        let block = Block::default().borders(Borders::ALL).title("Hooks");
 
-        let items: Vec<ListItem> = self.list.visible_items().iter().map(|h| {
-            let flag = if h.enabled { "[x]" } else { "[ ]" };
-            ListItem::new(format!("{} {} — {}", flag, h.name, h.script_path))
-        }).collect();
+        let items: Vec<ListItem> = self
+            .list
+            .visible_items()
+            .iter()
+            .map(|h| {
+                let flag = if h.enabled { "[x]" } else { "[ ]" };
+                ListItem::new(format!("{} {} — {}", flag, h.name, h.script_path))
+            })
+            .collect();
 
         let list = List::new(items).block(block);
         f.render_widget(list, area);

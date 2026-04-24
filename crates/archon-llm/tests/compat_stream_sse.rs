@@ -75,9 +75,7 @@ fn sample_request() -> LlmRequest {
 }
 
 /// Collect a stream until it closes or the helper's safety cap fires.
-async fn drain_stream(
-    mut rx: tokio::sync::mpsc::Receiver<StreamEvent>,
-) -> Vec<StreamEvent> {
+async fn drain_stream(mut rx: tokio::sync::mpsc::Receiver<StreamEvent>) -> Vec<StreamEvent> {
     let mut out = Vec::new();
     // Safety cap — 256 events is far beyond what the tests produce.
     for _ in 0..256 {
@@ -236,7 +234,10 @@ async fn sse_truncated_stream_closes_cleanly_with_message_stop() {
     let has_only = events
         .iter()
         .any(|e| matches!(e, StreamEvent::TextDelta { text, .. } if text == "only"));
-    assert!(has_only, "expected TextDelta{{text:\"only\"}} in {events:?}");
+    assert!(
+        has_only,
+        "expected TextDelta{{text:\"only\"}} in {events:?}"
+    );
 
     let has_stop = events.iter().any(|e| matches!(e, StreamEvent::MessageStop));
     assert!(
@@ -265,7 +266,10 @@ async fn sse_stream_maps_401_to_auth_error() {
 
     match provider.stream(sample_request()).await {
         Err(LlmError::Auth(msg)) => {
-            assert!(msg.contains("bad key"), "auth error should carry body: {msg}");
+            assert!(
+                msg.contains("bad key"),
+                "auth error should carry body: {msg}"
+            );
         }
         Err(other) => panic!("expected LlmError::Auth, got {other:?}"),
         Ok(_) => panic!("expected Err on 401 response"),

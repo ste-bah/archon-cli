@@ -1,10 +1,10 @@
 mod agent_handle;
-pub(crate) mod session;
-pub(crate) mod setup;
-mod slash_context;
 pub(crate) mod cli_args;
 mod command;
 mod runtime;
+pub(crate) mod session;
+pub(crate) mod setup;
+mod slash_context;
 
 use anyhow::Result;
 use clap::Parser;
@@ -30,7 +30,9 @@ async fn main() -> Result<()> {
     // call runs before any other thread is spawned, so concurrent env-var
     // access cannot occur.
     if let Some(ref url) = cli.remote_url {
-        unsafe { std::env::set_var("ARCHON_REMOTE_URL", url); }
+        unsafe {
+            std::env::set_var("ARCHON_REMOTE_URL", url);
+        }
     }
 
     // Load environment variables first (determines config path)
@@ -51,8 +53,10 @@ async fn main() -> Result<()> {
         .unwrap_or_else(default_config_path);
 
     // Parse --setting-sources filter
-    let layer_filter: Option<Vec<ConfigLayer>> =
-        cli.setting_sources.as_ref().map(|s| crate::setup::parse_layer_filter(s));
+    let layer_filter: Option<Vec<ConfigLayer>> = cli
+        .setting_sources
+        .as_ref()
+        .map(|s| crate::setup::parse_layer_filter(s));
 
     let working_dir_for_config = std::env::current_dir().unwrap_or_default();
     let mut config = archon_core::config_layers::load_layered_config(
@@ -178,7 +182,11 @@ async fn main() -> Result<()> {
             use crate::command::ide_stdio::handle_ide_stdio_command;
             return handle_ide_stdio_command().await;
         }
-        Some(Commands::Web { port, bind_address, no_open }) => {
+        Some(Commands::Web {
+            port,
+            bind_address,
+            no_open,
+        }) => {
             use crate::command::web::handle_web_command;
             return handle_web_command(port, bind_address, no_open, &config).await;
         }
@@ -186,9 +194,15 @@ async fn main() -> Result<()> {
             use crate::command::pipeline::handle_pipeline_command;
             return handle_pipeline_command(&action, &config, &env_vars).await;
         }
-        Some(Commands::RunAgentAsync { name, input, version, detach }) => {
+        Some(Commands::RunAgentAsync {
+            name,
+            input,
+            version,
+            detach,
+        }) => {
             use crate::command::task::handle_run_agent_async;
-            return handle_run_agent_async(name, input, version, detach, &working_dir_for_config).await;
+            return handle_run_agent_async(name, input, version, detach, &working_dir_for_config)
+                .await;
         }
         Some(Commands::TaskStatus { task_id, watch }) => {
             use crate::command::task::handle_task_status;
@@ -202,7 +216,11 @@ async fn main() -> Result<()> {
             use crate::command::task::handle_task_cancel;
             return handle_task_cancel(&task_id, &working_dir_for_config).await;
         }
-        Some(Commands::TaskList { state, agent, since }) => {
+        Some(Commands::TaskList {
+            state,
+            agent,
+            since,
+        }) => {
             use crate::command::task::handle_task_list;
             return handle_task_list(state, agent, since, &working_dir_for_config).await;
         }
@@ -229,11 +247,22 @@ async fn main() -> Result<()> {
         }) => {
             use crate::command::agent::handle_agent_search;
             return handle_agent_search(
-                tags, capabilities, name_pattern, version, logic,
-                include_invalid, registry_url, &working_dir_for_config,
-            ).await;
+                tags,
+                capabilities,
+                name_pattern,
+                version,
+                logic,
+                include_invalid,
+                registry_url,
+                &working_dir_for_config,
+            )
+            .await;
         }
-        Some(Commands::AgentInfo { name, version, json }) => {
+        Some(Commands::AgentInfo {
+            name,
+            version,
+            json,
+        }) => {
             use crate::command::agent::handle_agent_info;
             return handle_agent_info(name, version, json, &working_dir_for_config).await;
         }

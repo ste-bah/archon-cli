@@ -60,11 +60,7 @@ pub fn build_llm_provider(
     cfg: &LlmConfig,
     http: Arc<reqwest::Client>,
 ) -> Result<Arc<dyn LlmProvider>, ProviderError> {
-    let policy = cfg
-        .retry
-        .clone()
-        .map(RetryPolicy::from)
-        .unwrap_or_default();
+    let policy = cfg.retry.clone().map(RetryPolicy::from).unwrap_or_default();
     build_llm_provider_with_policy(cfg, http, policy)
 }
 
@@ -92,13 +88,13 @@ pub fn build_llm_provider_with_policy(
     };
 
     let inner: Arc<dyn LlmProvider> = match descriptor.compat_kind {
-        CompatKind::OpenAiCompat => Arc::new(OpenAiCompatProvider::new(
-            descriptor, http, api_key,
-        )),
+        CompatKind::OpenAiCompat => Arc::new(OpenAiCompatProvider::new(descriptor, http, api_key)),
         CompatKind::Native => dispatch_native(cfg, descriptor, http, api_key)?,
     };
 
-    Ok(Arc::new(RetryProvider::<dyn LlmProvider>::new(inner, policy)))
+    Ok(Arc::new(RetryProvider::<dyn LlmProvider>::new(
+        inner, policy,
+    )))
 }
 
 /// The **one** allowed `match descriptor.id` site in the whole providers

@@ -159,17 +159,13 @@ impl PipelineStateStore {
             )));
         }
 
-        let run: PipelineRun = serde_json::from_str(body)
-            .map_err(|e| PipelineError::StateCorrupted(e.to_string()))?;
+        let run: PipelineRun =
+            serde_json::from_str(body).map_err(|e| PipelineError::StateCorrupted(e.to_string()))?;
         Ok(run)
     }
 
     /// Append an audit event as a single JSONL line to `audit.log`.
-    pub fn append_audit(
-        &self,
-        id: PipelineId,
-        event: &AuditEvent,
-    ) -> Result<(), PipelineError> {
+    pub fn append_audit(&self, id: PipelineId, event: &AuditEvent) -> Result<(), PipelineError> {
         let line = AuditLine {
             ts: Utc::now().to_rfc3339(),
             event: event.clone(),
@@ -221,17 +217,13 @@ impl PipelineStateStore {
             return Ok(None);
         }
         let raw = fs::read_to_string(&path)?;
-        let value: serde_json::Value = serde_json::from_str(&raw)
-            .map_err(|e| PipelineError::StateCorrupted(e.to_string()))?;
+        let value: serde_json::Value =
+            serde_json::from_str(&raw).map_err(|e| PipelineError::StateCorrupted(e.to_string()))?;
         Ok(Some(value))
     }
 
     /// Delete a single step checkpoint, ignoring `NotFound`.
-    pub fn delete_checkpoint(
-        &self,
-        id: PipelineId,
-        step_id: &str,
-    ) -> Result<(), PipelineError> {
+    pub fn delete_checkpoint(&self, id: PipelineId, step_id: &str) -> Result<(), PipelineError> {
         let path = self.checkpoint_path(id, step_id);
         match fs::remove_file(&path) {
             Ok(()) => Ok(()),
@@ -294,14 +286,11 @@ impl PipelineStateStore {
     }
 
     /// Load a previously saved pipeline spec from `spec.json`.
-    pub fn load_spec(
-        &self,
-        id: PipelineId,
-    ) -> Result<crate::spec::PipelineSpec, PipelineError> {
+    pub fn load_spec(&self, id: PipelineId) -> Result<crate::spec::PipelineSpec, PipelineError> {
         let path = self.spec_path(id);
         let raw = fs::read_to_string(&path)?;
-        let spec: crate::spec::PipelineSpec = serde_json::from_str(&raw)
-            .map_err(|e| PipelineError::StateCorrupted(e.to_string()))?;
+        let spec: crate::spec::PipelineSpec =
+            serde_json::from_str(&raw).map_err(|e| PipelineError::StateCorrupted(e.to_string()))?;
         Ok(spec)
     }
 
@@ -459,7 +448,12 @@ mod tests {
         let run = sample_run();
         store.create(&run).unwrap();
         store
-            .append_audit(run.id, &AuditEvent::Started { spec_hash: "x".into() })
+            .append_audit(
+                run.id,
+                &AuditEvent::Started {
+                    spec_hash: "x".into(),
+                },
+            )
             .unwrap();
         store
             .write_checkpoint(run.id, "s1", &serde_json::json!({"ok": true}))

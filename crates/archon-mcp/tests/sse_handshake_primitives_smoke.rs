@@ -16,10 +16,10 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
+use axum::Router;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::routing::get;
-use axum::Router;
-use futures_util::{stream, StreamExt};
+use futures_util::{StreamExt, stream};
 use tokio::net::TcpListener;
 
 use archon_mcp::sse_transport::create_sse_transport;
@@ -31,10 +31,11 @@ const MCP_INITIALIZE_REQUEST: &str = r#"{"jsonrpc":"2.0","id":1,"method":"initia
 const MCP_INITIALIZE_RESPONSE: &str = r#"{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05","capabilities":{},"serverInfo":{"name":"mock-server","version":"0.1"}}}"#;
 
 /// Minimal MCP initialized NOTIFICATION shape.
-const MCP_INITIALIZED_NOTIFICATION: &str = r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#;
+const MCP_INITIALIZED_NOTIFICATION: &str =
+    r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#;
 
-async fn handshake_handler(
-) -> Sse<impl futures_util::Stream<Item = Result<Event, std::convert::Infallible>>> {
+async fn handshake_handler()
+-> Sse<impl futures_util::Stream<Item = Result<Event, std::convert::Infallible>>> {
     let frames = vec![
         Ok(Event::default().data(MCP_INITIALIZE_REQUEST)),
         Ok(Event::default().data(MCP_INITIALIZE_RESPONSE)),
@@ -85,22 +86,19 @@ async fn sse_frame_parser_decodes_mcp_initialize_request_response_notification()
     assert_eq!(frames[2].data, MCP_INITIALIZED_NOTIFICATION);
 
     // Verify JSON shape of each frame is real MCP payload.
-    let req: serde_json::Value =
-        serde_json::from_str(&frames[0].data).expect("req parses");
+    let req: serde_json::Value = serde_json::from_str(&frames[0].data).expect("req parses");
     assert_eq!(req["jsonrpc"], "2.0");
     assert_eq!(req["method"], "initialize");
     assert_eq!(req["params"]["protocolVersion"], "2024-11-05");
     assert_eq!(req["params"]["clientInfo"]["name"], "archon-cli");
 
-    let resp: serde_json::Value =
-        serde_json::from_str(&frames[1].data).expect("resp parses");
+    let resp: serde_json::Value = serde_json::from_str(&frames[1].data).expect("resp parses");
     assert_eq!(resp["jsonrpc"], "2.0");
     assert_eq!(resp["id"], 1);
     assert!(resp["result"].is_object());
     assert_eq!(resp["result"]["protocolVersion"], "2024-11-05");
 
-    let notif: serde_json::Value =
-        serde_json::from_str(&frames[2].data).expect("notif parses");
+    let notif: serde_json::Value = serde_json::from_str(&frames[2].data).expect("notif parses");
     assert_eq!(notif["jsonrpc"], "2.0");
     assert_eq!(notif["method"], "notifications/initialized");
 

@@ -62,5 +62,5 @@ pub trait ChannelMetricSink: Send + Sync {
 pub mod channel;
 pub mod server;
 
-pub use channel::{format_prometheus, ChannelMetrics, ChannelMetricsSnapshot};
+pub use channel::{ChannelMetrics, ChannelMetricsSnapshot, format_prometheus};
 pub use server::{serve_metrics, serve_metrics_on};

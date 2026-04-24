@@ -104,18 +104,16 @@ pub(super) async fn handle_tui_event(
             // priority branch (event_loop/input.rs) routes Up/Down/Enter/Esc
             // and render dispatch (render/body.rs draw_message_selector)
             // draws it.
-            app.message_selector = Some(
-                crate::screens::message_selector::MessageSelector::new(messages),
-            );
+            app.message_selector = Some(crate::screens::message_selector::MessageSelector::new(
+                messages,
+            ));
         }
         TuiEvent::ShowSkillsMenu(skills) => {
             // TASK-TUI-627 + followup: /skills opens this overlay; input
             // priority branch (event_loop/input.rs) routes Up/Down/Enter/Esc
             // and render dispatch (render/body.rs draw_skills_menu) draws
             // it. Enter injects `/{skill-name} ` into the input buffer.
-            app.skills_menu = Some(
-                crate::screens::skills_menu::SkillsMenu::new(skills),
-            );
+            app.skills_menu = Some(crate::screens::skills_menu::SkillsMenu::new(skills));
         }
         TuiEvent::OpenView(view_id) => {
             // TASK-AGS-822: placeholder handler. Full view rendering

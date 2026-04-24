@@ -15,11 +15,11 @@
 //! the agent registry (e.g. `/create-agent`) will gracefully fail with
 //! an error string rather than panicking.
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use archon_tools::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
 
-use super::{builtin, SkillContext, SkillOutput};
+use super::{SkillContext, SkillOutput, builtin};
 
 pub struct SkillTool;
 
@@ -113,9 +113,7 @@ impl Tool for SkillTool {
                     SkillOutput::Error(e) => ToolResult::error(e),
                 }
             }
-            other => ToolResult::error(format!(
-                "action must be 'list' or 'invoke', got '{other}'"
-            )),
+            other => ToolResult::error(format!("action must be 'list' or 'invoke', got '{other}'")),
         }
     }
 
@@ -143,9 +141,7 @@ mod tests {
     #[tokio::test]
     async fn skill_tool_lists_builtins() {
         let tool = SkillTool;
-        let result = tool
-            .execute(json!({ "action": "list" }), &ctx())
-            .await;
+        let result = tool.execute(json!({ "action": "list" }), &ctx()).await;
         assert!(!result.is_error);
         // The output is a JSON array of {name, description} objects.
         let parsed: Value = serde_json::from_str(&result.content).unwrap();
@@ -160,9 +156,7 @@ mod tests {
     #[tokio::test]
     async fn skill_tool_invoke_requires_name() {
         let tool = SkillTool;
-        let result = tool
-            .execute(json!({ "action": "invoke" }), &ctx())
-            .await;
+        let result = tool.execute(json!({ "action": "invoke" }), &ctx()).await;
         assert!(result.is_error);
         assert!(result.content.contains("name"));
     }
@@ -183,9 +177,7 @@ mod tests {
     #[tokio::test]
     async fn skill_tool_rejects_bad_action() {
         let tool = SkillTool;
-        let result = tool
-            .execute(json!({ "action": "delete" }), &ctx())
-            .await;
+        let result = tool.execute(json!({ "action": "delete" }), &ctx()).await;
         assert!(result.is_error);
         assert!(result.content.contains("action"));
     }

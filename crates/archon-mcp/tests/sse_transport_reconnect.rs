@@ -18,13 +18,13 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
+use axum::Router;
 use axum::extract::State;
 use axum::http::HeaderMap;
 use axum::response::sse::{Event, Sse};
 use axum::routing::get;
-use axum::Router;
-use futures_util::stream::{self, Stream};
 use futures_util::StreamExt;
+use futures_util::stream::{self, Stream};
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 
@@ -42,8 +42,7 @@ struct MockState {
     last_event_ids: Arc<Mutex<Vec<String>>>,
 }
 
-type BoxedEventStream =
-    Pin<Box<dyn Stream<Item = Result<Event, Infallible>> + Send + 'static>>;
+type BoxedEventStream = Pin<Box<dyn Stream<Item = Result<Event, Infallible>> + Send + 'static>>;
 
 async fn sse_handler(State(state): State<MockState>, headers: HeaderMap) -> Sse<BoxedEventStream> {
     let get_n = state.get_count.fetch_add(1, Ordering::SeqCst);
@@ -114,7 +113,7 @@ async fn sse_auto_reconnects_and_sends_last_event_id() {
     let config = ReconnectConfig {
         default_retry_ms: 50, // short to keep test fast
         max_retries: 5,
-        jitter_ratio: 0.0,    // deterministic for test
+        jitter_ratio: 0.0, // deterministic for test
     };
 
     tokio::spawn(pump_sse_stream_with_reconnect(
@@ -251,7 +250,9 @@ async fn sse_retry_field_updates_backoff() {
             vec![
                 // retry: 30000 (30 seconds) — no reconnect should happen
                 // inside the test's 1-second wait window.
-                Event::default().retry(Duration::from_millis(30_000)).data("first"),
+                Event::default()
+                    .retry(Duration::from_millis(30_000))
+                    .data("first"),
             ]
         } else {
             vec![Event::default().id("99").data("late-reconnect")]

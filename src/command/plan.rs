@@ -78,8 +78,8 @@ impl PlanHandler {
         let base: &std::path::Path = match ctx.working_dir.as_ref() {
             Some(p) => p.as_path(),
             None => {
-                cwd_owned = std::env::current_dir()
-                    .unwrap_or_else(|_| std::path::PathBuf::from("."));
+                cwd_owned =
+                    std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
                 // Widen lifetime via the owned buffer above.
                 // (We can't return a reference to a local without it.)
                 return plan_file::plan_path(&cwd_owned);
@@ -90,11 +90,7 @@ impl PlanHandler {
 }
 
 impl CommandHandler for PlanHandler {
-    fn execute(
-        &self,
-        ctx: &mut CommandContext,
-        args: &[String],
-    ) -> anyhow::Result<()> {
+    fn execute(&self, ctx: &mut CommandContext, args: &[String]) -> anyhow::Result<()> {
         // Normalise the first positional arg — whitespace-tolerant to
         // match the /permissions precedent at permissions.rs:258.
         let joined = args.join(" ");
@@ -380,7 +376,12 @@ mod tests {
 
         PlanHandler.execute(&mut ctx, &[]).unwrap();
         let events = drain_tui_events(&mut rx);
-        assert_eq!(events.len(), 1, "expected a single TextDelta; got {:?}", events);
+        assert_eq!(
+            events.len(),
+            1,
+            "expected a single TextDelta; got {:?}",
+            events
+        );
         match &events[0] {
             TuiEvent::TextDelta(s) => {
                 assert!(

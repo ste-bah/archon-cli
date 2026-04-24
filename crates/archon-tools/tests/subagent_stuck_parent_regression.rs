@@ -35,13 +35,13 @@ use std::sync::Arc;
 use std::sync::Once;
 use std::time::{Duration, Instant};
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use archon_tools::agent_tool::{AgentTool, SubagentRequest};
 use archon_tools::background_agents::{AgentStatus, BACKGROUND_AGENTS};
 use archon_tools::subagent_executor::{
-    install_subagent_executor, ExecutorError, OutcomeSideEffects, SubagentClassification,
-    SubagentExecutor,
+    ExecutorError, OutcomeSideEffects, SubagentClassification, SubagentExecutor,
+    install_subagent_executor,
 };
 use archon_tools::tool::{AgentMode, Tool, ToolContext};
 use async_trait::async_trait;
@@ -67,12 +67,7 @@ impl SubagentExecutor for StubExecutor {
         Ok(String::new())
     }
 
-    async fn on_inner_complete(
-        &self,
-        _subagent_id: String,
-        _result: Result<String, String>,
-    ) {
-    }
+    async fn on_inner_complete(&self, _subagent_id: String, _result: Result<String, String>) {}
 
     async fn on_visible_complete(
         &self,
@@ -202,9 +197,7 @@ async fn tc_tui_subagent_05_stuck_parent_guard() {
     assert!(
         matches!(
             status,
-            Some(AgentStatus::Running)
-                | Some(AgentStatus::Finished)
-                | Some(AgentStatus::Failed)
+            Some(AgentStatus::Running) | Some(AgentStatus::Finished) | Some(AgentStatus::Failed)
         ),
         "subagent must be registered in BACKGROUND_AGENTS after execute; got {status:?}"
     );
@@ -232,8 +225,7 @@ async fn tc_tui_subagent_05_stuck_parent_guard() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn tc_tui_subagent_05_no_archon_core_spawn_path() {
-    const AGENT_RS_PATH: &str =
-        concat!(env!("CARGO_MANIFEST_DIR"), "/../archon-core/src/agent.rs");
+    const AGENT_RS_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../archon-core/src/agent.rs");
 
     let src = std::fs::read_to_string(AGENT_RS_PATH).unwrap_or_else(|e| {
         panic!(

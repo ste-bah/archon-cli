@@ -173,7 +173,10 @@ async fn stream_cancel_mid_stream_drops_server_connection() {
 
     // Peak >= 1 confirms we did reach a live state.
     let peak = state.peak.load(Ordering::SeqCst);
-    assert!(peak >= 1, "peak active connections should be >= 1; got {peak}");
+    assert!(
+        peak >= 1,
+        "peak active connections should be >= 1; got {peak}"
+    );
 
     server.abort();
 }

@@ -2,11 +2,11 @@
 //! Layer 1 module — no imports from screens/ or app/.
 
 use ratatui::Frame;
-use ratatui::layout::{Rect, Constraint};
-use ratatui::widgets::{Block, Borders, Table, Row};
+use ratatui::layout::{Constraint, Rect};
+use ratatui::widgets::{Block, Borders, Row, Table};
 
-use crate::virtual_list::VirtualList;
 use crate::theme::Theme;
+use crate::virtual_list::VirtualList;
 
 /// Task identifier.
 pub type TaskId = String;
@@ -140,9 +140,7 @@ impl TaskOverlay {
 
     /// Render the tasks overlay into the given area.
     pub fn render(&self, f: &mut Frame, area: Rect, _theme: &Theme) {
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title("Tasks");
+        let block = Block::default().borders(Borders::ALL).title("Tasks");
 
         let widths = [
             Constraint::Percentage(25),
@@ -151,14 +149,15 @@ impl TaskOverlay {
         ];
 
         let header = Row::new(["ID", "Elapsed", "Status"]);
-        let rows: Vec<Row> = self.rows.visible_items().iter().map(|r| {
-            let elapsed = format_elapsed(r.elapsed_secs);
-            Row::new([
-                r.id.clone(),
-                elapsed,
-                r.status.clone(),
-            ])
-        }).collect();
+        let rows: Vec<Row> = self
+            .rows
+            .visible_items()
+            .iter()
+            .map(|r| {
+                let elapsed = format_elapsed(r.elapsed_secs);
+                Row::new([r.id.clone(), elapsed, r.status.clone()])
+            })
+            .collect();
 
         let table = Table::new(std::iter::once(header).chain(rows), &widths).block(block);
         f.render_widget(table, area);
@@ -218,17 +217,26 @@ mod tests {
 
     #[test]
     fn cancel_selected_emits_action() {
-        let mut overlay = TaskOverlay::new(vec![row("task-1", 10, "running"), row("task-2", 20, "running")]);
+        let mut overlay = TaskOverlay::new(vec![
+            row("task-1", 10, "running"),
+            row("task-2", 20, "running"),
+        ]);
         overlay.move_down();
         overlay.cancel_selected();
-        assert_eq!(overlay.last_action(), TaskAction::CancelRequested("task-2".into()));
+        assert_eq!(
+            overlay.last_action(),
+            TaskAction::CancelRequested("task-2".into())
+        );
     }
 
     #[test]
     fn inspect_selected_emits_action() {
         let mut overlay = TaskOverlay::new(vec![row("task-1", 10, "running")]);
         overlay.inspect_selected();
-        assert_eq!(overlay.last_action(), TaskAction::InspectRequested("task-1".into()));
+        assert_eq!(
+            overlay.last_action(),
+            TaskAction::InspectRequested("task-1".into())
+        );
     }
 
     #[test]

@@ -136,11 +136,7 @@ impl Default for CheckpointHandler {
 }
 
 impl CommandHandler for CheckpointHandler {
-    fn execute(
-        &self,
-        ctx: &mut CommandContext,
-        args: &[String],
-    ) -> anyhow::Result<()> {
+    fn execute(&self, ctx: &mut CommandContext, args: &[String]) -> anyhow::Result<()> {
         // R6: require session_id. `build_command_context` populates
         // this unconditionally from `SlashCommandContext::session_id`
         // per the AGS-815 fork.rs precedent, so at the real dispatch
@@ -181,29 +177,20 @@ impl CommandHandler for CheckpointHandler {
                         for s in &snapshots {
                             out.push_str(&format!(
                                 "  turn {} | {} | {} | {}\n",
-                                s.turn_number,
-                                s.tool_name,
-                                s.file_path,
-                                s.timestamp
+                                s.turn_number, s.tool_name, s.file_path, s.timestamp
                             ));
                         }
                         ctx.emit(TuiEvent::TextDelta(out));
                     }
                     Err(e) => {
-                        ctx.emit(TuiEvent::Error(format!(
-                            "Checkpoint list error: {e}"
-                        )));
+                        ctx.emit(TuiEvent::Error(format!("Checkpoint list error: {e}")));
                     }
                 },
                 Err(e) => {
-                    ctx.emit(TuiEvent::Error(format!(
-                        "Checkpoint store error: {e}"
-                    )));
+                    ctx.emit(TuiEvent::Error(format!("Checkpoint store error: {e}")));
                 }
             }
-        } else if let Some(file_path) =
-            arg.strip_prefix("restore").map(|s| s.trim())
-        {
+        } else if let Some(file_path) = arg.strip_prefix("restore").map(|s| s.trim()) {
             if file_path.is_empty() {
                 ctx.emit(TuiEvent::Error(
                     "Usage: /checkpoint restore <file_path>".into(),
@@ -212,27 +199,20 @@ impl CommandHandler for CheckpointHandler {
                 match archon_session::checkpoint::CheckpointStore::open(&ckpt_path) {
                     Ok(store) => match store.restore(session_id, file_path) {
                         Ok(()) => {
-                            ctx.emit(TuiEvent::TextDelta(
-                                format!("\nRestored: {file_path}\n"),
-                            ));
+                            ctx.emit(TuiEvent::TextDelta(format!("\nRestored: {file_path}\n")));
                         }
                         Err(e) => {
-                            ctx.emit(TuiEvent::Error(
-                                format!("Restore failed: {e}"),
-                            ));
+                            ctx.emit(TuiEvent::Error(format!("Restore failed: {e}")));
                         }
                     },
                     Err(e) => {
-                        ctx.emit(TuiEvent::Error(format!(
-                            "Checkpoint store error: {e}"
-                        )));
+                        ctx.emit(TuiEvent::Error(format!("Checkpoint store error: {e}")));
                     }
                 }
             }
         } else {
             ctx.emit(TuiEvent::TextDelta(
-                "\nUsage: /checkpoint list | /checkpoint restore <file_path>\n"
-                    .into(),
+                "\nUsage: /checkpoint list | /checkpoint restore <file_path>\n".into(),
             ));
         }
 
@@ -324,9 +304,7 @@ mod tests {
     /// supplied `session_id`. Mirrors the `make_rename_ctx(session_id)`
     /// fixture in `src/command/rename.rs` — DIRECT pattern, no
     /// snapshot, no effect slot.
-    fn make_ckpt_ctx(
-        session_id: Option<String>,
-    ) -> (CommandContext, mpsc::Receiver<TuiEvent>) {
+    fn make_ckpt_ctx(session_id: Option<String>) -> (CommandContext, mpsc::Receiver<TuiEvent>) {
         // TASK-AGS-POST-6-SHARED-FIXTURES-V2: migrated to CtxBuilder.
         crate::command::test_support::CtxBuilder::new()
             .with_session_id_opt(session_id)
@@ -432,16 +410,10 @@ mod tests {
         let seed_file = tmp.path().join("seed.txt");
         std::fs::write(&seed_file, b"hello").expect("seed file write");
         {
-            let store =
-                archon_session::checkpoint::CheckpointStore::open(&ckpt_path)
-                    .expect("open seed store");
+            let store = archon_session::checkpoint::CheckpointStore::open(&ckpt_path)
+                .expect("open seed store");
             store
-                .snapshot(
-                    sid,
-                    seed_file.to_str().expect("utf8"),
-                    1,
-                    "Edit",
-                )
+                .snapshot(sid, seed_file.to_str().expect("utf8"), 1, "Edit")
                 .expect("seed snapshot");
         }
 
@@ -478,9 +450,7 @@ mod tests {
                      newline, got: {text:?}"
                 );
             }
-            other => panic!(
-                "expected TuiEvent::TextDelta(..), got: {other:?}"
-            ),
+            other => panic!("expected TuiEvent::TextDelta(..), got: {other:?}"),
         }
     }
 
@@ -525,17 +495,13 @@ mod tests {
     /// `env_lock()` serialization as
     /// `execute_list_empty_emits_no_checkpoints_textdelta`.
     #[tokio::test]
-    async fn dispatcher_routes_slash_checkpoint_list_with_session_emits_textdelta(
-    ) {
+    async fn dispatcher_routes_slash_checkpoint_list_with_session_emits_textdelta() {
         let _env_guard = env_lock().lock().expect("env_lock");
         let tmp = tempfile::tempdir().expect("tempdir");
         let _env = EnvGuard::set(tmp.path());
 
         let mut builder = RegistryBuilder::new();
-        builder.insert_primary(
-            "checkpoint",
-            Arc::new(CheckpointHandler::new()),
-        );
+        builder.insert_primary("checkpoint", Arc::new(CheckpointHandler::new()));
         let registry = Arc::new(builder.build());
         let dispatcher = Dispatcher::new(registry);
 
@@ -573,10 +539,7 @@ mod tests {
     #[test]
     fn dispatcher_routes_slash_checkpoint_without_session_returns_err() {
         let mut builder = RegistryBuilder::new();
-        builder.insert_primary(
-            "checkpoint",
-            Arc::new(CheckpointHandler::new()),
-        );
+        builder.insert_primary("checkpoint", Arc::new(CheckpointHandler::new()));
         let registry = Arc::new(builder.build());
         let dispatcher = Dispatcher::new(registry);
 
@@ -589,8 +552,7 @@ mod tests {
         );
         let msg = format!("{:#}", res.unwrap_err());
         assert!(
-            msg.contains("session_id")
-                && msg.contains("build_command_context"),
+            msg.contains("session_id") && msg.contains("build_command_context"),
             "Err message must mention both 'session_id' and \
              'build_command_context', got: {msg}"
         );

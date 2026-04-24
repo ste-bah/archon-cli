@@ -93,11 +93,7 @@ impl Default for ClearHandler {
 }
 
 impl CommandHandler for ClearHandler {
-    fn execute(
-        &self,
-        _ctx: &mut CommandContext,
-        _args: &[String],
-    ) -> anyhow::Result<()> {
+    fn execute(&self, _ctx: &mut CommandContext, _args: &[String]) -> anyhow::Result<()> {
         // THIN-WRAPPER no-op. Byte-identical to the shipped
         // `declare_handler!` macro body (registry.rs:1163-1180): return
         // Ok(()) WITHOUT emitting any TuiEvent. Real body-migrate

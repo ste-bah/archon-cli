@@ -38,8 +38,7 @@ fn form_body(pairs: &[(&str, &str)]) -> String {
 }
 
 /// RFC 7636 §4.1 — unreserved URL-safe alphabet for code_verifier.
-const UNRESERVED: &[u8] =
-    b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
+const UNRESERVED: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
 
 /// Length of the generated code_verifier. 64 is comfortably inside the
 /// RFC 7636 bounds of [43, 128] and gives 64 * log2(66) ≈ 387 bits of entropy.
@@ -232,7 +231,10 @@ mod tests {
     #[test]
     fn code_challenge_rfc7636_appendix_b() {
         let v = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
-        assert_eq!(code_challenge(v), "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM");
+        assert_eq!(
+            code_challenge(v),
+            "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
+        );
     }
 
     #[test]

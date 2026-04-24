@@ -62,9 +62,10 @@ pub async fn spawn_mock_server() -> MockServer {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/v1/chat/completions"))
-        .respond_with(ResponseTemplate::new(200).set_body_string(
-            r#"{"choices":[{"message":{"content":"mock"}}]}"#,
-        ))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(r#"{"choices":[{"message":{"content":"mock"}}]}"#),
+        )
         .mount(&server)
         .await;
     server

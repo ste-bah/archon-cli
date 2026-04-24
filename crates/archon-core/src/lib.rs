@@ -1,7 +1,7 @@
-pub mod metrics;
 pub mod agent;
 pub mod agents;
 pub mod archonmd;
+pub mod metrics;
 pub use metrics::ChannelMetricSink;
 // TASK-AGS-101/104: BackgroundAgentRegistry. The module was relocated
 // to archon-tools in TASK-AGS-104 to break the
@@ -9,8 +9,8 @@ pub use metrics::ChannelMetricSink;
 // existing `archon_core::background_agents::*` paths keep working.
 pub use archon_tools::background_agents;
 pub use archon_tools::background_agents::{
-    AgentStatus, BackgroundAgentHandle, BackgroundAgentRegistry, BackgroundAgentRegistryApi,
-    RegistryError, RegistryEvent, BACKGROUND_AGENTS,
+    AgentStatus, BACKGROUND_AGENTS, BackgroundAgentHandle, BackgroundAgentRegistry,
+    BackgroundAgentRegistryApi, RegistryError, RegistryEvent,
 };
 pub mod cli_flags;
 pub mod commands;
@@ -34,10 +34,10 @@ pub mod output_format;
 // Lives in the library so both `dispatch.rs` (interception append) AND
 // the bin-crate `PlanHandler` (read/open) import from a single source
 // without a cyclic dep.
-pub mod plan_file;
 pub mod output_style;
-pub mod patterns;
 pub mod output_style_loader;
+pub mod patterns;
+pub mod plan_file;
 pub mod print_mode;
 pub mod reasoning;
 pub mod remote;

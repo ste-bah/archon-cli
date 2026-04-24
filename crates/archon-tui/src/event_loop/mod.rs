@@ -214,7 +214,7 @@ where
 
     loop {
         // Draw UI
-        terminal.draw(|frame| { crate::render::draw(frame, &mut app) })?;
+        terminal.draw(|frame| crate::render::draw(frame, &mut app))?;
 
         // Handle events: use shorter poll when animation is active
         let timeout = if app.input.ultrathink.active || app.thinking.active {

@@ -51,7 +51,9 @@ impl NotificationQueue {
     pub fn push(&mut self, level: Level, text: String, duration: std::time::Duration) -> u64 {
         let id = self.next_id;
         self.next_id += 1;
-        let expires_at = Instant::now().checked_add(duration).unwrap_or_else(Instant::now);
+        let expires_at = Instant::now()
+            .checked_add(duration)
+            .unwrap_or_else(Instant::now);
         self.notifications.push_back(Notification {
             id,
             level,
@@ -63,7 +65,11 @@ impl NotificationQueue {
 
     /// Remove all notifications whose `expires_at` has passed.
     pub fn tick(&mut self, now: Instant) {
-        while self.notifications.front().map_or(false, |n| n.expires_at <= now) {
+        while self
+            .notifications
+            .front()
+            .map_or(false, |n| n.expires_at <= now)
+        {
             self.notifications.pop_front();
         }
     }

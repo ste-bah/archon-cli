@@ -10,8 +10,8 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures_util::{stream, StreamExt};
-use serde_json::{json, Value};
+use futures_util::{StreamExt, stream};
+use serde_json::{Value, json};
 
 use super::{FanOutConfig, Pattern, PatternCtx, PatternError, PatternKind, PatternRegistry};
 
@@ -41,11 +41,7 @@ impl Pattern for FanOutFanInPattern {
         PatternKind::FanOut
     }
 
-    async fn execute(
-        &self,
-        input: Value,
-        ctx: PatternCtx,
-    ) -> Result<Value, PatternError> {
+    async fn execute(&self, input: Value, ctx: PatternCtx) -> Result<Value, PatternError> {
         let cfg = &self.config;
         let parallelism = cfg.workers.len().min(MAX_PARALLELISM);
 
@@ -53,16 +49,15 @@ impl Pattern for FanOutFanInPattern {
         let task_svc = ctx.task_service.clone();
         let worker_input = input.clone();
 
-        let results: Vec<Result<Value, PatternError>> = stream::iter(
-            cfg.workers.iter().cloned().map(move |worker_name| {
+        let results: Vec<Result<Value, PatternError>> =
+            stream::iter(cfg.workers.iter().cloned().map(move |worker_name| {
                 let svc = task_svc.clone();
                 let inp = worker_input.clone();
                 async move { svc.submit(&worker_name, inp).await }
-            }),
-        )
-        .buffer_unordered(parallelism)
-        .collect()
-        .await;
+            }))
+            .buffer_unordered(parallelism)
+            .collect()
+            .await;
 
         // Partition into successes and failures.
         let mut oks: Vec<Value> = Vec::new();
@@ -116,8 +111,8 @@ pub fn register(reg: &PatternRegistry, config: FanOutConfig) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     use async_trait::async_trait;
     use serde_json::json;
@@ -141,16 +136,10 @@ mod tests {
 
     #[async_trait]
     impl TaskServiceHandle for StubTaskService {
-        async fn submit(
-            &self,
-            agent: &str,
-            input: Value,
-        ) -> Result<Value, PatternError> {
+        async fn submit(&self, agent: &str, input: Value) -> Result<Value, PatternError> {
             self.call_count.fetch_add(1, Ordering::SeqCst);
             if self.fail_workers.contains(&agent.to_string()) {
-                return Err(PatternError::Execution(format!(
-                    "{agent} failed"
-                )));
+                return Err(PatternError::Execution(format!("{agent} failed")));
             }
             // Workers return their name + input. Aggregator merges.
             Ok(json!({"agent": agent, "input": input}))
@@ -197,10 +186,7 @@ mod tests {
         let pattern = FanOutFanInPattern::new(config);
         let ctx = make_ctx(svc);
 
-        let err = pattern
-            .execute(json!({"data": 1}), ctx)
-            .await
-            .unwrap_err();
+        let err = pattern.execute(json!({"data": 1}), ctx).await.unwrap_err();
         match err {
             PatternError::PartialResult { merged, errors } => {
                 assert!(!errors.is_empty(), "must report failed workers");
@@ -226,10 +212,7 @@ mod tests {
         let pattern = FanOutFanInPattern::new(config);
         let ctx = make_ctx(svc);
 
-        let err = pattern
-            .execute(json!({"data": 1}), ctx)
-            .await
-            .unwrap_err();
+        let err = pattern.execute(json!({"data": 1}), ctx).await.unwrap_err();
         match err {
             PatternError::Execution(msg) => {
                 assert!(

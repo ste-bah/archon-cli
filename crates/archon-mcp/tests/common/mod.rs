@@ -278,12 +278,7 @@ async fn mcp_sse(
         return Err(StatusCode::UNAUTHORIZED);
     }
 
-    let rx = state
-        .rx
-        .lock()
-        .await
-        .take()
-        .expect("mcp_sse called twice");
+    let rx = state.rx.lock().await.take().expect("mcp_sse called twice");
     let endpoint_data = state.post_path.clone();
 
     let endpoint_frame = futures_util::stream::once(async move {

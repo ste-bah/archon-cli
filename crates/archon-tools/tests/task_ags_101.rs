@@ -10,8 +10,8 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use archon_tools::background_agents::{
-    self, AgentStatus, BackgroundAgentHandle, BackgroundAgentRegistry,
-    BackgroundAgentRegistryApi, RegistryError, BACKGROUND_AGENTS,
+    self, AgentStatus, BACKGROUND_AGENTS, BackgroundAgentHandle, BackgroundAgentRegistry,
+    BackgroundAgentRegistryApi, RegistryError,
 };
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
@@ -98,7 +98,10 @@ async fn iter_running_excludes_finished_handles() {
     registry.register(finished).expect("register finished");
 
     let live = registry.iter_running();
-    assert!(live.contains(&running_id), "iter_running must include Running handle");
+    assert!(
+        live.contains(&running_id),
+        "iter_running must include Running handle"
+    );
     assert!(
         !live.contains(&finished_id),
         "iter_running must exclude Finished handle"

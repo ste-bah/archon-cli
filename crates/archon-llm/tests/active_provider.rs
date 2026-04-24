@@ -50,8 +50,7 @@ fn test_swap_changes_descriptor() {
                 api_key_env: Some(GROQ_VAR.into()),
                 retry: None,
             };
-            let active = ActiveProvider::new(&cfg_groq, http())
-                .expect("groq cfg builds");
+            let active = ActiveProvider::new(&cfg_groq, http()).expect("groq cfg builds");
             assert_eq!(active.current_descriptor().id, "groq");
 
             let cfg_deepseek = LlmConfig {
@@ -89,8 +88,7 @@ fn test_swap_failure_preserves_old_provider() {
             api_key_env: Some(GROQ_VAR.into()),
             retry: None,
         };
-        let active = ActiveProvider::new(&cfg_groq, http())
-            .expect("groq cfg builds");
+        let active = ActiveProvider::new(&cfg_groq, http()).expect("groq cfg builds");
         assert_eq!(active.current_descriptor().id, "groq");
 
         let cfg_bad = LlmConfig {
@@ -164,8 +162,7 @@ fn test_swap_missing_credential_preserves_old_provider() {
             api_key_env: Some(GROQ_VAR.into()),
             retry: None,
         };
-        let active =
-            ActiveProvider::new(&cfg_groq, http()).expect("groq builds");
+        let active = ActiveProvider::new(&cfg_groq, http()).expect("groq builds");
 
         let cfg_deepseek_no_env = LlmConfig {
             provider: "deepseek".into(),

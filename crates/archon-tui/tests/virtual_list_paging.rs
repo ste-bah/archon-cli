@@ -20,7 +20,8 @@ fn move_down_wraps_to_first() {
 fn page_up_down() {
     let items: Vec<i32> = (0..20).collect();
     let mut list = VirtualList::new(items, 5);
-    list.move_down(); list.move_down();
+    list.move_down();
+    list.move_down();
     list.page_up();
     assert!(list.selected_index() < 5);
 }

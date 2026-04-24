@@ -86,8 +86,7 @@ pub struct AgentSubagentExecutor {
     /// Shared pending resume messages slot (written from
     /// `Agent::process_message` SendMessage resume path, read from
     /// `run_to_completion` when building the runner).
-    pending_resume_messages:
-        Arc<Mutex<Option<Vec<serde_json::Value>>>>,
+    pending_resume_messages: Arc<Mutex<Option<Vec<serde_json::Value>>>>,
     /// Per-subagent worktree info cache. Populated inside
     /// `run_to_completion` when `isolation == "worktree"`; consumed by
     /// `on_visible_complete` when deciding clean-vs-preserved worktree
@@ -178,8 +177,7 @@ impl AgentSubagentExecutor {
             "TaskStop",
         ];
 
-        const DEFAULT_TOOLS: &[&str] =
-            &["Read", "Grep", "Glob", "Bash", "Write", "Edit"];
+        const DEFAULT_TOOLS: &[&str] = &["Read", "Grep", "Glob", "Bash", "Write", "Edit"];
 
         let base_allowed: Vec<&str> = if !request.allowed_tools.is_empty() {
             request
@@ -188,9 +186,7 @@ impl AgentSubagentExecutor {
                 .map(|s| s.as_str())
                 .filter(|n| !DENYLIST.contains(n))
                 .collect()
-        } else if let Some(def_tools) =
-            agent_def.and_then(|d| d.allowed_tools.as_ref())
-        {
+        } else if let Some(def_tools) = agent_def.and_then(|d| d.allowed_tools.as_ref()) {
             def_tools
                 .iter()
                 .map(|s| s.as_str())
@@ -211,11 +207,9 @@ impl AgentSubagentExecutor {
         // behavior as the old call at 2788. Sherlock's check on Q15
         // requires the AWAIT form at the subagent_mode site in
         // run_to_completion; this sync helper is fine to stay blocking.
-        let is_plan_mode =
-            self.parent_permission_mode.blocking_lock().as_str() == "plan";
+        let is_plan_mode = self.parent_permission_mode.blocking_lock().as_str() == "plan";
 
-        let mcp_scope: Option<&Vec<String>> =
-            agent_def.and_then(|d| d.mcp_servers.as_ref());
+        let mcp_scope: Option<&Vec<String>> = agent_def.and_then(|d| d.mcp_servers.as_ref());
 
         let final_allowed: Vec<&str> = base_allowed
             .into_iter()
@@ -296,12 +290,7 @@ impl SubagentExecutor for AgentSubagentExecutor {
         // internal manager id is used for status tracking. This is an
         // acceptable simplification given Q7's intent (avoid the
         // Arc<Mutex<Option<String>>> late-binding dance).
-        let manager_id = match self
-            .subagent_manager
-            .lock()
-            .await
-            .register(request.clone())
-        {
+        let manager_id = match self.subagent_manager.lock().await.register(request.clone()) {
             Ok(id) => id,
             Err(e) => {
                 return Err(ExecutorError::Internal(format!(
@@ -354,41 +343,42 @@ impl SubagentExecutor for AgentSubagentExecutor {
         // Predicate translated per mapping doc Section 1f:
         // explicit  fork → `request.subagent_type == Some("fork") && ctx.in_fork`
         // implicit  fork → `request.subagent_type.is_none() && is_fork_enabled() && ctx.in_fork`
-        let resolved_def: Option<CustomAgentDefinition> = if let Some(ref agent_type) =
-            request.subagent_type
-        {
-            if agent_type == "fork" && ctx.in_fork {
-                let _ = self.subagent_manager.lock().await.mark_failed(
-                    &manager_id,
-                    "Cannot fork inside a fork child".into(),
-                );
-                return Err(ExecutorError::Internal(
-                    "Cannot fork inside a fork child".into(),
-                ));
-            }
-            let reg = self
-                .agent_registry
-                .read()
-                .expect("agent registry lock poisoned");
-            reg.resolve(agent_type).cloned()
-        } else if crate::agents::built_in::is_fork_enabled() {
-            if ctx.in_fork {
-                let _ = self.subagent_manager.lock().await.mark_failed(
-                    &manager_id,
-                    "Cannot fork inside a fork child".into(),
-                );
-                return Err(ExecutorError::Internal(
-                    "Cannot fork inside a fork child".into(),
-                ));
-            }
-            let reg = self
-                .agent_registry
-                .read()
-                .expect("agent registry lock poisoned");
-            reg.resolve("fork").cloned()
-        } else {
-            None
-        };
+        let resolved_def: Option<CustomAgentDefinition> =
+            if let Some(ref agent_type) = request.subagent_type {
+                if agent_type == "fork" && ctx.in_fork {
+                    let _ = self
+                        .subagent_manager
+                        .lock()
+                        .await
+                        .mark_failed(&manager_id, "Cannot fork inside a fork child".into());
+                    return Err(ExecutorError::Internal(
+                        "Cannot fork inside a fork child".into(),
+                    ));
+                }
+                let reg = self
+                    .agent_registry
+                    .read()
+                    .expect("agent registry lock poisoned");
+                reg.resolve(agent_type).cloned()
+            } else if crate::agents::built_in::is_fork_enabled() {
+                if ctx.in_fork {
+                    let _ = self
+                        .subagent_manager
+                        .lock()
+                        .await
+                        .mark_failed(&manager_id, "Cannot fork inside a fork child".into());
+                    return Err(ExecutorError::Internal(
+                        "Cannot fork inside a fork child".into(),
+                    ));
+                }
+                let reg = self
+                    .agent_registry
+                    .read()
+                    .expect("agent registry lock poisoned");
+                reg.resolve("fork").cloned()
+            } else {
+                None
+            };
 
         // --- SYSTEM PROMPT ASSEMBLY ----------------------------------
         let base_system_prompt = resolved_def
@@ -427,9 +417,7 @@ impl SubagentExecutor for AgentSubagentExecutor {
                 } else {
                     parent_text
                 };
-                format!(
-                    "<parent-context>\n{truncated}\n</parent-context>\n\n{base_system_prompt}"
-                )
+                format!("<parent-context>\n{truncated}\n</parent-context>\n\n{base_system_prompt}")
             }
         } else {
             base_system_prompt
@@ -441,14 +429,11 @@ impl SubagentExecutor for AgentSubagentExecutor {
             .map(|d| d.omit_claude_md)
             .unwrap_or(false);
         let system_prompt = if !omit_claude_md {
-            let archon_md =
-                crate::archonmd::load_hierarchical_archon_md(&self.working_dir);
+            let archon_md = crate::archonmd::load_hierarchical_archon_md(&self.working_dir);
             if archon_md.is_empty() {
                 system_prompt
             } else {
-                format!(
-                    "{system_prompt}\n\n<archon-md>\n{archon_md}\n</archon-md>"
-                )
+                format!("{system_prompt}\n\n<archon-md>\n{archon_md}\n</archon-md>")
             }
         } else {
             system_prompt
@@ -495,11 +480,7 @@ impl SubagentExecutor for AgentSubagentExecutor {
                     Ok(hook_pairs) => {
                         if let Some(ref registry) = self.hook_registry {
                             for (event, config) in hook_pairs {
-                                registry.register_session_hook(
-                                    &self.session_id,
-                                    event,
-                                    config,
-                                );
+                                registry.register_session_hook(&self.session_id, event, config);
                             }
                             tracing::debug!(agent_type = ?request.subagent_type, "registered session-scoped hooks from agent definition");
                         }
@@ -577,9 +558,7 @@ impl SubagentExecutor for AgentSubagentExecutor {
                     );
                     if !memories.is_empty() {
                         let mem_block = memories.join("\n---\n");
-                        format!(
-                            "{system_prompt}\n\n<agent-memory>\n{mem_block}\n</agent-memory>"
-                        )
+                        format!("{system_prompt}\n\n<agent-memory>\n{mem_block}\n</agent-memory>")
                     } else {
                         system_prompt
                     }
@@ -629,8 +608,7 @@ impl SubagentExecutor for AgentSubagentExecutor {
         };
 
         // Build the subagent tool registry.
-        let (tool_defs, tool_reg) =
-            self.build_subagent_tools(&request, resolved_def.as_ref());
+        let (tool_defs, tool_reg) = self.build_subagent_tools(&request, resolved_def.as_ref());
 
         // Create worktree if isolation requests it.
         let worktree_info = if isolation.as_deref() == Some("worktree") {
@@ -664,9 +642,7 @@ impl SubagentExecutor for AgentSubagentExecutor {
             cache_id.clone(),
             MemoryMeta {
                 agent_type: resolved_def.as_ref().map(|d| d.agent_type.clone()),
-                memory_scope: resolved_def
-                    .as_ref()
-                    .and_then(|d| d.memory_scope.clone()),
+                memory_scope: resolved_def.as_ref().and_then(|d| d.memory_scope.clone()),
                 tags: resolved_def
                     .as_ref()
                     .map(|d| d.tags.clone())
@@ -677,18 +653,12 @@ impl SubagentExecutor for AgentSubagentExecutor {
         let working_dir = worktree_info
             .as_ref()
             .map(|wt| wt.worktree_path.clone())
-            .or_else(|| {
-                request
-                    .cwd
-                    .as_ref()
-                    .map(std::path::PathBuf::from)
-            })
+            .or_else(|| request.cwd.as_ref().map(std::path::PathBuf::from))
             .unwrap_or_else(|| self.working_dir.clone());
 
         // Subagent mode resolution (Q15: .lock().await).
         let subagent_mode = {
-            let parent_pm =
-                self.parent_permission_mode.lock().await.clone();
+            let parent_pm = self.parent_permission_mode.lock().await.clone();
             let def_pm_str = resolved_def
                 .as_ref()
                 .and_then(|d| d.permission_mode.as_ref())
@@ -745,8 +715,7 @@ impl SubagentExecutor for AgentSubagentExecutor {
         }
 
         // Transcript recording (AGT-024).
-        if let Some(store) =
-            crate::agents::transcript::AgentTranscriptStore::new(&self.session_id)
+        if let Some(store) = crate::agents::transcript::AgentTranscriptStore::new(&self.session_id)
         {
             let meta = crate::agents::transcript::AgentMetadata {
                 agent_type: resolved_def
@@ -764,9 +733,7 @@ impl SubagentExecutor for AgentSubagentExecutor {
         }
 
         // Inject resume messages if pending (from SendMessage resume).
-        if let Some(resume_msgs) =
-            self.pending_resume_messages.lock().await.take()
-        {
+        if let Some(resume_msgs) = self.pending_resume_messages.lock().await.take() {
             tracing::info!(
                 count = resume_msgs.len(),
                 "Injecting resume messages into SubagentRunner"
@@ -774,10 +741,7 @@ impl SubagentExecutor for AgentSubagentExecutor {
             runner.set_initial_messages(resume_msgs);
         }
 
-        runner.set_pending_message_source(
-            Arc::clone(&self.subagent_manager),
-            manager_id.clone(),
-        );
+        runner.set_pending_message_source(Arc::clone(&self.subagent_manager), manager_id.clone());
 
         {
             let mgr = self.subagent_manager.lock().await;
@@ -807,11 +771,7 @@ impl SubagentExecutor for AgentSubagentExecutor {
         }
     }
 
-    async fn on_inner_complete(
-        &self,
-        subagent_id: String,
-        result: Result<String, String>,
-    ) {
+    async fn on_inner_complete(&self, subagent_id: String, result: Result<String, String>) {
         // Mark the subagent as completed/failed in the manager. The
         // cache_id is the pre-allocated caller id; the manager keyed
         // this subagent under its own manager-allocated id. Since
@@ -834,19 +794,11 @@ impl SubagentExecutor for AgentSubagentExecutor {
         // reconcile).
         // Save agent memory (PRESERVE-D8 — single collapsed site).
         if let Ok(ref text) = result {
-            let meta = self
-                .memory_cache
-                .lock()
-                .await
-                .get(&subagent_id)
-                .cloned();
+            let meta = self.memory_cache.lock().await.get(&subagent_id).cloned();
             if let Some(meta) = meta {
-                if let (Some(agent_type), Some(memory)) =
-                    (meta.agent_type, self.memory.as_ref())
-                {
+                if let (Some(agent_type), Some(memory)) = (meta.agent_type, self.memory.as_ref()) {
                     let content: String = text.chars().take(500).collect();
-                    let title =
-                        format!("completion:{}:{}", agent_type, subagent_id);
+                    let title = format!("completion:{}:{}", agent_type, subagent_id);
                     let project_path = self.working_dir.to_string_lossy();
                     if let Err(e) = crate::agents::memory::save_agent_memory(
                         &agent_type,

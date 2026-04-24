@@ -123,11 +123,7 @@ impl Default for RenameHandler {
 }
 
 impl CommandHandler for RenameHandler {
-    fn execute(
-        &self,
-        ctx: &mut CommandContext,
-        args: &[String],
-    ) -> anyhow::Result<()> {
+    fn execute(&self, ctx: &mut CommandContext, args: &[String]) -> anyhow::Result<()> {
         // R3: join multi-token args with " " and trim. Byte-equivalent
         // to the shipped `s.strip_prefix("/rename").unwrap_or("").trim()`
         // for all inputs — single-token names collapse to the same
@@ -170,33 +166,25 @@ impl CommandHandler for RenameHandler {
         let db_path = archon_session::storage::default_db_path();
         match archon_session::storage::SessionStore::open(&db_path) {
             Ok(store) => {
-                match archon_session::naming::set_session_name(
-                    &store, session_id, name_arg,
-                ) {
+                match archon_session::naming::set_session_name(&store, session_id, name_arg) {
                     Ok(()) => {
                         // Success path: emit SessionRenamed first
                         // (consumers gate on this variant for TUI
                         // state), then the human-readable TextDelta.
                         // Byte-identical to shipped slash.rs:437-445
                         // order.
-                        ctx.emit(
-                            TuiEvent::SessionRenamed(name_arg.to_string()),
-                        );
-                        ctx.emit(TuiEvent::TextDelta(
-                            format!("\nSession renamed to: {name_arg}\n"),
-                        ));
+                        ctx.emit(TuiEvent::SessionRenamed(name_arg.to_string()));
+                        ctx.emit(TuiEvent::TextDelta(format!(
+                            "\nSession renamed to: {name_arg}\n"
+                        )));
                     }
                     Err(e) => {
-                        ctx.emit(TuiEvent::Error(
-                            format!("Rename failed: {e}"),
-                        ));
+                        ctx.emit(TuiEvent::Error(format!("Rename failed: {e}")));
                     }
                 }
             }
             Err(e) => {
-                ctx.emit(TuiEvent::Error(format!(
-                    "Session store error: {e}"
-                )));
+                ctx.emit(TuiEvent::Error(format!("Session store error: {e}")));
             }
         }
         Ok(())
@@ -286,9 +274,7 @@ mod tests {
     /// supplied `session_id`. Mirrors the `make_ctx(session_id)`
     /// fixture in `src/command/fork.rs` — DIRECT pattern, no
     /// snapshot, no effect slot.
-    fn make_rename_ctx(
-        session_id: Option<String>,
-    ) -> (CommandContext, mpsc::Receiver<TuiEvent>) {
+    fn make_rename_ctx(session_id: Option<String>) -> (CommandContext, mpsc::Receiver<TuiEvent>) {
         // TASK-AGS-POST-6-SHARED-FIXTURES-V2: migrated to CtxBuilder.
         crate::command::test_support::CtxBuilder::new()
             .with_session_id_opt(session_id)
@@ -402,8 +388,10 @@ mod tests {
         let res = h.execute(&mut ctx, &["mynewname".to_string()]);
         assert!(res.is_ok(), "execute must return Ok(()), got: {res:?}");
 
-        let ev1 =
-            rx.recv().await.expect("SessionRenamed event must be emitted");
+        let ev1 = rx
+            .recv()
+            .await
+            .expect("SessionRenamed event must be emitted");
         match ev1 {
             TuiEvent::SessionRenamed(name) => {
                 assert_eq!(name, "mynewname");
@@ -413,8 +401,10 @@ mod tests {
                  got: {other:?}"
             ),
         }
-        let ev2 =
-            rx.recv().await.expect("TextDelta confirmation must be emitted");
+        let ev2 = rx
+            .recv()
+            .await
+            .expect("TextDelta confirmation must be emitted");
         match ev2 {
             TuiEvent::TextDelta(text) => {
                 assert_eq!(text, "\nSession renamed to: mynewname\n");
@@ -435,8 +425,7 @@ mod tests {
     /// `env_lock()` serialization as
     /// `execute_with_session_id_success_path_emits_events`.
     #[tokio::test]
-    async fn dispatcher_routes_slash_rename_with_session_id_emits_expected_events(
-    ) {
+    async fn dispatcher_routes_slash_rename_with_session_id_emits_expected_events() {
         let _env_guard = env_lock().lock().expect("env_lock");
         let tmp = tempfile::tempdir().expect("tempdir");
         let _env = EnvGuard::set(tmp.path());
@@ -455,8 +444,7 @@ mod tests {
              path, got: {res:?}"
         );
 
-        let ev1 =
-            rx.recv().await.expect("SessionRenamed must be emitted");
+        let ev1 = rx.recv().await.expect("SessionRenamed must be emitted");
         match ev1 {
             TuiEvent::SessionRenamed(name) => {
                 assert_eq!(name, "dispatchedname");
@@ -502,8 +490,7 @@ mod tests {
         );
         let msg = format!("{:#}", res.unwrap_err());
         assert!(
-            msg.contains("session_id")
-                && msg.contains("build_command_context"),
+            msg.contains("session_id") && msg.contains("build_command_context"),
             "Err message must mention both 'session_id' and \
              'build_command_context', got: {msg}"
         );

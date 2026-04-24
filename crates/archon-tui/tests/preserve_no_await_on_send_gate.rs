@@ -210,7 +210,10 @@ fn scan_file(path: &Path) -> Vec<Offender> {
     let mut cursor = 0;
     'outer: while cursor + needle.len() <= bytes.len() {
         // Find next `.send(` occurrence.
-        let rel = match bytes[cursor..].windows(needle.len()).position(|w| w == needle) {
+        let rel = match bytes[cursor..]
+            .windows(needle.len())
+            .position(|w| w == needle)
+        {
             Some(r) => r,
             None => break,
         };
@@ -247,9 +250,8 @@ fn scan_file(path: &Path) -> Vec<Offender> {
         }
 
         // 2. Must end with one of the tracked suffixes.
-        let matches_suffix = ident.ends_with("_tx")
-            || ident.ends_with("_sender")
-            || ident.ends_with("_channel");
+        let matches_suffix =
+            ident.ends_with("_tx") || ident.ends_with("_sender") || ident.ends_with("_channel");
         if !matches_suffix {
             continue;
         }

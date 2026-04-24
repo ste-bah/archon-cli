@@ -87,9 +87,7 @@ pub(crate) fn build_llm_provider(
             let inline_key = llm_cfg.openai.api_key.clone().unwrap_or_default();
             let resolved = OpenAiProvider::resolve_api_key(&inline_key);
             if resolved.is_empty() {
-                tracing::warn!(
-                    "OpenAI selected but no API key found; falling back to Anthropic"
-                );
+                tracing::warn!("OpenAI selected but no API key found; falling back to Anthropic");
                 return Arc::new(AnthropicProvider::new(api_client));
             }
             Arc::new(OpenAiProvider::new(
@@ -114,9 +112,7 @@ pub(crate) fn build_llm_provider(
         "vertex" => {
             let project_id = llm_cfg.vertex.project_id.as_deref().unwrap_or("");
             if project_id.is_empty() {
-                tracing::warn!(
-                    "Vertex selected but project_id missing; falling back to Anthropic"
-                );
+                tracing::warn!("Vertex selected but project_id missing; falling back to Anthropic");
                 return Arc::new(AnthropicProvider::new(api_client));
             }
             let publisher = if llm_cfg.vertex.model.contains("claude") {

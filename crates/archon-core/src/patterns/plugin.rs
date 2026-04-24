@@ -72,11 +72,7 @@ impl Pattern for WasmPattern {
         PatternKind::Custom(self.name.clone())
     }
 
-    async fn execute(
-        &self,
-        input: Value,
-        _ctx: PatternCtx,
-    ) -> Result<Value, PatternError> {
+    async fn execute(&self, input: Value, _ctx: PatternCtx) -> Result<Value, PatternError> {
         // Serialize input to JSON bytes.
         let input_bytes = serde_json::to_vec(&input)
             .map_err(|e| PatternError::Execution(format!("wasm: {e}")))?;
@@ -92,11 +88,9 @@ impl Pattern for WasmPattern {
             .map_err(|e| PatternError::Execution(format!("wasm: {e:#}")))?;
 
         // Obtain exports.
-        let memory = instance
-            .get_memory(&mut store, "memory")
-            .ok_or_else(|| {
-                PatternError::Execution("wasm: module does not export 'memory'".into())
-            })?;
+        let memory = instance.get_memory(&mut store, "memory").ok_or_else(|| {
+            PatternError::Execution("wasm: module does not export 'memory'".into())
+        })?;
 
         let alloc_fn = instance
             .get_typed_func::<i32, i32>(&mut store, "alloc")
@@ -136,8 +130,7 @@ impl Pattern for WasmPattern {
         let out_bytes = &mem_data[out_ptr..out_ptr + out_len];
 
         // Parse as JSON.
-        serde_json::from_slice(out_bytes)
-            .map_err(|e| PatternError::Execution(format!("wasm: {e}")))
+        serde_json::from_slice(out_bytes).map_err(|e| PatternError::Execution(format!("wasm: {e}")))
     }
 }
 
@@ -164,8 +157,7 @@ impl PatternPluginLoader {
     /// Returns `true` if version `v` is compatible: accepts the current
     /// version and N-1 (if current > 0).
     fn is_version_supported(&self, v: u32) -> bool {
-        v == self.current_version
-            || (self.current_version > 0 && v == self.current_version - 1)
+        v == self.current_version || (self.current_version > 0 && v == self.current_version - 1)
     }
 
     /// Iterate all native plugins registered via `inventory::submit!`,
@@ -248,11 +240,7 @@ mod tests {
             PatternKind::Custom("echo".into())
         }
 
-        async fn execute(
-            &self,
-            input: Value,
-            _ctx: PatternCtx,
-        ) -> Result<Value, PatternError> {
+        async fn execute(&self, input: Value, _ctx: PatternCtx) -> Result<Value, PatternError> {
             Ok(input)
         }
     }
@@ -271,11 +259,7 @@ mod tests {
 
     #[async_trait]
     impl super::super::TaskServiceHandle for DummyTaskService {
-        async fn submit(
-            &self,
-            _agent: &str,
-            _input: Value,
-        ) -> Result<Value, PatternError> {
+        async fn submit(&self, _agent: &str, _input: Value) -> Result<Value, PatternError> {
             Ok(Value::Null)
         }
     }
@@ -333,7 +317,10 @@ mod tests {
         // current_version=2 — test_echo has version=1 = 2-1, should load.
         let loader = PatternPluginLoader::new(Arc::clone(&registry), 2);
         let count = loader.load_native().expect("load_native should succeed");
-        assert!(count >= 1, "test_echo (version 1) should load under N-1 rule");
+        assert!(
+            count >= 1,
+            "test_echo (version 1) should load under N-1 rule"
+        );
         assert!(
             registry.resolve("test_echo").is_some(),
             "test_echo should be registered"
@@ -356,11 +343,7 @@ mod tests {
             fn kind(&self) -> PatternKind {
                 PatternKind::Pipeline
             }
-            async fn execute(
-                &self,
-                input: Value,
-                _ctx: PatternCtx,
-            ) -> Result<Value, PatternError> {
+            async fn execute(&self, input: Value, _ctx: PatternCtx) -> Result<Value, PatternError> {
                 Ok(serde_json::json!({ "builtin": true, "input": input }))
             }
         }
@@ -494,10 +477,7 @@ mod tests {
                 .execute(input.clone(), ctx)
                 .await
                 .expect("echo execute should succeed");
-            assert_eq!(
-                output, input,
-                "echo pattern should return input unchanged"
-            );
+            assert_eq!(output, input, "echo pattern should return input unchanged");
         }
     }
 }

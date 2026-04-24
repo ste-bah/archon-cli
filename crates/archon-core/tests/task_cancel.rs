@@ -13,9 +13,7 @@ use tokio_util::sync::CancellationToken;
 use archon_core::tasks::events::EventBus;
 use archon_core::tasks::executor::{AgentExecutor, CancelHandle, TaskExecutor};
 use archon_core::tasks::metrics::MetricsRegistry;
-use archon_core::tasks::models::{
-    Task, TaskError, TaskEventKind, TaskId, TaskState,
-};
+use archon_core::tasks::models::{Task, TaskError, TaskEventKind, TaskId, TaskState};
 use archon_core::tasks::queue::{PerAgentTaskQueue, QueueConfig, TaskQueue};
 use archon_core::tasks::store::{InMemoryTaskStateStore, TaskStateStore};
 
@@ -118,8 +116,7 @@ async fn setup_harness(
     let tasks: Arc<DashMap<TaskId, Task>> = Arc::new(DashMap::new());
     let seq_counters: Arc<DashMap<TaskId, AtomicU64>> = Arc::new(DashMap::new());
     let metrics = Arc::new(MetricsRegistry::new());
-    let cancel_handles: Arc<DashMap<TaskId, Arc<CancelHandle>>> =
-        Arc::new(DashMap::new());
+    let cancel_handles: Arc<DashMap<TaskId, Arc<CancelHandle>>> = Arc::new(DashMap::new());
 
     let agent_owned = agent.to_string();
     let q = queue.clone();
@@ -347,10 +344,9 @@ async fn test_cancel_pending_task_removes_from_queue() {
     // Cancel the middle task while it's still pending.
     let cancel_id = task_ids[1];
     let q = queue.clone();
-    let removed =
-        tokio::task::spawn_blocking(move || q.remove_pending(cancel_id))
-            .await
-            .unwrap();
+    let removed = tokio::task::spawn_blocking(move || q.remove_pending(cancel_id))
+        .await
+        .unwrap();
     assert!(removed, "remove_pending should return true");
 
     // Update task state.
@@ -379,7 +375,10 @@ async fn test_cancel_pending_task_removes_from_queue() {
     let new_depth = tokio::task::spawn_blocking(move || q.depth("test-agent"))
         .await
         .unwrap();
-    assert_eq!(new_depth, 2, "queue depth should be 2 after removing 1 task");
+    assert_eq!(
+        new_depth, 2,
+        "queue depth should be 2 after removing 1 task"
+    );
 
     // Verify task state.
     let state = tasks.get(&cancel_id).map(|t| t.state);

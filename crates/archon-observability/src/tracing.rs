@@ -28,9 +28,9 @@
 //! preserved across both the lift (OBS-905) and the carve (OBS-906) so
 //! nobody reintroduces it.
 
+use tracing_subscriber::EnvFilter;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
-use tracing_subscriber::EnvFilter;
 
 use crate::redaction::RedactionLayer;
 
@@ -42,8 +42,8 @@ use crate::redaction::RedactionLayer;
 /// first call installs, subsequent calls collapse the "already set" error
 /// into `Ok(())` to preserve caller idempotency expectations.
 pub fn init_tracing(json: bool, level: ::tracing::Level) -> anyhow::Result<()> {
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new(level.to_string()));
+    let filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(level.to_string()));
 
     let redaction = RedactionLayer::stderr_with_format(json);
 

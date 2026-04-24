@@ -115,8 +115,8 @@
 
 use archon_tui::app::TuiEvent;
 
-use crate::command::registry::{CommandContext, CommandHandler};
 use crate::Result;
+use crate::command::registry::{CommandContext, CommandHandler};
 
 // ---------------------------------------------------------------------------
 // Pre-existing CLI `archon login` entry point (TUI-325). Untouched by B22.
@@ -170,11 +170,7 @@ impl Default for LoginHandler {
 }
 
 impl CommandHandler for LoginHandler {
-    fn execute(
-        &self,
-        ctx: &mut CommandContext,
-        _args: &[String],
-    ) -> anyhow::Result<()> {
+    fn execute(&self, ctx: &mut CommandContext, _args: &[String]) -> anyhow::Result<()> {
         // R6: require auth_label. `build_command_context` populates
         // this unconditionally from `SlashCommandContext::auth_label`
         // per the AGS-815 session_id / AGS-817 memory / B20 config_path
@@ -306,9 +302,7 @@ mod tests {
     /// / B17 `make_rename_ctx(session_id)` / B19 `make_rules_ctx(memory)`
     /// / B20 `make_reload_ctx(config_path)` shape — DIRECT pattern, no
     /// snapshot, no effect slot.
-    fn make_login_ctx(
-        auth_label: Option<String>,
-    ) -> (CommandContext, mpsc::Receiver<TuiEvent>) {
+    fn make_login_ctx(auth_label: Option<String>) -> (CommandContext, mpsc::Receiver<TuiEvent>) {
         // TASK-AGS-POST-6-SHARED-FIXTURES-V2: migrated to CtxBuilder.
         crate::command::test_support::CtxBuilder::new()
             .with_auth_label_opt(auth_label)
@@ -378,8 +372,7 @@ mod tests {
 
         let _guard = EnvGuard::set("HOME", tmp.path());
 
-        let (mut ctx, mut rx) =
-            make_login_ctx(Some("anthropic-api-key".to_string()));
+        let (mut ctx, mut rx) = make_login_ctx(Some("anthropic-api-key".to_string()));
         let h = LoginHandler::new();
         let res = h.execute(&mut ctx, &[]);
         assert!(res.is_ok(), "execute must return Ok(()), got: {res:?}");
@@ -402,9 +395,7 @@ mod tests {
                      to shipped slash.rs:291-297 format"
                 );
             }
-            other => panic!(
-                "expected TuiEvent::TextDelta(..), got: {other:?}"
-            ),
+            other => panic!("expected TuiEvent::TextDelta(..), got: {other:?}"),
         }
     }
 
@@ -421,8 +412,7 @@ mod tests {
         let _guard = EnvGuard::set("HOME", tmp.path());
 
         // Sanity: confirm HOME override propagates to dirs::home_dir().
-        let observed = dirs::home_dir()
-            .expect("dirs::home_dir returns Some under HOME=tmp");
+        let observed = dirs::home_dir().expect("dirs::home_dir returns Some under HOME=tmp");
         assert_eq!(
             observed,
             tmp.path(),
@@ -436,8 +426,7 @@ mod tests {
             cred_path.display()
         );
 
-        let (mut ctx, mut rx) =
-            make_login_ctx(Some("api-key".to_string()));
+        let (mut ctx, mut rx) = make_login_ctx(Some("api-key".to_string()));
         let h = LoginHandler::new();
         let res = h.execute(&mut ctx, &[]);
         assert!(res.is_ok(), "execute must return Ok(()), got: {res:?}");
@@ -460,9 +449,7 @@ mod tests {
                      byte-identical to shipped slash.rs:299-305 format"
                 );
             }
-            other => panic!(
-                "expected TuiEvent::TextDelta(..), got: {other:?}"
-            ),
+            other => panic!("expected TuiEvent::TextDelta(..), got: {other:?}"),
         }
     }
 
@@ -487,8 +474,7 @@ mod tests {
         let registry = Arc::new(builder.build());
         let dispatcher = Dispatcher::new(registry);
 
-        let (mut ctx, mut rx) =
-            make_login_ctx(Some("oauth".to_string()));
+        let (mut ctx, mut rx) = make_login_ctx(Some("oauth".to_string()));
         let res = dispatcher.dispatch(&mut ctx, "/login");
         assert!(
             res.is_ok(),
@@ -509,9 +495,7 @@ mod tests {
                      authenticated branch (cred_path exists), got: {text}"
                 );
             }
-            other => panic!(
-                "expected TuiEvent::TextDelta(..), got: {other:?}"
-            ),
+            other => panic!("expected TuiEvent::TextDelta(..), got: {other:?}"),
         }
     }
 
@@ -538,8 +522,7 @@ mod tests {
         );
         let msg = format!("{:#}", res.unwrap_err());
         assert!(
-            msg.contains("auth_label")
-                && msg.contains("build_command_context"),
+            msg.contains("auth_label") && msg.contains("build_command_context"),
             "Err message must mention both 'auth_label' and \
              'build_command_context', got: {msg}"
         );

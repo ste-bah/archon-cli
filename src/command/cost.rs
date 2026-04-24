@@ -92,9 +92,7 @@ pub(crate) struct CostSnapshot {
 /// variant with `provider_registry.price_table()` + multi-model
 /// breakdown + `--since` filter is SCOPE-HELD per orchestrator
 /// "shipped wins" rule.
-pub(crate) async fn build_cost_snapshot(
-    slash_ctx: &SlashCommandContext,
-) -> CostSnapshot {
+pub(crate) async fn build_cost_snapshot(slash_ctx: &SlashCommandContext) -> CostSnapshot {
     // Single mutex acquisition. Every derived value is computed INSIDE
     // this scope so the guard drops before the builder returns.
     let stats = slash_ctx.session_stats.lock().await;
@@ -141,11 +139,7 @@ pub(crate) async fn build_cost_snapshot(
 pub(crate) struct CostHandler;
 
 impl CommandHandler for CostHandler {
-    fn execute(
-        &self,
-        ctx: &mut CommandContext,
-        _args: &[String],
-    ) -> anyhow::Result<()> {
+    fn execute(&self, ctx: &mut CommandContext, _args: &[String]) -> anyhow::Result<()> {
         // Defensive: build_command_context is responsible for populating
         // cost_snapshot when the primary resolves to /cost. A None here
         // indicates a wiring regression (e.g. the builder was bypassed
@@ -217,9 +211,7 @@ mod tests {
         let h = CostHandler;
         let desc = h.description().to_lowercase();
         assert!(
-            desc.contains("cost")
-                || desc.contains("token")
-                || desc.contains("session"),
+            desc.contains("cost") || desc.contains("token") || desc.contains("session"),
             "CostHandler description should reference cost/token/session, got: {}",
             h.description()
         );
@@ -255,8 +247,7 @@ mod tests {
         );
         let err_msg = format!("{}", result.unwrap_err());
         assert!(
-            err_msg.contains("cost_snapshot")
-                || err_msg.contains("build_command_context"),
+            err_msg.contains("cost_snapshot") || err_msg.contains("build_command_context"),
             "error must describe the missing snapshot, got: {err_msg}"
         );
     }
@@ -313,11 +304,10 @@ mod tests {
             input_cost: 0.0,
             output_cost: 0.0,
             total_cost: 0.0,
-            cache_stats_line:
-                "Cache hit rate: 0.0% (0 reads / 0 total)\n\
+            cache_stats_line: "Cache hit rate: 0.0% (0 reads / 0 total)\n\
                  Cache creation: 0 tokens\n\
                  Estimated savings: 0 token-equivalents"
-                    .to_string(),
+                .to_string(),
             warn_threshold: 2.5,
             hard_label: "$25.00".to_string(),
         };
@@ -356,9 +346,7 @@ mod tests {
         assert!((snap.output_cost - cloned.output_cost).abs() < f64::EPSILON);
         assert!((snap.total_cost - cloned.total_cost).abs() < f64::EPSILON);
         assert_eq!(snap.cache_stats_line, cloned.cache_stats_line);
-        assert!(
-            (snap.warn_threshold - cloned.warn_threshold).abs() < f64::EPSILON
-        );
+        assert!((snap.warn_threshold - cloned.warn_threshold).abs() < f64::EPSILON);
         assert_eq!(snap.hard_label, cloned.hard_label);
         // Debug impl must not panic.
         let _ = format!("{snap:?}");

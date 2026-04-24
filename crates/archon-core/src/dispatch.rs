@@ -95,9 +95,7 @@ impl ToolRegistry {
             // the primary behaviour; the plan-file append is an
             // additive audit trail.
             let plan_path = crate::plan_file::plan_path(&ctx.working_dir);
-            if let Err(e) =
-                crate::plan_file::append_plan_entry(&plan_path, tool_name, &input)
-            {
+            if let Err(e) = crate::plan_file::append_plan_entry(&plan_path, tool_name, &input) {
                 tracing::warn!(
                     error = %e,
                     plan_path = %plan_path.display(),

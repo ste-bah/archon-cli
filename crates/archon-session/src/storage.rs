@@ -974,9 +974,13 @@ mod truncate_tests {
                 .save_message(&meta.id, i, &format!("m-{i}"))
                 .expect("save");
         }
-        store.truncate_messages_after(&meta.id, 0).expect("truncate");
+        store
+            .truncate_messages_after(&meta.id, 0)
+            .expect("truncate");
         // Second call on an already-truncated session is a no-op.
-        store.truncate_messages_after(&meta.id, 0).expect("truncate 2");
+        store
+            .truncate_messages_after(&meta.id, 0)
+            .expect("truncate 2");
         let after = store.load_messages(&meta.id).expect("load");
         assert_eq!(after.len(), 1, "only index 0 should remain");
     }

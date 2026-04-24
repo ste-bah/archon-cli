@@ -81,12 +81,19 @@ impl VoiceCaptureOverlay {
 
     /// Render voice capture overlay into area.
     pub fn render(&self, f: &mut Frame, area: Rect, _theme: &Theme) {
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title(format!("Voice Capture{}{}",
-                if self.is_recording { " [recording]" } else { "" },
-                if self.transcription.is_empty() { "" } else { " — " },
-            ));
+        let block = Block::default().borders(Borders::ALL).title(format!(
+            "Voice Capture{}{}",
+            if self.is_recording {
+                " [recording]"
+            } else {
+                ""
+            },
+            if self.transcription.is_empty() {
+                ""
+            } else {
+                " — "
+            },
+        ));
 
         let waveform_str: String = if self.waveform.is_empty() {
             "(no audio)".to_string()
@@ -96,17 +103,31 @@ impl VoiceCaptureOverlay {
                 let bar = ((val.abs() * 10.0) as usize).min(10);
                 s.push_str(&"=".repeat(bar));
             }
-            if s.len() > 80 { s.truncate(80); }
+            if s.len() > 80 {
+                s.truncate(80);
+            }
             s
         };
 
-        let status = if self.is_recording { "Recording..." } else { "Stopped" };
+        let status = if self.is_recording {
+            "Recording..."
+        } else {
+            "Stopped"
+        };
 
         let text = format!(
             "{}\n\nTranscription:\n{}\n\nWaveform:\n{}",
             status,
-            if self.transcription.is_empty() { "(none)" } else { &self.transcription },
-            if waveform_str.is_empty() { "(no signal)" } else { &waveform_str }
+            if self.transcription.is_empty() {
+                "(none)"
+            } else {
+                &self.transcription
+            },
+            if waveform_str.is_empty() {
+                "(no signal)"
+            } else {
+                &waveform_str
+            }
         );
 
         let para = Paragraph::new(text).block(block);

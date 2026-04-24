@@ -37,7 +37,9 @@ use tokio::sync::mpsc::Receiver;
 use tokio_util::sync::CancellationToken;
 
 use archon_llm::anthropic::AnthropicClient;
-use archon_llm::provider::{LlmError, LlmProvider, LlmRequest, LlmResponse, ModelInfo, ProviderFeature};
+use archon_llm::provider::{
+    LlmError, LlmProvider, LlmRequest, LlmResponse, ModelInfo, ProviderFeature,
+};
 use archon_llm::streaming::StreamEvent;
 use archon_llm::types::{ContentBlockType, Usage};
 
@@ -78,12 +80,7 @@ impl SubagentExecutor for FixedStringExecutor {
         }
     }
 
-    async fn on_inner_complete(
-        &self,
-        _subagent_id: String,
-        _result: Result<String, String>,
-    ) {
-    }
+    async fn on_inner_complete(&self, _subagent_id: String, _result: Result<String, String>) {}
 
     async fn on_visible_complete(
         &self,
@@ -198,9 +195,8 @@ impl LlmProvider for MockLlmProvider {
             // Turn 2: emit the last tool_result's content as an assistant
             // text block. This echo-through is the whole point — it proves
             // that the seam carried real data from the tool to the LLM.
-            let echoed = extract_last_tool_result(&request.messages).unwrap_or_else(|| {
-                "<no tool_result found in request.messages>".to_string()
-            });
+            let echoed = extract_last_tool_result(&request.messages)
+                .unwrap_or_else(|| "<no tool_result found in request.messages>".to_string());
             let _ = tx
                 .send(StreamEvent::ContentBlockStart {
                     index: 0,
@@ -291,8 +287,7 @@ async fn agent_process_message_carries_real_subagent_text_across_seam() {
 
     // 4. Build the Agent. Event channel is unbounded; drain it in a
     //    background task so send_event never fails.
-    let (event_tx, mut event_rx) =
-        tokio::sync::mpsc::unbounded_channel::<TimestampedEvent>();
+    let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel::<TimestampedEvent>();
     tokio::spawn(async move { while event_rx.recv().await.is_some() {} });
 
     let agent_registry = Arc::new(std::sync::RwLock::new(AgentRegistry::load(
@@ -324,7 +319,9 @@ async fn agent_process_message_carries_real_subagent_text_across_seam() {
         .and_then(|blocks| {
             blocks.iter().find_map(|b| {
                 if b.get("type").and_then(|t| t.as_str()) == Some("text") {
-                    b.get("text").and_then(|t| t.as_str()).map(|s| s.to_string())
+                    b.get("text")
+                        .and_then(|t| t.as_str())
+                        .map(|s| s.to_string())
                 } else {
                     None
                 }

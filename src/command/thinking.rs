@@ -109,11 +109,7 @@ use crate::command::registry::{CommandContext, CommandHandler};
 pub(crate) struct ThinkingHandler;
 
 impl CommandHandler for ThinkingHandler {
-    fn execute(
-        &self,
-        ctx: &mut CommandContext,
-        args: &[String],
-    ) -> anyhow::Result<()> {
+    fn execute(&self, ctx: &mut CommandContext, args: &[String]) -> anyhow::Result<()> {
         // 1. Require show_thinking handle. `build_command_context`
         //    populates this unconditionally from
         //    `SlashCommandContext::show_thinking` so at the real
@@ -122,12 +118,9 @@ impl CommandHandler for ThinkingHandler {
         //    `show_thinking: None` will hit this branch and observe an
         //    Err — mirroring the B01-FAST `fast_mode_shared` and
         //    AGS-815/817 DIRECT-pattern missing-shared-state precedent.
-        let shared = ctx
-            .show_thinking
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!(
-                "ThinkingHandler: show_thinking not populated in CommandContext"
-            ))?;
+        let shared = ctx.show_thinking.as_ref().ok_or_else(|| {
+            anyhow::anyhow!("ThinkingHandler: show_thinking not populated in CommandContext")
+        })?;
 
         // 2. Parse the subcommand. `args.first()` selects on/off/empty;
         //    anything else is a silent no-op (preserves legacy
@@ -158,9 +151,7 @@ impl CommandHandler for ThinkingHandler {
         //    TextDelta. Mirrors legacy slash.rs:77-80 and :85-88
         //    sequence byte-for-byte. The TUI consumes ThinkingToggle
         //    to flip a renderer flag before the TextDelta lands.
-        let _ = ctx
-            .tui_tx
-            .try_send(TuiEvent::ThinkingToggle(enable));
+        let _ = ctx.tui_tx.try_send(TuiEvent::ThinkingToggle(enable));
 
         // 5. Byte-for-byte preserved format strings from slash.rs:79
         //    and slash.rs:87. The leading and trailing `\n` wrap is
@@ -171,9 +162,7 @@ impl CommandHandler for ThinkingHandler {
         } else {
             "\nThinking display disabled.\n"
         };
-        let _ = ctx
-            .tui_tx
-            .try_send(TuiEvent::TextDelta(msg.to_string()));
+        let _ = ctx.tui_tx.try_send(TuiEvent::TextDelta(msg.to_string()));
 
         Ok(())
     }
@@ -222,9 +211,9 @@ mod tests {
              slash.rs:77 emits ThinkingToggle BEFORE TextDelta); got: {:?}",
             events
         );
-        let matched = events.iter().any(|e| {
-            matches!(e, TuiEvent::TextDelta(s) if s.contains("Thinking display enabled"))
-        });
+        let matched = events
+            .iter()
+            .any(|e| matches!(e, TuiEvent::TextDelta(s) if s.contains("Thinking display enabled")));
         assert!(
             matched,
             "expected TuiEvent::TextDelta containing 'Thinking display enabled.', \
@@ -254,9 +243,9 @@ mod tests {
              slash.rs:85 emits ThinkingToggle BEFORE TextDelta); got: {:?}",
             events
         );
-        let matched = events.iter().any(|e| {
-            matches!(e, TuiEvent::TextDelta(s) if s.contains("Thinking display disabled"))
-        });
+        let matched = events.iter().any(
+            |e| matches!(e, TuiEvent::TextDelta(s) if s.contains("Thinking display disabled")),
+        );
         assert!(
             matched,
             "expected TuiEvent::TextDelta containing 'Thinking display disabled.', \
@@ -284,9 +273,9 @@ mod tests {
             "empty args must emit ThinkingToggle(true) FIRST; got: {:?}",
             events
         );
-        let matched = events.iter().any(|e| {
-            matches!(e, TuiEvent::TextDelta(s) if s.contains("Thinking display enabled"))
-        });
+        let matched = events
+            .iter()
+            .any(|e| matches!(e, TuiEvent::TextDelta(s) if s.contains("Thinking display enabled")));
         assert!(
             matched,
             "empty args must emit TextDelta containing 'Thinking display enabled.', \
@@ -298,11 +287,7 @@ mod tests {
     #[test]
     fn thinking_handler_unknown_arg_is_silent_noop() {
         let (mut ctx, mut rx) = make_thinking_ctx(false);
-        let initial = ctx
-            .show_thinking
-            .as_ref()
-            .unwrap()
-            .load(Ordering::Relaxed);
+        let initial = ctx.show_thinking.as_ref().unwrap().load(Ordering::Relaxed);
         ThinkingHandler
             .execute(&mut ctx, &[String::from("foo")])
             .unwrap();

@@ -56,11 +56,7 @@ use crate::command::registry::{CommandContext, CommandHandler};
 pub(crate) struct VimHandler;
 
 impl CommandHandler for VimHandler {
-    fn execute(
-        &self,
-        ctx: &mut CommandContext,
-        _args: &[String],
-    ) -> anyhow::Result<()> {
+    fn execute(&self, ctx: &mut CommandContext, _args: &[String]) -> anyhow::Result<()> {
         // DIRECT pattern: two sequential sync `try_send` emissions
         // replace the shipped `.send().await` pair at slash.rs:408-412.
         //
@@ -120,9 +116,9 @@ mod tests {
         let events = drain_tui_events(&mut rx);
         let expected =
             "\nVim mode toggled. To persist: set vim_mode = true under [tui] in config.toml\n";
-        let matched = events.iter().any(|e| {
-            matches!(e, TuiEvent::TextDelta(s) if s == expected)
-        });
+        let matched = events
+            .iter()
+            .any(|e| matches!(e, TuiEvent::TextDelta(s) if s == expected));
         assert!(
             matched,
             "expected TuiEvent::TextDelta with byte-identical persist-hint \
@@ -134,16 +130,14 @@ mod tests {
     #[test]
     fn vim_handler_ignores_trailing_args() {
         let (mut ctx, mut rx) = make_vim_ctx();
-        VimHandler
-            .execute(&mut ctx, &[String::from("on")])
-            .unwrap();
+        VimHandler.execute(&mut ctx, &[String::from("on")]).unwrap();
         let events = drain_tui_events(&mut rx);
         let has_toggle = events.iter().any(|e| matches!(e, TuiEvent::VimToggle));
         let expected =
             "\nVim mode toggled. To persist: set vim_mode = true under [tui] in config.toml\n";
-        let has_delta = events.iter().any(|e| {
-            matches!(e, TuiEvent::TextDelta(s) if s == expected)
-        });
+        let has_delta = events
+            .iter()
+            .any(|e| matches!(e, TuiEvent::TextDelta(s) if s == expected));
         assert!(
             has_toggle && has_delta,
             "args=[\"on\"] must emit BOTH VimToggle and byte-identical \
@@ -195,15 +189,18 @@ mod tests {
         let (mut ctx, mut rx) = make_vim_ctx();
 
         let result = dispatcher.dispatch(&mut ctx, "/vim");
-        assert!(result.is_ok(), "dispatcher.dispatch(\"/vim\") must return Ok");
+        assert!(
+            result.is_ok(),
+            "dispatcher.dispatch(\"/vim\") must return Ok"
+        );
 
         let events = drain_tui_events(&mut rx);
         let expected =
             "\nVim mode toggled. To persist: set vim_mode = true under [tui] in config.toml\n";
         let has_toggle = events.iter().any(|e| matches!(e, TuiEvent::VimToggle));
-        let has_delta = events.iter().any(|e| {
-            matches!(e, TuiEvent::TextDelta(s) if s == expected)
-        });
+        let has_delta = events
+            .iter()
+            .any(|e| matches!(e, TuiEvent::TextDelta(s) if s == expected));
         let has_error = events.iter().any(|e| matches!(e, TuiEvent::Error(_)));
         assert!(
             has_toggle && has_delta && !has_error,
@@ -237,9 +234,9 @@ mod tests {
         let expected =
             "\nVim mode toggled. To persist: set vim_mode = true under [tui] in config.toml\n";
         let has_toggle = events.iter().any(|e| matches!(e, TuiEvent::VimToggle));
-        let has_delta = events.iter().any(|e| {
-            matches!(e, TuiEvent::TextDelta(s) if s == expected)
-        });
+        let has_delta = events
+            .iter()
+            .any(|e| matches!(e, TuiEvent::TextDelta(s) if s == expected));
         let has_error = events.iter().any(|e| matches!(e, TuiEvent::Error(_)));
         assert!(
             has_toggle && has_delta && !has_error,

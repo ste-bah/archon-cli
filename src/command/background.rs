@@ -8,9 +8,8 @@ pub fn handle_bg_list() -> anyhow::Result<()> {
     // Clean stale PIDs first
     let _ = archon_session::registry::cleanup_stale_pids();
 
-    let sessions =
-        archon_session::registry::list_sessions()
-            .map_err(|e| anyhow::anyhow!("failed to list background sessions: {e}"))?;
+    let sessions = archon_session::registry::list_sessions()
+        .map_err(|e| anyhow::anyhow!("failed to list background sessions: {e}"))?;
 
     if sessions.is_empty() {
         eprintln!("No background sessions found.");
@@ -61,9 +60,8 @@ pub fn handle_bg_attach(_id: &str) -> anyhow::Result<()> {
 
 /// View background session logs (non-streaming).
 pub fn handle_bg_logs(id: &str) -> anyhow::Result<()> {
-    let content =
-        archon_session::attach::view_logs(id)
-            .map_err(|e| anyhow::anyhow!("failed to read logs for session {id}: {e}"))?;
+    let content = archon_session::attach::view_logs(id)
+        .map_err(|e| anyhow::anyhow!("failed to read logs for session {id}: {e}"))?;
     print!("{content}");
     Ok(())
 }
@@ -93,10 +91,18 @@ pub fn handle_bg_launch(cli: &Cli) -> anyhow::Result<()> {
     let archon_binary = std::env::current_exe()
         .map_err(|e| anyhow::anyhow!("failed to resolve archon binary path: {e}"))?;
 
-    let session_id = archon_session::background::launch_background(&query, cli.bg_name.as_deref(), &archon_binary)
-        .map_err(|e| anyhow::anyhow!("failed to launch background session: {e}"))?;
+    let session_id = archon_session::background::launch_background(
+        &query,
+        cli.bg_name.as_deref(),
+        &archon_binary,
+    )
+    .map_err(|e| anyhow::anyhow!("failed to launch background session: {e}"))?;
 
-    let short_id = if session_id.len() > 8 { &session_id[..8] } else { &session_id };
+    let short_id = if session_id.len() > 8 {
+        &session_id[..8]
+    } else {
+        &session_id
+    };
     eprintln!("Background session started: {session_id}");
     eprintln!("  Attach: archon --attach {short_id}");
     eprintln!("  Logs:   archon --logs {short_id}");

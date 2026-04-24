@@ -136,7 +136,13 @@ async fn run_monitor(command: &str, timeout_ms: u64, ctx: &ToolContext) -> ToolR
     let mut child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => {
-            return ToolResult::success(format_report("error", -1, &[], false, Some(&e.to_string())));
+            return ToolResult::success(format_report(
+                "error",
+                -1,
+                &[],
+                false,
+                Some(&e.to_string()),
+            ));
         }
     };
 
@@ -228,8 +234,9 @@ fn format_report(
     if let Some(msg) = error {
         value["error"] = json!(msg);
     }
-    serde_json::to_string_pretty(&value)
-        .unwrap_or_else(|_| "{\"exit\":\"error\",\"code\":-1,\"events\":[],\"truncated\":false}".to_string())
+    serde_json::to_string_pretty(&value).unwrap_or_else(|_| {
+        "{\"exit\":\"error\",\"code\":-1,\"events\":[],\"truncated\":false}".to_string()
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -250,7 +257,11 @@ mod tests {
     }
 
     fn parse(result: &ToolResult) -> Value {
-        assert!(!result.is_error, "expected success, got error: {}", result.content);
+        assert!(
+            !result.is_error,
+            "expected success, got error: {}",
+            result.content
+        );
         serde_json::from_str(&result.content).expect("tool must emit JSON")
     }
 
@@ -269,7 +280,10 @@ mod tests {
             .iter()
             .map(|e| e.as_str().unwrap().to_string())
             .collect();
-        assert!(events.iter().any(|l| l.contains("hello")), "events: {events:?}");
+        assert!(
+            events.iter().any(|l| l.contains("hello")),
+            "events: {events:?}"
+        );
     }
 
     #[cfg(unix)]
@@ -279,7 +293,11 @@ mod tests {
         let input = json!({ "command": "sleep 5", "timeout_ms": 100 });
         let result = tool.execute(input, &ctx()).await;
         let v = parse(&result);
-        assert_eq!(v["exit"], "timeout", "expected timeout, got: {}", result.content);
+        assert_eq!(
+            v["exit"], "timeout",
+            "expected timeout, got: {}",
+            result.content
+        );
     }
 
     #[tokio::test]

@@ -1,5 +1,5 @@
-use std::sync::Arc;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 // ---------------------------------------------------------------------------
 // TASK-AGS-806: /tasks slash-command handler (body-migrate target)
@@ -22,21 +22,14 @@ use archon_tui::events::ViewId;
 pub(crate) struct TasksHandler;
 
 impl CommandHandler for TasksHandler {
-    fn execute(
-        &self,
-        ctx: &mut CommandContext,
-        _args: &[String],
-    ) -> anyhow::Result<()> {
+    fn execute(&self, ctx: &mut CommandContext, _args: &[String]) -> anyhow::Result<()> {
         let tasks = archon_tools::task_manager::TASK_MANAGER.list_tasks();
         let text = if tasks.is_empty() {
             "\nNo background tasks.\n".to_string()
         } else {
             let mut out = format!("\n{} background tasks:\n", tasks.len());
             for t in &tasks {
-                out.push_str(&format!(
-                    "  {} [{}] {}\n",
-                    &t.id, t.status, t.description
-                ));
+                out.push_str(&format!("  {} [{}] {}\n", &t.id, t.status, t.description));
             }
             out
         };
@@ -201,11 +194,9 @@ pub(crate) async fn handle_run_agent_async(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::command::registry::{CommandContext, CommandHandler, default_registry};
     use archon_tui::app::TuiEvent;
     use archon_tui::events::ViewId;
-    use crate::command::registry::{
-        default_registry, CommandContext, CommandHandler,
-    };
     use tokio::sync::mpsc;
 
     /// Build a `CommandContext` with a freshly-created channel and
@@ -289,9 +280,7 @@ mod tests {
     #[test]
     fn registry_resolves_tasks_aliases_ps_and_jobs() {
         let reg = default_registry();
-        let primary = reg
-            .get("tasks")
-            .expect("tasks primary must be registered");
+        let primary = reg.get("tasks").expect("tasks primary must be registered");
         let via_todo = reg
             .get("todo")
             .expect("'todo' alias must resolve to /tasks");

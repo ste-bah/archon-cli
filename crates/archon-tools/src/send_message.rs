@@ -78,7 +78,11 @@ pub enum SendMessageError {
 pub struct SendMessageTool;
 
 /// Known structured message types that carry an XML envelope instead of text.
-const STRUCTURED_TYPES: &[&str] = &["shutdown_request", "shutdown_response", "plan_approval_response"];
+const STRUCTURED_TYPES: &[&str] = &[
+    "shutdown_request",
+    "shutdown_response",
+    "plan_approval_response",
+];
 
 /// Message types that require `request_id` + `approve` fields (TASK-T2 G2).
 const RESPONSE_TYPES: &[&str] = &["shutdown_response", "plan_approval_response"];

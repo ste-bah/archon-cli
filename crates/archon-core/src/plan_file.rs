@@ -72,8 +72,7 @@ pub fn append_plan_entry(
         .append(true)
         .open(path)?;
     let ts = chrono::Utc::now().to_rfc3339();
-    let input_pretty = serde_json::to_string_pretty(input)
-        .unwrap_or_else(|_| input.to_string());
+    let input_pretty = serde_json::to_string_pretty(input).unwrap_or_else(|_| input.to_string());
     writeln!(
         file,
         "\n## {ts} — {tool_name} (intercepted in Plan Mode)\n\n```json\n{input_pretty}\n```\n"
@@ -96,11 +95,13 @@ pub fn open_plan_in_editor(path: &std::path::Path) -> std::io::Result<()> {
     let editor = std::env::var("EDITOR")
         .or_else(|_| std::env::var("VISUAL"))
         .unwrap_or_else(|_| {
-            if cfg!(windows) { "notepad".to_string() } else { "vi".to_string() }
+            if cfg!(windows) {
+                "notepad".to_string()
+            } else {
+                "vi".to_string()
+            }
         });
-    let status = std::process::Command::new(&editor)
-        .arg(path)
-        .status()?;
+    let status = std::process::Command::new(&editor).arg(path).status()?;
     if !status.success() {
         return Err(std::io::Error::new(
             std::io::ErrorKind::Other,

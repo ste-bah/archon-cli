@@ -112,9 +112,7 @@ pub(crate) struct ContextSnapshot {
 /// resolves to `/context`. All other commands leave
 /// `context_snapshot = None` to avoid unnecessary lock traffic on
 /// `session_stats`.
-pub(crate) async fn build_context_snapshot(
-    slash_ctx: &SlashCommandContext,
-) -> ContextSnapshot {
+pub(crate) async fn build_context_snapshot(slash_ctx: &SlashCommandContext) -> ContextSnapshot {
     // Single `session_stats.lock().await`, matching the shipped
     // one-shot read at slash.rs:269. The guard is released at the end
     // of this function — the handler body reads from owned values only.
@@ -143,11 +141,7 @@ pub(crate) async fn build_context_snapshot(
 pub(crate) struct ContextHandler;
 
 impl CommandHandler for ContextHandler {
-    fn execute(
-        &self,
-        ctx: &mut CommandContext,
-        _args: &[String],
-    ) -> anyhow::Result<()> {
+    fn execute(&self, ctx: &mut CommandContext, _args: &[String]) -> anyhow::Result<()> {
         // Defensive: build_command_context is responsible for
         // populating context_snapshot when the primary resolves to
         // /context. A None here indicates a wiring regression — surface
@@ -257,9 +251,7 @@ mod tests {
     /// supplied optional context snapshot. Tests exercising the
     /// defensive None branch pass `None`; tests exercising the happy
     /// path pass `Some(ContextSnapshot { .. })`.
-    fn make_ctx(
-        snapshot: Option<ContextSnapshot>,
-    ) -> (CommandContext, mpsc::Receiver<TuiEvent>) {
+    fn make_ctx(snapshot: Option<ContextSnapshot>) -> (CommandContext, mpsc::Receiver<TuiEvent>) {
         // TASK-AGS-POST-6-SHARED-FIXTURES-V2: migrated to CtxBuilder.
         crate::command::test_support::CtxBuilder::new()
             .with_context_snapshot_opt(snapshot)
@@ -271,9 +263,7 @@ mod tests {
         let h = ContextHandler;
         let desc = h.description().to_lowercase();
         assert!(
-            desc.contains("context")
-                || desc.contains("window")
-                || desc.contains("usage"),
+            desc.contains("context") || desc.contains("window") || desc.contains("usage"),
             "ContextHandler description should reference \
              context/window/usage, got: {}",
             h.description()
@@ -352,8 +342,7 @@ mod tests {
         );
         let err_msg = format!("{}", result.unwrap_err());
         assert!(
-            err_msg.contains("context_snapshot")
-                || err_msg.contains("build_command_context"),
+            err_msg.contains("context_snapshot") || err_msg.contains("build_command_context"),
             "error must describe the missing snapshot, got: {err_msg}"
         );
     }

@@ -51,9 +51,7 @@ pub(crate) struct ModelSnapshot {
 /// resolves to `/model` (or one of its aliases `/m` / `/switch-model`).
 /// All other commands leave `model_snapshot = None` to avoid unnecessary
 /// lock traffic.
-pub(crate) async fn build_model_snapshot(
-    slash_ctx: &SlashCommandContext,
-) -> ModelSnapshot {
+pub(crate) async fn build_model_snapshot(slash_ctx: &SlashCommandContext) -> ModelSnapshot {
     let ov = slash_ctx.model_override_shared.lock().await;
     let current_model = if ov.is_empty() {
         slash_ctx.default_model.clone()
@@ -69,11 +67,7 @@ pub(crate) async fn build_model_snapshot(
 pub(crate) struct ModelHandler;
 
 impl CommandHandler for ModelHandler {
-    fn execute(
-        &self,
-        ctx: &mut CommandContext,
-        args: &[String],
-    ) -> anyhow::Result<()> {
+    fn execute(&self, ctx: &mut CommandContext, args: &[String]) -> anyhow::Result<()> {
         // Shipped body uses `s.strip_prefix("/model").unwrap_or("").trim()`
         // which reduces to a single free-form trailing string. The
         // dispatcher hands us parser-tokenized `args: &[String]`. Joining
@@ -117,8 +111,7 @@ impl CommandHandler for ModelHandler {
                 // mutex write is performed by `apply_effect` in
                 // `command::context` after dispatch returns. That is
                 // where `.await` is legal.
-                ctx.pending_effect =
-                    Some(CommandEffect::SetModelOverride(resolved.clone()));
+                ctx.pending_effect = Some(CommandEffect::SetModelOverride(resolved.clone()));
                 let _ = ctx
                     .tui_tx
                     .try_send(TuiEvent::ModelChanged(resolved.clone()));
@@ -155,7 +148,10 @@ mod tests {
     fn model_handler_description_matches() {
         let h = ModelHandler;
         let desc = h.description();
-        assert!(!desc.is_empty(), "ModelHandler description must be non-empty");
+        assert!(
+            !desc.is_empty(),
+            "ModelHandler description must be non-empty"
+        );
         assert!(
             desc.to_lowercase().contains("model"),
             "ModelHandler description should reference 'model', got: {desc}"
@@ -219,8 +215,7 @@ mod tests {
         );
         let err_msg = format!("{}", result.unwrap_err());
         assert!(
-            err_msg.contains("model_snapshot")
-                || err_msg.contains("build_command_context"),
+            err_msg.contains("model_snapshot") || err_msg.contains("build_command_context"),
             "error must describe the missing snapshot, got: {err_msg}"
         );
     }

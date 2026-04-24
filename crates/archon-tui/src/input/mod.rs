@@ -15,7 +15,7 @@ use crate::commands::{self, CommandInfo};
 use crate::ultrathink::UltrathinkState;
 
 pub mod dispatch;
-pub use dispatch::{handle_key, KeyResult};
+pub use dispatch::{KeyResult, handle_key};
 
 /// Tracks the state of the slash-command autocomplete popup.
 #[derive(Debug, Default)]

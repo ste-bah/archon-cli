@@ -11,11 +11,11 @@
 
 use std::sync::Arc;
 
-use super::channel::{format_prometheus, ChannelMetrics};
+use super::channel::{ChannelMetrics, format_prometheus};
 
 /// Build the `/metrics` router over a snapshot-per-scrape handler.
 fn build_metrics_router(metrics: Arc<ChannelMetrics>) -> axum::Router {
-    use axum::{response::IntoResponse, routing::get, Router};
+    use axum::{Router, response::IntoResponse, routing::get};
 
     let metrics_for_handler = Arc::clone(&metrics);
     let handler = move || {
@@ -62,8 +62,8 @@ pub async fn serve_metrics_on(
 /// Production CLI path uses `serve_metrics_on` with pre-bound listener.
 pub async fn serve_metrics(port: u16, metrics: Arc<ChannelMetrics>) -> anyhow::Result<()> {
     let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
-    let listener = tokio::net::TcpListener::bind(addr).await.map_err(|e| {
-        anyhow::anyhow!("failed to bind metrics exporter on {addr}: {e}")
-    })?;
+    let listener = tokio::net::TcpListener::bind(addr)
+        .await
+        .map_err(|e| anyhow::anyhow!("failed to bind metrics exporter on {addr}: {e}"))?;
     serve_metrics_on(listener, metrics).await
 }

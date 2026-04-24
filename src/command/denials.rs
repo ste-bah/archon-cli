@@ -111,9 +111,7 @@ pub(crate) struct DenialSnapshot {
 /// The `20` limit is preserved verbatim from the shipped body — future
 /// readers changing the cap should consult the shipped body's
 /// diff-history and the `DenialLog::format_display` contract.
-pub(crate) async fn build_denial_snapshot(
-    slash_ctx: &SlashCommandContext,
-) -> DenialSnapshot {
+pub(crate) async fn build_denial_snapshot(slash_ctx: &SlashCommandContext) -> DenialSnapshot {
     // Single `denial_log.lock().await`, matching the shipped one-shot
     // read at slash.rs:377. The guard is released at the end of this
     // function — the handler body reads from the owned `String` only.
@@ -130,11 +128,7 @@ pub(crate) async fn build_denial_snapshot(
 pub(crate) struct DenialsHandler;
 
 impl CommandHandler for DenialsHandler {
-    fn execute(
-        &self,
-        ctx: &mut CommandContext,
-        _args: &[String],
-    ) -> anyhow::Result<()> {
+    fn execute(&self, ctx: &mut CommandContext, _args: &[String]) -> anyhow::Result<()> {
         // Defensive: build_command_context is responsible for populating
         // denial_snapshot when the primary resolves to /denials. A None
         // here indicates a wiring regression (e.g. the builder was
@@ -145,13 +139,10 @@ impl CommandHandler for DenialsHandler {
         // AGS-807/808/809/811/814 `anyhow::anyhow!` pattern in
         // production (both halt dispatch). Mirrors /mcp at mcp.rs:165-175
         // message style.
-        let snapshot = ctx
-            .denial_snapshot
-            .as_ref()
-            .expect(
-                "DenialsHandler invoked without denial_snapshot \
+        let snapshot = ctx.denial_snapshot.as_ref().expect(
+            "DenialsHandler invoked without denial_snapshot \
                  populated — build_command_context bug",
-            );
+        );
 
         // Byte-identical to shipped slash.rs:379-381: `format!("\n{text}\n")`.
         ctx.emit(TuiEvent::TextDelta(format!(
@@ -225,10 +216,7 @@ mod tests {
                     body
                 );
             }
-            other => panic!(
-                "expected TuiEvent::TextDelta, got: {:?}",
-                other
-            ),
+            other => panic!("expected TuiEvent::TextDelta, got: {:?}", other),
         }
     }
 
@@ -238,10 +226,9 @@ mod tests {
         // format_display output with `format!("\n{text}\n")`. After
         // Gate 5 deletes the shipped arm, this test is the sole
         // defender of the exact framing.
-        let (mut ctx, mut rx) =
-            make_denials_ctx(Some(DenialSnapshot {
-                formatted: "BODY".to_string(),
-            }));
+        let (mut ctx, mut rx) = make_denials_ctx(Some(DenialSnapshot {
+            formatted: "BODY".to_string(),
+        }));
         DenialsHandler.execute(&mut ctx, &[]).unwrap();
         let events = drain_tui_events(&mut rx);
         match &events[0] {
@@ -254,10 +241,7 @@ mod tests {
                      snapshot text, trailing \\n) MUST match."
                 );
             }
-            other => panic!(
-                "expected TuiEvent::TextDelta, got: {:?}",
-                other
-            ),
+            other => panic!("expected TuiEvent::TextDelta, got: {:?}", other),
         }
     }
 
@@ -294,8 +278,7 @@ mod tests {
         // interesting behaviour is the `log.format_display(20)` call
         // inside the lock scope; the harness below replicates that
         // exact contract.
-        let log_arc: Arc<Mutex<DenialLog>> =
-            Arc::new(Mutex::new(DenialLog::new()));
+        let log_arc: Arc<Mutex<DenialLog>> = Arc::new(Mutex::new(DenialLog::new()));
         {
             let mut log = log_arc.lock().await;
             log.record("Bash", "policy: deny all");
@@ -367,9 +350,9 @@ mod tests {
         );
 
         let events = drain_tui_events(&mut rx);
-        let has_text_delta = events.iter().any(|e| {
-            matches!(e, TuiEvent::TextDelta(s) if s == "\nBODY\n")
-        });
+        let has_text_delta = events
+            .iter()
+            .any(|e| matches!(e, TuiEvent::TextDelta(s) if s == "\nBODY\n"));
         let has_error = events.iter().any(|e| matches!(e, TuiEvent::Error(_)));
         assert!(
             has_text_delta && !has_error,
@@ -403,9 +386,9 @@ mod tests {
         );
 
         let events = drain_tui_events(&mut rx);
-        let has_text_delta = events.iter().any(|e| {
-            matches!(e, TuiEvent::TextDelta(s) if s == "\nBODY\n")
-        });
+        let has_text_delta = events
+            .iter()
+            .any(|e| matches!(e, TuiEvent::TextDelta(s) if s == "\nBODY\n"));
         let has_error = events.iter().any(|e| matches!(e, TuiEvent::Error(_)));
         assert!(
             has_text_delta && !has_error,

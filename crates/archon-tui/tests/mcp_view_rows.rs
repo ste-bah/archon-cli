@@ -1,6 +1,6 @@
 //! Tests for mcp_view rows.
 
-use archon_tui::screens::mcp_view::{McpServerRow, McpView, McpServerStatus, McpStatusStore};
+use archon_tui::screens::mcp_view::{McpServerRow, McpServerStatus, McpStatusStore, McpView};
 
 /// Mock store for testing McpStatusStore trait.
 struct TestStore {
@@ -72,16 +72,28 @@ fn mcp_view_navigation_wraps() {
 #[test]
 fn mcp_view_reconnect_selected() {
     let mut view = McpView::new();
-    view.set_servers(vec![make_row("test-reconnect", McpServerStatus::Disconnected)]);
-    assert_eq!(view.selected_server_name(), Some("test-reconnect".to_string()));
+    view.set_servers(vec![make_row(
+        "test-reconnect",
+        McpServerStatus::Disconnected,
+    )]);
+    assert_eq!(
+        view.selected_server_name(),
+        Some("test-reconnect".to_string())
+    );
 }
 
 #[test]
 fn mcp_view_disconnect_selected() {
     let mut view = McpView::new();
-    view.set_servers(vec![make_row("test-disconnect", McpServerStatus::Connected)]);
+    view.set_servers(vec![make_row(
+        "test-disconnect",
+        McpServerStatus::Connected,
+    )]);
     // move to first item then disconnect
-    assert_eq!(view.selected_server_name(), Some("test-disconnect".to_string()));
+    assert_eq!(
+        view.selected_server_name(),
+        Some("test-disconnect".to_string())
+    );
 }
 
 #[test]
@@ -102,7 +114,10 @@ fn mcp_view_page_up_down() {
 #[test]
 fn mcp_view_key_r_reconnect() {
     let mut view = McpView::new();
-    view.set_servers(vec![make_row("reconnect-me", McpServerStatus::Disconnected)]);
+    view.set_servers(vec![make_row(
+        "reconnect-me",
+        McpServerStatus::Disconnected,
+    )]);
     let name = view.selected_server_name();
     assert_eq!(name, Some("reconnect-me".to_string()));
 }
@@ -129,14 +144,15 @@ fn mcp_view_selected_returns_row() {
     let row = make_row("selected-test", McpServerStatus::Connecting);
     view.set_servers(vec![row.clone()]);
     assert!(view.selected().is_some());
-    assert_eq!(view.selected().map(|r| r.name.as_str()), Some("selected-test"));
+    assert_eq!(
+        view.selected().map(|r| r.name.as_str()),
+        Some("selected-test")
+    );
 }
 
 #[test]
 fn mcp_status_store_trait() {
-    let store = TestStore::new(vec![
-        make_row("trait-server", McpServerStatus::Connected),
-    ]);
+    let store = TestStore::new(vec![make_row("trait-server", McpServerStatus::Connected)]);
     let servers = store.get_servers();
     assert_eq!(servers.len(), 1);
     assert_eq!(servers[0].name, "trait-server");

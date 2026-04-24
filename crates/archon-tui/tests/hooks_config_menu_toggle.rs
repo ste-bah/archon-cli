@@ -1,6 +1,6 @@
 //! Integration tests for hooks_config_menu Space-toggle behavior.
 
-use archon_tui::screens::hooks_config_menu::{HookSpec, HooksMenu, HookStore};
+use archon_tui::screens::hooks_config_menu::{HookSpec, HookStore, HooksMenu};
 
 /// In-memory store for testing.
 struct TestHookStore {
@@ -72,10 +72,7 @@ fn test_toggle_after_loading_from_store() {
 
 #[test]
 fn test_menu_cursor_wraps() {
-    let store = TestHookStore::new(vec![
-        make_hook("hook-a", true),
-        make_hook("hook-b", false),
-    ]);
+    let store = TestHookStore::new(vec![make_hook("hook-a", true), make_hook("hook-b", false)]);
     let mut menu = HooksMenu::new();
     menu.set_hooks(store.load_hooks());
 

@@ -69,11 +69,7 @@ use crate::command::registry::{CommandContext, CommandHandler};
 pub(crate) struct FastHandler;
 
 impl CommandHandler for FastHandler {
-    fn execute(
-        &self,
-        ctx: &mut CommandContext,
-        _args: &[String],
-    ) -> anyhow::Result<()> {
+    fn execute(&self, ctx: &mut CommandContext, _args: &[String]) -> anyhow::Result<()> {
         // 1. Require fast_mode_shared handle. `build_command_context`
         //    populates this unconditionally from
         //    `SlashCommandContext::fast_mode_shared` so at the real
@@ -82,12 +78,9 @@ impl CommandHandler for FastHandler {
         //    `fast_mode_shared: None` will hit this branch and observe
         //    an Err — mirroring the AGS-815/817 DIRECT-pattern
         //    missing-shared-state precedent.
-        let shared = ctx
-            .fast_mode_shared
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!(
-                "FastHandler: fast_mode_shared not populated in CommandContext"
-            ))?;
+        let shared = ctx.fast_mode_shared.as_ref().ok_or_else(|| {
+            anyhow::anyhow!("FastHandler: fast_mode_shared not populated in CommandContext")
+        })?;
 
         // 2. DIRECT pattern: sync atomic toggle. Load prev, invert,
         //    store new. Preserves observable behavior of the shipped
@@ -136,9 +129,9 @@ mod tests {
              FastHandler::execute call"
         );
         let events = drain_tui_events(&mut rx);
-        let matched = events.iter().any(|e| {
-            matches!(e, TuiEvent::TextDelta(s) if s.contains("Fast mode ENABLED"))
-        });
+        let matched = events
+            .iter()
+            .any(|e| matches!(e, TuiEvent::TextDelta(s) if s.contains("Fast mode ENABLED")));
         assert!(
             matched,
             "expected TuiEvent::TextDelta containing 'Fast mode ENABLED', \
@@ -158,9 +151,9 @@ mod tests {
              FastHandler::execute call"
         );
         let events = drain_tui_events(&mut rx);
-        let matched = events.iter().any(|e| {
-            matches!(e, TuiEvent::TextDelta(s) if s.contains("Fast mode DISABLED"))
-        });
+        let matched = events
+            .iter()
+            .any(|e| matches!(e, TuiEvent::TextDelta(s) if s.contains("Fast mode DISABLED")));
         assert!(
             matched,
             "expected TuiEvent::TextDelta containing 'Fast mode DISABLED', \
@@ -189,12 +182,12 @@ mod tests {
         );
         // Both events emitted: ENABLED then DISABLED.
         let events = drain_tui_events(&mut rx);
-        let enabled = events.iter().any(|e| {
-            matches!(e, TuiEvent::TextDelta(s) if s.contains("Fast mode ENABLED"))
-        });
-        let disabled = events.iter().any(|e| {
-            matches!(e, TuiEvent::TextDelta(s) if s.contains("Fast mode DISABLED"))
-        });
+        let enabled = events
+            .iter()
+            .any(|e| matches!(e, TuiEvent::TextDelta(s) if s.contains("Fast mode ENABLED")));
+        let disabled = events
+            .iter()
+            .any(|e| matches!(e, TuiEvent::TextDelta(s) if s.contains("Fast mode DISABLED")));
         assert!(
             enabled && disabled,
             "expected both 'Fast mode ENABLED' and 'Fast mode DISABLED' \

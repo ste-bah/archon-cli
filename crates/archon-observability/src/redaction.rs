@@ -43,9 +43,9 @@ use regex::Regex;
 use std::io::Write;
 use std::sync::Mutex as StdMutex;
 use tracing::Subscriber;
+use tracing_subscriber::Layer;
 use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
-use tracing_subscriber::Layer;
 
 /// Regex for secret shapes we must never log. Alternation covers:
 ///   * OpenAI `sk-...` (20+ alnum)
@@ -158,10 +158,7 @@ impl RedactionLayer {
     /// layout. Exposed `pub(crate)` so `init_tracing` (in the sibling `tracing`
     /// module) can hand tests the same constructor that production uses.
     #[cfg_attr(not(test), allow(dead_code))]
-    pub(crate) fn with_writer_and_format<W: Write + Send + 'static>(
-        writer: W,
-        json: bool,
-    ) -> Self {
+    pub(crate) fn with_writer_and_format<W: Write + Send + 'static>(writer: W, json: bool) -> Self {
         Self {
             writer: StdMutex::new(Box::new(writer)),
             json,
@@ -287,11 +284,7 @@ where
                 if i > 0 {
                     fields_json.push(',');
                 }
-                fields_json.push_str(&format!(
-                    "\"{}\":\"{}\"",
-                    json_escape(k),
-                    json_escape(v)
-                ));
+                fields_json.push_str(&format!("\"{}\":\"{}\"", json_escape(k), json_escape(v)));
             }
             fields_json.push('}');
             let spans_json: String = spans
@@ -309,10 +302,7 @@ where
             } else {
                 format!(" {{{}}}", spans.join("::"))
             };
-            format!(
-                "[{} {}]{} {}\n",
-                level, target, span_suffix, visitor.buf
-            )
+            format!("[{} {}]{} {}\n", level, target, span_suffix, visitor.buf)
         };
 
         if let Ok(mut guard) = self.writer.lock() {
@@ -326,8 +316,8 @@ where
 mod redaction_tests {
     use super::*;
     use std::sync::Arc;
-    use tracing_subscriber::layer::SubscriberExt;
     use tracing_subscriber::EnvFilter;
+    use tracing_subscriber::layer::SubscriberExt;
 
     /// Shared in-memory writer that clones cheaply and is safe across threads.
     #[derive(Clone)]
@@ -360,14 +350,17 @@ mod redaction_tests {
     #[test]
     fn redaction_layer_redacts_every_secret_shape() {
         let cases = [
-            ("openai",  "sk-abcdefghijklmnopqrst0000"),
+            ("openai", "sk-abcdefghijklmnopqrst0000"),
             ("anthropic", "sk-ant-api03_ZZZZZZZZZZZZZZZZZZ1234"),
             ("aws_akia", "AKIAZZZZZZZZZZZZZZZZ"),
             ("github_pat", "ghp_abcdefghijklmnopqrstuvwxyz0123456789"),
             ("github_oauth", "gho_abcdefghijklmnopqrstuvwxyz0123456789"),
             ("stripe_live", "sk_live_abcdefghijklmnopqrstuvwx"),
             ("stripe_pub_live", "pk_live_abcdefghijklmnopqrstuvwx"),
-            ("jwt", "eyJhbGciOiJIUzI1NiIs.eyJzdWIiOiIxMjM0NTY.SflKxwRJSMe"),
+            (
+                "jwt",
+                "eyJhbGciOiJIUzI1NiIs.eyJzdWIiOiIxMjM0NTY.SflKxwRJSMe",
+            ),
             ("bearer", "bearer ya29.a0Af_abcDEF-123"),
         ];
 
@@ -395,7 +388,14 @@ mod redaction_tests {
     /// value is clean.
     #[test]
     fn redaction_layer_redacts_sensitive_field_names() {
-        for name in ["password", "api_key", "api-key", "authorization", "secret", "token"] {
+        for name in [
+            "password",
+            "api_key",
+            "api-key",
+            "authorization",
+            "secret",
+            "token",
+        ] {
             let redacted = redact(name);
             assert!(
                 redacted.contains(REDACTED),
@@ -446,9 +446,18 @@ mod redaction_tests {
             ::tracing::info!(user = "alice", "hello");
         });
         let captured = sink.contents();
-        assert!(captured.contains("\"level\":\"INFO\""), "json missing level: {captured:?}");
-        assert!(captured.contains("\"target\":"), "json missing target: {captured:?}");
-        assert!(captured.contains("\"fields\":{"), "json missing fields obj: {captured:?}");
+        assert!(
+            captured.contains("\"level\":\"INFO\""),
+            "json missing level: {captured:?}"
+        );
+        assert!(
+            captured.contains("\"target\":"),
+            "json missing target: {captured:?}"
+        );
+        assert!(
+            captured.contains("\"fields\":{"),
+            "json missing fields obj: {captured:?}"
+        );
     }
 
     #[test]
@@ -459,10 +468,7 @@ mod redaction_tests {
             out.contains("***REDACTED***"),
             "expected REDACTED marker, got: {out:?}"
         );
-        assert!(
-            !out.contains(raw),
-            "raw sk-proj- key leaked: {out:?}"
-        );
+        assert!(!out.contains(raw), "raw sk-proj- key leaked: {out:?}");
     }
 
     #[test]
@@ -473,10 +479,7 @@ mod redaction_tests {
             out.contains("***REDACTED***"),
             "expected REDACTED marker, got: {out:?}"
         );
-        assert!(
-            !out.contains(raw),
-            "raw sk-svcacct- key leaked: {out:?}"
-        );
+        assert!(!out.contains(raw), "raw sk-svcacct- key leaked: {out:?}");
     }
 
     #[test]
@@ -524,10 +527,7 @@ mod redaction_tests {
             !out.contains("sa@my-project.iam.gserviceaccount.com"),
             "client_email leaked: {out:?}"
         );
-        assert!(
-            !out.contains("abc123"),
-            "private_key_id leaked: {out:?}"
-        );
+        assert!(!out.contains("abc123"), "private_key_id leaked: {out:?}");
     }
 
     #[test]
@@ -549,10 +549,7 @@ mod redaction_tests {
         let raw = "-----BEGIN RSA PRIVATE KEY-----\nSECRETBYTES\n-----END RSA PRIVATE KEY-----";
         let out = redact(raw);
         assert!(out.contains(REDACTED));
-        assert!(
-            !out.contains("SECRETBYTES"),
-            "RSA PEM body leaked: {out:?}"
-        );
+        assert!(!out.contains("SECRETBYTES"), "RSA PEM body leaked: {out:?}");
     }
 
     #[test]

@@ -57,13 +57,10 @@ async fn producer_never_blocks_during_receiver_pause() {
     drop(tx);
 
     // Wait for receiver to drain
-    let received = tokio::time::timeout(
-        std::time::Duration::from_secs(10),
-        receiver,
-    )
-    .await
-    .expect("receiver timed out")
-    .expect("receiver panicked");
+    let received = tokio::time::timeout(std::time::Duration::from_secs(10), receiver)
+        .await
+        .expect("receiver timed out")
+        .expect("receiver panicked");
 
     // Assertions
     assert!(

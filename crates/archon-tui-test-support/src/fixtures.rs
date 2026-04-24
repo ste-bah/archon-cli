@@ -5,13 +5,13 @@
 //! equivalent Buffers via ratatui primitives so phase-3 modularization must
 //! converge to them.
 
+use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
-use ratatui::Terminal;
 
 /// Splash screen: centered box with title "Archon" and subtitle "press any key".
 pub fn splash_screen_buffer() -> Buffer {

@@ -7,7 +7,9 @@ pub mod ask_user;
 pub mod background_agents;
 // TASK-TUI-402: thin shim API re-exports for TUI layer.
 // TASK-TUI-406: spawn_gc_task added for registry memory bounds.
-pub use background_agents::{cancel_background_agent, poll_background_agent, spawn_gc_task, PollOutcome};
+pub use background_agents::{
+    PollOutcome, cancel_background_agent, poll_background_agent, spawn_gc_task,
+};
 pub mod bash;
 pub mod concurrency;
 pub mod config_tool;
@@ -32,9 +34,9 @@ pub mod agent_tool;
 // TASK-AGS-105: SubagentExecutor trait + OnceLock registry. The
 // concrete AgentSubagentExecutor is installed by archon-core at
 // Agent::new time.
-pub mod subagent_executor;
 pub mod git;
 pub mod send_message;
+pub mod subagent_executor;
 pub mod validation;
 
 pub mod task_create;

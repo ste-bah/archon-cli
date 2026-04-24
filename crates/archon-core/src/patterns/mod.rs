@@ -24,13 +24,15 @@ use serde_json::Value;
 pub use spec::*;
 
 // Re-export concrete pattern types.
-pub use pipeline::{PipelineAdapterConfig, PipelineEngineHandle, PipelinePattern};
-pub use fanout::FanOutFanInPattern;
 pub use broker::{AgentRegistryHandle, BrokerPattern, Candidate, CustomSelectorFn};
-pub use composite::{CompositeAgentPattern, CompiledComposite, CompositeConfig, CompositeNode, CompositeEdge};
-pub use remote::{RemoteAgentPattern, DiscoveryResolver, StaticResolver};
-pub use circuit_breaker::{CircuitBreaker, BreakerState, wrap_with_breaker};
-pub use plugin::{PatternPluginLoader, NativePluginDescriptor, WasmPluginConfig, WasmPattern};
+pub use circuit_breaker::{BreakerState, CircuitBreaker, wrap_with_breaker};
+pub use composite::{
+    CompiledComposite, CompositeAgentPattern, CompositeConfig, CompositeEdge, CompositeNode,
+};
+pub use fanout::FanOutFanInPattern;
+pub use pipeline::{PipelineAdapterConfig, PipelineEngineHandle, PipelinePattern};
+pub use plugin::{NativePluginDescriptor, PatternPluginLoader, WasmPattern, WasmPluginConfig};
+pub use remote::{DiscoveryResolver, RemoteAgentPattern, StaticResolver};
 
 // ---------------------------------------------------------------------------
 // PatternKind
@@ -88,11 +90,7 @@ pub enum PatternError {
 /// `archon_core::tasks` supplies the impl at composition time.
 #[async_trait]
 pub trait TaskServiceHandle: Send + Sync {
-    async fn submit(
-        &self,
-        agent: &str,
-        input: Value,
-    ) -> Result<Value, PatternError>;
+    async fn submit(&self, agent: &str, input: Value) -> Result<Value, PatternError>;
 }
 
 // ---------------------------------------------------------------------------
@@ -124,11 +122,7 @@ pub trait Pattern: Send + Sync {
     fn kind(&self) -> PatternKind;
 
     /// Execute the pattern with the given input and context.
-    async fn execute(
-        &self,
-        input: Value,
-        ctx: PatternCtx,
-    ) -> Result<Value, PatternError>;
+    async fn execute(&self, input: Value, ctx: PatternCtx) -> Result<Value, PatternError>;
 }
 
 // ---------------------------------------------------------------------------

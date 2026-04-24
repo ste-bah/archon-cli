@@ -3,11 +3,11 @@
 //! These are the non-body UI elements that appear in fixed regions.
 
 use ratatui::{
+    Frame,
     layout::Rect,
     style::{Color, Modifier, Style},
     text::Line,
     widgets::{Block, Borders, Paragraph},
-    Frame,
 };
 
 use crate::app::App;
@@ -21,9 +21,8 @@ pub fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
 
     let status_line = if app.input.ultrathink.active {
         let mut spans: Vec<ratatui::text::Span<'_>> = Vec::new();
-        for (ch, color) in ultrathink::ultrathink_status_spans(
-            app.input.ultrathink.shimmer_offset,
-        ) {
+        for (ch, color) in ultrathink::ultrathink_status_spans(app.input.ultrathink.shimmer_offset)
+        {
             spans.push(ratatui::text::Span::styled(
                 String::from(ch),
                 Style::default()
@@ -77,7 +76,9 @@ pub fn draw_permission_indicator(frame: &mut Frame, app: &App, area: Rect) {
         ratatui::text::Span::styled(" >> ", Style::default().fg(Color::Yellow)),
         ratatui::text::Span::styled(
             perm_display,
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
         ),
         ratatui::text::Span::styled(" (shift+tab to cycle)", Style::default().fg(t.muted)),
     ]);

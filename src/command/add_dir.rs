@@ -160,11 +160,7 @@ use crate::command::registry::{CommandContext, CommandEffect, CommandHandler};
 pub(crate) struct AddDirHandler;
 
 impl CommandHandler for AddDirHandler {
-    fn execute(
-        &self,
-        ctx: &mut CommandContext,
-        args: &[String],
-    ) -> anyhow::Result<()> {
+    fn execute(&self, ctx: &mut CommandContext, args: &[String]) -> anyhow::Result<()> {
         // R4: join multi-token args with " " and trim. Byte-equivalent
         // to the shipped `s.strip_prefix("/add-dir").unwrap_or("").trim()`
         // for all inputs — single-token paths collapse to the same
@@ -194,8 +190,7 @@ impl CommandHandler for AddDirHandler {
                 // Clone the PathBuf into the effect variant so the
                 // effect carries owned data across the .take() boundary
                 // at slash.rs — no borrow on ctx lifetime.
-                ctx.pending_effect =
-                    Some(CommandEffect::AddExtraDir(path.clone()));
+                ctx.pending_effect = Some(CommandEffect::AddExtraDir(path.clone()));
                 ctx.emit(TuiEvent::TextDelta(format!(
                     "\nAdded '{}' to working directories for this session.\nFiles in this directory are now accessible.\n",
                     path.display()
@@ -204,9 +199,7 @@ impl CommandHandler for AddDirHandler {
                 // Invalid directory — emit Error with byte-identical
                 // shipped format at slash.rs:685-687. NO effect stashed
                 // so `apply_effect` is never invoked for this branch.
-                ctx.emit(TuiEvent::Error(format!(
-                    "Directory not found: {path_arg}"
-                )));
+                ctx.emit(TuiEvent::Error(format!("Directory not found: {path_arg}")));
             }
         }
         Ok(())
@@ -326,9 +319,7 @@ mod tests {
                      byte-for-byte"
                 );
             }
-            other => panic!(
-                "empty-arg branch must emit TuiEvent::Error, got: {other:?}"
-            ),
+            other => panic!("empty-arg branch must emit TuiEvent::Error, got: {other:?}"),
         }
     }
 
@@ -375,9 +366,7 @@ mod tests {
                      the trimmed arg"
                 );
             }
-            other => panic!(
-                "expected Some(CommandEffect::AddExtraDir(path)), got: {other:?}"
-            ),
+            other => panic!("expected Some(CommandEffect::AddExtraDir(path)), got: {other:?}"),
         }
 
         // 2. Exactly one TextDelta event with byte-identical format.
@@ -476,9 +465,7 @@ mod tests {
 
         // 3. NO TextDelta — implied by len()==1 and the Error match
         //    above, but spell it out for the test contract.
-        let has_delta = events
-            .iter()
-            .any(|e| matches!(e, TuiEvent::TextDelta(_)));
+        let has_delta = events.iter().any(|e| matches!(e, TuiEvent::TextDelta(_)));
         assert!(
             !has_delta,
             "invalid-dir branch must emit NO TuiEvent::TextDelta; got: \
@@ -528,9 +515,7 @@ mod tests {
         // the joined path_arg (not just the first token).
         let joined = "/tmp foo-xyzzy-abc-123";
         let emitted_ok = events.iter().any(|e| match e {
-            TuiEvent::Error(msg) => {
-                msg == &format!("Directory not found: {joined}")
-            }
+            TuiEvent::Error(msg) => msg == &format!("Directory not found: {joined}"),
             TuiEvent::TextDelta(text) => text.contains(joined),
             _ => false,
         });
@@ -582,12 +567,10 @@ mod tests {
         while let Ok(ev) = rx.try_recv() {
             events.push(ev);
         }
-        let has_error = events.iter().any(|e| {
-            matches!(e, TuiEvent::Error(msg) if msg == expected_error)
-        });
-        let has_text_delta = events
+        let has_error = events
             .iter()
-            .any(|e| matches!(e, TuiEvent::TextDelta(_)));
+            .any(|e| matches!(e, TuiEvent::Error(msg) if msg == expected_error));
+        let has_text_delta = events.iter().any(|e| matches!(e, TuiEvent::TextDelta(_)));
         assert!(
             has_error && !has_text_delta,
             "end-to-end bare `/add-dir` must emit byte-identical \
@@ -605,8 +588,8 @@ mod tests {
     #[test]
     fn dispatcher_routes_slash_add_dir_with_valid_dir_end_to_end() {
         use crate::command::dispatcher::Dispatcher;
-        use crate::command::registry::default_registry;
         use crate::command::registry::CommandEffect;
+        use crate::command::registry::default_registry;
         use std::sync::Arc;
 
         let registry = Arc::new(default_registry());
@@ -658,9 +641,9 @@ mod tests {
         while let Ok(ev) = rx.try_recv() {
             events.push(ev);
         }
-        let has_text_delta = events.iter().any(|e| {
-            matches!(e, TuiEvent::TextDelta(s) if s == &expected_confirmation)
-        });
+        let has_text_delta = events
+            .iter()
+            .any(|e| matches!(e, TuiEvent::TextDelta(s) if s == &expected_confirmation));
         let has_error = events.iter().any(|e| matches!(e, TuiEvent::Error(_)));
         assert!(
             has_text_delta && !has_error,

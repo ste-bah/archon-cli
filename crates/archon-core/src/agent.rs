@@ -24,10 +24,10 @@ use tokio::sync::Mutex;
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 
+use crate::ChannelMetricSink;
 use crate::agents::AgentRegistry;
 use crate::dispatch::ToolRegistry;
 use crate::subagent::SubagentManager;
-use crate::ChannelMetricSink;
 
 // ---------------------------------------------------------------------------
 // Shared session statistics -- updated by the agent, read by slash commands
@@ -1378,7 +1378,8 @@ impl Agent {
                                                 // handle_subagent_result indirection.
                                                 let _ = resume_result; // legacy stub, drop
                                                 let resume_sid = agent_id.clone();
-                                                let cancel = tokio_util::sync::CancellationToken::new();
+                                                let cancel =
+                                                    tokio_util::sync::CancellationToken::new();
                                                 let resume_ctx = archon_tools::tool::ToolContext {
                                                     working_dir: self.config.working_dir.clone(),
                                                     session_id: self.config.session_id.clone(),
@@ -1474,10 +1475,9 @@ impl Agent {
                                         )),
                                     }
                                 }
-                                other => ToolResult::error(format!(
-                                    "Unknown message_type: {}",
-                                    other
-                                )),
+                                other => {
+                                    ToolResult::error(format!("Unknown message_type: {}", other))
+                                }
                             },
                             Err(e) => ToolResult::error(format!(
                                 "Failed to parse SendMessage result: {e}"
@@ -1934,7 +1934,10 @@ impl Agent {
         // TASK-AGS-102: unbounded send — synchronous, fails only if rx dropped.
         // TASK-AGS-108 ERR-ARCH-02: WARN on closed channel, continue execution.
         let event_name = event.event_name();
-        let timestamped = TimestampedEvent { sent_at: std::time::Instant::now(), inner: event };
+        let timestamped = TimestampedEvent {
+            sent_at: std::time::Instant::now(),
+            inner: event,
+        };
         if let Err(_) = self.event_tx.send(timestamped) {
             tracing::warn!(
                 event_id = event_name,

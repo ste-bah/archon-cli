@@ -84,9 +84,7 @@ impl ConditionEvaluator {
         let re = Regex::new(r"(^|[^.\w])([a-zA-Z_][a-zA-Z0-9_-]*)\.output\b")
             .map_err(|e| PipelineError::ValidationError(format!("regex error: {}", e)))?;
 
-        let result = re
-            .replace_all(inner, "${1}steps.${2}.output")
-            .to_string();
+        let result = re.replace_all(inner, "${1}steps.${2}.output").to_string();
         Ok(result)
     }
 
@@ -161,8 +159,7 @@ mod tests {
         let mut outputs = HashMap::new();
         outputs.insert("a".to_string(), json!({"should_run": true}));
 
-        let result =
-            ConditionEvaluator::evaluate("${a.output.should_run}", &outputs).unwrap();
+        let result = ConditionEvaluator::evaluate("${a.output.should_run}", &outputs).unwrap();
         assert!(result);
     }
 
@@ -171,8 +168,7 @@ mod tests {
         let mut outputs = HashMap::new();
         outputs.insert("a".to_string(), json!({"should_run": false}));
 
-        let result =
-            ConditionEvaluator::evaluate("${a.output.should_run}", &outputs).unwrap();
+        let result = ConditionEvaluator::evaluate("${a.output.should_run}", &outputs).unwrap();
         assert!(!result);
     }
 
@@ -181,12 +177,10 @@ mod tests {
         let mut outputs = HashMap::new();
         outputs.insert("a".to_string(), json!({"count": 5}));
 
-        let result =
-            ConditionEvaluator::evaluate("a.output.count > 3", &outputs).unwrap();
+        let result = ConditionEvaluator::evaluate("a.output.count > 3", &outputs).unwrap();
         assert!(result);
 
-        let result =
-            ConditionEvaluator::evaluate("a.output.count > 10", &outputs).unwrap();
+        let result = ConditionEvaluator::evaluate("a.output.count > 10", &outputs).unwrap();
         assert!(!result);
     }
 
@@ -195,12 +189,10 @@ mod tests {
         let mut outputs = HashMap::new();
         outputs.insert("a".to_string(), json!({"status": "ok"}));
 
-        let result =
-            ConditionEvaluator::evaluate("a.output.status == \"ok\"", &outputs).unwrap();
+        let result = ConditionEvaluator::evaluate("a.output.status == \"ok\"", &outputs).unwrap();
         assert!(result);
 
-        let result =
-            ConditionEvaluator::evaluate("a.output.status == \"fail\"", &outputs).unwrap();
+        let result = ConditionEvaluator::evaluate("a.output.status == \"fail\"", &outputs).unwrap();
         assert!(!result);
     }
 
@@ -236,16 +228,13 @@ mod tests {
         let mut outputs = HashMap::new();
         outputs.insert("a".to_string(), json!({"x": true, "y": false}));
 
-        let result =
-            ConditionEvaluator::evaluate("a.output.x && !a.output.y", &outputs).unwrap();
+        let result = ConditionEvaluator::evaluate("a.output.x && !a.output.y", &outputs).unwrap();
         assert!(result);
 
-        let result =
-            ConditionEvaluator::evaluate("a.output.x || a.output.y", &outputs).unwrap();
+        let result = ConditionEvaluator::evaluate("a.output.x || a.output.y", &outputs).unwrap();
         assert!(result);
 
-        let result =
-            ConditionEvaluator::evaluate("a.output.x && a.output.y", &outputs).unwrap();
+        let result = ConditionEvaluator::evaluate("a.output.x && a.output.y", &outputs).unwrap();
         assert!(!result);
     }
 }

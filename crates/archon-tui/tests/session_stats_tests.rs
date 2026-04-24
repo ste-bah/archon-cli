@@ -8,19 +8,28 @@ use std::time::Duration;
 #[test]
 fn session_stats_empty_returns_is_empty_true() {
     let stats = archon_tui::screens::session_stats::SessionStats::empty();
-    assert!(stats.is_empty(), "SessionStats::empty() should return is_empty() == true");
+    assert!(
+        stats.is_empty(),
+        "SessionStats::empty() should return is_empty() == true"
+    );
 }
 
 #[test]
 fn session_stats_default_returns_is_empty_true() {
     let stats = archon_tui::screens::session_stats::SessionStats::default();
-    assert!(stats.is_empty(), "SessionStats::default() should return is_empty() == true");
+    assert!(
+        stats.is_empty(),
+        "SessionStats::default() should return is_empty() == true"
+    );
 }
 
 #[test]
 fn session_stats_empty_has_zero_counts() {
     let stats = archon_tui::screens::session_stats::SessionStats::empty();
-    assert_eq!(stats.message_count, 0, "empty() should have message_count == 0");
+    assert_eq!(
+        stats.message_count, 0,
+        "empty() should have message_count == 0"
+    );
     assert_eq!(stats.agent_count, 0, "empty() should have agent_count == 0");
 }
 
@@ -39,7 +48,10 @@ fn session_stats_with_nonzero_counts_is_not_empty() {
         recent_tools: vec!["Read".to_string()],
     };
 
-    assert!(!stats.is_empty(), "SessionStats with non-zero counts should return is_empty() == false");
+    assert!(
+        !stats.is_empty(),
+        "SessionStats with non-zero counts should return is_empty() == false"
+    );
 }
 
 #[test]

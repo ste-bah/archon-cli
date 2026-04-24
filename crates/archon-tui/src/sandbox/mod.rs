@@ -180,11 +180,7 @@ mod tests {
             allow_network: false,
             ..Default::default()
         };
-        let result = check_permission(
-            "WebFetch",
-            &[String::from("https://example.com")],
-            &config,
-        );
+        let result = check_permission("WebFetch", &[String::from("https://example.com")], &config);
         assert_eq!(result, Err(SandboxError::NetworkDenied));
     }
 

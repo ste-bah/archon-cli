@@ -31,9 +31,7 @@ use async_trait::async_trait;
 use tokio::sync::mpsc::Receiver;
 
 use crate::anthropic::AnthropicClient;
-use crate::provider::{
-    LlmError, LlmProvider, LlmRequest, LlmResponse, ModelInfo, ProviderFeature,
-};
+use crate::provider::{LlmError, LlmProvider, LlmRequest, LlmResponse, ModelInfo, ProviderFeature};
 use crate::streaming::StreamEvent;
 
 /// Configuration for `RetryProvider`'s backoff loop.

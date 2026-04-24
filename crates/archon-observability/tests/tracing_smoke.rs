@@ -59,16 +59,28 @@ fn span_constructors_reachable_with_fields() {
         tracing_subscriber::registry().with(RedactionLayer::with_writer(Vec::<u8>::new()));
     ::tracing::subscriber::with_default(subscriber, || {
         let turn = span_agent_turn("t-smoke");
-        assert!(turn.field("task_id").is_some(), "agent.turn missing task_id");
-        assert!(turn.field("turn_ms").is_some(), "agent.turn missing turn_ms");
+        assert!(
+            turn.field("task_id").is_some(),
+            "agent.turn missing task_id"
+        );
+        assert!(
+            turn.field("turn_ms").is_some(),
+            "agent.turn missing turn_ms"
+        );
 
         let slash = span_slash_dispatch("t-smoke", "/noop");
         assert!(slash.field("task_id").is_some(), "slash missing task_id");
         assert!(slash.field("command").is_some(), "slash missing command");
 
         let send = span_channel_send("t-smoke", "AgentDelta");
-        assert!(send.field("task_id").is_some(), "channel.send missing task_id");
-        assert!(send.field("event_kind").is_some(), "channel.send missing event_kind");
+        assert!(
+            send.field("task_id").is_some(),
+            "channel.send missing task_id"
+        );
+        assert!(
+            send.field("event_kind").is_some(),
+            "channel.send missing event_kind"
+        );
     });
 }
 

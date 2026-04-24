@@ -33,7 +33,9 @@ impl CliTaskApi {
         let input_json = match input_path {
             Some(ref p) if p == "-" => {
                 let mut buf = String::new();
-                std::io::stdin().read_to_string(&mut buf).map_err(TaskError::Io)?;
+                std::io::stdin()
+                    .read_to_string(&mut buf)
+                    .map_err(TaskError::Io)?;
                 serde_json::from_str(&buf).unwrap_or(serde_json::json!({"input": buf}))
             }
             Some(ref p) => {
@@ -86,7 +88,9 @@ impl CliTaskApi {
 
         match self.service.result(id, stream).await {
             Ok(TaskResultStream::Inline(data)) => Ok(data),
-            Ok(TaskResultStream::File(path)) => std::fs::read_to_string(&path).map_err(TaskError::Io),
+            Ok(TaskResultStream::File(path)) => {
+                std::fs::read_to_string(&path).map_err(TaskError::Io)
+            }
             Err(TaskError::Pending) => {
                 // Exit code 2 for pending tasks
                 Err(TaskError::Pending)

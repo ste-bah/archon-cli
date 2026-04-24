@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 
-use crossterm::event::{KeyEvent, KeyCode, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 /// All distinct actions that can be triggered by a key binding.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -73,40 +73,106 @@ impl Default for KeyMap {
         let mut bindings = HashMap::new();
 
         // Control shortcuts
-        bindings.insert(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL), Action::Quit);
-        bindings.insert(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL), Action::Quit);
-        bindings.insert(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::CONTROL), Action::ToggleThinking);
-        bindings.insert(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::CONTROL), Action::VoiceHotkey);
-        bindings.insert(KeyEvent::new(KeyCode::Char('\\'), KeyModifiers::CONTROL), Action::ToggleSplit);
-        bindings.insert(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL), Action::SwitchPane);
+        bindings.insert(
+            KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
+            Action::Quit,
+        );
+        bindings.insert(
+            KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL),
+            Action::Quit,
+        );
+        bindings.insert(
+            KeyEvent::new(KeyCode::Char('t'), KeyModifiers::CONTROL),
+            Action::ToggleThinking,
+        );
+        bindings.insert(
+            KeyEvent::new(KeyCode::Char('v'), KeyModifiers::CONTROL),
+            Action::VoiceHotkey,
+        );
+        bindings.insert(
+            KeyEvent::new(KeyCode::Char('\\'), KeyModifiers::CONTROL),
+            Action::ToggleSplit,
+        );
+        bindings.insert(
+            KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL),
+            Action::SwitchPane,
+        );
 
         // Navigation / scroll
-        bindings.insert(KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE), Action::ScrollUp);
-        bindings.insert(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE), Action::ScrollDown);
-        bindings.insert(KeyEvent::new(KeyCode::Home, KeyModifiers::CONTROL), Action::ScrollTop);
-        bindings.insert(KeyEvent::new(KeyCode::End, KeyModifiers::CONTROL), Action::ScrollBottom);
+        bindings.insert(
+            KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE),
+            Action::ScrollUp,
+        );
+        bindings.insert(
+            KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE),
+            Action::ScrollDown,
+        );
+        bindings.insert(
+            KeyEvent::new(KeyCode::Home, KeyModifiers::CONTROL),
+            Action::ScrollTop,
+        );
+        bindings.insert(
+            KeyEvent::new(KeyCode::End, KeyModifiers::CONTROL),
+            Action::ScrollBottom,
+        );
 
         // Core editing keys
-        bindings.insert(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), Action::Submit);
-        bindings.insert(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE), Action::TabComplete);
-        bindings.insert(KeyEvent::new(KeyCode::BackTab, KeyModifiers::NONE), Action::CyclePermissionMode);
-        bindings.insert(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), Action::Escape);
-        bindings.insert(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE), Action::Backspace);
-        bindings.insert(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE), Action::HistoryUp);
-        bindings.insert(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE), Action::HistoryDown);
-        bindings.insert(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE), Action::MoveLeft);
-        bindings.insert(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE), Action::MoveRight);
+        bindings.insert(
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+            Action::Submit,
+        );
+        bindings.insert(
+            KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE),
+            Action::TabComplete,
+        );
+        bindings.insert(
+            KeyEvent::new(KeyCode::BackTab, KeyModifiers::NONE),
+            Action::CyclePermissionMode,
+        );
+        bindings.insert(
+            KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+            Action::Escape,
+        );
+        bindings.insert(
+            KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE),
+            Action::Backspace,
+        );
+        bindings.insert(
+            KeyEvent::new(KeyCode::Up, KeyModifiers::NONE),
+            Action::HistoryUp,
+        );
+        bindings.insert(
+            KeyEvent::new(KeyCode::Down, KeyModifiers::NONE),
+            Action::HistoryDown,
+        );
+        bindings.insert(
+            KeyEvent::new(KeyCode::Left, KeyModifiers::NONE),
+            Action::MoveLeft,
+        );
+        bindings.insert(
+            KeyEvent::new(KeyCode::Right, KeyModifiers::NONE),
+            Action::MoveRight,
+        );
 
         // Slash command
-        bindings.insert(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE), Action::SlashCommand("/".to_string()));
+        bindings.insert(
+            KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE),
+            Action::SlashCommand("/".to_string()),
+        );
 
         // Character input — NONE and SHIFT modifiers only; Alt/Ctrl are consumed by terminal.
         for &c in ASCII_PRINTABLE {
-            bindings.insert(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE), Action::CharInput(c));
+            bindings.insert(
+                KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE),
+                Action::CharInput(c),
+            );
         }
         for pair in SHIFT_PAIRS {
             let (base, shifted) = *pair;
-            bindings.insert(KeyEvent::new(KeyCode::Char(base), KeyModifiers::SHIFT), Action::CharInput(shifted));
+            bindings.insert(
+                KeyEvent::new(KeyCode::Char(base), KeyModifiers::SHIFT),
+                Action::CharInput(shifted),
+            );
         }
 
         Self { bindings }
@@ -126,10 +192,37 @@ impl KeyMap {
 // ── Character-set constants ───────────────────────────────────────────────────
 
 /// All printable ASCII (0x20–0x7E) except '/' (slash-command trigger).
-const ASCII_PRINTABLE: &[char] = &[' ', '!', '"', '#', '$', '%', '&', '\'', '(', ')', '*', '+', ',', '-', '.', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', ':', ';', '<', '=', '>', '?', '@', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', '[', '\\', ']', '^', '_', '`', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z', '{', '|', '}', '~'];
+const ASCII_PRINTABLE: &[char] = &[
+    ' ', '!', '"', '#', '$', '%', '&', '\'', '(', ')', '*', '+', ',', '-', '.', '0', '1', '2', '3',
+    '4', '5', '6', '7', '8', '9', ':', ';', '<', '=', '>', '?', '@', 'A', 'B', 'C', 'D', 'E', 'F',
+    'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y',
+    'Z', '[', '\\', ']', '^', '_', '`', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l',
+    'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z', '{', '|', '}', '~',
+];
 
 /// (unshifted, shifted) pairs for symbol keys where Shift changes the output.
-const SHIFT_PAIRS: &[(char, char)] = &[('1','!'),('2','@'),('3','#'),('4','$'),('5','%'),('6','^'),('7','&'),('8','*'),('9','('),('0',')'),('-','_'),('=','+'),('[','{'),(']','}'),('\\','|'),(';',':'),('\'','"'),(',','<'),('.','>'),('`','~')];
+const SHIFT_PAIRS: &[(char, char)] = &[
+    ('1', '!'),
+    ('2', '@'),
+    ('3', '#'),
+    ('4', '$'),
+    ('5', '%'),
+    ('6', '^'),
+    ('7', '&'),
+    ('8', '*'),
+    ('9', '('),
+    ('0', ')'),
+    ('-', '_'),
+    ('=', '+'),
+    ('[', '{'),
+    (']', '}'),
+    ('\\', '|'),
+    (';', ':'),
+    ('\'', '"'),
+    (',', '<'),
+    ('.', '>'),
+    ('`', '~'),
+];
 
 #[cfg(test)]
 mod tests {
@@ -244,7 +337,10 @@ mod tests {
     fn slash_opens_command() {
         let km = KeyMap::default();
         let slash = KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE);
-        assert_eq!(km.resolve(slash), Some(&Action::SlashCommand("/".to_string())));
+        assert_eq!(
+            km.resolve(slash),
+            Some(&Action::SlashCommand("/".to_string()))
+        );
     }
 
     #[test]

@@ -18,12 +18,12 @@ use std::time::{Duration, Instant};
 use serde_json::json;
 
 use archon_tools::agent_tool::{AgentTool, SubagentRequest};
+use archon_tools::cancel_background_agent;
 use archon_tools::subagent_executor::{
-    install_subagent_executor, ExecutorError, OutcomeSideEffects, SubagentClassification,
-    SubagentExecutor,
+    ExecutorError, OutcomeSideEffects, SubagentClassification, SubagentExecutor,
+    install_subagent_executor,
 };
 use archon_tools::tool::{AgentMode, Tool, ToolContext};
-use archon_tools::cancel_background_agent;
 use async_trait::async_trait;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
@@ -98,7 +98,9 @@ fn quantile_us(sorted: &[Duration], q: f64) -> u128 {
         return 0;
     }
     let n = sorted.len();
-    let idx = ((q * n as f64).ceil() as usize).saturating_sub(1).min(n - 1);
+    let idx = ((q * n as f64).ceil() as usize)
+        .saturating_sub(1)
+        .min(n - 1);
     sorted[idx].as_micros()
 }
 
@@ -145,13 +147,12 @@ async fn obs_915_100_stub_spawns_p95_latency() {
         let elapsed = t0.elapsed();
 
         assert!(!result.is_error, "spawn {i} failed: {}", result.content);
-        let v: serde_json::Value = serde_json::from_str(&result.content)
-            .expect("spawn result must be JSON");
+        let v: serde_json::Value =
+            serde_json::from_str(&result.content).expect("spawn result must be JSON");
         assert_eq!(v["status"], "spawned", "spawn {i} status mismatch");
 
-        let id = Uuid::parse_str(
-            v["agent_id"].as_str().expect("agent_id missing")
-        ).expect("agent_id must be UUID");
+        let id = Uuid::parse_str(v["agent_id"].as_str().expect("agent_id missing"))
+            .expect("agent_id must be UUID");
         spawned_ids.push(id);
         samples.lock().unwrap().push(elapsed);
     }

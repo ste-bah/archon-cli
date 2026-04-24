@@ -9,7 +9,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use archon_cli_workspace::event_coalescer::{
-    priority, EventCoalescer, Priority, HARD_CAP, RENDER_EVENT_BUDGET, SOFT_CAP,
+    EventCoalescer, HARD_CAP, Priority, RENDER_EVENT_BUDGET, SOFT_CAP, priority,
 };
 use archon_core::agent::AgentEvent;
 use archon_tools::tool::ToolResult;
@@ -41,9 +41,7 @@ fn priority_classifies_deltas_as_progress() {
 fn priority_classifies_state_transitions_as_state() {
     assert_eq!(priority(&AgentEvent::UserPromptReady), Priority::State);
     assert_eq!(
-        priority(&AgentEvent::ApiCallStarted {
-            model: "m".into()
-        }),
+        priority(&AgentEvent::ApiCallStarted { model: "m".into() }),
         Priority::State
     );
     assert_eq!(
@@ -90,7 +88,9 @@ fn priority_classifies_state_transitions_as_state() {
     assert_eq!(priority(&AgentEvent::CompactionTriggered), Priority::State);
     assert_eq!(priority(&AgentEvent::SessionComplete), Priority::State);
     assert_eq!(
-        priority(&AgentEvent::AskUser { question: "q".into() }),
+        priority(&AgentEvent::AskUser {
+            question: "q".into()
+        }),
         Priority::State
     );
     assert_eq!(
@@ -147,7 +147,9 @@ fn coalescer_drops_oldest_progress_first() {
         .any(|e| matches!(e, AgentEvent::TextDelta(s) if s == "p0"));
     assert!(!p0_present, "oldest Progress (p0) must have been dropped");
     // State event must still be present.
-    let s_present = drained.iter().any(|e| matches!(e, AgentEvent::Error(s) if s == "S"));
+    let s_present = drained
+        .iter()
+        .any(|e| matches!(e, AgentEvent::Error(s) if s == "S"));
     assert!(s_present, "State event must be preserved");
 }
 
@@ -185,8 +187,7 @@ fn constants_match_spec() {
 
 #[test]
 fn main_rs_wires_coalescer_into_render_loop() {
-    let src = fs::read_to_string(repo_root().join("src/main.rs"))
-        .expect("read main.rs");
+    let src = fs::read_to_string(repo_root().join("src/main.rs")).expect("read main.rs");
     assert!(
         src.contains("event_coalescer"),
         "src/main.rs must import event_coalescer module"
