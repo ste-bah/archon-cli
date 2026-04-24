@@ -4,10 +4,18 @@
 //! Up/Down arrows; Enter selects and closes. Esc cancels.
 //!
 //! Gate 2 scope: struct + selection-navigation methods + unit tests.
-//! Render + full input routing + truncation-on-confirm are deferred
-//! to a TUI-620-followup ticket per the orchestrator scope-reduction.
+//!
+//! TUI-620-followup landed the ratatui render method below plus the
+//! full render/input/truncate wiring in `render/body.rs`,
+//! `event_loop/input.rs`, and `src/session.rs`.
+
+use ratatui::layout::Rect;
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::widgets::{Block, Borders, Clear, List, ListItem};
+use ratatui::Frame;
 
 use crate::events::MessageSummary;
+use crate::theme::Theme;
 
 pub struct MessageSelector {
     pub messages: Vec<MessageSummary>,
@@ -46,9 +54,82 @@ impl MessageSelector {
         self.messages.get(self.selected_index)
     }
 
-    // TODO(TUI-620-followup): render(frame, area) — draw numbered
-    // list, highlight self.selected_index with reverse video. See
-    // `screens/session_browser.rs` render() for the canonical pattern.
+    /// Render the message-selector overlay inside `area`.
+    ///
+    /// Mirrors `render/body.rs::draw_session_picker` — a centered modal
+    /// ~9/10 wide, height = items.len() + 3 clamped to fit. Long lists
+    /// are scrolled so the currently selected row stays visible: the
+    /// visible slice starts at `selected_index.saturating_sub(height-1)`
+    /// and spans at most `height` rows.
+    pub fn render(&self, f: &mut Frame, area: Rect, theme: &Theme) {
+        let overlay_width = (area.width * 9 / 10)
+            .max(70)
+            .min(area.width.saturating_sub(2));
+        let overlay_height = (self.messages.len() as u16 + 3)
+            .min(area.height.saturating_sub(4))
+            .max(8);
+        let x = (area.width.saturating_sub(overlay_width)) / 2;
+        let y = (area.height.saturating_sub(overlay_height)) / 2;
+        let overlay_area = Rect::new(x, y, overlay_width, overlay_height);
+
+        f.render_widget(Clear, overlay_area);
+
+        // Visible slice — keep selected row on-screen when the list is
+        // taller than the overlay. Two rows are reserved for borders, so
+        // at most `overlay_height - 2` rows are available for items.
+        let body_rows = overlay_height.saturating_sub(2) as usize;
+        let total = self.messages.len();
+        let start = if total <= body_rows {
+            0
+        } else if self.selected_index >= body_rows {
+            self.selected_index + 1 - body_rows
+        } else {
+            0
+        };
+        let end = (start + body_rows).min(total);
+
+        let items: Vec<ListItem<'_>> = self.messages[start..end]
+            .iter()
+            .enumerate()
+            .map(|(offset, msg)| {
+                let idx = start + offset;
+                let style = if idx == self.selected_index {
+                    Style::default()
+                        .fg(Color::Black)
+                        .bg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(theme.fg)
+                };
+                let preview = truncate_preview(&msg.preview, 60);
+                let ts = msg.timestamp.format("%H:%M:%S");
+                let line = format!(" {idx}: {preview} | {ts}");
+                ListItem::new(line).style(style)
+            })
+            .collect();
+
+        let list = List::new(items).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(
+                    " /rewind — pick message to rewind to (Up/Down, Enter select, Esc cancel) ",
+                )
+                .border_style(Style::default().fg(theme.accent)),
+        );
+        f.render_widget(list, overlay_area);
+    }
+}
+
+/// Truncate `s` to at most `max` characters (char-boundary safe) with a
+/// trailing ellipsis when clipped. Mirrors the preview-shortening used
+/// by other overlays (e.g. `session_browser`).
+fn truncate_preview(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        return s.to_string();
+    }
+    let mut out: String = s.chars().take(max.saturating_sub(1)).collect();
+    out.push('…');
+    out
 }
 
 #[cfg(test)]
@@ -103,5 +184,18 @@ mod tests {
         sel.select_prev();
         assert_eq!(sel.selected_index, 0);
         assert!(sel.selected().is_none());
+    }
+
+    #[test]
+    fn truncate_preview_short_unchanged() {
+        assert_eq!(truncate_preview("hello", 10), "hello");
+    }
+
+    #[test]
+    fn truncate_preview_long_clipped_with_ellipsis() {
+        let s = "abcdefghijklmnop";
+        let out = truncate_preview(s, 6);
+        assert_eq!(out.chars().count(), 6);
+        assert!(out.ends_with('…'));
     }
 }

@@ -64,13 +64,68 @@ pub(crate) trait MessageLoader: Send + Sync {
 pub(crate) struct RealMessageLoader;
 
 impl MessageLoader for RealMessageLoader {
+    /// TUI-620-followup: load persisted messages for `session_id` from the
+    /// default SessionStore, parse each row as JSON, and project into the
+    /// `MessageSummary` struct consumed by the overlay.
+    ///
+    /// * `id` — stable `msg-NNN` derived from the message's ordinal
+    ///   position in the store.
+    /// * `timestamp` — taken from the JSON `timestamp` field when present
+    ///   and parseable; otherwise defaults to `chrono::Utc::now()`.
+    /// * `preview` — extracted from the JSON `content` (string OR array of
+    ///   `{text}` objects — mirrors the resume path in `src/session.rs`),
+    ///   truncated to 80 chars.
+    ///
+    /// Messages with empty content are skipped (matches session.rs's
+    /// resume-display behaviour).
     fn load(&self, session_id: &str) -> Result<Vec<MessageSummary>, String> {
-        // TODO(TUI-620-followup): wire to archon_session::storage::SessionStore
-        // message-fetch API once it exists. Until then return an empty Vec so
-        // the handler surfaces `Err("no messages to rewind to")` rather than
-        // panicking.
-        let _ = session_id;
-        Ok(Vec::new())
+        let db_path = archon_session::storage::default_db_path();
+        let store = archon_session::storage::SessionStore::open(&db_path)
+            .map_err(|e| format!("session store open failed: {e}"))?;
+
+        let raw = store
+            .load_messages(session_id)
+            .map_err(|e| format!("load_messages failed: {e}"))?;
+
+        let mut out: Vec<MessageSummary> = Vec::new();
+        for (idx, raw_msg) in raw.iter().enumerate() {
+            let value: serde_json::Value = match serde_json::from_str(raw_msg) {
+                Ok(v) => v,
+                Err(_) => continue, // skip malformed rows
+            };
+
+            // Same content-extraction shape as the /resume path in
+            // src/session.rs around line 2123 — handle String and
+            // Array-of-{text} forms.
+            let content = match &value["content"] {
+                serde_json::Value::String(s) => s.clone(),
+                serde_json::Value::Array(arr) => arr
+                    .iter()
+                    .filter_map(|item| item["text"].as_str().map(|s| s.to_string()))
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+                _ => String::new(),
+            };
+            if content.is_empty() {
+                continue;
+            }
+
+            let timestamp = value["timestamp"]
+                .as_str()
+                .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+                .map(|dt| dt.with_timezone(&chrono::Utc))
+                .unwrap_or_else(chrono::Utc::now);
+
+            let preview: String = content.chars().take(80).collect();
+
+            out.push(MessageSummary {
+                id: format!("msg-{idx:03}"),
+                timestamp,
+                preview,
+            });
+        }
+
+        Ok(out)
     }
 }
 

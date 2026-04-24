@@ -274,6 +274,20 @@ pub fn draw_session_picker(frame: &mut Frame, app: &App) {
     frame.render_widget(list, overlay_area);
 }
 
+/// Render the message-selector overlay (TASK-TUI-620 /rewind).
+///
+/// Delegates to `MessageSelector::render` with the full frame area so
+/// the overlay sizes itself (centered, ~9/10 wide) identically to
+/// `draw_session_picker` above.
+pub fn draw_message_selector(frame: &mut Frame, app: &App) {
+    let sel = match &app.message_selector {
+        Some(s) => s,
+        None => return,
+    };
+    let area = frame.area();
+    sel.render(frame, area, &app.theme);
+}
+
 /// Render the MCP manager overlay.
 pub fn draw_mcp_manager(frame: &mut Frame, app: &App) {
     let mcp_mgr = match &app.mcp_manager {

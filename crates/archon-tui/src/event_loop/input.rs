@@ -265,6 +265,40 @@ pub(super) async fn handle_key_event(
                     _ => return, // swallow all other keys while overlay is up
                 }
             }
+            // Handle message selector overlay — Up/Down/Enter/Esc
+            // (TASK-TUI-620-followup). Mirrors the session_picker branch
+            // above: Enter emits a protocol message that the session.rs
+            // consumer turns into a SessionStore truncation.
+            if app.message_selector.is_some() {
+                match key.code {
+                    KeyCode::Up => {
+                        if let Some(ref mut sel) = app.message_selector {
+                            sel.select_prev();
+                        }
+                        return;
+                    }
+                    KeyCode::Down => {
+                        if let Some(ref mut sel) = app.message_selector {
+                            sel.select_next();
+                        }
+                        return;
+                    }
+                    KeyCode::Enter => {
+                        if let Some(sel) = app.message_selector.take() {
+                            let idx = sel.selected_index;
+                            let _ = input_tx
+                                .send(format!("__truncate_session__ {}", idx))
+                                .await;
+                        }
+                        return;
+                    }
+                    KeyCode::Esc => {
+                        app.message_selector = None;
+                        return;
+                    }
+                    _ => return, // swallow other keys while overlay is up
+                }
+            }
             // Vim mode key routing — Ctrl+D / Ctrl+C fall through to normal handling
             let is_ctrl_quit = key.modifiers == KeyModifiers::CONTROL
                 && matches!(key.code, KeyCode::Char('d') | KeyCode::Char('c'));

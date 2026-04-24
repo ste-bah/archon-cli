@@ -228,7 +228,6 @@ pub struct App {
     /// Active MCP server manager modal (shown by /mcp).
     pub mcp_manager: Option<McpManager>,
     /// TASK-TUI-620: active message-selector modal (shown by /rewind).
-    /// TODO(TUI-620-followup): input routing + render wiring deferred.
     pub message_selector: Option<crate::screens::message_selector::MessageSelector>,
     /// TASK-TUI-627: active skills-menu modal (shown by /skills).
     /// TODO(TUI-627-followup): input routing + render wiring deferred.

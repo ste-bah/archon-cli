@@ -100,10 +100,10 @@ pub(super) async fn handle_tui_event(
             }
         }
         TuiEvent::ShowMessageSelector(messages) => {
-            // TASK-TUI-620: open the message-selector overlay. TODO(TUI-620-
-            // followup): input routing (priority branch in event_loop/input.rs)
-            // + render wiring (render/body.rs) are deferred — for now the
-            // overlay is reachable but not interactive.
+            // TASK-TUI-620 + followup: /rewind opens this overlay; input
+            // priority branch (event_loop/input.rs) routes Up/Down/Enter/Esc
+            // and render dispatch (render/body.rs draw_message_selector)
+            // draws it.
             app.message_selector = Some(
                 crate::screens::message_selector::MessageSelector::new(messages),
             );

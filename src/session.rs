@@ -2172,6 +2172,119 @@ pub(crate) async fn run_interactive_session(
                 continue;
             }
 
+            // ── TASK-TUI-620-followup: /rewind truncation ─────────
+            // Emitted by the MessageSelector overlay when the user hits
+            // Enter. `idx` is the message index the user rewound to —
+            // messages [0..=idx] are kept, everything after is dropped
+            // from the SessionStore AND the agent's in-memory
+            // conversation is rebuilt to match.
+            if let Some(idx_str) = input.strip_prefix("__truncate_session__ ") {
+                let idx_str = idx_str.trim();
+                let idx: u64 = match idx_str.parse() {
+                    Ok(n) => n,
+                    Err(_) => {
+                        let _ = input_tui_tx
+                            .send(TuiEvent::TextDelta(format!(
+                                "\n[rewind: invalid index '{idx_str}']\n"
+                            )))
+                            .await;
+                        let _ = input_tui_tx
+                            .send(TuiEvent::SlashCommandComplete)
+                            .await;
+                        continue;
+                    }
+                };
+
+                let target_session_id = session_id_for_input.clone();
+                let db_path = archon_session::storage::default_db_path();
+                match archon_session::storage::SessionStore::open(&db_path) {
+                    Ok(store) => {
+                        if let Err(e) =
+                            store.truncate_messages_after(&target_session_id, idx)
+                        {
+                            let _ = input_tui_tx
+                                .send(TuiEvent::Error(format!(
+                                    "Failed to truncate session: {e}"
+                                )))
+                                .await;
+                            let _ = input_tui_tx
+                                .send(TuiEvent::SlashCommandComplete)
+                                .await;
+                            continue;
+                        }
+
+                        // Reload the retained messages and rebuild the
+                        // in-memory conversation so the next turn sees
+                        // only history up to `idx`.
+                        match store.load_messages(&target_session_id) {
+                            Ok(raw_messages) => {
+                                let messages: Vec<serde_json::Value> = raw_messages
+                                    .iter()
+                                    .filter_map(|s| serde_json::from_str(s).ok())
+                                    .collect();
+                                let count = messages.len();
+                                agent.lock().await.clear_conversation().await;
+
+                                let _ = input_tui_tx
+                                    .send(TuiEvent::TextDelta(format!(
+                                        "\n━━━ Rewound to message {idx} ({count} messages kept) ━━━\n\n"
+                                    )))
+                                    .await;
+                                for msg in &messages {
+                                    let role = msg["role"].as_str().unwrap_or("unknown");
+                                    let content = match &msg["content"] {
+                                        serde_json::Value::String(s) => s.clone(),
+                                        serde_json::Value::Array(arr) => arr
+                                            .iter()
+                                            .filter_map(|item| {
+                                                item["text"].as_str().map(|s| s.to_string())
+                                            })
+                                            .collect::<Vec<_>>()
+                                            .join("\n"),
+                                        _ => String::new(),
+                                    };
+                                    if content.is_empty() {
+                                        continue;
+                                    }
+                                    let label = match role {
+                                        "user" => "> ",
+                                        "assistant" => "",
+                                        _ => "",
+                                    };
+                                    let _ = input_tui_tx
+                                        .send(TuiEvent::TextDelta(format!(
+                                            "{label}{content}\n\n"
+                                        )))
+                                        .await;
+                                }
+                                let _ = input_tui_tx
+                                    .send(TuiEvent::TextDelta(
+                                        "━━━ End of history — continue conversation ━━━\n\n"
+                                            .to_string(),
+                                    ))
+                                    .await;
+
+                                agent.lock().await.restore_conversation(messages);
+                            }
+                            Err(e) => {
+                                let _ = input_tui_tx
+                                    .send(TuiEvent::Error(format!(
+                                        "Failed to reload session after truncate: {e}"
+                                    )))
+                                    .await;
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        let _ = input_tui_tx
+                            .send(TuiEvent::Error(format!("Session store error: {e}")))
+                            .await;
+                    }
+                }
+                let _ = input_tui_tx.send(TuiEvent::SlashCommandComplete).await;
+                continue;
+            }
+
             // ── TASK-AGS-107 / TASK-TUI-107: Ctrl+C cancel ───────
             // TUI sends "__cancel__" when user presses Ctrl+C during
             // generation. Fire the CancellationToken held by the adapter
