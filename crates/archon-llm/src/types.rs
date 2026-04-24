@@ -71,13 +71,16 @@ pub enum ContentBlockType {
     ToolUse,
     // TASK-P0-B.1a (#178): multi-modal image input.
     Image,
+    // TASK-P0-B.1b (#179): multi-modal PDF document input.
+    Document,
 }
 
-// TASK-P0-B.1a (#178): ImageSource lives in the `multimodal` module
-// (Gate-1 requires its definition there) and is re-exported here so the
-// ContentBlock::Image variant can reference it without a cross-module
-// visibility rename.
-pub use crate::multimodal::ImageSource;
+// TASK-P0-B.1a (#178) + TASK-P0-B.1b (#179): ImageSource and
+// DocumentSource live in the `multimodal` module (Gate-1 requires their
+// definitions there) and are re-exported here so the
+// ContentBlock::{Image,Document} variants can reference them without a
+// cross-module visibility rename.
+pub use crate::multimodal::{DocumentSource, ImageSource};
 
 /// A message in the conversation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -110,4 +113,7 @@ pub enum ContentBlock {
     // TASK-P0-B.1a (#178): image content block (Anthropic schema).
     #[serde(rename = "image")]
     Image { source: ImageSource },
+    // TASK-P0-B.1b (#179): document content block (Anthropic schema).
+    #[serde(rename = "document")]
+    Document { source: DocumentSource },
 }
