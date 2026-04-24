@@ -59,3 +59,9 @@ toml = { workspace = true }
 # TASK-AGS-708: paused-time testing for RetryProvider backoff progression.
 # `features=["full"]` does NOT include `test-util`; add it here.
 tokio = { workspace = true, features = ["test-util"] }
+# TASK-P1-3-STREAM-CANCEL (#188): axum mock SSE server for the streaming
+# cancel smoke test. Workspace axum (0.8) already carries default
+# features (`tokio`, `http1`, `json`, etc.) which provide `axum::serve`
+# and `response::sse::{Sse, Event, KeepAlive}` without any extra deps.
+axum = { workspace = true }
+futures-util = { workspace = true }
