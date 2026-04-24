@@ -106,7 +106,10 @@ impl SseTransport {
 /// Background task that consumes the reqwest response byte stream, accumulates
 /// bytes into UTF-8 lines, parses them into [`SseFrame`]s, and forwards the
 /// frames to `tx`. Exits when the stream terminates or the receiver drops.
-async fn pump_sse_stream(resp: reqwest::Response, tx: mpsc::Sender<SseFrame>) {
+///
+/// Exposed to the crate so the higher-level MCP SSE wire-up module
+/// ([`crate::sse_mcp_transport`]) can reuse the same pump.
+pub(crate) async fn pump_sse_stream(resp: reqwest::Response, tx: mpsc::Sender<SseFrame>) {
     let mut stream = resp.bytes_stream();
     let mut buf: Vec<u8> = Vec::with_capacity(1024);
     let mut current = SseFrameBuilder::default();

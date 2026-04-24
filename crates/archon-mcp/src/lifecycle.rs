@@ -12,6 +12,7 @@ use tokio::sync::RwLock;
 
 use crate::client::McpClient;
 use crate::http_transport::create_http_transport;
+use crate::sse_mcp_transport::connect_mcp as connect_sse_mcp;
 use crate::transport::spawn_transport;
 use crate::transport_ws::WebSocketTransport;
 use crate::types::{McpError, ServerConfig, ServerState};
@@ -423,6 +424,17 @@ async fn connect_server(config: &ServerConfig) -> Result<McpClient, McpError> {
             let transport = create_ws_json_rpc_transport(ws_stream);
             McpClient::initialize(config, transport).await
         }
+        "sse" => {
+            let url = config.url.as_deref().ok_or_else(|| {
+                McpError::Transport(format!(
+                    "server '{}' has transport=sse but no url configured",
+                    config.name
+                ))
+            })?;
+            let transport =
+                connect_sse_mcp(url, config.headers.as_ref(), HTTP_CONNECT_TIMEOUT).await?;
+            McpClient::initialize(config, transport).await
+        }
         other => {
             tracing::warn!(
                 server = %config.name,
@@ -504,6 +516,17 @@ fn create_ws_json_rpc_transport(
     });
 
     (mapped_sink, mapped_stream)
+}
+
+/// Test-only helper: expose `connect_server` to integration tests under
+/// `tests/`. The private `connect_server` stays private for production code.
+///
+/// Used by `tests/sse_transport_roundtrip.rs` to verify the classic-SSE
+/// transport match arm end-to-end without duplicating the entire
+/// dispatch logic inside each test file.
+#[doc(hidden)]
+pub async fn connect_server_for_test(config: &ServerConfig) -> Result<McpClient, McpError> {
+    connect_server(config).await
 }
 
 /// Calculate exponential backoff delay capped at [`MAX_BACKOFF`].
