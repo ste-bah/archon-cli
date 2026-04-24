@@ -92,11 +92,14 @@ mod linux {
         const SAMPLE_EVERY: usize = 50;
         const EVENTS_PER_ITERATION: usize = 100;
 
-        // Threshold rationale: 1024 bytes/iteration ≈ 10 bytes/event.
-        // This is generous enough to absorb allocator noise, page-granular
-        // RSS jitter, and jemalloc arena retention, while still catching
-        // unbounded growth (e.g., a subscriber leak or regex cache bloat).
-        const SLOPE_THRESHOLD_BYTES_PER_ITER: f64 = 1024.0;
+        // Threshold rationale: 256 bytes/iteration ≈ 2.5 bytes/event — 4x
+        // tighter than the pre-OBS-917-TIGHTEN budget of 1024 bytes/iter.
+        // Baseline empirical measurement on this workload observes slope
+        // 0.00 bytes/iter (flat RSS), so 256 leaves ample headroom for
+        // allocator noise, page-granular RSS jitter, and jemalloc arena
+        // retention while catching even small subscriber / regex-cache
+        // leaks (per-event regressions >= ~3 bytes are now surfaced).
+        const SLOPE_THRESHOLD_BYTES_PER_ITER: f64 = 256.0;
 
         // Warmup: let the lazy regex compilation, tracing-subscriber
         // thread-local caches, and allocator arenas reach steady state so
