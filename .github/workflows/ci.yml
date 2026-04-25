@@ -41,6 +41,7 @@ jobs:
   build-and-test:
     name: build + test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -85,7 +86,20 @@ jobs:
         # build+link via CARGO_BUILD_JOBS=1, which keeps peak link memory
         # within ubuntu-latest's 7GB RAM ceiling and unblocks #225 SIGBUS
         # on the smoke_resolve_overflow link.
-        run: cargo nextest run --workspace --no-fail-fast --test-threads=1
+        #
+        # NOTE on test parallelism (#233):
+        # No --test-threads flag here on purpose. nextest defaults to
+        # num_cpus, which is fine on GitHub-hosted runners (ubuntu/macos:
+        # 4 cores + 16GB RAM, windows: 4 cores + 16GB RAM).
+        #
+        # The project's WSL2 dev box rule "cargo test MUST use
+        # --test-threads=2" applies to LOCAL developer invocations only
+        # (small RAM, prior crash incidents on parallel rustc/test
+        # binaries). It does NOT apply to CI runners. Forcing
+        # --test-threads=1 here previously timed out the ubuntu test step
+        # at 64+ minutes (commit 3fded2c). Job timeout-minutes:30 above
+        # bounds future regressions.
+        run: cargo nextest run --workspace --no-fail-fast
 
       - name: Run doctests
         shell: bash
