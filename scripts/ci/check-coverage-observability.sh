@@ -16,6 +16,12 @@ if ! command -v cargo-llvm-cov >/dev/null 2>&1; then
     exit 2
 fi
 
-cargo llvm-cov -p archon-observability -j1 --offline --fail-under-lines "$THRESHOLD" --summary-only -- --test-threads=2
+# NOTE: --offline OMITTED here intentionally (#232). cargo-llvm-cov uses
+# a separate target dir (target/llvm-cov-target/) NOT populated by
+# Swatinem/rust-cache@v2, so cargo needs network access to resolve deps
+# on the first invocation. Developer-invoked cargo commands MUST keep
+# --offline per the WSL2 dev-box rule; this loosening is CI-runner-
+# specific only because GitHub-hosted runners have network access.
+cargo llvm-cov -p archon-observability -j1 --fail-under-lines "$THRESHOLD" --summary-only -- --test-threads=2
 
 echo "OK: coverage >= ${THRESHOLD}%"
