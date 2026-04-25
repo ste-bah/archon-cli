@@ -33,6 +33,8 @@ pub(crate) mod errors;
 // TASK-#206 SLASH-EXIT: /exit handler + /q alias.
 pub(crate) mod exit;
 pub(crate) mod export;
+// TASK-#215 SLASH-EXTRA-USAGE: /extra-usage 6-section detailed report.
+pub(crate) mod extra_usage;
 pub(crate) mod fast;
 pub(crate) mod fork;
 pub(crate) mod garden;

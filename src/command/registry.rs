@@ -1737,6 +1737,14 @@ pub(crate) fn default_registry() -> Registry {
     // Alias replaces the dead skill-registry entry previously at
     // src/session.rs:1928 (which pointed to a non-existent `exit` skill).
     b.insert_primary("exit", Arc::new(crate::command::exit::ExitHandler));
+    // TASK-#215 SLASH-EXTRA-USAGE: /extra-usage 6-section detailed report.
+    // Reuses the existing `usage_snapshot` field; the snapshot population
+    // arm in src/command/context.rs is widened to also fire on
+    // primary == "extra-usage". No new CommandContext fields.
+    b.insert_primary(
+        "extra-usage",
+        Arc::new(crate::command::extra_usage::ExtraUsageHandler),
+    );
     // Aliases are collected from each handler's aliases() method
     // inside RegistryBuilder::build(). Collisions panic.
     b.build()
@@ -1767,7 +1775,10 @@ mod tests {
     ///
     /// TASK-#206 SLASH-EXIT adds `/exit` (with `/q` alias) as a new
     /// primary, bringing the total to 50.
-    const EXPECTED_COMMAND_COUNT: usize = 50;
+    ///
+    /// TASK-#215 SLASH-EXTRA-USAGE adds `/extra-usage` as a new primary,
+    /// bringing the total to 51.
+    const EXPECTED_COMMAND_COUNT: usize = 51;
 
     #[test]
     fn default_registry_contains_all_commands() {

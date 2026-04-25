@@ -303,8 +303,12 @@ pub(crate) fn build_command_context<'a>(
                 // permissions / B14 copy snapshot gating.
                 ctx.doctor_snapshot = Some(doctor::build_doctor_snapshot(slash_ctx).await);
             }
-            Some("usage") => {
+            Some("usage") | Some("extra-usage") => {
                 // TASK-AGS-POST-6-BODIES-B16-USAGE snapshot population.
+                // TASK-#215 SLASH-EXTRA-USAGE widens the arm to also fire
+                // on primary == "extra-usage" — both handlers consume the
+                // same `UsageSnapshot`; /extra-usage just renders it as
+                // 6 grouped sections + per-turn / cost-per-1k metrics.
                 // /usage is read-only (shipped slash.rs:315-336 emits a
                 // single TextDelta with aggregate session counters, costs,
                 // and the cache-stats line — no mutation). No aliases
