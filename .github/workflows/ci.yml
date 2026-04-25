@@ -41,40 +41,31 @@ jobs:
   build-and-test:
     name: build + test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    # Per-OS timeout (#237). Windows MSVC debug builds of this 1000-rlib
-    # workspace are inherently slower than Linux gcc/lld/mold; 30 min was
-    # too tight on commit 855977d (Windows hit timeout still in BUILD
-    # step, never reached test phase). Linux + macOS keep 30 min — they
-    # were completing comfortably under that. Windows bumped to 60 min
-    # to reflect the platform's actual build cost on GitHub-hosted
-    # runners.
+    # Per-OS timeout (#237). Linux + macOS use 30 min.
     #
-    # #242 Windows runner pin: windows-latest pinned to windows-2022.
-    # Between 2026-04-25 12:56 and 15:49 UTC, the rolling windows-latest
-    # image (now aliasing newer Windows) started exposing BASH_FUNC_*
-    # env vars in the runner agent's environment. dtolnay/rust-toolchain's
-    # composite action runs `shell: bash` steps that inherit those vars
-    # and bash's own Shellshock self-defense (CVE-2014-6271) refuses to
-    # start, emitting `::error::bash function injection ... is not
-    # allowed for security reasons`. Two consecutive runs on commit
-    # 6cba44b (24934615765 attempts 1+2) failed identically. Pinning
-    # windows-2022 reverts to the prior known-good image until either
-    # GitHub fixes the runner image (issue actions/partner-runner-images#169)
-    # or we migrate to a newer Windows runner. Tracked post-merge as
-    # follow-up in docs/executor-prompts/active/02-slash-command-parity-12.md
-    # Phase 5.
+    # #244 Windows CI DISABLED: removed windows runner from the build+test
+    # matrix entirely. The BASH_FUNC_* env-var bug on the windows-latest
+    # runner image (and verified to also be present on windows-2022 stable
+    # label, ruling out our prior #242 hypothesis) causes bash's CVE-2014-6271
+    # Shellshock self-defense to abort dtolnay/rust-toolchain's composite
+    # `shell: bash` install steps with `::error::bash function injection ...
+    # is not allowed for security reasons`. Failed runs on commits 6cba44b
+    # (windows-latest, 2x) and dee8536 (windows-2022, 1x). Tracked upstream
+    # as actions/partner-runner-images#169.
+    #
+    # Windows CI will be re-enabled once the upstream image is fixed,
+    # tracked as Phase 5 follow-up #243 in
+    # docs/executor-prompts/active/02-slash-command-parity-12.md.
     timeout-minutes: ${{ matrix.timeout-override }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-2022]
+        os: [ubuntu-latest, macos-latest]
         include:
           - os: ubuntu-latest
             timeout-override: 30
           - os: macos-latest
             timeout-override: 30
-          - os: windows-2022
-            timeout-override: 90
     steps:
       - uses: actions/checkout@v4
 
