@@ -59,7 +59,7 @@ jobs:
           - os: macos-latest
             timeout-override: 30
           - os: windows-latest
-            timeout-override: 60
+            timeout-override: 90
     steps:
       - uses: actions/checkout@v4
 
