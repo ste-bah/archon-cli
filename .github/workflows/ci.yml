@@ -60,14 +60,30 @@ jobs:
         with:
           shared-key: ci-${{ matrix.os }}
 
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: nextest
+
       - name: Build workspace
         run: cargo build --workspace --verbose
 
-      - name: Run tests
+      - name: Run tests (nextest)
         shell: bash
         env:
           CARGO_BUILD_JOBS: "1"
-        run: cargo test --workspace --verbose -- --test-threads=1
+        # nextest runs each test binary in its own process and serialises
+        # build+link via CARGO_BUILD_JOBS=1, which keeps peak link memory
+        # within ubuntu-latest's 7GB RAM ceiling and unblocks #225 SIGBUS
+        # on the smoke_resolve_overflow link.
+        run: cargo nextest run --workspace --no-fail-fast --test-threads=1
+
+      - name: Run doctests
+        shell: bash
+        env:
+          CARGO_BUILD_JOBS: "1"
+        # nextest does not execute doctests; preserve coverage here.
+        run: cargo test --workspace --doc -- --test-threads=1
 
   arch-lint:
     name: arch-lint (D10 spawn-everything)
