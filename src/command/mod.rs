@@ -54,6 +54,8 @@ pub(crate) mod plan;
 // TASK-P0-B.3 (#174): plan-file I/O shim (re-exports from archon_core).
 pub(crate) mod plan_file;
 pub(crate) mod plugin;
+// TASK-#210 SLASH-PROVIDERS: /providers list registered LLM providers.
+pub(crate) mod providers;
 pub(crate) mod recall;
 pub(crate) mod registry;
 pub(crate) mod release_notes;

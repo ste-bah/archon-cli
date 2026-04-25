@@ -1745,6 +1745,14 @@ pub(crate) fn default_registry() -> Registry {
         "extra-usage",
         Arc::new(crate::command::extra_usage::ExtraUsageHandler),
     );
+    // TASK-#210 SLASH-PROVIDERS: /providers lists 40 registered LLM
+    // providers (9 native + 31 OpenAI-compat) by reading the static
+    // archon_llm::providers::{list_native, list_compat} registries.
+    // No CommandContext field needed — registries are static.
+    b.insert_primary(
+        "providers",
+        Arc::new(crate::command::providers::ProvidersHandler),
+    );
     // Aliases are collected from each handler's aliases() method
     // inside RegistryBuilder::build(). Collisions panic.
     b.build()
@@ -1778,7 +1786,10 @@ mod tests {
     ///
     /// TASK-#215 SLASH-EXTRA-USAGE adds `/extra-usage` as a new primary,
     /// bringing the total to 51.
-    const EXPECTED_COMMAND_COUNT: usize = 51;
+    ///
+    /// TASK-#210 SLASH-PROVIDERS adds `/providers` as a new primary,
+    /// bringing the total to 52.
+    const EXPECTED_COMMAND_COUNT: usize = 52;
 
     #[test]
     fn default_registry_contains_all_commands() {
