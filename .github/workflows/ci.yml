@@ -56,6 +56,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y pkg-config perl make
 
+      - name: Install lld linker (low-memory linker for large workspaces)
+        if: runner.os == 'Linux'
+        # lld typically uses 30-50% less memory than GNU ld during link of
+        # large workspaces; mitigates ubuntu-latest 7GB SIGBUS during link of
+        # smoke_resolve_overflow (third remediation attempt — see #226).
+        run: |
+          sudo apt-get install -y lld
+          echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld" >> "$GITHUB_ENV"
+
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: ci-${{ matrix.os }}
