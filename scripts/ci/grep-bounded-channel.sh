@@ -37,11 +37,18 @@ FAIL=0
 #
 # Breakdown:
 #   (?:mpsc::)?         -> optional `mpsc::` module prefix
-#   channel\s*::\s*<    -> `channel::<` with optional whitespace
-#   [\s\S]*?            -> any chars (including newline) lazy
+#   \bchannel\s*::\s*<  -> `channel::<` at a word boundary (#229: rejects
+#                          `unbounded_channel` substring matches)
+#   [^>]*?              -> any chars EXCEPT `>` lazy. Critical (#229): bounds
+#                          the match within a single generic invocation.
+#                          Without this, the lazy `[\s\S]*?` would scan past
+#                          the closing `>` of `channel::<String>` to find an
+#                          unrelated `AgentEvent` mention elsewhere in the
+#                          same file (e.g., a use statement or unrelated
+#                          handler), producing massive false positives.
 #   \bAgentEvent\b      -> the type we guard
-#   [\s\S]*?>           -> close the generic (may be nested)
-P1='(?:mpsc::)?channel\s*::\s*<[\s\S]*?\bAgentEvent\b[\s\S]*?>'
+#   [^>]*?>             -> close the generic
+P1='(?:mpsc::)?\bchannel\s*::\s*<[^>]*?\bAgentEvent\b[^>]*?>'
 
 # Pattern 2: bounded Sender type mention. `mpsc::Sender<AgentEvent>` is the
 # bounded-sender type; the unbounded equivalent is `UnboundedSender<_>`. If
