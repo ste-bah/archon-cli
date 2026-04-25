@@ -604,8 +604,9 @@ mod tests {
     //     — defensive regression guard. If a future refactor silently
     //       drops or doubles a primary, this fails IMMEDIATELY without
     //       needing a full dispatch loop. Numeric witness pinned to
-    //       the registry-side `EXPECTED_COMMAND_COUNT = 49` constant
-    //       (registry.rs:1655); changes must land in both places.
+    //       the registry-side `EXPECTED_COMMAND_COUNT` constant in
+    //       registry.rs's #[cfg(test)] block; the two constants must
+    //       move in lockstep when a primary is added or removed.
     //
     // Failure-report strategy mirrors `registry_integration_all_commands_wired`
     // (registry.rs:2564) — collect-and-report, so a single run surfaces
@@ -614,11 +615,15 @@ mod tests {
     // -----------------------------------------------------------------
 
     /// Canonical primary-count invariant. Mirrors
-    /// `registry::tests::EXPECTED_COMMAND_COUNT` (registry.rs:1655).
-    /// That constant lives behind `#[cfg(test)]` inside `registry.rs`
-    /// and is not re-exported, so we pin the same integer here. If
-    /// either constant moves, BOTH must be updated in lockstep.
-    const EXPECTED_PRIMARY_COUNT: usize = 49;
+    /// `registry::tests::EXPECTED_COMMAND_COUNT` in registry.rs's
+    /// #[cfg(test)] block. That constant is not re-exported, so we pin
+    /// the same integer here. **If either constant moves, BOTH must be
+    /// updated in lockstep** — see TASK-#211 commit body for the
+    /// regression where #206/#215/#210 each bumped the registry-side
+    /// constant without updating this dispatcher mirror.
+    ///
+    /// Sequence: 49 → 50 (#206) → 51 (#215) → 52 (#210) → 53 (#211).
+    const EXPECTED_PRIMARY_COUNT: usize = 53;
 
     /// Drain every currently-queued event from `rx` using `try_recv`
     /// until the channel reports empty, returning the drained events
@@ -837,14 +842,15 @@ mod tests {
     #[test]
     fn registry_primary_count_matches_expected_count() {
         // Defensive regression guard: the registered primary count
-        // MUST equal `EXPECTED_PRIMARY_COUNT` (=49), and the iterator
+        // MUST equal `EXPECTED_PRIMARY_COUNT` (lockstep with
+        // `registry::tests::EXPECTED_COMMAND_COUNT`), and the iterator
         // produced by `Registry::names()` MUST yield exactly that many
         // distinct names. If a future refactor silently drops or
         // double-registers a primary this test fails immediately
         // without a full dispatch sweep. Mirrors
-        // `default_registry_contains_all_commands` in registry.rs
-        // :1658 but lives in the dispatcher test module so the
-        // dispatcher-side coverage guarantee is self-contained.
+        // `default_registry_contains_all_commands` in registry.rs but
+        // lives in the dispatcher test module so the dispatcher-side
+        // coverage guarantee is self-contained.
         let registry = default_registry();
         let names: Vec<&'static str> = registry.names();
 
@@ -852,9 +858,10 @@ mod tests {
             names.len(),
             EXPECTED_PRIMARY_COUNT,
             "registry.names().len() = {}, expected \
-             EXPECTED_PRIMARY_COUNT = {} (=49 per registry.rs:1655). \
-             A primary was added or removed without updating this \
-             constant.",
+             EXPECTED_PRIMARY_COUNT = {}. The two parallel constants \
+             (registry.rs::EXPECTED_COMMAND_COUNT and dispatcher.rs::\
+             EXPECTED_PRIMARY_COUNT) must move in lockstep. A primary \
+             was added or removed without updating one side.",
             names.len(),
             EXPECTED_PRIMARY_COUNT,
         );

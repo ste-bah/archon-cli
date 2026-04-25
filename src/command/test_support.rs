@@ -83,6 +83,8 @@ pub(crate) struct CtxBuilder {
     pending_effect: Option<crate::command::registry::CommandEffect>,
     pending_effort_set: Option<EffortLevel>,
     pending_export: Option<Arc<Mutex<Option<crate::command::export::ExportDescriptor>>>>,
+    // TASK-#211 SLASH-AGENT: agent registry handle for /agent.
+    agent_registry: Option<Arc<std::sync::RwLock<archon_core::agents::AgentRegistry>>>,
 }
 
 impl CtxBuilder {
@@ -116,6 +118,7 @@ impl CtxBuilder {
             pending_effect: None,
             pending_effort_set: None,
             pending_export: None,
+            agent_registry: None,
         }
     }
 
@@ -385,6 +388,23 @@ impl CtxBuilder {
         self
     }
 
+    /// TASK-#211 SLASH-AGENT: install an agent registry handle.
+    pub(crate) fn with_agent_registry(
+        mut self,
+        reg: Arc<std::sync::RwLock<archon_core::agents::AgentRegistry>>,
+    ) -> Self {
+        self.agent_registry = Some(reg);
+        self
+    }
+
+    pub(crate) fn with_agent_registry_opt(
+        mut self,
+        reg: Option<Arc<std::sync::RwLock<archon_core::agents::AgentRegistry>>>,
+    ) -> Self {
+        self.agent_registry = reg;
+        self
+    }
+
     /// Consume the builder and return `(CommandContext, Receiver)`.
     pub(crate) fn build(self) -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
         (
@@ -413,6 +433,7 @@ impl CtxBuilder {
                 pending_effect: self.pending_effect,
                 pending_effort_set: self.pending_effort_set,
                 pending_export: self.pending_export,
+                agent_registry: self.agent_registry,
             },
             self.tui_rx,
         )
@@ -636,6 +657,21 @@ pub(crate) fn fixture_usage_snapshot() -> crate::command::usage::UsageSnapshot {
              Estimated savings: 0 token-equivalents"
             .to_string(),
     }
+}
+
+/// Build a CommandContext for AgentHandler tests.
+///
+/// TASK-#211 SLASH-AGENT — DIRECT-with-field variant. Mirrors
+/// `make_help_ctx` shape but populates `agent_registry` (instead of
+/// `skill_registry`). When `Some(arc)` is supplied the handler reads
+/// the registry via `RwLock::read()`; when `None` is supplied the
+/// handler returns Err describing the missing-registry condition.
+pub(crate) fn make_agent_ctx(
+    registry: Option<Arc<std::sync::RwLock<archon_core::agents::AgentRegistry>>>,
+) -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
+    CtxBuilder::new()
+        .with_agent_registry_opt(registry)
+        .build()
 }
 
 /// Build a CommandContext for UsageHandler tests.

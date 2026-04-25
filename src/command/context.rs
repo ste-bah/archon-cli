@@ -173,6 +173,10 @@ pub(crate) fn build_command_context<'a>(
             // is cheap (one heap alloc); the handler includes the label
             // in the emitted `TuiEvent::TextDelta` message.
             auth_label: Some(slash_ctx.auth_label.clone()),
+            // TASK-#211 SLASH-AGENT: clone the Arc<RwLock<AgentRegistry>>
+            // unconditionally — handler reads it via the synchronous
+            // `RwLock::read()`. Cheap (~8 bytes + atomic refcount).
+            agent_registry: Some(Arc::clone(&slash_ctx.agent_registry)),
             pending_effect: None,
             // TASK-AGS-POST-6-BODIES-B11-EFFORT: SIDECAR slot for the
             // session-local `&mut EffortState` write. Initialised to

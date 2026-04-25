@@ -895,6 +895,22 @@ pub(crate) struct CommandContext {
     /// `CommandEffect` variant — `/login` is a pure DIRECT-pattern
     /// read (no async mutex writes back to shared state).
     pub(crate) auth_label: Option<String>,
+    /// TASK-#211 SLASH-AGENT DIRECT-pattern field (/agent).
+    ///
+    /// `Arc<RwLock<AgentRegistry>>` cloned from
+    /// `SlashCommandContext::agent_registry`, populated UNCONDITIONALLY
+    /// (mirrors the AGS-815 `session_id`, AGS-817 `memory`, B06-HELP
+    /// `skill_registry` cross-cutting precedent — not gated on the
+    /// primary name). `/agent` reads it to render the list / info /
+    /// run-hint subcommands; `RwLock::read()` is sync, so the handler
+    /// consumes the registry without holding any lock across `ctx.emit`.
+    /// `None` sentinel reserved for test fixtures that construct
+    /// `CommandContext` directly without standing up a full
+    /// `SlashCommandContext`; in those tests `/agent` returns an
+    /// Err-with-message describing the missing-registry condition
+    /// rather than panicking.
+    pub(crate) agent_registry:
+        Option<Arc<std::sync::RwLock<archon_core::agents::AgentRegistry>>>,
     /// TASK-AGS-808 effect-slot field (WRITE side of /model and future
     /// write-tickets).
     ///
@@ -1753,6 +1769,13 @@ pub(crate) fn default_registry() -> Registry {
         "providers",
         Arc::new(crate::command::providers::ProvidersHandler),
     );
+    // TASK-#211 SLASH-AGENT: /agent umbrella (list/info/run subcommands).
+    // Reads the new agent_registry field on CommandContext (DIRECT
+    // pattern; populated unconditionally from SlashCommandContext).
+    b.insert_primary(
+        "agent",
+        Arc::new(crate::command::agent_slash::AgentHandler),
+    );
     // Aliases are collected from each handler's aliases() method
     // inside RegistryBuilder::build(). Collisions panic.
     b.build()
@@ -1789,7 +1812,10 @@ mod tests {
     ///
     /// TASK-#210 SLASH-PROVIDERS adds `/providers` as a new primary,
     /// bringing the total to 52.
-    const EXPECTED_COMMAND_COUNT: usize = 52;
+    ///
+    /// TASK-#211 SLASH-AGENT adds `/agent` as a new primary, bringing
+    /// the total to 53.
+    const EXPECTED_COMMAND_COUNT: usize = 53;
 
     #[test]
     fn default_registry_contains_all_commands() {
@@ -2839,6 +2865,7 @@ mod tests {
             usage_snapshot: None,
             config_path: None,
             auth_label: None,
+            agent_registry: None,
             pending_effect: None,
             pending_effort_set: None,
             pending_export: None,

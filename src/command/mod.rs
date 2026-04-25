@@ -10,6 +10,8 @@
 
 pub(crate) mod add_dir;
 pub(crate) mod agent;
+// TASK-#211 SLASH-AGENT: /agent slash-command umbrella (list/info/run).
+pub(crate) mod agent_slash;
 pub(crate) mod background;
 pub(crate) mod bug;
 pub(crate) mod cancel;
