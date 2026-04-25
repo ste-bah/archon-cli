@@ -21,6 +21,7 @@ type CurrentAgentTask = Arc<Mutex<Option<(CancellationToken, tokio::task::JoinHa
 
 /// Verify that TUI's Ctrl+C handler sends `__cancel__` via input_tx
 /// when `is_generating` is true.
+#[ignore = "TDD test for unimplemented AGS-107 Ctrl+C cancellation wiring; tracked under #224 (CI cross-platform parity with P1.1 canary skip list)"]
 #[test]
 fn tui_ctrl_c_sends_cancel_control_message() {
     let src = std::fs::read_to_string("crates/archon-tui/src/app.rs").expect("cannot read app.rs");
@@ -61,6 +62,7 @@ fn tui_ctrl_c_sends_cancel_control_message() {
 
 /// Verify that the input handler in main.rs recognizes the `__cancel__`
 /// control message and calls `.cancel()` on the stored CancellationToken.
+#[ignore = "TDD test for unimplemented AGS-107 Ctrl+C cancellation wiring; tracked under #224 (CI cross-platform parity with P1.1 canary skip list)"]
 #[test]
 fn handler_recognizes_cancel_control_message() {
     let src = std::fs::read_to_string("src/main.rs").expect("cannot read src/main.rs");

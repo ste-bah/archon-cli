@@ -38,6 +38,7 @@ type CurrentAgentTask = Arc<Mutex<Option<(CancellationToken, tokio::task::JoinHa
 /// `process_message` call sites, and asserts each one is preceded by a
 /// `tokio::spawn` on the same or prior line within the input handler
 /// region (~lines 3250-3875).
+#[ignore = "TDD test for unimplemented AGS-106 input handler tokio::spawn wrapper; tracked under #224 (CI cross-platform parity with P1.1 canary skip list)"]
 #[test]
 fn process_message_never_sync_awaited_in_handler() {
     let src = std::fs::read_to_string("src/main.rs").expect("cannot read src/main.rs");

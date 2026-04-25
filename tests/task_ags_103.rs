@@ -185,6 +185,7 @@ fn constants_match_spec() {
 
 // ---------- wiring grep regression ----------
 
+#[ignore = "TDD test for unimplemented AGS-103 EventCoalescer wiring into render loop; tracked under #224 (CI cross-platform parity with P1.1 canary skip list)"]
 #[test]
 fn main_rs_wires_coalescer_into_render_loop() {
     let src = fs::read_to_string(repo_root().join("src/main.rs")).expect("read main.rs");

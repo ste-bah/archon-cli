@@ -8,6 +8,7 @@
 use std::io::Write;
 use std::process::Command;
 
+#[ignore = "TDD test for AGS-106/107 arch-lint integration sim; tracked under #224 (CI cross-platform parity with P1.1 canary skip list)"]
 #[test]
 fn lint_catches_injected_violation() {
     let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));

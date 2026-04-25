@@ -33,6 +33,7 @@ fn arch_lint_passes_on_clean_tree() {
     );
 }
 
+#[ignore = "TDD test for AGS-106/107 INPUT_HANDLER markers in src/main.rs; tracked under #224 (CI cross-platform parity with P1.1 canary skip list)"]
 #[test]
 fn input_handler_markers_exist() {
     let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));

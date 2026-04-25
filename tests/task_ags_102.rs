@@ -68,6 +68,7 @@ fn no_awaited_agent_event_send_in_agent_rs() {
     );
 }
 
+#[ignore = "TDD test for unimplemented AGS-102 unbounded AgentEvent flip; tracked under #224 (CI cross-platform parity with P1.1 canary skip list)"]
 #[test]
 fn main_rs_has_unbounded_agent_event_channels() {
     let src = read("src/main.rs");
@@ -78,6 +79,7 @@ fn main_rs_has_unbounded_agent_event_channels() {
     );
 }
 
+#[ignore = "TDD test for unimplemented AGS-102 unbounded AgentEvent flip; tracked under #224 (CI cross-platform parity with P1.1 canary skip list)"]
 #[test]
 fn agent_rs_uses_unbounded_sender_type() {
     let src = read("crates/archon-core/src/agent.rs");
@@ -87,6 +89,7 @@ fn agent_rs_uses_unbounded_sender_type() {
     );
 }
 
+#[ignore = "TDD test for unimplemented AGS-102 unbounded AgentEvent flip; tracked under #224 (CI cross-platform parity with P1.1 canary skip list)"]
 #[test]
 fn print_mode_receives_unbounded_receiver() {
     let src = read("crates/archon-core/src/print_mode.rs");

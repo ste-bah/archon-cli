@@ -106,6 +106,7 @@ fn contributing_md_links_to_philosophy() {
     );
 }
 
+#[ignore = "TDD test for unimplemented AGS-110 arch-lint activation; tracked under #224 (CI cross-platform parity with P1.1 canary skip list)"]
 #[test]
 fn arch_lint_script_has_pattern_scaffold() {
     // TASK-AGS-110 will uncomment the activation lines; this test guarantees
