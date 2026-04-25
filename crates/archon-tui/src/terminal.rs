@@ -59,11 +59,17 @@ impl Drop for TerminalGuard {
 /// # Arguments
 /// * `tx` - Channel sender for TuiEvent messages
 ///
+/// # Platform behaviour
+/// On non-Unix platforms (e.g. Windows) SIGWINCH does not exist; this
+/// function is a noop there. Windows surfaces terminal resize through
+/// `crossterm::event::Event::Resize`, which the input loop already handles.
+///
 /// # Example
 /// ```ignore
 /// let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
 /// install_sigwinch(tx);
 /// ```
+#[cfg(unix)]
 pub fn install_sigwinch(tx: tokio::sync::mpsc::UnboundedSender<TuiEvent>) {
     tokio::spawn(async move {
         use tokio::signal::unix::Signal;
@@ -99,6 +105,18 @@ pub fn install_sigwinch(tx: tokio::sync::mpsc::UnboundedSender<TuiEvent>) {
             }
         }
     });
+}
+
+/// Non-Unix noop variant of `install_sigwinch`.
+///
+/// SIGWINCH is a Unix-only signal; `tokio::signal::unix` does not exist on
+/// Windows. Resize events on Windows arrive via `crossterm::event::Event::Resize`
+/// from the input loop, so no signal handler is needed here.
+#[cfg(not(unix))]
+pub fn install_sigwinch(_tx: tokio::sync::mpsc::UnboundedSender<TuiEvent>) {
+    tracing::debug!(
+        "install_sigwinch: skipped on non-Unix (Windows uses crossterm Resize event)"
+    );
 }
 
 #[cfg(test)]
