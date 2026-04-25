@@ -110,6 +110,12 @@ fn smoke_underscore_plugin_skipped() {
     assert!(registry.resolve("_internal:bar").is_none());
 }
 
+// #234: Windows does not allow `:` in filenames. The fixture below
+// creates `.archon/agents/custom/foo:bar`, which fails on Windows with
+// `Os { code: 267, kind: NotADirectory }`. Source registry.rs:529-530
+// acknowledges colons are only legal "on platforms that allow it" —
+// gate this colon-fixture test to non-Windows platforms.
+#[cfg(not(windows))]
 #[test]
 fn smoke_custom_beats_plugin() {
     let project = TempDir::new().unwrap();

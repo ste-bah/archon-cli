@@ -1,0 +1,17 @@
+# Cargo workspace configuration.
+#
+# Windows main-thread stack size (#234):
+#   The default Windows main-thread stack is 1 MB, vs ~8 MB on Linux/macOS.
+#   The archon binary's tokio + ratatui runtime initialization exceeds 1 MB
+#   on Windows, causing a stack overflow during early init in the spawned
+#   binary. This crashes 27 cli-workspace integration tests that spawn
+#   `archon` and assert on its stderr (the SUT crashes before emitting the
+#   expected log lines). Bumping the binary's main-thread stack to 8 MB
+#   matches the Linux/macOS default and unblocks those tests.
+#
+#   This is the standard mitigation. Root-cause investigation (which
+#   specific code path consumes >1 MB of stack on Windows during init) is
+#   tracked separately as #235 and is non-blocking.
+
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "link-arg=/STACK:8388608"]

@@ -509,6 +509,13 @@ mod tests {
         );
     }
 
+    // #234: Windows does not allow `:` in filenames. The fixture below
+    // creates `.archon/agents/custom/foo:bar` which `fs::create_dir_all`
+    // rejects with `Os { code: 267, kind: NotADirectory }` on Windows.
+    // The source comment a few lines below ("our test tmp on Linux allows
+    // colons in filenames") already acknowledges this constraint — gate
+    // the test to non-Windows platforms.
+    #[cfg(not(windows))]
     #[test]
     fn registry_custom_agent_beats_plugin_with_same_key() {
         // G5 priority: project custom > user plugin.
