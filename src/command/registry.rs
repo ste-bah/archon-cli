@@ -1733,6 +1733,10 @@ pub(crate) fn default_registry() -> Registry {
     b.insert_primary("cancel", Arc::new(CancelHandler::new()));
     // TASK-AGS-816: NEW /voice primary (gap-fix Q4=A, no aliases).
     b.insert_primary("voice", Arc::new(VoiceHandler));
+    // TASK-#206 SLASH-EXIT: /exit graceful-shutdown handler, alias /q.
+    // Alias replaces the dead skill-registry entry previously at
+    // src/session.rs:1928 (which pointed to a non-existent `exit` skill).
+    b.insert_primary("exit", Arc::new(crate::command::exit::ExitHandler));
     // Aliases are collected from each handler's aliases() method
     // inside RegistryBuilder::build(). Collisions panic.
     b.build()
@@ -1760,7 +1764,10 @@ mod tests {
     ///
     /// TASK-AGS-816 adds `/voice` (gap-fix Q4=A, SECOND Batch-3 NEW
     /// primary) as a new primary, bringing the total to 40.
-    const EXPECTED_COMMAND_COUNT: usize = 49;
+    ///
+    /// TASK-#206 SLASH-EXIT adds `/exit` (with `/q` alias) as a new
+    /// primary, bringing the total to 50.
+    const EXPECTED_COMMAND_COUNT: usize = 50;
 
     #[test]
     fn default_registry_contains_all_commands() {
