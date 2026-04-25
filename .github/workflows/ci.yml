@@ -41,11 +41,25 @@ jobs:
   build-and-test:
     name: build + test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    # Per-OS timeout (#237). Windows MSVC debug builds of this 1000-rlib
+    # workspace are inherently slower than Linux gcc/lld/mold; 30 min was
+    # too tight on commit 855977d (Windows hit timeout still in BUILD
+    # step, never reached test phase). Linux + macOS keep 30 min — they
+    # were completing comfortably under that. Windows bumped to 60 min
+    # to reflect the platform's actual build cost on GitHub-hosted
+    # runners.
+    timeout-minutes: ${{ matrix.timeout-override }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            timeout-override: 30
+          - os: macos-latest
+            timeout-override: 30
+          - os: windows-latest
+            timeout-override: 60
     steps:
       - uses: actions/checkout@v4
 
