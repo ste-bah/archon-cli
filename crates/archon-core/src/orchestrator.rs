@@ -228,6 +228,7 @@ impl Orchestrator {
 
         for subtask in &mut subtasks {
             if *self.cancelled.lock().await {
+                // agent-event-tx-lint: ignore — channel holds OrchestratorEvent, not AgentEvent
                 let _ = event_tx.send(OrchestratorEvent::TeamCancelled).await;
                 anyhow::bail!("team cancelled");
             }

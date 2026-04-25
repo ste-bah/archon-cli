@@ -177,12 +177,14 @@ impl LlmProvider for MockLlmProvider {
                 })
                 .await;
             let input_json = json!({ "prompt": "run the subagent" }).to_string();
+            // agent-event-tx-lint: ignore — channel holds StreamEvent, not AgentEvent
             let _ = tx
                 .send(StreamEvent::InputJsonDelta {
                     index: 0,
                     partial_json: input_json,
                 })
                 .await;
+            // agent-event-tx-lint: ignore — channel holds StreamEvent, not AgentEvent
             let _ = tx.send(StreamEvent::ContentBlockStop { index: 0 }).await;
             let _ = tx
                 .send(StreamEvent::MessageDelta {
@@ -190,6 +192,7 @@ impl LlmProvider for MockLlmProvider {
                     usage: None,
                 })
                 .await;
+            // agent-event-tx-lint: ignore — channel holds StreamEvent, not AgentEvent
             let _ = tx.send(StreamEvent::MessageStop).await;
         } else {
             // Turn 2: emit the last tool_result's content as an assistant
@@ -197,6 +200,7 @@ impl LlmProvider for MockLlmProvider {
             // that the seam carried real data from the tool to the LLM.
             let echoed = extract_last_tool_result(&request.messages)
                 .unwrap_or_else(|| "<no tool_result found in request.messages>".to_string());
+            // agent-event-tx-lint: ignore — channel holds StreamEvent, not AgentEvent
             let _ = tx
                 .send(StreamEvent::ContentBlockStart {
                     index: 0,
@@ -205,12 +209,14 @@ impl LlmProvider for MockLlmProvider {
                     tool_name: None,
                 })
                 .await;
+            // agent-event-tx-lint: ignore — channel holds StreamEvent, not AgentEvent
             let _ = tx
                 .send(StreamEvent::TextDelta {
                     index: 0,
                     text: echoed,
                 })
                 .await;
+            // agent-event-tx-lint: ignore — channel holds StreamEvent, not AgentEvent
             let _ = tx.send(StreamEvent::ContentBlockStop { index: 0 }).await;
             let _ = tx
                 .send(StreamEvent::MessageDelta {
@@ -218,6 +224,7 @@ impl LlmProvider for MockLlmProvider {
                     usage: None,
                 })
                 .await;
+            // agent-event-tx-lint: ignore — channel holds StreamEvent, not AgentEvent
             let _ = tx.send(StreamEvent::MessageStop).await;
         }
 

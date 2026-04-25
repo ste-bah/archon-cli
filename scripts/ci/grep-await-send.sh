@@ -18,6 +18,29 @@
 # `AgentEvent` — `rg --type-add` lets us use `-t rust` to skip generated or
 # build artifacts. Test files are included: a `.send(...).await` inside a
 # test counts as a latent bug waiting to graduate into prod.
+#
+# False-positive escape hatch (#230):
+#   The two-pass narrowing (file mentions AgentEvent → match producer name)
+#   is coarse — a file can mention AgentEvent in an unrelated import or
+#   comment while the .send().await is on a channel of a DIFFERENT event
+#   type. To exclude such call sites without disabling the whole lint,
+#   add a comment marker on the line IMMEDIATELY PRECEDING the producer
+#   reference:
+#       // agent-event-tx-lint: ignore — channel holds OrchestratorEvent
+#       let _ = event_tx.send(OrchestratorEvent::X).await;
+#   Use sparingly. Prefer narrowing the producer name pattern below or
+#   refactoring the channel type. The marker is matched as a substring
+#   (case-sensitive). The lint reads the (lineno-1) of each hit and
+#   suppresses the report when the marker is present.
+#
+#   Limitations of the marker filter:
+#     - The marker MUST be on exactly the line directly above the producer
+#       reference. A two-line gap will not be detected.
+#     - Two single-line `.send(...).await` matches at adjacent linenos in
+#       the same file are treated as a single multi-line match by the
+#       continuation-detection heuristic; the second inherits the first's
+#       suppression decision. Annotate both individually if both need
+#       suppression and they happen to be on consecutive lines.
 set -euo pipefail
 
 ROOT="${TUI_GREP_ROOT:-crates/ src/}"
@@ -67,8 +90,11 @@ if [[ -z "$AGENT_EVENT_FILES" ]]; then
 fi
 
 # Pipe file list to rg via -F (fixed strings; file names, not a pattern).
+# `--with-filename` forces rg to prefix each row with the file path even when
+# only a single file is passed (rg's default omits the path prefix in that
+# case, which would break the marker filter's path:lineno parsing).
 # shellcheck disable=SC2086
-HITS=$(printf '%s\n' "$AGENT_EVENT_FILES" | xargs -r rg -n --no-heading -U --multiline-dotall "$PRODUCER_PATTERN" 2>&1) || {
+HITS=$(printf '%s\n' "$AGENT_EVENT_FILES" | xargs -r rg -n --no-heading --with-filename -U --multiline-dotall "$PRODUCER_PATTERN" 2>&1) || {
     rc=$?
     if [[ $rc -eq 1 ]]; then
         HITS=""
@@ -79,9 +105,59 @@ HITS=$(printf '%s\n' "$AGENT_EVENT_FILES" | xargs -r rg -n --no-heading -U --mul
     fi
 }
 
+# Filter out hits whose immediately-preceding line contains the
+# `agent-event-tx-lint: ignore` marker (#230 escape hatch).
+#
+# rg multi-line output prints ONE row per source-line spanning the match
+# (e.g., a 6-line `.send(...).await` produces 6 rows with consecutive
+# linenos). The marker check MUST be applied to the FIRST row of each
+# match (the producer reference), and continuation rows MUST inherit the
+# suppression decision. We detect match starts by lineno discontinuity:
+# any row whose path changed OR whose lineno is not previous+1 is a new
+# match start.
+FILTERED_HITS=""
 if [[ -n "$HITS" ]]; then
+    last_path=""
+    last_lineno=-2
+    suppress_current=false
+    while IFS= read -r line; do
+        [[ -z "$line" ]] && continue
+        # rg -n format: <path>:<lineno>:<text>
+        path="${line%%:*}"
+        rest="${line#*:}"
+        lineno="${rest%%:*}"
+        # Pass through any line that does not match the path:lineno:text shape.
+        if [[ ! "$lineno" =~ ^[0-9]+$ ]]; then
+            FILTERED_HITS+="$line"$'\n'
+            continue
+        fi
+        # Detect match-start vs continuation: a continuation has same path
+        # AND lineno = last_lineno + 1.
+        if [[ "$path" != "$last_path" || "$lineno" -ne "$((last_lineno + 1))" ]]; then
+            # New match start — re-evaluate the marker on (lineno - 1).
+            prev_line=""
+            if [[ "$lineno" -gt 1 && -f "$path" ]]; then
+                prev_line=$(sed -n "$((lineno - 1))p" "$path" 2>/dev/null || echo "")
+            fi
+            if [[ "$prev_line" == *"agent-event-tx-lint: ignore"* ]]; then
+                suppress_current=true
+            else
+                suppress_current=false
+            fi
+        fi
+        last_path="$path"
+        last_lineno="$lineno"
+        if [[ "$suppress_current" == true ]]; then
+            continue
+        fi
+        FILTERED_HITS+="$line"$'\n'
+    done <<<"$HITS"
+    FILTERED_HITS="${FILTERED_HITS%$'\n'}"
+fi
+
+if [[ -n "$FILTERED_HITS" ]]; then
     echo "FAIL: producer .send(...).await detected — AgentEvent channel sends are sync"
-    echo "$HITS"
+    echo "$FILTERED_HITS"
     exit 1
 fi
 
