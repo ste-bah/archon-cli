@@ -1,0 +1,11 @@
+---
+source: crates/archon-tui/tests/tui_snapshots.rs
+expression: repr
+---
+line_count=5
+---
+user: hello
+assistant: hi there
+[tool] read_file(src/main.rs)
+[thinking] Let me consider...
+assistant: here is the answer

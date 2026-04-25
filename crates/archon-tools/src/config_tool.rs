@@ -359,6 +359,7 @@ mod tests {
             session_id: "test-config".into(),
             mode: AgentMode::Normal,
             extra_dirs: vec![],
+            ..Default::default()
         }
     }
 

@@ -1,0 +1,18 @@
+---
+source: crates/archon-tui/tests/tui_snapshots.rs
+expression: lines
+---
+[
+    Line::from_iter([
+        Span::from("  • "),
+        Span::from("item one"),
+    ]),
+    Line::from_iter([
+        Span::from("  • "),
+        Span::from("item two"),
+    ]),
+    Line::from_iter([
+        Span::from("  • "),
+        Span::from("item three"),
+    ]),
+]

@@ -1,0 +1,25 @@
+[package]
+name = "archon-tui-test-support"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+tokio = { version = "1", features = ["test-util", "rt-multi-thread", "macros", "sync", "time"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+ratatui = { workspace = true }
+futures-util = "0.3"
+tracing = "0.1"
+regex-lite = "0.1"
+insta = { version = "1", features = ["yaml"] }
+hdrhistogram = "7"
+dashmap = "5"
+
+[dev-dependencies]
+insta = { version = "1", features = ["yaml"] }
+criterion = { version = "0.5", features = ["html_reports"] }
+hdrhistogram = "7"
+
+[[bench]]
+name = "eventloop_throughput"
+harness = false

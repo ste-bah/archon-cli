@@ -415,6 +415,37 @@ impl SessionStore {
         Ok(())
     }
 
+    /// Delete all messages with `message_index > keep_up_to` for the given
+    /// session. Messages at indices `0..=keep_up_to` are retained. Idempotent
+    /// — calling on an already-truncated session is a no-op.
+    ///
+    /// TASK-TUI-620-followup: backs the `/rewind` truncation flow. Mirrors
+    /// the `:rm messages {session_id, message_index}` delete pattern used
+    /// by `delete_session`.
+    pub fn truncate_messages_after(
+        &self,
+        session_id: &str,
+        keep_up_to: u64,
+    ) -> Result<(), SessionError> {
+        let mut params = BTreeMap::new();
+        params.insert("sid".to_string(), DataValue::from(session_id));
+        params.insert("keep".to_string(), DataValue::from(keep_up_to as i64));
+
+        self.db
+            .run_script(
+                "?[session_id, message_index] :=
+                    *messages{session_id, message_index},
+                    session_id = $sid,
+                    message_index > $keep
+                 :rm messages {session_id, message_index}",
+                params,
+                ScriptMutability::Mutable,
+            )
+            .map_err(db_err)?;
+
+        Ok(())
+    }
+
     /// Update session token usage, cost, and increment message count.
     pub fn update_usage(
         &self,
@@ -885,4 +916,72 @@ pub fn default_db_path() -> PathBuf {
         .join("archon")
         .join("sessions")
         .join("sessions.db")
+}
+
+#[cfg(test)]
+mod truncate_tests {
+    use super::*;
+
+    fn temp_store() -> (tempfile::TempDir, SessionStore) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("truncate-test.db");
+        let store = SessionStore::open(&path).expect("open store");
+        (dir, store)
+    }
+
+    #[test]
+    fn truncate_messages_after_keeps_prefix_only() {
+        let (_dir, store) = temp_store();
+        let meta = store
+            .create_session("/tmp/truncate", None, "test-model")
+            .expect("create session");
+
+        for i in 0..5u64 {
+            store
+                .save_message(&meta.id, i, &format!(r#"{{"idx":{i}}}"#))
+                .expect("save");
+        }
+
+        // Sanity: 5 messages written.
+        let before = store.load_messages(&meta.id).expect("load before");
+        assert_eq!(before.len(), 5, "expected 5 messages before truncate");
+
+        // Truncate: keep indices 0..=2, drop 3 and 4.
+        store
+            .truncate_messages_after(&meta.id, 2)
+            .expect("truncate");
+
+        let after = store.load_messages(&meta.id).expect("load after");
+        assert_eq!(
+            after.len(),
+            3,
+            "expected 3 messages kept (indices 0, 1, 2); got {}",
+            after.len()
+        );
+        assert!(after[0].contains("\"idx\":0"));
+        assert!(after[1].contains("\"idx\":1"));
+        assert!(after[2].contains("\"idx\":2"));
+    }
+
+    #[test]
+    fn truncate_messages_after_is_idempotent() {
+        let (_dir, store) = temp_store();
+        let meta = store
+            .create_session("/tmp/idemp", None, "test-model")
+            .expect("create session");
+        for i in 0..3u64 {
+            store
+                .save_message(&meta.id, i, &format!("m-{i}"))
+                .expect("save");
+        }
+        store
+            .truncate_messages_after(&meta.id, 0)
+            .expect("truncate");
+        // Second call on an already-truncated session is a no-op.
+        store
+            .truncate_messages_after(&meta.id, 0)
+            .expect("truncate 2");
+        let after = store.load_messages(&meta.id).expect("load");
+        assert_eq!(after.len(), 1, "only index 0 should remain");
+    }
 }

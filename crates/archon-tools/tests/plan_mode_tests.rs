@@ -10,6 +10,7 @@ fn ctx(mode: AgentMode) -> ToolContext {
         session_id: "test-plan".into(),
         mode,
         extra_dirs: vec![],
+        ..Default::default()
     }
 }
 

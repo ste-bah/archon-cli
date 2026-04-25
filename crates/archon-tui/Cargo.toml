@@ -22,9 +22,91 @@ async-trait.workspace = true
 reqwest = { workspace = true, features = ["multipart"] }
 serde_json.workspace = true
 archon-core = { path = "../archon-core" }
+archon-llm = { path = "../archon-llm" }
+archon-session = { path = "../archon-session" }
+# TASK-AGS-OBS-905: observability_tracing.rs lifted to archon-observability.
+# The in-tree src/observability_tracing.rs now re-exports from here so the
+# archon_tui::observability public surface stays byte-identical for callers.
+archon-observability = { path = "../archon-observability" }
 cpal = { workspace = true, optional = true }
+futures-util = { workspace = true }
+# OBS-901 (Stage 10): promoted to workspace.dependencies so
+# archon-observability (new owning crate for ChannelMetrics) and archon-tui
+# stay version-aligned. Pins unchanged — parking_lot = 0.12, hdrhistogram = 7.5.
+parking_lot = { workspace = true }
+hdrhistogram = { workspace = true }
+tempfile = "3.12"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+regex = "1"
+once_cell = "1"
+# TASK-TUI-803: Prometheus /metrics exporter served on loopback via --metrics-port.
+# axum 0.8 + tower 0.5 are already pinned at the workspace root; we opt in here
+# so the serve_metrics() helper can live alongside ChannelMetrics instead of
+# leaking the dependency into the top-level binary.
+axum = { workspace = true }
+tower = { workspace = true }
+qrcode = { version = "0.14.1", default-features = false }
+
+# jemalloc-ctl is used by TASK-TUI-809 (memory probe). jemalloc-sys'
+# build script fails on Windows + macOS + musl, so we gate to Linux only
+# (matching jemalloc-ctl's actual support footprint). The previous
+# `cfg(not(target_env = "musl"))` gate still pulled the dep in on
+# Windows/macOS where the build script broke. (TASK-CI-PORTABILITY-HOTFIX
+# / closes #221.)
+[target.'cfg(target_os = "linux")'.dependencies]
+jemalloc-ctl = "0.5"
+
+[dev-dependencies]
+insta = { workspace = true }
+criterion.workspace = true
+futures = "0.3"
+# TASK-TUI-410: load test drives archon-tools directly (AgentTool,
+# poll_background_agent, cancel_background_agent) per TECH-TUI-SUBAGENT
+# implementation_notes. uuid + tokio-util needed for the test-local
+# StubExecutor fixture reused from crates/archon-tools/tests/task_ags_104.rs.
+archon-tools = { path = "../archon-tools" }
+uuid = { workspace = true }
+tokio-util = { workspace = true }
+# TASK-TUI-905: Stage 9 preserve gate — REQ-FOR-PRESERVE-D8 regression guard
+# for the embedded CozoDB memory store across in-process restart. Dev-only
+# dep because the gate lives in tests/preserve_cozodb_memory_persist_gate.rs
+# and no production archon-tui code touches archon-memory directly. Required
+# by the TASK-TUI-905 Wiring Check (§Wiring Check line 94).
+archon-memory = { path = "../archon-memory" }
+# TASK-200 HYGIENE-LAYOUT-RACE: the layout module holds a process-global
+# `LAST_KNOWN_SIZE` (OnceLock<Mutex<(u16,u16)>>) by production design —
+# the render thread needs a shared view of the last resize. Unit tests
+# that exercise this global race under --test-threads=2. The absolute
+# rule forbids --test-threads=1, and thread_local would break the
+# production contract, so we serialize the 3 layout tests with
+# serial_test. Already workspace-pinned (archon-core, archon-tools).
+serial_test.workspace = true
+
+# procfs reads /proc/ — Linux-only. Gated to avoid macOS/Windows build
+# failures in `cargo check --tests`. (TASK-CI-PORTABILITY-HOTFIX /
+# closes #220.) The eventchannel_memory test that consumes this dep is
+# itself gated with #[cfg(target_os = "linux")]. Placed AFTER the plain
+# [dev-dependencies] table on purpose: TOML target-table sections claim
+# all subsequent keys until the next [...] header, so this MUST stay last
+# in the dev-dep cluster (or be followed by another header) to avoid
+# accidentally Linux-gating the deps above it.
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+procfs = "0.16"
+
+[[bench]]
+name = "eventchannel_load"
+path = "benches/eventchannel_load.rs"
+harness = false
+
+[[bench]]
+name = "eventchannel_latency"
+path = "benches/eventchannel_latency.rs"
+harness = false
 
 [features]
 default = []
 terminal-panel = []
 audio-capture = ["cpal"]
+# TASK-TUI-810: gates the 100-agents x 1000-events load test so default
+# `cargo test -p archon-tui` stays fast. CI enables via --features load-tests.
+load-tests = []

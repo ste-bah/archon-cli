@@ -1,0 +1,76 @@
+[package]
+name = "archon-observability"
+version.workspace = true
+edition.workspace = true
+publish = false
+description = "Shared observability primitives (tracing layers, redaction, metrics) for archon-cli. Owning crate for structured logging, secret redaction, and Prometheus exposition. Replaces the ad-hoc copies that previously lived in archon-tui and archon-core."
+
+# ---------------------------------------------------------------------------
+# Staging crate for AGS-OBS-9xx (Stage 10) — LIFT sequence:
+#   OBS-900 (shell): crate registration + hello-world const
+#   OBS-905: move archon-tui/src/observability_tracing.rs
+#            -> src/tracing.rs (init_tracing + RedactionLayer
+#            + span_* + redaction regex).
+#   OBS-906: carve RedactionLayer + SECRET_REGEX into src/redaction.rs
+#            and narrow src/tracing.rs to Layer glue only.
+#   OBS-901 (this ticket): lift archon-tui/src/observability.rs
+#                          -> src/metrics.rs. Brings ChannelMetrics,
+#                          ChannelMetricsSnapshot, the ChannelMetricSink
+#                          trait (formerly in archon-core), format_prometheus,
+#                          and serve_metrics_on/serve_metrics into this
+#                          crate. archon-core keeps a `pub use` shim for
+#                          ChannelMetricSink; archon-tui's observability.rs
+#                          becomes a thin re-export shim.
+#   (wiring): main.rs/session.rs/archon-core::logging switch to this crate
+#   OBS-907: add json arg to init_tracing; gate-walk JSON log output
+#
+# Dependency discipline: every new dep MUST come from [workspace.dependencies]
+# so the workspace dep graph stays consistent. OBS-905 pulled in tracing,
+# tracing-subscriber, regex, once_cell, anyhow. OBS-901 adds hdrhistogram,
+# parking_lot (ChannelMetrics internals), axum, tower, tokio (serve_metrics).
+# All five now reachable via workspace.dependencies — hdrhistogram and
+# parking_lot were promoted from archon-tui direct pins in this commit so
+# the two crates stay version-aligned.
+# ---------------------------------------------------------------------------
+
+[dependencies]
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+regex = { workspace = true }
+once_cell = { workspace = true }
+anyhow = { workspace = true }
+# OBS-901: ChannelMetrics internals — HDR histogram for P95 latency,
+# parking_lot Mutex wrapping the histogram.
+hdrhistogram = { workspace = true }
+parking_lot = { workspace = true }
+# OBS-901: serve_metrics_on/serve_metrics — Prometheus /metrics HTTP
+# endpoint. axum router + tokio TcpListener.
+axum = { workspace = true }
+tower = { workspace = true }
+tokio = { workspace = true }
+# OBS-901-WIRE: init_tracing_file — file-backed session logging with
+# RedactionLayer as the sole emitter. tracing-appender provides the
+# non-blocking worker + WorkerGuard; thiserror carries the LoggingError
+# enum that the call site already matches on (back-compat with the
+# pre-LIFT archon_core::logging::LoggingError surface).
+tracing-appender = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+# tests/tracing_smoke.rs installs a local subscriber via
+# tracing_subscriber::registry().with(RedactionLayer::...) so it can
+# exercise the span_* constructors with an active subscriber on the
+# current thread (integration tests run in parallel, so we cannot rely
+# on another test having installed a global one first). Pulled from the
+# workspace to stay version-aligned with the prod dependency above.
+tracing-subscriber = { workspace = true }
+tracing = { workspace = true }
+# OBS-901-WIRE: tests/init_tracing_file_smoke.rs drives the production
+# global-install path against a scratch dir. tempfile gives us a
+# hermetic `log_dir` per test run.
+tempfile = { workspace = true }
+# TASK-P1-4 (#189): tests/metrics_endpoint_e2e.rs scrapes the live
+# Prometheus `/metrics` endpoint served by serve_metrics_on() over
+# a real localhost TCP listener. reqwest provides the HTTP client;
+# workspace-declared feature set already includes rustls-tls + json.
+reqwest = { workspace = true }

@@ -1,44 +1,339 @@
-[api]
-default_model = "claude-sonnet-4-6"
-thinking_budget = 16384
-default_effort = "high"
-max_retries = 3
+# ============================================================================
+# Archon CLI — Project Configuration
+# ============================================================================
+# Layer: PROJECT  (path: <workdir>/.archon/config.toml)
+#
+# Load order (lowest → highest priority; later overrides earlier):
+#   1. User      — ~/.config/archon/config.toml
+#   2. Project   — <workdir>/.archon/config.toml        ← THIS FILE
+#   3. Local     — <workdir>/.archon/config.local.toml  (gitignored, secrets)
+#   4. Worktree  — <workdir>/.archon/worktrees/<name>.toml
+#   5. Settings  — --settings <path> CLI overlay
+#
+# Every field is listed with its default value and valid range.
+# Comment out (prefix with #) any field to fall back to the schema default.
+# ============================================================================
 
+
+# ----------------------------------------------------------------------------
+# [api] — Anthropic API + model defaults
+# ----------------------------------------------------------------------------
+[api]
+# Model to use. Options: claude-sonnet-4-6, claude-opus-4-6, claude-haiku-4-5-20251001
+default_model = "claude-sonnet-4-6"
+# Extended-thinking token budget (0 = disabled)
+thinking_budget = 16384
+# Reasoning effort: "low" | "medium" | "high"
+default_effort = "high"
+# Max HTTP retry attempts on transient failures
+max_retries = 3
+# Override API endpoint (for LiteLLM / Ollama / proxies). Leave commented to use default.
+# Resolution order: ANTHROPIC_BASE_URL env var > this field > https://api.anthropic.com/v1/messages
+# base_url = "http://localhost:11434/v1/messages"
+
+
+# ----------------------------------------------------------------------------
+# [llm] — Alternative LLM providers (when not using Anthropic directly)
+# ----------------------------------------------------------------------------
+# Anthropic (via the [api] section above) is the default and works with your
+# Claude subscription / API key. The sub-sections below are INACTIVE templates
+# for swapping to another provider — uncomment only the one you want to use
+# AND change `provider` accordingly.
+[llm]
+# Active provider: "anthropic" | "openai" | "bedrock" | "vertex" | "local"
+provider = "anthropic"
+
+# --- OpenAI (uncomment to activate) ---
+# [llm.openai]
+# api_key = "sk-..."                         # or set OPENAI_API_KEY env var
+# base_url = "https://api.openai.com/v1"     # or Azure OpenAI endpoint
+# model = "gpt-4o"
+
+# --- AWS Bedrock (uncomment to activate) ---
+# [llm.bedrock]
+# region = "us-east-1"
+# model_id = "anthropic.claude-sonnet-4-20250514-v1:0"
+
+# --- Google Vertex AI (uncomment to activate) ---
+# [llm.vertex]
+# project_id = "my-gcp-project"
+# region = "us-central1"
+# model = "claude-sonnet-4-20250514@20250514"
+# credentials_file = "/path/to/service-account.json"
+
+# --- Local / Ollama (uncomment to activate) ---
+# [llm.local]
+# base_url = "http://localhost:11434/v1"
+# model = "llama3:8b"
+# timeout_secs = 300
+# pull_if_missing = true
+
+
+# ----------------------------------------------------------------------------
+# [identity] — Request header / anti-distillation controls
+# ----------------------------------------------------------------------------
 [identity]
+# mode: "clean" (no spoofing) | "spoof" (mimic Claude Code headers) | "custom"
 mode = "spoof"
 spoof_version = "2.1.89"
 spoof_entrypoint = "cli"
+# Extra anthropic-beta headers to send (array of strings, or omit)
+# spoof_betas = ["fine-grained-tool-streaming-2025-05-14"]
 anti_distillation = false
+# workload = "coding"   # optional free-form tag
 
+# [identity.custom]   # Only used when identity.mode = "custom"
+# user_agent = "archon-cli/0.1.4"
+# x_app = "archon"
+# [identity.custom.extra_headers]
+# "X-Custom-Header" = "value"
+
+
+# ----------------------------------------------------------------------------
+# [personality] — Agent identity injected into the system prompt
+# ----------------------------------------------------------------------------
+[personality]
+name = "Archon"
+# MBTI: INTJ INTP ENTJ ENTP INFJ INFP ENFJ ENFP ISTJ ISFJ ESTJ ESFJ ISTP ISFP ESTP ESFP
+type = "INTJ"
+# Enneagram pattern: [1-9]w[1-9]
+enneagram = "4w5"
+traits = ["strategic", "direct", "self-critical", "truth-over-comfort"]
+communication_style = "terse"
+
+
+# ----------------------------------------------------------------------------
+# [consciousness] — Inner voice + behavioral rule seeding
+# ----------------------------------------------------------------------------
+[consciousness]
+inner_voice = true
+# Energy decay multiplier applied each turn (0.0..=1.0). 0.98 = 2% decay/turn.
+energy_decay_rate = 0.02
+# Core rules seeded into the memory graph on startup. Idempotent, max 50 rules.
+initial_rules = [
+    "Always ask before modifying files",
+    "Explain reasoning before acting",
+    "Never create files unless explicitly requested",
+]
+# Persist InnerVoice + rule scores across sessions
+persist_personality = true
+# Max personality snapshots to retain (oldest pruned first)
+personality_history_limit = 50
+
+
+# ----------------------------------------------------------------------------
+# [tools] — Tool execution limits
+# ----------------------------------------------------------------------------
 [tools]
+# Seconds before a Bash command is killed
 bash_timeout = 120
+# Max bytes of Bash stdout/stderr captured
 bash_max_output = 102400
+# Max concurrent tool calls (1..=16)
 max_concurrency = 4
 
+
+# ----------------------------------------------------------------------------
+# [permissions] — Tool-call permission model + fine-grained rules
+# ----------------------------------------------------------------------------
 [permissions]
-mode = "ask"
+# Canonical modes: "default" | "acceptEdits" | "plan" | "auto" | "dontAsk" | "bypassPermissions"
+# Legacy aliases accepted: "ask" (= default), "yolo" (= bypassPermissions)
+mode = "default"
+# Filesystem allow/deny lists (absolute paths or globs)
 allow_paths = []
 deny_paths = []
+# Command classification (by prefix) for Bash tool
+safe_commands = []
+risky_commands = []
+dangerous_commands = []
 
+# Fine-grained rules. Each rule: { tool = "<ToolName>", pattern = "<prefix>:*" }
+# Evaluation order: always_deny > always_allow > always_ask > mode logic.
+always_allow = []
+always_deny = []
+always_ask = []
+
+# Example:
+# [[permissions.always_allow]]
+# tool = "Bash"
+# pattern = "git status"
+# [[permissions.always_deny]]
+# tool = "Bash"
+# pattern = "rm -rf"
+
+
+# ----------------------------------------------------------------------------
+# [context] — Conversation compaction + caching
+# ----------------------------------------------------------------------------
 [context]
-compact_threshold = 0.800000011920929
+# Fraction of context window that triggers auto-compaction (0.0..=1.0)
+compact_threshold = 0.80
+# Hard cap on context tokens (None = use model default)
+# max_tokens = 200000
+# Recent turns always preserved through compaction
 preserve_recent_turns = 3
+# Use cache_control breakpoints on static system prompt blocks
+prompt_cache = true
+# Max characters of hierarchical ARCHON.md (alias: claudemd_max_tokens)
+archonmd_max_tokens = 8192
 
+
+# ----------------------------------------------------------------------------
+# [memory] — Persistent memory graph (CozoDB + embeddings)
+# ----------------------------------------------------------------------------
 [memory]
 enabled = true
+# CozoDB file path. None → default: ~/.archon/memory.db
+# db_path = "/custom/path/memory.db"
 
+# Embedding provider: "auto" | "local" | "openai"
+#   auto   — OpenAI if OPENAI_API_KEY or ARCHON_MEMORY_OPENAIKEY set, else local
+#   local  — fastembed BGE-base-en-v1.5 quantized (768-dim, CPU-only, ~100MB download)
+#   openai — text-embedding-3-small (1536-dim, requires API key)
+embedding_provider = "auto"
+
+# Hybrid search blend: 0.0 = pure vector, 1.0 = pure keyword. 0.3 = 70% vec / 30% kw.
+hybrid_alpha = 0.3
+
+# --- Memory Garden (background consolidation) ---
+[memory.garden]
+auto_consolidate = true
+min_hours_between_runs = 24
+# Cosine similarity above which two memories are treated as duplicates
+dedup_similarity_threshold = 0.92
+# Days after which low-importance memories are pruned
+staleness_days = 30
+staleness_importance_floor = 0.3
+# Importance lost per day without access
+importance_decay_per_day = 0.01
+# Hard cap on total memories before overflow pruning
+max_memories = 5000
+# Number of memories in session-start briefing
+briefing_limit = 15
+
+
+# ----------------------------------------------------------------------------
+# [cost] — Spending guardrails (USD)
+# ----------------------------------------------------------------------------
 [cost]
+# Warn once session cost exceeds this amount
 warn_threshold = 30.0
+# Hard stop when session cost reaches this amount (0.0 = disabled)
 hard_limit = 0.0
 
+
+# ----------------------------------------------------------------------------
+# [logging] — Log rotation
+# ----------------------------------------------------------------------------
 [logging]
+# Levels: "trace" | "debug" | "info" | "warn" | "error"
 level = "info"
 max_files = 50
 max_file_size_mb = 10
 
-[session]
-auto_resume = true
 
+# ----------------------------------------------------------------------------
+# [session] — Session persistence
+# ----------------------------------------------------------------------------
+[session]
+# Custom sessions DB path. None → default: ~/.archon/sessions/
+# db_path = "/custom/sessions.db"
+auto_resume = false
+
+
+# ----------------------------------------------------------------------------
+# [checkpoint] — Snapshot / rollback
+# ----------------------------------------------------------------------------
 [checkpoint]
 enabled = true
 max_checkpoints = 10
+
+
+# ----------------------------------------------------------------------------
+# [tui] — Terminal UI
+# ----------------------------------------------------------------------------
+[tui]
+vim_mode = true
+# Verbose mode: show full turn-by-turn output (Ctrl+V toggles at runtime)
+verbose = true
+# Named color theme. Built-ins: intj, intp, dark, light, ocean, fire, forest,
+# mono, daltonized, auto. Unknown names fall back to "dark".
+# theme = "intj"
+
+
+# ----------------------------------------------------------------------------
+# output_style (top-level) — Named prompt-style overlay
+# ----------------------------------------------------------------------------
+# Built-ins: Explanatory, Learning, Formal, Concise (case-sensitive).
+# Overridden by --output-style CLI flag. Unknown values fall back to "default".
+# output_style = "Concise"
+
+
+# ----------------------------------------------------------------------------
+# [update] — Self-update (checks GitHub Releases)
+# ----------------------------------------------------------------------------
+[update]
+# Channel: "stable" | "beta"
+channel = "stable"
+auto_check = true
+check_interval_hours = 24
+# release_url = "https://api.github.com/repos/ste-bah/archon/releases/latest"
+
+
+# ----------------------------------------------------------------------------
+# [remote] — SSH remote agent mode
+# ----------------------------------------------------------------------------
+[remote]
+# Sync mode: "manual" | "auto"
+sync_mode = "manual"
+
+[remote.ssh]
+host = ""
+port = 22
+user = ""
+# key_file = "~/.ssh/id_ed25519"
+agent_forwarding = false
+
+
+# ----------------------------------------------------------------------------
+# [ws_remote] — WebSocket server (archon serve)
+# ----------------------------------------------------------------------------
+[ws_remote]
+port = 8420
+# tls_cert = "/path/to/cert.pem"
+# tls_key  = "/path/to/key.pem"
+
+
+# ----------------------------------------------------------------------------
+# [orchestrator] — Multi-agent team coordination
+# ----------------------------------------------------------------------------
+[orchestrator]
+max_concurrent = 4
+timeout_secs = 300
+max_retries = 2
+
+
+# ----------------------------------------------------------------------------
+# [voice] — Speech-to-text input
+# ----------------------------------------------------------------------------
+[voice]
+enabled = false
+device = "default"
+# Voice activity detection threshold (0.0..=1.0)
+vad_threshold = 0.02
+# STT provider: "openai" | ... (extensible)
+stt_provider = "openai"
+# stt_api_key = "..."   # prefer config.local.toml for secrets
+stt_url = "https://api.openai.com"
+hotkey = "ctrl+shift+v"
+toggle_mode = false
+
+
+# ----------------------------------------------------------------------------
+# [web] — Browser UI (archon web)
+# ----------------------------------------------------------------------------
+[web]
+port = 8421
+bind_address = "127.0.0.1"
+open_browser = true

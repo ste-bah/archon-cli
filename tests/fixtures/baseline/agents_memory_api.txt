@@ -1,0 +1,33 @@
+# cargo-public-api 0.51.0
+pub struct archon_core::agents::memory::ExtractionState
+pub archon_core::agents::memory::ExtractionState::extraction_interval: u32
+pub archon_core::agents::memory::ExtractionState::last_memory_message_uuid: core::option::Option<alloc::string::String>
+pub archon_core::agents::memory::ExtractionState::turns_since_last_extraction: u32
+impl archon_core::agents::memory::ExtractionState
+pub fn archon_core::agents::memory::ExtractionState::with_interval(interval: u32) -> Self
+impl core::default::Default for archon_core::agents::memory::ExtractionState
+pub fn archon_core::agents::memory::ExtractionState::default() -> Self
+impl core::fmt::Debug for archon_core::agents::memory::ExtractionState
+pub fn archon_core::agents::memory::ExtractionState::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for archon_core::agents::memory::ExtractionState
+impl core::marker::Send for archon_core::agents::memory::ExtractionState
+impl core::marker::Sync for archon_core::agents::memory::ExtractionState
+impl core::marker::Unpin for archon_core::agents::memory::ExtractionState
+impl core::marker::UnsafeUnpin for archon_core::agents::memory::ExtractionState
+impl core::panic::unwind_safe::RefUnwindSafe for archon_core::agents::memory::ExtractionState
+impl core::panic::unwind_safe::UnwindSafe for archon_core::agents::memory::ExtractionState
+pub const archon_core::agents::memory::MAX_ENTRYPOINT_BYTES: usize
+pub const archon_core::agents::memory::MAX_ENTRYPOINT_LINES: usize
+pub fn archon_core::agents::memory::agent_tag(agent_type: &str) -> alloc::string::String
+pub fn archon_core::agents::memory::build_full_memory_prompt(memory_dir: &std::path::Path, scope_guidance: &str, existing_memory: &str) -> alloc::string::String
+pub async fn archon_core::agents::memory::ensure_memory_dir_exists(path: &std::path::Path)
+pub fn archon_core::agents::memory::get_agent_memory_dir(agent_type: &str, scope: &archon_core::agents::AgentMemoryScope, cwd: &std::path::Path) -> std::path::PathBuf
+pub fn archon_core::agents::memory::has_memory_writes_since(messages: &[serde_json::value::Value], since_uuid: core::option::Option<&str>, memory_dir: &std::path::Path) -> bool
+pub fn archon_core::agents::memory::increment_invocation_count(agent_dir: &std::path::Path) -> core::result::Result<u64, alloc::string::String>
+pub fn archon_core::agents::memory::load_agent_memory(agent_type: &str, recall_queries: &[alloc::string::String], memory: &dyn archon_memory::access::MemoryTrait, memory_scope: core::option::Option<&archon_core::agents::AgentMemoryScope>) -> alloc::vec::Vec<alloc::string::String>
+pub fn archon_core::agents::memory::load_agent_memory_prompt(agent_type: &str, memory_scope: core::option::Option<&archon_core::agents::AgentMemoryScope>, cwd: &std::path::Path) -> core::option::Option<alloc::string::String>
+pub fn archon_core::agents::memory::save_agent_memory(agent_type: &str, content: &str, title: &str, extra_tags: &[alloc::string::String], memory: &dyn archon_memory::access::MemoryTrait, project_path: &str, memory_scope: core::option::Option<&archon_core::agents::AgentMemoryScope>) -> core::result::Result<alloc::string::String, archon_memory::types::MemoryError>
+pub async fn archon_core::agents::memory::scan_memory_files(dir: &std::path::Path) -> alloc::string::String
+pub fn archon_core::agents::memory::scope_tag(scope: &archon_core::agents::AgentMemoryScope) -> alloc::string::String
+pub fn archon_core::agents::memory::should_extract(is_subagent: bool, state: &mut archon_core::agents::memory::ExtractionState, messages: &[serde_json::value::Value], memory_dir: &std::path::Path) -> bool
+pub fn archon_core::agents::memory::truncate_entrypoint_content(raw: &str, max_lines: usize, max_bytes: usize) -> alloc::string::String

@@ -5,6 +5,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
@@ -40,12 +41,46 @@ jobs:
   build-and-test:
     name: build + test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    # Per-OS timeout (#237). Linux + macOS use 30 min.
+    #
+    # #244 Windows CI DISABLED: removed windows runner from the build+test
+    # matrix entirely. The BASH_FUNC_* env-var bug on the windows-latest
+    # runner image (and verified to also be present on windows-2022 stable
+    # label, ruling out our prior #242 hypothesis) causes bash's CVE-2014-6271
+    # Shellshock self-defense to abort dtolnay/rust-toolchain's composite
+    # `shell: bash` install steps with `::error::bash function injection ...
+    # is not allowed for security reasons`. Failed runs on commits 6cba44b
+    # (windows-latest, 2x) and dee8536 (windows-2022, 1x). Tracked upstream
+    # as actions/partner-runner-images#169.
+    #
+    # Windows CI will be re-enabled once the upstream image is fixed,
+    # tracked as Phase 5 follow-up #243 in
+    # docs/executor-prompts/active/02-slash-command-parity-12.md.
+    timeout-minutes: ${{ matrix.timeout-override }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            timeout-override: 30
+          - os: macos-latest
+            timeout-override: 30
     steps:
       - uses: actions/checkout@v4
+
+      - name: Free disk space (Linux only)
+        if: runner.os == 'Linux'
+        # GitHub-hosted ubuntu-latest has ~14 GB free disk by default. A
+        # 1000-rlib debug build + rust-cache restore can push this near
+        # zero, and the linker's mmap'd intermediate writes then SIGBUS
+        # on the largest test binaries (#236 voice_capture_events, after
+        # #226 lld already cleared smoke_resolve_overflow). Removing the
+        # pre-installed Android/CodeQL/Haskell/.NET bloat frees ~30 GB
+        # of headroom BEFORE cache restore.
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -55,18 +90,135 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y pkg-config perl make
 
+      - name: Install mold linker (faster + lower memory than lld for large workspaces)
+        if: runner.os == 'Linux'
+        # Fourth remediation for #236 ubuntu link-time SIGBUS:
+        #   #220 [profile.test] tweaks: didn't help
+        #   #225 cargo-nextest migration: didn't help (linker memory unchanged)
+        #   #226 lld swap: cleared smoke_resolve_overflow but voice_capture_events
+        #         still SIGBUS on commit 855977d
+        #   #236 (this): mold + free-disk. mold is faster + lower-memory than
+        #         lld for large workspaces; available in standard ubuntu repos.
+        # Drop-in via the same `-fuse-ld=` mechanism. If mold install fails,
+        # apt-get -y will fail noisily, halting the job and surfacing the
+        # regression rather than silently degrading.
+        run: |
+          sudo apt-get install -y mold
+          echo "RUSTFLAGS=-C link-arg=-fuse-ld=mold" >> "$GITHUB_ENV"
+
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: ci-${{ matrix.os }}
 
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: nextest
+
       - name: Build workspace
         run: cargo build --workspace --verbose
 
-      - name: Run tests
+      - name: Run tests (nextest)
         shell: bash
         env:
           CARGO_BUILD_JOBS: "1"
-        run: cargo test --workspace --verbose -- --test-threads=1
+        # nextest runs each test binary in its own process and serialises
+        # build+link via CARGO_BUILD_JOBS=1, which keeps peak link memory
+        # within ubuntu-latest's 7GB RAM ceiling and unblocks #225 SIGBUS
+        # on the smoke_resolve_overflow link.
+        #
+        # NOTE on test parallelism (#233):
+        # No --test-threads flag here on purpose. nextest defaults to
+        # num_cpus, which is fine on GitHub-hosted runners (ubuntu/macos:
+        # 4 cores + 16GB RAM, windows: 4 cores + 16GB RAM).
+        #
+        # The project's WSL2 dev box rule "cargo test MUST use
+        # --test-threads=2" applies to LOCAL developer invocations only
+        # (small RAM, prior crash incidents on parallel rustc/test
+        # binaries). It does NOT apply to CI runners. Forcing
+        # --test-threads=1 here previously timed out the ubuntu test step
+        # at 64+ minutes (commit 3fded2c). Job timeout-minutes:30 above
+        # bounds future regressions.
+        run: cargo nextest run --workspace --no-fail-fast
+
+      - name: Run doctests
+        shell: bash
+        env:
+          CARGO_BUILD_JOBS: "1"
+        # nextest does not execute doctests; preserve coverage here.
+        run: cargo test --workspace --doc -- --test-threads=1
+
+  arch-lint:
+    name: arch-lint (D10 spawn-everything)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run architecture lint scaffold
+        run: bash scripts/lint/arch-lint.sh
+      - name: check-file-sizes (NFR-FOR-D4-MAINTAINABILITY)
+        run: bash scripts/check-file-sizes.sh
+
+  preserve-invariants:
+    name: preserve-invariants (TASK-AGS-OBS-918)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: check-preserve-invariants (fraud detection)
+        run: bash scripts/check-preserve-invariants.sh
+      - name: preserve-invariants self-test (fraud-detection-of-the-fraud-detector)
+        run: bash scripts/tests/preserve-invariants-self-test.sh
+
+  tui-file-size-lint:
+    name: tui-file-size-lint (NFR-TUI-QUAL-001)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: check-tui-file-sizes
+        run: bash scripts/check-tui-file-sizes.sh
+
+  tui-cycle-check:
+    name: tui-cycle-check (NFR-TUI-MOD-002)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: check-tui-module-cycles
+        run: bash scripts/check-tui-module-cycles.sh
+
+  tui-duplication-check:
+    name: tui-duplication-check (NFR-TUI-MOD-003)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: check-tui-duplication
+        run: bash scripts/check-tui-duplication.sh
+
+  tui-complexity:
+    name: tui-complexity (NFR-TUI-QUAL-003)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - name: check-tui-complexity
+        run: bash scripts/check-tui-complexity.sh
+
+  tui-coverage:
+    name: tui-coverage (NFR-TUI-QUAL-002)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      - name: Install cargo-llvm-cov
+        run: cargo install cargo-llvm-cov --locked
+      - name: check-tui-coverage
+        run: TUI_COVERAGE_MIN=10 bash scripts/check-tui-coverage.sh
 
   build-release-smoke:
     name: release build smoke

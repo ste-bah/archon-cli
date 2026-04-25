@@ -47,3 +47,23 @@ lcov.info
 
 # Scratch / test files
 hello.txt
+
+# Local documentation (not committed).
+# Use /docs/* instead of /docs/ so that negated sub-paths below can be
+# re-included (git cannot re-include children of a fully excluded parent).
+/docs/*
+# Exception: architectural guidelines are committed (REQ-FOR-D10 et al.)
+!/docs/architecture/
+!/docs/architecture/**
+# Exception: coverage baseline snapshot (TUI-328 / NFR-TUI-QUAL-003).
+!/docs/tui-coverage-baseline.json
+# Exception: phase-3 modularization final report (TUI-329).
+!/docs/tui-modularization-report.md
+# Exception: stage-7.5 audit artifacts (POST-6-METRICS-SWEEP et al.) —
+# permanent Sherlock-verified audit records backing POST-STAGE-6 close.
+# Parent dir must be negated first (git cannot re-include children of an
+# excluded parent); stage-7.5/tickets/ remains ignored via /docs/* above.
+!/docs/stage-7.5/
+/docs/stage-7.5/*
+!/docs/stage-7.5/audits/
+!/docs/stage-7.5/audits/**

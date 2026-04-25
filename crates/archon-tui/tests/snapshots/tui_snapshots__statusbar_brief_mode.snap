@@ -1,0 +1,5 @@
+---
+source: crates/archon-tui/tests/tui_snapshots.rs
+expression: bar.format()
+---
+claude-sonnet-4-6 | spoof | ask | $0.00 | [brief]

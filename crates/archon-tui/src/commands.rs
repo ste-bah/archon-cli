@@ -70,6 +70,38 @@ pub fn all_commands() -> Vec<CommandInfo> {
             description: "Report a bug",
         },
         CommandInfo {
+            name: "/review",
+            description: "Review a pull request (no arg = list open PRs)",
+        },
+        CommandInfo {
+            name: "/commit",
+            description: "Create a git commit with AI assistance",
+        },
+        CommandInfo {
+            name: "/tag",
+            description: "Toggle a searchable tag on the current session",
+        },
+        CommandInfo {
+            name: "/sandbox",
+            description: "Toggle sandbox restrictions (on|off|status)",
+        },
+        CommandInfo {
+            name: "/rewind",
+            description: "Open message selector to rewind conversation",
+        },
+        CommandInfo {
+            name: "/skills",
+            description: "Browse and invoke available skills",
+        },
+        CommandInfo {
+            name: "/session",
+            description: "Show remote session QR code and URL",
+        },
+        CommandInfo {
+            name: "/plan",
+            description: "Enable Plan Mode (approve each tool call individually)",
+        },
+        CommandInfo {
             name: "/login",
             description: "Re-authenticate",
         },

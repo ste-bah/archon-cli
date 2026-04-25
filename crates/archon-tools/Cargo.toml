@@ -25,6 +25,10 @@ dirs.workspace = true
 async-lsp.workspace = true
 lsp-types.workspace = true
 tokio-util.workspace = true
+# TASK-AGS-104: background_agents registry relocated here from
+# archon-core to break the archon-core <-> archon-tools cycle.
+dashmap.workspace = true
+once_cell.workspace = true
 tower.workspace = true
 which.workspace = true
 tree-sitter.workspace = true
@@ -36,3 +40,9 @@ petgraph.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+# TASK-AGS-105: serialize tests that rely on process-global
+# subagent executor state installed via OnceLock.
+serial_test.workspace = true
+# TASK-P1-6 (#191): sha256 byte-for-byte equality check for the
+# apply_patch round-trip verification test.
+sha2.workspace = true

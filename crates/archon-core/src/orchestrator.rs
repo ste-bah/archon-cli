@@ -11,7 +11,7 @@ use config::{ExecutionMode, OrchestratorConfig, TeamConfig};
 use events::{OrchestratorEvent, Subtask, SubtaskStatus};
 use pool::AgentPool;
 
-use crate::agent::{Agent, AgentConfig, AgentEvent};
+use crate::agent::{Agent, AgentConfig, AgentEvent, TimestampedEvent};
 use crate::agents::AgentRegistry;
 use crate::dispatch::create_default_registry;
 use archon_llm::provider::LlmProvider;
@@ -84,7 +84,7 @@ impl SubtaskExecutor for RealSubtaskExecutor {
 
         let registry = create_default_registry(self.working_dir.clone());
         let tool_defs = registry.tool_definitions();
-        let (event_tx, mut event_rx) = tokio::sync::mpsc::channel::<AgentEvent>(256);
+        let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel::<TimestampedEvent>();
 
         let config = AgentConfig {
             model: self.model.clone(),
@@ -109,12 +109,15 @@ impl SubtaskExecutor for RealSubtaskExecutor {
             self.agent_registry.clone(),
         );
 
+        // Wire subagent executor (TASK-AGS-105)
+        agent.install_subagent_executor();
+
         // Collect text output in a background task
         let output = Arc::new(Mutex::new(String::new()));
         let output_collector = Arc::clone(&output);
         let collector_handle = tokio::spawn(async move {
-            while let Some(event) = event_rx.recv().await {
-                if let AgentEvent::TextDelta(text) = event {
+            while let Some(ts) = event_rx.recv().await {
+                if let AgentEvent::TextDelta(text) = ts.inner {
                     output_collector.lock().await.push_str(&text);
                 }
             }
@@ -225,6 +228,7 @@ impl Orchestrator {
 
         for subtask in &mut subtasks {
             if *self.cancelled.lock().await {
+                // agent-event-tx-lint: ignore — channel holds OrchestratorEvent, not AgentEvent
                 let _ = event_tx.send(OrchestratorEvent::TeamCancelled).await;
                 anyhow::bail!("team cancelled");
             }

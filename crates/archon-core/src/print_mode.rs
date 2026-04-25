@@ -43,7 +43,7 @@ pub struct PrintModeConfig {
 use std::io::Write as _;
 use std::sync::Arc;
 
-use crate::agent::{Agent, AgentEvent};
+use crate::agent::{Agent, AgentEvent, TimestampedEvent};
 use crate::config::ArchonConfig;
 use crate::output_format::{format_agent_event, format_json_result};
 
@@ -55,7 +55,7 @@ pub async fn run_print_mode(
     config: PrintModeConfig,
     _archon_config: &ArchonConfig,
     agent: &mut Agent,
-    mut event_rx: tokio::sync::mpsc::Receiver<AgentEvent>,
+    mut event_rx: tokio::sync::mpsc::UnboundedReceiver<TimestampedEvent>,
 ) -> i32 {
     let query = config.query.clone();
     let output_format = config.output_format.clone();
@@ -86,7 +86,8 @@ pub async fn run_print_mode(
         let mut stdout = std::io::stdout();
         let mut stderr = std::io::stderr();
 
-        while let Some(event) = event_rx.recv().await {
+        while let Some(ts) = event_rx.recv().await {
+            let event = ts.inner;
             // Track turn completions
             if let AgentEvent::TurnComplete {
                 input_tokens,

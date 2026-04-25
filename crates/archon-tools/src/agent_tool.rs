@@ -1,6 +1,15 @@
+use std::sync::{Arc, Mutex};
+use std::time::SystemTime;
+
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use tokio_util::sync::CancellationToken;
+use uuid::Uuid;
 
+use crate::background_agents::{
+    AgentStatus, BACKGROUND_AGENTS, BackgroundAgentHandle, RegistryError, new_result_slot,
+};
+use crate::subagent_executor::{SubagentClassification, SubagentOutcome, get_subagent_executor};
 use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
 
 // ---------------------------------------------------------------------------
@@ -244,19 +253,332 @@ impl Tool for AgentTool {
         })
     }
 
-    async fn execute(&self, input: serde_json::Value, _ctx: &ToolContext) -> ToolResult {
-        match self.validate_and_build(&input) {
-            Ok(request) => match serde_json::to_string_pretty(&request) {
-                Ok(json_str) => ToolResult::success(json_str),
-                Err(e) => ToolResult::error(format!("failed to serialize request: {e}")),
-            },
-            Err(e) => ToolResult::error(e.to_string()),
+    async fn execute(&self, input: serde_json::Value, ctx: &ToolContext) -> ToolResult {
+        // TASK-AGS-105: `AgentTool::execute` routes through the installed
+        // `SubagentExecutor` via `run_subagent`. Two top-level branches:
+        //
+        //   - ExplicitBackground (run_in_background: true): spawn
+        //     `run_subagent` into a detached task, register the handle
+        //     in BACKGROUND_AGENTS, return `{agent_id, status:"spawned"}`
+        //     synchronously. Preserves the TASK-AGS-104 background
+        //     contract byte-for-byte.
+        //   - Foreground (default): spawn `run_subagent`, await the
+        //     outcome, map per the Section 2d matrix (Completed → real
+        //     text; Failed → error; AutoBackgrounded → spawn marker with
+        //     the exact pre-allocated id; Cancelled → error).
+        //
+        // See docs/task-ags-105-mapping.md Sections 2c + 2d for the
+        // full contract.
+        let request = match self.validate_and_build(&input) {
+            Ok(req) => req,
+            Err(e) => return ToolResult::error(e.to_string()),
+        };
+
+        let agent_id: Uuid = Uuid::new_v4();
+        let subagent_id = agent_id.to_string();
+
+        // Resolve the installed executor once. Classification happens
+        // on the parent task before spawning so we don't spawn-and-
+        // abandon on the background path.
+        let exec = match get_subagent_executor() {
+            Some(e) => e,
+            None => {
+                return ToolResult::error(
+                    "subagent executor not installed — archon-core did not call \
+                     install_subagent_executor before AgentTool::execute",
+                );
+            }
+        };
+        let classification = exec.classify(&request);
+
+        // TASK-AGS-107: if the parent agent has a cancel_parent token,
+        // create a child so cancelling the parent (Ctrl+C) cascades to
+        // this subagent. Otherwise create a standalone token.
+        let cancel = match &ctx.cancel_parent {
+            Some(parent) => parent.child_token(),
+            None => CancellationToken::new(),
+        };
+        let cancel_child = cancel.clone();
+        // Kept alive after `cancel` is moved into the handle so the
+        // register-failure branch below can still fire cancellation on
+        // the already-spawned task.
+        let cancel_for_failure = cancel.clone();
+        let status: Arc<Mutex<AgentStatus>> = Arc::new(Mutex::new(AgentStatus::Running));
+        let status_child = Arc::clone(&status);
+        let result_slot = new_result_slot();
+        let result_slot_child = Arc::clone(&result_slot);
+        let ctx_clone = ctx.clone();
+        let sid_spawn = subagent_id.clone();
+
+        let join = tokio::spawn(async move {
+            let outcome = run_subagent(sid_spawn.clone(), request, cancel_child, ctx_clone).await;
+            let (final_status, payload) = match &outcome {
+                SubagentOutcome::Completed(text) => (AgentStatus::Finished, Ok(text.clone())),
+                SubagentOutcome::Failed(err) => (AgentStatus::Failed, Err(err.clone())),
+                SubagentOutcome::AutoBackgrounded => {
+                    // The runner is still executing — mark Running here
+                    // so registry watchers don't see a premature
+                    // terminal state. on_inner_complete will still fire
+                    // from the runner's tail when it eventually finishes.
+                    (
+                        AgentStatus::Running,
+                        Ok(format!("auto-backgrounded:{sid_spawn}")),
+                    )
+                }
+                SubagentOutcome::Cancelled => {
+                    (AgentStatus::Failed, Err("subagent cancelled".into()))
+                }
+            };
+            *status_child
+                .lock()
+                .expect("status mutex poisoned in AgentTool::execute spawn") = final_status;
+            *result_slot_child
+                .lock()
+                .expect("result_slot mutex poisoned in AgentTool::execute spawn") = Some(payload);
+            outcome
+        });
+
+        // Background path: detach the JoinHandle (we can't await it from
+        // here without blocking), register the handle with a placeholder
+        // abort handle, and return the spawn marker. Use an adapter
+        // tokio::spawn to give BackgroundAgentHandle a `JoinHandle<()>`
+        // since the inner join returns `SubagentOutcome`.
+        if matches!(classification, SubagentClassification::ExplicitBackground) {
+            let adapter = tokio::spawn(async move {
+                let _ = join.await;
+            });
+
+            // TASK-AGS-108 ERR-ARCH-01: keep a clone for retry on collision.
+            let result_slot_retry = Arc::clone(&result_slot);
+            let handle = BackgroundAgentHandle {
+                agent_id,
+                join_handle: Some(adapter),
+                cancel_token: cancel,
+                spawned_at: SystemTime::now(),
+                status,
+                result_slot,
+            };
+
+            // TASK-AGS-108 ERR-ARCH-01: retry-once on duplicate UUID collision.
+            // If the astronomically-rare UUID collision hits, regenerate the
+            // agent_id in the handle and retry once. On second collision,
+            // surface the error and cancel the spawned task.
+            match BACKGROUND_AGENTS.register(handle) {
+                Ok(()) => {}
+                Err(RegistryError::Duplicate(dup_id)) => {
+                    tracing::warn!(
+                        agent_id = %dup_id,
+                        "Subagent ID collision: retrying with new UUID"
+                    );
+                    let new_id = Uuid::new_v4();
+                    let retry_handle = BackgroundAgentHandle {
+                        agent_id: new_id,
+                        join_handle: None, // adapter already consumed; the task runs detached
+                        cancel_token: cancel_for_failure.clone(),
+                        spawned_at: SystemTime::now(),
+                        status: Arc::new(Mutex::new(AgentStatus::Running)),
+                        result_slot: result_slot_retry,
+                    };
+                    if let Err(e2) = BACKGROUND_AGENTS.register(retry_handle) {
+                        cancel_for_failure.cancel();
+                        return ToolResult::error(format!(
+                            "background registry register failed after retry: {e2}"
+                        ));
+                    }
+                }
+                Err(e) => {
+                    cancel_for_failure.cancel();
+                    return ToolResult::error(format!("background registry register failed: {e}"));
+                }
+            }
+            drop(cancel_for_failure);
+
+            return ToolResult::success(
+                json!({
+                    "agent_id": agent_id.to_string(),
+                    "status": "spawned",
+                })
+                .to_string(),
+            );
+        }
+
+        // Foreground path: register the handle first (so parallel
+        // tooling can observe the running agent), then await the join.
+        // The join resolves with the final SubagentOutcome which we map
+        // to a user-facing ToolResult.
+        //
+        // We cannot reuse the same JoinHandle for both registration and
+        // the local .await, so we move the join into a oneshot by
+        // splitting: the spawned task writes its terminal status via
+        // `status_child` + `result_slot_child` (already wired above)
+        // and we await the join ourselves below.
+        let handle = {
+            // Adapter JoinHandle<()> — we still want the registry to
+            // own a clean Joinable handle even though the real outcome
+            // is delivered via result_slot. For the foreground path we
+            // don't actually need the registry lookup, but registering
+            // is cheap and preserves symmetry with the background path.
+            let (reg_cancel_tx, reg_cancel_rx) = tokio::sync::oneshot::channel::<()>();
+            // Drop reg_cancel_tx on the happy path — we only use the rx
+            // as an adapter target that never fires, keeping the adapter
+            // task alive until the real join completes.
+            drop(reg_cancel_tx);
+            let reg_adapter = tokio::spawn(async move {
+                let _ = reg_cancel_rx.await; // never resolves; task is idle
+            });
+            // Immediately abort the idle adapter — the foreground path
+            // does not actually need it once we've awaited the real
+            // outcome. We pre-register a nominal handle for symmetry.
+            reg_adapter.abort();
+            let noop_join: tokio::task::JoinHandle<()> = tokio::spawn(async {});
+
+            BackgroundAgentHandle {
+                agent_id,
+                join_handle: Some(noop_join),
+                cancel_token: cancel.clone(),
+                spawned_at: SystemTime::now(),
+                status: Arc::clone(&status),
+                result_slot: Arc::clone(&result_slot),
+            }
+        };
+        if let Err(e) = BACKGROUND_AGENTS.register(handle) {
+            cancel_for_failure.cancel();
+            return ToolResult::error(format!("background registry register failed: {e}"));
+        }
+        drop(cancel_for_failure);
+
+        // Await the spawned `run_subagent` future. This is the
+        // foreground contract: we block here until the executor either
+        // completes, fails, auto-backgrounds (timer), or cancels.
+        let outcome = match join.await {
+            Ok(o) => o,
+            Err(e) => {
+                return ToolResult::error(format!("subagent join panicked: {e}"));
+            }
+        };
+
+        match outcome {
+            SubagentOutcome::Completed(text) => ToolResult::success(text),
+            SubagentOutcome::Failed(err) => ToolResult::error(err),
+            SubagentOutcome::AutoBackgrounded => {
+                // Preserve the EXACT old text format from
+                // agent.rs:3050-3053 so Sherlock's byte-for-byte checks
+                // on the auto-background marker still pass.
+                let ms = exec.auto_background_ms();
+                let secs = if ms == 0 { 120 } else { ms / 1000 };
+                ToolResult::success(format!(
+                    "Subagent '{subagent_id}' auto-backgrounded after {secs}s. Still running — \
+                     use SendMessage to check status."
+                ))
+            }
+            SubagentOutcome::Cancelled => ToolResult::error("subagent cancelled"),
         }
     }
 
     fn permission_level(&self, _input: &serde_json::Value) -> PermissionLevel {
         PermissionLevel::Risky
     }
+}
+
+// ---------------------------------------------------------------------------
+// run_subagent — the AGT-025 `tokio::select!` race, relocated from
+// archon-core per TASK-AGS-105 mapping doc Section 2c.
+// ---------------------------------------------------------------------------
+//
+// Owns the AGT-025 auto-background race against the installed
+// `SubagentExecutor`. The executor's `run_to_completion` fires
+// `on_inner_complete` at its tail UNCONDITIONALLY (preserves
+// PRESERVE-D8). `run_subagent` fires `on_visible_complete` only on the
+// non-timer arms (preserves PRESERVE-D5 — post-abandonment auto-bg
+// agents get inner side effects but NOT visible hooks).
+pub async fn run_subagent(
+    subagent_id: String,
+    request: SubagentRequest,
+    cancel: CancellationToken,
+    ctx: ToolContext,
+) -> SubagentOutcome {
+    use std::time::Duration;
+
+    let exec = match get_subagent_executor() {
+        Some(e) => e,
+        None => {
+            return SubagentOutcome::Failed("subagent executor not installed".to_string());
+        }
+    };
+    let auto_bg_ms = exec.auto_background_ms();
+
+    let nested = ctx.nested;
+    let join = tokio::spawn({
+        let exec = Arc::clone(&exec);
+        let cancel = cancel.clone();
+        let ctx = ctx.clone();
+        let req = request.clone();
+        let sid = subagent_id.clone();
+        async move { exec.run_to_completion(sid, req, ctx, cancel).await }
+    });
+
+    let outcome = if auto_bg_ms == 0 {
+        tokio::select! {
+            _ = cancel.cancelled() => SubagentOutcome::Cancelled,
+            r = join => match r {
+                Ok(Ok(text))  => SubagentOutcome::Completed(text),
+                Ok(Err(e))    => SubagentOutcome::Failed(format!("{e}")),
+                Err(e)        => SubagentOutcome::Failed(format!("join panic: {e}")),
+            },
+        }
+    } else {
+        let timer = tokio::time::sleep(Duration::from_millis(auto_bg_ms));
+        tokio::select! {
+            _ = cancel.cancelled() => SubagentOutcome::Cancelled,
+            r = join => match r {
+                Ok(Ok(text))  => SubagentOutcome::Completed(text),
+                Ok(Err(e))    => SubagentOutcome::Failed(format!("{e}")),
+                Err(e)        => SubagentOutcome::Failed(format!("join panic: {e}")),
+            },
+            _ = timer => SubagentOutcome::AutoBackgrounded,
+        }
+    };
+
+    // on_visible_complete fires ONLY for non-timer completion arms.
+    // The AutoBackgrounded arm INTENTIONALLY does NOT call it, which
+    // preserves PRESERVE-D5: post-abandonment auto-backgrounded agents
+    // get inner side effects (fired from run_to_completion's tail when
+    // the runner eventually finishes) but NOT visible hooks or
+    // worktree cleanup.
+    match &outcome {
+        SubagentOutcome::Completed(text) => {
+            let side_effects = exec
+                .on_visible_complete(subagent_id.clone(), Ok(text.clone()), nested)
+                .await;
+            // If there's a worktree-preserved note, splice it into the
+            // returned text. The executor returned the base text via
+            // run_to_completion; we append the suffix here so the
+            // caller (AgentTool::execute) receives the fully-composed
+            // string with no awareness of worktree plumbing.
+            if let Some(suffix) = side_effects.text_suffix {
+                return SubagentOutcome::Completed(format!("{text}{suffix}"));
+            }
+        }
+        SubagentOutcome::Failed(err) => {
+            let _ = exec
+                .on_visible_complete(subagent_id.clone(), Err(err.clone()), nested)
+                .await;
+        }
+        SubagentOutcome::AutoBackgrounded => {
+            // NO on_visible_complete call — see PRESERVE-D5 above.
+        }
+        SubagentOutcome::Cancelled => {
+            let _ = exec
+                .on_visible_complete(
+                    subagent_id.clone(),
+                    Err("subagent cancelled".to_string()),
+                    nested,
+                )
+                .await;
+        }
+    }
+
+    outcome
 }
 
 // ---------------------------------------------------------------------------
@@ -273,11 +595,14 @@ mod tests {
             session_id: "test-session".into(),
             mode: crate::tool::AgentMode::Normal,
             extra_dirs: vec![],
+            ..Default::default()
         }
     }
 
     #[tokio::test]
     async fn valid_input_returns_subagent_request() {
+        // TASK-AGS-104: execute() now returns {agent_id,status}; validate
+        // SubagentRequest shape directly via validate_and_build.
         let tool = AgentTool::new();
         let input = json!({
             "prompt": "Summarize the codebase",
@@ -286,11 +611,7 @@ mod tests {
             "max_turns": 5
         });
 
-        let result = tool.execute(input, &make_ctx()).await;
-        assert!(!result.is_error, "unexpected error: {}", result.content);
-
-        let request: SubagentRequest =
-            serde_json::from_str(&result.content).expect("should deserialize");
+        let request = tool.validate_and_build(&input).expect("valid input");
         assert_eq!(request.prompt, "Summarize the codebase");
         assert_eq!(request.model.as_deref(), Some("claude-sonnet-4-6"));
         assert_eq!(request.allowed_tools, vec!["Read", "Glob"]);
@@ -329,10 +650,7 @@ mod tests {
         let tool = AgentTool::new();
         let input = json!({ "prompt": "Do something" });
 
-        let result = tool.execute(input, &make_ctx()).await;
-        assert!(!result.is_error);
-
-        let request: SubagentRequest = serde_json::from_str(&result.content).unwrap();
+        let request = tool.validate_and_build(&input).expect("valid input");
         assert_eq!(request.max_turns, SubagentRequest::DEFAULT_MAX_TURNS);
         assert_eq!(request.timeout_secs, SubagentRequest::DEFAULT_TIMEOUT_SECS);
         assert!(!request.run_in_background);
@@ -347,10 +665,7 @@ mod tests {
             "allowed_tools": ["Read", "Write", "Edit"]
         });
 
-        let result = tool.execute(input, &make_ctx()).await;
-        assert!(!result.is_error);
-
-        let request: SubagentRequest = serde_json::from_str(&result.content).unwrap();
+        let request = tool.validate_and_build(&input).expect("valid input");
         assert_eq!(request.allowed_tools, vec!["Read", "Write", "Edit"]);
     }
 
@@ -359,10 +674,7 @@ mod tests {
         let tool = AgentTool::new();
         let input = json!({ "prompt": "Analyze code" });
 
-        let result = tool.execute(input, &make_ctx()).await;
-        assert!(!result.is_error);
-
-        let request: SubagentRequest = serde_json::from_str(&result.content).unwrap();
+        let request = tool.validate_and_build(&input).expect("valid input");
         assert!(request.allowed_tools.is_empty());
     }
 
@@ -397,10 +709,7 @@ mod tests {
             "subagent_type": "code-reviewer"
         });
 
-        let result = tool.execute(input, &make_ctx()).await;
-        assert!(!result.is_error);
-
-        let request: SubagentRequest = serde_json::from_str(&result.content).unwrap();
+        let request = tool.validate_and_build(&input).expect("valid input");
         assert_eq!(request.subagent_type.as_deref(), Some("code-reviewer"));
     }
 
@@ -409,10 +718,7 @@ mod tests {
         let tool = AgentTool::new();
         let input = json!({ "prompt": "Do something" });
 
-        let result = tool.execute(input, &make_ctx()).await;
-        assert!(!result.is_error);
-
-        let request: SubagentRequest = serde_json::from_str(&result.content).unwrap();
+        let request = tool.validate_and_build(&input).expect("valid input");
         assert!(request.subagent_type.is_none());
     }
 
@@ -463,10 +769,7 @@ mod tests {
             "run_in_background": true
         });
 
-        let result = tool.execute(input, &make_ctx()).await;
-        assert!(!result.is_error);
-
-        let request: SubagentRequest = serde_json::from_str(&result.content).unwrap();
+        let request = tool.validate_and_build(&input).expect("valid input");
         assert!(request.run_in_background);
     }
 
@@ -507,10 +810,7 @@ mod tests {
             "cwd": "/tmp"
         });
 
-        let result = tool.execute(input, &make_ctx()).await;
-        assert!(!result.is_error);
-
-        let request: SubagentRequest = serde_json::from_str(&result.content).unwrap();
+        let request = tool.validate_and_build(&input).expect("valid input");
         assert_eq!(request.cwd.as_deref(), Some("/tmp"));
     }
 
@@ -555,10 +855,7 @@ mod tests {
             "isolation": "worktree"
         });
 
-        let result = tool.execute(input, &make_ctx()).await;
-        assert!(!result.is_error);
-
-        let request: SubagentRequest = serde_json::from_str(&result.content).unwrap();
+        let request = tool.validate_and_build(&input).expect("valid input");
         assert_eq!(request.isolation.as_deref(), Some("worktree"));
     }
 
@@ -567,10 +864,7 @@ mod tests {
         let tool = AgentTool::new();
         let input = json!({ "prompt": "Do something" });
 
-        let result = tool.execute(input, &make_ctx()).await;
-        assert!(!result.is_error);
-
-        let request: SubagentRequest = serde_json::from_str(&result.content).unwrap();
+        let request = tool.validate_and_build(&input).expect("valid input");
         assert!(request.isolation.is_none());
     }
 

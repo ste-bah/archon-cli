@@ -1,0 +1,43 @@
+# Preserve file-size whitelist (TASK-TUI-903, ERR-TUI-004)
+# Format: one path per line, # comments allowed.
+# Entries MUST include an expiry date in a trailing `# expires YYYY-MM-DD` comment.
+# TASK-TUI-905 audits this list each stage.
+#
+# Seed (2026-04-21): 29 pre-existing TUI/command files exceed 500 LoC. SPEC-TUI-MODULARIZATION
+# splits are tracked as REM-2c..i (pending Steven sign-off on REM-2b split plan).
+# All entries expire 2026-05-15 — TASK-TUI-905 audits, and un-whitelisted offenders MUST be
+# split or re-dated by that point.
+
+# --- crates/archon-tui/src/ (8) ---
+crates/archon-tui/src/app.rs                       # expires 2026-05-15 (REM-2d)
+crates/archon-tui/src/event_loop.rs                # expires 2026-05-15 (REM-2g)
+crates/archon-tui/src/markdown.rs                  # expires 2026-05-15 (REM-2c)
+crates/archon-tui/src/output.rs                    # expires 2026-05-15 (REM-2h)
+crates/archon-tui/src/task_dispatch_tests.rs       # expires 2026-05-15 (REM-2f)
+crates/archon-tui/src/theme.rs                     # expires 2026-05-15 (REM-2i)
+crates/archon-tui/src/vim.rs                       # expires 2026-05-15 (REM-2e)
+
+# --- legacy worktree-root src/ (22) — Stage 7.5 command crate dispatcher files ---
+src/cli_args.rs                                    # expires 2026-05-15
+src/main.rs                                        # expires 2026-05-15 (fmt-inflated 482->511, commit 6adc1d6)
+src/session.rs                                     # expires 2026-05-15
+src/session_loop/mod.rs                            # expires 2026-05-15 (TASK-SESSION-LOOP-EXTRACT — post-extract of 915-line tokio::spawn body from session.rs; follow-up TASK-SESSION-LOOP-SPLIT will split into per-event-category helpers)
+src/command/add_dir.rs                             # expires 2026-05-15
+src/command/checkpoint.rs                          # expires 2026-05-15
+src/command/context.rs                             # expires 2026-05-15
+src/command/copy.rs                                # expires 2026-05-15
+src/command/dispatcher.rs                          # expires 2026-05-15
+src/command/doctor.rs                              # expires 2026-05-15
+src/command/effort.rs                              # expires 2026-05-15
+src/command/garden.rs                              # expires 2026-05-15
+src/command/help.rs                                # expires 2026-05-15
+src/command/login.rs                               # expires 2026-05-15
+src/command/logout.rs                              # expires 2026-05-15
+src/command/memory.rs                              # expires 2026-05-15
+src/command/parser.rs                              # expires 2026-05-15
+src/command/permissions.rs                         # expires 2026-05-15
+src/command/recall.rs                              # expires 2026-05-15
+src/command/registry.rs                            # expires 2026-05-15
+src/command/rename.rs                              # expires 2026-05-15
+src/command/rules.rs                               # expires 2026-05-15
+src/command/test_support.rs                        # expires 2026-05-15

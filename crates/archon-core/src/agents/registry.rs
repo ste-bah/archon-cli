@@ -5,7 +5,7 @@ use tracing::debug;
 
 use super::built_in::get_built_in_agents;
 use super::definition::{AgentSource, CustomAgentDefinition};
-use super::loader::{AgentLoadError, load_custom_agents};
+use super::loader::{AgentLoadError, load_custom_agents, load_plugin_agents};
 
 // ---------------------------------------------------------------------------
 // AgentRegistry
@@ -22,8 +22,26 @@ pub struct AgentRegistry {
 }
 
 impl AgentRegistry {
-    /// Load agents from all three sources.
+    /// Load agents from all sources using the real user home directory.
     pub fn load(project_dir: &Path) -> Self {
+        Self::load_with_user_home(project_dir, dirs::home_dir().as_deref())
+    }
+
+    /// Load agents from all sources with an explicit user home directory.
+    ///
+    /// Priority (lowest → highest, later entries override earlier ones on
+    /// key collision):
+    ///
+    /// 1. Built-in agents
+    /// 2. Project plugin agents (`<project>/.archon/plugins/*/agents/*`)
+    /// 3. User plugin agents (`<user_home>/.archon/plugins/*/agents/*`)
+    /// 4. Project custom agents (`<project>/.archon/agents/custom/*`)
+    /// 5. User custom agents (`<user_home>/.archon/agents/custom/*`) — wins
+    ///
+    /// This ordering ranks `project custom` ABOVE `user plugin`: authored
+    /// custom agents are a deliberate override surface and win over any
+    /// installed plugin bundle regardless of scope.
+    pub fn load_with_user_home(project_dir: &Path, user_home: Option<&Path>) -> Self {
         let mut agents = HashMap::new();
         let mut errors = Vec::new();
 
@@ -32,7 +50,33 @@ impl AgentRegistry {
             agents.insert(agent.agent_type.clone(), agent);
         }
 
-        // 2. Project agents (.archon/agents/custom/)
+        // 2. Project plugin agents (<project>/.archon/plugins/)
+        let project_plugins = project_dir.join(".archon/plugins");
+        match load_plugin_agents(&project_plugins) {
+            Ok(loaded) => {
+                debug!(count = loaded.len(), "loaded project plugin agents");
+                for a in loaded {
+                    agents.insert(a.agent_type.clone(), a);
+                }
+            }
+            Err(e) => errors.push(e),
+        }
+
+        // 3. User plugin agents (<user_home>/.archon/plugins/)
+        if let Some(home) = user_home {
+            let user_plugins = home.join(".archon/plugins");
+            match load_plugin_agents(&user_plugins) {
+                Ok(loaded) => {
+                    debug!(count = loaded.len(), "loaded user plugin agents");
+                    for a in loaded {
+                        agents.insert(a.agent_type.clone(), a);
+                    }
+                }
+                Err(e) => errors.push(e),
+            }
+        }
+
+        // 4. Project custom agents (.archon/agents/custom/)
         let project_custom = project_dir.join(".archon/agents/custom");
         if project_custom.is_dir() {
             match load_custom_agents(&project_custom, AgentSource::Project) {
@@ -46,8 +90,8 @@ impl AgentRegistry {
             }
         }
 
-        // 3. User agents (~/.archon/agents/custom/) — highest priority
-        if let Some(home) = dirs::home_dir() {
+        // 5. User custom agents (~/.archon/agents/custom/) — highest priority
+        if let Some(home) = user_home {
             let user_custom = home.join(".archon/agents/custom");
             if user_custom.is_dir() {
                 match load_custom_agents(&user_custom, AgentSource::User) {
@@ -346,6 +390,177 @@ mod tests {
         assert!(registry.is_empty());
         assert_eq!(registry.len(), 0);
         assert!(registry.list().is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // G5 — plugin agent loading + priority tests
+    // -----------------------------------------------------------------------
+
+    /// Create a minimal plugin agent fixture at
+    /// `<root>/<plugin>/agents/<agent>/` with the 6-file structure. The
+    /// `marker` string is embedded in the INTENT body so tests can assert
+    /// which version (project vs user vs custom) won a priority collision.
+    fn create_plugin_fixture(plugins_root: &Path, plugin: &str, agent: &str, marker: &str) {
+        let dir = plugins_root.join(plugin).join("agents").join(agent);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("agent.md"),
+            format!("# {agent}\n\n## INTENT\n{marker}\n"),
+        )
+        .unwrap();
+        fs::write(dir.join("behavior.md"), "").unwrap();
+        fs::write(dir.join("context.md"), "").unwrap();
+        fs::write(dir.join("tools.md"), "").unwrap();
+        fs::write(
+            dir.join("memory-keys.json"),
+            r#"{"recall_queries":[],"leann_queries":[],"tags":[]}"#,
+        )
+        .unwrap();
+        fs::write(
+            dir.join("meta.json"),
+            r#"{"version":"1.0","created_at":"2026-04-01T00:00:00Z","updated_at":"2026-04-01T00:00:00Z","invocation_count":0,"quality":{"applied_rate":0.0,"completion_rate":0.0},"evolution_history":[],"archived":false}"#,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn registry_loads_project_plugin_agent() {
+        let project = TempDir::new().unwrap();
+        let user = TempDir::new().unwrap();
+
+        create_plugin_fixture(
+            &project.path().join(".archon/plugins"),
+            "foo",
+            "bar",
+            "project-foo-bar",
+        );
+
+        let registry = AgentRegistry::load_with_user_home(project.path(), Some(user.path()));
+
+        let agent = registry
+            .resolve("foo:bar")
+            .expect("foo:bar should be resolvable from project plugin");
+        assert_eq!(
+            agent.source,
+            AgentSource::Plugin("foo".to_string()),
+            "source must be Plugin(foo)"
+        );
+        assert!(
+            agent.description.contains("project-foo-bar"),
+            "description should come from project plugin fixture"
+        );
+    }
+
+    #[test]
+    fn registry_user_plugin_beats_project_plugin_on_same_key() {
+        // G5 priority: user plugin > project plugin (but custom beats both).
+        let project = TempDir::new().unwrap();
+        let user = TempDir::new().unwrap();
+
+        create_plugin_fixture(
+            &project.path().join(".archon/plugins"),
+            "foo",
+            "bar",
+            "project-version",
+        );
+        create_plugin_fixture(
+            &user.path().join(".archon/plugins"),
+            "foo",
+            "bar",
+            "user-version",
+        );
+
+        let registry = AgentRegistry::load_with_user_home(project.path(), Some(user.path()));
+        let agent = registry.resolve("foo:bar").expect("foo:bar must resolve");
+
+        assert_eq!(
+            agent.source,
+            AgentSource::Plugin("foo".to_string()),
+            "source remains Plugin(foo) — both versions belong to the same plugin name"
+        );
+        assert!(
+            agent.description.contains("user-version"),
+            "user plugin must win over project plugin on key collision; \
+             got description: {:?}",
+            agent.description
+        );
+        assert!(
+            !agent.description.contains("project-version"),
+            "project-version must have been overwritten by user-version"
+        );
+    }
+
+    #[test]
+    fn registry_underscore_plugin_dir_skipped() {
+        let project = TempDir::new().unwrap();
+        let user = TempDir::new().unwrap();
+
+        create_plugin_fixture(
+            &project.path().join(".archon/plugins"),
+            "_internal",
+            "bar",
+            "internal-bar",
+        );
+
+        let registry = AgentRegistry::load_with_user_home(project.path(), Some(user.path()));
+        assert!(
+            registry.resolve("_internal:bar").is_none(),
+            "_-prefixed plugin dirs must be skipped entirely"
+        );
+    }
+
+    // #234: Windows does not allow `:` in filenames. The fixture below
+    // creates `.archon/agents/custom/foo:bar` which `fs::create_dir_all`
+    // rejects with `Os { code: 267, kind: NotADirectory }` on Windows.
+    // The source comment a few lines below ("our test tmp on Linux allows
+    // colons in filenames") already acknowledges this constraint — gate
+    // the test to non-Windows platforms.
+    #[cfg(not(windows))]
+    #[test]
+    fn registry_custom_agent_beats_plugin_with_same_key() {
+        // G5 priority: project custom > user plugin.
+        // Create a plugin providing "foo:bar" in USER scope (higher of the
+        // two plugin levels) and a custom agent literally named "foo:bar"
+        // in PROJECT scope. Custom must still win.
+        let project = TempDir::new().unwrap();
+        let user = TempDir::new().unwrap();
+
+        create_plugin_fixture(
+            &user.path().join(".archon/plugins"),
+            "foo",
+            "bar",
+            "plugin-version",
+        );
+
+        // Custom agent with literal type "foo:bar" (the agent dir name
+        // includes the colon on platforms that allow it; our test tmp on
+        // Linux allows colons in filenames).
+        let custom_dir = project.path().join(".archon/agents/custom/foo:bar");
+        fs::create_dir_all(&custom_dir).unwrap();
+        fs::write(
+            custom_dir.join("agent.md"),
+            "# foo:bar\n\n## INTENT\ncustom-version\n",
+        )
+        .unwrap();
+        fs::write(
+            custom_dir.join("meta.json"),
+            r#"{"version":"1.0","created_at":"2026-04-01T00:00:00Z","updated_at":"2026-04-01T00:00:00Z","invocation_count":0,"quality":{"applied_rate":0.0,"completion_rate":0.0},"evolution_history":[],"archived":false}"#,
+        )
+        .unwrap();
+
+        let registry = AgentRegistry::load_with_user_home(project.path(), Some(user.path()));
+        let agent = registry.resolve("foo:bar").expect("foo:bar must resolve");
+
+        assert_eq!(
+            agent.source,
+            AgentSource::Project,
+            "custom project agent must override user plugin"
+        );
+        assert!(
+            agent.description.contains("custom-version"),
+            "custom agent must win; got {:?}",
+            agent.description
+        );
     }
 
     #[test]

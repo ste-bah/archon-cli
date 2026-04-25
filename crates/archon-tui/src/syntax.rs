@@ -226,6 +226,7 @@ pub fn highlight_code(code: &str, language: &str) -> Option<Vec<Line<'static>>> 
     let mut current_spans: Vec<Span<'static>> = Vec::new();
     let mut style_stack: Vec<Style> = vec![Style::default().fg(Color::White)];
 
+    // yield_now not needed: sync loop, not cancellable regardless.
     for event in events {
         let event = match event {
             Ok(e) => e,
@@ -288,6 +289,7 @@ pub fn render_plain_code(code: &str, language: Option<&str>) -> Vec<Line<'static
     }
 
     // Code lines
+    // yield_now not needed: sync loop, not cancellable regardless.
     for line in code.lines() {
         lines.push(Line::from(Span::styled(line.to_string(), code_style)));
     }

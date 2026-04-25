@@ -195,9 +195,25 @@ impl VoicePipeline {
 /// Receives [`VoiceTrigger`]s, drives audio capture, transcribes via STT,
 /// and emits [`TuiEvent::VoiceText`] to the TUI event channel. Returns when
 /// `trigger_rx` is closed (all senders dropped).
+// TUI-330: cognitive complexity (96/25). This is an event loop whose branches
+// (trigger variants × capture states × transcription outcomes) all share
+// local state (pipeline handle, in-flight capture buffers, tui_event_tx).
+// Extracting arms into helpers requires threading >=4 mutable references
+// through function boundaries with no coherence gain, and fragments the
+// `select!` / match cascade that is the architectural focal point of this
+// loop.
+//
+// TUI-331: Remove this allow when `VoicePipeline` is split into
+// `VoicePipeline::Input` (audio capture: device handle, recording state,
+// capture buffers) and `VoicePipeline::Output` (STT decoding + TuiEvent
+// emission: tui_event_tx, transcription state) sub-structs. After that
+// split, per-trigger handlers can accept a narrower `&mut` receiver (either
+// Input or Output, not both), which will drop helper-threading cost below
+// the breakeven point and let the arm extraction land <25.
+#[allow(clippy::cognitive_complexity)]
 pub async fn voice_loop(
     mut trigger_rx: mpsc::Receiver<VoiceTrigger>,
-    tui_event_tx: mpsc::Sender<TuiEvent>,
+    tui_event_tx: mpsc::UnboundedSender<TuiEvent>,
     pipeline: VoicePipeline,
 ) {
     tracing::info!("voice: pipeline started");
@@ -208,9 +224,7 @@ pub async fn voice_loop(
             VoiceTrigger::Toggle if !recording => {
                 if let Err(e) = pipeline.audio.start().await {
                     tracing::warn!("voice: start failed: {e}");
-                    let _ = tui_event_tx
-                        .send(TuiEvent::VoiceText(format!("[voice error: {e}]")))
-                        .await;
+                    let _ = tui_event_tx.send(TuiEvent::VoiceText(format!("[voice error: {e}]")));
                     continue;
                 }
                 recording = true;
@@ -237,16 +251,14 @@ pub async fn voice_loop(
                 match pipeline.stt.transcribe(&wav).await {
                     Ok(text) => {
                         tracing::info!("voice: transcribed {} chars", text.len());
-                        if tui_event_tx.send(TuiEvent::VoiceText(text)).await.is_err() {
+                        if tui_event_tx.send(TuiEvent::VoiceText(text)).is_err() {
                             tracing::warn!("voice: tui event channel closed; exiting loop");
                             return;
                         }
                     }
                     Err(e) => {
                         tracing::warn!("voice: transcribe failed: {e}");
-                        let _ = tui_event_tx
-                            .send(TuiEvent::VoiceText(format!("[stt error: {e}]")))
-                            .await;
+                        let _ = tui_event_tx.send(TuiEvent::VoiceText(format!("[stt error: {e}]")));
                     }
                 }
             }

@@ -31,8 +31,37 @@ aws-sigv4 = { version = "1", features = ["sign-http"] }
 aws-credential-types.workspace = true
 jsonwebtoken.workspace = true
 hmac.workspace = true
+# TASK-AGS-700: descriptor `base_url: Url` + serde round-trip support.
+url = { version = "2", features = ["serde"] }
+# TASK-AGS-701: ApiKey wraps SecretString to enforce NFR-SECURITY-001.
+# thiserror/reqwest already satisfied via workspace (v2 / v0.12) — spec's
+# "thiserror=1" and "reqwest=0.11" versions are stale, workspace wins.
+secrecy = "0.8"
+# TASK-AGS-702: 31-entry OpenAI-compat registry built once on first access.
+once_cell.workspace = true
+# TASK-AGS-708: ±25% jitter on RetryProvider backoffs (workspace rand = 0.9
+# overrides the spec's stale `rand = "0.8"` suggestion per phase-wide
+# "workspace wins" convention already established for reqwest/thiserror).
+rand.workspace = true
+# TASK-AGS-709: ArcSwap-backed `ActiveProvider` for live provider swaps
+# (workspace = 1; spec's stale `arc-swap = "1.6"` is overridden by the
+# phase-wide "workspace wins" convention).
+arc-swap.workspace = true
 
 [dev-dependencies]
 async-trait.workspace = true
 uuid.workspace = true
 reqwest = { workspace = true, features = ["blocking"] }
+# TASK-AGS-703: wiremock HTTP mock server for OpenAiCompatProvider integration tests.
+wiremock = { workspace = true }
+# TASK-AGS-706: TOML round-trip tests for LlmConfig.
+toml = { workspace = true }
+# TASK-AGS-708: paused-time testing for RetryProvider backoff progression.
+# `features=["full"]` does NOT include `test-util`; add it here.
+tokio = { workspace = true, features = ["test-util"] }
+# TASK-P1-3-STREAM-CANCEL (#188): axum mock SSE server for the streaming
+# cancel smoke test. Workspace axum (0.8) already carries default
+# features (`tokio`, `http1`, `json`, etc.) which provide `axum::serve`
+# and `response::sse::{Sse, Event, KeepAlive}` without any extra deps.
+axum = { workspace = true }
+futures-util = { workspace = true }

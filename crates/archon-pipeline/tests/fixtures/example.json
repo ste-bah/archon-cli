@@ -1,0 +1,29 @@
+{
+  "name": "analysis-pipeline",
+  "version": "1.0",
+  "global_timeout_secs": 3600,
+  "max_parallelism": 3,
+  "steps": [
+    {
+      "id": "parse",
+      "agent": "code-parser",
+      "input": { "file": "src/main.rs" }
+    },
+    {
+      "id": "analyze",
+      "agent": "code-analyzer",
+      "depends_on": ["parse"],
+      "input": { "mode": "deep" }
+    },
+    {
+      "id": "review",
+      "agent": "code-reviewer",
+      "depends_on": ["analyze"],
+      "retry": {
+        "max_attempts": 2,
+        "backoff": "exponential",
+        "base_delay_ms": 500
+      }
+    }
+  ]
+}

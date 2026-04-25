@@ -21,6 +21,7 @@ fn make_ctx() -> ToolContext {
         session_id: "test-notebook".into(),
         mode: AgentMode::Normal,
         extra_dirs: vec![],
+        ..Default::default()
     }
 }
 

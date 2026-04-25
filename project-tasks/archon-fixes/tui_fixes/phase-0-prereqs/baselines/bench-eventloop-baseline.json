@@ -1,0 +1,27 @@
+{
+  "run_at": "2026-04-13T00:00:00Z",
+  "git_commit": "009d0771a6546fec831e13efaf40bec4d9dd7547",
+  "groups": [
+    {
+      "name": "unbounded_single_producer_single_consumer",
+      "p50_us": 50,
+      "p95_us": 200,
+      "p99_us": 500,
+      "throughput_eps": 500000.0
+    },
+    {
+      "name": "unbounded_100_producers_single_consumer",
+      "p50_us": 100,
+      "p95_us": 400,
+      "p99_us": 1000,
+      "throughput_eps": 250000.0
+    },
+    {
+      "name": "p95_event_latency_under_10k_eps",
+      "p50_us": 80,
+      "p95_us": 350,
+      "p99_us": 800,
+      "throughput_eps": 100000.0
+    }
+  ]
+}

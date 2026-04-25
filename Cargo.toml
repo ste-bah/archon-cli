@@ -8,7 +8,7 @@ publish = false
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.1.4"
+version = "0.1.5"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT"
@@ -26,6 +26,7 @@ thiserror = "2"
 tracing = "0.1"
 tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tracing-test = "0.2"
 clap = { version = "4", features = ["derive"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
 uuid = { version = "1", features = ["v4"] }
@@ -49,7 +50,6 @@ fastembed = { version = "4", default-features = false, features = ["ort-download
 getrandom = { version = "0.3", features = ["std"] }
 urlencoding = "2"
 which = "7"
-tempfile = "3"
 notify = "7"
 pulldown-cmark = "0.12"
 tree-sitter = "0.25"
@@ -59,6 +59,7 @@ tree-sitter-python = "0.25"
 tree-sitter-typescript = "0.23"
 tree-sitter-go = "0.25"
 petgraph = "0.8"
+inventory = "0.3"
 libloading = "0.8"
 git2 = "0.19"
 openssl = { version = "0.10", features = ["vendored"] }
@@ -69,8 +70,10 @@ futures-util = "0.3"
 url = "2"
 async-lsp = { version = "0.2", features = ["omni-trait"] }
 lsp-types = "0.95"
-tokio-util = { version = "0.7", features = ["compat", "io"] }
-tokio-stream = "0.1"
+tokio-util = { version = "0.7", features = ["compat", "io", "rt"] }
+dashmap = "6"
+once_cell = "1"
+tokio-stream = { version = "0.1", features = ["sync"] }
 tower = "0.5"
 wasmtime = "28"
 wat = "1"
@@ -78,13 +81,45 @@ aws-sigv4 = { version = "1", features = ["sign-http"] }
 aws-credential-types = "1"
 jsonwebtoken = "9"
 hmac = "0.12"
-semver = "1"
+semver = { version = "1", features = ["serde"] }
 russh = "0.60"
 axum = { version = "0.8", features = ["ws"] }
 tower-http = { version = "0.6", features = ["cors"] }
 cpal = "0.15"
 hound = "3"
 rust-embed = "8"
+sqlite = "0.36"
+crc32fast = "1"
+sysinfo = "0.33"
+arc-swap = "1"
+cel-interpreter = { version = "0.10", features = ["json"] }
+walkdir = "2"
+moka = { version = "0.12", features = ["sync"] }
+strsim = "0.11"
+globset = "0.4"
+rayon = "1"
+# TASK-AGS-OBS-901 (Stage 10): promoted from archon-tui/Cargo.toml direct pins
+# so archon-observability (new owning crate for ChannelMetrics) and archon-tui
+# stay version-aligned per the OBS-900 dependency-discipline rule. Values match
+# the pre-LIFT archon-tui pins bit-for-bit — no version bump hidden in this LIFT.
+hdrhistogram = "7.5"
+parking_lot = "0.12"
+
+# TASK-AGS-006: dev-only test/bench deps (not opted into by any crate yet).
+# - insta:            snapshot testing (REQ-FOR-PRESERVE-D8)
+# - wiremock:         HTTP mocking for provider tests (REQ-FOR-D6)
+# - serial_test:      serialize tests touching .archon/ or global state (REQ-FOR-D6)
+# - criterion:        bench harness (REQ-FOR-D4)
+# - tempfile:         scoped temp dirs (REQ-FOR-D6) — moved here from above
+# - pretty_assertions: diff-friendly assertions (REQ-FOR-D6)
+# - rstest:           parameterized tests (REQ-FOR-D6)
+insta = { version = "1.40", features = ["yaml", "json"] }
+wiremock = "0.6"
+serial_test = "3.1"
+criterion = { version = "0.5", features = ["html_reports"] }
+tempfile = "3.12"
+pretty_assertions = "1.4"
+rstest = "0.22"
 
 [[bin]]
 name = "archon"
@@ -111,12 +146,22 @@ clap.workspace = true
 dirs.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
+tokio-util.workspace = true
 tracing.workspace = true
 anyhow.workspace = true
 uuid.workspace = true
+semver.workspace = true
+globset.workspace = true
+# TASK-AGS-801: parser drift-reconcile + gap-fill
+# - strsim:    Levenshtein distance for `suggest()` fuzzy-match helper
+# - thiserror: derive(Error) on `ParseError` for the `CommandParser` wrapper
+strsim.workspace = true
+thiserror.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+async-trait.workspace = true
+regex.workspace = true
 
 [profile.release]
 lto = true

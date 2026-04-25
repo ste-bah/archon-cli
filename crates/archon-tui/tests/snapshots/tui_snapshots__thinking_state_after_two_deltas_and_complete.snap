@@ -1,0 +1,6 @@
+---
+source: crates/archon-tui/tests/tui_snapshots.rs
+expression: repr
+---
+has_content=true
+bright_dot_index=0

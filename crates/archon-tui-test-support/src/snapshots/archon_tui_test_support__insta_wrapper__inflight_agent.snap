@@ -1,0 +1,6 @@
+---
+source: crates/archon-tui-test-support/src/insta_wrapper.rs
+expression: rendered
+---
+Agent: general-purpose (1234ms)
+working...

@@ -1,4 +1,15 @@
+pub mod apply_patch;
 pub mod ask_user;
+// TASK-AGS-104: relocated from archon-core to break the
+// archon-core <-> archon-tools dependency cycle. archon-core
+// re-exports this module for back-compat so existing consumers
+// keep the `archon_core::background_agents::*` path.
+pub mod background_agents;
+// TASK-TUI-402: thin shim API re-exports for TUI layer.
+// TASK-TUI-406: spawn_gc_task added for registry memory bounds.
+pub use background_agents::{
+    PollOutcome, cancel_background_agent, poll_background_agent, spawn_gc_task,
+};
 pub mod bash;
 pub mod concurrency;
 pub mod config_tool;
@@ -7,8 +18,10 @@ pub mod file_read;
 pub mod file_write;
 pub mod glob_tool;
 pub mod grep;
+pub mod monitor;
 pub mod plan_mode;
 pub mod powershell;
+pub mod push_notification;
 pub mod registry;
 pub mod sleep;
 pub mod todo_write;
@@ -18,8 +31,12 @@ pub mod toolsearch;
 pub mod webfetch;
 
 pub mod agent_tool;
+// TASK-AGS-105: SubagentExecutor trait + OnceLock registry. The
+// concrete AgentSubagentExecutor is installed by archon-core at
+// Agent::new time.
 pub mod git;
 pub mod send_message;
+pub mod subagent_executor;
 pub mod validation;
 
 pub mod task_create;

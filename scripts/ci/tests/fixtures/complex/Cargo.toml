@@ -1,0 +1,12 @@
+[package]
+name = "complex-fixture"
+version = "0.0.1"
+edition = "2021"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[workspace]
+# Explicit empty workspace so this fixture is NOT pulled into the parent
+# archon-cli workspace when cargo walks up from this directory.

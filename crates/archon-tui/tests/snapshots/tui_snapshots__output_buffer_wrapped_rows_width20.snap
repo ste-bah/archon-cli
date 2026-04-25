@@ -1,0 +1,5 @@
+---
+source: crates/archon-tui/tests/tui_snapshots.rs
+expression: "format!(\"{}\", rows)"
+---
+4

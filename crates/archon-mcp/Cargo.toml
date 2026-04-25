@@ -16,13 +16,22 @@ uuid.workspace = true
 chrono.workspace = true
 dirs.workspace = true
 regex.workspace = true
-rmcp = { version = "1.3", features = ["client", "transport-child-process", "transport-streamable-http-client", "transport-streamable-http-client-reqwest"] }
+# rmcp 1.3 removed the dedicated `transport-sse-client` feature (see upstream
+# PR #387 "Remove SSE transports"). The legacy SSE client transport is kept
+# as an archon-local implementation in `sse_transport.rs` which uses the
+# `client-side-sse` feature (SSE stream parsing utilities) pulled in
+# transitively by `transport-streamable-http-client`.
+rmcp = { version = "1.3", features = ["client", "transport-child-process", "transport-streamable-http-client", "transport-streamable-http-client-reqwest", "client-side-sse"] }
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "stream"] }
 http = "1"
 tokio-tungstenite.workspace = true
+tokio-stream = { workspace = true }
 rand.workspace = true
 futures-util.workspace = true
 url.workspace = true
+sha2 = { workspace = true }
+base64 = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"
+axum = { workspace = true, features = ["ws", "form"] }

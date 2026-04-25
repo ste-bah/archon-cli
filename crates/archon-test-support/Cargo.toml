@@ -1,0 +1,28 @@
+[package]
+name = "archon-test-support"
+version.workspace = true
+edition.workspace = true
+publish = false
+description = "Test-only doubles and helpers for archon-cli. Never pulled into the production graph."
+
+[dependencies]
+wiremock.workspace = true
+tokio.workspace = true
+serde = { workspace = true, features = ["derive"] }
+async-trait.workspace = true
+anyhow.workspace = true
+tempfile.workspace = true
+# TASK-AGS-008 fix (2026-04-11): archon-memory is required so
+# `MockMemoryTrait` can implement the real `archon_memory::MemoryTrait`
+# (12-method, object-safe). No production graph leak: every crate that
+# dev-depends on archon-test-support already has archon-memory in its
+# production dep tree.
+archon-memory = { path = "../archon-memory" }
+
+# TASK-AGS-014: insta is available as a dev-dep so downstream phase-4
+# snapshot tests can pull it transitively when they use the
+# `tui_capture` helpers. Kept out of `[dependencies]` to prevent it
+# from leaking into the production graph of any crate that depends on
+# archon-test-support at dev time.
+[dev-dependencies]
+insta.workspace = true

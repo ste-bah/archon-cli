@@ -17,6 +17,7 @@ fn make_ctx() -> ToolContext {
         session_id: "test-session".into(),
         mode: AgentMode::Normal,
         extra_dirs: vec![],
+        ..Default::default()
     }
 }
 
@@ -215,32 +216,15 @@ async fn task_create_tool_returns_id_json() {
     assert_eq!(task_id.len(), 8);
 }
 
-#[tokio::test]
-async fn task_create_returns_subagent_request() {
-    let tool = TaskCreateTool;
-    let input = serde_json::json!({
-        "subject": "research task",
-        "description": "Analyze the codebase structure",
-        "prompt": "Analyze the codebase structure and report findings"
-    });
-    let result = tool.execute(input, &make_ctx()).await;
-    assert!(!result.is_error, "unexpected error: {}", result.content);
-
-    let parsed: serde_json::Value = serde_json::from_str(&result.content).unwrap();
-    let task_id = parsed["task_id"].as_str().unwrap();
-    assert_eq!(task_id.len(), 8);
-
-    // Should include subagent_request so agent loop can spawn
-    let request = &parsed["subagent_request"];
-    assert!(
-        request.is_object(),
-        "TaskCreate should include subagent_request for agent loop, got: {parsed}"
-    );
-    assert!(
-        request["prompt"].as_str().is_some(),
-        "subagent_request should have prompt"
-    );
-}
+// TASK-AGS-105: The old `task_create_returns_subagent_request` test asserted
+// a serialized `subagent_request` field in the response, used by the legacy
+// `handle_subagent_result` indirection. That indirection is deleted;
+// TaskCreate now routes directly through the installed SubagentExecutor and
+// returns either a task_id-only response (manual), a spawn marker
+// (background) or the final result (foreground). Exercising the prompt path
+// requires an installed executor, which the task_create.rs embedded test
+// module covers for the manual-task path without the executor seam. The old
+// shape test is therefore removed.
 
 #[tokio::test]
 async fn task_create_without_prompt_has_no_subagent_request() {
@@ -262,32 +246,13 @@ async fn task_create_without_prompt_has_no_subagent_request() {
     );
 }
 
-#[tokio::test]
-async fn task_create_subagent_request_roundtrip() {
-    use archon_tools::agent_tool::SubagentRequest;
-
-    let tool = TaskCreateTool;
-    let input = serde_json::json!({
-        "subject": "roundtrip test",
-        "description": "verify struct fidelity",
-        "prompt": "Do something useful",
-        "model": "claude-sonnet-4-6",
-        "allowed_tools": ["Read", "Glob"],
-        "max_turns": 5
-    });
-    let result = tool.execute(input, &make_ctx()).await;
-    assert!(!result.is_error);
-
-    let parsed: serde_json::Value = serde_json::from_str(&result.content).unwrap();
-    let req: SubagentRequest = serde_json::from_value(parsed["subagent_request"].clone())
-        .expect("subagent_request should deserialize to SubagentRequest");
-
-    assert_eq!(req.prompt, "Do something useful");
-    assert_eq!(req.model.as_deref(), Some("claude-sonnet-4-6"));
-    assert_eq!(req.allowed_tools, vec!["Read", "Glob"]);
-    assert_eq!(req.max_turns, 5);
-    assert_eq!(req.timeout_secs, SubagentRequest::DEFAULT_TIMEOUT_SECS);
-}
+// TASK-AGS-105: `task_create_subagent_request_roundtrip` previously verified
+// that the tool serialized SubagentRequest fields back out via the response
+// JSON. With the indirection removed, SubagentRequest parsing is exercised
+// at the TaskCreateTool::execute entry point directly and covered by the
+// validation tests below (task_create_invalid_max_turns_errors) plus the
+// task_create.rs embedded tests. The round-trip assertion no longer has a
+// stable shape to target and is removed.
 
 #[tokio::test]
 async fn task_create_invalid_max_turns_errors() {

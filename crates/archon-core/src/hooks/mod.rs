@@ -23,7 +23,7 @@ pub use executor::{is_in_hook_agent, set_in_hook_agent};
 pub use function::FunctionRegistry;
 pub use http::{execute_http_hook, interpolate_env_vars, is_localhost};
 pub use permissions::{PermissionStore, RuntimePermissionStore, apply_permission_updates};
-pub use registry::HookRegistry;
+pub use registry::{HookRegistry, HookSummary};
 pub use toml_loader::{load_hooks_from_toml, parse_hooks_toml};
 pub use types::{
     AggregatedHookResult, ElicitationAction, HookCommandType, HookConfig, HookError, HookEvent,

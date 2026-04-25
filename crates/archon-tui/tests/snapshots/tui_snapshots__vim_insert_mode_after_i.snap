@@ -1,0 +1,10 @@
+---
+source: crates/archon-tui/tests/tui_snapshots.rs
+expression: vim_snapshot(&state)
+---
+mode=-- INSERT --
+cursor=(0,0)
+command_buffer=""
+text=<<<
+hello
+>>>

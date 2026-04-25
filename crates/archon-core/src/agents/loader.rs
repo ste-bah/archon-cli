@@ -59,6 +59,97 @@ pub fn load_custom_agents(
     Ok(agents)
 }
 
+/// Load all plugin-provided agents from `plugins_root`.
+///
+/// Scans `<plugins_root>/<plugin_name>/agents/<agent_name>/` for the 6-file
+/// agent structure. Plugin directories whose name starts with `_` are
+/// skipped (same convention as [`load_custom_agents`]). Agent subdirectories
+/// whose name starts with `_` are also skipped. Loaded agents have their
+/// `agent_type` prefixed with `<plugin_name>:` and carry
+/// [`AgentSource::Plugin`]`(plugin_name)` as provenance.
+///
+/// A non-existent `plugins_root` returns `Ok(vec![])` — plugin roots are
+/// optional, not an error condition. A plugin directory without an
+/// `agents/` subdir is silently skipped (the plugin may provide only
+/// skills, hooks, or other resources).
+pub fn load_plugin_agents(
+    plugins_root: &Path,
+) -> Result<Vec<CustomAgentDefinition>, AgentLoadError> {
+    if !plugins_root.is_dir() {
+        return Ok(Vec::new());
+    }
+
+    let entries = std::fs::read_dir(plugins_root).map_err(|e| AgentLoadError::ReadDir {
+        path: plugins_root.display().to_string(),
+        source: e,
+    })?;
+
+    let mut agents = Vec::new();
+
+    for entry in entries.flatten() {
+        let plugin_path = entry.path();
+        if !plugin_path.is_dir() {
+            continue;
+        }
+        let plugin_name = match plugin_path.file_name().and_then(|n| n.to_str()) {
+            Some(n) => n.to_string(),
+            None => continue,
+        };
+        // Skip private/template/archived plugin dirs (same rule as custom agents).
+        if plugin_name.starts_with('_') {
+            continue;
+        }
+
+        // Agents live at <plugin>/agents/<agent_name>/
+        let agents_dir = plugin_path.join("agents");
+        if !agents_dir.is_dir() {
+            // Plugin without an agents/ subdir: plugin may provide only
+            // skills/hooks/commands/etc. Not an error.
+            continue;
+        }
+
+        let agent_entries = match std::fs::read_dir(&agents_dir) {
+            Ok(e) => e,
+            Err(e) => {
+                warn!(
+                    plugin = plugin_name,
+                    dir = %agents_dir.display(),
+                    error = %e,
+                    "failed to read plugin agents dir; skipping plugin"
+                );
+                continue;
+            }
+        };
+
+        for agent_entry in agent_entries.flatten() {
+            let agent_path = agent_entry.path();
+            if !agent_path.is_dir() {
+                continue;
+            }
+            let agent_name = match agent_path.file_name().and_then(|n| n.to_str()) {
+                Some(n) => n.to_string(),
+                None => continue,
+            };
+            // Inherit the _-prefix skip rule for agent subdirs too.
+            if agent_name.starts_with('_') {
+                continue;
+            }
+
+            let mut def = load_single_agent(
+                &agent_path,
+                &agent_name,
+                AgentSource::Plugin(plugin_name.clone()),
+            );
+            // Namespace the agent_type with the plugin name so it can't
+            // collide with bare custom agents of the same local name.
+            def.agent_type = format!("{plugin_name}:{agent_name}");
+            agents.push(def);
+        }
+    }
+
+    Ok(agents)
+}
+
 // ---------------------------------------------------------------------------
 // Single agent loader
 // ---------------------------------------------------------------------------
@@ -1406,5 +1497,137 @@ mod tests {
     fn extract_tool_guidance_empty_tools_md() {
         assert!(extract_tool_guidance("").is_empty());
         assert!(extract_tool_guidance("   \n  ").is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // G5 — plugin agent loader tests
+    // -----------------------------------------------------------------------
+
+    /// Create a minimal plugin agent fixture at
+    /// `<plugins_root>/<plugin>/agents/<agent>/` with the 6-file structure.
+    /// `agent_md_body` allows tests to distinguish two otherwise-identical
+    /// agents (used by the priority collision test).
+    fn create_plugin_agent(plugins_root: &Path, plugin: &str, agent: &str, agent_md_body: &str) {
+        let agent_dir = plugins_root.join(plugin).join("agents").join(agent);
+        fs::create_dir_all(&agent_dir).unwrap();
+        fs::write(
+            agent_dir.join("agent.md"),
+            format!("# {agent}\n\n## INTENT\n{agent_md_body}\n"),
+        )
+        .unwrap();
+        fs::write(agent_dir.join("behavior.md"), "Be careful.\n").unwrap();
+        fs::write(agent_dir.join("context.md"), "Plugin context.\n").unwrap();
+        fs::write(
+            agent_dir.join("tools.md"),
+            "# Tools\n\n## Primary Tools\n- **Read**: read files\n",
+        )
+        .unwrap();
+        fs::write(
+            agent_dir.join("memory-keys.json"),
+            r#"{"recall_queries":[],"leann_queries":[],"tags":[]}"#,
+        )
+        .unwrap();
+        fs::write(
+            agent_dir.join("meta.json"),
+            r#"{"version":"1.0","created_at":"2026-04-01T00:00:00Z","updated_at":"2026-04-01T00:00:00Z","invocation_count":0,"quality":{"applied_rate":0.0,"completion_rate":0.0},"evolution_history":[],"archived":false}"#,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn load_plugin_agents_discovers_single_plugin_agent() {
+        let tmp = TempDir::new().unwrap();
+        create_plugin_agent(tmp.path(), "foo", "bar", "Bar agent body.");
+
+        let agents = load_plugin_agents(tmp.path()).unwrap();
+
+        assert_eq!(agents.len(), 1, "should discover exactly one plugin agent");
+        let bar = &agents[0];
+        assert_eq!(
+            bar.agent_type, "foo:bar",
+            "agent_type must be prefixed with plugin name"
+        );
+        assert_eq!(
+            bar.source,
+            AgentSource::Plugin("foo".to_string()),
+            "source must be Plugin(plugin_name)"
+        );
+        assert!(
+            bar.description.contains("Bar agent body"),
+            "description should come from agent.md INTENT"
+        );
+    }
+
+    #[test]
+    fn load_plugin_agents_skips_underscore_plugin_dirs() {
+        let tmp = TempDir::new().unwrap();
+        create_plugin_agent(tmp.path(), "_internal", "bar", "Internal bar.");
+        create_plugin_agent(tmp.path(), "real", "bar", "Real bar.");
+
+        let agents = load_plugin_agents(tmp.path()).unwrap();
+
+        assert_eq!(agents.len(), 1, "_-prefixed plugin dirs must be skipped");
+        assert_eq!(agents[0].agent_type, "real:bar");
+    }
+
+    #[test]
+    fn load_plugin_agents_skips_underscore_agent_dirs() {
+        let tmp = TempDir::new().unwrap();
+        create_plugin_agent(tmp.path(), "foo", "_template", "Template.");
+        create_plugin_agent(tmp.path(), "foo", "real", "Real agent.");
+
+        let agents = load_plugin_agents(tmp.path()).unwrap();
+
+        assert_eq!(agents.len(), 1);
+        assert_eq!(agents[0].agent_type, "foo:real");
+    }
+
+    #[test]
+    fn load_plugin_agents_nonexistent_root_returns_empty() {
+        let tmp = TempDir::new().unwrap();
+        let nonexistent = tmp.path().join("does-not-exist");
+        let agents = load_plugin_agents(&nonexistent).unwrap();
+        assert!(agents.is_empty());
+    }
+
+    #[test]
+    fn load_plugin_agents_empty_plugins_dir_returns_empty() {
+        let tmp = TempDir::new().unwrap();
+        // Create an empty plugins root.
+        fs::create_dir_all(tmp.path()).unwrap();
+        let agents = load_plugin_agents(tmp.path()).unwrap();
+        assert!(agents.is_empty());
+    }
+
+    #[test]
+    fn load_plugin_agents_plugin_without_agents_dir_skipped() {
+        let tmp = TempDir::new().unwrap();
+        // A plugin with no agents/ subdir should be silently skipped.
+        fs::create_dir_all(tmp.path().join("no-agents")).unwrap();
+        // Plus a real one to ensure the loop continues.
+        create_plugin_agent(tmp.path(), "has-agents", "bar", "Bar.");
+
+        let agents = load_plugin_agents(tmp.path()).unwrap();
+        assert_eq!(agents.len(), 1);
+        assert_eq!(agents[0].agent_type, "has-agents:bar");
+    }
+
+    #[test]
+    fn load_plugin_agents_multiple_plugins_and_agents() {
+        let tmp = TempDir::new().unwrap();
+        create_plugin_agent(tmp.path(), "alpha", "one", "alpha one");
+        create_plugin_agent(tmp.path(), "alpha", "two", "alpha two");
+        create_plugin_agent(tmp.path(), "beta", "one", "beta one");
+
+        let mut agents = load_plugin_agents(tmp.path()).unwrap();
+        agents.sort_by(|a, b| a.agent_type.cmp(&b.agent_type));
+
+        assert_eq!(agents.len(), 3);
+        assert_eq!(agents[0].agent_type, "alpha:one");
+        assert_eq!(agents[0].source, AgentSource::Plugin("alpha".into()));
+        assert_eq!(agents[1].agent_type, "alpha:two");
+        assert_eq!(agents[1].source, AgentSource::Plugin("alpha".into()));
+        assert_eq!(agents[2].agent_type, "beta:one");
+        assert_eq!(agents[2].source, AgentSource::Plugin("beta".into()));
     }
 }

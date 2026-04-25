@@ -1,0 +1,29 @@
+# Banned-Imports Guard — curated regex list.
+#
+# Format: one ERE regex per line. Comments start with '#'. Every new pattern
+# MUST be preceded by a comment citing the REQ-* it enforces.
+#
+# SPEC DIVERGENCE (approved 2026-04-11):
+# TASK-AGS-003 §"pattern file contains EXACTLY these patterns" listed 4
+# patterns, one of which was `\bMemoryGraph\b`. Execution discovered this
+# targets the archon-cli's OWN differentiator struct (archon_memory::
+# MemoryGraph — embedded CozoDB semantic memory) rather than the outer
+# Archon MemoryGraph MCP service. The inner struct is a validated
+# "keep-and-expand" asset, not a banned import. Steven explicitly approved
+# dropping the `\bMemoryGraph\b` pattern on 2026-04-11. The remaining 3
+# patterns still enforce REQ-FOR-PRESERVE-D8 via the `mcp__memorygraph__`
+# namespace (outer MCP) and the file-based fallback bans.
+#
+# To add a pattern: cite the REQ, explain the ban in one line, then append
+# the regex on its own line. Later tasks APPEND — they do not replace.
+
+# REQ-FOR-PRESERVE-D8: memory must flow through archon_memory::MemoryTrait,
+# never through the outer-archon MemoryGraph MCP tool namespace.
+mcp__memorygraph__
+
+# REQ-FOR-PRESERVE-D8: no ad-hoc file-based fallback for agent memory.
+save_agent_memory_to_file
+
+# REQ-FOR-PRESERVE-D8: agent-memory warnings must go through tracing,
+# not stderr.
+eprintln!\(.*save_agent_memory

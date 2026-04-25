@@ -1,0 +1,11 @@
+# Workspace-wide clippy cognitive-complexity threshold.
+#
+# Chosen via probe (2026-04-22): threshold=10 produced 147 warnings across the
+# workspace; threshold=60 reduced this to 4 warnings (extreme legacy outliers
+# at 117, 419, 574). The threshold is forward-looking: new functions should stay
+# under 60, while existing legacy debt is grandfathered and tracked separately.
+#
+# CI enforcement: scripts/ci/check-complexity.sh enforces -D (deny) scoped to
+# archon-tui only (--no-deps), so dependency violations do not block the gate.
+# Workspace-wide advisory runs use -W (warn) and exit 0.
+cognitive-complexity-threshold = 60

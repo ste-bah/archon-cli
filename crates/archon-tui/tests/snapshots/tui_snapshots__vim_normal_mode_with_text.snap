@@ -1,0 +1,12 @@
+---
+source: crates/archon-tui/tests/tui_snapshots.rs
+expression: vim_snapshot(&state)
+---
+mode=-- NORMAL --
+cursor=(0,0)
+command_buffer=""
+text=<<<
+line one
+line two
+line three
+>>>

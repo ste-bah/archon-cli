@@ -1,0 +1,7 @@
+name: missing-ref-test
+version: "1.0"
+steps:
+  - id: A
+    agent: agent-a
+    input:
+      ref: "${ghost.output}"

@@ -1,0 +1,27 @@
+[package]
+name = "archon-bench"
+version.workspace = true
+edition.workspace = true
+publish = false
+description = "Criterion bench harness for archon-cli NFR-PERF gates. Bodies populated by phase-1..3 tasks."
+
+[lib]
+path = "src/lib.rs"
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "task_submit"
+path = "benches/task_submit.rs"
+harness = false
+
+[[bench]]
+name = "discovery_scan"
+path = "benches/discovery_scan.rs"
+harness = false
+
+[[bench]]
+name = "fanout_100"
+path = "benches/fanout_100.rs"
+harness = false

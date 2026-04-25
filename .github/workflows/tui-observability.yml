@@ -1,0 +1,252 @@
+name: TUI Observability
+
+# Wires every TASK-TUI-804..813 lint/load gate into a 9-job matrix.
+# Spec: project-tasks/archon-fixes/tui_fixes/phase-8-observability/TASK-TUI-814.md
+# Cross-ref: 02-technical-spec.md lines 1124-1140 (CI layout), 1248-1250 (required vs
+# allowed-to-fail classification). Do not flip continue-on-error here; that is
+# the modularization-completion task.
+
+on:
+  pull_request:
+    paths:
+      - 'crates/archon-tui/**'
+      - 'crates/archon-observability/**'
+      - 'scripts/ci/**'
+      - '.github/workflows/tui-observability.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'crates/archon-tui/**'
+      - 'crates/archon-observability/**'
+      - 'scripts/ci/**'
+      - '.github/workflows/tui-observability.yml'
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  tui-lint-filesize:
+    name: TUI lint — file size (<=500 lines)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run check-tui-file-sizes.sh
+        run: bash scripts/ci/check-tui-file-sizes.sh
+
+  tui-lint-complexity:
+    name: TUI lint — cognitive complexity
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config perl make
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-complexity-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-complexity-
+      - name: Run check-complexity.sh
+        run: bash scripts/ci/check-complexity.sh
+
+  tui-lint-cycles:
+    name: TUI lint — workspace cycles
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin
+            target
+          key: ${{ runner.os }}-cargo-cycles-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-cycles-
+      - name: Install cargo-depgraph
+        run: |
+          if ! command -v cargo-depgraph >/dev/null 2>&1; then
+            cargo install cargo-depgraph --locked
+          fi
+      - name: Run check-cycles.sh
+        run: bash scripts/ci/check-cycles.sh
+
+  tui-lint-duplication:
+    name: TUI lint — code duplication (jscpd)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Run check-duplicate-code.sh
+        env:
+          JSCPD_TARGET_DIR: crates/archon-tui/src
+          JSCPD_THRESHOLD: '5'
+        run: bash scripts/ci/check-duplicate-code.sh
+
+  tui-lint-bounded-channel:
+    name: TUI lint — bounded AgentEvent channel (REQUIRED)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ripgrep
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
+      - name: Run grep-bounded-channel.sh
+        run: bash scripts/ci/grep-bounded-channel.sh
+
+  tui-lint-await-send:
+    name: TUI lint — .send().await on agent_event_tx (REQUIRED)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ripgrep
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
+      - name: Run grep-await-send.sh
+        run: bash scripts/ci/grep-await-send.sh
+
+  tui-coverage:
+    name: TUI coverage (cargo llvm-cov)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config perl make
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin
+            target
+          key: ${{ runner.os }}-cargo-coverage-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-coverage-
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+      - name: Run check-coverage.sh
+        env:
+          COVERAGE_THRESHOLD: '80'
+        run: bash scripts/ci/check-coverage.sh
+
+  observability-coverage:
+    name: Observability coverage (cargo llvm-cov)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config perl make
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin
+            target
+          key: ${{ runner.os }}-cargo-obs-coverage-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-obs-coverage-
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+      - name: Run check-coverage-observability.sh
+        env:
+          COVERAGE_THRESHOLD: '80'
+        run: bash scripts/ci/check-coverage-observability.sh
+
+  tui-load-tests:
+    name: TUI load tests (100 agents, 1000 events)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config perl make
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-load-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-load-
+      - name: Run cargo test (load-tests feature)
+        run: |
+          cargo test -p archon-tui --features load-tests \
+            --test load_100_agents_1000_events \
+            --test subagent_100_concurrent \
+            --test event_latency_p95 \
+            --test channel_memory_linear \
+            -- --nocapture
+
+  tui-unit:
+    name: TUI unit tests (REQUIRED)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config perl make
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-unit-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-unit-
+      - name: Run cargo test (lib)
+        run: cargo test -p archon-tui --lib

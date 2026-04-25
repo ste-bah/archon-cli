@@ -1,0 +1,208 @@
+{
+  "generated_at": "2026-04-13T23:04:22+01:00",
+  "git_commit": "1386e139c57f610ff4eab2bbefb85cf278531cca",
+  "files": [
+    {
+      "path": "src/main.rs",
+      "lines": 6158
+    },
+    {
+      "path": "crates/archon-tui/src/app.rs",
+      "lines": 1772
+    },
+    {
+      "path": "crates/archon-tui/src/vim.rs",
+      "lines": 1008
+    },
+    {
+      "path": "crates/archon-tui/src/output.rs",
+      "lines": 634
+    },
+    {
+      "path": "crates/archon-tui/src/theme.rs",
+      "lines": 624
+    },
+    {
+      "path": "src/cli_args.rs",
+      "lines": 561
+    },
+    {
+      "path": "crates/archon-tui/src/markdown.rs",
+      "lines": 533
+    },
+    {
+      "path": "crates/archon-tui/src/split_pane.rs",
+      "lines": 470
+    },
+    {
+      "path": "crates/archon-tui/src/views/tasks_overlay.rs",
+      "lines": 444
+    },
+    {
+      "path": "crates/archon-tui/src/views/context_viz.rs",
+      "lines": 422
+    },
+    {
+      "path": "crates/archon-tui/src/input.rs",
+      "lines": 385
+    },
+    {
+      "path": "crates/archon-tui/src/syntax.rs",
+      "lines": 384
+    },
+    {
+      "path": "crates/archon-tui/src/views/model_picker.rs",
+      "lines": 347
+    },
+    {
+      "path": "crates/archon-tui/src/splash.rs",
+      "lines": 340
+    },
+    {
+      "path": "crates/archon-tui/src/ultrathink.rs",
+      "lines": 321
+    },
+    {
+      "path": "crates/archon-tui/src/views/diff_viewer.rs",
+      "lines": 320
+    },
+    {
+      "path": "src/runtime/llm.rs",
+      "lines": 301
+    },
+    {
+      "path": "crates/archon-tui/src/views/session_browser.rs",
+      "lines": 289
+    },
+    {
+      "path": "src/command/dispatcher.rs",
+      "lines": 283
+    },
+    {
+      "path": "crates/archon-tui/src/voice/pipeline.rs",
+      "lines": 266
+    },
+    {
+      "path": "src/command/registry.rs",
+      "lines": 261
+    },
+    {
+      "path": "crates/archon-tui/src/terminal_panel.rs",
+      "lines": 254
+    },
+    {
+      "path": "crates/archon-tui/src/virtual_scroll.rs",
+      "lines": 236
+    },
+    {
+      "path": "src/command/parser.rs",
+      "lines": 168
+    },
+    {
+      "path": "crates/archon-tui/src/views/settings.rs",
+      "lines": 163
+    },
+    {
+      "path": "crates/archon-tui/src/diff_view.rs",
+      "lines": 147
+    },
+    {
+      "path": "crates/archon-tui/src/views/agents.rs",
+      "lines": 147
+    },
+    {
+      "path": "crates/archon-tui/src/views/history.rs",
+      "lines": 147
+    },
+    {
+      "path": "crates/archon-tui/src/commands.rs",
+      "lines": 143
+    },
+    {
+      "path": "src/event_coalescer.rs",
+      "lines": 128
+    },
+    {
+      "path": "crates/archon-tui/src/theme_registry.rs",
+      "lines": 116
+    },
+    {
+      "path": "crates/archon-tui/src/status.rs",
+      "lines": 101
+    },
+    {
+      "path": "crates/archon-tui/src/voice/capture.rs",
+      "lines": 100
+    },
+    {
+      "path": "crates/archon-tui/src/voice/stt.rs",
+      "lines": 90
+    },
+    {
+      "path": "crates/archon-tui/src/views/help.rs",
+      "lines": 83
+    },
+    {
+      "path": "crates/archon-tui/src/verbosity.rs",
+      "lines": 54
+    },
+    {
+      "path": "crates/archon-tui/src/permissions.rs",
+      "lines": 54
+    },
+    {
+      "path": "crates/archon-tui/src/lib.rs",
+      "lines": 30
+    },
+    {
+      "path": "crates/archon-tui/src/views/mod.rs",
+      "lines": 16
+    },
+    {
+      "path": "src/command/mod.rs",
+      "lines": 13
+    },
+    {
+      "path": "src/lib.rs",
+      "lines": 7
+    },
+    {
+      "path": "src/runtime/mod.rs",
+      "lines": 6
+    },
+    {
+      "path": "crates/archon-tui/src/voice.rs",
+      "lines": 3
+    }
+  ],
+  "over_500": [
+    {
+      "path": "src/main.rs",
+      "lines": 6158
+    },
+    {
+      "path": "crates/archon-tui/src/app.rs",
+      "lines": 1772
+    },
+    {
+      "path": "crates/archon-tui/src/vim.rs",
+      "lines": 1008
+    },
+    {
+      "path": "crates/archon-tui/src/output.rs",
+      "lines": 634
+    },
+    {
+      "path": "crates/archon-tui/src/theme.rs",
+      "lines": 624
+    },
+    {
+      "path": "src/cli_args.rs",
+      "lines": 561
+    },
+    {
+      "path": "crates/archon-tui/src/markdown.rs",
+      "lines": 533
+    }
+  ]
+}

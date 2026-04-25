@@ -1,0 +1,13 @@
+# Hermetic fixture for test-check-coverage.sh (TASK-TUI-809).
+# Empty [workspace] stanza prevents cargo from absorbing this crate into the
+# parent archon-cli workspace when the fixture is copied to a temp dir.
+[workspace]
+
+[package]
+name = "covergate"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[lib]
+path = "src/lib.rs"

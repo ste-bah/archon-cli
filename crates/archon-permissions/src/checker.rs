@@ -67,6 +67,20 @@ impl PermissionChecker {
 
             PermissionMode::DontAsk => PermissionDecision::Allow,
 
+            PermissionMode::Bubble => {
+                // Bubble: delegate to sandbox. Without a concrete sandbox
+                // backend in the checker crate (sandbox lives in
+                // archon-tui), treat Bubble like Default at the checker
+                // layer — user confirmation is required. The tool dispatch
+                // layer (which has access to `archon_tui::sandbox`) is
+                // responsible for pre-filtering via SandboxGuard BEFORE
+                // the permission check fires, so tools that pass the
+                // sandbox gate never reach this arm.
+                PermissionDecision::NeedsPermission(format!(
+                    "Bubble sandbox: user confirmation required for {tool_name}"
+                ))
+            }
+
             PermissionMode::Plan => {
                 if PLAN_MODE_WHITELIST.contains(&tool_name) {
                     PermissionDecision::Allow

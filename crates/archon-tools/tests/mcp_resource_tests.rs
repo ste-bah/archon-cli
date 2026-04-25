@@ -12,6 +12,7 @@ fn make_ctx() -> ToolContext {
         session_id: "test-session".into(),
         mode: AgentMode::Normal,
         extra_dirs: vec![],
+        ..Default::default()
     }
 }
 

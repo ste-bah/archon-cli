@@ -1,0 +1,5 @@
+---
+source: crates/archon-tui/tests/tui_snapshots.rs
+expression: state.expanded_header()
+---
+▼ Tool: read_file -- ok

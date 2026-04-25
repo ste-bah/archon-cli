@@ -6,6 +6,7 @@ use archon_tools::plan_mode::is_tool_allowed_in_mode;
 use archon_tools::tool::{Tool, ToolContext, ToolResult};
 
 /// Registry of available tools.
+#[derive(Clone)]
 pub struct ToolRegistry {
     tools: HashMap<String, Arc<dyn Tool>>,
 }
@@ -86,8 +87,25 @@ impl ToolRegistry {
     ) -> ToolResult {
         // Check if tool is allowed in current mode
         if !is_tool_allowed_in_mode(tool_name, ctx.mode) {
+            // TASK-P0-B.3 (#174): append the intercepted call to
+            // `.archon/plan.md` so the user can review it later via
+            // `/plan` or edit via `/plan open`. IO failures are logged
+            // but MUST NOT replace the block: the interception contract
+            // (return an error so the model sees the tool failed) is
+            // the primary behaviour; the plan-file append is an
+            // additive audit trail.
+            let plan_path = crate::plan_file::plan_path(&ctx.working_dir);
+            if let Err(e) = crate::plan_file::append_plan_entry(&plan_path, tool_name, &input) {
+                tracing::warn!(
+                    error = %e,
+                    plan_path = %plan_path.display(),
+                    tool = tool_name,
+                    "failed to append intercepted tool call to plan file"
+                );
+            }
             return ToolResult::error(format!(
-                "Tool '{tool_name}' is not available in plan mode. Only read-only tools are allowed."
+                "Tool '{tool_name}' is not available in plan mode. Only read-only tools are allowed. \
+                 The call has been queued in the plan file for review — use `/plan` to view or `/plan open` to edit."
             ));
         }
 
@@ -123,15 +141,31 @@ pub fn create_default_registry(working_dir: PathBuf) -> ToolRegistry {
     registry.register(Box::new(archon_tools::file_read::ReadTool));
     registry.register(Box::new(archon_tools::file_write::WriteTool));
     registry.register(Box::new(archon_tools::file_edit::EditTool));
+    // TASK-P0-B.5 (#183): ApplyPatch registered next to EditTool for
+    // topical locality — both are filesystem-mutating edit tools.
+    registry.register(Box::new(archon_tools::apply_patch::ApplyPatchTool));
     registry.register(Box::new(archon_tools::glob_tool::GlobTool));
     registry.register(Box::new(archon_tools::grep::GrepTool));
     registry.register(Box::new(archon_tools::bash::BashTool::default()));
+    // TASK-P0-B.6a (#184): Monitor registered next to Bash for topical
+    // locality — both spawn shell commands; Monitor differs by returning
+    // bounded-time stdout events instead of blocking until exit.
+    registry.register(Box::new(archon_tools::monitor::MonitorTool));
+    // TASK-P0-B.6b (#185): PushNotification emits a structured
+    // tracing event on the `archon::notification` target. Registered
+    // alongside Monitor because both are "observability" tools —
+    // Monitor observes external commands, PushNotification lets the
+    // LLM surface events of its own.
+    registry.register(Box::new(
+        archon_tools::push_notification::PushNotificationTool,
+    ));
     registry.register(Box::new(archon_tools::powershell::PowerShellTool::default()));
     registry.register(Box::new(archon_tools::sleep::SleepTool));
     registry.register(Box::new(archon_tools::ask_user::AskUserTool));
     registry.register(Box::new(archon_tools::todo_write::TodoWriteTool));
     registry.register(Box::new(archon_tools::plan_mode::EnterPlanModeTool));
     registry.register(Box::new(archon_tools::plan_mode::ExitPlanModeTool));
+    registry.register(Box::new(crate::skills::skill_tool::SkillTool));
     registry.register(Box::new(archon_tools::webfetch::WebFetchTool));
     registry.register(Box::new(archon_tools::config_tool::ConfigTool));
     registry.register(Box::new(archon_tools::agent_tool::AgentTool::new()));
@@ -302,6 +336,7 @@ mod tests {
             session_id: "test".into(),
             mode: AgentMode::Normal,
             extra_dirs: vec![],
+            ..Default::default()
         };
 
         let result = registry
@@ -365,6 +400,7 @@ mod tests {
             session_id: "test".into(),
             mode: AgentMode::Plan,
             extra_dirs: vec![],
+            ..Default::default()
         };
 
         let result = registry

@@ -1,0 +1,18 @@
+{
+  "captured_at": "2026-04-13T23:04:25+01:00",
+  "git_commit": "1386e139c57f610ff4eab2bbefb85cf278531cca",
+  "loc_baseline_sha": "23eca0baa1d7849f7e26ceef73aac5f07fe3906cfbe13b638a7e0d5815a9587f",
+  "file_size_gate": "pass",
+  "banned_patterns_gate": "pass",
+  "cargo_test_archon_tui_test_support": "pass",
+  "bench_eventloop_baseline_sha": "c69167aa8c53768e87e10a4a8fca2fbeb802788caa005248fc03f22a343809c0",
+  "artefacts": [
+    "project-tasks/archon-fixes/tui_fixes/phase-0-prereqs/baselines/loc-baseline.json",
+    "project-tasks/archon-fixes/tui_fixes/phase-0-prereqs/baselines/loc-baseline.md",
+    "project-tasks/archon-fixes/tui_fixes/phase-0-prereqs/baselines/file-size-allowlist.json",
+    "project-tasks/archon-fixes/tui_fixes/phase-0-prereqs/baselines/bench-eventloop-baseline.json",
+    "project-tasks/archon-fixes/tui_fixes/phase-0-prereqs/HANDOFF.md",
+    "project-tasks/archon-fixes/tui_fixes/phase-0-prereqs/baselines/phase0-capture-manifest.json",
+    "crates/archon-tui-test-support"
+  ]
+}
