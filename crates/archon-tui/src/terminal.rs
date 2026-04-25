@@ -114,9 +114,7 @@ pub fn install_sigwinch(tx: tokio::sync::mpsc::UnboundedSender<TuiEvent>) {
 /// from the input loop, so no signal handler is needed here.
 #[cfg(not(unix))]
 pub fn install_sigwinch(_tx: tokio::sync::mpsc::UnboundedSender<TuiEvent>) {
-    tracing::debug!(
-        "install_sigwinch: skipped on non-Unix (Windows uses crossterm Resize event)"
-    );
+    tracing::debug!("install_sigwinch: skipped on non-Unix (Windows uses crossterm Resize event)");
 }
 
 #[cfg(test)]
