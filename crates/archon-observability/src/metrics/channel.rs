@@ -63,15 +63,32 @@ impl ChannelMetrics {
     /// Record a drain event with the given batch size.
     #[inline]
     pub fn record_drained(&self, batch_size: u64) {
-        // Cap batch_size at current backlog to prevent underflow
-        let current_backlog = self.backlog_depth.load(Ordering::Relaxed);
-        let actual_drained = batch_size.min(current_backlog);
-        if actual_drained > 0 {
-            self.total_drained
-                .fetch_add(actual_drained, Ordering::Relaxed);
-            self.backlog_depth
-                .fetch_sub(actual_drained, Ordering::Relaxed);
-        }
+        // #231: do NOT cap `batch_size` at the current `backlog_depth` atomic.
+        // The previous cap was a TOCTOU bug. `record_sent` is two separate
+        // atomic ops (`total_sent.fetch_add` THEN `backlog_depth.fetch_add`),
+        // and a concurrent producer can:
+        //   1. tx.send(event)                            // mpsc receives event
+        //   2. drain pulls event via rx.recv             // before producer's metric updates
+        //   3. drain calls record_drained(1)
+        //   4. producer's record_sent() runs
+        // At step 3 the cap saw `backlog_depth == 0` and silently dropped the
+        // drain accounting → `total_drained` undercounted permanently.
+        // Result: `backlog_depth` derived from `total_sent - total_drained`
+        // stayed > 0 forever and the load test panicked on its drain wait.
+        //
+        // Fix: always credit exactly what was drained, and use saturating_sub
+        // on the atomic backlog_depth to handle the legitimate transient
+        // ordering where a drain's record_drained lands before its matching
+        // record_sent. The `snapshot()` and `warn_if_backlog_over` paths
+        // derive backlog_depth from `total_sent - total_drained` for
+        // race-free accuracy; the atomic field becomes a best-effort
+        // fast-path read for direct .load() consumers.
+        self.total_drained.fetch_add(batch_size, Ordering::Relaxed);
+        let _ = self
+            .backlog_depth
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |cur| {
+                Some(cur.saturating_sub(batch_size))
+            });
         self.max_batch_size.fetch_max(batch_size, Ordering::Relaxed);
     }
 
@@ -91,7 +108,15 @@ impl ChannelMetrics {
     /// concurrent races.
     #[inline]
     pub fn warn_if_backlog_over(&self, threshold: u64) -> bool {
-        let backlog = self.backlog_depth.load(Ordering::Relaxed);
+        // #231: derive backlog from total_sent - total_drained for race-free
+        // accuracy. The raw atomic backlog_depth field is a best-effort
+        // fast-path; under concurrent producer/consumer it can briefly
+        // diverge from total_sent - total_drained (see record_drained
+        // comment block).
+        let backlog = self
+            .total_sent
+            .load(Ordering::Relaxed)
+            .saturating_sub(self.total_drained.load(Ordering::Relaxed));
         if backlog <= threshold {
             return false;
         }
@@ -120,12 +145,20 @@ impl ChannelMetrics {
     }
 
     /// Take an atomic snapshot of all counters.
+    ///
+    /// `backlog_depth` is derived from `total_sent - total_drained` (#231)
+    /// rather than reading the raw atomic field. The raw atomic can briefly
+    /// diverge from the true in-flight count under concurrent producer/
+    /// consumer access (see `record_drained` comment block); the derived
+    /// value is race-free.
     #[inline]
     pub fn snapshot(&self) -> ChannelMetricsSnapshot {
+        let total_sent = self.total_sent.load(Ordering::Relaxed);
+        let total_drained = self.total_drained.load(Ordering::Relaxed);
         ChannelMetricsSnapshot {
-            backlog_depth: self.backlog_depth.load(Ordering::Relaxed),
-            total_sent: self.total_sent.load(Ordering::Relaxed),
-            total_drained: self.total_drained.load(Ordering::Relaxed),
+            backlog_depth: total_sent.saturating_sub(total_drained),
+            total_sent,
+            total_drained,
             max_batch_size: self.max_batch_size.load(Ordering::Relaxed),
             p95_send_to_render_ms: {
                 let guard = self.p95_send_to_render_ms.lock();
