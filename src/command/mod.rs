@@ -93,6 +93,8 @@ pub(crate) mod session;
 pub(crate) mod skills;
 pub(crate) mod slash;
 pub(crate) mod status;
+// TASK-#209 SLASH-SUMMARY: /summary one-glance session headline.
+pub(crate) mod summary;
 pub(crate) mod task;
 pub(crate) mod team;
 // TASK-TUI-623: /tag session tag toggle.

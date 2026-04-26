@@ -1843,6 +1843,16 @@ pub(crate) fn default_registry() -> Registry {
         "search",
         Arc::new(crate::command::search::SearchHandler::new()),
     );
+    // TASK-#209 SLASH-SUMMARY: /summary one-glance session headline.
+    // TextDelta-only (no overlay) — peer pattern with /usage,
+    // /extra-usage, /cost, /status. Reuses the existing
+    // `usage_snapshot` field; the snapshot-population arm in
+    // src/command/context.rs is widened to fire on
+    // primary == "summary" alongside "usage" and "extra-usage".
+    b.insert_primary(
+        "summary",
+        Arc::new(crate::command::summary::SummaryHandler),
+    );
     // Aliases are collected from each handler's aliases() method
     // inside RegistryBuilder::build(). Collisions panic.
     b.build()
@@ -1903,7 +1913,10 @@ mod tests {
     ///
     /// TASK-#208 SLASH-SEARCH adds `/search` as a new primary,
     /// bringing the total to 60.
-    const EXPECTED_COMMAND_COUNT: usize = 60;
+    ///
+    /// TASK-#209 SLASH-SUMMARY adds `/summary` as a new primary,
+    /// bringing the total to 61.
+    const EXPECTED_COMMAND_COUNT: usize = 61;
 
     #[test]
     fn default_registry_contains_all_commands() {
