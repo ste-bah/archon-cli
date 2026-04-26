@@ -67,6 +67,10 @@ pub struct AppConfig {
     pub splash: Option<SplashConfig>,
     pub btw_tx: Option<tokio::sync::mpsc::Sender<String>>,
     pub permission_tx: Option<tokio::sync::mpsc::Sender<bool>>,
+    /// Command catalog injected from the bin crate's registry so the
+    /// slash-command autocomplete popup stays locked to the single
+    /// source of truth. Built from `Registry::primaries_with_descriptions()`.
+    pub command_catalog: Vec<crate::commands::CommandInfo>,
 }
 
 /// Thin entry point that sets up terminal infrastructure and delegates to

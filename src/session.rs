@@ -32,8 +32,10 @@ use archon_llm::identity::{
 use archon_memory::{MemoryAccess, MemoryGraph, MemoryTrait};
 use archon_permissions::auto::{AutoModeConfig, AutoModeEvaluator};
 use archon_tui::app::TuiEvent;
+use archon_tui::commands::CommandInfo;
 use archon_tui::observability;
 
+use crate::command::registry::default_registry;
 use crate::runtime::llm::build_llm_provider;
 use crate::setup::strip_cache_control_if_disabled;
 
@@ -2193,6 +2195,17 @@ pub(crate) async fn run_interactive_session(
         let _ = tui_event_tx.send(TuiEvent::SetVimMode(true));
     }
 
+    // Build the slash-command autocomplete catalog from the registry so
+    // the popup stays locked to the single source of truth.
+    let command_catalog: Vec<CommandInfo> = default_registry()
+        .primaries_with_descriptions()
+        .into_iter()
+        .map(|(name, desc)| CommandInfo {
+            name: format!("/{name}"),
+            description: desc.to_string(),
+        })
+        .collect();
+
     // Run the TUI (blocks until user quits)
     archon_tui::app::run(archon_tui::app::AppConfig {
         event_rx: tui_event_rx,
@@ -2200,6 +2213,7 @@ pub(crate) async fn run_interactive_session(
         splash: splash_opt,
         btw_tx: Some(btw_tx),
         permission_tx: Some(perm_prompt_tx),
+        command_catalog,
     })
     .await?;
 

@@ -60,6 +60,7 @@ async fn run_with_backend_walks_wide_event_surface() {
         splash: None,
         btw_tx: None,
         permission_tx: None,
+        command_catalog: Vec::new(),
     };
 
     let backend = TestBackend::new(120, 32);

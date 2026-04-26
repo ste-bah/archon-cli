@@ -1,137 +1,48 @@
-/// Static registry of all slash commands with names and descriptions.
+/// Command catalog for slash-command autocomplete.
+///
+/// Populated at startup from the bin crate's `Registry::primaries_with_descriptions()`,
+/// NOT hand-maintained. The catalog is injected via [`set_catalog`] before the
+/// TUI event loop begins.
+use std::sync::RwLock;
 
 #[derive(Debug, Clone)]
 pub struct CommandInfo {
-    pub name: &'static str,
-    pub description: &'static str,
+    pub name: String,
+    pub description: String,
 }
 
-/// Return the full list of slash commands.
+/// Global command catalog. Set at startup from the registry.
+static CATALOG: RwLock<Vec<CommandInfo>> = RwLock::new(Vec::new());
+
+/// Inject the command catalog. Called at TUI startup; tests may call repeatedly.
+pub fn set_catalog(catalog: Vec<CommandInfo>) {
+    *CATALOG.write().expect("catalog lock poisoned") = catalog;
+}
+
+/// Return a snapshot of the full command list.
 pub fn all_commands() -> Vec<CommandInfo> {
-    vec![
-        CommandInfo {
-            name: "/model",
-            description: "Switch model (opus, sonnet, haiku)",
-        },
-        CommandInfo {
-            name: "/fast",
-            description: "Toggle fast mode",
-        },
-        CommandInfo {
-            name: "/effort",
-            description: "Set effort (high, medium, low)",
-        },
-        CommandInfo {
-            name: "/thinking",
-            description: "Toggle thinking display (on/off)",
-        },
-        CommandInfo {
-            name: "/compact",
-            description: "Compact context (micro | snip N-M | auto)",
-        },
-        CommandInfo {
-            name: "/clear",
-            description: "Clear conversation history",
-        },
-        CommandInfo {
-            name: "/status",
-            description: "Show session status",
-        },
-        CommandInfo {
-            name: "/cost",
-            description: "Show session cost",
-        },
-        CommandInfo {
-            name: "/permissions",
-            description: "Set permission mode (auto/ask/yolo)",
-        },
-        CommandInfo {
-            name: "/config",
-            description: "View/edit runtime config",
-        },
-        CommandInfo {
-            name: "/memory",
-            description: "Memory operations (list/search/clear)",
-        },
-        CommandInfo {
-            name: "/doctor",
-            description: "Run diagnostics",
-        },
-        CommandInfo {
-            name: "/export",
-            description: "Export conversation to JSON",
-        },
-        CommandInfo {
-            name: "/diff",
-            description: "Show git diff",
-        },
-        CommandInfo {
-            name: "/bug",
-            description: "Report a bug",
-        },
-        CommandInfo {
-            name: "/review",
-            description: "Review a pull request (no arg = list open PRs)",
-        },
-        CommandInfo {
-            name: "/commit",
-            description: "Create a git commit with AI assistance",
-        },
-        CommandInfo {
-            name: "/tag",
-            description: "Toggle a searchable tag on the current session",
-        },
-        CommandInfo {
-            name: "/sandbox",
-            description: "Toggle sandbox restrictions (on|off|status)",
-        },
-        CommandInfo {
-            name: "/rewind",
-            description: "Open message selector to rewind conversation",
-        },
-        CommandInfo {
-            name: "/skills",
-            description: "Browse and invoke available skills",
-        },
-        CommandInfo {
-            name: "/session",
-            description: "Show remote session QR code and URL",
-        },
-        CommandInfo {
-            name: "/plan",
-            description: "Enable Plan Mode (approve each tool call individually)",
-        },
-        CommandInfo {
-            name: "/login",
-            description: "Re-authenticate",
-        },
-        CommandInfo {
-            name: "/vim",
-            description: "Toggle vim mode",
-        },
-        CommandInfo {
-            name: "/hooks",
-            description: "Show configured hooks",
-        },
-        CommandInfo {
-            name: "/help",
-            description: "Show all commands",
-        },
-    ]
+    CATALOG.read().expect("catalog lock poisoned").clone()
 }
 
 /// Filter commands by case-insensitive prefix match on name.
-pub fn filter_commands(prefix: &str) -> Vec<&'static CommandInfo> {
-    // Leak the vec so we can return &'static references — the list is small
-    // and lives for the entire program lifetime anyway.
-    use std::sync::OnceLock;
-    static COMMANDS: OnceLock<Vec<CommandInfo>> = OnceLock::new();
-    let commands = COMMANDS.get_or_init(all_commands);
+pub fn filter_commands(prefix: &str) -> Vec<CommandInfo> {
+    let catalog = CATALOG.read().expect("catalog lock poisoned");
+    let lower = prefix.to_ascii_lowercase();
+    catalog
+        .iter()
+        .filter(|cmd| cmd.name.to_ascii_lowercase().starts_with(&lower))
+        .cloned()
+        .collect()
+}
 
+/// Core filter logic operating on an explicit slice. Tests use this directly
+/// to avoid depending on the global catalog.
+fn filter(commands: &[CommandInfo], prefix: &str) -> Vec<CommandInfo> {
     let lower = prefix.to_ascii_lowercase();
     commands
         .iter()
         .filter(|cmd| cmd.name.to_ascii_lowercase().starts_with(&lower))
+        .cloned()
         .collect()
 }
 
@@ -139,36 +50,70 @@ pub fn filter_commands(prefix: &str) -> Vec<&'static CommandInfo> {
 mod tests {
     use super::*;
 
+    fn make_catalog() -> Vec<CommandInfo> {
+        vec![
+            CommandInfo {
+                name: "/model".into(),
+                description: "Switch model".into(),
+            },
+            CommandInfo {
+                name: "/cost".into(),
+                description: "Show cost".into(),
+            },
+            CommandInfo {
+                name: "/compact".into(),
+                description: "Compact context".into(),
+            },
+            CommandInfo {
+                name: "/clear".into(),
+                description: "Clear history".into(),
+            },
+            CommandInfo {
+                name: "/config".into(),
+                description: "View config".into(),
+            },
+            CommandInfo {
+                name: "/help".into(),
+                description: "Show help".into(),
+            },
+        ]
+    }
+
     #[test]
     fn filter_returns_all_on_slash() {
-        let results = filter_commands("/");
-        assert_eq!(results.len(), all_commands().len());
+        let catalog = make_catalog();
+        let results = filter(&catalog, "/");
+        assert_eq!(results.len(), catalog.len());
     }
 
     #[test]
     fn filter_returns_model_on_mo() {
-        let results = filter_commands("/mo");
+        let catalog = make_catalog();
+        let results = filter(&catalog, "/mo");
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].name, "/model");
     }
 
     #[test]
     fn filter_returns_empty_on_xyz() {
-        let results = filter_commands("/xyz");
+        let catalog = make_catalog();
+        let results = filter(&catalog, "/xyz");
         assert!(results.is_empty());
     }
 
     #[test]
     fn filter_is_case_insensitive() {
-        let results = filter_commands("/MO");
+        let catalog = make_catalog();
+        let results = filter(&catalog, "/MO");
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].name, "/model");
     }
 
     #[test]
     fn filter_multiple_matches() {
+        let catalog = make_catalog();
         // /cost, /compact, /clear, /config — all start with /c
-        let results = filter_commands("/c");
+        let results = filter(&catalog, "/c");
         assert!(results.len() > 1);
         assert!(results.iter().all(|cmd| cmd.name.starts_with("/c")));
     }

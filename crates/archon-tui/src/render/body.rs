@@ -204,7 +204,7 @@ pub fn draw_suggestions_popup(frame: &mut Frame, app: &App, input_area: Rect) {
             };
             let line = Line::from(vec![
                 ratatui::text::Span::styled(format!("{:<16}", cmd.name), style),
-                ratatui::text::Span::styled(cmd.description, desc_style),
+                ratatui::text::Span::styled(cmd.description.as_str(), desc_style),
             ]);
             ListItem::new(line)
         })

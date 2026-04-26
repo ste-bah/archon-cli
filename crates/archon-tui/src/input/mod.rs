@@ -58,7 +58,9 @@ impl SuggestionState {
 
     /// Return the currently selected command name, if any.
     pub fn selected_name(&self) -> Option<&str> {
-        self.suggestions.get(self.selected_index).map(|c| c.name)
+        self.suggestions
+            .get(self.selected_index)
+            .map(|c| c.name.as_str())
     }
 }
 
@@ -166,10 +168,7 @@ impl InputHandler {
                 return;
             }
 
-            let matched: Vec<CommandInfo> = commands::filter_commands(prefix)
-                .into_iter()
-                .cloned()
-                .collect();
+            let matched: Vec<CommandInfo> = commands::filter_commands(prefix);
             if matched.is_empty() {
                 self.suggestions.deactivate();
             } else {
@@ -306,7 +305,27 @@ mod tests {
     }
 
     #[test]
+    fn init_test_catalog() {
+        use crate::commands;
+        let _ = commands::set_catalog(vec![
+            commands::CommandInfo {
+                name: "/model".into(),
+                description: "Switch model".into(),
+            },
+            commands::CommandInfo {
+                name: "/cost".into(),
+                description: "Show cost".into(),
+            },
+            commands::CommandInfo {
+                name: "/help".into(),
+                description: "Show help".into(),
+            },
+        ]);
+    }
+
+    #[test]
     fn suggestions_activate_on_slash() {
+        init_test_catalog();
         let mut input = InputHandler::new();
         input.insert('/');
         assert!(input.suggestions.active);
@@ -315,6 +334,7 @@ mod tests {
 
     #[test]
     fn suggestions_deactivate_on_dismiss() {
+        init_test_catalog();
         let mut input = InputHandler::new();
         input.insert('/');
         assert!(input.suggestions.active);
@@ -324,6 +344,7 @@ mod tests {
 
     #[test]
     fn tab_completes_selected_command() {
+        init_test_catalog();
         let mut input = InputHandler::new();
         // Type "/mo" to filter to /model
         for ch in "/mo".chars() {
@@ -346,6 +367,7 @@ mod tests {
 
     #[test]
     fn suggestions_deactivate_on_backspace_past_slash() {
+        init_test_catalog();
         let mut input = InputHandler::new();
         input.insert('/');
         assert!(input.suggestions.active);
@@ -355,6 +377,7 @@ mod tests {
 
     #[test]
     fn suggestions_dismiss_when_argument_typed() {
+        init_test_catalog();
         let mut input = InputHandler::new();
         // Type "/model" — suggestions active
         for ch in "/model".chars() {
@@ -376,6 +399,7 @@ mod tests {
 
     #[test]
     fn suggestions_stay_active_for_partial_prefix() {
+        init_test_catalog();
         let mut input = InputHandler::new();
         for ch in "/mo".chars() {
             input.insert(ch);

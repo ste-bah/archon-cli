@@ -197,8 +197,8 @@ fn suggestions_popup_renders_when_active() {
     if app.input.suggestions.suggestions.is_empty() {
         // Inject a synthetic suggestion via the commands registry.
         app.input.suggestions.suggestions = vec![archon_tui::commands::CommandInfo {
-            name: "/help",
-            description: "show help",
+            name: "/help".into(),
+            description: "show help".into(),
         }];
     }
     let rendered = render_once(&mut app);
@@ -212,8 +212,8 @@ fn suggestions_popup_suppressed_while_generating() {
     app.is_generating = true;
     app.input.suggestions.active = true;
     app.input.suggestions.suggestions = vec![archon_tui::commands::CommandInfo {
-        name: "/help",
-        description: "show help",
+        name: "/help".into(),
+        description: "show help".into(),
     }];
     let rendered = render_once(&mut app);
     // Popup box must not be drawn while generating — "Commands" title should

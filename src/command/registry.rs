@@ -1196,6 +1196,17 @@ impl Registry {
         self.commands.keys().copied().collect()
     }
 
+    /// All primary command names paired with their registered descriptions.
+    /// Mirrors [`Registry::names`] shape — iterates `self.commands` and calls
+    /// [`CommandHandler::description`] for each entry. Used to build the TUI
+    /// autocomplete catalog so the popup stays locked to the registry.
+    pub(crate) fn primaries_with_descriptions(&self) -> Vec<(&'static str, &str)> {
+        self.commands
+            .iter()
+            .map(|(name, handler)| (*name, handler.description()))
+            .collect()
+    }
+
     /// Test-only helper: returns `true` if `alias` is registered in the
     /// alias map. The `recall_is_standalone_not_alias` test uses this
     /// to enforce Steven's directive that `/recall` stays a primary
@@ -1939,6 +1950,19 @@ mod tests {
             registry.len(),
             EXPECTED_COMMAND_COUNT,
             "default_registry must register every pre-TASK-AGS-622 slash command"
+        );
+    }
+
+    #[test]
+    fn primaries_with_descriptions_count_matches_expected() {
+        let registry = default_registry();
+        let catalog = registry.primaries_with_descriptions();
+        assert_eq!(
+            catalog.len(),
+            EXPECTED_COMMAND_COUNT,
+            "primaries_with_descriptions().len() must equal EXPECTED_COMMAND_COUNT — \
+             catalog↔registry lockstep invariant. If you added/removed a primary, \
+             update EXPECTED_COMMAND_COUNT."
         );
     }
 

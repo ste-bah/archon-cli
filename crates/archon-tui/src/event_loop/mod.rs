@@ -191,7 +191,10 @@ where
         splash,
         btw_tx,
         permission_tx,
+        command_catalog,
     } = config;
+
+    crate::commands::set_catalog(command_catalog);
 
     let mut app = App::new();
     match splash {
