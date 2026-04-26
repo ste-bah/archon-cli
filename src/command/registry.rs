@@ -1834,6 +1834,15 @@ pub(crate) fn default_registry() -> Registry {
         "files",
         Arc::new(crate::command::files::FilesHandler::new()),
     );
+    // TASK-#208 SLASH-SEARCH: /search <query> recursive basename
+    // substring match (case-insensitive) over working_dir, capped at
+    // 200 results, max_depth 8, same SKIP_DIRS filter as /files.
+    // Emits ShowSearchResults overlay; Enter on a result injects
+    // `@<absolute-path> ` into the prompt.
+    b.insert_primary(
+        "search",
+        Arc::new(crate::command::search::SearchHandler::new()),
+    );
     // Aliases are collected from each handler's aliases() method
     // inside RegistryBuilder::build(). Collisions panic.
     b.build()
@@ -1891,7 +1900,10 @@ mod tests {
     ///
     /// TASK-#207 SLASH-FILES adds `/files` as a new primary,
     /// bringing the total to 59.
-    const EXPECTED_COMMAND_COUNT: usize = 59;
+    ///
+    /// TASK-#208 SLASH-SEARCH adds `/search` as a new primary,
+    /// bringing the total to 60.
+    const EXPECTED_COMMAND_COUNT: usize = 60;
 
     #[test]
     fn default_registry_contains_all_commands() {

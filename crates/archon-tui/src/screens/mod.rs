@@ -2,6 +2,8 @@
 
 // TASK-#207 SLASH-FILES: file-picker overlay (3-file sub-module).
 pub mod file_picker;
+// TASK-#208 SLASH-SEARCH: search-results overlay with highlighting.
+pub mod search_results;
 pub mod hooks_config_menu;
 pub mod mcp_view;
 pub mod memory_file_selector;

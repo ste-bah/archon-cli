@@ -165,6 +165,19 @@ pub enum TuiEvent {
         /// acceptable (rendered as `(empty directory)`).
         entries: Vec<FileEntry>,
     },
+    /// TASK-#208 SLASH-SEARCH: open the search-results overlay with
+    /// the original query string and a list of matched paths. The
+    /// event-loop handler constructs `SearchResults::new(query,
+    /// entries)` and assigns to `app.search_results`.
+    ShowSearchResults {
+        /// The original query the user supplied to `/search <query>`.
+        /// Used for the case-insensitive highlight match in the
+        /// rendered rows.
+        query: String,
+        /// The matched file paths (cap'd at the slash handler's
+        /// `max_results` ceiling).
+        entries: Vec<FileEntry>,
+    },
     /// TASK-AGS-822: open an overlay view identified by `ViewId`.
     /// Emitted by the slash-command dispatcher in response to
     /// view-opening commands (`/tasks`, `/settings`, `/context`,

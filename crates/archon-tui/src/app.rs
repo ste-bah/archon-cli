@@ -108,6 +108,12 @@ pub enum TuiEvent {
         root: std::path::PathBuf,
         entries: Vec<FileEntry>,
     },
+    /// TASK-#208 SLASH-SEARCH: open the search-results overlay with
+    /// the user's query string + a list of matched paths.
+    ShowSearchResults {
+        query: String,
+        entries: Vec<FileEntry>,
+    },
     /// TASK-AGS-822: open an overlay view identified by `ViewId`.
     /// Emitted by the slash-command dispatcher in response to
     /// view-opening commands (`/tasks`, `/settings`, `/context`,
@@ -254,6 +260,8 @@ pub struct App {
     pub skills_menu: Option<crate::screens::skills_menu::SkillsMenu>,
     /// TASK-#207 SLASH-FILES: active file-picker modal (shown by /files).
     pub file_picker: Option<crate::screens::file_picker::FilePicker>,
+    /// TASK-#208 SLASH-SEARCH: active search-results modal (shown by /search).
+    pub search_results: Option<crate::screens::search_results::SearchResults>,
     /// Vim keybinding state — Some when vim mode is active, None otherwise.
     pub vim_state: Option<VimState>,
     /// Split pane layout and state manager.
@@ -287,6 +295,7 @@ impl Default for App {
             message_selector: None,
             skills_menu: None,
             file_picker: None,
+            search_results: None,
             vim_state: None,
             panes: SplitPaneManager::new(),
         }

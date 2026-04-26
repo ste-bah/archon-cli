@@ -319,6 +319,16 @@ pub fn draw_file_picker(frame: &mut Frame, app: &App) {
     picker.render(frame, area, &app.theme);
 }
 
+/// Render the search-results overlay (TASK-#208 SLASH-SEARCH).
+pub fn draw_search_results(frame: &mut Frame, app: &App) {
+    let sr = match &app.search_results {
+        Some(s) => s,
+        None => return,
+    };
+    let area = frame.area();
+    sr.render(frame, area, &app.theme);
+}
+
 /// Render the MCP manager overlay.
 pub fn draw_mcp_manager(frame: &mut Frame, app: &App) {
     let mcp_mgr = match &app.mcp_manager {

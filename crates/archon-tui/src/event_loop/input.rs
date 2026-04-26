@@ -329,6 +329,41 @@ pub(super) async fn handle_key_event(
                     _ => return, // swallow other keys while overlay is up
                 }
             }
+            // Handle search results overlay (TASK-#208 SLASH-SEARCH) —
+            // Up/Down navigate; Enter injects `@<absolute-path> ` into
+            // the input buffer and closes; Esc closes without injection.
+            // No descend/ascend (results are a flat list spanning many
+            // directories).
+            if app.search_results.is_some() {
+                match key.code {
+                    KeyCode::Up => {
+                        if let Some(ref mut sr) = app.search_results {
+                            sr.select_prev();
+                        }
+                        return;
+                    }
+                    KeyCode::Down => {
+                        if let Some(ref mut sr) = app.search_results {
+                            sr.select_next();
+                        }
+                        return;
+                    }
+                    KeyCode::Enter => {
+                        if let Some(sr) = app.search_results.take() {
+                            if let Some(file) = sr.selected() {
+                                app.input
+                                    .set_text(&format!("@{} ", file.path.display()));
+                            }
+                        }
+                        return;
+                    }
+                    KeyCode::Esc => {
+                        app.search_results = None;
+                        return;
+                    }
+                    _ => return,
+                }
+            }
             // Handle file picker overlay (TASK-#207 SLASH-FILES) —
             // Up/Down navigate; Enter on a directory descends (re-walks
             // the directory in-place); Enter on a file injects

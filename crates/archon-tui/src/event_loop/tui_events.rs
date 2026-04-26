@@ -123,6 +123,15 @@ pub(super) async fn handle_tui_event(
             // (render/body.rs draw_file_picker) draws it.
             app.file_picker = Some(crate::screens::file_picker::FilePicker::new(root, entries));
         }
+        TuiEvent::ShowSearchResults { query, entries } => {
+            // TASK-#208 SLASH-SEARCH: /search opens this overlay; input
+            // priority branch routes Up/Down/Enter/Esc. Enter injects
+            // `@<absolute-path> ` into the input buffer and closes the
+            // overlay (no descend semantics — search results are flat).
+            app.search_results = Some(crate::screens::search_results::SearchResults::new(
+                query, entries,
+            ));
+        }
         TuiEvent::OpenView(view_id) => {
             // TASK-AGS-822: placeholder handler. Full view rendering
             // deferred to Stage 7+ UI tickets. Log the open request
