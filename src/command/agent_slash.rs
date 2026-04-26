@@ -61,7 +61,7 @@ impl CommandHandler for AgentHandler {
     }
 
     fn description(&self) -> &str {
-        "Manage custom agents (list, info, run — delegates run to /run-agent skill)"
+        "Manage custom agents (list, info, run — use /run-agent to invoke)"
     }
 
     fn aliases(&self) -> &'static [&'static str] {
@@ -183,7 +183,7 @@ fn render_info(registry: &RwLock<AgentRegistry>, name: &str) -> String {
 fn render_run_hint(rest: &[String]) -> String {
     if rest.is_empty() {
         return "\n\
-            /agent run is a delegate-hint command. Use the run-agent skill instead:\n  \
+            /agent run is a delegate-hint command. Use the /run-agent command:\n  \
             /run-agent <agent-name> <task description>\n\n\
             Run `/agent list` to see available agent names.\n"
             .to_string();
@@ -196,11 +196,10 @@ fn render_run_hint(rest: &[String]) -> String {
     };
     format!(
         "\n\
-        /agent run delegates to the /run-agent skill. Run:\n  \
+        Use the /run-agent command to invoke this agent:\n  \
         /run-agent {name} {task}\n\n\
-        (The skill produces a SkillOutput::Prompt that spawns the subagent\n\
-        via the Agent tool — re-implementing it here would duplicate the\n\
-        existing surface.)\n",
+        (The /run-agent handler validates the agent name and emits\n\
+        instructions for natural-language invocation.)\n",
         name = name,
         task = task
     )
@@ -385,7 +384,7 @@ mod tests {
             .unwrap();
         let body = take_text_delta(&mut rx);
         assert!(body.contains("/run-agent sherlock-holmes audit the repo"));
-        assert!(body.contains("delegates to the /run-agent skill"));
+        assert!(body.contains("Use the /run-agent command to invoke this agent"));
     }
 
     #[test]

@@ -77,6 +77,8 @@ pub(crate) mod refresh;
 pub(crate) mod remote;
 pub(crate) mod rename;
 pub(crate) mod resume;
+// TASK-HOTFIX-V0.1.7: /run-agent primary command (#248).
+pub(crate) mod run_agent;
 // TASK-TUI-622: /review PR code-review prompt builder.
 pub(crate) mod review;
 // TASK-#208 SLASH-SEARCH: /search recursive basename substring search.

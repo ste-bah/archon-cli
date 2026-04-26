@@ -19,6 +19,7 @@
 
 pub mod body;
 pub mod chrome;
+pub mod cursor;
 pub mod layout;
 
 pub use layout::{Layout, compute_layout};
