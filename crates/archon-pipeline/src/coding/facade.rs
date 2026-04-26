@@ -8,6 +8,7 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::Instant;
+use tokio::sync::mpsc::UnboundedSender;
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
@@ -83,6 +84,10 @@ pub struct CodingFacade {
     quality_calculator: CodingQualityCalculator,
     rlm_store: Mutex<RlmStore>,
     learning: Option<Mutex<LearningIntegration>>,
+    /// Optional sender for per-agent progress events (TUI streaming).
+    /// Uses internal mutability so the sender can be attached after
+    /// construction (it's not known at bootstrap time).
+    tui_sender: Mutex<Option<UnboundedSender<String>>>,
 }
 
 impl CodingFacade {
@@ -92,6 +97,7 @@ impl CodingFacade {
             quality_calculator: CodingQualityCalculator::new(),
             rlm_store: Mutex::new(RlmStore::new()),
             learning: None,
+            tui_sender: Mutex::new(None),
         }
     }
 
@@ -104,7 +110,19 @@ impl CodingFacade {
             quality_calculator: CodingQualityCalculator::new(),
             rlm_store: Mutex::new(RlmStore::new()),
             learning: Some(Mutex::new(learning)),
+            tui_sender: Mutex::new(None),
         }
+    }
+
+    /// Attach a TUI sender at construction time (builder pattern).
+    pub fn with_tui_sender(mut self, tx: UnboundedSender<String>) -> Self {
+        self.tui_sender = Mutex::new(Some(tx));
+        self
+    }
+
+    /// Set the TUI sender after construction (called from dispatch handler).
+    pub fn set_tui_sender(&self, tx: UnboundedSender<String>) {
+        *self.tui_sender.lock().expect("tui_sender lock") = Some(tx);
     }
 
     /// Build the 11-layer prompt for a given agent.
@@ -417,6 +435,14 @@ impl PipelineFacade for CodingFacade {
             if let Ok(mut learning) = learning_mutex.lock() {
                 learning.on_agent_complete(&agent.key, quality.overall, &result.output);
             }
+        }
+
+        // Emit per-agent progress to TUI if sender is attached.
+        if let Some(ref tx) = *self.tui_sender.lock().expect("tui_sender lock") {
+            let _ = tx.send(format!(
+                "[pipeline phase {}] {} complete (quality: {:.2})\n",
+                agent.phase, agent.display_name, quality.overall,
+            ));
         }
 
         Ok(())

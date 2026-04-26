@@ -1439,6 +1439,84 @@ pub(crate) async fn run_interactive_session(
         }
     }
     let agent_registry_for_skills = Arc::clone(&agent_registry);
+
+    // TASK-DS-001: construct async TaskService for TUI agent/pipeline
+    // invocation. Uses a separate AgentRegistry load (not the RwLock-
+    // wrapped one) because DefaultTaskService::new takes Arc<AgentRegistry>,
+    // not Arc<RwLock<AgentRegistry>>. Pattern matches
+    // src/command/task.rs:175-177. 10000 = max queue size.
+    let task_service: Arc<dyn archon_core::tasks::TaskService> =
+        Arc::new(archon_core::tasks::DefaultTaskService::new(
+            Arc::new(archon_core::agents::AgentRegistry::load(&working_dir)),
+            10000,
+        ));
+
+    // Initialise LEANN code index for pipeline deep-search context.
+    // Resilient: if the DB fails to open, leann stays None and pipelines
+    // run without semantic search (same as CLI init_leann).
+    let leann: Option<Arc<archon_pipeline::runner::LeannIntegration>> = {
+        let db_path = working_dir.join(".archon").join("leann.db");
+        if let Some(parent) = db_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        match archon_leann::CodeIndex::new(&db_path, Default::default()) {
+            Ok(idx) => {
+                let li = Arc::new(archon_pipeline::runner::LeannIntegration::new(
+                    std::sync::Arc::new(idx),
+                ));
+                // Init the index in the background — non-blocking.
+                let li_bg = Arc::clone(&li);
+                let wd = working_dir.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = li_bg.init_repository(&wd).await {
+                        tracing::warn!(error = %e, "LEANN background init failed; continuing without code context");
+                    }
+                });
+                Some(li)
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "LEANN unavailable; continuing without code context");
+                None
+            }
+        }
+    };
+
+    // Construct pipeline facades + LLM adapter once at bootstrap for
+    // TUI /archon-code and /archon-research commands per Deliverable 3.
+    let coding_pipeline: Arc<archon_pipeline::coding::facade::CodingFacade> =
+        Arc::new(archon_pipeline::coding::facade::CodingFacade::new());
+    let research_pipeline: Arc<archon_pipeline::research::facade::ResearchFacade> =
+        Arc::new(archon_pipeline::research::facade::ResearchFacade::new(
+            Arc::clone(&memory),
+            None, // LEANN searcher not wired (separate from LeannIntegration)
+            working_dir.display().to_string(),
+            None, // no style override
+        ));
+    let llm_adapter: Arc<dyn archon_pipeline::runner::LlmClient> = {
+        let pipe_auth = resolve_auth_with_keys(
+            env_vars.anthropic_api_key.as_deref(),
+            env_vars.archon_api_key.as_deref(),
+            env_vars.archon_oauth_token.as_deref(),
+            std::env::var("ANTHROPIC_AUTH_TOKEN").ok().as_deref(),
+        )
+        .map_err(|e| tracing::warn!("Pipeline LLM auth unavailable: {e}"))
+        .unwrap_or(archon_llm::auth::AuthProvider::ApiKey(
+            archon_llm::types::Secret::new(String::new()),
+        ));
+        let identity = archon_llm::identity::IdentityProvider::new(
+            archon_llm::identity::IdentityMode::Clean,
+            uuid::Uuid::new_v4().to_string(),
+            "tui-pipeline-device".to_string(),
+            String::new(),
+        );
+        let api_url = std::env::var("ANTHROPIC_BASE_URL")
+            .ok()
+            .or_else(|| config.api.base_url.clone());
+        let pipe_client = archon_llm::anthropic::AnthropicClient::new(pipe_auth, identity, api_url);
+        Arc::new(archon_pipeline::llm_adapter::AnthropicLlmAdapter::new(
+            Arc::new(pipe_client),
+        ))
+    };
     // TASK-TUI-107: clone the agent_event_tx so the dispatcher constructed
     // inside the input-loop spawn can also hold a producer. The original
     // sender is moved into Agent::new below.
@@ -1939,6 +2017,11 @@ pub(crate) async fn run_interactive_session(
             || cli.dangerously_skip_permissions,
         denial_log: Arc::clone(&agent.denial_log),
         agent_registry: Arc::clone(&agent_registry_for_skills),
+        task_service: Arc::clone(&task_service),
+        coding_pipeline: Arc::clone(&coding_pipeline),
+        research_pipeline: Arc::clone(&research_pipeline),
+        llm_adapter: Arc::clone(&llm_adapter),
+        leann: leann.clone(),
         registry: std::sync::Arc::clone(&registry),
         dispatcher: std::sync::Arc::clone(&dispatcher),
         // TASK-AGS-POST-6-EXPORT-MIGRATE: SIDECAR-SLOT shared slot for

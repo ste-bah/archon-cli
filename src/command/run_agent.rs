@@ -1,34 +1,34 @@
-//! TASK-HOTFIX-V0.1.7: /run-agent slash-command handler (#248).
+//! `/run-agent` slash-command handler.
 //!
-//! Registered as a primary command so `/run-agent <name> <task>` no longer
-//! produces "Unknown command". Validates the agent name against the registry
-//! and emits actionable instructions.
+//! v0.1.8: Wired with real `TaskService::submit()` via `tokio::spawn`.
+//! Validates the agent name against the registry, then submits the task
+//! asynchronously without blocking the TUI input loop.
 //!
-//! Full async agent invocation (Option A) requires plumbing an async task
-//! submission surface into the sync `CommandHandler::execute` path — deferred
-//! to a follow-up feature ticket. This handler fixes the immediate UX break:
-//! `/agent run` hints no longer point to a non-existent command.
+//! v0.1.7: Hint-only stub that emitted natural-language instructions.
+
+use archon_core::tasks::models::SubmitRequest;
+use archon_tui::app::TuiEvent;
 
 use crate::command::registry::{CommandContext, CommandHandler};
 
-/// Zero-sized handler registered as the primary `/run-agent` command.
+/// Handler for `/run-agent <agent-name> <task description>`.
 pub(crate) struct RunAgentHandler;
 
 impl CommandHandler for RunAgentHandler {
     fn execute(&self, ctx: &mut CommandContext, args: &[String]) -> anyhow::Result<()> {
         if args.is_empty() {
-            ctx.emit(archon_tui::app::TuiEvent::TextDelta(
+            ctx.emit(TuiEvent::TextDelta(
                 "\n/run-agent — invoke a custom agent.\n\n\
                  Usage: /run-agent <agent-name> <task description>\n\n\
-                 The task is sent as a natural-language instruction. The system\n\
-                 routes it to the agent you name.\n\n\
+                 The task is submitted asynchronously. The agent name must\n\
+                 match a registered custom agent.\n\n\
                  Run /agent list to see available agent names.\n"
                     .to_string(),
             ));
             return Ok(());
         }
 
-        let agent_name = &args[0];
+        let agent_name = args[0].clone();
         let task = if args.len() > 1 {
             args[1..].join(" ")
         } else {
@@ -38,8 +38,8 @@ impl CommandHandler for RunAgentHandler {
         // Validate agent exists if registry is available.
         if let Some(ref registry) = ctx.agent_registry {
             let reg = registry.read().unwrap();
-            if reg.resolve(agent_name).is_none() {
-                ctx.emit(archon_tui::app::TuiEvent::Error(format!(
+            if reg.resolve(&agent_name).is_none() {
+                ctx.emit(TuiEvent::Error(format!(
                     "Unknown agent: {agent_name}. Use /agent list to see registered agents."
                 )));
                 return Ok(());
@@ -47,18 +47,49 @@ impl CommandHandler for RunAgentHandler {
         }
 
         if task.is_empty() {
-            ctx.emit(archon_tui::app::TuiEvent::TextDelta(format!(
+            ctx.emit(TuiEvent::TextDelta(format!(
                 "\nAgent `{agent_name}` found. Provide a task description:\n\
                  /run-agent {agent_name} <task description>\n"
             )));
-        } else {
-            ctx.emit(archon_tui::app::TuiEvent::TextDelta(format!(
-                "\nTo invoke `{agent_name}` with this task, type it as a natural-\n\
-                 language instruction in the input box:\n\n\
-                 > use the {agent_name} agent to {task}\n\n\
-                 The system will route your request to the agent automatically.\n"
-            )));
+            return Ok(());
         }
+
+        // Submit via TaskService asynchronously.
+        let task_service = match ctx.task_service.clone() {
+            Some(ts) => ts,
+            None => {
+                ctx.emit(TuiEvent::Error(
+                    "TaskService not available (no async runtime configured).".into(),
+                ));
+                return Ok(());
+            }
+        };
+
+        let tui_tx = ctx.tui_tx.clone();
+        let input = serde_json::Value::String(task.clone());
+        let owner = "tui".to_string();
+
+        tokio::spawn(async move {
+            match task_service
+                .submit(SubmitRequest {
+                    agent_name,
+                    agent_version: None,
+                    input,
+                    owner,
+                })
+                .await
+            {
+                Ok(task_id) => {
+                    let _ = tui_tx.send(TuiEvent::TextDelta(format!(
+                        "\nTask submitted: {task_id}\n\
+                         Task: {task}\n"
+                    )));
+                }
+                Err(e) => {
+                    let _ = tui_tx.send(TuiEvent::Error(format!("Task submission failed: {e}")));
+                }
+            }
+        });
 
         Ok(())
     }
@@ -99,6 +130,21 @@ mod tests {
         assert!(
             desc.contains("Invoke"),
             "description must mention invoke, got: {desc}"
+        );
+    }
+
+    #[test]
+    fn run_agent_handler_no_task_service_emits_error() {
+        let (mut ctx, mut rx) = make_ctx();
+        RunAgentHandler
+            .execute(&mut ctx, &["sherlock-holmes".into(), "audit".into()])
+            .unwrap();
+        let events = drain_tui_events(&mut rx);
+        let has_error = events.iter().any(|e| matches!(e, TuiEvent::Error(_)));
+        assert!(
+            has_error,
+            "missing task_service must emit error, got: {:?}",
+            events
         );
     }
 

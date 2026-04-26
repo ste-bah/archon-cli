@@ -434,6 +434,11 @@ impl CtxBuilder {
                 pending_effort_set: self.pending_effort_set,
                 pending_export: self.pending_export,
                 agent_registry: self.agent_registry,
+                task_service: None,
+                coding_pipeline: None,
+                research_pipeline: None,
+                llm_adapter: None,
+                leann: None,
             },
             self.tui_rx,
         )

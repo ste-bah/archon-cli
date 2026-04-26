@@ -233,6 +233,8 @@ use crate::command::reload::ReloadHandler;
 // full R1-R7 invariant list.
 use crate::command::rename::RenameHandler;
 // TASK-HOTFIX-V0.1.7: /run-agent primary (#248).
+use crate::command::archon_code::ArchonCodeHandler;
+use crate::command::archon_research::ArchonResearchHandler;
 use crate::command::run_agent::RunAgentHandler;
 // TASK-AGS-POST-6-BODIES-B18-RECALL: real /recall handler lives in
 // `crate::command::recall`. DIRECT-sync-via-MemoryTrait body-migrate —
@@ -582,9 +584,26 @@ use crate::command::cancel::CancelHandler;
 /// The extension is additive — new fields append to the struct and to
 /// the session.rs construction block in lockstep.
 pub(crate) struct CommandContext {
-    // TASK-AGS-822 extension-pattern reference (commented out — no
-    // field added by THAT ticket; see body-migrate AGS-806..819):
-    //   pub(crate) task_service: Arc<dyn TaskService>,
+    /// TASK-DS-001: Async TaskService wired into CommandContext per
+    /// 02-technical-spec line 1226 and REQ-ASYNC-001. Constructed at
+    /// session bootstrap via `DefaultTaskService::new(agent_registry,
+    /// 10000)`. Cloned into per-dispatch context from
+    /// `SlashCommandContext` via the DIRECT pattern (unconditionally,
+    /// no per-command gate). Handlers call `ctx.task_service.submit()`
+    /// to spawn agents without blocking the TUI input loop.
+    pub(crate) task_service: Option<Arc<dyn archon_core::tasks::TaskService>>,
+    /// Coding pipeline facade — cloned from SlashCommandContext via
+    /// DIRECT pattern. Populated unconditionally.
+    pub(crate) coding_pipeline: Option<Arc<archon_pipeline::coding::facade::CodingFacade>>,
+    /// Research pipeline facade — cloned from SlashCommandContext via
+    /// DIRECT pattern. Populated unconditionally.
+    pub(crate) research_pipeline: Option<Arc<archon_pipeline::research::facade::ResearchFacade>>,
+    /// Shared LLM client for pipeline execution — cloned from
+    /// SlashCommandContext via DIRECT pattern. Populated unconditionally.
+    pub(crate) llm_adapter: Option<Arc<dyn archon_pipeline::runner::LlmClient>>,
+    /// LEANN integration — cloned from SlashCommandContext via DIRECT
+    /// pattern. Populated unconditionally.
+    pub(crate) leann: Option<Arc<archon_pipeline::runner::LeannIntegration>>,
     /// TUI event sink for text deltas, errors, and state change
     /// notifications.
     ///
@@ -1748,6 +1767,9 @@ pub(crate) fn default_registry() -> Registry {
     b.insert_primary("rules", Arc::new(RulesHandler::new()));
     // TASK-HOTFIX-V0.1.7: /run-agent primary (#248).
     b.insert_primary("run-agent", Arc::new(RunAgentHandler));
+    // Deliverable C: /archon-code + /archon-research TUI primaries.
+    b.insert_primary("archon-code", Arc::new(ArchonCodeHandler));
+    b.insert_primary("archon-research", Arc::new(ArchonResearchHandler));
     // TASK-AGS-805: /cancel primary (aliases: stop, abort).
     b.insert_primary("cancel", Arc::new(CancelHandler::new()));
     // TASK-AGS-816: NEW /voice primary (gap-fix Q4=A, no aliases).
@@ -1908,7 +1930,7 @@ mod tests {
     /// TASK-#209 SLASH-SUMMARY adds `/summary` as a new primary,
     /// bringing the total to 61. TASK-HOTFIX-V0.1.7 adds `/run-agent`
     /// as a new primary, bringing the total to 62.
-    const EXPECTED_COMMAND_COUNT: usize = 62;
+    const EXPECTED_COMMAND_COUNT: usize = 64;
 
     #[test]
     fn default_registry_contains_all_commands() {
@@ -2959,6 +2981,11 @@ mod tests {
             config_path: None,
             auth_label: None,
             agent_registry: None,
+            task_service: None,
+            coding_pipeline: None,
+            research_pipeline: None,
+            llm_adapter: None,
+            leann: None,
             pending_effect: None,
             pending_effort_set: None,
             pending_export: None,

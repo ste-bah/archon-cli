@@ -49,6 +49,22 @@ pub(crate) struct SlashCommandContext {
     pub(crate) denial_log: Arc<tokio::sync::Mutex<archon_permissions::denial_log::DenialLog>>,
     /// Agent registry for agent management skills.
     pub(crate) agent_registry: Arc<std::sync::RwLock<archon_core::agents::AgentRegistry>>,
+    /// TASK-DS-001: Async TaskService for non-blocking agent/pipeline
+    /// invocation from TUI per REQ-ASYNC-001. Constructed once at
+    /// session bootstrap; cloned into `CommandContext` per-dispatch
+    /// via the DIRECT pattern.
+    pub(crate) task_service: Arc<dyn archon_core::tasks::TaskService>,
+    /// Coding pipeline facade — constructed once at bootstrap, cloned
+    /// into per-dispatch CommandContext via DIRECT pattern. Handlers
+    /// call `set_tui_sender()` before `run_pipeline()`.
+    pub(crate) coding_pipeline: Arc<archon_pipeline::coding::facade::CodingFacade>,
+    /// Research pipeline facade — constructed once at bootstrap.
+    pub(crate) research_pipeline: Arc<archon_pipeline::research::facade::ResearchFacade>,
+    /// Shared LLM client for pipeline execution.
+    pub(crate) llm_adapter: Arc<dyn archon_pipeline::runner::LlmClient>,
+    /// LEANN semantic code index for pipeline deep-search context.
+    /// Created at bootstrap; None if CozoDB fails to open.
+    pub(crate) leann: Option<Arc<archon_pipeline::runner::LeannIntegration>>,
     #[allow(dead_code)]
     pub(crate) registry: Arc<Registry>,
     #[allow(dead_code)]
