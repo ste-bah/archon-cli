@@ -897,9 +897,9 @@ pub(crate) async fn run_interactive_session(
             "custom" => {
                 let custom = config.identity.custom.as_ref();
                 IdentityMode::Custom {
-                    user_agent: custom
-                        .map(|c| c.user_agent.clone())
-                        .unwrap_or_else(|| "archon-cli/0.1.0".into()),
+                    user_agent: custom.map(|c| c.user_agent.clone()).unwrap_or_else(|| {
+                        concat!("archon-cli/", env!("CARGO_PKG_VERSION")).into()
+                    }),
                     x_app: custom
                         .map(|c| c.x_app.clone())
                         .unwrap_or_else(|| "archon".into()),

@@ -140,7 +140,10 @@ async fn main() -> Result<()> {
         config.logging.max_file_size_mb,
     );
 
-    tracing::info!("Archon CLI v0.1.0 started, session {session_id}");
+    tracing::info!(
+        "Archon CLI v{} started, session {session_id}",
+        env!("CARGO_PKG_VERSION")
+    );
     if config.memory.enabled {
         tracing::info!("memory.enabled=true: memory tools + graph injection ACTIVE");
     } else {

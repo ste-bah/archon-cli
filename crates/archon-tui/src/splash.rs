@@ -170,7 +170,7 @@ pub fn render_splash<'a>(
 // ── helper builders ──────────────────────────────────────────────
 
 fn top_border<'a>(t: &Theme, width: usize) -> Line<'a> {
-    let version = "Archon v0.1.0";
+    let version = concat!("Archon v", env!("CARGO_PKG_VERSION"));
     let dashes_after = width.saturating_sub(5 + version.len() + 1);
     let text = format!("╭─── {version} {pad}╮", pad = "─".repeat(dashes_after));
     Line::from(Span::styled(text, Style::default().fg(t.border_active)))
