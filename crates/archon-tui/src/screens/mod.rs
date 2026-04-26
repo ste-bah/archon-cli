@@ -1,5 +1,7 @@
 //! Screens module index.
 
+// TASK-#207 SLASH-FILES: file-picker overlay (3-file sub-module).
+pub mod file_picker;
 pub mod hooks_config_menu;
 pub mod mcp_view;
 pub mod memory_file_selector;

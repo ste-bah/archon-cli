@@ -115,6 +115,14 @@ pub(super) async fn handle_tui_event(
             // it. Enter injects `/{skill-name} ` into the input buffer.
             app.skills_menu = Some(crate::screens::skills_menu::SkillsMenu::new(skills));
         }
+        TuiEvent::ShowFilePicker { root, entries } => {
+            // TASK-#207 SLASH-FILES: /files opens this overlay; input
+            // priority branch (event_loop/input.rs) routes Up/Down,
+            // Enter (descend on dir / inject `@<path>` and close on
+            // file), Backspace (ascend), Esc (close); render dispatch
+            // (render/body.rs draw_file_picker) draws it.
+            app.file_picker = Some(crate::screens::file_picker::FilePicker::new(root, entries));
+        }
         TuiEvent::OpenView(view_id) => {
             // TASK-AGS-822: placeholder handler. Full view rendering
             // deferred to Stage 7+ UI tickets. Log the open request

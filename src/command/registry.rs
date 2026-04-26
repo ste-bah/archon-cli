@@ -1825,6 +1825,15 @@ pub(crate) fn default_registry() -> Registry {
         "reload-plugins",
         Arc::new(crate::command::reload_plugins::ReloadPluginsHandler),
     );
+    // TASK-#207 SLASH-FILES: /files opens a file-picker overlay rooted
+    // at working_dir. Walks one level via the screen module's
+    // `read_dir_entries` helper (skips dotfiles + common build-
+    // artifact dirs); user navigates with Up/Down/Enter/Backspace/Esc;
+    // Enter on a file injects `@<absolute-path> ` into the prompt.
+    b.insert_primary(
+        "files",
+        Arc::new(crate::command::files::FilesHandler::new()),
+    );
     // Aliases are collected from each handler's aliases() method
     // inside RegistryBuilder::build(). Collisions panic.
     b.build()
@@ -1879,7 +1888,10 @@ mod tests {
     ///
     /// TASK-#217 SLASH-RELOAD-PLUGINS adds `/reload-plugins` as a
     /// new primary, bringing the total to 58.
-    const EXPECTED_COMMAND_COUNT: usize = 58;
+    ///
+    /// TASK-#207 SLASH-FILES adds `/files` as a new primary,
+    /// bringing the total to 59.
+    const EXPECTED_COMMAND_COUNT: usize = 59;
 
     #[test]
     fn default_registry_contains_all_commands() {

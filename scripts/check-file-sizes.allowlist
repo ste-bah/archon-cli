@@ -156,6 +156,18 @@ crates/archon-observability/src/redaction.rs
 crates/archon-tui/src/screens/session_browser.rs
 crates/archon-tui/tests/task_dispatch.rs
 
+# Grew 491→510 in TASK-#207 SLASH-FILES (added ShowFilePicker variant +
+# file_picker field + Default init). Root cause is the dual-TuiEvent-
+# enum structure: events.rs holds the canonical layer-0 definition AND
+# app.rs holds a parallel duplicate that consumers import via
+# `archon_tui::app::TuiEvent`. Adding any new variant requires editing
+# both. The structural fix is to delete the app.rs duplicate and
+# `pub use crate::events::TuiEvent;` instead — that's a cross-cutting
+# refactor (touches every consumer's import path) and out of scope for
+# #207's wrapper-scope ticket. Allowlisted here; consolidation
+# follow-up tracked.
+crates/archon-tui/src/app.rs
+
 # --- root src/command ---
 src/command/add_dir.rs
 src/command/checkpoint.rs

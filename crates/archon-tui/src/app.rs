@@ -25,7 +25,9 @@ use crate::vim::VimState;
 // layer-0 reasoning as `McpServerEntry` / `SessionPickerEntry` —
 // external consumers (bin-crate command handlers, integration tests)
 // reach the enum via `archon_tui::app::ViewId`.
-pub use crate::events::{McpServerEntry, MessageSummary, SessionPickerEntry, SkillEntry, ViewId};
+pub use crate::events::{
+    FileEntry, McpServerEntry, MessageSummary, SessionPickerEntry, SkillEntry, ViewId,
+};
 
 // REM-2d: Modal overlay state types relocated to sibling module
 // `crate::app_modals` (docs/rem-2-split-plan.md §7, Option 7A). The
@@ -95,6 +97,17 @@ pub enum TuiEvent {
     /// TASK-TUI-627: open the skills-menu overlay with a pre-computed
     /// list of SkillEntry. Input/render routing deferred to TUI-627-followup.
     ShowSkillsMenu(Vec<SkillEntry>),
+    /// TASK-#207 SLASH-FILES: open the file-picker overlay with a
+    /// pre-walked initial listing of `root` (the picker's
+    /// ascent-clamp anchor). The event-loop arm constructs
+    /// `FilePicker::new(root, entries)` and assigns to
+    /// `app.file_picker`. Input priority branch routes
+    /// Up/Down/Enter/Backspace/Esc; render dispatch in
+    /// `render/body.rs::draw_file_picker` draws it.
+    ShowFilePicker {
+        root: std::path::PathBuf,
+        entries: Vec<FileEntry>,
+    },
     /// TASK-AGS-822: open an overlay view identified by `ViewId`.
     /// Emitted by the slash-command dispatcher in response to
     /// view-opening commands (`/tasks`, `/settings`, `/context`,
@@ -239,6 +252,8 @@ pub struct App {
     pub message_selector: Option<crate::screens::message_selector::MessageSelector>,
     /// TASK-TUI-627: active skills-menu modal (shown by /skills).
     pub skills_menu: Option<crate::screens::skills_menu::SkillsMenu>,
+    /// TASK-#207 SLASH-FILES: active file-picker modal (shown by /files).
+    pub file_picker: Option<crate::screens::file_picker::FilePicker>,
     /// Vim keybinding state — Some when vim mode is active, None otherwise.
     pub vim_state: Option<VimState>,
     /// Split pane layout and state manager.
@@ -271,6 +286,7 @@ impl Default for App {
             mcp_manager: None,
             message_selector: None,
             skills_menu: None,
+            file_picker: None,
             vim_state: None,
             panes: SplitPaneManager::new(),
         }

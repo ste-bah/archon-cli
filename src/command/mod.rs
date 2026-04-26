@@ -40,6 +40,8 @@ pub(crate) mod export;
 // TASK-#215 SLASH-EXTRA-USAGE: /extra-usage 6-section detailed report.
 pub(crate) mod extra_usage;
 pub(crate) mod fast;
+// TASK-#207 SLASH-FILES: /files file-picker overlay.
+pub(crate) mod files;
 pub(crate) mod fork;
 pub(crate) mod garden;
 pub(crate) mod help;
