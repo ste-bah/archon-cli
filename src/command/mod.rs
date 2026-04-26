@@ -64,6 +64,8 @@ pub(crate) mod recall;
 pub(crate) mod registry;
 pub(crate) mod release_notes;
 pub(crate) mod reload;
+// TASK-#213 SLASH-REFRESH: /refresh re-scan agent registry from disk.
+pub(crate) mod refresh;
 pub(crate) mod remote;
 pub(crate) mod rename;
 pub(crate) mod resume;

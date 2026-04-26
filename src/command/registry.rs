@@ -1783,6 +1783,14 @@ pub(crate) fn default_registry() -> Registry {
         "managed-agents",
         Arc::new(crate::command::managed_agents::ManagedAgentsHandler),
     );
+    // TASK-#213 SLASH-REFRESH: /refresh re-scans the AgentRegistry
+    // from disk (sync RwLock::write() + AgentRegistry::reload). Skill
+    // refresh is deferred (no Mutex wrapper on the skill registry);
+    // WASM plugin hot-reload is deferred to #217.
+    b.insert_primary(
+        "refresh",
+        Arc::new(crate::command::refresh::RefreshHandler),
+    );
     // Aliases are collected from each handler's aliases() method
     // inside RegistryBuilder::build(). Collisions panic.
     b.build()
@@ -1825,7 +1833,10 @@ mod tests {
     ///
     /// TASK-#212 SLASH-MANAGED-AGENTS adds `/managed-agents` as a new
     /// primary, bringing the total to 54.
-    const EXPECTED_COMMAND_COUNT: usize = 54;
+    ///
+    /// TASK-#213 SLASH-REFRESH adds `/refresh` as a new primary,
+    /// bringing the total to 55.
+    const EXPECTED_COMMAND_COUNT: usize = 55;
 
     #[test]
     fn default_registry_contains_all_commands() {
