@@ -67,3 +67,8 @@ hello.txt
 /docs/stage-7.5/*
 !/docs/stage-7.5/audits/
 !/docs/stage-7.5/audits/**
+
+# Local-only artifacts (not for VCS)
+FORENSIC-TASK-DECOMPOSITION.yaml
+*:Zone.Identifier
+.archon/leann.db
