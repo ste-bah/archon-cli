@@ -305,6 +305,30 @@ pub fn draw_skills_menu(frame: &mut Frame, app: &App) {
     menu.render(frame, area, &app.theme);
 }
 
+/// Render the file-picker overlay (TASK-#207 SLASH-FILES).
+///
+/// Delegates to `FilePicker::render` with the full frame area so the
+/// overlay sizes itself (centered, ~9/10 wide) identically to the
+/// other overlays.
+pub fn draw_file_picker(frame: &mut Frame, app: &App) {
+    let picker = match &app.file_picker {
+        Some(p) => p,
+        None => return,
+    };
+    let area = frame.area();
+    picker.render(frame, area, &app.theme);
+}
+
+/// Render the search-results overlay (TASK-#208 SLASH-SEARCH).
+pub fn draw_search_results(frame: &mut Frame, app: &App) {
+    let sr = match &app.search_results {
+        Some(s) => s,
+        None => return,
+    };
+    let area = frame.area();
+    sr.render(frame, area, &app.theme);
+}
+
 /// Render the MCP manager overlay.
 pub fn draw_mcp_manager(frame: &mut Frame, app: &App) {
     let mcp_mgr = match &app.mcp_manager {

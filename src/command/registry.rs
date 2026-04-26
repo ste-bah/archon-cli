@@ -895,6 +895,21 @@ pub(crate) struct CommandContext {
     /// `CommandEffect` variant — `/login` is a pure DIRECT-pattern
     /// read (no async mutex writes back to shared state).
     pub(crate) auth_label: Option<String>,
+    /// TASK-#211 SLASH-AGENT DIRECT-pattern field (/agent).
+    ///
+    /// `Arc<RwLock<AgentRegistry>>` cloned from
+    /// `SlashCommandContext::agent_registry`, populated UNCONDITIONALLY
+    /// (mirrors the AGS-815 `session_id`, AGS-817 `memory`, B06-HELP
+    /// `skill_registry` cross-cutting precedent — not gated on the
+    /// primary name). `/agent` reads it to render the list / info /
+    /// run-hint subcommands; `RwLock::read()` is sync, so the handler
+    /// consumes the registry without holding any lock across `ctx.emit`.
+    /// `None` sentinel reserved for test fixtures that construct
+    /// `CommandContext` directly without standing up a full
+    /// `SlashCommandContext`; in those tests `/agent` returns an
+    /// Err-with-message describing the missing-registry condition
+    /// rather than panicking.
+    pub(crate) agent_registry: Option<Arc<std::sync::RwLock<archon_core::agents::AgentRegistry>>>,
     /// TASK-AGS-808 effect-slot field (WRITE side of /model and future
     /// write-tickets).
     ///
@@ -1733,6 +1748,98 @@ pub(crate) fn default_registry() -> Registry {
     b.insert_primary("cancel", Arc::new(CancelHandler::new()));
     // TASK-AGS-816: NEW /voice primary (gap-fix Q4=A, no aliases).
     b.insert_primary("voice", Arc::new(VoiceHandler));
+    // TASK-#206 SLASH-EXIT: /exit graceful-shutdown handler, alias /q.
+    // Alias replaces the dead skill-registry entry previously at
+    // src/session.rs:1928 (which pointed to a non-existent `exit` skill).
+    b.insert_primary("exit", Arc::new(crate::command::exit::ExitHandler));
+    // TASK-#215 SLASH-EXTRA-USAGE: /extra-usage 6-section detailed report.
+    // Reuses the existing `usage_snapshot` field; the snapshot population
+    // arm in src/command/context.rs is widened to also fire on
+    // primary == "extra-usage". No new CommandContext fields.
+    b.insert_primary(
+        "extra-usage",
+        Arc::new(crate::command::extra_usage::ExtraUsageHandler),
+    );
+    // TASK-#210 SLASH-PROVIDERS: /providers lists 40 registered LLM
+    // providers (9 native + 31 OpenAI-compat) by reading the static
+    // archon_llm::providers::{list_native, list_compat} registries.
+    // No CommandContext field needed — registries are static.
+    b.insert_primary(
+        "providers",
+        Arc::new(crate::command::providers::ProvidersHandler),
+    );
+    // TASK-#211 SLASH-AGENT: /agent umbrella (list/info/run subcommands).
+    // Reads the new agent_registry field on CommandContext (DIRECT
+    // pattern; populated unconditionally from SlashCommandContext).
+    b.insert_primary("agent", Arc::new(crate::command::agent_slash::AgentHandler));
+    // TASK-#212 SLASH-MANAGED-AGENTS: /managed-agents remote-registry
+    // status + how-to. Pure status command — no async fetch (deferred
+    // to a follow-up; see managed_agents.rs module rustdoc).
+    b.insert_primary(
+        "managed-agents",
+        Arc::new(crate::command::managed_agents::ManagedAgentsHandler),
+    );
+    // TASK-#213 SLASH-REFRESH: /refresh re-scans the AgentRegistry
+    // from disk (sync RwLock::write() + AgentRegistry::reload). Skill
+    // refresh is deferred (no Mutex wrapper on the skill registry);
+    // WASM plugin hot-reload is deferred to #217.
+    b.insert_primary("refresh", Arc::new(crate::command::refresh::RefreshHandler));
+    // TASK-#214 SLASH-CONNECT: /connect — list configured MCP servers
+    // + emit connect-hint TextDelta. Dynamic in-session connect
+    // (wrapping `McpServerManager::enable_server`) is DEFERRED — the
+    // upstream `lifecycle::connect_server` future is genuinely !Send
+    // (rmcp/tungstenite path), and wrapping it from a `Future + Send +
+    // 'a` apply_effect path needs either an upstream Send-cleanup or a
+    // session-wide LocalSet — both cross-cutting and out of scope. NO
+    // `CommandEffect` variant added; see `src/command/connect.rs`
+    // module rustdoc for the full reconciliation.
+    b.insert_primary("connect", Arc::new(crate::command::connect::ConnectHandler));
+    // TASK-#216 SLASH-PLUGIN: /plugin umbrella — list/info subcommands
+    // re-scan disk via the shared `load_plugins_from_default_dirs()`
+    // helper; enable/disable/install/reload subcommands emit hint
+    // TextDeltas (persistence layer is absent in archon-plugin and
+    // adding it is cross-cutting subsystem work — see
+    // `src/command/plugin_slash.rs` module rustdoc for the full
+    // reconciliation).
+    b.insert_primary(
+        "plugin",
+        Arc::new(crate::command::plugin_slash::PluginSlashHandler),
+    );
+    // TASK-#217 SLASH-RELOAD-PLUGINS: /reload-plugins disk re-scan via
+    // the same shared helper (load_plugins_from_default_dirs). True
+    // in-process hot-swap of a running WASM module is DEFERRED —
+    // `WasmPluginHost` has no `reload_plugin` API and no session-
+    // shared host exists. See `src/command/reload_plugins.rs` module
+    // rustdoc for the full reconciliation.
+    b.insert_primary(
+        "reload-plugins",
+        Arc::new(crate::command::reload_plugins::ReloadPluginsHandler),
+    );
+    // TASK-#207 SLASH-FILES: /files opens a file-picker overlay rooted
+    // at working_dir. Walks one level via the screen module's
+    // `read_dir_entries` helper (skips dotfiles + common build-
+    // artifact dirs); user navigates with Up/Down/Enter/Backspace/Esc;
+    // Enter on a file injects `@<absolute-path> ` into the prompt.
+    b.insert_primary(
+        "files",
+        Arc::new(crate::command::files::FilesHandler::new()),
+    );
+    // TASK-#208 SLASH-SEARCH: /search <query> recursive basename
+    // substring match (case-insensitive) over working_dir, capped at
+    // 200 results, max_depth 8, same SKIP_DIRS filter as /files.
+    // Emits ShowSearchResults overlay; Enter on a result injects
+    // `@<absolute-path> ` into the prompt.
+    b.insert_primary(
+        "search",
+        Arc::new(crate::command::search::SearchHandler::new()),
+    );
+    // TASK-#209 SLASH-SUMMARY: /summary one-glance session headline.
+    // TextDelta-only (no overlay) — peer pattern with /usage,
+    // /extra-usage, /cost, /status. Reuses the existing
+    // `usage_snapshot` field; the snapshot-population arm in
+    // src/command/context.rs is widened to fire on
+    // primary == "summary" alongside "usage" and "extra-usage".
+    b.insert_primary("summary", Arc::new(crate::command::summary::SummaryHandler));
     // Aliases are collected from each handler's aliases() method
     // inside RegistryBuilder::build(). Collisions panic.
     b.build()
@@ -1760,7 +1867,43 @@ mod tests {
     ///
     /// TASK-AGS-816 adds `/voice` (gap-fix Q4=A, SECOND Batch-3 NEW
     /// primary) as a new primary, bringing the total to 40.
-    const EXPECTED_COMMAND_COUNT: usize = 49;
+    ///
+    /// TASK-#206 SLASH-EXIT adds `/exit` (with `/q` alias) as a new
+    /// primary, bringing the total to 50.
+    ///
+    /// TASK-#215 SLASH-EXTRA-USAGE adds `/extra-usage` as a new primary,
+    /// bringing the total to 51.
+    ///
+    /// TASK-#210 SLASH-PROVIDERS adds `/providers` as a new primary,
+    /// bringing the total to 52.
+    ///
+    /// TASK-#211 SLASH-AGENT adds `/agent` as a new primary, bringing
+    /// the total to 53.
+    ///
+    /// TASK-#212 SLASH-MANAGED-AGENTS adds `/managed-agents` as a new
+    /// primary, bringing the total to 54.
+    ///
+    /// TASK-#213 SLASH-REFRESH adds `/refresh` as a new primary,
+    /// bringing the total to 55.
+    ///
+    /// TASK-#214 SLASH-CONNECT adds `/connect` as a new primary,
+    /// bringing the total to 56.
+    ///
+    /// TASK-#216 SLASH-PLUGIN adds `/plugin` as a new primary,
+    /// bringing the total to 57.
+    ///
+    /// TASK-#217 SLASH-RELOAD-PLUGINS adds `/reload-plugins` as a
+    /// new primary, bringing the total to 58.
+    ///
+    /// TASK-#207 SLASH-FILES adds `/files` as a new primary,
+    /// bringing the total to 59.
+    ///
+    /// TASK-#208 SLASH-SEARCH adds `/search` as a new primary,
+    /// bringing the total to 60.
+    ///
+    /// TASK-#209 SLASH-SUMMARY adds `/summary` as a new primary,
+    /// bringing the total to 61.
+    const EXPECTED_COMMAND_COUNT: usize = 61;
 
     #[test]
     fn default_registry_contains_all_commands() {
@@ -2810,6 +2953,7 @@ mod tests {
             usage_snapshot: None,
             config_path: None,
             auth_label: None,
+            agent_registry: None,
             pending_effect: None,
             pending_effort_set: None,
             pending_export: None,

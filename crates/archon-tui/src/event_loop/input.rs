@@ -329,6 +329,96 @@ pub(super) async fn handle_key_event(
                     _ => return, // swallow other keys while overlay is up
                 }
             }
+            // Handle search results overlay (TASK-#208 SLASH-SEARCH) —
+            // Up/Down navigate; Enter injects `@<absolute-path> ` into
+            // the input buffer and closes; Esc closes without injection.
+            // No descend/ascend (results are a flat list spanning many
+            // directories).
+            if app.search_results.is_some() {
+                match key.code {
+                    KeyCode::Up => {
+                        if let Some(ref mut sr) = app.search_results {
+                            sr.select_prev();
+                        }
+                        return;
+                    }
+                    KeyCode::Down => {
+                        if let Some(ref mut sr) = app.search_results {
+                            sr.select_next();
+                        }
+                        return;
+                    }
+                    KeyCode::Enter => {
+                        if let Some(sr) = app.search_results.take() {
+                            if let Some(file) = sr.selected() {
+                                app.input.set_text(&format!("@{} ", file.path.display()));
+                            }
+                        }
+                        return;
+                    }
+                    KeyCode::Esc => {
+                        app.search_results = None;
+                        return;
+                    }
+                    _ => return,
+                }
+            }
+            // Handle file picker overlay (TASK-#207 SLASH-FILES) —
+            // Up/Down navigate; Enter on a directory descends (re-walks
+            // the directory in-place); Enter on a file injects
+            // `@<absolute-path> ` into the input buffer and closes the
+            // overlay; Backspace ascends to the parent (clamped to the
+            // picker's `root`); Esc closes without injection.
+            if app.file_picker.is_some() {
+                match key.code {
+                    KeyCode::Up => {
+                        if let Some(ref mut picker) = app.file_picker {
+                            picker.select_prev();
+                        }
+                        return;
+                    }
+                    KeyCode::Down => {
+                        if let Some(ref mut picker) = app.file_picker {
+                            picker.select_next();
+                        }
+                        return;
+                    }
+                    KeyCode::Enter => {
+                        let is_dir = app
+                            .file_picker
+                            .as_ref()
+                            .and_then(|p| p.selected())
+                            .map(|e| e.is_dir)
+                            .unwrap_or(false);
+                        if is_dir {
+                            // Descend in-place; do NOT close the overlay.
+                            if let Some(ref mut picker) = app.file_picker {
+                                let _ = picker.descend();
+                            }
+                        } else {
+                            // File pick — take ownership, inject `@<path>`,
+                            // drop the picker.
+                            if let Some(picker) = app.file_picker.take() {
+                                if let Some(file) = picker.selected() {
+                                    app.input.set_text(&format!("@{} ", file.path.display()));
+                                }
+                            }
+                        }
+                        return;
+                    }
+                    KeyCode::Backspace => {
+                        if let Some(ref mut picker) = app.file_picker {
+                            let _ = picker.ascend();
+                        }
+                        return;
+                    }
+                    KeyCode::Esc => {
+                        app.file_picker = None;
+                        return;
+                    }
+                    _ => return, // swallow other keys while overlay is up
+                }
+            }
             // Vim mode key routing — Ctrl+D / Ctrl+C fall through to normal handling
             let is_ctrl_quit = key.modifiers == KeyModifiers::CONTROL
                 && matches!(key.code, KeyCode::Char('d') | KeyCode::Char('c'));

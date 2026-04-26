@@ -1923,9 +1923,13 @@ pub(crate) async fn run_interactive_session(
                 tracing::debug!("discovered user skill: {}", skill.name);
                 reg.register(Box::new(skill));
             }
-            // Common aliases for built-in skills
+            // Common aliases for built-in skills.
+            // NOTE TASK-#206 SLASH-EXIT: the previous `q -> exit` skill
+            // alias here was dead code — no `exit` skill ever existed in
+            // the SkillRegistry. The `/q` alias is now declared on
+            // `ExitHandler::aliases()` in the COMMAND registry, so /q
+            // resolves to the real shutdown handler.
             reg.register_alias("?", "help");
-            reg.register_alias("q", "exit");
             reg
         }),
         last_assistant_response: Arc::clone(&last_assistant_response_shared),

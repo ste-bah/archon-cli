@@ -1,9 +1,25 @@
 //! Plugin management command handler.
 //! Extracted from main.rs to reduce main.rs from 6234 to < 500 lines.
+//!
+//! TASK-#216 SLASH-PLUGIN + TASK-#217 SLASH-RELOAD-PLUGINS extract the
+//! plugin-loader construction into [`load_plugins_from_default_dirs`]
+//! so the slash handlers (`PluginSlashHandler` in `plugin_slash.rs`,
+//! `ReloadPluginsHandler` in `reload_plugins.rs`) can call the same
+//! resolver as the CLI surface — avoids drift in plugins-dir / cache-
+//! dir / seed-dir resolution between the two surfaces.
 
 use crate::cli_args::PluginAction;
 
-pub fn handle_plugin_command(action: PluginAction) -> anyhow::Result<()> {
+/// Build a fresh `PluginLoader` from the default Archon directories
+/// (`~/.local/share/archon/plugins`, `~/.cache/archon/wasm`,
+/// `ARCHON_PLUGIN_SEED_DIR`) and run `load_all()`. Returns the
+/// `PluginLoadResult` directly.
+///
+/// Shared by the CLI handler (`handle_plugin_command`) and the slash
+/// handlers added in TASK-#216 / TASK-#217. No session state, no
+/// caching across calls — every invocation re-scans disk + re-parses
+/// manifests. This matches the shipped CLI behaviour.
+pub(crate) fn load_plugins_from_default_dirs() -> archon_plugin::result::PluginLoadResult {
     use archon_plugin::loader::PluginLoader;
 
     let plugins_dir = dirs::data_local_dir()
@@ -28,7 +44,11 @@ pub fn handle_plugin_command(action: PluginAction) -> anyhow::Result<()> {
     if !seed_dirs.is_empty() {
         loader = loader.with_seed_dirs(seed_dirs);
     }
-    let result = loader.load_all();
+    loader.load_all()
+}
+
+pub fn handle_plugin_command(action: PluginAction) -> anyhow::Result<()> {
+    let result = load_plugins_from_default_dirs();
 
     match action {
         PluginAction::List => {

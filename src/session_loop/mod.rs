@@ -453,7 +453,7 @@ pub(crate) fn run_session_loop(
             // ── Phase 2: Slash command dispatch (CLI-110) ────────
             if !slash_commands_disabled && input.starts_with('/') {
                 // GAP 1: /compact needs direct access to agent.compact()
-                if input.trim() == "/exit" || input.trim() == "/quit" {
+                if matches!(input.trim(), "/exit" | "/quit" | "/q") {
                     // CLI-416: Save personality snapshot before session ends.
                     if persist_personality {
                         let iv_arc = agent.lock().await.inner_voice().cloned();

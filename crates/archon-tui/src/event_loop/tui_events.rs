@@ -115,6 +115,23 @@ pub(super) async fn handle_tui_event(
             // it. Enter injects `/{skill-name} ` into the input buffer.
             app.skills_menu = Some(crate::screens::skills_menu::SkillsMenu::new(skills));
         }
+        TuiEvent::ShowFilePicker { root, entries } => {
+            // TASK-#207 SLASH-FILES: /files opens this overlay; input
+            // priority branch (event_loop/input.rs) routes Up/Down,
+            // Enter (descend on dir / inject `@<path>` and close on
+            // file), Backspace (ascend), Esc (close); render dispatch
+            // (render/body.rs draw_file_picker) draws it.
+            app.file_picker = Some(crate::screens::file_picker::FilePicker::new(root, entries));
+        }
+        TuiEvent::ShowSearchResults { query, entries } => {
+            // TASK-#208 SLASH-SEARCH: /search opens this overlay; input
+            // priority branch routes Up/Down/Enter/Esc. Enter injects
+            // `@<absolute-path> ` into the input buffer and closes the
+            // overlay (no descend semantics — search results are flat).
+            app.search_results = Some(crate::screens::search_results::SearchResults::new(
+                query, entries,
+            ));
+        }
         TuiEvent::OpenView(view_id) => {
             // TASK-AGS-822: placeholder handler. Full view rendering
             // deferred to Stage 7+ UI tickets. Log the open request
@@ -158,6 +175,16 @@ pub(super) async fn handle_tui_event(
         }
         TuiEvent::Done => {
             app.should_quit = true;
+        }
+        // TUI-330: NotificationTimeout was added to events::TuiEvent but
+        // never wired through the legacy app::TuiEvent duplicate. After
+        // TASK-#246 retired the duplicate (this commit), the match must
+        // cover it. The active notification overlay (if any) is dropped
+        // on timeout — same effect as Esc on the overlay path.
+        TuiEvent::NotificationTimeout(_ms) => {
+            // Notification overlays are owned by render::chrome; the
+            // event-loop side is a no-op (the timeout simply triggers a
+            // re-render which then sees the expiry and clears).
         }
     }
 }

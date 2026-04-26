@@ -74,6 +74,22 @@ pub struct SkillEntry {
     pub description: String,
 }
 
+/// TASK-#207 SLASH-FILES: a single entry in the /files file-picker
+/// overlay. Defined at layer 0 (events.rs) so `TuiEvent::ShowFilePicker`
+/// can reference it without events.rs importing from `crate::app`.
+/// Re-exported from `crate::app` for external/public-API stability.
+#[derive(Debug, Clone)]
+pub struct FileEntry {
+    /// Display name — the file's basename, no parent path.
+    pub name: String,
+    /// Absolute path. Used for `@<path>` injection on file-Enter,
+    /// and as the new `current_dir` when the picker descends into a
+    /// directory.
+    pub path: std::path::PathBuf,
+    /// `true` for directories, `false` for regular files.
+    pub is_dir: bool,
+}
+
 /// An MCP server entry shown in the MCP manager overlay.
 ///
 /// Defined here (layer 0) so that `TuiEvent::ShowMcpManager` and
@@ -136,6 +152,32 @@ pub enum TuiEvent {
     /// TASK-TUI-627: open the skills-menu overlay with a pre-computed
     /// list of SkillEntry. Input/render routing deferred to TUI-627-followup.
     ShowSkillsMenu(Vec<SkillEntry>),
+    /// TASK-#207 SLASH-FILES: open the file-picker overlay with a
+    /// pre-walked initial listing of the working directory. The
+    /// event-loop handler constructs `FilePicker::new(root, entries)`
+    /// where `root` is the picker's clamp-anchor (passed via the
+    /// first entry's parent — see `event_loop/tui_events.rs` for the
+    /// resolution path).
+    ShowFilePicker {
+        /// Original working directory (the picker's ascent-clamp root).
+        root: std::path::PathBuf,
+        /// Pre-walked initial listing of `root`. Empty Vec is
+        /// acceptable (rendered as `(empty directory)`).
+        entries: Vec<FileEntry>,
+    },
+    /// TASK-#208 SLASH-SEARCH: open the search-results overlay with
+    /// the original query string and a list of matched paths. The
+    /// event-loop handler constructs `SearchResults::new(query,
+    /// entries)` and assigns to `app.search_results`.
+    ShowSearchResults {
+        /// The original query the user supplied to `/search <query>`.
+        /// Used for the case-insensitive highlight match in the
+        /// rendered rows.
+        query: String,
+        /// The matched file paths (cap'd at the slash handler's
+        /// `max_results` ceiling).
+        entries: Vec<FileEntry>,
+    },
     /// TASK-AGS-822: open an overlay view identified by `ViewId`.
     /// Emitted by the slash-command dispatcher in response to
     /// view-opening commands (`/tasks`, `/settings`, `/context`,

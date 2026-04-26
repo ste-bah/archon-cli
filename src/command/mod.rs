@@ -10,6 +10,8 @@
 
 pub(crate) mod add_dir;
 pub(crate) mod agent;
+// TASK-#211 SLASH-AGENT: /agent slash-command umbrella (list/info/run).
+pub(crate) mod agent_slash;
 pub(crate) mod background;
 pub(crate) mod bug;
 pub(crate) mod cancel;
@@ -20,6 +22,8 @@ pub(crate) mod color;
 pub(crate) mod commit;
 pub(crate) mod compact;
 pub(crate) mod config;
+// TASK-#214 SLASH-CONNECT: /connect dynamic MCP server connect.
+pub(crate) mod connect;
 pub(crate) mod context;
 pub(crate) mod context_cmd;
 pub(crate) mod copy;
@@ -30,8 +34,14 @@ pub(crate) mod dispatcher;
 pub(crate) mod doctor;
 pub(crate) mod effort;
 pub(crate) mod errors;
+// TASK-#206 SLASH-EXIT: /exit handler + /q alias.
+pub(crate) mod exit;
 pub(crate) mod export;
+// TASK-#215 SLASH-EXTRA-USAGE: /extra-usage 6-section detailed report.
+pub(crate) mod extra_usage;
 pub(crate) mod fast;
+// TASK-#207 SLASH-FILES: /files file-picker overlay.
+pub(crate) mod files;
 pub(crate) mod fork;
 pub(crate) mod garden;
 pub(crate) mod help;
@@ -39,6 +49,8 @@ pub(crate) mod hooks;
 pub(crate) mod ide_stdio;
 pub(crate) mod login;
 pub(crate) mod logout;
+// TASK-#212 SLASH-MANAGED-AGENTS: /managed-agents remote-registry status.
+pub(crate) mod managed_agents;
 pub(crate) mod mcp;
 pub(crate) mod memory;
 pub(crate) mod model;
@@ -50,15 +62,25 @@ pub(crate) mod plan;
 // TASK-P0-B.3 (#174): plan-file I/O shim (re-exports from archon_core).
 pub(crate) mod plan_file;
 pub(crate) mod plugin;
+// TASK-#216 SLASH-PLUGIN: /plugin umbrella (list/info/hint subcommands).
+pub(crate) mod plugin_slash;
+// TASK-#210 SLASH-PROVIDERS: /providers list registered LLM providers.
+pub(crate) mod providers;
+// TASK-#217 SLASH-RELOAD-PLUGINS: /reload-plugins disk re-scan.
 pub(crate) mod recall;
 pub(crate) mod registry;
 pub(crate) mod release_notes;
 pub(crate) mod reload;
+pub(crate) mod reload_plugins;
+// TASK-#213 SLASH-REFRESH: /refresh re-scan agent registry from disk.
+pub(crate) mod refresh;
 pub(crate) mod remote;
 pub(crate) mod rename;
 pub(crate) mod resume;
 // TASK-TUI-622: /review PR code-review prompt builder.
 pub(crate) mod review;
+// TASK-#208 SLASH-SEARCH: /search recursive basename substring search.
+pub(crate) mod search;
 // TASK-TUI-620: /rewind message-selector overlay launcher.
 pub(crate) mod rewind;
 pub(crate) mod rules;
@@ -71,6 +93,8 @@ pub(crate) mod session;
 pub(crate) mod skills;
 pub(crate) mod slash;
 pub(crate) mod status;
+// TASK-#209 SLASH-SUMMARY: /summary one-glance session headline.
+pub(crate) mod summary;
 pub(crate) mod task;
 pub(crate) mod team;
 // TASK-TUI-623: /tag session tag toggle.

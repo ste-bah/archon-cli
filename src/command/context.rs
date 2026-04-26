@@ -173,6 +173,10 @@ pub(crate) fn build_command_context<'a>(
             // is cheap (one heap alloc); the handler includes the label
             // in the emitted `TuiEvent::TextDelta` message.
             auth_label: Some(slash_ctx.auth_label.clone()),
+            // TASK-#211 SLASH-AGENT: clone the Arc<RwLock<AgentRegistry>>
+            // unconditionally — handler reads it via the synchronous
+            // `RwLock::read()`. Cheap (~8 bytes + atomic refcount).
+            agent_registry: Some(Arc::clone(&slash_ctx.agent_registry)),
             pending_effect: None,
             // TASK-AGS-POST-6-BODIES-B11-EFFORT: SIDECAR slot for the
             // session-local `&mut EffortState` write. Initialised to
@@ -214,8 +218,14 @@ pub(crate) fn build_command_context<'a>(
                 // `usage` remains a separate primary (UsageHandler).
                 ctx.cost_snapshot = Some(cost::build_cost_snapshot(slash_ctx).await);
             }
-            Some("mcp") => {
+            Some("mcp") | Some("connect") => {
                 // TASK-AGS-811 snapshot population. /mcp is read-only, so
+                // TASK-#214 SLASH-CONNECT widens the arm: /connect (no
+                // args) renders the same server list, so it consumes the
+                // same async-built snapshot. The /connect WRITE path
+                // (with name arg) doesn't strictly need the snapshot,
+                // but populating it unconditionally keeps the gate
+                // simple and preserves the no-args list view.
                 // there is no paired `apply_effect` branch. No aliases —
                 // the shipped stub at registry.rs had none and the spec
                 // lists none. The builder awaits
@@ -303,8 +313,15 @@ pub(crate) fn build_command_context<'a>(
                 // permissions / B14 copy snapshot gating.
                 ctx.doctor_snapshot = Some(doctor::build_doctor_snapshot(slash_ctx).await);
             }
-            Some("usage") => {
+            Some("usage") | Some("extra-usage") | Some("summary") => {
                 // TASK-AGS-POST-6-BODIES-B16-USAGE snapshot population.
+                // TASK-#215 SLASH-EXTRA-USAGE widens the arm to also fire
+                // on primary == "extra-usage" — both handlers consume the
+                // same `UsageSnapshot`; /extra-usage just renders it as
+                // 6 grouped sections + per-turn / cost-per-1k metrics.
+                // TASK-#209 SLASH-SUMMARY widens once more — /summary
+                // emits a one-glance headline using the same snapshot
+                // (turns + total tokens + total cost + first cache line).
                 // /usage is read-only (shipped slash.rs:315-336 emits a
                 // single TextDelta with aggregate session counters, costs,
                 // and the cache-stats line — no mutation). No aliases
