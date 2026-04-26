@@ -1815,6 +1815,16 @@ pub(crate) fn default_registry() -> Registry {
         "plugin",
         Arc::new(crate::command::plugin_slash::PluginSlashHandler),
     );
+    // TASK-#217 SLASH-RELOAD-PLUGINS: /reload-plugins disk re-scan via
+    // the same shared helper (load_plugins_from_default_dirs). True
+    // in-process hot-swap of a running WASM module is DEFERRED —
+    // `WasmPluginHost` has no `reload_plugin` API and no session-
+    // shared host exists. See `src/command/reload_plugins.rs` module
+    // rustdoc for the full reconciliation.
+    b.insert_primary(
+        "reload-plugins",
+        Arc::new(crate::command::reload_plugins::ReloadPluginsHandler),
+    );
     // Aliases are collected from each handler's aliases() method
     // inside RegistryBuilder::build(). Collisions panic.
     b.build()
@@ -1866,7 +1876,10 @@ mod tests {
     ///
     /// TASK-#216 SLASH-PLUGIN adds `/plugin` as a new primary,
     /// bringing the total to 57.
-    const EXPECTED_COMMAND_COUNT: usize = 57;
+    ///
+    /// TASK-#217 SLASH-RELOAD-PLUGINS adds `/reload-plugins` as a
+    /// new primary, bringing the total to 58.
+    const EXPECTED_COMMAND_COUNT: usize = 58;
 
     #[test]
     fn default_registry_contains_all_commands() {
