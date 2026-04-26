@@ -78,6 +78,10 @@ pub(crate) mod remote;
 pub(crate) mod rename;
 pub(crate) mod resume;
 // TASK-HOTFIX-V0.1.7: /run-agent primary command (#248).
+/// `/archon-code` — 48-agent coding pipeline TUI primary.
+pub(crate) mod archon_code;
+/// `/archon-research` — 46-agent research pipeline TUI primary.
+pub(crate) mod archon_research;
 pub(crate) mod run_agent;
 // TASK-TUI-622: /review PR code-review prompt builder.
 pub(crate) mod review;

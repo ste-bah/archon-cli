@@ -177,6 +177,18 @@ pub(crate) fn build_command_context<'a>(
             // unconditionally — handler reads it via the synchronous
             // `RwLock::read()`. Cheap (~8 bytes + atomic refcount).
             agent_registry: Some(Arc::clone(&slash_ctx.agent_registry)),
+            // TASK-DS-001: DIRECT-pattern clone of TaskService.
+            // Populated UNCONDITIONALLY (not gated on primary name).
+            // `Arc<dyn TaskService>` is cheap to clone (~8 bytes +
+            // atomic refcount); handlers call `ctx.task_service.submit()`
+            // to spawn agents without blocking the TUI input loop.
+            task_service: Some(Arc::clone(&slash_ctx.task_service)),
+            // DIRECT-pattern clones for pipeline TUI commands.
+            coding_pipeline: Some(Arc::clone(&slash_ctx.coding_pipeline)),
+            research_pipeline: Some(Arc::clone(&slash_ctx.research_pipeline)),
+            llm_adapter: Some(Arc::clone(&slash_ctx.llm_adapter)),
+            // DIRECT-pattern clone for LEANN pipeline integration.
+            leann: slash_ctx.leann.as_ref().map(Arc::clone),
             pending_effect: None,
             // TASK-AGS-POST-6-BODIES-B11-EFFORT: SIDECAR slot for the
             // session-local `&mut EffortState` write. Initialised to

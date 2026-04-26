@@ -3,14 +3,24 @@
 //! Wires together [`ResearchPromptBuilder`], [`PhDQualityCalculator`], and
 //! [`StyleInjector`] to drive the 46-agent research pipeline through the
 //! shared runner loop.
+//!
+//! # Memory
+//!
+//! Per REQ-RESEARCH-008, agent outputs are persisted via `archon-memory`
+//! (CozoDB + HNSW) with tags `["phd-pipeline", "<namespace>"]`. LEANN
+//! semantic search provides fallback for missing keys.
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
+use tokio::sync::mpsc::UnboundedSender;
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 
+use archon_memory::{MemoryTrait, MemoryType, SearchFilter};
+
+use crate::coding::rlm::LeannSearcher;
 use crate::runner::{
     AgentInfo, AgentResult, NextAgent, PipelineFacade, PipelineResult, PipelineSession,
     PipelineType, QualityScore, ToolAccessLevel,
@@ -26,8 +36,8 @@ use super::quality::PhDQualityCalculator;
 // Constants
 // ---------------------------------------------------------------------------
 
-/// Memory namespace for research pipeline data.
-const MEMORY_NAMESPACE: &str = "project/research";
+/// Tag applied to all research pipeline memories.
+const TAG_PHD_PIPELINE: &str = "phd-pipeline";
 
 // ---------------------------------------------------------------------------
 // ResearchFacade
@@ -37,60 +47,116 @@ const MEMORY_NAMESPACE: &str = "project/research";
 pub struct ResearchFacade {
     quality_calculator: PhDQualityCalculator,
     prompt_builder: ResearchPromptBuilder,
-    /// In-memory store keyed by `"{namespace}/{memory_key}"`.
-    memory_store: Mutex<HashMap<String, String>>,
+    /// CozoDB + HNSW memory backend per REQ-RESEARCH-008.
+    memory: Arc<dyn MemoryTrait>,
+    /// LEANN semantic search fallback for missing memory keys.
+    leann_searcher: Option<Arc<dyn LeannSearcher>>,
+    /// Project path for memory provenance.
+    project_path: String,
     /// Optional style override provided via `--style`.
     style_prompt: Option<String>,
     /// Optional PhD learning integration for recording quality feedback.
     learning: Option<Mutex<PhDLearningIntegration>>,
+    /// Optional sender for per-agent progress events (TUI streaming).
+    /// Uses internal mutability so the sender can be attached after
+    /// construction (it's not known at bootstrap time).
+    tui_sender: Mutex<Option<UnboundedSender<String>>>,
 }
 
 impl ResearchFacade {
-    /// Create a new facade with an optional style prompt override.
-    pub fn new(style_prompt: Option<String>) -> Self {
+    /// Create a new facade backed by the given memory backend.
+    pub fn new(
+        memory: Arc<dyn MemoryTrait>,
+        leann_searcher: Option<Arc<dyn LeannSearcher>>,
+        project_path: String,
+        style_prompt: Option<String>,
+    ) -> Self {
         Self {
             quality_calculator: PhDQualityCalculator::new(),
             prompt_builder: ResearchPromptBuilder::new(),
-            memory_store: Mutex::new(HashMap::new()),
+            memory,
+            leann_searcher,
+            project_path,
             style_prompt,
             learning: None,
+            tui_sender: Mutex::new(None),
         }
     }
 
     /// Create a new facade with PhD learning integration enabled.
-    pub fn with_learning(style_prompt: Option<String>, learning: PhDLearningIntegration) -> Self {
+    pub fn with_learning(
+        memory: Arc<dyn MemoryTrait>,
+        leann_searcher: Option<Arc<dyn LeannSearcher>>,
+        project_path: String,
+        style_prompt: Option<String>,
+        learning: PhDLearningIntegration,
+    ) -> Self {
         Self {
             quality_calculator: PhDQualityCalculator::new(),
             prompt_builder: ResearchPromptBuilder::new(),
-            memory_store: Mutex::new(HashMap::new()),
+            memory,
+            leann_searcher,
+            project_path,
             style_prompt,
             learning: Some(Mutex::new(learning)),
+            tui_sender: Mutex::new(None),
         }
     }
 
-    /// Build the namespaced key for the memory store.
-    fn memory_key(namespace: &str, key: &str) -> String {
-        format!("{}/{}", namespace, key)
+    /// Attach a TUI sender at construction time (builder pattern).
+    pub fn with_tui_sender(mut self, tx: UnboundedSender<String>) -> Self {
+        self.tui_sender = Mutex::new(Some(tx));
+        self
     }
 
-    /// Store a value in the in-memory store.
+    /// Set the TUI sender after construction (called from dispatch handler).
+    pub fn set_tui_sender(&self, tx: UnboundedSender<String>) {
+        *self.tui_sender.lock().expect("tui_sender lock") = Some(tx);
+    }
+
+    /// Extract the top-level namespace from a memory key for tagging.
+    ///
+    /// `"research/foundation/framing"` → `"research"`.
+    fn key_namespace(key: &str) -> &str {
+        key.split('/').next().unwrap_or("research")
+    }
+
+    /// Persist a value under the given memory key with `phd-pipeline` tags.
     fn store_memory(&self, key: &str, value: String) {
-        let ns_key = Self::memory_key(MEMORY_NAMESPACE, key);
-        self.memory_store
-            .lock()
-            .expect("memory_store lock poisoned")
-            .insert(ns_key, value);
+        let namespace = Self::key_namespace(key);
+        let tags: Vec<String> = vec![TAG_PHD_PIPELINE.to_string(), namespace.to_string()];
+        let _ = self.memory.store_memory(
+            &value,
+            key,
+            MemoryType::Fact,
+            0.5,
+            &tags,
+            "pipeline",
+            &self.project_path,
+        );
     }
 
-    /// Recall content for a memory key, returning empty string if absent.
+    /// Recall content for a memory key, with LEANN fallback.
     fn recall_memory(&self, key: &str) -> String {
-        let ns_key = Self::memory_key(MEMORY_NAMESPACE, key);
-        self.memory_store
-            .lock()
-            .expect("memory_store lock poisoned")
-            .get(&ns_key)
-            .cloned()
-            .unwrap_or_default()
+        // Search by phd-pipeline tag, filter by title match.
+        let filter = SearchFilter {
+            tags: vec![TAG_PHD_PIPELINE.to_string()],
+            ..Default::default()
+        };
+        if let Ok(memories) = self.memory.search_memories(&filter) {
+            for m in &memories {
+                if m.title == key {
+                    return m.content.clone();
+                }
+            }
+        }
+
+        // LEANN fallback.
+        if let Some(ref leann) = self.leann_searcher {
+            return leann.search(key);
+        }
+
+        String::new()
     }
 
     /// Recall all memory keys for an agent, concatenating non-empty values.
@@ -177,7 +243,6 @@ impl PipelineFacade for ResearchFacade {
             style,
         );
 
-        // Build the messages / system / tools triple.
         let messages = vec![serde_json::json!({
             "role": "user",
             "content": prompt_text,
@@ -192,7 +257,6 @@ impl PipelineFacade for ResearchFacade {
             ),
         })];
 
-        // No custom tools for research agents — they use built-in MCP tools.
         let tools: Vec<serde_json::Value> = Vec::new();
 
         Ok((messages, system, tools))
@@ -242,7 +306,8 @@ impl PipelineFacade for ResearchFacade {
         result: &AgentResult,
         quality: &QualityScore,
     ) -> Result<()> {
-        // Store output at agent's primary memory key.
+        // Store output at agent's primary memory key — persisted via
+        // CozoDB + HNSW with tags per REQ-RESEARCH-008.
         if let Some(research_agent) = get_agent_by_key(&agent.key) {
             if let Some(&primary_key) = research_agent.memory_keys.first() {
                 self.store_memory(primary_key, result.output.clone());
@@ -256,6 +321,14 @@ impl PipelineFacade for ResearchFacade {
             }
         }
 
+        // Emit per-agent progress to TUI if sender is attached.
+        if let Some(ref tx) = *self.tui_sender.lock().expect("tui_sender lock") {
+            let _ = tx.send(format!(
+                "[pipeline phase {}] {} complete (quality: {:.2})\n",
+                agent.phase, agent.display_name, quality.overall,
+            ));
+        }
+
         Ok(())
     }
 
@@ -263,7 +336,6 @@ impl PipelineFacade for ResearchFacade {
         let total_cost: f64 = session.agent_results.iter().map(|(_, r)| r.cost_usd).sum();
         let duration = session.started_at.elapsed();
 
-        // Final output: last agent's output or summary.
         let final_output = session
             .agent_results
             .last()
@@ -289,10 +361,60 @@ impl PipelineFacade for ResearchFacade {
 mod tests {
     use super::*;
     use crate::runner::{AgentResult, QualityScore};
+    use archon_memory::graph::MemoryGraph;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
 
+    // -----------------------------------------------------------------------
+    // Mock LeannSearcher
+    // -----------------------------------------------------------------------
+
+    struct MockLeannSearcher {
+        response: String,
+        call_count: AtomicUsize,
+    }
+
+    impl MockLeannSearcher {
+        fn new(response: &str) -> Self {
+            Self {
+                response: response.to_string(),
+                call_count: AtomicUsize::new(0),
+            }
+        }
+
+        fn calls(&self) -> usize {
+            self.call_count.load(Ordering::SeqCst)
+        }
+    }
+
+    impl LeannSearcher for MockLeannSearcher {
+        fn search(&self, _query: &str) -> String {
+            self.call_count.fetch_add(1, Ordering::SeqCst);
+            self.response.clone()
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Helpers
+    // -----------------------------------------------------------------------
+
+    fn make_memory() -> Arc<dyn MemoryTrait> {
+        Arc::new(MemoryGraph::in_memory().expect("in-memory graph created"))
+    }
+
     fn make_facade() -> ResearchFacade {
-        ResearchFacade::new(None)
+        ResearchFacade::new(make_memory(), None, String::new(), None)
+    }
+
+    fn make_facade_with_leann(response: &str) -> (ResearchFacade, Arc<MockLeannSearcher>) {
+        let leann = Arc::new(MockLeannSearcher::new(response));
+        let facade = ResearchFacade::new(
+            make_memory(),
+            Some(leann.clone() as Arc<dyn LeannSearcher>),
+            String::new(),
+            None,
+        );
+        (facade, leann)
     }
 
     fn make_agent_result(output: &str) -> AgentResult {
@@ -332,7 +454,6 @@ mod tests {
         let facade = make_facade();
         let mut session = facade.init_session("test").await.unwrap();
 
-        // First call should return Continue with first agent
         match facade.next_agent(&session).await.unwrap() {
             NextAgent::Continue(agent) => {
                 assert_eq!(agent.key, "step-back-analyzer");
@@ -343,14 +464,12 @@ mod tests {
             ),
         }
 
-        // Simulate 46 completed agents
         for i in 0..RESEARCH_AGENTS.len() {
             let agent_info = ResearchFacade::to_agent_info(&RESEARCH_AGENTS[i]);
             let result = make_agent_result("output");
             session.agent_results.push((agent_info, result));
         }
 
-        // Should now be Done
         match facade.next_agent(&session).await.unwrap() {
             NextAgent::Done => {}
             _ => panic!("Expected Done after all agents"),
@@ -382,7 +501,7 @@ mod tests {
         assert!(score.dimensions.contains_key("format_quality"));
     }
 
-    // 5. process_completion stores at memory_keys[0]
+    // 5. process_completion stores at memory_keys[0] via MemoryTrait
     #[tokio::test]
     async fn process_completion_stores_memory() {
         let facade = make_facade();
@@ -399,18 +518,16 @@ mod tests {
             .await
             .unwrap();
 
-        // Check that memory was stored at the primary key
         let stored = facade.recall_memory("research/foundation/framing");
         assert_eq!(stored, "step-back analysis output");
     }
 
-    // 6. Memory flows between agents (store from A, recall in B)
+    // 6. Memory flows between agents (store via MemoryTrait, recall in B)
     #[tokio::test]
     async fn memory_flows_between_agents() {
         let facade = make_facade();
         let mut session = facade.init_session("AI research").await.unwrap();
 
-        // Process completion for first agent (step-back-analyzer)
         let agent_a = ResearchFacade::to_agent_info(&RESEARCH_AGENTS[0]);
         let result_a = make_agent_result("Foundation analysis: AI impacts healthcare deeply.");
         let quality = QualityScore {
@@ -422,10 +539,6 @@ mod tests {
             .await
             .unwrap();
 
-        // Now build prompt for second agent that might reference the same memory
-        // The chapter-synthesizer (index 6) has memory_keys that include
-        // "research/quality/synthesis" — different from what we stored.
-        // Instead, directly verify we can recall what was stored.
         let recalled = facade.recall_memory("research/foundation/framing");
         assert_eq!(
             recalled,
@@ -446,7 +559,6 @@ mod tests {
         assert_eq!(system.len(), 1);
         assert!(tools.is_empty());
 
-        // Verify message structure
         let msg = &messages[0];
         assert_eq!(msg["role"], "user");
         let content = msg["content"].as_str().unwrap();
@@ -474,10 +586,14 @@ mod tests {
     // 9. Style prompt passed to Phase 6 agents
     #[tokio::test]
     async fn style_prompt_passed_to_phase6() {
-        let facade = ResearchFacade::new(Some("Use British English spelling".to_string()));
+        let facade = ResearchFacade::new(
+            make_memory(),
+            None,
+            String::new(),
+            Some("Use British English spelling".to_string()),
+        );
         let session = facade.init_session("test").await.unwrap();
 
-        // introduction-writer is index 29, Phase 6
         let agent_info = ResearchFacade::to_agent_info(&RESEARCH_AGENTS[29]);
         assert_eq!(agent_info.key, "introduction-writer");
 
@@ -499,7 +615,8 @@ mod tests {
     fn facade_with_learning_implements_trait() {
         use crate::learning::integration::PhDLearningIntegration;
         let learning = PhDLearningIntegration::new();
-        let facade = ResearchFacade::with_learning(None, learning);
+        let facade =
+            ResearchFacade::with_learning(make_memory(), None, String::new(), None, learning);
         let _: &dyn PipelineFacade = &facade;
     }
 
@@ -514,9 +631,98 @@ mod tests {
         assert_eq!(info.phase, 1);
         assert_eq!(info.tool_access_level, ToolAccessLevel::ReadOnly);
 
-        // Phase 6 agent should have Full access
         let writer = &RESEARCH_AGENTS[29];
         let writer_info = ResearchFacade::to_agent_info(writer);
         assert_eq!(writer_info.tool_access_level, ToolAccessLevel::Full);
+    }
+
+    // 12. LEANN fallback triggers when memory key is missing
+    #[tokio::test]
+    async fn leann_fallback_on_missing_key() {
+        let (facade, leann) = make_facade_with_leann("LEANN fallback result");
+
+        let result = facade.recall_memory("research/nonexistent/key");
+        assert_eq!(result, "LEANN fallback result");
+        assert_eq!(leann.calls(), 1);
+    }
+
+    // 13. LEANN fallback NOT called when key exists
+    #[tokio::test]
+    async fn leann_not_called_when_key_exists() {
+        let (facade, leann) = make_facade_with_leann("should not be used");
+
+        // Store first via process_completion
+        let mut session = facade.init_session("test").await.unwrap();
+        let agent_info = ResearchFacade::to_agent_info(&RESEARCH_AGENTS[0]);
+        let result = make_agent_result("stored content");
+        let quality = QualityScore {
+            overall: 0.75,
+            dimensions: HashMap::new(),
+        };
+        facade
+            .process_completion(&mut session, &agent_info, &result, &quality)
+            .await
+            .unwrap();
+
+        let recalled = facade.recall_memory("research/foundation/framing");
+        assert_eq!(recalled, "stored content");
+        assert_eq!(leann.calls(), 0);
+    }
+
+    // 14. Memory persistence across two facades sharing the same MemoryTrait
+    #[tokio::test]
+    async fn memory_persists_across_facades_with_same_backend() {
+        let memory = make_memory();
+        let facade_a = ResearchFacade::new(Arc::clone(&memory), None, String::new(), None);
+        let facade_b = ResearchFacade::new(Arc::clone(&memory), None, String::new(), None);
+
+        // Store via facade A
+        let mut session = facade_a.init_session("test").await.unwrap();
+        let agent_info = ResearchFacade::to_agent_info(&RESEARCH_AGENTS[0]);
+        let result = make_agent_result("persistent output");
+        let quality = QualityScore {
+            overall: 0.75,
+            dimensions: HashMap::new(),
+        };
+        facade_a
+            .process_completion(&mut session, &agent_info, &result, &quality)
+            .await
+            .unwrap();
+
+        // Recall via facade B (same backend, different facade)
+        let recalled = facade_b.recall_memory("research/foundation/framing");
+        assert_eq!(recalled, "persistent output");
+    }
+
+    // 15. store_memory uses phd-pipeline tags
+    #[tokio::test]
+    async fn store_memory_uses_phd_pipeline_tags() {
+        let facade = make_facade();
+        let mut session = facade.init_session("test").await.unwrap();
+        let agent_info = ResearchFacade::to_agent_info(&RESEARCH_AGENTS[0]);
+        let result = make_agent_result("tagged output");
+        let quality = QualityScore {
+            overall: 0.75,
+            dimensions: HashMap::new(),
+        };
+        facade
+            .process_completion(&mut session, &agent_info, &result, &quality)
+            .await
+            .unwrap();
+
+        // Verify tag search works
+        let filter = SearchFilter {
+            tags: vec![TAG_PHD_PIPELINE.to_string()],
+            ..Default::default()
+        };
+        let results = facade.memory.search_memories(&filter).unwrap();
+        assert!(
+            !results.is_empty(),
+            "should find memories with phd-pipeline tag"
+        );
+        let found = results
+            .iter()
+            .any(|m| m.title == "research/foundation/framing");
+        assert!(found, "should find the stored memory by title");
     }
 }

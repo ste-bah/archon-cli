@@ -196,10 +196,9 @@ fn render_run_hint(rest: &[String]) -> String {
     };
     format!(
         "\n\
-        Use the /run-agent command to invoke this agent:\n  \
+        Use the /run-agent command to submit this agent asynchronously:\n  \
         /run-agent {name} {task}\n\n\
-        (The /run-agent handler validates the agent name and emits\n\
-        instructions for natural-language invocation.)\n",
+        The task will be queued and executed; progress is streamed to the TUI.\n",
         name = name,
         task = task
     )
@@ -384,7 +383,7 @@ mod tests {
             .unwrap();
         let body = take_text_delta(&mut rx);
         assert!(body.contains("/run-agent sherlock-holmes audit the repo"));
-        assert!(body.contains("Use the /run-agent command to invoke this agent"));
+        assert!(body.contains("submit this agent asynchronously"));
     }
 
     #[test]

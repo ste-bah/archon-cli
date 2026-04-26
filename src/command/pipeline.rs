@@ -2,15 +2,26 @@
 //! Extracted from main.rs to reduce main.rs from 1532 to < 500 lines.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use archon_core::cli_flags::ResolvedFlags;
 use archon_core::config::ArchonConfig;
 use archon_core::env_vars::ArchonEnvVars;
 use archon_llm::auth::resolve_auth_with_keys;
 use archon_llm::identity::{IdentityMode, IdentityProvider};
+use archon_memory::{MemoryTrait, graph::MemoryGraph};
+use archon_pipeline::coding::rlm::LeannSearcher;
 
 use crate::cli_args::PipelineAction;
 use crate::setup;
+
+/// No-op LEANN searcher used when LEANN is unavailable.
+struct NoopLeannSearcher;
+impl LeannSearcher for NoopLeannSearcher {
+    fn search(&self, _query: &str) -> String {
+        String::new()
+    }
+}
 
 /// Handle `/archon pipeline` subcommands.
 pub async fn handle_pipeline_command(
@@ -106,7 +117,14 @@ pub async fn handle_pipeline_command(
                 );
                 let phd_learning =
                     archon_pipeline::learning::integration::PhDLearningIntegration::new();
+                let memory: Arc<dyn MemoryTrait> = Arc::new(
+                    MemoryGraph::in_memory().expect("in-memory graph for research pipeline"),
+                );
+                let leann: Option<Arc<dyn LeannSearcher>> = Some(Arc::new(NoopLeannSearcher));
                 let facade = archon_pipeline::research::facade::ResearchFacade::with_learning(
+                    memory,
+                    leann,
+                    cwd.display().to_string(),
                     None,
                     phd_learning,
                 );
@@ -203,8 +221,17 @@ pub async fn handle_pipeline_command(
                             let phd_learning =
                                 archon_pipeline::learning::integration::PhDLearningIntegration::new(
                                 );
+                            let memory: Arc<dyn MemoryTrait> = Arc::new(
+                                MemoryGraph::in_memory()
+                                    .expect("in-memory graph for research resume"),
+                            );
+                            let leann: Option<Arc<dyn LeannSearcher>> =
+                                Some(Arc::new(NoopLeannSearcher));
                             let facade =
                                 archon_pipeline::research::facade::ResearchFacade::with_learning(
+                                    memory,
+                                    leann,
+                                    cwd.display().to_string(),
                                     None,
                                     phd_learning,
                                 );
