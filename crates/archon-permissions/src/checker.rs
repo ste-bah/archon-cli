@@ -1,7 +1,7 @@
 use crate::mode::{PermissionDecision, PermissionMode};
 use crate::rules::RuleSet;
 
-/// Tools allowed in Plan mode (read-only + navigation).
+/// Tools allowed in Plan mode (read-only + navigation + coordination).
 const PLAN_MODE_WHITELIST: &[&str] = &[
     "Read",
     "Glob",
@@ -9,12 +9,13 @@ const PLAN_MODE_WHITELIST: &[&str] = &[
     "AskUserQuestion",
     "EnterPlanMode",
     "ToolSearch",
+    "Agent",
 ];
 
 /// Tools auto-allowed in AcceptEdits mode (file operations + search).
 const ACCEPT_EDITS_WHITELIST: &[&str] = &["Read", "Write", "Edit", "Glob", "Grep"];
 
-/// Tools that are safe (read-only) and auto-allowed in Default mode.
+/// Tools that are safe (read-only or coordination) and auto-allowed in Default mode.
 const DEFAULT_SAFE_TOOLS: &[&str] = &[
     "Read",
     "Glob",
@@ -22,6 +23,7 @@ const DEFAULT_SAFE_TOOLS: &[&str] = &[
     "ToolSearch",
     "AskUserQuestion",
     "EnterPlanMode",
+    "Agent",
 ];
 
 /// Permission checker that gates tool execution based on the current mode
@@ -127,5 +129,74 @@ impl PermissionChecker {
                 }
             }
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn agent_tool_allowed_in_default_mode() {
+        let checker = PermissionChecker::new(PermissionMode::Default, RuleSet::empty());
+        let decision = checker.check("Agent", "spawn subagent", "");
+        assert_eq!(decision, PermissionDecision::Allow);
+    }
+
+    #[test]
+    fn agent_tool_allowed_in_accept_edits_mode() {
+        let checker = PermissionChecker::new(PermissionMode::AcceptEdits, RuleSet::empty());
+        let decision = checker.check("Agent", "spawn subagent", "");
+        assert_eq!(decision, PermissionDecision::Allow);
+    }
+
+    #[test]
+    fn agent_tool_allowed_in_auto_mode() {
+        let checker = PermissionChecker::new(PermissionMode::Auto, RuleSet::empty());
+        let decision = checker.check("Agent", "spawn subagent", "");
+        assert_eq!(decision, PermissionDecision::Allow);
+    }
+
+    #[test]
+    fn agent_tool_allowed_in_plan_mode() {
+        let checker = PermissionChecker::new(PermissionMode::Plan, RuleSet::empty());
+        let decision = checker.check("Agent", "spawn subagent", "");
+        assert_eq!(decision, PermissionDecision::Allow);
+    }
+
+    #[test]
+    fn dangerous_tools_still_gated_in_default_mode() {
+        let checker = PermissionChecker::new(PermissionMode::Default, RuleSet::empty());
+        // Bash, Write, Edit should still require permission
+        assert!(matches!(
+            checker.check("Bash", "run command", ""),
+            PermissionDecision::NeedsPermission(_)
+        ));
+        assert!(matches!(
+            checker.check("Write", "write file", ""),
+            PermissionDecision::NeedsPermission(_)
+        ));
+        assert!(matches!(
+            checker.check("Edit", "edit file", ""),
+            PermissionDecision::NeedsPermission(_)
+        ));
+    }
+
+    #[test]
+    fn deny_rule_still_blocks_agent_tool() {
+        // Even though Agent is in DEFAULT_SAFE_TOOLS, an explicit deny
+        // rule should still block it (deny rules are absolute).
+        let mut rules = RuleSet::empty();
+        rules.always_deny.push(crate::rules::ToolRule {
+            tool: "Agent".to_string(),
+            pattern: "*".to_string(),
+        });
+        let checker = PermissionChecker::new(PermissionMode::Default, rules);
+        let decision = checker.check("Agent", "spawn subagent", "");
+        assert!(matches!(decision, PermissionDecision::Deny(_)));
     }
 }

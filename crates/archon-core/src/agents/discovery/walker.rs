@@ -16,7 +16,7 @@ pub struct DiscoveredFile {
 }
 
 /// Allowed file extensions for agent metadata files.
-const ALLOWED_EXTENSIONS: &[&str] = &["json", "yaml", "yml", "toml"];
+const ALLOWED_EXTENSIONS: &[&str] = &["json", "yaml", "yml", "toml", "md"];
 
 /// Recursively walk `root` and return all agent metadata files with
 /// their inferred category.
@@ -157,7 +157,7 @@ mod tests {
     fn non_whitelisted_extension_excluded() {
         let tmp = TempDir::new().unwrap();
         fs::create_dir_all(tmp.path().join("custom")).unwrap();
-        fs::write(tmp.path().join("custom/readme.md"), "").unwrap();
+        fs::write(tmp.path().join("custom/readme.txt"), "").unwrap();
         fs::write(tmp.path().join("custom/agent.yaml"), "").unwrap();
 
         let results = walk_agents_dir(tmp.path()).unwrap();
