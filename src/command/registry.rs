@@ -1804,6 +1804,17 @@ pub(crate) fn default_registry() -> Registry {
         "connect",
         Arc::new(crate::command::connect::ConnectHandler),
     );
+    // TASK-#216 SLASH-PLUGIN: /plugin umbrella — list/info subcommands
+    // re-scan disk via the shared `load_plugins_from_default_dirs()`
+    // helper; enable/disable/install/reload subcommands emit hint
+    // TextDeltas (persistence layer is absent in archon-plugin and
+    // adding it is cross-cutting subsystem work — see
+    // `src/command/plugin_slash.rs` module rustdoc for the full
+    // reconciliation).
+    b.insert_primary(
+        "plugin",
+        Arc::new(crate::command::plugin_slash::PluginSlashHandler),
+    );
     // Aliases are collected from each handler's aliases() method
     // inside RegistryBuilder::build(). Collisions panic.
     b.build()
@@ -1852,7 +1863,10 @@ mod tests {
     ///
     /// TASK-#214 SLASH-CONNECT adds `/connect` as a new primary,
     /// bringing the total to 56.
-    const EXPECTED_COMMAND_COUNT: usize = 56;
+    ///
+    /// TASK-#216 SLASH-PLUGIN adds `/plugin` as a new primary,
+    /// bringing the total to 57.
+    const EXPECTED_COMMAND_COUNT: usize = 57;
 
     #[test]
     fn default_registry_contains_all_commands() {
