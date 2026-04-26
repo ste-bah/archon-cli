@@ -232,6 +232,8 @@ use crate::command::reload::ReloadHandler;
 // lists none. See `src/command/rename.rs` module rustdoc for the
 // full R1-R7 invariant list.
 use crate::command::rename::RenameHandler;
+// TASK-HOTFIX-V0.1.7: /run-agent primary (#248).
+use crate::command::run_agent::RunAgentHandler;
 // TASK-AGS-POST-6-BODIES-B18-RECALL: real /recall handler lives in
 // `crate::command::recall`. DIRECT-sync-via-MemoryTrait body-migrate —
 // `archon_memory::MemoryTrait::recall_memories(query, limit)` is a
@@ -1744,6 +1746,8 @@ pub(crate) fn default_registry() -> Registry {
     b.insert_primary("theme", Arc::new(ThemeHandler));
     b.insert_primary("recall", Arc::new(RecallHandler::new()));
     b.insert_primary("rules", Arc::new(RulesHandler::new()));
+    // TASK-HOTFIX-V0.1.7: /run-agent primary (#248).
+    b.insert_primary("run-agent", Arc::new(RunAgentHandler));
     // TASK-AGS-805: /cancel primary (aliases: stop, abort).
     b.insert_primary("cancel", Arc::new(CancelHandler::new()));
     // TASK-AGS-816: NEW /voice primary (gap-fix Q4=A, no aliases).
@@ -1902,8 +1906,9 @@ mod tests {
     /// bringing the total to 60.
     ///
     /// TASK-#209 SLASH-SUMMARY adds `/summary` as a new primary,
-    /// bringing the total to 61.
-    const EXPECTED_COMMAND_COUNT: usize = 61;
+    /// bringing the total to 61. TASK-HOTFIX-V0.1.7 adds `/run-agent`
+    /// as a new primary, bringing the total to 62.
+    const EXPECTED_COMMAND_COUNT: usize = 62;
 
     #[test]
     fn default_registry_contains_all_commands() {

@@ -1,10 +1,8 @@
-//! Body rendering — output area, input area, overlays.
-//!
-//! This is the core of the TUI draw pipeline.
+//! Body rendering — output area, input area, overlays (core TUI draw pipeline).
 
 use ratatui::{
     Frame,
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::Rect,
     style::{Color, Modifier, Style},
     text::Line,
     widgets::{
@@ -15,9 +13,10 @@ use ratatui::{
 
 use crate::app::{App, McpManagerView};
 use crate::markdown::render_markdown_line;
-use crate::output::{OutputBuffer, ThinkingState, ToolOutputState};
+use crate::output::OutputBuffer;
 use crate::splash;
-use crate::vim::VimState;
+
+use super::cursor::set_input_cursor;
 
 /// Render the output area (top section with scrollable content).
 pub fn draw_output_area(frame: &mut Frame, app: &App, area: Rect) {
@@ -156,6 +155,7 @@ pub fn draw_input_area(frame: &mut Frame, app: &App, area: Rect) {
     };
 
     frame.render_widget(input_widget, area);
+    set_input_cursor(frame, app, area);
 }
 
 /// Render the session name badge (right-aligned on input line).
@@ -173,7 +173,6 @@ pub fn draw_session_badge(frame: &mut Frame, app: &App, input_area: Rect) {
         Paragraph::new(badge).style(Style::default().fg(Color::Black).bg(Color::Cyan));
     frame.render_widget(badge_widget, badge_area);
 }
-
 /// Render the command suggestion popup (above the input line).
 pub fn draw_suggestions_popup(frame: &mut Frame, app: &App, input_area: Rect) {
     if !app.input.suggestions.active || app.is_generating {

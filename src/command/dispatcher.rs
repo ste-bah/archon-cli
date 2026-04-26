@@ -625,7 +625,7 @@ mod tests {
     /// Sequence: 49 → 50 (#206) → 51 (#215) → 52 (#210) → 53 (#211)
     /// → 54 (#212) → 55 (#213) → 56 (#214) → 57 (#216) → 58 (#217)
     /// → 59 (#207) → 60 (#208) → 61 (#209).
-    const EXPECTED_PRIMARY_COUNT: usize = 61;
+    const EXPECTED_PRIMARY_COUNT: usize = 62;
 
     /// Drain every currently-queued event from `rx` using `try_recv`
     /// until the channel reports empty, returning the drained events
