@@ -234,7 +234,10 @@ pub fn load_config(
 
 /// Log startup information about memory and prompt cache settings.
 pub fn log_startup_info(config: &archon_core::config::ArchonConfig, session_id: &str) {
-    tracing::info!("Archon CLI v0.1.0 started, session {session_id}");
+    tracing::info!(
+        "Archon CLI v{} started, session {session_id}",
+        env!("CARGO_PKG_VERSION")
+    );
     if config.memory.enabled {
         tracing::info!("memory.enabled=true: memory tools + graph injection ACTIVE");
     } else {

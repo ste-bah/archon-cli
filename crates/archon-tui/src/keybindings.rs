@@ -130,6 +130,10 @@ impl Default for KeyMap {
             Action::CyclePermissionMode,
         );
         bindings.insert(
+            KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT),
+            Action::CyclePermissionMode,
+        );
+        bindings.insert(
             KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
             Action::Escape,
         );
@@ -296,6 +300,16 @@ mod tests {
         let km = KeyMap::default();
         let backtab = KeyEvent::new(KeyCode::BackTab, KeyModifiers::NONE);
         assert_eq!(km.resolve(backtab), Some(&Action::CyclePermissionMode));
+    }
+
+    #[test]
+    fn shift_tab_with_shift_modifier_cycles_permission() {
+        let km = KeyMap::default();
+        let backtab_shift = KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT);
+        assert_eq!(
+            km.resolve(backtab_shift),
+            Some(&Action::CyclePermissionMode)
+        );
     }
 
     #[test]

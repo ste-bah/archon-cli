@@ -85,7 +85,10 @@ impl CommandHandler for ReleaseNotesHandler {
         // verbatim so both source-level `grep` equivalence and
         // compiled-string equivalence hold.
         ctx.emit(TuiEvent::TextDelta(
-            "\nArchon CLI v0.1.0 (Phase 3)\n\n\
+            concat!(
+                "\nArchon CLI v",
+                env!("CARGO_PKG_VERSION"),
+                " (Phase 3)\n\n\
          - 33 tasks implemented across 7 batches\n\
          - TUI with markdown rendering, syntax highlighting, vim mode\n\
          - MCP stdio + HTTP transports with lifecycle management\n\
@@ -96,7 +99,8 @@ impl CommandHandler for ReleaseNotesHandler {
          - Print mode (-p) for scripting\n\
          - /btw side questions with parallel API calls\n\n\
          Full changelog: https://github.com/archon-cli/archon/releases\n"
-                .to_string(),
+            )
+            .to_string(),
         ));
 
         Ok(())
@@ -118,7 +122,10 @@ mod tests {
     /// shipped string literal at slash.rs:451-461 using the same
     /// `\`-continuation idiom. `assert_eq!` against this constant
     /// proves the handler emits the shipped bytes without drift.
-    const EXPECTED_RELEASE_NOTES_BODY: &str = "\nArchon CLI v0.1.0 (Phase 3)\n\n\
+    const EXPECTED_RELEASE_NOTES_BODY: &str = concat!(
+        "\nArchon CLI v",
+        env!("CARGO_PKG_VERSION"),
+        " (Phase 3)\n\n\
          - 33 tasks implemented across 7 batches\n\
          - TUI with markdown rendering, syntax highlighting, vim mode\n\
          - MCP stdio + HTTP transports with lifecycle management\n\
@@ -128,7 +135,8 @@ mod tests {
          - Permission model with 6 modes\n\
          - Print mode (-p) for scripting\n\
          - /btw side questions with parallel API calls\n\n\
-         Full changelog: https://github.com/archon-cli/archon/releases\n";
+         Full changelog: https://github.com/archon-cli/archon/releases\n"
+    );
 
     /// Build a minimal CommandContext for /release-notes tests.
     /// /release-notes is pure emit-only — no new CommandContext field

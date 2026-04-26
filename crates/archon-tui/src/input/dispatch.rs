@@ -168,6 +168,9 @@ pub fn handle_key(app: &mut App, key: KeyEvent, keymap: &KeyMap) -> KeyResult {
             }
             KeyResult::SendInput(text)
         }
-        Action::SlashCommand(_) => KeyResult::Nothing,
+        Action::SlashCommand(_) => {
+            app.input.insert('/');
+            KeyResult::Nothing
+        }
     }
 }
