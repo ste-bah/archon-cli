@@ -418,16 +418,16 @@ async fn test_tc_06_sigwinch_reflow_no_frame_drop() {
     let handle = tokio::spawn(async move { archon_tui::run_event_loop(cfg).await });
 
     tui_event_tx
-        .send(archon_tui::app::TuiEvent::UserInput("stream".into()))
+        .send(archon_tui::events::TuiEvent::UserInput("stream".into()))
         .expect("send UserInput(stream)");
     tui_event_tx
-        .send(archon_tui::app::TuiEvent::Resize {
+        .send(archon_tui::events::TuiEvent::Resize {
             cols: 200,
             rows: 60,
         })
         .expect("send first Resize");
     tui_event_tx
-        .send(archon_tui::app::TuiEvent::Resize {
+        .send(archon_tui::events::TuiEvent::Resize {
             cols: 200,
             rows: 60,
         })
@@ -435,7 +435,7 @@ async fn test_tc_06_sigwinch_reflow_no_frame_drop() {
 
     sleep(Duration::from_millis(500)).await;
     tui_event_tx
-        .send(archon_tui::app::TuiEvent::Done)
+        .send(archon_tui::events::TuiEvent::Done)
         .expect("send Done");
     handle
         .await

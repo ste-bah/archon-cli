@@ -176,5 +176,15 @@ pub(super) async fn handle_tui_event(
         TuiEvent::Done => {
             app.should_quit = true;
         }
+        // TUI-330: NotificationTimeout was added to events::TuiEvent but
+        // never wired through the legacy app::TuiEvent duplicate. After
+        // TASK-#246 retired the duplicate (this commit), the match must
+        // cover it. The active notification overlay (if any) is dropped
+        // on timeout — same effect as Esc on the overlay path.
+        TuiEvent::NotificationTimeout(_ms) => {
+            // Notification overlays are owned by render::chrome; the
+            // event-loop side is a no-op (the timeout simply triggers a
+            // re-render which then sees the expiry and clears).
+        }
     }
 }

@@ -25,8 +25,17 @@ use crate::vim::VimState;
 // layer-0 reasoning as `McpServerEntry` / `SessionPickerEntry` —
 // external consumers (bin-crate command handlers, integration tests)
 // reach the enum via `archon_tui::app::ViewId`.
+// TASK-#246 SLASH-CLEANUP-DUAL-TUIEVENT (2026-04-26): `TuiEvent` was a
+// duplicate of `crate::events::TuiEvent` predating the events.rs
+// extraction (TUI-330). #207/#208 kept the duplication going by adding
+// `ShowFilePicker` + `ShowSearchResults` variants to BOTH enums, which
+// pushed app.rs past the 500-line TUI lint ceiling. This commit
+// retires `app::TuiEvent` — the path `archon_tui::app::TuiEvent` is
+// preserved for API stability via the `pub use` below so 50+ consumers
+// continue to import it unchanged. `events::TuiEvent` is the sole
+// canonical definition.
 pub use crate::events::{
-    FileEntry, McpServerEntry, MessageSummary, SessionPickerEntry, SkillEntry, ViewId,
+    FileEntry, McpServerEntry, MessageSummary, SessionPickerEntry, SkillEntry, TuiEvent, ViewId,
 };
 
 // REM-2d: Modal overlay state types relocated to sibling module
@@ -35,121 +44,9 @@ pub use crate::events::{
 // path is preserved via this re-export so downstream callers are untouched.
 pub use crate::app_modals::{McpManager, McpManagerView, SessionPicker, SplashConfig};
 
-/// Message from the agent loop to the TUI.
-#[derive(Debug, Clone)]
-pub enum TuiEvent {
-    TextDelta(String),
-    ThinkingDelta(String),
-    ToolStart {
-        name: String,
-        id: String,
-    },
-    ToolComplete {
-        name: String,
-        id: String,
-        success: bool,
-        output: String,
-    },
-    TurnComplete {
-        input_tokens: u64,
-        output_tokens: u64,
-    },
-    Error(String),
-    /// Sent by main.rs right before agent.process_message(). This is the ONLY
-    /// place is_generating should be set to true — at the point generation
-    /// actually starts, not at input submission time.
-    GenerationStarted,
-    /// Sent by main.rs after a slash command is handled. Resets is_generating
-    /// in case it was set by a prior event.
-    SlashCommandComplete,
-    /// Toggle thinking display on/off in the TUI.
-    ThinkingToggle(bool),
-    /// Update the model name shown in the status bar.
-    ModelChanged(String),
-    /// /btw side question response — show as overlay.
-    BtwResponse(String),
-    /// Permission prompt — agent wants to use a risky tool, needs y/n.
-    PermissionPrompt {
-        tool: String,
-        description: String,
-    },
-    /// Session was renamed — show name badge on input line.
-    SessionRenamed(String),
-    /// Permission mode changed — update status bar and permission indicator.
-    PermissionModeChanged(String),
-    /// Show interactive session picker for /resume.
-    ShowSessionPicker(Vec<SessionPickerEntry>),
-    /// Set the accent color on the active theme (used by /color).
-    SetAccentColor(ratatui::style::Color),
-    /// Replace the entire theme by name (used by /theme).
-    SetTheme(String),
-    /// Show MCP server manager overlay.
-    ShowMcpManager(Vec<McpServerEntry>),
-    /// Update MCP server manager with fresh state (after reconnect/disable).
-    UpdateMcpManager(Vec<McpServerEntry>),
-    /// TASK-TUI-620: open the message-selector overlay with a pre-computed
-    /// list of MessageSummary entries. The `/rewind` slash command builds
-    /// the list from session history and emits this event; the event-loop
-    /// arm sets `app.message_selector = Some(...)`. Follow-up ticket wires
-    /// input routing + render — for now the overlay is reachable but not
-    /// interactive.
-    ShowMessageSelector(Vec<MessageSummary>),
-    /// TASK-TUI-627: open the skills-menu overlay with a pre-computed
-    /// list of SkillEntry. Input/render routing deferred to TUI-627-followup.
-    ShowSkillsMenu(Vec<SkillEntry>),
-    /// TASK-#207 SLASH-FILES: open the file-picker overlay with a
-    /// pre-walked initial listing of `root` (the picker's
-    /// ascent-clamp anchor). The event-loop arm constructs
-    /// `FilePicker::new(root, entries)` and assigns to
-    /// `app.file_picker`. Input priority branch routes
-    /// Up/Down/Enter/Backspace/Esc; render dispatch in
-    /// `render/body.rs::draw_file_picker` draws it.
-    ShowFilePicker {
-        root: std::path::PathBuf,
-        entries: Vec<FileEntry>,
-    },
-    /// TASK-#208 SLASH-SEARCH: open the search-results overlay with
-    /// the user's query string + a list of matched paths.
-    ShowSearchResults {
-        query: String,
-        entries: Vec<FileEntry>,
-    },
-    /// TASK-AGS-822: open an overlay view identified by `ViewId`.
-    /// Emitted by the slash-command dispatcher in response to
-    /// view-opening commands (`/tasks`, `/settings`, `/context`,
-    /// `/memory`, `/model`, `/status`). Clustered with other
-    /// overlay-opening variants so future readers locate overlay
-    /// events in one place. `ViewId` is defined at layer 0
-    /// (`crate::events::ViewId`) and re-exported from this module.
-    OpenView(ViewId),
-    /// Enable or disable vim keybindings (from config at startup).
-    SetVimMode(bool),
-    /// Toggle vim keybindings on/off (used by /vim slash command).
-    VimToggle,
-    /// Transcribed voice text — inject into the input buffer.
-    VoiceText(String),
-    /// Set the active agent name and color in the status bar (AGT-015).
-    SetAgentInfo {
-        name: String,
-        color: Option<String>,
-    },
-    /// Terminal was resized — route through `crate::layout::handle_resize`
-    /// to record the new dimensions and mark the next frame dirty (TUI-105).
-    Resize {
-        cols: u16,
-        rows: u16,
-    },
-    /// User submitted a prompt via the input line. Consumed by
-    /// `run_event_loop` (TUI-106).
-    UserInput(String),
-    /// User pressed /cancel — the dispatcher should abort the in-flight
-    /// turn. Consumed by `run_event_loop` (TUI-106).
-    SlashCancel,
-    /// User ran /agent <id> — the dispatcher should switch the active
-    /// agent. Consumed by `run_event_loop` (TUI-106).
-    SlashAgent(String),
-    Done,
-}
+// `enum TuiEvent` was DELETED here as part of TASK-#246. The 115-line
+// duplicate is gone; consumers reach the canonical definition via
+// `crate::events::TuiEvent` (re-exported above).
 
 /// Callback type for sending user input to the agent loop.
 pub type InputSender = tokio::sync::mpsc::Sender<String>;

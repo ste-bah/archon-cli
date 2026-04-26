@@ -121,4 +121,168 @@ mod tests {
         assert_eq!(out.chars().count(), 10);
         assert!(out.ends_with('…'));
     }
+
+    // ─────────────────────────────────────────────────────────────────
+    // TASK-CI-PHASE4-REGRESSION-FIX Part 2: render-fn coverage tests.
+    //
+    // Drive `FilePicker::render` against a `TestBackend` to lift this
+    // file's line coverage from 32.93% over the 80% TUI threshold.
+    // Pattern mirrors `tests/render_coverage.rs::buffer_to_string`.
+    // ─────────────────────────────────────────────────────────────────
+
+    use crate::events::FileEntry;
+    use crate::screens::file_picker::FilePicker;
+    use crate::theme::intj_theme;
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+    use std::path::PathBuf;
+
+    /// Render a FilePicker overlay into a TestBackend and return the
+    /// flattened buffer string.
+    fn render_to_string(p: &FilePicker, w: u16, h: u16) -> String {
+        let backend = TestBackend::new(w, h);
+        let mut terminal = Terminal::new(backend).expect("TestBackend");
+        let theme = intj_theme();
+        terminal
+            .draw(|f| p.render(f, f.area(), &theme))
+            .expect("draw");
+        let buffer = terminal.backend().buffer().clone();
+        let area = buffer.area;
+        let mut s = String::with_capacity((area.width as usize + 1) * area.height as usize);
+        for y in 0..area.height {
+            for x in 0..area.width {
+                s.push_str(buffer[(x, y)].symbol());
+            }
+            s.push('\n');
+        }
+        s
+    }
+
+    fn entry(name: &str, is_dir: bool) -> FileEntry {
+        FileEntry {
+            name: name.to_string(),
+            path: PathBuf::from(format!("/proj/{name}")),
+            is_dir,
+        }
+    }
+
+    #[test]
+    fn render_empty_directory_shows_placeholder() {
+        let picker = FilePicker::new(PathBuf::from("/proj"), vec![]);
+        let body = render_to_string(&picker, 80, 24);
+        assert!(
+            body.contains("(empty directory)"),
+            "empty branch must render `(empty directory)` placeholder; got:\n{body}"
+        );
+        // Title bar should reference /files and the breadcrumb (`.` at root).
+        assert!(body.contains("/files"));
+    }
+
+    #[test]
+    fn render_single_file_shows_F_badge() {
+        let picker = FilePicker::new(PathBuf::from("/proj"), vec![entry("Cargo.toml", false)]);
+        let body = render_to_string(&picker, 100, 24);
+        assert!(body.contains("Cargo.toml"));
+        assert!(
+            body.contains("[F]"),
+            "regular file must show [F] badge; got:\n{body}"
+        );
+    }
+
+    #[test]
+    fn render_dir_entry_shows_D_badge() {
+        let picker = FilePicker::new(PathBuf::from("/proj"), vec![entry("src", true)]);
+        let body = render_to_string(&picker, 100, 24);
+        assert!(body.contains("src"));
+        assert!(
+            body.contains("[D]"),
+            "directory must show [D] badge; got:\n{body}"
+        );
+    }
+
+    #[test]
+    fn render_mixed_entries_shows_both_badges() {
+        let picker = FilePicker::new(
+            PathBuf::from("/proj"),
+            vec![
+                entry("src", true),
+                entry("tests", true),
+                entry("Cargo.toml", false),
+                entry("README.md", false),
+            ],
+        );
+        let body = render_to_string(&picker, 120, 24);
+        assert!(body.contains("[D]"));
+        assert!(body.contains("[F]"));
+        assert!(body.contains("src"));
+        assert!(body.contains("tests"));
+        assert!(body.contains("Cargo.toml"));
+        assert!(body.contains("README.md"));
+    }
+
+    #[test]
+    fn render_with_selection_at_middle() {
+        let entries: Vec<FileEntry> = (0..5).map(|i| entry(&format!("f{i}.rs"), false)).collect();
+        let mut picker = FilePicker::new(PathBuf::from("/proj"), entries);
+        picker.selected_index = 2;
+        let body = render_to_string(&picker, 100, 24);
+        for i in 0..5 {
+            assert!(body.contains(&format!("f{i}.rs")), "row {i} missing");
+        }
+    }
+
+    #[test]
+    fn render_scrolls_to_keep_selection_visible() {
+        // 50 entries in a small overlay forces the visible-slice scroll
+        // path. Selection near end must stay on-screen; early entries
+        // must scroll off.
+        let entries: Vec<FileEntry> = (0..50)
+            .map(|i| entry(&format!("file{i:02}.rs"), false))
+            .collect();
+        let mut picker = FilePicker::new(PathBuf::from("/proj"), entries);
+        picker.selected_index = 40;
+        let body = render_to_string(&picker, 80, 14);
+        assert!(
+            body.contains("file40.rs"),
+            "selected entry must be on-screen; got:\n{body}"
+        );
+        assert!(
+            !body.contains("file00.rs"),
+            "early entries must scroll off-screen; got:\n{body}"
+        );
+    }
+
+    #[test]
+    fn render_breadcrumb_reflects_subdir() {
+        // After descending into a subdir, breadcrumb shows `./<rel>`
+        // in the title bar. We can't actually descend without a real
+        // filesystem (would call walker::read_dir_entries), so simulate
+        // by constructing the picker state directly.
+        let mut picker = FilePicker::new(PathBuf::from("/proj"), vec![entry("inner.rs", false)]);
+        picker.current_dir = PathBuf::from("/proj/src/sub");
+        let body = render_to_string(&picker, 120, 24);
+        assert!(
+            body.contains("./src/sub"),
+            "breadcrumb must show relative subdir path; got:\n{body}"
+        );
+    }
+
+    #[test]
+    fn render_long_filename_truncated_with_ellipsis() {
+        // Filenames > 64 chars get char-aware truncation with `…`.
+        let long_name = "a".repeat(80);
+        let picker = FilePicker::new(PathBuf::from("/proj"), vec![entry(&long_name, false)]);
+        let body = render_to_string(&picker, 100, 24);
+        assert!(
+            body.contains('…'),
+            "long filename must include ellipsis on truncation; got:\n{body}"
+        );
+    }
+
+    #[test]
+    fn render_small_terminal_does_not_panic() {
+        let picker = FilePicker::new(PathBuf::from("/proj"), vec![entry("x.rs", false)]);
+        let body = render_to_string(&picker, 30, 8);
+        assert!(!body.is_empty());
+    }
 }
