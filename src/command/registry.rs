@@ -1776,6 +1776,13 @@ pub(crate) fn default_registry() -> Registry {
         "agent",
         Arc::new(crate::command::agent_slash::AgentHandler),
     );
+    // TASK-#212 SLASH-MANAGED-AGENTS: /managed-agents remote-registry
+    // status + how-to. Pure status command — no async fetch (deferred
+    // to a follow-up; see managed_agents.rs module rustdoc).
+    b.insert_primary(
+        "managed-agents",
+        Arc::new(crate::command::managed_agents::ManagedAgentsHandler),
+    );
     // Aliases are collected from each handler's aliases() method
     // inside RegistryBuilder::build(). Collisions panic.
     b.build()
@@ -1815,7 +1822,10 @@ mod tests {
     ///
     /// TASK-#211 SLASH-AGENT adds `/agent` as a new primary, bringing
     /// the total to 53.
-    const EXPECTED_COMMAND_COUNT: usize = 53;
+    ///
+    /// TASK-#212 SLASH-MANAGED-AGENTS adds `/managed-agents` as a new
+    /// primary, bringing the total to 54.
+    const EXPECTED_COMMAND_COUNT: usize = 54;
 
     #[test]
     fn default_registry_contains_all_commands() {

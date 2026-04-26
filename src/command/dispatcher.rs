@@ -622,8 +622,9 @@ mod tests {
     /// regression where #206/#215/#210 each bumped the registry-side
     /// constant without updating this dispatcher mirror.
     ///
-    /// Sequence: 49 → 50 (#206) → 51 (#215) → 52 (#210) → 53 (#211).
-    const EXPECTED_PRIMARY_COUNT: usize = 53;
+    /// Sequence: 49 → 50 (#206) → 51 (#215) → 52 (#210) → 53 (#211)
+    /// → 54 (#212).
+    const EXPECTED_PRIMARY_COUNT: usize = 54;
 
     /// Drain every currently-queued event from `rx` using `try_recv`
     /// until the channel reports empty, returning the drained events
