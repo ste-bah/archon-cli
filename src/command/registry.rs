@@ -909,8 +909,7 @@ pub(crate) struct CommandContext {
     /// `SlashCommandContext`; in those tests `/agent` returns an
     /// Err-with-message describing the missing-registry condition
     /// rather than panicking.
-    pub(crate) agent_registry:
-        Option<Arc<std::sync::RwLock<archon_core::agents::AgentRegistry>>>,
+    pub(crate) agent_registry: Option<Arc<std::sync::RwLock<archon_core::agents::AgentRegistry>>>,
     /// TASK-AGS-808 effect-slot field (WRITE side of /model and future
     /// write-tickets).
     ///
@@ -1772,10 +1771,7 @@ pub(crate) fn default_registry() -> Registry {
     // TASK-#211 SLASH-AGENT: /agent umbrella (list/info/run subcommands).
     // Reads the new agent_registry field on CommandContext (DIRECT
     // pattern; populated unconditionally from SlashCommandContext).
-    b.insert_primary(
-        "agent",
-        Arc::new(crate::command::agent_slash::AgentHandler),
-    );
+    b.insert_primary("agent", Arc::new(crate::command::agent_slash::AgentHandler));
     // TASK-#212 SLASH-MANAGED-AGENTS: /managed-agents remote-registry
     // status + how-to. Pure status command — no async fetch (deferred
     // to a follow-up; see managed_agents.rs module rustdoc).
@@ -1787,10 +1783,7 @@ pub(crate) fn default_registry() -> Registry {
     // from disk (sync RwLock::write() + AgentRegistry::reload). Skill
     // refresh is deferred (no Mutex wrapper on the skill registry);
     // WASM plugin hot-reload is deferred to #217.
-    b.insert_primary(
-        "refresh",
-        Arc::new(crate::command::refresh::RefreshHandler),
-    );
+    b.insert_primary("refresh", Arc::new(crate::command::refresh::RefreshHandler));
     // TASK-#214 SLASH-CONNECT: /connect — list configured MCP servers
     // + emit connect-hint TextDelta. Dynamic in-session connect
     // (wrapping `McpServerManager::enable_server`) is DEFERRED — the
@@ -1800,10 +1793,7 @@ pub(crate) fn default_registry() -> Registry {
     // session-wide LocalSet — both cross-cutting and out of scope. NO
     // `CommandEffect` variant added; see `src/command/connect.rs`
     // module rustdoc for the full reconciliation.
-    b.insert_primary(
-        "connect",
-        Arc::new(crate::command::connect::ConnectHandler),
-    );
+    b.insert_primary("connect", Arc::new(crate::command::connect::ConnectHandler));
     // TASK-#216 SLASH-PLUGIN: /plugin umbrella — list/info subcommands
     // re-scan disk via the shared `load_plugins_from_default_dirs()`
     // helper; enable/disable/install/reload subcommands emit hint
@@ -1849,10 +1839,7 @@ pub(crate) fn default_registry() -> Registry {
     // `usage_snapshot` field; the snapshot-population arm in
     // src/command/context.rs is widened to fire on
     // primary == "summary" alongside "usage" and "extra-usage".
-    b.insert_primary(
-        "summary",
-        Arc::new(crate::command::summary::SummaryHandler),
-    );
+    b.insert_primary("summary", Arc::new(crate::command::summary::SummaryHandler));
     // Aliases are collected from each handler's aliases() method
     // inside RegistryBuilder::build(). Collisions panic.
     b.build()

@@ -181,8 +181,10 @@ mod tests {
 
     #[test]
     fn select_next_wraps() {
-        let mut p =
-            FilePicker::new(PathBuf::from("/tmp"), vec![entry("a", false), entry("b", false)]);
+        let mut p = FilePicker::new(
+            PathBuf::from("/tmp"),
+            vec![entry("a", false), entry("b", false)],
+        );
         p.select_next();
         assert_eq!(p.selected_index, 1);
         p.select_next();
@@ -191,8 +193,10 @@ mod tests {
 
     #[test]
     fn select_prev_wraps_at_start() {
-        let mut p =
-            FilePicker::new(PathBuf::from("/tmp"), vec![entry("a", false), entry("b", false)]);
+        let mut p = FilePicker::new(
+            PathBuf::from("/tmp"),
+            vec![entry("a", false), entry("b", false)],
+        );
         p.select_prev();
         assert_eq!(p.selected_index, 1);
     }
@@ -210,17 +214,13 @@ mod tests {
 
     #[test]
     fn descend_into_file_is_noop() {
-        let mut p = FilePicker::new(
-            PathBuf::from("/tmp"),
-            vec![entry("a-file", false)],
-        );
+        let mut p = FilePicker::new(PathBuf::from("/tmp"), vec![entry("a-file", false)]);
         assert!(!p.descend());
     }
 
     #[test]
     fn ascend_at_root_is_noop() {
-        let mut p =
-            FilePicker::new(PathBuf::from("/tmp"), vec![entry("a", false)]);
+        let mut p = FilePicker::new(PathBuf::from("/tmp"), vec![entry("a", false)]);
         assert!(!p.ascend());
     }
 
@@ -264,8 +264,7 @@ mod tests {
 
     #[test]
     fn breadcrumb_subdir_is_relative() {
-        let mut p =
-            FilePicker::new(PathBuf::from("/tmp/myproject"), vec![]);
+        let mut p = FilePicker::new(PathBuf::from("/tmp/myproject"), vec![]);
         p.current_dir = PathBuf::from("/tmp/myproject/src/foo");
         let crumb = p.breadcrumb();
         assert!(

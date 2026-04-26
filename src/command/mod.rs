@@ -67,11 +67,11 @@ pub(crate) mod plugin_slash;
 // TASK-#210 SLASH-PROVIDERS: /providers list registered LLM providers.
 pub(crate) mod providers;
 // TASK-#217 SLASH-RELOAD-PLUGINS: /reload-plugins disk re-scan.
-pub(crate) mod reload_plugins;
 pub(crate) mod recall;
 pub(crate) mod registry;
 pub(crate) mod release_notes;
 pub(crate) mod reload;
+pub(crate) mod reload_plugins;
 // TASK-#213 SLASH-REFRESH: /refresh re-scan agent registry from disk.
 pub(crate) mod refresh;
 pub(crate) mod remote;

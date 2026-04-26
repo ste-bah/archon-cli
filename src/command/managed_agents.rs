@@ -124,9 +124,7 @@ fn render_status(registry_url: Option<&str>) -> String {
            wrapper-scope ticket cannot ship it without crossing into\n  \
            subsystem refactor territory.\n",
     );
-    out.push_str(
-        "  • Use `/agent list` for agents already loaded in this session.\n",
-    );
+    out.push_str("  • Use `/agent list` for agents already loaded in this session.\n");
 
     out
 }

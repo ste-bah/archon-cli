@@ -351,8 +351,7 @@ pub(super) async fn handle_key_event(
                     KeyCode::Enter => {
                         if let Some(sr) = app.search_results.take() {
                             if let Some(file) = sr.selected() {
-                                app.input
-                                    .set_text(&format!("@{} ", file.path.display()));
+                                app.input.set_text(&format!("@{} ", file.path.display()));
                             }
                         }
                         return;
@@ -401,8 +400,7 @@ pub(super) async fn handle_key_event(
                             // drop the picker.
                             if let Some(picker) = app.file_picker.take() {
                                 if let Some(file) = picker.selected() {
-                                    app.input
-                                        .set_text(&format!("@{} ", file.path.display()));
+                                    app.input.set_text(&format!("@{} ", file.path.display()));
                                 }
                             }
                         }

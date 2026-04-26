@@ -290,10 +290,7 @@ mod tests {
             other => panic!("expected ShowSearchResults, got {:?}", other),
         }
         // Verify the searcher saw the right inputs.
-        assert_eq!(
-            mock.captured_query.lock().unwrap().clone().unwrap(),
-            "foo"
-        );
+        assert_eq!(mock.captured_query.lock().unwrap().clone().unwrap(), "foo");
         assert_eq!(
             mock.captured_root.lock().unwrap().clone().unwrap(),
             PathBuf::from("/tmp/proj")
@@ -336,7 +333,9 @@ mod tests {
         let (mut ctx, mut rx) = CtxBuilder::new()
             .with_working_dir(PathBuf::from("/tmp"))
             .build();
-        handler.execute(&mut ctx, &[String::from("nomatch")]).unwrap();
+        handler
+            .execute(&mut ctx, &[String::from("nomatch")])
+            .unwrap();
         let events = drain_tui_events(&mut rx);
         assert_eq!(events.len(), 1);
         match &events[0] {

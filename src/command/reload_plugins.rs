@@ -174,9 +174,7 @@ mod tests {
         // matches the `#[error("plugin load failed: {0}")]` attr).
         let errors = vec![(
             "broken-plugin".to_string(),
-            archon_plugin::PluginError::LoadFailed(
-                "missing required field: name".to_string(),
-            ),
+            archon_plugin::PluginError::LoadFailed("missing required field: name".to_string()),
         )];
         let body = render_summary(2, 1, 1, &errors);
         assert!(body.contains("Total found: 4"));

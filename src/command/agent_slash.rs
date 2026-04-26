@@ -89,10 +89,7 @@ fn render_list(registry: &RwLock<AgentRegistry>) -> String {
 
     let mut out = String::with_capacity(2048);
     out.push('\n');
-    out.push_str(&format!(
-        "Available agents ({} total)\n",
-        entries.len()
-    ));
+    out.push_str(&format!("Available agents ({} total)\n", entries.len()));
     out.push_str(&format!(
         "  {:<name$}  {:<source$}  description\n",
         "name",
@@ -318,8 +315,7 @@ mod tests {
     fn list_subcommand_emits_total_count_header() {
         // Use empty registry — confirms 0-agent rendering.
         let handler = AgentHandler;
-        let (mut ctx, mut rx) =
-            make_agent_ctx(Some(fixture_agent_registry()));
+        let (mut ctx, mut rx) = make_agent_ctx(Some(fixture_agent_registry()));
         handler.execute(&mut ctx, &[]).unwrap();
         let body = take_text_delta(&mut rx);
         assert!(
@@ -333,18 +329,19 @@ mod tests {
     #[test]
     fn list_explicit_keyword_matches_default() {
         let handler = AgentHandler;
-        let (mut ctx, mut rx) =
-            make_agent_ctx(Some(fixture_agent_registry()));
+        let (mut ctx, mut rx) = make_agent_ctx(Some(fixture_agent_registry()));
         handler.execute(&mut ctx, &[String::from("list")]).unwrap();
         let body = take_text_delta(&mut rx);
-        assert!(body.contains("Available agents"), "list keyword path failed");
+        assert!(
+            body.contains("Available agents"),
+            "list keyword path failed"
+        );
     }
 
     #[test]
     fn info_unknown_agent_returns_friendly_message() {
         let handler = AgentHandler;
-        let (mut ctx, mut rx) =
-            make_agent_ctx(Some(fixture_agent_registry()));
+        let (mut ctx, mut rx) = make_agent_ctx(Some(fixture_agent_registry()));
         handler
             .execute(&mut ctx, &[String::from("info"), String::from("ghost")])
             .unwrap();
@@ -359,8 +356,7 @@ mod tests {
     #[test]
     fn info_without_name_emits_usage() {
         let handler = AgentHandler;
-        let (mut ctx, mut rx) =
-            make_agent_ctx(Some(fixture_agent_registry()));
+        let (mut ctx, mut rx) = make_agent_ctx(Some(fixture_agent_registry()));
         handler.execute(&mut ctx, &[String::from("info")]).unwrap();
         let body = take_text_delta(&mut rx);
         assert!(
@@ -374,8 +370,7 @@ mod tests {
     #[test]
     fn run_subcommand_delegates_to_run_agent_skill() {
         let handler = AgentHandler;
-        let (mut ctx, mut rx) =
-            make_agent_ctx(Some(fixture_agent_registry()));
+        let (mut ctx, mut rx) = make_agent_ctx(Some(fixture_agent_registry()));
         handler
             .execute(
                 &mut ctx,
@@ -396,8 +391,7 @@ mod tests {
     #[test]
     fn unknown_subcommand_emits_usage() {
         let handler = AgentHandler;
-        let (mut ctx, mut rx) =
-            make_agent_ctx(Some(fixture_agent_registry()));
+        let (mut ctx, mut rx) = make_agent_ctx(Some(fixture_agent_registry()));
         handler
             .execute(&mut ctx, &[String::from("frobnicate")])
             .unwrap();
@@ -438,16 +432,13 @@ mod tests {
         let handler = registry
             .get("agent")
             .expect("agent must be registered in default_registry()");
-        let (mut ctx, mut rx) =
-            make_agent_ctx(Some(fixture_agent_registry()));
+        let (mut ctx, mut rx) = make_agent_ctx(Some(fixture_agent_registry()));
         handler.execute(&mut ctx, &[]).unwrap();
         let body = take_text_delta(&mut rx);
         assert!(body.contains("Available agents"));
     }
 
-    fn take_text_delta(
-        rx: &mut tokio::sync::mpsc::UnboundedReceiver<TuiEvent>,
-    ) -> String {
+    fn take_text_delta(rx: &mut tokio::sync::mpsc::UnboundedReceiver<TuiEvent>) -> String {
         let events = drain_tui_events(rx);
         assert_eq!(events.len(), 1, "expected one TextDelta; got {:?}", events);
         match events.into_iter().next().unwrap() {

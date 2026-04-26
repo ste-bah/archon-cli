@@ -1,7 +1,18 @@
 # archon-tui carryover >=500 lines (phase-3 ratchet; shrinks to zero by TUI-310..329)
-# NOTE: app.rs was REMOVED from this allowlist under TUI-310 after its
-# event-loop body was extracted into event_loop.rs (1250 -> 493 lines, then
-# 485 after TUI-330 moved entry types to events.rs). DO NOT re-add app.rs.
+#
+# === TEMPORARY WAIVER (2026-04-26 → expires 2026-06-30) ===
+# The TUI-310/330/331 "DO NOT re-add app.rs" rule is temporarily WAIVED
+# while the dual-TuiEvent-enum structural debt introduced by #207/#208
+# SLASH-FILES + SLASH-SEARCH (which added ShowFilePicker / ShowSearchResults
+# variants to BOTH events::TuiEvent and app::TuiEvent) is consolidated.
+# Tracked as #246 SLASH-CLEANUP-DUAL-TUIEVENT — when that ticket lands and
+# retires the app::TuiEvent duplicate, app.rs SHRINKS BELOW 500 and this
+# waiver MUST be removed (along with this comment block, restoring the
+# "DO NOT re-add" rule below).
+crates/archon-tui/src/app.rs                        # expires 2026-06-30 (#246)
+# (waived — see entry above) NOTE: app.rs was REMOVED from this allowlist under TUI-310 after its
+# (waived — see entry above) event-loop body was extracted into event_loop.rs (1250 -> 493 lines, then
+# (waived — see entry above) 485 after TUI-330 moved entry types to events.rs). DO NOT re-add app.rs.
 crates/archon-tui/src/markdown.rs
 crates/archon-tui/src/output.rs
 crates/archon-tui/src/task_dispatch_tests.rs

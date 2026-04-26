@@ -72,11 +72,7 @@ impl CommandHandler for ExtraUsageHandler {
             )
         })?;
 
-        let session_id_line = ctx
-            .session_id
-            .as_deref()
-            .unwrap_or("(none)")
-            .to_string();
+        let session_id_line = ctx.session_id.as_deref().unwrap_or("(none)").to_string();
 
         let total_tokens = snap.input_tokens.saturating_add(snap.output_tokens);
 
@@ -204,14 +200,7 @@ mod tests {
             other => panic!("expected TextDelta, got {:?}", other),
         };
 
-        for header in [
-            "SESSION",
-            "TOKENS",
-            "COSTS",
-            "CACHE",
-            "EFFICIENCY",
-            "NOTES",
-        ] {
+        for header in ["SESSION", "TOKENS", "COSTS", "CACHE", "EFFICIENCY", "NOTES"] {
             assert!(
                 body.contains(header),
                 "rendered output missing section header `{}`; full body:\n{}",
@@ -311,14 +300,7 @@ mod tests {
             TuiEvent::TextDelta(s) => s.clone(),
             other => panic!("expected TextDelta, got {:?}", other),
         };
-        for header in [
-            "SESSION",
-            "TOKENS",
-            "COSTS",
-            "CACHE",
-            "EFFICIENCY",
-            "NOTES",
-        ] {
+        for header in ["SESSION", "TOKENS", "COSTS", "CACHE", "EFFICIENCY", "NOTES"] {
             assert!(
                 body.contains(header),
                 "registry-dispatched output missing section header `{}`",

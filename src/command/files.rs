@@ -177,8 +177,7 @@ mod tests {
     #[test]
     fn execute_with_working_dir_emits_show_file_picker() {
         let entries = vec![entry("src", true), entry("Cargo.toml", false)];
-        let handler =
-            FilesHandler::with_walker(Arc::new(MockDirWalker::ok(entries.clone())));
+        let handler = FilesHandler::with_walker(Arc::new(MockDirWalker::ok(entries.clone())));
         let (mut ctx, mut rx) = CtxBuilder::new()
             .with_working_dir(PathBuf::from("/tmp/myproject"))
             .build();

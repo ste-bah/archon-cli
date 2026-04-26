@@ -48,8 +48,7 @@ impl FilePicker {
         let end = (start + body_rows).min(total);
 
         let items: Vec<ListItem<'_>> = if self.entries.is_empty() {
-            vec![ListItem::new(" (empty directory) ")
-                .style(Style::default().fg(theme.fg))]
+            vec![ListItem::new(" (empty directory) ").style(Style::default().fg(theme.fg))]
         } else {
             self.entries[start..end]
                 .iter()

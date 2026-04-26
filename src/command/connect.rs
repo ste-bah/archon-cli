@@ -100,9 +100,7 @@ impl CommandHandler for ConnectHandler {
 /// Render the no-args list view from the supplied `mcp_snapshot`.
 /// Pulled out so unit tests can exercise both populated and `None`
 /// branches without standing up a full builder.
-fn render_list(
-    snapshot: Option<&crate::command::mcp::McpSnapshot>,
-) -> String {
+fn render_list(snapshot: Option<&crate::command::mcp::McpSnapshot>) -> String {
     let mut out = String::with_capacity(512);
     out.push('\n');
     out.push_str("/connect — Configured MCP servers\n");
@@ -124,14 +122,8 @@ fn render_list(
             );
         }
         Some(snap) => {
-            out.push_str(&format!(
-                "Servers ({} total):\n",
-                snap.entries.len()
-            ));
-            out.push_str(&format!(
-                "  {:<24}  {:<10}  tools\n",
-                "name", "state"
-            ));
+            out.push_str(&format!("Servers ({} total):\n", snap.entries.len()));
+            out.push_str(&format!("  {:<24}  {:<10}  tools\n", "name", "state"));
             out.push_str(&format!(
                 "  {}  {}  -----\n",
                 "-".repeat(24),

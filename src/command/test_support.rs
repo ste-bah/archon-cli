@@ -669,9 +669,7 @@ pub(crate) fn fixture_usage_snapshot() -> crate::command::usage::UsageSnapshot {
 pub(crate) fn make_agent_ctx(
     registry: Option<Arc<std::sync::RwLock<archon_core::agents::AgentRegistry>>>,
 ) -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
-    CtxBuilder::new()
-        .with_agent_registry_opt(registry)
-        .build()
+    CtxBuilder::new().with_agent_registry_opt(registry).build()
 }
 
 /// Build a CommandContext for UsageHandler tests.

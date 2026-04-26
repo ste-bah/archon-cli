@@ -96,8 +96,10 @@ impl SearchResults {
         let end = (start + body_rows).min(total);
 
         let items: Vec<ListItem<'_>> = if self.entries.is_empty() {
-            vec![ListItem::new(format!(" no matches for `{}` ", self.query))
-                .style(Style::default().fg(theme.fg))]
+            vec![
+                ListItem::new(format!(" no matches for `{}` ", self.query))
+                    .style(Style::default().fg(theme.fg)),
+            ]
         } else {
             self.entries[start..end]
                 .iter()
@@ -185,8 +187,7 @@ fn build_highlighted_spans(
     // path for ASCII; for Unicode the `to_lowercase()` byte length
     // can differ. To stay safe, recompute the match boundary by
     // walking the original path's char-byte indices.
-    let (before, match_segment, after) =
-        split_at_case_insensitive(path, query, match_byte_idx);
+    let (before, match_segment, after) = split_at_case_insensitive(path, query, match_byte_idx);
 
     if !before.is_empty() {
         out.push(Span::styled(before.to_string(), row_style));
@@ -274,18 +275,14 @@ mod tests {
 
     #[test]
     fn new_starts_at_zero() {
-        let r = SearchResults::new(
-            "foo".into(),
-            vec![entry("foo.txt"), entry("foobar.rs")],
-        );
+        let r = SearchResults::new("foo".into(), vec![entry("foo.txt"), entry("foobar.rs")]);
         assert_eq!(r.selected_index, 0);
         assert_eq!(r.query, "foo");
     }
 
     #[test]
     fn select_next_wraps() {
-        let mut r =
-            SearchResults::new("x".into(), vec![entry("a"), entry("b")]);
+        let mut r = SearchResults::new("x".into(), vec![entry("a"), entry("b")]);
         r.select_next();
         assert_eq!(r.selected_index, 1);
         r.select_next();
@@ -294,8 +291,7 @@ mod tests {
 
     #[test]
     fn select_prev_wraps_at_start() {
-        let mut r =
-            SearchResults::new("x".into(), vec![entry("a"), entry("b")]);
+        let mut r = SearchResults::new("x".into(), vec![entry("a"), entry("b")]);
         r.select_prev();
         assert_eq!(r.selected_index, 1);
     }

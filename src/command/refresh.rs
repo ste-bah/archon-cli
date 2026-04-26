@@ -163,9 +163,7 @@ mod tests {
         let registry = std::sync::Arc::new(std::sync::RwLock::new(
             archon_core::agents::AgentRegistry::empty(),
         ));
-        let (mut ctx, _rx) = CtxBuilder::new()
-            .with_agent_registry(registry)
-            .build();
+        let (mut ctx, _rx) = CtxBuilder::new().with_agent_registry(registry).build();
         let result = handler.execute(&mut ctx, &[]);
         assert!(result.is_err());
         let msg = format!("{:#}", result.unwrap_err()).to_lowercase();

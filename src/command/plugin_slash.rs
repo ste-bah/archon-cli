@@ -186,11 +186,7 @@ fn render_info(name: &str) -> String {
 
     match plugin {
         Some(p) => {
-            let status = if result
-                .disabled
-                .iter()
-                .any(|d| d.manifest.name == name)
-            {
+            let status = if result.disabled.iter().any(|d| d.manifest.name == name) {
                 "disabled"
             } else {
                 "enabled"

@@ -257,18 +257,12 @@ mod tests {
         let body = render();
         let row_count = body
             .lines()
-            .filter(|l| {
-                l.starts_with("  ")
-                    && !l.starts_with("  -")
-                    && !l.starts_with("  id ")
-            })
+            .filter(|l| l.starts_with("  ") && !l.starts_with("  -") && !l.starts_with("  id "))
             .count();
         assert_eq!(
-            row_count,
-            40,
+            row_count, 40,
             "expected exactly 40 provider rows; got {}; body:\n{}",
-            row_count,
-            body
+            row_count, body
         );
     }
 
