@@ -1791,6 +1791,19 @@ pub(crate) fn default_registry() -> Registry {
         "refresh",
         Arc::new(crate::command::refresh::RefreshHandler),
     );
+    // TASK-#214 SLASH-CONNECT: /connect — list configured MCP servers
+    // + emit connect-hint TextDelta. Dynamic in-session connect
+    // (wrapping `McpServerManager::enable_server`) is DEFERRED — the
+    // upstream `lifecycle::connect_server` future is genuinely !Send
+    // (rmcp/tungstenite path), and wrapping it from a `Future + Send +
+    // 'a` apply_effect path needs either an upstream Send-cleanup or a
+    // session-wide LocalSet — both cross-cutting and out of scope. NO
+    // `CommandEffect` variant added; see `src/command/connect.rs`
+    // module rustdoc for the full reconciliation.
+    b.insert_primary(
+        "connect",
+        Arc::new(crate::command::connect::ConnectHandler),
+    );
     // Aliases are collected from each handler's aliases() method
     // inside RegistryBuilder::build(). Collisions panic.
     b.build()
@@ -1836,7 +1849,10 @@ mod tests {
     ///
     /// TASK-#213 SLASH-REFRESH adds `/refresh` as a new primary,
     /// bringing the total to 55.
-    const EXPECTED_COMMAND_COUNT: usize = 55;
+    ///
+    /// TASK-#214 SLASH-CONNECT adds `/connect` as a new primary,
+    /// bringing the total to 56.
+    const EXPECTED_COMMAND_COUNT: usize = 56;
 
     #[test]
     fn default_registry_contains_all_commands() {

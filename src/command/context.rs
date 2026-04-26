@@ -218,8 +218,14 @@ pub(crate) fn build_command_context<'a>(
                 // `usage` remains a separate primary (UsageHandler).
                 ctx.cost_snapshot = Some(cost::build_cost_snapshot(slash_ctx).await);
             }
-            Some("mcp") => {
+            Some("mcp") | Some("connect") => {
                 // TASK-AGS-811 snapshot population. /mcp is read-only, so
+                // TASK-#214 SLASH-CONNECT widens the arm: /connect (no
+                // args) renders the same server list, so it consumes the
+                // same async-built snapshot. The /connect WRITE path
+                // (with name arg) doesn't strictly need the snapshot,
+                // but populating it unconditionally keeps the gate
+                // simple and preserves the no-args list view.
                 // there is no paired `apply_effect` branch. No aliases —
                 // the shipped stub at registry.rs had none and the spec
                 // lists none. The builder awaits

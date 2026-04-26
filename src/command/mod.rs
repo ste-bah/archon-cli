@@ -22,6 +22,8 @@ pub(crate) mod color;
 pub(crate) mod commit;
 pub(crate) mod compact;
 pub(crate) mod config;
+// TASK-#214 SLASH-CONNECT: /connect dynamic MCP server connect.
+pub(crate) mod connect;
 pub(crate) mod context;
 pub(crate) mod context_cmd;
 pub(crate) mod copy;
