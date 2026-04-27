@@ -59,6 +59,7 @@ A privacy-first, self-aware AI coding assistant written in Rust. Archon replaces
 - [Learning Systems](#learning-systems)
 - [Crate Architecture](#crate-architecture)
 - [Phase Roadmap](#phase-roadmap)
+- [Release Notes (v0.1.6 → v0.1.13)](#release-notes-v016--v0113)
 - [License](#license)
 
 ---
@@ -77,10 +78,10 @@ A privacy-first, self-aware AI coding assistant written in Rust. Archon replaces
 | Personality persistence | None | Full cross-session snapshot (InnerVoice + rule scores + trends) |
 | Self-reflection | None | InnerVoice (confidence, energy, struggles, successes) |
 | Behavioral rules | ARCHON.md only | Scored rules (0-100) with decay, reinforcement, trend tracking |
-| TUI | Basic | Full ratatui TUI with 22 themes |
+| TUI | Basic | Full ratatui TUI with 23 themes |
 | Session resume | ID only | ID prefix, name, or name prefix |
 | Tool execution | Node.js | Native Rust async |
-| Binary size | ~200 MB | ~55 MB (release, stripped) |
+| Binary size | ~200 MB | ~66 MB (release, v0.1.13) |
 | MCP transports | stdio | stdio, WebSocket, streamable-HTTP |
 | Plugins | No | Dynamic .so/.dll/.dylib, trait-based ABI |
 | Multi-agent teams | Single agent | Sequential, Parallel, Pipeline, DAG modes |
@@ -383,7 +384,7 @@ max_files = 50
 max_file_size_mb = 10
 
 [cost]
-warn_threshold = 100.0                # Warn when session cost exceeds $N
+warn_threshold = 30.0                 # Warn when session cost exceeds $N (default 30)
 hard_limit = 0.0                      # 0.0 = no hard limit
 
 [ws_remote]
@@ -489,268 +490,362 @@ On first startup, Archon sends a cheap probe request (Haiku, 1 token) to validat
 
 ## CLI Reference
 
+Run `archon --help` for the live, authoritative listing. Every entry below is verified against `src/cli_args.rs` at v0.1.13.
+
 ### Subcommands
 
-| Subcommand | Description |
-|------------|-------------|
+| Subcommand | Synopsis |
+|------------|----------|
 | `archon` | Start interactive TUI (default) |
-| `archon login` | OAuth PKCE login flow |
-| `archon logout` | Sign out |
-| `archon serve [--port N] [--token-path P]` | Start WebSocket server for remote access |
-| `archon remote ws <url> [--token T]` | Connect to remote agent via WebSocket |
-| `archon remote ssh <target>` | Connect to remote agent via SSH |
-| `archon web [--port N] [--bind-address A] [--no-open]` | Start web UI server |
-| `archon team run --team NAME <goal>` | Execute a multi-agent team |
+| `archon login` | Authenticate with Anthropic via OAuth PKCE flow |
+| `archon serve [--port PORT] [--token-path PATH]` | Start WebSocket server for remote agent access |
+| `archon remote ws <URL> [--token TOKEN]` | Connect to remote agent via WebSocket |
+| `archon remote ssh <TARGET>` | Connect to remote agent via SSH |
+| `archon web [--port PORT] [--bind-address ADDR] [--no-open]` | Start browser-based web UI |
+| `archon team run --team NAME <GOAL>` | Execute a multi-agent team on a goal |
 | `archon team list` | List configured teams |
-| `archon plugin list` | List loaded plugins |
-| `archon plugin info <name>` | Show plugin details |
+| `archon plugin list` | List discovered plugins |
+| `archon plugin info <NAME>` | Show plugin details |
 | `archon ide-stdio` | Run in IDE stdio mode (JSON-RPC over stdin/stdout) |
-| `archon kb ingest <PATH>` | Ingest document into knowledge base |
-| `archon kb query <QUESTION>` | Ask a question against the KB |
-| `archon kb compile [--topic T]` | LLM-compile KB nodes into structured knowledge |
-| `archon kb stats` | Show KB statistics |
-| `archon leann index <PATH>` | Index a repository for semantic code search |
-| `archon leann search <QUERY>` | Search the semantic code index |
-| `archon leann stats` | Show LEANN index statistics |
+| `archon pipeline code <TASK> [--dry-run]` | Run the coding pipeline on a task |
+| `archon pipeline research <TOPIC> [--dry-run]` | Run the research pipeline on a topic |
+| `archon pipeline status <SESSION_ID>` | Show status of a pipeline session |
+| `archon pipeline resume <SESSION_ID>` | Resume an interrupted pipeline session |
+| `archon pipeline list` | List all pipeline sessions |
+| `archon pipeline abort <SESSION_ID>` | Abort a running pipeline session |
+| `archon pipeline run <FILE> [--format FMT] [--detach]` | Run declarative pipeline from spec file |
+| `archon pipeline cancel <ID>` | Cancel a running declarative pipeline |
+| `archon run-agent-async <NAME> [--input FILE] [--version REQ] [--detach]` | Submit an async agent task |
+| `archon task-status <TASK_ID> [--watch]` | Check status of an async task |
+| `archon task-result <TASK_ID> [--stream]` | Get result of a completed async task |
+| `archon task-cancel <TASK_ID>` | Cancel a running async task |
+| `archon task-list [--state STATE] [--agent AGENT] [--since DURATION]` | List async tasks |
+| `archon task-events <TASK_ID> [--from-seq SEQ]` | Stream task events (NDJSON) |
+| `archon metrics` | Prometheus task execution metrics |
+| `archon agent-list [--include-invalid]` | List all discovered agents (CLI-only path) |
+| `archon agent-search [--tag TAG] [--capability CAP] [--name-pattern P] [--version REQ] ...` | Search agents by tag, capability, name, or version |
+| `archon agent-info <NAME> [--version REQ] [--json]` | Show detailed agent information |
 | `archon update [--check] [--force]` | Check for / apply updates |
-| `archon --list-sessions` | List all resumable sessions |
-| `archon --list-themes` | List all TUI themes |
+| `archon --sessions [--branch B] [--dir D] [--after DATE] [--before DATE] [--search TXT] [--stats] [--delete ID]` | Session search & management (replaces `--list-sessions`) |
+| `archon --list-themes` | List TUI themes |
 | `archon --list-output-styles` | List output styles |
+
+> The TUI also exposes a richer agent surface via `/agent list`, `/agent info`, `/run-agent` and the pipeline launchers `/archon-code`, `/archon-research` (see Slash Commands).
 
 ### Top-level flags
 
 | Flag | Purpose |
 |------|---------|
-| `-p, --print [QUERY]` | Non-interactive mode (JSON-lines output) |
-| `--input-format <fmt>` | `text` / `json` / `stream-json` |
-| `--output-format <fmt>` | `text` / `json` / `stream-json` |
-| `--json-schema <schema>` | Validate final output against JSON schema |
+| `-p, --print [QUERY]` | Non-interactive single-query mode (`-p` reads stdin) |
+| `--input-format <FMT>` | `text` / `json` / `stream-json` (default: text) |
+| `--output-format <FMT>` | `text` / `json` / `stream-json` (default: text) |
+| `--json-schema <SCHEMA>` | Validate final assistant output against JSON schema |
 | `--max-turns <N>` | Hard cap on agent turns |
-| `--max-budget-usd <AMT>` | Hard cost limit |
-| `--resume <ID|NAME>` | Resume session by ID/name/prefix |
-| `--session-name <NAME>` | Assign name to new session |
-| `--continue-session` | Continue last session |
-| `--fork-session` | Fork from existing session |
-| `--model <MODEL>` | Override model |
-| `--fast` | Fast mode (reduced latency) |
-| `--effort <level>` | `high` / `medium` / `low` |
+| `--max-budget-usd <AMOUNT>` | Hard cost limit in USD |
+| `--no-session-persistence` | Don't persist session to disk (print mode) |
+| `-n, --session-name <NAME>` | Assign name to new session |
+| `-c, --continue-session` | Continue most recent session in cwd |
+| `--fork-session` | Fork resumed session instead of appending |
+| `--resume [ID\|NAME]` | Resume by ID, name, or prefix (list if no arg) |
+| `--no-resume` | Disable auto-resume for this invocation |
+| `--model <MODEL>` | Override default model |
+| `--fast` | Fast mode (reduced latency, lower quality) |
+| `--effort <LEVEL>` | `high` / `medium` / `low` |
+| `--identity-spoof` | Enable Claude Code header spoofing |
+| `--remote-url <URL>` | Remote URL for `/session` QR display |
 | `--agent <NAME>` | Use named agent definition |
-| `--theme <NAME>` | Startup theme |
+| `--system-prompt <TEXT>` / `--system-prompt-file <PATH>` | Replace system prompt |
+| `--append-system-prompt <TEXT>` / `--append-system-prompt-file <PATH>` | Append to default system prompt |
+| `--theme <NAME>` | Startup TUI theme |
 | `--output-style <NAME>` | `Explanatory` / `Learning` / `Formal` / `Concise` |
-| `--system-prompt <TEXT>` | Replace system prompt |
-| `--append-system-prompt <TEXT>` | Append to system prompt |
-| `--permission-mode <MODE>` | Override permission enforcement |
+| `--permission-mode <MODE>` | Override permissions (`default`, `acceptEdits`, `plan`, `auto`, `dontAsk`, `bypassPermissions`) |
 | `--dangerously-skip-permissions` | Skip all permission checks |
-| `--sandbox` | Enforce read-only mode |
+| `--allow-dangerously-skip-permissions` | Allow `bypassPermissions` in mode cycle |
 | `--bare` | Minimal mode (no hooks, ARCHON.md, MCP auto-start) |
-| `--init` | Run init hooks then start interactive |
-| `--headless` | No TUI, JSON-lines stdio (for backend integration) |
+| `--init` / `--init-only` | Run init hooks then continue / exit |
+| `--disable-slash-commands` | Disable slash command parsing |
+| `--headless` | No TUI; JSON-lines stdio for backend integration |
+| `--session-id <ID>` | Session ID for headless/remote (auto-generated if omitted) |
 | `--mcp-config <FILES>` | MCP config files (repeatable) |
-| `--strict-mcp-config` | Ignore auto-discovered MCP configs |
-| `--tools <PATTERNS>` | Tool allowlist |
+| `--strict-mcp-config` | Use only `--mcp-config` files (skip discovery) |
+| `--add-dir <PATHS>` | Additional working directories for file access |
+| `--tools <LIST>` | Restrict available tools |
 | `--allowed-tools <PATTERNS>` | Tools that skip permission checks |
-| `--disallowed-tools <PATTERNS>` | Tools that are always denied |
-| `--bg [QUERY]` | Spawn background session |
-| `--ps` | List background sessions |
-| `--attach <ID>` | Attach to background session |
-| `--kill <ID>` | Kill background session |
-| `--logs <ID>` | Tail logs of background session |
-| `--verbose` | Verbose logging |
-| `--debug [CATEGORIES]` | Debug logging for categories |
-| `--debug-file <PATH>` | Write debug logs to file |
+| `--disallowed-tools <PATTERNS>` | Tools removed from model context |
+| `--bg [QUERY]` / `--bg-name <NAME>` | Spawn background session |
+| `--ps` / `--attach <ID>` / `--kill <ID>` / `--logs <ID>` | Manage background sessions |
+| `--settings <PATH>` | Additional TOML settings overlay |
+| `--setting-sources <LAYERS>` | Comma-separated config layers (`user,project,local`) |
+| `--metrics-port <PORT>` | Prometheus `/metrics` exporter port (0 disables) |
+| `--verbose` / `--debug [CATEGORIES]` / `--debug-file <PATH>` | Logging controls |
 
 ---
 
 ## Slash Commands
 
-All slash commands work in the interactive TUI. Type `/help` to see them in-app.
+All slash commands work in the interactive TUI. Type `/help` to see them in-app. As of v0.1.13 the registry contains **64 primary commands** (lockstep-tested at `EXPECTED_COMMAND_COUNT = 64` in `src/command/registry.rs`). Aliases come from each handler's `aliases()` method.
 
-### Core / Meta
+### Core & Meta
 
-| Command | Description |
-|---------|-------------|
-| `/help` | Show available commands |
-| `/clear` | Clear conversation history |
-| `/exit` | Exit Archon |
-| `/context` | Show context window usage stats |
-| `/status` | Show session status |
-| `/doctor` | Run diagnostics |
-| `/cost` | Session cost breakdown |
-| `/usage` | Token usage, cost, turn count |
-| `/effort <level>` | Set reasoning effort (high/medium/low) |
-| `/fast` | Toggle fast mode |
-| `/thinking` | Toggle extended thinking display |
-| `/plan` | Show / update current plan |
+| Command | Aliases | Description |
+|---------|---------|-------------|
+| `/help` | `?`, `h` | Show available commands and shortcuts |
+| `/clear` | `cls` | Clear conversation history |
+| `/exit` | `q` | Exit Archon (graceful shutdown) |
+| `/context` | — | Show current context window usage |
+| `/status` | `info` | Session status (model, effort, token use) |
+| `/doctor` | — | Run diagnostics |
+| `/cost` | — | Session token cost breakdown |
+| `/usage` | — | Token usage, cost, turn count |
+| `/extra-usage` | — | 6-section detailed usage report |
+| `/summary` | — | One-line session headline |
+| `/effort` | — | Set reasoning effort (`high`/`medium`/`low`) |
+| `/fast` | — | Toggle fast mode |
+| `/thinking` | — | Toggle extended thinking display |
+| `/plan` | — | Toggle Plan Mode |
+| `/copy` | — | Copy last assistant response to clipboard |
 
 ### Git Integration
 
-| Command | Description |
-|---------|-------------|
-| `/git-status` / `/gs` | Show repo status |
-| `/diff [--staged]` | Show git diff |
-| `/branch [--create N\|--switch N]` | Manage branches |
-| `/commit [-m MSG]` | Stage & commit (auto-generates message if `-m` omitted) |
-| `/pr "Title" [--body "desc"]` | Create PR via `gh` CLI |
+| Command | Aliases | Description |
+|---------|---------|-------------|
+| `/diff` | — | Show git diff |
+| `/commit` | — | AI-assisted commit (gathers status/diff/log into a structured prompt) |
+| `/review` | — | Review a PR (no arg lists open PRs; with number reviews the diff) |
 
 ### Session Management
 
-| Command | Description |
-|---------|-------------|
-| `/resume [ID\|NAME]` | Resume previous session |
-| `/sessions [QUERY]` | Search & list previous sessions |
-| `/tag <tag>` | Tag current session |
-| `/rename <name>` | Rename current session |
-| `/fork [NAME]` | Fork conversation at current point |
-| `/rewind` | Rewind to previous checkpoint |
-| `/checkpoint` | Save session checkpoint |
+| Command | Aliases | Description |
+|---------|---------|-------------|
+| `/resume` | `continue`, `open-session` | Resume a previous session |
+| `/tag` | — | Toggle a searchable tag on the current session |
+| `/rename` | — | Rename current session |
+| `/fork` | — | Fork the session into a new branch |
+| `/rewind` | — | Open message-selector overlay to rewind |
+| `/checkpoint` | — | Create or restore a session checkpoint |
+| `/session` | — | Show remote-session QR code + URL |
 
-### File / Project
+### File & Project
 
-| Command | Description |
-|---------|-------------|
-| `/restore <FILE> [CHECKPOINT]` | Restore file from checkpoint |
-| `/undo` | Undo last file modification |
-| `/init` | Initialize project with ARCHON.md template |
-| `/add-dir <PATH>` | Add working directory for file access |
-| `/agents` | List agent definitions from `.archon/agents/` |
-| `/recall <QUERY>` | Search memories by keyword |
-| `/garden` | Run memory consolidation now, print report |
-| `/garden stats` | Show memory distribution by type, staleness, top-N |
-| `/tasks` | List and manage background tasks |
+| Command | Aliases | Description |
+|---------|---------|-------------|
+| `/files` | — | File-picker overlay rooted at working dir (Enter injects `@<path> `) |
+| `/search` | — | Recursive basename substring search (capped at 200 results) |
+| `/add-dir` | — | Add working directory for file access |
+| `/recall` | — | Search memories by keyword |
+| `/garden` | — | Run memory consolidation now, print report |
+| `/memory` | — | Store / recall / manage memories |
+| `/tasks` | — | List and manage background tasks |
 
-### Configuration
+### Agents & Pipelines
 
-| Command | Description |
-|---------|-------------|
-| `/theme <NAME>` | Change UI theme |
-| `/color <NAME>` | Change prompt bar accent color |
-| `/model <MODEL>` | Switch model mid-session |
-| `/permissions` | Show current permission mode |
-| `/sandbox` | Show sandbox mode info |
-| `/keybindings` | Show keybinding reference |
-| `/statusline` | Configure status line content |
-| `/reload` | Force configuration reload |
-| `/refresh-identity` | Clear beta header cache & reprobe |
-| `/settings` | Show / modify settings |
+| Command | Aliases | Description |
+|---------|---------|-------------|
+| `/agent` | — | Umbrella: `/agent list`, `/agent info <name>`, `/agent run <name>` |
+| `/run-agent` | — | Invoke a custom agent by name with a task description (async via TaskService) |
+| `/archon-code` | — | Run the 50-agent coding pipeline on a task |
+| `/archon-research` | — | Run the 46-agent PhD research pipeline on a topic |
+| `/managed-agents` | — | Show managed-agent (remote-registry) status + how to fetch the listing |
+| `/refresh` | — | Re-scan the agent registry from disk (picks up newly-dropped `.md` agents) |
+
+### Configuration & Discovery
+
+| Command | Aliases | Description |
+|---------|---------|-------------|
+| `/theme` | — | Change UI theme |
+| `/color` | — | Change prompt bar accent color |
+| `/model` | `m`, `switch-model` | Show or switch the active model |
+| `/permissions` | — | Show current permission mode |
+| `/sandbox` | `sandbox-toggle` | Toggle sandbox restrictions (Bubble-mode gate) |
+| `/config` | `settings`, `prefs` | Show / modify settings |
+| `/reload` | — | Force configuration reload |
+| `/vim` | — | Toggle vim-style modal input |
+| `/skills` | — | Browse and invoke available skills |
+| `/providers` | — | List all registered LLM providers (native + OpenAI-compatible) |
+
+### Infrastructure & Resources
+
+| Command | Aliases | Description |
+|---------|---------|-------------|
+| `/mcp` | — | Show MCP server status |
+| `/connect` | — | List configured MCP servers (`/connect <name>` shows connection hint) |
+| `/plugin` | — | Manage WASM plugins (`list`, `info`; enable/disable/install/reload deferred) |
+| `/reload-plugins` | — | Re-scan plugin directories from disk |
+| `/hooks` | — | List or manage hook registrations |
+| `/voice` | — | Show or manage voice input configuration |
 
 ### Analysis & Insights
 
-| Command | Description |
-|---------|-------------|
-| `/insights` | Session patterns, tool usage, error rates |
-| `/stats` | Daily usage, session history, model preferences |
-| `/security-review` | Analyze pending changes for vulnerabilities |
-| `/copy` | Copy last assistant response to clipboard |
-| `/btw` | Aside marker (tangent, don't change focus) |
+| Command | Aliases | Description |
+|---------|---------|-------------|
+| `/denials` | — | Show denied permissions in current session |
+| `/rules` | — | View or edit behavioral rules |
 
 ### Utility
 
+| Command | Aliases | Description |
+|---------|---------|-------------|
+| `/cancel` | `stop`, `abort` | Cancel the current operation |
+| `/compact` | — | Trigger context compaction |
+| `/export` | `save` | Export session transcript |
+| `/login` | — | Re-authenticate |
+| `/logout` | — | Sign out |
+| `/release-notes` | — | Show version changelog |
+| `/bug` | — | Report bug (links to GitHub issues) |
+| `/teleport` | — | Jump to a named conversation location (hidden from `/help`) |
+
+### Built-in Skills (additional commands)
+
+Beyond the 64 primaries above, archon-cli ships **30 built-in skills** in `crates/archon-core/src/skills/{builtin,expanded}.rs`. They behave like slash commands but are resolved through the Skill registry rather than the primary registry. User-authored skills in `.archon/skills/` and plugin-supplied skills extend this surface further.
+
 | Command | Description |
 |---------|-------------|
-| `/feedback <MSG>` | Submit feedback |
-| `/bug` | Report bug (links to GitHub issues) |
-| `/login` / `/logout` | Re-authenticate / sign out |
-| `/release-notes` | Show version changelog |
-| `/schedule` | Create scheduled task (delegates to `CronCreate`) |
+| `/git-status` (alias `/gs`) | Show repo status |
+| `/branch` | Manage branches (create / switch) |
+| `/pr` | Create a pull request via `gh` |
+| `/restore` | List, diff, or restore file checkpoints (`/restore`, `/restore <file>`, `/restore <file> <turn>`, `/restore --all`) |
+| `/undo` | Undo last file modification |
+| `/init` | Initialize project with ARCHON.md template |
+| `/sessions` | Search and list previous sessions (with filters) |
+| `/keybindings` | Show keybinding reference |
+| `/statusline` | Configure status line content |
+| `/insights` | Session patterns, tool usage, error rates |
+| `/stats` | Daily usage, session history, model preferences |
+| `/security-review` | Analyze pending changes for vulnerabilities |
+| `/feedback` | Submit feedback |
+| `/schedule` | Create a scheduled task (delegates to `CronCreate`) |
 | `/remote-control` | Show remote control mode info |
-| `/compact [micro\|snip N-M\|auto]` | Trigger context compaction |
+| `/btw` | Aside marker (tangent, don't change focus) |
+| `/refresh-identity` | Clear beta header cache & reprobe |
+
+> Many of these names also appear as primaries (e.g., `/fork`, `/rename`, `/usage`, `/copy`, `/recall`, `/theme`). The primary handler takes precedence at dispatch time; the skill is the fallback / cross-platform variant.
 
 ---
 
 ## Tools Reference
 
-Tools are callable by the LLM during agent turns. 40+ built-in tools across 10 categories.
+Tools are callable by the LLM during agent turns. **43 registered tools across 13 categories** (verified at v0.1.13). Permission level is per-tool: `Safe` (auto-approved by default), `Risky` (prompts in `default` mode), or context-dependent (Bash/PowerShell classify per-command via `archon_permissions::classifier`).
 
 ### File & Code
 
-| Tool | Purpose |
-|------|---------|
-| `Bash` | Execute shell commands (timeout + output limits) |
-| `Read` | Read files (pagination, image/PDF, Jupyter notebooks) |
-| `Write` | Write files (with permission checks) |
-| `Edit` | String-replace edits to existing files |
-| `Glob` | Fast file pattern matching |
-| `Grep` | Ripgrep-backed search (regex, context, BM25) |
+| Tool | Permission | Purpose |
+|------|-----------|---------|
+| `Read` | Safe | Read files with pagination (image/PDF, Jupyter notebooks supported) |
+| `Write` | Risky | Write files (creates parent dirs, overwrites existing) |
+| `Edit` | Risky | Exact-string replacement edits |
+| `ApplyPatch` | Risky | Apply a unified-diff patch to an absolute file path |
+| `Glob` | Safe | Fast file pattern matching (sorted by mtime) |
+| `Grep` | Safe | Ripgrep-backed regex search (content / files-with-matches / count modes) |
+| `Bash` | Variable | Execute shell command (classified at dispatch) |
 
-### Web & Fetch
+### Shell & Observability
 
-| Tool | Purpose |
-|------|---------|
-| `WebFetch` | Fetch & parse web pages (HTML → markdown) |
-| `WebSearch` | DuckDuckGo web search (returns top results) |
+| Tool | Permission | Purpose |
+|------|-----------|---------|
+| `PowerShell` | Variable | Execute PowerShell command |
+| `Monitor` | Variable | Run a shell command and collect stdout as line-events within a bounded window |
+| `PushNotification` | Safe | Emit a user-visible notification (e.g., long-running task complete) |
+
+### Web
+
+| Tool | Permission | Purpose |
+|------|-----------|---------|
+| `WebFetch` | Safe | HTTP GET with response body (HTML→markdown) |
+| `WebSearch` | Safe | DuckDuckGo search (titles, URLs, snippets) |
 
 ### Agent Orchestration
 
-| Tool | Purpose |
-|------|---------|
-| `Agent` | Spawn child agents (parallel or delegated work) |
-| `SendMessage` | Continue a prior subagent by ID or name |
-| `AskUserQuestion` | Blocking user confirmation (structured choices) |
-| `EnterPlanMode` / `ExitPlanMode` | Enter/exit structured planning mode |
-| `EnterWorktree` / `ExitWorktree` | Create/exit isolated git worktrees |
+| Tool | Permission | Purpose |
+|------|-----------|---------|
+| `Agent` | Safe* | Spawn a subagent. Concurrent invocations run in parallel via `join_all` (v0.1.12+) |
+| `SendMessage` | Safe | Send a follow-up message to a running subagent by ID or name |
+| `AskUserQuestion` | Safe | Blocking user confirmation (structured choices) |
+
+> *Note: in `default` permission mode the `Agent` tool is auto-approved (PRD-AGENTS-001 Option B); dangerous downstream tools (Bash/Write/Edit) inherit gating from the parent's mode. See [Permission System](#permission-system).
+
+### Planning & Isolation
+
+| Tool | Permission | Purpose |
+|------|-----------|---------|
+| `EnterPlanMode` | Safe | Enter Plan Mode (read-only tool whitelist) |
+| `ExitPlanMode` | Safe | Exit Plan Mode |
+| `EnterWorktree` | Risky | Create an isolated git worktree for the current session |
+| `ExitWorktree` | Risky | Exit worktree (`merge` / `keep` / `remove`) |
 
 ### Task Management
 
-| Tool | Purpose |
-|------|---------|
-| `TodoWrite` | Manage session todo list |
-| `TaskCreate` | Create structured background task |
-| `TaskGet` | Retrieve task by ID |
-| `TaskUpdate` | Mark in_progress/completed, set deps |
-| `TaskList` | List all tasks with status |
-| `TaskStop` | Cancel running task |
-| `TaskOutput` | Read task output stream |
+| Tool | Permission | Purpose |
+|------|-----------|---------|
+| `TodoWrite` | Safe | Overwrite session todo list (max 100 items) |
+| `TaskCreate` | Variable | Create a tracked task; optionally spawns a background agent |
+| `TaskGet` | Safe | Get details by task ID |
+| `TaskUpdate` | Safe | Update description / status |
+| `TaskList` | Safe | List all tasks with status |
+| `TaskStop` | Risky | Cancel a running task |
+| `TaskOutput` | Safe | Read task output stream (offset + limit supported) |
 
 ### Memory
 
-| Tool | Purpose |
-|------|---------|
-| `memory_store` | Explicit memory persistence (Fact/Decision/Rule/...) |
-| `memory_recall` | Semantic search over memory graph (BM25 + vector) |
+| Tool | Permission | Purpose |
+|------|-----------|---------|
+| `memory_store` | Safe | Persist a memory in CozoDB (Fact/Decision/Rule/...) |
+| `memory_recall` | Safe | Hybrid BM25 + vector search over the memory graph |
 
-### Cron / Scheduling
+### Code Intelligence
 
-| Tool | Purpose |
-|------|---------|
-| `CronCreate` | Schedule recurring task with cron expression |
-| `CronList` | List scheduled tasks |
-| `CronDelete` | Remove scheduled task |
+| Tool | Permission | Purpose |
+|------|-----------|---------|
+| `lsp` | Safe | LSP dispatch: `goToDefinition`, `findReferences`, `hover`, `documentSymbol`, `workspaceSymbol`, `goToImplementation`, `prepareCallHierarchy`, `incomingCalls`, `outgoingCalls`. Returns empty when no language server is connected. |
+| `CartographerScan` | Safe | Index a codebase for symbols (Rust, Python, TS, JS, Go) |
 
-### LSP (Language Server Protocol)
+### Scheduling
 
-| Tool | Purpose |
-|------|---------|
-| `LSP` | Single tool dispatching: `goToDefinition`, `findReferences`, `hover`, `documentSymbol`, `workspaceSymbol`, `goToImplementation`, `prepareCallHierarchy`, `incomingCalls`, `outgoingCalls` |
+| Tool | Permission | Purpose |
+|------|-----------|---------|
+| `CronCreate` | Risky | Schedule a recurring task with a cron expression |
+| `CronList` | Safe | List scheduled tasks |
+| `CronDelete` | Risky | Remove a scheduled task by ID |
 
-### Team (Multi-Agent)
+### Configuration & Discovery
 
-| Tool | Purpose |
-|------|---------|
-| `TeamCreate` | Instantiate multi-agent team |
-| `SendMessageTeam` | Send message to team member |
-| `ReadTeamMessages` | Read team member responses |
+| Tool | Permission | Purpose |
+|------|-----------|---------|
+| `Config` | Variable | Get or set runtime config (session-scoped; does not modify config files on disk) |
+| `ToolSearch` | Safe | Fetch full schemas for deferred tools (`select:Foo,Bar` or keyword search) |
+| `Skill` | Safe | Enumerate or invoke a built-in skill (`list` / `invoke`) |
+
+### Notebook & State
+
+| Tool | Permission | Purpose |
+|------|-----------|---------|
+| `NotebookEdit` | Risky | Edit Jupyter `.ipynb` cells (insert/replace/delete/move) |
 
 ### MCP
 
-| Tool | Purpose |
-|------|---------|
-| `ListMcpResources` | List resources from connected MCP servers |
-| `ReadMcpResource` | Read MCP resource content |
+| Tool | Permission | Purpose |
+|------|-----------|---------|
+| `ListMcpResources` | Safe | List resources from connected MCP servers (filter by server) |
+| `ReadMcpResource` | Safe | Read an MCP resource by URI (text inline, binary base64; truncated at 100KB) |
+
+### Team (Multi-Agent)
+
+| Tool | Permission | Purpose |
+|------|-----------|---------|
+| `TeamCreate` | Safe | Create a team (writes `team.json` + per-member inboxes; does NOT spawn agents) |
+| `TeamDelete` | Risky | Delete a team and its inbox files |
 
 ### Runtime Control
 
-| Tool | Purpose |
-|------|---------|
-| `ConfigTool` | Read/update config at runtime |
-| `ToolSearch` | Discover available tools dynamically |
-| `Sleep` | Async-safe delay |
-| `RemoteTrigger` | Call remote agent API |
+| Tool | Permission | Purpose |
+|------|-----------|---------|
+| `RemoteTrigger` | Risky | HTTP POST to an allow-listed remote endpoint (`remote_triggers.allowed_hosts`) |
+| `Sleep` | Safe | Async-safe delay (max 300s) |
 
 ---
 
 ## Themes
 
-22 themes total. Switch with `/theme <name>` or `--theme <name>`.
+23 themes total (16 MBTI + 7 utility, plus an `auto` indirection that resolves to `dark` based on system preference). Switch with `/theme <name>` or `--theme <name>`. Run `archon --list-themes` for the live list.
 
 ### MBTI Themes (16)
 
@@ -773,7 +868,7 @@ Tools are callable by the LLM during agent turns. 40+ built-in tools across 10 c
 | `/theme estp` | Entrepreneur | Bold red, vivid yellow |
 | `/theme esfp` | Entertainer | Coral, energetic yellow |
 
-### Utility Themes (6)
+### Utility Themes (7 + auto)
 
 | Command | Description |
 |---------|-------------|
@@ -783,6 +878,8 @@ Tools are callable by the LLM during agent turns. 40+ built-in tools across 10 c
 | `/theme fire` | Red/orange fire |
 | `/theme forest` | Natural greens |
 | `/theme mono` | Monochrome grey |
+| `/theme daltonized` | Colorblind-friendly palette |
+| `/theme auto` | System dark/light detection (currently resolves to `dark`) |
 
 ---
 
@@ -1465,8 +1562,8 @@ archon --resume "fix-auth-bug"
 # Name prefix
 archon --resume "fix-auth"
 
-# List resumable sessions
-archon --list-sessions
+# List / search resumable sessions (replaces the older --list-sessions alias)
+archon --sessions
 ```
 
 Resolution order: exact UUID → UUID prefix → exact name → name prefix. Ambiguous matches return candidates.
@@ -1597,7 +1694,7 @@ Per-turn token costs are accumulated per session and surfaced via `/cost` and `/
 
 ```toml
 [cost]
-warn_threshold = 100.0   # Warn when session cost exceeds $N
+warn_threshold = 30.0    # Warn when session cost exceeds $N (default)
 hard_limit = 0.0         # 0.0 = no hard cap
 ```
 
@@ -1849,7 +1946,9 @@ graph TD
 
 ### Agent Definition System
 
-Agent behavior is defined in `.archon/agents/` markdown files with YAML frontmatter and loaded at runtime by the `agent_loader` module. Execution order is governed by TOML manifests.
+Two formats are supported. Pipeline agents (coding / research) use the **TOML-manifest + frontmatter `.md`** layout. User-authored custom agents can use either the **flat-file YAML-frontmatter** form (single `.md`, claude-flow shape) or the legacy **6-file directory** form. v0.1.10/v0.1.11 added flat-file discovery and wired both into the unified `AgentRegistry`.
+
+#### Pipeline-style (TOML manifest + frontmatter `.md`)
 
 ```
 .archon/agents/
@@ -1858,7 +1957,7 @@ Agent behavior is defined in `.archon/agents/` markdown files with YAML frontmat
 │   ├── contract-agent.md      # Agent #1 (YAML frontmatter + instructions)
 │   ├── requirement-extractor.md
 │   ├── ...
-│   └── recovery-agent.md      # Agent #50
+│   └── recovery-agent.md
 └── phdresearch/
     ├── pipeline.toml          # 46-agent execution order + phase defs
     ├── step-back-analyzer.md
@@ -1866,7 +1965,7 @@ Agent behavior is defined in `.archon/agents/` markdown files with YAML frontmat
     └── file-length-manager.md
 ```
 
-**Frontmatter fields** (parsed by `agent_loader::parse_frontmatter`):
+**Pipeline frontmatter fields** (parsed by `archon_pipeline::agent_loader::parse_frontmatter`):
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -1880,6 +1979,71 @@ Agent behavior is defined in `.archon/agents/` markdown files with YAML frontmat
 | `tools` | list | Allowed tools |
 | `qualityGates` | list/map | Quality gate criteria |
 | `capabilities` | list | Agent capabilities |
+
+#### Flat-file YAML-frontmatter (custom agents, v0.1.10+)
+
+Single `.md` file per agent. Discoverable anywhere under `.archon/agents/` (recursive walk). Preferred for new custom agents.
+
+```markdown
+---
+name: over-engineering-therapist
+description: Therapeutic code reviewer specializing in over-engineering patterns
+tools: Read, Grep, Glob, Bash
+model: sonnet
+color: teal
+tags: [review, refactor]
+---
+
+# Over-Engineering Therapist
+
+You are a specialized code reviewer combining...
+[body becomes the system_prompt]
+```
+
+| YAML field | Maps to | Notes |
+|------------|---------|-------|
+| `name` | `agent_type` | Falls back to filename stem if absent |
+| `description` | `description` | One-sentence role |
+| `tools` | `allowed_tools` | Comma-separated string OR YAML array; both accepted |
+| `model` | `model` | `sonnet`, `opus`, full model ID — passed through |
+| `color` | `color` | TUI display tint |
+| `tags` | `tags` | YAML array, optional |
+| body after `---` | `system_prompt` | Trimmed; everything after the closing delimiter |
+
+Files without frontmatter (READMEs, etc.) are silently skipped. Malformed YAML logs a warning; the walk continues.
+
+#### Legacy 6-file directory (custom agents, v0.1.0+)
+
+Multi-file format under `.archon/agents/custom/<name>/`. Use when you need rich per-tool guidance (`tools.md`), structured memory configuration (`memory-keys.json`), or hooks/isolation in `meta.json`.
+
+```
+.archon/agents/custom/my-agent/
+├── agent.md          # Role + ## INTENT section (first paragraph extracted as description)
+├── behavior.md       # Behavioral instructions (optional, appended to agent.md)
+├── context.md        # Static context injection (optional)
+├── tools.md          # Allowed tools + per-tool narrative guidance
+├── memory-keys.json  # { memory_scope, recall_queries, leann_queries }
+└── meta.json         # { model, effort, max_turns, permission_mode, isolation, hooks }
+```
+
+#### Format selection
+
+- **Flat-file YAML** — new agents, simple cases, one-file portability, claude-flow compatibility.
+- **6-file** — agents needing rich `tool_guidance` text, custom `memory_scope` / `recall_queries` / `leann_queries`, `meta.json` hooks, or `permission_mode` / `isolation` overrides.
+
+#### Priority order on name collisions
+
+`AgentRegistry::load_with_user_home()` loads agents in 7 tiers (later overrides earlier):
+
+1. Built-in agents
+2. Project plugins (`.archon/plugins/<name>/agents/`)
+3. User plugins (`~/.archon/plugins/<name>/agents/`)
+4. Project flat-file agents (`.archon/agents/**/*.md`, excluding `custom/`)
+5. Project 6-file agents (`.archon/agents/custom/<name>/`)
+6. User flat-file agents (`~/.archon/agents/**/*.md`, excluding `custom/`)
+7. User 6-file agents (`~/.archon/agents/custom/<name>/`)
+
+User scope wins over project. 6-file wins over flat-file at the same scope (more explicit shape — if both exist with the same name, the 6-file directory was authored deliberately).
 
 ### Gate Enforcement
 
@@ -2036,14 +2200,9 @@ graph TD
 
 Answer-type nodes receive a 0.9x relevance penalty to prevent answer recycling (answers to prior questions outranking source material). This is enforced by `EC-PIPE-018`.
 
-### CLI
+### Access
 
-```bash
-archon kb ingest ./docs/           # Ingest all documents in directory
-archon kb query "How does auth work?"  # Q&A with citations
-archon kb compile --topic security     # LLM-compile nodes by topic
-archon kb stats                        # Index statistics
-```
+The Knowledge Base lives in `crates/archon-pipeline/src/kb/` and is consumed by pipeline agents (e.g., the research pipeline's literature-mapper, citation-extractor, evidence-synthesizer). It is **not currently exposed as an `archon kb` CLI subcommand** — invocation happens via the research pipeline (`archon pipeline research <topic>` or `/archon-research <topic>`) or via direct library use of the `archon_pipeline::kb` API.
 
 ---
 
@@ -2214,7 +2373,7 @@ archon (binary)
 ├── archon-tui           ratatui TUI
 │   ├── app.rs           State, events, input box
 │   ├── split_pane.rs    Split-pane layout (Ctrl+\)
-│   ├── theme.rs         22 themes
+│   ├── theme.rs         23 themes (16 MBTI + 7 utility + auto)
 │   └── vim.rs           Vim mode keybindings
 │
 ├── archon-pipeline      50-agent coding + 46-agent research pipelines
@@ -2286,10 +2445,60 @@ archon (binary)
 |-------|--------|-------------|
 | **Phase 1**, Core Engine | ✅ Complete | Agent loop, streaming API, tool execution, permission system, config, TUI, session management |
 | **Phase 2**, Consciousness | ✅ Complete | Memory graph (CozoDB), auto-extraction, per-turn injection, rules engine, personality config, inner voice |
-| **Phase 3**, UX & Ergonomics | ✅ Complete | 22 themes, MBTI themes, resume by name/prefix, `/color` and `/theme` commands, memory tools wired |
+| **Phase 3**, UX & Ergonomics | ✅ Complete | 23 themes, MBTI themes, resume by name/prefix, `/color` and `/theme` commands, memory tools wired |
 | **Phase 4**, Plugins & Skills | ✅ Complete | Plugin system (`archon-plugin`), user-defined slash commands, skill system, hook extensibility |
 | **Phase 5**, Multi-Agent & Learning | ✅ Complete | Subagent orchestration, team execution, MCP transport, LSP client, WebSocket remote, personality persistence (cross-session InnerVoice + rule scores + trends), memory garden (6-phase consolidation + `/garden` command), correction tracking with severity-based rule reinforcement |
 | **Phase 6**, Pipelines & Intelligence | ✅ Complete | 50-agent coding pipeline (CodingFacade, 11-layer prompt, 6 phases), agent_loader (.md frontmatter + TOML manifests), 5 deterministic gates, 6 structured artefacts, session recovery, append-only ledgers, layered context (L0-L3), 46-agent research pipeline (ResearchFacade, 7 phases), LEANN semantic code search (tree-sitter + HNSW), Knowledge Base (ingest/compile/Q&A), Learning systems (SONA, ReasoningBank 12 modes, GNN 3-layer attention, CausalMemory hypergraph, ProvenanceStore L-Scores, ShadowVectorSearch contradiction detection, DESC, Reflexion), AutoCapture |
+
+---
+
+## Release Notes (v0.1.6 → v0.1.13)
+
+Last 2 weeks of stabilisation work. Each version was shipped to `main` as a single PR.
+
+### v0.1.13 — Purge `tokio Mutex::blocking_lock` from async paths (PR #10)
+
+`tokio::sync::Mutex::blocking_lock()` panics from inside an async runtime task. The v0.1.12 audit grepped `block_on / block_in_place / Runtime::new` but missed `blocking_lock`, leaving 16 production-code matches across 4 site classes. Fixed:
+
+- `crates/archon-core/src/subagent_executor.rs:210` — the immediate panic on agent launch (`parent_permission_mode.blocking_lock()` from async `build_subagent_tools`). Made the method async, switched to `.lock().await`.
+- `src/session.rs` — 8 sites in async `run_print_mode_session` and related; in-place fix to `.lock().await`.
+- `crates/archon-core/src/tasks/queue.rs` — 5 sites. Per-review, swapped `pending: tokio::sync::Mutex<VecDeque<_>>` to `std::sync::Mutex<VecDeque<_>>` (no `.await` held inside critical sections — verified). `TaskQueue` trait stays sync; callers in `service.rs`/`executor.rs` unchanged.
+- New regression-guard test `no_blocking_lock_outside_allowlist` (workspace-wide grep, allowlist starts empty) to prevent recurrence.
+
+### v0.1.12 — Embedding panic fix + parallel concurrent agent dispatch (PR #9)
+
+Two architectural fixes shipped together:
+
+- **Launch panic.** `crates/archon-memory/src/embedding/openai.rs::request_batch` called `reqwest::blocking::Client::send()` without `block_in_place`. `reqwest::blocking` constructs a tokio runtime per call, which panics from async context with "Cannot start a runtime from within a runtime". Wrapped `OpenAIEmbedding::embed` body in `tokio::task::block_in_place`.
+- **Parallel tool dispatch.** `subagent.rs::run` was iterating `pending_tools` in a serial `for` loop, so N tool_use blocks per turn ran one-by-one. Refactored to claurst's three-phase pattern (`/tmp/claurst/src-rust/crates/query/src/lib.rs:1815-1944`): sequential pre-hooks → `futures::future::join_all` over `Vec<Either<ready, execute>>` → sequential post-hooks. `join_all` preserves input order natively (Anthropic API requires it). N concurrent Agent dispatches per turn.
+
+Also confirmed `AgentTool::execute` is reentrant (`BACKGROUND_AGENTS` uses per-`agent_id` inserts, no global lock); added a barrier-based regression test asserting two concurrent invocations rendezvous mid-flight with `BACKGROUND_AGENTS.iter_running().count() == 2`.
+
+### v0.1.11 — Wire flat-file YAML loader into `AgentRegistry` (PR #8)
+
+v0.1.10 added flat-file YAML-frontmatter agent discovery — but only to `LocalDiscoverySource` (the `DiscoveryCatalog` code path used by the CLI subcommand `archon agent list`). The TUI surface (`/agent list`, `/run-agent`, AgentTool spawning, all session paths) reads from a different system: `AgentRegistry::load_with_user_home()`.
+
+Result before v0.1.11: `/agent list` showed 13 agents (`custom/<name>/` 6-file dirs); 300+ flat-file `.md` agents in `.archon/agents/` (e.g., `over-engineering-therapist.md`, `github/*.md`, `templates/*.md`) silently dropped.
+
+Fix: new `load_flat_file_agents(dir, source)` in `crates/archon-core/src/agents/loader.rs`. Wired as priority tiers 4.5 (project) and 5.5 (user) in `load_with_user_home`. User scope wins over project; 6-file wins over flat-file at the same scope.
+
+### v0.1.10 — Flat-file YAML-frontmatter agent discovery + permission inheritance (PR #7)
+
+- **Discovery (Option B).** `LocalDiscoverySource::load_all` now walks `.md` files in addition to JSON/YAML/TOML and parses YAML frontmatter (`---`-delimited). Defaults injected for `version` and `resource_requirements` when absent. Files without frontmatter (READMEs) are silently skipped. EC-DISCOVERY-001 invalid-state preserved with `state: AgentState::Invalid(reason)` for malformed frontmatter.
+- **Permission inheritance.** `crates/archon-permissions/src/checker.rs::DEFAULT_SAFE_TOOLS` now includes `Agent`. Subagents inherit the parent's `permission_mode` via `subagent_executor.rs:660-675`. In `default` mode, `/run-agent <name>` no longer returns "elevated permissions required". Dangerous downstream tools (Bash/Write/Edit) still gated.
+
+### v0.1.9 — Registry-backed slash-command autocomplete (PR #6)
+
+`crates/archon-tui/src/commands.rs::all_commands()` was a hardcoded `Vec<CommandInfo>` with 28 entries while `default_registry()` registered 64 primaries. Result: 30+ commands invisible to autocomplete, including `/archon-code`, `/archon-research`, `/run-agent`. New `Registry::primaries_with_descriptions()` plus catalog injection at TUI startup. Lockstep regression test pins `catalog.len() == EXPECTED_COMMAND_COUNT`.
+
+### v0.1.7 / v0.1.8 — Pipeline & agent slash-command rollout
+
+- v0.1.7: `/run-agent` primary + Shift+Tab permission-mode cycling + cursor visibility hotfix.
+- v0.1.8: Deliverable C — TUI pipeline launchers `/archon-code` and `/archon-research`, real `task_service.submit()` wire (was hint-only in v0.1.7), LEANN integration, real research RLM with CozoDB+HNSW.
+
+### v0.1.6 — Slash-command parity (PR #2)
+
+Added 12 slash commands across phases (`/exit`, `/files`, `/search`, `/summary`, `/providers`, `/agent`, `/managed-agents`, `/refresh`, `/connect`, `/extra-usage`, `/plugin`, `/reload-plugins`).
 
 ---
 
