@@ -316,7 +316,10 @@ mod tests {
         let report = source.load_all(&catalog).unwrap();
         // 1 valid flat-file, 1 invalid flat-file
         assert_eq!(report.loaded, 1, "expected 1 loaded (flat-file valid)");
-        assert_eq!(report.invalid, 1, "expected 1 invalid (bad YAML frontmatter)");
+        assert_eq!(
+            report.invalid, 1,
+            "expected 1 invalid (bad YAML frontmatter)"
+        );
     }
 
     #[test]

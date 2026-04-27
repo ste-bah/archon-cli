@@ -151,7 +151,206 @@ pub fn load_plugin_agents(
 }
 
 // ---------------------------------------------------------------------------
-// Single agent loader
+// Flat-file YAML-frontmatter agent loader (v0.1.11)
+// ---------------------------------------------------------------------------
+
+/// Extract YAML frontmatter and body from a markdown string.
+///
+/// Frontmatter is delimited by `---` lines. Returns `(frontmatter, body)`
+/// or `None` if the file does not start with `---` or has no closing `---`.
+fn extract_yaml_frontmatter_and_body(content: &str) -> Option<(String, String)> {
+    let mut lines = content.lines();
+    if lines.next()?.trim() != "---" {
+        return None;
+    }
+    let mut frontmatter = String::new();
+    for line in lines.by_ref() {
+        if line.trim() == "---" {
+            let body = lines.collect::<Vec<_>>().join("\n");
+            return Some((frontmatter, body));
+        }
+        frontmatter.push_str(line);
+        frontmatter.push('\n');
+    }
+    None
+}
+
+/// Parse the `tools` YAML field, which can be either a comma-separated
+/// string (`"Read, Grep, Glob"`) or a YAML array (`["Read", "Grep"]`).
+fn parse_tools_field(value: &serde_json::Value) -> Option<Vec<String>> {
+    match value {
+        serde_json::Value::Array(arr) => {
+            let tools: Vec<String> = arr
+                .iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect();
+            if tools.is_empty() { None } else { Some(tools) }
+        }
+        serde_json::Value::String(s) => {
+            let tools: Vec<String> = s
+                .split(',')
+                .map(|t| t.trim().to_string())
+                .filter(|t| !t.is_empty())
+                .collect();
+            if tools.is_empty() { None } else { Some(tools) }
+        }
+        _ => None,
+    }
+}
+
+/// Parse a single flat-file `.md` agent with YAML frontmatter into a
+/// `CustomAgentDefinition`. Returns `Ok(None)` for files without
+/// frontmatter (READMEs etc. — silently skipped).
+fn parse_flat_file_agent(
+    path: &Path,
+    source: &AgentSource,
+) -> Result<Option<CustomAgentDefinition>, String> {
+    let content = std::fs::read_to_string(path).map_err(|e| format!("read error: {e}"))?;
+
+    let (frontmatter, body) = match extract_yaml_frontmatter_and_body(&content) {
+        Some(fm) => fm,
+        None => return Ok(None),
+    };
+
+    let parsed: serde_json::Value =
+        serde_yml::from_str(&frontmatter).map_err(|e| format!("YAML parse error: {e}"))?;
+
+    let filename_stem = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("unknown");
+
+    let agent_type = parsed
+        .get("name")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(String::from)
+        .unwrap_or_else(|| filename_stem.to_string());
+
+    let description = parsed
+        .get("description")
+        .and_then(|v| v.as_str())
+        .map(String::from)
+        .unwrap_or_default();
+
+    let allowed_tools = parsed.get("tools").and_then(parse_tools_field);
+
+    let model = parsed
+        .get("model")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+
+    let color = parsed
+        .get("color")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+
+    let tags = parsed
+        .get("tags")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let base_dir = path.parent().map(|p| p.to_string_lossy().into_owned());
+
+    Ok(Some(CustomAgentDefinition {
+        agent_type,
+        system_prompt: body.trim().to_string(),
+        description,
+        allowed_tools,
+        disallowed_tools: None,
+        tool_guidance: String::new(),
+        model,
+        effort: None,
+        max_turns: None,
+        permission_mode: None,
+        background: false,
+        initial_prompt: None,
+        color,
+        memory_scope: None,
+        recall_queries: Vec::new(),
+        leann_queries: Vec::new(),
+        tags,
+        source: source.clone(),
+        meta: AgentMeta::default(),
+        filename: Some(filename_stem.to_string()),
+        base_dir,
+        isolation: None,
+        mcp_servers: None,
+        required_mcp_servers: None,
+        hooks: None,
+        skills: None,
+        omit_claude_md: false,
+        critical_system_reminder: None,
+    }))
+}
+
+/// Load all flat-file YAML-frontmatter agents from a root directory,
+/// recursively walking all subdirectories except `custom/` (handled by
+/// `load_custom_agents`) and hidden/private dirs (`.` or `_` prefix).
+///
+/// Each `.md` file with a valid YAML frontmatter becomes one
+/// `CustomAgentDefinition`. Files without frontmatter are silently
+/// skipped (READMEs etc.). Malformed YAML is logged at `warn!` level
+/// and the file is skipped — the walk continues.
+pub fn load_flat_file_agents(
+    agents_root: &Path,
+    source: AgentSource,
+) -> Result<Vec<CustomAgentDefinition>, AgentLoadError> {
+    if !agents_root.exists() {
+        return Ok(Vec::new());
+    }
+
+    let mut agents = Vec::new();
+
+    for entry in walkdir::WalkDir::new(agents_root)
+        .follow_links(false)
+        .into_iter()
+        .filter_entry(|e| {
+            if e.depth() == 0 {
+                return true;
+            }
+            e.file_name()
+                .to_str()
+                .map(|s| !s.starts_with('.') && !s.starts_with('_') && s != "custom")
+                .unwrap_or(false)
+        })
+    {
+        let entry = match entry {
+            Ok(e) => e,
+            Err(e) => {
+                warn!(error = %e, "walkdir error in flat-file agent discovery");
+                continue;
+            }
+        };
+
+        if !entry.file_type().is_file() {
+            continue;
+        }
+
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("md") {
+            continue;
+        }
+
+        match parse_flat_file_agent(path, &source) {
+            Ok(Some(agent)) => agents.push(agent),
+            Ok(None) => {} // no frontmatter — silent skip
+            Err(e) => {
+                warn!(path = %path.display(), error = %e, "failed to parse flat-file agent");
+            }
+        }
+    }
+
+    Ok(agents)
+}
+
+// ---------------------------------------------------------------------------
+// Single agent loader (6-file format)
 // ---------------------------------------------------------------------------
 
 fn load_single_agent(dir: &Path, name: &str, source: AgentSource) -> CustomAgentDefinition {
@@ -1629,5 +1828,194 @@ mod tests {
         assert_eq!(agents[1].source, AgentSource::Plugin("alpha".into()));
         assert_eq!(agents[2].agent_type, "beta:one");
         assert_eq!(agents[2].source, AgentSource::Plugin("beta".into()));
+    }
+
+    // -----------------------------------------------------------------------
+    // Flat-file agent loader tests (v0.1.11)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn flat_file_loader_finds_basic_agent() {
+        let tmp = TempDir::new().unwrap();
+        let agents_dir = tmp.path().join("agents");
+        fs::create_dir_all(&agents_dir).unwrap();
+        fs::write(
+            agents_dir.join("over-engineering-therapist.md"),
+            "---\nname: over-engineering-therapist\ndescription: Therapeutic code reviewer\n\
+             tools: Read, Grep, Glob, Bash\nmodel: sonnet\ncolor: teal\n---\n\n\
+             # Over-Engineering Therapist\n\nYou are a specialized therapeutic code reviewer.\n",
+        )
+        .unwrap();
+
+        let agents = load_flat_file_agents(&agents_dir, AgentSource::Project).unwrap();
+        assert_eq!(agents.len(), 1);
+        let a = &agents[0];
+        assert_eq!(a.agent_type, "over-engineering-therapist");
+        assert_eq!(a.description, "Therapeutic code reviewer");
+        assert!(
+            a.system_prompt
+                .contains("You are a specialized therapeutic code reviewer")
+        );
+        assert_eq!(a.model.as_deref(), Some("sonnet"));
+        assert_eq!(a.color.as_deref(), Some("teal"));
+        assert_eq!(a.source, AgentSource::Project);
+    }
+
+    #[test]
+    fn flat_file_loader_recursive_subdirs() {
+        let tmp = TempDir::new().unwrap();
+        let agents_dir = tmp.path().join("agents");
+        fs::create_dir_all(agents_dir.join("templates")).unwrap();
+        fs::write(
+            agents_dir.join("templates/sub-agent.md"),
+            "---\nname: sub-agent\ndescription: A subdirectory agent\n---\n\nSub agent body.\n",
+        )
+        .unwrap();
+        fs::write(
+            agents_dir.join("top-agent.md"),
+            "---\nname: top-agent\ndescription: A top-level agent\n---\n\nTop agent body.\n",
+        )
+        .unwrap();
+
+        let agents = load_flat_file_agents(&agents_dir, AgentSource::Project).unwrap();
+        let names: Vec<&str> = agents.iter().map(|a| a.agent_type.as_str()).collect();
+        assert!(
+            names.contains(&"sub-agent"),
+            "sub-agent from subdir must be found; got {:?}",
+            names
+        );
+        assert!(names.contains(&"top-agent"), "top-agent must be found");
+        assert_eq!(agents.len(), 2);
+    }
+
+    #[test]
+    fn flat_file_loader_skips_custom_subdir() {
+        let tmp = TempDir::new().unwrap();
+        let agents_dir = tmp.path().join("agents");
+        fs::create_dir_all(agents_dir.join("custom")).unwrap();
+        fs::write(
+            agents_dir.join("custom/should-skip.md"),
+            "---\nname: should-skip\ndescription: This is in custom/\n---\n\nBody.\n",
+        )
+        .unwrap();
+        fs::write(
+            agents_dir.join("top.md"),
+            "---\nname: top\ndescription: Top-level agent\n---\n\nTop body.\n",
+        )
+        .unwrap();
+
+        let agents = load_flat_file_agents(&agents_dir, AgentSource::Project).unwrap();
+        let names: Vec<&str> = agents.iter().map(|a| a.agent_type.as_str()).collect();
+        assert!(names.contains(&"top"), "top agent should be loaded");
+        assert!(!names.contains(&"should-skip"), "custom/ must be skipped");
+        assert_eq!(agents.len(), 1);
+    }
+
+    #[test]
+    fn flat_file_loader_skips_no_frontmatter() {
+        let tmp = TempDir::new().unwrap();
+        let agents_dir = tmp.path().join("agents");
+        fs::create_dir_all(&agents_dir).unwrap();
+        fs::write(
+            agents_dir.join("README.md"),
+            "# README\n\nThis is not an agent — just a readme.\n",
+        )
+        .unwrap();
+        fs::write(
+            agents_dir.join("real-agent.md"),
+            "---\nname: real-agent\ndescription: A real one\n---\n\nReal body.\n",
+        )
+        .unwrap();
+
+        let agents = load_flat_file_agents(&agents_dir, AgentSource::Project).unwrap();
+        let names: Vec<&str> = agents.iter().map(|a| a.agent_type.as_str()).collect();
+        assert!(names.contains(&"real-agent"), "real-agent should be loaded");
+        assert!(
+            !names.contains(&"README"),
+            "README (no frontmatter) must be skipped"
+        );
+        assert_eq!(agents.len(), 1);
+    }
+
+    #[test]
+    fn flat_file_loader_malformed_frontmatter_logs_skips() {
+        let tmp = TempDir::new().unwrap();
+        let agents_dir = tmp.path().join("agents");
+        fs::create_dir_all(&agents_dir).unwrap();
+        fs::write(
+            agents_dir.join("broken.md"),
+            "---\n{this is not valid yaml]]]\n---\n\nBody.\n",
+        )
+        .unwrap();
+        fs::write(
+            agents_dir.join("good.md"),
+            "---\nname: good\ndescription: Works fine\n---\n\nGood body.\n",
+        )
+        .unwrap();
+
+        let agents = load_flat_file_agents(&agents_dir, AgentSource::Project).unwrap();
+        let names: Vec<&str> = agents.iter().map(|a| a.agent_type.as_str()).collect();
+        assert!(names.contains(&"good"), "good agent must still be loaded");
+        assert!(!names.contains(&"broken"), "malformed YAML must be skipped");
+        assert_eq!(agents.len(), 1);
+    }
+
+    #[test]
+    fn flat_file_loader_missing_root_returns_empty() {
+        let tmp = TempDir::new().unwrap();
+        let nonexistent = tmp.path().join("does-not-exist");
+        let agents = load_flat_file_agents(&nonexistent, AgentSource::Project).unwrap();
+        assert!(agents.is_empty());
+    }
+
+    #[test]
+    fn flat_file_loader_tools_csv() {
+        let tmp = TempDir::new().unwrap();
+        let agents_dir = tmp.path().join("agents");
+        fs::create_dir_all(&agents_dir).unwrap();
+        fs::write(
+            agents_dir.join("tooled.md"),
+            "---\nname: tooled\ndescription: Has tools\n\
+             tools: Read, Grep, Glob, Bash\n---\n\nBody.\n",
+        )
+        .unwrap();
+
+        let agents = load_flat_file_agents(&agents_dir, AgentSource::Project).unwrap();
+        let tools = agents[0].allowed_tools.as_ref().unwrap();
+        assert_eq!(tools, &vec!["Read", "Grep", "Glob", "Bash"]);
+    }
+
+    #[test]
+    fn flat_file_loader_tools_yaml_array() {
+        let tmp = TempDir::new().unwrap();
+        let agents_dir = tmp.path().join("agents");
+        fs::create_dir_all(&agents_dir).unwrap();
+        fs::write(
+            agents_dir.join("tooled.yaml.md"),
+            "---\nname: tooled\ndescription: Has tools as array\n\
+             tools:\n  - Read\n  - Grep\n  - Glob\n  - Bash\n---\n\nBody.\n",
+        )
+        .unwrap();
+
+        let agents = load_flat_file_agents(&agents_dir, AgentSource::Project).unwrap();
+        let tools = agents[0].allowed_tools.as_ref().unwrap();
+        assert_eq!(tools, &vec!["Read", "Grep", "Glob", "Bash"]);
+    }
+
+    #[test]
+    fn flat_file_loader_filename_stem_fallback() {
+        let tmp = TempDir::new().unwrap();
+        let agents_dir = tmp.path().join("agents");
+        fs::create_dir_all(&agents_dir).unwrap();
+        fs::write(
+            agents_dir.join("nameless.md"),
+            "---\ndescription: No name field here\n---\n\nBody text.\n",
+        )
+        .unwrap();
+
+        let agents = load_flat_file_agents(&agents_dir, AgentSource::Project).unwrap();
+        assert_eq!(agents.len(), 1);
+        assert_eq!(agents[0].agent_type, "nameless");
+        assert_eq!(agents[0].description, "No name field here");
     }
 }
