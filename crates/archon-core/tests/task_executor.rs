@@ -114,8 +114,8 @@ fn make_task(agent_name: &str) -> Task {
     }
 }
 
-/// Setup harness. Must be called from `spawn_blocking` or outside a tokio
-/// runtime because `PerAgentTaskQueue::enqueue` uses `blocking_lock`.
+/// Setup harness. Safe to call from any context — the queue uses
+/// `std::sync::Mutex` internally (no `.await` inside critical sections).
 async fn setup_harness(
     config: QueueConfig,
     agent: &str,

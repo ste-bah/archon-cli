@@ -1,9 +1,9 @@
 use std::collections::VecDeque;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use dashmap::DashMap;
-use tokio::sync::{Mutex, OwnedSemaphorePermit, Semaphore};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 use crate::tasks::models::{TaskError, TaskId};
 
@@ -96,7 +96,7 @@ impl PerAgentTaskQueue {
 impl TaskQueue for PerAgentTaskQueue {
     fn enqueue(&self, task_id: TaskId, agent_name: &str) -> Result<(), TaskError> {
         let slot = self.get_or_create_slot(agent_name);
-        let mut pending = slot.pending.blocking_lock();
+        let mut pending = slot.pending.lock().expect("queue mutex poisoned");
         if pending.len() >= slot.config.queue_capacity {
             return Err(TaskError::QueueFull);
         }
@@ -116,7 +116,7 @@ impl TaskQueue for PerAgentTaskQueue {
             None => {
                 // Check burst mode: if oldest pending entry waited longer than
                 // the burst threshold, try to acquire a burst permit.
-                let pending = slot.pending.blocking_lock();
+                let pending = slot.pending.lock().expect("queue mutex poisoned");
                 if let Some(front) = pending.front() {
                     if front.enqueued_at.elapsed() >= slot.config.burst_threshold {
                         drop(pending);
@@ -131,14 +131,14 @@ impl TaskQueue for PerAgentTaskQueue {
         };
 
         let permit = permit?;
-        let mut pending = slot.pending.blocking_lock();
+        let mut pending = slot.pending.lock().expect("queue mutex poisoned");
         let entry = pending.pop_front()?;
         Some((entry.task_id, permit))
     }
 
     fn remove_pending(&self, task_id: TaskId) -> bool {
         for entry in self.queues.iter() {
-            let mut pending = entry.value().pending.blocking_lock();
+            let mut pending = entry.value().pending.lock().expect("queue mutex poisoned");
             if let Some(pos) = pending.iter().position(|e| e.task_id == task_id) {
                 pending.remove(pos);
                 return true;
@@ -150,7 +150,7 @@ impl TaskQueue for PerAgentTaskQueue {
     fn depth(&self, agent_name: &str) -> usize {
         self.queues
             .get(agent_name)
-            .map(|slot| slot.pending.blocking_lock().len())
+            .map(|slot| slot.pending.lock().expect("queue mutex poisoned").len())
             .unwrap_or(0)
     }
 }

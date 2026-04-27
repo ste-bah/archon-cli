@@ -433,12 +433,12 @@ pub(crate) async fn run_print_mode_session(
         if let Some(ref m) = def.model {
             if m != "inherit" {
                 agent_config.model = m.clone();
-                *agent_config.model_override.blocking_lock() = m.clone();
+                *agent_config.model_override.lock().await = m.clone();
             }
         }
         if let Some(ref e) = def.effort {
             if let Ok(level) = e.parse::<archon_llm::effort::EffortLevel>() {
-                *agent_config.effort_level.blocking_lock() = level;
+                *agent_config.effort_level.lock().await = level;
             } else {
                 tracing::warn!(agent = %def.agent_type, effort = %e, "invalid effort level in agent definition, using default");
             }
@@ -446,7 +446,7 @@ pub(crate) async fn run_print_mode_session(
         if let Some(ref pm) = def.permission_mode {
             let mode_str = pm.as_str();
             // AC-103: Agent permission_mode must NOT override parent BypassPermissions/AcceptEdits/Auto
-            let parent_mode = agent_config.permission_mode.blocking_lock().clone();
+            let parent_mode = agent_config.permission_mode.lock().await.clone();
             let parent_is_privileged = matches!(
                 parent_mode.as_str(),
                 "bypassPermissions" | "acceptEdits" | "auto"
@@ -462,7 +462,7 @@ pub(crate) async fn run_print_mode_session(
                     "agent requests bypassPermissions but --dangerously-skip-permissions not passed; ignoring"
                 );
             } else {
-                *agent_config.permission_mode.blocking_lock() = mode_str.to_string();
+                *agent_config.permission_mode.lock().await = mode_str.to_string();
             }
         }
         if def.max_turns.is_some() {
@@ -1356,12 +1356,12 @@ pub(crate) async fn run_interactive_session(
         if let Some(ref m) = def.model {
             if m != "inherit" {
                 agent_config.model = m.clone();
-                *agent_config.model_override.blocking_lock() = m.clone();
+                *agent_config.model_override.lock().await = m.clone();
             }
         }
         if let Some(ref e) = def.effort {
             if let Ok(level) = e.parse::<archon_llm::effort::EffortLevel>() {
-                *agent_config.effort_level.blocking_lock() = level;
+                *agent_config.effort_level.lock().await = level;
             } else {
                 tracing::warn!(agent = %def.agent_type, effort = %e, "invalid effort level in agent definition, using default");
             }
@@ -1369,7 +1369,7 @@ pub(crate) async fn run_interactive_session(
         if let Some(ref pm) = def.permission_mode {
             let mode_str = pm.as_str();
             // AC-103: Agent permission_mode must NOT override parent BypassPermissions/AcceptEdits/Auto
-            let parent_mode = agent_config.permission_mode.blocking_lock().clone();
+            let parent_mode = agent_config.permission_mode.lock().await.clone();
             let parent_is_privileged = matches!(
                 parent_mode.as_str(),
                 "bypassPermissions" | "acceptEdits" | "auto"
@@ -1385,7 +1385,7 @@ pub(crate) async fn run_interactive_session(
                     "agent requests bypassPermissions but --dangerously-skip-permissions not passed; ignoring"
                 );
             } else {
-                *agent_config.permission_mode.blocking_lock() = mode_str.to_string();
+                *agent_config.permission_mode.lock().await = mode_str.to_string();
             }
         }
         if def.max_turns.is_some() {
