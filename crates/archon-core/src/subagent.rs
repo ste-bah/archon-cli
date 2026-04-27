@@ -368,6 +368,7 @@ pub mod runner {
     use std::sync::Arc;
     use std::time::{Duration, Instant};
 
+    use archon_llm::identity::IdentityProvider;
     use archon_llm::provider::{LlmProvider, LlmRequest};
     use archon_llm::streaming::StreamEvent;
     use archon_llm::types::ContentBlockType;
@@ -412,6 +413,9 @@ pub mod runner {
         /// Parent AgentConfig for aligning LLM request structural fields
         /// (max_tokens, thinking, speed, effort) with the parent's working shape.
         agent_config: std::sync::Arc<crate::agent::AgentConfig>,
+        /// Parent identity provider for billing-header prepend in spoof mode
+        /// (v0.1.19 — last structural alignment gap between parent and subagent).
+        identity: std::sync::Arc<IdentityProvider>,
     }
 
     /// A single pending tool call collected from the stream.
@@ -433,6 +437,7 @@ pub mod runner {
             max_turns: u32,
             timeout_secs: u64,
             agent_config: std::sync::Arc<crate::agent::AgentConfig>,
+            identity: std::sync::Arc<IdentityProvider>,
         ) -> Self {
             Self {
                 provider,
@@ -453,6 +458,7 @@ pub mod runner {
                 shutdown_flag: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 progress: None,
                 agent_config,
+                identity,
             }
         }
 
@@ -619,10 +625,35 @@ pub mod runner {
                     return Ok("[Agent shutdown requested]".to_string());
                 }
 
-                let mut system = vec![serde_json::json!({
+                // Assemble system blocks: billing header (spoof mode) →
+                // agent body → critical system reminder (AGT-022).
+                // Order matters for prompt-cache breakpoints (v0.1.19).
+                let first_user_message = messages
+                    .first()
+                    .and_then(|m| m.get("content"))
+                    .and_then(|c| c.as_str())
+                    .unwrap_or("");
+
+                let mut system: Vec<serde_json::Value> = Vec::new();
+
+                // Billing header prepend aligns subagent with parent when
+                // IdentityMode::Spoof is active — without this, Anthropic
+                // 429s the request (project-zero billing-marker check).
+                // IdentityMode::Clean returns None from billing_header(),
+                // so the block is only pushed in spoof mode.
+                if let Some(billing) = self.identity.billing_header(first_user_message) {
+                    system.push(serde_json::json!({
+                        "type": "text",
+                        "text": billing,
+                        "cache_control": { "type": "ephemeral" }
+                    }));
+                }
+
+                system.push(serde_json::json!({
                     "type": "text",
                     "text": &self.system_prompt,
-                })];
+                }));
+
                 // Inject critical system reminder every turn (AGT-022)
                 if let Some(ref reminder) = self.critical_system_reminder {
                     system.push(serde_json::json!({
@@ -646,9 +677,8 @@ pub mod runner {
                     }
                 };
 
-                let (max_tokens, thinking, speed) = self
-                    .agent_config
-                    .build_base_request_fields(&self.model);
+                let (max_tokens, thinking, speed) =
+                    self.agent_config.build_base_request_fields(&self.model);
 
                 let request = LlmRequest {
                     model: self.model.clone(),
@@ -880,6 +910,7 @@ pub mod runner {
     mod tests {
         use super::*;
         use crate::agent::AgentConfig;
+        use archon_llm::identity::IdentityMode;
         use archon_llm::provider::{LlmResponse, ModelInfo, ProviderFeature};
         use archon_llm::types::Usage;
         use archon_tools::tool::{PermissionLevel, Tool};
@@ -1042,6 +1073,12 @@ pub mod runner {
                 max_turns,
                 300,
                 Arc::new(AgentConfig::default()),
+                Arc::new(IdentityProvider::new(
+                    IdentityMode::Clean,
+                    "test".into(),
+                    String::new(),
+                    String::new(),
+                )),
             )
         }
 
@@ -1143,6 +1180,12 @@ pub mod runner {
                 5,
                 60,
                 Arc::new(AgentConfig::default()),
+                Arc::new(IdentityProvider::new(
+                    IdentityMode::Clean,
+                    "test".into(),
+                    String::new(),
+                    String::new(),
+                )),
             );
             let result = runner.run("hello").await.unwrap();
             assert_eq!(result, "No tools needed");
@@ -1411,6 +1454,12 @@ pub mod runner {
                 5,
                 60,
                 Arc::new(AgentConfig::default()),
+                Arc::new(IdentityProvider::new(
+                    IdentityMode::Clean,
+                    "test".into(),
+                    String::new(),
+                    String::new(),
+                )),
             );
 
             let start = std::time::Instant::now();

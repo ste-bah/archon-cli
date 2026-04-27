@@ -42,6 +42,7 @@ use async_trait::async_trait;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
+use archon_llm::identity::IdentityProvider;
 use archon_llm::provider::LlmProvider;
 use archon_memory::MemoryTrait;
 use archon_tools::agent_tool::SubagentRequest;
@@ -90,6 +91,9 @@ pub struct AgentSubagentExecutor {
     /// Parent AgentConfig for structural LLM request field alignment
     /// (max_tokens, thinking, speed, effort live reads at subagent build time).
     agent_config: Arc<crate::agent::AgentConfig>,
+    /// Parent identity provider for billing-header prepend in spoof mode
+    /// (v0.1.19 — subagent system prompt alignment with parent's).
+    identity: Arc<IdentityProvider>,
     /// Per-subagent worktree info cache. Populated inside
     /// `run_to_completion` when `isolation == "worktree"`; consumed by
     /// `on_visible_complete` when deciding clean-vs-preserved worktree
@@ -133,6 +137,7 @@ impl AgentSubagentExecutor {
         parent_permission_mode: Arc<Mutex<String>>,
         pending_resume_messages: Arc<Mutex<Option<Vec<serde_json::Value>>>>,
         agent_config: Arc<crate::agent::AgentConfig>,
+        identity: Arc<IdentityProvider>,
     ) -> Self {
         Self {
             client,
@@ -148,6 +153,7 @@ impl AgentSubagentExecutor {
             parent_permission_mode,
             pending_resume_messages,
             agent_config,
+            identity,
             worktree_cache: Arc::new(Mutex::new(HashMap::new())),
             memory_cache: Arc::new(Mutex::new(HashMap::new())),
         }
@@ -705,6 +711,7 @@ impl SubagentExecutor for AgentSubagentExecutor {
             max_turns,
             request.timeout_secs,
             Arc::clone(&self.agent_config),
+            Arc::clone(&self.identity),
         );
 
         if let Some(effort) = def_effort {

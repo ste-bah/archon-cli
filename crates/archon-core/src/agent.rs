@@ -440,6 +440,14 @@ impl Agent {
             Arc::clone(&self.config.permission_mode),
             Arc::clone(&self.pending_resume_messages),
             Arc::new(self.config.clone()),
+            Arc::new(self.identity_provider().cloned().unwrap_or_else(|| {
+                archon_llm::identity::IdentityProvider::new(
+                    archon_llm::identity::IdentityMode::Clean,
+                    self.config.session_id.clone(),
+                    String::new(),
+                    String::new(),
+                )
+            })),
         );
         archon_tools::subagent_executor::install_subagent_executor(Arc::new(exec));
     }

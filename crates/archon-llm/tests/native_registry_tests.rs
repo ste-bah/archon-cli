@@ -153,7 +153,7 @@ fn simple_request() -> LlmRequest {
         speed: None,
         effort: None,
         extra: serde_json::Value::Null,
-            request_origin: None,
+        request_origin: None,
     }
 }
 

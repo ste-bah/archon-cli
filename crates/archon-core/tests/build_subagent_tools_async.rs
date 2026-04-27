@@ -5,6 +5,7 @@ use archon_core::agents::AgentRegistry;
 use archon_core::dispatch::ToolRegistry;
 use archon_core::subagent::SubagentManager;
 use archon_core::subagent_executor::AgentSubagentExecutor;
+use archon_llm::identity::{IdentityMode, IdentityProvider};
 use archon_llm::provider::{
     LlmError, LlmProvider, LlmRequest, LlmResponse, ModelInfo, ProviderFeature,
 };
@@ -63,6 +64,12 @@ async fn build_subagent_tools_does_not_panic_from_async_context() {
         parent_permission_mode,
         pending_resume_messages,
         Arc::new(AgentConfig::default()),
+        Arc::new(IdentityProvider::new(
+            IdentityMode::Clean,
+            "test-session".into(),
+            String::new(),
+            String::new(),
+        )),
     );
 
     let request = SubagentRequest {
