@@ -4,6 +4,7 @@ use std::time::SystemTime;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio_util::sync::CancellationToken;
+use tracing::{error, warn};
 use uuid::Uuid;
 
 use crate::background_agents::{
@@ -61,6 +62,61 @@ pub enum AgentToolError {
 
     #[error("invalid input: {0}")]
     InvalidInput(String),
+}
+
+// ---------------------------------------------------------------------------
+// Failure classification — additive prefix so the LLM stops guessing
+// "rate limited" when the real error is something else.
+// ---------------------------------------------------------------------------
+
+/// Conservative heuristic: classify a subagent failure string into a
+/// category prefix. Only emits a specific category when the signal is
+/// unambiguous (HTTP status codes, exact Rust panic format, etc.).
+/// Defaults to neutral `[subagent_failure]` — the original error text
+/// carries the truth regardless.
+pub fn classify_failure_prefix(err: &str) -> &'static str {
+    let low = err.to_lowercase();
+
+    // Rate limit: requires HTTP 429 OR the explicit phrase "rate limit"
+    // surrounded by word boundaries.
+    if low.contains("429 ")
+        || low.contains(" 429")
+        || low == "429"
+        || low.contains(" rate limit ")
+        || low.starts_with("rate limit ")
+        || low.ends_with(" rate limit")
+        || low.contains("rate-limit")
+    {
+        return "[subagent_rate_limited]";
+    }
+
+    // Auth: HTTP 401 OR explicit "authentication failed" / "invalid api key" /
+    // "unauthorized". Do NOT match generic "auth" substring.
+    if low.contains(" 401")
+        || low.contains("401 ")
+        || low.contains("authentication failed")
+        || low.contains("invalid api key")
+        || low.contains("unauthorized")
+    {
+        return "[subagent_auth_failed]";
+    }
+
+    // Panic: only the explicit "panicked at" phrase (standard Rust format).
+    if low.contains("panicked at") || low.contains("thread '") {
+        return "[subagent_panic]";
+    }
+
+    // Timeout: "timed out", "timeout exceeded", "deadline exceeded".
+    if low.contains("timed out")
+        || low.contains("timeout exceeded")
+        || low.contains("deadline exceeded")
+    {
+        return "[subagent_timeout]";
+    }
+
+    // Default — the error text carries the truth; we just label it
+    // generically so the LLM knows it was a subagent failure.
+    "[subagent_failure]"
 }
 
 // ---------------------------------------------------------------------------
@@ -309,6 +365,7 @@ impl Tool for AgentTool {
         let result_slot_child = Arc::clone(&result_slot);
         let ctx_clone = ctx.clone();
         let sid_spawn = subagent_id.clone();
+        let subagent_type = request.subagent_type.clone();
 
         let join = tokio::spawn(async move {
             let outcome = run_subagent(sid_spawn.clone(), request, cancel_child, ctx_clone).await;
@@ -443,7 +500,8 @@ impl Tool for AgentTool {
         };
         if let Err(e) = BACKGROUND_AGENTS.register(handle) {
             cancel_for_failure.cancel();
-            return ToolResult::error(format!("background registry register failed: {e}"));
+            let msg = format!("background registry register failed: {e}");
+            return ToolResult::error(format!("{} {}", classify_failure_prefix(&msg), msg));
         }
         drop(cancel_for_failure);
 
@@ -453,13 +511,29 @@ impl Tool for AgentTool {
         let outcome = match join.await {
             Ok(o) => o,
             Err(e) => {
-                return ToolResult::error(format!("subagent join panicked: {e}"));
+                error!(
+                    subagent_id = %subagent_id,
+                    subagent_type = ?subagent_type,
+                    error = %e,
+                    "AgentTool: subagent join panicked",
+                );
+                let msg = format!("subagent join panicked: {e}");
+                return ToolResult::error(format!("{} {}", classify_failure_prefix(&msg), msg));
             }
         };
 
         match outcome {
             SubagentOutcome::Completed(text) => ToolResult::success(text),
-            SubagentOutcome::Failed(err) => ToolResult::error(err),
+            SubagentOutcome::Failed(err) => {
+                error!(
+                    subagent_id = %subagent_id,
+                    subagent_type = ?subagent_type,
+                    error = %err,
+                    "AgentTool: subagent run failed",
+                );
+                let prefixed = format!("{} {}", classify_failure_prefix(&err), err);
+                ToolResult::error(prefixed)
+            }
             SubagentOutcome::AutoBackgrounded => {
                 // Preserve the EXACT old text format from
                 // agent.rs:3050-3053 so Sherlock's byte-for-byte checks
@@ -471,7 +545,14 @@ impl Tool for AgentTool {
                      use SendMessage to check status."
                 ))
             }
-            SubagentOutcome::Cancelled => ToolResult::error("subagent cancelled"),
+            SubagentOutcome::Cancelled => {
+                warn!(
+                    subagent_id = %subagent_id,
+                    "AgentTool: subagent cancelled",
+                );
+                let msg = "subagent cancelled".to_string();
+                ToolResult::error(format!("{} {}", classify_failure_prefix(&msg), msg))
+            }
         }
     }
 

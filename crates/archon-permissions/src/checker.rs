@@ -133,6 +133,26 @@ impl PermissionChecker {
 }
 
 // ---------------------------------------------------------------------------
+// Public accessors — single source of truth for mode gate lists
+// ---------------------------------------------------------------------------
+
+pub fn default_safe_tools() -> &'static [&'static str] {
+    DEFAULT_SAFE_TOOLS
+}
+
+pub fn is_default_safe_tool(name: &str) -> bool {
+    DEFAULT_SAFE_TOOLS.contains(&name)
+}
+
+pub fn accept_edits_whitelist() -> &'static [&'static str] {
+    ACCEPT_EDITS_WHITELIST
+}
+
+pub fn is_accept_edits_safe_tool(name: &str) -> bool {
+    ACCEPT_EDITS_WHITELIST.contains(&name)
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
