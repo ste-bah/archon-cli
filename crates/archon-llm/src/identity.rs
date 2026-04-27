@@ -1,11 +1,14 @@
 use std::collections::HashMap;
 use std::fs;
-use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::path::PathBuf;
+
+use sha2::{Digest, Sha256};
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
+
+const FINGERPRINT_SALT: &str = "59cf53e54c78";
 
 /// Beta strings always sent (primary identity + unconditionally required).
 pub const DEFAULT_BETAS: &[&str] = &[
@@ -154,9 +157,32 @@ impl IdentityProvider {
         }
     }
 
+    /// Generate the billing header for the system prompt (Layer 6).
+    pub fn billing_header(&self, first_user_message: &str) -> Option<String> {
+        match &self.mode {
+            IdentityMode::Spoof {
+                version,
+                entrypoint,
+                workload,
+                ..
+            } => {
+                let fp = compute_fingerprint(first_user_message, version);
+                let mut header = format!(
+                    "x-anthropic-billing-header: cc_version={version}.{fp}; cc_entrypoint={entrypoint};"
+                );
+                if let Some(wl) = workload {
+                    header.push_str(&format!(" cc_workload={wl};"));
+                }
+                Some(header)
+            }
+            _ => None,
+        }
+    }
+
     /// Generate system prompt blocks with correct cache_control scopes.
     pub fn system_prompt_blocks(
         &self,
+        first_user_message: &str,
         static_content: &str,
         dynamic_content: &str,
     ) -> Vec<serde_json::Value> {
@@ -164,14 +190,23 @@ impl IdentityProvider {
             IdentityMode::Spoof { .. } => {
                 let mut blocks = Vec::new();
 
-                // Block 1: Identity prefix (scope = org)
+                // Block 1: Billing header (cacheScope = null / ephemeral)
+                if let Some(billing) = self.billing_header(first_user_message) {
+                    blocks.push(serde_json::json!({
+                        "type": "text",
+                        "text": billing,
+                        "cache_control": { "type": "ephemeral" }
+                    }));
+                }
+
+                // Block 2: Identity prefix (scope = org)
                 blocks.push(serde_json::json!({
                     "type": "text",
                     "text": "You are Claude Code, Anthropic's official CLI for Claude.",
                     "cache_control": { "type": "ephemeral", "scope": "org" }
                 }));
 
-                // Block 2: Static content (scope = global for 1P)
+                // Block 3: Static content (scope = global for 1P)
                 if !static_content.is_empty() {
                     blocks.push(serde_json::json!({
                         "type": "text",
@@ -180,7 +215,7 @@ impl IdentityProvider {
                     }));
                 }
 
-                // Block 3: Dynamic content (no cache_control)
+                // Block 4: Dynamic content (no cache_control)
                 if !dynamic_content.is_empty() {
                     blocks.push(serde_json::json!({
                         "type": "text",
@@ -209,6 +244,31 @@ impl IdentityProvider {
             }
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Fingerprint algorithm (REQ-IDENTITY-003)
+// ---------------------------------------------------------------------------
+
+/// Compute the fingerprint for the billing header.
+///
+/// ```text
+/// salt = "59cf53e54c78"
+/// chars = msg[4] + msg[7] + msg[20] (use "0" for missing)
+/// input = salt + chars + version
+/// fingerprint = SHA256(input)[0:3] (first 3 hex chars)
+/// ```
+pub fn compute_fingerprint(first_user_message: &str, version: &str) -> String {
+    let chars: Vec<u8> = first_user_message.as_bytes().to_vec();
+
+    let c4 = chars.get(4).copied().unwrap_or(b'0') as char;
+    let c7 = chars.get(7).copied().unwrap_or(b'0') as char;
+    let c20 = chars.get(20).copied().unwrap_or(b'0') as char;
+
+    let input = format!("{FINGERPRINT_SALT}{c4}{c7}{c20}{version}");
+    let hash = Sha256::digest(input.as_bytes());
+    let hex = hex::encode(hash);
+    hex[..3].to_string()
 }
 
 // ---------------------------------------------------------------------------
@@ -253,151 +313,47 @@ fn device_id_path() -> PathBuf {
 /// Regex pattern for beta headers.
 const BETA_REGEX: &str = r"[a-z][a-z0-9-]+-\d{4}-\d{2}-\d{2}";
 
-/// Live identity values extracted from the installed Claude Code binary.
-/// Empty fields when Claude Code isn't installed or doesn't yield a match.
-#[derive(Debug, Clone, Default)]
-pub struct DiscoveredIdentity {
-    /// e.g. "2.1.89" — extracted from MACRO.VERSION-style constant strings.
-    pub version: Option<String>,
-    /// All `anthropic-beta` tokens found in the binary's strings table.
-    pub betas: Vec<String>,
-    /// e.g. "claude-cli/2.1.89 (external, cli)" — User-Agent template if
-    /// found verbatim; else None and caller composes from version.
-    pub user_agent_template: Option<String>,
-    /// e.g. "cli" or "claude_code" — default cc_entrypoint string when
-    /// found in the binary.
-    pub entrypoint_default: Option<String>,
-    /// True if the binary references `NATIVE_CLIENT_ATTESTATION` or the
-    /// `cch=00000` placeholder.
-    pub cch_required: bool,
-}
-
-/// Memoised cache — binary scan runs once per process.
-static DISCOVERED_IDENTITY: OnceLock<DiscoveredIdentity> = OnceLock::new();
-
-/// Discover full Claude Code identity from the installed binary's strings table.
+/// Discover beta headers from installed Claude Code binary.
 ///
-/// Extracts version, betas, user-agent template, entrypoint, and CCH status.
-/// Returns all-default `DiscoveredIdentity` when Claude Code isn't installed.
-///
-/// Result is memoised — the 234M binary is scanned at most once per process.
-pub fn discover_claude_code_identity() -> &'static DiscoveredIdentity {
-    DISCOVERED_IDENTITY.get_or_init(discover_inner)
-}
-
-fn discover_inner() -> DiscoveredIdentity {
-    let claude_path = match find_claude_binary() {
+/// Returns discovered betas, or empty vec if Claude Code not found.
+pub fn discover_betas_from_claude() -> Vec<String> {
+    let claude_path = find_claude_binary();
+    let path = match claude_path {
         Some(p) => p,
         None => {
-            tracing::info!("Claude Code not installed, identity discovery skipped");
-            return DiscoveredIdentity::default();
+            tracing::info!("Claude Code not installed, using default betas");
+            return Vec::new();
         }
     };
 
-    tracing::debug!("Found Claude Code at: {:?}", claude_path);
+    tracing::debug!("Found Claude Code at: {:?}", path);
 
-    let content = match extract_strings_from_binary(&claude_path) {
+    let content = match extract_strings_from_binary(&path) {
         Ok(c) => c,
         Err(e) => {
             tracing::warn!("Cannot read Claude Code binary: {e}");
-            return DiscoveredIdentity::default();
+            return Vec::new();
         }
     };
 
-    let mut discovered = parse_identity_from_strings(&content);
-
-    // Fallback: if binary string-scrape didn't yield a version (common on
-    // Bun-templated builds like v2.1.119+), try the sibling package.json.
-    if discovered.version.is_none() {
-        discovered.version = version_from_package_json(&claude_path);
-        if discovered.version.is_some() {
-            tracing::info!("version resolved from package.json fallback");
-        }
-    }
-
-    discovered
-}
-
-/// Try to read the Claude Code version from the npm package metadata at
-/// `<binary_dir>/../package.json`. This is more reliable than binary string-
-/// scraping on recent Claude Code versions where Bun templates `${VERSION}`
-/// at runtime instead of embedding it as a literal.
-pub(crate) fn version_from_package_json(claude_path: &Path) -> Option<String> {
-    let real = std::fs::canonicalize(claude_path).ok()?;
-    let pkg_json = real.parent()?.parent()?.join("package.json");
-    let content = std::fs::read_to_string(&pkg_json).ok()?;
-    let v: serde_json::Value = serde_json::from_str(&content).ok()?;
-    v.get("version").and_then(|x| x.as_str()).map(String::from)
-}
-
-/// Parse identity fields from already-extracted binary strings.
-///
-/// Public for testing — callers can feed synthetic strings data without
-/// needing an actual Claude Code binary on disk.
-pub fn parse_identity_from_strings(content: &str) -> DiscoveredIdentity {
-    // Extract version: look for "claude-cli/X.Y.Z"
-    let version_re = regex::Regex::new(r"claude-cli/(\d+\.\d+\.\d+)").ok();
-    let version = version_re
-        .as_ref()
-        .and_then(|re| re.captures(content))
-        .and_then(|caps| caps.get(1))
-        .map(|m| m.as_str().to_string());
-
-    // Extract betas
-    let betas = {
-        let mut v: Vec<String> = regex::Regex::new(BETA_REGEX)
-            .iter()
-            .flat_map(|re| re.find_iter(content))
-            .map(|m| m.as_str().to_string())
-            .collect();
-        v.sort();
-        v.dedup();
-        v
+    let re = match regex::Regex::new(BETA_REGEX) {
+        Ok(r) => r,
+        Err(_) => return Vec::new(),
     };
 
-    // Extract user-agent template: "claude-cli/X.Y.Z (...)"
-    let ua_re = regex::Regex::new(r"claude-cli/\d+\.\d+\.\d+\s+\([^)]+\)").ok();
-    let user_agent_template = ua_re
-        .as_ref()
-        .and_then(|re| re.find(content))
-        .map(|m| m.as_str().to_string());
+    let mut betas: Vec<String> = re
+        .find_iter(&content)
+        .map(|m| m.as_str().to_string())
+        .collect();
 
-    // Extract entrypoint: "cc_entrypoint=..."
-    let entrypoint_re = regex::Regex::new(r"cc_entrypoint=([a-z_]+)").ok();
-    let entrypoint_default = entrypoint_re
-        .as_ref()
-        .and_then(|re| re.captures(content))
-        .and_then(|caps| caps.get(1))
-        .map(|m| m.as_str().to_string());
+    betas.sort();
+    betas.dedup();
 
-    // Detect CCH requirement
-    let cch_required =
-        content.contains("NATIVE_CLIENT_ATTESTATION") || content.contains("cch=00000");
-
-    tracing::info!(
-        "Discovered Claude Code identity: version={:?}, betas={}, ua={:?}, entrypoint={:?}, cch_required={}",
-        version,
-        betas.len(),
-        user_agent_template,
-        entrypoint_default,
-        cch_required
+    tracing::debug!(
+        "Auto-discovered {} beta headers from Claude Code",
+        betas.len()
     );
-
-    DiscoveredIdentity {
-        version,
-        betas,
-        user_agent_template,
-        entrypoint_default,
-        cch_required,
-    }
-}
-
-/// Discover beta headers from installed Claude Code binary.
-///
-/// Thin shim around `discover_claude_code_identity()` for backward compatibility.
-/// Returns discovered betas, or empty vec if Claude Code not found.
-pub fn discover_betas_from_claude() -> Vec<String> {
-    discover_claude_code_identity().betas.clone()
+    betas
 }
 
 /// Find the Claude Code binary in PATH or common locations.
@@ -640,39 +596,6 @@ pub fn resolve_betas(config_betas: Option<&[String]>) -> Vec<String> {
 }
 
 // ---------------------------------------------------------------------------
-// Identity field resolvers (v0.1.16 — priority: discovered > config > default)
-// ---------------------------------------------------------------------------
-
-/// Resolve spoof version with priority: discovered > config.
-/// Returns `(version_string, source_label)` for startup logging.
-pub fn resolve_spoof_version(config_version: &str) -> (String, &'static str) {
-    let discovered = discover_claude_code_identity();
-    if let Some(ref v) = discovered.version {
-        return (v.clone(), "discovered");
-    }
-    (config_version.to_string(), "config")
-}
-
-/// Resolve user-agent with priority: discovered template > composed from version.
-/// Returns `(user_agent_string, source_label)` for startup logging.
-pub fn resolve_user_agent(version: &str, discovered: Option<&str>) -> (String, &'static str) {
-    if let Some(ua) = discovered {
-        return (ua.to_string(), "discovered");
-    }
-    (format!("claude-cli/{version} (external, cli)"), "composed")
-}
-
-/// Resolve entrypoint with priority: discovered > config.
-/// Returns `(entrypoint_string, source_label)` for startup logging.
-pub fn resolve_entrypoint(config_ep: &str) -> (String, &'static str) {
-    let discovered = discover_claude_code_identity();
-    if let Some(ref ep) = discovered.entrypoint_default {
-        return (ep.clone(), "discovered");
-    }
-    (config_ep.to_string(), "config")
-}
-
-// ---------------------------------------------------------------------------
 // Tests for new beta validation cache functions
 // ---------------------------------------------------------------------------
 
@@ -765,76 +688,5 @@ mod beta_validation_cache_tests {
             !result.is_empty(),
             "should always return at least some betas"
         );
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Tests for package.json version fallback (v0.1.16)
-// ---------------------------------------------------------------------------
-
-#[cfg(test)]
-mod package_json_fallback_tests {
-    use super::*;
-
-    #[test]
-    fn version_from_package_json_extracts_version() {
-        let tmp = std::env::temp_dir().join("archon_pkg_json_test");
-        let _ = std::fs::create_dir_all(&tmp);
-
-        // Simulate: bin/claude (binary) → ../package.json
-        let bin_dir = tmp.join("bin");
-        std::fs::create_dir_all(&bin_dir).unwrap();
-        let claude_path = bin_dir.join("claude");
-
-        // Write a package.json with version
-        let pkg = serde_json::json!({
-            "name": "claude-code",
-            "version": "2.1.119"
-        });
-        std::fs::write(
-            tmp.join("package.json"),
-            serde_json::to_string_pretty(&pkg).unwrap(),
-        )
-        .unwrap();
-
-        // Create the fake binary file so canonicalize works
-        std::fs::write(&claude_path, b"fake binary content").unwrap();
-
-        let version = version_from_package_json(&claude_path);
-        assert_eq!(version.as_deref(), Some("2.1.119"));
-
-        // Cleanup
-        let _ = std::fs::remove_dir_all(&tmp);
-    }
-
-    #[test]
-    fn version_from_package_json_returns_none_when_no_package_json() {
-        let tmp = std::env::temp_dir().join("archon_pkg_json_test_none");
-        let _ = std::fs::create_dir_all(&tmp);
-        let bin_dir = tmp.join("bin");
-        std::fs::create_dir_all(&bin_dir).unwrap();
-        let claude_path = bin_dir.join("claude");
-        std::fs::write(&claude_path, b"fake binary").unwrap();
-
-        let version = version_from_package_json(&claude_path);
-        assert!(version.is_none());
-
-        let _ = std::fs::remove_dir_all(&tmp);
-    }
-
-    #[test]
-    fn version_from_package_json_returns_none_for_malformed_json() {
-        let tmp = std::env::temp_dir().join("archon_pkg_json_test_malformed");
-        let _ = std::fs::create_dir_all(&tmp);
-        let bin_dir = tmp.join("bin");
-        std::fs::create_dir_all(&bin_dir).unwrap();
-        let claude_path = bin_dir.join("claude");
-        std::fs::write(&claude_path, b"fake binary").unwrap();
-        std::fs::write(tmp.join("package.json"), b"not valid json").unwrap();
-
-        let version = version_from_package_json(&claude_path);
-        assert!(version.is_none());
-
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 }

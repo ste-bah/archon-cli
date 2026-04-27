@@ -381,7 +381,6 @@ fn map_http_error(status: u16, body: String) -> LlmError {
         401 => LlmError::Auth(body),
         429 => LlmError::RateLimited {
             retry_after_secs: 60,
-            body_preview: body[..body.len().min(300)].to_string(),
         },
         500 | 503 => LlmError::Overloaded,
         _ => LlmError::Server {

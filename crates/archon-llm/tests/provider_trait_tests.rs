@@ -139,7 +139,6 @@ fn llm_request_from_message_request_round_trip() {
         thinking: Some(serde_json::json!({"type": "enabled", "budget_tokens": 1024})),
         speed: Some("fast".into()),
         effort: Some("low".into()),
-        request_origin: None,
     };
 
     let llm_req: LlmRequest = msg_req.into();

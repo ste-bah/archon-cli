@@ -2,7 +2,6 @@
 pub mod active;
 pub mod anthropic;
 pub mod auth;
-pub mod cch;
 // TASK-AGS-706: LlmConfig + resolve_descriptor — feeds build_llm_provider.
 pub mod config;
 pub mod effort;

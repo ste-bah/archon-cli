@@ -1,8 +1,60 @@
 use std::collections::HashMap;
 
 use archon_llm::identity::{
-    DEFAULT_BETAS, IdentityMode, IdentityProvider, discover_betas_from_claude, resolve_betas,
+    DEFAULT_BETAS, IdentityMode, IdentityProvider, compute_fingerprint, discover_betas_from_claude,
+    resolve_betas,
 };
+
+// -----------------------------------------------------------------------
+// Fingerprint algorithm (REQ-IDENTITY-003)
+// -----------------------------------------------------------------------
+
+#[test]
+fn fingerprint_known_vector() {
+    // "Hello, how are you today?" indices: [4]='o', [7]=' ', [20]='d'
+    let fp = compute_fingerprint("Hello, how are you today?", "2.1.89");
+    assert_eq!(fp.len(), 3, "fingerprint should be 3 hex chars");
+    // Deterministic -- same input produces same output
+    let fp2 = compute_fingerprint("Hello, how are you today?", "2.1.89");
+    assert_eq!(fp, fp2);
+}
+
+#[test]
+fn fingerprint_short_message_pads_with_zero() {
+    // Message "Hi" has length 2. Indices 4, 7, 20 all missing -> '0'
+    let fp = compute_fingerprint("Hi", "2.1.89");
+    assert_eq!(fp.len(), 3);
+
+    // All zeros should produce same fingerprint as "000" padding
+    let fp_explicit = compute_fingerprint("Hi", "2.1.89");
+    assert_eq!(fp, fp_explicit);
+}
+
+#[test]
+fn fingerprint_empty_message() {
+    let fp = compute_fingerprint("", "2.1.89");
+    assert_eq!(fp.len(), 3);
+    // All padding chars are '0'
+}
+
+#[test]
+fn fingerprint_different_versions_differ() {
+    let fp1 = compute_fingerprint("same message content here!", "2.1.89");
+    let fp2 = compute_fingerprint("same message content here!", "3.0.0");
+    assert_ne!(
+        fp1, fp2,
+        "different versions should produce different fingerprints"
+    );
+}
+
+#[test]
+fn fingerprint_different_messages_differ() {
+    let fp1 = compute_fingerprint("Hello, how are you today?", "2.1.89");
+    let fp2 = compute_fingerprint("Goodbye cruel world!!!!!!", "2.1.89");
+    // Different chars at indices 4, 7, 20 should produce different fingerprints
+    // (unless hash collision, extremely unlikely)
+    assert_ne!(fp1, fp2);
+}
 
 // -----------------------------------------------------------------------
 // Identity headers (spoof mode)
@@ -148,6 +200,60 @@ fn clean_metadata_is_empty() {
 }
 
 // -----------------------------------------------------------------------
+// Billing header (Layer 6)
+// -----------------------------------------------------------------------
+
+#[test]
+fn billing_header_present_in_spoof() {
+    let provider = IdentityProvider::new(
+        IdentityMode::Spoof {
+            version: "2.1.89".into(),
+            entrypoint: "cli".into(),
+            betas: vec![],
+            workload: None,
+            anti_distillation: false,
+        },
+        "s".into(),
+        "d".into(),
+        "a".into(),
+    );
+
+    let header = provider.billing_header("test message for fingerprint");
+    assert!(header.is_some());
+    let h = header.expect("billing header");
+    assert!(h.contains("x-anthropic-billing-header:"));
+    assert!(h.contains("cc_version=2.1.89."));
+    assert!(h.contains("cc_entrypoint=cli"));
+}
+
+#[test]
+fn billing_header_with_workload() {
+    let provider = IdentityProvider::new(
+        IdentityMode::Spoof {
+            version: "2.1.89".into(),
+            entrypoint: "cli".into(),
+            betas: vec![],
+            workload: Some("cron".into()),
+            anti_distillation: false,
+        },
+        "s".into(),
+        "d".into(),
+        "a".into(),
+    );
+
+    let header = provider
+        .billing_header("msg")
+        .expect("should have billing header");
+    assert!(header.contains("cc_workload=cron"));
+}
+
+#[test]
+fn no_billing_header_in_clean_mode() {
+    let provider = IdentityProvider::new(IdentityMode::Clean, "s".into(), "d".into(), "a".into());
+    assert!(provider.billing_header("msg").is_none());
+}
+
+// -----------------------------------------------------------------------
 // System prompt blocks (REQ-IDENTITY-009)
 // -----------------------------------------------------------------------
 
@@ -166,16 +272,23 @@ fn spoof_system_prompt_has_correct_cache_scopes() {
         "a".into(),
     );
 
-    let blocks = provider.system_prompt_blocks("static content", "dynamic content");
+    let blocks = provider.system_prompt_blocks("Hello", "static content", "dynamic content");
 
-    // Block 0: identity prefix (scope = org)
-    assert_eq!(blocks[0]["cache_control"]["scope"].as_str(), Some("org"));
+    // Block 0: billing (ephemeral, no scope)
+    assert!(blocks[0]["cache_control"]["scope"].is_null());
+    assert_eq!(
+        blocks[0]["cache_control"]["type"].as_str(),
+        Some("ephemeral")
+    );
 
-    // Block 1: static (scope = global)
-    assert_eq!(blocks[1]["cache_control"]["scope"].as_str(), Some("global"));
+    // Block 1: identity prefix (scope = org)
+    assert_eq!(blocks[1]["cache_control"]["scope"].as_str(), Some("org"));
 
-    // Block 2: dynamic (no cache_control)
-    assert!(blocks[2].get("cache_control").is_none());
+    // Block 2: static (scope = global)
+    assert_eq!(blocks[2]["cache_control"]["scope"].as_str(), Some("global"));
+
+    // Block 3: dynamic (no cache_control)
+    assert!(blocks[3].get("cache_control").is_none());
 }
 
 // -----------------------------------------------------------------------

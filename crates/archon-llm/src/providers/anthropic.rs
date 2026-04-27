@@ -19,13 +19,9 @@ impl From<ApiError> for LlmError {
         match e {
             ApiError::HttpError(msg) => LlmError::Http(msg),
             ApiError::AuthError(msg) => LlmError::Auth(msg),
-            ApiError::RateLimited {
-                retry_after_secs,
-                body_preview,
-            } => LlmError::RateLimited {
-                retry_after_secs,
-                body_preview,
-            },
+            ApiError::RateLimited { retry_after_secs } => {
+                LlmError::RateLimited { retry_after_secs }
+            }
             ApiError::Overloaded => LlmError::Overloaded,
             ApiError::ServerError { status, message } => LlmError::Server { status, message },
             ApiError::SerializeError(msg) => LlmError::Serialize(msg),
