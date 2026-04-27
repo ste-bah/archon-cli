@@ -5,7 +5,9 @@ use tracing::debug;
 
 use super::built_in::get_built_in_agents;
 use super::definition::{AgentSource, CustomAgentDefinition};
-use super::loader::{AgentLoadError, load_custom_agents, load_plugin_agents};
+use super::loader::{
+    AgentLoadError, load_custom_agents, load_flat_file_agents, load_plugin_agents,
+};
 
 // ---------------------------------------------------------------------------
 // AgentRegistry
@@ -13,8 +15,12 @@ use super::loader::{AgentLoadError, load_custom_agents, load_plugin_agents};
 
 /// Central lookup for all agent definitions.
 ///
-/// Priority (highest wins on name conflict):
-///   built-in (lowest) < project (.archon/agents/custom/) < user (~/.archon/agents/custom/)
+/// Priority (lowest → highest, later wins on name conflict):
+///   built-in < project plugins < user plugins < project flat-file
+///   < project custom (6-file) < user flat-file < user custom (6-file) (highest)
+///
+/// User scope wins over project; 6-file format wins over flat-file at the
+/// same scope (6-file is the more explicit, configurable surface).
 #[derive(Debug)]
 pub struct AgentRegistry {
     agents: HashMap<String, CustomAgentDefinition>,
@@ -35,12 +41,13 @@ impl AgentRegistry {
     /// 1. Built-in agents
     /// 2. Project plugin agents (`<project>/.archon/plugins/*/agents/*`)
     /// 3. User plugin agents (`<user_home>/.archon/plugins/*/agents/*`)
-    /// 4. Project custom agents (`<project>/.archon/agents/custom/*`)
-    /// 5. User custom agents (`<user_home>/.archon/agents/custom/*`) — wins
+    /// 4. Project flat-file agents — YAML frontmatter (`<project>/.archon/agents/*.md`)
+    /// 5. Project custom agents — 6-file format (`<project>/.archon/agents/custom/*`)
+    /// 6. User flat-file agents — YAML frontmatter (`<user_home>/.archon/agents/*.md`)
+    /// 7. User custom agents — 6-file format (`<user_home>/.archon/agents/custom/*`)
     ///
-    /// This ordering ranks `project custom` ABOVE `user plugin`: authored
-    /// custom agents are a deliberate override surface and win over any
-    /// installed plugin bundle regardless of scope.
+    /// User scope wins over project scope. 6-file format wins over flat-file
+    /// at the same scope (6-file is the more explicit, configurable surface).
     pub fn load_with_user_home(project_dir: &Path, user_home: Option<&Path>) -> Self {
         let mut agents = HashMap::new();
         let mut errors = Vec::new();
@@ -76,7 +83,23 @@ impl AgentRegistry {
             }
         }
 
-        // 4. Project custom agents (.archon/agents/custom/)
+        // 4. Project flat-file agents (.archon/agents/*.md, recursive)
+        //    — claude-flow YAML-frontmatter shape. Skips custom/ subdir
+        //    (handled by step 5) and dotfiles/_-prefixed dirs.
+        let project_flat = project_dir.join(".archon/agents");
+        match load_flat_file_agents(&project_flat, AgentSource::Project) {
+            Ok(loaded) => {
+                debug!(count = loaded.len(), "loaded project flat-file agents");
+                for a in loaded {
+                    agents.insert(a.agent_type.clone(), a);
+                }
+            }
+            Err(e) => errors.push(e),
+        }
+
+        // 5. Project custom agents (.archon/agents/custom/) — 6-file format.
+        //    Loaded AFTER flat-file so the more explicit 6-file shape wins
+        //    on key collision at the same scope.
         let project_custom = project_dir.join(".archon/agents/custom");
         if project_custom.is_dir() {
             match load_custom_agents(&project_custom, AgentSource::Project) {
@@ -90,7 +113,22 @@ impl AgentRegistry {
             }
         }
 
-        // 5. User custom agents (~/.archon/agents/custom/) — highest priority
+        // 6. User flat-file agents (~/.archon/agents/*.md, recursive)
+        if let Some(home) = user_home {
+            let user_flat = home.join(".archon/agents");
+            match load_flat_file_agents(&user_flat, AgentSource::User) {
+                Ok(loaded) => {
+                    debug!(count = loaded.len(), "loaded user flat-file agents");
+                    for a in loaded {
+                        agents.insert(a.agent_type.clone(), a);
+                    }
+                }
+                Err(e) => errors.push(e),
+            }
+        }
+
+        // 7. User custom agents (~/.archon/agents/custom/) — 6-file format.
+        //    Loaded AFTER flat-file at the same scope for the same reason.
         if let Some(home) = user_home {
             let user_custom = home.join(".archon/agents/custom");
             if user_custom.is_dir() {
@@ -579,5 +617,139 @@ mod tests {
         let map = registry.color_map();
         assert_eq!(map.len(), 1);
         assert_eq!(map.get("colored").unwrap(), "#ff0000");
+    }
+
+    // -----------------------------------------------------------------------
+    // Flat-file agent loading tests (v0.1.11)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn load_picks_up_flat_file_agents() {
+        let project = TempDir::new().unwrap();
+        let agents_dir = project.path().join(".archon/agents");
+        fs::create_dir_all(&agents_dir).unwrap();
+        fs::write(
+            agents_dir.join("foo.md"),
+            "---\nname: foo\ndescription: A flat-file agent\n---\n\nFlat file body.\n",
+        )
+        .unwrap();
+
+        let registry = AgentRegistry::load_with_user_home(project.path(), None);
+        let agent = registry
+            .resolve("foo")
+            .expect("flat-file agent foo must resolve");
+        assert_eq!(agent.source, AgentSource::Project);
+        assert_eq!(agent.description, "A flat-file agent");
+    }
+
+    #[test]
+    fn load_combines_6file_and_flat_file() {
+        let project = TempDir::new().unwrap();
+        fs::create_dir_all(project.path().join(".archon/agents/custom/six-file")).unwrap();
+        create_agent(&project.path().join(".archon/agents/custom"), "six-file");
+        fs::write(
+            project.path().join(".archon/agents/flat.md"),
+            "---\nname: flat\ndescription: A flat-file agent\n---\n\nFlat body.\n",
+        )
+        .unwrap();
+
+        let registry = AgentRegistry::load_with_user_home(project.path(), None);
+        assert!(
+            registry.resolve("six-file").is_some(),
+            "6-file agent must resolve"
+        );
+        assert!(
+            registry.resolve("flat").is_some(),
+            "flat-file agent must resolve"
+        );
+        // 4 built-ins + 1 custom 6-file + 1 flat-file = 6
+        assert_eq!(registry.len(), 6);
+    }
+
+    #[test]
+    fn load_user_flat_file_overrides_project_flat_file() {
+        let project = TempDir::new().unwrap();
+        let user = TempDir::new().unwrap();
+
+        fs::create_dir_all(project.path().join(".archon/agents")).unwrap();
+        fs::write(
+            project.path().join(".archon/agents/shared.md"),
+            "---\nname: shared\ndescription: project flat-file version\n---\n\nProject body.\n",
+        )
+        .unwrap();
+
+        fs::create_dir_all(user.path().join(".archon/agents")).unwrap();
+        fs::write(
+            user.path().join(".archon/agents/shared.md"),
+            "---\nname: shared\ndescription: user flat-file version\n---\n\nUser body.\n",
+        )
+        .unwrap();
+
+        let registry = AgentRegistry::load_with_user_home(project.path(), Some(user.path()));
+        let agent = registry.resolve("shared").expect("shared must resolve");
+        assert_eq!(
+            agent.description, "user flat-file version",
+            "user flat-file must override project flat-file"
+        );
+        assert_eq!(agent.source, AgentSource::User);
+    }
+
+    #[test]
+    fn load_6file_overrides_flat_file_at_same_scope() {
+        let project = TempDir::new().unwrap();
+
+        // Flat-file agent named "collision"
+        fs::create_dir_all(project.path().join(".archon/agents")).unwrap();
+        fs::write(
+            project.path().join(".archon/agents/collision.md"),
+            "---\nname: collision\ndescription: flat-file version\n---\n\nFlat body.\n",
+        )
+        .unwrap();
+
+        // 6-file agent also named "collision" in custom/
+        create_agent(&project.path().join(".archon/agents/custom"), "collision");
+
+        let registry = AgentRegistry::load_with_user_home(project.path(), None);
+        let agent = registry
+            .resolve("collision")
+            .expect("collision must resolve");
+        assert_eq!(
+            agent.source,
+            AgentSource::Project,
+            "6-file format must win over flat-file at the same project scope"
+        );
+        assert!(
+            agent.description.contains("Test agent collision"),
+            "6-file agent description must appear; got {:?}",
+            agent.description
+        );
+    }
+
+    /// Lockstep regression test: flat-file agents from a real fixture are
+    /// loaded and counted. Without this, the two-system split (DiscoveryCatalog
+    /// vs AgentRegistry) can drift again.
+    #[test]
+    fn load_real_flat_file_agents_from_archon_dir() {
+        let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/flat_file_agents");
+        let registry = AgentRegistry::load_with_user_home(&fixture, None);
+
+        let mut names: Vec<&str> = registry
+            .list()
+            .iter()
+            .filter(|d| matches!(d.source, AgentSource::Project))
+            .map(|d| d.agent_type.as_str())
+            .collect();
+        names.sort();
+
+        // Expected: a, b, c (from sub/).
+        // custom/skip.md skipped by filter_entry (custom/ excluded).
+        // README.md skipped (no frontmatter).
+        assert_eq!(
+            names,
+            vec!["a", "b", "c"],
+            "expected 3 flat-file project agents; got {:?}",
+            names
+        );
     }
 }
