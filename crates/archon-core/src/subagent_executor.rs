@@ -697,7 +697,7 @@ impl SubagentExecutor for AgentSubagentExecutor {
             self.client.clone(),
             system_prompt,
             tool_defs,
-            tool_reg,
+            Arc::new(tool_reg),
             tool_ctx,
             model,
             max_turns,
