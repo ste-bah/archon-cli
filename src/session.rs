@@ -2162,6 +2162,7 @@ pub(crate) async fn run_interactive_session(
                         thinking: None,
                         speed: None,
                         effort: None,
+                        request_origin: None,
                     };
                     let stream_result: Result<
                         tokio::sync::mpsc::Receiver<archon_llm::streaming::StreamEvent>,

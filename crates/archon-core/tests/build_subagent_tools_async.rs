@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use archon_core::agent::AgentConfig;
 use archon_core::agents::AgentRegistry;
 use archon_core::dispatch::ToolRegistry;
 use archon_core::subagent::SubagentManager;
@@ -61,6 +62,7 @@ async fn build_subagent_tools_does_not_panic_from_async_context() {
         vec![],
         parent_permission_mode,
         pending_resume_messages,
+        Arc::new(AgentConfig::default()),
     );
 
     let request = SubagentRequest {

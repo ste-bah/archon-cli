@@ -391,7 +391,6 @@ pub mod runner {
         model: String,
         max_turns: u32,
         timeout_secs: u64,
-        max_tokens: u32,
         /// Critical system reminder re-injected every turn (AGT-022).
         critical_system_reminder: Option<String>,
         /// Effort level passed to the LLM API (e.g. "low", "medium", "high").
@@ -410,6 +409,9 @@ pub mod runner {
         shutdown_flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
         /// TASK-T3 (G4): per-agent progress tracker shared with SubagentManager.
         progress: Option<std::sync::Arc<std::sync::Mutex<super::ProgressTracker>>>,
+        /// Parent AgentConfig for aligning LLM request structural fields
+        /// (max_tokens, thinking, speed, effort) with the parent's working shape.
+        agent_config: std::sync::Arc<crate::agent::AgentConfig>,
     }
 
     /// A single pending tool call collected from the stream.
@@ -430,6 +432,7 @@ pub mod runner {
             model: String,
             max_turns: u32,
             timeout_secs: u64,
+            agent_config: std::sync::Arc<crate::agent::AgentConfig>,
         ) -> Self {
             Self {
                 provider,
@@ -440,7 +443,6 @@ pub mod runner {
                 model,
                 max_turns,
                 timeout_secs,
-                max_tokens: 16384,
                 critical_system_reminder: None,
                 effort: None,
                 transcript_store: None,
@@ -450,6 +452,7 @@ pub mod runner {
                 runner_agent_id: None,
                 shutdown_flag: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 progress: None,
+                agent_config,
             }
         }
 
@@ -631,14 +634,33 @@ pub mod runner {
                 // Context snipping: prevent unbounded message growth
                 Self::snip_context_if_needed(&mut messages);
 
+                // Effort layering: per-agent-definition override wins if Some;
+                // otherwise read the parent's live /effort setting (v0.1.18).
+                let effort = if self.effort.is_some() {
+                    self.effort.clone()
+                } else {
+                    let level = self.agent_config.effort_level.lock().await;
+                    match *level {
+                        archon_llm::effort::EffortLevel::High => None,
+                        other => Some(other.to_string()),
+                    }
+                };
+
+                let (max_tokens, thinking, speed) = self
+                    .agent_config
+                    .build_base_request_fields(&self.model);
+
                 let request = LlmRequest {
                     model: self.model.clone(),
-                    max_tokens: self.max_tokens,
+                    max_tokens,
                     system,
                     messages: messages.clone(),
                     tools: self.tool_definitions.clone(),
-                    effort: self.effort.clone(),
-                    ..LlmRequest::default()
+                    thinking,
+                    speed,
+                    effort,
+                    extra: serde_json::Value::Null,
+                    request_origin: Some("subagent".into()),
                 };
 
                 // Stream the response
@@ -857,6 +879,7 @@ pub mod runner {
     #[cfg(test)]
     mod tests {
         use super::*;
+        use crate::agent::AgentConfig;
         use archon_llm::provider::{LlmResponse, ModelInfo, ProviderFeature};
         use archon_llm::types::Usage;
         use archon_tools::tool::{PermissionLevel, Tool};
@@ -1018,6 +1041,7 @@ pub mod runner {
                 "mock-model".into(),
                 max_turns,
                 300,
+                Arc::new(AgentConfig::default()),
             )
         }
 
@@ -1118,6 +1142,7 @@ pub mod runner {
                 "mock".into(),
                 5,
                 60,
+                Arc::new(AgentConfig::default()),
             );
             let result = runner.run("hello").await.unwrap();
             assert_eq!(result, "No tools needed");
@@ -1385,6 +1410,7 @@ pub mod runner {
                 "mock".into(),
                 5,
                 60,
+                Arc::new(AgentConfig::default()),
             );
 
             let start = std::time::Instant::now();

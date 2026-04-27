@@ -84,6 +84,8 @@ pub struct LlmRequest {
     pub effort: Option<String>,
     /// Provider-specific escape hatch for parameters not in this struct.
     pub extra: serde_json::Value,
+    /// Diagnostic marker for tracing: "main_session", "subagent", or None.
+    pub request_origin: Option<String>,
 }
 
 impl Default for LlmRequest {
@@ -98,6 +100,7 @@ impl Default for LlmRequest {
             speed: None,
             effort: None,
             extra: serde_json::Value::Null,
+            request_origin: None,
         }
     }
 }
@@ -115,6 +118,7 @@ impl From<MessageRequest> for LlmRequest {
             speed: mr.speed,
             effort: mr.effort,
             extra: serde_json::Value::Null,
+            request_origin: None,
         }
     }
 }
@@ -130,6 +134,7 @@ impl From<LlmRequest> for MessageRequest {
             thinking: lr.thinking,
             speed: lr.speed,
             effort: lr.effort,
+            request_origin: lr.request_origin,
         }
     }
 }

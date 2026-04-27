@@ -177,6 +177,30 @@ pub struct AgentConfig {
     pub cancel_token: Option<tokio_util::sync::CancellationToken>,
 }
 
+impl AgentConfig {
+    /// Build the structural `LlmRequest` fields that must align between parent
+    /// and subagent requests (v0.1.18 fix).
+    ///
+    /// Returns `(max_tokens, thinking, speed)`. Effort is excluded because
+    /// it requires async lock access and has subagent-specific layering
+    /// (per-agent-def override vs live /effort).
+    pub fn build_base_request_fields(
+        &self,
+        model: &str,
+    ) -> (u32, Option<serde_json::Value>, Option<String>) {
+        let speed = if self.fast_mode.load(std::sync::atomic::Ordering::Relaxed) {
+            Some("fast".to_string())
+        } else {
+            None
+        };
+        let thinking = {
+            let mode = archon_llm::thinking::select_thinking_mode(model, self.thinking_budget);
+            archon_llm::thinking::thinking_param(&mode)
+        };
+        (self.max_tokens, thinking, speed)
+    }
+}
+
 impl Default for AgentConfig {
     fn default() -> Self {
         Self {
@@ -415,6 +439,7 @@ impl Agent {
             self.config.system_prompt.clone(),
             Arc::clone(&self.config.permission_mode),
             Arc::clone(&self.pending_resume_messages),
+            Arc::new(self.config.clone()),
         );
         archon_tools::subagent_executor::install_subagent_executor(Arc::new(exec));
     }
@@ -576,13 +601,6 @@ impl Agent {
             // Append critical system reminder (AGT-022) — re-injected every turn
             self.inject_critical_reminder(&mut system_with_memories);
 
-            // GAP 3: Read fast_mode from shared atomic
-            let speed = if self.config.fast_mode.load(Ordering::Relaxed) {
-                Some("fast".to_string())
-            } else {
-                None
-            };
-
             // GAP 4: Read effort level from shared mutex.
             // Ultrathink override: if input contains "ultrathink" (case-insensitive),
             // force effort to high for this turn only.
@@ -608,23 +626,21 @@ impl Agent {
                 }
             };
 
+            let (max_tokens, thinking, speed) =
+                self.config.build_base_request_fields(&active_model);
+
             // Build the API request
             let request = LlmRequest {
                 model: active_model.clone(),
-                max_tokens: self.config.max_tokens,
+                max_tokens,
                 system: system_with_memories,
                 messages: self.state.messages.clone(),
                 tools: self.config.tools.clone(),
-                thinking: {
-                    let mode = archon_llm::thinking::select_thinking_mode(
-                        &active_model,
-                        self.config.thinking_budget,
-                    );
-                    archon_llm::thinking::thinking_param(&mode)
-                },
+                thinking,
                 speed,
                 effort,
                 extra: serde_json::Value::Null,
+                request_origin: Some("main_session".into()),
             };
 
             self.send_event(AgentEvent::ApiCallStarted {
@@ -2313,6 +2329,7 @@ impl Agent {
             speed: Some("fast".to_string()),
             effort: Some("low".to_string()),
             extra: serde_json::Value::Null,
+            request_origin: None,
         };
 
         match self.client.stream(request).await {
@@ -2567,6 +2584,7 @@ impl Agent {
                 speed: Some("fast".to_string()),
                 effort: Some("low".to_string()),
                 extra: serde_json::Value::Null,
+                request_origin: None,
             };
 
             match client.stream(request).await {

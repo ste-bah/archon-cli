@@ -87,6 +87,9 @@ pub struct AgentSubagentExecutor {
     /// `Agent::process_message` SendMessage resume path, read from
     /// `run_to_completion` when building the runner).
     pending_resume_messages: Arc<Mutex<Option<Vec<serde_json::Value>>>>,
+    /// Parent AgentConfig for structural LLM request field alignment
+    /// (max_tokens, thinking, speed, effort live reads at subagent build time).
+    agent_config: Arc<crate::agent::AgentConfig>,
     /// Per-subagent worktree info cache. Populated inside
     /// `run_to_completion` when `isolation == "worktree"`; consumed by
     /// `on_visible_complete` when deciding clean-vs-preserved worktree
@@ -129,6 +132,7 @@ impl AgentSubagentExecutor {
         parent_system_prompt: Vec<serde_json::Value>,
         parent_permission_mode: Arc<Mutex<String>>,
         pending_resume_messages: Arc<Mutex<Option<Vec<serde_json::Value>>>>,
+        agent_config: Arc<crate::agent::AgentConfig>,
     ) -> Self {
         Self {
             client,
@@ -143,6 +147,7 @@ impl AgentSubagentExecutor {
             parent_system_prompt,
             parent_permission_mode,
             pending_resume_messages,
+            agent_config,
             worktree_cache: Arc::new(Mutex::new(HashMap::new())),
             memory_cache: Arc::new(Mutex::new(HashMap::new())),
         }
@@ -699,6 +704,7 @@ impl SubagentExecutor for AgentSubagentExecutor {
             model,
             max_turns,
             request.timeout_secs,
+            Arc::clone(&self.agent_config),
         );
 
         if let Some(effort) = def_effort {

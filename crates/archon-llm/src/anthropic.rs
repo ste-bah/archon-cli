@@ -96,13 +96,14 @@ impl AnthropicClient {
                 req = req.header(name, value);
             }
 
-            tracing::debug!(
-                "API request: model={}, headers={:?}, body_len={}",
+            tracing::info!(
+                "API request: url={}, model={}, request_origin={:?}, body_len={}",
+                self.api_url,
                 request.model,
-                headers.keys().collect::<Vec<_>>(),
+                request.request_origin.as_deref().unwrap_or("unknown"),
                 body.len()
             );
-            tracing::debug!("API request body: {}", &body[..body.len().min(2000)]);
+            tracing::info!("API request body: {}", &body[..body.len().min(2000)]);
 
             let response = req
                 .body(body.clone())
@@ -378,6 +379,8 @@ pub struct MessageRequest {
     pub speed: Option<String>,
     /// When effort is not High, set to the effort level string (e.g. `"low"`, `"medium"`).
     pub effort: Option<String>,
+    /// Diagnostic marker: None, "main_session", or "subagent".
+    pub request_origin: Option<String>,
 }
 
 impl Default for MessageRequest {
@@ -391,6 +394,7 @@ impl Default for MessageRequest {
             thinking: None,
             speed: None,
             effort: None,
+            request_origin: None,
         }
     }
 }

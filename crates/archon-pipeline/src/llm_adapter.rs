@@ -47,6 +47,7 @@ impl LlmClient for AnthropicLlmAdapter {
             thinking: None,
             speed: None,
             effort: None,
+            request_origin: None,
         };
 
         let mut rx = self
