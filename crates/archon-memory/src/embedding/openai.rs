@@ -186,14 +186,18 @@ impl EmbeddingProvider for OpenAIEmbedding {
             return Ok(Vec::new());
         }
 
-        // Chunk into batches to respect API limits
-        let mut all_embeddings: Vec<Vec<f32>> = Vec::with_capacity(texts.len());
-        for chunk in texts.chunks(MAX_BATCH_SIZE) {
-            let batch = self.request_batch(chunk)?;
-            all_embeddings.extend(batch);
-        }
-
-        Ok(all_embeddings)
+        // Wrap in block_in_place: request_batch calls reqwest::blocking::Client::send()
+        // which internally creates a tokio runtime. Without this wrap, that panics
+        // with "Cannot start a runtime from within a runtime" when embed() is called
+        // from an async tokio task (the normal agent dispatch path).
+        tokio::task::block_in_place(|| {
+            let mut all_embeddings: Vec<Vec<f32>> = Vec::with_capacity(texts.len());
+            for chunk in texts.chunks(MAX_BATCH_SIZE) {
+                let batch = self.request_batch(chunk)?;
+                all_embeddings.extend(batch);
+            }
+            Ok(all_embeddings)
+        })
     }
 
     fn dimensions(&self) -> usize {

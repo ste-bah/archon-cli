@@ -44,6 +44,7 @@ tokio-stream.workspace = true
 russh.workspace = true
 axum.workspace = true
 tokio-tungstenite.workspace = true
+futures.workspace = true
 futures-util.workspace = true
 url.workspace = true
 rand.workspace = true

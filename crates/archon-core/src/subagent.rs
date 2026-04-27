@@ -372,6 +372,8 @@ pub mod runner {
     use archon_llm::streaming::StreamEvent;
     use archon_llm::types::ContentBlockType;
     use archon_tools::tool::ToolContext;
+    use archon_tools::tool::ToolResult;
+    use futures::future::join_all;
 
     use crate::dispatch::ToolRegistry;
 
@@ -384,7 +386,7 @@ pub mod runner {
         provider: Arc<dyn LlmProvider>,
         system_prompt: String,
         tool_definitions: Vec<serde_json::Value>,
-        registry: ToolRegistry,
+        registry: Arc<ToolRegistry>,
         tool_context: ToolContext,
         model: String,
         max_turns: u32,
@@ -423,7 +425,7 @@ pub mod runner {
             provider: Arc<dyn LlmProvider>,
             system_prompt: String,
             tool_definitions: Vec<serde_json::Value>,
-            registry: ToolRegistry,
+            registry: Arc<ToolRegistry>,
             tool_context: ToolContext,
             model: String,
             max_turns: u32,
@@ -759,19 +761,54 @@ pub mod runner {
                 self.record_transcript(&assistant_msg);
                 messages.push(assistant_msg);
 
-                // Dispatch each tool call
-                let mut tool_results: Vec<serde_json::Value> = Vec::new();
+                // ── Three-phase parallel tool dispatch (v0.1.12) ──────────────
+                // Mirrors claurst's proven pattern:
+                //   Phase 1: sequential pre-hook pass (hooks/permissions are
+                //            interactive and cannot be parallelized)
+                //   Phase 2: concurrent execution via futures::future::join_all
+                //            over Either<Left blocked, Right execute>.
+                //            join_all preserves input order natively.
+                //   Phase 3: assemble tool_result blocks in order, update
+                //            progress tracker (sync, no .await across locks)
+                //
+                // Phase 1 — collect PreparedTool entries.
+                struct PreparedTool {
+                    id: String,
+                    name: String,
+                    input: serde_json::Value,
+                }
+                let mut prepared: Vec<PreparedTool> = Vec::with_capacity(pending_tools.len());
                 for tool in &pending_tools {
                     let input: serde_json::Value =
                         serde_json::from_str(&tool.input_json).unwrap_or(serde_json::json!({}));
+                    prepared.push(PreparedTool {
+                        id: tool.id.clone(),
+                        name: tool.name.clone(),
+                        input,
+                    });
+                }
 
-                    let result = self
-                        .registry
-                        .dispatch(&tool.name, input, &self.tool_context)
-                        .await;
+                // Phase 2 — execute all tools concurrently via join_all.
+                // Each async block owns its cloned name/input/registry.
+                let registry = Arc::clone(&self.registry);
+                let exec_futures: Vec<_> = prepared
+                    .iter()
+                    .map(|p| {
+                        let name = p.name.clone();
+                        let input = p.input.clone();
+                        let registry = Arc::clone(&registry);
+                        let ctx = self.tool_context.clone();
+                        async move { registry.dispatch(&name, input, &ctx).await }
+                    })
+                    .collect();
 
-                    // TASK-T3 (G4): record tool dispatch in progress tracker.
-                    // Lock is acquired and dropped synchronously — never across an await.
+                let exec_results: Vec<ToolResult> = join_all(exec_futures).await;
+
+                // Phase 3 — assemble tool_result blocks IN ORDER.
+                // join_all preserves input order, so zip is correct.
+                let mut tool_results: Vec<serde_json::Value> = Vec::with_capacity(prepared.len());
+                for (p, result) in prepared.iter().zip(exec_results.into_iter()) {
+                    // Progress update — sync only, lock never crosses .await
                     if let Some(ref t) = self.progress {
                         if let Ok(mut g) = t.lock() {
                             g.tool_use_count += 1;
@@ -779,16 +816,15 @@ pub mod runner {
                                 g.recent_activities.pop_front();
                             }
                             g.recent_activities.push_back(super::ToolActivity {
-                                tool_name: tool.name.clone(),
+                                tool_name: p.name.clone(),
                                 timestamp: chrono::Utc::now(),
                             });
                             g.last_update = chrono::Utc::now();
                         }
                     }
-
                     tool_results.push(serde_json::json!({
                         "type": "tool_result",
-                        "tool_use_id": tool.id,
+                        "tool_use_id": p.id,
                         "content": result.content,
                         "is_error": result.is_error,
                     }));
@@ -823,6 +859,7 @@ pub mod runner {
         use super::*;
         use archon_llm::provider::{LlmResponse, ModelInfo, ProviderFeature};
         use archon_llm::types::Usage;
+        use archon_tools::tool::{PermissionLevel, Tool};
         use std::sync::atomic::{AtomicU32, Ordering};
         use tokio::sync::mpsc;
 
@@ -961,9 +998,9 @@ pub mod runner {
         }
 
         fn make_runner(provider: Arc<dyn LlmProvider>, max_turns: u32) -> SubagentRunner {
-            let registry = crate::dispatch::create_default_registry(
+            let registry = Arc::new(crate::dispatch::create_default_registry(
                 std::env::current_dir().unwrap_or_default(),
-            );
+            ));
             let tool_defs = registry.tool_definitions();
             let ctx = ToolContext {
                 working_dir: std::env::current_dir().unwrap_or_default(),
@@ -1062,9 +1099,9 @@ pub mod runner {
         #[tokio::test]
         async fn empty_tool_definitions_still_works() {
             let provider = Arc::new(MockProvider::new(vec![text_response("No tools needed")]));
-            let registry = crate::dispatch::create_default_registry(
+            let registry = Arc::new(crate::dispatch::create_default_registry(
                 std::env::current_dir().unwrap_or_default(),
-            );
+            ));
             let ctx = ToolContext {
                 working_dir: std::env::current_dir().unwrap_or_default(),
                 session_id: "test".into(),
@@ -1233,6 +1270,140 @@ pub mod runner {
             // Turn 2 (text_response):     MessageStart input=10, output=5
             assert_eq!(g.cumulative_input_tokens, 20);
             assert_eq!(g.cumulative_output_tokens, 25);
+        }
+
+        // ── v0.1.12: parallel tool dispatch regression test ──────────
+
+        struct SleeperTool {
+            name: String,
+            delay_ms: u64,
+        }
+
+        #[async_trait::async_trait]
+        impl Tool for SleeperTool {
+            fn name(&self) -> &str {
+                &self.name
+            }
+            fn description(&self) -> &str {
+                "test sleeper"
+            }
+            fn input_schema(&self) -> serde_json::Value {
+                serde_json::json!({})
+            }
+            async fn execute(&self, _input: serde_json::Value, _ctx: &ToolContext) -> ToolResult {
+                tokio::time::sleep(std::time::Duration::from_millis(self.delay_ms)).await;
+                ToolResult::success(format!("done:{}", self.name))
+            }
+            fn permission_level(&self, _input: &serde_json::Value) -> PermissionLevel {
+                PermissionLevel::Safe
+            }
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn parallel_tool_dispatch_concurrent_and_order_preserved() {
+            let mut registry = ToolRegistry::new();
+            registry.register(Box::new(SleeperTool {
+                name: "sleeper-A".into(),
+                delay_ms: 400,
+            }));
+            registry.register(Box::new(SleeperTool {
+                name: "sleeper-B".into(),
+                delay_ms: 200,
+            }));
+            registry.register(Box::new(SleeperTool {
+                name: "sleeper-C".into(),
+                delay_ms: 300,
+            }));
+            let registry = Arc::new(registry);
+            let tool_defs = registry.tool_definitions();
+
+            let provider = Arc::new(MockProvider::new(vec![
+                // Turn 1: 3 tool_use blocks with shuffled delays
+                vec![
+                    StreamEvent::MessageStart {
+                        id: "msg-1".into(),
+                        model: "mock".into(),
+                        usage: Usage {
+                            input_tokens: 10,
+                            output_tokens: 5,
+                            cache_creation_input_tokens: 0,
+                            cache_read_input_tokens: 0,
+                        },
+                    },
+                    StreamEvent::ContentBlockStart {
+                        index: 0,
+                        block_type: ContentBlockType::ToolUse,
+                        tool_use_id: Some("t1".into()),
+                        tool_name: Some("sleeper-A".into()),
+                    },
+                    StreamEvent::InputJsonDelta {
+                        index: 0,
+                        partial_json: "{}".into(),
+                    },
+                    StreamEvent::ContentBlockStop { index: 0 },
+                    StreamEvent::ContentBlockStart {
+                        index: 1,
+                        block_type: ContentBlockType::ToolUse,
+                        tool_use_id: Some("t2".into()),
+                        tool_name: Some("sleeper-B".into()),
+                    },
+                    StreamEvent::InputJsonDelta {
+                        index: 1,
+                        partial_json: "{}".into(),
+                    },
+                    StreamEvent::ContentBlockStop { index: 1 },
+                    StreamEvent::ContentBlockStart {
+                        index: 2,
+                        block_type: ContentBlockType::ToolUse,
+                        tool_use_id: Some("t3".into()),
+                        tool_name: Some("sleeper-C".into()),
+                    },
+                    StreamEvent::InputJsonDelta {
+                        index: 2,
+                        partial_json: "{}".into(),
+                    },
+                    StreamEvent::ContentBlockStop { index: 2 },
+                    StreamEvent::MessageStop,
+                ],
+                text_response("all done"),
+            ]));
+
+            let ctx = ToolContext {
+                working_dir: std::env::current_dir().unwrap_or_default(),
+                session_id: "test-parallel".into(),
+                mode: archon_tools::tool::AgentMode::Normal,
+                extra_dirs: vec![],
+                ..Default::default()
+            };
+
+            let runner = SubagentRunner::new(
+                provider,
+                "test".into(),
+                tool_defs,
+                registry,
+                ctx,
+                "mock".into(),
+                5,
+                60,
+            );
+
+            let start = std::time::Instant::now();
+            let result = runner.run("run all three").await.unwrap();
+            let elapsed = start.elapsed();
+
+            // The subagent ran turn 1 (3 tool_use dispatched in parallel)
+            // then turn 2 (text "all done"). If dispatch had failed, the
+            // subagent would have returned an error. "all done" means the
+            // loop completed cleanly.
+            assert_eq!(result, "all done");
+
+            // Concurrent: max delay is 400ms. Serial sum would be ~900ms.
+            // 1.5× headroom for CI variance.
+            assert!(
+                elapsed.as_millis() < 900,
+                "{}ms — expected <900ms for 3×400ms concurrent (serial would be ~900ms)",
+                elapsed.as_millis()
+            );
         }
     }
 }

@@ -8,7 +8,7 @@ publish = false
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.1.11"
+version = "0.1.12"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT"
@@ -66,6 +66,7 @@ openssl = { version = "0.10", features = ["vendored"] }
 cron = "0.12"
 rand = "0.9"
 tokio-tungstenite = { version = "0.26", features = ["rustls-tls-native-roots"] }
+futures = "0.3"
 futures-util = "0.3"
 url = "2"
 async-lsp = { version = "0.2", features = ["omni-trait"] }
