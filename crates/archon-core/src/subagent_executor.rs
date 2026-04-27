@@ -162,7 +162,7 @@ impl AgentSubagentExecutor {
     /// Build the filtered tool registry for a subagent. Ported from
     /// the old `Agent::build_subagent_tools` at `agent.rs:3182` — see
     /// mapping doc Section 7-Q5 (option b: method on the executor).
-    fn build_subagent_tools(
+    pub async fn build_subagent_tools(
         &self,
         request: &SubagentRequest,
         agent_def: Option<&CustomAgentDefinition>,
@@ -202,12 +202,7 @@ impl AgentSubagentExecutor {
             .unwrap_or_default();
 
         const PLAN_MODE_DENY: &[&str] = &["Write", "Edit", "Bash", "NotebookEdit"];
-        // Mapping doc Q15: switch to `.lock().await` during port. The
-        // method is sync here, so we use `blocking_lock` — same byte
-        // behavior as the old call at 2788. Sherlock's check on Q15
-        // requires the AWAIT form at the subagent_mode site in
-        // run_to_completion; this sync helper is fine to stay blocking.
-        let is_plan_mode = self.parent_permission_mode.blocking_lock().as_str() == "plan";
+        let is_plan_mode = self.parent_permission_mode.lock().await.as_str() == "plan";
 
         let mcp_scope: Option<&Vec<String>> = agent_def.and_then(|d| d.mcp_servers.as_ref());
 
@@ -608,7 +603,9 @@ impl SubagentExecutor for AgentSubagentExecutor {
         };
 
         // Build the subagent tool registry.
-        let (tool_defs, tool_reg) = self.build_subagent_tools(&request, resolved_def.as_ref());
+        let (tool_defs, tool_reg) = self
+            .build_subagent_tools(&request, resolved_def.as_ref())
+            .await;
 
         // Create worktree if isolation requests it.
         let worktree_info = if isolation.as_deref() == Some("worktree") {

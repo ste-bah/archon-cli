@@ -115,8 +115,9 @@ impl TaskExecutor {
     /// Main poll loop. Iterates agents, dequeues tasks, spawns per-task futures.
     /// Runs until `shutdown` is cancelled.
     ///
-    /// Queue operations (`try_dequeue`, `depth`) use `blocking_lock()` internally,
-    /// so we run them on a blocking thread to avoid panicking from async context.
+    /// Queue operations use `std::sync::Mutex` internally and are safe to call from
+    /// async context — no `.await` is held inside any critical section.
+    /// They're run on a blocking thread to minimize scheduler contention.
     pub async fn run(&self, agents: Vec<String>) {
         loop {
             if self.shutdown.is_cancelled() {

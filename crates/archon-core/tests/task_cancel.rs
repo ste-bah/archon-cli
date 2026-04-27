@@ -398,7 +398,7 @@ async fn test_cancel_already_cancelled_returns_error() {
     let tmp = tempfile::TempDir::new().unwrap();
     let registry = Arc::new(AgentRegistry::load(tmp.path()));
 
-    // Use no-queue variant to avoid blocking_lock panics in async context.
+    // Use no-queue variant — queue uses std::sync::Mutex, safe in any context.
     let svc = DefaultTaskService::new(registry, 100);
 
     let req = archon_core::tasks::models::SubmitRequest {
@@ -433,7 +433,7 @@ async fn test_cancel_finished_task_returns_error() {
     let tmp = tempfile::TempDir::new().unwrap();
     let registry = Arc::new(AgentRegistry::load(tmp.path()));
 
-    // Use no-queue variant to avoid blocking_lock panics in async context.
+    // Use no-queue variant — queue uses std::sync::Mutex, safe in any context.
     let svc = DefaultTaskService::new(registry, 100);
 
     let req = archon_core::tasks::models::SubmitRequest {
