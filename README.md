@@ -12,6 +12,7 @@ A privacy-first, self-aware AI coding assistant written in Rust. Archon replaces
 
 - [Overview](#overview)
 - [Quick Start](#quick-start)
+- [Build from Source](#build-from-source)
 - [Architecture](#architecture)
 - [Setup](#setup)
   - [macOS](#macos)
@@ -113,6 +114,184 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 # Non-interactive print mode
 ./target/release/archon -p "summarize src/main.rs" --output-format json
 ```
+
+---
+
+## Build from Source
+
+archon-cli is a 21-crate Cargo workspace. There are no precompiled binaries — clone, install Rust, build with `cargo build --release`. End-to-end build time is ~3-4 minutes on a modern laptop, longer on WSL2 (see WSL2 caveat below).
+
+### Prerequisites
+
+| Requirement | Minimum | Notes |
+|-------------|---------|-------|
+| Rust toolchain | 1.85+ | edition 2024 — older toolchains will not compile |
+| `cargo` | bundled with Rust | comes from rustup |
+| Git | any recent | for `git clone` and branch-aware sessions at runtime |
+| Disk space | ~3 GB free | target/ build artefacts dominate |
+| RAM | 4 GB minimum, 8 GB+ recommended | the linker phase peaks; WSL2 OOMs with parallel rustc on 4 GB |
+| OS | Linux, macOS 12+, Windows 10/11 (native or WSL2) | |
+
+### Install Rust
+
+If you don't already have Rust installed:
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source "$HOME/.cargo/env"
+rustc --version    # verify: should print 1.85.0 or newer
+```
+
+`rustup` will pick up the workspace's pinned toolchain from `rust-toolchain.toml` (if present) on first build.
+
+### Install OS build dependencies
+
+archon-cli links against OpenSSL via `reqwest` (rustls is also enabled, but build-deps still need pkg-config + libssl headers on Linux for some transitive crates).
+
+#### Ubuntu / Debian / WSL2-Ubuntu
+
+```bash
+sudo apt update
+sudo apt install -y build-essential pkg-config libssl-dev git
+```
+
+#### Fedora / RHEL / Rocky
+
+```bash
+sudo dnf install -y gcc pkg-config openssl-devel git
+```
+
+#### Arch / Manjaro
+
+```bash
+sudo pacman -S --needed base-devel openssl pkg-config git
+```
+
+#### macOS
+
+```bash
+xcode-select --install                                # Xcode CLI tools
+# OpenSSL is supplied by the system; no extra steps needed for default builds.
+# If a transitive crate complains about OpenSSL, install via brew:
+brew install pkg-config openssl
+export PKG_CONFIG_PATH="$(brew --prefix openssl)/lib/pkgconfig"
+```
+
+#### Windows (native)
+
+Install via [winget](https://learn.microsoft.com/en-us/windows/package-manager/winget/) in PowerShell:
+
+```powershell
+winget install Rustlang.Rustup
+winget install Microsoft.VisualStudio.2022.BuildTools
+# In the VS Build Tools installer, select "Desktop development with C++"
+winget install Git.Git
+```
+
+### Clone and build
+
+```bash
+git clone https://github.com/ste-bah/archon-cli
+cd archon-cli
+cargo build --release --bin archon
+```
+
+The release binary will be at `target/release/archon` (~66 MB).
+
+For an incremental dev build (faster compile, larger binary, debug symbols):
+
+```bash
+cargo build --bin archon
+./target/debug/archon --version
+```
+
+### WSL2 caveat — parallelism limit
+
+If you are building inside **WSL2**, do NOT let cargo run rustc in parallel against the full 21-crate workspace. WSL2's memory pressure on multi-process compilation has caused OOM kills in our test environments. Instead, restrict to one job:
+
+```bash
+cargo build --release --bin archon -j1
+```
+
+Build time on WSL2 with `-j1` is ~3-4 minutes; without `-j1` it can OOM the entire WSL2 VM. Native Linux and macOS do not need this flag.
+
+### Install to PATH
+
+After a successful build, place the binary somewhere in `$PATH`:
+
+```bash
+# Option A: copy to /usr/local/bin (Linux/macOS)
+sudo cp target/release/archon /usr/local/bin/
+
+# Option B: cargo install (Linux/macOS/Windows)
+cargo install --path .
+# Installs to ~/.cargo/bin/archon — make sure ~/.cargo/bin is in PATH
+```
+
+For Windows native (PowerShell):
+
+```powershell
+$env:PATH += ";$PWD\target\release"
+# Or copy archon.exe to a directory already in PATH
+```
+
+### Verify the build
+
+```bash
+archon --version
+# Expected output: archon 0.1.20 (<short-sha>)
+
+archon --help                   # full subcommand listing
+archon --list-themes            # 23 themes available
+archon --list-output-styles     # 5 output styles available
+```
+
+### First run
+
+archon-cli stores per-user state under `~/.local/share/archon/` (Linux/macOS) or `%APPDATA%\archon\` (Windows) and reads project config from `<workdir>/.archon/config.toml`. On the very first run, no config exists yet — `archon` boots with built-in defaults and you authenticate via:
+
+```bash
+archon login                              # OAuth PKCE flow (Claude.ai subscriber)
+# OR
+export ANTHROPIC_API_KEY="sk-ant-..."     # direct API-key auth
+```
+
+See [Authentication](#authentication) and [Configuration](#configuration) for full setup.
+
+### Run the test suite (optional)
+
+```bash
+# Native Linux/macOS — full parallelism
+cargo test --workspace
+
+# WSL2 — restrict parallelism (same reason as build)
+cargo test --workspace -j1 -- --test-threads=2
+
+# Faster, prettier output via nextest (one-time install)
+cargo install cargo-nextest
+cargo nextest run --workspace -j1 -- --test-threads=2
+```
+
+### Common build problems
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| `error: package 'archon-cli-workspace' specifies edition 2024` | Rust < 1.85 | `rustup update stable` |
+| `failed to resolve openssl` on Linux | missing `libssl-dev` | install OS build deps (above) |
+| WSL2 build hangs then `Killed`/`signal: 9` | OOM during parallel rustc | rebuild with `cargo build --release -j1` |
+| `linker 'cc' not found` | missing C toolchain | install `build-essential` (Linux) or Xcode CLI tools (macOS) |
+| Long build (30+ min on first run) | full dependency graph fetch + compile | normal for first build; subsequent rebuilds use the incremental cache |
+| `error: linking with cc failed` after a long compile | linker memory exhaustion | install `lld` and add `RUSTFLAGS='-Clink-arg=-fuse-ld=lld'` to the env, or switch to `-j1` |
+
+### Build flags reference
+
+| Flag | Purpose |
+|------|---------|
+| `--release` | optimized build (slow compile, fast runtime, ~66 MB output) |
+| `--bin archon` | only build the `archon` CLI binary — skips test/example targets and other workspace bins (`archon-pipeline-runner`, etc.) for faster iteration |
+| `-j1` | restrict cargo to one rustc process (mandatory on WSL2 with <8 GB RAM) |
+| `--offline` | reuse the local registry cache; do NOT fetch new crates (faster on rebuilds, fails on first build) |
+| `--profile dev` | default debug build; preserves debug symbols, no optimization |
 
 ---
 
