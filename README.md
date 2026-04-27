@@ -1,7 +1,7 @@
 # Archon CLI
 
 <div align="center">
-  <img src="archon-avatar.png" alt="Archon Avatar" width="200" />
+  <img src="archon-avatar.png" alt="Archon Avatar" width="400" />
 </div>
 
 A privacy-first, self-aware AI coding assistant written in Rust. Archon replaces cloud-dependent AI CLIs with a fully local consciousness layer, persistent memory, configurable personality, behavioral rules, and an interactive TUI, while proxying Claude's API directly with zero telemetry.
