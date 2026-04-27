@@ -311,14 +311,14 @@ dependencies = [
 
 [[package]]
 name = "archon-bench"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "criterion",
 ]
 
 [[package]]
 name = "archon-cli-workspace"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "anyhow",
  "archon-consciousness",
@@ -356,7 +356,7 @@ dependencies = [
 
 [[package]]
 name = "archon-consciousness"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "anyhow",
  "archon-memory",
@@ -371,7 +371,7 @@ dependencies = [
 
 [[package]]
 name = "archon-context"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "anyhow",
  "chrono",
@@ -383,7 +383,7 @@ dependencies = [
 
 [[package]]
 name = "archon-core"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -443,7 +443,7 @@ dependencies = [
 
 [[package]]
 name = "archon-leann"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "anyhow",
  "archon-memory",
@@ -471,7 +471,7 @@ dependencies = [
 
 [[package]]
 name = "archon-llm"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -512,7 +512,7 @@ dependencies = [
 
 [[package]]
 name = "archon-mcp"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "anyhow",
  "archon-tools",
@@ -542,7 +542,7 @@ dependencies = [
 
 [[package]]
 name = "archon-memory"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "anyhow",
  "chrono",
@@ -563,7 +563,7 @@ dependencies = [
 
 [[package]]
 name = "archon-observability"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "anyhow",
  "axum",
@@ -583,7 +583,7 @@ dependencies = [
 
 [[package]]
 name = "archon-permissions"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "anyhow",
  "glob",
@@ -596,7 +596,7 @@ dependencies = [
 
 [[package]]
 name = "archon-pipeline"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "anyhow",
  "archon-core",
@@ -629,7 +629,7 @@ dependencies = [
 
 [[package]]
 name = "archon-plugin"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "anyhow",
  "archon-core",
@@ -647,7 +647,7 @@ dependencies = [
 
 [[package]]
 name = "archon-sdk"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "anyhow",
  "archon-core",
@@ -670,7 +670,7 @@ dependencies = [
 
 [[package]]
 name = "archon-session"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "anyhow",
  "chrono",
@@ -687,7 +687,7 @@ dependencies = [
 
 [[package]]
 name = "archon-test-support"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "anyhow",
  "archon-memory",
@@ -701,7 +701,7 @@ dependencies = [
 
 [[package]]
 name = "archon-tools"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "anyhow",
  "archon-memory",
@@ -741,7 +741,7 @@ dependencies = [
 
 [[package]]
 name = "archon-tui"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "anyhow",
  "archon-core",
@@ -789,7 +789,7 @@ dependencies = [
 
 [[package]]
 name = "archon-tui-test-support"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "criterion",
  "dashmap 5.5.3",
