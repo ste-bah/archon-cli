@@ -96,13 +96,29 @@ impl AnthropicClient {
                 req = req.header(name, value);
             }
 
-            tracing::debug!(
-                "API request: model={}, headers={:?}, body_len={}",
+            // Spoof mode: compute Claude Code billing header from the
+            // actual request body. The server validates this hash against
+            // the body bytes; any mismatch (or missing header) yields 429.
+            if matches!(
+                self.identity.mode,
+                crate::identity::IdentityMode::Spoof { .. }
+            ) {
+                let cch = crate::cch::compute_cch(body.as_bytes());
+                let billing_value = format!(
+                    "cc_version=0.1; cc_entrypoint=claude_code; {cch}; cc_workload=claude_code;"
+                );
+                tracing::debug!(%billing_value, "injecting x-anthropic-billing-header");
+                req = req.header("x-anthropic-billing-header", billing_value);
+            }
+
+            tracing::info!(
+                "API request: model={}, origin={}, headers={:?}, body_len={}",
                 request.model,
+                request.request_origin.as_deref().unwrap_or("unknown"),
                 headers.keys().collect::<Vec<_>>(),
                 body.len()
             );
-            tracing::debug!("API request body: {}", &body[..body.len().min(2000)]);
+            tracing::info!("API request body: {}", &body[..body.len().min(2000)]);
 
             let response = req
                 .body(body.clone())
@@ -125,7 +141,7 @@ impl AnthropicClient {
 
             let response_body = response.text().await.unwrap_or_default();
 
-            tracing::debug!(
+            tracing::error!(
                 "API error response: status={}, retry-after={:?}, body={}",
                 status,
                 retry_after_header,
@@ -140,7 +156,9 @@ impl AnthropicClient {
 
             match &err {
                 // 429: wait for retry-after then retry
-                ApiError::RateLimited { retry_after_secs } => {
+                ApiError::RateLimited {
+                    retry_after_secs, ..
+                } => {
                     if attempt < MAX_RETRIES {
                         let delay = *retry_after_secs;
                         tracing::warn!(
@@ -378,6 +396,8 @@ pub struct MessageRequest {
     pub speed: Option<String>,
     /// When effort is not High, set to the effort level string (e.g. `"low"`, `"medium"`).
     pub effort: Option<String>,
+    /// Tags request origin for log correlation: "main_session" | "subagent" | "pipeline".
+    pub request_origin: Option<String>,
 }
 
 impl Default for MessageRequest {
@@ -391,6 +411,7 @@ impl Default for MessageRequest {
             thinking: None,
             speed: None,
             effort: None,
+            request_origin: None,
         }
     }
 }
@@ -407,8 +428,11 @@ pub enum ApiError {
     #[error("authentication error: {0}")]
     AuthError(String),
 
-    #[error("rate limited: retry after {retry_after_secs}s")]
-    RateLimited { retry_after_secs: u64 },
+    #[error("rate limited: retry after {retry_after_secs}s | body: {body_preview}")]
+    RateLimited {
+        retry_after_secs: u64,
+        body_preview: String,
+    },
 
     #[error("server overloaded (529)")]
     Overloaded,
@@ -445,6 +469,7 @@ fn classify_error(status: u16, body: &str, retry_after_header: Option<&str>) -> 
             retry_after_secs: retry_after_header
                 .and_then(|s| s.parse().ok())
                 .unwrap_or_else(|| extract_retry_after(body)),
+            body_preview: body[..body.len().min(300)].to_string(),
         },
         529 => ApiError::Overloaded,
         500 | 502 | 503 => ApiError::ServerError {

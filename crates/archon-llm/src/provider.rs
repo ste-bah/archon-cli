@@ -25,8 +25,11 @@ pub enum LlmError {
     #[error("authentication error: {0}")]
     Auth(String),
 
-    #[error("rate limited: retry after {retry_after_secs}s")]
-    RateLimited { retry_after_secs: u64 },
+    #[error("rate limited: retry after {retry_after_secs}s | body: {body_preview}")]
+    RateLimited {
+        retry_after_secs: u64,
+        body_preview: String,
+    },
 
     #[error("server overloaded")]
     Overloaded,
@@ -82,6 +85,8 @@ pub struct LlmRequest {
     pub speed: Option<String>,
     /// When effort is not High, set to the effort level string (e.g. `"low"`, `"medium"`).
     pub effort: Option<String>,
+    /// Tags request origin for log correlation: "main_session" | "subagent" | "pipeline".
+    pub request_origin: Option<String>,
     /// Provider-specific escape hatch for parameters not in this struct.
     pub extra: serde_json::Value,
 }
@@ -97,6 +102,7 @@ impl Default for LlmRequest {
             thinking: None,
             speed: None,
             effort: None,
+            request_origin: None,
             extra: serde_json::Value::Null,
         }
     }
@@ -114,6 +120,7 @@ impl From<MessageRequest> for LlmRequest {
             thinking: mr.thinking,
             speed: mr.speed,
             effort: mr.effort,
+            request_origin: mr.request_origin,
             extra: serde_json::Value::Null,
         }
     }
@@ -130,6 +137,7 @@ impl From<LlmRequest> for MessageRequest {
             thinking: lr.thinking,
             speed: lr.speed,
             effort: lr.effort,
+            request_origin: lr.request_origin,
         }
     }
 }

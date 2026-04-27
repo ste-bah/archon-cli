@@ -638,6 +638,7 @@ pub mod runner {
                     messages: messages.clone(),
                     tools: self.tool_definitions.clone(),
                     effort: self.effort.clone(),
+                    request_origin: Some("subagent".into()),
                     ..LlmRequest::default()
                 };
 
