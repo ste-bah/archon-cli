@@ -384,6 +384,34 @@ fn find_claude_binary() -> Option<PathBuf> {
     None
 }
 
+/// Read the version field from the npm package.json that ships with the
+/// installed Claude Code binary.
+///
+/// Resolution: takes the path returned by `find_claude_binary()`, follows
+/// symlinks to the real file, walks up two levels (bin/claude.exe →
+/// ../package.json), parses the JSON, returns `version` as String.
+///
+/// Returns None if:
+/// - find_claude_binary() returns None (not installed)
+/// - canonicalize fails
+/// - package.json doesn't exist or isn't readable
+/// - JSON is malformed or has no string `version` field
+pub fn version_from_package_json() -> Option<String> {
+    let claude_path = find_claude_binary()?;
+    version_from_package_json_at(&claude_path)
+}
+
+/// Same as `version_from_package_json` but takes an explicit binary path
+/// (testable in isolation without relying on PATH state).
+pub fn version_from_package_json_at(claude_path: &std::path::Path) -> Option<String> {
+    let real = std::fs::canonicalize(claude_path).ok()?;
+    // bin/claude.exe → ../package.json
+    let pkg_json = real.parent()?.parent()?.join("package.json");
+    let content = std::fs::read_to_string(&pkg_json).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&content).ok()?;
+    v.get("version").and_then(|x| x.as_str()).map(String::from)
+}
+
 /// Extract printable strings from a binary file (like `strings` command).
 fn extract_strings_from_binary(path: &PathBuf) -> Result<String, std::io::Error> {
     let content = fs::read(path)?;

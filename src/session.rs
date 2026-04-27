@@ -27,7 +27,7 @@ use archon_llm::effort::{self, EffortLevel, EffortState};
 use archon_llm::fast_mode::FastModeState;
 use archon_llm::identity::{
     IdentityMode, IdentityProvider, get_or_create_device_id, resolve_and_validate_betas,
-    resolve_betas,
+    resolve_betas, version_from_package_json,
 };
 use archon_memory::{MemoryAccess, MemoryGraph, MemoryTrait};
 use archon_permissions::auto::{AutoModeConfig, AutoModeEvaluator};
@@ -186,8 +186,14 @@ pub(crate) async fn run_print_mode_session(
     let device_id = get_or_create_device_id();
     let betas = resolve_betas(config.identity.spoof_betas.as_deref());
     let identity_mode = if cli.identity_spoof {
+        let resolved_version = version_from_package_json();
+        let (version, version_source) = match resolved_version {
+            Some(v) => (v, "package.json"),
+            None => (config.identity.spoof_version.clone(), "config"),
+        };
+        tracing::info!(version = %version, version_source = version_source, "Spoof version resolved");
         IdentityMode::Spoof {
-            version: config.identity.spoof_version.clone(),
+            version,
             entrypoint: config.identity.spoof_entrypoint.clone(),
             betas,
             workload: config.identity.workload.clone(),
@@ -887,7 +893,8 @@ pub(crate) async fn run_interactive_session(
     let identity_mode = if cli.identity_spoof {
         // --identity-spoof flag overrides everything
         IdentityMode::Spoof {
-            version: config.identity.spoof_version.clone(),
+            version: version_from_package_json()
+                .unwrap_or_else(|| config.identity.spoof_version.clone()),
             entrypoint: config.identity.spoof_entrypoint.clone(),
             betas,
             workload: config.identity.workload.clone(),
@@ -911,7 +918,8 @@ pub(crate) async fn run_interactive_session(
                 }
             }
             "spoof" => IdentityMode::Spoof {
-                version: config.identity.spoof_version.clone(),
+                version: version_from_package_json()
+                    .unwrap_or_else(|| config.identity.spoof_version.clone()),
                 entrypoint: config.identity.spoof_entrypoint.clone(),
                 betas: resolve_betas(config.identity.spoof_betas.as_deref()),
                 workload: config.identity.workload.clone(),
