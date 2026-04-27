@@ -256,8 +256,9 @@ impl App {
             tool_state.complete(output, !success);
         }
         if !success {
-            // Only show tool failures — they're actionable information
-            self.output.append_line(&format!("[tool] {name} failed"));
+            let truncated: String = output.chars().take(200).collect();
+            self.output
+                .append_line(&format!("[tool] {name} failed: {truncated}"));
         }
     }
 

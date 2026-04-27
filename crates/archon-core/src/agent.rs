@@ -15,6 +15,7 @@ use archon_memory::extraction::{
 };
 use archon_memory::injection::MemoryInjector;
 use archon_permissions::auto::{AutoDecision, AutoModeEvaluator};
+use archon_permissions::is_default_safe_tool;
 use archon_session::checkpoint::CheckpointStore;
 use archon_session::plan::PlanStore;
 use archon_tools::plan_mode::is_tool_allowed_in_mode;
@@ -28,6 +29,13 @@ use crate::ChannelMetricSink;
 use crate::agents::AgentRegistry;
 use crate::dispatch::ToolRegistry;
 use crate::subagent::SubagentManager;
+
+/// Single source of truth gate: does the agent loop auto-allow this tool in
+/// default mode? Must always agree with `archon_permissions::DEFAULT_SAFE_TOOLS`.
+/// Called by the lockstep regression test.
+pub fn is_safe_in_default_mode(name: &str) -> bool {
+    is_default_safe_tool(name)
+}
 
 // ---------------------------------------------------------------------------
 // Shared session statistics -- updated by the agent, read by slash commands
@@ -878,13 +886,11 @@ impl Agent {
                                 false
                             }
                         },
-                        "default" | "ask" => match tool.name.as_str() {
-                            "Read" | "Glob" | "Grep" | "ToolSearch" | "AskUserQuestion"
-                            | "TodoWrite" | "Sleep" | "EnterPlanMode" | "ExitPlanMode" => {
+                        "default" | "ask" => {
+                            if is_default_safe_tool(&tool.name) {
                                 tracing::debug!(tool = %tool.name, "default-mode: safe, allowed");
                                 true
-                            }
-                            _ => {
+                            } else {
                                 let perm_agg = self
                                     .fire_hook(
                                         crate::hooks::HookEvent::PermissionRequest,
@@ -956,7 +962,7 @@ impl Agent {
                                     true
                                 }
                             }
-                        },
+                        }
                         _ => {
                             // "auto" mode -- use AutoModeEvaluator
                             if let Some(ref evaluator) = self.auto_evaluator {
@@ -975,8 +981,8 @@ impl Agent {
                                             .unwrap_or("");
                                         evaluator.evaluate_file_write(Path::new(path))
                                     }
-                                    "Read" | "Glob" | "Grep" | "ToolSearch" | "AskUserQuestion"
-                                    | "TodoWrite" | "Sleep" => AutoDecision::Allow,
+                                    "TodoWrite" | "Sleep" => AutoDecision::Allow,
+                                    _ if is_default_safe_tool(&tool.name) => AutoDecision::Allow,
                                     "Config" => {
                                         let action = input
                                             .get("action")
