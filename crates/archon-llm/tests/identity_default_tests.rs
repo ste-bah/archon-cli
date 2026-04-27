@@ -101,8 +101,14 @@ fn clean_metadata_empty() {
 }
 
 #[test]
+fn clean_no_billing_header() {
+    let bh = clean_provider().billing_header("any user message");
+    assert!(bh.is_none(), "clean mode must not produce a billing header");
+}
+
+#[test]
 fn clean_system_blocks_no_cache_scope() {
-    let blocks = clean_provider().system_prompt_blocks("static", "dynamic");
+    let blocks = clean_provider().system_prompt_blocks("msg", "static", "dynamic");
     for (i, block) in blocks.iter().enumerate() {
         let scope = block.pointer("/cache_control/scope");
         assert!(
@@ -135,6 +141,28 @@ fn spoof_layer1_user_agent() {
         headers.get("User-Agent").map(String::as_str),
         Some("claude-cli/2.1.89 (external, cli)"),
         "spoof layer 1: User-Agent must mimic Claude Code"
+    );
+}
+
+#[test]
+fn spoof_layer2_fingerprint() {
+    let provider = spoof_provider(None, false);
+    let bh = provider
+        .billing_header("sample user message for fingerprint testing")
+        .expect("spoof must produce billing header");
+    let version_prefix = "cc_version=2.1.89.";
+    let start = bh
+        .find(version_prefix)
+        .expect("billing header must contain cc_version=2.1.89.");
+    let after_prefix = &bh[start + version_prefix.len()..];
+    let fp: String = after_prefix
+        .chars()
+        .take_while(|c| c.is_ascii_hexdigit())
+        .collect();
+    assert_eq!(
+        fp.len(),
+        3,
+        "spoof layer 2: fingerprint must be 3 hex chars, got: '{fp}'"
     );
 }
 
@@ -176,17 +204,37 @@ fn spoof_layer4_metadata() {
 }
 
 #[test]
+fn spoof_layer5_billing() {
+    let provider = spoof_provider(None, false);
+    let bh = provider
+        .billing_header("hello world test message")
+        .expect("spoof must produce billing header");
+    assert!(
+        bh.contains("x-anthropic-billing-header:"),
+        "spoof layer 5: must contain billing header prefix"
+    );
+    assert!(
+        bh.contains("cc_version="),
+        "spoof layer 5: must contain cc_version="
+    );
+    assert!(
+        bh.contains("cc_entrypoint="),
+        "spoof layer 5: must contain cc_entrypoint="
+    );
+}
+
+#[test]
 fn spoof_layer6_identity_prefix() {
     let provider = spoof_provider(None, false);
-    let blocks = provider.system_prompt_blocks("static content", "dynamic content");
+    let blocks = provider.system_prompt_blocks("msg", "static content", "dynamic content");
     assert!(
         blocks.len() >= 2,
         "spoof must produce at least 2 system blocks, got {}",
         blocks.len()
     );
-    let identity_block_text = blocks[0]["text"]
+    let identity_block_text = blocks[1]["text"]
         .as_str()
-        .expect("block[0] must have text field");
+        .expect("block[1] must have text field");
     assert!(
         identity_block_text.contains("You are Claude Code"),
         "spoof layer 6: identity prefix must contain 'You are Claude Code', got: {identity_block_text}"
@@ -196,18 +244,36 @@ fn spoof_layer6_identity_prefix() {
 #[test]
 fn spoof_layer7_cache_scopes() {
     let provider = spoof_provider(None, false);
-    let blocks = provider.system_prompt_blocks("static", "dynamic");
+    let blocks = provider.system_prompt_blocks("msg", "static", "dynamic");
 
     assert_eq!(
-        blocks[0]["cache_control"]["scope"].as_str(),
-        Some("org"),
-        "spoof layer 7: block 0 must have scope=org"
+        blocks[0]["cache_control"]["type"].as_str(),
+        Some("ephemeral"),
+        "spoof layer 7: block 0 must be ephemeral"
     );
 
     assert_eq!(
         blocks[1]["cache_control"]["scope"].as_str(),
+        Some("org"),
+        "spoof layer 7: block 1 must have scope=org"
+    );
+
+    assert_eq!(
+        blocks[2]["cache_control"]["scope"].as_str(),
         Some("global"),
-        "spoof layer 7: block 1 must have scope=global"
+        "spoof layer 7: block 2 must have scope=global"
+    );
+}
+
+#[test]
+fn spoof_layer8_workload() {
+    let provider = spoof_provider(Some("cron".into()), false);
+    let bh = provider
+        .billing_header("workload test message")
+        .expect("spoof with workload must produce billing header");
+    assert!(
+        bh.contains("cc_workload=cron"),
+        "spoof layer 8: billing header must contain cc_workload=cron, got: {bh}"
     );
 }
 

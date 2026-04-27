@@ -101,7 +101,6 @@ fn base_request() -> LlmRequest {
         thinking: None,
         speed: None,
         effort: None,
-        request_origin: None,
         extra: serde_json::Value::Null,
     }
 }
@@ -344,8 +343,7 @@ fn classify_retry_variants() {
     );
     assert_eq!(
         classify(&LlmError::RateLimited {
-            retry_after_secs: 1,
-            body_preview: "test".into(),
+            retry_after_secs: 1
         }),
         RetryDecision::Retry,
         "RateLimited -> Retry"
@@ -452,7 +450,6 @@ async fn rate_limited_sleeps_for_retry_after() {
     let inner = Arc::new(MockProvider::new(vec![
         Err(LlmError::RateLimited {
             retry_after_secs: 2,
-            body_preview: "test".into(),
         }),
         Ok(ok_response()),
     ]));

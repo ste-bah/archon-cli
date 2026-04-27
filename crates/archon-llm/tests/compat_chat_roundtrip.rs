@@ -92,7 +92,6 @@ fn simple_user_request(model: &str) -> LlmRequest {
         thinking: None,
         speed: None,
         effort: None,
-        request_origin: None,
         extra: serde_json::Value::Null,
     }
 }

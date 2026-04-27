@@ -72,7 +72,7 @@ pub enum RetryDecision {
 pub fn classify(err: &LlmError) -> RetryDecision {
     match err {
         LlmError::Http(_) => RetryDecision::Retry,
-        LlmError::RateLimited { .. } => RetryDecision::Retry, // unchanged — still retry on rate limits
+        LlmError::RateLimited { .. } => RetryDecision::Retry,
         LlmError::Overloaded => RetryDecision::Retry,
         LlmError::Server { status, .. } if *status >= 500 => RetryDecision::Retry,
 
@@ -132,10 +132,7 @@ impl<P: LlmProvider + ?Sized> RetryProvider<P> {
     /// Determine how long to sleep after the given error on retry `attempt`.
     /// `LlmError::RateLimited` overrides the formula with the server hint.
     fn sleep_for_error(&self, err: &LlmError, attempt: u32) -> Duration {
-        if let LlmError::RateLimited {
-            retry_after_secs, ..
-        } = err
-        {
+        if let LlmError::RateLimited { retry_after_secs } = err {
             return Duration::from_secs(*retry_after_secs);
         }
         self.backoff_for_attempt(attempt)
