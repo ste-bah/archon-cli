@@ -615,6 +615,7 @@ impl Agent {
                 system: system_with_memories,
                 messages: self.state.messages.clone(),
                 tools: self.config.tools.clone(),
+                request_origin: Some("main_session".into()),
                 thinking: {
                     let mode = archon_llm::thinking::select_thinking_mode(
                         &active_model,
@@ -2312,6 +2313,7 @@ impl Agent {
             thinking: None,
             speed: Some("fast".to_string()),
             effort: Some("low".to_string()),
+            request_origin: Some("main_session".into()),
             extra: serde_json::Value::Null,
         };
 
@@ -2566,6 +2568,7 @@ impl Agent {
                 thinking: None,
                 speed: Some("fast".to_string()),
                 effort: Some("low".to_string()),
+                request_origin: Some("main_session".into()),
                 extra: serde_json::Value::Null,
             };
 

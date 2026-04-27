@@ -8,7 +8,7 @@ publish = false
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.1.14"
+version = "0.1.16"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT"
@@ -97,6 +97,7 @@ cel-interpreter = { version = "0.10", features = ["json"] }
 walkdir = "2"
 moka = { version = "0.12", features = ["sync"] }
 strsim = "0.11"
+xxhash-rust = { version = "0.8", features = ["xxh64"] }
 globset = "0.4"
 rayon = "1"
 # TASK-AGS-OBS-901 (Stage 10): promoted from archon-tui/Cargo.toml direct pins

@@ -43,6 +43,7 @@ once_cell.workspace = true
 # overrides the spec's stale `rand = "0.8"` suggestion per phase-wide
 # "workspace wins" convention already established for reqwest/thiserror).
 rand.workspace = true
+xxhash-rust.workspace = true
 # TASK-AGS-709: ArcSwap-backed `ActiveProvider` for live provider swaps
 # (workspace = 1; spec's stale `arc-swap = "1.6"` is overridden by the
 # phase-wide "workspace wins" convention).

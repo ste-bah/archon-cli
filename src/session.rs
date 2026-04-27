@@ -26,8 +26,9 @@ use archon_llm::auth::resolve_auth_with_keys;
 use archon_llm::effort::{self, EffortLevel, EffortState};
 use archon_llm::fast_mode::FastModeState;
 use archon_llm::identity::{
-    IdentityMode, IdentityProvider, get_or_create_device_id, resolve_and_validate_betas,
-    resolve_betas,
+    IdentityMode, IdentityProvider, discover_claude_code_identity, get_or_create_device_id,
+    resolve_and_validate_betas, resolve_betas, resolve_entrypoint, resolve_spoof_version,
+    resolve_user_agent,
 };
 use archon_memory::{MemoryAccess, MemoryGraph, MemoryTrait};
 use archon_permissions::auto::{AutoModeConfig, AutoModeEvaluator};
@@ -186,9 +187,23 @@ pub(crate) async fn run_print_mode_session(
     let device_id = get_or_create_device_id();
     let betas = resolve_betas(config.identity.spoof_betas.as_deref());
     let identity_mode = if cli.identity_spoof {
+        let (version, version_source) = resolve_spoof_version(&config.identity.spoof_version);
+        let (entrypoint, entrypoint_source) = resolve_entrypoint(&config.identity.spoof_entrypoint);
+        let discovered = discover_claude_code_identity();
+        let (user_agent, user_agent_source) =
+            resolve_user_agent(&version, discovered.user_agent_template.as_deref());
+        tracing::info!(
+            version = %version,
+            version_source = version_source,
+            entrypoint = %entrypoint,
+            entrypoint_source = entrypoint_source,
+            user_agent = %user_agent,
+            user_agent_source = user_agent_source,
+            "Spoof identity resolved",
+        );
         IdentityMode::Spoof {
-            version: config.identity.spoof_version.clone(),
-            entrypoint: config.identity.spoof_entrypoint.clone(),
+            version,
+            entrypoint,
             betas,
             workload: config.identity.workload.clone(),
             anti_distillation: config.identity.anti_distillation,
@@ -298,7 +313,7 @@ pub(crate) async fn run_print_mode_session(
     let git_branch = git_info.as_ref().map(|g| g.branch.as_str());
     let env_section = build_environment_section(&working_dir, git_branch);
 
-    let mut identity_blocks = identity.system_prompt_blocks("", &archon_md, &env_section);
+    let mut identity_blocks = identity.system_prompt_blocks(&archon_md, &env_section);
     // Gated by config.context.prompt_cache (TASK-WIRE-003) — strip cache_control
     // from identity blocks when disabled so print mode honours the flag too.
     strip_cache_control_if_disabled(&mut identity_blocks, config.context.prompt_cache);
@@ -886,9 +901,23 @@ pub(crate) async fn run_interactive_session(
 
     let identity_mode = if cli.identity_spoof {
         // --identity-spoof flag overrides everything
+        let (version, version_source) = resolve_spoof_version(&config.identity.spoof_version);
+        let (entrypoint, entrypoint_source) = resolve_entrypoint(&config.identity.spoof_entrypoint);
+        let discovered = discover_claude_code_identity();
+        let (user_agent, user_agent_source) =
+            resolve_user_agent(&version, discovered.user_agent_template.as_deref());
+        tracing::info!(
+            version = %version,
+            version_source = version_source,
+            entrypoint = %entrypoint,
+            entrypoint_source = entrypoint_source,
+            user_agent = %user_agent,
+            user_agent_source = user_agent_source,
+            "Spoof identity resolved",
+        );
         IdentityMode::Spoof {
-            version: config.identity.spoof_version.clone(),
-            entrypoint: config.identity.spoof_entrypoint.clone(),
+            version,
+            entrypoint,
             betas,
             workload: config.identity.workload.clone(),
             anti_distillation: config.identity.anti_distillation,
@@ -910,13 +939,32 @@ pub(crate) async fn run_interactive_session(
                         .unwrap_or_default(),
                 }
             }
-            "spoof" => IdentityMode::Spoof {
-                version: config.identity.spoof_version.clone(),
-                entrypoint: config.identity.spoof_entrypoint.clone(),
-                betas: resolve_betas(config.identity.spoof_betas.as_deref()),
-                workload: config.identity.workload.clone(),
-                anti_distillation: config.identity.anti_distillation,
-            },
+            "spoof" => {
+                let betas = resolve_betas(config.identity.spoof_betas.as_deref());
+                let (version, version_source) =
+                    resolve_spoof_version(&config.identity.spoof_version);
+                let (entrypoint, entrypoint_source) =
+                    resolve_entrypoint(&config.identity.spoof_entrypoint);
+                let discovered = discover_claude_code_identity();
+                let (user_agent, user_agent_source) =
+                    resolve_user_agent(&version, discovered.user_agent_template.as_deref());
+                tracing::info!(
+                    version = %version,
+                    version_source = version_source,
+                    entrypoint = %entrypoint,
+                    entrypoint_source = entrypoint_source,
+                    user_agent = %user_agent,
+                    user_agent_source = user_agent_source,
+                    "Spoof identity resolved",
+                );
+                IdentityMode::Spoof {
+                    version,
+                    entrypoint,
+                    betas,
+                    workload: config.identity.workload.clone(),
+                    anti_distillation: config.identity.anti_distillation,
+                }
+            }
             _ => IdentityMode::Clean,
         }
     };
@@ -1146,7 +1194,7 @@ pub(crate) async fn run_interactive_session(
     }
 
     // Build identity blocks as a text string for the assembler
-    let identity_blocks = identity.system_prompt_blocks("", &archon_md, &env_section);
+    let identity_blocks = identity.system_prompt_blocks(&archon_md, &env_section);
     let identity_text = identity_blocks
         .iter()
         .filter_map(|b| b.get("text").and_then(|v| v.as_str()))
@@ -2162,6 +2210,7 @@ pub(crate) async fn run_interactive_session(
                         thinking: None,
                         speed: None,
                         effort: None,
+                        request_origin: Some("main_session".into()),
                     };
                     let stream_result: Result<
                         tokio::sync::mpsc::Receiver<archon_llm::streaming::StreamEvent>,
