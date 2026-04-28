@@ -92,6 +92,9 @@ pub struct LayerActivationCache {
     pub layer_id: String,
     pub input: Vec<f32>,
     pub pre_activation: Vec<f32>,
+    /// Output of the activation function (before residual / layer norm).
+    pub true_post_activation: Vec<f32>,
+    /// Final layer output (after residual + layer norm).
     pub post_activation: Vec<f32>,
     pub weights: Arc<Vec<Vec<f32>>>,
 }
@@ -515,6 +518,7 @@ impl GnnEnhancer {
 
         // Post-activation
         let post_activation = apply_activation(&pre_activation, self.config.activation);
+        let true_post_activation = post_activation.clone();
 
         // Residual + layer norm
         let mut output = post_activation;
@@ -530,7 +534,8 @@ impl GnnEnhancer {
             layer_id,
             input: input.to_vec(),
             pre_activation,
-            post_activation: output.clone(), // post-norm, but we store what backprop needs
+            true_post_activation,
+            post_activation: output.clone(),
             weights: Arc::clone(&weights),
         };
 
