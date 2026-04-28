@@ -280,14 +280,8 @@ mod tests {
 
         // Set Fisher directly: all ones for layer1, all zeros for layer2
         let mut fisher_map = HashMap::new();
-        fisher_map.insert(
-            "layer1".to_string(),
-            vec![vec![1.0; 2]; 2],
-        );
-        fisher_map.insert(
-            "layer2".to_string(),
-            vec![vec![0.0; 2]; 2],
-        );
+        fisher_map.insert("layer1".to_string(), vec![vec![1.0; 2]; 2]);
+        fisher_map.insert("layer2".to_string(), vec![vec![0.0; 2]; 2]);
         ewc.fisher = fisher_map;
         ewc.update_anchor(&weights);
 
@@ -298,8 +292,16 @@ mod tests {
         let penalty = ewc.penalty(&deviated);
         // lambda=1.0, fisher=1.0, diff=0.1: per weight = 0.5 * 1.0 * 0.01 = 0.005
         // 4 weights = 0.02
-        assert!(penalty > 0.0, "Penalty should be positive when deviating from anchor, got {}", penalty);
-        assert!((penalty - 0.02).abs() < 1e-6, "Expected ~0.02, got {}", penalty);
+        assert!(
+            penalty > 0.0,
+            "Penalty should be positive when deviating from anchor, got {}",
+            penalty
+        );
+        assert!(
+            (penalty - 0.02).abs() < 1e-6,
+            "Expected ~0.02, got {}",
+            penalty
+        );
     }
 
     #[test]

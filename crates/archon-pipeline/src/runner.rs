@@ -439,9 +439,7 @@ pub async fn run_pipeline(
                     };
 
                     // Score quality.
-                    let quality = facade
-                        .score_quality(&session, &agent, &result)
-                        .await?;
+                    let quality = facade.score_quality(&session, &agent, &result).await?;
                     result.quality = Some(quality.clone());
 
                     let meets_threshold = quality.overall >= agent.quality_threshold;
@@ -493,11 +491,7 @@ pub async fn run_pipeline(
 
                 // v0.1.23: Feed quality back into learning integration (SONA trajectory).
                 if let Some(ref mut li) = learning {
-                    li.on_agent_complete(
-                        &agent.key,
-                        quality.overall,
-                        &result.output,
-                    );
+                    li.on_agent_complete(&agent.key, quality.overall, &result.output);
                 }
 
                 // Re-index modified files for implementation agents (Phase 4+).

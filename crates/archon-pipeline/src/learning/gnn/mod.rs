@@ -247,7 +247,12 @@ impl GnnEnhancer {
         cache_config: CacheConfig,
         weight_seed: u64,
     ) -> Self {
-        Self::new(config, cache_config, weight_seed, WeightStore::with_in_memory())
+        Self::new(
+            config,
+            cache_config,
+            weight_seed,
+            WeightStore::with_in_memory(),
+        )
     }
 
     // -----------------------------------------------------------------------

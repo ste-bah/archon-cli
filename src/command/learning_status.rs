@@ -84,8 +84,7 @@ impl LearningStatusHandler {
             .map_err(|e| anyhow::anyhow!("Schema init failed: {e}"))?;
 
         // Load config for GNN model + training params
-        let config = archon_core::config::load_config()
-            .unwrap_or_default();
+        let config = archon_core::config::load_config().unwrap_or_default();
         let gnn_cfg = &config.learning.gnn;
         let train_cfg_val = &gnn_cfg.training;
 
@@ -129,9 +128,7 @@ impl LearningStatusHandler {
         );
 
         let weight_store = std::sync::Arc::new(
-            archon_pipeline::learning::gnn::weights::WeightStore::new(
-                std::sync::Arc::clone(db),
-            ),
+            archon_pipeline::learning::gnn::weights::WeightStore::new(std::sync::Arc::clone(db)),
         );
 
         let training_config = archon_pipeline::learning::gnn::trainer::TrainingConfig {
@@ -161,8 +158,8 @@ impl LearningStatusHandler {
         let elapsed_ms = start.elapsed().as_millis();
 
         let weight_version_after = weight_store.current_version();
-        let rolled_back = outcome.final_loss > outcome.initial_loss * 1.1
-            || outcome.final_loss.is_nan();
+        let rolled_back =
+            outcome.final_loss > outcome.initial_loss * 1.1 || outcome.final_loss.is_nan();
 
         // Write training run record
         let run_id = uuid::Uuid::new_v4().to_string();
@@ -267,7 +264,8 @@ fn query_trajectories(
         :limit 512
     ";
 
-    let result = db.run_script(query, Default::default(), cozo::ScriptMutability::Immutable)
+    let result = db
+        .run_script(query, Default::default(), cozo::ScriptMutability::Immutable)
         .map_err(|e| anyhow::anyhow!("CozoDB query failed: {e}"))?;
 
     let mut trajectories = Vec::with_capacity(result.rows.len());
@@ -314,6 +312,9 @@ mod tests {
     #[test]
     fn learning_status_handler_has_description() {
         let desc = LearningStatusHandler.description();
-        assert!(desc.contains("learning"), "description must mention learning, got: {desc}");
+        assert!(
+            desc.contains("learning"),
+            "description must mention learning, got: {desc}"
+        );
     }
 }

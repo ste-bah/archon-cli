@@ -26,10 +26,7 @@ impl ContextualEngine {
             return 0.0;
         }
 
-        let match_count = query_terms
-            .iter()
-            .filter(|term| cl.contains(*term))
-            .count();
+        let match_count = query_terms.iter().filter(|term| cl.contains(*term)).count();
 
         match_count as f64 / query_terms.len() as f64
     }
@@ -65,10 +62,7 @@ impl ContextualEngine {
     }
 
     /// Generate contextual insights by cross-referencing signals.
-    fn generate_insights(
-        signals: &[ContextualSignal],
-        query: &str,
-    ) -> Vec<ContextualInsight> {
+    fn generate_insights(signals: &[ContextualSignal], query: &str) -> Vec<ContextualInsight> {
         let mut insights = Vec::new();
 
         // Insight 1: Most relevant signal to the query.
@@ -85,10 +79,7 @@ impl ContextualEngine {
         for (signal, score) in scored.iter().take(5) {
             if *score > 0.0 {
                 insights.push(ContextualInsight {
-                    description: format!(
-                        "Relevant context (score={:.2}): {}",
-                        score, signal.text
-                    ),
+                    description: format!("Relevant context (score={:.2}): {}", score, signal.text),
                     confidence: *score,
                 });
             }

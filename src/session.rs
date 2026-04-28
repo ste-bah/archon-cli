@@ -1525,8 +1525,7 @@ pub(crate) async fn run_interactive_session(
         match cozo::DbInstance::new("rocksdb", db_path.to_str().unwrap_or(""), "") {
             Ok(db) => {
                 // Initialise learning schemas on first open.
-                if let Err(e) =
-                    archon_pipeline::learning::schema::initialize_learning_schemas(&db)
+                if let Err(e) = archon_pipeline::learning::schema::initialize_learning_schemas(&db)
                 {
                     tracing::warn!(error = %e, "Learning schema init failed; retrain may not work");
                 }

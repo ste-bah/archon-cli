@@ -2,6 +2,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use crate::auto_extraction::AutoExtractor;
 use archon_consciousness::corrections::{CorrectionTracker, CorrectionType};
 use archon_consciousness::inner_voice::InnerVoice;
 use archon_consciousness::rules::RulesEngine;
@@ -14,7 +15,6 @@ use archon_memory::extraction::{
     should_extract, store_extracted,
 };
 use archon_memory::injection::MemoryInjector;
-use crate::auto_extraction::AutoExtractor;
 use archon_permissions::auto::{AutoDecision, AutoModeEvaluator};
 use archon_permissions::is_default_safe_tool;
 use archon_session::checkpoint::CheckpointStore;

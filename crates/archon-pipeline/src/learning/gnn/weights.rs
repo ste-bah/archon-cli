@@ -349,9 +349,7 @@ impl WeightStore {
             let in_dim = w.first().map(|r| r.len()).unwrap_or(0) as i64;
             let out_dim = w.len() as i64;
             let weights_blob = serialize_matrix(w);
-            let bias_blob = bias
-                .map(|b| serialize_vector(b))
-                .unwrap_or_default();
+            let bias_blob = bias.map(|b| serialize_vector(b)).unwrap_or_default();
 
             let has_nan = w.iter().any(|row| row.iter().any(|x| x.is_nan()))
                 || bias.map(|b| b.iter().any(|x| x.is_nan())).unwrap_or(false);
@@ -369,19 +367,10 @@ impl WeightStore {
             params.insert("out_dim".to_string(), cozo::DataValue::from(out_dim));
             params.insert("init".to_string(), cozo::DataValue::from("He"));
             params.insert("seed".to_string(), cozo::DataValue::from(0_i64));
-            params.insert(
-                "wblob".to_string(),
-                cozo::DataValue::Bytes(weights_blob),
-            );
-            params.insert(
-                "bblob".to_string(),
-                cozo::DataValue::Bytes(bias_blob),
-            );
+            params.insert("wblob".to_string(), cozo::DataValue::Bytes(weights_blob));
+            params.insert("bblob".to_string(), cozo::DataValue::Bytes(bias_blob));
             params.insert("norm".to_string(), cozo::DataValue::from(norm_l2 as f64));
-            params.insert(
-                "nan".to_string(),
-                cozo::DataValue::from(has_nan),
-            );
+            params.insert("nan".to_string(), cozo::DataValue::from(has_nan));
             params.insert("ts".to_string(), cozo::DataValue::from(now_ms));
 
             db.run_script(
@@ -399,8 +388,7 @@ impl WeightStore {
             .map_err(|e| WeightStoreError::Db(format!("save_all layer {}: {}", layer_id, e)))?;
         }
 
-        self.current_version
-            .store(new_version, Ordering::Release);
+        self.current_version.store(new_version, Ordering::Release);
         Ok(new_version)
     }
 

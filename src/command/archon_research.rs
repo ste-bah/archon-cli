@@ -65,7 +65,16 @@ impl CommandHandler for ArchonResearchHandler {
         )));
 
         tokio::spawn(async move {
-            match run_pipeline(research.as_ref(), llm.as_ref(), &topic, leann.as_deref(), None, None).await {
+            match run_pipeline(
+                research.as_ref(),
+                llm.as_ref(),
+                &topic,
+                leann.as_deref(),
+                None,
+                None,
+            )
+            .await
+            {
                 Ok(result) => {
                     let _ = tui_tx.send(TuiEvent::TextDelta(format!(
                         "\n=== Pipeline Complete ===\n\

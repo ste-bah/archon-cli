@@ -197,8 +197,7 @@ impl GnnTrainer {
         };
 
         // Train/validation split
-        let split_idx =
-            ((1.0 - self.config.validation_split) * triplets.len() as f32) as usize;
+        let split_idx = ((1.0 - self.config.validation_split) * triplets.len() as f32) as usize;
         let split_idx = split_idx.max(1).min(triplets.len().saturating_sub(1));
         let (train_triplets, val_triplets) = triplets.split_at(split_idx);
 
@@ -297,36 +296,34 @@ impl GnnTrainer {
         // Check weight sanity first — NaN/Inf weights always trigger rollback.
         let weight_norms = compute_layer_norms(enhancer);
         let has_nan_weights = weight_norms.iter().any(|(_, _, nan)| *nan);
-        let rolled_back = if final_loss > initial_loss * 1.1
-            || final_loss.is_nan()
-            || has_nan_weights
-        {
-            warn!(
-                "Training degraded loss ({} → {}), rolling back to version {}",
-                initial_loss, final_loss, weight_version_before
-            );
-            if let Some(ref ws) = self.weight_store {
-                if weight_version_before > 0 {
-                    let _ = ws.load_version(weight_version_before);
-                }
-            }
-            true
-        } else if final_loss < initial_loss {
-            if let Some(ref ws) = self.weight_store {
-                match ws.save_all() {
-                    Ok(new_version) => {
-                        info!(
-                            "Saved weight version {} (loss: {} → {})",
-                            new_version, initial_loss, final_loss
-                        );
+        let rolled_back =
+            if final_loss > initial_loss * 1.1 || final_loss.is_nan() || has_nan_weights {
+                warn!(
+                    "Training degraded loss ({} → {}), rolling back to version {}",
+                    initial_loss, final_loss, weight_version_before
+                );
+                if let Some(ref ws) = self.weight_store {
+                    if weight_version_before > 0 {
+                        let _ = ws.load_version(weight_version_before);
                     }
-                    Err(e) => warn!("Failed to save weights: {}", e),
                 }
-            }
-            false
-        } else {
-            false
-        };
+                true
+            } else if final_loss < initial_loss {
+                if let Some(ref ws) = self.weight_store {
+                    match ws.save_all() {
+                        Ok(new_version) => {
+                            info!(
+                                "Saved weight version {} (loss: {} → {})",
+                                new_version, initial_loss, final_loss
+                            );
+                        }
+                        Err(e) => warn!("Failed to save weights: {}", e),
+                    }
+                }
+                false
+            } else {
+                false
+            };
 
         TrainingOutcome {
             epochs_completed,
@@ -352,10 +349,7 @@ impl GnnTrainer {
     // -----------------------------------------------------------------------
 
     /// Forward-pass all samples, collecting enhanced embeddings.
-    fn forward_all(
-        enhancer: &GnnEnhancer,
-        samples: &[TrajectoryWithFeedback],
-    ) -> Vec<Vec<f32>> {
+    fn forward_all(enhancer: &GnnEnhancer, samples: &[TrajectoryWithFeedback]) -> Vec<Vec<f32>> {
         samples
             .iter()
             .map(|s| {
@@ -407,7 +401,10 @@ impl GnnTrainer {
             None
         };
 
-        EpochResult { train_loss, val_loss }
+        EpochResult {
+            train_loss,
+            val_loss,
+        }
     }
 
     fn train_batch(
@@ -454,8 +451,7 @@ impl GnnTrainer {
             let emb_p = &embeddings[triplet.positive];
             let emb_n = &embeddings[triplet.negative];
 
-            let loss_result =
-                loss::compute_loss(emb_a, emb_p, emb_n, self.config.margin);
+            let loss_result = loss::compute_loss(emb_a, emb_p, emb_n, self.config.margin);
 
             total_loss += loss_result.loss;
             if loss_result.loss <= 0.0 {
@@ -518,8 +514,7 @@ impl GnnTrainer {
                             .into_iter()
                             .map(|row| row.into_iter().map(|v| v / batch_size).collect())
                             .collect();
-                        let db: Vec<f32> =
-                            db.into_iter().map(|v| v / batch_size).collect();
+                        let db: Vec<f32> = db.into_iter().map(|v| v / batch_size).collect();
                         (dw, db)
                     })
                     .collect()
@@ -532,11 +527,7 @@ impl GnnTrainer {
         }
     }
 
-    fn apply_gradients(
-        &mut self,
-        enhancer: &GnnEnhancer,
-        grads: &[(Vec<Vec<f32>>, Vec<f32>)],
-    ) {
+    fn apply_gradients(&mut self, enhancer: &GnnEnhancer, grads: &[(Vec<Vec<f32>>, Vec<f32>)]) {
         let mut clipped = grads.to_vec();
         for (dw, db) in &mut clipped {
             backprop::clip_gradient_matrix(dw, self.config.max_gradient_norm);
@@ -572,11 +563,7 @@ impl GnnTrainer {
         enhancer.set_weights(l1, l2, l3);
     }
 
-    fn compute_triplet_loss(
-        &self,
-        triplets: &[loss::Triplet],
-        embeddings: &[Vec<f32>],
-    ) -> f32 {
+    fn compute_triplet_loss(&self, triplets: &[loss::Triplet], embeddings: &[Vec<f32>]) -> f32 {
         if triplets.is_empty() {
             return 0.0;
         }
@@ -684,11 +671,7 @@ mod tests {
     }
 
     fn test_enhancer() -> GnnEnhancer {
-        GnnEnhancer::with_in_memory_weights(
-            GnnConfig::default(),
-            CacheConfig::default(),
-            42,
-        )
+        GnnEnhancer::with_in_memory_weights(GnnConfig::default(), CacheConfig::default(), 42)
     }
 
     #[test]

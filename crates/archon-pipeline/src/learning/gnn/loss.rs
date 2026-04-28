@@ -353,8 +353,14 @@ mod tests {
         let margin = 1.0;
 
         let result = compute_loss(&anchor, &positive, &negative, margin);
-        assert_eq!(result.loss, 0.0, "Loss should be zero when negative is far enough");
-        assert!(result.grad_anchor.iter().all(|v| *v == 0.0), "Gradients should be zero when no loss");
+        assert_eq!(
+            result.loss, 0.0,
+            "Loss should be zero when negative is far enough"
+        );
+        assert!(
+            result.grad_anchor.iter().all(|v| *v == 0.0),
+            "Gradients should be zero when no loss"
+        );
         assert!(result.grad_positive.iter().all(|v| *v == 0.0));
         assert!(result.grad_negative.iter().all(|v| *v == 0.0));
     }
@@ -368,7 +374,10 @@ mod tests {
         let margin = 1.0;
 
         let result = compute_loss(&anchor, &positive, &negative, margin);
-        assert!(result.loss > 0.0, "Loss should be positive when anchor is closer to negative");
+        assert!(
+            result.loss > 0.0,
+            "Loss should be positive when anchor is closer to negative"
+        );
     }
 
     #[test]
@@ -381,8 +390,14 @@ mod tests {
 
         let result = compute_loss(&anchor, &positive, &negative, margin);
         // grad_anchor = 2(a-p) - 2(a-n) = -2p + 2n = (-2, 0) + (0, 2) = (-2, 2)
-        assert!((result.grad_anchor[0] + 2.0).abs() < 1e-6, "grad_anchor[0] should point away from positive");
-        assert!((result.grad_anchor[1] - 2.0).abs() < 1e-6, "grad_anchor[1] should point toward negative");
+        assert!(
+            (result.grad_anchor[0] + 2.0).abs() < 1e-6,
+            "grad_anchor[0] should point away from positive"
+        );
+        assert!(
+            (result.grad_anchor[1] - 2.0).abs() < 1e-6,
+            "grad_anchor[1] should point toward negative"
+        );
     }
 
     #[test]
@@ -394,7 +409,10 @@ mod tests {
         let margin = 1.0;
 
         let result = compute_loss(&anchor, &positive, &negative, margin);
-        assert!(result.loss > 0.0, "Loss should be positive when margin is violated");
+        assert!(
+            result.loss > 0.0,
+            "Loss should be positive when margin is violated"
+        );
         // grad_positive = -2(a-p) = -2*(-5, 0) = (10, 0) — toward anchor
         assert!((result.grad_positive[0] - 10.0).abs() < 1e-6);
     }
@@ -402,16 +420,24 @@ mod tests {
     #[test]
     fn test_batch_triplet_loss_average() {
         let embeddings = vec![
-            vec![0.0, 0.0], // anchor 1
-            vec![1.0, 0.0], // positive 1
+            vec![0.0, 0.0],  // anchor 1
+            vec![1.0, 0.0],  // positive 1
             vec![0.0, 10.0], // negative 1 (far)
-            vec![0.0, 0.0], // anchor 2
-            vec![0.0, 1.0], // positive 2
+            vec![0.0, 0.0],  // anchor 2
+            vec![0.0, 1.0],  // positive 2
             vec![10.0, 0.0], // negative 2 (far)
         ];
         let triplets = vec![
-            Triplet { anchor: 0, positive: 1, negative: 2 },
-            Triplet { anchor: 3, positive: 4, negative: 5 },
+            Triplet {
+                anchor: 0,
+                positive: 1,
+                negative: 2,
+            },
+            Triplet {
+                anchor: 3,
+                positive: 4,
+                negative: 5,
+            },
         ];
 
         let loss = batch_triplet_loss(&embeddings, &triplets, 1.0);
@@ -438,11 +464,15 @@ mod tests {
             assert!(t.positive < embeddings.len());
             assert!(t.negative < embeddings.len());
             // Anchor and positive should share the same label
-            assert_eq!(labels[t.anchor], labels[t.positive],
-                "Anchor and positive must have same label");
+            assert_eq!(
+                labels[t.anchor], labels[t.positive],
+                "Anchor and positive must have same label"
+            );
             // Anchor and negative should have different labels
-            assert_ne!(labels[t.anchor], labels[t.negative],
-                "Anchor and negative must have different labels");
+            assert_ne!(
+                labels[t.anchor], labels[t.negative],
+                "Anchor and negative must have different labels"
+            );
         }
     }
 
@@ -538,10 +568,10 @@ mod tests {
     #[test]
     fn test_build_triplets_produces_valid_indices() {
         let samples = vec![
-            make_sample("a", vec![0.0; 4], 0.9), // anchor + good
+            make_sample("a", vec![0.0; 4], 0.9),  // anchor + good
             make_sample("b", vec![1.0; 4], 0.85), // good
-            make_sample("c", vec![2.0; 4], 0.2), // bad
-            make_sample("d", vec![3.0; 4], 0.1), // bad
+            make_sample("c", vec![2.0; 4], 0.2),  // bad
+            make_sample("d", vec![3.0; 4], 0.1),  // bad
         ];
         let cfg = ContrastiveLossConfig::default();
         let triplets = build_triplets(&samples, &cfg);

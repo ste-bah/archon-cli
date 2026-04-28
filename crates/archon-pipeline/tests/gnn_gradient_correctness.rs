@@ -5,8 +5,8 @@
 //! a 3-layer toy network with 8-dim input.
 
 use archon_pipeline::learning::gnn::backprop::{self, full_backward};
-use archon_pipeline::learning::gnn::math::ActivationType;
 use archon_pipeline::learning::gnn::cache::CacheConfig;
+use archon_pipeline::learning::gnn::math::ActivationType;
 use archon_pipeline::learning::gnn::{GnnConfig, GnnEnhancer};
 
 /// Simple linear forward pass in f64: y = W @ x.
@@ -46,7 +46,10 @@ fn layer_backward_matches_numerical_gradient() {
     assert_eq!(analytical.dx.len(), in_dim);
 
     // Convert to f64 for high-precision numerical gradient
-    let w_f64: Vec<Vec<f64>> = weights.iter().map(|row| row.iter().map(|&v| v as f64).collect()).collect();
+    let w_f64: Vec<Vec<f64>> = weights
+        .iter()
+        .map(|row| row.iter().map(|&v| v as f64).collect())
+        .collect();
     let x_f64: Vec<f64> = input.iter().map(|&v| v as f64).collect();
     let g_f64: Vec<f64> = grad_output.iter().map(|&v| v as f64).collect();
 

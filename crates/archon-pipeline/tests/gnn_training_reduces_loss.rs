@@ -5,9 +5,9 @@
 //! 2. No NaN/Inf: every epoch, every layer has finite positive weight norm
 //! 3. No overfit divergence: val_loss <= train_loss * 1.5 for >=70% of epochs
 
+use archon_pipeline::learning::gnn::cache::CacheConfig;
 use archon_pipeline::learning::gnn::loss::TrajectoryWithFeedback;
 use archon_pipeline::learning::gnn::trainer::{GnnTrainer, TrainingConfig};
-use archon_pipeline::learning::gnn::cache::CacheConfig;
 use archon_pipeline::learning::gnn::{GnnConfig, GnnEnhancer};
 
 const DIM: usize = 16;
@@ -81,7 +81,10 @@ fn training_reduces_loss_and_passes_three_property_gate() {
     }
 
     // Must have completed at least 1 epoch
-    assert!(outcome.epochs_completed >= 1, "must complete at least 1 epoch");
+    assert!(
+        outcome.epochs_completed >= 1,
+        "must complete at least 1 epoch"
+    );
 
     // ---------------------------------------------------------------
     // Property 1: Loss reduction >= 20%
@@ -126,10 +129,7 @@ fn training_reduces_loss_and_passes_three_property_gate() {
     // ---------------------------------------------------------------
     // Property 3: No overfit divergence (>=70% of epochs pass)
     // ---------------------------------------------------------------
-    let valid_epochs: Vec<_> = metrics
-        .iter()
-        .filter(|m| m.val_loss.is_some())
-        .collect();
+    let valid_epochs: Vec<_> = metrics.iter().filter(|m| m.val_loss.is_some()).collect();
     assert!(
         valid_epochs.len() >= 3,
         "need at least 3 epochs with validation loss, got {}",

@@ -379,12 +379,19 @@ mod tests {
             make_test_cache(&[0.4; 4], &[0.5; 4], &[0.6; 4], &[0.7; 4]),
             make_test_cache(&[0.7; 4], &[0.8; 4], &[0.9; 4], &[1.0; 4]),
         ];
-        let lw = LayerWeights { w: vec![vec![0.5; 4]; 4], bias: vec![0.1; 4] };
+        let lw = LayerWeights {
+            w: vec![vec![0.5; 4]; 4],
+            bias: vec![0.1; 4],
+        };
         let grads = full_backward(
             &caches,
             [&lw, &lw, &lw],
             &[0.1; 4],
-            [ActivationType::LeakyRelu, ActivationType::LeakyRelu, ActivationType::Tanh],
+            [
+                ActivationType::LeakyRelu,
+                ActivationType::LeakyRelu,
+                ActivationType::Tanh,
+            ],
         );
 
         assert_eq!(grads.len(), 3);
@@ -406,18 +413,28 @@ mod tests {
             make_test_cache(&[0.4; 4], &[0.5; 4], &[0.6; 4], &[0.7; 4]),
             make_test_cache(&[0.7; 4], &[0.8; 4], &[0.9; 4], &[1.0; 4]),
         ];
-        let lw = LayerWeights { w: vec![vec![0.5; 4]; 4], bias: vec![0.1; 4] };
+        let lw = LayerWeights {
+            w: vec![vec![0.5; 4]; 4],
+            bias: vec![0.1; 4],
+        };
         let grads = full_backward(
             &caches,
             [&lw, &lw, &lw],
             &[0.1; 4],
-            [ActivationType::Relu, ActivationType::Relu, ActivationType::Relu],
+            [
+                ActivationType::Relu,
+                ActivationType::Relu,
+                ActivationType::Relu,
+            ],
         );
 
         // dx should be non-zero (includes residual contribution)
         for g in &grads {
             let dx_norm: f32 = g.dx.iter().map(|v| v * v).sum::<f32>().sqrt();
-            assert!(dx_norm > 0.0, "dx should be non-zero with residual connection");
+            assert!(
+                dx_norm > 0.0,
+                "dx should be non-zero with residual connection"
+            );
         }
     }
 
@@ -430,12 +447,19 @@ mod tests {
             make_test_cache(&[0.5; 4], &[0.6; 4], &[0.7; 4], &[0.8; 4]),
             make_test_cache(&[0.9; 4], &[1.0; 4], &[1.1; 4], &[1.2; 4]),
         ];
-        let lw = LayerWeights { w: vec![vec![0.5; 4]; 4], bias: vec![0.1; 4] };
+        let lw = LayerWeights {
+            w: vec![vec![0.5; 4]; 4],
+            bias: vec![0.1; 4],
+        };
         let grads = full_backward(
             &caches,
             [&lw, &lw, &lw],
             &[0.1; 4],
-            [ActivationType::LeakyRelu, ActivationType::LeakyRelu, ActivationType::Tanh],
+            [
+                ActivationType::LeakyRelu,
+                ActivationType::LeakyRelu,
+                ActivationType::Tanh,
+            ],
         );
 
         for g in &grads {

@@ -227,7 +227,10 @@ mod tests {
         let original = layers[0].w[0][0];
 
         opt.step(&mut layers, &grads);
-        assert_ne!(layers[0].w[0][0], original, "Weights should change after Adam step");
+        assert_ne!(
+            layers[0].w[0][0], original,
+            "Weights should change after Adam step"
+        );
         assert_eq!(opt.step_count(), 1);
     }
 
@@ -244,7 +247,10 @@ mod tests {
         let original_w = layers[0].w.clone();
 
         opt.step(&mut layers, &grads);
-        assert_eq!(layers[0].w, original_w, "NaN gradients should not modify weights");
+        assert_eq!(
+            layers[0].w, original_w,
+            "NaN gradients should not modify weights"
+        );
     }
 
     #[test]
@@ -260,7 +266,10 @@ mod tests {
         let original_w = layers[0].w.clone();
 
         opt.step(&mut layers, &grads);
-        assert_eq!(layers[0].w, original_w, "Inf gradients should not modify weights");
+        assert_eq!(
+            layers[0].w, original_w,
+            "Inf gradients should not modify weights"
+        );
     }
 
     #[test]
@@ -275,12 +284,18 @@ mod tests {
         let original_bias = layers[0].bias.clone();
 
         opt.step(&mut layers, &grads);
-        assert_eq!(layers[0].bias, original_bias, "NaN bias gradients should not modify biases");
+        assert_eq!(
+            layers[0].bias, original_bias,
+            "NaN bias gradients should not modify biases"
+        );
     }
 
     #[test]
     fn test_reset_zeros_state() {
-        let config = AdamConfig { learning_rate: 0.01, ..AdamConfig::default() };
+        let config = AdamConfig {
+            learning_rate: 0.01,
+            ..AdamConfig::default()
+        };
         let sw = simple_weights();
         let layers_ref: Vec<&LayerWeights> = sw.iter().collect();
         let mut opt = AdamOptimizer::new(config, &layers_ref);
@@ -296,15 +311,27 @@ mod tests {
         // After reset, another step with same grads should produce same result
         let mut layers2 = simple_weights();
         opt.step(&mut layers2, &grads);
-        assert_eq!(layers[0].w, layers2[0].w, "After reset, weights should match first step");
-        assert_eq!(layers[0].bias, layers2[0].bias, "After reset, biases should match first step");
+        assert_eq!(
+            layers[0].w, layers2[0].w,
+            "After reset, weights should match first step"
+        );
+        assert_eq!(
+            layers[0].bias, layers2[0].bias,
+            "After reset, biases should match first step"
+        );
     }
 
     #[test]
     fn test_flatten_unflatten_roundtrip() {
         let layers = vec![
-            LayerWeights { w: vec![vec![1.0, 2.0]; 2], bias: vec![0.1; 2] },
-            LayerWeights { w: vec![vec![3.0, 4.0, 5.0]], bias: vec![0.2] },
+            LayerWeights {
+                w: vec![vec![1.0, 2.0]; 2],
+                bias: vec![0.1; 2],
+            },
+            LayerWeights {
+                w: vec![vec![3.0, 4.0, 5.0]],
+                bias: vec![0.2],
+            },
         ];
         let shapes = [(2, 2), (1, 3)];
         let flat = AdamOptimizer::flatten_weights(&layers);
@@ -322,11 +349,17 @@ mod tests {
         let sw = simple_weights();
         let layers_ref: Vec<&LayerWeights> = sw.iter().collect();
         let mut opt_low = AdamOptimizer::new(
-            AdamConfig { learning_rate: 0.001, ..AdamConfig::default() },
+            AdamConfig {
+                learning_rate: 0.001,
+                ..AdamConfig::default()
+            },
             &layers_ref,
         );
         let mut opt_high = AdamOptimizer::new(
-            AdamConfig { learning_rate: 0.1, ..AdamConfig::default() },
+            AdamConfig {
+                learning_rate: 0.1,
+                ..AdamConfig::default()
+            },
             &layers_ref,
         );
 
@@ -340,7 +373,10 @@ mod tests {
         // Higher LR should produce larger weight changes
         let diff_low = (layers_low[0].w[0][0] - 0.1).abs();
         let diff_high = (layers_high[0].w[0][0] - 0.1).abs();
-        assert!(diff_high > diff_low, "Higher learning rate should produce larger weight changes");
+        assert!(
+            diff_high > diff_low,
+            "Higher learning rate should produce larger weight changes"
+        );
     }
 
     #[test]
@@ -358,14 +394,24 @@ mod tests {
         opt1.step(&mut layers1, &grads);
         opt2.step(&mut layers2, &grads);
 
-        assert_eq!(layers1[0].w, layers2[0].w, "Same config + same grads = same output");
+        assert_eq!(
+            layers1[0].w, layers2[0].w,
+            "Same config + same grads = same output"
+        );
         assert_eq!(layers1[0].bias, layers2[0].bias);
     }
 
     #[test]
     fn test_weight_decay_changes_update() {
-        let config_no_wd = AdamConfig { weight_decay: 0.0, ..AdamConfig::default() };
-        let config_wd = AdamConfig { weight_decay: 0.1, learning_rate: 0.1, ..AdamConfig::default() };
+        let config_no_wd = AdamConfig {
+            weight_decay: 0.0,
+            ..AdamConfig::default()
+        };
+        let config_wd = AdamConfig {
+            weight_decay: 0.1,
+            learning_rate: 0.1,
+            ..AdamConfig::default()
+        };
         let sw = simple_weights();
         let layers_ref: Vec<&LayerWeights> = sw.iter().collect();
         let mut opt_no = AdamOptimizer::new(config_no_wd, &layers_ref);

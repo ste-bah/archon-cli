@@ -7,10 +7,10 @@
 
 use std::sync::Arc;
 
+use archon_pipeline::learning::gnn::cache::CacheConfig;
 use archon_pipeline::learning::gnn::loss::TrajectoryWithFeedback;
 use archon_pipeline::learning::gnn::trainer::{GnnTrainer, TrainingConfig};
 use archon_pipeline::learning::gnn::weights::{Initialization, WeightStore};
-use archon_pipeline::learning::gnn::cache::CacheConfig;
 use archon_pipeline::learning::gnn::{GnnConfig, GnnEnhancer};
 use archon_pipeline::learning::schema;
 
@@ -66,15 +66,27 @@ fn nan_guard_keeps_weights_finite_under_extreme_lr() {
         let l3_w = store.get_weights("layer3");
         let l3_b = store.get_bias("layer3");
         enhancer.set_weights(
-            archon_pipeline::learning::gnn::LayerWeights { w: (*l1_w).clone(), bias: (*l1_b).clone() },
-            archon_pipeline::learning::gnn::LayerWeights { w: (*l2_w).clone(), bias: (*l2_b).clone() },
-            archon_pipeline::learning::gnn::LayerWeights { w: (*l3_w).clone(), bias: (*l3_b).clone() },
+            archon_pipeline::learning::gnn::LayerWeights {
+                w: (*l1_w).clone(),
+                bias: (*l1_b).clone(),
+            },
+            archon_pipeline::learning::gnn::LayerWeights {
+                w: (*l2_w).clone(),
+                bias: (*l2_b).clone(),
+            },
+            archon_pipeline::learning::gnn::LayerWeights {
+                w: (*l3_w).clone(),
+                bias: (*l3_b).clone(),
+            },
         );
     }
 
     let test_input: Vec<f32> = vec![0.5; dim];
     let pre = enhancer.enhance(&test_input, None, None, false);
-    assert!(pre.enhanced.iter().all(|v| v.is_finite()), "pre-training must be finite");
+    assert!(
+        pre.enhanced.iter().all(|v| v.is_finite()),
+        "pre-training must be finite"
+    );
 
     let samples = make_samples(30);
     let training_cfg = TrainingConfig {
@@ -114,7 +126,9 @@ fn nan_guard_keeps_weights_finite_under_extreme_lr() {
     // Version should be preserved (either rollback restored, or no save occurred)
     let store2 = WeightStore::new(Arc::clone(&db));
     assert!(store2.current_version() >= v_before);
-    store2.load_version(v_before).expect("can still load pre-training version");
+    store2
+        .load_version(v_before)
+        .expect("can still load pre-training version");
 }
 
 #[test]
@@ -144,9 +158,18 @@ fn cozodb_weight_version_survives_training() {
         let l3_w = store.get_weights("layer3");
         let l3_b = store.get_bias("layer3");
         enhancer.set_weights(
-            archon_pipeline::learning::gnn::LayerWeights { w: (*l1_w).clone(), bias: (*l1_b).clone() },
-            archon_pipeline::learning::gnn::LayerWeights { w: (*l2_w).clone(), bias: (*l2_b).clone() },
-            archon_pipeline::learning::gnn::LayerWeights { w: (*l3_w).clone(), bias: (*l3_b).clone() },
+            archon_pipeline::learning::gnn::LayerWeights {
+                w: (*l1_w).clone(),
+                bias: (*l1_b).clone(),
+            },
+            archon_pipeline::learning::gnn::LayerWeights {
+                w: (*l2_w).clone(),
+                bias: (*l2_b).clone(),
+            },
+            archon_pipeline::learning::gnn::LayerWeights {
+                w: (*l3_w).clone(),
+                bias: (*l3_b).clone(),
+            },
         );
     }
 
@@ -170,6 +193,8 @@ fn cozodb_weight_version_survives_training() {
 
     // A fresh store can still load the pre-training version
     let store2 = WeightStore::new(Arc::clone(&db));
-    store2.load_version(v_before).expect("pre-training version must be loadable");
+    store2
+        .load_version(v_before)
+        .expect("pre-training version must be loadable");
     assert!(store2.has_layer("layer1"));
 }

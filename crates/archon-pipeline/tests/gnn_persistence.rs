@@ -78,8 +78,12 @@ fn adam_state_survives_roundtrip() {
         ]
         :replace gnn_adam_state { layer_id, version => timestep, m_blob, v_blob }
     "#;
-    db.run_script(adam_state, Default::default(), cozo::ScriptMutability::Mutable)
-        .expect("adam insert");
+    db.run_script(
+        adam_state,
+        Default::default(),
+        cozo::ScriptMutability::Mutable,
+    )
+    .expect("adam insert");
 
     // Fresh store should still load
     let store2 = WeightStore::new(Arc::clone(&db));
