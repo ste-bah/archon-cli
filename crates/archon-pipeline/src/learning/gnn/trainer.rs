@@ -104,7 +104,7 @@ impl GNNTrainer {
             learning_rate: self.config.learning_rate,
             ..AdamConfig::default()
         };
-        let mut optimizer = AdamOptimizer::new(adam_config, &[l1, l2, l3]);
+        let mut optimizer = AdamOptimizer::new(adam_config, &[&l1, &l2, &l3]);
 
         let mut results = Vec::with_capacity(self.config.epochs);
         let mut best_val_loss = f32::INFINITY;
@@ -201,7 +201,7 @@ impl GNNTrainer {
         // Forward pass all samples
         let embeddings: Vec<Vec<f32>> = samples
             .iter()
-            .map(|s| enhancer.enhance(&s.embedding).enhanced)
+            .map(|s| enhancer.enhance_legacy(&s.embedding).enhanced)
             .collect();
         let labels: Vec<u32> = samples.iter().map(|s| s.label).collect();
 
@@ -224,12 +224,12 @@ impl GNNTrainer {
         );
 
         // Backprop through the network for the anchor
-        let fwd = enhancer.enhance(&samples[t.anchor].embedding);
-        if fwd.activation_caches.len() == 3 {
+        let fwd = enhancer.enhance_legacy(&samples[t.anchor].embedding);
+        if fwd.activation_cache.len() == 3 {
             let (l1, l2, l3) = enhancer.get_weights();
             let grads = backprop::full_backward(
-                &fwd.activation_caches,
-                [l1, l2, l3],
+                &fwd.activation_cache,
+                [&l1, &l2, &l3],
                 &loss_result.grad_anchor,
                 [
                     ActivationType::LeakyRelu,
@@ -273,7 +273,7 @@ impl GNNTrainer {
     fn validate(&self, enhancer: &GNNEnhancer, samples: &[TrainingSample]) -> f32 {
         let embeddings: Vec<Vec<f32>> = samples
             .iter()
-            .map(|s| enhancer.enhance(&s.embedding).enhanced)
+            .map(|s| enhancer.enhance_legacy(&s.embedding).enhanced)
             .collect();
         let labels: Vec<u32> = samples.iter().map(|s| s.label).collect();
 
