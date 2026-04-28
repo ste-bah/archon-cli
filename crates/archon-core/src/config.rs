@@ -531,7 +531,7 @@ pub struct LearningConfig {
     pub sona: ToggleConfig,
     pub provenance: ToggleConfig,
     pub desc: ToggleConfig,
-    pub gnn: ToggleConfig,
+    pub gnn: GnnModelConfig,
     pub causal_memory: ToggleConfig,
     pub shadow_vector: ToggleConfig,
     pub reasoning_bank: ToggleConfig,
@@ -544,7 +544,7 @@ impl Default for LearningConfig {
             sona: ToggleConfig::enabled(),
             provenance: ToggleConfig::enabled(),
             desc: ToggleConfig::enabled(),
-            gnn: ToggleConfig::enabled(),
+            gnn: GnnModelConfig::default(),
             causal_memory: ToggleConfig::enabled(),
             shadow_vector: ToggleConfig::enabled(),
             reasoning_bank: ToggleConfig::enabled(),
@@ -568,6 +568,81 @@ impl ToggleConfig {
 impl Default for ToggleConfig {
     fn default() -> Self {
         Self::enabled()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// GNN model configuration — [learning.gnn]
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GnnModelConfig {
+    pub enabled: bool,
+    pub input_dim: usize,
+    pub output_dim: usize,
+    pub num_layers: usize,
+    pub attention_heads: usize,
+    pub max_nodes: usize,
+    pub use_residual: bool,
+    pub use_layer_norm: bool,
+    pub activation: String,
+    pub weight_seed: u64,
+    #[serde(alias = "training")]
+    pub training: GnnTrainingConfig,
+}
+
+impl Default for GnnModelConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            input_dim: 1536,
+            output_dim: 1536,
+            num_layers: 3,
+            attention_heads: 12,
+            max_nodes: 50,
+            use_residual: true,
+            use_layer_norm: true,
+            activation: "relu".to_string(),
+            weight_seed: 0,
+            training: GnnTrainingConfig::default(),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// GNN training configuration — [learning.gnn.training]
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GnnTrainingConfig {
+    pub learning_rate: f32,
+    pub batch_size: usize,
+    pub max_epochs: usize,
+    pub early_stopping_patience: usize,
+    pub validation_split: f32,
+    pub ewc_lambda: f32,
+    pub margin: f32,
+    pub max_gradient_norm: f32,
+    pub max_triplets_per_run: usize,
+    pub max_runtime_ms: u64,
+}
+
+impl Default for GnnTrainingConfig {
+    fn default() -> Self {
+        Self {
+            learning_rate: 0.001,
+            batch_size: 32,
+            max_epochs: 10,
+            early_stopping_patience: 3,
+            validation_split: 0.2,
+            ewc_lambda: 0.1,
+            margin: 0.5,
+            max_gradient_norm: 1.0,
+            max_triplets_per_run: 256,
+            max_runtime_ms: 300_000,
+        }
     }
 }
 

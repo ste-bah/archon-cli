@@ -994,6 +994,10 @@ pub(crate) struct CommandContext {
     /// this ticket).
     pub(crate) pending_export:
         Option<Arc<std::sync::Mutex<Option<crate::command::export::ExportDescriptor>>>>,
+    /// CozoDB instance for learning subsystem persistence (GNN weights,
+    /// trajectories, Adam state, training runs). Cloned from
+    /// `SlashCommandContext::cozo_db` at dispatch time via DIRECT pattern.
+    pub(crate) cozo_db: Option<Arc<cozo::DbInstance>>,
 }
 
 // TASK-AGS-POST-6-TRY-SEND: wraps `tui_tx.try_send` at every handler
@@ -1944,7 +1948,7 @@ mod tests {
     /// TASK-#209 SLASH-SUMMARY adds `/summary` as a new primary,
     /// bringing the total to 61. TASK-HOTFIX-V0.1.7 adds `/run-agent`
     /// as a new primary, bringing the total to 62.
-    const EXPECTED_COMMAND_COUNT: usize = 64;
+    const EXPECTED_COMMAND_COUNT: usize = 65;
 
     #[test]
     fn default_registry_contains_all_commands() {
@@ -3016,6 +3020,7 @@ mod tests {
             pending_effect: None,
             pending_effort_set: None,
             pending_export: None,
+            cozo_db: None,
         }
     }
 

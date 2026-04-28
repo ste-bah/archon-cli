@@ -207,6 +207,7 @@ pub(crate) fn build_command_context<'a>(
             // session.rs has in scope. See src/command/export.rs module
             // rustdoc for the full SIDECAR-SLOT rationale.
             pending_export: Some(Arc::clone(&slash_ctx.pending_export_shared)),
+            cozo_db: slash_ctx.cozo_db.clone(),
         };
 
         // Resolve the primary command name (alias-aware) so "/info" routes

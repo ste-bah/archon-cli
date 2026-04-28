@@ -5,7 +5,7 @@ fn mem_db() -> DbInstance {
     DbInstance::new("mem", "", "").unwrap()
 }
 
-const ALL_RELATIONS: [&str; 12] = [
+const ALL_RELATIONS: [&str; 13] = [
     "trajectories",
     "trajectory_steps",
     "patterns",
@@ -16,7 +16,8 @@ const ALL_RELATIONS: [&str; 12] = [
     "desc_episodes",
     "desc_episode_metadata",
     "gnn_weights",
-    "training_history",
+    "gnn_adam_state",
+    "gnn_training_runs",
     "shadow_documents",
 ];
 
@@ -369,35 +370,42 @@ fn test_gnn_weights_crud() {
     let db = mem_db();
     initialize_learning_schemas(&db).unwrap();
 
+    // Use :replace with all 11 columns (keys: layer_id, version; values: 9 columns)
+    // Bytes columns get empty lists as placeholders
     let insert = r#"
-        ?[weight_id, model_name, layer_index, weights_blob, shape, created_at] <- [
-            ["gw-001", "causal-gnn-v1", 0, [1, 2, 3, 4], [2, 2], 1700000000000]
+        ?[layer_id, version, in_dim, out_dim, initialization, seed, weights_blob, bias_blob, norm_l2, has_nan, saved_at_ms] <- [
+            ["gnn_embed", 1, 2, 2, "xavier_uniform", 42, [], [], 0.5, false, 1700000000000]
         ]
-        :put gnn_weights {
-            weight_id
+        :replace gnn_weights {
+            layer_id, version
             =>
-            model_name,
-            layer_index,
+            in_dim,
+            out_dim,
+            initialization,
+            seed,
             weights_blob,
-            shape,
-            created_at
+            bias_blob,
+            norm_l2,
+            has_nan,
+            saved_at_ms
         }
     "#;
     db.run_script(insert, Default::default(), ScriptMutability::Mutable)
         .unwrap();
 
     let query = r#"
-        ?[weight_id, model_name, layer_index] :=
-            *gnn_weights[weight_id, model_name, layer_index, _, _, _]
+        ?[layer_id, version, in_dim, out_dim] :=
+            *gnn_weights[layer_id, version, in_dim, out_dim, _, _, _, _, _, _, _]
     "#;
     let result = db
         .run_script(query, Default::default(), ScriptMutability::Immutable)
         .unwrap();
 
     assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0].get_str().unwrap(), "gw-001");
-    assert_eq!(result.rows[0][1].get_str().unwrap(), "causal-gnn-v1");
-    assert_eq!(result.rows[0][2].get_int().unwrap(), 0);
+    assert_eq!(result.rows[0][0].get_str().unwrap(), "gnn_embed");
+    assert_eq!(result.rows[0][1].get_int().unwrap(), 1);
+    assert_eq!(result.rows[0][2].get_int().unwrap(), 2);
+    assert_eq!(result.rows[0][3].get_int().unwrap(), 2);
 }
 
 #[test]
@@ -406,27 +414,31 @@ fn test_training_history_crud() {
     initialize_learning_schemas(&db).unwrap();
 
     let insert = r#"
-        ?[run_id, model_name, epochs, epoch_losses, final_loss, early_stopped, started_at, finished_at] <- [
-            ["tr-001", "causal-gnn-v1", 50, [0.9, 0.7, 0.5, 0.3], 0.3, false, 1700000000000, 1700003600000]
+        ?[run_id, started_at_ms, completed_at_ms, trigger_reason, samples_processed, epochs_completed, final_loss, best_loss, weight_version_before, weight_version_after, rolled_back, error] <- [
+            ["tr-001", 1700000000000, 1700003600000, "schedule", 640, 5, 0.3, 0.25, 1, 2, false, null]
         ]
-        :put training_history {
+        :put gnn_training_runs {
             run_id
             =>
-            model_name,
-            epochs,
-            epoch_losses,
+            started_at_ms,
+            completed_at_ms,
+            trigger_reason,
+            samples_processed,
+            epochs_completed,
             final_loss,
-            early_stopped,
-            started_at,
-            finished_at
+            best_loss,
+            weight_version_before,
+            weight_version_after,
+            rolled_back,
+            error
         }
     "#;
     db.run_script(insert, Default::default(), ScriptMutability::Mutable)
         .unwrap();
 
     let query = r#"
-        ?[run_id, model_name, final_loss, early_stopped] :=
-            *training_history[run_id, model_name, _, _, final_loss, early_stopped, _, _]
+        ?[run_id, trigger_reason, final_loss, rolled_back] :=
+            *gnn_training_runs[run_id, _, _, trigger_reason, _, _, final_loss, _, _, _, rolled_back, _]
     "#;
     let result = db
         .run_script(query, Default::default(), ScriptMutability::Immutable)
@@ -434,7 +446,7 @@ fn test_training_history_crud() {
 
     assert_eq!(result.rows.len(), 1);
     assert_eq!(result.rows[0][0].get_str().unwrap(), "tr-001");
-    assert_eq!(result.rows[0][1].get_str().unwrap(), "causal-gnn-v1");
+    assert_eq!(result.rows[0][1].get_str().unwrap(), "schedule");
     assert!((result.rows[0][2].get_float().unwrap() - 0.3).abs() < f64::EPSILON);
     assert_eq!(result.rows[0][3].get_bool().unwrap(), false);
 }
@@ -488,8 +500,8 @@ fn test_verify_learning_schemas() {
 
     assert_eq!(
         report.present.len(),
-        12,
-        "all 12 relations should be present"
+        13,
+        "all 13 relations should be present"
     );
     assert_eq!(
         report.missing.len(),
@@ -519,8 +531,8 @@ fn test_verify_on_empty_db() {
     );
     assert_eq!(
         report.missing.len(),
-        12,
-        "all 12 relations should be missing on empty db"
+        13,
+        "all 13 relations should be missing on empty db"
     );
 
     for rel in &ALL_RELATIONS {

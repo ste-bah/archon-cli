@@ -345,7 +345,7 @@ impl ReasoningBank {
             (Some(gnn), Some(emb)) => {
                 // Convert f64 embedding to f32 for GNN, enhance, convert back
                 let f32_emb: Vec<f32> = emb.iter().map(|&v| v as f32).collect();
-                let result = gnn.enhance(&f32_emb);
+                let result = gnn.enhance(&f32_emb, None, None, false);
                 let enhanced_f64: Vec<f64> = result.enhanced.iter().map(|&v| v as f64).collect();
                 (Some(enhanced_f64), "gnn_enhanced")
             }

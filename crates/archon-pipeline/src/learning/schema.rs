@@ -1,8 +1,8 @@
 //! CozoDB schema definitions for all learning subsystems.
 //!
-//! Defines 12 stored relations covering trajectories, patterns, causal graphs,
+//! Defines 13 stored relations covering trajectories, patterns, causal graphs,
 //! provenance tracking, episodic memory, DESC episode metadata, GNN weights,
-//! training history, and shadow documents.
+//! Adam optimizer state, training runs, and shadow documents.
 
 use anyhow::Result;
 use cozo::ScriptMutability;
@@ -132,27 +132,47 @@ pub const DESC_EPISODE_METADATA_SCHEMA: &str = "
 
 pub const GNN_WEIGHTS_SCHEMA: &str = "
 :create gnn_weights {
-    weight_id: String
+    layer_id: String,
+    version: Int
     =>
-    model_name: String,
-    layer_index: Int,
-    weights_blob: [Int],
-    shape: [Int],
-    created_at: Int
+    in_dim: Int,
+    out_dim: Int,
+    initialization: String,
+    seed: Int,
+    weights_blob: Bytes,
+    bias_blob: Bytes,
+    norm_l2: Float,
+    has_nan: Bool,
+    saved_at_ms: Int
 }
 ";
 
-pub const TRAINING_HISTORY_SCHEMA: &str = "
-:create training_history {
+pub const GNN_ADAM_STATE_SCHEMA: &str = "
+:create gnn_adam_state {
+    layer_id: String,
+    version: Int
+    =>
+    m_blob: Bytes,
+    v_blob: Bytes,
+    step: Int
+}
+";
+
+pub const GNN_TRAINING_RUNS_SCHEMA: &str = "
+:create gnn_training_runs {
     run_id: String
     =>
-    model_name: String,
-    epochs: Int,
-    epoch_losses: [Float],
+    started_at_ms: Int,
+    completed_at_ms: Int,
+    trigger_reason: String,
+    samples_processed: Int,
+    epochs_completed: Int,
     final_loss: Float,
-    early_stopped: Bool,
-    started_at: Int,
-    finished_at: Int
+    best_loss: Float,
+    weight_version_before: Int,
+    weight_version_after: Int,
+    rolled_back: Bool,
+    error: String?
 }
 ";
 
@@ -173,7 +193,7 @@ pub const SHADOW_DOCUMENTS_SCHEMA: &str = "
 // All relation names (used by both initialize and verify)
 // ---------------------------------------------------------------------------
 
-const ALL_LEARNING_RELATIONS: [&str; 12] = [
+const ALL_LEARNING_RELATIONS: [&str; 13] = [
     "trajectories",
     "trajectory_steps",
     "patterns",
@@ -184,7 +204,8 @@ const ALL_LEARNING_RELATIONS: [&str; 12] = [
     "desc_episodes",
     "desc_episode_metadata",
     "gnn_weights",
-    "training_history",
+    "gnn_adam_state",
+    "gnn_training_runs",
     "shadow_documents",
 ];
 
@@ -204,7 +225,7 @@ pub struct SchemaVerificationReport {
 // Public API
 // ---------------------------------------------------------------------------
 
-/// Create all 12 learning relations in the database.
+/// Create all 13 learning relations in the database.
 ///
 /// This function is idempotent: calling it when relations already exist will
 /// silently succeed without error.
@@ -220,7 +241,8 @@ pub fn initialize_learning_schemas(db: &cozo::DbInstance) -> Result<()> {
         DESC_EPISODES_SCHEMA,
         DESC_EPISODE_METADATA_SCHEMA,
         GNN_WEIGHTS_SCHEMA,
-        TRAINING_HISTORY_SCHEMA,
+        GNN_ADAM_STATE_SCHEMA,
+        GNN_TRAINING_RUNS_SCHEMA,
         SHADOW_DOCUMENTS_SCHEMA,
     ];
 
@@ -240,7 +262,7 @@ pub fn initialize_learning_schemas(db: &cozo::DbInstance) -> Result<()> {
     Ok(())
 }
 
-/// Check which of the 12 learning relations exist in the database.
+/// Check which of the 13 learning relations exist in the database.
 pub fn verify_learning_schemas(db: &cozo::DbInstance) -> Result<SchemaVerificationReport> {
     let result = db
         .run_script(

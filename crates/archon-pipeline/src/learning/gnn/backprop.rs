@@ -75,6 +75,40 @@ pub fn layer_backward(input: &[f32], weights: &[Vec<f32>], grad_output: &[f32]) 
     GradientResult { dw, dx, db }
 }
 
+/// Backward pass through a projection layer (weights only, no activation, no dx).
+///
+/// Returns `(dw, db)` — weight and bias gradients. Unlike `layer_backward`,
+/// this does not compute `dx` since projection layers are terminal (no further
+/// gradient chaining).
+pub fn project_backward(
+    input: &[f32],
+    weights: &[Vec<f32>],
+    grad_output: &[f32],
+) -> (Vec<Vec<f32>>, Vec<f32>) {
+    let out_dim = weights.len();
+    let in_dim = input.len();
+
+    let dw: Vec<Vec<f32>> = (0..out_dim)
+        .map(|i| (0..in_dim).map(|j| grad_output[i] * input[j]).collect())
+        .collect();
+
+    let db = grad_output.to_vec();
+
+    (dw, db)
+}
+
+/// Backward pass through a graph aggregation step.
+///
+/// Forward: `aggregated = sum(neighbor_embeddings) / neighbor_count`
+/// Backward: `d_neighbor = d_aggregated / neighbor_count` for each neighbor.
+pub fn aggregate_backward(d_aggregated: &[f32], neighbor_count: usize) -> Vec<f32> {
+    if neighbor_count == 0 {
+        return vec![0.0; d_aggregated.len()];
+    }
+    let scale = 1.0 / neighbor_count as f32;
+    d_aggregated.iter().map(|g| g * scale).collect()
+}
+
 /// Clip gradient vector to a maximum L2 norm.
 pub fn clip_gradients(gradients: &mut [f32], max_norm: f32) {
     let norm: f32 = gradients.iter().map(|g| g * g).sum::<f32>().sqrt();
@@ -417,5 +451,67 @@ mod tests {
                 assert!(v.is_finite(), "db must be finite");
             }
         }
+    }
+
+    // ---- project_backward ----
+
+    #[test]
+    fn test_project_backward_dimensions() {
+        let input = vec![1.0; 4];
+        let weights = vec![vec![0.5; 4]; 3];
+        let grad_output = vec![0.1; 3];
+
+        let (dw, db) = project_backward(&input, &weights, &grad_output);
+        assert_eq!(dw.len(), 3);
+        assert_eq!(dw[0].len(), 4);
+        assert_eq!(db.len(), 3);
+    }
+
+    #[test]
+    fn test_project_backward_no_dx() {
+        // project_backward does NOT return dx — it's for terminal projections
+        let input = vec![2.0; 4];
+        let weights = vec![vec![0.25; 4]; 2];
+        let grad_output = vec![0.5; 2];
+
+        let (dw, db) = project_backward(&input, &weights, &grad_output);
+        // dw[i][j] = grad_output[i] * input[j] = 0.5 * 2.0 = 1.0
+        for row in &dw {
+            for &v in row {
+                assert!((v - 1.0).abs() < 1e-6);
+            }
+        }
+        // db = grad_output
+        assert!((db[0] - 0.5).abs() < 1e-6);
+        assert!((db[1] - 0.5).abs() < 1e-6);
+    }
+
+    // ---- aggregate_backward ----
+
+    #[test]
+    fn test_aggregate_backward_equal_split() {
+        let d_agg = vec![3.0, 6.0, 9.0];
+        let result = aggregate_backward(&d_agg, 3);
+        // Each neighbor gets 1/3 of the gradient
+        assert!((result[0] - 1.0).abs() < 1e-6);
+        assert!((result[1] - 2.0).abs() < 1e-6);
+        assert!((result[2] - 3.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_aggregate_backward_single_neighbor() {
+        let d_agg = vec![5.0, 10.0];
+        let result = aggregate_backward(&d_agg, 1);
+        // Single neighbor gets all gradient
+        assert!((result[0] - 5.0).abs() < 1e-6);
+        assert!((result[1] - 10.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_aggregate_backward_zero_neighbors() {
+        let d_agg = vec![1.0, 2.0];
+        let result = aggregate_backward(&d_agg, 0);
+        // Zero neighbors -> zero gradient
+        assert_eq!(result, vec![0.0, 0.0]);
     }
 }

@@ -1515,6 +1515,30 @@ pub(crate) async fn run_interactive_session(
         }
     };
 
+    // GNN learning CozoDB — persistent store for weights, Adam state,
+    // training runs, and trajectories. Used by /learning-status retrain.
+    let learning_cozo_db: Option<Arc<cozo::DbInstance>> = {
+        let db_path = working_dir.join(".archon").join("learning.db");
+        if let Some(parent) = db_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        match cozo::DbInstance::new("rocksdb", db_path.to_str().unwrap_or(""), "") {
+            Ok(db) => {
+                // Initialise learning schemas on first open.
+                if let Err(e) =
+                    archon_pipeline::learning::schema::initialize_learning_schemas(&db)
+                {
+                    tracing::warn!(error = %e, "Learning schema init failed; retrain may not work");
+                }
+                Some(Arc::new(db))
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "CozoDB learning store unavailable; retrain disabled");
+                None
+            }
+        }
+    };
+
     // Construct pipeline facades + LLM adapter once at bootstrap for
     // TUI /archon-code and /archon-research commands per Deliverable 3.
     let coding_pipeline: Arc<archon_pipeline::coding::facade::CodingFacade> =
@@ -2088,6 +2112,10 @@ pub(crate) async fn run_interactive_session(
         // Initial value is None — no export queued until the handler
         // stashes one.
         pending_export_shared: Arc::new(std::sync::Mutex::new(None)),
+        // GNN/learning CozoDB — persistent store for weights, trajectories,
+        // Adam state, and training runs. Created once at bootstrap, shared
+        // across commands via the DIRECT pattern (same as memory/leann).
+        cozo_db: learning_cozo_db.clone(),
     };
 
     // Spawn agent input processor with slash command dispatch

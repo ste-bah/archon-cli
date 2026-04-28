@@ -1,375 +1,782 @@
-//! GNN training loop, background trainer, and trigger controller.
+//! Synchronous GNN training loop with Adam, EWC, early stopping, and timeout.
+//!
+//! PR 2 implementation — single-threaded, synchronous training. PR 3 wraps
+//! this in a tokio background task.
 
-use std::sync::{
-    Arc, Mutex,
-    atomic::{AtomicBool, Ordering},
-};
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::time::Instant;
 
 use tracing::{info, warn};
 
-use super::GNNEnhancer;
 use super::backprop;
-use super::ewc::EWCRegularizer;
-use super::history::{TrainingHistoryManager, TrainingRunConfig, TrainingRunMetrics};
-use super::loss;
+use super::ewc::EwcRegularizer;
+use super::loss::{self, ContrastiveLossConfig, TrajectoryWithFeedback};
 use super::math::ActivationType;
 use super::optimizer::{AdamConfig, AdamOptimizer};
+use super::weights::WeightStore;
+use super::{GnnEnhancer, LayerWeights};
 
-/// Training configuration.
+// ---------------------------------------------------------------------------
+// TrainingConfig
+// ---------------------------------------------------------------------------
+
+/// Configuration for a synchronous training run.
 #[derive(Debug, Clone)]
 pub struct TrainingConfig {
     pub learning_rate: f32,
-    pub epochs: usize,
     pub batch_size: usize,
-    pub margin: f32,
+    pub max_epochs: usize,
+    pub early_stopping_patience: usize,
     pub validation_split: f32,
-    pub early_stop_patience: usize,
-    pub lr_decay_factor: f32,
-    pub lr_decay_every: usize,
-    pub max_grad_norm: f32,
     pub ewc_lambda: f32,
+    pub margin: f32,
+    pub max_gradient_norm: f32,
+    pub shuffle: bool,
+    pub min_improvement: f32,
+    pub max_triplets_per_run: usize,
+    pub max_runtime_ms: u64,
 }
 
 impl Default for TrainingConfig {
     fn default() -> Self {
         Self {
             learning_rate: 0.001,
-            epochs: 50,
             batch_size: 32,
-            margin: 1.0,
+            max_epochs: 10,
+            early_stopping_patience: 3,
             validation_split: 0.2,
-            early_stop_patience: 5,
-            lr_decay_factor: 0.5,
-            lr_decay_every: 10,
-            max_grad_norm: 1.0,
             ewc_lambda: 0.1,
+            margin: 0.5,
+            max_gradient_norm: 1.0,
+            shuffle: true,
+            min_improvement: 0.001,
+            max_triplets_per_run: 256,
+            max_runtime_ms: 300_000,
         }
     }
 }
 
-/// A training sample: embedding + label.
-#[derive(Debug, Clone)]
-pub struct TrainingSample {
-    pub embedding: Vec<f32>,
-    pub label: u32,
-}
+// ---------------------------------------------------------------------------
+// Per-epoch metrics (public — consumed by integration tests)
+// ---------------------------------------------------------------------------
 
-/// Result of a training epoch.
+/// Per-epoch metrics captured during training.
+///
+/// Used by the `gnn_training_reduces_loss` acceptance gate to verify
+/// NaN-free training, loss reduction, and no overfit divergence.
 #[derive(Debug, Clone)]
-pub struct EpochResult {
+pub struct EpochMetrics {
     pub epoch: usize,
     pub train_loss: f32,
     pub val_loss: Option<f32>,
-    pub learning_rate: f32,
+    /// (layer_id, l2_norm_of_weights, has_nan_or_inf)
+    pub layer_norms: Vec<(String, f32, bool)>,
 }
 
-/// GNN trainer — runs the training loop with Adam, EWC, early stopping, and LR scheduling.
-pub struct GNNTrainer {
+// ---------------------------------------------------------------------------
+// TrainingOutcome
+// ---------------------------------------------------------------------------
+
+/// Result of a completed training run.
+#[derive(Debug, Clone)]
+pub struct TrainingOutcome {
+    pub epochs_completed: usize,
+    pub batches_processed: usize,
+    pub samples_processed: usize,
+    pub initial_loss: f32,
+    pub final_loss: f32,
+    pub best_loss: f32,
+    pub validation_loss: Option<f32>,
+    pub stopped_early: bool,
+    pub timed_out: bool,
+    pub cancelled: bool,
+    /// Per-epoch metrics collected during training.
+    pub epoch_metrics: Vec<EpochMetrics>,
+}
+
+// ---------------------------------------------------------------------------
+// Internal batch result
+// ---------------------------------------------------------------------------
+
+struct BatchResult {
+    loss: f32,
+    grads: Vec<(Vec<Vec<f32>>, Vec<f32>)>,
+}
+
+/// Internal epoch return — train_loss + optional val_loss.
+struct EpochResult {
+    train_loss: f32,
+    val_loss: Option<f32>,
+}
+
+// ---------------------------------------------------------------------------
+// GnnTrainer
+// ---------------------------------------------------------------------------
+
+/// Synchronous GNN trainer.
+///
+/// Runs forward → loss → backward → Adam step in a standard loop.
+/// Cancellation and timeout are checked at batch boundaries.
+pub struct GnnTrainer {
     config: TrainingConfig,
-    ewc: EWCRegularizer,
-    history: TrainingHistoryManager,
+    optimizer: AdamOptimizer,
+    ewc: EwcRegularizer,
+    loss_config: ContrastiveLossConfig,
+    weight_store: Option<Arc<WeightStore>>,
 }
 
-impl GNNTrainer {
-    pub fn new(config: TrainingConfig) -> Self {
-        let ewc = EWCRegularizer::new(config.ewc_lambda);
+impl GnnTrainer {
+    /// Create a new trainer.
+    ///
+    /// `weight_store` is optional — when provided, weights are persisted after
+    /// each successful training run (loss decreased, no NaN).
+    pub fn new(config: TrainingConfig, weight_store: Option<Arc<WeightStore>>) -> Self {
+        let adam_config = AdamConfig {
+            learning_rate: config.learning_rate,
+            ..AdamConfig::default()
+        };
+        let dummy: Vec<&LayerWeights> = vec![];
+        let optimizer = AdamOptimizer::new(adam_config, &dummy);
+
+        let ewc = EwcRegularizer::new(config.ewc_lambda);
+        let loss_config = ContrastiveLossConfig {
+            margin: config.margin,
+            ..ContrastiveLossConfig::default()
+        };
+
         Self {
             config,
+            optimizer,
             ewc,
-            history: TrainingHistoryManager::new(100),
+            loss_config,
+            weight_store,
         }
     }
 
-    /// Run the full training loop on the given enhancer and samples.
+    /// Run the full training loop.
+    ///
+    /// `cancel` — optional atomic bool checked at batch boundaries.
     pub fn train(
         &mut self,
-        enhancer: &mut GNNEnhancer,
-        samples: &[TrainingSample],
-    ) -> Vec<EpochResult> {
-        if samples.len() < 3 {
-            warn!("Need at least 3 samples for triplet training");
-            return vec![];
+        enhancer: &GnnEnhancer,
+        samples: &[TrajectoryWithFeedback],
+        cancel: Option<&std::sync::atomic::AtomicBool>,
+    ) -> TrainingOutcome {
+        let start_time = Instant::now();
+        let mut samples_processed = 0usize;
+        let mut batches_processed = 0usize;
+        let mut timed_out = false;
+        let mut cancelled = false;
+        let mut epoch_metrics: Vec<EpochMetrics> = Vec::new();
+
+        // Build triplets (indices into samples)
+        let triplets = loss::build_triplets(samples, &self.loss_config);
+        if triplets.len() < 2 {
+            warn!("Not enough triplets for training (got {})", triplets.len());
+            return TrainingOutcome {
+                epochs_completed: 0,
+                batches_processed: 0,
+                samples_processed: 0,
+                initial_loss: 0.0,
+                final_loss: 0.0,
+                best_loss: 0.0,
+                validation_loss: None,
+                stopped_early: false,
+                timed_out: false,
+                cancelled: false,
+                epoch_metrics,
+            };
         }
 
-        let start_time = std::time::Instant::now();
-
-        // Split into train/val
-        let split_idx = ((1.0 - self.config.validation_split) * samples.len() as f32) as usize;
-        let split_idx = split_idx.max(2).min(samples.len() - 1);
-        let (train_samples, val_samples) = samples.split_at(split_idx);
-
-        // Initialize optimizer
-        let (l1, l2, l3) = enhancer.get_weights();
-        let adam_config = AdamConfig {
-            learning_rate: self.config.learning_rate,
-            ..AdamConfig::default()
+        // Truncate to max_triplets_per_run
+        let triplets = if triplets.len() > self.config.max_triplets_per_run {
+            triplets[..self.config.max_triplets_per_run].to_vec()
+        } else {
+            triplets
         };
-        let mut optimizer = AdamOptimizer::new(adam_config, &[&l1, &l2, &l3]);
 
-        let mut results = Vec::with_capacity(self.config.epochs);
-        let mut best_val_loss = f32::INFINITY;
-        let mut patience_counter = 0;
+        // Train/validation split
+        let split_idx =
+            ((1.0 - self.config.validation_split) * triplets.len() as f32) as usize;
+        let split_idx = split_idx.max(1).min(triplets.len().saturating_sub(1));
+        let (train_triplets, val_triplets) = triplets.split_at(split_idx);
 
-        for epoch in 0..self.config.epochs {
-            // LR scheduling
-            if self.config.lr_decay_every > 0
-                && epoch > 0
-                && epoch % self.config.lr_decay_every == 0
-            {
-                let new_lr = optimizer.learning_rate() * self.config.lr_decay_factor;
-                optimizer.set_learning_rate(new_lr);
+        // Initialize optimizer with current layer shapes
+        let (l1, l2, l3) = enhancer.get_weights();
+        self.optimizer = AdamOptimizer::new(
+            AdamConfig {
+                learning_rate: self.config.learning_rate,
+                ..AdamConfig::default()
+            },
+            &[&l1, &l2, &l3],
+        );
+
+        // Compute initial loss — bust cache so embeddings are fresh
+        enhancer.clear_cache();
+        let all_embeddings = Self::forward_all(enhancer, samples);
+        let initial_loss = self.compute_triplet_loss(&train_triplets, &all_embeddings);
+        let mut best_loss = initial_loss;
+
+        // Record pre-training weight version
+        let weight_version_before = self
+            .weight_store
+            .as_ref()
+            .map(|ws| ws.current_version())
+            .unwrap_or(0);
+
+        let mut no_improvement_epochs = 0usize;
+        let mut epochs_completed = 0usize;
+
+        for epoch in 0..self.config.max_epochs {
+            // Timeout check
+            if start_time.elapsed().as_millis() as u64 > self.config.max_runtime_ms {
+                timed_out = true;
+                break;
             }
 
-            // Training step
-            let train_loss = self.train_epoch(enhancer, train_samples, &mut optimizer);
+            // Cancellation check
+            if cancel.map(|c| c.load(std::sync::atomic::Ordering::Relaxed)) == Some(true) {
+                cancelled = true;
+                break;
+            }
 
-            // Validation step
-            let val_loss = if !val_samples.is_empty() {
-                Some(self.validate(enhancer, val_samples))
+            // Refresh embeddings after previous epoch's weight updates — bust cache
+            enhancer.clear_cache();
+            let embeddings = Self::forward_all(enhancer, samples);
+
+            let epoch_result = self.train_epoch(
+                enhancer,
+                samples,
+                train_triplets,
+                &embeddings,
+                val_triplets,
+                &mut batches_processed,
+                &mut samples_processed,
+                cancel,
+            );
+
+            // Collect per-epoch layer-norm metrics
+            let layer_norms = compute_layer_norms(enhancer);
+            epoch_metrics.push(EpochMetrics {
+                epoch,
+                train_loss: epoch_result.train_loss,
+                val_loss: epoch_result.val_loss,
+                layer_norms,
+            });
+
+            epochs_completed += 1;
+
+            // Early stopping check
+            if let Some(val_loss) = epoch_result.val_loss {
+                if val_loss < best_loss - self.config.min_improvement {
+                    best_loss = val_loss;
+                    no_improvement_epochs = 0;
+                } else {
+                    no_improvement_epochs += 1;
+                    if no_improvement_epochs >= self.config.early_stopping_patience {
+                        break;
+                    }
+                }
+            } else if epoch_result.train_loss < best_loss - self.config.min_improvement {
+                best_loss = epoch_result.train_loss;
+                no_improvement_epochs = 0;
+            } else {
+                no_improvement_epochs += 1;
+                if no_improvement_epochs >= self.config.early_stopping_patience {
+                    break;
+                }
+            }
+        }
+
+        enhancer.clear_cache();
+        let final_embeddings = Self::forward_all(enhancer, samples);
+        let final_loss = self.compute_triplet_loss(&train_triplets, &final_embeddings);
+
+        // Post-training: persist or rollback.
+        // Check weight sanity first — NaN/Inf weights always trigger rollback.
+        let weight_norms = compute_layer_norms(enhancer);
+        let has_nan_weights = weight_norms.iter().any(|(_, _, nan)| *nan);
+        let rolled_back = if final_loss > initial_loss * 1.1
+            || final_loss.is_nan()
+            || has_nan_weights
+        {
+            warn!(
+                "Training degraded loss ({} → {}), rolling back to version {}",
+                initial_loss, final_loss, weight_version_before
+            );
+            if let Some(ref ws) = self.weight_store {
+                if weight_version_before > 0 {
+                    let _ = ws.load_version(weight_version_before);
+                }
+            }
+            true
+        } else if final_loss < initial_loss {
+            if let Some(ref ws) = self.weight_store {
+                match ws.save_all() {
+                    Ok(new_version) => {
+                        info!(
+                            "Saved weight version {} (loss: {} → {})",
+                            new_version, initial_loss, final_loss
+                        );
+                    }
+                    Err(e) => warn!("Failed to save weights: {}", e),
+                }
+            }
+            false
+        } else {
+            false
+        };
+
+        TrainingOutcome {
+            epochs_completed,
+            batches_processed,
+            samples_processed,
+            initial_loss,
+            final_loss,
+            best_loss,
+            validation_loss: if !val_triplets.is_empty() {
+                Some(self.compute_triplet_loss(&val_triplets, &final_embeddings))
             } else {
                 None
-            };
+            },
+            stopped_early: no_improvement_epochs >= self.config.early_stopping_patience,
+            timed_out,
+            cancelled: cancelled || rolled_back,
+            epoch_metrics,
+        }
+    }
 
-            let epoch_result = EpochResult {
-                epoch,
-                train_loss,
-                val_loss,
-                learning_rate: optimizer.learning_rate(),
-            };
-            results.push(epoch_result);
+    // -----------------------------------------------------------------------
+    // Private: forward / epoch / batch
+    // -----------------------------------------------------------------------
 
-            // Early stopping
-            if let Some(vl) = val_loss {
-                if vl < best_val_loss {
-                    best_val_loss = vl;
-                    patience_counter = 0;
-                } else {
-                    patience_counter += 1;
-                    if patience_counter >= self.config.early_stop_patience {
-                        info!(
-                            "Early stopping at epoch {} (val_loss={:.4}, best={:.4})",
-                            epoch, vl, best_val_loss
-                        );
-                        break;
+    /// Forward-pass all samples, collecting enhanced embeddings.
+    fn forward_all(
+        enhancer: &GnnEnhancer,
+        samples: &[TrajectoryWithFeedback],
+    ) -> Vec<Vec<f32>> {
+        samples
+            .iter()
+            .map(|s| {
+                let fwd = enhancer.enhance(&s.embedding, None, None, false);
+                fwd.enhanced
+            })
+            .collect()
+    }
+
+    fn train_epoch(
+        &mut self,
+        enhancer: &GnnEnhancer,
+        samples: &[TrajectoryWithFeedback],
+        train: &[loss::Triplet],
+        embeddings: &[Vec<f32>],
+        val: &[loss::Triplet],
+        batches_processed: &mut usize,
+        samples_processed: &mut usize,
+        cancel: Option<&std::sync::atomic::AtomicBool>,
+    ) -> EpochResult {
+        let mut total_loss = 0.0_f32;
+        let mut batch_count = 0usize;
+
+        for batch in train.chunks(self.config.batch_size) {
+            if cancel.map(|c| c.load(std::sync::atomic::Ordering::Relaxed)) == Some(true) {
+                break;
+            }
+
+            let result = self.train_batch(enhancer, samples, batch, embeddings);
+            total_loss += result.loss;
+            batch_count += 1;
+
+            // Apply gradients
+            self.apply_gradients(enhancer, &result.grads);
+
+            *batches_processed += 1;
+            *samples_processed += batch.len();
+        }
+
+        let train_loss = if batch_count > 0 {
+            total_loss / batch_count as f32
+        } else {
+            0.0
+        };
+
+        let val_loss = if !val.is_empty() {
+            Some(self.compute_triplet_loss(val, embeddings))
+        } else {
+            None
+        };
+
+        EpochResult { train_loss, val_loss }
+    }
+
+    fn train_batch(
+        &self,
+        enhancer: &GnnEnhancer,
+        samples: &[TrajectoryWithFeedback],
+        batch: &[loss::Triplet],
+        embeddings: &[Vec<f32>],
+    ) -> BatchResult {
+        let mut total_loss = 0.0_f32;
+        let mut accumulated_grads: Option<Vec<(Vec<Vec<f32>>, Vec<f32>)>> = None;
+
+        // Collect unique indices in this batch for activation-collected forward pass
+        let mut unique_indices: Vec<usize> = Vec::new();
+        {
+            let mut seen = std::collections::HashSet::new();
+            for t in batch {
+                if seen.insert(t.anchor) {
+                    unique_indices.push(t.anchor);
+                }
+                if seen.insert(t.positive) {
+                    unique_indices.push(t.positive);
+                }
+                if seen.insert(t.negative) {
+                    unique_indices.push(t.negative);
+                }
+            }
+        }
+
+        // Forward pass with activation collection for unique samples
+        let mut activations: HashMap<usize, Vec<super::LayerActivationCache>> = HashMap::new();
+        for &idx in &unique_indices {
+            let fwd = enhancer.enhance(
+                &samples[idx].embedding,
+                None,
+                None,
+                true, // collect activations
+            );
+            activations.insert(idx, fwd.activation_cache);
+        }
+
+        for triplet in batch {
+            let emb_a = &embeddings[triplet.anchor];
+            let emb_p = &embeddings[triplet.positive];
+            let emb_n = &embeddings[triplet.negative];
+
+            let loss_result =
+                loss::compute_loss(emb_a, emb_p, emb_n, self.config.margin);
+
+            total_loss += loss_result.loss;
+            if loss_result.loss <= 0.0 {
+                continue;
+            }
+
+            // Backprop through GNN for anchor embedding
+            if let Some(caches) = activations.get(&triplet.anchor) {
+                if caches.len() == 3 {
+                    let (l1, l2, l3) = enhancer.get_weights();
+                    let grads = backprop::full_backward(
+                        caches,
+                        [&l1, &l2, &l3],
+                        &loss_result.grad_anchor,
+                        [
+                            ActivationType::LeakyRelu,
+                            ActivationType::LeakyRelu,
+                            ActivationType::Tanh,
+                        ],
+                    );
+
+                    let layer_grads: Vec<(Vec<Vec<f32>>, Vec<f32>)> =
+                        grads.into_iter().map(|g| (g.dw, g.db)).collect();
+
+                    // Accumulate
+                    match &mut accumulated_grads {
+                        Some(acc) => {
+                            for (i, (dw, db)) in layer_grads.iter().enumerate() {
+                                for (row_a, row_g) in acc[i].0.iter_mut().zip(dw.iter()) {
+                                    for (a, g) in row_a.iter_mut().zip(row_g.iter()) {
+                                        *a += *g;
+                                    }
+                                }
+                                for (a, g) in acc[i].1.iter_mut().zip(db.iter()) {
+                                    *a += *g;
+                                }
+                            }
+                        }
+                        None => {
+                            accumulated_grads = Some(layer_grads);
+                        }
                     }
                 }
             }
         }
 
-        // Record training run
-        let duration = start_time.elapsed().as_secs_f64();
-        let final_loss = results.last().map(|r| r.train_loss).unwrap_or(0.0);
-        let best_loss = results
-            .iter()
-            .map(|r| r.train_loss)
-            .fold(f32::INFINITY, f32::min);
-
-        let run_config = TrainingRunConfig {
-            learning_rate: self.config.learning_rate,
-            epochs: self.config.epochs,
-            batch_size: self.config.batch_size,
-            margin: self.config.margin,
-            ewc_lambda: self.config.ewc_lambda,
+        let batch_size = batch.len() as f32;
+        let avg_loss = if batch.is_empty() {
+            0.0
+        } else {
+            total_loss / batch_size
         };
-        let run_metrics = TrainingRunMetrics {
-            final_loss,
-            best_loss,
-            final_val_loss: results.last().and_then(|r| r.val_loss),
-            epochs_completed: results.len(),
-            early_stopped: patience_counter >= self.config.early_stop_patience,
-            duration_secs: duration,
-        };
-        self.history.record_run(run_config, run_metrics);
 
-        // Update EWC Fisher information
-        let (l1, l2, l3) = enhancer.get_weights();
-        let flat_weights = AdamOptimizer::flatten_weights(&[l1.clone(), l2.clone(), l3.clone()]);
-        // Use squared gradients from last epoch as Fisher approximation
-        let fisher_approx = vec![0.01; flat_weights.len()];
-        self.ewc
-            .update_fisher_information(&flat_weights, &fisher_approx);
+        // Average gradients
+        let grads = accumulated_grads
+            .map(|acc| {
+                acc.into_iter()
+                    .map(|(dw, db)| {
+                        let dw: Vec<Vec<f32>> = dw
+                            .into_iter()
+                            .map(|row| row.into_iter().map(|v| v / batch_size).collect())
+                            .collect();
+                        let db: Vec<f32> =
+                            db.into_iter().map(|v| v / batch_size).collect();
+                        (dw, db)
+                    })
+                    .collect()
+            })
+            .unwrap_or_else(|| zero_grads(enhancer));
 
-        results
+        BatchResult {
+            loss: avg_loss,
+            grads,
+        }
     }
 
-    fn train_epoch(
-        &self,
-        enhancer: &mut GNNEnhancer,
-        samples: &[TrainingSample],
-        optimizer: &mut AdamOptimizer,
-    ) -> f32 {
-        // Forward pass all samples
-        let embeddings: Vec<Vec<f32>> = samples
-            .iter()
-            .map(|s| enhancer.enhance_legacy(&s.embedding).enhanced)
-            .collect();
-        let labels: Vec<u32> = samples.iter().map(|s| s.label).collect();
+    fn apply_gradients(
+        &mut self,
+        enhancer: &GnnEnhancer,
+        grads: &[(Vec<Vec<f32>>, Vec<f32>)],
+    ) {
+        let mut clipped = grads.to_vec();
+        for (dw, db) in &mut clipped {
+            backprop::clip_gradient_matrix(dw, self.config.max_gradient_norm);
+            backprop::clip_gradients(db, self.config.max_gradient_norm);
+        }
 
-        // Mine triplets
-        let triplets = loss::mine_triplets(&embeddings, &labels);
+        // Add EWC penalty gradients
+        if self.ewc.is_initialized() {
+            let (l1, l2, l3) = enhancer.get_weights();
+            let ewc_layers = [
+                self.ewc.penalty_gradient("gnn_embed", &l1.w),
+                self.ewc.penalty_gradient("gnn_hidden", &l2.w),
+                self.ewc.penalty_gradient("gnn_output", &l3.w),
+            ];
+            for (i, ewc_grad) in ewc_layers.iter().enumerate() {
+                if let Some((dw, _db)) = clipped.get_mut(i) {
+                    for (row_dw, row_ewc) in dw.iter_mut().zip(ewc_grad.iter()) {
+                        for (d, e) in row_dw.iter_mut().zip(row_ewc.iter()) {
+                            *d += *e;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Apply Adam step
+        let (l1, l2, l3) = enhancer.get_weights();
+        let mut layers = vec![l1.clone(), l2.clone(), l3.clone()];
+        self.optimizer.step(&mut layers, &clipped);
+        let l1 = layers.remove(0);
+        let l2 = layers.remove(0);
+        let l3 = layers.remove(0);
+        enhancer.set_weights(l1, l2, l3);
+    }
+
+    fn compute_triplet_loss(
+        &self,
+        triplets: &[loss::Triplet],
+        embeddings: &[Vec<f32>],
+    ) -> f32 {
         if triplets.is_empty() {
             return 0.0;
         }
-
-        // Compute average loss
-        let avg_loss = loss::batch_triplet_loss(&embeddings, &triplets, self.config.margin);
-
-        // Compute gradients via backpropagation using first triplet as representative
-        let t = &triplets[0];
-        let loss_result = loss::compute_loss(
-            &embeddings[t.anchor],
-            &embeddings[t.positive],
-            &embeddings[t.negative],
-            self.config.margin,
-        );
-
-        // Backprop through the network for the anchor
-        let fwd = enhancer.enhance_legacy(&samples[t.anchor].embedding);
-        if fwd.activation_cache.len() == 3 {
-            let (l1, l2, l3) = enhancer.get_weights();
-            let grads = backprop::full_backward(
-                &fwd.activation_cache,
-                [&l1, &l2, &l3],
-                &loss_result.grad_anchor,
-                [
-                    ActivationType::LeakyRelu,
-                    ActivationType::LeakyRelu,
-                    ActivationType::Tanh,
-                ],
-            );
-
-            // Collect gradients
-            let mut layer_grads: Vec<(Vec<Vec<f32>>, Vec<f32>)> =
-                grads.into_iter().map(|g| (g.dw, g.db)).collect();
-
-            // Clip gradients
-            for (dw, db) in &mut layer_grads {
-                backprop::clip_gradient_matrix(dw, self.config.max_grad_norm);
-                backprop::clip_gradients(db, self.config.max_grad_norm);
-            }
-
-            // Add EWC penalty gradients
-            if self.ewc.is_initialized() {
-                let (l1, l2, l3) = enhancer.get_weights();
-                let flat = AdamOptimizer::flatten_weights(&[l1.clone(), l2.clone(), l3.clone()]);
-                let ewc_grad = self.ewc.compute_penalty_gradient(&flat);
-                // Distribute EWC gradients back (simplified: add to bias terms)
-                let _ = ewc_grad; // EWC grad application is approximate for performance
-            }
-
-            // Apply optimizer step
-            let (l1, l2, l3) = enhancer.get_weights();
-            let mut layers = vec![l1.clone(), l2.clone(), l3.clone()];
-            optimizer.step(&mut layers, &layer_grads);
-            let l1 = layers.remove(0);
-            let l2 = layers.remove(0);
-            let l3 = layers.remove(0);
-            enhancer.set_weights(l1, l2, l3);
-        }
-
-        avg_loss
-    }
-
-    fn validate(&self, enhancer: &GNNEnhancer, samples: &[TrainingSample]) -> f32 {
-        let embeddings: Vec<Vec<f32>> = samples
+        let total: f32 = triplets
             .iter()
-            .map(|s| enhancer.enhance_legacy(&s.embedding).enhanced)
-            .collect();
-        let labels: Vec<u32> = samples.iter().map(|s| s.label).collect();
-
-        let triplets = loss::mine_triplets(&embeddings, &labels);
-        loss::batch_triplet_loss(&embeddings, &triplets, self.config.margin)
+            .map(|t| {
+                loss::compute_loss(
+                    &embeddings[t.anchor],
+                    &embeddings[t.positive],
+                    &embeddings[t.negative],
+                    self.config.margin,
+                )
+                .loss
+            })
+            .sum();
+        total / triplets.len() as f32
     }
 
-    /// Get training history.
-    pub fn history(&self) -> &TrainingHistoryManager {
-        &self.history
+    // -----------------------------------------------------------------------
+    // Accessors
+    // -----------------------------------------------------------------------
+
+    pub fn config(&self) -> &TrainingConfig {
+        &self.config
+    }
+
+    pub fn learning_rate(&self) -> f32 {
+        self.optimizer.learning_rate()
+    }
+
+    pub fn set_learning_rate(&mut self, lr: f32) {
+        self.optimizer.set_learning_rate(lr);
+    }
+
+    pub fn ewc(&self) -> &EwcRegularizer {
+        &self.ewc
     }
 }
 
-/// Background trainer — spawns training on a separate thread.
-pub struct BackgroundTrainer {
-    is_training: Arc<AtomicBool>,
-    result: Arc<Mutex<Option<Vec<EpochResult>>>>,
-}
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
-impl BackgroundTrainer {
-    pub fn new() -> Self {
-        Self {
-            is_training: Arc::new(AtomicBool::new(false)),
-            result: Arc::new(Mutex::new(None)),
-        }
-    }
-
-    /// Start background training. Returns false if already training.
-    pub fn start(
-        &self,
-        mut enhancer: GNNEnhancer,
-        samples: Vec<TrainingSample>,
-        config: TrainingConfig,
-    ) -> bool {
-        if self.is_training.load(Ordering::SeqCst) {
-            return false;
-        }
-
-        self.is_training.store(true, Ordering::SeqCst);
-        let is_training = self.is_training.clone();
-        let result = self.result.clone();
-
-        std::thread::spawn(move || {
-            let mut trainer = GNNTrainer::new(config);
-            let epoch_results = trainer.train(&mut enhancer, &samples);
-
-            if let Ok(mut r) = result.lock() {
-                *r = Some(epoch_results);
+/// Compute per-layer L2 weight norms and NaN/Inf status.
+fn compute_layer_norms(enhancer: &GnnEnhancer) -> Vec<(String, f32, bool)> {
+    let (l1, l2, l3) = enhancer.get_weights();
+    let layers = [("layer1", &l1), ("layer2", &l2), ("layer3", &l3)];
+    layers
+        .iter()
+        .map(|(name, lw)| {
+            let mut sum_sq = 0.0f64;
+            let mut has_nan = false;
+            for row in &lw.w {
+                for &v in row {
+                    if v.is_nan() || v.is_infinite() {
+                        has_nan = true;
+                    }
+                    sum_sq += (v as f64) * (v as f64);
+                }
             }
-            is_training.store(false, Ordering::SeqCst);
-        });
-
-        true
-    }
-
-    /// Check if training is in progress.
-    pub fn is_training(&self) -> bool {
-        self.is_training.load(Ordering::SeqCst)
-    }
-
-    /// Take the completed training results (returns None if still training or no results).
-    pub fn take_result(&self) -> Option<Vec<EpochResult>> {
-        if self.is_training() {
-            return None;
-        }
-        self.result.lock().ok().and_then(|mut r| r.take())
-    }
+            for &v in &lw.bias {
+                if v.is_nan() || v.is_infinite() {
+                    has_nan = true;
+                }
+                sum_sq += (v as f64) * (v as f64);
+            }
+            (name.to_string(), (sum_sq.sqrt()) as f32, has_nan)
+        })
+        .collect()
 }
 
-/// Auto-trigger controller — starts training when enough new samples accumulate.
-pub struct TrainingTriggerController {
-    sample_threshold: usize,
-    pending_samples: Vec<TrainingSample>,
+fn zero_grads(enhancer: &GnnEnhancer) -> Vec<(Vec<Vec<f32>>, Vec<f32>)> {
+    let (l1, l2, l3) = enhancer.get_weights();
+    vec![
+        (
+            vec![vec![0.0; l1.w[0].len()]; l1.w.len()],
+            vec![0.0; l1.bias.len()],
+        ),
+        (
+            vec![vec![0.0; l2.w[0].len()]; l2.w.len()],
+            vec![0.0; l2.bias.len()],
+        ),
+        (
+            vec![vec![0.0; l3.w[0].len()]; l3.w.len()],
+            vec![0.0; l3.bias.len()],
+        ),
+    ]
 }
 
-impl TrainingTriggerController {
-    pub fn new(sample_threshold: usize) -> Self {
-        Self {
-            sample_threshold,
-            pending_samples: Vec::new(),
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::learning::gnn::{CacheConfig, GnnConfig};
+
+    fn make_sample(id: &str, embedding: Vec<f32>, quality: f32) -> TrajectoryWithFeedback {
+        TrajectoryWithFeedback {
+            trajectory_id: id.to_string(),
+            embedding,
+            quality,
         }
     }
 
-    /// Add a sample. Returns true if threshold is met and training should trigger.
-    pub fn add_sample(&mut self, sample: TrainingSample) -> bool {
-        self.pending_samples.push(sample);
-        self.pending_samples.len() >= self.sample_threshold
+    fn test_enhancer() -> GnnEnhancer {
+        GnnEnhancer::with_in_memory_weights(
+            GnnConfig::default(),
+            CacheConfig::default(),
+            42,
+        )
     }
 
-    /// Take all pending samples (resets the buffer).
-    pub fn take_samples(&mut self) -> Vec<TrainingSample> {
-        std::mem::take(&mut self.pending_samples)
+    #[test]
+    fn test_trainer_requires_enough_samples() {
+        let mut trainer = GnnTrainer::new(TrainingConfig::default(), None);
+        let enhancer = test_enhancer();
+        let samples = vec![
+            make_sample("a", vec![0.1; 4], 0.9),
+            make_sample("b", vec![0.2; 4], 0.1),
+        ];
+        let outcome = trainer.train(&enhancer, &samples, None);
+        assert_eq!(outcome.epochs_completed, 0);
     }
 
-    /// Current count of pending samples.
-    pub fn pending_count(&self) -> usize {
-        self.pending_samples.len()
+    #[test]
+    fn test_trainer_runs_with_valid_samples() {
+        let mut trainer = GnnTrainer::new(
+            TrainingConfig {
+                max_epochs: 1,
+                batch_size: 4,
+                max_triplets_per_run: 16,
+                max_runtime_ms: 30_000,
+                ..TrainingConfig::default()
+            },
+            None,
+        );
+        let enhancer = test_enhancer();
+        let samples: Vec<TrajectoryWithFeedback> = (0..10)
+            .map(|i| {
+                let q = if i % 2 == 0 { 0.9 } else { 0.1 };
+                make_sample(&format!("t{}", i), vec![i as f32 * 0.1; 4], q)
+            })
+            .collect();
+
+        let outcome = trainer.train(&enhancer, &samples, None);
+        assert!(outcome.epochs_completed >= 1);
+        assert!(outcome.batches_processed > 0);
+    }
+
+    #[test]
+    fn test_trainer_cancellation() {
+        let mut trainer = GnnTrainer::new(
+            TrainingConfig {
+                max_epochs: 10,
+                batch_size: 2,
+                max_triplets_per_run: 16,
+                max_runtime_ms: 30_000,
+                ..TrainingConfig::default()
+            },
+            None,
+        );
+        let enhancer = test_enhancer();
+        let samples: Vec<TrajectoryWithFeedback> = (0..10)
+            .map(|i| {
+                let q = if i % 2 == 0 { 0.9 } else { 0.1 };
+                make_sample(&format!("t{}", i), vec![i as f32 * 0.1; 4], q)
+            })
+            .collect();
+
+        let cancel = std::sync::atomic::AtomicBool::new(true);
+        let outcome = trainer.train(&enhancer, &samples, Some(&cancel));
+        assert!(outcome.cancelled);
+    }
+
+    #[test]
+    fn test_training_config_defaults() {
+        let cfg = TrainingConfig::default();
+        assert!((cfg.learning_rate - 0.001).abs() < 1e-6);
+        assert_eq!(cfg.max_epochs, 10);
+        assert_eq!(cfg.batch_size, 32);
+    }
+
+    #[test]
+    fn test_training_outcome_fields() {
+        let outcome = TrainingOutcome {
+            epochs_completed: 5,
+            batches_processed: 20,
+            samples_processed: 640,
+            initial_loss: 0.5,
+            final_loss: 0.3,
+            best_loss: 0.25,
+            validation_loss: Some(0.28),
+            stopped_early: false,
+            timed_out: false,
+            cancelled: false,
+            epoch_metrics: vec![],
+        };
+        assert!(outcome.final_loss < outcome.initial_loss);
+        assert!(!outcome.cancelled);
     }
 }

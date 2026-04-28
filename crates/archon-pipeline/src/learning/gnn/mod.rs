@@ -247,7 +247,7 @@ impl GnnEnhancer {
         cache_config: CacheConfig,
         weight_seed: u64,
     ) -> Self {
-        Self::new(config, cache_config, weight_seed, WeightStore::new())
+        Self::new(config, cache_config, weight_seed, WeightStore::with_in_memory())
     }
 
     // -----------------------------------------------------------------------
@@ -772,8 +772,7 @@ mod tests {
     #[test]
     fn test_nan_handling_falls_back() {
         // Create a weight store with NaN-producing weights
-        let store = WeightStore::new();
-        let init = Initialization::He;
+        let store = WeightStore::with_in_memory();
         // Override layer1 with huge weights that will produce Inf/NaN through relu
         let huge: Vec<Vec<f32>> = vec![vec![f32::MAX; 1536]; 1024];
         store.set_weights("layer1", huge.clone(), vec![0.0; 1024]);
