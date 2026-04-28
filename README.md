@@ -60,7 +60,7 @@ A privacy-first, self-aware AI coding assistant written in Rust. Archon replaces
 - [Learning Systems](#learning-systems)
 - [Crate Architecture](#crate-architecture)
 - [Phase Roadmap](#phase-roadmap)
-- [Release Notes (v0.1.6 → v0.1.23)](#release-notes-v016--v0123)
+- [Release Notes (v0.1.6 → v0.1.24)](#release-notes-v016--v0124)
 - [License](#license)
 
 ---
@@ -2631,9 +2631,20 @@ archon (binary)
 
 ---
 
-## Release Notes (v0.1.6 → v0.1.23)
+## Release Notes (v0.1.6 → v0.1.24)
 
 Last 2 weeks of stabilisation work. Each version was shipped to `main` as a single PR.
+
+### v0.1.24 — GNN forward pass parity with TypeScript (PR #12)
+
+PR 1 of GNN port: faithful round-trip 3-layer GNN (1536→1024→1280→1536) with graph attention, residual connections, layer normalization, and LRU+TTL cache. Acceptance gate: cosine similarity >= 0.999 vs TS reference fixtures.
+- Ported `gnn-enhancer.ts`, `gnn-math.ts`, `gnn-cache.ts` to Rust (`archon-pipeline` crate)
+- xoshiro128** PRNG with non-standard output function matching JS `Math.imul` exactly
+- FNV-1a stride-4 cache key hash byte-matching TS behaviour
+- Scaled dot-product graph attention with adjacency-weighted softmax
+- Numerically stable softmax with uniform fallback on zero-sum
+- 385 lib tests + 8 integration tests (gnn_parity_with_ts, gnn_attention)
+- Pure `Vec<Vec<f32>>` — no new ML crate dependencies
 
 ### v0.1.23 — Wire all learning systems into production (PR #11)
 
