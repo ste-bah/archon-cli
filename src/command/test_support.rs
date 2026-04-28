@@ -85,6 +85,7 @@ pub(crate) struct CtxBuilder {
     pending_export: Option<Arc<Mutex<Option<crate::command::export::ExportDescriptor>>>>,
     // TASK-#211 SLASH-AGENT: agent registry handle for /agent.
     agent_registry: Option<Arc<std::sync::RwLock<archon_core::agents::AgentRegistry>>>,
+    cozo_db: Option<Arc<cozo::DbInstance>>,
 }
 
 impl CtxBuilder {
@@ -119,6 +120,7 @@ impl CtxBuilder {
             pending_effort_set: None,
             pending_export: None,
             agent_registry: None,
+            cozo_db: None,
         }
     }
 
@@ -439,6 +441,7 @@ impl CtxBuilder {
                 research_pipeline: None,
                 llm_adapter: None,
                 leann: None,
+                cozo_db: self.cozo_db.clone(),
             },
             self.tui_rx,
         )

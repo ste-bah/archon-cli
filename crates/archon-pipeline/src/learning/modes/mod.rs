@@ -393,10 +393,7 @@ mod tests {
         let engine = DeductiveEngine::new();
         let req = make_request(
             "therefore what follows",
-            vec![
-                "if: it rains then the ground is wet",
-                "premise: it rains",
-            ],
+            vec!["if: it rains then the ground is wet", "premise: it rains"],
         );
         let output = engine.reason(&req).unwrap();
         assert_eq!(output.result_type, ResultType::Deductions);

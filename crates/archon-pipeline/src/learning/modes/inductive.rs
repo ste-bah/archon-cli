@@ -38,10 +38,8 @@ impl InductiveEngine {
                 });
             } else {
                 // Free-form: treat each line as an example.
-                let words: Vec<String> = trimmed
-                    .split_whitespace()
-                    .map(|s| s.to_string())
-                    .collect();
+                let words: Vec<String> =
+                    trimmed.split_whitespace().map(|s| s.to_string()).collect();
                 examples.push(Example {
                     label: format!("ex{}", examples.len() + 1),
                     features: words,
@@ -107,7 +105,8 @@ impl InductiveEngine {
         }
 
         for (feat, labels) in &feature_labels {
-            if labels.len() == 1 && examples.iter().filter(|ex| ex.label == labels[0]).count() >= 2 {
+            if labels.len() == 1 && examples.iter().filter(|ex| ex.label == labels[0]).count() >= 2
+            {
                 generalisations.push(Generalisation {
                     rule: format!(
                         "Feature '{}' appears exclusively in '{}' examples ({} instances)",
@@ -178,10 +177,7 @@ impl ReasoningEngine for InductiveEngine {
                 .enumerate()
                 .map(|(i, g)| ReasoningItem {
                     label: format!("G{}", i + 1),
-                    description: format!(
-                        "{} (from {} examples)",
-                        g.rule, g.example_count
-                    ),
+                    description: format!("{} (from {} examples)", g.rule, g.example_count),
                     confidence: g.confidence,
                     supporting_evidence: vec![format!("{} examples", g.example_count)],
                 })

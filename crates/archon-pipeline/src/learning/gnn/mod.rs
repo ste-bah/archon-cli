@@ -92,6 +92,9 @@ pub struct LayerActivationCache {
     pub layer_id: String,
     pub input: Vec<f32>,
     pub pre_activation: Vec<f32>,
+    /// Output of the activation function (before residual / layer norm).
+    pub true_post_activation: Vec<f32>,
+    /// Final layer output (after residual + layer norm).
     pub post_activation: Vec<f32>,
     pub weights: Arc<Vec<Vec<f32>>>,
 }
@@ -244,7 +247,12 @@ impl GnnEnhancer {
         cache_config: CacheConfig,
         weight_seed: u64,
     ) -> Self {
-        Self::new(config, cache_config, weight_seed, WeightStore::new())
+        Self::new(
+            config,
+            cache_config,
+            weight_seed,
+            WeightStore::with_in_memory(),
+        )
     }
 
     // -----------------------------------------------------------------------
@@ -515,6 +523,7 @@ impl GnnEnhancer {
 
         // Post-activation
         let post_activation = apply_activation(&pre_activation, self.config.activation);
+        let true_post_activation = post_activation.clone();
 
         // Residual + layer norm
         let mut output = post_activation;
@@ -530,7 +539,8 @@ impl GnnEnhancer {
             layer_id,
             input: input.to_vec(),
             pre_activation,
-            post_activation: output.clone(), // post-norm, but we store what backprop needs
+            true_post_activation,
+            post_activation: output.clone(),
             weights: Arc::clone(&weights),
         };
 
@@ -767,8 +777,7 @@ mod tests {
     #[test]
     fn test_nan_handling_falls_back() {
         // Create a weight store with NaN-producing weights
-        let store = WeightStore::new();
-        let init = Initialization::He;
+        let store = WeightStore::with_in_memory();
         // Override layer1 with huge weights that will produce Inf/NaN through relu
         let huge: Vec<Vec<f32>> = vec![vec![f32::MAX; 1536]; 1024];
         store.set_weights("layer1", huge.clone(), vec![0.0; 1024]);

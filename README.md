@@ -60,7 +60,7 @@ A privacy-first, self-aware AI coding assistant written in Rust. Archon replaces
 - [Learning Systems](#learning-systems)
 - [Crate Architecture](#crate-architecture)
 - [Phase Roadmap](#phase-roadmap)
-- [Release Notes (v0.1.6 → v0.1.24)](#release-notes-v016--v0124)
+- [Release Notes (v0.1.6 → v0.1.25)](#release-notes-v016--v0125)
 - [License](#license)
 
 ---
@@ -2631,9 +2631,21 @@ archon (binary)
 
 ---
 
-## Release Notes (v0.1.6 → v0.1.24)
+## Release Notes (v0.1.6 → v0.1.25)
 
 Last 2 weeks of stabilisation work. Each version was shipped to `main` as a single PR.
+
+### v0.1.25 — GNN training infrastructure (PR #13)
+
+PR 2 of GNN port: Adam optimizer, backpropagation, triplet loss, and EWC regularizer. 27 new unit tests covering optimizer safety, activation gradients, softmax Jacobian, residual gradient splitting, and loss function correctness.
+- Adam optimizer with bias correction, weight decay, NaN/Inf guards, MIN_V_HAT stability floor, and reset()
+- softmax_backward: sigma_i * (dL/dsigma_i - dot(sigma, dL/dsigma)) matching TS reference
+- activation_backward fix: ReLU/LeakyRelu gate on pre_activation, Tanh/Sigmoid formula on true_post_activation
+- Residual gradient splitting: upstream gradient flows to both main path and skip connection
+- LayerActivationCache: added true_post_activation field (pre-residual+norm) for correct Tanh/Sigmoid backward
+- 10 optimizer tests + 11 backprop tests + 10 loss tests = 31 new unit tests
+- Contrastive/triplet loss with hard triplet mining parity tests
+- All 416 lib tests + 4 GNN parity tests pass (0 failures)
 
 ### v0.1.24 — GNN forward pass parity with TypeScript (PR #12)
 

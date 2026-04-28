@@ -173,8 +173,7 @@ impl ReasoningEngine for DeductiveEngine {
                 result_type: ResultType::Deductions,
                 items: vec![ReasoningItem {
                     label: "No Premises".to_string(),
-                    description: "No premises found in context for deductive reasoning"
-                        .to_string(),
+                    description: "No premises found in context for deductive reasoning".to_string(),
                     confidence: 0.0,
                     supporting_evidence: vec![],
                 }],

@@ -133,7 +133,13 @@ impl AutoExtractor {
 
         Ok(text
             .lines()
-            .map(|l| l.trim().trim_start_matches('-').trim_start_matches('*').trim().to_string())
+            .map(|l| {
+                l.trim()
+                    .trim_start_matches('-')
+                    .trim_start_matches('*')
+                    .trim()
+                    .to_string()
+            })
             .filter(|l| !l.is_empty())
             .collect())
     }
@@ -206,10 +212,7 @@ mod tests {
         ) -> Result<(), archon_memory::types::MemoryError> {
             Ok(())
         }
-        fn delete_memory(
-            &self,
-            _id: &str,
-        ) -> Result<(), archon_memory::types::MemoryError> {
+        fn delete_memory(&self, _id: &str) -> Result<(), archon_memory::types::MemoryError> {
             Ok(())
         }
         fn create_relationship(
@@ -260,12 +263,7 @@ mod tests {
     fn test_disabled_returns_empty() {
         let rt = tokio::runtime::Runtime::new().unwrap();
         // Test that constructor stores enabled flag correctly.
-        let extractor = AutoExtractor::new(
-            Arc::new(FakeLlm),
-            Arc::new(FakeMemory),
-            5,
-            false,
-        );
+        let extractor = AutoExtractor::new(Arc::new(FakeLlm), Arc::new(FakeMemory), 5, false);
         assert!(!extractor.enabled);
         // Throttle check: turn 5 but disabled -> empty result
         let result = rt.block_on(extractor.maybe_extract(&[], 5, "test"));
@@ -277,25 +275,35 @@ mod tests {
     struct FakeLlm;
     #[async_trait::async_trait]
     impl LlmProvider for FakeLlm {
-        fn name(&self) -> &str { "fake" }
-        fn models(&self) -> Vec<archon_llm::provider::ModelInfo> { vec![] }
-        async fn stream(&self, _request: LlmRequest) -> Result<tokio::sync::mpsc::Receiver<archon_llm::streaming::StreamEvent>, archon_llm::provider::LlmError> {
+        fn name(&self) -> &str {
+            "fake"
+        }
+        fn models(&self) -> Vec<archon_llm::provider::ModelInfo> {
+            vec![]
+        }
+        async fn stream(
+            &self,
+            _request: LlmRequest,
+        ) -> Result<
+            tokio::sync::mpsc::Receiver<archon_llm::streaming::StreamEvent>,
+            archon_llm::provider::LlmError,
+        > {
             Err(archon_llm::provider::LlmError::Http("fake".into()))
         }
-        async fn complete(&self, _request: LlmRequest) -> Result<LlmResponse, archon_llm::provider::LlmError> {
+        async fn complete(
+            &self,
+            _request: LlmRequest,
+        ) -> Result<LlmResponse, archon_llm::provider::LlmError> {
             Err(archon_llm::provider::LlmError::Http("fake".into()))
         }
-        fn supports_feature(&self, _feature: archon_llm::provider::ProviderFeature) -> bool { false }
+        fn supports_feature(&self, _feature: archon_llm::provider::ProviderFeature) -> bool {
+            false
+        }
     }
 
     #[test]
     fn test_throttled_by_turn_count() {
-        let extractor = AutoExtractor::new(
-            Arc::new(FakeLlm),
-            Arc::new(FakeMemory),
-            5,
-            true,
-        );
+        let extractor = AutoExtractor::new(Arc::new(FakeLlm), Arc::new(FakeMemory), 5, true);
         let rt = tokio::runtime::Runtime::new().unwrap();
         // Turn 3 < every_n_turns=5: should not trigger extraction.
         let result = rt.block_on(extractor.maybe_extract(&[], 3, "test"));
@@ -304,12 +312,7 @@ mod tests {
 
     #[test]
     fn test_last_run_turn_updated() {
-        let extractor = AutoExtractor::new(
-            Arc::new(FakeLlm),
-            Arc::new(FakeMemory),
-            5,
-            true,
-        );
+        let extractor = AutoExtractor::new(Arc::new(FakeLlm), Arc::new(FakeMemory), 5, true);
         let rt = tokio::runtime::Runtime::new().unwrap();
         // Turn 5 >= 5: will attempt extraction, LLM fails, but turn gets updated.
         let _ = rt.block_on(extractor.maybe_extract(&["user: hello".into()], 5, "test"));
@@ -318,40 +321,22 @@ mod tests {
 
     #[test]
     fn test_every_n_turns_defaults_to_5() {
-        let extractor = AutoExtractor::new(
-            Arc::new(FakeLlm),
-            Arc::new(FakeMemory),
-            0,
-            true,
-        );
+        let extractor = AutoExtractor::new(Arc::new(FakeLlm), Arc::new(FakeMemory), 0, true);
         assert_eq!(extractor.every_n_turns, 5);
     }
 
     #[test]
     fn test_memory_config_enabled_flag() {
-        let extractor = AutoExtractor::new(
-            Arc::new(FakeLlm),
-            Arc::new(FakeMemory),
-            5,
-            false,
-        );
+        let extractor = AutoExtractor::new(Arc::new(FakeLlm), Arc::new(FakeMemory), 5, false);
         assert!(!extractor.enabled);
     }
 
     #[test]
     fn test_llm_error_returns_empty() {
-        let extractor = AutoExtractor::new(
-            Arc::new(FakeLlm),
-            Arc::new(FakeMemory),
-            5,
-            true,
-        );
+        let extractor = AutoExtractor::new(Arc::new(FakeLlm), Arc::new(FakeMemory), 5, true);
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let result = rt.block_on(extractor.maybe_extract(
-            &["user: test message".into()],
-            5,
-            "test",
-        ));
+        let result =
+            rt.block_on(extractor.maybe_extract(&["user: test message".into()], 5, "test"));
         assert!(result.is_empty());
     }
 }

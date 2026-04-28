@@ -65,6 +65,9 @@ pub(crate) struct SlashCommandContext {
     /// LEANN semantic code index for pipeline deep-search context.
     /// Created at bootstrap; None if CozoDB fails to open.
     pub(crate) leann: Option<Arc<archon_pipeline::runner::LeannIntegration>>,
+    /// CozoDB instance for learning subsystem persistence (GNN weights,
+    /// trajectories, Adam state, training runs). Created at bootstrap.
+    pub(crate) cozo_db: Option<Arc<cozo::DbInstance>>,
     #[allow(dead_code)]
     pub(crate) registry: Arc<Registry>,
     #[allow(dead_code)]

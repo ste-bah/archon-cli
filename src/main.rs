@@ -504,7 +504,10 @@ async fn handle_kb_action(action: cli_args::KbAction) -> Result<()> {
                 }
             };
             let result = kb.ingest(&src).await?;
-            println!("Ingested: {} nodes, {} chunks", result.nodes_created, result.chunks_processed);
+            println!(
+                "Ingested: {} nodes, {} chunks",
+                result.nodes_created, result.chunks_processed
+            );
             if !result.errors.is_empty() {
                 for e in &result.errors {
                     eprintln!("  Error: {e}");
