@@ -79,7 +79,7 @@ pub async fn handle_pipeline_command(
                 println!("Starting coding pipeline...");
                 println!("Task: {task}");
                 let result =
-                    archon_pipeline::runner::run_pipeline(&facade, &adapter, task, leann.as_ref())
+                    archon_pipeline::runner::run_pipeline(&facade, &adapter, task, leann.as_ref(), None, None)
                         .await?;
                 print_pipeline_result(&result);
             }
@@ -131,7 +131,7 @@ pub async fn handle_pipeline_command(
                 println!("Starting research pipeline...");
                 println!("Topic: {topic}");
                 let result =
-                    archon_pipeline::runner::run_pipeline(&facade, &adapter, topic, None).await?;
+                    archon_pipeline::runner::run_pipeline(&facade, &adapter, topic, None, None, None).await?;
                 print_pipeline_result(&result);
             }
         }
@@ -213,6 +213,8 @@ pub async fn handle_pipeline_command(
                                 &adapter,
                                 &session.task,
                                 None,
+                                None,
+                                None,
                             )
                             .await?;
                             print_pipeline_result(&result);
@@ -240,6 +242,8 @@ pub async fn handle_pipeline_command(
                                 &facade,
                                 &adapter,
                                 &session.task,
+                                None,
+                                None,
                                 None,
                             )
                             .await?;

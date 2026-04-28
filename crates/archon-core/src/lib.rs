@@ -1,6 +1,7 @@
 pub mod agent;
 pub mod agents;
 pub mod archonmd;
+pub mod auto_extraction;
 pub mod metrics;
 pub use metrics::ChannelMetricSink;
 // TASK-AGS-101/104: BackgroundAgentRegistry. The module was relocated

@@ -47,6 +47,7 @@ pub(crate) mod garden;
 pub(crate) mod help;
 pub(crate) mod hooks;
 pub(crate) mod ide_stdio;
+pub(crate) mod learning_status;
 pub(crate) mod login;
 pub(crate) mod logout;
 // TASK-#212 SLASH-MANAGED-AGENTS: /managed-agents remote-registry status.

@@ -270,6 +270,9 @@ async fn main() -> Result<()> {
             use crate::command::agent::handle_agent_info;
             return handle_agent_info(name, version, json, &working_dir_for_config).await;
         }
+        Some(Commands::Kb { ref action }) => {
+            let _ = handle_kb_action(action.clone()).await;
+        }
         None => {}
     }
 
@@ -480,6 +483,61 @@ async fn main() -> Result<()> {
     .await
 }
 
+// v0.1.23: Knowledge base CLI handler.
+async fn handle_kb_action(action: cli_args::KbAction) -> Result<()> {
+    use archon_pipeline::kb::{IngestSource, KnowledgeBase};
+
+    let db = cozo::DbInstance::new("mem", "", "")
+        .map_err(|e| anyhow::anyhow!("Failed to open KB: {e}"))?;
+    let kb = KnowledgeBase::new(db)?;
+
+    match action {
+        cli_args::KbAction::Ingest { source, domain: _ } => {
+            let src = if source.starts_with("http://") || source.starts_with("https://") {
+                IngestSource::Url(source)
+            } else {
+                let path = std::path::PathBuf::from(&source);
+                if path.is_dir() {
+                    IngestSource::Directory(path)
+                } else {
+                    IngestSource::FilePath(path)
+                }
+            };
+            let result = kb.ingest(&src).await?;
+            println!("Ingested: {} nodes, {} chunks", result.nodes_created, result.chunks_processed);
+            if !result.errors.is_empty() {
+                for e in &result.errors {
+                    eprintln!("  Error: {e}");
+                }
+            }
+        }
+        cli_args::KbAction::List => {
+            let nodes = kb.list().await?;
+            for n in &nodes {
+                println!("{}  {:?}  {}", n.node_id, n.node_type, n.title);
+            }
+            println!("{} nodes", nodes.len());
+        }
+        cli_args::KbAction::Search { query, limit } => {
+            let results = kb.search(&query, limit).await?;
+            for n in &results {
+                println!("{}  {:?}  {}", n.node_id, n.node_type, n.title);
+            }
+            println!("{} results", results.len());
+        }
+        cli_args::KbAction::Stats => {
+            let stats = kb.stats().await?;
+            println!("Total nodes: {}", stats.total_nodes);
+            println!("Total edges: {}", stats.total_edges);
+            for (ntype, count) in &stats.nodes_by_type {
+                println!("  {ntype}: {count}");
+            }
+        }
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod wire_tests {
     use super::*;
@@ -511,5 +569,36 @@ mod wire_tests {
         assert_eq!(blocks[0].get("text").unwrap(), "a");
         assert_eq!(blocks[1].get("text").unwrap(), "b");
         assert_eq!(blocks[2].get("text").unwrap(), "c");
+    }
+
+    // v0.1.23: KB CLI subcommand tests
+    #[tokio::test]
+    async fn kb_stats_on_empty_db() {
+        let result = handle_kb_action(cli_args::KbAction::Stats).await;
+        assert!(result.is_ok(), "stats on empty DB must succeed");
+    }
+
+    #[tokio::test]
+    async fn kb_list_on_empty_db() {
+        let result = handle_kb_action(cli_args::KbAction::List).await;
+        assert!(result.is_ok(), "list on empty DB must succeed");
+    }
+
+    #[tokio::test]
+    async fn kb_search_on_empty_db_returns_no_matches() {
+        let result = handle_kb_action(cli_args::KbAction::Search {
+            query: "nonexistent".into(),
+            limit: 10,
+        })
+        .await;
+        assert!(result.is_ok(), "search on empty DB must succeed");
+    }
+
+    #[tokio::test]
+    async fn kb_stats_default_subcommand_works() {
+        // Verify the KbAction::Stats variant can be constructed and dispatched
+        let action = cli_args::KbAction::Stats;
+        let result = handle_kb_action(action).await;
+        assert!(result.is_ok());
     }
 }

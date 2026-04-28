@@ -13,6 +13,9 @@ use anyhow::Result;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
+use crate::learning::integration::LearningIntegration;
+use crate::learning::reflexion::{FailedTrajectory, ReflexionInjector};
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -336,6 +339,8 @@ pub async fn run_pipeline(
     llm: &dyn LlmClient,
     task: &str,
     leann: Option<&LeannIntegration>,
+    mut reflexion: Option<&mut ReflexionInjector>,
+    mut learning: Option<&mut LearningIntegration>,
 ) -> Result<PipelineResult> {
     let mut session = facade.init_session(task).await?;
 
@@ -363,44 +368,137 @@ pub async fn run_pipeline(
                     session.leann_context = li.search_context(&session.task, &agent.key);
                 }
 
-                // Build a fresh prompt — context isolation.
-                let (messages, system, tools) = facade.build_prompt(&session, &agent).await?;
-
-                // Execute against the LLM.
-                let agent_start = Instant::now();
-                let llm_response = llm
-                    .send_message(messages, system, tools, &agent.model)
-                    .await?;
-                let duration = agent_start.elapsed();
-
-                // Build the agent result.
-                let mut result = AgentResult {
-                    output: llm_response.content,
-                    tool_use_log: llm_response.tool_uses,
-                    tokens_in: llm_response.tokens_in,
-                    tokens_out: llm_response.tokens_out,
-                    cost_usd: 0.0, // Cost calculation deferred to facade/billing
-                    duration,
-                    quality: None,
+                // v0.1.23: Query learning integration for SONA + ReasoningBank context.
+                let learning_ctx = if let Some(ref mut li) = learning {
+                    li.on_agent_start(
+                        &agent.key,
+                        &agent.phase.to_string(),
+                        &session.task,
+                        &session.id,
+                    )
+                } else {
+                    Default::default()
                 };
 
-                // Score quality.
-                let quality = facade.score_quality(&session, &agent, &result).await?;
-                result.quality = Some(quality.clone());
+                // v0.1.23: Retry loop with reflexion injection (max 3 attempts).
+                const MAX_ATTEMPTS: usize = 3;
+                let mut attempt = 0usize;
+                let (result, quality) = loop {
+                    attempt += 1;
 
-                tracing::info!(
-                    agent_key = %agent.key,
-                    quality_overall = quality.overall,
-                    tokens_in = result.tokens_in,
-                    tokens_out = result.tokens_out,
-                    duration_ms = duration.as_millis() as u64,
-                    "Agent completed"
-                );
+                    // Build a fresh prompt — context isolation.
+                    let (messages, mut system, tools) =
+                        facade.build_prompt(&session, &agent).await?;
+
+                    // Inject learning context on first attempt.
+                    if attempt == 1 {
+                        if !learning_ctx.sona_context.is_empty() {
+                            system.push(serde_json::json!({
+                                "text": format!("## SONA Trajectory\n{}", learning_ctx.sona_context),
+                            }));
+                        }
+                        if !learning_ctx.reasoning_context.is_empty() {
+                            system.push(serde_json::json!({
+                                "text": format!("## Reasoning Context\n{}", learning_ctx.reasoning_context),
+                            }));
+                        }
+                    }
+
+                    // Inject reflexion context on retry.
+                    if attempt > 1 {
+                        if let Some(ref ri) = reflexion {
+                            if let Some(ctx) = ri.inject_reflexion(&agent.key) {
+                                system.push(serde_json::json!({
+                                    "text": ctx.formatted_prompt_section,
+                                }));
+                                tracing::info!(
+                                    agent_key = %agent.key,
+                                    attempt = attempt,
+                                    "Reflexion context injected"
+                                );
+                            }
+                        }
+                    }
+
+                    // Execute against the LLM.
+                    let agent_start = Instant::now();
+                    let llm_response = llm
+                        .send_message(messages, system, tools, &agent.model)
+                        .await?;
+                    let duration = agent_start.elapsed();
+
+                    // Build the agent result.
+                    let mut result = AgentResult {
+                        output: llm_response.content,
+                        tool_use_log: llm_response.tool_uses,
+                        tokens_in: llm_response.tokens_in,
+                        tokens_out: llm_response.tokens_out,
+                        cost_usd: 0.0,
+                        duration,
+                        quality: None,
+                    };
+
+                    // Score quality.
+                    let quality = facade
+                        .score_quality(&session, &agent, &result)
+                        .await?;
+                    result.quality = Some(quality.clone());
+
+                    let meets_threshold = quality.overall >= agent.quality_threshold;
+
+                    tracing::info!(
+                        agent_key = %agent.key,
+                        attempt = attempt,
+                        quality_overall = quality.overall,
+                        threshold = agent.quality_threshold,
+                        meets_threshold = meets_threshold,
+                        tokens_in = result.tokens_in,
+                        tokens_out = result.tokens_out,
+                        duration_ms = duration.as_millis() as u64,
+                        "Agent completed"
+                    );
+
+                    if meets_threshold || attempt >= MAX_ATTEMPTS {
+                        break (result, quality);
+                    }
+
+                    // Record failure for reflexion on next attempt.
+                    if let Some(ref mut ri) = reflexion {
+                        ri.record_failure(FailedTrajectory {
+                            agent_name: agent.key.clone(),
+                            attempt,
+                            output_summary: result.output.clone(),
+                            failure_reason: format!(
+                                "Quality {:.2} below threshold {:.2}",
+                                quality.overall, agent.quality_threshold
+                            ),
+                            quality_score: quality.overall,
+                            timestamp: std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_secs(),
+                        });
+                        tracing::info!(
+                            agent_key = %agent.key,
+                            attempt = attempt,
+                            "Recorded failure for reflexion"
+                        );
+                    }
+                };
 
                 // Post-processing.
                 facade
                     .process_completion(&mut session, &agent, &result, &quality)
                     .await?;
+
+                // v0.1.23: Feed quality back into learning integration (SONA trajectory).
+                if let Some(ref mut li) = learning {
+                    li.on_agent_complete(
+                        &agent.key,
+                        quality.overall,
+                        &result.output,
+                    );
+                }
 
                 // Re-index modified files for implementation agents (Phase 4+).
                 if agent.phase >= 4 {

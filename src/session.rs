@@ -1556,7 +1556,7 @@ pub(crate) async fn run_interactive_session(
     // sender is moved into Agent::new below.
     let agent_event_tx_for_dispatcher = agent_event_tx.clone();
     let mut agent = Agent::new(
-        provider,
+        Arc::clone(&provider),
         registry,
         agent_config,
         agent_event_tx,
@@ -1588,6 +1588,28 @@ pub(crate) async fn run_interactive_session(
     if config.memory.enabled {
         agent.set_memory(Arc::clone(&memory));
     }
+
+    // v0.1.23: Wire AutoExtraction (LLM-driven fact extraction every N turns).
+    if config.memory.auto_extraction.enabled && config.memory.enabled {
+        let extractor = Arc::new(archon_core::auto_extraction::AutoExtractor::new(
+            Arc::clone(&provider),
+            Arc::clone(&memory),
+            config.memory.auto_extraction.every_n_turns,
+            true,
+        ));
+        agent.set_auto_extractor(extractor);
+        tracing::info!(
+            every_n_turns = config.memory.auto_extraction.every_n_turns,
+            "auto-extraction: wired into agent loop"
+        );
+    }
+
+    // v0.1.23: Construct AutoCapture (regex-based memory detection at turn boundary).
+    let auto_capture = if config.memory.auto_capture.enabled && config.memory.enabled {
+        Some(Arc::new(archon_pipeline::capture::AutoCapture::new(true)))
+    } else {
+        None
+    };
 
     // Wire inner voice if enabled in config. The state is injected into
     // the system prompt before every turn and updated from tool outcomes.
@@ -2112,6 +2134,7 @@ pub(crate) async fn run_interactive_session(
         effort_state,
         cmd_ctx,
         mcp_lifecycle_tx,
+        auto_capture,
     ));
 
     // Build splash screen config with recent activity from session store

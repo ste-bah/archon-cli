@@ -284,7 +284,7 @@ async fn test_three_agent_pipeline_executes_end_to_end() {
     let facade = StubFacade::new();
     let llm = MockLlmClient::new("Agent output OK");
 
-    let result = run_pipeline(&facade, &llm, "Implement feature X", None)
+    let result = run_pipeline(&facade, &llm, "Implement feature X", None, None, None)
         .await
         .expect("pipeline should complete without error");
 
@@ -308,7 +308,7 @@ async fn test_context_isolation_fresh_messages() {
     let facade = StubFacade::new();
     let llm = MockLlmClient::new("Isolated response");
 
-    let _result = run_pipeline(&facade, &llm, "Test isolation", None)
+    let _result = run_pipeline(&facade, &llm, "Test isolation", None, None, None)
         .await
         .expect("pipeline should succeed");
 
@@ -332,7 +332,7 @@ async fn test_pipeline_result_contains_all_agents() {
     let facade = StubFacade::new();
     let llm = MockLlmClient::new("Result content");
 
-    let result = run_pipeline(&facade, &llm, "Check agent count", None)
+    let result = run_pipeline(&facade, &llm, "Check agent count", None, None, None)
         .await
         .expect("pipeline should succeed");
 
@@ -360,7 +360,7 @@ async fn test_per_agent_overhead_under_2_seconds() {
     let llm = MockLlmClient::new("Fast response");
 
     let start = Instant::now();
-    let result = run_pipeline(&facade, &llm, "Performance test", None)
+    let result = run_pipeline(&facade, &llm, "Performance test", None, None, None)
         .await
         .expect("pipeline should succeed");
     let elapsed = start.elapsed();
@@ -383,7 +383,7 @@ async fn test_skip_agent() {
     let facade = SkipFacade::new();
     let llm = MockLlmClient::new("Non-skipped output");
 
-    let result = run_pipeline(&facade, &llm, "Test skip semantics", None)
+    let result = run_pipeline(&facade, &llm, "Test skip semantics", None, None, None)
         .await
         .expect("pipeline should succeed");
 
@@ -418,7 +418,7 @@ async fn test_quality_score_stored() {
     let facade = StubFacade::new();
     let llm = MockLlmClient::new("Quality-checked output");
 
-    let result = run_pipeline(&facade, &llm, "Quality scoring test", None)
+    let result = run_pipeline(&facade, &llm, "Quality scoring test", None, None, None)
         .await
         .expect("pipeline should succeed");
 

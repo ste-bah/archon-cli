@@ -36,46 +36,26 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use archon_core::agent::Agent;
+use archon_pipeline::capture::AutoCapture;
 use archon_tui::{AgentRouter, TurnRunner};
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
 /// Adapter bridging main.rs's `Arc<Mutex<Agent>>` to archon_tui's
 /// `TurnRunner` trait.
-///
-/// Why this adapter exists:
-/// - `archon_core::agent::Agent` is a concrete struct, not a trait
-///   (TUI-100 deviation).
-/// - `archon_tui` cannot depend on `archon_core` directly — that would pin
-///   `archon_tui` to a single agent impl and break its clean dependency
-///   direction.
-/// - Therefore the binary crate (`archon-cli-workspace`) owns the trait
-///   impl, wrapping the concrete `Agent` in an `Arc<Mutex<_>>` and
-///   implementing `run_turn` as lock + `set_cancel_token` +
-///   `process_message` + anyhow coercion.
-///
-/// ## Cancel-token side channel
-///
-/// The adapter owns a shared `Arc<Mutex<Option<CancellationToken>>>` slot.
-/// Each `run_turn` creates a fresh `CancellationToken`, stores it in the
-/// slot, calls `agent.set_cancel_token(Some(..))` so `ToolContext.cancel_parent`
-/// propagates into subagent `child_token()` chains, runs `process_message`,
-/// then clears both the slot and the agent's token.
-///
-/// On Ctrl+C (`__cancel__`), the main input loop calls `self.fire_cancel()`
-/// which fires the stored token (reaching spawned children) in addition to
-/// calling `AgentDispatcher::cancel_current()` which aborts the outer
-/// JoinHandle (reaching the turn future at its next `.await`).
 pub struct AgentHandle {
     agent: Arc<Mutex<Agent>>,
     cancel_slot: Arc<Mutex<Option<CancellationToken>>>,
+    /// v0.1.23: AutoCapture instance for per-turn regex-based memory detection.
+    auto_capture: Option<Arc<AutoCapture>>,
 }
 
 impl AgentHandle {
-    pub fn new(agent: Arc<Mutex<Agent>>) -> Self {
+    pub fn new(agent: Arc<Mutex<Agent>>, auto_capture: Option<Arc<AutoCapture>>) -> Self {
         Self {
             agent,
             cancel_slot: Arc::new(Mutex::new(None)),
+            auto_capture,
         }
     }
 
@@ -108,6 +88,33 @@ impl TurnRunner for AgentHandle {
                 let mut slot = cancel_slot.lock().await;
                 *slot = Some(cancel.clone());
             }
+            // v0.1.23: AutoCapture — regex-based memory detection at turn boundary.
+            if let Some(ref capture) = self.auto_capture {
+                let mut guard = agent.lock().await;
+                let turn_num = guard.turn_number() as usize;
+                let captured = capture.detect(&prompt, turn_num);
+                if !captured.is_empty() {
+                    let mut recent: Vec<archon_pipeline::capture::CapturedMemory> = Vec::new();
+                    for mem in captured {
+                        if !AutoCapture::is_duplicate(&mem, &recent) {
+                            if let Some(ref memory) = guard.memory_handle() {
+                                let _ = memory.store_memory(
+                                    &mem.content,
+                                    &mem.content.chars().take(80).collect::<String>(),
+                                    archon_memory::types::MemoryType::Fact,
+                                    mem.confidence as f64,
+                                    &["auto-captured".to_string()],
+                                    "auto_capture",
+                                    "",
+                                );
+                            }
+                            recent.push(mem);
+                        }
+                    }
+                }
+                drop(guard);
+            }
+
             let mut guard = agent.lock().await;
             guard.set_cancel_token(Some(cancel));
             let result = guard

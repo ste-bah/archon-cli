@@ -35,6 +35,7 @@ pub struct ArchonConfig {
     pub permissions: PermissionsConfig,
     pub context: ContextConfig,
     pub memory: MemoryConfig,
+    pub learning: LearningConfig,
     pub cost: CostConfig,
     pub logging: LoggingConfig,
     pub session: SessionConfig,
@@ -476,6 +477,10 @@ pub struct MemoryConfig {
     pub hybrid_alpha: f32,
     /// Memory garden consolidation settings.
     pub garden: archon_memory::garden::GardenConfig,
+    /// Auto-capture settings (regex-based memory detection at turn boundary).
+    pub auto_capture: AutoCaptureConfig,
+    /// Auto-extraction settings (LLM-driven fact extraction every N turns).
+    pub auto_extraction: AutoExtractionConfig,
 }
 
 impl Default for MemoryConfig {
@@ -486,6 +491,98 @@ impl Default for MemoryConfig {
             embedding_provider: archon_memory::embedding::EmbeddingProviderKind::Auto,
             hybrid_alpha: 0.3,
             garden: archon_memory::garden::GardenConfig::default(),
+            auto_capture: AutoCaptureConfig::default(),
+            auto_extraction: AutoExtractionConfig::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AutoCaptureConfig {
+    pub enabled: bool,
+}
+
+impl Default for AutoCaptureConfig {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AutoExtractionConfig {
+    pub enabled: bool,
+    pub every_n_turns: u32,
+}
+
+impl Default for AutoExtractionConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            every_n_turns: 5,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LearningConfig {
+    pub sona: ToggleConfig,
+    pub provenance: ToggleConfig,
+    pub desc: ToggleConfig,
+    pub gnn: ToggleConfig,
+    pub causal_memory: ToggleConfig,
+    pub shadow_vector: ToggleConfig,
+    pub reasoning_bank: ToggleConfig,
+    pub reflexion: ReflexionConfig,
+}
+
+impl Default for LearningConfig {
+    fn default() -> Self {
+        Self {
+            sona: ToggleConfig::enabled(),
+            provenance: ToggleConfig::enabled(),
+            desc: ToggleConfig::enabled(),
+            gnn: ToggleConfig::enabled(),
+            causal_memory: ToggleConfig::enabled(),
+            shadow_vector: ToggleConfig::enabled(),
+            reasoning_bank: ToggleConfig::enabled(),
+            reflexion: ReflexionConfig::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ToggleConfig {
+    pub enabled: bool,
+}
+
+impl ToggleConfig {
+    pub const fn enabled() -> Self {
+        Self { enabled: true }
+    }
+}
+
+impl Default for ToggleConfig {
+    fn default() -> Self {
+        Self::enabled()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ReflexionConfig {
+    pub enabled: bool,
+    pub max_per_agent: usize,
+}
+
+impl Default for ReflexionConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            max_per_agent: 3,
         }
     }
 }

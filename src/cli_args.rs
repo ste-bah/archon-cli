@@ -443,6 +443,11 @@ pub enum Commands {
         #[arg(long)]
         json: bool,
     },
+    /// Manage the knowledge base
+    Kb {
+        #[command(subcommand)]
+        action: KbAction,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -538,6 +543,30 @@ pub enum RemoteAction {
         #[arg(long)]
         token: Option<String>,
     },
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum KbAction {
+    /// Ingest a file, URL, or directory into the knowledge base
+    Ingest {
+        /// Path or URL to ingest
+        source: String,
+        /// Domain tag for the ingested content
+        #[arg(long)]
+        domain: Option<String>,
+    },
+    /// List all nodes in the knowledge base
+    List,
+    /// Search for nodes matching a query string
+    Search {
+        /// Search query
+        query: String,
+        /// Maximum results
+        #[arg(long, default_value = "10")]
+        limit: usize,
+    },
+    /// Show knowledge base statistics
+    Stats,
 }
 
 #[derive(Subcommand, Debug)]

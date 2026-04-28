@@ -65,7 +65,7 @@ impl CommandHandler for ArchonCodeHandler {
         )));
 
         tokio::spawn(async move {
-            match run_pipeline(coding.as_ref(), llm.as_ref(), &task, leann.as_deref()).await {
+            match run_pipeline(coding.as_ref(), llm.as_ref(), &task, leann.as_deref(), None, None).await {
                 Ok(result) => {
                     let _ = tui_tx.send(TuiEvent::TextDelta(format!(
                         "\n=== Pipeline Complete ===\n\

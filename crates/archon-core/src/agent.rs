@@ -14,6 +14,7 @@ use archon_memory::extraction::{
     should_extract, store_extracted,
 };
 use archon_memory::injection::MemoryInjector;
+use crate::auto_extraction::AutoExtractor;
 use archon_permissions::auto::{AutoDecision, AutoModeEvaluator};
 use archon_permissions::is_default_safe_tool;
 use archon_session::checkpoint::CheckpointStore;
@@ -314,6 +315,8 @@ pub struct Agent {
     memory_injector: MemoryInjector,
     extraction_config: ExtractionConfig,
     extraction_state: ExtractionState,
+    // v0.1.23: AutoExtraction (LLM-based) learning system.
+    auto_extractor: Option<Arc<AutoExtractor>>,
     // GAP 6: Auto-mode permission evaluator
     auto_evaluator: Option<AutoModeEvaluator>,
     // GAP 8: Subagent manager
@@ -387,6 +390,7 @@ impl Agent {
             memory_injector: MemoryInjector::new(),
             extraction_config: ExtractionConfig::default(),
             extraction_state: ExtractionState::default(),
+            auto_extractor: None,
             auto_evaluator: None,
             subagent_manager: Arc::new(Mutex::new(SubagentManager::default())),
             show_thinking: Arc::new(AtomicBool::new(true)),
@@ -583,6 +587,21 @@ impl Agent {
         self.memory = Some(memory);
     }
 
+    /// Set the auto-extraction system (v0.1.23: LLM-driven fact extraction every N turns).
+    pub fn set_auto_extractor(&mut self, extractor: Arc<AutoExtractor>) {
+        self.auto_extractor = Some(extractor);
+    }
+
+    /// Current turn number (for AutoCapture indexing).
+    pub fn turn_number(&self) -> u64 {
+        self.turn_number
+    }
+
+    /// Access the memory handle, if set (for AutoCapture storage).
+    pub fn memory_handle(&self) -> Option<&Arc<dyn MemoryTrait>> {
+        self.memory.as_ref()
+    }
+
     /// Restore conversation state from previously saved messages.
     /// Used for session resume (`--resume <id>`).
     pub fn restore_conversation(&mut self, messages: Vec<serde_json::Value>) {
@@ -599,6 +618,37 @@ impl Agent {
     pub async fn process_message(&mut self, user_input: &str) -> Result<(), AgentLoopError> {
         self.turn_number += 1;
         self.state.add_user_message(user_input);
+
+        // v0.1.23: AutoExtraction — LLM-driven fact extraction every N turns.
+        if let Some(ref extractor) = self.auto_extractor {
+            let extractor = Arc::clone(extractor);
+            let turns: Vec<String> = self
+                .state
+                .messages
+                .iter()
+                .filter_map(|m| {
+                    m.get("content").and_then(|c| {
+                        if let Some(s) = c.as_str() {
+                            Some(s.to_string())
+                        } else if let Some(arr) = c.as_array() {
+                            let text: String = arr
+                                .iter()
+                                .filter_map(|b| b.get("text").and_then(|t| t.as_str()))
+                                .collect::<Vec<_>>()
+                                .join(" ");
+                            if text.is_empty() { None } else { Some(text) }
+                        } else {
+                            None
+                        }
+                    })
+                })
+                .collect();
+            let model = self.config.model.clone();
+            let turn = self.turn_number as u32;
+            tokio::spawn(async move {
+                let _ = extractor.maybe_extract(&turns, turn, &model).await;
+            });
+        }
 
         let mut agentic_iterations: u32 = 0;
         loop {

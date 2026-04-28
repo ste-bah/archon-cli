@@ -290,7 +290,6 @@ pub fn register_builtins() -> SkillRegistry {
     // Agent management skills (PRD-AGENTS-001)
     registry.register(Box::new(super::agent_skills::CreateAgentSkill));
     registry.register(Box::new(super::agent_skills::ListAgentsSkill));
-    registry.register(Box::new(super::agent_skills::RunAgentSkill));
     registry.register(Box::new(super::agent_skills::AdjustBehaviorSkill));
     registry.register(Box::new(super::agent_skills::EvolveAgentSkill));
     registry.register(Box::new(super::agent_skills::ArchiveAgentSkill));

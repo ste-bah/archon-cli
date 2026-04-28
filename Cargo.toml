@@ -8,7 +8,7 @@ publish = false
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.1.22"
+version = "0.1.23"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT"
@@ -159,6 +159,7 @@ globset.workspace = true
 # - thiserror: derive(Error) on `ParseError` for the `CommandParser` wrapper
 strsim.workspace = true
 thiserror.workspace = true
+cozo.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

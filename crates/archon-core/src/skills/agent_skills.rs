@@ -187,52 +187,6 @@ impl Skill for ListAgentsSkill {
 }
 
 // ---------------------------------------------------------------------------
-// /run-agent — Spawn a subagent with a specific agent type
-// ---------------------------------------------------------------------------
-
-pub struct RunAgentSkill;
-
-impl Skill for RunAgentSkill {
-    fn name(&self) -> &str {
-        "run-agent"
-    }
-
-    fn description(&self) -> &str {
-        "Invoke a custom agent with a task description"
-    }
-
-    fn execute(&self, args: &[String], _ctx: &SkillContext) -> SkillOutput {
-        if args.is_empty() {
-            return SkillOutput::Error(
-                "Usage: /run-agent <agent-name> <task description>\n\nExample: /run-agent code-reviewer Review the auth module for security issues".into(),
-            );
-        }
-
-        let agent_name = &args[0];
-        if !is_valid_agent_name(agent_name) {
-            return SkillOutput::Error(format!("Invalid agent name: {agent_name}"));
-        }
-        let task = if args.len() > 1 {
-            args[1..].join(" ")
-        } else {
-            return SkillOutput::Error(
-                "Usage: /run-agent <agent-name> <task description>\n\nPlease provide a task for the agent.".into(),
-            );
-        };
-
-        let prompt = format!(
-            r#"Use the Agent tool to spawn a subagent with the following parameters:
-- subagent_type: "{agent_name}"
-- prompt: "{task}"
-
-Spawn the agent now and report its results."#
-        );
-
-        SkillOutput::Prompt(prompt)
-    }
-}
-
-// ---------------------------------------------------------------------------
 // /adjust-behavior — Modify an agent's behavior.md
 // ---------------------------------------------------------------------------
 
@@ -704,63 +658,6 @@ mod tests {
         match output {
             SkillOutput::Text(t) => assert!(t.contains("No agents")),
             other => panic!("expected Text, got: {:?}", other),
-        }
-    }
-
-    // -----------------------------------------------------------------------
-    // /run-agent tests
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn run_agent_no_args_returns_error() {
-        let skill = RunAgentSkill;
-        let ctx = SkillContext {
-            session_id: "test".into(),
-            working_dir: std::path::PathBuf::from("/tmp"),
-            model: "sonnet".into(),
-            agent_registry: None,
-        };
-        let output = skill.execute(&[], &ctx);
-        assert!(matches!(output, SkillOutput::Error(_)));
-    }
-
-    #[test]
-    fn run_agent_no_task_returns_error() {
-        let skill = RunAgentSkill;
-        let ctx = SkillContext {
-            session_id: "test".into(),
-            working_dir: std::path::PathBuf::from("/tmp"),
-            model: "sonnet".into(),
-            agent_registry: None,
-        };
-        let output = skill.execute(&["code-reviewer".into()], &ctx);
-        assert!(matches!(output, SkillOutput::Error(_)));
-    }
-
-    #[test]
-    fn run_agent_returns_prompt_with_agent_name() {
-        let skill = RunAgentSkill;
-        let ctx = SkillContext {
-            session_id: "test".into(),
-            working_dir: std::path::PathBuf::from("/tmp"),
-            model: "sonnet".into(),
-            agent_registry: None,
-        };
-        let output = skill.execute(
-            &[
-                "code-reviewer".into(),
-                "Review".into(),
-                "auth".into(),
-                "module".into(),
-            ],
-            &ctx,
-        );
-        match output {
-            SkillOutput::Prompt(p) => {
-                assert!(p.contains("code-reviewer"));
-                assert!(p.contains("Review auth module"));
-            }
-            other => panic!("expected Prompt, got: {:?}", other),
         }
     }
 

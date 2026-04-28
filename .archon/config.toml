@@ -254,7 +254,7 @@ max_checkpoints = 10
 # [tui] — Terminal UI
 # ----------------------------------------------------------------------------
 [tui]
-vim_mode = true
+vim_mode = false
 # Verbose mode: show full turn-by-turn output (Ctrl+V toggles at runtime)
 verbose = true
 # Named color theme. Built-ins: intj, intp, dark, light, ocean, fire, forest,

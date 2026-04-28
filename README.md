@@ -60,7 +60,7 @@ A privacy-first, self-aware AI coding assistant written in Rust. Archon replaces
 - [Learning Systems](#learning-systems)
 - [Crate Architecture](#crate-architecture)
 - [Phase Roadmap](#phase-roadmap)
-- [Release Notes (v0.1.6 → v0.1.13)](#release-notes-v016--v0113)
+- [Release Notes (v0.1.6 → v0.1.23)](#release-notes-v016--v0123)
 - [License](#license)
 
 ---
@@ -2631,9 +2631,24 @@ archon (binary)
 
 ---
 
-## Release Notes (v0.1.6 → v0.1.13)
+## Release Notes (v0.1.6 → v0.1.23)
 
 Last 2 weeks of stabilisation work. Each version was shipped to `main` as a single PR.
+
+### v0.1.23 — Wire all learning systems into production (PR #11)
+
+All 8 learning subsystems wired end-to-end into the pipeline runner:
+- **AutoExtraction** — new module; background extraction of memories from agent outputs every N turns. 6 unit tests.
+- **AutoCapture** — wired through `session.rs` → `run_session_loop` → `AgentHandle::run_turn`. Captures agent outputs as facts.
+- **Reflexion** — retry loop (max 3 attempts) with quality-gated reflexion injection. Failed trajectories recorded per-agent, cap-limited. 6 tests.
+- **LearningIntegration** — orchestrates SONA + ReasoningBank context injection before prompt build, quality feedback after agent completion. 8 tests.
+- **ReasoningBank** — 4 reasoning modes (PatternMatch, CausalInference, Contextual, Hybrid) with auto mode selection, trajectory tracking, and GNN-enhanced embeddings. 14 integration tests.
+- **`/learning-status`** — new slash command; reports config-based enabled/disabled status of all 8 learning subsystems in table format.
+- **`archon kb`** — new CLI subcommand with `ingest`, `list`, `search`, `stats` actions. CozoDB-backed.
+- **Delete duplicate `RunAgentSkill`** — removed stub skill from `agent_skills.rs`; `/run-agent` now exclusively uses the real `RunAgentHandler`.
+- **Fix stale hint text** — `agent_slash.rs` no longer references deleted `RunAgentSkill`.
+- **Config schema** — added `learning.reflexion`, `memory.auto_extraction` sections.
+- **KB CLI tests** — 4 tests (stats, list, search empty, dispatch). Learning status smoke test.
 
 ### v0.1.13 — Purge `tokio Mutex::blocking_lock` from async paths (PR #10)
 

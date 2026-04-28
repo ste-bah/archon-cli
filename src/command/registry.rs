@@ -71,6 +71,8 @@ use crate::command::mcp::{McpHandler, McpSnapshot};
 // no snapshot/effect-slot needed. No aliases (spec lists none). Primary
 // count grows from 38 -> 39.
 use crate::command::hooks::HooksHandler;
+// v0.1.23: /learning-status reports status of all 8 learning subsystems.
+use crate::command::learning_status::LearningStatusHandler;
 // TASK-AGS-815: real /fork handler lives in `crate::command::fork`.
 // DIRECT-pattern body-migrate (sync `archon_session::fork::fork_session`
 // + `SessionStore::open`; no snapshot/effect-slot needed — session_id
@@ -1769,6 +1771,7 @@ pub(crate) fn default_registry() -> Registry {
     b.insert_primary("mcp", Arc::new(McpHandler));
     // TASK-AGS-812: NEW /hooks primary (gap-fix Q4=A, no aliases).
     b.insert_primary("hooks", Arc::new(HooksHandler));
+    b.insert_primary("learning-status", Arc::new(LearningStatusHandler));
     b.insert_primary("fork", Arc::new(ForkHandler));
     b.insert_primary("checkpoint", Arc::new(CheckpointHandler::new()));
     b.insert_primary("add-dir", Arc::new(AddDirHandler));

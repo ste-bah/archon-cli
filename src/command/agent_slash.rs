@@ -4,10 +4,7 @@
 //!   - `/agent` (no args)      → list all available agents
 //!   - `/agent list`           → same as no-args (alias for the empty form)
 //!   - `/agent info <name>`    → show full details for one agent
-//!   - `/agent run <name> ...` → delegate-hint to `/run-agent` skill
-//!     (the skill returns `SkillOutput::Prompt`, which is the
-//!     established surface for spawning subagents — re-implementing it
-//!     here would duplicate `agent_skills::RunAgentSkill`)
+//!   - `/agent run <name> ...` → delegate to `/run-agent` command handler
 //!   - any other subcommand    → usage TextDelta
 //!
 //! Reads the live `AgentRegistry` via the new `agent_registry` field on
@@ -212,7 +209,7 @@ fn render_usage(prefix: &str) -> String {
         Subcommands:\n  \
         list                   List all available agents (default).\n  \
         info <name>            Show full details for one agent.\n  \
-        run  <name> <task...>  Delegate-hint to the /run-agent skill.\n\n\
+        run  <name> <task...>  Delegate to /run-agent (async task submission).\n\n\
         Run `/agent list` to start.\n",
         prefix = prefix,
     )

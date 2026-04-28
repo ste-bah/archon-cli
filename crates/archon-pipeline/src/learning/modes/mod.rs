@@ -1,13 +1,17 @@
-//! Extended reasoning mode engines — 8 specialized reasoning paradigms.
+//! Extended reasoning mode engines — 12 specialized reasoning paradigms.
 //! Implements REQ-LEARN-011.
 
 pub mod abductive;
 pub mod adversarial;
 pub mod analogical;
+pub mod causal;
 pub mod constraint;
+pub mod contextual;
 pub mod counterfactual;
 pub mod decomposition;
+pub mod deductive;
 pub mod first_principles;
+pub mod inductive;
 pub mod temporal;
 
 use anyhow::Result;
@@ -47,6 +51,10 @@ pub enum ResultType {
     Subproblems,
     Axioms,
     TemporalInferences,
+    CausalChains,
+    ContextualInsights,
+    Deductions,
+    Generalizations,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -104,6 +112,34 @@ impl ExtendedModeSelector {
         {
             return Some("temporal");
         }
+        if lower.contains("deduce")
+            || lower.contains("therefore")
+            || lower.contains("syllogism")
+            || lower.contains("logical")
+        {
+            return Some("deductive");
+        }
+        if lower.contains("generalize")
+            || lower.contains("induct")
+            || lower.contains("pattern from")
+            || lower.contains("examples show")
+        {
+            return Some("inductive");
+        }
+        if lower.contains("causes ")
+            || lower.contains("effect of")
+            || lower.contains("causal chain")
+            || lower.contains("leads to")
+        {
+            return Some("causal");
+        }
+        if lower.contains("depends on context")
+            || lower.contains("situational")
+            || lower.contains("contextual")
+            || lower.contains("in this scenario")
+        {
+            return Some("contextual");
+        }
         None
     }
 }
@@ -114,10 +150,14 @@ mod tests {
     use abductive::AbductiveEngine;
     use adversarial::AdversarialEngine;
     use analogical::AnalogicalEngine;
+    use causal::CausalEngine;
     use constraint::ConstraintEngine;
+    use contextual::ContextualEngine;
     use counterfactual::CounterfactualEngine;
     use decomposition::DecompositionEngine;
+    use deductive::DeductiveEngine;
     use first_principles::FirstPrinciplesEngine;
+    use inductive::InductiveEngine;
     use temporal::TemporalEngine;
 
     fn make_request(query: &str, context: Vec<&str>) -> ReasoningRequest {
@@ -279,21 +319,29 @@ mod tests {
             Box::new(AbductiveEngine::new()),
             Box::new(AdversarialEngine::new()),
             Box::new(AnalogicalEngine::new()),
+            Box::new(CausalEngine::new()),
             Box::new(ConstraintEngine::new()),
+            Box::new(ContextualEngine::new()),
             Box::new(CounterfactualEngine::new()),
             Box::new(DecompositionEngine::new()),
+            Box::new(DeductiveEngine::new()),
             Box::new(FirstPrinciplesEngine::new()),
+            Box::new(InductiveEngine::new()),
             Box::new(TemporalEngine::new()),
         ];
-        assert_eq!(engines.len(), 8);
+        assert_eq!(engines.len(), 12);
         let names: Vec<&str> = engines.iter().map(|e| e.name()).collect();
         assert!(names.contains(&"abductive"));
         assert!(names.contains(&"adversarial"));
         assert!(names.contains(&"analogical"));
+        assert!(names.contains(&"causal"));
         assert!(names.contains(&"constraint"));
+        assert!(names.contains(&"contextual"));
         assert!(names.contains(&"counterfactual"));
         assert!(names.contains(&"decomposition"));
+        assert!(names.contains(&"deductive"));
         assert!(names.contains(&"first_principles"));
+        assert!(names.contains(&"inductive"));
         assert!(names.contains(&"temporal"));
     }
 
@@ -338,5 +386,89 @@ mod tests {
         assert_eq!(ExtendedModeSelector::select("hello world"), None);
         assert_eq!(ExtendedModeSelector::select("implement a function"), None);
         assert_eq!(ExtendedModeSelector::select(""), None);
+    }
+
+    #[test]
+    fn test_deductive_returns_deductions() {
+        let engine = DeductiveEngine::new();
+        let req = make_request(
+            "therefore what follows",
+            vec![
+                "if: it rains then the ground is wet",
+                "premise: it rains",
+            ],
+        );
+        let output = engine.reason(&req).unwrap();
+        assert_eq!(output.result_type, ResultType::Deductions);
+        assert!(!output.items.is_empty());
+    }
+
+    #[test]
+    fn test_inductive_returns_generalizations() {
+        let engine = InductiveEngine::new();
+        let req = make_request(
+            "generalize from these examples",
+            vec![
+                "example:bird|wings,feathers,beak",
+                "example:bird|wings,feathers,talons",
+                "example:bird|wings,beak,talons",
+            ],
+        );
+        let output = engine.reason(&req).unwrap();
+        assert_eq!(output.result_type, ResultType::Generalizations);
+        assert!(!output.items.is_empty());
+    }
+
+    #[test]
+    fn test_causal_returns_causal_chains() {
+        let engine = CausalEngine::new();
+        let req = make_request(
+            "what is the chain of events",
+            vec![
+                "cause:rain -> effect:wet ground",
+                "cause:wet ground -> effect:slippery surface",
+                "cause:slippery surface -> effect:accident",
+            ],
+        );
+        let output = engine.reason(&req).unwrap();
+        assert_eq!(output.result_type, ResultType::CausalChains);
+        assert!(!output.items.is_empty());
+    }
+
+    #[test]
+    fn test_contextual_returns_contextual_insights() {
+        let engine = ContextualEngine::new();
+        let req = make_request(
+            "what should we do in this scenario",
+            vec![
+                "scenario: production outage",
+                "signal: database is down",
+                "signal: users reporting errors",
+                "context: peak traffic hours",
+            ],
+        );
+        let output = engine.reason(&req).unwrap();
+        assert_eq!(output.result_type, ResultType::ContextualInsights);
+        assert!(!output.items.is_empty());
+    }
+
+    #[test]
+    fn test_extended_mode_selector_new_modes() {
+        assert_eq!(
+            ExtendedModeSelector::select("deduce the logical conclusion"),
+            Some("deductive")
+        );
+        assert_eq!(
+            ExtendedModeSelector::select("generalize from examples"),
+            Some("inductive")
+        );
+        assert_eq!(
+            ExtendedModeSelector::select("what causes this effect"),
+            Some("causal")
+        );
+        assert_eq!(
+            ExtendedModeSelector::select("it depends on context"),
+            Some("contextual")
+        );
     }
 }

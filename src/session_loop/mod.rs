@@ -24,6 +24,7 @@ use archon_core::agent::Agent;
 use archon_core::skills::{SkillContext, SkillOutput};
 use archon_llm::effort::EffortState;
 use archon_llm::fast_mode::FastModeState;
+use archon_pipeline::capture::AutoCapture;
 use archon_tui::app::TuiEvent;
 
 use crate::command::slash::handle_slash_command;
@@ -66,6 +67,7 @@ pub(crate) fn run_session_loop(
     mut effort_state: EffortState,
     mut cmd_ctx: SlashCommandContext,
     mcp_lifecycle_tx: McpLifecycleTx,
+    auto_capture: Option<Arc<AutoCapture>>,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> {
     Box::pin(async move {
         let agent = Arc::new(tokio::sync::Mutex::new(agent));
@@ -133,7 +135,10 @@ pub(crate) fn run_session_loop(
         // TASK-TUI-107: AgentDispatcher owns the in-flight turn lifecycle,
         // queues overflow prompts FIFO, and polls completion without
         // blocking. AgentHandle bridges `Arc<Mutex<Agent>>` to TurnRunner.
-        let adapter = Arc::new(crate::agent_handle::AgentHandle::new(Arc::clone(&agent)));
+        let adapter = Arc::new(crate::agent_handle::AgentHandle::new(
+            Arc::clone(&agent),
+            auto_capture,
+        ));
         let router: Arc<dyn archon_tui::AgentRouter> =
             Arc::new(crate::agent_handle::NoopAgentRouter);
         let mut dispatcher =
