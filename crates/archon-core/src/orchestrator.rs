@@ -82,7 +82,7 @@ impl SubtaskExecutor for RealSubtaskExecutor {
             )
         };
 
-        let registry = create_default_registry(self.working_dir.clone());
+        let registry = create_default_registry(self.working_dir.clone(), None);
         let tool_defs = registry.tool_definitions();
         let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel::<TimestampedEvent>();
 

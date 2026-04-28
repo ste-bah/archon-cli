@@ -76,6 +76,9 @@ pub mod team_message;
 
 pub mod cartographer;
 
+pub mod leann_find_similar;
+pub mod leann_search;
+
 // Stubs for tools implemented in later tasks
 pub mod agent {}
 pub mod notebook;

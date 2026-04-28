@@ -46,6 +46,28 @@ use crate::setup::strip_cache_control_if_disabled;
 ///
 /// Bind failures are validated synchronously: we call `TcpListener::bind`
 /// *before* spawning the serve task so a "permission denied" / "address in
+/// Construct the LEANN CodeIndex for the tool registry.
+///
+/// Resilient: returns `None` when the DB fails to open. The caller
+/// propagates `None` through `create_default_registry`, which skips
+/// LEANN tool registration — agent sees no LeannSearch/LeannFindSimilar
+/// in ToolSearch results, graceful no-op.
+fn init_leann_index(
+    working_dir: &std::path::Path,
+) -> Option<std::sync::Arc<archon_leann::CodeIndex>> {
+    let db_path = working_dir.join(".archon").join("leann.db");
+    if let Some(parent) = db_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    match archon_leann::CodeIndex::new(&db_path, Default::default()) {
+        Ok(idx) => Some(std::sync::Arc::new(idx)),
+        Err(e) => {
+            tracing::warn!(error = %e, "LEANN unavailable; continuing without code context");
+            None
+        }
+    }
+}
+
 /// use" error propagates as `Err` to the caller rather than disappearing
 /// into a `tokio::spawn` closure where the TUI swallows stderr. Post-bind
 /// serve failures (peer reset, listener EOF) still warn-and-exit in the
@@ -218,7 +240,8 @@ pub(crate) async fn run_print_mode_session(
 
     let api_client = AnthropicClient::new(auth, identity.clone(), api_url);
     let working_dir = std::env::current_dir().unwrap_or_default();
-    let mut registry = create_default_registry(working_dir.clone());
+    let leann_index = init_leann_index(&working_dir);
+    let mut registry = create_default_registry(working_dir.clone(), leann_index);
     // Wire config-driven bash tool limits
     registry.register(Box::new(archon_tools::bash::BashTool {
         timeout_secs: config.tools.bash_timeout,
@@ -975,7 +998,8 @@ pub(crate) async fn run_interactive_session(
     }
 
     // Build tool registry and get tool definitions for API
-    let mut registry = create_default_registry(working_dir.clone());
+    let leann_index = init_leann_index(&working_dir);
+    let mut registry = create_default_registry(working_dir.clone(), leann_index);
     // Wire config-driven bash tool limits
     registry.register(Box::new(archon_tools::bash::BashTool {
         timeout_secs: config.tools.bash_timeout,

@@ -12,6 +12,7 @@ archon-context = { path = "../archon-context" }
 archon-session = { path = "../archon-session" }
 archon-consciousness = { path = "../archon-consciousness" }
 archon-memory = { path = "../archon-memory" }
+archon-leann = { path = "../archon-leann" }
 # TASK-AGS-OBS-901: `src/metrics.rs` now re-exports `ChannelMetricSink` from
 # archon-observability (trait was moved there in OBS-901 so the trait + type
 # + impl all live in one crate — orphan-rule constraint). No cycle:

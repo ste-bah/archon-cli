@@ -135,7 +135,10 @@ impl Default for ToolRegistry {
 ///
 /// `working_dir` is passed to tools that operate on the current project
 /// (cron scheduler store, LSP manager, team config, etc.).
-pub fn create_default_registry(working_dir: PathBuf) -> ToolRegistry {
+pub fn create_default_registry(
+    working_dir: PathBuf,
+    leann_index: Option<std::sync::Arc<archon_leann::CodeIndex>>,
+) -> ToolRegistry {
     let mut registry = ToolRegistry::new();
 
     registry.register(Box::new(archon_tools::file_read::ReadTool));
@@ -220,6 +223,17 @@ pub fn create_default_registry(working_dir: PathBuf) -> ToolRegistry {
     // Code Cartographer — symbol indexing and codebase navigation.
     registry.register(Box::new(archon_tools::cartographer::CartographerTool));
 
+    // LEANN semantic code search — only registered when the index is
+    // available (graceful no-op when LEANN initialisation fails).
+    if let Some(ref idx) = leann_index {
+        registry.register(Box::new(archon_tools::leann_search::LeannSearchTool::new(
+            std::sync::Arc::clone(idx),
+        )));
+        registry.register(Box::new(
+            archon_tools::leann_find_similar::LeannFindSimilarTool::new(std::sync::Arc::clone(idx)),
+        ));
+    }
+
     // Register ToolSearch with a snapshot of all tool definitions captured at this point.
     // Must be registered LAST so the snapshot includes all other tools.
     let tool_defs_snapshot = registry.tool_definitions();
@@ -238,7 +252,7 @@ mod tests {
     #[test]
     fn default_registry_has_all_tools() {
         let working_dir = std::env::temp_dir();
-        let registry = create_default_registry(working_dir);
+        let registry = create_default_registry(working_dir, None);
         let names = registry.tool_names();
 
         // Core tools
@@ -315,7 +329,7 @@ mod tests {
 
     #[test]
     fn tool_definitions_valid_json() {
-        let registry = create_default_registry(std::env::temp_dir());
+        let registry = create_default_registry(std::env::temp_dir(), None);
         let defs = registry.tool_definitions();
 
         for def in &defs {
@@ -330,7 +344,7 @@ mod tests {
 
     #[tokio::test]
     async fn dispatch_unknown_tool_returns_error() {
-        let registry = create_default_registry(std::env::temp_dir());
+        let registry = create_default_registry(std::env::temp_dir(), None);
         let ctx = ToolContext {
             working_dir: std::env::temp_dir(),
             session_id: "test".into(),
@@ -349,7 +363,7 @@ mod tests {
 
     #[test]
     fn clone_filtered_with_subset() {
-        let registry = create_default_registry(std::env::temp_dir());
+        let registry = create_default_registry(std::env::temp_dir(), None);
         let filtered = registry.clone_filtered(&["Read", "Grep"]);
         let names = filtered.tool_names();
         assert_eq!(names.len(), 2);
@@ -359,14 +373,14 @@ mod tests {
 
     #[test]
     fn clone_filtered_empty_list_returns_empty() {
-        let registry = create_default_registry(std::env::temp_dir());
+        let registry = create_default_registry(std::env::temp_dir(), None);
         let filtered = registry.clone_filtered(&[]);
         assert!(filtered.tool_names().is_empty());
     }
 
     #[test]
     fn clone_filtered_nonexistent_tool_ignored() {
-        let registry = create_default_registry(std::env::temp_dir());
+        let registry = create_default_registry(std::env::temp_dir(), None);
         let filtered = registry.clone_filtered(&["Read", "FakeTool"]);
         let names = filtered.tool_names();
         assert_eq!(names.len(), 1);
@@ -375,7 +389,7 @@ mod tests {
 
     #[test]
     fn clone_filtered_does_not_mutate_original() {
-        let registry = create_default_registry(std::env::temp_dir());
+        let registry = create_default_registry(std::env::temp_dir(), None);
         let original_count = registry.tool_names().len();
         let _filtered = registry.clone_filtered(&["Read"]);
         assert_eq!(registry.tool_names().len(), original_count);
@@ -383,7 +397,7 @@ mod tests {
 
     #[test]
     fn clone_filtered_tool_definitions_match() {
-        let registry = create_default_registry(std::env::temp_dir());
+        let registry = create_default_registry(std::env::temp_dir(), None);
         let filtered = registry.clone_filtered(&["Read", "Glob"]);
         let defs = filtered.tool_definitions();
         assert_eq!(defs.len(), 2);
@@ -394,7 +408,7 @@ mod tests {
 
     #[tokio::test]
     async fn dispatch_blocked_in_plan_mode() {
-        let registry = create_default_registry(std::env::temp_dir());
+        let registry = create_default_registry(std::env::temp_dir(), None);
         let ctx = ToolContext {
             working_dir: std::env::temp_dir(),
             session_id: "test".into(),

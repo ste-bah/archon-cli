@@ -6,6 +6,7 @@ edition.workspace = true
 [dependencies]
 archon-permissions = { path = "../archon-permissions" }
 archon-memory = { path = "../archon-memory" }
+archon-leann = { path = "../archon-leann" }
 async-trait.workspace = true
 serde.workspace = true
 serde_json.workspace = true

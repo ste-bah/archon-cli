@@ -39,6 +39,7 @@ tempfile = "3.12"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 regex = "1"
 once_cell = "1"
+image = "0.25"
 # TASK-TUI-803: Prometheus /metrics exporter served on loopback via --metrics-port.
 # axum 0.8 + tower 0.5 are already pinned at the workspace root; we opt in here
 # so the serve_metrics() helper can live alongside ChannelMetrics instead of

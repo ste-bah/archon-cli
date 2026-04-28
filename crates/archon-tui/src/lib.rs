@@ -14,6 +14,7 @@ pub mod permissions;
 // TASK-TUI-628: sandbox module — logical Bubble-mode permission check.
 pub mod sandbox;
 pub mod splash;
+pub mod splash_compat;
 pub mod status;
 pub mod theme;
 pub mod ultrathink;

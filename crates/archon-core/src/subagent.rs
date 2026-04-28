@@ -1054,6 +1054,7 @@ pub mod runner {
         fn make_runner(provider: Arc<dyn LlmProvider>, max_turns: u32) -> SubagentRunner {
             let registry = Arc::new(crate::dispatch::create_default_registry(
                 std::env::current_dir().unwrap_or_default(),
+                None,
             ));
             let tool_defs = registry.tool_definitions();
             let ctx = ToolContext {
@@ -1162,6 +1163,7 @@ pub mod runner {
             let provider = Arc::new(MockProvider::new(vec![text_response("No tools needed")]));
             let registry = Arc::new(crate::dispatch::create_default_registry(
                 std::env::current_dir().unwrap_or_default(),
+                None,
             ));
             let ctx = ToolContext {
                 working_dir: std::env::current_dir().unwrap_or_default(),

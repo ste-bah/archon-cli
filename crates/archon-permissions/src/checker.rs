@@ -16,14 +16,44 @@ const PLAN_MODE_WHITELIST: &[&str] = &[
 const ACCEPT_EDITS_WHITELIST: &[&str] = &["Read", "Write", "Edit", "Glob", "Grep"];
 
 /// Tools that are safe (read-only or coordination) and auto-allowed in Default mode.
+///
+/// Selection criteria: read-only, local-only (no shell/network/filesystem
+/// mutation), no destructive external side effects.
 const DEFAULT_SAFE_TOOLS: &[&str] = &[
+    // ----- Read-only file/code inspection -----
     "Read",
     "Glob",
     "Grep",
+    // ----- Coordination -----
     "ToolSearch",
     "AskUserQuestion",
     "EnterPlanMode",
     "Agent",
+    // ----- Memory (local CozoDB graph; no network/shell) -----
+    "memory_store",
+    "memory_recall",
+    // ----- Sleep / planning / in-session state -----
+    "Sleep",
+    "TodoWrite",
+    "ExitPlanMode",
+    // ----- Read-only code/symbol intelligence -----
+    "lsp",
+    "CartographerScan",
+    // ----- Read-only catalog/discovery -----
+    "CronList",
+    "ListMcpResources",
+    // ----- LEANN semantic code search (read-only) -----
+    "LeannSearch",
+    "LeannFindSimilar",
+    // ----- Task lifecycle (internal coordination; no external effects) -----
+    "TaskGet",
+    "TaskList",
+    "TaskOutput",
+    "TaskCreate",
+    "TaskUpdate",
+    "TaskStop",
+    // ----- User-visible local notifications -----
+    "PushNotification",
 ];
 
 /// Permission checker that gates tool execution based on the current mode

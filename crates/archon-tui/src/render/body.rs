@@ -23,13 +23,18 @@ pub fn draw_output_area(frame: &mut Frame, app: &App, area: Rect) {
     let t = &app.theme;
 
     // Output area — splash or buffer lines + thinking indicator
-    let output_lines: Vec<Line<'_>> = if app.show_splash {
-        splash::render_splash(
+    if app.show_splash {
+        splash::draw_splash(
+            frame.buffer_mut(),
+            area,
             &app.splash_model,
             &app.splash_working_dir,
             &app.splash_activity,
-        )
-    } else {
+        );
+        return;
+    }
+
+    let output_lines: Vec<Line<'_>> = {
         let mut lines: Vec<Line<'_>> = app
             .output
             .all_lines()
@@ -54,11 +59,7 @@ pub fn draw_output_area(frame: &mut Frame, app: &App, area: Rect) {
     let raw_refs: Vec<&str> = raw_strings.iter().map(|s| s.as_str()).collect();
     let total_wrapped = OutputBuffer::count_wrapped_rows(&raw_refs, output_width);
 
-    let scroll_y = if app.show_splash {
-        0
-    } else {
-        app.output.effective_scroll(total_wrapped, visible_height)
-    };
+    let scroll_y = app.output.effective_scroll(total_wrapped, visible_height);
 
     // Border color signals when the user is scrolled away from bottom
     let border_style = if app.output.scroll_locked {
@@ -74,7 +75,7 @@ pub fn draw_output_area(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(output_widget, area);
 
     // Scrollbar — only shown when content exceeds visible area
-    if total_wrapped > visible_height && !app.show_splash {
+    if total_wrapped > visible_height {
         let mut scrollbar_state =
             ScrollbarState::new(total_wrapped.saturating_sub(visible_height) as usize)
                 .position(scroll_y as usize);
