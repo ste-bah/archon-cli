@@ -16,6 +16,12 @@ use crate::theme::{Theme, intj_theme};
 
 pub use crate::splash_compat::render_splash;
 
+/// Test-only access to `render_halfblock_image` for integration tests.
+#[doc(hidden)]
+pub fn test_render_halfblock_image(buf: &mut Buffer, area: Rect, img: &image::DynamicImage) {
+    render_halfblock_image(buf, area, img);
+}
+
 // ---------------------------------------------------------------------------
 // Embedded avatar
 // ---------------------------------------------------------------------------
@@ -51,28 +57,62 @@ fn render_halfblock_image(buf: &mut Buffer, area: Rect, img: &image::DynamicImag
         return;
     }
 
-    let pixel_w = cell_w;
-    let pixel_h = cell_h * 2; // 2 rows of pixels per terminal cell
+    // Terminal area in pixels: each cell = 1px wide × 2px tall (halfblock).
+    let max_px_w = cell_w;
+    let max_px_h = cell_h * 2;
 
-    let resized = img.resize_exact(pixel_w, pixel_h, image::imageops::FilterType::Nearest);
+    // Preserve source aspect ratio.
+    let (src_w, src_h) = (img.width(), img.height());
+    let scale_w = max_px_w as f64 / src_w as f64;
+    let scale_h = max_px_h as f64 / src_h as f64;
+    let scale = scale_w.min(scale_h);
+
+    let render_px_w = ((src_w as f64 * scale).round() as u32).max(1);
+    let render_px_h = ((src_h as f64 * scale).round() as u32).max(1);
+
+    // Center the rendered image within the area (letterbox / pillarbox).
+    let pad_px_x = (max_px_w - render_px_w) / 2;
+    let pad_px_y = (max_px_h - render_px_h) / 2;
+
+    let resized = img.resize_exact(
+        render_px_w,
+        render_px_h,
+        image::imageops::FilterType::Lanczos3,
+    );
     let rgba = resized.to_rgba8();
 
+    // Render row by row — cells outside the image region fill with black.
     for cell_row in 0..cell_h {
-        let top_y = cell_row * 2;
-        let bottom_y = top_y + 1;
-        let y = area.y + cell_row as u16;
-
+        let row_y = area.y + cell_row as u16;
         let mut spans = Vec::with_capacity(cell_w as usize);
+
+        let img_top_y = (cell_row * 2) as i64 - pad_px_y as i64;
+        let img_bot_y = img_top_y + 1;
+
         for col in 0..cell_w {
-            let top = rgba.get_pixel(col, top_y);
-            let bottom = rgba.get_pixel(col, bottom_y);
-            let fg = Color::Rgb(top[0], top[1], top[2]);
-            let bg = Color::Rgb(bottom[0], bottom[1], bottom[2]);
+            let img_x = col as i64 - pad_px_x as i64;
+
+            let in_x = img_x >= 0 && (img_x as u32) < render_px_w;
+            let top_in = in_x && img_top_y >= 0 && (img_top_y as u32) < render_px_h;
+            let bot_in = in_x && img_bot_y >= 0 && (img_bot_y as u32) < render_px_h;
+
+            let fg = if top_in {
+                let p = rgba.get_pixel(img_x as u32, img_top_y as u32);
+                Color::Rgb(p[0], p[1], p[2])
+            } else {
+                Color::Black
+            };
+            let bg = if bot_in {
+                let p = rgba.get_pixel(img_x as u32, img_bot_y as u32);
+                Color::Rgb(p[0], p[1], p[2])
+            } else {
+                Color::Black
+            };
             spans.push(Span::styled("▀", Style::default().fg(fg).bg(bg)));
         }
 
         let line = Line::from(spans);
-        let row_area = Rect::new(area.x, y, area.width, 1);
+        let row_area = Rect::new(area.x, row_y, area.width, 1);
         Paragraph::new(line).render(row_area, buf);
     }
 }
@@ -195,7 +235,7 @@ pub fn draw_splash(
             Style::default().fg(t.muted),
         )));
     }
-    while activity_lines.len() < 5 {
+    while activity_lines.len() < 12 {
         activity_lines.push(Line::from(""));
     }
 
@@ -263,7 +303,7 @@ pub fn draw_splash(
 
     // Image + activity section (rows 4-8)
     let image_area_top = area.y + 4;
-    let image_area_height = 5u16;
+    let image_area_height = 12u16;
     let left_col_x = area.x + 1;
 
     if use_ascii_fallback {

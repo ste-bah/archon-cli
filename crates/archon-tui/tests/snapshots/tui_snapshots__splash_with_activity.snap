@@ -3,7 +3,7 @@ source: crates/archon-tui/tests/tui_snapshots.rs
 expression: lines
 ---
 [
-    Line::from(Span::from("╭─── Archon v0.1.21 ────────────────────────────────────────────╮").fg(Color::Rgb(80, 120, 220))),
+    Line::from(Span::from("╭─── Archon v0.1.22 ────────────────────────────────────────────╮").fg(Color::Rgb(80, 120, 220))),
     Line::from_iter([
         Span::from("│").fg(Color::Rgb(80, 120, 220)),
         Span::from("                                                              "),
