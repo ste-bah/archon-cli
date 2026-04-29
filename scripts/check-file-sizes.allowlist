@@ -72,7 +72,12 @@ crates/archon-pipeline/src/kb/query.rs
 crates/archon-pipeline/src/learning/causal.rs
 crates/archon-pipeline/src/learning/desc.rs
 crates/archon-pipeline/src/learning/integration.rs
-crates/archon-pipeline/src/learning/reasoning.rs
+crates/archon-pipeline/src/learning/gnn/auto_trainer.rs
+crates/archon-pipeline/src/learning/gnn/backprop.rs
+crates/archon-pipeline/src/learning/gnn/loss.rs
+crates/archon-pipeline/src/learning/gnn/mod.rs
+crates/archon-pipeline/src/learning/gnn/trainer.rs
+crates/archon-pipeline/src/learning/gnn/weights.rs
 crates/archon-pipeline/src/learning/sona.rs
 crates/archon-pipeline/src/manifest.rs
 crates/archon-pipeline/src/research/agents.rs

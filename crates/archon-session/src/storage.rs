@@ -96,9 +96,11 @@ impl SessionStore {
         let db = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             DbInstance::new("sqlite", &path_str, "")
         }))
-        .map_err(|_panic_err| SessionError::DbError(
-            "cozo panicked during sqlite init — concurrent access or filesystem error".into(),
-        ))?
+        .map_err(|_panic_err| {
+            SessionError::DbError(
+                "cozo panicked during sqlite init — concurrent access or filesystem error".into(),
+            )
+        })?
         .map_err(db_err)?;
 
         #[cfg(unix)]

@@ -269,8 +269,10 @@ mod tests {
         unsafe {
             std::env::remove_var("GROQ_API_KEY");
         }
-        let mut cfg = LlmConfig::default();
-        cfg.provider = "groq".to_string();
+        let cfg = LlmConfig {
+            provider: "groq".to_string(),
+            ..Default::default()
+        };
         let provider = build_llm_provider(&cfg, make_test_client());
         assert_eq!(
             provider.name(),
@@ -289,8 +291,10 @@ mod tests {
     #[test]
     fn test_unknown_flat_provider_falls_back_to_anthropic() {
         let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let mut cfg = LlmConfig::default();
-        cfg.provider = "definitely-not-a-real-provider-zzz".to_string();
+        let cfg = LlmConfig {
+            provider: "definitely-not-a-real-provider-zzz".to_string(),
+            ..Default::default()
+        };
         let provider = build_llm_provider(&cfg, make_test_client());
         assert_eq!(provider.name(), "anthropic");
     }

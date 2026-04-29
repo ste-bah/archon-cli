@@ -4,13 +4,13 @@ use std::collections::HashMap;
 
 use tracing::warn;
 
+use super::super::confidence;
+use super::super::patterns::TaskType;
 use super::cosine_sim_f64;
 use super::{
     InferenceResult, PatternMatchResult, ProvenanceInfo, ReasoningMode, ReasoningRequest,
     ReasoningResponse, now_epoch,
 };
-use super::super::confidence;
-use super::super::patterns::TaskType;
 
 impl super::ReasoningBank {
     pub(super) fn reason_pattern_match(
