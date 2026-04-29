@@ -737,7 +737,7 @@ mod tests {
     #[test]
     fn test_serialize_matrix_roundtrip() {
         let original = vec![
-            vec![1.0_f32, -2.5, 3.14],
+            vec![1.0_f32, -2.5, std::f32::consts::PI],
             vec![0.0, f32::INFINITY, f32::NEG_INFINITY],
         ];
         let bytes = serialize_matrix(&original);

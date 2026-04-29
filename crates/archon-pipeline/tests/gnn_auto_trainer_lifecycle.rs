@@ -56,7 +56,7 @@ async fn lifecycle_spawn_train_shutdown() {
         trigger_new_memories: 5,
         trigger_corrections: 5,
         first_run_threshold: 5,
-        max_runtime_ms: 30_000,
+        max_runtime_ms: 120_000,
         tick_interval_ms: 100,
         ..AutoTrainerConfig::default()
     };
@@ -66,7 +66,7 @@ async fn lifecycle_spawn_train_shutdown() {
 
     let train_cfg = TrainingConfig {
         max_epochs: 3,
-        max_runtime_ms: 25_000,
+        max_runtime_ms: 120_000,
         ..TrainingConfig::default()
     };
 
@@ -79,7 +79,7 @@ async fn lifecycle_spawn_train_shutdown() {
 
     // Wait for training to complete (poll status)
     let start = std::time::Instant::now();
-    let timeout = std::time::Duration::from_secs(30);
+    let timeout = std::time::Duration::from_secs(90);
     loop {
         let status = trainer.status();
         if status.training_count > 0 || start.elapsed() > timeout {

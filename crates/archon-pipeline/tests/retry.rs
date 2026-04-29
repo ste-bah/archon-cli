@@ -20,7 +20,7 @@ use std::time::Duration;
 use anyhow::Result;
 
 use archon_pipeline::retry::{
-    RetryConfig, RetryableError, calculate_delay, classify_error, with_retry,
+    RetryConfig, RetryableError, calculate_delay, with_retry,
 };
 
 // ---------------------------------------------------------------------------
