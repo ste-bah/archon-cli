@@ -2631,9 +2631,22 @@ archon (binary)
 
 ---
 
-## Release Notes (v0.1.6 → v0.1.25)
+## Release Notes (v0.1.6 → v0.1.27)
 
 Last 2 weeks of stabilisation work. Each version was shipped to `main` as a single PR.
+
+### v0.1.27 — GNN hygiene: early stopping + foreground test hardening (PR #18)
+
+Closes two findings from the v0.1.24-v0.1.26 GNN port audits. No new functionality.
+
+- **Finding A — foreground-blocking test was probabilistic-pass.** `gnn_auto_trainer_does_not_block_foreground` asserted latency ratio < 2x but didn't verify training actually overlapped with the measurement window. If `training_in_progress` never flipped true, the test passed trivially. Fixed by tracking `training_observed` across wait loop + during-timings loop and asserting `training_observed || training_count > 0` before the latency check.
+- **Finding B — `early_stopping_patience` config field was unused.** `TrainingConfig` defaulted to patience=3 but the epoch loop ignored it, causing validation loss to regress past best (0.634 at epoch 4 → 0.715 at epoch 11). Fixed by: tracking `best_epoch_weights` (pre-epoch snapshot), breaking when `epochs_since_improvement >= patience`, restoring best-epoch weights on early stop. Falls back to train_loss when validation disabled. `TrainingOutcome` extended with `best_epoch`, `best_val_loss`, `best_train_loss`.
+- 3 new tests in `gnn_early_stopping.rs`: plateau detection, weight restoration verification, patience=0 disabled.
+- All existing acceptance gates pass (training reduces loss, foreground non-blocking, rollback).
+
+### v0.1.26 — GNN auto-retraining (PR #17)
+
+Background tokio task wrapping GnnTrainer: trigger system (new memories/corrections/elapsed), throttle, spawn/status/shutdown API, `/learning-status` integration. CozoDB-backed WeightStore persistence.
 
 ### v0.1.25 — GNN training infrastructure (PR #13)
 

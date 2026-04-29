@@ -1,7 +1,10 @@
 //! GNN auto-trainer acceptance gate: foreground latency during training.
 //!
 //! Verifies `during_p95 < baseline_p95 * 2.0` while the auto-trainer is
-//! running a training job in `spawn_blocking`.
+//! running a training job in `spawn_blocking`. Also verifies that training
+//! actually overlapped with the foreground measurement window — the test
+//! fails fast with a diagnostic if training never started, rather than
+//! trivially passing against an idle trainer.
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -37,17 +40,6 @@ fn p95_us(timings: &[u128]) -> u128 {
     sorted[idx.saturating_sub(1).min(sorted.len() - 1)]
 }
 
-fn run_foreground_work(enhancer: &GnnEnhancer, n: usize) -> Vec<u128> {
-    let mut timings = Vec::with_capacity(n);
-    let input: Vec<f32> = (0..1536).map(|i| (i as f32).sin()).collect();
-    for _ in 0..n {
-        let t0 = Instant::now();
-        let _ = enhancer.enhance(&input, None, None, false);
-        timings.push(t0.elapsed().as_micros());
-    }
-    timings
-}
-
 #[tokio::test]
 async fn foreground_latency_during_training_stays_within_bounds() {
     let db = Arc::new(cozo::DbInstance::new("mem", "", "").unwrap());
@@ -66,7 +58,13 @@ async fn foreground_latency_during_training_stays_within_bounds() {
     ));
 
     // Baseline: 20 foreground calls without training
-    let baseline_timings = run_foreground_work(&enhancer, 20);
+    let mut baseline_timings = Vec::with_capacity(20);
+    let input: Vec<f32> = (0..1536).map(|i| (i as f32).sin()).collect();
+    for _ in 0..20 {
+        let t0 = Instant::now();
+        let _ = enhancer.enhance(&input, None, None, false);
+        baseline_timings.push(t0.elapsed().as_micros());
+    }
     let baseline_p95 = p95_us(&baseline_timings);
 
     let samples = make_samples(60, 1536);
@@ -100,22 +98,37 @@ async fn foreground_latency_during_training_stays_within_bounds() {
         sample_provider,
     );
 
-    // Wait until training starts
+    // Wait until training starts, tracking whether we observed it
+    let mut training_observed = false;
     let start = Instant::now();
     loop {
-        if trainer.status().training_in_progress || start.elapsed().as_secs() > 10 {
+        if trainer.status().training_in_progress {
+            training_observed = true;
             break;
         }
-        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        if start.elapsed().as_secs() > 10 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
 
-    // Run foreground work WHILE training is in progress
-    let during_timings = run_foreground_work(&enhancer, 20);
+    // Run foreground work WHILE training is in progress, also polling
+    // training_in_progress between iterations
+    let mut during_timings = Vec::with_capacity(20);
+    for _ in 0..20 {
+        let t0 = Instant::now();
+        let _ = enhancer.enhance(&input, None, None, false);
+        during_timings.push(t0.elapsed().as_micros());
+        if trainer.status().training_in_progress {
+            training_observed = true;
+        }
+    }
     let during_p95 = p95_us(&during_timings);
 
     trainer.shutdown();
 
-    let status = trainer.status();
+    let final_status = trainer.status();
+    let training_overlap = training_observed || final_status.training_count > 0;
 
     eprintln!("baseline_p95 = {baseline_p95} us");
     eprintln!("during_p95  = {during_p95} us");
@@ -123,7 +136,16 @@ async fn foreground_latency_during_training_stays_within_bounds() {
         "ratio = {:.2}",
         during_p95 as f64 / baseline_p95.max(1) as f64
     );
-    eprintln!("training_count = {}", status.training_count);
+    eprintln!("training_count = {}", final_status.training_count);
+    eprintln!("training_observed = {training_observed}");
+
+    assert!(
+        training_overlap,
+        "Test invalid: training never overlapped with foreground measurement \
+         (training_in_progress never true AND training_count=0). \
+         Either trigger logic is broken or measurement window is wrong. \
+         baseline_p95={baseline_p95}us, during_p95={during_p95}us"
+    );
 
     let ratio = during_p95 as f64 / baseline_p95.max(1) as f64;
     assert!(

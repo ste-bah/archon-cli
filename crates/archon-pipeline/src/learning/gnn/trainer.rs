@@ -91,6 +91,12 @@ pub struct TrainingOutcome {
     pub stopped_early: bool,
     pub timed_out: bool,
     pub cancelled: bool,
+    /// Epoch that produced best_val_loss (0-indexed).
+    pub best_epoch: usize,
+    /// Best validation loss observed across all epochs.
+    pub best_val_loss: f32,
+    /// Training loss at best_epoch (for weight-restoration verification).
+    pub best_train_loss: f32,
     /// Per-epoch metrics collected during training.
     pub epoch_metrics: Vec<EpochMetrics>,
 }
@@ -185,6 +191,9 @@ impl GnnTrainer {
                 stopped_early: false,
                 timed_out: false,
                 cancelled: false,
+                best_epoch: 0,
+                best_val_loss: 0.0,
+                best_train_loss: 0.0,
                 epoch_metrics,
             };
         }
@@ -215,7 +224,7 @@ impl GnnTrainer {
         enhancer.clear_cache();
         let all_embeddings = Self::forward_all(enhancer, samples);
         let initial_loss = self.compute_triplet_loss(&train_triplets, &all_embeddings);
-        let mut best_loss = initial_loss;
+        let mut best_loss = f32::MAX;
 
         // Record pre-training weight version
         let weight_version_before = self
@@ -226,6 +235,9 @@ impl GnnTrainer {
 
         let mut no_improvement_epochs = 0usize;
         let mut epochs_completed = 0usize;
+        let mut best_epoch_weights: Option<(LayerWeights, LayerWeights, LayerWeights)> = None;
+        let mut best_epoch = 0usize;
+        let mut best_train_loss = 0.0_f32;
 
         for epoch in 0..self.config.max_epochs {
             // Timeout check
@@ -239,6 +251,11 @@ impl GnnTrainer {
                 cancelled = true;
                 break;
             }
+
+            // Snapshot weights BEFORE this epoch — if this epoch improves the
+            // loss, we want the pre-epoch weights so best_train_loss (computed
+            // from pre-epoch embeddings) matches the restored state.
+            let pre_epoch_weights = enhancer.get_weights();
 
             // Refresh embeddings after previous epoch's weight updates — bust cache
             enhancer.clear_cache();
@@ -267,24 +284,45 @@ impl GnnTrainer {
             epochs_completed += 1;
 
             // Early stopping check
+            let patience = self.config.early_stopping_patience;
+            let mut improved = false;
             if let Some(val_loss) = epoch_result.val_loss {
                 if val_loss < best_loss - self.config.min_improvement {
                     best_loss = val_loss;
                     no_improvement_epochs = 0;
-                } else {
+                    improved = true;
+                } else if patience > 0 {
                     no_improvement_epochs += 1;
-                    if no_improvement_epochs >= self.config.early_stopping_patience {
+                    if no_improvement_epochs >= patience {
                         break;
                     }
                 }
             } else if epoch_result.train_loss < best_loss - self.config.min_improvement {
                 best_loss = epoch_result.train_loss;
                 no_improvement_epochs = 0;
-            } else {
+                improved = true;
+            } else if patience > 0 {
                 no_improvement_epochs += 1;
-                if no_improvement_epochs >= self.config.early_stopping_patience {
+                if no_improvement_epochs >= patience {
                     break;
                 }
+            }
+
+            if improved {
+                best_epoch_weights = Some(pre_epoch_weights);
+                best_epoch = epoch;
+                best_train_loss = epoch_result.train_loss;
+            }
+        }
+
+        let stopped_early = self.config.early_stopping_patience > 0
+            && no_improvement_epochs >= self.config.early_stopping_patience;
+
+        // Restore best-epoch weights when early stopping fired
+        if stopped_early {
+            if let Some((l1, l2, l3)) = best_epoch_weights.take() {
+                enhancer.set_weights(l1, l2, l3);
+                enhancer.clear_cache();
             }
         }
 
@@ -341,9 +379,12 @@ impl GnnTrainer {
             } else {
                 None
             },
-            stopped_early: no_improvement_epochs >= self.config.early_stopping_patience,
+            stopped_early,
             timed_out,
             cancelled: cancelled || rolled_back,
+            best_epoch,
+            best_val_loss: best_loss,
+            best_train_loss,
             epoch_metrics,
         }
     }
@@ -761,6 +802,9 @@ mod tests {
             stopped_early: false,
             timed_out: false,
             cancelled: false,
+            best_epoch: 4,
+            best_val_loss: 0.25,
+            best_train_loss: 0.26,
             epoch_metrics: vec![],
         };
         assert!(outcome.final_loss < outcome.initial_loss);
