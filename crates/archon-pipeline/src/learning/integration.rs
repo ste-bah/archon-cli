@@ -131,6 +131,7 @@ impl LearningIntegration {
                 task_type: None,
                 max_results: Some(3),
                 confidence_threshold: Some(self.config.quality_threshold),
+                context: None,
             };
             let response: ReasoningResponse = rb.reason(&request);
             if response.overall_confidence > 0.0 {
@@ -226,6 +227,7 @@ impl LearningIntegration {
                 task_type: None,
                 max_results: Some(3),
                 confidence_threshold: Some(self.config.quality_threshold),
+                context: None,
             };
             let response = rb.reason(&request);
             if response.overall_confidence > 0.0 {

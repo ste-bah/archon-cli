@@ -1,4 +1,4 @@
-//! Tests for ReasoningBank — 4 modes, ModeSelector, TrajectoryTracker.
+//! Tests for ReasoningBank — 14 modes, ModeSelector, TrajectoryTracker.
 //! Covers REQ-LEARN-005.
 
 use archon_pipeline::learning::patterns::{CreatePatternParams, PatternStore, TaskType};
@@ -50,6 +50,7 @@ fn test_pattern_match_mode_returns_results() {
         task_type: Some(TaskType::Coding),
         max_results: Some(10),
         confidence_threshold: Some(0.0),
+        context: None,
     };
 
     let resp = bank.reason(&req);
@@ -62,7 +63,7 @@ fn test_pattern_match_mode_returns_results() {
 }
 
 // ---------------------------------------------------------------------------
-// Test 2: CausalInference mode returns empty results with warning (stubbed)
+// Test 2: Causal mode returns empty results with warning (stubbed)
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -72,21 +73,19 @@ fn test_causal_inference_mode_is_stubbed() {
     let req = ReasoningRequest {
         query: "why did the build fail".to_string(),
         query_embedding: None,
-        mode: Some(ReasoningMode::CausalInference),
+        mode: Some(ReasoningMode::Causal),
         task_type: None,
         max_results: None,
         confidence_threshold: None,
+        context: None,
     };
 
     let resp = bank.reason(&req);
-    assert_eq!(resp.mode_used, ReasoningMode::CausalInference);
-    assert!(
-        resp.patterns.is_empty(),
-        "CausalInference stub returns no patterns"
-    );
+    assert_eq!(resp.mode_used, ReasoningMode::Causal);
+    assert!(resp.patterns.is_empty(), "Causal stub returns no patterns");
     assert!(
         resp.inferences.is_empty(),
-        "CausalInference stub returns no inferences"
+        "Causal stub returns no inferences"
     );
     assert_eq!(resp.overall_confidence, 0.0);
 }
@@ -107,6 +106,7 @@ fn test_contextual_mode_returns_similarity_results() {
         task_type: None,
         max_results: Some(10),
         confidence_threshold: Some(0.0),
+        context: None,
     };
 
     let resp = bank.reason(&req);
@@ -134,6 +134,7 @@ fn test_hybrid_mode_combines_results() {
         task_type: Some(TaskType::Coding),
         max_results: Some(10),
         confidence_threshold: Some(0.0),
+        context: None,
     };
 
     let resp = bank.reason(&req);
@@ -143,44 +144,50 @@ fn test_hybrid_mode_combines_results() {
 }
 
 #[test]
-fn test_hybrid_weights_sum_to_one() {
+fn test_config_weights_are_nonzero() {
     let config = ReasoningBankConfig::default();
-    let total = config.pattern_weight + config.causal_weight + config.contextual_weight;
-    // Allow floating-point tolerance
-    assert!(
-        (total - 1.0).abs() < 1e-9,
-        "weights must sum to 1.0, got {}",
-        total
-    );
+    assert!(config.deductive_weight > 0.0);
+    assert!(config.inductive_weight > 0.0);
+    assert!(config.abductive_weight > 0.0);
+    assert!(config.analogical_weight > 0.0);
+    assert!(config.adversarial_weight > 0.0);
+    assert!(config.counterfactual_weight > 0.0);
+    assert!(config.temporal_weight > 0.0);
+    assert!(config.constraint_weight > 0.0);
+    assert!(config.decomposition_weight > 0.0);
+    assert!(config.first_principles_weight > 0.0);
+    assert!(config.causal_weight > 0.0);
+    assert!(config.contextual_weight > 0.0);
+    assert!(config.pattern_weight > 0.0);
 }
 
 // ---------------------------------------------------------------------------
-// Test 5: ModeSelector: "why" queries -> CausalInference
+// Test 5: ModeSelector: "cause" queries -> Causal
 // ---------------------------------------------------------------------------
 
 #[test]
-fn test_mode_selector_why_query() {
-    let mode = ModeSelector::select("why is the server crashing");
-    assert_eq!(mode, ReasoningMode::CausalInference);
+fn test_mode_selector_cause_query() {
+    let mode = ModeSelector::select("what caused the server to crash");
+    assert_eq!(mode, ReasoningMode::Causal);
 }
 
 // ---------------------------------------------------------------------------
-// Test 6: ModeSelector: "similar to" queries -> Contextual
+// Test 6: ModeSelector: "similar to" queries -> Analogical
 // ---------------------------------------------------------------------------
 
 #[test]
 fn test_mode_selector_similar_to_query() {
     let mode = ModeSelector::select("find code similar to this function");
-    assert_eq!(mode, ReasoningMode::Contextual);
+    assert_eq!(mode, ReasoningMode::Analogical);
 }
 
 // ---------------------------------------------------------------------------
-// Test 7: ModeSelector: "how to" queries -> PatternMatch
+// Test 7: ModeSelector: "template" queries -> PatternMatch
 // ---------------------------------------------------------------------------
 
 #[test]
-fn test_mode_selector_how_to_query() {
-    let mode = ModeSelector::select("how to implement a binary search");
+fn test_mode_selector_template_query() {
+    let mode = ModeSelector::select("template for a binary search");
     assert_eq!(mode, ReasoningMode::PatternMatch);
 }
 
@@ -210,6 +217,7 @@ fn test_trajectory_tracker_records_path() {
         task_type: Some(TaskType::Coding),
         max_results: None,
         confidence_threshold: Some(0.0),
+        context: None,
     };
 
     bank.reason(&req);
@@ -226,11 +234,21 @@ fn test_trajectory_tracker_records_path() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn test_default_config_matches_typescript_defaults() {
+fn test_default_config_matches_expected() {
     let config = ReasoningBankConfig::default();
-    assert!((config.pattern_weight - 0.3).abs() < 1e-9);
-    assert!((config.causal_weight - 0.3).abs() < 1e-9);
-    assert!((config.contextual_weight - 0.4).abs() < 1e-9);
+    assert!((config.deductive_weight - 1.0).abs() < 1e-9);
+    assert!((config.inductive_weight - 1.0).abs() < 1e-9);
+    assert!((config.abductive_weight - 1.0).abs() < 1e-9);
+    assert!((config.analogical_weight - 1.0).abs() < 1e-9);
+    assert!((config.adversarial_weight - 1.0).abs() < 1e-9);
+    assert!((config.counterfactual_weight - 1.0).abs() < 1e-9);
+    assert!((config.temporal_weight - 1.0).abs() < 1e-9);
+    assert!((config.constraint_weight - 1.0).abs() < 1e-9);
+    assert!((config.decomposition_weight - 1.0).abs() < 1e-9);
+    assert!((config.first_principles_weight - 1.0).abs() < 1e-9);
+    assert!((config.causal_weight - 1.0).abs() < 1e-9);
+    assert!((config.contextual_weight - 1.0).abs() < 1e-9);
+    assert!((config.pattern_weight - 0.5).abs() < 1e-9);
     assert_eq!(config.default_max_results, 10);
     assert!((config.default_confidence_threshold - 0.7).abs() < 1e-9);
     assert!((config.default_min_l_score - 0.5).abs() < 1e-9);
@@ -260,6 +278,7 @@ fn test_contextual_mode_works_without_gnn_enhancer() {
         task_type: None,
         max_results: Some(10),
         confidence_threshold: Some(0.0),
+        context: None,
     };
 
     // Must not panic
@@ -276,9 +295,19 @@ fn test_contextual_mode_works_without_gnn_enhancer() {
 #[test]
 fn test_dependency_injection_via_deps_struct() {
     let custom_config = ReasoningBankConfig {
-        pattern_weight: 0.5,
+        deductive_weight: 0.5,
+        inductive_weight: 0.5,
+        abductive_weight: 0.5,
+        analogical_weight: 0.5,
+        adversarial_weight: 0.5,
+        counterfactual_weight: 0.5,
+        temporal_weight: 0.5,
+        constraint_weight: 0.5,
+        decomposition_weight: 0.5,
+        first_principles_weight: 0.5,
         causal_weight: 0.2,
         contextual_weight: 0.3,
+        pattern_weight: 0.5,
         default_max_results: 5,
         default_confidence_threshold: 0.6,
         default_min_l_score: 0.4,
@@ -297,10 +326,11 @@ fn test_dependency_injection_via_deps_struct() {
     let req = ReasoningRequest {
         query: "anything".to_string(),
         query_embedding: None,
-        mode: Some(ReasoningMode::CausalInference),
+        mode: Some(ReasoningMode::Causal),
         task_type: None,
         max_results: None,
         confidence_threshold: None,
+        context: None,
     };
 
     bank.reason(&req);
@@ -324,6 +354,7 @@ fn test_trajectory_tracker_standalone() {
         overall_confidence: 0.42,
         provenance: vec![],
         trajectory_id: None,
+        context_metadata: std::collections::HashMap::new(),
     };
 
     let record = TrajectoryTracker::record("test query", ReasoningMode::Hybrid, &dummy_resp);
