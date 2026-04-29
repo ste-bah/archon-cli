@@ -10,6 +10,7 @@
 //!   layer2: 1024 → 1280 (expand)
 //!   layer3: 1280 → output_dim (restore to 1536)
 
+pub mod auto_trainer;
 pub mod backprop;
 pub mod cache;
 pub mod ewc;

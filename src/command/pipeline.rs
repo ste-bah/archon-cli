@@ -73,6 +73,7 @@ pub async fn handle_pipeline_command(
                     None,
                     None,
                     Default::default(),
+                    None,
                 );
                 let facade = archon_pipeline::coding::facade::CodingFacade::with_learning(learning);
                 let leann = init_leann(&cwd).await;
@@ -210,6 +211,7 @@ pub async fn handle_pipeline_command(
                                     None,
                                     None,
                                     Default::default(),
+                                    None,
                                 );
                             let facade =
                                 archon_pipeline::coding::facade::CodingFacade::with_learning(

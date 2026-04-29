@@ -27,37 +27,60 @@ impl CommandHandler for LearningStatusHandler {
 impl LearningStatusHandler {
     fn execute_status(&self, ctx: &mut CommandContext) -> anyhow::Result<()> {
         let status = match archon_core::config::load_config() {
-            Ok(config) => format!(
-                "## Learning Systems Status (v0.1.25)\n\
-                 \n\
-                 | Subsystem         | Status  |\n\
-                 |-------------------|---------|\n\
-                 | SONA              | {} |\n\
-                 | DESC              | {} |\n\
-                 | GNN               | {} |\n\
-                 | Causal Memory     | {} |\n\
-                 | Shadow Vector     | {} |\n\
-                 | Reasoning Bank    | {} |\n\
-                 | AutoCapture       | {} |\n\
-                 | AutoExtraction    | {} |\n\
-                 | Reflexion         | {} |\n\
-                 \n\
-                 AutoExtraction interval: every {} turns.\n\
-                 Reflexion max failures per agent: {}.",
-                on_off(config.learning.sona.enabled),
-                on_off(config.learning.desc.enabled),
-                on_off(config.learning.gnn.enabled),
-                on_off(config.learning.causal_memory.enabled),
-                on_off(config.learning.shadow_vector.enabled),
-                on_off(config.learning.reasoning_bank.enabled),
-                on_off(config.memory.auto_capture.enabled),
-                on_off(config.memory.auto_extraction.enabled),
-                on_off(config.learning.reflexion.enabled),
-                config.memory.auto_extraction.every_n_turns,
-                config.learning.reflexion.max_per_agent,
-            ),
+            Ok(config) => {
+                let at = &config.learning.gnn.auto_trainer;
+                let gnn_line = if config.learning.gnn.enabled {
+                    let at_status = if at.enabled {
+                        format!(
+                            "enabled (every {}s, throttle {}min, trigger: {} mem / {} corr / {}h elapsed)",
+                            at.tick_interval_ms / 1000,
+                            at.min_throttle_ms / 60_000,
+                            at.trigger_new_memories,
+                            at.trigger_corrections,
+                            at.trigger_elapsed_ms / 3_600_000,
+                        )
+                    } else {
+                        "enabled, auto-trainer OFF".to_string()
+                    };
+                    at_status
+                } else {
+                    "OFF".to_string()
+                };
+
+                format!(
+                    "## Learning Systems Status (v0.1.26)\n\
+                     \n\
+                     | Subsystem         | Status  |\n\
+                     |-------------------|---------|\n\
+                     | SONA              | {} |\n\
+                     | DESC              | {} |\n\
+                     | GNN               | {} |\n\
+                     | GNN Auto-Trainer  | {} |\n\
+                     | Causal Memory     | {} |\n\
+                     | Shadow Vector     | {} |\n\
+                     | Reasoning Bank    | {} |\n\
+                     | AutoCapture       | {} |\n\
+                     | AutoExtraction    | {} |\n\
+                     | Reflexion         | {} |\n\
+                     \n\
+                     AutoExtraction interval: every {} turns.\n\
+                     Reflexion max failures per agent: {}.",
+                    on_off(config.learning.sona.enabled),
+                    on_off(config.learning.desc.enabled),
+                    on_off(config.learning.gnn.enabled),
+                    gnn_line,
+                    on_off(config.learning.causal_memory.enabled),
+                    on_off(config.learning.shadow_vector.enabled),
+                    on_off(config.learning.reasoning_bank.enabled),
+                    on_off(config.memory.auto_capture.enabled),
+                    on_off(config.memory.auto_extraction.enabled),
+                    on_off(config.learning.reflexion.enabled),
+                    config.memory.auto_extraction.every_n_turns,
+                    config.learning.reflexion.max_per_agent,
+                )
+            }
             Err(e) => format!(
-                "## Learning Systems Status (v0.1.25)\n\nConfig unavailable: {e}\n\n\
+                "## Learning Systems Status (v0.1.26)\n\nConfig unavailable: {e}\n\n\
                  All learning subsystems are configured via `~/.archon/config.toml`."
             ),
         };

@@ -310,6 +310,10 @@ impl GnnTrainer {
                 true
             } else if final_loss < initial_loss {
                 if let Some(ref ws) = self.weight_store {
+                    let (l1, l2, l3) = enhancer.get_weights();
+                    ws.set_weights("layer1", l1.w, l1.bias);
+                    ws.set_weights("layer2", l2.w, l2.bias);
+                    ws.set_weights("layer3", l3.w, l3.bias);
                     match ws.save_all() {
                         Ok(new_version) => {
                             info!(

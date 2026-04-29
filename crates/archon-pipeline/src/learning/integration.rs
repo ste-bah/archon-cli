@@ -1,10 +1,12 @@
-//! Integration Wiring — orchestrates SONA, ReasoningBank, DESC, and Sherlock
-//! learning subsystems into a unified pipeline-facing API.
+//! Integration Wiring — orchestrates SONA, ReasoningBank, DESC, Sherlock,
+//! and GNN auto-training subsystems into a unified pipeline-facing API.
 //!
 //! Implements REQ-LEARN-F09.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
+use super::gnn::auto_trainer::AutoTrainer;
 use super::reasoning::{ReasoningBank, ReasoningRequest, ReasoningResponse};
 use super::sona::{FeedbackInput, SonaEngine, Trajectory};
 
@@ -65,6 +67,9 @@ pub struct LearningIntegration {
     active_trajectories: HashMap<String, String>,
     /// Pipeline session ID for trajectory grouping.
     session_id: String,
+    /// GNN auto-trainer hooks (PR 3 v0.1.26). Incremented on memory store and
+    /// correction events so the background task can trigger retraining.
+    auto_trainer: Option<Arc<AutoTrainer>>,
 }
 
 impl LearningIntegration {
@@ -73,6 +78,7 @@ impl LearningIntegration {
         sona: Option<SonaEngine>,
         reasoning_bank: Option<ReasoningBank>,
         config: LearningIntegrationConfig,
+        auto_trainer: Option<Arc<AutoTrainer>>,
     ) -> Self {
         Self {
             sona,
@@ -80,6 +86,7 @@ impl LearningIntegration {
             config,
             active_trajectories: HashMap::new(),
             session_id: uuid::Uuid::new_v4().to_string(),
+            auto_trainer,
         }
     }
 
@@ -182,6 +189,26 @@ impl LearningIntegration {
             };
             // Best-effort feedback — ignore errors
             let _ = sona.provide_feedback(&input);
+        }
+    }
+
+    /// Record a new memory for auto-trainer trigger tracking.
+    ///
+    /// Call this whenever a memory is stored in the pipeline (MemoryGraph, CozoDB, etc.).
+    /// The auto-trainer uses this to decide when to retrain.
+    pub fn on_memory_stored(&self) {
+        if let Some(ref at) = self.auto_trainer {
+            at.record_memory();
+        }
+    }
+
+    /// Record a new correction for auto-trainer trigger tracking.
+    ///
+    /// Call this whenever a correction feedback event is recorded.
+    /// Correction spikes are a strong signal that the GNN needs retraining.
+    pub fn on_correction_recorded(&self) {
+        if let Some(ref at) = self.auto_trainer {
+            at.record_correction();
         }
     }
 
@@ -470,7 +497,7 @@ mod tests {
     #[test]
     fn on_agent_start_returns_context_with_all_none() {
         let config = LearningIntegrationConfig::default();
-        let mut integration = LearningIntegration::new(None, None, config);
+        let mut integration = LearningIntegration::new(None, None, config, None);
 
         let ctx = integration.on_agent_start("test-agent", "phase1", "build widget", "pipe-001");
 
@@ -484,7 +511,7 @@ mod tests {
     #[test]
     fn on_agent_complete_works_with_sona_none() {
         let config = LearningIntegrationConfig::default();
-        let mut integration = LearningIntegration::new(None, None, config);
+        let mut integration = LearningIntegration::new(None, None, config, None);
 
         // Should not panic
         integration.on_agent_complete("test-agent", 0.95, "completed successfully");
