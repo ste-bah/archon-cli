@@ -67,6 +67,22 @@ hello.txt
 /docs/stage-7.5/*
 !/docs/stage-7.5/audits/
 !/docs/stage-7.5/audits/**
+# Exception: user-facing documentation tree (README split, v0.1.28+).
+!/docs/README.md
+!/docs/getting-started/
+!/docs/getting-started/**
+!/docs/reference/
+!/docs/reference/**
+!/docs/integrations/
+!/docs/integrations/**
+!/docs/cookbook/
+!/docs/cookbook/**
+!/docs/operations/
+!/docs/operations/**
+!/docs/development/
+!/docs/development/**
+!/docs/release-notes/
+!/docs/release-notes/**
 
 # Local-only artifacts (not for VCS)
 FORENSIC-TASK-DECOMPOSITION.yaml
