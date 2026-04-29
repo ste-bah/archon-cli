@@ -19,9 +19,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 
-use archon_pipeline::retry::{
-    RetryConfig, RetryableError, calculate_delay, with_retry,
-};
+use archon_pipeline::retry::{RetryConfig, RetryableError, calculate_delay, with_retry};
 
 // ---------------------------------------------------------------------------
 // Helpers
