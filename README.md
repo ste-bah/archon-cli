@@ -530,8 +530,8 @@ bash_max_output = 102400
 max_concurrency = 4
 
 [permissions]
-mode = "ask"                          # ask | auto | deny | plan | acceptEdits
-                                      #  | dontAsk | bypassPermissions
+mode = "Default"                      # Default | AcceptEdits | Plan | Auto
+                                      #  | DontAsk | Bubble | BypassPermissions
 allow_paths = []
 deny_paths = []
 sandbox = false                       # Read-only enforcement
@@ -1681,7 +1681,7 @@ Enforced on every tool call that touches the filesystem, shell, or network.
 
 ```toml
 [permissions]
-mode = "ask"
+mode = "Default"
 always_allow = ["Read:*", "Glob:*", "Grep:*"]
 always_deny = ["Bash:rm -rf*", "Write:/etc/*"]
 always_ask = ["Bash:git push*"]
