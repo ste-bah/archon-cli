@@ -590,6 +590,7 @@ pub struct GnnModelConfig {
     pub weight_seed: u64,
     #[serde(alias = "training")]
     pub training: GnnTrainingConfig,
+    pub auto_trainer: GnnAutoTrainerConfig,
 }
 
 impl Default for GnnModelConfig {
@@ -606,6 +607,7 @@ impl Default for GnnModelConfig {
             activation: "relu".to_string(),
             weight_seed: 0,
             training: GnnTrainingConfig::default(),
+            auto_trainer: GnnAutoTrainerConfig::default(),
         }
     }
 }
@@ -642,6 +644,45 @@ impl Default for GnnTrainingConfig {
             max_gradient_norm: 1.0,
             max_triplets_per_run: 256,
             max_runtime_ms: 300_000,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// GNN auto-trainer configuration — [learning.gnn.auto_trainer]
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GnnAutoTrainerConfig {
+    pub enabled: bool,
+    /// Minimum time between training runs in ms (throttle).
+    pub min_throttle_ms: u64,
+    /// Trigger training after N new memories since last train.
+    pub trigger_new_memories: u64,
+    /// Trigger training after this many ms since last train.
+    pub trigger_elapsed_ms: u64,
+    /// Trigger training after N corrections since last train.
+    pub trigger_corrections: u64,
+    /// Memories needed before the first training run.
+    pub first_run_threshold: u64,
+    /// Max wall-clock time per training run in ms.
+    pub max_runtime_ms: u64,
+    /// Background tick interval in ms.
+    pub tick_interval_ms: u64,
+}
+
+impl Default for GnnAutoTrainerConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            min_throttle_ms: 3_600_000,
+            trigger_new_memories: 50,
+            trigger_elapsed_ms: 21_600_000,
+            trigger_corrections: 5,
+            first_run_threshold: 100,
+            max_runtime_ms: 300_000,
+            tick_interval_ms: 60_000,
         }
     }
 }

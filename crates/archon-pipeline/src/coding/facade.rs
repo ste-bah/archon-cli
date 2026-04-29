@@ -913,7 +913,8 @@ mod tests {
     #[test]
     fn facade_with_learning_implements_trait() {
         use crate::learning::integration::{LearningIntegration, LearningIntegrationConfig};
-        let learning = LearningIntegration::new(None, None, LearningIntegrationConfig::default());
+        let learning =
+            LearningIntegration::new(None, None, LearningIntegrationConfig::default(), None);
         let facade = CodingFacade::with_learning(learning);
         let _boxed: Box<dyn PipelineFacade> = Box::new(facade);
     }
