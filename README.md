@@ -737,7 +737,7 @@ Run `archon --help` for the live, authoritative listing. Every entry below is ve
 | `--append-system-prompt <TEXT>` / `--append-system-prompt-file <PATH>` | Append to default system prompt |
 | `--theme <NAME>` | Startup TUI theme |
 | `--output-style <NAME>` | `Explanatory` / `Learning` / `Formal` / `Concise` |
-| `--permission-mode <MODE>` | Override permissions (`default`, `acceptEdits`, `plan`, `auto`, `dontAsk`, `bypassPermissions`) |
+| `--permission-mode <MODE>` | Override permissions (`default`, `acceptEdits`, `plan`, `auto`, `dontAsk`, `bubble`, `bypassPermissions`) |
 | `--dangerously-skip-permissions` | Skip all permission checks |
 | `--allow-dangerously-skip-permissions` | Allow `bypassPermissions` in mode cycle |
 | `--bare` | Minimal mode (no hooks, ARCHON.md, MCP auto-start) |
@@ -762,7 +762,7 @@ Run `archon --help` for the live, authoritative listing. Every entry below is ve
 
 ## Slash Commands
 
-All slash commands work in the interactive TUI. Type `/help` to see them in-app. As of v0.1.13 the registry contains **64 primary commands** (lockstep-tested at `EXPECTED_COMMAND_COUNT = 64` in `src/command/registry.rs`). Aliases come from each handler's `aliases()` method.
+All slash commands work in the interactive TUI. Type `/help` to see them in-app. As of v0.1.28 the registry contains **65 primary commands** (lockstep-tested at `EXPECTED_COMMAND_COUNT = 65` in `src/command/registry.rs`). Aliases come from each handler's `aliases()` method.
 
 ### Core & Meta
 
@@ -875,7 +875,7 @@ All slash commands work in the interactive TUI. Type `/help` to see them in-app.
 
 ### Built-in Skills (additional commands)
 
-Beyond the 64 primaries above, archon-cli ships **30 built-in skills** in `crates/archon-core/src/skills/{builtin,expanded}.rs`. They behave like slash commands but are resolved through the Skill registry rather than the primary registry. User-authored skills in `.archon/skills/` and plugin-supplied skills extend this surface further.
+Beyond the 65 primaries above, archon-cli ships **55 built-in skills (21 in builtin.rs, 34 in expanded.rs)** in `crates/archon-core/src/skills/{builtin,expanded}.rs`. They behave like slash commands but are resolved through the Skill registry rather than the primary registry. User-authored skills in `.archon/skills/` and plugin-supplied skills extend this surface further.
 
 | Command | Description |
 |---------|-------------|
@@ -1669,13 +1669,13 @@ Enforced on every tool call that touches the filesystem, shell, or network.
 
 | Mode | Behaviour |
 |------|-----------|
-| `ask` (default) | Prompt user for risky operations |
-| `auto` | Auto-approve all tool calls |
-| `deny` | Deny all unsafe operations (read-only) |
-| `plan` | Plan-only mode, no writes, no shell |
-| `acceptEdits` | Auto-accept file edits, ask for shell |
-| `dontAsk` | Never prompt (silent auto-approve) |
-| `bypassPermissions` | Skip all permission checks |
+| `Default` (default) | Prompt for risky/dangerous operations |
+| `AcceptEdits` | Auto-allow file edits (Read/Write/Edit/Glob/Grep), prompt for Bash |
+| `Plan` | Read-only: only whitelisted tools allowed |
+| `Auto` | Heuristic-based: auto-approve safe, prompt risky, warn dangerous |
+| `DontAsk` | Auto-allow everything except always_deny rules |
+| `Bubble` | Auto-approve within sandbox limits (stricter than DontAsk, looser than BypassPermissions) |
+| `BypassPermissions` | Skip all permission checks entirely |
 
 ### Rule lists
 
@@ -1694,7 +1694,7 @@ sandbox = false
 
 - `--permission-mode <MODE>`, runtime override
 - `--dangerously-skip-permissions`, equivalent to `bypassPermissions`
-- `--sandbox`, enforce `deny` for writes
+- `--sandbox`, enforce `Bubble` sandbox (auto-approve reads, restrict writes)
 
 ---
 
@@ -2394,7 +2394,7 @@ graph TD
     subgraph core["Core Learning"]
         SONA["SONA Engine<br/>Trajectory-aware optimization"]
         RB["ReasoningBank<br/>4 core + 8 extended modes"]
-        GNN["GNN Enhancer<br/>3-layer graph attention<br/>1536D → 1024D"]
+        GNN["GNN Enhancer<br/>3-layer graph attention<br/>1536-dim round-trip<br/>(1536→1024→1280→1536)"]
     end
 
     subgraph memory_layer["Memory & Causality"]
@@ -2430,7 +2430,7 @@ graph TD
 |--------|---------|-------------|
 | **SONA** | Trajectory-aware optimization | Tracks agent performance across runs, adjusts prompts |
 | **ReasoningBank** | Multi-modal reasoning (12 modes) | Core: deductive, inductive, abductive, analogical. Extended: adversarial, counterfactual, temporal, constraint, decomposition, first-principles, causal, contextual |
-| **GNN Enhancer** | Graph neural network | 3-layer attention (1536->1280->1280->1024), Xavier init, NaN fallback, Adam optimizer, contrastive loss, EWC regularization |
+| **GNN Enhancer** | Graph neural network | 3-layer round-trip attention (1536→1024→1280→1536), 12 heads, He init for ReLU, residual + layer norm, auto-retraining with contrastive loss |
 | **CausalMemory** | Causal relationship tracking | Hypergraph with multi-cause hyperedges, BFS traversal (max 5 hops), cycle detection |
 | **ProvenanceStore** | Source credibility scoring | L-Scores (recency decay, authority, corroboration, domain relevance), citation path traversal |
 | **ShadowVectorSearch** | Contradiction detection | Semantic inversion (negate embedding), find docs similar to shadow vector |
@@ -2445,10 +2445,13 @@ All learning systems accept `Option<T>` dependencies. When a system is unavailab
 
 ```mermaid
 graph LR
-    INPUT["Input<br/>1536-dim"] --> L1["Layer 1<br/>Attention + ReLU<br/>1536 → 1280"]
-    L1 --> L2["Layer 2<br/>Attention + ReLU<br/>1280 → 1280"]
-    L2 --> L3["Layer 3<br/>Attention + Tanh<br/>1280 → 1024"]
-    L3 --> OUTPUT["Output<br/>1024-dim"]
+    INPUT["Input<br/>1536-dim"] --> L1["Layer 1<br/>12-head Attention + ReLU<br/>1536 → 1024"]
+    L1 --> RES1["Residual + LayerNorm"]
+    RES1 --> L2["Layer 2<br/>12-head Attention + ReLU<br/>1024 → 1280"]
+    L2 --> RES2["Residual + LayerNorm"]
+    RES2 --> L3["Layer 3<br/>12-head Attention + ReLU<br/>1280 → 1536"]
+    L3 --> RES3["Residual + LayerNorm"]
+    RES3 --> OUTPUT["Output<br/>1536-dim (round-trip)"]
 
     L1 --> |"cache"| CACHE["LRU Cache<br/>1000 entries, 300s TTL"]
     L2 --> |"cache"| CACHE
@@ -2457,8 +2460,8 @@ graph LR
     subgraph training["Training Loop"]
         LOSS["Contrastive Loss<br/>(triplet mining)"]
         ADAM["Adam Optimizer<br/>β1=0.9, β2=0.999"]
-        EWC["EWC Regularizer<br/>(Fisher information)"]
-        LOSS --> ADAM --> EWC
+        RETRAIN["Auto-Retraining<br/>(cosine-similarity threshold)"]
+        LOSS --> ADAM --> RETRAIN
     end
 
     OUTPUT --> LOSS
@@ -2468,6 +2471,9 @@ graph LR
     style L1 fill:#16213e,stroke:#e94560,color:#e0e0e0
     style L2 fill:#16213e,stroke:#e94560,color:#e0e0e0
     style L3 fill:#16213e,stroke:#e94560,color:#e0e0e0
+    style RES1 fill:#16213e,stroke:#e94560,color:#e0e0e0
+    style RES2 fill:#16213e,stroke:#e94560,color:#e0e0e0
+    style RES3 fill:#16213e,stroke:#e94560,color:#e0e0e0
     style training fill:#1a1a2e,stroke:#533483,color:#e0e0e0
     style CACHE fill:#1a1a2e,stroke:#533483,color:#e0e0e0
 ```

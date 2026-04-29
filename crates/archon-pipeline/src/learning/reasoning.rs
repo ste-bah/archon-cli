@@ -1,7 +1,9 @@
-//! ReasoningBank — unified reasoning orchestrator with 4 modes.
+//! ReasoningBank — unified reasoning orchestrator with 14 modes.
 //!
 //! Implements REQ-LEARN-005.
-//! Modes: PatternMatch, CausalInference, Contextual, Hybrid.
+//! Modes: Deductive, Inductive, Abductive, Analogical, Adversarial,
+//! Counterfactual, Temporal, Constraint, Decomposition, FirstPrinciples,
+//! Causal, Contextual, PatternMatch, Hybrid.
 
 use std::collections::HashMap;
 
@@ -16,13 +18,29 @@ use super::sona::SonaEngine;
 // Enumerations
 // ---------------------------------------------------------------------------
 
-/// Reasoning mode selection.
+/// Reasoning mode selection — 12 spec modes + 2 meta-modes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ReasoningMode {
-    PatternMatch,
-    CausalInference,
-    Contextual,
-    Hybrid,
+    // Core 4 (formal logical reasoning)
+    Deductive,  // general rules → specific conclusions
+    Inductive,  // specific observations → general rules
+    Abductive,  // best explanation for observations
+    Analogical, // structural similarity transfer
+
+    // Extended 8 (specialized reasoning paradigms)
+    Adversarial,     // counterexample / red-team
+    Counterfactual,  // alternate-outcome "what if"
+    Temporal,        // time-aware sequence
+    Constraint,      // constraint satisfaction
+    Decomposition,   // sub-problem breakdown
+    FirstPrinciples, // axiom-based derivation
+    #[serde(alias = "CausalInference")]
+    Causal, // cause-effect (renamed from CausalInference)
+    Contextual,      // context-aware
+
+    // Meta-modes (not on the "12" list, kept as orchestrators)
+    PatternMatch, // legacy LLM-based template matching
+    Hybrid,       // auto-aggregator across modes
 }
 
 // ---------------------------------------------------------------------------
@@ -32,9 +50,22 @@ pub enum ReasoningMode {
 /// Configuration for the ReasoningBank.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReasoningBankConfig {
-    pub pattern_weight: f64,
+    // Core 4 weights
+    pub deductive_weight: f64,
+    pub inductive_weight: f64,
+    pub abductive_weight: f64,
+    pub analogical_weight: f64,
+    // Extended 8 weights
+    pub adversarial_weight: f64,
+    pub counterfactual_weight: f64,
+    pub temporal_weight: f64,
+    pub constraint_weight: f64,
+    pub decomposition_weight: f64,
+    pub first_principles_weight: f64,
     pub causal_weight: f64,
     pub contextual_weight: f64,
+    // Legacy
+    pub pattern_weight: f64,
     pub default_max_results: usize,
     pub default_confidence_threshold: f64,
     pub default_min_l_score: f64,
@@ -45,9 +76,19 @@ pub struct ReasoningBankConfig {
 impl Default for ReasoningBankConfig {
     fn default() -> Self {
         Self {
-            pattern_weight: 0.3,
-            causal_weight: 0.3,
-            contextual_weight: 0.4,
+            deductive_weight: 1.0,
+            inductive_weight: 1.0,
+            abductive_weight: 1.0,
+            analogical_weight: 1.0,
+            adversarial_weight: 1.0,
+            counterfactual_weight: 1.0,
+            temporal_weight: 1.0,
+            constraint_weight: 1.0,
+            decomposition_weight: 1.0,
+            first_principles_weight: 1.0,
+            causal_weight: 1.0,
+            contextual_weight: 1.0,
+            pattern_weight: 0.5,
             default_max_results: 10,
             default_confidence_threshold: 0.7,
             default_min_l_score: 0.5,
@@ -62,7 +103,7 @@ impl Default for ReasoningBankConfig {
 // ---------------------------------------------------------------------------
 
 /// A reasoning request.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ReasoningRequest {
     pub query: String,
     pub query_embedding: Option<Vec<f64>>,
@@ -70,6 +111,8 @@ pub struct ReasoningRequest {
     pub task_type: Option<TaskType>,
     pub max_results: Option<usize>,
     pub confidence_threshold: Option<f64>,
+    /// Optional context strings for extended reasoning engines.
+    pub context: Option<Vec<String>>,
 }
 
 /// A single pattern match result.
@@ -105,6 +148,8 @@ pub struct ReasoningResponse {
     pub overall_confidence: f64,
     pub provenance: Vec<ProvenanceInfo>,
     pub trajectory_id: Option<String>,
+    /// Arbitrary metadata keyed by engine (e.g. engine_name → "deductive").
+    pub context_metadata: HashMap<String, String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -132,6 +177,7 @@ use super::gnn::GNNEnhancer;
 
 // CausalMemory is now provided by super::causal (wired in F04).
 use super::causal::CausalMemory;
+use crate::learning::modes;
 
 /// Dependencies injected into ReasoningBank.
 pub struct ReasoningBankDeps {
@@ -146,7 +192,7 @@ pub struct ReasoningBankDeps {
 // ReasoningBank
 // ---------------------------------------------------------------------------
 
-/// Unified reasoning orchestrator — routes queries through 4 reasoning modes.
+/// Unified reasoning orchestrator — routes queries through 14 reasoning modes.
 pub struct ReasoningBank {
     pattern_store: PatternStore,
     causal_memory: Option<CausalMemory>,
@@ -193,9 +239,59 @@ impl ReasoningBank {
             ReasoningMode::PatternMatch => {
                 self.reason_pattern_match(request, max_results, threshold)
             }
-            ReasoningMode::CausalInference => self.reason_causal(request, max_results),
+            ReasoningMode::Causal => self.reason_causal(request, max_results),
             ReasoningMode::Contextual => self.reason_contextual(request, max_results, threshold),
             ReasoningMode::Hybrid => self.reason_hybrid(request, max_results, threshold),
+            ReasoningMode::Deductive => self.reason_via_engine(
+                &modes::deductive::DeductiveEngine::new(),
+                request,
+                max_results,
+            ),
+            ReasoningMode::Inductive => self.reason_via_engine(
+                &modes::inductive::InductiveEngine::new(),
+                request,
+                max_results,
+            ),
+            ReasoningMode::Abductive => self.reason_via_engine(
+                &modes::abductive::AbductiveEngine::new(),
+                request,
+                max_results,
+            ),
+            ReasoningMode::Analogical => self.reason_via_engine(
+                &modes::analogical::AnalogicalEngine::new(),
+                request,
+                max_results,
+            ),
+            ReasoningMode::Adversarial => self.reason_via_engine(
+                &modes::adversarial::AdversarialEngine::new(),
+                request,
+                max_results,
+            ),
+            ReasoningMode::Counterfactual => self.reason_via_engine(
+                &modes::counterfactual::CounterfactualEngine::new(),
+                request,
+                max_results,
+            ),
+            ReasoningMode::Temporal => self.reason_via_engine(
+                &modes::temporal::TemporalEngine::new(),
+                request,
+                max_results,
+            ),
+            ReasoningMode::Constraint => self.reason_via_engine(
+                &modes::constraint::ConstraintEngine::new(),
+                request,
+                max_results,
+            ),
+            ReasoningMode::Decomposition => self.reason_via_engine(
+                &modes::decomposition::DecompositionEngine::new(),
+                request,
+                max_results,
+            ),
+            ReasoningMode::FirstPrinciples => self.reason_via_engine(
+                &modes::first_principles::FirstPrinciplesEngine::new(),
+                request,
+                max_results,
+            ),
         };
 
         if self.config.enable_trajectory_tracking {
@@ -209,6 +305,105 @@ impl ReasoningBank {
     /// Return all recorded trajectory records.
     pub fn trajectories(&self) -> &[TrajectoryRecord] {
         &self.trajectory_records
+    }
+
+    // -----------------------------------------------------------------------
+    // Engine dispatch helpers
+    // -----------------------------------------------------------------------
+
+    /// Dispatch a reasoning request to a [`ReasoningEngine`] and convert the output.
+    fn reason_via_engine(
+        &self,
+        engine: &dyn modes::ReasoningEngine,
+        request: &ReasoningRequest,
+        max_results: usize,
+    ) -> ReasoningResponse {
+        let mode_request = modes::ReasoningRequest {
+            query: request.query.clone(),
+            context: request.context.clone().unwrap_or_default(),
+            parameters: std::collections::HashMap::new(),
+        };
+
+        let output = engine.reason(&mode_request).unwrap_or_else(|e| {
+            tracing::warn!(engine = engine.name(), error = %e, "Reasoning engine failed");
+            modes::ReasoningOutput {
+                engine_name: engine.name().to_string(),
+                result_type: modes::ResultType::ContextualInsights,
+                items: vec![],
+                confidence: 0.0,
+                provenance: vec![],
+            }
+        });
+
+        self.engine_output_to_response(output, max_results)
+    }
+
+    /// Convert a [`modes::ReasoningOutput`] into a [`ReasoningResponse`].
+    fn engine_output_to_response(
+        &self,
+        output: modes::ReasoningOutput,
+        max_results: usize,
+    ) -> ReasoningResponse {
+        let mode = match output.engine_name.as_str() {
+            "deductive" => ReasoningMode::Deductive,
+            "inductive" => ReasoningMode::Inductive,
+            "abductive" => ReasoningMode::Abductive,
+            "analogical" => ReasoningMode::Analogical,
+            "adversarial" => ReasoningMode::Adversarial,
+            "counterfactual" => ReasoningMode::Counterfactual,
+            "temporal" => ReasoningMode::Temporal,
+            "constraint" => ReasoningMode::Constraint,
+            "decomposition" => ReasoningMode::Decomposition,
+            "first_principles" => ReasoningMode::FirstPrinciples,
+            "causal" => ReasoningMode::Causal,
+            "contextual" => ReasoningMode::Contextual,
+            _ => ReasoningMode::Hybrid,
+        };
+
+        let mut patterns: Vec<PatternMatchResult> = output
+            .items
+            .iter()
+            .take(max_results)
+            .map(|item| PatternMatchResult {
+                pattern_id: item.label.clone(),
+                template: item.description.clone(),
+                confidence: item.confidence,
+            })
+            .collect();
+
+        // Flow provenance strings into context_metadata
+        let mut context_metadata = HashMap::new();
+        context_metadata.insert("engine_name".to_string(), output.engine_name.clone());
+        if !output.provenance.is_empty() {
+            context_metadata.insert("provenance".to_string(), output.provenance.join(", "));
+        }
+
+        let overall = if patterns.is_empty() {
+            output.confidence
+        } else {
+            patterns.iter().map(|p| p.confidence).sum::<f64>() / patterns.len() as f64
+        };
+
+        // Sort by confidence descending
+        patterns.sort_by(|a, b| {
+            b.confidence
+                .partial_cmp(&a.confidence)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        ReasoningResponse {
+            mode_used: mode,
+            patterns,
+            inferences: vec![],
+            overall_confidence: overall,
+            provenance: vec![ProvenanceInfo {
+                source: output.engine_name.clone(),
+                mode,
+                timestamp: now_epoch(),
+            }],
+            trajectory_id: None,
+            context_metadata,
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -262,6 +457,7 @@ impl ReasoningBank {
                 timestamp: now_epoch(),
             }],
             trajectory_id: None,
+            context_metadata: HashMap::new(),
         }
     }
 
@@ -271,16 +467,17 @@ impl ReasoningBank {
             None => {
                 warn!("CausalMemory not available -- causal-inference mode returning empty");
                 return ReasoningResponse {
-                    mode_used: ReasoningMode::CausalInference,
+                    mode_used: ReasoningMode::Causal,
                     patterns: vec![],
                     inferences: vec![],
                     overall_confidence: 0.0,
                     provenance: vec![ProvenanceInfo {
                         source: "causal_memory_none".into(),
-                        mode: ReasoningMode::CausalInference,
+                        mode: ReasoningMode::Causal,
                         timestamp: now_epoch(),
                     }],
                     trajectory_id: None,
+                    context_metadata: HashMap::new(),
                 };
             }
         };
@@ -318,16 +515,17 @@ impl ReasoningBank {
         inferences.truncate(max_results);
 
         ReasoningResponse {
-            mode_used: ReasoningMode::CausalInference,
+            mode_used: ReasoningMode::Causal,
             patterns: vec![],
             inferences,
             overall_confidence: result.confidence,
             provenance: vec![ProvenanceInfo {
                 source: "causal_memory".into(),
-                mode: ReasoningMode::CausalInference,
+                mode: ReasoningMode::Causal,
                 timestamp: now_epoch(),
             }],
             trajectory_id: None,
+            context_metadata: HashMap::new(),
         }
     }
 
@@ -390,6 +588,7 @@ impl ReasoningBank {
                 timestamp: now_epoch(),
             }],
             trajectory_id: None,
+            context_metadata: HashMap::new(),
         }
     }
 
@@ -465,7 +664,7 @@ impl ReasoningBank {
                     } else {
                         "causal_memory_none".into()
                     },
-                    mode: ReasoningMode::CausalInference,
+                    mode: ReasoningMode::Causal,
                     timestamp: now_epoch(),
                 },
                 ProvenanceInfo {
@@ -475,6 +674,7 @@ impl ReasoningBank {
                 },
             ],
             trajectory_id: None,
+            context_metadata: HashMap::new(),
         }
     }
 }
@@ -489,40 +689,88 @@ pub struct ModeSelector;
 impl ModeSelector {
     /// Auto-select reasoning mode based on query keywords.
     pub fn select(query: &str) -> ReasoningMode {
-        let lower = query.to_lowercase();
+        let q = query.to_lowercase();
 
-        // Causal queries
-        if lower.starts_with("why ")
-            || lower.contains("because")
-            || lower.contains("caused by")
-            || lower.contains("root cause")
-            || lower.contains("what caused")
-        {
-            return ReasoningMode::CausalInference;
+        // Decomposition: "break down", "steps", "subtasks" (must precede "break")
+        if q.contains("break down") || q.contains("steps") || q.contains("subtasks") {
+            return ReasoningMode::Decomposition;
         }
 
-        // Contextual / similarity queries
-        if lower.contains("similar to")
-            || lower.contains("like this")
-            || lower.contains("resembles")
-            || lower.contains("related code")
-            || lower.contains("find similar")
+        // Counterfactual: "what if", "had X been", "suppose X were"
+        if q.contains("what if")
+            || q.contains("suppose")
+            || (q.contains("had ") && q.contains(" been"))
         {
+            return ReasoningMode::Counterfactual;
+        }
+
+        // Adversarial: "break", "attack", "exploit", "fail", "edge case"
+        if (q.contains("break") && !q.contains("break down"))
+            || q.contains("attack")
+            || q.contains("exploit")
+            || q.contains("edge case")
+        {
+            return ReasoningMode::Adversarial;
+        }
+
+        // Temporal: "before", "after", "since", "when did", "sequence"
+        if q.contains("before ")
+            || q.contains("after ")
+            || q.contains("when did")
+            || q.contains("sequence")
+        {
+            return ReasoningMode::Temporal;
+        }
+
+        // Constraint: "must", "constraint", "require", "satisfy"
+        if q.contains("constraint") || q.contains("must satisfy") || q.contains("requirement") {
+            return ReasoningMode::Constraint;
+        }
+
+        // Abductive: "why did", "best explanation", "diagnose"
+        if q.contains("why did") || q.contains("best explanation") || q.contains("diagnose") {
+            return ReasoningMode::Abductive;
+        }
+
+        // Analogical: "similar to", "like", "analogous"
+        if q.contains("similar to") || q.contains("analogous") || q.contains("like the ") {
+            return ReasoningMode::Analogical;
+        }
+
+        // Inductive: "pattern", "general rule", "always", "usually"
+        if q.contains("pattern") || q.contains("general rule") || q.contains("always") {
+            return ReasoningMode::Inductive;
+        }
+
+        // Deductive: "if X then Y", "rule states", "implies"
+        if q.contains("therefore") || q.contains("implies") || q.contains("rule states") {
+            return ReasoningMode::Deductive;
+        }
+
+        // First principles: "from scratch", "fundamentals", "axioms"
+        if q.contains("from scratch")
+            || q.contains("fundamentals")
+            || q.contains("first principles")
+        {
+            return ReasoningMode::FirstPrinciples;
+        }
+
+        // Causal: "cause", "because"
+        if q.contains("cause") || q.contains("because") {
+            return ReasoningMode::Causal;
+        }
+
+        // Contextual: "context", "when"
+        if q.contains("context") || q.contains("when") {
             return ReasoningMode::Contextual;
         }
 
-        // Pattern-match queries
-        if lower.starts_with("how to")
-            || lower.starts_with("how do")
-            || lower.contains("best practice")
-            || lower.contains("pattern for")
-            || lower.contains("template for")
-            || lower.contains("example of")
-        {
+        // Pattern match: "similar pattern", "template"
+        if q.contains("similar pattern") || q.contains("template") {
             return ReasoningMode::PatternMatch;
         }
 
-        // Default: hybrid
+        // Default: Hybrid (aggregator over all)
         ReasoningMode::Hybrid
     }
 }

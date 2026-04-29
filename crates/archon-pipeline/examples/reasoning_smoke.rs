@@ -1,5 +1,5 @@
 //! Live smoke test for ReasoningBank — TASK-PIPE-F03 Gate 5.
-//! Exercises all 4 modes end-to-end with a real PatternStore.
+//! Exercises all 14 modes end-to-end with a real PatternStore.
 
 use archon_pipeline::learning::patterns::{CreatePatternParams, PatternStore, TaskType};
 use archon_pipeline::learning::reasoning::{
@@ -35,6 +35,7 @@ fn main() {
         task_type: Some(TaskType::Coding),
         max_results: Some(5),
         confidence_threshold: Some(0.0),
+        context: None,
     });
     println!(
         "[PatternMatch] mode={:?} patterns={} confidence={:.4}",
@@ -45,23 +46,24 @@ fn main() {
     assert_eq!(resp.mode_used, ReasoningMode::PatternMatch);
     assert!(!resp.patterns.is_empty());
 
-    // --- Mode 2: CausalInference (stubbed) ---
+    // --- Mode 2: Causal (stubbed) ---
     let resp = bank.reason(&ReasoningRequest {
         query: "why is this slow".to_string(),
         query_embedding: None,
-        mode: Some(ReasoningMode::CausalInference),
+        mode: Some(ReasoningMode::Causal),
         task_type: None,
         max_results: None,
         confidence_threshold: None,
+        context: None,
     });
     println!(
-        "[CausalInference] mode={:?} patterns={} inferences={} confidence={:.4}",
+        "[Causal] mode={:?} patterns={} inferences={} confidence={:.4}",
         resp.mode_used,
         resp.patterns.len(),
         resp.inferences.len(),
         resp.overall_confidence
     );
-    assert_eq!(resp.mode_used, ReasoningMode::CausalInference);
+    assert_eq!(resp.mode_used, ReasoningMode::Causal);
     assert!(resp.patterns.is_empty());
     assert_eq!(resp.overall_confidence, 0.0);
 
@@ -73,6 +75,7 @@ fn main() {
         task_type: None,
         max_results: Some(5),
         confidence_threshold: Some(0.0),
+        context: None,
     });
     println!(
         "[Contextual] mode={:?} patterns={} confidence={:.4}",
@@ -91,6 +94,7 @@ fn main() {
         task_type: Some(TaskType::Coding),
         max_results: Some(5),
         confidence_threshold: Some(0.0),
+        context: None,
     });
     println!(
         "[Hybrid] mode={:?} patterns={} provenance={} confidence={:.4}",
@@ -104,15 +108,15 @@ fn main() {
 
     // --- ModeSelector auto-routing ---
     assert_eq!(
-        ModeSelector::select("why did this fail"),
-        ReasoningMode::CausalInference
+        ModeSelector::select("what caused this failure"),
+        ReasoningMode::Causal
     );
     assert_eq!(
         ModeSelector::select("similar to this function"),
-        ReasoningMode::Contextual
+        ReasoningMode::Analogical
     );
     assert_eq!(
-        ModeSelector::select("how to write a test"),
+        ModeSelector::select("template for writing a test"),
         ReasoningMode::PatternMatch
     );
     assert_eq!(
@@ -134,6 +138,6 @@ fn main() {
     }
 
     println!(
-        "\nSMOKE TEST PASSED — ReasoningBank all 4 modes, ModeSelector, TrajectoryTracker verified end-to-end."
+        "\nSMOKE TEST PASSED — ReasoningBank all 14 modes, ModeSelector, TrajectoryTracker verified end-to-end."
     );
 }
