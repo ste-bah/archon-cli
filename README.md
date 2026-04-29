@@ -1,5 +1,9 @@
 # archon-cli
 
+<div align="center">
+  <img src="archon-avatar.png" alt="Archon Avatar" width="600" />
+</div>
+
 A strategic engineering CLI built in Rust. Self-learning agent platform with persistent memory, multi-agent pipelines, and identity-aware Anthropic API integration.
 
 > **Documentation has moved.** This README is now a landing page. The full structured docs live in [`docs/`](docs/README.md) — start there.
