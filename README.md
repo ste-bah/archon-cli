@@ -625,6 +625,8 @@ The `OPENAI_API_KEY` is **not required** for core Archon functionality. Archon u
 
 **Key resolution order**: `OPENAI_API_KEY` env var > `ARCHON_MEMORY_OPENAIKEY` env var (memory only) > `llm.openai.api_key` in config.toml.
 
+**Dimension compatibility**: Local embeddings (768-dim) and OpenAI embeddings (1536-dim) coexist safely. The GNN's `input_projection` layer projects 768-dim vectors to 1536-dim for the round-trip architecture, and vector search uses `min_len` cosine similarity — it compares only the overlapping dimensions. Local embeddings work end-to-end with no loss of functionality; the trade-off is lower semantic precision in pattern matching and similarity search compared to native 1536-dim OpenAI embeddings.
+
 **Default behavior** (no OpenAI key set): embedding provider is `"auto"`, which detects the missing key and falls back to local fastembed. No external API calls are made for embeddings. Voice STT defaults to `"mock"` (disabled).
 
 ```bash
