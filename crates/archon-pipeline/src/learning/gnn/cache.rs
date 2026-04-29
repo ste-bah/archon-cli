@@ -361,7 +361,7 @@ mod tests {
         // Verify FNV-1a stride-4 behaviour.
         // hash = 0x811c9dc5 ^ (round(1.0*1000) as u32) = 0x811c9dc5 ^ 1000
         // then hash = hash.wrapping_mul(0x01000193)
-        let h = hash_embedding(&vec![1.0, 2.0, 3.0, 4.0, 5.0]);
+        let h = hash_embedding(&[1.0, 2.0, 3.0, 4.0, 5.0]);
         assert_eq!(h.len(), 8); // 8 hex chars
         assert!(h.chars().all(|c| c.is_ascii_hexdigit()));
     }

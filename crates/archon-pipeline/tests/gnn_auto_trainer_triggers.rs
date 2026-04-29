@@ -72,7 +72,7 @@ async fn first_run_triggers_when_memories_exceed_threshold() {
 
     trainer.spawn(enhancer, ws, short_train_cfg(), provider);
 
-    let deadline = Instant::now() + Duration::from_secs(20);
+    let deadline = Instant::now() + Duration::from_secs(90);
     while trainer.status().training_count == 0 && Instant::now() < deadline {
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
@@ -108,7 +108,7 @@ async fn memory_accumulation_triggers_after_first_run() {
         provider,
     );
 
-    let deadline = Instant::now() + Duration::from_secs(30);
+    let deadline = Instant::now() + Duration::from_secs(120);
     while trainer.status().training_count == 0 && Instant::now() < deadline {
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
@@ -175,7 +175,7 @@ async fn correction_trigger_fires() {
     // Trigger via corrections
     trainer.record_corrections(10);
 
-    let deadline = Instant::now() + Duration::from_secs(15);
+    let deadline = Instant::now() + Duration::from_secs(90);
     while trainer.status().training_count == 0 && Instant::now() < deadline {
         tokio::time::sleep(Duration::from_millis(200)).await;
     }

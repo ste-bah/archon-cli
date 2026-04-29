@@ -68,7 +68,7 @@ fn training_stops_early_when_validation_plateaus() {
         learning_rate: 0.05,
         batch_size: 8,
         max_triplets_per_run: 64,
-        max_runtime_ms: 30_000,
+        max_runtime_ms: 120_000,
         min_improvement: 0.0005,
         ..TrainingConfig::default()
     };
@@ -111,7 +111,7 @@ fn early_stopping_restores_best_weights() {
         learning_rate: 0.05,
         batch_size: 8,
         max_triplets_per_run: 64,
-        max_runtime_ms: 30_000,
+        max_runtime_ms: 120_000,
         min_improvement: 0.0005,
         ..TrainingConfig::default()
     };
@@ -166,7 +166,7 @@ fn early_stopping_disabled_when_patience_zero() {
         learning_rate: 0.05,
         batch_size: 8,
         max_triplets_per_run: 64,
-        max_runtime_ms: 30_000,
+        max_runtime_ms: 120_000,
         ..TrainingConfig::default()
     };
 

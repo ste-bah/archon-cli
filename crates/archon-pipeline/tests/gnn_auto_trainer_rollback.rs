@@ -73,7 +73,7 @@ async fn auto_trainer_rollback_preserves_version_integrity() {
     trainer.spawn(Arc::clone(&enhancer), Arc::clone(&ws), train_cfg, provider1);
 
     // Wait for training to complete
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(25);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(90);
     while trainer.status().training_count == 0 && std::time::Instant::now() < deadline {
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
     }

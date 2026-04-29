@@ -90,7 +90,16 @@ impl SessionStore {
         }
 
         let path_str = path.to_string_lossy().to_string();
-        let db = DbInstance::new("sqlite", &path_str, "").map_err(db_err)?;
+        // TASK-AGS-815: cozo-ce 0.7.13-alpha.3 has a .unwrap() bug in
+        // new_cozo_sqlite (sqlite.rs:49). catch_unwind converts the panic
+        // into a SessionError so callers see a clean error instead of abort.
+        let db = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            DbInstance::new("sqlite", &path_str, "")
+        }))
+        .map_err(|_panic_err| SessionError::DbError(
+            "cozo panicked during sqlite init — concurrent access or filesystem error".into(),
+        ))?
+        .map_err(db_err)?;
 
         #[cfg(unix)]
         secure_file_permissions(path)?;
