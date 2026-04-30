@@ -97,8 +97,8 @@ impl CommandHandler for VoiceHandler {
             }
             other => {
                 let msg = format!(
-                    "Unknown /voice subcommand: {other}. Valid: list, \
-                     enable, disable, switch"
+                    "Unknown /voice subcommand: {other}. Only 'list' is \
+                     currently functional (enable/disable/switch are not yet implemented)"
                 );
                 ctx.emit(TuiEvent::TextDelta(msg));
             }
@@ -107,7 +107,7 @@ impl CommandHandler for VoiceHandler {
     }
 
     fn description(&self) -> &'static str {
-        "Show or manage voice input configuration"
+        "Show voice input configuration (enable/disable/switch not yet implemented)"
     }
 
     fn aliases(&self) -> &'static [&'static str] {
