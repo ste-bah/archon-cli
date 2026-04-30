@@ -213,6 +213,96 @@ max_memories = 5000
 # Number of memories in session-start briefing
 briefing_limit = 15
 
+# --- AutoCapture (regex-based memory detection at turn boundary) ---
+[memory.auto_capture]
+enabled = true
+
+# --- AutoExtraction (LLM-driven fact extraction every N turns) ---
+[memory.auto_extraction]
+enabled = true
+every_n_turns = 5
+
+
+# ----------------------------------------------------------------------------
+# [learning] — Self-learning subsystems
+# ----------------------------------------------------------------------------
+# Eight subsystems coordinated via LearningIntegration in archon-pipeline.
+# Each toggle defaults to enabled = true; flip to false to disable that
+# subsystem without touching others. The GNN subsystem has its own training
+# and auto-trainer subsections below.
+
+# SONA — Self-Organizing Network Architecture (trajectory pattern store)
+[learning.sona]
+enabled = true
+
+# ProvenanceStore — L-Score system tracking memory reliability
+[learning.provenance]
+enabled = true
+
+# DESC — Detailed Episodic Storage and Compression
+[learning.desc]
+enabled = true
+
+# CausalMemory — directed hypergraph of cause-effect relationships
+[learning.causal_memory]
+enabled = true
+
+# ShadowVectorSearch — contradiction detection across memories
+[learning.shadow_vector]
+enabled = true
+
+# ReasoningBank — 12 reasoning modes (deductive, inductive, abductive,
+# analogical, adversarial, counterfactual, temporal, constraint, decomposition,
+# first-principles, causal, contextual) plus PatternMatch + Hybrid meta-modes
+[learning.reasoning_bank]
+enabled = true
+
+# Reflexion — N-attempt retry loop with self-critique on failed agent dispatch
+[learning.reflexion]
+enabled = true
+max_per_agent = 3
+
+# --- GNN Enhancer (round-trip 1536 → 1024 → 1280 → 1536 graph attention) ---
+[learning.gnn]
+enabled = true
+input_dim = 1536
+output_dim = 1536
+num_layers = 3
+attention_heads = 12
+max_nodes = 50
+use_residual = true
+use_layer_norm = true
+# Activation: "relu" | "leaky_relu" | "tanh" | "sigmoid"
+activation = "relu"
+# Seed for reproducible weight init. 0 = auto (timestamp-derived per run)
+weight_seed = 0
+
+# --- GNN training hyperparameters (used by manual /learning-status retrain) ---
+[learning.gnn.training]
+learning_rate = 0.001
+batch_size = 32
+max_epochs = 10
+early_stopping_patience = 3
+validation_split = 0.2
+ewc_lambda = 0.1
+margin = 0.5
+max_gradient_norm = 1.0
+max_triplets_per_run = 256
+max_runtime_ms = 300000        # 5 minutes max per training run
+
+# --- GNN background auto-retraining ---
+# OFF by default. Enable to let the GNN retrain itself in the background
+# whenever ANY of the trigger thresholds are met (memories / time / corrections).
+[learning.gnn.auto_trainer]
+enabled = false                # turn on to enable autonomous retraining
+min_throttle_ms = 3600000      # 1 hour minimum between runs
+trigger_new_memories = 50      # fire when N new memories accrued
+trigger_elapsed_ms = 21600000  # 6 hours
+trigger_corrections = 5        # fire when N user corrections logged
+first_run_threshold = 100      # kickoff at startup if memory_count > this
+max_runtime_ms = 300000        # 5 minutes max per run
+tick_interval_ms = 60000       # background poll interval (1 minute)
+
 
 # ----------------------------------------------------------------------------
 # [cost] — Spending guardrails (USD)
@@ -255,7 +345,9 @@ max_checkpoints = 10
 # [tui] — Terminal UI
 # ----------------------------------------------------------------------------
 [tui]
-vim_mode = true
+# Vim modal-input keybindings. Default OFF — enable explicitly if you want
+# vim normal/insert mode keys. Toggle in-session via /vim.
+vim_mode = false
 # Verbose mode: show full turn-by-turn output (Ctrl+V toggles at runtime)
 verbose = true
 # Named color theme. Built-ins: intj, intp, dark, light, ocean, fire, forest,
