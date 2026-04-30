@@ -268,8 +268,6 @@ fn test_search_result_fields() {
 
 #[test]
 fn test_index_stats_display() {
-    
-
     let stats = IndexStats::default();
     let display = format!("{}", stats);
     assert!(!display.is_empty(), "Display output should not be empty");

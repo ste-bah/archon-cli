@@ -175,7 +175,6 @@ impl AutoExtractor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
 
     struct FakeMemory;
     impl MemoryTrait for FakeMemory {
