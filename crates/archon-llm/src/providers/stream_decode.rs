@@ -81,10 +81,10 @@ mod tests {
     #[test]
     fn decode_sse_skips_comments() {
         // Validation Criterion 4: `: keepalive` must return None.
-        assert!(matches!(decode_sse_line(b": keepalive"), None));
-        assert!(matches!(decode_sse_line(b":ping"), None));
-        assert!(matches!(decode_sse_line(b""), None));
-        assert!(matches!(decode_sse_line(b"   "), None));
+        assert!(decode_sse_line(b": keepalive").is_none());
+        assert!(decode_sse_line(b":ping").is_none());
+        assert!(decode_sse_line(b"").is_none());
+        assert!(decode_sse_line(b"   ").is_none());
     }
 
     #[test]
@@ -132,9 +132,9 @@ mod tests {
 
     #[test]
     fn decode_sse_ignores_non_data_fields() {
-        assert!(matches!(decode_sse_line(b"event: ping"), None));
-        assert!(matches!(decode_sse_line(b"id: 42"), None));
-        assert!(matches!(decode_sse_line(b"retry: 1000"), None));
+        assert!(decode_sse_line(b"event: ping").is_none());
+        assert!(decode_sse_line(b"id: 42").is_none());
+        assert!(decode_sse_line(b"retry: 1000").is_none());
     }
 
     #[test]
@@ -150,9 +150,9 @@ mod tests {
 
     #[test]
     fn decode_ndjson_skips_empty() {
-        assert!(matches!(decode_ndjson_line(b""), None));
-        assert!(matches!(decode_ndjson_line(b"   "), None));
-        assert!(matches!(decode_ndjson_line(b"\t"), None));
+        assert!(decode_ndjson_line(b"").is_none());
+        assert!(decode_ndjson_line(b"   ").is_none());
+        assert!(decode_ndjson_line(b"\t").is_none());
     }
 
     #[test]

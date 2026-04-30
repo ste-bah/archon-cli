@@ -72,8 +72,7 @@ pub(crate) struct SlashCommandContext {
     /// `/learning-status` reads live state from this; None means the trainer
     /// is disabled in config OR the learning CozoDB failed to open.
     /// Reference: `archon-pipeline/src/learning/gnn/auto_trainer.rs`.
-    pub(crate) auto_trainer:
-        Option<Arc<archon_pipeline::learning::gnn::auto_trainer::AutoTrainer>>,
+    pub(crate) auto_trainer: Option<Arc<archon_pipeline::learning::gnn::auto_trainer::AutoTrainer>>,
     #[allow(dead_code)]
     pub(crate) registry: Arc<Registry>,
     #[allow(dead_code)]

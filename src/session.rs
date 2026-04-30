@@ -1659,44 +1659,46 @@ pub(crate) async fn run_interactive_session(
         } else if let Some(ref db) = learning_cozo_db {
             let gnn_cfg = &config.learning.gnn;
             let train_cfg = &gnn_cfg.training;
-            let params = archon_pipeline::learning::gnn::auto_trainer_runtime::AutoTrainerBuildParams {
-                at_config: archon_pipeline::learning::gnn::auto_trainer::AutoTrainerConfig {
-                    enabled: at_cfg.enabled,
-                    min_throttle_ms: at_cfg.min_throttle_ms,
-                    trigger_new_memories: at_cfg.trigger_new_memories,
-                    trigger_elapsed_ms: at_cfg.trigger_elapsed_ms,
-                    trigger_corrections: at_cfg.trigger_corrections,
-                    first_run_threshold: at_cfg.first_run_threshold,
-                    max_runtime_ms: at_cfg.max_runtime_ms,
-                    tick_interval_ms: at_cfg.tick_interval_ms,
-                },
-                training_config: archon_pipeline::learning::gnn::trainer::TrainingConfig {
-                    learning_rate: train_cfg.learning_rate,
-                    batch_size: train_cfg.batch_size,
-                    max_epochs: train_cfg.max_epochs,
-                    early_stopping_patience: train_cfg.early_stopping_patience,
-                    validation_split: train_cfg.validation_split,
-                    ewc_lambda: train_cfg.ewc_lambda,
-                    margin: train_cfg.margin,
-                    max_gradient_norm: train_cfg.max_gradient_norm,
-                    max_triplets_per_run: train_cfg.max_triplets_per_run,
-                    max_runtime_ms: train_cfg.max_runtime_ms,
-                    ..Default::default()
-                },
-                gnn_input_dim: gnn_cfg.input_dim,
-                gnn_output_dim: gnn_cfg.output_dim,
-                gnn_num_layers: gnn_cfg.num_layers,
-                gnn_attention_heads: gnn_cfg.attention_heads,
-                gnn_max_nodes: gnn_cfg.max_nodes,
-                gnn_use_residual: gnn_cfg.use_residual,
-                gnn_use_layer_norm: gnn_cfg.use_layer_norm,
-                gnn_activation: gnn_cfg.activation.clone(),
-                gnn_weight_seed: gnn_cfg.weight_seed,
-            };
-            let at = archon_pipeline::learning::gnn::auto_trainer_runtime::build_and_spawn_auto_trainer(
-                params,
-                Arc::clone(db),
-            );
+            let params =
+                archon_pipeline::learning::gnn::auto_trainer_runtime::AutoTrainerBuildParams {
+                    at_config: archon_pipeline::learning::gnn::auto_trainer::AutoTrainerConfig {
+                        enabled: at_cfg.enabled,
+                        min_throttle_ms: at_cfg.min_throttle_ms,
+                        trigger_new_memories: at_cfg.trigger_new_memories,
+                        trigger_elapsed_ms: at_cfg.trigger_elapsed_ms,
+                        trigger_corrections: at_cfg.trigger_corrections,
+                        first_run_threshold: at_cfg.first_run_threshold,
+                        max_runtime_ms: at_cfg.max_runtime_ms,
+                        tick_interval_ms: at_cfg.tick_interval_ms,
+                    },
+                    training_config: archon_pipeline::learning::gnn::trainer::TrainingConfig {
+                        learning_rate: train_cfg.learning_rate,
+                        batch_size: train_cfg.batch_size,
+                        max_epochs: train_cfg.max_epochs,
+                        early_stopping_patience: train_cfg.early_stopping_patience,
+                        validation_split: train_cfg.validation_split,
+                        ewc_lambda: train_cfg.ewc_lambda,
+                        margin: train_cfg.margin,
+                        max_gradient_norm: train_cfg.max_gradient_norm,
+                        max_triplets_per_run: train_cfg.max_triplets_per_run,
+                        max_runtime_ms: train_cfg.max_runtime_ms,
+                        ..Default::default()
+                    },
+                    gnn_input_dim: gnn_cfg.input_dim,
+                    gnn_output_dim: gnn_cfg.output_dim,
+                    gnn_num_layers: gnn_cfg.num_layers,
+                    gnn_attention_heads: gnn_cfg.attention_heads,
+                    gnn_max_nodes: gnn_cfg.max_nodes,
+                    gnn_use_residual: gnn_cfg.use_residual,
+                    gnn_use_layer_norm: gnn_cfg.use_layer_norm,
+                    gnn_activation: gnn_cfg.activation.clone(),
+                    gnn_weight_seed: gnn_cfg.weight_seed,
+                };
+            let at =
+                archon_pipeline::learning::gnn::auto_trainer_runtime::build_and_spawn_auto_trainer(
+                    params,
+                    Arc::clone(db),
+                );
             if at.is_some() {
                 tracing::info!(
                     interval_ms = at_cfg.tick_interval_ms,
@@ -1720,13 +1722,11 @@ pub(crate) async fn run_interactive_session(
     // its triggers (memory accumulation, correction spike) never fire.
     if let Some(ref at) = auto_trainer {
         let at_mem = Arc::clone(at);
-        let mem_cb: Arc<dyn Fn(u64) + Send + Sync> =
-            Arc::new(move |n| at_mem.record_memories(n));
+        let mem_cb: Arc<dyn Fn(u64) + Send + Sync> = Arc::new(move |n| at_mem.record_memories(n));
         agent.set_record_memory_callback(mem_cb);
 
         let at_corr = Arc::clone(at);
-        let corr_cb: Arc<dyn Fn() + Send + Sync> =
-            Arc::new(move || at_corr.record_correction());
+        let corr_cb: Arc<dyn Fn() + Send + Sync> = Arc::new(move || at_corr.record_correction());
         agent.set_record_correction_callback(corr_cb);
     }
 

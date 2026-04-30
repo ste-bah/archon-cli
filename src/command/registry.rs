@@ -1001,8 +1001,7 @@ pub(crate) struct CommandContext {
     /// GNN auto-trainer Arc cloned from `SlashCommandContext::auto_trainer`
     /// at dispatch time. Used by `/learning-status` to display live loop state.
     /// Reference: `archon-pipeline/src/learning/gnn/auto_trainer.rs`.
-    pub(crate) auto_trainer:
-        Option<Arc<archon_pipeline::learning::gnn::auto_trainer::AutoTrainer>>,
+    pub(crate) auto_trainer: Option<Arc<archon_pipeline::learning::gnn::auto_trainer::AutoTrainer>>,
 }
 
 // TASK-AGS-POST-6-TRY-SEND: wraps `tui_tx.try_send` at every handler

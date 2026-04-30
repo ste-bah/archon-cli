@@ -125,7 +125,7 @@ fn clean_mode_identifies_as_archon() {
     );
     assert_eq!(headers.get("x-app").map(String::as_str), Some("archon"));
     // No billing-related headers
-    assert!(headers.get("X-Claude-Code-Session-Id").is_none());
+    assert!(!headers.contains_key("X-Claude-Code-Session-Id"));
 }
 
 // -----------------------------------------------------------------------
