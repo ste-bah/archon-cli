@@ -55,6 +55,7 @@ fn make_descriptor(uri: &str, auth_flavor: AuthFlavor) -> &'static ProviderDescr
         supports: ProviderFeatures::chat_only(),
         headers: HashMap::new(),
         quirks: ProviderQuirks::DEFAULT,
+        is_gap: false,
     };
     Box::leak(Box::new(d))
 }

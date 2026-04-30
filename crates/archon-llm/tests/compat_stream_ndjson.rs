@@ -34,6 +34,7 @@ fn leak_mistral_descriptor(mock: &MockServer) -> &'static ProviderDescriptor {
         headers: HashMap::new(),
         // Mistral quirks set stream_delimiter to MistralNdjson.
         quirks: ProviderQuirks::MISTRAL,
+        is_gap: false,
     };
     Box::leak(Box::new(desc))
 }

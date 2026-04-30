@@ -67,6 +67,7 @@ fn leak_with_mock(
         supports: original.supports,
         headers: HashMap::new(), // drop static headers so matcher stays simple
         quirks: original.quirks,
+        is_gap: false,
     };
     Box::leak(Box::new(cloned))
 }

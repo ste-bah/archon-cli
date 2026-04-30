@@ -56,6 +56,7 @@ fn leak_descriptor(
         supports: features,
         headers: HashMap::new(),
         quirks,
+        is_gap: false,
     };
     Box::leak(Box::new(desc))
 }

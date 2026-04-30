@@ -58,6 +58,7 @@ fn leak_descriptor(id: &str, uri: &str) -> &'static ProviderDescriptor {
         supports: ProviderFeatures::chat_only(),
         headers: HashMap::new(),
         quirks: ProviderQuirks::DEFAULT,
+        is_gap: false,
     };
     Box::leak(Box::new(d))
 }
