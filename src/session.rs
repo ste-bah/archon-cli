@@ -1656,6 +1656,11 @@ pub(crate) async fn run_interactive_session(
     let auto_trainer: Option<Arc<archon_pipeline::learning::gnn::auto_trainer::AutoTrainer>> = {
         let at_cfg = &config.learning.gnn.auto_trainer;
         if !at_cfg.enabled || !config.learning.gnn.enabled {
+            tracing::info!(
+                at_enabled = at_cfg.enabled,
+                gnn_enabled = config.learning.gnn.enabled,
+                "GNN auto-trainer disabled by config"
+            );
             None
         } else if let Some(ref db) = learning_cozo_db {
             let gnn_cfg = &config.learning.gnn;

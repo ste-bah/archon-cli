@@ -290,10 +290,11 @@ max_triplets_per_run = 256
 max_runtime_ms = 300000        # 5 minutes max per training run
 
 # --- GNN background auto-retraining ---
-# OFF by default. Enable to let the GNN retrain itself in the background
-# whenever ANY of the trigger thresholds are met (memories / time / corrections).
+# ON by default. The GNN retrains itself in the background whenever ANY of
+# the trigger thresholds are met (memories / time / corrections).
+# Set to false to disable autonomous retraining (only /learning-status retrain works).
 [learning.gnn.auto_trainer]
-enabled = false                # turn on to enable autonomous retraining
+enabled = true
 min_throttle_ms = 3600000      # 1 hour minimum between runs
 trigger_new_memories = 50      # fire when N new memories accrued
 trigger_elapsed_ms = 21600000  # 6 hours
