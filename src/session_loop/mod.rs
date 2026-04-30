@@ -31,8 +31,10 @@ use crate::command::slash::handle_slash_command;
 use crate::slash_context::SlashCommandContext;
 
 mod mcp_task;
+mod personality_save;
 
 pub(crate) use mcp_task::{McpLifecycleTx, spawn_mcp_lifecycle_task};
+use personality_save::save_personality_snapshot_if_enabled;
 
 /// Run the interactive agent input loop to completion.
 ///
@@ -160,6 +162,23 @@ pub(crate) fn run_session_loop(
         let mut poll_tick = tokio::time::interval(std::time::Duration::from_millis(16));
         poll_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
+        // TASK #244 CONSCIOUSNESS-PERSIST-3: belt-and-braces signal handlers
+        // for off-terminal kills (`kill -INT/-TERM <pid>`). In-TUI Ctrl+C/D
+        // is handled by TASK #243 in the TUI input dispatcher; SIGINT is
+        // suppressed by the terminal driver (ISIG cleared) while raw mode is
+        // on, so these arms only fire pre-raw / post-raw / external kill.
+        #[cfg(unix)]
+        let mut sigterm_stream = match tokio::signal::unix::signal(
+            tokio::signal::unix::SignalKind::terminate(),
+        ) {
+            Ok(s) => Some(s),
+            Err(e) => {
+                tracing::warn!("install SIGTERM handler failed: {e}");
+                None
+            }
+        };
+        let shutdown_in_progress = std::sync::atomic::AtomicBool::new(false);
+
         // BEGIN INPUT_HANDLER — arch-lint.sh scopes D1 grep to this region
         loop {
             let input = tokio::select! {
@@ -213,6 +232,35 @@ pub(crate) fn run_session_loop(
                         Some(input) => input,
                         None => break,
                     }
+                }
+                _ = tokio::signal::ctrl_c() => {
+                    // TASK #244: external SIGINT (kill -INT). Synthesize "/exit"
+                    // so the existing handler runs the snapshot save + SessionEnd
+                    // hook + Goodbye/Done events. AtomicBool reentrancy guard
+                    // prevents double-save if user mashes Ctrl+C.
+                    if shutdown_in_progress.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                        continue;
+                    }
+                    tracing::info!("SIGINT received; routing through /exit");
+                    "/exit".to_string()
+                }
+                _ = async {
+                    #[cfg(unix)]
+                    {
+                        if let Some(s) = sigterm_stream.as_mut() {
+                            s.recv().await;
+                        } else {
+                            std::future::pending::<()>().await
+                        }
+                    }
+                    #[cfg(not(unix))]
+                    { std::future::pending::<()>().await }
+                } => {
+                    if shutdown_in_progress.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                        continue;
+                    }
+                    tracing::info!("SIGTERM received; routing through /exit");
+                    "/exit".to_string()
                 }
             };
             // Session picker selection — load messages and restore conversation
@@ -463,42 +511,18 @@ pub(crate) fn run_session_loop(
             if !slash_commands_disabled && input.starts_with('/') {
                 // GAP 1: /compact needs direct access to agent.compact()
                 if matches!(input.trim(), "/exit" | "/quit" | "/q") {
-                    // CLI-416: Save personality snapshot before session ends.
-                    if persist_personality {
-                        let iv_arc = agent.lock().await.inner_voice().cloned();
-                        if let Some(iv_arc) = iv_arc {
-                            let iv = iv_arc.lock().await;
-                            let stats = iv.to_session_stats(
-                                session_start_confidence,
-                                session_start_instant.elapsed().as_secs(),
-                            );
-                            let snapshot_iv = iv.on_compaction();
-                            drop(iv);
-                            let engine = archon_consciousness::rules::RulesEngine::new(
-                                cmd_ctx.memory.as_ref(),
-                            );
-                            let rule_scores = engine.export_scores().unwrap_or_default();
-                            let snap = archon_consciousness::persistence::PersonalitySnapshot {
-                                session_id: cmd_ctx.session_id.clone(),
-                                timestamp: chrono::Utc::now(),
-                                inner_voice: snapshot_iv,
-                                rule_scores,
-                                stats,
-                            };
-                            if let Err(e) = archon_consciousness::persistence::save_snapshot(
-                                cmd_ctx.memory.as_ref(),
-                                &snap,
-                            ) {
-                                tracing::warn!("personality: failed to save snapshot: {e}");
-                            }
-                            if let Err(e) = archon_consciousness::persistence::prune_snapshots(
-                                cmd_ctx.memory.as_ref(),
-                                personality_history_limit,
-                            ) {
-                                tracing::warn!("personality: failed to prune snapshots: {e}");
-                            }
-                        }
-                    }
+                    // CLI-416 / TASK #242: save personality snapshot before exit.
+                    let iv_arc = agent.lock().await.inner_voice().cloned();
+                    save_personality_snapshot_if_enabled(
+                        iv_arc,
+                        cmd_ctx.memory.as_ref(),
+                        &cmd_ctx.session_id,
+                        persist_personality,
+                        personality_history_limit,
+                        session_start_confidence,
+                        session_start_instant,
+                    )
+                    .await;
 
                     // Fire SessionEnd hook and close the TUI
                     {
@@ -535,42 +559,18 @@ pub(crate) fn run_session_loop(
 
                 // /clear needs direct access to agent.clear_conversation()
                 if input.trim() == "/clear" {
-                    // CLI-416: Save personality snapshot before clearing session.
-                    if persist_personality {
-                        let iv_arc = agent.lock().await.inner_voice().cloned();
-                        if let Some(iv_arc) = iv_arc {
-                            let iv = iv_arc.lock().await;
-                            let stats = iv.to_session_stats(
-                                session_start_confidence,
-                                session_start_instant.elapsed().as_secs(),
-                            );
-                            let snapshot_iv = iv.on_compaction();
-                            drop(iv);
-                            let engine = archon_consciousness::rules::RulesEngine::new(
-                                cmd_ctx.memory.as_ref(),
-                            );
-                            let rule_scores = engine.export_scores().unwrap_or_default();
-                            let snap = archon_consciousness::persistence::PersonalitySnapshot {
-                                session_id: cmd_ctx.session_id.clone(),
-                                timestamp: chrono::Utc::now(),
-                                inner_voice: snapshot_iv,
-                                rule_scores,
-                                stats,
-                            };
-                            if let Err(e) = archon_consciousness::persistence::save_snapshot(
-                                cmd_ctx.memory.as_ref(),
-                                &snap,
-                            ) {
-                                tracing::warn!("personality: failed to save snapshot: {e}");
-                            }
-                            if let Err(e) = archon_consciousness::persistence::prune_snapshots(
-                                cmd_ctx.memory.as_ref(),
-                                personality_history_limit,
-                            ) {
-                                tracing::warn!("personality: failed to prune snapshots: {e}");
-                            }
-                        }
-                    }
+                    // CLI-416 / TASK #242: save personality snapshot before clearing.
+                    let iv_arc = agent.lock().await.inner_voice().cloned();
+                    save_personality_snapshot_if_enabled(
+                        iv_arc,
+                        cmd_ctx.memory.as_ref(),
+                        &cmd_ctx.session_id,
+                        persist_personality,
+                        personality_history_limit,
+                        session_start_confidence,
+                        session_start_instant,
+                    )
+                    .await;
 
                     // Fire SessionEnd hook before clearing
                     {

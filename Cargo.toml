@@ -8,7 +8,7 @@ publish = false
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.1.30"
+version = "0.1.31"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT"
@@ -160,6 +160,8 @@ globset.workspace = true
 strsim.workspace = true
 thiserror.workspace = true
 cozo.workspace = true
+# TASK #246: panic_save terminal restore (Show + LeaveAlternateScreen + disable_raw_mode)
+crossterm.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

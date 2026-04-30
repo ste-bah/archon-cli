@@ -2238,6 +2238,38 @@ pub(crate) async fn run_interactive_session(
     } else {
         0.7
     };
+
+    // TASK #246 CONSCIOUSNESS-PERSIST-5: install panic hook + InnerVoice mirror.
+    //
+    // Site rationale: must run AFTER both `session_start_*` are bound and
+    // BEFORE `agent` moves into the `tokio::spawn` below (line ~2253).
+    // Captures: cmd_ctx.memory, cmd_ctx.session_id, current InnerVoice,
+    // session_start_*, personality_history_limit. The mirror Arc is
+    // wired into the agent so every InnerVoice mutation updates it,
+    // keeping the panic-hook view of state in lock-step with the
+    // tokio-mutex view (TASK #245).
+    if let Some(iv_arc) = agent.inner_voice().cloned() {
+        let initial_iv = iv_arc.lock().await.clone();
+        let mirror = crate::panic_save::install(
+            Arc::clone(&cmd_ctx.memory),
+            initial_iv,
+            cmd_ctx.session_id.clone(),
+            session_start_confidence,
+            session_start_instant,
+            personality_history_limit,
+        );
+        let mirror_for_cb = Arc::clone(&mirror);
+        let cb: Arc<dyn Fn(&archon_consciousness::inner_voice::InnerVoice) + Send + Sync> =
+            Arc::new(move |new_state| {
+                let snapshot = new_state.clone();
+                match mirror_for_cb.lock() {
+                    Ok(mut m) => *m = snapshot,
+                    Err(p) => *p.into_inner() = snapshot,
+                }
+            });
+        agent.set_inner_voice_change_callback(cb);
+    }
+
     // Clone api_url for the btw_tx background task (line ~1683); the spawn below consumes it.
     let api_url_for_btw = api_url.clone();
     // TASK-TUI-107: old `handle.await`-prior serialization slot deleted.

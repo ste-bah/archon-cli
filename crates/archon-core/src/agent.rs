@@ -368,6 +368,13 @@ pub struct Agent {
     /// GNN auto-trainer hook: invoked after a successful correction record.
     /// Same injection rationale as `record_memory_callback`.
     record_correction_callback: Option<Arc<dyn Fn() + Send + Sync>>,
+    /// Personality-mirror hook: invoked with the post-mutation `&InnerVoice`
+    /// after every write site (per-tool-call, per-turn-complete, user
+    /// correction). Wired by the binary at startup so a sync-Mutex mirror
+    /// stays in lock-step with the async-Mutex inner_voice. The mirror is
+    /// read by the panic hook (which has no tokio runtime to await on the
+    /// async Mutex). Reference: `src/panic_save.rs` and TASK #245.
+    inner_voice_change_callback: Option<Arc<dyn Fn(&InnerVoice) + Send + Sync>>,
 }
 
 impl Agent {
@@ -424,6 +431,9 @@ impl Agent {
             // methods get called from agent's memory + correction code paths.
             record_memory_callback: None,
             record_correction_callback: None,
+            // TASK #245: wired by the binary at startup; default None makes
+            // tests and non-interactive paths no-op.
+            inner_voice_change_callback: None,
         }
     }
 
@@ -621,6 +631,20 @@ impl Agent {
     /// Called from `detect_and_record_correction` after a successful record.
     pub fn set_record_correction_callback(&mut self, cb: Arc<dyn Fn() + Send + Sync>) {
         self.record_correction_callback = Some(cb);
+    }
+
+    /// Wire the personality-mirror update hook (TASK #245).
+    ///
+    /// Called from every InnerVoice write site (per-tool, per-turn, user
+    /// correction) immediately after mutation, while still holding the
+    /// async-Mutex guard. The binary captures a sync-Mutex mirror of
+    /// InnerVoice so a panic hook (which has no tokio runtime) can read
+    /// the latest state to build a snapshot.
+    pub fn set_inner_voice_change_callback(
+        &mut self,
+        cb: Arc<dyn Fn(&InnerVoice) + Send + Sync>,
+    ) {
+        self.inner_voice_change_callback = Some(cb);
     }
 
     /// Current turn number (for AutoCapture indexing).
@@ -1948,6 +1972,10 @@ impl Agent {
                         } else {
                             iv.on_tool_success(&pre.tool_name);
                         }
+                        // TASK #245: keep panic-mirror in lock-step.
+                        if let Some(ref cb) = self.inner_voice_change_callback {
+                            cb(&iv);
+                        }
                     }
 
                     // Wire 3: Track plan step progress on Write/Edit completions.
@@ -2031,7 +2059,12 @@ impl Agent {
 
             // Apply turn completion to inner voice (energy decay, turn counter).
             if let Some(iv) = &self.inner_voice {
-                iv.lock().await.on_turn_complete();
+                let mut iv_guard = iv.lock().await;
+                iv_guard.on_turn_complete();
+                // TASK #245: keep panic-mirror in lock-step.
+                if let Some(ref cb) = self.inner_voice_change_callback {
+                    cb(&iv_guard);
+                }
             }
 
             self.send_event(AgentEvent::TurnComplete {
@@ -2608,6 +2641,11 @@ impl Agent {
         if let Some(ref iv) = self.inner_voice {
             if let Ok(mut iv) = iv.try_lock() {
                 iv.on_user_correction();
+                // TASK #245: keep panic-mirror in lock-step (inside the same
+                // try_lock guard, so mirror cannot drift relative to actual).
+                if let Some(ref cb) = self.inner_voice_change_callback {
+                    cb(&iv);
+                }
             }
         }
 

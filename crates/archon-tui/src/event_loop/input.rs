@@ -448,7 +448,15 @@ pub(super) async fn handle_key_event(
             match crate::input::handle_key(app, key, keymap) {
                 crate::input::KeyResult::Nothing => {}
                 crate::input::KeyResult::Quit => {
-                    app.should_quit = true;
+                    // TASK #243 CONSCIOUSNESS-PERSIST-2: route Ctrl+C / Ctrl+D / `q`
+                    // through the /exit slash command so the personality-snapshot
+                    // save in `session_loop::run_session_loop` runs before TUI
+                    // exit. try_send (not .await) to avoid deadlocking when the
+                    // bounded(16) input channel is full — fall back to immediate
+                    // should_quit so Ctrl+C is always graceful.
+                    if input_tx.try_send("/exit".to_string()).is_err() {
+                        app.should_quit = true;
+                    }
                 }
                 crate::input::KeyResult::SendInput(text) => {
                     let _ = input_tx.send(text).await;

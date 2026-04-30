@@ -1,6 +1,7 @@
 mod agent_handle;
 pub(crate) mod cli_args;
 mod command;
+mod panic_save;
 mod runtime;
 pub(crate) mod session;
 pub(crate) mod session_loop;
