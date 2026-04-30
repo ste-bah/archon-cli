@@ -235,13 +235,12 @@ Agents like `frontend-implementer`, `config-implementer`, `service-implementer` 
 
 archon-cli has LEANN built in (`archon-leann` crate). LEANN tools are exposed to the agent and via slash commands. **No external LEANN service** — the built-in tools are canonical.
 
-**Tools:**
-- `leann_search` — semantic code search (HNSW over embeddings)
-- `leann_find_similar` — find similar code chunks
+**Tools (registered conditionally when the LEANN index is available):**
+- `LeannSearch` — semantic code search (HNSW over embeddings)
+- `LeannFindSimilar` — find similar code chunks
 - `CartographerScan` — index a codebase for symbols (Rust, Python, TS, JS, Go)
 
-**Slash commands:**
-- `/cartographer-scan` (or via CartographerScan tool) — re-index after major changes
+**Re-indexing:** invoke the `CartographerScan` tool to re-index after major changes. archon-cli automatically registers LEANN tools at session startup if the index initializes successfully.
 
 **Usage rules:**
 - After completing a coding task that wrote 20+ files, the index gets rebuilt automatically on next query
