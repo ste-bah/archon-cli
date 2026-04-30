@@ -134,10 +134,10 @@ archon-cli's session/auto-resume picks up where the previous session left off, b
 
 **THE AGENT MUST:**
 - ✅ Use the `Agent` tool to spawn pipeline agents ONLY
-- ✅ Start with `Agent("task-analyzer", ...)` as the first action
+- ✅ Start with `Agent("contract-agent", ...)` as the first action (the first agent in `crates/archon-pipeline/src/coding/agents.rs`)
 - ✅ Execute all agents through the pipeline runner's dispatch loop
 - ✅ Wait for each phase to complete before spawning the next
-- ✅ Only allow implementation agents (Phase 4+) to write files
+- ✅ Only allow Phase 4 (Implementation), Phase 5 (Testing), and Phase 6 (Refinement) agents to write files. Phases 1 (Understanding), 2 (Design), and 3 (WiringPlan) are read-only per `coding/agents.rs::ToolAccess::ReadOnly`
 - ✅ **RUN THE FULL PIPELINE WITHOUT STOPPING** — no status checks, no "should I continue?", no pausing between batches
 - ✅ For batch mode, run ALL tasks back-to-back without asking between tasks
 
@@ -145,8 +145,8 @@ archon-cli's session/auto-resume picks up where the previous session left off, b
 
 ```
 AFTER /archon-code is detected:
-1. The agent's FIRST tool call MUST be Agent("task-analyzer", ...)
-2. Write/Edit are NOT permitted until Phase 4 agents are running
+1. The agent's FIRST tool call MUST be Agent("contract-agent", ...)
+2. Write/Edit are NOT permitted until Phase 4 (Implementation) agents are running
 3. If the agent is about to write code directly -> STOP
 4. Ask: "I was about to bypass the pipeline. Should I restart properly?"
 ```
@@ -159,20 +159,20 @@ If the agent finds itself doing ANY of these after /archon-code:
 - Using Write tool before spawning 7+ Agent tool calls
 
 **IMMEDIATELY STOP AND SAY:**
-> "PIPELINE VIOLATION: I was about to write code directly instead of using the 50-agent pipeline. Let me restart correctly with Agent('task-analyzer', ...)."
+> "PIPELINE VIOLATION: I was about to write code directly instead of using the 50-agent pipeline. Let me restart correctly with Agent('contract-agent', ...)."
 
 ### 📋 CORRECT /archon-code FLOW
 
 ```
 1. /archon-code invoked
-2. Agent("task-analyzer", ...) <- MUST BE FIRST
+2. Agent("contract-agent", ...) <- MUST BE FIRST
 3. Agent("requirement-extractor", ...)
 4. Agent("requirement-prioritizer", ...)
 5. ... (continue through all 50 agents across 6 phases)
-6. ONLY implementation agents write files
+6. ONLY Phase 4-6 agents write files
 ```
 
-The 50-agent coding pipeline is documented at `docs/architecture/pipelines.md` and `docs/cookbook/god-code-pipeline.md`.
+The 50 agent keys, phase membership, and tool-access levels are defined in `crates/archon-pipeline/src/coding/agents.rs::AGENTS`. The 50-agent coding pipeline is documented at `docs/architecture/pipelines.md` and `docs/cookbook/god-code-pipeline.md`.
 
 ### 🚨 PIPELINE AGENT INTEGRITY — NO STUBS, NO BATCHING, NO SHORTCUTS
 
@@ -299,25 +299,26 @@ See `docs/integrations/mcp-servers.md` for transport details and reconnection be
 - Modules: < 100 lines per impl, single concept
 - ALL user-facing `.md` files go in `./docs/` (NEVER root, except the convention files above)
 
-The Gate 2 auto-check at `scripts/dev-flow-gate.sh` enforces the 1500-line cap. Files over 1500 must be split before the gate can pass.
+The file-size guard at `scripts/check-file-sizes.sh` (Step 1 of `scripts/ci-gate.sh`) enforces the 1500-line cap via a ratchet allowlist. Files over 1500 must be split before the guard can pass.
 
 ---
 
 ## 🔑 KEY AGENTS
 
-When delegating work, prefer these built-in agent roles:
+archon-cli has no built-in registry of general-purpose flat-file agents (`coder`, `code-analyzer`, `tester`, etc.) — those are root-archon Claude Code subagent role names. archon-cli's actual agent inventory comes from two sources:
 
-| Agent | Use |
-|---|---|
-| `coder` | Implementation (modules, functions, types) |
-| `code-analyzer` | Architecture analysis, refactoring proposals |
-| `tester` | Integration tests, end-to-end scenarios |
-| `perf-analyzer` | Profiling, bottlenecks, allocation patterns |
-| `system-architect` | High-level architecture, data flow |
-| `reviewer` | Code review, verification, regression hunting |
-| `sherlock-holmes` | Forensic adversarial review (Gate 3 / 6) |
+1. **The 50-agent coding pipeline** in `crates/archon-pipeline/src/coding/agents.rs::AGENTS`. Keys include `contract-agent`, `requirement-extractor`, `requirement-prioritizer`, `code-generator`, `service-implementer`, `frontend-implementer`, `config-implementer`, `security-tester`, `coverage-analyzer`, `quality-gate`, `sign-off-approver`, etc. (50 total across 6 phases).
+2. **The 46-agent research pipeline** in `crates/archon-pipeline/src/research/agents.rs::RESEARCH_AGENTS`. Keys include `self-ask-decomposer`, `literature-mapper`, `gap-hunter`, `evidence-synthesizer`, `dissertation-architect`, etc.
 
-For domain-specific roles (security, frontend, data layer, etc.), see the full agent registry: `/agent list` or `archon agent-list`.
+These are pipeline agents — they run as part of `/archon-code` and `/archon-research`, not standalone via `/run-agent` (use the slash-command pipelines instead).
+
+**To delegate ad-hoc work via `/run-agent`**, drop a flat-file YAML-frontmatter `.md` agent into `<workdir>/.archon/agents/` or `~/.config/archon/agents/`. Then it becomes available via `/run-agent <name> <task>`. See `docs/development/adding-an-agent.md`.
+
+**Discovery commands:**
+- `/agent list` — list all discovered agents (pipeline + flat-file + plugins)
+- `archon agent-list` — same, from CLI
+- `archon agent-search --tag review` — filter by tag
+- `archon agent-info <name>` — show agent metadata
 
 ---
 
@@ -377,31 +378,45 @@ This recovers from the rustc ICE on `petgraph::graphmap::NeighborsDirected::next
 ## 🧠 MEMORY REMINDER
 **ALL memory uses `memory_store` / `memory_recall` — archon-cli's built-in CozoDB graph is the ONLY memory system. NEVER write to MEMORY.md or markdown files. NEVER call external memory services.**
 
-## DEV FLOW ENFORCEMENT — ABSOLUTE LAW
+## CI GATES — `scripts/ci-gate.sh`
 
-**When executing tasks from `project-tasks/`, EVERY task MUST complete ALL 6 gates IN ORDER. No exceptions. No shortcuts. "Going fast" does NOT mean skipping gates.**
+archon-cli's CI flow is technical (compile/lint/test) — NOT root archon's narrative 6-gate Sherlock-review protocol. The single source of truth is `scripts/ci-gate.sh` which runs every guard in order and fails fast on the first failure. Any GitHub Actions / GitLab / local hook should call this script rather than replicate its steps.
+
+**The 7 ci-gate steps (in order):**
 
 ```
-GATE 1: tests-written-first       — Test file exists BEFORE implementation
-GATE 2: implementation-complete    — Code compiles, no errors. File-size auto-check (< 1500 lines)
-GATE 3: sherlock-code-review       — Sherlock adversarial review of implementation (MUST contain APPROVED/PASS)
-GATE 4: tests-passing              — All tests pass (include count)
-GATE 5: live-smoke-test            — Feature actually invoked end-to-end (fraud detection blocks fake evidence)
-GATE 6: sherlock-final-review      — Sherlock final review: integration + wiring verified (MUST contain APPROVED/PASS)
+Step 1 — FileSizeGuard           — scripts/check-file-sizes.sh, ratchet against allowlist
+Step 2 — BannedImports           — scripts/check-banned-imports.sh, allowlist-driven import policing
+Step 3 — cargo fmt --check       — workspace-wide format check
+Step 4 — cargo clippy            — --all-targets --jobs 1 -- -D warnings
+Step 5 — cargo test              — --workspace --jobs 1 -- --test-threads=2
+Step 6 — baseline test-list diff — vs tests/fixtures/baseline/cargo_test_list.txt
+Step 7 — cargo bench --no-run    — archon-bench compile-only check
 ```
 
-**Enforcement mechanism (HARDENED — cannot be bypassed):**
-- Run `scripts/dev-flow-pass-gate.sh TASK-ID gate-name "evidence"` to pass each gate
-- Run `scripts/dev-flow-gate.sh TASK-ID` to verify all gates before marking complete
-- **PreToolUse hook on TaskUpdate BLOCKS marking any TASK-*-NNN as completed without all 6 gates passed**
-- Gate 3 + 6: Evidence MUST contain Sherlock verdict (APPROVED / PASS / INNOCENT). REJECTED = blocked.
-- Gate 5: Fraud detection blocks "tests pass", "library crate", "not yet wired" etc. Requires real execution proof.
-- **The hook cannot be bypassed by "forgetting" to call the gate scripts — no gate files = BLOCKED.**
-- A task with missing gates is NOT DONE regardless of what the agent thinks
+**WSL2 thread policy** is enforced in ci-gate.sh: every `cargo test` runs with `--test-threads=2`. Reason: REQ-FOR-D1/D2/D3 introduce shared global state that deadlocks under unlimited parallelism on WSL2. Tests needing stricter isolation use `#[serial_test::serial]` individually.
 
-**VIOLATION = immediate stop and report. The agent does NOT get to decide which gates matter.**
+**TUI-specific gates** (run as part of TUI workflows, separate from ci-gate.sh):
+- `scripts/tui-file-size-gate.sh` — ratchet-style file-size enforcement for `crates/archon-tui/`
+- `scripts/tui-banned-patterns-gate.sh` — banned-pattern detection in TUI sources
+- `scripts/check-tui-duplication.sh` — duplication detection
+- `scripts/check-tui-coverage.sh` — coverage tracking
+- `scripts/check-tui-module-cycles.sh` — module dependency cycle detection
+- `scripts/check-tui-complexity.sh` — complexity ratchet
 
-Full dev-flow documentation: `docs/development/dev-flow-gates.md`.
+**Other guards:**
+- `scripts/check-preserve-invariants.sh` — preservation invariant tests for migration phases
+- `scripts/check-banned-imports.sh` — workspace-wide banned-import policing
+
+**Running CI locally:**
+```bash
+./scripts/ci-gate.sh                # full CI
+./scripts/ci-gate.sh --skip-bench   # skip step 7 (faster)
+```
+
+**Reference:** TASK-AGS-001 through TASK-AGS-007 in `scripts/ci-gate.README.md`.
+
+> **Note:** The 6-gate Sherlock-narrative protocol with `scripts/dev-flow-gate.sh` and `scripts/dev-flow-pass-gate.sh` lives in **root archon** (`/home/unixdude/Archon-projects/archon/scripts/`), not archon-cli. Root archon's protocol governs `project-tasks/TASK-*-NNN` task tracking with PreToolUse hooks blocking incomplete TaskUpdate. That protocol does NOT apply to archon-cli — archon-cli has no `project-tasks/TASK-*-NNN` directory and no equivalent hook. When the user is operating archon-cli (this codebase), use the technical ci-gate.sh flow above.
 
 ## Cargo discipline (WSL2)
 
@@ -441,7 +456,7 @@ ABSOLUTE RULE — when orchestrating subagent ticket execution (any executor —
 11. **NEVER spawn parallel implementation agents — sequential ONLY.** Read-only agents (research, analysis) can run in parallel.
 12. **After compaction: recall behavioural rules from the memory graph before proceeding.**
 13. **`/run-agent` and `/agent run` do NOT require confirmation — the command IS the intent.**
-14. **EVERY task from `project-tasks/` MUST pass all 6 dev flow gates. Sherlock review is NOT optional.**
+14. **Before opening a PR or pushing to main: run `scripts/ci-gate.sh` locally and confirm exit 0.** No exceptions.
 15. **"User said go fast" does NOT mean "skip quality gates." It means "don't stop to ask between tasks."**
 16. **Cargo commands on WSL2 use `-j1` always — see "Cargo discipline" above.**
 17. **No `Co-Authored-By:` lines in commit messages.**

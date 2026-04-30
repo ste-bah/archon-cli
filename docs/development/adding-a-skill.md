@@ -96,16 +96,19 @@ Update [docs/reference/skills.md](../reference/skills.md) — add to the highlig
 
 If the skill name happens to conflict with a primary command, document the precedence (primary wins; skill is fallback).
 
-## Step 5: dev flow gates
+## Step 5: CI gate verification
+
+Run locally before pushing:
 
 ```bash
-scripts/dev-flow-pass-gate.sh TASK-ID tests-written-first      "tests at expanded.rs:540-560"
-scripts/dev-flow-pass-gate.sh TASK-ID implementation-complete  "cargo check -p archon-core -j1: PASS"
-scripts/dev-flow-pass-gate.sh TASK-ID sherlock-code-review     "Sherlock APPROVED"
-scripts/dev-flow-pass-gate.sh TASK-ID tests-passing            "cargo test -p archon-core skills: 5 passed (including default_registry_includes_my_skill)"
-scripts/dev-flow-pass-gate.sh TASK-ID live-smoke-test          "TUI: typed /my-skill, observed expected behavior"
-scripts/dev-flow-pass-gate.sh TASK-ID sherlock-final-review    "Sherlock APPROVED — registered in default_registry, autocomplete picks it up"
+cargo check -p archon-core -j1
+cargo test -p archon-core skills -- --test-threads=2     # includes default_registry_includes_my_skill
+cargo fmt --all -- --check
+cargo clippy --workspace -- -D warnings
+./scripts/ci-gate.sh                  # full CI gate
 ```
+
+Plus a live smoke test in the TUI: type `/my-skill` and confirm autocomplete picks it up + the skill executes end-to-end.
 
 ## Skill vs primary command
 

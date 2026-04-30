@@ -10,10 +10,10 @@ Semver. Pre-1.0 means breaking changes can land in minor versions; archon-cli is
 
 ### 1. Implement and verify
 
-Pass all 6 [dev flow gates](dev-flow-gates.md):
+Pass [CI gates](dev-flow-gates.md):
 
 ```bash
-scripts/dev-flow-gate.sh TASK-ID
+./scripts/ci-gate.sh
 ```
 
 ### 2. Bump the workspace version

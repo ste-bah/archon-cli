@@ -117,16 +117,19 @@ Update [docs/reference/tools.md](../reference/tools.md) — add the tool to the 
 
 If the tool is risky / variable, update the permission examples in [docs/reference/permissions.md](../reference/permissions.md) if relevant.
 
-## Step 7: dev flow gates
+## Step 7: CI gate verification
+
+Run locally before pushing:
 
 ```bash
-scripts/dev-flow-pass-gate.sh TASK-ID tests-written-first  "tests at crates/archon-tools/src/my_tool.rs:50-65"
-scripts/dev-flow-pass-gate.sh TASK-ID implementation-complete  "cargo check -p archon-tools -j1: PASS"
-scripts/dev-flow-pass-gate.sh TASK-ID sherlock-code-review     "Sherlock APPROVED"
-scripts/dev-flow-pass-gate.sh TASK-ID tests-passing            "cargo test -p archon-tools my_tool: 3 passed"
-scripts/dev-flow-pass-gate.sh TASK-ID live-smoke-test          "TUI invocation: agent called MyTool, returned expected output"
-scripts/dev-flow-pass-gate.sh TASK-ID sherlock-final-review    "Sherlock APPROVED — wired in registry, schema valid"
+cargo check -p archon-tools -j1
+cargo test -p archon-tools my_tool -- --test-threads=2
+cargo fmt --all -- --check
+cargo clippy --workspace -- -D warnings
+./scripts/ci-gate.sh                  # full CI gate
 ```
+
+Plus a live smoke test in the TUI: invoke your tool from an agent context and confirm it behaves end-to-end (don't trust unit tests alone — see `docs/development/dev-flow-gates.md` for the cold-read audit pattern).
 
 ## Common patterns
 

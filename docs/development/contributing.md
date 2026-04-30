@@ -5,7 +5,7 @@
 1. Fork the repo on GitHub
 2. Clone your fork, branch from `main`
 3. Make changes; add tests
-4. Run the dev flow gates locally (`scripts/dev-flow-gate.sh`)
+4. Run the CI gate locally (`scripts/ci-gate.sh`)
 5. Open a PR
 
 ## Dev environment
@@ -31,25 +31,16 @@
 - Mock external deps (network, file system, time)
 - Integration tests for cross-crate behavior in `crates/<crate>/tests/`
 
-## Dev flow gates
+## CI gates
 
-Every task must pass the 6 gates:
+archon-cli's CI flow is `scripts/ci-gate.sh` — 7 technical gates (file-size, banned-imports, fmt, clippy, test, baseline diff, bench compile-check). Run locally before pushing:
 
-| Gate | Check |
-|---|---|
-| 1. tests-written-first | Test file exists BEFORE implementation |
-| 2. implementation-complete | Code compiles, no errors |
-| 3. sherlock-code-review | Sherlock adversarial review approves |
-| 4. tests-passing | All tests pass (with count) |
-| 5. live-smoke-test | Feature actually invoked end-to-end |
-| 6. sherlock-final-review | Sherlock final review: integration + wiring verified |
-
-Run locally:
 ```bash
-scripts/dev-flow-gate.sh TASK-ID
+./scripts/ci-gate.sh                # full
+./scripts/ci-gate.sh --skip-bench   # faster iteration
 ```
 
-See [Dev flow gates](dev-flow-gates.md) for details.
+See [CI gates](dev-flow-gates.md) for the full step list and rationale.
 
 ## Cargo discipline
 

@@ -10,7 +10,7 @@ Triggered by `/archon-code` (or `archon pipeline code <task>`). Decomposes a cod
 
 | Phase | Agents | Purpose |
 |---|---|---|
-| 1. Specification | task-analyzer, requirement-extractor, requirement-prioritizer, scope-definer, feasibility-analyzer | Parse the task, extract requirements, define scope |
+| 1. Understanding | contract-agent, requirement-extractor, requirement-prioritizer, scope-definer, context-gatherer, feasibility-analyzer, pattern-explorer, technology-scout | Parse the task, extract requirements, define scope, explore codebase |
 | 2. Exploration | context-gatherer, codebase-analyzer, pattern-explorer, technology-scout, ambiguity-clarifier | Explore the codebase, identify patterns, clarify unknowns |
 | 3. Architecture | system-designer, component-designer, interface-designer, data-architect, security-architect, integration-architect, performance-architect | Design system architecture, components, interfaces |
 | 4. Implementation | code-generator, unit-implementer, service-implementer, api-implementer, frontend-implementer, data-layer-implementer, type-implementer, error-handler-implementer, logger-implementer, config-implementer, integration-tester, dependency-manager | Generate code, types, error handling |
@@ -21,11 +21,15 @@ Triggered by `/archon-code` (or `archon pipeline code <task>`). Decomposes a cod
 
 ### Agent definition system
 
-Each pipeline agent is defined in two places:
-1. **Markdown front-matter** at `agents/coding/<name>.md` with description, tools, model, capabilities
-2. **TOML manifest** at `manifests/<name>.toml` with versioning, dependencies, permission requirements
+Pipeline agents are defined as **Rust constants** in:
+- `crates/archon-pipeline/src/coding/agents.rs::AGENTS` — 50 coding agents
+- `crates/archon-pipeline/src/research/agents.rs::RESEARCH_AGENTS` — 46 research agents
 
-The agent loader (`crates/archon-core/src/agents/loader.rs`) parses both, validates consistency, and registers the agent into the runtime registry. Flat-file YAML-frontmatter agents work the same way (added in v0.1.10).
+Each entry has fields: `key`, `phase`, `tool_access` (`ReadOnly` / `Full`), `depends_on` (predecessor keys), and `prompt_source_path` (path to a markdown file containing the agent's prompt template, e.g. `.archon/agents/coding-pipeline/<key>.md`).
+
+The agent loader at `crates/archon-pipeline/src/agent_loader.rs` reads the prompt source files and combines them with the Rust struct to build the runtime agent definitions.
+
+Flat-file YAML-frontmatter agents (added in v0.1.10) live separately at `<workdir>/.archon/agents/` or `~/.config/archon/agents/` and are loaded by `crates/archon-core/src/agents/loader.rs::AgentRegistry::load_with_user_home`. Those are user-extensible and invoked via `/run-agent <name>`, NOT part of the pipeline.
 
 ### Layered context (L0-L3)
 

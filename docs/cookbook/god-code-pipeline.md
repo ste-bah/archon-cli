@@ -30,9 +30,9 @@ archon pipeline code "..." --dry-run
 
 The pipeline runs 6 phases sequentially. Each phase has reviewers that gate progression to the next.
 
-### Phase 1: Specification (5 agents)
+### Phase 1: Understanding (8 agents)
 
-`task-analyzer` parses your input → `requirement-extractor` pulls out functional/non-functional requirements → `requirement-prioritizer` MoSCoW-orders them → `scope-definer` sets boundaries → `feasibility-analyzer` validates technical feasibility.
+`contract-agent` parses the input contract → `requirement-extractor` pulls out functional/non-functional requirements → `requirement-prioritizer` MoSCoW-orders them → `scope-definer` sets boundaries → `context-gatherer` reads existing code → `feasibility-analyzer` validates technical feasibility → `pattern-explorer` identifies relevant patterns → `technology-scout` evaluates external solutions.
 
 Output: `specification.json` with structured requirements, scope, feasibility verdict.
 
@@ -119,18 +119,9 @@ A project-local agent definition takes precedence over the built-in.
 
 ## Dev flow gates (separate concept)
 
-Don't confuse the pipeline's 5 deterministic gates with the `dev-flow` gates run by `scripts/dev-flow-gate.sh`. The latter is a project-internal CI/build flow:
+Don't confuse the pipeline's deterministic gates (between phases) with archon-cli's CI gates (`scripts/ci-gate.sh`). The pipeline gates govern phase transitions during a `/archon-code` run; the CI gates govern code quality before merge. Different concerns.
 
-| Gate | Check |
-|---|---|
-| 1. tests-written-first | Test file exists BEFORE implementation |
-| 2. implementation-complete | Code compiles, no errors |
-| 3. sherlock-code-review | Sherlock adversarial review of implementation |
-| 4. tests-passing | All tests pass (include count) |
-| 5. live-smoke-test | Feature actually invoked end-to-end |
-| 6. sherlock-final-review | Sherlock final review: integration + wiring verified |
-
-See [Dev flow gates](../development/dev-flow-gates.md) for the project-internal protocol.
+See [CI gates](../development/dev-flow-gates.md) for the technical CI flow (file-size, banned-imports, fmt, clippy, test, baseline diff, bench compile-check).
 
 ## See also
 
