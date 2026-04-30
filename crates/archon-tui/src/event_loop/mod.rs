@@ -228,6 +228,11 @@ where
 
         // Check for agent events (non-blocking)
         while let Ok(tui_event) = event_rx.try_recv() {
+            // TASK #218 TUI-EVENT-BACKPRESSURE-MONITORING: count drains for
+            // observability + stall detection. Sender side is uninstrumented
+            // (would require wrapping ~100 callsites); this drain counter +
+            // `warn_if_drain_stalled` give operators rate-of-progress signals.
+            crate::observability::record_tui_event_drain();
             tui_events::handle_tui_event(&mut app, tui_event, &input_tx).await;
         }
 

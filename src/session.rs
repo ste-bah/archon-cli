@@ -1446,6 +1446,19 @@ pub(crate) async fn run_interactive_session(
     // TUI-EVENT-BACKPRESSURE-MONITORING will add runtime channel-depth
     // metrics via the existing ChannelMetrics infra (OBS-901).
     let (tui_event_tx, tui_event_rx) = tokio::sync::mpsc::unbounded_channel::<TuiEvent>();
+
+    // TASK #218 TUI-EVENT-BACKPRESSURE-MONITORING: spawn a periodic stall
+    // detector. Drain counter + last-drain timestamp updated at the
+    // event_rx.try_recv() site in archon-tui::event_loop. If no drain in
+    // > 10s while the session is alive, emit a warn so operators can
+    // correlate with a stuck render thread or runaway producer.
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
+        loop {
+            interval.tick().await;
+            archon_tui::observability::warn_if_drain_stalled(10_000);
+        }
+    });
     // CRIT-13: Forward voice pipeline events to TUI event channel
     if let Some(mut voice_rx) = voice_event_rx {
         let voice_fwd_tx = tui_event_tx.clone();

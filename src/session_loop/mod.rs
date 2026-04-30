@@ -30,11 +30,15 @@ use archon_tui::app::TuiEvent;
 use crate::command::slash::handle_slash_command;
 use crate::slash_context::SlashCommandContext;
 
+mod lifecycle_hooks;
 mod mcp_task;
 mod personality_save;
+mod slash_handlers;
 
 pub(crate) use mcp_task::{McpLifecycleTx, spawn_mcp_lifecycle_task};
+use lifecycle_hooks::fire_session_startup_hooks;
 use personality_save::save_personality_snapshot_if_enabled;
+use slash_handlers::{handle_clear_command, handle_refresh_identity_command};
 
 /// Run the interactive agent input loop to completion.
 ///
@@ -77,53 +81,9 @@ pub(crate) fn run_session_loop(
     Box::pin(async move {
         let agent = Arc::new(tokio::sync::Mutex::new(agent));
 
-        // CRIT-06: Fire Setup hook once agent is fully configured
-        {
-            let guard = agent.lock().await;
-            guard.fire_hook_detached(
-                archon_core::hooks::HookType::Setup,
-                serde_json::json!({
-                    "hook_event": "Setup",
-                }),
-            )
-        }
-        .await;
-
-        // CRIT-06: Fire SessionStart hook at the beginning of the session
-        let session_start_agg = {
-            let guard = agent.lock().await;
-            guard.fire_hook_detached(
-                archon_core::hooks::HookType::SessionStart,
-                serde_json::json!({
-                    "hook_event": "SessionStart",
-                    "reason": "new_session",
-                }),
-            )
-        }
-        .await;
-        // Consume watch_paths from SessionStart hooks (REQ-HOOK-017)
-        if !session_start_agg.watch_paths.is_empty() {
-            tracing::info!(
-                "SessionStart hook returned {} watch paths",
-                session_start_agg.watch_paths.len()
-            );
-            agent
-                .lock()
-                .await
-                .add_watch_paths(session_start_agg.watch_paths);
-        }
-
-        // CRIT-06: Fire InstructionsLoaded hook after session starts and instructions are loaded
-        {
-            let guard = agent.lock().await;
-            guard.fire_hook_detached(
-                archon_core::hooks::HookType::InstructionsLoaded,
-                serde_json::json!({
-                    "hook_event": "InstructionsLoaded",
-                }),
-            )
-        }
-        .await;
+        // TASK #219: lifecycle hooks (Setup → SessionStart → InstructionsLoaded)
+        // extracted to lifecycle_hooks.rs.
+        fire_session_startup_hooks(&agent).await;
 
         // AGT-015: Send agent name/color to TUI status bar when in --agent mode
         if let Some(ref def) = agent_def {
@@ -559,130 +519,22 @@ pub(crate) fn run_session_loop(
 
                 // /clear needs direct access to agent.clear_conversation()
                 if input.trim() == "/clear" {
-                    // CLI-416 / TASK #242: save personality snapshot before clearing.
-                    let iv_arc = agent.lock().await.inner_voice().cloned();
-                    save_personality_snapshot_if_enabled(
-                        iv_arc,
-                        cmd_ctx.memory.as_ref(),
-                        &cmd_ctx.session_id,
+                    handle_clear_command(
+                        &agent,
+                        &cmd_ctx,
+                        &input_tui_tx,
                         persist_personality,
                         personality_history_limit,
                         session_start_confidence,
                         session_start_instant,
                     )
                     .await;
-
-                    // Fire SessionEnd hook before clearing
-                    {
-                        let guard = agent.lock().await;
-                        guard.fire_hook_detached(
-                            archon_core::hooks::HookType::SessionEnd,
-                            serde_json::json!({"hook_type": "session_end", "reason": "clear"}),
-                        )
-                    }
-                    .await;
-                    agent.lock().await.clear_watch_paths();
-                    // Clear conversation
-                    {
-                        let mut guard = agent.lock().await;
-                        guard.clear_conversation_detached()
-                    }
-                    .await;
-                    // Reset session stats
-                    {
-                        let mut stats = cmd_ctx.session_stats.lock().await;
-                        *stats = archon_core::agent::SessionStats::default();
-                    }
-                    // Clear last assistant response buffer
-                    {
-                        let mut resp = cmd_ctx.last_assistant_response.lock().await;
-                        resp.clear();
-                    }
-                    // Fire SessionStart hook after
-                    let clear_start_agg = {
-                        let guard = agent.lock().await;
-                        guard.fire_hook_detached(
-                            archon_core::hooks::HookType::SessionStart,
-                            serde_json::json!({"hook_type": "session_start", "reason": "clear"}),
-                        )
-                    }
-                    .await;
-                    if !clear_start_agg.watch_paths.is_empty() {
-                        tracing::info!(
-                            "SessionStart hook returned {} watch paths",
-                            clear_start_agg.watch_paths.len()
-                        );
-                        agent
-                            .lock()
-                            .await
-                            .add_watch_paths(clear_start_agg.watch_paths);
-                    }
-                    let _ = input_tui_tx.send(TuiEvent::TextDelta(
-                        "\nConversation cleared. Session reset.\n".into(),
-                    ));
-                    let _ = input_tui_tx.send(TuiEvent::SlashCommandComplete);
                     continue;
                 }
 
                 // /refresh-identity — clears beta caches and re-runs discovery in background
                 if input.trim() == "/refresh-identity" {
-                    // Clear the validated beta cache
-                    let validated_cache = dirs::config_dir()
-                        .unwrap_or_default()
-                        .join("archon")
-                        .join("validated_betas.json");
-                    let _ = std::fs::remove_file(&validated_cache);
-                    // Clear the raw discovered cache
-                    let raw_cache = dirs::config_dir()
-                        .unwrap_or_default()
-                        .join("archon")
-                        .join("discovered_betas.json");
-                    let _ = std::fs::remove_file(&raw_cache);
-
-                    // Spawn background re-discovery using a temporary client
-                    let (refresh_auth, refresh_identity) = {
-                        let guard = agent.lock().await;
-                        match (
-                            guard.auth_provider().cloned(),
-                            guard.identity_provider().cloned(),
-                        ) {
-                            (Some(a), Some(i)) => (a, i),
-                            _ => {
-                                drop(guard);
-                                let _ = input_tui_tx.send(TuiEvent::TextDelta(
-                                    "\nIdentity refresh not supported for this provider.\n".into(),
-                                ));
-                                continue;
-                            }
-                        }
-                    };
-                    let refresh_api_url = api_url.clone();
-                    let refresh_tui_tx = input_tui_tx.clone();
-                    tokio::spawn(async move {
-                        let refresh_client = archon_llm::anthropic::AnthropicClient::new(
-                            refresh_auth,
-                            refresh_identity,
-                            refresh_api_url,
-                        );
-                        let validated =
-                            archon_llm::identity::resolve_and_validate_betas(&refresh_client, None)
-                                .await;
-                        tracing::info!(
-                            "Identity refresh complete: {} betas validated",
-                            validated.len()
-                        );
-                        let _ = refresh_tui_tx.send(TuiEvent::TextDelta(format!(
-                            "\nIdentity refresh complete: {} betas validated and cached.\n\
-                             Restart archon to apply the updated beta headers.\n",
-                            validated.len()
-                        )));
-                    });
-
-                    let _ = input_tui_tx.send(TuiEvent::TextDelta(
-                        "\nIdentity cache cleared. Re-discovering beta headers in background...\n"
-                            .into(),
-                    ));
-                    let _ = input_tui_tx.send(TuiEvent::SlashCommandComplete);
+                    handle_refresh_identity_command(&agent, &api_url, &input_tui_tx).await;
                     continue;
                 }
 
