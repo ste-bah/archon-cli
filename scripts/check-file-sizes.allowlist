@@ -187,6 +187,7 @@ src/command/login.rs
 src/command/logout.rs
 src/command/memory.rs
 src/command/parser.rs
+src/command/pipeline.rs
 src/command/permissions.rs
 src/command/recall.rs
 src/command/registry.rs
