@@ -98,7 +98,6 @@ mod compilation_tests {
 
 mod orphan_tests {
     use super::*;
-    
 
     #[tokio::test]
     async fn orphan_detected_for_unreferenced_file() {

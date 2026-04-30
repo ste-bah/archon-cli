@@ -35,8 +35,8 @@ mod mcp_task;
 mod personality_save;
 mod slash_handlers;
 
-pub(crate) use mcp_task::{McpLifecycleTx, spawn_mcp_lifecycle_task};
 use lifecycle_hooks::fire_session_startup_hooks;
+pub(crate) use mcp_task::{McpLifecycleTx, spawn_mcp_lifecycle_task};
 use personality_save::save_personality_snapshot_if_enabled;
 use slash_handlers::{handle_clear_command, handle_refresh_identity_command};
 
@@ -128,15 +128,14 @@ pub(crate) fn run_session_loop(
         // suppressed by the terminal driver (ISIG cleared) while raw mode is
         // on, so these arms only fire pre-raw / post-raw / external kill.
         #[cfg(unix)]
-        let mut sigterm_stream = match tokio::signal::unix::signal(
-            tokio::signal::unix::SignalKind::terminate(),
-        ) {
-            Ok(s) => Some(s),
-            Err(e) => {
-                tracing::warn!("install SIGTERM handler failed: {e}");
-                None
-            }
-        };
+        let mut sigterm_stream =
+            match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+                Ok(s) => Some(s),
+                Err(e) => {
+                    tracing::warn!("install SIGTERM handler failed: {e}");
+                    None
+                }
+            };
         let shutdown_in_progress = std::sync::atomic::AtomicBool::new(false);
 
         // BEGIN INPUT_HANDLER — arch-lint.sh scopes D1 grep to this region

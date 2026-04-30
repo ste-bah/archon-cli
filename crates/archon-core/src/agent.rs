@@ -640,10 +640,7 @@ impl Agent {
     /// async-Mutex guard. The binary captures a sync-Mutex mirror of
     /// InnerVoice so a panic hook (which has no tokio runtime) can read
     /// the latest state to build a snapshot.
-    pub fn set_inner_voice_change_callback(
-        &mut self,
-        cb: Arc<dyn Fn(&InnerVoice) + Send + Sync>,
-    ) {
+    pub fn set_inner_voice_change_callback(&mut self, cb: Arc<dyn Fn(&InnerVoice) + Send + Sync>) {
         self.inner_voice_change_callback = Some(cb);
     }
 

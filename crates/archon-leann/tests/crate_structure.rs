@@ -2,12 +2,4 @@
 //! If any `pub mod` declaration is missing or its file doesn't exist, this won't compile.
 
 #[test]
-fn leann_modules_are_reachable() {
-    
-    
-    
-    
-    
-    
-    
-}
+fn leann_modules_are_reachable() {}
