@@ -65,7 +65,7 @@ impl LearningStatusHandler {
                 };
 
                 format!(
-                    "## Learning Systems Status (v0.1.26)\n\
+                    "## Learning Systems Status (archon v{})\n\
                      \n\
                      | Subsystem         | Status  |\n\
                      |-------------------|---------|\n\
@@ -82,6 +82,7 @@ impl LearningStatusHandler {
                      \n\
                      AutoExtraction interval: every {} turns.\n\
                      Reflexion max failures per agent: {}.",
+                    env!("CARGO_PKG_VERSION"),
                     on_off(config.learning.sona.enabled),
                     on_off(config.learning.desc.enabled),
                     on_off(config.learning.gnn.enabled),
@@ -97,8 +98,9 @@ impl LearningStatusHandler {
                 )
             }
             Err(e) => format!(
-                "## Learning Systems Status (v0.1.26)\n\nConfig unavailable: {e}\n\n\
-                 All learning subsystems are configured via `~/.archon/config.toml`."
+                "## Learning Systems Status (archon v{})\n\nConfig unavailable: {e}\n\n\
+                 All learning subsystems are configured via `~/.archon/config.toml`.",
+                env!("CARGO_PKG_VERSION"),
             ),
         };
 

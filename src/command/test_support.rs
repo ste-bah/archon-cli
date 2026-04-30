@@ -12,7 +12,7 @@
 //! ONE file (this one) — the builder's `new()` pre-populates every field,
 //! and any new `.with_*` setters live alongside the existing ones.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 

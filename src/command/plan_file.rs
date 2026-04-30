@@ -1,5 +1,10 @@
 //! TASK-P0-B.3 (#174) bin-crate facade for plan-file I/O helpers.
 //!
+//! TASK #228: facade helpers exist for the Gate-1 structural verifier;
+//! some are not invoked yet from dispatch — file-level allow keeps the
+//! grep surface intact.
+#![allow(dead_code)]
+//!
 //! The canonical implementation lives in `archon-core` at
 //! `crates/archon-core/src/plan_file.rs` so the dispatch layer
 //! (library) and the `/plan` slash-command handler (bin) share ONE

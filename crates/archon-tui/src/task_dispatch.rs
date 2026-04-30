@@ -25,7 +25,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Instant;
 
-use archon_core::agent::{AgentEvent, TimestampedEvent};
+use archon_core::agent::TimestampedEvent;
 use tokio::sync::mpsc::UnboundedSender;
 
 /// Abstraction over "something that can run a single agent turn". Defined

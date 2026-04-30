@@ -5,7 +5,7 @@
 //! compiled only for integration builds. All symbols referenced here are
 //! public re-exports of `task_dispatch`.
 
-use archon_core::agent::{AgentEvent, TimestampedEvent};
+use archon_core::agent::TimestampedEvent;
 use archon_tui::task_dispatch::{
     AgentDispatcher, AgentRouter, CancelOutcome, DispatchResult, QueuedPrompt, TurnOutcome,
     TurnRunner,

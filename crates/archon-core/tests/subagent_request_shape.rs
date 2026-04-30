@@ -252,7 +252,7 @@ async fn subagent_system_block_starts_with_billing_header_in_spoof_mode() {
         String::new(),
     );
 
-    let mut runner = make_runner(provider, identity);
+    let runner = make_runner(provider, identity);
     let _ = runner.run("hello").await;
 
     let request = captured
@@ -300,7 +300,7 @@ async fn subagent_system_block_omits_billing_header_in_clean_mode() {
         String::new(),
     );
 
-    let mut runner = make_runner(provider, identity);
+    let runner = make_runner(provider, identity);
     let _ = runner.run("hello").await;
 
     let request = captured

@@ -1,6 +1,5 @@
 use archon_tui::overlays::{OverlayRenderer, OverlayStack};
-use ratatui::widgets::Widget;
-use ratatui::{Frame, buffer::Buffer, layout::Rect};
+use ratatui::{Frame, layout::Rect};
 
 struct DummyOverlay(&'static str);
 

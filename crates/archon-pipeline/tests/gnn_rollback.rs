@@ -101,7 +101,7 @@ fn nan_guard_keeps_weights_finite_under_extreme_lr() {
     };
 
     let mut trainer = GnnTrainer::new(training_cfg, Some(Arc::new(store)));
-    let outcome = trainer.train(&enhancer, &samples, None);
+    let _outcome = trainer.train(&enhancer, &samples, None);
 
     // Core safety property: training must not crash even with extreme lr.
     // The NaN guard in optimizer + forward_pass prevents weight corruption.

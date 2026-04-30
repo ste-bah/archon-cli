@@ -3,12 +3,10 @@
 //! Validates: list, stats, search, delete (with cascade), export.
 
 use std::collections::BTreeMap;
-use std::path::Path;
 
 use cozo::{DataValue, DbInstance, ScriptMutability};
 
 use archon_pipeline::kb::KnowledgeBase;
-use archon_pipeline::kb::schema::ensure_kb_schema;
 
 // ---------------------------------------------------------------------------
 // Helpers

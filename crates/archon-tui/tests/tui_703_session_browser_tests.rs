@@ -8,8 +8,7 @@
 //! REQ-TUI-MOD-006 / REQ-TUI-MOD-007
 
 use archon_tui::screens::session_browser::{SessionBrowser, SessionState, SessionSummary};
-use chrono::{DateTime, Utc};
-use std::sync::Arc;
+use chrono::Utc;
 
 /// Gate 1: Verify SessionBrowser::new accepts an Arc<SessionStore>.
 #[test]

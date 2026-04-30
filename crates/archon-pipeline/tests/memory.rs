@@ -229,7 +229,7 @@ async fn test_create_agent_relationship() {
 
     // Store two agent outputs.
     let meta1 = coding_metadata("sess-006", 1, vec!["pipeline".into()]);
-    let id1 = store_agent_output(
+    let _id1 = store_agent_output(
         &graph,
         "sess-006",
         "task-analyzer",

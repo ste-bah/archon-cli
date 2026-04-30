@@ -11,7 +11,6 @@ use std::sync::Arc;
 use archon_session::storage::SessionStore;
 
 use crate::theme::Theme;
-use crate::virtual_list::VirtualList;
 
 use super::{SessionState, SessionSummary};
 
@@ -160,7 +159,7 @@ impl SessionBrowser {
     }
 
     /// Render session list into area.
-    pub fn render(&self, f: &mut Frame, area: Rect, theme: &Theme) {
+    pub fn render(&self, f: &mut Frame, area: Rect, _theme: &Theme) {
         let block = Block::default()
             .borders(Borders::ALL)
             .title("Session Browser");

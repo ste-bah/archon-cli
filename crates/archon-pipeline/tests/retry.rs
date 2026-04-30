@@ -83,7 +83,7 @@ fn make_multi_status_failing_op(
     statuses: Vec<u16>,
     counter: Arc<AtomicU32>,
 ) -> impl Fn() -> Pin<Box<dyn Future<Output = Result<String>>>> {
-    let total_failures = statuses.len() as u32;
+    let _total_failures = statuses.len() as u32;
     move || {
         let counter = counter.clone();
         let statuses = statuses.clone();
@@ -272,7 +272,7 @@ async fn test_retry_after_header_respected() {
         jitter: false,
     };
 
-    let retry_after = Duration::from_millis(50);
+    let _retry_after = Duration::from_millis(50);
 
     // Create an op that returns 429 with retry_after on the first call,
     // then succeeds.

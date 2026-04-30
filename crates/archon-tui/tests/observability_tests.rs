@@ -1,5 +1,5 @@
 //! Unit tests for ChannelMetrics
-use archon_tui::observability::{ChannelMetrics, ChannelMetricsSnapshot};
+use archon_tui::observability::ChannelMetrics;
 
 fn make_fresh() -> ChannelMetrics {
     ChannelMetrics::new()

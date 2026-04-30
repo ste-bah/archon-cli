@@ -7,7 +7,7 @@
 
 use archon_pipeline::runner::PipelineType;
 use archon_pipeline::session::{
-    CompletedAgent, PipelineCheckpoint, SessionStatus, abort, checkpoint, detect_interrupted,
+    PipelineCheckpoint, SessionStatus, abort, checkpoint, detect_interrupted,
     list_sessions, mark_completed, new_session, record_agent_completion, resume,
 };
 use std::fs;

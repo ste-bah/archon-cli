@@ -1,6 +1,6 @@
 use std::path::Path;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 
 use crate::auto_extraction::AutoExtractor;
 use archon_consciousness::corrections::{CorrectionTracker, CorrectionType};

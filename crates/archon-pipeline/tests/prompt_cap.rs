@@ -5,7 +5,7 @@
 //! keeps the assembled prompt within 80 % of the model context window.
 
 use archon_pipeline::prompt_cap::{
-    PromptLayer, TruncatedPrompt, TruncationPriority, count_tokens, truncate_prompt,
+    PromptLayer, TruncationPriority, count_tokens, truncate_prompt,
 };
 
 // ---------------------------------------------------------------------------

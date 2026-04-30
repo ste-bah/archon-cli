@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 
 use archon_pipeline::runner::{
     AgentInfo, AgentResult, LlmClient, LlmResponse, NextAgent, PipelineFacade, PipelineResult,
-    PipelineSession, PipelineType, QualityScore, ToolAccessLevel, ToolUseEntry, run_pipeline,
+    PipelineSession, PipelineType, QualityScore, ToolAccessLevel, run_pipeline,
 };
 
 // ---------------------------------------------------------------------------

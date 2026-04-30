@@ -10,7 +10,7 @@
 //! - Correct 1-indexed line numbers
 //! - Pattern names correctly identify triggered patterns
 
-use archon_pipeline::coding::gates::{ForbiddenPatternScanner, Severity};
+use archon_pipeline::coding::gates::ForbiddenPatternScanner;
 
 // ---------------------------------------------------------------------------
 // 1. Forbidden pattern detection — zero false negatives

@@ -4,7 +4,6 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use archon_core::cli_flags::ResolvedFlags;
 use archon_core::config::ArchonConfig;
 use archon_core::env_vars::ArchonEnvVars;
 use archon_llm::auth::resolve_auth_with_keys;
@@ -13,7 +12,6 @@ use archon_memory::{MemoryTrait, graph::MemoryGraph};
 use archon_pipeline::coding::rlm::LeannSearcher;
 
 use crate::cli_args::PipelineAction;
-use crate::setup;
 
 /// No-op LEANN searcher used when LEANN is unavailable.
 struct NoopLeannSearcher;

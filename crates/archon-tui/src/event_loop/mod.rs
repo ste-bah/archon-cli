@@ -60,8 +60,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
-use archon_core::agent::{AgentEvent, TimestampedEvent};
-use crossterm::event::{self, Event};
+use archon_core::agent::TimestampedEvent;
+use crossterm::event::{self};
 use ratatui::Terminal;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 

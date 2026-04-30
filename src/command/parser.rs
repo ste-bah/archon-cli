@@ -1,5 +1,11 @@
 //! Slash command parser.
 //!
+//! TASK #228: TASK-AGS-801 spec types (`Arg`, `CommandParser::parse`) are
+//! defined for the drift-reconcile gap-fill but not yet wired into
+//! production dispatch — file-level allow keeps the spec surface intact
+//! without warning noise.
+#![allow(dead_code)]
+//!
 //! Pure function: takes raw user input (e.g. `"/effort high"`) and emits
 //! a [`ParsedCommand`] describing the command name and its arguments.
 //! No I/O, no async, no app state. Dispatch and registry live in

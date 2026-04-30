@@ -36,7 +36,7 @@ fn session_state_serde_roundtrip() {
 /// Gate 1: Verify BranchPoint roundtrips through serde_json with chrono DateTime.
 #[test]
 fn branch_point_serde_roundtrip() {
-    use chrono::{DateTime, Utc};
+    use chrono::Utc;
 
     let point = BranchPoint {
         id: "bp-1".to_string(),
@@ -89,7 +89,7 @@ fn branch_point_debug_does_not_panic() {
 /// Gate 1: Verify SessionState with branches serializes correctly.
 #[test]
 fn session_state_with_branches_roundtrip() {
-    use chrono::Utc;
+    
 
     let state = SessionState::with_session("main-session".to_string());
     let json = serde_json::to_string(&state).expect("serialize");

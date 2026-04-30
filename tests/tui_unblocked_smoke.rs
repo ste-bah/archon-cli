@@ -20,7 +20,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use archon_core::agent::{AgentEvent, TimestampedEvent};
+use archon_core::agent::TimestampedEvent;
 use archon_tui::{AgentDispatcher, AgentRouter, DispatchResult, TurnOutcome, TurnRunner};
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::unbounded_channel;

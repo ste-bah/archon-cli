@@ -1457,7 +1457,7 @@ pub(crate) async fn run_interactive_session(
             }
         });
     }
-    let (user_input_tx, mut user_input_rx) = tokio::sync::mpsc::channel::<String>(16);
+    let (user_input_tx, user_input_rx) = tokio::sync::mpsc::channel::<String>(16);
 
     // Create agent
     let provider = build_llm_provider(&config.llm, api_client);
@@ -2151,7 +2151,7 @@ pub(crate) async fn run_interactive_session(
         crate::command::dispatcher::Dispatcher::new(std::sync::Arc::clone(&registry)),
     );
 
-    let mut cmd_ctx = SlashCommandContext {
+    let cmd_ctx = SlashCommandContext {
         fast_mode_shared: Arc::clone(&fast_mode_shared),
         effort_level_shared: Arc::clone(&effort_level_shared),
         model_override_shared: Arc::clone(&model_override_shared),

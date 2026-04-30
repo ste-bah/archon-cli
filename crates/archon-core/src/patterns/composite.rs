@@ -266,7 +266,7 @@ pub fn register(reg: &PatternRegistry) {
             PatternKind::Composite
         }
 
-        async fn execute(&self, input: Value, _ctx: PatternCtx) -> Result<Value, PatternError> {
+        async fn execute(&self, _input: Value, _ctx: PatternCtx) -> Result<Value, PatternError> {
             Err(PatternError::Execution(
                 "composite factory: use CompositeAgentPattern::build() to create instances".into(),
             ))

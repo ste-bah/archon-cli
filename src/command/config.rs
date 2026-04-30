@@ -26,7 +26,6 @@
 //! unchanged by POST-6-NO-STUB and continues to be the upstream
 //! intercept target at `src/command/slash.rs:247`.
 
-use crate::cli_args::Cli;
 use crate::command::registry::{CommandContext, CommandHandler};
 use crate::slash_context::SlashCommandContext;
 use archon_tui::app::TuiEvent;

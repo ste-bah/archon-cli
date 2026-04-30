@@ -268,7 +268,7 @@ fn test_search_result_fields() {
 
 #[test]
 fn test_index_stats_display() {
-    use std::fmt::Write;
+    
 
     let stats = IndexStats::default();
     let display = format!("{}", stats);

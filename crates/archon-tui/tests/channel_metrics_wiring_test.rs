@@ -4,7 +4,7 @@
 // This is expected and correct behavior at this gate.
 
 use archon_core::ChannelMetricSink;
-use archon_tui::observability::{ChannelMetrics, ChannelMetricsSnapshot};
+use archon_tui::observability::ChannelMetrics;
 
 /// Verify ChannelMetrics implements ChannelMetricSink trait.
 #[test]

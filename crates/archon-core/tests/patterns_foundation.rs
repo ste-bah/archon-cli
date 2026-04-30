@@ -4,14 +4,13 @@
 //! logic is implemented.
 
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
 
 use archon_core::patterns::spec::{
     BrokerConfig, BrokerSelector, CircuitBreakerConfig, FanOutConfig, PatternSpec,
-    RemoteAgentConfig, RemoteTransport,
 };
 use archon_core::patterns::{
     Pattern, PatternCtx, PatternError, PatternKind, PatternRegistry, TaskServiceHandle,

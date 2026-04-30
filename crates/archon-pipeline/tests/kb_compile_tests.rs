@@ -10,7 +10,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::Result;
 use cozo::{DataValue, DbInstance, ScriptMutability};
 
-use archon_pipeline::kb::compile::{CompileMetrics, Compiler, KbLlmClient};
+use archon_pipeline::kb::compile::{Compiler, KbLlmClient};
 use archon_pipeline::kb::schema::ensure_kb_schema;
 
 // ---------------------------------------------------------------------------

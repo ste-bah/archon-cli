@@ -5,7 +5,6 @@
 //! domain tags, and IngestResult reporting.
 
 use std::collections::BTreeMap;
-use std::path::Path;
 
 use cozo::{DataValue, DbInstance, ScriptMutability};
 

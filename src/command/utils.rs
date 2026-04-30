@@ -1,4 +1,9 @@
 //! Helper utilities extracted from main.rs to reduce main.rs from 1349 to < 500 lines.
+//!
+//! TASK #228: several helpers below are not currently invoked but are
+//! kept as ready-to-use utilities for the in-progress slash-command +
+//! resume-list refactors. File-level allow(dead_code) silences noise.
+#![allow(dead_code)]
 
 // ---------------------------------------------------------------------------
 // Date/time helpers

@@ -101,7 +101,7 @@ impl TurnRunner for AgentHandle {
             }
             // v0.1.23: AutoCapture — regex-based memory detection at turn boundary.
             if let Some(ref capture) = self.auto_capture {
-                let mut guard = agent.lock().await;
+                let guard = agent.lock().await;
                 let turn_num = guard.turn_number() as usize;
                 let captured = capture.detect(&prompt, turn_num);
                 if !captured.is_empty() {

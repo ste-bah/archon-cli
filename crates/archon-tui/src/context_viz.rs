@@ -7,7 +7,6 @@ use ratatui::{
     buffer::Buffer,
     layout::Rect,
     style::{Color, Style},
-    symbols::block,
     widgets::Widget,
 };
 use std::collections::VecDeque;

@@ -12,7 +12,7 @@ use std::io::{BufRead, Write};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 use tokio::sync::mpsc;
 
-use archon_core::agent::{AgentEvent, TimestampedEvent};
+use archon_core::agent::TimestampedEvent;
 
 use crate::ide::handler::{IdeProtocolHandler, event_to_notification};
 

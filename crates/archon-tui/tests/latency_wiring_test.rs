@@ -21,7 +21,7 @@ fn sent_at_populated_at_producer() {
         sent_at: Instant::now(),
         inner: event,
     };
-    let now = Instant::now();
+    let _now = Instant::now();
     // Should be within 10ms
     assert!(
         ts_event.sent_at.elapsed().as_millis() <= 10,

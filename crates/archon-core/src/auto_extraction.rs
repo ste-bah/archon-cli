@@ -175,7 +175,7 @@ impl AutoExtractor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::AtomicU32;
+    
 
     struct FakeMemory;
     impl MemoryTrait for FakeMemory {

@@ -7,7 +7,7 @@
 use archon_session::storage::SessionStore;
 use archon_tui::screens::session_branching::SessionBranching;
 use archon_tui::screens::session_browser::{BranchPoint, SessionState};
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use std::sync::Arc;
 use tempfile::TempDir;
 

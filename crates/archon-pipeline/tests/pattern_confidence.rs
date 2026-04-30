@@ -8,9 +8,8 @@ use archon_pipeline::learning::confidence::{
     rank_patterns,
 };
 use archon_pipeline::learning::patterns::{
-    CreatePatternParams, Pattern, PatternStore, PruneParams, TaskType,
+    CreatePatternParams, PatternStore, PruneParams, TaskType,
 };
-use archon_pipeline::learning::sona::cosine_similarity;
 
 // ---------------------------------------------------------------------------
 // Confidence scorer tests

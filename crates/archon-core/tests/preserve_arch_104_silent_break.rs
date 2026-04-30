@@ -50,7 +50,7 @@ use archon_tools::subagent_executor::{
 };
 use archon_tools::tool::ToolContext;
 
-use archon_core::agent::{Agent, AgentConfig, AgentEvent, TimestampedEvent};
+use archon_core::agent::{Agent, AgentConfig, TimestampedEvent};
 use archon_core::agents::AgentRegistry;
 use archon_core::dispatch::ToolRegistry;
 

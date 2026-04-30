@@ -1,19 +1,22 @@
-// Setup and initialization functions extracted from main.rs
+// Setup and initialization functions extracted from main.rs.
+//
+// TASK #228 (post-cargo-fix): several helpers below are not currently
+// invoked from main.rs but are kept as ready-to-use utilities for the
+// in-progress runtime/launcher refactor. File-level allow(dead_code)
+// silences the noise without flagging each individually.
+#![allow(dead_code)]
+
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use anyhow::Result;
-use clap::Parser;
 
 use archon_core::config::default_config_path;
 use archon_core::config_layers::ConfigLayer;
 use archon_core::env_vars::{self, ArchonEnvVars};
-use archon_core::logging::{default_log_dir, init_logging, rotate_logs};
-use archon_llm::identity::IdentityProvider;
+use archon_core::logging::{default_log_dir, init_logging};
 use archon_tui::app::TuiEvent;
 
 use crate::cli_args::Cli;
-use archon_core::cli_flags::ResolvedFlags;
 
 /// Parse `--setting-sources` names into [`ConfigLayer`] variants, warning on
 /// unrecognised values.

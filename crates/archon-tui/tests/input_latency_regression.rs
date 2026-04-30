@@ -32,7 +32,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use archon_core::agent::{AgentEvent, TimestampedEvent};
+use archon_core::agent::TimestampedEvent;
 use archon_tui::{AgentDispatcher, AgentRouter, DispatchResult, TurnRunner};
 use tokio::sync::mpsc;
 
