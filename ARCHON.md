@@ -210,17 +210,17 @@ Agents like `frontend-implementer`, `config-implementer`, `service-implementer` 
 
 ## 🧠 MEMORY SYSTEM
 
-archon-cli has a built-in CozoDB memory graph accessed via two tools:
+**archon-cli is standalone. The built-in CozoDB memory graph is the ONLY memory system.** No MemoryGraph MCP, no external memory backend — `memory_store` and `memory_recall` are the canonical tools.
+
 - `memory_store` — persist a memory in the graph (Fact / Decision / Rule / etc.)
 - `memory_recall` — hybrid BM25 + vector search over the memory graph
 
 **Memory rules:**
 - ALL memory storage uses the `memory_store` tool — NEVER write to MEMORY.md or markdown files for memory persistence
+- ALL memory retrieval uses `memory_recall` — NEVER read from any external memory service
 - Store decisions, patterns, corrections, and project state via `memory_store`
 - Use `memory_recall` after compaction to reload behavioural rules
-- The memory graph lives at `~/.local/share/archon/memory.db` (CozoDB)
-
-**Optional MCP-backed memory:** if `mcp__memorygraph__*` tools are configured via `.mcp.json`, they provide an additional memory surface separate from the built-in graph. Use built-in tools first; fall back to MCP only when explicitly directed.
+- The memory graph lives at `~/.local/share/archon/memory.db` (CozoDB, per-user state)
 
 **Memory garden:**
 - `/garden` — run consolidation now, print report
@@ -233,7 +233,7 @@ archon-cli has a built-in CozoDB memory graph accessed via two tools:
 
 ## 🔍 LEANN SEMANTIC INDEX
 
-archon-cli has LEANN built in (`archon-leann` crate) — separate from any MCP-based LEANN. LEANN tools are exposed to the agent and via slash commands.
+archon-cli has LEANN built in (`archon-leann` crate). LEANN tools are exposed to the agent and via slash commands. **No external LEANN service** — the built-in tools are canonical.
 
 **Tools:**
 - `leann_search` — semantic code search (HNSW over embeddings)
@@ -257,18 +257,18 @@ archon-cli has LEANN built in (`archon-leann` crate) — separate from any MCP-b
 
 ## 🔌 MCP Servers
 
-archon-cli supports stdio, WebSocket, and HTTP-streamable MCP transports. Configure via `.mcp.json` at workspace root or `~/.config/archon/.mcp.json`.
+archon-cli supports stdio, WebSocket, and HTTP-streamable MCP transports for **external integrations** (third-party tools, code navigation, web search). Memory and LEANN are NOT exposed via MCP — those are built in.
 
-Common MCP servers (whatever the user has configured):
+Configure MCP via `.mcp.json` at workspace root or `~/.config/archon/.mcp.json`. Common external servers:
 
 | Server | Purpose |
 |---|---|
-| `memorygraph` | Optional persistent memory graph (alternative to built-in) |
-| `leann-search` | Optional semantic code index (alternative to built-in) |
 | `serena` | Semantic code navigation (symbols, references, refactoring) |
 | `perplexity` | Web search, research, reasoning with citations |
 | `filesystem` | File-system access surface |
 | `github` | GitHub API surface |
+| `puppeteer` | Browser automation |
+| `postgres` | Database query surface |
 
 See `docs/integrations/mcp-servers.md` for transport details and reconnection behaviour.
 
@@ -376,7 +376,7 @@ This recovers from the rustc ICE on `petgraph::graphmap::NeighborsDirected::next
 **STOP AND ASK before doing anything. Never act autonomously after compaction.**
 
 ## 🧠 MEMORY REMINDER
-**ALL memory uses `memory_store` / `memory_recall` (or `mcp__memorygraph__*` if MCP configured). NEVER write to MEMORY.md or markdown files for memory storage.**
+**ALL memory uses `memory_store` / `memory_recall` — archon-cli's built-in CozoDB graph is the ONLY memory system. NEVER write to MEMORY.md or markdown files. NEVER call external memory services.**
 
 ## DEV FLOW ENFORCEMENT — ABSOLUTE LAW
 
