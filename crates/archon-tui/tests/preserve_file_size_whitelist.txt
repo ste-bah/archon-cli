@@ -37,6 +37,7 @@ src/command/logout.rs                              # expires 2026-05-15
 src/command/memory.rs                              # expires 2026-05-15
 src/command/parser.rs                              # expires 2026-05-15
 src/command/permissions.rs                         # expires 2026-05-15
+src/command/pipeline.rs                            # expires 2026-05-15 (GNN auto-trainer wiring, commit cec9673)
 src/command/recall.rs                              # expires 2026-05-15
 src/command/registry.rs                            # expires 2026-05-15
 src/command/rename.rs                              # expires 2026-05-15
