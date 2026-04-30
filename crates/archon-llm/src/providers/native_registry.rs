@@ -44,6 +44,7 @@ pub static NATIVE_REGISTRY: Lazy<HashMap<&'static str, ProviderDescriptor>> = La
             },
             headers: HashMap::new(),
             quirks: ProviderQuirks::DEFAULT,
+            is_gap: false,
         },
     );
 
@@ -67,6 +68,7 @@ pub static NATIVE_REGISTRY: Lazy<HashMap<&'static str, ProviderDescriptor>> = La
             },
             headers: HashMap::new(),
             quirks: ProviderQuirks::DEFAULT,
+            is_gap: false,
         },
     );
 
@@ -92,6 +94,7 @@ pub static NATIVE_REGISTRY: Lazy<HashMap<&'static str, ProviderDescriptor>> = La
             },
             headers: HashMap::new(),
             quirks: ProviderQuirks::DEFAULT,
+            is_gap: false,
         },
     );
 
@@ -115,6 +118,7 @@ pub static NATIVE_REGISTRY: Lazy<HashMap<&'static str, ProviderDescriptor>> = La
             },
             headers: HashMap::new(),
             quirks: ProviderQuirks::DEFAULT,
+            is_gap: false,
         },
     );
 
@@ -138,6 +142,7 @@ pub static NATIVE_REGISTRY: Lazy<HashMap<&'static str, ProviderDescriptor>> = La
             },
             headers: HashMap::new(),
             quirks: ProviderQuirks::DEFAULT,
+            is_gap: false,
         },
     );
 
@@ -158,6 +163,7 @@ pub static NATIVE_REGISTRY: Lazy<HashMap<&'static str, ProviderDescriptor>> = La
             supports: ProviderFeatures::chat_only(),
             headers: HashMap::new(),
             quirks: ProviderQuirks::DEFAULT,
+            is_gap: true,
         },
     );
 
@@ -175,6 +181,7 @@ pub static NATIVE_REGISTRY: Lazy<HashMap<&'static str, ProviderDescriptor>> = La
             supports: ProviderFeatures::chat_only(),
             headers: HashMap::new(),
             quirks: ProviderQuirks::DEFAULT,
+            is_gap: true,
         },
     );
 
@@ -192,6 +199,7 @@ pub static NATIVE_REGISTRY: Lazy<HashMap<&'static str, ProviderDescriptor>> = La
             supports: ProviderFeatures::chat_only(),
             headers: HashMap::new(),
             quirks: ProviderQuirks::DEFAULT,
+            is_gap: true,
         },
     );
 
@@ -209,6 +217,7 @@ pub static NATIVE_REGISTRY: Lazy<HashMap<&'static str, ProviderDescriptor>> = La
             supports: ProviderFeatures::chat_only(),
             headers: HashMap::new(),
             quirks: ProviderQuirks::DEFAULT,
+            is_gap: true,
         },
     );
 

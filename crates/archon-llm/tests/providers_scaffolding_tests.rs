@@ -132,6 +132,7 @@ fn provider_descriptor_exhaustive_construction() {
         supports: ProviderFeatures::chat_only(),
         headers,
         quirks: ProviderQuirks::DEFAULT,
+        is_gap: false,
     };
 
     assert_eq!(d.id, "groq");
@@ -158,6 +159,7 @@ fn provider_descriptor_is_clone() {
         supports: ProviderFeatures::none(),
         headers: HashMap::new(),
         quirks: ProviderQuirks::DEFAULT,
+        is_gap: false,
     };
     let _cloned = d.clone(); // proves Clone is derived
 }
@@ -201,6 +203,7 @@ fn descriptor_has_no_secret_field() {
         supports: ProviderFeatures::none(),
         headers: HashMap::new(),
         quirks: ProviderQuirks::DEFAULT,
+        is_gap: false,
     };
     // Prove the descriptor only *names* the env var, not the value.
     assert_eq!(d.env_key_var, "X_API_KEY");

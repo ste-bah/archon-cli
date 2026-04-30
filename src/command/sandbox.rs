@@ -51,17 +51,17 @@ impl CommandHandler for SandboxHandler {
         let message = match cmd {
             "on" | "enable" => {
                 self.enabled.store(true, Ordering::SeqCst);
-                "Sandbox enabled — tool dispatch will check permissions via Bubble mode."
+                "Sandbox flag set to ON (note: tool dispatch does not yet read this flag — sandbox enforcement is not wired)."
             }
             "off" | "disable" => {
                 self.enabled.store(false, Ordering::SeqCst);
-                "Sandbox disabled — tool dispatch bypasses Bubble check."
+                "Sandbox flag set to OFF (note: tool dispatch does not yet read this flag — sandbox enforcement is not wired)."
             }
             "" | "status" => {
                 if self.enabled.load(Ordering::SeqCst) {
-                    "Sandbox status: ENABLED (Bubble mode restrictions active)."
+                    "Sandbox flag: ON (note: flag is not yet read by tool dispatch — sandbox enforcement is not wired)."
                 } else {
-                    "Sandbox status: disabled."
+                    "Sandbox flag: OFF (note: flag is not yet read by tool dispatch — sandbox enforcement is not wired)."
                 }
             }
             other => {
@@ -77,7 +77,7 @@ impl CommandHandler for SandboxHandler {
     }
 
     fn description(&self) -> &str {
-        "Toggle sandbox restrictions (on|off|status) — Bubble-mode gate"
+        "Toggle sandbox flag (on|off|status) — enforcement not yet wired to dispatch"
     }
 
     fn aliases(&self) -> &'static [&'static str] {

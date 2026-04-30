@@ -7,17 +7,19 @@ use std::sync::Arc;
 //
 // Real `CommandHandler` impl moved here from the `declare_handler!` stub
 // at src/command/registry.rs:330 and the legacy match arm at
-// src/command/slash.rs:546-561. Body emits a `TextDelta` (backward-
-// compatible user output) plus a `TuiEvent::OpenView(ViewId::Tasks)`
-// (forward-compat per AGS-822 — placeholder-handled by run_inner until
-// the Stage 7+ overlay ticket lands).
+// src/command/slash.rs:546-561. Body emits a `TextDelta` listing
+// background tasks from the global TASK_MANAGER.
 //
-// Aliases extended `[todo]` -> `[todo, ps, jobs]` per spec validation
-// criterion 4.
+// GHOST-010: Removed dead `TuiEvent::OpenView(ViewId::Tasks)` emission
+// (prior forward-compat per AGS-822). The only consumer was a
+// tracing::info placeholder in tui_events.rs — no view was ever rendered.
+// Description updated from "List or manage" to "List" since this handler
+// has never managed tasks.
+//
+// Aliases: [todo, ps, jobs] per spec validation criterion 4.
 
 use crate::command::registry::{CommandContext, CommandHandler};
 use archon_tui::app::TuiEvent;
-use archon_tui::events::ViewId;
 
 pub(crate) struct TasksHandler;
 
@@ -33,20 +35,12 @@ impl CommandHandler for TasksHandler {
             }
             out
         };
-        // try_send is the sync analogue of the shipped
-        // `let _ = tui_tx.send(...).await` in slash.rs:546-561 — both
-        // ignore send failures (channel closed/full). Acceptable here
-        // because /tasks output is best-effort UI.
         ctx.emit(TuiEvent::TextDelta(text));
-        // AGS-822 forward-compat primitive. View-rendering is
-        // placeholder-handled by run_inner until the Stage 7+ overlay
-        // ticket lands; the OpenView emission is the contract.
-        ctx.emit(TuiEvent::OpenView(ViewId::Tasks));
         Ok(())
     }
 
     fn description(&self) -> &str {
-        "List or manage project tasks"
+        "List background tasks"
     }
 
     fn aliases(&self) -> &'static [&'static str] {
@@ -196,14 +190,9 @@ mod tests {
     use super::*;
     use crate::command::registry::{CommandContext, CommandHandler, default_registry};
     use archon_tui::app::TuiEvent;
-    use archon_tui::events::ViewId;
     use tokio::sync::mpsc;
 
-    /// Build a `CommandContext` with a freshly-created channel and
-    /// return both the context and the receiver so tests can drain
-    /// emitted events.
     fn make_ctx() -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
-        // TASK-AGS-POST-6-SHARED-FIXTURES-V2: migrated to CtxBuilder.
         crate::command::test_support::CtxBuilder::new().build()
     }
 
@@ -215,6 +204,10 @@ mod tests {
             desc.contains("task"),
             "TasksHandler description should mention 'task', got: {}",
             h.description()
+        );
+        assert!(
+            !desc.contains("manage"),
+            "TasksHandler description must not claim 'manage' — handler only lists (GHOST-010)"
         );
     }
 
@@ -235,7 +228,6 @@ mod tests {
         h.execute(&mut ctx, &[])
             .expect("TasksHandler::execute must return Ok");
 
-        // Drain channel: collect all events synchronously.
         let mut events = Vec::new();
         while let Ok(ev) = rx.try_recv() {
             events.push(ev);
@@ -252,30 +244,27 @@ mod tests {
     }
 
     #[test]
-    fn tasks_handler_execute_emits_open_view_tasks_event() {
+    fn tasks_handler_execute_only_emits_textdelta_no_openview() {
+        // GHOST-010: /tasks no longer emits OpenView(ViewId::Tasks) —
+        // that was a dead forward-compat wire with only a tracing::info
+        // placeholder consumer.
         let (mut ctx, mut rx) = make_ctx();
         let h = TasksHandler;
         h.execute(&mut ctx, &[])
             .expect("TasksHandler::execute must return Ok");
 
-        let mut saw_open_view_tasks = false;
+        let mut saw_text = false;
         while let Ok(ev) = rx.try_recv() {
-            if let TuiEvent::OpenView(ViewId::Tasks) = ev {
-                saw_open_view_tasks = true;
-                break;
+            match ev {
+                TuiEvent::TextDelta(_) => saw_text = true,
+                TuiEvent::OpenView(_) => {
+                    panic!("TasksHandler must NOT emit OpenView — dead wire removed (GHOST-010)")
+                }
+                _ => {}
             }
         }
-        assert!(
-            saw_open_view_tasks,
-            "TasksHandler::execute must emit TuiEvent::OpenView(ViewId::Tasks) per AGS-822 forward-compat"
-        );
+        assert!(saw_text, "TasksHandler must emit TextDelta");
     }
-
-    // -----------------------------------------------------------------
-    // Registry-level wiring: /tasks aliases ps and jobs must resolve to
-    // the same handler as the primary /tasks. Verifies AGS-806 alias
-    // extension reaches the public registry surface.
-    // -----------------------------------------------------------------
 
     #[test]
     fn registry_resolves_tasks_aliases_ps_and_jobs() {

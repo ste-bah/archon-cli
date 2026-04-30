@@ -115,12 +115,16 @@ fn divider_row() -> String {
 fn fmt_provider_row(d: &ProviderDescriptor) -> String {
     let display = truncate_chars(&d.display_name, COL_DISPLAY);
     let model = truncate_chars(&d.default_model, COL_MODEL);
+    let mut features = fmt_features(&d.supports);
+    if d.is_gap {
+        features.push_str(" [gap]");
+    }
     format!(
         "  {:<id$}  {:<display$}  {:<model$}  {}\n",
         d.id,
         display,
         model,
-        fmt_features(&d.supports),
+        features,
         id = COL_ID,
         display = COL_DISPLAY,
         model = COL_MODEL,
@@ -313,6 +317,34 @@ mod tests {
             5,
             "char-count must respect codepoints, not bytes"
         );
+    }
+
+    #[test]
+    fn execute_marks_gap_providers() {
+        let body = render();
+        // Gap providers must show [gap] in their feature column.
+        for id in ["azure", "cohere", "copilot", "minimax"] {
+            assert!(
+                body.contains(&format!("[gap]")),
+                "gap provider `{}` missing [gap] marker; body:\n{}",
+                id,
+                body
+            );
+        }
+        // Non-gap providers must NOT show [gap].
+        for id in ["openai", "anthropic", "ollama", "groq"] {
+            // Find the row for this provider and check it lacks [gap]
+            let row = body
+                .lines()
+                .find(|l| l.trim_start().starts_with(id))
+                .unwrap_or_else(|| panic!("provider `{}` not found in output", id));
+            assert!(
+                !row.contains("[gap]"),
+                "non-gap provider `{}` incorrectly shows [gap]; row: {}",
+                id,
+                row
+            );
+        }
     }
 
     #[test]

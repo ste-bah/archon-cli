@@ -175,6 +175,13 @@ impl LeannIntegration {
         Self { code_index }
     }
 
+    /// Expose the inner [`CodeIndex`] so callers can build
+    /// [`LeannSearcher`](archon_pipeline::coding::rlm::LeannSearcher)
+    /// implementations (e.g. for the research pipeline facade).
+    pub fn code_index(&self) -> &Arc<archon_leann::CodeIndex> {
+        &self.code_index
+    }
+
     /// Index the repository on pipeline startup.
     ///
     /// Logs a warning and returns `Ok(())` if indexing fails so the pipeline
