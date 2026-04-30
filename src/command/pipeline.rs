@@ -511,7 +511,8 @@ fn build_pipeline_auto_trainer(
     if let Some(parent) = db_path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    let db = match cozo::DbInstance::new("rocksdb", db_path.to_str().unwrap_or(""), "") {
+    // "newrocksdb" engine = pure-Rust rust-rocksdb binding (cozo storage-new-rocksdb feature)
+    let db = match cozo::DbInstance::new("newrocksdb", db_path.to_str().unwrap_or(""), "") {
         Ok(db) => db,
         Err(e) => {
             tracing::warn!(error = %e, "pipeline: learning DB unavailable; auto_trainer not spawned");

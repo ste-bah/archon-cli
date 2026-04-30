@@ -36,7 +36,7 @@ oauth2 = "5"
 fd-lock = "4"
 open = "5"
 tiny_http = "0.12"
-cozo = { package = "cozo-ce", version = "0.7.13-alpha.3", default-features = false, features = ["storage-sqlite", "storage-sqlite-src", "rayon"] }
+cozo = { package = "cozo-ce", version = "0.7.13-alpha.3", default-features = false, features = ["storage-sqlite", "storage-sqlite-src", "storage-new-rocksdb", "rayon"] }
 ratatui = "0.29"
 crossterm = "0.28"
 toml = "0.8"

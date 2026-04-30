@@ -1522,7 +1522,8 @@ pub(crate) async fn run_interactive_session(
         if let Some(parent) = db_path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        match cozo::DbInstance::new("rocksdb", db_path.to_str().unwrap_or(""), "") {
+        // "newrocksdb" engine = pure-Rust rust-rocksdb binding (cozo storage-new-rocksdb feature)
+        match cozo::DbInstance::new("newrocksdb", db_path.to_str().unwrap_or(""), "") {
             Ok(db) => {
                 // Initialise learning schemas on first open.
                 if let Err(e) = archon_pipeline::learning::schema::initialize_learning_schemas(&db)
@@ -1650,8 +1651,8 @@ pub(crate) async fn run_interactive_session(
     //   4. Pass the Arc through to the SlashCommandContext so /learning-status
     //      reads live loop state instead of just config
     //   5. Forward to AgentHandle so the AutoCapture site also records memory
-    //   6. Shutdown happens implicitly on process exit via tokio's runtime
-    //      drop; explicit shutdown is in the cleanup path further down.
+    //   6. Shutdown is fired explicitly below near mcp_manager.shutdown_all()
+    //      to flush RocksDB MANIFEST cleanly before the runtime drops.
     let auto_trainer: Option<Arc<archon_pipeline::learning::gnn::auto_trainer::AutoTrainer>> = {
         let at_cfg = &config.learning.gnn.auto_trainer;
         if !at_cfg.enabled || !config.learning.gnn.enabled {
@@ -2401,6 +2402,10 @@ pub(crate) async fn run_interactive_session(
         command_catalog,
     })
     .await?;
+
+    if let Some(at) = auto_trainer.as_ref() {
+        at.shutdown();
+    }
 
     // ── Phase 2: Graceful MCP shutdown ──────────────────────────
     mcp_manager.shutdown_all().await;

@@ -88,6 +88,7 @@ hello.txt
 FORENSIC-TASK-DECOMPOSITION.yaml
 *:Zone.Identifier
 .archon/leann.db
+.archon/learning.db/
 crates/archon-tui/tests/snapshots/tui_snapshots__splash_empty_activity.snap.new
 crates/archon-tui/tests/snapshots/tui_snapshots__splash_with_activity.snap.new
 archon
