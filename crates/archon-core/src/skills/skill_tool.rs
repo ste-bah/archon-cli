@@ -117,12 +117,48 @@ impl Tool for SkillTool {
         }
     }
 
-    fn permission_level(&self, _input: &Value) -> PermissionLevel {
-        // The Skill tool itself is Safe (read-only listing + dispatch). The
-        // dispatched skill may have side effects but is classified
-        // independently via the slash-command path where side-effecting
-        // skills use their own approval flows.
-        PermissionLevel::Safe
+    fn permission_level(&self, input: &Value) -> PermissionLevel {
+        let action = input.get("action").and_then(|v| v.as_str()).unwrap_or("");
+        if action != "invoke" {
+            return PermissionLevel::Safe;
+        }
+
+        let name = input.get("name").and_then(|v| v.as_str()).unwrap_or("");
+        let has_args = input
+            .get("args")
+            .and_then(|v| v.as_array())
+            .map(|a| !a.is_empty())
+            .unwrap_or(false);
+
+        match name {
+            "branch" => {
+                let args: Vec<&str> = input
+                    .get("args")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| arr.iter().filter_map(|x| x.as_str()).collect())
+                    .unwrap_or_default();
+                if args
+                    .iter()
+                    .any(|a| *a == "--create" || *a == "-c" || *a == "--switch" || *a == "-s")
+                {
+                    return PermissionLevel::Dangerous;
+                }
+                PermissionLevel::Safe
+            }
+            "commit" => {
+                let args: Vec<&str> = input
+                    .get("args")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| arr.iter().filter_map(|x| x.as_str()).collect())
+                    .unwrap_or_default();
+                if args.iter().any(|a| *a == "-m") {
+                    return PermissionLevel::Dangerous;
+                }
+                PermissionLevel::Safe
+            }
+            "pr" if has_args => PermissionLevel::Dangerous,
+            _ => PermissionLevel::Safe,
+        }
     }
 }
 
@@ -138,12 +174,15 @@ mod tests {
         }
     }
 
+    // ------------------------------------------------------------------
+    // Execute tests
+    // ------------------------------------------------------------------
+
     #[tokio::test]
     async fn skill_tool_lists_builtins() {
         let tool = SkillTool;
         let result = tool.execute(json!({ "action": "list" }), &ctx()).await;
         assert!(!result.is_error);
-        // The output is a JSON array of {name, description} objects.
         let parsed: Value = serde_json::from_str(&result.content).unwrap();
         let arr = parsed.as_array().expect("output must be array");
         assert!(!arr.is_empty(), "register_builtins must yield skills");
@@ -195,5 +234,80 @@ mod tests {
         assert_eq!(schema["type"], "object");
         assert!(schema["properties"]["action"].is_object());
         assert!(schema["required"].is_array());
+    }
+
+    // ------------------------------------------------------------------
+    // Permission-level tests (GHOST-001)
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn permission_list_is_safe() {
+        let tool = SkillTool;
+        let input = json!({ "action": "list" });
+        assert_eq!(tool.permission_level(&input), PermissionLevel::Safe);
+    }
+
+    #[test]
+    fn permission_invoke_info_branch_is_safe() {
+        let tool = SkillTool;
+        let input = json!({ "action": "invoke", "name": "branch", "args": [] });
+        assert_eq!(tool.permission_level(&input), PermissionLevel::Safe);
+    }
+
+    #[test]
+    fn permission_invoke_info_pr_is_safe() {
+        let tool = SkillTool;
+        let input = json!({ "action": "invoke", "name": "pr", "args": [] });
+        assert_eq!(tool.permission_level(&input), PermissionLevel::Safe);
+    }
+
+    #[test]
+    fn permission_branch_create_is_dangerous() {
+        let tool = SkillTool;
+        let input = json!({ "action": "invoke", "name": "branch", "args": ["--create", "foo"] });
+        assert_eq!(tool.permission_level(&input), PermissionLevel::Dangerous);
+    }
+
+    #[test]
+    fn permission_branch_switch_is_dangerous() {
+        let tool = SkillTool;
+        let input = json!({ "action": "invoke", "name": "branch", "args": ["--switch", "bar"] });
+        assert_eq!(tool.permission_level(&input), PermissionLevel::Dangerous);
+    }
+
+    #[test]
+    fn permission_commit_is_dangerous() {
+        let tool = SkillTool;
+        let input = json!({ "action": "invoke", "name": "commit", "args": ["-m", "fix stuff"] });
+        assert_eq!(tool.permission_level(&input), PermissionLevel::Dangerous);
+    }
+
+    #[test]
+    fn permission_pr_create_is_dangerous() {
+        let tool = SkillTool;
+        let input = json!({ "action": "invoke", "name": "pr", "args": ["My PR title"] });
+        assert_eq!(tool.permission_level(&input), PermissionLevel::Dangerous);
+    }
+
+    #[test]
+    fn permission_unknown_skill_is_safe() {
+        let tool = SkillTool;
+        let input = json!({ "action": "invoke", "name": "no-such-skill", "args": ["whatever"] });
+        assert_eq!(tool.permission_level(&input), PermissionLevel::Safe);
+    }
+
+    #[test]
+    fn permission_unknown_action_is_safe() {
+        let tool = SkillTool;
+        let input = json!({ "action": "delete" });
+        assert_eq!(tool.permission_level(&input), PermissionLevel::Safe);
+    }
+
+    #[test]
+    fn permission_commit_without_m_flag_is_safe() {
+        // commit without -m generates a prompt, does not mutate
+        let tool = SkillTool;
+        let input = json!({ "action": "invoke", "name": "commit", "args": [] });
+        assert_eq!(tool.permission_level(&input), PermissionLevel::Safe);
     }
 }
