@@ -96,8 +96,8 @@ impl CommandHandler for HooksHandler {
             }
             other => {
                 let msg = format!(
-                    "Unknown /hooks subcommand: {other}. Valid: list, \
-                     enable, disable, reload"
+                    "Unknown /hooks subcommand: {other}. Only 'list' is \
+                     currently functional (enable/disable/reload are not yet implemented)"
                 );
                 ctx.emit(TuiEvent::TextDelta(msg));
             }
@@ -106,7 +106,7 @@ impl CommandHandler for HooksHandler {
     }
 
     fn description(&self) -> &'static str {
-        "List or manage hook registrations"
+        "List hook registrations (enable/disable/reload not yet implemented)"
     }
 
     fn aliases(&self) -> &'static [&'static str] {
