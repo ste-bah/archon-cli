@@ -39,6 +39,18 @@ use crate::command::registry::default_registry;
 use crate::runtime::llm::build_llm_provider;
 use crate::setup::strip_cache_control_if_disabled;
 
+use archon_core::remote::protocol::AgentMessage;
+
+/// Result of [`build_session_agent`] — a fully constructed Agent plus
+/// the event receiver, resolved agent definition, and channel metrics.
+#[allow(dead_code)]
+struct BuiltAgent {
+    agent: Agent,
+    event_rx: tokio::sync::mpsc::UnboundedReceiver<TimestampedEvent>,
+    agent_def: Option<archon_core::agents::definition::CustomAgentDefinition>,
+    metrics: std::sync::Arc<archon_tui::observability::ChannelMetrics>,
+}
+
 /// Spawn the Prometheus `/metrics` exporter when `--metrics-port PORT` is
 /// both present and non-zero. Port 0 is treated as "disabled" per the
 /// documented CLI contract (otherwise `--metrics-port 0` would bind to an
@@ -181,16 +193,23 @@ pub(crate) async fn fetch_account_uuid(auth: &archon_llm::auth::AuthProvider) ->
     }
 }
 
-/// Run a print-mode session: set up auth/agent, process one query, return exit code.
-pub(crate) async fn run_print_mode_session(
+/// Build a fully configured Agent for print-mode or headless sessions.
+///
+/// Returns the Agent, its event receiver, the resolved agent definition
+/// (if any), and channel metrics. The caller is responsible for closing
+/// the event channel or draining events between messages.
+///
+/// When `inject_output_style` is true, output-style prompts are appended
+/// to the system prompt (print mode). When false, they are skipped
+/// (headless mode — the remote client controls formatting).
+async fn build_session_agent(
     config: &archon_core::config::ArchonConfig,
     session_id: &str,
     cli: &Cli,
     env_vars: &ArchonEnvVars,
-    print_config: PrintModeConfig,
     resolved_flags: &archon_core::cli_flags::ResolvedFlags,
-) -> i32 {
-    // Resolve authentication (same as interactive)
+    inject_output_style: bool,
+) -> Result<BuiltAgent, i32> {
     let auth = match resolve_auth_with_keys(
         env_vars.anthropic_api_key.as_deref(),
         env_vars.archon_api_key.as_deref(),
@@ -201,7 +220,7 @@ pub(crate) async fn run_print_mode_session(
         Err(e) => {
             eprintln!("Authentication failed: {e}");
             eprintln!("Run `archon login` or set ANTHROPIC_API_KEY.");
-            return archon_core::print_mode::EXIT_ERROR;
+            return Err(archon_core::print_mode::EXIT_ERROR);
         }
     };
 
@@ -233,7 +252,6 @@ pub(crate) async fn run_print_mode_session(
         account_uuid,
     );
 
-    // Resolve API base URL: env var > config > hardcoded default (inside AnthropicClient::new)
     let api_url = std::env::var("ANTHROPIC_BASE_URL")
         .ok()
         .or_else(|| config.api.base_url.clone());
@@ -242,20 +260,15 @@ pub(crate) async fn run_print_mode_session(
     let working_dir = std::env::current_dir().unwrap_or_default();
     let leann_index = init_leann_index(&working_dir);
     let mut registry = create_default_registry(working_dir.clone(), leann_index);
-    // Wire config-driven bash tool limits
     registry.register(Box::new(archon_tools::bash::BashTool {
         timeout_secs: config.tools.bash_timeout,
         max_output_bytes: config.tools.bash_max_output,
     }));
 
-    // Apply tool filtering from resolved flags (CLI-220)
     apply_tool_filters(&mut registry, resolved_flags);
 
-    // ── Resolve --agent flag against AgentRegistry (AGT-008) ──
-    // Load registry early so we can resolve before tool_defs extraction.
     let agent_registry_early = AgentRegistry::load(&working_dir);
 
-    // ── Inject agent listing into Agent tool description (AGT-011) ──
     {
         let agents: Vec<(String, String)> = agent_registry_early
             .list()
@@ -270,20 +283,19 @@ pub(crate) async fn run_print_mode_session(
     let agent_def = if let Some(ref agent_name) = resolved_flags.agent {
         match agent_registry_early.resolve(agent_name) {
             Some(def) => {
-                tracing::info!(agent = agent_name, "print mode: resolved custom agent");
+                tracing::info!(agent = agent_name, "resolved custom agent");
                 Some(def.clone())
             }
             None => {
                 let available = agent_registry_early.available_agent_names().join(", ");
                 eprintln!("Unknown agent '{}'. Available: {}", agent_name, available);
-                return 1;
+                return Err(1);
             }
         }
     } else {
         None
     };
 
-    // Apply agent tool filtering to registry
     if let Some(ref def) = agent_def {
         if let Some(ref allowed) = def.allowed_tools {
             let allowed_refs: Vec<&str> = allowed.iter().map(|s| s.as_str()).collect();
@@ -295,7 +307,6 @@ pub(crate) async fn run_print_mode_session(
         }
     }
 
-    // Pre-flight check: required MCP servers must be available for --agent mode
     if let Some(ref def) = agent_def {
         let available_tools = registry.tool_names();
         let available_mcp: Vec<String> = available_tools
@@ -308,13 +319,10 @@ pub(crate) async fn run_print_mode_session(
                 "Agent '{}' requires MCP servers {:?} but they are not available.",
                 def.agent_type, def.required_mcp_servers,
             );
-            return 1;
+            return Err(1);
         }
     }
 
-    // Build a minimal system prompt (skip ARCHON.md in bare mode)
-    // Note: omit_claude_md is subagent-spawn only (matches Claude Code behavior).
-    // --agent CLI mode always gets full ARCHON.md.
     let archon_md = if resolved_flags.bare_mode {
         String::new()
     } else {
@@ -328,17 +336,12 @@ pub(crate) async fn run_print_mode_session(
     let env_section = build_environment_section(&working_dir, git_branch);
 
     let mut identity_blocks = identity.system_prompt_blocks("", &archon_md, &env_section);
-    // Gated by config.context.prompt_cache (TASK-WIRE-003) — strip cache_control
-    // from identity blocks when disabled so print mode honours the flag too.
     strip_cache_control_if_disabled(&mut identity_blocks, config.context.prompt_cache);
     let mut system_prompt: Vec<serde_json::Value> = identity_blocks;
 
-    // Inject agent system prompt (replaces default personality in print mode)
     if let Some(ref def) = agent_def {
-        // Clear default identity blocks and inject agent prompt instead
         let mut agent_prompt = def.system_prompt.clone();
 
-        // Inject tool guidance
         if !def.tool_guidance.is_empty() {
             agent_prompt = format!(
                 "{agent_prompt}\n\n<tool-guidance>\n{}\n</tool-guidance>",
@@ -346,7 +349,6 @@ pub(crate) async fn run_print_mode_session(
             );
         }
 
-        // Inject skills
         if let Some(ref skills) = def.skills {
             if !skills.is_empty() {
                 let skills_list = skills.join(", ");
@@ -356,7 +358,6 @@ pub(crate) async fn run_print_mode_session(
             }
         }
 
-        // Inject LEANN queries and memory tags
         if !def.leann_queries.is_empty() {
             let queries = def.leann_queries.join(", ");
             agent_prompt = format!(
@@ -376,8 +377,8 @@ pub(crate) async fn run_print_mode_session(
         })];
     }
 
-    // ── Output style injection for print mode (CLI-310) ──────────
-    {
+    // Output style injection — only for print mode
+    if inject_output_style {
         use archon_core::output_style::OutputStyleRegistry;
         use archon_core::output_style_loader::load_styles_from_dir;
 
@@ -456,9 +457,7 @@ pub(crate) async fn run_print_mode_session(
         cancel_token: None,
     };
 
-    // Apply agent execution config overrides (AGT-008)
     if let Some(ref def) = agent_def {
-        // AC-113: model="inherit" means use parent model (skip override)
         if let Some(ref m) = def.model {
             if m != "inherit" {
                 agent_config.model = m.clone();
@@ -474,7 +473,6 @@ pub(crate) async fn run_print_mode_session(
         }
         if let Some(ref pm) = def.permission_mode {
             let mode_str = pm.as_str();
-            // AC-103: Agent permission_mode must NOT override parent BypassPermissions/AcceptEdits/Auto
             let parent_mode = agent_config.permission_mode.lock().await.clone();
             let parent_is_privileged = matches!(
                 parent_mode.as_str(),
@@ -504,7 +502,6 @@ pub(crate) async fn run_print_mode_session(
     let provider = build_llm_provider(&config.llm, api_client);
     tracing::info!("LLM provider: {}", provider.name());
 
-    // Load custom agent registry (built-in + project + user agents)
     let agent_registry = Arc::new(std::sync::RwLock::new(AgentRegistry::load(&working_dir)));
     {
         let reg = agent_registry.read().expect("agent registry lock");
@@ -521,31 +518,21 @@ pub(crate) async fn run_print_mode_session(
         agent_registry,
     );
 
-    // Wire channel metrics for observability (TASK-TUI-206)
     let metrics = Arc::new(archon_tui::observability::ChannelMetrics::default());
     let metrics_for_agent = Arc::clone(&metrics);
     agent.set_channel_metrics(metrics_for_agent);
 
-    // TASK-TUI-803: spawn Prometheus /metrics exporter on loopback when
-    // `--metrics-port <PORT>` is set (non-zero). Shares the metrics Arc
-    // with the agent so every scrape reflects live counter state. Bind
-    // errors surface synchronously so an unusable `--metrics-port 80`
-    // fails the session rather than silently lying. Print-mode returns
-    // i32 (not Result), so the bind error is rendered to stderr and
-    // EXIT_ERROR is returned directly instead of `?`-propagating.
     if let Err(e) = spawn_metrics_exporter(cli.metrics_port, Arc::clone(&metrics)) {
         eprintln!("Metrics exporter failed: {e}");
-        return archon_core::print_mode::EXIT_ERROR;
+        return Err(archon_core::print_mode::EXIT_ERROR);
     }
 
-    // Wire hook system for print mode — load hooks then register agent-specific hooks
     {
         let home_dir = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
         let hook_registry = archon_core::hooks::HookRegistry::load_all(&working_dir, &home_dir);
         let arc = std::sync::Arc::new(hook_registry);
         agent.set_hook_registry(Arc::clone(&arc));
 
-        // Register agent-specific hooks as session-scoped hooks
         if let Some(ref def) = agent_def {
             if let Some(ref hooks_json) = def.hooks {
                 match archon_core::agents::loader::parse_agent_hooks(hooks_json) {
@@ -553,7 +540,7 @@ pub(crate) async fn run_print_mode_session(
                         for (event, config) in hook_pairs {
                             arc.register_session_hook(session_id, event, config);
                         }
-                        tracing::info!(agent = %def.agent_type, "print mode: registered agent session-scoped hooks");
+                        tracing::info!(agent = %def.agent_type, "registered agent session-scoped hooks");
                     }
                     Err(e) => {
                         tracing::warn!(agent = %def.agent_type, error = %e, "failed to parse agent hooks")
@@ -563,23 +550,46 @@ pub(crate) async fn run_print_mode_session(
         }
     }
 
-    // Wire auto-mode evaluator
     let auto_eval = AutoModeEvaluator::new(AutoModeConfig {
         project_dir: Some(working_dir),
         ..Default::default()
     });
     agent.set_auto_evaluator(auto_eval);
 
-    // Wire subagent executor (TASK-AGS-105) — must be AFTER all post-construction
-    // setters so AgentSubagentExecutor captures hook_registry, memory, etc.
     agent.install_subagent_executor();
 
-    // Wire Phase G: critical_system_reminder for per-turn injection in print mode
     if let Some(ref def) = agent_def {
         if let Some(ref reminder) = def.critical_system_reminder {
             agent.set_critical_system_reminder(reminder.clone());
         }
     }
+
+    Ok(BuiltAgent {
+        agent,
+        event_rx: agent_event_rx,
+        agent_def,
+        metrics,
+    })
+}
+
+/// Run a print-mode session: set up auth/agent, process one query, return exit code.
+pub(crate) async fn run_print_mode_session(
+    config: &archon_core::config::ArchonConfig,
+    session_id: &str,
+    cli: &Cli,
+    env_vars: &ArchonEnvVars,
+    print_config: PrintModeConfig,
+    resolved_flags: &archon_core::cli_flags::ResolvedFlags,
+) -> i32 {
+    let BuiltAgent {
+        mut agent,
+        event_rx,
+        agent_def,
+        ..
+    } = match build_session_agent(config, session_id, cli, env_vars, resolved_flags, true).await {
+        Ok(b) => b,
+        Err(exit_code) => return exit_code,
+    };
 
     // AGT-011: Prepend initial_prompt to the query in print mode
     let mut print_config = print_config;
@@ -589,7 +599,158 @@ pub(crate) async fn run_print_mode_session(
         }
     }
 
-    run_print_mode(print_config, config, &mut agent, agent_event_rx).await
+    run_print_mode(print_config, config, &mut agent, event_rx).await
+}
+
+/// Run a headless-mode session: build the Agent, then enter a JSON-lines
+/// I/O loop on stdin/stdout using the [`AgentMessage`] protocol.
+///
+/// Each `UserMessage` line triggers a full agent invocation
+/// (`process_message`). `TextDelta` events are collected into an
+/// `AssistantMessage` reply. `Ping` → `Pong`. The loop exits on EOF.
+pub(crate) async fn run_headless_session(
+    config: &archon_core::config::ArchonConfig,
+    session_id: &str,
+    cli: &Cli,
+    env_vars: &ArchonEnvVars,
+    resolved_flags: &archon_core::cli_flags::ResolvedFlags,
+) -> i32 {
+    let BuiltAgent {
+        mut agent,
+        event_rx,
+        ..
+    } = match build_session_agent(config, session_id, cli, env_vars, resolved_flags, false).await {
+        Ok(b) => b,
+        Err(exit_code) => return exit_code,
+    };
+
+    let stdin = tokio::io::stdin();
+    let mut reader = tokio::io::BufReader::new(stdin);
+    let mut stdout = tokio::io::stdout();
+    let mut line = String::new();
+    let mut event_rx = event_rx;
+
+    tracing::info!(%session_id, "headless: agent loop started");
+
+    loop {
+        line.clear();
+        match tokio::io::AsyncBufReadExt::read_line(&mut reader, &mut line).await {
+            Ok(0) => {
+                tracing::info!("headless: stdin closed (EOF)");
+                break;
+            }
+            Ok(_) => {}
+            Err(e) => {
+                tracing::error!("headless: read error: {e}");
+                return 1;
+            }
+        }
+
+        match AgentMessage::from_json_line(&line) {
+            Ok(AgentMessage::Ping) => {
+                if let Ok(pong) = AgentMessage::Pong.to_json_line() {
+                    if tokio::io::AsyncWriteExt::write_all(&mut stdout, pong.as_bytes())
+                        .await
+                        .is_err()
+                    {
+                        tracing::error!("headless: stdout write failed, exiting");
+                        return 1;
+                    }
+                    if tokio::io::AsyncWriteExt::flush(&mut stdout).await.is_err() {
+                        tracing::error!("headless: stdout flush failed, exiting");
+                        return 1;
+                    }
+                }
+            }
+            Ok(AgentMessage::UserMessage { content }) => {
+                tracing::info!(len = content.len(), "headless: processing UserMessage");
+
+                if let Err(e) = agent.process_message(&content).await {
+                    tracing::error!(%e, "headless: agent error");
+                    // Drain stale events from the failed processing before
+                    // sending the error response to avoid leaking fragments
+                    // into the next message's response.
+                    loop {
+                        match event_rx.try_recv() {
+                            Ok(_) => {} // discard
+                            Err(tokio::sync::mpsc::error::TryRecvError::Empty) => break,
+                            Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => break,
+                        }
+                    }
+                    let err = AgentMessage::Error {
+                        message: format!("agent error: {e}"),
+                    };
+                    if let Ok(line) = err.to_json_line() {
+                        if tokio::io::AsyncWriteExt::write_all(&mut stdout, line.as_bytes())
+                            .await
+                            .is_err()
+                        {
+                            return 1;
+                        }
+                        if tokio::io::AsyncWriteExt::flush(&mut stdout).await.is_err() {
+                            return 1;
+                        }
+                    }
+                    continue;
+                }
+
+                // Drain TextDelta events to build the response
+                let mut response_text = String::new();
+                loop {
+                    match event_rx.try_recv() {
+                        Ok(ts) => {
+                            if let AgentEvent::TextDelta(text) = ts.inner {
+                                response_text.push_str(&text);
+                            }
+                        }
+                        Err(tokio::sync::mpsc::error::TryRecvError::Empty) => break,
+                        Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
+                            tracing::warn!("headless: event channel disconnected");
+                            break;
+                        }
+                    }
+                }
+
+                let msg = AgentMessage::AssistantMessage {
+                    content: response_text,
+                };
+                if let Ok(line) = msg.to_json_line() {
+                    if tokio::io::AsyncWriteExt::write_all(&mut stdout, line.as_bytes())
+                        .await
+                        .is_err()
+                    {
+                        tracing::error!("headless: stdout write failed, exiting");
+                        return 1;
+                    }
+                    if tokio::io::AsyncWriteExt::flush(&mut stdout).await.is_err() {
+                        return 1;
+                    }
+                }
+            }
+            Ok(_) => {
+                tracing::debug!("headless: ignoring non-UserMessage/non-Ping");
+            }
+            Err(e) => {
+                tracing::warn!(%e, "headless: parse error");
+                let err = AgentMessage::Error {
+                    message: format!("parse error: {e}"),
+                };
+                if let Ok(line) = err.to_json_line() {
+                    if tokio::io::AsyncWriteExt::write_all(&mut stdout, line.as_bytes())
+                        .await
+                        .is_err()
+                    {
+                        return 1;
+                    }
+                    if tokio::io::AsyncWriteExt::flush(&mut stdout).await.is_err() {
+                        return 1;
+                    }
+                }
+            }
+        }
+    }
+
+    0
 }
 
 // ── Interactive session helpers ─────────────────────────────────────────────

@@ -282,12 +282,17 @@ async fn main() -> Result<()> {
         let headless_session_id = cli
             .session_id
             .clone()
-            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+            .unwrap_or_else(|| session_id.clone());
         tracing::info!("headless mode: session_id={headless_session_id}");
-        archon_core::headless::HeadlessRuntime::new(headless_session_id)
-            .run()
-            .await?;
-        return Ok(());
+        let exit_code = crate::session::run_headless_session(
+            &config,
+            &headless_session_id,
+            &cli,
+            &env_vars,
+            &resolved_flags,
+        )
+        .await;
+        std::process::exit(exit_code);
     }
 
     // ── Output style: --list-output-styles (CLI-310) ─────────────
