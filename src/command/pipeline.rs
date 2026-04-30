@@ -206,12 +206,16 @@ pub async fn handle_pipeline_command(
                     let facade_type = &session.pipeline_type;
                     match format!("{:?}", facade_type).as_str() {
                         "Coding" => {
+                            // Reference: archon-pipeline/src/learning/gnn/auto_trainer_runtime.rs.
+                            // Same wiring as the fresh `Code` action above; resume path
+                            // gets the same auto-trainer treatment so the loop is consistent.
+                            let resume_auto_trainer = build_pipeline_auto_trainer(config, &cwd);
                             let learning =
                                 archon_pipeline::learning::integration::LearningIntegration::new(
                                     None,
                                     None,
                                     Default::default(),
-                                    None,
+                                    resume_auto_trainer,
                                 );
                             let facade =
                                 archon_pipeline::coding::facade::CodingFacade::with_learning(
@@ -475,4 +479,86 @@ fn print_pipeline_result(result: &archon_pipeline::runner::PipelineResult) {
     println!("Agents run: {}", result.agent_results.len());
     println!("Total cost: ${:.4}", result.total_cost_usd);
     println!("Duration: {:.1}s", result.duration.as_secs_f64());
+}
+
+/// Build the GNN auto-trainer for pipeline-mode invocations.
+///
+/// Reference:
+/// - `archon-pipeline/src/learning/gnn/auto_trainer_runtime.rs`
+/// - `src/session.rs` (interactive session uses the same construction pattern)
+///
+/// Returns `None` if any of: auto-trainer disabled in config, GNN disabled in
+/// config, learning DB cannot be opened. Pipeline runs are typically shorter
+/// than the configured throttle (default 1h), so the spawned loop may not fire
+/// even one training run within a single pipeline invocation. The wiring is
+/// here so:
+///   1. Memory + correction events from the pipeline runner increment the
+///      counters (visible across pipeline + interactive runs that share the
+///      same learning DB)
+///   2. The `LearningIntegration::on_memory_stored` / `on_correction_recorded`
+///      hooks resolve to the live AutoTrainer Arc instead of `None`
+///   3. /learning-status (run from interactive shell) sees consistent state
+fn build_pipeline_auto_trainer(
+    config: &ArchonConfig,
+    cwd: &std::path::Path,
+) -> Option<Arc<archon_pipeline::learning::gnn::auto_trainer::AutoTrainer>> {
+    let at_cfg = &config.learning.gnn.auto_trainer;
+    if !at_cfg.enabled || !config.learning.gnn.enabled {
+        return None;
+    }
+
+    let db_path = cwd.join(".archon").join("learning.db");
+    if let Some(parent) = db_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let db = match cozo::DbInstance::new("rocksdb", db_path.to_str().unwrap_or(""), "") {
+        Ok(db) => db,
+        Err(e) => {
+            tracing::warn!(error = %e, "pipeline: learning DB unavailable; auto_trainer not spawned");
+            return None;
+        }
+    };
+    if let Err(e) = archon_pipeline::learning::schema::initialize_learning_schemas(&db) {
+        tracing::warn!(error = %e, "pipeline: learning schema init failed; auto_trainer not spawned");
+        return None;
+    }
+    let db = Arc::new(db);
+
+    let gnn_cfg = &config.learning.gnn;
+    let train_cfg = &gnn_cfg.training;
+    let params = archon_pipeline::learning::gnn::auto_trainer_runtime::AutoTrainerBuildParams {
+        at_config: archon_pipeline::learning::gnn::auto_trainer::AutoTrainerConfig {
+            enabled: at_cfg.enabled,
+            min_throttle_ms: at_cfg.min_throttle_ms,
+            trigger_new_memories: at_cfg.trigger_new_memories,
+            trigger_elapsed_ms: at_cfg.trigger_elapsed_ms,
+            trigger_corrections: at_cfg.trigger_corrections,
+            first_run_threshold: at_cfg.first_run_threshold,
+            max_runtime_ms: at_cfg.max_runtime_ms,
+            tick_interval_ms: at_cfg.tick_interval_ms,
+        },
+        training_config: archon_pipeline::learning::gnn::trainer::TrainingConfig {
+            learning_rate: train_cfg.learning_rate,
+            batch_size: train_cfg.batch_size,
+            max_epochs: train_cfg.max_epochs,
+            early_stopping_patience: train_cfg.early_stopping_patience,
+            validation_split: train_cfg.validation_split,
+            ewc_lambda: train_cfg.ewc_lambda,
+            margin: train_cfg.margin,
+            max_gradient_norm: train_cfg.max_gradient_norm,
+            max_triplets_per_run: train_cfg.max_triplets_per_run,
+            max_runtime_ms: train_cfg.max_runtime_ms,
+            ..Default::default()
+        },
+        gnn_input_dim: gnn_cfg.input_dim,
+        gnn_output_dim: gnn_cfg.output_dim,
+        gnn_num_layers: gnn_cfg.num_layers,
+        gnn_attention_heads: gnn_cfg.attention_heads,
+        gnn_max_nodes: gnn_cfg.max_nodes,
+        gnn_use_residual: gnn_cfg.use_residual,
+        gnn_use_layer_norm: gnn_cfg.use_layer_norm,
+        gnn_activation: gnn_cfg.activation.clone(),
+        gnn_weight_seed: gnn_cfg.weight_seed,
+    };
+    archon_pipeline::learning::gnn::auto_trainer_runtime::build_and_spawn_auto_trainer(params, db)
 }

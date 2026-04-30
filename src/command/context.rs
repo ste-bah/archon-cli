@@ -208,6 +208,10 @@ pub(crate) fn build_command_context<'a>(
             // rustdoc for the full SIDECAR-SLOT rationale.
             pending_export: Some(Arc::clone(&slash_ctx.pending_export_shared)),
             cozo_db: slash_ctx.cozo_db.clone(),
+            // Reference: archon-pipeline/src/learning/gnn/auto_trainer.rs.
+            // /learning-status reads .status() from this Arc to display
+            // live loop state (training_count, memories_since_last_train, etc.)
+            auto_trainer: slash_ctx.auto_trainer.clone(),
         };
 
         // Resolve the primary command name (alias-aware) so "/info" routes

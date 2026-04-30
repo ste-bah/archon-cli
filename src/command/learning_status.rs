@@ -26,13 +26,31 @@ impl CommandHandler for LearningStatusHandler {
 
 impl LearningStatusHandler {
     fn execute_status(&self, ctx: &mut CommandContext) -> anyhow::Result<()> {
+        // Reference: archon-pipeline/src/learning/gnn/auto_trainer.rs::status.
+        // Read live loop state if the AutoTrainer Arc is wired through. If not
+        // wired (older session, build without learning DB, kill-switch), fall
+        // back to config-claimed state and label it explicitly so the operator
+        // can tell the difference.
+        let live = ctx.auto_trainer.as_ref().map(|at| at.status());
+
         let status = match archon_core::config::load_config() {
             Ok(config) => {
                 let at = &config.learning.gnn.auto_trainer;
                 let gnn_line = if config.learning.gnn.enabled {
-                    let at_status = if at.enabled {
+                    if let Some(snap) = &live {
                         format!(
-                            "enabled (every {}s, throttle {}min, trigger: {} mem / {} corr / {}h elapsed)",
+                            "RUNNING — {} runs, {} mem / {} corr since last train, {} (training_in_progress={})",
+                            snap.training_count,
+                            snap.memories_since_last_train,
+                            snap.corrections_since_last_train,
+                            snap.seconds_since_last_train
+                                .map(|s| format!("last {}s ago", s))
+                                .unwrap_or_else(|| "never trained".into()),
+                            snap.training_in_progress,
+                        )
+                    } else if at.enabled {
+                        format!(
+                            "config: enabled (every {}s, throttle {}min, triggers: {} mem / {} corr / {}h elapsed) — NOT spawned (no learning DB or kill-switch active)",
                             at.tick_interval_ms / 1000,
                             at.min_throttle_ms / 60_000,
                             at.trigger_new_memories,
@@ -40,11 +58,10 @@ impl LearningStatusHandler {
                             at.trigger_elapsed_ms / 3_600_000,
                         )
                     } else {
-                        "enabled, auto-trainer OFF".to_string()
-                    };
-                    at_status
+                        "OFF (auto_trainer.enabled=false in config)".to_string()
+                    }
                 } else {
-                    "OFF".to_string()
+                    "OFF (gnn.enabled=false in config)".to_string()
                 };
 
                 format!(
@@ -111,9 +128,10 @@ impl LearningStatusHandler {
         let gnn_cfg = &config.learning.gnn;
         let train_cfg_val = &gnn_cfg.training;
 
-        // Query trajectories with quality scores from CozoDB
+        // Query trajectories — shared with the auto-trainer's sample provider.
+        // Reference: archon-pipeline/src/learning/gnn/auto_trainer_runtime.rs.
         let trajectories: Vec<archon_pipeline::learning::gnn::loss::TrajectoryWithFeedback> =
-            match query_trajectories(db) {
+            match archon_pipeline::learning::gnn::auto_trainer_runtime::query_trajectories_for_training(db) {
                 Ok(trajs) => trajs,
                 Err(e) => {
                     let _ = ctx.tui_tx.send(TuiEvent::TextDelta(format!(
@@ -272,44 +290,11 @@ fn on_off(enabled: bool) -> &'static str {
     if enabled { "enabled" } else { "disabled" }
 }
 
-/// Query trajectories with quality scores from CozoDB.
-///
-/// Returns up to 512 trajectories with `quality > 0`, ordered by most
-/// recently updated first.
-fn query_trajectories(
-    db: &cozo::DbInstance,
-) -> anyhow::Result<Vec<archon_pipeline::learning::gnn::loss::TrajectoryWithFeedback>> {
-    let query = "
-        ?[trajectory_id, embedding, quality] :=
-            *trajectories[trajectory_id, _, _, _, _, _, quality, _, _, _, _, _],
-            quality > 0.0
-        :order -quality
-        :limit 512
-    ";
-
-    let result = db
-        .run_script(query, Default::default(), cozo::ScriptMutability::Immutable)
-        .map_err(|e| anyhow::anyhow!("CozoDB query failed: {e}"))?;
-
-    let mut trajectories = Vec::with_capacity(result.rows.len());
-    for row in &result.rows {
-        let trajectory_id = row[0].get_str().unwrap_or("unknown").to_string();
-        // CozoDB stores Float as f64; embedding is not stored in this schema yet
-        // For now, use a zero embedding — full integration in PR 3
-        let quality = row[1].get_float().unwrap_or(0.0) as f32;
-        let embedding = vec![0.0f32; 1536]; // placeholder until embeddings are stored
-
-        trajectories.push(
-            archon_pipeline::learning::gnn::loss::TrajectoryWithFeedback {
-                trajectory_id,
-                embedding,
-                quality,
-            },
-        );
-    }
-
-    Ok(trajectories)
-}
+// `query_trajectories` was duplicated in this file and in auto_trainer_runtime;
+// the shared implementation lives at
+// `archon-pipeline/src/learning/gnn/auto_trainer_runtime.rs::query_trajectories_for_training`.
+// Keeping a single source of truth means the auto-trainer's sample provider
+// and the manual `/learning-status retrain` command always agree.
 
 #[cfg(test)]
 mod tests {

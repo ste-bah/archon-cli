@@ -11,6 +11,8 @@
 //!   layer3: 1280 → output_dim (restore to 1536)
 
 pub mod auto_trainer;
+// Reference: auto_trainer_runtime.rs (build/spawn helpers used by session.rs + pipeline.rs)
+pub mod auto_trainer_runtime;
 pub mod backprop;
 pub mod cache;
 pub mod ewc;

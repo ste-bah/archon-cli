@@ -442,6 +442,10 @@ impl CtxBuilder {
                 llm_adapter: None,
                 leann: None,
                 cozo_db: self.cozo_db.clone(),
+                // Reference: archon-pipeline/src/learning/gnn/auto_trainer.rs.
+                // Tests don't need a real auto-trainer; learning_status's
+                // status branch falls back to config-only display when None.
+                auto_trainer: None,
             },
             self.tui_rx,
         )

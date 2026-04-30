@@ -68,6 +68,9 @@ pub(crate) fn run_session_loop(
     mut cmd_ctx: SlashCommandContext,
     mcp_lifecycle_tx: McpLifecycleTx,
     auto_capture: Option<Arc<AutoCapture>>,
+    // Reference: archon-pipeline/src/learning/gnn/auto_trainer_runtime.rs.
+    // Forwarded to AgentHandle so the auto-capture site can call record_memory.
+    auto_trainer: Option<Arc<archon_pipeline::learning::gnn::auto_trainer::AutoTrainer>>,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> {
     Box::pin(async move {
         let agent = Arc::new(tokio::sync::Mutex::new(agent));
@@ -138,6 +141,7 @@ pub(crate) fn run_session_loop(
         let adapter = Arc::new(crate::agent_handle::AgentHandle::new(
             Arc::clone(&agent),
             auto_capture,
+            auto_trainer.clone(),
         ));
         let router: Arc<dyn archon_tui::AgentRouter> =
             Arc::new(crate::agent_handle::NoopAgentRouter);

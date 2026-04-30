@@ -359,6 +359,15 @@ pub struct Agent {
     pending_resume_messages: Arc<tokio::sync::Mutex<Option<Vec<serde_json::Value>>>>,
     /// Channel instrumentation sink for tracking sent/drained counts.
     metrics: Option<Arc<dyn ChannelMetricSink>>,
+    /// GNN auto-trainer hook: invoked with `n=count` after a successful memory
+    /// store (auto-extraction, inner-voice snapshot). archon-core cannot depend
+    /// on archon-pipeline (would create a cycle), so the AutoTrainer is injected
+    /// as a closure by the binary at startup. Reference:
+    /// `archon-pipeline/src/learning/gnn/auto_trainer_runtime.rs`.
+    record_memory_callback: Option<Arc<dyn Fn(u64) + Send + Sync>>,
+    /// GNN auto-trainer hook: invoked after a successful correction record.
+    /// Same injection rationale as `record_memory_callback`.
+    record_correction_callback: Option<Arc<dyn Fn() + Send + Sync>>,
 }
 
 impl Agent {
@@ -409,6 +418,12 @@ impl Agent {
             critical_system_reminder: None,
             pending_resume_messages: Arc::new(tokio::sync::Mutex::new(None)),
             metrics: None,
+            // Reference: archon-pipeline/src/learning/gnn/auto_trainer_runtime.rs.
+            // Wired by the binary at startup via set_record_memory_callback /
+            // set_record_correction_callback so the AutoTrainer's record_*
+            // methods get called from agent's memory + correction code paths.
+            record_memory_callback: None,
+            record_correction_callback: None,
         }
     }
 
@@ -590,6 +605,22 @@ impl Agent {
     /// Set the auto-extraction system (v0.1.23: LLM-driven fact extraction every N turns).
     pub fn set_auto_extractor(&mut self, extractor: Arc<AutoExtractor>) {
         self.auto_extractor = Some(extractor);
+    }
+
+    /// Wire the GNN auto-trainer's `record_memory(n)` hook.
+    ///
+    /// archon-core cannot depend on archon-pipeline directly (cycle), so the
+    /// binary builds an AutoTrainer via `auto_trainer_runtime::build_and_spawn_auto_trainer`
+    /// and injects this closure pointing at it. Called from the auto-extraction
+    /// memory store path (line ~2659) and inner-voice snapshot path (line ~2308).
+    pub fn set_record_memory_callback(&mut self, cb: Arc<dyn Fn(u64) + Send + Sync>) {
+        self.record_memory_callback = Some(cb);
+    }
+
+    /// Wire the GNN auto-trainer's `record_correction()` hook.
+    /// Called from `detect_and_record_correction` after a successful record.
+    pub fn set_record_correction_callback(&mut self, cb: Arc<dyn Fn() + Send + Sync>) {
+        self.record_correction_callback = Some(cb);
     }
 
     /// Current turn number (for AutoCapture indexing).
@@ -2562,8 +2593,15 @@ impl Agent {
 
         let tracker = CorrectionTracker::new(graph.as_ref());
         let context = format!("turn:{}", self.turn_number);
-        if let Err(e) = tracker.record_correction(correction_type, user_input, &context, None) {
-            tracing::warn!("failed to record correction: {e}");
+        match tracker.record_correction(correction_type, user_input, &context, None) {
+            Ok(_) => {
+                // Reference: archon-pipeline/src/learning/gnn/auto_trainer.rs::record_correction.
+                // Closure-injection avoids cycle (archon-core cannot import archon-pipeline).
+                if let Some(ref cb) = self.record_correction_callback {
+                    cb();
+                }
+            }
+            Err(e) => tracing::warn!("failed to record correction: {e}"),
         }
 
         // CRIT-15 (ITEM 5): Notify inner voice of user correction.
@@ -2618,6 +2656,8 @@ impl Agent {
         let turn = self.turn_number as usize;
         let client = Arc::clone(&self.client);
         let model = self.config.model.clone();
+        // Reference: auto_trainer_runtime.rs — closure pointing at AutoTrainer.record_memories.
+        let mem_cb = self.record_memory_callback.as_ref().map(Arc::clone);
 
         // Record extraction so we don't fire again immediately
         self.extraction_state.record_extraction(turn);
@@ -2658,7 +2698,13 @@ impl Agent {
                     if !extracted.is_empty() {
                         match store_extracted(graph.as_ref(), &extracted, &session_id) {
                             Ok(count) => {
-                                tracing::info!("auto-extracted {count} memories at turn {turn}")
+                                tracing::info!("auto-extracted {count} memories at turn {turn}");
+                                // Reference: auto_trainer.rs::record_memories — bumps the
+                                // GNN auto-trainer's memory counter so triggers fire when
+                                // the configured threshold is met.
+                                if let Some(ref cb) = mem_cb {
+                                    cb(count as u64);
+                                }
                             }
                             Err(e) => tracing::warn!("memory extraction storage failed: {e}"),
                         }

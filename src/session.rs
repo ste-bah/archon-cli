@@ -1634,6 +1634,102 @@ pub(crate) async fn run_interactive_session(
         None
     };
 
+    // v0.1.26: Wire the GNN auto-trainer.
+    //
+    // Reference: archon-pipeline/src/learning/gnn/auto_trainer_runtime.rs.
+    //
+    // The original v0.1.26 PR shipped the AutoTrainer infrastructure but never
+    // wired it from the application's startup path: pipeline.rs:72 passed
+    // `None` as the auto_trainer, and session.rs (this file) never built one.
+    // `/learning-status` consequently displayed config-claimed state ("enabled")
+    // while the background loop never ran. Below we:
+    //   1. Build the AutoTrainer + sample provider from config + the learning DB
+    //   2. Spawn the background loop
+    //   3. Inject closure callbacks into Agent so detect_and_record_correction
+    //      and the auto-extraction memory store path bump the trainer counters
+    //   4. Pass the Arc through to the SlashCommandContext so /learning-status
+    //      reads live loop state instead of just config
+    //   5. Forward to AgentHandle so the AutoCapture site also records memory
+    //   6. Shutdown happens implicitly on process exit via tokio's runtime
+    //      drop; explicit shutdown is in the cleanup path further down.
+    let auto_trainer: Option<Arc<archon_pipeline::learning::gnn::auto_trainer::AutoTrainer>> = {
+        let at_cfg = &config.learning.gnn.auto_trainer;
+        if !at_cfg.enabled || !config.learning.gnn.enabled {
+            None
+        } else if let Some(ref db) = learning_cozo_db {
+            let gnn_cfg = &config.learning.gnn;
+            let train_cfg = &gnn_cfg.training;
+            let params = archon_pipeline::learning::gnn::auto_trainer_runtime::AutoTrainerBuildParams {
+                at_config: archon_pipeline::learning::gnn::auto_trainer::AutoTrainerConfig {
+                    enabled: at_cfg.enabled,
+                    min_throttle_ms: at_cfg.min_throttle_ms,
+                    trigger_new_memories: at_cfg.trigger_new_memories,
+                    trigger_elapsed_ms: at_cfg.trigger_elapsed_ms,
+                    trigger_corrections: at_cfg.trigger_corrections,
+                    first_run_threshold: at_cfg.first_run_threshold,
+                    max_runtime_ms: at_cfg.max_runtime_ms,
+                    tick_interval_ms: at_cfg.tick_interval_ms,
+                },
+                training_config: archon_pipeline::learning::gnn::trainer::TrainingConfig {
+                    learning_rate: train_cfg.learning_rate,
+                    batch_size: train_cfg.batch_size,
+                    max_epochs: train_cfg.max_epochs,
+                    early_stopping_patience: train_cfg.early_stopping_patience,
+                    validation_split: train_cfg.validation_split,
+                    ewc_lambda: train_cfg.ewc_lambda,
+                    margin: train_cfg.margin,
+                    max_gradient_norm: train_cfg.max_gradient_norm,
+                    max_triplets_per_run: train_cfg.max_triplets_per_run,
+                    max_runtime_ms: train_cfg.max_runtime_ms,
+                    ..Default::default()
+                },
+                gnn_input_dim: gnn_cfg.input_dim,
+                gnn_output_dim: gnn_cfg.output_dim,
+                gnn_num_layers: gnn_cfg.num_layers,
+                gnn_attention_heads: gnn_cfg.attention_heads,
+                gnn_max_nodes: gnn_cfg.max_nodes,
+                gnn_use_residual: gnn_cfg.use_residual,
+                gnn_use_layer_norm: gnn_cfg.use_layer_norm,
+                gnn_activation: gnn_cfg.activation.clone(),
+                gnn_weight_seed: gnn_cfg.weight_seed,
+            };
+            let at = archon_pipeline::learning::gnn::auto_trainer_runtime::build_and_spawn_auto_trainer(
+                params,
+                Arc::clone(db),
+            );
+            if at.is_some() {
+                tracing::info!(
+                    interval_ms = at_cfg.tick_interval_ms,
+                    throttle_ms = at_cfg.min_throttle_ms,
+                    first_run_threshold = at_cfg.first_run_threshold,
+                    "GNN auto-trainer spawned"
+                );
+            }
+            at
+        } else {
+            tracing::warn!(
+                "GNN auto-trainer enabled in config but learning CozoDB unavailable; not spawning"
+            );
+            None
+        }
+    };
+
+    // Inject record_memory + record_correction callbacks into the Agent so the
+    // existing memory-store and correction code paths in archon-core/agent.rs
+    // bump the auto-trainer counters. Without this wiring the loop spawns but
+    // its triggers (memory accumulation, correction spike) never fire.
+    if let Some(ref at) = auto_trainer {
+        let at_mem = Arc::clone(at);
+        let mem_cb: Arc<dyn Fn(u64) + Send + Sync> =
+            Arc::new(move |n| at_mem.record_memories(n));
+        agent.set_record_memory_callback(mem_cb);
+
+        let at_corr = Arc::clone(at);
+        let corr_cb: Arc<dyn Fn() + Send + Sync> =
+            Arc::new(move || at_corr.record_correction());
+        agent.set_record_correction_callback(corr_cb);
+    }
+
     // Wire inner voice if enabled in config. The state is injected into
     // the system prompt before every turn and updated from tool outcomes.
     if archon_consciousness::inner_voice::InnerVoice::is_enabled(config.consciousness.inner_voice) {
@@ -2115,6 +2211,11 @@ pub(crate) async fn run_interactive_session(
         // Adam state, and training runs. Created once at bootstrap, shared
         // across commands via the DIRECT pattern (same as memory/leann).
         cozo_db: learning_cozo_db.clone(),
+        // GNN auto-trainer — Some when config.learning.gnn.auto_trainer.enabled
+        // and the learning DB opened successfully. /learning-status reads
+        // .status() from this for live loop state. Reference:
+        // archon-pipeline/src/learning/gnn/auto_trainer.rs.
+        auto_trainer: auto_trainer.clone(),
     };
 
     // Spawn agent input processor with slash command dispatch
@@ -2162,6 +2263,7 @@ pub(crate) async fn run_interactive_session(
         cmd_ctx,
         mcp_lifecycle_tx,
         auto_capture,
+        auto_trainer.clone(),
     ));
 
     // Build splash screen config with recent activity from session store

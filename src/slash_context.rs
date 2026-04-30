@@ -68,6 +68,12 @@ pub(crate) struct SlashCommandContext {
     /// CozoDB instance for learning subsystem persistence (GNN weights,
     /// trajectories, Adam state, training runs). Created at bootstrap.
     pub(crate) cozo_db: Option<Arc<cozo::DbInstance>>,
+    /// GNN auto-trainer Arc — Some when the background loop is running.
+    /// `/learning-status` reads live state from this; None means the trainer
+    /// is disabled in config OR the learning CozoDB failed to open.
+    /// Reference: `archon-pipeline/src/learning/gnn/auto_trainer.rs`.
+    pub(crate) auto_trainer:
+        Option<Arc<archon_pipeline::learning::gnn::auto_trainer::AutoTrainer>>,
     #[allow(dead_code)]
     pub(crate) registry: Arc<Registry>,
     #[allow(dead_code)]

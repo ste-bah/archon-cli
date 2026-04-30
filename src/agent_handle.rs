@@ -37,6 +37,9 @@ use std::sync::Arc;
 
 use archon_core::agent::Agent;
 use archon_pipeline::capture::AutoCapture;
+// Reference: archon-pipeline/src/learning/gnn/auto_trainer.rs — record_memory() bumps the
+// GNN auto-trainer's memory counter so triggers fire when threshold is met.
+use archon_pipeline::learning::gnn::auto_trainer::AutoTrainer;
 use archon_tui::{AgentRouter, TurnRunner};
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
@@ -48,14 +51,22 @@ pub struct AgentHandle {
     cancel_slot: Arc<Mutex<Option<CancellationToken>>>,
     /// v0.1.23: AutoCapture instance for per-turn regex-based memory detection.
     auto_capture: Option<Arc<AutoCapture>>,
+    /// GNN auto-trainer — when present, the auto-capture site below records each
+    /// stored memory so the background loop's triggers fire correctly.
+    auto_trainer: Option<Arc<AutoTrainer>>,
 }
 
 impl AgentHandle {
-    pub fn new(agent: Arc<Mutex<Agent>>, auto_capture: Option<Arc<AutoCapture>>) -> Self {
+    pub fn new(
+        agent: Arc<Mutex<Agent>>,
+        auto_capture: Option<Arc<AutoCapture>>,
+        auto_trainer: Option<Arc<AutoTrainer>>,
+    ) -> Self {
         Self {
             agent,
             cancel_slot: Arc::new(Mutex::new(None)),
             auto_capture,
+            auto_trainer,
         }
     }
 
@@ -98,7 +109,7 @@ impl TurnRunner for AgentHandle {
                     for mem in captured {
                         if !AutoCapture::is_duplicate(&mem, &recent) {
                             if let Some(ref memory) = guard.memory_handle() {
-                                let _ = memory.store_memory(
+                                let stored = memory.store_memory(
                                     &mem.content,
                                     &mem.content.chars().take(80).collect::<String>(),
                                     archon_memory::types::MemoryType::Fact,
@@ -107,6 +118,14 @@ impl TurnRunner for AgentHandle {
                                     "auto_capture",
                                     "",
                                 );
+                                // Reference: auto_trainer.rs::record_memory.
+                                // Only count successful stores so triggers reflect
+                                // real memory accumulation.
+                                if stored.is_ok() {
+                                    if let Some(ref at) = self.auto_trainer {
+                                        at.record_memory();
+                                    }
+                                }
                             }
                             recent.push(mem);
                         }
