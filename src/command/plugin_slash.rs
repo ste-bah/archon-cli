@@ -112,7 +112,7 @@ impl CommandHandler for PluginSlashHandler {
     }
 
     fn description(&self) -> &str {
-        "Manage WASM plugins (list, info — enable/disable/install/reload deferred)"
+        "List/inspect WASM plugins (enable/disable/install/reload not yet implemented)"
     }
 
     fn aliases(&self) -> &'static [&'static str] {
@@ -305,7 +305,7 @@ fn render_reload_hint() -> String {
 fn render_usage(prefix: &str) -> String {
     format!(
         "\n\
-         /plugin — manage WASM plugins.\n\
+         /plugin — list and inspect WASM plugins.\n\
          Note: {prefix}\n\
          \n\
          Subcommands:\n  \
