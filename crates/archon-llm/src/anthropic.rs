@@ -103,7 +103,7 @@ impl AnthropicClient {
                 request.request_origin.as_deref().unwrap_or("unknown"),
                 body.len()
             );
-            tracing::info!("API request body: {}", &body[..body.len().min(2000)]);
+            tracing::info!("API request body: {}", crate::debug_body::debug_body(&body));
 
             let response = req
                 .body(body.clone())
@@ -130,7 +130,7 @@ impl AnthropicClient {
                 "API error response: status={}, retry-after={:?}, body={}",
                 status,
                 retry_after_header,
-                &response_body[..response_body.len().min(500)]
+                crate::debug_body::debug_body(&response_body)
             );
 
             let err = classify_error(

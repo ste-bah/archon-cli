@@ -4,6 +4,7 @@ pub mod anthropic;
 pub mod auth;
 // TASK-AGS-706: LlmConfig + resolve_descriptor — feeds build_llm_provider.
 pub mod config;
+pub(crate) mod debug_body;
 pub mod effort;
 pub mod fast_mode;
 pub mod identity;

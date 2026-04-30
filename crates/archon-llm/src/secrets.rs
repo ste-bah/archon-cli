@@ -20,7 +20,7 @@ pub struct ApiKey(SecretString);
 impl ApiKey {
     /// Wrap a raw string as an `ApiKey`.
     pub fn new(value: String) -> Self {
-        ApiKey(SecretString::new(value.into()))
+        ApiKey(SecretString::new(value))
     }
 
     /// Borrow the underlying secret as `&str`. Call sites must not log the

@@ -62,6 +62,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 
 ## Release notes
 
+- [v0.1.29](release-notes/v0.1.29.md) — fix UTF-8 byte-slicing panic in API request body logging
 - [v0.1.28](release-notes/v0.1.28.md) — ReasoningBank 12-mode wire-up + README accuracy sweep
 - [v0.1.27](release-notes/v0.1.27.md) — GNN hygiene: early stopping, foreground test hardening
 - [v0.1.26](release-notes/v0.1.26.md) — GNN auto-retraining

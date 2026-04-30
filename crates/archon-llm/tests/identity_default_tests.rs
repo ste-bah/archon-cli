@@ -68,7 +68,7 @@ fn clean_x_app_is_archon() {
 fn clean_no_session_id_header() {
     let headers = clean_provider().request_headers("req-3");
     assert!(
-        headers.get("X-Claude-Code-Session-Id").is_none(),
+        !headers.contains_key("X-Claude-Code-Session-Id"),
         "clean mode must not leak X-Claude-Code-Session-Id"
     );
 }
@@ -77,7 +77,7 @@ fn clean_no_session_id_header() {
 fn clean_no_request_id_header() {
     let headers = clean_provider().request_headers("req-4");
     assert!(
-        headers.get("x-client-request-id").is_none(),
+        !headers.contains_key("x-client-request-id"),
         "clean mode must not leak x-client-request-id"
     );
 }
@@ -86,7 +86,7 @@ fn clean_no_request_id_header() {
 fn clean_no_beta_header() {
     let headers = clean_provider().request_headers("req-5");
     assert!(
-        headers.get("anthropic-beta").is_none(),
+        !headers.contains_key("anthropic-beta"),
         "clean mode must not include anthropic-beta header"
     );
 }

@@ -154,6 +154,7 @@ fn hmac_sha256(key: &[u8], data: &[u8]) -> Vec<u8> {
 /// - `service` — AWS service name (e.g. `"bedrock"`)
 /// - `body` — request body bytes
 /// - `now` — timestamp for signing
+#[allow(clippy::too_many_arguments)]
 pub fn build_authorization_header(
     creds: &AwsCredentials,
     method: &str,

@@ -147,17 +147,15 @@ pub fn build_and_spawn_auto_trainer(
     // and converted to an empty sample set so the auto-trainer's tick loop
     // never panics on a transient query failure.
     let db_for_provider = Arc::clone(&db);
-    let sample_provider: Arc<
-        dyn Fn() -> Vec<TrajectoryWithFeedback> + Send + Sync,
-    > = Arc::new(move || {
-        match query_trajectories_for_training(&db_for_provider) {
+    let sample_provider: Arc<dyn Fn() -> Vec<TrajectoryWithFeedback> + Send + Sync> = Arc::new(
+        move || match query_trajectories_for_training(&db_for_provider) {
             Ok(t) => t,
             Err(e) => {
                 tracing::warn!(error = %e, "AutoTrainer: sample provider query failed");
                 Vec::new()
             }
-        }
-    });
+        },
+    );
 
     let at = Arc::new(AutoTrainer::new(params.at_config));
     at.spawn(
@@ -213,7 +211,13 @@ mod tests {
         assert!(matches!(parse_activation("garbage"), ActivationType::Relu));
         assert!(matches!(parse_activation("RELU"), ActivationType::Relu));
         assert!(matches!(parse_activation("tanh"), ActivationType::Tanh));
-        assert!(matches!(parse_activation("Sigmoid"), ActivationType::Sigmoid));
-        assert!(matches!(parse_activation("leaky_relu"), ActivationType::LeakyRelu));
+        assert!(matches!(
+            parse_activation("Sigmoid"),
+            ActivationType::Sigmoid
+        ));
+        assert!(matches!(
+            parse_activation("leaky_relu"),
+            ActivationType::LeakyRelu
+        ));
     }
 }
