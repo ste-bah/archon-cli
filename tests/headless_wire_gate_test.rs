@@ -34,17 +34,29 @@ fn agent_message_user_message_round_trip() {
 fn agent_message_ping_pong_round_trip() {
     let ping = archon_core::remote::protocol::AgentMessage::Ping;
     let line = ping.to_json_line().unwrap();
-    assert!(line.contains("\"ping\""), "line should contain ping: {line}");
+    assert!(
+        line.contains("\"ping\""),
+        "line should contain ping: {line}"
+    );
 
     let parsed = archon_core::remote::protocol::AgentMessage::from_json_line(&line).unwrap();
-    assert!(matches!(parsed, archon_core::remote::protocol::AgentMessage::Ping));
+    assert!(matches!(
+        parsed,
+        archon_core::remote::protocol::AgentMessage::Ping
+    ));
 
     let pong = archon_core::remote::protocol::AgentMessage::Pong;
     let line = pong.to_json_line().unwrap();
-    assert!(line.contains("\"pong\""), "line should contain pong: {line}");
+    assert!(
+        line.contains("\"pong\""),
+        "line should contain pong: {line}"
+    );
 
     let parsed = archon_core::remote::protocol::AgentMessage::from_json_line(&line).unwrap();
-    assert!(matches!(parsed, archon_core::remote::protocol::AgentMessage::Pong));
+    assert!(matches!(
+        parsed,
+        archon_core::remote::protocol::AgentMessage::Pong
+    ));
 }
 
 #[test]
@@ -89,7 +101,9 @@ fn agent_message_empty_input_rejected() {
 fn agent_message_invalid_json_returns_error() {
     let result = archon_core::remote::protocol::AgentMessage::from_json_line("not json at all");
     assert!(result.is_err());
-    let result = archon_core::remote::protocol::AgentMessage::from_json_line(r#"{"type":"unknown_variant","x":1}"#);
+    let result = archon_core::remote::protocol::AgentMessage::from_json_line(
+        r#"{"type":"unknown_variant","x":1}"#,
+    );
     assert!(result.is_err());
 }
 

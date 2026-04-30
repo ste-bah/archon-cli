@@ -257,9 +257,9 @@ mod tests {
         while let Ok(ev) = rx.try_recv() {
             match ev {
                 TuiEvent::TextDelta(_) => saw_text = true,
-                TuiEvent::OpenView(_) => panic!(
-                    "TasksHandler must NOT emit OpenView — dead wire removed (GHOST-010)"
-                ),
+                TuiEvent::OpenView(_) => {
+                    panic!("TasksHandler must NOT emit OpenView — dead wire removed (GHOST-010)")
+                }
                 _ => {}
             }
         }

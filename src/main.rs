@@ -279,10 +279,7 @@ async fn main() -> Result<()> {
 
     // ── Headless mode (--headless) ───────────────────────────────
     if cli.headless {
-        let headless_session_id = cli
-            .session_id
-            .clone()
-            .unwrap_or_else(|| session_id.clone());
+        let headless_session_id = cli.session_id.clone().unwrap_or_else(|| session_id.clone());
         tracing::info!("headless mode: session_id={headless_session_id}");
         let exit_code = crate::session::run_headless_session(
             &config,
