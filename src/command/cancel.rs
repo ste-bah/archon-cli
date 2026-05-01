@@ -123,12 +123,15 @@ mod tests {
     }
 
     #[test]
-    fn cancel_handler_description_is_honest() {
+    fn cancel_handler_description_mentions_cancel() {
+        // GHOST-007 wired real Option B cancellation. Description now
+        // simply says "Cancel the currently running task" — no longer
+        // hedges about idle state or Ctrl+C only.
         let h = CancelHandler::new();
         let desc = h.description().to_lowercase();
         assert!(
-            desc.contains("idle") || desc.contains("ctrl"),
-            "CancelHandler description must mention idle state or Ctrl+C, got: {}",
+            desc.contains("cancel"),
+            "CancelHandler description must mention 'cancel', got: {}",
             h.description()
         );
     }

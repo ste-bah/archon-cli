@@ -314,29 +314,18 @@ mod tests {
     }
 
     #[test]
-    fn execute_marks_gap_providers() {
+    fn execute_does_not_list_stripped_providers() {
+        // GHOST-003 stripped the 4 stub native providers (azure, cohere,
+        // copilot, minimax) entirely from NATIVE_REGISTRY. They must NOT
+        // appear in /providers output at all (no [gap] marker, no row).
         let body = render();
-        // Gap providers must show [gap] in their feature column.
         for id in ["azure", "cohere", "copilot", "minimax"] {
             assert!(
-                body.contains(&format!("[gap]")),
-                "gap provider `{}` missing [gap] marker; body:\n{}",
+                !body.contains(id),
+                "stripped stub provider `{}` must not appear in /providers \
+                 output; body:\n{}",
                 id,
                 body
-            );
-        }
-        // Non-gap providers must NOT show [gap].
-        for id in ["openai", "anthropic", "ollama", "groq"] {
-            // Find the row for this provider and check it lacks [gap]
-            let row = body
-                .lines()
-                .find(|l| l.trim_start().starts_with(id))
-                .unwrap_or_else(|| panic!("provider `{}` not found in output", id));
-            assert!(
-                !row.contains("[gap]"),
-                "non-gap provider `{}` incorrectly shows [gap]; row: {}",
-                id,
-                row
             );
         }
     }
