@@ -1,129 +1,90 @@
 # Adding a skill
 
-Built-in skills are Rust-implemented composable command sequences. User-authored skills are TOML files (covered in [Skills reference](../reference/skills.md)). This page covers built-in skill development.
+Built-in skills are Rust-implemented composable command sequences. User-authored skills are SKILL.md or TOML files (covered in [Skills reference](../reference/skills.md)). This page covers built-in skill development.
 
 ## Where built-in skills live
 
-- `crates/archon-core/src/skills/builtin.rs` — 21 core skills
+- `crates/archon-core/src/skills/builtin.rs` — 21 core skills + `register_builtins()` assembly
 - `crates/archon-core/src/skills/expanded.rs` — 34 expanded skills
+- `crates/archon-core/src/skills/engineering_pack.rs` — 5 Phase 2 skills via `engineering_skill!` macro
+- `crates/archon-core/src/skills/archon_pack.rs` — 5 Phase 3 skills via `archon_skill!` macro
+- `crates/archon-core/src/skills/embedded_skill_md.rs` — `include_str!()` constants for embedded SKILL.md bodies
 
-The split is historical; new skills can land in either file. Convention: lighter-weight session/git skills in `builtin.rs`, project-management and analysis skills in `expanded.rs`.
+## Two approaches
 
-## Step 1: implement the Skill trait
+### Approach A: Embedded prompt-template skill (recommended for new skills)
 
+If the skill is fundamentally a prompt template, write a SKILL.md in `assets/skills/<name>/SKILL.md`, embed it, and use the macro:
+
+**Step 1:** Create `assets/skills/my-skill/SKILL.md` with frontmatter and process body.
+
+**Step 2:** Add `include_str!()` constant in `embedded_skill_md.rs`:
 ```rust
-// In crates/archon-core/src/skills/expanded.rs (or builtin.rs)
+pub const MY_SKILL: &str = include_str!("../../../../assets/skills/my-skill/SKILL.md");
+```
 
-use crate::skills::{Skill, SkillContext, SkillResult};
-use async_trait::async_trait;
+**Step 3:** Use the macro in `archon_pack.rs` (or `engineering_pack.rs`):
+```rust
+archon_skill!(MySkill, MY_SKILL);
+```
+
+**Step 4:** Register in `builtin.rs::register_builtins()`:
+```rust
+registry.register(Box::new(super::archon_pack::MySkill));
+```
+
+The macro generates the full `Skill` trait impl including override resolution. Users can replace the body without recompiling.
+
+### Approach B: Manual Skill trait impl
+
+For skills that need Rust logic beyond a prompt template.
+
+**Step 1:** Implement the Skill trait:
+```rust
+use crate::skills::{Skill, SkillContext, SkillOutput};
 
 pub struct MySkill;
 
-#[async_trait]
 impl Skill for MySkill {
-    fn name(&self) -> &'static str { "my-skill" }
-
-    fn description(&self) -> &'static str {
-        "Does something useful. Invoke with /my-skill"
-    }
-
-    fn trigger(&self) -> &'static str { "/my-skill" }
-
-    fn aliases(&self) -> &'static [&'static str] {
-        &["/ms"]   // optional
-    }
-
-    async fn execute(&self, args: &str, ctx: SkillContext) -> SkillResult {
-        // Implementation: typically constructs a prompt and submits it
-        let prompt = format!("Run my-skill workflow with args: {}", args);
-        ctx.submit_prompt(prompt).await
+    fn name(&self) -> &str { "my-skill" }
+    fn description(&self) -> &str { "Does something useful." }
+    fn execute(&self, args: &[String], ctx: &SkillContext) -> SkillOutput {
+        // Custom logic: return Text, Markdown, Prompt, or Error
+        SkillOutput::Text("result".to_string())
     }
 }
 ```
 
-## Step 2: register in the registry assembly
+**Step 2:** Register in `builtin.rs::register_builtins()`.
 
-In `crates/archon-core/src/skills/expanded.rs`:
+## Tests
 
-```rust
-pub fn register_expanded_skills(registry: &mut SkillRegistry) {
-    // ... existing skills
-    registry.add(Box::new(MySkill));
-}
-```
-
-The skill registry is assembled in `crates/archon-core/src/skills/mod.rs::default_registry`.
-
-## Step 3: tests
-
-In the same file:
-
-```rust
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn my_skill_metadata() {
-        let skill = MySkill;
-        assert_eq!(skill.name(), "my-skill");
-        assert_eq!(skill.trigger(), "/my-skill");
-    }
-
-    #[tokio::test]
-    async fn my_skill_executes() {
-        let skill = MySkill;
-        let ctx = SkillContext::test();
-        let result = skill.execute("test args", ctx).await;
-        assert!(result.is_ok());
-    }
-}
-```
-
-Plus a registry-level test in `crates/archon-core/src/skills/mod.rs`:
+Inline tests in the same file (metadata + smoke):
 
 ```rust
 #[test]
-fn default_registry_includes_my_skill() {
-    let registry = default_registry();
-    assert!(registry.has("/my-skill"), "missing /my-skill");
+fn my_skill_metadata() {
+    assert_eq!(MySkill.name(), "my-skill");
+    assert!(!MySkill.description().is_empty());
 }
 ```
 
-## Step 4: documentation
+Integration tests in `crates/archon-core/tests/`:
+- Registry lookup
+- Prompt emission
+- Override precedence (flat-file, subdir, embedded fallback)
 
-Update [docs/reference/skills.md](../reference/skills.md) — add to the highlights table if the skill is widely useful, or note it as part of the 55-total count.
-
-If the skill name happens to conflict with a primary command, document the precedence (primary wins; skill is fallback).
-
-## Step 5: CI gate verification
-
-Run locally before pushing:
+## CI gate verification
 
 ```bash
 cargo check -p archon-core -j1
-cargo test -p archon-core skills -- --test-threads=2     # includes default_registry_includes_my_skill
+cargo test -p archon-core -j1 -- --test-threads=2
 cargo fmt --all -- --check
-cargo clippy --workspace -- -D warnings
-./scripts/ci-gate.sh                  # full CI gate
+./scripts/ci-gate.sh
 ```
-
-Plus a live smoke test in the TUI: type `/my-skill` and confirm autocomplete picks it up + the skill executes end-to-end.
-
-## Skill vs primary command
-
-Pick a primary command (in `src/command/registry.rs`) instead of a skill if:
-- The command needs Rust state (other than the prompt machinery)
-- The command interacts with the TUI directly (e.g., overlay panels)
-- The command must run synchronously (skills typically construct prompts and submit)
-
-Pick a skill if:
-- The "command" is fundamentally a prompt template
-- The behavior is composable from existing tools
-- You want users to be able to override / extend via TOML in `.archon/skills/`
 
 ## See also
 
-- [Skills reference](../reference/skills.md) — TOML user skills
+- [Skills reference](../reference/skills.md) — user-authored SKILL.md and TOML skills
 - [Slash commands reference](../reference/slash-commands.md) — primary commands
 - [Dev flow gates](dev-flow-gates.md)

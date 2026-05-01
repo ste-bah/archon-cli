@@ -287,6 +287,24 @@ pub fn register_builtins() -> SkillRegistry {
     // Expanded skills (CLI-225)
     super::expanded::register_expanded_skills(&mut registry);
 
+    // Phase 1 skill foundation
+    registry.register(Box::new(super::to_prd::ToPrdSkill));
+    registry.register(Box::new(super::prd_to_spec::PrdToSpecSkill));
+
+    // Phase 2 engineering pack
+    registry.register(Box::new(super::engineering_pack::GrillMeSkill));
+    registry.register(Box::new(super::engineering_pack::GrillWithDocsSkill));
+    registry.register(Box::new(super::engineering_pack::DiagnoseSkill));
+    registry.register(Box::new(super::engineering_pack::TddSkill));
+    registry.register(Box::new(super::engineering_pack::ZoomOutSkill));
+
+    // Phase 3 archon-specific skills
+    registry.register(Box::new(super::archon_pack::SpecToTasksSkill));
+    registry.register(Box::new(super::archon_pack::ComposePipelineSkill));
+    registry.register(Box::new(super::archon_pack::CiGateWalkerSkill));
+    registry.register(Box::new(super::archon_pack::SetupArchonSkillsSkill));
+    registry.register(Box::new(super::archon_pack::WriteASkillSkill));
+
     // Agent management skills (PRD-AGENTS-001)
     registry.register(Box::new(super::agent_skills::CreateAgentSkill));
     registry.register(Box::new(super::agent_skills::ListAgentsSkill));

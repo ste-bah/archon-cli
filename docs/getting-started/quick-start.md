@@ -28,6 +28,14 @@ cargo build --release --bin archon -j1
 
 The binary lands at `target/release/archon` (~66 MB).
 
+## Initialise project
+
+```bash
+bash scripts/archon-init.sh --target $(pwd)
+```
+
+This creates `.archon/`, `prds/`, and `tasks/` directories and a `.gitignore` entry. Safe to re-run — always idempotent.
+
 ## Authenticate
 
 Pick one:
@@ -46,7 +54,7 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 ./target/release/archon
 ```
 
-That opens the TUI. Type `/help` for the command list.
+That opens the TUI. Type `/help` for the command list, or `/setup-archon-skills` for an interactive configuration wizard.
 
 ## Smoke test
 

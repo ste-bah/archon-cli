@@ -107,6 +107,14 @@ cargo install --path .
 # Installs to ~/.cargo/bin/archon — make sure ~/.cargo/bin is in PATH
 ```
 
+## Initialise a project
+
+```bash
+bash scripts/archon-init.sh --target /path/to/your/project
+```
+
+Creates `.archon/`, `prds/`, `tasks/` and wires `.gitignore`. Safe to re-run.
+
 For Windows native (PowerShell):
 ```powershell
 $env:PATH += ";$PWD\target\release"

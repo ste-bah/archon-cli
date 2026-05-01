@@ -1,9 +1,15 @@
 pub mod agent_skills;
+pub mod archon_pack;
 pub mod builtin;
 pub mod discovery;
+pub mod embedded_skill_md;
+pub mod engineering_pack;
 pub mod expanded;
 pub mod parser;
 pub mod skill_tool;
+pub mod templates;
+pub mod to_prd;
+pub mod prd_to_spec;
 
 use std::collections::HashMap;
 
