@@ -88,7 +88,7 @@ fn timestamp_is_valid_iso8601() {
     );
     let has_tz = ctx.timestamp.contains('Z')
         || ctx.timestamp.contains('+')
-        || ctx.timestamp.rfind('-').map_or(false, |i| i > 10);
+        || ctx.timestamp.rfind('-').is_some_and(|i| i > 10);
     assert!(has_tz, "timestamp should have timezone: {}", ctx.timestamp);
 }
 

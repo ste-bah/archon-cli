@@ -172,15 +172,14 @@ mod tests {
 
         let mut saw_status = false;
         while let Ok(ev) = rx.try_recv() {
-            if let TuiEvent::TextDelta(text) = ev
-                && text.contains("Voice configuration:")
-            {
-                saw_status = true;
-            }
-            if let TuiEvent::Error(text) = ev
-                && text.contains("Failed to load config for /voice")
-            {
-                saw_status = true;
+            match ev {
+                TuiEvent::TextDelta(text) if text.contains("Voice configuration:") => {
+                    saw_status = true;
+                }
+                TuiEvent::Error(text) if text.contains("Failed to load config for /voice") => {
+                    saw_status = true;
+                }
+                _ => {}
             }
         }
         assert!(saw_status, "bare /voice must emit status");
@@ -241,7 +240,7 @@ mod tests {
     /// message or an Error if persistence fails.
     #[test]
     fn voice_handler_on_off_emit_restart_message() {
-        for (sub, expected_enabled) in [("on", "true"), ("off", "false")] {
+        for (sub, _expected_enabled) in [("on", "true"), ("off", "false")] {
             let (mut ctx, mut rx) = make_ctx();
             let h = VoiceHandler;
             let res = h.execute(&mut ctx, &[sub.to_string()]);

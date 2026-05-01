@@ -43,3 +43,5 @@ src/command/registry.rs                            # expires 2026-05-15
 src/command/rename.rs                              # expires 2026-05-15
 src/command/rules.rs                               # expires 2026-05-15
 src/command/test_support.rs                        # expires 2026-05-15
+
+src/command/plugin_slash.rs # expires 2026-06-30  # GHOST-005 enable/disable/install/reload real impl

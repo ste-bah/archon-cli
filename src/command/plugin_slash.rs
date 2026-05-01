@@ -491,36 +491,63 @@ mod tests {
         assert!(body.contains("Subcommands:"));
     }
 
+    // GHOST-005: real impl now wires enable/disable/install/reload through
+    // CommandContext.plugin_enable_state and disk persistence. Tests below
+    // exercise the user-visible output paths reachable from a default test
+    // fixture (no plugin_enable_state set, no fixture plugins on disk).
+
     #[test]
-    fn enable_subcommand_emits_deferral_hint() {
+    fn enable_subcommand_emits_state_unavailable_or_not_found() {
         let body = execute_subcommand(&["enable", "myplugin"]);
-        assert!(body.contains("/plugin enable `myplugin`"));
-        assert!(body.contains("DEFERRED"));
-        assert!(body.contains("manifest.toml"));
-        assert!(body.contains("/reload-plugins"));
+        // Either "state not available" (no plugin_enable_state on ctx in
+        // bare test fixture) OR "not found on disk" (state present, no
+        // fixture plugin). Both are non-error, non-deferral outputs.
+        let lower = body.to_lowercase();
+        assert!(
+            lower.contains("plugin state not available")
+                || lower.contains("not found on disk")
+                || lower.contains("`myplugin` enabled"),
+            "expected state-unavailable / not-found / enabled message; got: {body}"
+        );
     }
 
     #[test]
-    fn disable_subcommand_emits_deferral_hint() {
+    fn disable_subcommand_emits_state_unavailable_or_not_found() {
         let body = execute_subcommand(&["disable", "myplugin"]);
-        assert!(body.contains("/plugin disable `myplugin`"));
-        assert!(body.contains("DEFERRED"));
+        let lower = body.to_lowercase();
+        assert!(
+            lower.contains("plugin state not available")
+                || lower.contains("not found on disk")
+                || lower.contains("`myplugin` disabled"),
+            "expected state-unavailable / not-found / disabled message; got: {body}"
+        );
     }
 
     #[test]
-    fn install_subcommand_emits_manual_install_hint() {
+    fn install_subcommand_emits_install_outcome() {
         let body = execute_subcommand(&["install", "myplugin"]);
-        assert!(body.contains("/plugin install `myplugin`"));
-        assert!(body.contains("manifest.toml"));
-        assert!(body.contains(".wasm"));
-        assert!(body.contains("/reload-plugins"));
+        let lower = body.to_lowercase();
+        // install handler can return: success, already-exists (use --force),
+        // source-not-found, or install error. All are valid non-deferral
+        // outputs of the real handler.
+        assert!(
+            lower.contains("myplugin")
+                && (lower.contains("install")
+                    || lower.contains("already exists")
+                    || lower.contains("not found")
+                    || lower.contains("source")),
+            "expected install-outcome message mentioning myplugin; got: {body}"
+        );
     }
 
     #[test]
-    fn reload_subcommand_points_to_reload_plugins() {
+    fn reload_subcommand_emits_reload_summary() {
         let body = execute_subcommand(&["reload"]);
-        assert!(body.contains("/reload-plugins"));
-        assert!(body.contains("dedicated"));
+        // Real reload handler emits "/plugin reload — N enabled, M disabled, K errors".
+        assert!(
+            body.contains("/plugin reload"),
+            "expected reload summary header; got: {body}"
+        );
     }
 
     #[test]

@@ -646,10 +646,7 @@ impl HookRegistry {
         // Ensure parent directory exists.
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| {
-                HookError::IoError(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!("create .archon dir: {e}"),
-                ))
+                HookError::IoError(std::io::Error::other(format!("create .archon dir: {e}")))
             })?;
         }
 
@@ -663,10 +660,9 @@ impl HookRegistry {
         let new_content = merge_overrides_into_toml(&existing, &overrides);
 
         std::fs::write(&path, &new_content).map_err(|e| {
-            HookError::IoError(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("write hooks.local.toml: {e}"),
-            ))
+            HookError::IoError(std::io::Error::other(format!(
+                "write hooks.local.toml: {e}"
+            )))
         })?;
 
         Ok(())
@@ -848,12 +844,6 @@ impl Default for HookRegistry {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/// Check if a HookMatcher.matcher string matches a tool name.
-/// Simple equality check; "*" matches everything.
-fn matcher_matches(matcher: &str, tool_name: &str) -> bool {
-    matcher == "*" || matcher == tool_name
-}
 
 fn make_once_key(event_name: &str, source: &Option<String>, command: &str) -> String {
     format!("{event_name}:{}:{command}", source.as_deref().unwrap_or(""))

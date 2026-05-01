@@ -8,6 +8,4 @@
 //! without depending on the binary entry point.
 
 pub mod cli_args;
-#[cfg(any(test, feature = "test-support"))]
-pub mod command;
 pub mod event_coalescer;

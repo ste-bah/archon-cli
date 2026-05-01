@@ -311,7 +311,6 @@ fn host_initializes_with_custom_limits() {
     let config = PluginHostConfig {
         max_memory_bytes: 32 * 1024 * 1024,
         fuel_budget: 5_000_000,
-        ..Default::default()
     };
     let host = WasmPluginHost::new(config);
     assert!(host.is_ok());

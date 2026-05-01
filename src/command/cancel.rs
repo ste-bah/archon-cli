@@ -68,10 +68,10 @@ impl CommandHandler for CancelHandler {
 
         // Fire cancel token first (mirrors Ctrl+C path ordering:
         // adapter.fire_cancel() before dispatcher.cancel_current()).
-        if let Some(ref slot) = ctx.cancel_handle {
-            if let Some(ref handle) = *slot.lock().unwrap() {
-                handle.fire_cancel();
-            }
+        if let Some(ref slot) = ctx.cancel_handle
+            && let Some(ref handle) = *slot.lock().unwrap()
+        {
+            handle.fire_cancel();
         }
 
         // Abort the JoinHandle and report the outcome.

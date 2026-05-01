@@ -171,7 +171,7 @@ fn test_pattern_error_variants_exist() {
 
 #[test]
 fn test_pattern_kind_variants() {
-    let kinds = vec![
+    let kinds = [
         PatternKind::Pipeline,
         PatternKind::FanOut,
         PatternKind::Broker,

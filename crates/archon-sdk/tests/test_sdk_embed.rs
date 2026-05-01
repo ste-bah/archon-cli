@@ -17,6 +17,7 @@ use archon_sdk::{
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 /// A simple echo handler for tests.
+#[allow(clippy::type_complexity)]
 fn echo_handler() -> Arc<
     dyn Fn(
             serde_json::Value,

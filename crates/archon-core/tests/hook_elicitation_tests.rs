@@ -148,7 +148,7 @@ fn test_aggregated_merge_no_elicitation_does_not_overwrite() {
 // ---------------------------------------------------------------------------
 
 fn make_elicitation_registry(event: HookEvent, cmd: &str) -> HookRegistry {
-    let mut registry = HookRegistry::new();
+    let registry = HookRegistry::new();
     registry.register_matchers(
         event,
         vec![HookMatcher {

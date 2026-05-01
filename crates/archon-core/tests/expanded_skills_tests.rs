@@ -122,16 +122,13 @@ fn git_branch_skill_not_overwritten() {
     // Git branch skill returns branch listing, not conversation fork
     let ctx = make_ctx();
     let output = skill.execute(&[], &ctx);
-    match output {
-        SkillOutput::Text(t) => {
-            // Git branch skill output should NOT contain "fork"
-            assert!(
-                !t.contains("Forking conversation"),
-                "git /branch should not be the conversation fork skill"
-            );
-        }
-        _ => {} // errors are fine (no git repo in test dir)
-    }
+    if let SkillOutput::Text(t) = output {
+        // Git branch skill output should NOT contain "fork"
+        assert!(
+            !t.contains("Forking conversation"),
+            "git /branch should not be the conversation fork skill"
+        );
+    } // errors are fine (no git repo in test dir)
 }
 
 #[test]
