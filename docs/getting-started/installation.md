@@ -110,10 +110,14 @@ cargo install --path .
 ## Initialise a project
 
 ```bash
-bash scripts/archon-init.sh --target /path/to/your/project
+sh scripts/archon-init.sh --target /path/to/your/project
+# Or with the curated assets from this clone:
+sh scripts/archon-init.sh --target /path/to/your/project --archon-cli-repo $(pwd)
 ```
 
 Creates `.archon/`, `prds/`, `tasks/` and wires `.gitignore`. Safe to re-run.
+
+See [Project setup](project-setup.md) for full details — flags, scenarios, what's created vs not, exit codes, troubleshooting.
 
 For Windows native (PowerShell):
 ```powershell
