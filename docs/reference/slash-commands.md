@@ -56,7 +56,7 @@ Beyond the 65 primaries, archon-cli ships **55 built-in skills** (21 in `crates/
 | `/recall` | — | Search memories by keyword |
 | `/garden` | — | Run memory consolidation now, print report |
 | `/memory` | — | Store / recall / manage memories |
-| `/tasks` | — | List and manage background tasks |
+| `/tasks` | `todo`, `ps`, `jobs` | List background tasks |
 
 ## Agents & pipelines
 
@@ -77,12 +77,12 @@ Beyond the 65 primaries, archon-cli ships **55 built-in skills** (21 in `crates/
 | `/color` | — | Change prompt bar accent color |
 | `/model` | `m`, `switch-model` | Show or switch the active model |
 | `/permissions` | — | Show current permission mode |
-| `/sandbox` | `sandbox-toggle` | Toggle sandbox restrictions (Bubble-mode gate) |
+| `/sandbox` | `sandbox-toggle` | Toggle sandbox flag (enforcement not yet wired) |
 | `/config` | `settings`, `prefs` | Show / modify settings |
 | `/reload` | — | Force configuration reload |
 | `/vim` | — | Toggle vim-style modal input |
 | `/skills` | — | Browse and invoke available skills |
-| `/providers` | — | List all registered LLM providers (native + OpenAI-compatible) |
+| `/providers` | — | List LLM providers ([gap] = stub, not configurable) |
 
 ## Infrastructure & resources
 
@@ -92,8 +92,8 @@ Beyond the 65 primaries, archon-cli ships **55 built-in skills** (21 in `crates/
 | `/connect` | — | List configured MCP servers (`/connect <name>` shows connection hint) |
 | `/plugin` | — | Manage WASM plugins (`list`, `info`, `enable`, `disable`, `install`, `reload`) |
 | `/reload-plugins` | — | Re-scan plugin directories from disk |
-| `/hooks` | — | List or manage hook registrations |
-| `/voice` | — | Show or manage voice input configuration |
+| `/hooks` | — | List hook registrations (enable/disable/reload not yet implemented) |
+| `/voice` | — | Show voice input configuration (enable/disable/switch not yet implemented) |
 
 ## Analysis & insights
 
@@ -107,7 +107,7 @@ Beyond the 65 primaries, archon-cli ships **55 built-in skills** (21 in `crates/
 
 | Command | Aliases | Description |
 |---|---|---|
-| `/cancel` | `stop`, `abort` | Cancel the current operation |
+| `/cancel` | `stop`, `abort` | Report idle state — use Ctrl+C to cancel a running task |
 | `/compact` | — | Trigger context compaction |
 | `/export` | `save` | Export session transcript |
 | `/login` | — | Re-authenticate |

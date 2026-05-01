@@ -123,13 +123,13 @@ mod tests {
     }
 
     #[test]
-    fn cancel_handler_description_byte_identical_to_shipped() {
+    fn cancel_handler_description_is_honest() {
         let h = CancelHandler::new();
-        assert_eq!(
-            h.description(),
-            "Cancel the currently running task",
-            "CancelHandler description must match the shipped \
-             declare_handler! stub verbatim (shipped-wins drift-reconcile)"
+        let desc = h.description().to_lowercase();
+        assert!(
+            desc.contains("idle") || desc.contains("ctrl"),
+            "CancelHandler description must mention idle state or Ctrl+C, got: {}",
+            h.description()
         );
     }
 

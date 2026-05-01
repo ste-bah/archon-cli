@@ -62,7 +62,7 @@ impl CommandHandler for VoiceHandler {
     }
 
     fn description(&self) -> &'static str {
-        "Show or manage voice input configuration"
+        "Show voice input configuration (enable/disable/switch not yet implemented)"
     }
 
     fn aliases(&self) -> &'static [&'static str] {

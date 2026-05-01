@@ -82,4 +82,9 @@ pub struct ProviderDescriptor {
     /// attribute fills in `ProviderQuirks::DEFAULT` on deserialize.
     #[serde(skip, default)]
     pub quirks: ProviderQuirks,
+    /// GHOST-003: true when this provider has no real implementation
+    /// (stub/gap provider). `/providers` uses this to mark entries as
+    /// not-yet-configurable.
+    #[serde(default)]
+    pub is_gap: bool,
 }

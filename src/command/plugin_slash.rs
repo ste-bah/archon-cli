@@ -395,7 +395,7 @@ fn handle_reload(state: Option<&Arc<RwLock<HashMap<String, bool>>>>) -> String {
 fn render_usage(prefix: &str) -> String {
     format!(
         "\n\
-         /plugin — manage WASM plugins.\n\
+         /plugin — list and inspect WASM plugins.\n\
          Note: {prefix}\n\
          \n\
          Subcommands:\n  \

@@ -13,11 +13,32 @@ use archon_pipeline::coding::rlm::LeannSearcher;
 
 use crate::cli_args::PipelineAction;
 
-/// No-op LEANN searcher used when LEANN is unavailable.
-struct NoopLeannSearcher;
-impl LeannSearcher for NoopLeannSearcher {
-    fn search(&self, _query: &str) -> String {
-        String::new()
+/// LEANN searcher backed by a real [`archon_leann::CodeIndex`].
+///
+/// Used by the research pipeline so it gets actual semantic code search
+/// results instead of the prior `NoopLeannSearcher` ghost-wire (GHOST-009).
+struct CodeIndexLeannSearcher {
+    index: std::sync::Arc<archon_leann::CodeIndex>,
+}
+
+impl LeannSearcher for CodeIndexLeannSearcher {
+    fn search(&self, query: &str) -> String {
+        match self.index.search_code(query, 5) {
+            Ok(results) if !results.is_empty() => {
+                let mut out = String::with_capacity(results.len() * 256);
+                for r in &results {
+                    let snippet: String = r.content.chars().take(300).collect();
+                    out.push_str(&format!(
+                        "{}:{}  {}\n",
+                        r.file_path.display(),
+                        r.line_start,
+                        snippet
+                    ));
+                }
+                out
+            }
+            _ => String::new(),
+        }
     }
 }
 
@@ -125,7 +146,7 @@ pub async fn handle_pipeline_command(
                 let memory: Arc<dyn MemoryTrait> = Arc::new(
                     MemoryGraph::in_memory().expect("in-memory graph for research pipeline"),
                 );
-                let leann: Option<Arc<dyn LeannSearcher>> = Some(Arc::new(NoopLeannSearcher));
+                let leann = init_research_leann(&cwd).await;
                 let facade = archon_pipeline::research::facade::ResearchFacade::with_learning(
                     memory,
                     leann,
@@ -239,8 +260,7 @@ pub async fn handle_pipeline_command(
                                 MemoryGraph::in_memory()
                                     .expect("in-memory graph for research resume"),
                             );
-                            let leann: Option<Arc<dyn LeannSearcher>> =
-                                Some(Arc::new(NoopLeannSearcher));
+                            let leann = init_research_leann(&cwd).await;
                             let facade =
                                 archon_pipeline::research::facade::ResearchFacade::with_learning(
                                     memory,
@@ -397,6 +417,42 @@ async fn init_leann(cwd: &std::path::Path) -> Option<archon_pipeline::runner::Le
         }
         Err(e) => {
             tracing::warn!(error = %e, "LEANN unavailable; continuing without code context");
+            None
+        }
+    }
+}
+
+/// Build a [`LeannSearcher`] for the research pipeline facade.
+///
+/// Mirrors `init_leann` but returns the trait object the research facade
+/// expects instead of the coding-pipeline `LeannIntegration` wrapper.
+/// Falls back to `None` when the LEANN index cannot be created, same as
+/// the coding pipeline.
+async fn init_research_leann(cwd: &std::path::Path) -> Option<Arc<dyn LeannSearcher>> {
+    let db_path = cwd.join(".archon").join("leann.db");
+    if let Some(parent) = db_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    match archon_leann::CodeIndex::new(&db_path, Default::default()) {
+        Ok(idx) => {
+            let idx = std::sync::Arc::new(idx);
+            // Best-effort indexing — failures are logged, not fatal.
+            let config = archon_leann::IndexConfig {
+                root_path: cwd.to_path_buf(),
+                include_patterns: vec!["**/*.rs".into(), "**/*.py".into(), "**/*.ts".into()],
+                exclude_patterns: vec![
+                    "**/target/**".into(),
+                    "**/node_modules/**".into(),
+                    "**/.git/**".into(),
+                ],
+            };
+            if let Err(e) = idx.index_repository(cwd, &config).await {
+                tracing::warn!(error = %e, "LEANN repo indexing failed; research pipeline continuing without code context");
+            }
+            Some(Arc::new(CodeIndexLeannSearcher { index: idx }))
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "LEANN unavailable for research pipeline; continuing without code context");
             None
         }
     }
