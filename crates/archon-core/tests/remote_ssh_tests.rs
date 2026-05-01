@@ -1,5 +1,4 @@
 use archon_core::config::{SshConfig, SshRemoteConfig};
-use archon_core::headless::HeadlessRuntime;
 use archon_core::remote::{SyncMode, protocol::AgentMessage};
 
 // ---------------------------------------------------------------------------
@@ -268,27 +267,10 @@ fn archon_config_has_remote_section() {
 }
 
 // ---------------------------------------------------------------------------
-// HeadlessRuntime
+// HeadlessRuntime — DELETED. Production headless mode now uses
+// crate::session::run_headless_session (real agent loop). The dead
+// crates/archon-core/src/headless.rs module + its tests were removed.
 // ---------------------------------------------------------------------------
-
-#[test]
-fn headless_runtime_new_stores_session_id() {
-    let rt = HeadlessRuntime::new("test-session-42".to_string());
-    assert_eq!(rt.session_id, "test-session-42");
-}
-
-#[test]
-fn headless_runtime_new_with_empty_session_id() {
-    let rt = HeadlessRuntime::new(String::new());
-    assert_eq!(rt.session_id, "");
-}
-
-#[test]
-fn headless_runtime_new_with_uuid_like_id() {
-    let id = "550e8400-e29b-41d4-a716-446655440000".to_string();
-    let rt = HeadlessRuntime::new(id.clone());
-    assert_eq!(rt.session_id, id);
-}
 
 // ---------------------------------------------------------------------------
 // Target parsing (user@host)

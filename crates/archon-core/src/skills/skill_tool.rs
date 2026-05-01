@@ -146,15 +146,11 @@ impl Tool for SkillTool {
                 PermissionLevel::Safe
             }
             "commit" => {
-                let args: Vec<&str> = input
-                    .get("args")
-                    .and_then(|v| v.as_array())
-                    .map(|arr| arr.iter().filter_map(|x| x.as_str()).collect())
-                    .unwrap_or_default();
-                if args.contains(&"-m") {
-                    return PermissionLevel::Dangerous;
-                }
-                PermissionLevel::Safe
+                // CommitSkill::execute always calls stage_all() unconditionally
+                // BEFORE checking for -m (see builtin.rs:187), so even a
+                // bare /commit invocation mutates the git index. Classify
+                // as Dangerous regardless of -m presence.
+                PermissionLevel::Dangerous
             }
             "pr" if has_args => PermissionLevel::Dangerous,
             _ => PermissionLevel::Safe,
@@ -304,10 +300,12 @@ mod tests {
     }
 
     #[test]
-    fn permission_commit_without_m_flag_is_safe() {
-        // commit without -m generates a prompt, does not mutate
+    fn permission_commit_without_m_flag_is_dangerous() {
+        // CommitSkill::execute always calls stage_all() before checking for
+        // -m (see builtin.rs:187), so even bare /commit mutates the git
+        // index. Must be Dangerous regardless of -m.
         let tool = SkillTool;
         let input = json!({ "action": "invoke", "name": "commit", "args": [] });
-        assert_eq!(tool.permission_level(&input), PermissionLevel::Safe);
+        assert_eq!(tool.permission_level(&input), PermissionLevel::Dangerous);
     }
 }

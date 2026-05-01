@@ -77,12 +77,12 @@ Beyond the 65 primaries, archon-cli ships **55 built-in skills** (21 in `crates/
 | `/color` | — | Change prompt bar accent color |
 | `/model` | `m`, `switch-model` | Show or switch the active model |
 | `/permissions` | — | Show current permission mode |
-| `/sandbox` | `sandbox-toggle` | Toggle sandbox flag (enforcement not yet wired) |
+| `/sandbox` | `sandbox-toggle` | Toggle sandbox restrictions (gates tool dispatch via SandboxBackend) |
 | `/config` | `settings`, `prefs` | Show / modify settings |
 | `/reload` | — | Force configuration reload |
 | `/vim` | — | Toggle vim-style modal input |
 | `/skills` | — | Browse and invoke available skills |
-| `/providers` | — | List LLM providers ([gap] = stub, not configurable) |
+| `/providers` | — | List registered LLM providers (5 native + 31 OpenAI-compatible) |
 
 ## Infrastructure & resources
 
@@ -92,8 +92,8 @@ Beyond the 65 primaries, archon-cli ships **55 built-in skills** (21 in `crates/
 | `/connect` | — | List configured MCP servers (`/connect <name>` shows connection hint) |
 | `/plugin` | — | Manage WASM plugins (`list`, `info`, `enable`, `disable`, `install`, `reload`) |
 | `/reload-plugins` | — | Re-scan plugin directories from disk |
-| `/hooks` | — | List hook registrations (enable/disable/reload not yet implemented) |
-| `/voice` | — | Show voice input configuration (enable/disable/switch not yet implemented) |
+| `/hooks` | — | List or manage hook registrations (list, enable, disable, reload) |
+| `/voice` | — | Show or toggle voice input configuration (status, on, off) |
 
 ## Analysis & insights
 
@@ -107,7 +107,7 @@ Beyond the 65 primaries, archon-cli ships **55 built-in skills** (21 in `crates/
 
 | Command | Aliases | Description |
 |---|---|---|
-| `/cancel` | `stop`, `abort` | Report idle state — use Ctrl+C to cancel a running task |
+| `/cancel` | `stop`, `abort` | Cancel the in-flight task (fires cancel token + dispatcher abort) |
 | `/compact` | — | Trigger context compaction |
 | `/export` | `save` | Export session transcript |
 | `/login` | — | Re-authenticate |

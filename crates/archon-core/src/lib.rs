@@ -25,7 +25,6 @@ pub mod cost_alerts;
 pub mod dispatch;
 pub mod env_vars;
 pub mod git;
-pub mod headless;
 pub mod hooks;
 pub mod input_format;
 pub mod logging;
