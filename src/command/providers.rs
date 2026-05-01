@@ -316,7 +316,6 @@ mod tests {
     }
 
     #[test]
-    #[test]
     fn execute_marks_gap_providers() {
         let body = render();
         // Gap providers must show [gap] in their feature column.
