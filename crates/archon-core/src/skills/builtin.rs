@@ -291,6 +291,13 @@ pub fn register_builtins() -> SkillRegistry {
     registry.register(Box::new(super::to_prd::ToPrdSkill));
     registry.register(Box::new(super::prd_to_spec::PrdToSpecSkill));
 
+    // Phase 2 engineering pack
+    registry.register(Box::new(super::engineering_pack::GrillMeSkill));
+    registry.register(Box::new(super::engineering_pack::GrillWithDocsSkill));
+    registry.register(Box::new(super::engineering_pack::DiagnoseSkill));
+    registry.register(Box::new(super::engineering_pack::TddSkill));
+    registry.register(Box::new(super::engineering_pack::ZoomOutSkill));
+
     // Agent management skills (PRD-AGENTS-001)
     registry.register(Box::new(super::agent_skills::CreateAgentSkill));
     registry.register(Box::new(super::agent_skills::ListAgentsSkill));

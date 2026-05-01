@@ -1,6 +1,8 @@
 pub mod agent_skills;
 pub mod builtin;
 pub mod discovery;
+pub mod embedded_skill_md;
+pub mod engineering_pack;
 pub mod expanded;
 pub mod parser;
 pub mod skill_tool;

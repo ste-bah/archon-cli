@@ -52,3 +52,28 @@ pub fn resolve_template(name: &str, workdir: &Path) -> (String, TemplateSource) 
     };
     (embedded.to_string(), TemplateSource::Embedded)
 }
+
+/// Resolve the body portion of a SKILL.md by name across override paths.
+/// Returns `Some(body)` if any override is found and parses cleanly,
+/// `None` otherwise (caller falls back to embedded).
+pub fn resolve_skill_body(name: &str, workdir: &Path) -> Option<String> {
+    let candidates: Vec<Option<PathBuf>> = vec![
+        Some(workdir.join(format!(".archon/skills/{name}.md"))),
+        Some(workdir.join(format!(".archon/skills/{name}/SKILL.md"))),
+        dirs::config_dir().map(|h| h.join(format!("archon/skills/{name}.md"))),
+        dirs::config_dir().map(|h| h.join(format!("archon/skills/{name}/SKILL.md"))),
+    ];
+    let candidates: Vec<PathBuf> = candidates.into_iter().flatten().collect();
+
+    for path in candidates {
+        if !path.is_file() {
+            continue;
+        }
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            if let Some(skill) = crate::skills::discovery::parse_skill_md(&content) {
+                return Some(skill.body);
+            }
+        }
+    }
+    None
+}
