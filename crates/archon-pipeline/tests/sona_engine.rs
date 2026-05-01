@@ -97,7 +97,11 @@ mod math_tests {
     fn weight_clamped_to_range() {
         // Very large gradient should still clamp weight to [-1, 1]
         let w = calculate_weight_update(100.0, 1.0, 0.0, 0.0);
-        assert!(w >= -1.0 && w <= 1.0, "weight should be clamped, got {}", w);
+        assert!(
+            (-1.0..=1.0).contains(&w),
+            "weight should be clamped, got {}",
+            w
+        );
     }
 }
 

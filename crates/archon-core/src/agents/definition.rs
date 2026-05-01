@@ -429,29 +429,37 @@ mod tests {
 
     #[test]
     fn has_required_mcp_satisfied() {
-        let mut def = CustomAgentDefinition::default();
-        def.required_mcp_servers = Some(vec!["github".into()]);
+        let def = CustomAgentDefinition {
+            required_mcp_servers: Some(vec!["github".into()]),
+            ..CustomAgentDefinition::default()
+        };
         assert!(def.has_required_mcp_servers(&["mcp__github__api".into()]));
     }
 
     #[test]
     fn has_required_mcp_not_satisfied() {
-        let mut def = CustomAgentDefinition::default();
-        def.required_mcp_servers = Some(vec!["github".into()]);
+        let def = CustomAgentDefinition {
+            required_mcp_servers: Some(vec!["github".into()]),
+            ..CustomAgentDefinition::default()
+        };
         assert!(!def.has_required_mcp_servers(&["slack".into()]));
     }
 
     #[test]
     fn has_required_mcp_case_insensitive() {
-        let mut def = CustomAgentDefinition::default();
-        def.required_mcp_servers = Some(vec!["GitHub".into()]);
+        let def = CustomAgentDefinition {
+            required_mcp_servers: Some(vec!["GitHub".into()]),
+            ..CustomAgentDefinition::default()
+        };
         assert!(def.has_required_mcp_servers(&["mcp__github__api".into()]));
     }
 
     #[test]
     fn has_required_mcp_multiple_requirements() {
-        let mut def = CustomAgentDefinition::default();
-        def.required_mcp_servers = Some(vec!["github".into(), "slack".into()]);
+        let def = CustomAgentDefinition {
+            required_mcp_servers: Some(vec!["github".into(), "slack".into()]),
+            ..CustomAgentDefinition::default()
+        };
         // Only github available, not slack
         assert!(!def.has_required_mcp_servers(&["mcp__github__api".into()]));
         // Both available
@@ -460,8 +468,10 @@ mod tests {
 
     #[test]
     fn has_required_mcp_empty_requirements_always_true() {
-        let mut def = CustomAgentDefinition::default();
-        def.required_mcp_servers = Some(vec![]);
+        let def = CustomAgentDefinition {
+            required_mcp_servers: Some(vec![]),
+            ..CustomAgentDefinition::default()
+        };
         assert!(def.has_required_mcp_servers(&[]));
     }
 
@@ -553,7 +563,10 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[test]
+    #[allow(clippy::field_reassign_with_default)]
     fn definition_permission_mode_accepts_typed_enum() {
+        // Multiple reassignments of the same field — struct-init pattern
+        // doesn't apply.
         let mut def = CustomAgentDefinition::default();
         def.permission_mode = Some(PermissionMode::Auto);
         assert_eq!(def.permission_mode, Some(PermissionMode::Auto));

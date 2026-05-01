@@ -307,7 +307,7 @@ mod tests {
     #[test]
     fn init_test_catalog() {
         use crate::commands;
-        let _ = commands::set_catalog(vec![
+        commands::set_catalog(vec![
             commands::CommandInfo {
                 name: "/model".into(),
                 description: "Switch model".into(),

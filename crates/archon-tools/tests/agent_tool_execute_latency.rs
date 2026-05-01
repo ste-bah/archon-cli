@@ -172,12 +172,11 @@ async fn tc_tui_subagent_02_execute_sync_under_10ms() {
         "warm-up must not error (would invalidate the measurement): {}",
         warm.content
     );
-    if let Ok(v) = serde_json::from_str::<Value>(&warm.content) {
-        if let Some(id_str) = v["agent_id"].as_str() {
-            if let Ok(warm_id) = uuid::Uuid::parse_str(id_str) {
-                let _ = BACKGROUND_AGENTS.cancel(&warm_id);
-            }
-        }
+    if let Ok(v) = serde_json::from_str::<Value>(&warm.content)
+        && let Some(id_str) = v["agent_id"].as_str()
+        && let Ok(warm_id) = uuid::Uuid::parse_str(id_str)
+    {
+        let _ = BACKGROUND_AGENTS.cancel(&warm_id);
     }
 
     // Measured call — this is the TC-TUI-SUBAGENT-02 assertion target.

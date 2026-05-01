@@ -125,7 +125,7 @@ async fn drain_dispatcher(dispatcher: &mut AgentDispatcher, deadline: Instant) {
         }
     }
     // Final sweep
-    while let Some(_) = dispatcher.poll_completion() {}
+    while dispatcher.poll_completion().is_some() {}
 }
 
 /// Core concurrent-agent test harness.

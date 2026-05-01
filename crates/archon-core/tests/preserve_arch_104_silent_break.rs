@@ -255,10 +255,10 @@ fn extract_last_tool_result(messages: &[serde_json::Value]) -> Option<String> {
         }
         if let Some(arr) = msg.get("content").and_then(|c| c.as_array()) {
             for block in arr {
-                if block.get("type").and_then(|t| t.as_str()) == Some("tool_result") {
-                    if let Some(s) = block.get("content").and_then(|c| c.as_str()) {
-                        return Some(s.to_string());
-                    }
+                if block.get("type").and_then(|t| t.as_str()) == Some("tool_result")
+                    && let Some(s) = block.get("content").and_then(|c| c.as_str())
+                {
+                    return Some(s.to_string());
                 }
             }
         }
@@ -286,10 +286,12 @@ async fn agent_process_message_carries_real_subagent_text_across_seam() {
 
     // 3. Build an AgentConfig. Use yolo permission mode so AgentTool
     //    (PermissionLevel::Risky) is auto-allowed without a prompt.
-    let mut config = AgentConfig::default();
-    config.working_dir = std::env::temp_dir();
-    config.session_id = "preserve-104-seam-test".into();
-    config.max_turns = Some(5); // safety valve
+    let config = AgentConfig {
+        working_dir: std::env::temp_dir(),
+        session_id: "preserve-104-seam-test".into(),
+        max_turns: Some(5), // safety valve
+        ..AgentConfig::default()
+    };
     *config.permission_mode.lock().await = "yolo".to_string();
 
     // 4. Build the Agent. Event channel is unbounded; drain it in a

@@ -68,7 +68,7 @@ fn test_task_error_variants() {
         TaskError::AlreadyCancelled,
         TaskError::Corrupted,
         TaskError::QueueFull,
-        TaskError::Io(std::io::Error::new(std::io::ErrorKind::Other, "test")),
+        TaskError::Io(std::io::Error::other("test")),
     ];
 
     // Each variant should produce a non-empty Display string.

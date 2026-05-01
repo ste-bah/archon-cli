@@ -550,7 +550,12 @@ mod tests {
         ));
         let ws = Arc::new(WeightStore::with_in_memory());
 
-        trainer.spawn(enhancer, ws, TrainingConfig::default(), Arc::new(|| vec![]));
+        trainer.spawn(
+            enhancer,
+            ws,
+            TrainingConfig::default(),
+            Arc::new(std::vec::Vec::new),
+        );
 
         // Handle should not be stored when disabled
         assert!(trainer.handle.lock().unwrap().is_none());

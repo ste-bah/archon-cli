@@ -148,7 +148,7 @@ mod ingest_tests {
         std::fs::write(tmp.path().join("root.md"), "# Root\n\nRoot content.\n").unwrap();
         std::fs::write(sub.join("nested.md"), "# Nested\n\nNested content.\n").unwrap();
         // Non-text file should be skipped
-        std::fs::write(tmp.path().join("binary.bin"), &[0u8; 50]).unwrap();
+        std::fs::write(tmp.path().join("binary.bin"), [0u8; 50]).unwrap();
 
         let result = ingester
             .ingest_directory(tmp.path(), "testdir", None)

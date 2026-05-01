@@ -1,5 +1,4 @@
 use archon_core::skills::templates::{self, TemplateSource};
-use std::path::Path;
 
 #[test]
 fn resolve_returns_embedded_when_no_overrides() {

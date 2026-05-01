@@ -213,7 +213,7 @@ fn buffer_to_string(buf: &Buffer) -> String {
     for y in 0..buf.area().height {
         for x in 0..buf.area().width {
             if let Some(cell) = buf.cell((x, y)) {
-                s.push_str(&cell.symbol());
+                s.push_str(cell.symbol());
             }
         }
         s.push('\n');
@@ -366,11 +366,11 @@ fn splash_image_area_height_is_12() {
     for y in image_top..image_bot {
         let mut row_has_content = false;
         for x in 1..40u16 {
-            if let Some(cell) = buf.cell((x, y)) {
-                if cell.symbol().contains('▀') {
-                    row_has_content = true;
-                    break;
-                }
+            if let Some(cell) = buf.cell((x, y))
+                && cell.symbol().contains('▀')
+            {
+                row_has_content = true;
+                break;
             }
         }
         if row_has_content {

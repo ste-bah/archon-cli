@@ -450,7 +450,7 @@ fn test_training_history_crud() {
     assert_eq!(result.rows[0][0].get_str().unwrap(), "tr-001");
     assert_eq!(result.rows[0][1].get_str().unwrap(), "schedule");
     assert!((result.rows[0][2].get_float().unwrap() - 0.3).abs() < f64::EPSILON);
-    assert_eq!(result.rows[0][3].get_bool().unwrap(), false);
+    assert!(!result.rows[0][3].get_bool().unwrap());
 }
 
 #[test]

@@ -1,4 +1,4 @@
-use archon_core::skills::{Skill, SkillContext, SkillOutput, builtin::register_builtins};
+use archon_core::skills::{SkillContext, SkillOutput, builtin::register_builtins};
 
 #[test]
 fn default_registry_includes_all_5_engineering_skills() {

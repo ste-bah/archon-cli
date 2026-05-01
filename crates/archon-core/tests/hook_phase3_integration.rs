@@ -106,7 +106,7 @@ async fn test_agent_hook_spawns_and_parses_response() {
         enabled: true,
     };
 
-    let mut registry = HookRegistry::new();
+    let registry = HookRegistry::new();
     registry.register_matchers(
         HookEvent::PreToolUse,
         vec![HookMatcher {
@@ -158,7 +158,7 @@ async fn test_agent_hook_spawns_and_parses_response() {
 async fn test_recursion_guard_blocks_nested_fires() {
     let hook = command_hook("echo ok");
 
-    let mut registry = HookRegistry::new();
+    let registry = HookRegistry::new();
     registry.register_matchers(
         HookEvent::PreToolUse,
         vec![HookMatcher {
@@ -288,7 +288,7 @@ async fn test_function_noop_and_block_all_and_unknown() {
     assert_eq!(unknown_result.outcome, HookOutcome::Success);
 
     // Also test via HookRegistry with function-type hooks in an event.
-    let mut hook_reg = HookRegistry::new();
+    let hook_reg = HookRegistry::new();
     hook_reg.register_matchers(
         HookEvent::Notification,
         vec![HookMatcher {
@@ -446,7 +446,7 @@ async fn test_session_hooks_register_fire_autoclear_isolation() {
 #[tokio::test]
 async fn test_timeout_budget_exhaustion_and_skip() {
     // Create registry with a tiny budget of 100ms.
-    let mut registry = HookRegistry::with_config(HookExecutionConfig {
+    let registry = HookRegistry::with_config(HookExecutionConfig {
         aggregate_timeout_ms: 100,
     });
 
@@ -487,7 +487,7 @@ async fn test_timeout_budget_exhaustion_and_skip() {
 
 #[tokio::test]
 async fn test_mixed_scenario_all_hook_types_fire() {
-    let mut registry = HookRegistry::new();
+    let registry = HookRegistry::new();
     set_in_hook_agent(false);
 
     let event = HookEvent::PostToolUse;
@@ -651,7 +651,7 @@ async fn test_session_hook_timeout_clamped_to_budget() {
 #[tokio::test]
 async fn test_callbacks_skipped_when_budget_exhausted() {
     // Tiny budget of 100ms. A persistent hook sleeps 1s to consume it.
-    let mut registry = HookRegistry::with_config(HookExecutionConfig {
+    let registry = HookRegistry::with_config(HookExecutionConfig {
         aggregate_timeout_ms: 100,
     });
     set_in_hook_agent(false);

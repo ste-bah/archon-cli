@@ -555,10 +555,10 @@ impl MockRouter {
 
 impl AgentRouter for MockRouter {
     fn switch(&self, agent_id: &str) -> anyhow::Result<()> {
-        if let Some(ref rej) = self.reject {
-            if agent_id == rej {
-                anyhow::bail!("router rejected agent_id: {agent_id}");
-            }
+        if let Some(ref rej) = self.reject
+            && agent_id == rej
+        {
+            anyhow::bail!("router rejected agent_id: {agent_id}");
         }
         self.calls.lock().unwrap().push(agent_id.to_string());
         Ok(())

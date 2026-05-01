@@ -22,7 +22,7 @@ fn function_hook(command: &str) -> HookConfig {
 
 #[tokio::test]
 async fn test_function_noop_returns_success() {
-    let mut registry = HookRegistry::new();
+    let registry = HookRegistry::new();
     registry.register_matchers(
         HookEvent::PreToolUse,
         vec![HookMatcher {
@@ -50,7 +50,7 @@ async fn test_function_noop_returns_success() {
 
 #[tokio::test]
 async fn test_function_block_all_returns_blocking() {
-    let mut registry = HookRegistry::new();
+    let registry = HookRegistry::new();
     registry.register_matchers(
         HookEvent::PreToolUse,
         vec![HookMatcher {
@@ -81,7 +81,7 @@ async fn test_function_block_all_returns_blocking() {
 
 #[tokio::test]
 async fn test_function_unknown_returns_success_failopen() {
-    let mut registry = HookRegistry::new();
+    let registry = HookRegistry::new();
     registry.register_matchers(
         HookEvent::PreToolUse,
         vec![HookMatcher {
@@ -146,7 +146,7 @@ async fn test_function_hook_via_registry() {
 
 #[tokio::test]
 async fn test_multiple_function_hooks() {
-    let mut registry = HookRegistry::new();
+    let registry = HookRegistry::new();
     registry.register_matchers(
         HookEvent::PreToolUse,
         vec![HookMatcher {

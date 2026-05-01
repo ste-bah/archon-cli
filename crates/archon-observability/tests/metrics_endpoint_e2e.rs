@@ -85,10 +85,12 @@ async fn metrics_endpoint_serves_prometheus_shape_with_live_values() {
             2,
             "sample line '{line}' must have '<name> <value>' shape"
         );
-        let _: f64 = parts[1].parse().expect(&format!(
-            "sample value '{}' must parse as f64 (line='{line}')",
-            parts[1]
-        ));
+        let _: f64 = parts[1].parse().unwrap_or_else(|_| {
+            panic!(
+                "sample value '{}' must parse as f64 (line='{line}')",
+                parts[1]
+            )
+        });
         sample_count += 1;
     }
     assert!(sample_count >= 1, "expected at least one metric sample");
@@ -103,7 +105,7 @@ async fn metrics_endpoint_serves_prometheus_shape_with_live_values() {
             && l.split_whitespace()
                 .nth(1)
                 .and_then(|v| v.parse::<f64>().ok())
-                .map_or(false, |v| v > 0.0)
+                .is_some_and(|v| v > 0.0)
     });
     assert!(
         sent_line.is_some(),

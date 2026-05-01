@@ -16,6 +16,17 @@
 - Optional: `lld` linker for faster builds
 - WSL2: see [Installation](../getting-started/installation.md#wsl2-caveat)
 
+## Git hooks (one-time setup after clone)
+
+```bash
+./scripts/install-git-hooks.sh
+```
+
+Sets `core.hooksPath = scripts/git-hooks`. Active hooks:
+- **pre-push**: runs `cargo fmt --all -- --check` (strict — blocks on drift) then `cargo clippy --workspace --all-targets -j1` (advisory — warnings emit but only compile errors block, matching CI semantics). Bypass with `git push --no-verify` (rare; only when CI on a feature branch is the right place to catch the issue).
+
+Hook scripts are tracked in the repo, so updates land via `git pull` — no manual copy to `.git/hooks/`.
+
 ## Code style
 
 - `cargo fmt --all` before every commit

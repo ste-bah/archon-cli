@@ -395,7 +395,7 @@ fn test_settings_json_backward_compat() {
 
     // Both formats produce compatible HookMatcher structures that can be
     // registered into the same HookRegistry via register_matchers.
-    let mut registry = HookRegistry::load_from_settings_json(json).unwrap();
+    let registry = HookRegistry::load_from_settings_json(json).unwrap();
     for (event, matchers) in toml_settings {
         registry.register_matchers(event, matchers, Some("toml"));
     }
@@ -471,7 +471,7 @@ timeout = 5
 
     // In load_all, hooks from ~/.archon/policy/hooks.toml get tagged Policy
     // and registered with source = Some("policy")
-    let mut registry = HookRegistry::new();
+    let registry = HookRegistry::new();
     for (event, hook_matchers) in settings {
         registry.register_matchers(event, hook_matchers, Some("policy"));
     }

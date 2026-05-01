@@ -122,12 +122,11 @@ async fn obs_915_100_stub_spawns_p95_latency() {
             )
             .await;
         assert!(!warm.is_error, "pre-warm failed: {}", warm.content);
-        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&warm.content) {
-            if let Some(id_str) = v["agent_id"].as_str() {
-                if let Ok(id) = Uuid::parse_str(id_str) {
-                    let _ = cancel_background_agent(&id);
-                }
-            }
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&warm.content)
+            && let Some(id_str) = v["agent_id"].as_str()
+            && let Ok(id) = Uuid::parse_str(id_str)
+        {
+            let _ = cancel_background_agent(&id);
         }
     }
 

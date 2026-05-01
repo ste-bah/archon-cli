@@ -348,7 +348,7 @@ mod tests {
     fn algorithm_is_clone_copy_debug_eq() {
         let a = Algorithm::LATS;
         let b = a; // Copy
-        let _c = a.clone(); // Clone
+        let _c = a; // Clone
         assert_eq!(a, b); // PartialEq + Eq
         let _ = format!("{:?}", a); // Debug
     }

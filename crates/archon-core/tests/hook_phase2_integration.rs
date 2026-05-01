@@ -29,7 +29,7 @@ fn make_registry_with_type(
     cmd: &str,
     hook_type: HookCommandType,
 ) -> HookRegistry {
-    let mut registry = HookRegistry::new();
+    let registry = HookRegistry::new();
     registry.register_matchers(
         event,
         vec![HookMatcher {
@@ -54,7 +54,7 @@ fn make_registry_with_type(
 }
 
 fn make_multi_hook_registry(event: HookEvent, hooks: Vec<(&str, HookCommandType)>) -> HookRegistry {
-    let mut registry = HookRegistry::new();
+    let registry = HookRegistry::new();
     let hook_configs: Vec<HookConfig> = hooks
         .into_iter()
         .map(|(cmd, ht)| HookConfig {

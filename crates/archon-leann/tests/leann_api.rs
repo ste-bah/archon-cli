@@ -283,11 +283,11 @@ fn test_no_mcp_references() {
         if let Ok(entries) = std::fs::read_dir(dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
-                if path.is_file() && path.extension().map_or(false, |e| e == "rs") {
-                    if let Ok(content) = std::fs::read_to_string(&path) {
-                        if content.to_lowercase().contains("mcp") {
-                            found.push(path.display().to_string());
-                        }
+                if path.is_file() && path.extension().is_some_and(|e| e == "rs") {
+                    if let Ok(content) = std::fs::read_to_string(&path)
+                        && content.to_lowercase().contains("mcp")
+                    {
+                        found.push(path.display().to_string());
                     }
                 } else if path.is_dir() {
                     scan_dir(&path, found);

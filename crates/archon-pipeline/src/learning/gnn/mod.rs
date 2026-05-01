@@ -955,7 +955,7 @@ mod tests {
         );
         let lrelu = apply_activation(&input, ActivationType::LeakyRelu);
         assert!((lrelu[0] - (-0.02)).abs() < 1e-6);
-        assert!((apply_activation(&vec![0.0], ActivationType::Tanh)[0] - 0.0).abs() < 1e-6);
-        assert!((apply_activation(&vec![0.0], ActivationType::Sigmoid)[0] - 0.5).abs() < 1e-6);
+        assert!((apply_activation(&[0.0], ActivationType::Tanh)[0] - 0.0).abs() < 1e-6);
+        assert!((apply_activation(&[0.0], ActivationType::Sigmoid)[0] - 0.5).abs() < 1e-6);
     }
 }

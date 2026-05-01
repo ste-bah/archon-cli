@@ -126,7 +126,12 @@ async fn disabled_auto_trainer_does_not_run() {
         0,
     ));
     let ws = Arc::new(WeightStore::with_in_memory());
-    trainer.spawn(enhancer, ws, TrainingConfig::default(), Arc::new(|| vec![]));
+    trainer.spawn(
+        enhancer,
+        ws,
+        TrainingConfig::default(),
+        Arc::new(std::vec::Vec::new),
+    );
 
     let status = trainer.status();
     assert!(!status.enabled);

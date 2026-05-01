@@ -41,6 +41,7 @@ impl MockAgentExecutor {
         }
     }
 
+    #[allow(dead_code)] // Test helper kept for future use; flagged as dead by current test set.
     fn with_fail_agents(mut self, agents: HashSet<String>) -> Self {
         self.fail_agents = agents;
         self
@@ -290,15 +291,10 @@ async fn test_executor_forwards_events_with_monotonic_seq() {
     // Collect events.
     let mut events = Vec::new();
     let timeout = Duration::from_secs(5);
-    loop {
-        match tokio::time::timeout(timeout, rx.next()).await {
-            Ok(Some(evt)) => {
-                events.push(evt);
-                if events.len() >= 2 {
-                    break;
-                }
-            }
-            _ => break,
+    while let Ok(Some(evt)) = tokio::time::timeout(timeout, rx.next()).await {
+        events.push(evt);
+        if events.len() >= 2 {
+            break;
         }
     }
 

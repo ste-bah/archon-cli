@@ -311,8 +311,8 @@ mod tests {
     fn test_smart_cache_key_different_embeddings() {
         let cfg = CacheConfig::default();
         let mgr = GnnCacheManager::new(cfg);
-        let k1 = mgr.smart_cache_key(&vec![1.0, 2.0, 3.0, 4.0, 5.0], &[]);
-        let k2 = mgr.smart_cache_key(&vec![1.0, 2.0, 3.0, 4.0, 5.1], &[]);
+        let k1 = mgr.smart_cache_key(&[1.0, 2.0, 3.0, 4.0, 5.0], &[]);
+        let k2 = mgr.smart_cache_key(&[1.0, 2.0, 3.0, 4.0, 5.1], &[]);
         assert_ne!(k1, k2);
     }
 
@@ -320,7 +320,7 @@ mod tests {
     fn test_put_and_get() {
         let cfg = CacheConfig::default();
         let mgr = GnnCacheManager::new(cfg);
-        let key = mgr.smart_cache_key(&vec![1.0], &[]);
+        let key = mgr.smart_cache_key(&[1.0], &[]);
         mgr.put(key.clone(), vec![42.0], "empty".to_string());
         let entry = mgr.get(&key);
         assert!(entry.is_some());
@@ -340,9 +340,9 @@ mod tests {
         cfg.max_size = 2;
         let mgr = GnnCacheManager::new(cfg);
 
-        let k1 = mgr.smart_cache_key(&vec![1.0], &[]);
-        let k2 = mgr.smart_cache_key(&vec![2.0], &[]);
-        let k3 = mgr.smart_cache_key(&vec![3.0], &[]);
+        let k1 = mgr.smart_cache_key(&[1.0], &[]);
+        let k2 = mgr.smart_cache_key(&[2.0], &[]);
+        let k3 = mgr.smart_cache_key(&[3.0], &[]);
 
         mgr.put(k1.clone(), vec![1.0], "empty".to_string());
         thread::sleep(Duration::from_millis(1));

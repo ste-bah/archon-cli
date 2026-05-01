@@ -59,8 +59,10 @@ fn haiku_gets_budgeted_thinking() {
 
 #[test]
 fn thinking_disabled_for_zero_budget_non_adaptive_model() {
-    let mut config = AgentConfig::default();
-    config.thinking_budget = 0;
+    let config = AgentConfig {
+        thinking_budget: 0,
+        ..AgentConfig::default()
+    };
     let (_max_tokens, thinking, _speed) = config.build_base_request_fields("gpt-4o");
     assert!(
         thinking.is_none(),
@@ -74,8 +76,10 @@ fn max_tokens_uses_config_value() {
     let (max_tokens, _thinking, _speed) = config.build_base_request_fields("claude-sonnet-4-6");
     assert_eq!(max_tokens, 8192);
 
-    let mut config = AgentConfig::default();
-    config.max_tokens = 4096;
+    let config = AgentConfig {
+        max_tokens: 4096,
+        ..AgentConfig::default()
+    };
     let (max_tokens, _, _) = config.build_base_request_fields("claude-sonnet-4-6");
     assert_eq!(max_tokens, 4096);
 }
@@ -92,8 +96,10 @@ fn speed_is_fast_when_fast_mode_enabled() {
     use std::sync::Arc;
     use std::sync::atomic::AtomicBool;
 
-    let mut config = AgentConfig::default();
-    config.fast_mode = Arc::new(AtomicBool::new(true));
+    let config = AgentConfig {
+        fast_mode: Arc::new(AtomicBool::new(true)),
+        ..AgentConfig::default()
+    };
     let (_max_tokens, _thinking, speed) = config.build_base_request_fields("claude-sonnet-4-6");
     assert_eq!(speed, Some("fast".to_string()));
 }
@@ -126,10 +132,10 @@ fn comprehensive_structural_alignment() {
     // The same AgentConfig produces the same (max_tokens, thinking, speed)
     // regardless of which model is used. Both parent and subagent call this
     // same helper, so if this test passes, the alignment is locked.
-    let mut config = AgentConfig::default();
-
-    // Test with fast_mode on
-    config.fast_mode = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let config = AgentConfig {
+        fast_mode: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
+        ..AgentConfig::default()
+    };
 
     for model in &["claude-sonnet-4-6", "claude-opus-4-6"] {
         let (max_tokens, thinking, speed) = config.build_base_request_fields(model);
@@ -284,7 +290,7 @@ async fn subagent_system_block_starts_with_billing_header_in_spoof_mode() {
     let body_found = request.system[1..].iter().any(|b| {
         b["text"]
             .as_str()
-            .map_or(false, |t| t.contains("Test agent body"))
+            .is_some_and(|t| t.contains("Test agent body"))
     });
     assert!(body_found, "agent body not found in system blocks");
 }
@@ -324,7 +330,7 @@ async fn subagent_system_block_omits_billing_header_in_clean_mode() {
     let body_found = request.system.iter().any(|b| {
         b["text"]
             .as_str()
-            .map_or(false, |t| t.contains("Test agent body"))
+            .is_some_and(|t| t.contains("Test agent body"))
     });
     assert!(body_found, "agent body not found in system blocks");
 }

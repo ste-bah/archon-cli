@@ -271,7 +271,7 @@ async fn test_tc_04_burst_10_messages_fifo_no_loss() {
 
     let recorded: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
     let outcomes: Vec<BurstOutcome> = std::iter::once(BurstOutcome::Success)
-        .chain(std::iter::repeat(BurstOutcome::Success).take(10))
+        .chain(std::iter::repeat_n(BurstOutcome::Success, 10))
         .collect();
     let runner: Arc<dyn TurnRunner> =
         Arc::new(BurstRunner::new(outcomes, Arc::clone(&recorded), 200));

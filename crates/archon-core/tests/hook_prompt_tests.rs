@@ -13,7 +13,7 @@ use archon_core::hooks::{HookCommandType, HookConfig, HookEvent, HookMatcher, Ho
 // ---------------------------------------------------------------------------
 
 fn make_prompt_registry(event: HookEvent, cmd: &str) -> HookRegistry {
-    let mut registry = HookRegistry::new();
+    let registry = HookRegistry::new();
     registry.register_matchers(
         event,
         vec![HookMatcher {

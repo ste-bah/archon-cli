@@ -29,18 +29,18 @@ pub enum TemplateSource {
 pub fn resolve_template(name: &str, workdir: &Path) -> (String, TemplateSource) {
     if let Some(home) = dirs::config_dir() {
         let user_path: PathBuf = home.join("archon/templates").join(format!("{name}.md"));
-        if user_path.exists() {
-            if let Ok(content) = std::fs::read_to_string(&user_path) {
-                return (content, TemplateSource::UserOverride);
-            }
+        if user_path.exists()
+            && let Ok(content) = std::fs::read_to_string(&user_path)
+        {
+            return (content, TemplateSource::UserOverride);
         }
     }
 
     let workdir_path: PathBuf = workdir.join("assets/templates").join(format!("{name}.md"));
-    if workdir_path.exists() {
-        if let Ok(content) = std::fs::read_to_string(&workdir_path) {
-            return (content, TemplateSource::WorkdirOverride);
-        }
+    if workdir_path.exists()
+        && let Ok(content) = std::fs::read_to_string(&workdir_path)
+    {
+        return (content, TemplateSource::WorkdirOverride);
     }
 
     let embedded = match name {
@@ -67,10 +67,10 @@ pub fn resolve_skill_body(name: &str, workdir: &Path) -> Option<String> {
         if !path.is_file() {
             continue;
         }
-        if let Ok(content) = std::fs::read_to_string(&path) {
-            if let Some(skill) = crate::skills::discovery::parse_skill_md(&content) {
-                return Some(skill.body);
-            }
+        if let Ok(content) = std::fs::read_to_string(&path)
+            && let Some(skill) = crate::skills::discovery::parse_skill_md(&content)
+        {
+            return Some(skill.body);
         }
     }
     None

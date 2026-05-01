@@ -36,7 +36,7 @@ mod confidence_tests {
         // Inputs outside [0,1] should be clamped
         let c = calculate_confidence(1.5, -0.2, 0.8);
         assert!(
-            c >= 0.0 && c <= 1.0,
+            (0.0..=1.0).contains(&c),
             "confidence should be in [0,1], got {}",
             c
         );

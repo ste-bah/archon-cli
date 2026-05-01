@@ -311,7 +311,7 @@ mod indexer_tests {
         // Only non-code files
         std::fs::write(tmp.path().join("readme.txt"), "just text").unwrap();
         std::fs::write(tmp.path().join("data.csv"), "a,b,c").unwrap();
-        std::fs::write(tmp.path().join("image.png"), &[0u8; 100]).unwrap();
+        std::fs::write(tmp.path().join("image.png"), [0u8; 100]).unwrap();
 
         let index_config = IndexConfig {
             root_path: tmp.path().to_path_buf(),

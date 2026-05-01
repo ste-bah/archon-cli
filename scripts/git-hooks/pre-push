@@ -1,0 +1,59 @@
+#!/bin/sh
+# Pre-push hook: enforce cargo fmt + clippy before letting commits leave the
+# host. Mirrors the CI gates so the rustfmt/clippy failure mode that shipped
+# at 0101801, ba40d94, and 86c0462 cannot recur.
+#
+# Install with: scripts/install-git-hooks.sh
+# Bypass (sparingly): git push --no-verify
+#
+# WSL2 ABSOLUTE RULE: cargo MUST run with -j1. No exceptions.
+
+set -eu
+
+# stdin contains <local_ref> <local_sha> <remote_ref> <remote_sha> per line.
+# We don't filter by branch — the gate runs for every push.
+cat >/dev/null
+
+# Resolve repo root so the hook works from any worktree subdir.
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
+
+printf '\n[pre-push] running cargo fmt --check ...\n'
+if ! cargo fmt --all -- --check; then
+    cat >&2 <<'MSG'
+
+[pre-push] BLOCKED: cargo fmt --check failed.
+
+Fix with:
+    cargo fmt --all
+    git add -u
+    git commit --amend --no-edit
+    git push
+
+To bypass this gate (NOT recommended):
+    git push --no-verify
+MSG
+    exit 1
+fi
+
+printf '\n[pre-push] running cargo clippy (workspace, -j1) — matches CI advisory ...\n'
+if ! cargo clippy --workspace --all-targets -j1; then
+    cat >&2 <<'MSG'
+
+[pre-push] BLOCKED: cargo clippy reported COMPILATION ERRORS.
+
+This means the code does not type-check, not just that there are
+lint warnings. Lint warnings are advisory in CI; only true compile
+errors block.
+
+To see what failed:
+    cargo clippy --workspace --all-targets -j1
+
+To bypass this gate (NOT recommended):
+    git push --no-verify
+MSG
+    exit 1
+fi
+
+printf '\n[pre-push] all gates passed. Pushing.\n'
+exit 0

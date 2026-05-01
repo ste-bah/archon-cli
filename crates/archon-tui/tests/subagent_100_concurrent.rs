@@ -167,12 +167,11 @@ async fn tc_tui_observability_08_100_concurrent() {
             "pre-warm execute must succeed: {}",
             warm_result.content
         );
-        if let Ok(v) = serde_json::from_str::<Value>(&warm_result.content) {
-            if let Some(id_str) = v["agent_id"].as_str() {
-                if let Ok(warm_id) = Uuid::parse_str(id_str) {
-                    let _ = cancel_background_agent(&warm_id);
-                }
-            }
+        if let Ok(v) = serde_json::from_str::<Value>(&warm_result.content)
+            && let Some(id_str) = v["agent_id"].as_str()
+            && let Ok(warm_id) = Uuid::parse_str(id_str)
+        {
+            let _ = cancel_background_agent(&warm_id);
         }
     }
 

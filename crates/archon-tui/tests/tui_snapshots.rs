@@ -114,7 +114,7 @@ fn snapshot_output_buffer_wrapped_rows_count() {
         "short",
         "a longer line that will wrap around a narrow width",
     ];
-    let refs: Vec<&str> = lines.iter().copied().collect();
+    let refs: Vec<&str> = lines.to_vec();
     let rows = OutputBuffer::count_wrapped_rows(&refs, 20);
     insta::assert_snapshot!("output_buffer_wrapped_rows_width20", format!("{}", rows));
 }

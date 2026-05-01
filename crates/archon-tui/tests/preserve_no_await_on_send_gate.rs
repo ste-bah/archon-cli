@@ -257,7 +257,7 @@ fn scan_file(path: &Path) -> Vec<Offender> {
         }
 
         // 3. Whitelist check.
-        if WHITELISTED_SENDERS.iter().any(|w| *w == ident) {
+        if WHITELISTED_SENDERS.contains(&ident) {
             continue;
         }
 

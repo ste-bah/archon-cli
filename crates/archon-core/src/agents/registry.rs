@@ -226,6 +226,7 @@ impl AgentRegistry {
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
+#[allow(clippy::field_reassign_with_default)] // Tests mutate constructed defaults; refactoring all sites to struct-init is out of scope.
 mod tests {
     use super::*;
     use std::fs;
@@ -298,17 +299,21 @@ mod tests {
         let mut registry = AgentRegistry::load(tmp.path());
 
         // Insert project-level agent
-        let mut project_agent = CustomAgentDefinition::default();
-        project_agent.agent_type = "shared".into();
-        project_agent.description = "project version".into();
-        project_agent.source = AgentSource::Project;
+        let project_agent = CustomAgentDefinition {
+            agent_type: "shared".into(),
+            description: "project version".into(),
+            source: AgentSource::Project,
+            ..CustomAgentDefinition::default()
+        };
         registry.agents.insert("shared".into(), project_agent);
 
         // Insert user-level agent (higher priority — same name, overwrites)
-        let mut user_agent = CustomAgentDefinition::default();
-        user_agent.agent_type = "shared".into();
-        user_agent.description = "user version".into();
-        user_agent.source = AgentSource::User;
+        let user_agent = CustomAgentDefinition {
+            agent_type: "shared".into(),
+            description: "user version".into(),
+            source: AgentSource::User,
+            ..CustomAgentDefinition::default()
+        };
         registry.agents.insert("shared".into(), user_agent);
 
         let resolved = registry.resolve("shared").unwrap();
