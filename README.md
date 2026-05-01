@@ -90,9 +90,9 @@ archon-cli/
 
 ## Status
 
-- Current version: **v0.1.28** ([release notes](docs/release-notes/v0.1.28.md))
+- Current version: **v0.1.35** ([release notes](docs/release-notes/v0.1.35.md))
 - Active development; pre-1.0 means breaking changes can land in minor versions
-- Phase 6 complete (pipelines + learning systems wired); see release notes for the v0.1.6 → v0.1.28 stabilisation arc
+- Phase 6 complete (pipelines + learning systems wired); see release notes for the v0.1.6 → v0.1.35 stabilisation arc
 
 ## Contributing
 
