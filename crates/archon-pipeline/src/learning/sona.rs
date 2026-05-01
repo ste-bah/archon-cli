@@ -4,8 +4,14 @@
 //! Port of sona-engine.ts, sona-types.ts, sona-utils.ts, step-capture-service.ts.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
+
+use archon_memory::embedding::EmbeddingProvider;
+use cozo::DbInstance;
+
+use crate::learning::trajectory_store;
 
 // ---------------------------------------------------------------------------
 // Constants (matching TypeScript)
@@ -26,7 +32,7 @@ pub const MAX_OBSERVATION_LEN: usize = 10_000;
 // ---------------------------------------------------------------------------
 
 /// Configuration for the SONA Engine.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct SonaConfig {
     pub learning_rate: f64,
     pub regularization: f64,
@@ -34,6 +40,14 @@ pub struct SonaConfig {
     pub drift_reject_threshold: f64,
     pub max_checkpoints: usize,
     pub fisher_decay_rate: f64,
+    /// Target embedding dimensionality for GNN input (pad/truncate to this).
+    pub gnn_input_dim: usize,
+    /// Optional CozoDB handle for persisting trajectories.
+    #[serde(skip)]
+    pub db: Option<Arc<DbInstance>>,
+    /// Optional embedding provider for computing trajectory embeddings.
+    #[serde(skip)]
+    pub embedding_provider: Option<Arc<dyn EmbeddingProvider>>,
 }
 
 impl Default for SonaConfig {
@@ -45,7 +59,33 @@ impl Default for SonaConfig {
             drift_reject_threshold: DEFAULT_DRIFT_REJECT_THRESHOLD,
             max_checkpoints: DEFAULT_MAX_CHECKPOINTS,
             fisher_decay_rate: FISHER_DECAY_RATE,
+            gnn_input_dim: 1536,
+            db: None,
+            embedding_provider: None,
         }
+    }
+}
+
+// Manual Debug impl — EmbeddingProvider is not Debug.
+impl std::fmt::Debug for SonaConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SonaConfig")
+            .field("learning_rate", &self.learning_rate)
+            .field("regularization", &self.regularization)
+            .field("drift_alert_threshold", &self.drift_alert_threshold)
+            .field("drift_reject_threshold", &self.drift_reject_threshold)
+            .field("max_checkpoints", &self.max_checkpoints)
+            .field("fisher_decay_rate", &self.fisher_decay_rate)
+            .field("gnn_input_dim", &self.gnn_input_dim)
+            .field("db", &self.db.as_ref().map(|_| "Arc<DbInstance>"))
+            .field(
+                "embedding_provider",
+                &self
+                    .embedding_provider
+                    .as_ref()
+                    .map(|_| "Arc<dyn EmbeddingProvider>"),
+            )
+            .finish()
     }
 }
 
@@ -60,9 +100,13 @@ pub struct Trajectory {
     pub route: String,
     pub agent_key: String,
     pub session_id: String,
+    pub patterns: Vec<String>,
+    pub context: Vec<String>,
+    pub embedding: Vec<f32>,
     pub quality: f64,
     pub reward: f64,
     pub feedback_score: f64,
+    pub weights_path: String,
     pub created_at: u64,
     pub updated_at: u64,
 }
@@ -236,16 +280,24 @@ pub struct SonaEngine {
     fisher: HashMap<String, HashMap<String, f64>>,
     /// Checkpoint stack for rollback.
     checkpoints: Vec<WeightCheckpoint>,
+    /// Optional CozoDB handle for persisting trajectories.
+    db: Option<Arc<DbInstance>>,
+    /// Optional embedding provider for computing trajectory embeddings.
+    embedding_provider: Option<Arc<dyn EmbeddingProvider>>,
 }
 
 impl SonaEngine {
     pub fn new(config: SonaConfig) -> Self {
+        let db = config.db.clone();
+        let embedding_provider = config.embedding_provider.clone();
         Self {
             config,
             trajectories: HashMap::new(),
             weights: HashMap::new(),
             fisher: HashMap::new(),
             checkpoints: Vec::new(),
+            db,
+            embedding_provider,
         }
     }
 
@@ -262,14 +314,23 @@ impl SonaEngine {
             route: route.to_string(),
             agent_key: agent_key.to_string(),
             session_id: session_id.to_string(),
+            patterns: vec![],
+            context: vec![],
+            embedding: vec![],
             quality: 0.0,
             reward: 0.0,
             feedback_score: 0.0,
+            weights_path: String::new(),
             created_at: now,
             updated_at: now,
         };
         self.trajectories
             .insert(traj.trajectory_id.clone(), traj.clone());
+
+        if let Some(ref db) = self.db {
+            let _ = trajectory_store::store_trajectory(db, &traj);
+        }
+
         traj
     }
 
@@ -293,6 +354,39 @@ impl SonaEngine {
         traj.reward = reward;
         traj.feedback_score = input.l_score;
         traj.updated_at = epoch_secs();
+
+        // Embed at first non-zero quality so the trainer sees real vectors.
+        if traj.embedding.is_empty()
+            && input.quality > 0.0
+            && let Some(ref provider) = self.embedding_provider
+        {
+            let text = format!(
+                "route:{}\nagent:{}\npatterns:{}\ncontext:{}",
+                traj.route,
+                traj.agent_key,
+                traj.patterns.join(","),
+                traj.context.join("\n"),
+            );
+            match provider.embed(&[text]) {
+                Ok(embeddings) => {
+                    if let Some(emb) = embeddings.into_iter().next() {
+                        traj.embedding = pad_or_truncate(emb, self.config.gnn_input_dim);
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        trajectory_id = %traj.trajectory_id,
+                        error = %e,
+                        "embedding failed for trajectory"
+                    );
+                }
+            }
+        }
+
+        // Persist updated trajectory to CozoDB when available.
+        if let Some(ref db) = self.db {
+            let _ = trajectory_store::store_trajectory(db, traj);
+        }
 
         let route = traj.route.clone();
         let pattern_id = "default".to_string();
@@ -521,4 +615,14 @@ fn epoch_secs() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
+}
+
+/// Pad with zeros if v.len() < target, truncate if v.len() > target.
+pub fn pad_or_truncate(mut v: Vec<f32>, target: usize) -> Vec<f32> {
+    if v.len() < target {
+        v.resize(target, 0.0);
+    } else if v.len() > target {
+        v.truncate(target);
+    }
+    v
 }

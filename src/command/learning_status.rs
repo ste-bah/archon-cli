@@ -133,7 +133,7 @@ impl LearningStatusHandler {
         // Query trajectories — shared with the auto-trainer's sample provider.
         // Reference: archon-pipeline/src/learning/gnn/auto_trainer_runtime.rs.
         let trajectories: Vec<archon_pipeline::learning::gnn::loss::TrajectoryWithFeedback> =
-            match archon_pipeline::learning::gnn::auto_trainer_runtime::query_trajectories_for_training(db) {
+            match archon_pipeline::learning::gnn::auto_trainer_runtime::query_trajectories_for_training(db, gnn_cfg.input_dim) {
                 Ok(trajs) => trajs,
                 Err(e) => {
                     let _ = ctx.tui_tx.send(TuiEvent::TextDelta(format!(

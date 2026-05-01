@@ -31,17 +31,19 @@ use crate::learning::gnn::{GnnConfig, GnnEnhancer};
 // Sample provider — replaces the duplicated query in learning_status.rs
 // ---------------------------------------------------------------------------
 
-/// Query trajectories with quality scores from CozoDB.
+/// Query trajectories with quality scores and embeddings from CozoDB.
 ///
 /// Returns up to 512 trajectories with `quality > 0`, ordered by quality
-/// descending. Used as the AutoTrainer sample provider AND by the manual
+/// descending. Skips rows with empty or wrong-dim embeddings.
+/// Used as the AutoTrainer sample provider AND by the manual
 /// `/learning-status retrain` command.
 pub fn query_trajectories_for_training(
     db: &DbInstance,
+    gnn_input_dim: usize,
 ) -> Result<Vec<TrajectoryWithFeedback>, String> {
     let query = "
-        ?[trajectory_id, quality] :=
-            *trajectories[trajectory_id, _, _, _, _, _, quality, _, _, _, _, _],
+        ?[trajectory_id, emb, quality] :=
+            *trajectories[trajectory_id, _, _, _, _, _, emb, quality, _, _, _, _, _],
             quality > 0.0
         :order -quality
         :limit 512
@@ -54,11 +56,26 @@ pub fn query_trajectories_for_training(
     let mut trajectories = Vec::with_capacity(result.rows.len());
     for row in &result.rows {
         let trajectory_id = row[0].get_str().unwrap_or("unknown").to_string();
-        let quality = row[1].get_float().unwrap_or(0.0) as f32;
-        // Embedding storage is not yet wired into the trajectories schema —
-        // the manual retrain command also uses a zero placeholder. When the
-        // schema gains an embedding column, both call sites switch in lockstep.
-        let embedding = vec![0.0f32; 1536];
+        let embedding: Vec<f32> = match &row[1] {
+            cozo::DataValue::List(list) => list
+                .iter()
+                .filter_map(|v| v.get_float().map(|f| f as f32))
+                .collect(),
+            _ => vec![],
+        };
+        let quality = row[2].get_float().unwrap_or(0.0) as f32;
+
+        // Skip trajectories whose embedding dimension doesn't match the GNN input.
+        if embedding.len() != gnn_input_dim {
+            tracing::warn!(
+                trajectory_id = %trajectory_id,
+                len = embedding.len(),
+                expected = gnn_input_dim,
+                "skipping trajectory with malformed embedding"
+            );
+            continue;
+        }
+
         trajectories.push(TrajectoryWithFeedback {
             trajectory_id,
             embedding,
@@ -147,8 +164,9 @@ pub fn build_and_spawn_auto_trainer(
     // and converted to an empty sample set so the auto-trainer's tick loop
     // never panics on a transient query failure.
     let db_for_provider = Arc::clone(&db);
+    let gnn_input_dim = params.gnn_input_dim;
     let sample_provider: Arc<dyn Fn() -> Vec<TrajectoryWithFeedback> + Send + Sync> = Arc::new(
-        move || match query_trajectories_for_training(&db_for_provider) {
+        move || match query_trajectories_for_training(&db_for_provider, gnn_input_dim) {
             Ok(t) => t,
             Err(e) => {
                 tracing::warn!(error = %e, "AutoTrainer: sample provider query failed");

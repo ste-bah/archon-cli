@@ -5,7 +5,7 @@ fn mem_db() -> DbInstance {
     DbInstance::new("mem", "", "").unwrap()
 }
 
-const ALL_RELATIONS: [&str; 13] = [
+const ALL_RELATIONS: [&str; 14] = [
     "trajectories",
     "trajectory_steps",
     "patterns",
@@ -19,6 +19,7 @@ const ALL_RELATIONS: [&str; 13] = [
     "gnn_adam_state",
     "gnn_training_runs",
     "shadow_documents",
+    "learning_schema_version",
 ];
 
 fn get_relation_names(db: &DbInstance) -> Vec<String> {
@@ -69,8 +70,8 @@ fn test_trajectories_crud() {
     initialize_learning_schemas(&db).unwrap();
 
     let insert = r#"
-        ?[trajectory_id, route, agent_key, session_id, patterns, context, quality, reward, feedback_score, weights_path, created_at, updated_at] <- [
-            ["traj-001", "reasoning.causal", "task-analyzer", "sess-1", ["pat-1","pat-2"], ["ctx-1"], 0.85, 1.2, 0.9, "/weights/w1.bin", 1700000000000, 1700000000000]
+        ?[trajectory_id, route, agent_key, session_id, patterns, context, embedding, quality, reward, feedback_score, weights_path, created_at, updated_at] <- [
+            ["traj-001", "reasoning.causal", "task-analyzer", "sess-1", ["pat-1","pat-2"], ["ctx-1"], [], 0.85, 1.2, 0.9, "/weights/w1.bin", 1700000000000, 1700000000000]
         ]
         :put trajectories {
             trajectory_id
@@ -80,6 +81,7 @@ fn test_trajectories_crud() {
             session_id,
             patterns,
             context,
+            embedding,
             quality,
             reward,
             feedback_score,
@@ -93,7 +95,7 @@ fn test_trajectories_crud() {
 
     let query = r#"
         ?[trajectory_id, route, quality] :=
-            *trajectories[trajectory_id, route, _, _, _, _, quality, _, _, _, _, _]
+            *trajectories[trajectory_id, route, _, _, _, _, _, quality, _, _, _, _, _]
     "#;
     let result = db
         .run_script(query, Default::default(), ScriptMutability::Immutable)
@@ -500,8 +502,8 @@ fn test_verify_learning_schemas() {
 
     assert_eq!(
         report.present.len(),
-        13,
-        "all 13 relations should be present"
+        14,
+        "all 14 relations should be present"
     );
     assert_eq!(
         report.missing.len(),
@@ -531,8 +533,8 @@ fn test_verify_on_empty_db() {
     );
     assert_eq!(
         report.missing.len(),
-        13,
-        "all 13 relations should be missing on empty db"
+        14,
+        "all 14 relations should be missing on empty db"
     );
 
     for rel in &ALL_RELATIONS {
@@ -551,11 +553,11 @@ fn test_key_constraint_trajectories() {
 
     // First insert with :put
     let insert1 = r#"
-        ?[trajectory_id, route, agent_key, session_id, patterns, context, quality, reward, feedback_score, weights_path, created_at, updated_at] <- [
-            ["traj-dup", "route.a", "agent-1", "sess-1", [], [], 0.5, 0.5, 0.5, "/w1.bin", 1700000000000, 1700000000000]
+        ?[trajectory_id, route, agent_key, session_id, patterns, context, embedding, quality, reward, feedback_score, weights_path, created_at, updated_at] <- [
+            ["traj-dup", "route.a", "agent-1", "sess-1", [], [], [], 0.5, 0.5, 0.5, "/w1.bin", 1700000000000, 1700000000000]
         ]
         :put trajectories {
-            trajectory_id => route, agent_key, session_id, patterns, context, quality, reward, feedback_score, weights_path, created_at, updated_at
+            trajectory_id => route, agent_key, session_id, patterns, context, embedding, quality, reward, feedback_score, weights_path, created_at, updated_at
         }
     "#;
     db.run_script(insert1, Default::default(), ScriptMutability::Mutable)
@@ -563,11 +565,11 @@ fn test_key_constraint_trajectories() {
 
     // Second :put with same key should upsert (overwrite)
     let insert2 = r#"
-        ?[trajectory_id, route, agent_key, session_id, patterns, context, quality, reward, feedback_score, weights_path, created_at, updated_at] <- [
-            ["traj-dup", "route.b", "agent-2", "sess-2", [], [], 0.9, 0.9, 0.9, "/w2.bin", 1700000000000, 1700000000000]
+        ?[trajectory_id, route, agent_key, session_id, patterns, context, embedding, quality, reward, feedback_score, weights_path, created_at, updated_at] <- [
+            ["traj-dup", "route.b", "agent-2", "sess-2", [], [], [], 0.9, 0.9, 0.9, "/w2.bin", 1700000000000, 1700000000000]
         ]
         :put trajectories {
-            trajectory_id => route, agent_key, session_id, patterns, context, quality, reward, feedback_score, weights_path, created_at, updated_at
+            trajectory_id => route, agent_key, session_id, patterns, context, embedding, quality, reward, feedback_score, weights_path, created_at, updated_at
         }
     "#;
     db.run_script(insert2, Default::default(), ScriptMutability::Mutable)
@@ -575,7 +577,7 @@ fn test_key_constraint_trajectories() {
 
     // Should have exactly one row
     let count_query = r#"
-        ?[count(trajectory_id)] := *trajectories[trajectory_id, _, _, _, _, _, _, _, _, _, _, _]
+        ?[count(trajectory_id)] := *trajectories[trajectory_id, _, _, _, _, _, _, _, _, _, _, _, _]
     "#;
     let result = db
         .run_script(count_query, Default::default(), ScriptMutability::Immutable)
@@ -584,7 +586,7 @@ fn test_key_constraint_trajectories() {
 
     // Verify it was overwritten with second values
     let check = r#"
-        ?[route] := *trajectories["traj-dup", route, _, _, _, _, _, _, _, _, _, _]
+        ?[route] := *trajectories["traj-dup", route, _, _, _, _, _, _, _, _, _, _, _]
     "#;
     let result = db
         .run_script(check, Default::default(), ScriptMutability::Immutable)
@@ -593,11 +595,11 @@ fn test_key_constraint_trajectories() {
 
     // :insert with duplicate key should error
     let insert_dup = r#"
-        ?[trajectory_id, route, agent_key, session_id, patterns, context, quality, reward, feedback_score, weights_path, created_at, updated_at] <- [
-            ["traj-dup", "route.c", "agent-3", "sess-3", [], [], 0.1, 0.1, 0.1, "/w3.bin", 1700000000000, 1700000000000]
+        ?[trajectory_id, route, agent_key, session_id, patterns, context, embedding, quality, reward, feedback_score, weights_path, created_at, updated_at] <- [
+            ["traj-dup", "route.c", "agent-3", "sess-3", [], [], [], 0.1, 0.1, 0.1, "/w3.bin", 1700000000000, 1700000000000]
         ]
         :insert trajectories {
-            trajectory_id => route, agent_key, session_id, patterns, context, quality, reward, feedback_score, weights_path, created_at, updated_at
+            trajectory_id => route, agent_key, session_id, patterns, context, embedding, quality, reward, feedback_score, weights_path, created_at, updated_at
         }
     "#;
     let err = db.run_script(insert_dup, Default::default(), ScriptMutability::Mutable);

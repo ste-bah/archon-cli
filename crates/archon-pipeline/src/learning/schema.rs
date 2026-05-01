@@ -1,8 +1,8 @@
 //! CozoDB schema definitions for all learning subsystems.
 //!
-//! Defines 13 stored relations covering trajectories, patterns, causal graphs,
+//! Defines 14 stored relations covering trajectories, patterns, causal graphs,
 //! provenance tracking, episodic memory, DESC episode metadata, GNN weights,
-//! Adam optimizer state, training runs, and shadow documents.
+//! Adam optimizer state, training runs, shadow documents, and schema versioning.
 
 use anyhow::Result;
 use cozo::ScriptMutability;
@@ -20,6 +20,7 @@ pub const TRAJECTORIES_SCHEMA: &str = "
     session_id: String,
     patterns: [String],
     context: [String],
+    embedding: [Float],
     quality: Float,
     reward: Float,
     feedback_score: Float,
@@ -176,6 +177,15 @@ pub const GNN_TRAINING_RUNS_SCHEMA: &str = "
 }
 ";
 
+pub const LEARNING_SCHEMA_VERSION_SCHEMA: &str = "
+:create learning_schema_version {
+    component: String
+    =>
+    version: Int,
+    applied_at: Int
+}
+";
+
 pub const SHADOW_DOCUMENTS_SCHEMA: &str = "
 :create shadow_documents {
     doc_id: String
@@ -193,7 +203,7 @@ pub const SHADOW_DOCUMENTS_SCHEMA: &str = "
 // All relation names (used by both initialize and verify)
 // ---------------------------------------------------------------------------
 
-const ALL_LEARNING_RELATIONS: [&str; 13] = [
+const ALL_LEARNING_RELATIONS: [&str; 14] = [
     "trajectories",
     "trajectory_steps",
     "patterns",
@@ -207,6 +217,7 @@ const ALL_LEARNING_RELATIONS: [&str; 13] = [
     "gnn_adam_state",
     "gnn_training_runs",
     "shadow_documents",
+    "learning_schema_version",
 ];
 
 // ---------------------------------------------------------------------------
@@ -225,7 +236,7 @@ pub struct SchemaVerificationReport {
 // Public API
 // ---------------------------------------------------------------------------
 
-/// Create all 13 learning relations in the database.
+/// Create all 14 learning relations in the database.
 ///
 /// This function is idempotent: calling it when relations already exist will
 /// silently succeed without error.
@@ -244,6 +255,7 @@ pub fn initialize_learning_schemas(db: &cozo::DbInstance) -> Result<()> {
         GNN_ADAM_STATE_SCHEMA,
         GNN_TRAINING_RUNS_SCHEMA,
         SHADOW_DOCUMENTS_SCHEMA,
+        LEARNING_SCHEMA_VERSION_SCHEMA,
     ];
 
     for script in schemas {
@@ -259,10 +271,14 @@ pub fn initialize_learning_schemas(db: &cozo::DbInstance) -> Result<()> {
             }
         }
     }
+
+    // Apply any pending migrations after schema creation.
+    crate::learning::migrations::apply_pending_migrations(db)?;
+
     Ok(())
 }
 
-/// Check which of the 13 learning relations exist in the database.
+/// Check which of the 14 learning relations exist in the database.
 pub fn verify_learning_schemas(db: &cozo::DbInstance) -> Result<SchemaVerificationReport> {
     let result = db
         .run_script(
