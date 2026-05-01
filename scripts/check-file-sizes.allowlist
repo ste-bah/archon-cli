@@ -212,3 +212,7 @@ src/session_loop/mod.rs
 # task_executor.rs inflated 482 -> 513 by `cargo fmt --all` (commit 6adc1d6,
 # pure formatting, zero semantic change). Same follow-up as src/main.rs.
 crates/archon-core/tests/task_executor.rs
+
+# plugin_slash.rs inflated to 580 lines by GHOST-005 real impl
+# (handle_enable_disable / handle_install / handle_reload bodies + tests).
+src/command/plugin_slash.rs
