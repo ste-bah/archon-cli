@@ -200,8 +200,7 @@ mod tests {
 
     #[test]
     fn unknown_provider_falls_back_to_anthropic() {
-        let mut cfg = LlmConfig::default();
-        cfg.provider = "__ags699_unknown__".into();
+        let cfg = LlmConfig { provider: "__ags699_unknown__".into(), ..Default::default() };
         let provider = build_llm_provider(&cfg, make_test_client());
         assert_eq!(provider.name(), "anthropic");
     }
@@ -216,8 +215,7 @@ mod tests {
             std::env::remove_var("OPENAI_API_KEY");
         }
 
-        let mut cfg = LlmConfig::default();
-        cfg.provider = "openai".into();
+        let mut cfg = LlmConfig { provider: "openai".into(), ..Default::default() };
         cfg.openai.api_key = None;
         let provider = build_llm_provider(&cfg, make_test_client());
         assert_eq!(provider.name(), "anthropic");
@@ -232,8 +230,7 @@ mod tests {
 
     #[test]
     fn bedrock_with_missing_region_falls_back_to_anthropic() {
-        let mut cfg = LlmConfig::default();
-        cfg.provider = "bedrock".into();
+        let mut cfg = LlmConfig { provider: "bedrock".into(), ..Default::default() };
         cfg.bedrock.region = String::new();
         let provider = build_llm_provider(&cfg, make_test_client());
         assert_eq!(provider.name(), "anthropic");
@@ -244,8 +241,7 @@ mod tests {
     #[test]
     fn test_anthropic_provider_explicit_returns_anthropic() {
         let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let mut cfg = LlmConfig::default();
-        cfg.provider = "anthropic".to_string();
+        let cfg = LlmConfig { provider: "anthropic".to_string(), ..Default::default() };
         let provider = build_llm_provider(&cfg, make_test_client());
         assert_eq!(provider.name(), "anthropic");
     }
@@ -253,8 +249,7 @@ mod tests {
     #[test]
     fn test_local_provider_constructs_without_fallback() {
         let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let mut cfg = LlmConfig::default();
-        cfg.provider = "local".to_string();
+        let cfg = LlmConfig { provider: "local".to_string(), ..Default::default() };
         let provider = build_llm_provider(&cfg, make_test_client());
         // LocalProvider::name() returns "local" (verified in
         // crates/archon-llm/src/providers/local.rs ~line 227).

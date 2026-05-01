@@ -13,6 +13,12 @@ use super::{ReasoningEngine, ReasoningItem, ReasoningOutput, ReasoningRequest, R
 /// Temporal reasoning: Allen's interval algebra and timeline analysis.
 pub struct TemporalEngine;
 
+impl Default for TemporalEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TemporalEngine {
     pub fn new() -> Self {
         Self

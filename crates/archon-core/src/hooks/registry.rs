@@ -361,13 +361,12 @@ impl HookRegistry {
         } else {
             new_settings // Will fail to read, which is fine (handled by if let Ok)
         };
-        if let Ok(json_str) = std::fs::read_to_string(&settings_path) {
-            if let Ok(settings) = serde_json::from_str::<SettingsJson>(&json_str) {
+        if let Ok(json_str) = std::fs::read_to_string(&settings_path)
+            && let Ok(settings) = serde_json::from_str::<SettingsJson>(&json_str) {
                 for (event, matchers) in settings.hooks {
                     registry.register_matchers(event, matchers, Some("project"));
                 }
             }
-        }
 
         // 2-5. TOML sources (with .claude fallback for backward compat)
         let sources: [(std::path::PathBuf, std::path::PathBuf, &str); 4] = [

@@ -617,10 +617,11 @@ impl SessionStore {
                     )));
                 }
                 1 => {
-                    let mut nr = cozo::NamedRows::default();
-                    nr.rows = matches;
-                    nr.headers = all.headers;
-                    nr
+                    cozo::NamedRows {
+                        rows: matches,
+                        headers: all.headers,
+                        ..Default::default()
+                    }
                 }
                 n => {
                     return Err(SessionError::NotFound(format!(

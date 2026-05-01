@@ -125,9 +125,9 @@ impl PermissionChecker {
             }
 
             PermissionMode::AcceptEdits => {
-                if ACCEPT_EDITS_WHITELIST.contains(&tool_name) {
-                    PermissionDecision::Allow
-                } else if DEFAULT_SAFE_TOOLS.contains(&tool_name) {
+                if ACCEPT_EDITS_WHITELIST.contains(&tool_name)
+                    || DEFAULT_SAFE_TOOLS.contains(&tool_name)
+                {
                     PermissionDecision::Allow
                 } else {
                     PermissionDecision::NeedsPermission(format!(

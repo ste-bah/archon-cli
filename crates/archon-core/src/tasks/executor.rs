@@ -54,6 +54,7 @@ pub struct TaskExecutor {
 }
 
 impl TaskExecutor {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         queue: Arc<dyn TaskQueue>,
         store: Arc<dyn TaskStateStore>,
@@ -81,6 +82,7 @@ impl TaskExecutor {
 
     /// Create a TaskExecutor with a pre-existing cancel_handles map
     /// (shared with DefaultTaskService for coordinated cancellation).
+    #[allow(clippy::too_many_arguments)]
     pub fn with_cancel_handles(
         queue: Arc<dyn TaskQueue>,
         store: Arc<dyn TaskStateStore>,
@@ -185,6 +187,7 @@ impl TaskExecutor {
     }
 
     #[instrument(skip_all, fields(task_id = %task_id, agent = %agent_name))]
+    #[allow(clippy::too_many_arguments)]
     async fn run_task(
         task_id: TaskId,
         agent_name: String,

@@ -262,15 +262,14 @@ mod tests {
 
         let mut saw_hint = false;
         while let Ok(ev) = rx.try_recv() {
-            if let TuiEvent::TextDelta(text) = ev {
-                if text.contains("Unknown /voice subcommand")
-                    && text.contains("list")
-                    && text.contains("enable")
-                    && text.contains("disable")
-                    && text.contains("switch")
-                {
-                    saw_hint = true;
-                }
+            if let TuiEvent::TextDelta(text) = ev
+                && text.contains("Unknown /voice subcommand")
+                && text.contains("list")
+                && text.contains("enable")
+                && text.contains("disable")
+                && text.contains("switch")
+            {
+                saw_hint = true;
             }
         }
         assert!(
@@ -300,12 +299,11 @@ mod tests {
 
             let mut saw_placeholder = false;
             while let Ok(ev) = rx.try_recv() {
-                if let TuiEvent::TextDelta(text) = ev {
-                    if text.contains(&format!("Voice {sub} command not yet implemented"))
-                        && text.contains("~/.archon/settings.json")
-                    {
-                        saw_placeholder = true;
-                    }
+                if let TuiEvent::TextDelta(text) = ev
+                    && text.contains(&format!("Voice {sub} command not yet implemented"))
+                    && text.contains("~/.archon/settings.json")
+                {
+                    saw_placeholder = true;
                 }
             }
             assert!(
@@ -364,8 +362,7 @@ mod tests {
     #[test]
     fn render_list_masks_stt_api_key() {
         // Empty key -> "(empty)".
-        let mut voice = VoiceConfig::default();
-        voice.stt_api_key = String::new();
+        let voice = VoiceConfig::default();
         let out_empty = render_list(&voice);
         assert!(
             out_empty.contains("stt_api_key:   (empty)"),
@@ -378,7 +375,7 @@ mod tests {
 
         // Populated key -> "(set)", and the raw secret must not appear.
         let secret = "sk-super-secret-should-not-leak-abcdef123456";
-        voice.stt_api_key = secret.to_string();
+        let voice = VoiceConfig { stt_api_key: secret.to_string(), ..Default::default() };
         let out_set = render_list(&voice);
         assert!(
             out_set.contains("stt_api_key:   (set)"),

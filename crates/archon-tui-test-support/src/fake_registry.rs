@@ -89,6 +89,10 @@ impl FakeRegistry {
         self.inner.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
     pub fn shutdown_all(&self) {
         for entry in self.inner.iter() {
             entry.handle.abort();

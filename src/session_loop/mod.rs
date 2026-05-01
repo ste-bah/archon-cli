@@ -159,8 +159,8 @@ pub(crate) fn run_session_loop(
                                 for (idx, msg) in
                                     guard.conversation_state().messages.iter().enumerate()
                                 {
-                                    if let Ok(json_str) = serde_json::to_string(msg) {
-                                        if let Err(e) = session_store_for_input
+                                    if let Ok(json_str) = serde_json::to_string(msg)
+                                        && let Err(e) = session_store_for_input
                                             .save_message(
                                                 &session_id_for_input,
                                                 idx as u64,
@@ -169,16 +169,14 @@ pub(crate) fn run_session_loop(
                                         {
                                             tracing::warn!("save_message idx {idx}: {e}");
                                         }
-                                    }
                                 }
                             }
                             Some(PostTurnAction::SkillComplete { reload_registry_for }) => {
-                                if reload_registry_for.as_deref() == Some("create-agent") {
-                                    if let Ok(mut reg) = cmd_ctx.agent_registry.write() {
+                                if reload_registry_for.as_deref() == Some("create-agent")
+                                    && let Ok(mut reg) = cmd_ctx.agent_registry.write() {
                                         reg.reload(&cmd_ctx.working_dir);
                                         tracing::info!("agent registry reloaded");
                                     }
-                                }
                                 let _ = input_tui_tx
                                     .send(TuiEvent::SlashCommandComplete);
                             }
@@ -763,8 +761,8 @@ pub(crate) fn run_session_loop(
         // AGT-015: Increment agent invocation count on session end.
         // Wired ONLY here (not at /exit) to avoid double-counting — the Stop
         // hook fires on ALL exit paths (/exit, /quit, Ctrl-C, channel close).
-        if let Some(ref def) = agent_def {
-            if let Some(ref base_dir) = def.base_dir {
+        if let Some(ref def) = agent_def
+            && let Some(ref base_dir) = def.base_dir {
                 let agent_dir = std::path::Path::new(base_dir);
                 if let Err(e) = archon_core::agents::memory::increment_invocation_count(agent_dir) {
                     tracing::warn!(
@@ -773,7 +771,6 @@ pub(crate) fn run_session_loop(
                     );
                 }
             }
-        }
 
         // TASK-TUI-107: drain in-flight turn + queue before the Stop hook.
         let drain_deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);

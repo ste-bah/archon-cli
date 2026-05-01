@@ -97,6 +97,8 @@
 //! Empty / missing subcommand defaults to `"list"` (matches shipped
 //! `"" | "list"` arm).
 
+
+#[allow(unused_imports)]
 use std::sync::Arc;
 
 use archon_memory::MemoryTrait;
@@ -484,10 +486,10 @@ mod tests {
 
         let mut saw_empty = false;
         while let Ok(ev) = rx.try_recv() {
-            if let TuiEvent::TextDelta(text) = ev {
-                if text == "\nNo memories stored.\n" {
-                    saw_empty = true;
-                }
+            if let TuiEvent::TextDelta(text) = ev
+                && text == "\nNo memories stored.\n"
+            {
+                saw_empty = true;
             }
         }
         assert!(
@@ -556,10 +558,10 @@ mod tests {
 
         let mut saw_usage = false;
         while let Ok(ev) = rx.try_recv() {
-            if let TuiEvent::Error(text) = ev {
-                if text == "Usage: /memory search <query>" {
-                    saw_usage = true;
-                }
+            if let TuiEvent::Error(text) = ev
+                && text == "Usage: /memory search <query>"
+            {
+                saw_usage = true;
             }
         }
         assert!(
@@ -639,10 +641,10 @@ mod tests {
         );
         let mut saw_no_match = false;
         while let Ok(ev) = rx.try_recv() {
-            if let TuiEvent::TextDelta(text) = ev {
-                if text == "\nNo memories matching \"missing-token\".\n" {
-                    saw_no_match = true;
-                }
+            if let TuiEvent::TextDelta(text) = ev
+                && text == "\nNo memories matching \"missing-token\".\n"
+            {
+                saw_no_match = true;
             }
         }
         assert!(
@@ -661,10 +663,10 @@ mod tests {
         assert!(res.is_ok(), "clear must return Ok, got: {res:?}");
         let mut saw_cleared = false;
         while let Ok(ev) = rx.try_recv() {
-            if let TuiEvent::TextDelta(text) = ev {
-                if text == "\nCleared 7 memories from the graph.\n" {
-                    saw_cleared = true;
-                }
+            if let TuiEvent::TextDelta(text) = ev
+                && text == "\nCleared 7 memories from the graph.\n"
+            {
+                saw_cleared = true;
             }
         }
         assert!(
@@ -686,13 +688,12 @@ mod tests {
         );
         let mut saw_unknown = false;
         while let Ok(ev) = rx.try_recv() {
-            if let TuiEvent::Error(text) = ev {
-                if text
+            if let TuiEvent::Error(text) = ev
+                && text
                     == "Unknown memory subcommand: nope. Use list, \
                         search, or clear."
-                {
-                    saw_unknown = true;
-                }
+            {
+                saw_unknown = true;
             }
         }
         assert!(

@@ -41,6 +41,7 @@ impl Pattern for FanOutFanInPattern {
         PatternKind::FanOut
     }
 
+    #[allow(clippy::redundant_iter_cloned)]
     async fn execute(&self, input: Value, ctx: PatternCtx) -> Result<Value, PatternError> {
         let cfg = &self.config;
         let parallelism = cfg.workers.len().min(MAX_PARALLELISM);

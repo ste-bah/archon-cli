@@ -44,32 +44,23 @@ impl FsWatcher {
         watcher.watch(root, RecursiveMode::Recursive)?;
 
         let worker = std::thread::spawn(move || {
-            loop {
-                // Wait for the first event
-                match rx.recv() {
-                    Ok(_event) => {
-                        // Debounce: collect events for DEBOUNCE_MS, then rescan
-                        std::thread::sleep(Duration::from_millis(DEBOUNCE_MS));
-                        // Drain any accumulated events
-                        while rx.try_recv().is_ok() {}
+            while let Ok(_event) = rx.recv() {
+                // Debounce: collect events for DEBOUNCE_MS, then rescan
+                std::thread::sleep(Duration::from_millis(DEBOUNCE_MS));
+                // Drain any accumulated events
+                while rx.try_recv().is_ok() {}
 
-                        debug!("watcher debounce elapsed, rescanning");
-                        match source.load_all(&catalog) {
-                            Ok(report) => {
-                                debug!(
-                                    loaded = report.loaded,
-                                    invalid = report.invalid,
-                                    "watcher rescan complete"
-                                );
-                            }
-                            Err(e) => {
-                                warn!("watcher rescan failed: {e}");
-                            }
-                        }
+                debug!("watcher debounce elapsed, rescanning");
+                match source.load_all(&catalog) {
+                    Ok(report) => {
+                        debug!(
+                            loaded = report.loaded,
+                            invalid = report.invalid,
+                            "watcher rescan complete"
+                        );
                     }
-                    Err(_) => {
-                        // Channel closed, watcher dropped
-                        break;
+                    Err(e) => {
+                        warn!("watcher rescan failed: {e}");
                     }
                 }
             }

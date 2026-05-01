@@ -25,6 +25,7 @@ pub enum LayoutMode {
 
 /// A single line within a hunk.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(non_camel_case_types)]
 pub enum DiffLine {
     context(String),
     deletion(String),

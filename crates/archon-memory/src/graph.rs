@@ -211,6 +211,7 @@ impl MemoryGraph {
     // ── CRUD ──────────────────────────────────────────────────
 
     /// Store a new memory and return its UUID.
+    #[allow(clippy::too_many_arguments)]
     pub fn store_memory(
         &self,
         content: &str,

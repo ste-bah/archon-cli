@@ -118,8 +118,6 @@ pub(crate) fn parse_layer_filter(sources: &[String]) -> Vec<ConfigLayer> {
 }
 
 /// Apply `--tools` (whitelist) and `--disallowed-tools` (blacklist) from
-
-/// Apply `--tools` (whitelist) and `--disallowed-tools` (blacklist) from
 /// resolved CLI flags to the tool registry.
 pub(crate) fn apply_tool_filters(
     registry: &mut archon_core::dispatch::ToolRegistry,
@@ -346,15 +344,13 @@ pub(crate) async fn run_print_mode_session(
             );
         }
 
-        // Inject skills
-        if let Some(ref skills) = def.skills {
-            if !skills.is_empty() {
+        if let Some(ref skills) = def.skills
+            && !skills.is_empty() {
                 let skills_list = skills.join(", ");
                 agent_prompt = format!(
                     "{agent_prompt}\n\n<available-skills>\nThe following skills are available to you: {skills_list}\nInvoke them by name when relevant to the task.\n</available-skills>"
                 );
             }
-        }
 
         // Inject LEANN queries and memory tags
         if !def.leann_queries.is_empty() {
@@ -422,6 +418,8 @@ pub(crate) async fn run_print_mode_session(
     let tool_defs = registry.tool_definitions();
 
     let fast_mode_shared = Arc::new(AtomicBool::new(cli.fast));
+    // GHOST-006: shared sandbox flag — toggled by /sandbox on/off, read by dispatch.
+    let sandbox_flag = Arc::new(AtomicBool::new(false));
     let initial_effort = if let Some(ref effort_arg) = cli.effort {
         archon_llm::effort::parse_level(effort_arg).unwrap_or(EffortLevel::Medium)
     } else {
@@ -454,17 +452,19 @@ pub(crate) async fn run_print_mode_session(
         max_tool_concurrency: config.tools.max_concurrency as usize,
         max_turns: None,
         cancel_token: None,
+        // GHOST-006: SandboxBackend wraps the shared flag for dispatch gating.
+        sandbox: Some(std::sync::Arc::new(
+            archon_tui::sandbox::SharedSandboxFlag::with_flag(sandbox_flag.clone()),
+        )),
     };
 
     // Apply agent execution config overrides (AGT-008)
     if let Some(ref def) = agent_def {
-        // AC-113: model="inherit" means use parent model (skip override)
-        if let Some(ref m) = def.model {
-            if m != "inherit" {
+        if let Some(ref m) = def.model
+            && m != "inherit" {
                 agent_config.model = m.clone();
                 *agent_config.model_override.lock().await = m.clone();
             }
-        }
         if let Some(ref e) = def.effort {
             if let Ok(level) = e.parse::<archon_llm::effort::EffortLevel>() {
                 *agent_config.effort_level.lock().await = level;
@@ -545,9 +545,8 @@ pub(crate) async fn run_print_mode_session(
         let arc = std::sync::Arc::new(hook_registry);
         agent.set_hook_registry(Arc::clone(&arc));
 
-        // Register agent-specific hooks as session-scoped hooks
-        if let Some(ref def) = agent_def {
-            if let Some(ref hooks_json) = def.hooks {
+        if let Some(ref def) = agent_def
+            && let Some(ref hooks_json) = def.hooks {
                 match archon_core::agents::loader::parse_agent_hooks(hooks_json) {
                     Ok(hook_pairs) => {
                         for (event, config) in hook_pairs {
@@ -560,7 +559,6 @@ pub(crate) async fn run_print_mode_session(
                     }
                 }
             }
-        }
     }
 
     // Wire auto-mode evaluator
@@ -574,20 +572,17 @@ pub(crate) async fn run_print_mode_session(
     // setters so AgentSubagentExecutor captures hook_registry, memory, etc.
     agent.install_subagent_executor();
 
-    // Wire Phase G: critical_system_reminder for per-turn injection in print mode
-    if let Some(ref def) = agent_def {
-        if let Some(ref reminder) = def.critical_system_reminder {
+    if let Some(ref def) = agent_def
+        && let Some(ref reminder) = def.critical_system_reminder {
             agent.set_critical_system_reminder(reminder.clone());
         }
-    }
 
     // AGT-011: Prepend initial_prompt to the query in print mode
     let mut print_config = print_config;
-    if let Some(ref def) = agent_def {
-        if let Some(ref prefix) = def.initial_prompt {
+    if let Some(ref def) = agent_def
+        && let Some(ref prefix) = def.initial_prompt {
             print_config.query = format!("{prefix}\n\n{}", print_config.query);
         }
-    }
 
     run_print_mode(print_config, config, &mut agent, agent_event_rx).await
 }
@@ -750,6 +745,8 @@ pub(crate) async fn run_interactive_session(
     // ── Phase 2: Initialize fast mode (CLI-118) ─────────────────
     // Shared atomic so slash commands and the agent see the same state
     let fast_mode_shared = Arc::new(AtomicBool::new(cli.fast));
+    // GHOST-006: shared sandbox flag for second boot path.
+    let sandbox_flag = Arc::new(AtomicBool::new(false));
     let fast_mode = FastModeState::new_with(cli.fast);
     if cli.fast {
         tracing::info!("fast mode enabled via --fast flag");
@@ -772,12 +769,9 @@ pub(crate) async fn run_interactive_session(
         }
     } else {
         // Use config default (medium unless overridden in config)
-        match effort::parse_level(&config.api.default_effort) {
-            Ok(level) => {
-                effort_state.set_level(level);
-                initial_effort = level;
-            }
-            Err(_) => {} // default is Medium, already set
+        if let Ok(level) = effort::parse_level(&config.api.default_effort) {
+            effort_state.set_level(level);
+            initial_effort = level;
         }
     }
     let effort_level_shared = Arc::new(tokio::sync::Mutex::new(initial_effort));
@@ -1225,12 +1219,11 @@ pub(crate) async fn run_interactive_session(
                 prompt = format!("{prompt}\n\n<tool-guidance>\n{}\n</tool-guidance>", a.tool_guidance);
             }
             // Inject skills into agent system prompt
-            if let Some(ref skills) = a.skills {
-                if !skills.is_empty() {
+            if let Some(ref skills) = a.skills
+                && !skills.is_empty() {
                     let skills_list = skills.join(", ");
                     prompt = format!("{prompt}\n\n<available-skills>\nThe following skills are available to you: {skills_list}\nInvoke them by name when relevant to the task.\n</available-skills>");
                 }
-            }
             // Inject LEANN queries and memory tags
             if !a.leann_queries.is_empty() {
                 let queries = a.leann_queries.join(", ");
@@ -1276,11 +1269,10 @@ pub(crate) async fn run_interactive_session(
                 // Gated by config.context.prompt_cache (TASK-WIRE-003) — when
                 // disabled, we omit the cache_control hint entirely so the API
                 // treats every block as non-cacheable.
-                if config.context.prompt_cache {
-                    if let Some(ref cc) = section.cache_control {
+                if config.context.prompt_cache
+                    && let Some(ref cc) = section.cache_control {
                         block["cache_control"] = serde_json::json!({ "type": cc });
                     }
-                }
                 block
             })
             .collect();
@@ -1380,17 +1372,20 @@ pub(crate) async fn run_interactive_session(
         max_tool_concurrency: config.tools.max_concurrency as usize,
         max_turns: None,
         cancel_token: None,
+        // GHOST-006: SandboxBackend wraps the shared flag for dispatch gating.
+        sandbox: Some(std::sync::Arc::new(
+            archon_tui::sandbox::SharedSandboxFlag::with_flag(sandbox_flag.clone()),
+        )),
     };
 
     // Apply agent execution config overrides
     if let Some(ref def) = agent_def {
         // AC-113: model="inherit" means use parent model (skip override)
-        if let Some(ref m) = def.model {
-            if m != "inherit" {
+        if let Some(ref m) = def.model
+            && m != "inherit" {
                 agent_config.model = m.clone();
                 *agent_config.model_override.lock().await = m.clone();
             }
-        }
         if let Some(ref e) = def.effort {
             if let Ok(level) = e.parse::<archon_llm::effort::EffortLevel>() {
                 *agent_config.effort_level.lock().await = level;
@@ -1792,11 +1787,10 @@ pub(crate) async fn run_interactive_session(
         }
 
         // Generate personality briefing for first turn.
-        if let Ok(trends) = archon_consciousness::persistence::compute_trends(memory.as_ref(), 10) {
-            if let Ok(Some(last)) =
+        if let Ok(trends) = archon_consciousness::persistence::compute_trends(memory.as_ref(), 10)
+            && let Ok(Some(last)) =
                 archon_consciousness::persistence::load_latest_snapshot(memory.as_ref())
-            {
-                if trends.total_sessions > 0 {
+                && trends.total_sessions > 0 {
                     let briefing =
                         archon_consciousness::persistence::generate_briefing(&trends, &last);
                     agent.set_personality_briefing(briefing);
@@ -1805,8 +1799,6 @@ pub(crate) async fn run_interactive_session(
                         "personality: briefing generated for first turn"
                     );
                 }
-            }
-        }
     }
 
     // CLI-417: Memory garden — auto-consolidation and briefing on session start.
@@ -1912,10 +1904,10 @@ pub(crate) async fn run_interactive_session(
         // CRIT-15 (ITEM 5): Restore inner voice from snapshot on session resume.
         if archon_consciousness::inner_voice::InnerVoice::is_enabled(
             config.consciousness.inner_voice,
-        ) {
-            if let Ok(memories) = memory.recall_memories("inner_voice_snapshot", 1) {
-                if let Some(m) = memories.first() {
-                    if let Ok(snapshot) = serde_json::from_str::<
+        )
+            && let Ok(memories) = memory.recall_memories("inner_voice_snapshot", 1)
+                && let Some(m) = memories.first()
+                    && let Ok(snapshot) = serde_json::from_str::<
                         archon_consciousness::inner_voice::InnerVoiceSnapshot,
                     >(&m.content)
                     {
@@ -1925,9 +1917,6 @@ pub(crate) async fn run_interactive_session(
                         agent.set_inner_voice(iv);
                         tracing::info!("inner voice state restored from snapshot");
                     }
-                }
-            }
-        }
     }
 
     // Wire --fork-session: fork the resumed session so new messages go to a fresh session
@@ -2226,6 +2215,8 @@ pub(crate) async fn run_interactive_session(
         // Initial value is None — no export queued until the handler
         // stashes one.
         pending_export_shared: Arc::new(std::sync::Mutex::new(None)),
+        // GHOST-006: shared sandbox flag for /sandbox handler ↔ dispatch gating.
+        sandbox_flag: Arc::clone(&sandbox_flag),
         // GNN/learning CozoDB — persistent store for weights, trajectories,
         // Adam state, and training runs. Created once at bootstrap, shared
         // across commands via the DIRECT pattern (same as memory/leann).
@@ -2370,7 +2361,6 @@ pub(crate) async fn run_interactive_session(
         let btw_model = config.api.default_model.clone();
         let btw_max_tokens = config.api.thinking_budget;
         // Use the pre-cloned system prompt so /btw shares the prompt cache
-        let btw_system_prompt = btw_system_prompt;
         tokio::spawn(async move {
             while let Some(question) = btw_rx.recv().await {
                 let tui_tx = btw_tui_tx.clone();

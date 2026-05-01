@@ -130,11 +130,10 @@ pub async fn pump_sse_stream_with_reconnect(
         for (name, value) in &base_headers {
             req = req.header(name.clone(), value.clone());
         }
-        if let Some(id) = &state.last_event_id {
-            if let Ok(v) = HeaderValue::from_str(id) {
+        if let Some(id) = &state.last_event_id
+            && let Ok(v) = HeaderValue::from_str(id) {
                 req = req.header("Last-Event-ID", v);
             }
-        }
 
         // Try to open the stream.
         let resp = match req.send().await {

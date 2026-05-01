@@ -39,8 +39,7 @@ impl EventLog {
         use tokio::io::AsyncWriteExt;
 
         let json = serde_json::to_vec(&event).map_err(|e| {
-            TaskError::Io(std::io::Error::new(
-                std::io::ErrorKind::Other,
+            TaskError::Io(std::io::Error::other(
                 e.to_string(),
             ))
         })?;
@@ -78,11 +77,10 @@ impl EventLog {
                 break; // truncated record — stop here
             }
 
-            if let Ok(event) = serde_json::from_slice::<TaskEvent>(&data[cursor..cursor + len]) {
-                if event.seq >= from_seq {
+            if let Ok(event) = serde_json::from_slice::<TaskEvent>(&data[cursor..cursor + len])
+                && event.seq >= from_seq {
                     events.push(event);
                 }
-            }
             cursor += len;
         }
 

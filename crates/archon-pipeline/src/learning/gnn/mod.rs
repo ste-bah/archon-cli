@@ -613,6 +613,7 @@ impl GnnEnhancer {
             .collect()
     }
 
+    #[allow(clippy::needless_range_loop)]
     /// Build symmetric adjacency matrix from edges.
     fn build_adjacency_matrix(&self, graph: &TrajectoryGraph) -> Vec<Vec<f32>> {
         let n = graph.nodes.len();

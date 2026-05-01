@@ -19,18 +19,15 @@ pub enum PermissionLevel {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub enum AgentMode {
     /// Normal mode -- all tools available.
+    #[default]
     Normal,
     /// Plan mode -- only read-only tools allowed.
     Plan,
 }
 
-impl Default for AgentMode {
-    fn default() -> Self {
-        Self::Normal
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Tool context -- passed to every tool execution
@@ -64,6 +61,10 @@ pub struct ToolContext {
     /// to all spawned subagents. `None` for top-level tool invocations
     /// where no parent cancel exists.
     pub cancel_parent: Option<CancellationToken>,
+    /// GHOST-006: sandbox enforcement backend. When set, both dispatch paths
+    /// (agent.rs direct execute + dispatch.rs subagent path) check this
+    /// before running a tool. Toggled via `/sandbox on/off`.
+    pub sandbox: Option<std::sync::Arc<dyn archon_permissions::SandboxBackend>>,
 }
 
 // ---------------------------------------------------------------------------

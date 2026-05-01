@@ -104,7 +104,7 @@ impl Searcher for RealSearcher {
                 if name.starts_with('.') {
                     return false;
                 }
-                if SKIP_DIRS.iter().any(|d| *d == name) {
+                if SKIP_DIRS.contains(&name) {
                     return false;
                 }
                 true
@@ -381,8 +381,8 @@ mod tests {
         let pid = std::process::id();
         let root = std::env::temp_dir().join(format!("search_skip_{pid}"));
         let _ = std::fs::remove_dir_all(&root);
-        std::fs::create_dir_all(&root.join(".git")).unwrap();
-        std::fs::create_dir_all(&root.join("target")).unwrap();
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        std::fs::create_dir_all(root.join("target")).unwrap();
         std::fs::write(root.join(".git").join("foo.rs"), b"x").unwrap();
         std::fs::write(root.join("target").join("foo.rs"), b"x").unwrap();
         std::fs::write(root.join(".hidden-foo"), b"x").unwrap();

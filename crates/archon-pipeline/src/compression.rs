@@ -59,7 +59,7 @@ struct Extracted {
 
 /// Approximate token count using chars/4 heuristic (rounded up).
 pub fn estimate_tokens(text: &str) -> usize {
-    (text.len() + 3) / 4
+    text.len().div_ceil(4)
 }
 
 /// Compress raw memory text into compact symbolic format.
@@ -461,7 +461,7 @@ fn build_compressed(
                 let ctx = context
                     .split_whitespace()
                     .take(2)
-                    .map(|w| apply_known_abbrev(w))
+                    .map(apply_known_abbrev)
                     .collect::<Vec<_>>()
                     .join(" ");
                 format!("{}>{}", c, ctx)

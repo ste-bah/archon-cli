@@ -37,6 +37,7 @@ pub fn filter_commands(prefix: &str) -> Vec<CommandInfo> {
 
 /// Core filter logic operating on an explicit slice. Tests use this directly
 /// to avoid depending on the global catalog.
+#[allow(dead_code)]
 fn filter(commands: &[CommandInfo], prefix: &str) -> Vec<CommandInfo> {
     let lower = prefix.to_ascii_lowercase();
     commands

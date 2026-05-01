@@ -527,6 +527,7 @@ impl Default for AutoExtractionConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
+#[derive(Default)]
 pub struct LearningConfig {
     pub sona: ToggleConfig,
     pub provenance: ToggleConfig,
@@ -538,20 +539,6 @@ pub struct LearningConfig {
     pub reflexion: ReflexionConfig,
 }
 
-impl Default for LearningConfig {
-    fn default() -> Self {
-        Self {
-            sona: ToggleConfig::enabled(),
-            provenance: ToggleConfig::enabled(),
-            desc: ToggleConfig::enabled(),
-            gnn: GnnModelConfig::default(),
-            causal_memory: ToggleConfig::enabled(),
-            shadow_vector: ToggleConfig::enabled(),
-            reasoning_bank: ToggleConfig::enabled(),
-            reflexion: ReflexionConfig::default(),
-        }
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]

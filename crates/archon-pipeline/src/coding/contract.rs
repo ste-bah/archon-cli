@@ -181,11 +181,9 @@ impl ContractValidatedGate {
 /// The actual LLM call happens at runtime; this function provides the
 /// template structure and default alternative generation logic.
 pub fn generate_alternatives(vague_goal: &str) -> Vec<TaskContract> {
-    let alternatives = vec![
-        ("narrow", "Focused minimal scope"),
+    let alternatives = [("narrow", "Focused minimal scope"),
         ("moderate", "Balanced scope with key improvements"),
-        ("broad", "Comprehensive scope covering all aspects"),
-    ];
+        ("broad", "Comprehensive scope covering all aspects")];
 
     alternatives
         .iter()

@@ -253,7 +253,7 @@ mod tests {
         // effect — opening the plan file and entering Plan Mode are
         // distinct intents.
         assert!(
-            matches!(ctx.pending_effect, None),
+            ctx.pending_effect.is_none(),
             "open-branch must NOT stash SetPermissionMode; got: {:?}",
             ctx.pending_effect
         );
@@ -352,7 +352,7 @@ mod tests {
         }
         // `/plan open` must NOT flip mode.
         assert!(
-            matches!(ctx.pending_effect, None),
+            ctx.pending_effect.is_none(),
             "open-branch must NOT stash SetPermissionMode; got: {:?}",
             ctx.pending_effect
         );

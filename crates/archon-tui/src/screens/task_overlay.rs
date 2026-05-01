@@ -29,18 +29,15 @@ pub trait TaskStore: Send + Sync {
 
 /// Action emitted by the tasks overlay.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Default)]
 pub enum TaskAction {
+    #[default]
     None,
     CancelRequested(TaskId),
     InspectRequested(TaskId),
     RefreshRequested,
 }
 
-impl Default for TaskAction {
-    fn default() -> Self {
-        Self::None
-    }
-}
 
 /// Tasks overlay state with virtualized scrolling.
 #[derive(Debug)]

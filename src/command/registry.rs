@@ -585,7 +585,7 @@ use crate::command::cancel::CancelHandler;
 ///
 /// The extension is additive — new fields append to the struct and to
 /// the session.rs construction block in lockstep.
-pub(crate) struct CommandContext {
+pub struct CommandContext {
     /// TASK-DS-001: Async TaskService wired into CommandContext per
     /// 02-technical-spec line 1226 and REQ-ASYNC-001. Constructed at
     /// session bootstrap via `DefaultTaskService::new(agent_registry,
@@ -1002,6 +1002,9 @@ pub(crate) struct CommandContext {
     /// at dispatch time. Used by `/learning-status` to display live loop state.
     /// Reference: `archon-pipeline/src/learning/gnn/auto_trainer.rs`.
     pub(crate) auto_trainer: Option<Arc<archon_pipeline::learning::gnn::auto_trainer::AutoTrainer>>,
+    /// GHOST-006: shared sandbox flag, cloned from SlashCommandContext.
+    /// Toggled by /sandbox on/off; read by both tool-execution dispatch paths.
+    pub(crate) sandbox_flag: Option<Arc<std::sync::atomic::AtomicBool>>,
 }
 
 // TASK-AGS-POST-6-TRY-SEND: wraps `tui_tx.try_send` at every handler
@@ -3028,6 +3031,7 @@ mod tests {
             // Reference: archon-pipeline/src/learning/gnn/auto_trainer.rs.
             // Test fixture — emit() doesn't touch this field.
             auto_trainer: None,
+            sandbox_flag: None,
         }
     }
 

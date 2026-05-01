@@ -6,6 +6,7 @@ use archon_core::agents::discovery::local::LocalDiscoverySource;
 use archon_core::agents::discovery::remote::RemoteDiscoverySource;
 use archon_core::agents::schema::AgentSchemaValidator;
 
+#[allow(clippy::ptr_arg)]
 fn build_catalog(working_dir: &PathBuf) -> DiscoveryCatalog {
     let validator = Arc::new(AgentSchemaValidator::new().expect("schema compile"));
     let catalog = DiscoveryCatalog::new();
@@ -34,8 +35,8 @@ pub(crate) async fn handle_agent_list(
     };
     let results = catalog.list(&filter);
     println!(
-        "{:<30} {:<10} {:<15} {}",
-        "NAME", "VERSION", "CATEGORY", "DESCRIPTION"
+        "{:<30} {:<10} {:<15} DESCRIPTION",
+        "NAME", "VERSION", "CATEGORY"
     );
     println!("{}", "-".repeat(80));
     for meta in &results {
@@ -50,6 +51,7 @@ pub(crate) async fn handle_agent_list(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments, clippy::ptr_arg)]
 pub(crate) async fn handle_agent_search(
     tags: Vec<String>,
     capabilities: Vec<String>,
@@ -114,8 +116,8 @@ pub(crate) async fn handle_agent_search(
     };
     let results = catalog.list(&filter);
     println!(
-        "{:<30} {:<10} {:<15} {}",
-        "NAME", "VERSION", "CATEGORY", "DESCRIPTION"
+        "{:<30} {:<10} {:<15} DESCRIPTION",
+        "NAME", "VERSION", "CATEGORY"
     );
     println!("{}", "-".repeat(80));
     for meta in &results {
@@ -130,6 +132,7 @@ pub(crate) async fn handle_agent_search(
     Ok(())
 }
 
+#[allow(clippy::ptr_arg)]
 pub(crate) async fn handle_agent_info(
     name: String,
     version: Option<String>,

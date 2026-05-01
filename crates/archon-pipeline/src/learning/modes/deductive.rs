@@ -10,6 +10,12 @@ use super::{ReasoningEngine, ReasoningItem, ReasoningOutput, ReasoningRequest, R
 /// Deductive reasoning: top-down inference from premises to conclusions.
 pub struct DeductiveEngine;
 
+impl Default for DeductiveEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DeductiveEngine {
     pub fn new() -> Self {
         Self
@@ -128,8 +134,8 @@ impl DeductiveEngine {
                 if a_text.contains("are") && b_text.contains("are") {
                     let a_parts: Vec<&str> = a_text.split(" are ").collect();
                     let b_parts: Vec<&str> = b_text.split(" are ").collect();
-                    if a_parts.len() == 2 && b_parts.len() == 2 {
-                        if a_parts[1].trim() == b_parts[0].trim() {
+                    if a_parts.len() == 2 && b_parts.len() == 2
+                        && a_parts[1].trim() == b_parts[0].trim() {
                             conclusions.push(Conclusion {
                                 description: format!(
                                     "Syllogism: '{}' and '{}' → '{} are {}'",
@@ -139,7 +145,6 @@ impl DeductiveEngine {
                                 premises_used: vec![a.text.clone(), b.text.clone()],
                             });
                         }
-                    }
                 }
             }
         }

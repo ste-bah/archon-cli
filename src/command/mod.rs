@@ -109,8 +109,8 @@ pub(crate) mod tag;
 // TASK-TUI-621: hidden stub `/teleport` command (no is_visible() on
 // trait — visibility handled by omission from archon-tui commands.rs).
 pub(crate) mod teleport;
-#[cfg(test)]
-pub(crate) mod test_support;
+#[cfg(any(test, feature = "test-support"))]
+pub mod test_support;
 pub(crate) mod theme;
 pub(crate) mod thinking;
 pub(crate) mod tui_helpers;

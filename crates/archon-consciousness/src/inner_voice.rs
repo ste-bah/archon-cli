@@ -210,7 +210,7 @@ impl InnerVoice {
         start_confidence: f32,
         duration_secs: u64,
     ) -> crate::persistence::SessionStats {
-        let total_tool_calls: u32 = self.tool_failure_counts.values().map(|&v| v).sum::<u32>()
+        let total_tool_calls: u32 = self.tool_failure_counts.values().copied().sum::<u32>()
             + self.successes.len() as u32;
         let total_tool_failures: u32 = self.tool_failure_counts.values().sum();
 

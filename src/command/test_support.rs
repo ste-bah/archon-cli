@@ -31,7 +31,7 @@ use crate::command::registry::CommandContext;
 /// semantics are preserved de-facto — tests never produce enough events
 /// to matter, and the receiver API (`try_recv`, `recv`) is the same
 /// shape. See `session.rs:1414` for full rationale.
-pub(crate) fn mock_tui_channel() -> (
+pub fn mock_tui_channel() -> (
     mpsc::UnboundedSender<TuiEvent>,
     mpsc::UnboundedReceiver<TuiEvent>,
 ) {
@@ -57,7 +57,7 @@ pub(crate) fn mock_tui_channel() -> (
 /// Channel capacity `16` matches the existing `mock_tui_channel()` and
 /// every V1 `make_*_ctx` helper so V1 call sites can migrate without
 /// observing a different buffer size.
-pub(crate) struct CtxBuilder {
+pub struct CtxBuilder {
     tui_tx: mpsc::UnboundedSender<TuiEvent>,
     tui_rx: mpsc::UnboundedReceiver<TuiEvent>,
     status_snapshot: Option<crate::command::status::StatusSnapshot>,
@@ -86,12 +86,15 @@ pub(crate) struct CtxBuilder {
     // TASK-#211 SLASH-AGENT: agent registry handle for /agent.
     agent_registry: Option<Arc<std::sync::RwLock<archon_core::agents::AgentRegistry>>>,
     cozo_db: Option<Arc<cozo::DbInstance>>,
+    // GHOST-006: sandbox flag for /sandbox handler tests.
+    sandbox_flag: Option<Arc<AtomicBool>>,
 }
 
+#[allow(dead_code)]
 impl CtxBuilder {
     /// Create a new builder with every field set to its test-safe default
     /// and a fresh bounded mpsc channel (capacity 16, matching V1).
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         let (tx, rx) = mock_tui_channel();
         Self {
             tui_tx: tx,
@@ -121,10 +124,11 @@ impl CtxBuilder {
             pending_export: None,
             agent_registry: None,
             cozo_db: None,
+            sandbox_flag: None,
         }
     }
 
-    pub(crate) fn with_status_snapshot(
+    pub fn with_status_snapshot(
         mut self,
         s: crate::command::status::StatusSnapshot,
     ) -> Self {
@@ -132,7 +136,7 @@ impl CtxBuilder {
         self
     }
 
-    pub(crate) fn with_status_snapshot_opt(
+    pub fn with_status_snapshot_opt(
         mut self,
         s: Option<crate::command::status::StatusSnapshot>,
     ) -> Self {
@@ -140,12 +144,12 @@ impl CtxBuilder {
         self
     }
 
-    pub(crate) fn with_model_snapshot(mut self, s: crate::command::model::ModelSnapshot) -> Self {
+    pub fn with_model_snapshot(mut self, s: crate::command::model::ModelSnapshot) -> Self {
         self.model_snapshot = Some(s);
         self
     }
 
-    pub(crate) fn with_model_snapshot_opt(
+    pub fn with_model_snapshot_opt(
         mut self,
         s: Option<crate::command::model::ModelSnapshot>,
     ) -> Self {
@@ -153,12 +157,12 @@ impl CtxBuilder {
         self
     }
 
-    pub(crate) fn with_cost_snapshot(mut self, s: crate::command::cost::CostSnapshot) -> Self {
+    pub fn with_cost_snapshot(mut self, s: crate::command::cost::CostSnapshot) -> Self {
         self.cost_snapshot = Some(s);
         self
     }
 
-    pub(crate) fn with_cost_snapshot_opt(
+    pub fn with_cost_snapshot_opt(
         mut self,
         s: Option<crate::command::cost::CostSnapshot>,
     ) -> Self {
@@ -166,12 +170,12 @@ impl CtxBuilder {
         self
     }
 
-    pub(crate) fn with_mcp_snapshot(mut self, s: crate::command::mcp::McpSnapshot) -> Self {
+    pub fn with_mcp_snapshot(mut self, s: crate::command::mcp::McpSnapshot) -> Self {
         self.mcp_snapshot = Some(s);
         self
     }
 
-    pub(crate) fn with_mcp_snapshot_opt(
+    pub fn with_mcp_snapshot_opt(
         mut self,
         s: Option<crate::command::mcp::McpSnapshot>,
     ) -> Self {
@@ -179,7 +183,7 @@ impl CtxBuilder {
         self
     }
 
-    pub(crate) fn with_context_snapshot(
+    pub fn with_context_snapshot(
         mut self,
         s: crate::command::context_cmd::ContextSnapshot,
     ) -> Self {
@@ -187,7 +191,7 @@ impl CtxBuilder {
         self
     }
 
-    pub(crate) fn with_context_snapshot_opt(
+    pub fn with_context_snapshot_opt(
         mut self,
         s: Option<crate::command::context_cmd::ContextSnapshot>,
     ) -> Self {
@@ -195,22 +199,22 @@ impl CtxBuilder {
         self
     }
 
-    pub(crate) fn with_session_id(mut self, id: String) -> Self {
+    pub fn with_session_id(mut self, id: String) -> Self {
         self.session_id = Some(id);
         self
     }
 
-    pub(crate) fn with_session_id_opt(mut self, id: Option<String>) -> Self {
+    pub fn with_session_id_opt(mut self, id: Option<String>) -> Self {
         self.session_id = id;
         self
     }
 
-    pub(crate) fn with_memory(mut self, memory: Arc<dyn archon_memory::MemoryTrait>) -> Self {
+    pub fn with_memory(mut self, memory: Arc<dyn archon_memory::MemoryTrait>) -> Self {
         self.memory = Some(memory);
         self
     }
 
-    pub(crate) fn with_memory_opt(
+    pub fn with_memory_opt(
         mut self,
         memory: Option<Arc<dyn archon_memory::MemoryTrait>>,
     ) -> Self {
@@ -218,12 +222,12 @@ impl CtxBuilder {
         self
     }
 
-    pub(crate) fn with_garden_config(mut self, c: archon_memory::garden::GardenConfig) -> Self {
+    pub fn with_garden_config(mut self, c: archon_memory::garden::GardenConfig) -> Self {
         self.garden_config = Some(c);
         self
     }
 
-    pub(crate) fn with_garden_config_opt(
+    pub fn with_garden_config_opt(
         mut self,
         c: Option<archon_memory::garden::GardenConfig>,
     ) -> Self {
@@ -231,27 +235,27 @@ impl CtxBuilder {
         self
     }
 
-    pub(crate) fn with_fast_mode_shared(mut self, shared: Arc<AtomicBool>) -> Self {
+    pub fn with_fast_mode_shared(mut self, shared: Arc<AtomicBool>) -> Self {
         self.fast_mode_shared = Some(shared);
         self
     }
 
-    pub(crate) fn with_show_thinking(mut self, shared: Arc<AtomicBool>) -> Self {
+    pub fn with_show_thinking(mut self, shared: Arc<AtomicBool>) -> Self {
         self.show_thinking = Some(shared);
         self
     }
 
-    pub(crate) fn with_working_dir(mut self, path: std::path::PathBuf) -> Self {
+    pub fn with_working_dir(mut self, path: std::path::PathBuf) -> Self {
         self.working_dir = Some(path);
         self
     }
 
-    pub(crate) fn with_working_dir_opt(mut self, path: Option<std::path::PathBuf>) -> Self {
+    pub fn with_working_dir_opt(mut self, path: Option<std::path::PathBuf>) -> Self {
         self.working_dir = path;
         self
     }
 
-    pub(crate) fn with_skill_registry(
+    pub fn with_skill_registry(
         mut self,
         reg: Arc<archon_core::skills::SkillRegistry>,
     ) -> Self {
@@ -259,7 +263,7 @@ impl CtxBuilder {
         self
     }
 
-    pub(crate) fn with_denial_snapshot(
+    pub fn with_denial_snapshot(
         mut self,
         s: crate::command::denials::DenialSnapshot,
     ) -> Self {
@@ -267,7 +271,7 @@ impl CtxBuilder {
         self
     }
 
-    pub(crate) fn with_denial_snapshot_opt(
+    pub fn with_denial_snapshot_opt(
         mut self,
         s: Option<crate::command::denials::DenialSnapshot>,
     ) -> Self {
@@ -275,7 +279,7 @@ impl CtxBuilder {
         self
     }
 
-    pub(crate) fn with_effort_snapshot(
+    pub fn with_effort_snapshot(
         mut self,
         s: crate::command::effort::EffortSnapshot,
     ) -> Self {
@@ -283,7 +287,7 @@ impl CtxBuilder {
         self
     }
 
-    pub(crate) fn with_effort_snapshot_opt(
+    pub fn with_effort_snapshot_opt(
         mut self,
         s: Option<crate::command::effort::EffortSnapshot>,
     ) -> Self {
@@ -291,7 +295,7 @@ impl CtxBuilder {
         self
     }
 
-    pub(crate) fn with_permissions_snapshot(
+    pub fn with_permissions_snapshot(
         mut self,
         s: crate::command::permissions::PermissionsSnapshot,
     ) -> Self {
@@ -299,7 +303,7 @@ impl CtxBuilder {
         self
     }
 
-    pub(crate) fn with_permissions_snapshot_opt(
+    pub fn with_permissions_snapshot_opt(
         mut self,
         s: Option<crate::command::permissions::PermissionsSnapshot>,
     ) -> Self {
@@ -307,12 +311,12 @@ impl CtxBuilder {
         self
     }
 
-    pub(crate) fn with_copy_snapshot(mut self, s: crate::command::copy::CopySnapshot) -> Self {
+    pub fn with_copy_snapshot(mut self, s: crate::command::copy::CopySnapshot) -> Self {
         self.copy_snapshot = Some(s);
         self
     }
 
-    pub(crate) fn with_copy_snapshot_opt(
+    pub fn with_copy_snapshot_opt(
         mut self,
         s: Option<crate::command::copy::CopySnapshot>,
     ) -> Self {
@@ -320,7 +324,7 @@ impl CtxBuilder {
         self
     }
 
-    pub(crate) fn with_doctor_snapshot(
+    pub fn with_doctor_snapshot(
         mut self,
         s: crate::command::doctor::DoctorSnapshot,
     ) -> Self {
@@ -328,7 +332,7 @@ impl CtxBuilder {
         self
     }
 
-    pub(crate) fn with_doctor_snapshot_opt(
+    pub fn with_doctor_snapshot_opt(
         mut self,
         s: Option<crate::command::doctor::DoctorSnapshot>,
     ) -> Self {
@@ -336,12 +340,12 @@ impl CtxBuilder {
         self
     }
 
-    pub(crate) fn with_usage_snapshot(mut self, s: crate::command::usage::UsageSnapshot) -> Self {
+    pub fn with_usage_snapshot(mut self, s: crate::command::usage::UsageSnapshot) -> Self {
         self.usage_snapshot = Some(s);
         self
     }
 
-    pub(crate) fn with_usage_snapshot_opt(
+    pub fn with_usage_snapshot_opt(
         mut self,
         s: Option<crate::command::usage::UsageSnapshot>,
     ) -> Self {
@@ -349,27 +353,27 @@ impl CtxBuilder {
         self
     }
 
-    pub(crate) fn with_config_path(mut self, path: std::path::PathBuf) -> Self {
+    pub fn with_config_path(mut self, path: std::path::PathBuf) -> Self {
         self.config_path = Some(path);
         self
     }
 
-    pub(crate) fn with_config_path_opt(mut self, path: Option<std::path::PathBuf>) -> Self {
+    pub fn with_config_path_opt(mut self, path: Option<std::path::PathBuf>) -> Self {
         self.config_path = path;
         self
     }
 
-    pub(crate) fn with_auth_label(mut self, label: String) -> Self {
+    pub fn with_auth_label(mut self, label: String) -> Self {
         self.auth_label = Some(label);
         self
     }
 
-    pub(crate) fn with_auth_label_opt(mut self, label: Option<String>) -> Self {
+    pub fn with_auth_label_opt(mut self, label: Option<String>) -> Self {
         self.auth_label = label;
         self
     }
 
-    pub(crate) fn with_pending_effect(
+    pub fn with_pending_effect(
         mut self,
         e: crate::command::registry::CommandEffect,
     ) -> Self {
@@ -377,12 +381,12 @@ impl CtxBuilder {
         self
     }
 
-    pub(crate) fn with_pending_effort_set(mut self, level: EffortLevel) -> Self {
+    pub fn with_pending_effort_set(mut self, level: EffortLevel) -> Self {
         self.pending_effort_set = Some(level);
         self
     }
 
-    pub(crate) fn with_pending_export(
+    pub fn with_pending_export(
         mut self,
         slot: Arc<Mutex<Option<crate::command::export::ExportDescriptor>>>,
     ) -> Self {
@@ -391,7 +395,7 @@ impl CtxBuilder {
     }
 
     /// TASK-#211 SLASH-AGENT: install an agent registry handle.
-    pub(crate) fn with_agent_registry(
+    pub fn with_agent_registry(
         mut self,
         reg: Arc<std::sync::RwLock<archon_core::agents::AgentRegistry>>,
     ) -> Self {
@@ -399,7 +403,7 @@ impl CtxBuilder {
         self
     }
 
-    pub(crate) fn with_agent_registry_opt(
+    pub fn with_agent_registry_opt(
         mut self,
         reg: Option<Arc<std::sync::RwLock<archon_core::agents::AgentRegistry>>>,
     ) -> Self {
@@ -407,8 +411,14 @@ impl CtxBuilder {
         self
     }
 
+    /// GHOST-006: install a sandbox flag for /sandbox handler tests.
+    pub fn with_sandbox_flag(mut self, flag: Arc<AtomicBool>) -> Self {
+        self.sandbox_flag = Some(flag);
+        self
+    }
+
     /// Consume the builder and return `(CommandContext, Receiver)`.
-    pub(crate) fn build(self) -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
+    pub fn build(self) -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
         (
             CommandContext {
                 tui_tx: self.tui_tx,
@@ -442,6 +452,7 @@ impl CtxBuilder {
                 llm_adapter: None,
                 leann: None,
                 cozo_db: self.cozo_db.clone(),
+                sandbox_flag: self.sandbox_flag,
                 // Reference: archon-pipeline/src/learning/gnn/auto_trainer.rs.
                 // Tests don't need a real auto-trainer; learning_status's
                 // status branch falls back to config-only display when None.
@@ -453,7 +464,7 @@ impl CtxBuilder {
 }
 
 /// Drain all available events from the receiver.
-pub(crate) fn drain_tui_events(rx: &mut mpsc::UnboundedReceiver<TuiEvent>) -> Vec<TuiEvent> {
+pub fn drain_tui_events(rx: &mut mpsc::UnboundedReceiver<TuiEvent>) -> Vec<TuiEvent> {
     let mut events = Vec::new();
     while let Ok(ev) = rx.try_recv() {
         events.push(ev);
@@ -463,7 +474,7 @@ pub(crate) fn drain_tui_events(rx: &mut mpsc::UnboundedReceiver<TuiEvent>) -> Ve
 
 /// Minimal test-only StatusSnapshot. Values chosen so format-string
 /// substitutions are obvious in assertion output.
-pub(crate) fn fixture_status_snapshot() -> crate::command::status::StatusSnapshot {
+pub fn fixture_status_snapshot() -> crate::command::status::StatusSnapshot {
     crate::command::status::StatusSnapshot {
         current_model: "claude-opus-4-7".to_string(),
         perm_mode: "default".to_string(),
@@ -478,7 +489,8 @@ pub(crate) fn fixture_status_snapshot() -> crate::command::status::StatusSnapsho
 }
 
 /// Minimal test-only ModelSnapshot.
-pub(crate) fn fixture_model_snapshot() -> crate::command::model::ModelSnapshot {
+#[allow(dead_code)]
+pub fn fixture_model_snapshot() -> crate::command::model::ModelSnapshot {
     crate::command::model::ModelSnapshot {
         current_model: "claude-opus-4-7".to_string(),
     }
@@ -487,7 +499,7 @@ pub(crate) fn fixture_model_snapshot() -> crate::command::model::ModelSnapshot {
 /// Minimal test-only CostSnapshot. Values chosen so format
 /// substitutions are obvious: 1_000_000 input tokens @ $3/Mtok
 /// = $3.00, 500_000 output tokens @ $15/Mtok = $7.50, total = $10.50.
-pub(crate) fn fixture_cost_snapshot() -> crate::command::cost::CostSnapshot {
+pub fn fixture_cost_snapshot() -> crate::command::cost::CostSnapshot {
     crate::command::cost::CostSnapshot {
         input_tokens: 1_000_000,
         output_tokens: 500_000,
@@ -506,7 +518,7 @@ pub(crate) fn fixture_cost_snapshot() -> crate::command::cost::CostSnapshot {
 /// Build a CommandContext for StatusHandler tests.
 ///
 /// V2: thin wrapper over `CtxBuilder` (deferred cleanup).
-pub(crate) fn make_status_ctx(
+pub fn make_status_ctx(
     snapshot: Option<crate::command::status::StatusSnapshot>,
 ) -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
     CtxBuilder::new().with_status_snapshot_opt(snapshot).build()
@@ -515,7 +527,7 @@ pub(crate) fn make_status_ctx(
 /// Build a CommandContext for ModelHandler tests.
 ///
 /// V2: thin wrapper over `CtxBuilder` (deferred cleanup).
-pub(crate) fn make_model_ctx(
+pub fn make_model_ctx(
     snapshot: Option<crate::command::model::ModelSnapshot>,
 ) -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
     CtxBuilder::new().with_model_snapshot_opt(snapshot).build()
@@ -524,7 +536,7 @@ pub(crate) fn make_model_ctx(
 /// Build a CommandContext for CostHandler tests.
 ///
 /// V2: thin wrapper over `CtxBuilder` (deferred cleanup).
-pub(crate) fn make_cost_ctx(
+pub fn make_cost_ctx(
     snapshot: Option<crate::command::cost::CostSnapshot>,
 ) -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
     CtxBuilder::new().with_cost_snapshot_opt(snapshot).build()
@@ -540,7 +552,7 @@ pub(crate) fn make_cost_ctx(
 /// optional fields are left at `None` — mirroring peer helpers.
 ///
 /// V2: thin wrapper over `CtxBuilder` (deferred cleanup).
-pub(crate) fn make_fast_ctx(initial: bool) -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
+pub fn make_fast_ctx(initial: bool) -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
     CtxBuilder::new()
         .with_fast_mode_shared(Arc::new(AtomicBool::new(initial)))
         .build()
@@ -555,7 +567,7 @@ pub(crate) fn make_fast_ctx(initial: bool) -> (CommandContext, mpsc::UnboundedRe
 /// shape: wire a mock TuiEvent channel and nothing else. No
 /// peer-fixture rollout was needed because no new struct field was
 /// added for this ticket.
-pub(crate) fn make_bug_ctx() -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
+pub fn make_bug_ctx() -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
     CtxBuilder::new().build()
 }
 
@@ -573,7 +585,7 @@ pub(crate) fn make_bug_ctx() -> (CommandContext, mpsc::UnboundedReceiver<TuiEven
 /// `Arc<AtomicBool>`; the helper itself never reads or stores.
 ///
 /// V2: thin wrapper over `CtxBuilder` (deferred cleanup).
-pub(crate) fn make_thinking_ctx(
+pub fn make_thinking_ctx(
     initial: bool,
 ) -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
     CtxBuilder::new()
@@ -594,7 +606,7 @@ pub(crate) fn make_thinking_ctx(
 /// the handler must emit exactly one `TuiEvent::Error` describing the
 /// missing-shared-state condition and leave `pending_effect` at `None`
 /// (mirroring B01-FAST's `fast_mode_shared=None` handling pattern).
-pub(crate) fn make_diff_ctx(
+pub fn make_diff_ctx(
     working_dir: Option<std::path::PathBuf>,
 ) -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
     CtxBuilder::new().with_working_dir_opt(working_dir).build()
@@ -619,7 +631,7 @@ pub(crate) fn make_diff_ctx(
 ///
 /// All other optional fields are left at `None`, mirroring peer
 /// helpers.
-pub(crate) fn make_help_ctx() -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
+pub fn make_help_ctx() -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
     use archon_core::skills::SkillRegistry;
     use archon_core::skills::builtin::HelpSkill;
     let mut registry = SkillRegistry::new();
@@ -639,7 +651,7 @@ pub(crate) fn make_help_ctx() -> (CommandContext, mpsc::UnboundedReceiver<TuiEve
 /// None-defensive-panic cases without a second constructor. Mirrors
 /// `make_status_ctx` / `make_cost_ctx` / `make_mcp_ctx` snapshot-helper
 /// shape.
-pub(crate) fn make_denials_ctx(
+pub fn make_denials_ctx(
     snapshot: Option<crate::command::denials::DenialSnapshot>,
 ) -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
     CtxBuilder::new().with_denial_snapshot_opt(snapshot).build()
@@ -656,7 +668,7 @@ pub(crate) fn make_denials_ctx(
 /// `.4`-precision byte-identical shipped format at slash.rs:315-336
 /// which has no Warn/Hard lines) and adds `turn_count` (/usage is the
 /// only command that surfaces turn count).
-pub(crate) fn fixture_usage_snapshot() -> crate::command::usage::UsageSnapshot {
+pub fn fixture_usage_snapshot() -> crate::command::usage::UsageSnapshot {
     crate::command::usage::UsageSnapshot {
         input_tokens: 1_000_000,
         output_tokens: 500_000,
@@ -678,7 +690,7 @@ pub(crate) fn fixture_usage_snapshot() -> crate::command::usage::UsageSnapshot {
 /// `skill_registry`). When `Some(arc)` is supplied the handler reads
 /// the registry via `RwLock::read()`; when `None` is supplied the
 /// handler returns Err describing the missing-registry condition.
-pub(crate) fn make_agent_ctx(
+pub fn make_agent_ctx(
     registry: Option<Arc<std::sync::RwLock<archon_core::agents::AgentRegistry>>>,
 ) -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
     CtxBuilder::new().with_agent_registry_opt(registry).build()
@@ -691,7 +703,7 @@ pub(crate) fn make_agent_ctx(
 /// with the supplied `Option<UsageSnapshot>`. When `None` the handler
 /// must return `Err` describing the missing-snapshot wiring regression;
 /// when `Some(_)` the handler emits a single byte-identical TextDelta.
-pub(crate) fn make_usage_ctx(
+pub fn make_usage_ctx(
     snapshot: Option<crate::command::usage::UsageSnapshot>,
 ) -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
     CtxBuilder::new().with_usage_snapshot_opt(snapshot).build()

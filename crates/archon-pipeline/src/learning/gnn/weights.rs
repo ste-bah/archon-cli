@@ -25,6 +25,7 @@ pub struct Xoshiro128StarStar {
 }
 
 impl Xoshiro128StarStar {
+    #[allow(clippy::needless_range_loop)]
     /// Seed via SplitMix64 (matching the JS SeededRng constructor).
     pub fn new(seed: u64) -> Self {
         let mut s = [0u32; 4];
@@ -52,7 +53,7 @@ impl Xoshiro128StarStar {
         self.s[1] ^= self.s[2];
         self.s[0] ^= self.s[3];
         self.s[2] ^= t;
-        self.s[3] = (self.s[3] << 11) | (self.s[3] >> 21);
+        self.s[3] = self.s[3].rotate_left(11);
 
         (result as f64 / 0xFFFF_FFFF_u32 as f64) as f32 - 0.5
     }

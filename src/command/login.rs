@@ -365,19 +365,22 @@ mod tests {
     /// `Status: authenticated` block.
     #[tokio::test]
     async fn execute_authenticated_branch_emits_textdelta() {
-        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let archon_dir = tmp.path().join(".archon");
-        std::fs::create_dir_all(&archon_dir).expect("create .archon dir");
-        let cred_path = archon_dir.join(".credentials.json");
-        std::fs::write(&cred_path, "{}").expect("write credentials file");
-
-        let _guard = EnvGuard::set("HOME", tmp.path());
-
         let (mut ctx, mut rx) = make_login_ctx(Some("anthropic-api-key".to_string()));
         let h = LoginHandler::new();
-        let res = h.execute(&mut ctx, &[]);
-        assert!(res.is_ok(), "execute must return Ok(()), got: {res:?}");
+        let cred_path;
+        {
+            let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            let tmp = tempfile::tempdir().expect("tempdir");
+            let archon_dir = tmp.path().join(".archon");
+            std::fs::create_dir_all(&archon_dir).expect("create .archon dir");
+            cred_path = archon_dir.join(".credentials.json");
+            std::fs::write(&cred_path, "{}").expect("write credentials file");
+
+            let _guard = EnvGuard::set("HOME", tmp.path());
+
+            let res = h.execute(&mut ctx, &[]);
+            assert!(res.is_ok(), "execute must return Ok(()), got: {res:?}");
+        }
 
         let ev = rx.recv().await.expect("TextDelta must be emitted");
         match ev {
@@ -407,31 +410,33 @@ mod tests {
     /// OAuth-instructions block.
     #[tokio::test]
     async fn execute_not_authenticated_branch_emits_textdelta() {
-        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let tmp = tempfile::tempdir().expect("tempdir");
-        // Do NOT create .archon/.credentials.json — cred_path.exists()
-        // must return false.
-        let _guard = EnvGuard::set("HOME", tmp.path());
-
-        // Sanity: confirm HOME override propagates to dirs::home_dir().
-        let observed = dirs::home_dir().expect("dirs::home_dir returns Some under HOME=tmp");
-        assert_eq!(
-            observed,
-            tmp.path(),
-            "dirs::home_dir must reflect the HOME override"
-        );
-        let cred_path = observed.join(".archon").join(".credentials.json");
-        assert!(
-            !cred_path.exists(),
-            ".archon/.credentials.json must not exist for the not-auth \
-             branch, got: {}",
-            cred_path.display()
-        );
-
         let (mut ctx, mut rx) = make_login_ctx(Some("api-key".to_string()));
         let h = LoginHandler::new();
-        let res = h.execute(&mut ctx, &[]);
-        assert!(res.is_ok(), "execute must return Ok(()), got: {res:?}");
+        {
+            let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            let tmp = tempfile::tempdir().expect("tempdir");
+            // Do NOT create .archon/.credentials.json — cred_path.exists()
+            // must return false.
+            let _guard = EnvGuard::set("HOME", tmp.path());
+
+            // Sanity: confirm HOME override propagates to dirs::home_dir().
+            let observed = dirs::home_dir().expect("dirs::home_dir returns Some under HOME=tmp");
+            assert_eq!(
+                observed,
+                tmp.path(),
+                "dirs::home_dir must reflect the HOME override"
+            );
+            let cred_path = observed.join(".archon").join(".credentials.json");
+            assert!(
+                !cred_path.exists(),
+                ".archon/.credentials.json must not exist for the not-auth \
+                 branch, got: {}",
+                cred_path.display()
+            );
+
+            let res = h.execute(&mut ctx, &[]);
+            assert!(res.is_ok(), "execute must return Ok(()), got: {res:?}");
+        }
 
         let ev = rx.recv().await.expect("TextDelta must be emitted");
         match ev {
@@ -463,25 +468,27 @@ mod tests {
     /// trick to select the authenticated branch deterministically.
     #[tokio::test]
     async fn dispatcher_routes_slash_login_with_auth_label_emits_textdelta() {
-        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let archon_dir = tmp.path().join(".archon");
-        std::fs::create_dir_all(&archon_dir).expect("create .archon dir");
-        let cred_path = archon_dir.join(".credentials.json");
-        std::fs::write(&cred_path, "{}").expect("write credentials file");
-        let _guard = EnvGuard::set("HOME", tmp.path());
-
-        let mut builder = RegistryBuilder::new();
-        builder.insert_primary("login", Arc::new(LoginHandler::new()));
-        let registry = Arc::new(builder.build());
-        let dispatcher = Dispatcher::new(registry);
-
         let (mut ctx, mut rx) = make_login_ctx(Some("oauth".to_string()));
-        let res = dispatcher.dispatch(&mut ctx, "/login");
-        assert!(
-            res.is_ok(),
-            "dispatcher.dispatch must return Ok(()), got: {res:?}"
-        );
+        {
+            let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            let tmp = tempfile::tempdir().expect("tempdir");
+            let archon_dir = tmp.path().join(".archon");
+            std::fs::create_dir_all(&archon_dir).expect("create .archon dir");
+            let cred_path = archon_dir.join(".credentials.json");
+            std::fs::write(&cred_path, "{}").expect("write credentials file");
+            let _guard = EnvGuard::set("HOME", tmp.path());
+
+            let mut builder = RegistryBuilder::new();
+            builder.insert_primary("login", Arc::new(LoginHandler::new()));
+            let registry = Arc::new(builder.build());
+            let dispatcher = Dispatcher::new(registry);
+
+            let res = dispatcher.dispatch(&mut ctx, "/login");
+            assert!(
+                res.is_ok(),
+                "dispatcher.dispatch must return Ok(()), got: {res:?}"
+            );
+        }
 
         let ev = rx.recv().await.expect("TextDelta must be emitted");
         match ev {

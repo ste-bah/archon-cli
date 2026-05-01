@@ -162,7 +162,7 @@ impl ChannelMetrics {
             max_batch_size: self.max_batch_size.load(Ordering::Relaxed),
             p95_send_to_render_ms: {
                 let guard = self.p95_send_to_render_ms.lock();
-                guard.value_at_percentile(95.0) as u64
+                guard.value_at_percentile(95.0)
             },
         }
     }

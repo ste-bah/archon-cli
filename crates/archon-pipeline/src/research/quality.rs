@@ -372,12 +372,11 @@ impl PhDQualityCalculator {
         };
 
         // Agent-specific minimum penalty
-        if let Some(expected_min) = context.expected_min_length {
-            if word_count < expected_min {
+        if let Some(expected_min) = context.expected_min_length
+            && word_count < expected_min {
                 let ratio = word_count as f64 / expected_min as f64;
                 score *= 0.7 + 0.3 * ratio;
             }
-        }
 
         // Critical agent penalty
         if context.is_critical_agent && word_count < 1000 {

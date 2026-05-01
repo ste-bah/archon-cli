@@ -11,6 +11,12 @@ use super::{ReasoningEngine, ReasoningItem, ReasoningOutput, ReasoningRequest, R
 /// Contextual reasoning: adapts conclusions based on situational context.
 pub struct ContextualEngine;
 
+impl Default for ContextualEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ContextualEngine {
     pub fn new() -> Self {
         Self

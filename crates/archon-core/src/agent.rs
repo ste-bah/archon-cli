@@ -176,6 +176,10 @@ pub struct AgentConfig {
     /// subagent spawns create child_token() chains. Set by the input
     /// handler spawn in main.rs.
     pub cancel_token: Option<tokio_util::sync::CancellationToken>,
+    /// GHOST-006: sandbox enforcement backend. Injected by the TUI session
+    /// boot, threaded into ToolContext, and consulted by both tool-execution
+    /// dispatch paths. Toggled at runtime via `/sandbox on/off`.
+    pub sandbox: Option<std::sync::Arc<dyn archon_permissions::SandboxBackend>>,
 }
 
 impl AgentConfig {
@@ -220,6 +224,7 @@ impl Default for AgentConfig {
             max_tool_concurrency: archon_tools::concurrency::DEFAULT_MAX_CONCURRENCY,
             max_turns: None,
             cancel_token: None,
+            sandbox: None,
         }
     }
 }
@@ -374,6 +379,7 @@ pub struct Agent {
     /// stays in lock-step with the async-Mutex inner_voice. The mirror is
     /// read by the panic hook (which has no tokio runtime to await on the
     /// async Mutex). Reference: `src/panic_save.rs` and TASK #245.
+    #[allow(clippy::type_complexity)]
     inner_voice_change_callback: Option<Arc<dyn Fn(&InnerVoice) + Send + Sync>>,
 }
 
@@ -935,6 +941,9 @@ impl Agent {
                     // TASK-AGS-107: propagate cancel token so subagent spawns
                     // create child_token() chains for Ctrl+C cascading.
                     cancel_parent: self.config.cancel_token.clone(),
+                    // GHOST-006: sandbox backend from session boot, checked at
+                    // both dispatch sites.
+                    sandbox: self.config.sandbox.clone(),
                 };
 
                 // -------------------------------------------------------
@@ -1392,7 +1401,16 @@ impl Agent {
 
                         join_set.spawn(async move {
                             let _permit = sem_clone.acquire().await.expect("semaphore closed");
-                            let result = tool.execute(input, &ctx_clone).await;
+                            // GHOST-006: sandbox pre-check (main-agent direct path).
+                            let result =
+                                if let Some(ref backend) = ctx_clone.sandbox {
+                                    match backend.check(tool.name(), &input) {
+                                        Err(reason) => ToolResult::error(reason),
+                                        Ok(()) => tool.execute(input, &ctx_clone).await,
+                                    }
+                                } else {
+                                    tool.execute(input, &ctx_clone).await
+                                };
                             (idx, result)
                         });
                     }
@@ -1426,7 +1444,16 @@ impl Agent {
                     // Sequential dispatch (single tool or concurrency disabled)
                     let mut results = Vec::with_capacity(allowed.len());
                     for pre in &allowed {
-                        let result = pre.tool_arc.execute(pre.input.clone(), &ctx).await;
+                        // GHOST-006: sandbox pre-check (main-agent sequential path).
+                        let result =
+                            if let Some(ref backend) = ctx.sandbox {
+                                match backend.check(pre.tool_arc.name(), &pre.input) {
+                                    Err(reason) => ToolResult::error(reason),
+                                    Ok(()) => pre.tool_arc.execute(pre.input.clone(), &ctx).await,
+                                }
+                            } else {
+                                pre.tool_arc.execute(pre.input.clone(), &ctx).await
+                            };
                         results.push(result);
                     }
                     results
@@ -1442,7 +1469,6 @@ impl Agent {
                     // TASK-AGS-105: AgentTool / TaskCreate now return their
                     // final user-facing ToolResult directly via the
                     // SubagentExecutor seam. No re-parse or indirection here.
-                    let result = result;
 
                     // CRIT-07 + AGT-026: Intercept SendMessage and route to target agent.
                     // 4 delivery paths:
@@ -1553,6 +1579,7 @@ impl Agent {
                                                     in_fork: crate::agents::built_in::is_in_fork_child_by_messages(&self.state.messages),
                                                     nested: false,
                                                     cancel_parent: self.config.cancel_token.clone(),
+                                                    sandbox: self.config.sandbox.clone(),
                                                 };
                                                 match archon_tools::agent_tool::run_subagent(
                                                     resume_sid,
@@ -1910,11 +1937,11 @@ impl Agent {
                     }
 
                     // CRIT-06: Fire CwdChanged if a Bash tool call changed the working directory
-                    if pre.tool_name == "Bash" {
-                        if let Some(cmd) = pre.input.get("command").and_then(|v| v.as_str()) {
-                            if cmd.trim_start().starts_with("cd ")
+                    if pre.tool_name == "Bash"
+                        && let Some(cmd) = pre.input.get("command").and_then(|v| v.as_str())
+                            && (cmd.trim_start().starts_with("cd ")
                                 || cmd.contains(" && cd ")
-                                || cmd.contains("; cd ")
+                                || cmd.contains("; cd "))
                             {
                                 let cwd_agg = self
                                     .fire_hook(
@@ -1934,8 +1961,6 @@ impl Agent {
                                     self.file_watch_manager.add_watch_paths(cwd_agg.watch_paths);
                                 }
                             }
-                        }
-                    }
 
                     // CRIT-06: Fire WorktreeCreate/WorktreeRemove based on tool name
                     if pre.tool_name == "EnterWorktree" {
@@ -1979,12 +2004,13 @@ impl Agent {
                     }
 
                     // Wire 3: Track plan step progress on Write/Edit completions.
-                    if !result.is_error && (pre.tool_name == "Write" || pre.tool_name == "Edit") {
-                        if let Some(ref plan_store) = self.plan_store {
+                    if !result.is_error && (pre.tool_name == "Write" || pre.tool_name == "Edit")
+                        && let Some(ref plan_store) = self.plan_store {
                             let sid = self.config.session_id.clone();
-                            if let Ok(Some(plan)) = plan_store.load_latest_plan(&sid) {
-                                if plan.status == "active" || plan.status == "draft" {
-                                    if let Some(ref fp) = pre.file_path {
+                            if let Ok(Some(plan)) = plan_store.load_latest_plan(&sid)
+                                && (plan.status == "active" || plan.status == "draft")
+                                && let Some(ref fp) = pre.file_path
+                            {
                                         for step in &plan.steps {
                                             if step.status
                                                 == archon_session::plan::PlanStepStatus::Pending
@@ -1992,8 +2018,7 @@ impl Agent {
                                                     .affected_files
                                                     .iter()
                                                     .any(|f| fp.ends_with(f) || f.ends_with(fp))
-                                            {
-                                                if let Err(e) = plan_store.update_step_status(
+                                                && let Err(e) = plan_store.update_step_status(
                                                     &sid,
                                                     &plan.id,
                                                     step.number,
@@ -2001,13 +2026,9 @@ impl Agent {
                                                 ) {
                                                     tracing::debug!("plan step update failed: {e}");
                                                 }
-                                            }
                                         }
                                     }
-                                }
                             }
-                        }
-                    }
 
                     self.state
                         .add_tool_result(&pre.tool_id, &result.content, result.is_error);
@@ -2021,8 +2042,8 @@ impl Agent {
 
                 // Check max_turns limit before looping
                 agentic_iterations += 1;
-                if let Some(max) = self.config.max_turns {
-                    if agentic_iterations >= max {
+                if let Some(max) = self.config.max_turns
+                    && agentic_iterations >= max {
                         tracing::info!(
                             "max_turns limit reached ({}/{}), stopping agentic loop",
                             agentic_iterations,
@@ -2034,7 +2055,6 @@ impl Agent {
                         .await;
                         break;
                     }
-                }
 
                 // Loop back to send tool results to the API
                 continue;
@@ -2074,14 +2094,13 @@ impl Agent {
             .await;
 
             // CRIT-14 (ITEM 4): Decay rule scores every 50 turns.
-            if self.turn_number % 50 == 0 {
-                if let Some(ref graph) = self.memory {
+            if self.turn_number.is_multiple_of(50)
+                && let Some(ref graph) = self.memory {
                     let engine = RulesEngine::new(graph.as_ref());
                     if let Err(e) = engine.decay_scores(1.0) {
                         tracing::warn!("rules decay_scores failed: {e}");
                     }
                 }
-            }
 
             // Detect user corrections and record them in the memory graph.
             if let Some(ref graph) = self.memory {
@@ -2112,7 +2131,7 @@ impl Agent {
             sent_at: std::time::Instant::now(),
             inner: event,
         };
-        if let Err(_) = self.event_tx.send(timestamped) {
+        if self.event_tx.send(timestamped).is_err() {
             tracing::warn!(
                 event_id = event_name,
                 "Agent event channel closed: dropping event"
@@ -2311,14 +2330,13 @@ impl Agent {
                 let mut summary_text = self.generate_compaction_summary(&context_msgs).await;
 
                 // Wire 4: Inject active plan context into compaction summary.
-                if let Some(ref plan_store) = self.plan_store {
-                    if let Some(plan_ctx) = archon_session::plan::plan_context_for_compaction(
+                if let Some(ref plan_store) = self.plan_store
+                    && let Some(plan_ctx) = archon_session::plan::plan_context_for_compaction(
                         plan_store,
                         &self.config.session_id,
                     ) {
                         summary_text.push_str(&plan_ctx);
                     }
-                }
 
                 match effective_strategy {
                     archon_context::boundary::CompactionStrategy::Micro => {
@@ -2368,8 +2386,8 @@ impl Agent {
                 snapshot.turn_count
             );
             // Persist snapshot so it can be restored via InnerVoice::from_snapshot on resume.
-            if let Some(ref graph) = self.memory {
-                if let Ok(json) = serde_json::to_string(&snapshot) {
+            if let Some(ref graph) = self.memory
+                && let Ok(json) = serde_json::to_string(&snapshot) {
                     let _ = graph.store_memory(
                         &json,
                         "inner_voice_snapshot",
@@ -2380,7 +2398,6 @@ impl Agent {
                         "",
                     );
                 }
-            }
         }
 
         // Compute post-compaction token count
@@ -2638,8 +2655,8 @@ impl Agent {
         }
 
         // CRIT-15 (ITEM 5): Notify inner voice of user correction.
-        if let Some(ref iv) = self.inner_voice {
-            if let Ok(mut iv) = iv.try_lock() {
+        if let Some(ref iv) = self.inner_voice
+            && let Ok(mut iv) = iv.try_lock() {
                 iv.on_user_correction();
                 // TASK #245: keep panic-mirror in lock-step (inside the same
                 // try_lock guard, so mirror cannot drift relative to actual).
@@ -2647,19 +2664,16 @@ impl Agent {
                     cb(&iv);
                 }
             }
-        }
 
         // CRIT-14 (ITEM 4): Reinforce rules related to the correction.
         // When the user corrects us, reinforce the top matching rule so it
         // gains more prominence in future prompts.
         let engine = RulesEngine::new(graph.as_ref());
-        if let Ok(rules) = engine.get_rules_sorted() {
-            if let Some(top) = rules.first() {
-                if let Err(e) = engine.reinforce_rule(&top.id) {
+        if let Ok(rules) = engine.get_rules_sorted()
+            && let Some(top) = rules.first()
+                && let Err(e) = engine.reinforce_rule(&top.id) {
                     tracing::debug!("reinforce_rule failed: {e}");
                 }
-            }
-        }
     }
 
     /// GAP 5: Trigger memory extraction in the background.
@@ -2846,8 +2860,8 @@ fn parse_plan_from_text(text: &str) -> archon_session::plan::PlanDocument {
                 } else {
                     trimmed.strip_prefix("- ").map(|s| s.trim())
                 };
-                if let Some(desc) = desc {
-                    if !desc.is_empty() {
+                if let Some(desc) = desc
+                    && !desc.is_empty() {
                         step_num += 1;
                         steps.push(PlanStep {
                             number: step_num,
@@ -2856,7 +2870,6 @@ fn parse_plan_from_text(text: &str) -> archon_session::plan::PlanDocument {
                             status: PlanStepStatus::Pending,
                         });
                     }
-                }
             }
             Section::Risks => {
                 if let Some(r) = trimmed.strip_prefix("- ") {

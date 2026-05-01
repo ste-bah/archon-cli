@@ -11,6 +11,12 @@ use super::{ReasoningEngine, ReasoningItem, ReasoningOutput, ReasoningRequest, R
 /// First principles reasoning: building from fundamental truths.
 pub struct FirstPrinciplesEngine;
 
+impl Default for FirstPrinciplesEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FirstPrinciplesEngine {
     pub fn new() -> Self {
         Self
@@ -32,9 +38,7 @@ impl FirstPrinciplesEngine {
                 || lower.starts_with("principle:")
                 || lower.starts_with("fact:")
             {
-                let content = trimmed
-                    .splitn(2, ':')
-                    .nth(1)
+                let content = trimmed.split_once(':').map(|x| x.1)
                     .unwrap_or(trimmed)
                     .trim()
                     .to_string();
@@ -43,9 +47,7 @@ impl FirstPrinciplesEngine {
                     certainty: 1.0,
                 });
             } else if lower.starts_with("assumption:") || lower.starts_with("belief:") {
-                let content = trimmed
-                    .splitn(2, ':')
-                    .nth(1)
+                let content = trimmed.split_once(':').map(|x| x.1)
                     .unwrap_or(trimmed)
                     .trim()
                     .to_string();

@@ -22,6 +22,7 @@ use crate::types::{Memory, MemoryError, MemoryType, RelType, SearchFilter};
 /// Both [`MemoryGraph`] (direct) and [`MemoryClient`] (remote via TCP)
 /// implement this trait, so callers can be polymorphic.
 pub trait MemoryTrait: Send + Sync {
+    #[allow(clippy::too_many_arguments)]
     fn store_memory(
         &self,
         content: &str,

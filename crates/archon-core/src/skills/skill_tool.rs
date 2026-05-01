@@ -117,12 +117,48 @@ impl Tool for SkillTool {
         }
     }
 
-    fn permission_level(&self, _input: &Value) -> PermissionLevel {
-        // The Skill tool itself is Safe (read-only listing + dispatch). The
-        // dispatched skill may have side effects but is classified
-        // independently via the slash-command path where side-effecting
-        // skills use their own approval flows.
-        PermissionLevel::Safe
+    fn permission_level(&self, input: &Value) -> PermissionLevel {
+        let action = input.get("action").and_then(|v| v.as_str()).unwrap_or("");
+        if action != "invoke" {
+            return PermissionLevel::Safe;
+        }
+
+        let name = input.get("name").and_then(|v| v.as_str()).unwrap_or("");
+        let has_args = input
+            .get("args")
+            .and_then(|v| v.as_array())
+            .map(|a| !a.is_empty())
+            .unwrap_or(false);
+
+        match name {
+            "branch" => {
+                let args: Vec<&str> = input
+                    .get("args")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| arr.iter().filter_map(|x| x.as_str()).collect())
+                    .unwrap_or_default();
+                if args
+                    .iter()
+                    .any(|a| *a == "--create" || *a == "-c" || *a == "--switch" || *a == "-s")
+                {
+                    return PermissionLevel::Dangerous;
+                }
+                PermissionLevel::Safe
+            }
+            "commit" => {
+                let args: Vec<&str> = input
+                    .get("args")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| arr.iter().filter_map(|x| x.as_str()).collect())
+                    .unwrap_or_default();
+                if args.contains(&"-m") {
+                    return PermissionLevel::Dangerous;
+                }
+                PermissionLevel::Safe
+            }
+            "pr" if has_args => PermissionLevel::Dangerous,
+            _ => PermissionLevel::Safe,
+        }
     }
 }
 

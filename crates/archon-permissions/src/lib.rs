@@ -11,4 +11,6 @@ pub use checker::{
 
 // Stubs for later tasks
 pub mod prompt {}
-pub mod sandbox {}
+
+pub mod sandbox;
+pub use sandbox::SandboxBackend;

@@ -99,7 +99,7 @@ impl FrameBuffer {
         let mut out = String::with_capacity((self.width as usize + 1) * self.height as usize);
         for row in &self.cells {
             let line: String = row.iter().collect();
-            let _ = write!(out, "{}\n", line.trim_end());
+            let _ = writeln!(out, "{}", line.trim_end());
         }
         out
     }

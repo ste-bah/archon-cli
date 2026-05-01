@@ -221,10 +221,10 @@ mod tests {
 
         let mut saw_header = false;
         while let Ok(ev) = rx.try_recv() {
-            if let TuiEvent::TextDelta(text) = ev {
-                if text.contains("Registered hooks (") {
-                    saw_header = true;
-                }
+            if let TuiEvent::TextDelta(text) = ev
+                && text.contains("Registered hooks (")
+            {
+                saw_header = true;
             }
         }
         assert!(
@@ -250,15 +250,14 @@ mod tests {
 
         let mut saw_hint = false;
         while let Ok(ev) = rx.try_recv() {
-            if let TuiEvent::TextDelta(text) = ev {
-                if text.contains("Unknown /hooks subcommand")
-                    && text.contains("list")
-                    && text.contains("enable")
-                    && text.contains("disable")
-                    && text.contains("reload")
-                {
-                    saw_hint = true;
-                }
+            if let TuiEvent::TextDelta(text) = ev
+                && text.contains("Unknown /hooks subcommand")
+                && text.contains("list")
+                && text.contains("enable")
+                && text.contains("disable")
+                && text.contains("reload")
+            {
+                saw_hint = true;
             }
         }
         assert!(
@@ -288,12 +287,11 @@ mod tests {
 
             let mut saw_placeholder = false;
             while let Ok(ev) = rx.try_recv() {
-                if let TuiEvent::TextDelta(text) = ev {
-                    if text.contains(&format!("Hook {sub} command not yet implemented"))
-                        && text.contains("~/.archon/settings.json")
-                    {
-                        saw_placeholder = true;
-                    }
+                if let TuiEvent::TextDelta(text) = ev
+                    && text.contains(&format!("Hook {sub} command not yet implemented"))
+                    && text.contains("~/.archon/settings.json")
+                {
+                    saw_placeholder = true;
                 }
             }
             assert!(

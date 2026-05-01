@@ -137,33 +137,27 @@ fn default_base_delay_ms() -> u64 {
 /// Backoff strategy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum BackoffKind {
     Fixed,
     Linear,
+    #[default]
     Exponential,
 }
 
-impl Default for BackoffKind {
-    fn default() -> Self {
-        Self::Exponential
-    }
-}
 
 /// Policy applied when a step fails.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum OnFailurePolicy {
     Retry,
+    #[default]
     Rollback,
     Skip,
     Fail,
 }
 
-impl Default for OnFailurePolicy {
-    fn default() -> Self {
-        Self::Rollback
-    }
-}
 
 /// Supported pipeline definition formats.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

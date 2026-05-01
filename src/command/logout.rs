@@ -273,31 +273,33 @@ mod tests {
     /// tempdir WITHOUT `.archon/.credentials.json`.
     #[tokio::test]
     async fn execute_no_credentials_emits_no_stored_textdelta() {
-        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let tmp = tempfile::tempdir().expect("tempdir");
-        // Do NOT create .archon/.credentials.json — cred_path.exists()
-        // must return false.
-        let _guard = EnvGuard::set("HOME", tmp.path());
-
-        // Sanity: confirm HOME override propagates to dirs::home_dir().
-        let observed = dirs::home_dir().expect("dirs::home_dir returns Some under HOME=tmp");
-        assert_eq!(
-            observed,
-            tmp.path(),
-            "dirs::home_dir must reflect the HOME override"
-        );
-        let cred_path = observed.join(".archon").join(".credentials.json");
-        assert!(
-            !cred_path.exists(),
-            ".archon/.credentials.json must not exist for the no-creds \
-             branch, got: {}",
-            cred_path.display()
-        );
-
         let (mut ctx, mut rx) = make_logout_ctx();
         let h = LogoutHandler::new();
-        let res = h.execute(&mut ctx, &[]);
-        assert!(res.is_ok(), "execute must return Ok(()), got: {res:?}");
+        {
+            let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            let tmp = tempfile::tempdir().expect("tempdir");
+            // Do NOT create .archon/.credentials.json — cred_path.exists()
+            // must return false.
+            let _guard = EnvGuard::set("HOME", tmp.path());
+
+            // Sanity: confirm HOME override propagates to dirs::home_dir().
+            let observed = dirs::home_dir().expect("dirs::home_dir returns Some under HOME=tmp");
+            assert_eq!(
+                observed,
+                tmp.path(),
+                "dirs::home_dir must reflect the HOME override"
+            );
+            let cred_path = observed.join(".archon").join(".credentials.json");
+            assert!(
+                !cred_path.exists(),
+                ".archon/.credentials.json must not exist for the no-creds \
+                 branch, got: {}",
+                cred_path.display()
+            );
+
+            let res = h.execute(&mut ctx, &[]);
+            assert!(res.is_ok(), "execute must return Ok(()), got: {res:?}");
+        }
 
         let ev = rx.recv().await.expect("TextDelta must be emitted");
         match ev {
@@ -317,26 +319,29 @@ mod tests {
     /// file is gone post-execute.
     #[tokio::test]
     async fn execute_remove_success_emits_logged_out_textdelta() {
-        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let archon_dir = tmp.path().join(".archon");
-        std::fs::create_dir_all(&archon_dir).expect("create .archon dir");
-        let cred_path = archon_dir.join(".credentials.json");
-        std::fs::write(&cred_path, "{}").expect("write credentials file");
-
-        let _guard = EnvGuard::set("HOME", tmp.path());
-
-        // Sanity: the file must exist pre-execute.
-        assert!(
-            cred_path.exists(),
-            "cred_path must exist before execute, got: {}",
-            cred_path.display()
-        );
-
         let (mut ctx, mut rx) = make_logout_ctx();
         let h = LogoutHandler::new();
-        let res = h.execute(&mut ctx, &[]);
-        assert!(res.is_ok(), "execute must return Ok(()), got: {res:?}");
+        let cred_path;
+        {
+            let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            let tmp = tempfile::tempdir().expect("tempdir");
+            let archon_dir = tmp.path().join(".archon");
+            std::fs::create_dir_all(&archon_dir).expect("create .archon dir");
+            cred_path = archon_dir.join(".credentials.json");
+            std::fs::write(&cred_path, "{}").expect("write credentials file");
+
+            let _guard = EnvGuard::set("HOME", tmp.path());
+
+            // Sanity: the file must exist pre-execute.
+            assert!(
+                cred_path.exists(),
+                "cred_path must exist before execute, got: {}",
+                cred_path.display()
+            );
+
+            let res = h.execute(&mut ctx, &[]);
+            assert!(res.is_ok(), "execute must return Ok(()), got: {res:?}");
+        }
 
         let ev = rx.recv().await.expect("TextDelta must be emitted");
         match ev {
@@ -370,35 +375,37 @@ mod tests {
     /// EISDIR).
     #[tokio::test]
     async fn execute_remove_failure_emits_error() {
-        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let archon_dir = tmp.path().join(".archon");
-        std::fs::create_dir_all(&archon_dir).expect("create .archon dir");
-        // Create `.credentials.json` as a DIRECTORY so `remove_file`
-        // fails at runtime. `cred_path.exists()` still returns true
-        // (it's a directory entry).
-        let cred_path = archon_dir.join(".credentials.json");
-        std::fs::create_dir_all(&cred_path).expect("create .credentials.json as dir");
-
-        let _guard = EnvGuard::set("HOME", tmp.path());
-
-        // Sanity: cred_path exists-as-directory.
-        assert!(
-            cred_path.exists(),
-            "cred_path must exist before execute, got: {}",
-            cred_path.display()
-        );
-        assert!(
-            cred_path.is_dir(),
-            "cred_path must be a directory to force remove_file \
-             failure, got: {}",
-            cred_path.display()
-        );
-
         let (mut ctx, mut rx) = make_logout_ctx();
         let h = LogoutHandler::new();
-        let res = h.execute(&mut ctx, &[]);
-        assert!(res.is_ok(), "execute must return Ok(()), got: {res:?}");
+        {
+            let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            let tmp = tempfile::tempdir().expect("tempdir");
+            let archon_dir = tmp.path().join(".archon");
+            std::fs::create_dir_all(&archon_dir).expect("create .archon dir");
+            // Create `.credentials.json` as a DIRECTORY so `remove_file`
+            // fails at runtime. `cred_path.exists()` still returns true
+            // (it's a directory entry).
+            let cred_path = archon_dir.join(".credentials.json");
+            std::fs::create_dir_all(&cred_path).expect("create .credentials.json as dir");
+
+            let _guard = EnvGuard::set("HOME", tmp.path());
+
+            // Sanity: cred_path exists-as-directory.
+            assert!(
+                cred_path.exists(),
+                "cred_path must exist before execute, got: {}",
+                cred_path.display()
+            );
+            assert!(
+                cred_path.is_dir(),
+                "cred_path must be a directory to force remove_file \
+                 failure, got: {}",
+                cred_path.display()
+            );
+
+            let res = h.execute(&mut ctx, &[]);
+            assert!(res.is_ok(), "execute must return Ok(()), got: {res:?}");
+        }
 
         let ev = rx.recv().await.expect("Error must be emitted");
         match ev {
@@ -430,22 +437,24 @@ mod tests {
     /// file) to select the no-creds branch deterministically.
     #[tokio::test]
     async fn dispatcher_routes_slash_logout_no_creds_emits_textdelta() {
-        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let tmp = tempfile::tempdir().expect("tempdir");
-        // No cred file.
-        let _guard = EnvGuard::set("HOME", tmp.path());
-
-        let mut builder = RegistryBuilder::new();
-        builder.insert_primary("logout", Arc::new(LogoutHandler::new()));
-        let registry = Arc::new(builder.build());
-        let dispatcher = Dispatcher::new(registry);
-
         let (mut ctx, mut rx) = make_logout_ctx();
-        let res = dispatcher.dispatch(&mut ctx, "/logout");
-        assert!(
-            res.is_ok(),
-            "dispatcher.dispatch must return Ok(()), got: {res:?}"
-        );
+        {
+            let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            let tmp = tempfile::tempdir().expect("tempdir");
+            // No cred file.
+            let _guard = EnvGuard::set("HOME", tmp.path());
+
+            let mut builder = RegistryBuilder::new();
+            builder.insert_primary("logout", Arc::new(LogoutHandler::new()));
+            let registry = Arc::new(builder.build());
+            let dispatcher = Dispatcher::new(registry);
+
+            let res = dispatcher.dispatch(&mut ctx, "/logout");
+            assert!(
+                res.is_ok(),
+                "dispatcher.dispatch must return Ok(()), got: {res:?}"
+            );
+        }
 
         let ev = rx.recv().await.expect("TextDelta must be emitted");
         match ev {
@@ -468,25 +477,28 @@ mod tests {
     /// logged-out branch fires end-to-end AND the file is gone after.
     #[tokio::test]
     async fn dispatcher_routes_slash_logout_removes_creds() {
-        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let archon_dir = tmp.path().join(".archon");
-        std::fs::create_dir_all(&archon_dir).expect("create .archon dir");
-        let cred_path = archon_dir.join(".credentials.json");
-        std::fs::write(&cred_path, "{}").expect("write credentials file");
-        let _guard = EnvGuard::set("HOME", tmp.path());
-
-        let mut builder = RegistryBuilder::new();
-        builder.insert_primary("logout", Arc::new(LogoutHandler::new()));
-        let registry = Arc::new(builder.build());
-        let dispatcher = Dispatcher::new(registry);
-
         let (mut ctx, mut rx) = make_logout_ctx();
-        let res = dispatcher.dispatch(&mut ctx, "/logout");
-        assert!(
-            res.is_ok(),
-            "dispatcher.dispatch must return Ok(()), got: {res:?}"
-        );
+        let cred_path;
+        {
+            let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            let tmp = tempfile::tempdir().expect("tempdir");
+            let archon_dir = tmp.path().join(".archon");
+            std::fs::create_dir_all(&archon_dir).expect("create .archon dir");
+            cred_path = archon_dir.join(".credentials.json");
+            std::fs::write(&cred_path, "{}").expect("write credentials file");
+            let _guard = EnvGuard::set("HOME", tmp.path());
+
+            let mut builder = RegistryBuilder::new();
+            builder.insert_primary("logout", Arc::new(LogoutHandler::new()));
+            let registry = Arc::new(builder.build());
+            let dispatcher = Dispatcher::new(registry);
+
+            let res = dispatcher.dispatch(&mut ctx, "/logout");
+            assert!(
+                res.is_ok(),
+                "dispatcher.dispatch must return Ok(()), got: {res:?}"
+            );
+        }
 
         let ev = rx.recv().await.expect("TextDelta must be emitted");
         match ev {

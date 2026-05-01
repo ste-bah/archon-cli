@@ -117,8 +117,8 @@ impl PreToolUseHook {
         }
 
         // 3. Bash: check dangerous command patterns (any phase)
-        if tool_name == "Bash" {
-            if let Some(cmd) = tool_input.get("command").and_then(|v| v.as_str()) {
+        if tool_name == "Bash"
+            && let Some(cmd) = tool_input.get("command").and_then(|v| v.as_str()) {
                 for pattern in &self.dangerous_patterns {
                     if pattern.is_match(cmd) {
                         return HookDecision::Block {
@@ -130,12 +130,11 @@ impl PreToolUseHook {
                     }
                 }
             }
-        }
 
         // 4. Write/Edit: check file scope
-        if matches!(tool_name, "Write" | "Edit") {
-            if let Some(file_path) = tool_input.get("file_path").and_then(|v| v.as_str()) {
-                if !self.affected_files.is_empty()
+        if matches!(tool_name, "Write" | "Edit")
+            && let Some(file_path) = tool_input.get("file_path").and_then(|v| v.as_str())
+                && !self.affected_files.is_empty()
                     && !self.affected_files.iter().any(|af| file_path.contains(af))
                 {
                     if self.current_phase <= 3 {
@@ -151,8 +150,6 @@ impl PreToolUseHook {
                         };
                     }
                 }
-            }
-        }
 
         HookDecision::Allow
     }
@@ -218,7 +215,7 @@ impl PostToolUseHook {
             return false;
         }
         let count = self.edit_counter.load(Ordering::Relaxed);
-        count > 0 && count % 5 == 0
+        count > 0 && count.is_multiple_of(5)
     }
 
     /// Reset the edit counter (call when starting a new agent).

@@ -613,7 +613,7 @@ pub fn extract_tools(tools_md: &str) -> Option<Vec<String>> {
         if let Some(rest) = trimmed.strip_prefix("- ") {
             let name = rest
                 .trim_start_matches("**")
-                .split(|c: char| c == '*' || c == ':' || c == ' ')
+                .split(['*', ':', ' '])
                 .next()
                 .unwrap_or("")
                 .trim();
@@ -662,8 +662,8 @@ pub fn extract_tool_guidance(tools_md: &str) -> String {
         }
     }
 
-    let result = guidance_lines.join("\n").trim().to_string();
-    result
+    
+    guidance_lines.join("\n").trim().to_string()
 }
 
 // ---------------------------------------------------------------------------

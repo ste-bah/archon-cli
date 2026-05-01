@@ -17,6 +17,7 @@ impl InputFormat {
     /// Parse an input format string.
     ///
     /// Accepted values: `"text"`, `"stream-json"`.
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Result<Self, String> {
         match s {
             "text" => Ok(Self::Text),

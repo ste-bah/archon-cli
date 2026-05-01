@@ -84,6 +84,9 @@ pub(crate) fn build_command_context<'a>(
             // refcount increment); the handler reads + atomically stores
             // through it to toggle fast mode.
             fast_mode_shared: Some(Arc::clone(&slash_ctx.fast_mode_shared)),
+            // GHOST-006: sandbox flag, same DIRECT pattern as fast_mode_shared.
+            // Toggled by /sandbox on/off; read by dispatch paths via SandboxBackend.
+            sandbox_flag: Some(Arc::clone(&slash_ctx.sandbox_flag)),
             // TASK-AGS-POST-6-BODIES-B02-THINKING: /thinking DIRECT-pattern
             // consumer. Populated UNCONDITIONALLY here (not gated on the
             // primary name, same as AGS-815 session_id, AGS-817 memory,

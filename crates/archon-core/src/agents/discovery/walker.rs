@@ -47,8 +47,7 @@ pub fn walk_agents_dir(root: &Path) -> Result<Vec<DiscoveredFile>, DiscoveryErro
         })
     {
         let entry = entry.map_err(|e| {
-            DiscoveryError::Io(std::io::Error::new(
-                std::io::ErrorKind::Other,
+            DiscoveryError::Io(std::io::Error::other(
                 e.to_string(),
             ))
         })?;

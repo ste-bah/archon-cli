@@ -316,6 +316,35 @@ mod tests {
     }
 
     #[test]
+    #[test]
+    fn execute_marks_gap_providers() {
+        let body = render();
+        // Gap providers must show [gap] in their feature column.
+        for id in ["azure", "cohere", "copilot", "minimax"] {
+            assert!(
+                body.contains("[gap]"),
+                "gap provider `{}` missing [gap] marker; body:\n{}",
+                id,
+                body
+            );
+        }
+        // Non-gap providers must NOT show [gap].
+        for id in ["openai", "anthropic", "ollama", "groq"] {
+            // Find the row for this provider and check it lacks [gap]
+            let row = body
+                .lines()
+                .find(|l| l.trim_start().starts_with(id))
+                .unwrap_or_else(|| panic!("provider `{}` not found in output", id));
+            assert!(
+                !row.contains("[gap]"),
+                "non-gap provider `{}` incorrectly shows [gap]; row: {}",
+                id,
+                row
+            );
+        }
+    }
+
+    #[test]
     fn description_and_aliases() {
         let h = ProvidersHandler;
         assert!(!h.description().is_empty());

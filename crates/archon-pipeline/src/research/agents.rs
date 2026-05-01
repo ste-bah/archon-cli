@@ -860,14 +860,13 @@ pub fn validate_configuration() -> Result<(), String> {
     // Verify each agent's phase matches the phase that lists it
     for phase in RESEARCH_PHASES.iter() {
         for agent_key in phase.agent_keys.iter() {
-            if let Some(agent) = get_agent_by_key(agent_key) {
-                if agent.phase != phase.id {
+            if let Some(agent) = get_agent_by_key(agent_key)
+                && agent.phase != phase.id {
                     return Err(format!(
                         "Agent \"{}\" has phase {} but is listed in phase {}",
                         agent_key, agent.phase, phase.id
                     ));
                 }
-            }
         }
     }
 

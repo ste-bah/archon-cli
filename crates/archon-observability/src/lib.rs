@@ -49,10 +49,10 @@
 //!
 //!   * [`file_init`] — `init_tracing_file(session_id, log_level, log_dir)`
 //!     + `LogGuard` + `LoggingError`. File-backed session logging with
-//!     `RedactionLayer` as the sole emitter — closes the dead-wire.
-//!     `archon-core::logging` re-exports this as `init_logging` so every
-//!     existing caller routes through the redaction path without a
-//!     signature change.
+//!       `RedactionLayer` as the sole emitter — closes the dead-wire.
+//!       `archon-core::logging` re-exports this as `init_logging` so every
+//!       existing caller routes through the redaction path without a
+//!       signature change.
 //!
 //! Still to land (follow-up tickets):
 //!

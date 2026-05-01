@@ -279,8 +279,8 @@ pub async fn handle_pipeline_command(
             }
             Ok(sessions) => {
                 println!(
-                    "{:<38} {:<10} {:<10} {:>6} {:>10}  {}",
-                    "SESSION ID", "TYPE", "STATUS", "AGENTS", "COST", "TASK"
+                    "{:<38} {:<10} {:<10} {:>6} {:>10}  TASK",
+                    "SESSION ID", "TYPE", "STATUS", "AGENTS", "COST"
                 );
                 println!("{}", "-".repeat(100));
                 for s in &sessions {

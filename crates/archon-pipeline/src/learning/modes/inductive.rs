@@ -10,6 +10,12 @@ use super::{ReasoningEngine, ReasoningItem, ReasoningOutput, ReasoningRequest, R
 /// Inductive reasoning: bottom-up generalisation from specific examples.
 pub struct InductiveEngine;
 
+impl Default for InductiveEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl InductiveEngine {
     pub fn new() -> Self {
         Self

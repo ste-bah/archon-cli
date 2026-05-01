@@ -241,11 +241,10 @@ impl StyleInjector {
         prompt.push_str(base_prompt);
 
         // Phase 6 only: inject style.
-        if agent_phase == 6 {
-            if let Some(style) = style_prompt {
+        if agent_phase == 6
+            && let Some(style) = style_prompt {
                 prompt = self.build_styled_prompt(&prompt, style);
             }
-        }
 
         prompt
     }

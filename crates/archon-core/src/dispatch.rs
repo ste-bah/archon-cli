@@ -78,13 +78,19 @@ impl ToolRegistry {
             .collect()
     }
 
-    /// Dispatch a tool call: check mode, execute, return result.
+    /// Dispatch a tool call: check mode, check sandbox, execute, return result.
     pub async fn dispatch(
         &self,
         tool_name: &str,
         input: serde_json::Value,
         ctx: &ToolContext,
     ) -> ToolResult {
+        // GHOST-006: sandbox pre-check (subagent path — BOTH dispatch sites must gate).
+        if let Some(ref backend) = ctx.sandbox
+            && let Err(reason) = backend.check(tool_name, &input) {
+                return ToolResult::error(reason);
+            }
+
         // Check if tool is allowed in current mode
         if !is_tool_allowed_in_mode(tool_name, ctx.mode) {
             // TASK-P0-B.3 (#174): append the intercepted call to

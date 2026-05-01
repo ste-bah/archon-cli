@@ -43,6 +43,10 @@
 //!     `from_str` to include Bubble.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+use archon_permissions::SandboxBackend;
 
 /// Sandbox configuration — allowlists for paths, toggles for
 /// network/shell. `enabled` turns the whole sandbox on/off.
@@ -135,6 +139,64 @@ pub fn check_permission(
 /// Helper: returns `true` if `path` is inside any of `allowed`.
 fn path_in_any(path: &Path, allowed: &[PathBuf]) -> bool {
     allowed.iter().any(|base| path.starts_with(base))
+}
+
+// ---------------------------------------------------------------------------
+// GHOST-006: SandboxBackend impl — shared flag, toggled via /sandbox on/off
+// ---------------------------------------------------------------------------
+
+/// Shared sandbox flag that implements [`SandboxBackend`]. The flag is toggled
+/// by `/sandbox on/off` and read by both tool-execution dispatch paths.
+#[derive(Debug, Clone)]
+pub struct SharedSandboxFlag {
+    pub enabled: Arc<AtomicBool>,
+}
+
+impl SharedSandboxFlag {
+    pub fn new() -> Self {
+        Self {
+            enabled: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    pub fn with_flag(enabled: Arc<AtomicBool>) -> Self {
+        Self { enabled }
+    }
+
+    pub fn is_enabled(&self) -> bool {
+        self.enabled.load(Ordering::SeqCst)
+    }
+}
+
+impl Default for SharedSandboxFlag {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl SandboxBackend for SharedSandboxFlag {
+    fn check(&self, tool: &str, _input: &serde_json::Value) -> Result<(), String> {
+        if !self.enabled.load(Ordering::SeqCst) {
+            return Ok(());
+        }
+        // When sandbox is enabled, block all write/network/shell tools.
+        // Read-only tools (Read, Glob, Grep, LSP, Task*) are allowed.
+        match tool {
+            "Write" | "Edit" | "NotebookEdit" => {
+                Err(format!("sandbox: {tool} is blocked (write operations disabled)"))
+            }
+            "Bash" | "Shell" => {
+                Err(format!("sandbox: {tool} is blocked (shell operations disabled)"))
+            }
+            "WebFetch" | "WebSearch" => {
+                Err(format!("sandbox: {tool} is blocked (network operations disabled)"))
+            }
+            "TaskCreate" | "TaskUpdate" | "Agent" => {
+                Err(format!("sandbox: {tool} is blocked (agent spawning disabled)"))
+            }
+            _ => Ok(()),
+        }
+    }
 }
 
 #[cfg(test)]

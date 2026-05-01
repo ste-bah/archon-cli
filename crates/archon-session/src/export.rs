@@ -19,6 +19,7 @@ impl ExportFormat {
     ///
     /// Accepts `"markdown"`, `"json"`, or `"text"`.
     /// Returns an error message for anything else.
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Result<Self, String> {
         match s.to_lowercase().as_str() {
             "markdown" | "md" => Ok(Self::Markdown),

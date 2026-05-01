@@ -103,8 +103,7 @@ pub fn open_plan_in_editor(path: &std::path::Path) -> std::io::Result<()> {
         });
     let status = std::process::Command::new(&editor).arg(path).status()?;
     if !status.success() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
+        return Err(std::io::Error::other(
             format!("editor '{editor}' exited with status {status}"),
         ));
     }

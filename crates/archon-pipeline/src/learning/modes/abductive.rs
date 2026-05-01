@@ -11,6 +11,12 @@ use super::{ReasoningEngine, ReasoningItem, ReasoningOutput, ReasoningRequest, R
 /// Abductive reasoning: inference to the best explanation.
 pub struct AbductiveEngine;
 
+impl Default for AbductiveEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AbductiveEngine {
     pub fn new() -> Self {
         Self

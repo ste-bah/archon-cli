@@ -69,11 +69,10 @@ pub fn is_fork_enabled() -> bool {
 pub fn is_in_fork_child_by_messages(messages: &[serde_json::Value]) -> bool {
     messages.iter().any(|m| {
         // Check top-level "content" string
-        if let Some(s) = m.get("content").and_then(|c| c.as_str()) {
-            if s.contains("<fork_boilerplate>") {
+        if let Some(s) = m.get("content").and_then(|c| c.as_str())
+            && s.contains("<fork_boilerplate>") {
                 return true;
             }
-        }
         // Check content array entries (system prompt blocks)
         if let Some(arr) = m.get("content").and_then(|c| c.as_array()) {
             return arr.iter().any(|block| {

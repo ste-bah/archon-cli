@@ -100,4 +100,7 @@ pub(crate) struct SlashCommandContext {
     /// across any lock. Single-shot per dispatch by construction.
     pub(crate) pending_export_shared:
         Arc<std::sync::Mutex<Option<crate::command::export::ExportDescriptor>>>,
+    /// GHOST-006: shared sandbox flag toggled by /sandbox on/off and read by
+    /// both tool-execution dispatch paths through the SandboxBackend trait.
+    pub(crate) sandbox_flag: Arc<AtomicBool>,
 }

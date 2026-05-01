@@ -136,33 +136,29 @@ pub fn compute_stats(
         // Parse JSON message content
         if let Ok(json) = serde_json::from_str::<serde_json::Value>(content) {
             // Extract agent
-            if let Some(agent_val) = json.get("agent").and_then(|v| v.as_str()) {
-                if agents.insert(agent_val.to_string()) {
-                    if recent_agents.len() < 10 {
+            if let Some(agent_val) = json.get("agent").and_then(|v| v.as_str())
+                && agents.insert(agent_val.to_string())
+                    && recent_agents.len() < 10 {
                         recent_agents.push(agent_val.to_string());
                     }
-                }
-            }
 
             // Extract command
-            if let Some(cmd_val) = json.get("command").and_then(|v| v.as_str()) {
-                if !cmd_val.is_empty() && !recent_commands.contains(&cmd_val.to_string()) {
+            if let Some(cmd_val) = json.get("command").and_then(|v| v.as_str())
+                && !cmd_val.is_empty() && !recent_commands.contains(&cmd_val.to_string()) {
                     recent_commands.push(cmd_val.to_string());
                     if recent_commands.len() > 10 {
                         recent_commands.remove(0);
                     }
                 }
-            }
 
             // Extract tool
-            if let Some(tool_val) = json.get("tool").and_then(|v| v.as_str()) {
-                if !tool_val.is_empty() && !recent_tools.contains(&tool_val.to_string()) {
+            if let Some(tool_val) = json.get("tool").and_then(|v| v.as_str())
+                && !tool_val.is_empty() && !recent_tools.contains(&tool_val.to_string()) {
                     recent_tools.push(tool_val.to_string());
                     if recent_tools.len() > 10 {
                         recent_tools.remove(0);
                     }
                 }
-            }
 
             // Extract token usage if present
             if let Some(token_obj) = json.get("token_usage") {
@@ -192,7 +188,7 @@ pub fn compute_stats(
         .unwrap_or_else(|_| chrono::Utc::now());
     let elapsed = chrono::Utc::now().signed_duration_since(created_at);
     let elapsed =
-        std::time::Duration::from_secs(elapsed.num_seconds().try_into().unwrap_or(0).max(0));
+        std::time::Duration::from_secs(elapsed.num_seconds().try_into().unwrap_or(0));
 
     SessionStats {
         message_count,

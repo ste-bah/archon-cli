@@ -198,8 +198,8 @@ impl WorktreeManager {
                 continue;
             }
             let meta_path = path.join(".archon-worktree.json");
-            if let Ok(contents) = fs::read_to_string(&meta_path) {
-                if let Ok(meta) = serde_json::from_str::<serde_json::Value>(&contents) {
+            if let Ok(contents) = fs::read_to_string(&meta_path)
+                && let Ok(meta) = serde_json::from_str::<serde_json::Value>(&contents) {
                     let info = WorktreeInfo {
                         session_id: meta["session_id"].as_str().unwrap_or_default().to_string(),
                         branch_name: meta["branch_name"].as_str().unwrap_or_default().to_string(),
@@ -218,7 +218,6 @@ impl WorktreeManager {
                     };
                     result.push(info);
                 }
-            }
         }
 
         result
@@ -257,11 +256,10 @@ impl WorktreeManager {
                     return false;
                 }
                 // Ignore our own metadata file
-                if let Some(path) = s.path() {
-                    if path == ".archon-worktree.json" {
+                if let Some(path) = s.path()
+                    && path == ".archon-worktree.json" {
                         return false;
                     }
-                }
                 true
             });
 

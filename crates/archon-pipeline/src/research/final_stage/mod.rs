@@ -106,6 +106,7 @@ pub struct FinalStageOrchestrator {
 }
 
 impl FinalStageOrchestrator {
+    #[allow(clippy::new_without_default)]
     /// Create a new orchestrator in the `Idle` state.
     pub fn new() -> Self {
         Self {

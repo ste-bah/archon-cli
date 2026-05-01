@@ -141,11 +141,10 @@ pub fn get_agent_memory_dir(agent_type: &str, scope: &AgentMemoryScope, cwd: &Pa
 
 /// Ensure memory directory exists (lazy, fire-and-forget).
 pub async fn ensure_memory_dir_exists(path: &Path) {
-    if let Err(e) = tokio::fs::create_dir_all(path).await {
-        if e.kind() != std::io::ErrorKind::AlreadyExists {
+    if let Err(e) = tokio::fs::create_dir_all(path).await
+        && e.kind() != std::io::ErrorKind::AlreadyExists {
             tracing::warn!(path = %path.display(), error = %e, "Failed to create memory dir");
         }
-    }
 }
 
 /// Truncate MEMORY.md content to line AND byte caps.
@@ -409,8 +408,8 @@ pub fn has_memory_writes_since(
             for block in content {
                 if block.get("type").and_then(|t| t.as_str()) == Some("tool_use") {
                     let name = block.get("name").and_then(|n| n.as_str()).unwrap_or("");
-                    if name == "Write" || name == "Edit" {
-                        if let Some(input) = block.get("input") {
+                    if (name == "Write" || name == "Edit")
+                        && let Some(input) = block.get("input") {
                             let file_path = input
                                 .get("file_path")
                                 .and_then(|p| p.as_str())
@@ -419,7 +418,6 @@ pub fn has_memory_writes_since(
                                 return true;
                             }
                         }
-                    }
                 }
             }
         }
@@ -433,11 +431,10 @@ pub async fn scan_memory_files(dir: &Path) -> String {
         Ok(mut entries) => {
             let mut files = Vec::new();
             while let Ok(Some(entry)) = entries.next_entry().await {
-                if let Some(name) = entry.file_name().to_str() {
-                    if name.ends_with(".md") {
+                if let Some(name) = entry.file_name().to_str()
+                    && name.ends_with(".md") {
                         files.push(name.to_string());
                     }
-                }
             }
             if files.is_empty() {
                 "(no files)".to_string()

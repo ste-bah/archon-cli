@@ -223,7 +223,7 @@ impl GnnTrainer {
         // Compute initial loss — bust cache so embeddings are fresh
         enhancer.clear_cache();
         let all_embeddings = Self::forward_all(enhancer, samples);
-        let initial_loss = self.compute_triplet_loss(&train_triplets, &all_embeddings);
+        let initial_loss = self.compute_triplet_loss(train_triplets, &all_embeddings);
         let mut best_loss = f32::MAX;
 
         // Record pre-training weight version
@@ -319,16 +319,15 @@ impl GnnTrainer {
             && no_improvement_epochs >= self.config.early_stopping_patience;
 
         // Restore best-epoch weights when early stopping fired
-        if stopped_early {
-            if let Some((l1, l2, l3)) = best_epoch_weights.take() {
+        if stopped_early
+            && let Some((l1, l2, l3)) = best_epoch_weights.take() {
                 enhancer.set_weights(l1, l2, l3);
                 enhancer.clear_cache();
             }
-        }
 
         enhancer.clear_cache();
         let final_embeddings = Self::forward_all(enhancer, samples);
-        let final_loss = self.compute_triplet_loss(&train_triplets, &final_embeddings);
+        let final_loss = self.compute_triplet_loss(train_triplets, &final_embeddings);
 
         // Post-training: persist or rollback.
         // Check weight sanity first — NaN/Inf weights always trigger rollback.
@@ -340,11 +339,10 @@ impl GnnTrainer {
                     "Training degraded loss ({} → {}), rolling back to version {}",
                     initial_loss, final_loss, weight_version_before
                 );
-                if let Some(ref ws) = self.weight_store {
-                    if weight_version_before > 0 {
+                if let Some(ref ws) = self.weight_store
+                    && weight_version_before > 0 {
                         let _ = ws.load_version(weight_version_before);
                     }
-                }
                 true
             } else if final_loss < initial_loss {
                 if let Some(ref ws) = self.weight_store {
@@ -375,7 +373,7 @@ impl GnnTrainer {
             final_loss,
             best_loss,
             validation_loss: if !val_triplets.is_empty() {
-                Some(self.compute_triplet_loss(&val_triplets, &final_embeddings))
+                Some(self.compute_triplet_loss(val_triplets, &final_embeddings))
             } else {
                 None
             },
@@ -404,6 +402,7 @@ impl GnnTrainer {
             .collect()
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn train_epoch(
         &mut self,
         enhancer: &GnnEnhancer,
@@ -452,6 +451,7 @@ impl GnnTrainer {
         }
     }
 
+    #[allow(clippy::type_complexity)]
     fn train_batch(
         &self,
         enhancer: &GnnEnhancer,
@@ -504,8 +504,8 @@ impl GnnTrainer {
             }
 
             // Backprop through GNN for anchor embedding
-            if let Some(caches) = activations.get(&triplet.anchor) {
-                if caches.len() == 3 {
+            if let Some(caches) = activations.get(&triplet.anchor)
+                && caches.len() == 3 {
                     let (l1, l2, l3) = enhancer.get_weights();
                     let grads = backprop::full_backward(
                         caches,
@@ -540,7 +540,6 @@ impl GnnTrainer {
                         }
                     }
                 }
-            }
         }
 
         let batch_size = batch.len() as f32;

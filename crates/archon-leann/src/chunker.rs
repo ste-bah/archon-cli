@@ -46,13 +46,12 @@ impl Chunker {
         let mut languages = HashMap::new();
 
         // Optionally try dynamic grammars (best-effort).
-        if let Some(ref dir) = grammar_dir {
-            if dir.is_dir() {
-                // Future: iterate .so/.dylib files and load via libloading.
-                // For now we only use built-in grammars.
-                let _ = dir; // suppress unused warning
-            }
-            // If the directory doesn't exist, we just skip — no error.
+        if let Some(ref dir) = grammar_dir
+            && dir.is_dir()
+        {
+            // Future: iterate .so/.dylib files and load via libloading.
+            // For now we only use built-in grammars.
+            let _ = dir; // suppress unused warning
         }
 
         // Register built-in grammars. Each `LanguageFn.into()` yields a
@@ -171,6 +170,7 @@ fn target_node_kinds(language: Language) -> Vec<&'static str> {
 /// For Python, when we encounter a `class_definition` we do NOT emit the
 /// whole class as a single chunk. Instead we walk into the class body and
 /// emit each method (`function_definition`) individually.
+#[allow(clippy::too_many_arguments)]
 fn collect_chunks(
     node: tree_sitter::Node<'_>,
     language: Language,
@@ -189,11 +189,11 @@ fn collect_chunks(
         return;
     }
 
-    if target_kinds.contains(&kind) {
-        if let Ok(text) = node.utf8_text(content.as_bytes()) {
-            let chunk = make_chunk(node, text, path, lang_str, file_hash);
-            chunks.push(chunk);
-        }
+    if target_kinds.contains(&kind)
+        && let Ok(text) = node.utf8_text(content.as_bytes())
+    {
+        let chunk = make_chunk(node, text, path, lang_str, file_hash);
+        chunks.push(chunk);
     }
 }
 
@@ -213,10 +213,10 @@ fn extract_python_class_methods(
         if child.kind() == "block" {
             let mut body_cursor = child.walk();
             for body_child in child.children(&mut body_cursor) {
-                if body_child.kind() == "function_definition" {
-                    if let Ok(text) = body_child.utf8_text(content.as_bytes()) {
-                        chunks.push(make_chunk(body_child, text, path, lang_str, file_hash));
-                    }
+                if body_child.kind() == "function_definition"
+                    && let Ok(text) = body_child.utf8_text(content.as_bytes())
+                {
+                    chunks.push(make_chunk(body_child, text, path, lang_str, file_hash));
                 }
             }
         }

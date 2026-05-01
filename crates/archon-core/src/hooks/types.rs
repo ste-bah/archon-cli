@@ -354,8 +354,8 @@ impl AggregatedHookResult {
         }
 
         // permission_behavior: policy wins; non-policy cannot Allow blocked tools (REQ-HOOK-004a)
-        if let Some(ref pb) = result.permission_behavior {
-            if *pb != PermissionBehavior::Passthrough {
+        if let Some(ref pb) = result.permission_behavior
+            && *pb != PermissionBehavior::Passthrough {
                 let is_policy = result.source_authority == Some(SourceAuthority::Policy);
                 match pb {
                     PermissionBehavior::Allow if !is_policy => {
@@ -373,7 +373,6 @@ impl AggregatedHookResult {
                     }
                 }
             }
-        }
 
         // prevent_continuation: any true wins
         if result.prevent_continuation == Some(true) {

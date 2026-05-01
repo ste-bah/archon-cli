@@ -5,7 +5,7 @@
 //! - `layout` — `Layout` struct and `compute_layout()` for region computation
 //! - `chrome` — status bar, permission indicator, /btw overlay
 //! - `body` — output area, input area, session badge, suggestions popup,
-//!            MCP manager overlay, session picker overlay
+//!   MCP manager overlay, session picker overlay
 //! - `mod.rs` — facade: `draw()` function entry point
 //!
 //! ## Usage

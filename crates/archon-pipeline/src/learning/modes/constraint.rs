@@ -13,6 +13,12 @@ use super::{ReasoningEngine, ReasoningItem, ReasoningOutput, ReasoningRequest, R
 /// Constraint satisfaction reasoning engine.
 pub struct ConstraintEngine;
 
+impl Default for ConstraintEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ConstraintEngine {
     pub fn new() -> Self {
         Self
@@ -71,11 +77,10 @@ impl ConstraintEngine {
 
         while let Some((xi, xj)) = queue.pop() {
             if Self::revise(csp, &xi, &xj) {
-                if let Some(domain) = csp.variables.get(&xi) {
-                    if domain.is_empty() {
+                if let Some(domain) = csp.variables.get(&xi)
+                    && domain.is_empty() {
                         return false; // Domain wiped out — unsatisfiable.
                     }
-                }
                 // Add all neighbors of xi (except xj) back to queue.
                 for constraint in &csp.constraints {
                     let neighbor = match constraint {
@@ -99,6 +104,7 @@ impl ConstraintEngine {
         true
     }
 
+    #[allow(clippy::if_same_then_else)]
     /// Revise domain of xi to be arc-consistent with xj.
     fn revise(csp: &mut CSP, xi: &str, xj: &str) -> bool {
         let mut revised = false;
@@ -193,6 +199,7 @@ impl ConstraintEngine {
     }
 }
 
+#[allow(clippy::upper_case_acronyms)]
 struct CSP {
     variables: HashMap<String, Vec<String>>,
     constraints: Vec<Constraint>,
