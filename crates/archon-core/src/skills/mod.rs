@@ -6,10 +6,10 @@ pub mod embedded_skill_md;
 pub mod engineering_pack;
 pub mod expanded;
 pub mod parser;
+pub mod prd_to_spec;
 pub mod skill_tool;
 pub mod templates;
 pub mod to_prd;
-pub mod prd_to_spec;
 
 use std::collections::HashMap;
 

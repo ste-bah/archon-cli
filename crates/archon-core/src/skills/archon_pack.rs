@@ -6,8 +6,8 @@
 
 use std::sync::OnceLock;
 
-use super::{Skill, SkillContext, SkillOutput, embedded_skill_md, templates};
 use super::engineering_pack::{ParsedEmbedded, parse_once};
+use super::{Skill, SkillContext, SkillOutput, embedded_skill_md, templates};
 
 // Used in tests
 #[cfg(test)]
@@ -45,9 +45,7 @@ macro_rules! archon_skill {
                     format!("User input for this skill invocation: {}", args.join(" "))
                 };
 
-                SkillOutput::Prompt(format!(
-                    "{body}\n\n---USER REQUEST---\n\n{user_block}"
-                ))
+                SkillOutput::Prompt(format!("{body}\n\n---USER REQUEST---\n\n{user_block}"))
             }
         }
     };
@@ -112,7 +110,10 @@ mod tests {
             embedded_skill_md::WRITE_A_SKILL,
         ];
         for raw in &embedded {
-            assert!(parse_skill_md(raw).is_some(), "embedded SKILL.md must parse");
+            assert!(
+                parse_skill_md(raw).is_some(),
+                "embedded SKILL.md must parse"
+            );
         }
     }
 

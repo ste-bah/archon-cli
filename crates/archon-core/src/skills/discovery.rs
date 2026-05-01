@@ -59,8 +59,7 @@ pub fn discover_user_skills(working_dir: &Path) -> Vec<UserSkill> {
         let dir_entries: Vec<_> = entries.flatten().collect();
 
         // Pass 1: subdir layout — `<name>/SKILL.md`
-        let mut subdir_names: std::collections::HashSet<String> =
-            std::collections::HashSet::new();
+        let mut subdir_names: std::collections::HashSet<String> = std::collections::HashSet::new();
         for entry in &dir_entries {
             let skill_file = entry.path().join("SKILL.md");
             if !skill_file.is_file() {
@@ -96,7 +95,11 @@ pub fn discover_user_skills(working_dir: &Path) -> Vec<UserSkill> {
                     tracing::info!(
                         "skill {} present in both subdir and flat-file form; subdir wins (subdir={}, flat={})",
                         skill.name,
-                        path.parent().unwrap_or(&path).join(&skill.name).join("SKILL.md").display(),
+                        path.parent()
+                            .unwrap_or(&path)
+                            .join(&skill.name)
+                            .join("SKILL.md")
+                            .display(),
                         path.display()
                     );
                     continue;
@@ -177,7 +180,8 @@ mod tests {
 
     #[test]
     fn parse_preserves_body_whitespace() {
-        let content = "---\nname: test\ndescription: whitespace\n---\n\nParagraph 1.\n\nParagraph 2.\n\n";
+        let content =
+            "---\nname: test\ndescription: whitespace\n---\n\nParagraph 1.\n\nParagraph 2.\n\n";
         let skill = parse_skill_md(content).unwrap();
         assert!(skill.body.contains("Paragraph 2."));
     }

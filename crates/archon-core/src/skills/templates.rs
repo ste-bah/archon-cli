@@ -11,10 +11,8 @@
 
 use std::path::{Path, PathBuf};
 
-pub const AI_AGENT_PRD: &str =
-    include_str!("../../../../assets/templates/ai-agent-prd.md");
-pub const PRD_TO_SPEC: &str =
-    include_str!("../../../../assets/templates/prdtospec.md");
+pub const AI_AGENT_PRD: &str = include_str!("../../../../assets/templates/ai-agent-prd.md");
+pub const PRD_TO_SPEC: &str = include_str!("../../../../assets/templates/prdtospec.md");
 
 /// Source label so callers/tests can verify which override won.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

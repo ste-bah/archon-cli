@@ -1,7 +1,4 @@
-use archon_core::skills::{
-    Skill, SkillContext, SkillOutput,
-    builtin::register_builtins,
-};
+use archon_core::skills::{Skill, SkillContext, SkillOutput, builtin::register_builtins};
 
 #[test]
 fn default_registry_includes_all_5_engineering_skills() {
@@ -41,7 +38,10 @@ fn engineering_skill_uses_embedded_when_no_overrides() {
     let out = skill.execute(&[], &ctx);
     match out {
         SkillOutput::Prompt(body) => {
-            assert!(body.contains("Interview me relentlessly"), "expected embedded body marker");
+            assert!(
+                body.contains("Interview me relentlessly"),
+                "expected embedded body marker"
+            );
         }
         _ => panic!("expected Prompt"),
     }
@@ -68,8 +68,14 @@ fn engineering_skill_workdir_flat_override_wins() {
     let out = skill.execute(&[], &ctx);
     match out {
         SkillOutput::Prompt(body) => {
-            assert!(body.contains("OVERRIDE_BODY_MARKER_XYZ123"), "expected override body marker");
-            assert!(!body.contains("Interview me relentlessly"), "should NOT contain embedded marker");
+            assert!(
+                body.contains("OVERRIDE_BODY_MARKER_XYZ123"),
+                "expected override body marker"
+            );
+            assert!(
+                !body.contains("Interview me relentlessly"),
+                "should NOT contain embedded marker"
+            );
         }
         _ => panic!("expected Prompt"),
     }
@@ -96,8 +102,14 @@ fn engineering_skill_workdir_subdir_override_wins() {
     let out = skill.execute(&[], &ctx);
     match out {
         SkillOutput::Prompt(body) => {
-            assert!(body.contains("SUBDIR_OVERRIDE_BODY_ABC456"), "expected subdir override body marker");
-            assert!(!body.contains("Interview me relentlessly"), "should NOT contain embedded marker");
+            assert!(
+                body.contains("SUBDIR_OVERRIDE_BODY_ABC456"),
+                "expected subdir override body marker"
+            );
+            assert!(
+                !body.contains("Interview me relentlessly"),
+                "should NOT contain embedded marker"
+            );
         }
         _ => panic!("expected Prompt"),
     }

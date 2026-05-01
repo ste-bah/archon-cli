@@ -27,9 +27,7 @@ impl Skill for PrdToSpecSkill {
             );
         }
         if args.is_empty() {
-            return SkillOutput::Error(
-                "Usage: /prd-to-spec <path/to/PRD.md>".to_string(),
-            );
+            return SkillOutput::Error("Usage: /prd-to-spec <path/to/PRD.md>".to_string());
         }
         let prd_path = &args[0];
         let user_block = format!(

@@ -1,7 +1,4 @@
-use archon_core::skills::{
-    Skill, SkillContext, SkillOutput,
-    builtin::register_builtins,
-};
+use archon_core::skills::{Skill, SkillContext, SkillOutput, builtin::register_builtins};
 
 #[test]
 fn default_registry_includes_all_5_archon_skills() {
@@ -68,8 +65,14 @@ fn archon_skill_workdir_flat_override_wins() {
     let out = skill.execute(&[], &ctx);
     match out {
         SkillOutput::Prompt(body) => {
-            assert!(body.contains("OVERRIDE_BODY_MARKER_ARCHON_XYZ"), "expected override body marker");
-            assert!(!body.contains("ci-gate.sh"), "should NOT contain embedded marker");
+            assert!(
+                body.contains("OVERRIDE_BODY_MARKER_ARCHON_XYZ"),
+                "expected override body marker"
+            );
+            assert!(
+                !body.contains("ci-gate.sh"),
+                "should NOT contain embedded marker"
+            );
         }
         _ => panic!("expected Prompt"),
     }
@@ -96,8 +99,14 @@ fn archon_skill_workdir_subdir_override_wins() {
     let out = skill.execute(&[], &ctx);
     match out {
         SkillOutput::Prompt(body) => {
-            assert!(body.contains("SUBDIR_OVERRIDE_ARCHON_ABC"), "expected subdir override body marker");
-            assert!(!body.contains("ci-gate.sh"), "should NOT contain embedded marker");
+            assert!(
+                body.contains("SUBDIR_OVERRIDE_ARCHON_ABC"),
+                "expected subdir override body marker"
+            );
+            assert!(
+                !body.contains("ci-gate.sh"),
+                "should NOT contain embedded marker"
+            );
         }
         _ => panic!("expected Prompt"),
     }

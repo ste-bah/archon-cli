@@ -5,8 +5,8 @@
 
 use std::sync::OnceLock;
 
-use super::{Skill, SkillContext, SkillOutput, embedded_skill_md, templates};
 use super::discovery::parse_skill_md;
+use super::{Skill, SkillContext, SkillOutput, embedded_skill_md, templates};
 
 /// Lazy parse of an embedded SKILL.md into a (name, description, body) triple.
 /// Cached process-wide via OnceLock.
@@ -24,8 +24,8 @@ pub(crate) fn parse_once(
     raw: &'static str,
 ) -> &'static ParsedEmbedded {
     slot.get_or_init(|| {
-        let parsed = parse_skill_md(raw)
-            .expect("embedded SKILL.md must parse — caught by build-time test");
+        let parsed =
+            parse_skill_md(raw).expect("embedded SKILL.md must parse — caught by build-time test");
         ParsedEmbedded {
             name: parsed.name,
             description: parsed.description,
@@ -66,9 +66,7 @@ macro_rules! engineering_skill {
                     format!("User input for this skill invocation: {}", args.join(" "))
                 };
 
-                SkillOutput::Prompt(format!(
-                    "{body}\n\n---USER REQUEST---\n\n{user_block}"
-                ))
+                SkillOutput::Prompt(format!("{body}\n\n---USER REQUEST---\n\n{user_block}"))
             }
         }
     };
@@ -104,7 +102,12 @@ mod tests {
     fn grill_with_docs_metadata() {
         assert_eq!(GrillWithDocsSkill.name(), "grill-with-docs");
         let desc = GrillWithDocsSkill.description();
-        assert!(desc.contains("context") || desc.contains("glossary") || desc.contains("CONTEXT") || desc.contains("documentation"));
+        assert!(
+            desc.contains("context")
+                || desc.contains("glossary")
+                || desc.contains("CONTEXT")
+                || desc.contains("documentation")
+        );
     }
 
     #[test]
@@ -135,7 +138,10 @@ mod tests {
             embedded_skill_md::ZOOM_OUT,
         ];
         for raw in &embedded {
-            assert!(parse_skill_md(raw).is_some(), "embedded SKILL.md must parse");
+            assert!(
+                parse_skill_md(raw).is_some(),
+                "embedded SKILL.md must parse"
+            );
         }
     }
 
@@ -150,7 +156,12 @@ mod tests {
         ];
         for raw in &embedded {
             let parsed = parse_skill_md(raw).unwrap();
-            assert!(parsed.body.len() >= 10, "{} body is {} chars, expected non-empty", parsed.name, parsed.body.len());
+            assert!(
+                parsed.body.len() >= 10,
+                "{} body is {} chars, expected non-empty",
+                parsed.name,
+                parsed.body.len()
+            );
         }
     }
 }
