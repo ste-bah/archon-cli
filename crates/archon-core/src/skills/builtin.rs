@@ -287,6 +287,10 @@ pub fn register_builtins() -> SkillRegistry {
     // Expanded skills (CLI-225)
     super::expanded::register_expanded_skills(&mut registry);
 
+    // Phase 1 skill foundation
+    registry.register(Box::new(super::to_prd::ToPrdSkill));
+    registry.register(Box::new(super::prd_to_spec::PrdToSpecSkill));
+
     // Agent management skills (PRD-AGENTS-001)
     registry.register(Box::new(super::agent_skills::CreateAgentSkill));
     registry.register(Box::new(super::agent_skills::ListAgentsSkill));

@@ -4,6 +4,9 @@ pub mod discovery;
 pub mod expanded;
 pub mod parser;
 pub mod skill_tool;
+pub mod templates;
+pub mod to_prd;
+pub mod prd_to_spec;
 
 use std::collections::HashMap;
 
