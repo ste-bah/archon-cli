@@ -137,9 +137,10 @@ pub async fn handle_remote_command(
             ..Default::default()
         };
         if let Some(tp) = token_path
-            && let Ok(tok) = std::fs::read_to_string(tp) {
-                srv_cfg.token = Some(tok.trim().to_string());
-            }
+            && let Ok(tok) = std::fs::read_to_string(tp)
+        {
+            srv_cfg.token = Some(tok.trim().to_string());
+        }
         let ide_proto = IdeProtocolHandler::new(env!("CARGO_PKG_VERSION"));
         let ide_handler: IdeHandlerFn = Arc::new(Mutex::new(Box::new({
             let mut h = ide_proto;

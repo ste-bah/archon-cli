@@ -730,9 +730,10 @@ pub mod runner {
                             partial_json,
                         } => {
                             if Some(index) == current_tool_index
-                                && let Some(tool) = pending_tools.last_mut() {
-                                    tool.input_json.push_str(&partial_json);
-                                }
+                                && let Some(tool) = pending_tools.last_mut()
+                            {
+                                tool.input_json.push_str(&partial_json);
+                            }
                         }
                         StreamEvent::ContentBlockStop { .. } => {
                             current_tool_index = None;
@@ -747,28 +748,29 @@ pub mod runner {
                             // TASK-T3 (G4): accumulate Usage from message_start.
                             // Lock guard MUST NOT cross an .await — only sync work in here.
                             if let Some(ref t) = self.progress
-                                && let Ok(mut g) = t.lock() {
-                                    g.cumulative_input_tokens += usage.input_tokens;
-                                    g.cumulative_output_tokens += usage.output_tokens;
-                                    g.cumulative_cache_creation_tokens +=
-                                        usage.cache_creation_input_tokens;
-                                    g.cumulative_cache_read_tokens += usage.cache_read_input_tokens;
-                                    g.last_update = chrono::Utc::now();
-                                }
+                                && let Ok(mut g) = t.lock()
+                            {
+                                g.cumulative_input_tokens += usage.input_tokens;
+                                g.cumulative_output_tokens += usage.output_tokens;
+                                g.cumulative_cache_creation_tokens +=
+                                    usage.cache_creation_input_tokens;
+                                g.cumulative_cache_read_tokens += usage.cache_read_input_tokens;
+                                g.last_update = chrono::Utc::now();
+                            }
                         }
                         StreamEvent::MessageDelta {
                             usage: Some(ref u), ..
                         } => {
                             // TASK-T3 (G4): accumulate Usage from message_delta.
                             if let Some(ref t) = self.progress
-                                && let Ok(mut g) = t.lock() {
-                                    g.cumulative_input_tokens += u.input_tokens;
-                                    g.cumulative_output_tokens += u.output_tokens;
-                                    g.cumulative_cache_creation_tokens +=
-                                        u.cache_creation_input_tokens;
-                                    g.cumulative_cache_read_tokens += u.cache_read_input_tokens;
-                                    g.last_update = chrono::Utc::now();
-                                }
+                                && let Ok(mut g) = t.lock()
+                            {
+                                g.cumulative_input_tokens += u.input_tokens;
+                                g.cumulative_output_tokens += u.output_tokens;
+                                g.cumulative_cache_creation_tokens += u.cache_creation_input_tokens;
+                                g.cumulative_cache_read_tokens += u.cache_read_input_tokens;
+                                g.last_update = chrono::Utc::now();
+                            }
                         }
                         _ => {} // ThinkingDelta, SignatureDelta, MessageDelta{usage:None}, MessageStop, Ping, etc.
                     }
@@ -860,17 +862,18 @@ pub mod runner {
                 for (p, result) in prepared.iter().zip(exec_results.into_iter()) {
                     // Progress update — sync only, lock never crosses .await
                     if let Some(ref t) = self.progress
-                        && let Ok(mut g) = t.lock() {
-                            g.tool_use_count += 1;
-                            if g.recent_activities.len() >= 5 {
-                                g.recent_activities.pop_front();
-                            }
-                            g.recent_activities.push_back(super::ToolActivity {
-                                tool_name: p.name.clone(),
-                                timestamp: chrono::Utc::now(),
-                            });
-                            g.last_update = chrono::Utc::now();
+                        && let Ok(mut g) = t.lock()
+                    {
+                        g.tool_use_count += 1;
+                        if g.recent_activities.len() >= 5 {
+                            g.recent_activities.pop_front();
                         }
+                        g.recent_activities.push_back(super::ToolActivity {
+                            tool_name: p.name.clone(),
+                            timestamp: chrono::Utc::now(),
+                        });
+                        g.last_update = chrono::Utc::now();
+                    }
                     tool_results.push(serde_json::json!({
                         "type": "tool_result",
                         "tool_use_id": p.id,

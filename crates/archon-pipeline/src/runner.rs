@@ -407,16 +407,17 @@ pub async fn run_pipeline(
                     // Inject reflexion context on retry.
                     if attempt > 1
                         && let Some(ref ri) = reflexion
-                            && let Some(ctx) = ri.inject_reflexion(&agent.key) {
-                                system.push(serde_json::json!({
-                                    "text": ctx.formatted_prompt_section,
-                                }));
-                                tracing::info!(
-                                    agent_key = %agent.key,
-                                    attempt = attempt,
-                                    "Reflexion context injected"
-                                );
-                            }
+                        && let Some(ctx) = ri.inject_reflexion(&agent.key)
+                    {
+                        system.push(serde_json::json!({
+                            "text": ctx.formatted_prompt_section,
+                        }));
+                        tracing::info!(
+                            agent_key = %agent.key,
+                            attempt = attempt,
+                            "Reflexion context injected"
+                        );
+                    }
 
                     // Execute against the LLM.
                     let agent_start = Instant::now();
@@ -494,25 +495,26 @@ pub async fn run_pipeline(
 
                 // Re-index modified files for implementation agents (Phase 4+).
                 if agent.phase >= 4
-                    && let Some(li) = leann {
-                        match li.index_modified_files(&result.tool_use_log).await {
-                            Ok(count) if count > 0 => {
-                                tracing::info!(
-                                    agent_key = %agent.key,
-                                    files_indexed = count,
-                                    "LEANN re-indexed modified files"
-                                );
-                            }
-                            Err(e) => {
-                                tracing::warn!(
-                                    agent_key = %agent.key,
-                                    error = %e,
-                                    "LEANN re-indexing failed; continuing"
-                                );
-                            }
-                            _ => {}
+                    && let Some(li) = leann
+                {
+                    match li.index_modified_files(&result.tool_use_log).await {
+                        Ok(count) if count > 0 => {
+                            tracing::info!(
+                                agent_key = %agent.key,
+                                files_indexed = count,
+                                "LEANN re-indexed modified files"
+                            );
                         }
+                        Err(e) => {
+                            tracing::warn!(
+                                agent_key = %agent.key,
+                                error = %e,
+                                "LEANN re-indexing failed; continuing"
+                            );
+                        }
+                        _ => {}
                     }
+                }
 
                 // Store in session.
                 session.agent_results.push((agent, result));

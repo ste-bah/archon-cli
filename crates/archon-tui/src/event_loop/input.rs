@@ -316,9 +316,10 @@ pub(super) async fn handle_key_event(
                     }
                     KeyCode::Enter => {
                         if let Some(menu) = app.skills_menu.take()
-                            && let Some(skill) = menu.selected() {
-                                app.input.set_text(&format!("/{} ", skill.name));
-                            }
+                            && let Some(skill) = menu.selected()
+                        {
+                            app.input.set_text(&format!("/{} ", skill.name));
+                        }
                         return;
                     }
                     KeyCode::Esc => {
@@ -349,9 +350,10 @@ pub(super) async fn handle_key_event(
                     }
                     KeyCode::Enter => {
                         if let Some(sr) = app.search_results.take()
-                            && let Some(file) = sr.selected() {
-                                app.input.set_text(&format!("@{} ", file.path.display()));
-                            }
+                            && let Some(file) = sr.selected()
+                        {
+                            app.input.set_text(&format!("@{} ", file.path.display()));
+                        }
                         return;
                     }
                     KeyCode::Esc => {
@@ -397,9 +399,10 @@ pub(super) async fn handle_key_event(
                             // File pick — take ownership, inject `@<path>`,
                             // drop the picker.
                             if let Some(picker) = app.file_picker.take()
-                                && let Some(file) = picker.selected() {
-                                    app.input.set_text(&format!("@{} ", file.path.display()));
-                                }
+                                && let Some(file) = picker.selected()
+                            {
+                                app.input.set_text(&format!("@{} ", file.path.display()));
+                            }
                         }
                         return;
                     }

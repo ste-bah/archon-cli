@@ -25,9 +25,9 @@ pub mod registry;
 // registry (TASK-AGS-702) and credential wrapper (TASK-AGS-701).
 pub mod openai_compat;
 
-// TASK-AGS-704: native registry (9 descriptors) + stub impls for the 4
-// gap-filler natives (azure, cohere, copilot, minimax).
-pub mod native_gap;
+// GHOST-003: native registry (5 descriptors). The 4 stub providers
+// (azure, cohere, copilot, minimax) were removed — they had no real
+// wire implementations and returned LlmError::Unsupported.
 pub mod native_registry;
 
 // TASK-AGS-706: runtime dispatcher routing LlmConfig -> concrete provider.
@@ -46,7 +46,6 @@ pub use builder::{build_llm_provider, build_llm_provider_with_policy};
 pub use descriptor::{AuthFlavor, CompatKind, ProviderDescriptor};
 pub use error::ProviderError;
 pub use features::ProviderFeatures;
-pub use native_gap::{AzureProvider, CohereProvider, CopilotProvider, MinimaxProvider};
 pub use native_registry::{NATIVE_REGISTRY, count_native, get_native, list_native};
 pub use openai_compat::OpenAiCompatProvider;
 pub use quirks::{ProviderQuirks, StreamDelimiter, ToolCallFormat};

@@ -35,6 +35,7 @@ fn http_config(url: &str) -> HookConfig {
         status_message: None,
         headers: Default::default(),
         allowed_env_vars: Default::default(),
+        enabled: true,
     }
 }
 

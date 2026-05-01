@@ -662,7 +662,6 @@ pub fn extract_tool_guidance(tools_md: &str) -> String {
         }
     }
 
-    
     guidance_lines.join("\n").trim().to_string()
 }
 

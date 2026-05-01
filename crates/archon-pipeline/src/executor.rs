@@ -437,9 +437,10 @@ impl PipelineExecutor {
             let mut outputs: HashMap<String, serde_json::Value> = HashMap::new();
             for (sid, srun) in &run.steps {
                 if srun.state == StepRunState::Finished
-                    && let Some(ref output) = srun.output {
-                        outputs.insert(sid.clone(), output.clone());
-                    }
+                    && let Some(ref output) = srun.output
+                {
+                    outputs.insert(sid.clone(), output.clone());
+                }
             }
             let resolved = vars::substitute(&step.input, &outputs)?;
             (resolved, run.id, outputs)

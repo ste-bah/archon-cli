@@ -107,9 +107,10 @@ impl Tool for LspTool {
 
         // Lazy init on first use
         if !guard.is_connected()
-            && let Err(e) = guard.ensure_connected().await {
-                return ToolResult::error(format!("LSP not available: {e}"));
-            }
+            && let Err(e) = guard.ensure_connected().await
+        {
+            return ToolResult::error(format!("LSP not available: {e}"));
+        }
 
         let client = match guard.client_mut() {
             Some(c) => c,

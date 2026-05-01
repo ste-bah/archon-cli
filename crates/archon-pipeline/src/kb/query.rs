@@ -236,9 +236,10 @@ impl QueryEngine {
 
                 // Apply type filter if specified
                 if let Some(filter) = type_filter
-                    && !filter.contains(&node.node_type) {
-                        return None;
-                    }
+                    && !filter.contains(&node.node_type)
+                {
+                    return None;
+                }
 
                 // Calculate relevance score based on title vs content match
                 let query_lower = query_text.to_lowercase();

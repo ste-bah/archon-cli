@@ -4,9 +4,7 @@
 //! truncates prompt layers by priority, respects required-layer guarantees, and
 //! keeps the assembled prompt within 80 % of the model context window.
 
-use archon_pipeline::prompt_cap::{
-    PromptLayer, TruncationPriority, count_tokens, truncate_prompt,
-};
+use archon_pipeline::prompt_cap::{PromptLayer, TruncationPriority, count_tokens, truncate_prompt};
 
 // ---------------------------------------------------------------------------
 // Helper

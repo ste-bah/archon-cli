@@ -179,12 +179,7 @@ impl PluginLoader {
     }
 
     /// Attempt to load one plugin. Returns the outcome.
-    fn load_one(
-        &self,
-        dir_name: &str,
-        plugin_dir: &Path,
-        loaded_names: &[String],
-    ) -> LoadOutcome {
+    fn load_one(&self, dir_name: &str, plugin_dir: &Path, loaded_names: &[String]) -> LoadOutcome {
         // 1. Load manifest (None = no manifest file = silent skip)
         let manifest = match load_manifest(plugin_dir) {
             None => return LoadOutcome::Skip,

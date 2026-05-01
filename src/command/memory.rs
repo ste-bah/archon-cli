@@ -97,7 +97,6 @@
 //! Empty / missing subcommand defaults to `"list"` (matches shipped
 //! `"" | "list"` arm).
 
-
 #[allow(unused_imports)]
 use std::sync::Arc;
 

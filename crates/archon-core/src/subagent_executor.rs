@@ -223,16 +223,17 @@ impl AgentSubagentExecutor {
             .filter(|n| !is_plan_mode || !PLAN_MODE_DENY.contains(n))
             .filter(|n| {
                 if let Some(allowed_servers) = mcp_scope
-                    && n.starts_with("mcp__") {
-                        let parts: Vec<&str> = n.splitn(3, "__").collect();
-                        if parts.len() >= 2 {
-                            let server = parts[1];
-                            return allowed_servers
-                                .iter()
-                                .any(|s| s.eq_ignore_ascii_case(server));
-                        }
-                        return false;
+                    && n.starts_with("mcp__")
+                {
+                    let parts: Vec<&str> = n.splitn(3, "__").collect();
+                    if parts.len() >= 2 {
+                        let server = parts[1];
+                        return allowed_servers
+                            .iter()
+                            .any(|s| s.eq_ignore_ascii_case(server));
                     }
+                    return false;
+                }
                 true
             })
             .collect();
@@ -259,10 +260,11 @@ impl SubagentExecutor for AgentSubagentExecutor {
         // registry read lock; keep this quick (no .await).
         if let Some(ref agent_type) = request.subagent_type
             && let Ok(reg) = self.agent_registry.read()
-                && let Some(def) = reg.resolve(agent_type)
-                    && def.background {
-                        return SubagentClassification::ExplicitBackground;
-                    }
+            && let Some(def) = reg.resolve(agent_type)
+            && def.background
+        {
+            return SubagentClassification::ExplicitBackground;
+        }
         // Fork-mode forceAsync pattern: when fork is globally enabled,
         // all agent spawns get forced async. Preserves the old
         // `force_async = is_fork_enabled()` gate at agent.rs:2576-2579.
@@ -477,21 +479,22 @@ impl SubagentExecutor for AgentSubagentExecutor {
 
         // Session-scoped hook registration from agent def.
         if let Some(ref def) = resolved_def
-            && let Some(ref hooks_json) = def.hooks {
-                match crate::agents::loader::parse_agent_hooks(hooks_json) {
-                    Ok(hook_pairs) => {
-                        if let Some(ref registry) = self.hook_registry {
-                            for (event, config) in hook_pairs {
-                                registry.register_session_hook(&self.session_id, event, config);
-                            }
-                            tracing::debug!(agent_type = ?request.subagent_type, "registered session-scoped hooks from agent definition");
+            && let Some(ref hooks_json) = def.hooks
+        {
+            match crate::agents::loader::parse_agent_hooks(hooks_json) {
+                Ok(hook_pairs) => {
+                    if let Some(ref registry) = self.hook_registry {
+                        for (event, config) in hook_pairs {
+                            registry.register_session_hook(&self.session_id, event, config);
                         }
-                    }
-                    Err(e) => {
-                        tracing::warn!(agent_type = ?request.subagent_type, error = %e, "failed to parse agent hooks")
+                        tracing::debug!(agent_type = ?request.subagent_type, "registered session-scoped hooks from agent definition");
                     }
                 }
+                Err(e) => {
+                    tracing::warn!(agent_type = ?request.subagent_type, error = %e, "failed to parse agent hooks")
+                }
             }
+        }
 
         // MCP pre-flight check.
         if let Some(ref def) = resolved_def {
@@ -716,9 +719,10 @@ impl SubagentExecutor for AgentSubagentExecutor {
         }
 
         if let Some(ref def) = resolved_def
-            && let Some(ref reminder) = def.critical_system_reminder {
-                runner.set_critical_system_reminder(reminder.clone());
-            }
+            && let Some(ref reminder) = def.critical_system_reminder
+        {
+            runner.set_critical_system_reminder(reminder.clone());
+        }
 
         // Transcript recording (AGT-024).
         if let Some(store) = crate::agents::transcript::AgentTranscriptStore::new(&self.session_id)
@@ -802,22 +806,23 @@ impl SubagentExecutor for AgentSubagentExecutor {
         if let Ok(ref text) = result {
             let meta = self.memory_cache.lock().await.get(&subagent_id).cloned();
             if let Some(meta) = meta
-                && let (Some(agent_type), Some(memory)) = (meta.agent_type, self.memory.as_ref()) {
-                    let content: String = text.chars().take(500).collect();
-                    let title = format!("completion:{}:{}", agent_type, subagent_id);
-                    let project_path = self.working_dir.to_string_lossy();
-                    if let Err(e) = crate::agents::memory::save_agent_memory(
-                        &agent_type,
-                        &content,
-                        &title,
-                        &meta.tags,
-                        memory.as_ref(),
-                        &project_path,
-                        meta.memory_scope.as_ref(),
-                    ) {
-                        tracing::warn!(agent = %agent_type, error = %e, "failed to save agent memory");
-                    }
+                && let (Some(agent_type), Some(memory)) = (meta.agent_type, self.memory.as_ref())
+            {
+                let content: String = text.chars().take(500).collect();
+                let title = format!("completion:{}:{}", agent_type, subagent_id);
+                let project_path = self.working_dir.to_string_lossy();
+                if let Err(e) = crate::agents::memory::save_agent_memory(
+                    &agent_type,
+                    &content,
+                    &title,
+                    &meta.tags,
+                    memory.as_ref(),
+                    &project_path,
+                    meta.memory_scope.as_ref(),
+                ) {
+                    tracing::warn!(agent = %agent_type, error = %e, "failed to save agent memory");
                 }
+            }
         }
         // Best-effort manager update. Because the manager keys agents
         // under their own internally-generated id, this call may miss

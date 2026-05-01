@@ -31,6 +31,7 @@ fn cmd_hook(command: &str, timeout: Option<u32>) -> HookConfig {
         status_message: None,
         headers: HashMap::new(),
         allowed_env_vars: Vec::new(),
+        enabled: true,
     }
 }
 

@@ -75,10 +75,11 @@ impl AgentHandle {
     /// waits on a contended lock.
     pub fn fire_cancel(&self) {
         if let Ok(guard) = self.cancel_slot.try_lock()
-            && let Some(ref token) = *guard {
-                token.cancel();
-                tracing::info!("AgentHandle: fired CancellationToken on current turn");
-            }
+            && let Some(ref token) = *guard
+        {
+            token.cancel();
+            tracing::info!("AgentHandle: fired CancellationToken on current turn");
+        }
     }
 }
 
@@ -121,9 +122,10 @@ impl TurnRunner for AgentHandle {
                                 // Only count successful stores so triggers reflect
                                 // real memory accumulation.
                                 if stored.is_ok()
-                                    && let Some(ref at) = self.auto_trainer {
-                                        at.record_memory();
-                                    }
+                                    && let Some(ref at) = self.auto_trainer
+                                {
+                                    at.record_memory();
+                                }
                             }
                             recent.push(mem);
                         }

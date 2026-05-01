@@ -147,9 +147,10 @@ pub(crate) async fn pump_sse_stream(resp: reqwest::Response, tx: mpsc::Sender<Ss
             if line.is_empty() {
                 // Blank line = frame dispatch.
                 if let Some(frame) = current.take_frame()
-                    && tx.send(frame).await.is_err() {
-                        return; // receiver dropped
-                    }
+                    && tx.send(frame).await.is_err()
+                {
+                    return; // receiver dropped
+                }
                 continue;
             }
             if line.starts_with(':') {

@@ -72,7 +72,9 @@ impl AutoExtractor {
                 &["auto-extracted".to_string()],
                 "auto_extraction",
                 "",
-            ) { stored_ids.push(id) }
+            ) {
+                stored_ids.push(id)
+            }
         }
 
         stored_ids
@@ -172,7 +174,6 @@ impl AutoExtractor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
 
     struct FakeMemory;
     impl MemoryTrait for FakeMemory {

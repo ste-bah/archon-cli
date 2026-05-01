@@ -132,13 +132,14 @@ impl DiscoveryCatalog {
 
         // Collision detection: same (name, version) from different path
         if let Some(existing) = self.live.entries.get(&key)
-            && existing.source_path != meta.source_path {
-                warn!(
-                    "agent collision: name={} version={} existing={:?} ignored={:?}",
-                    meta.name, meta.version, existing.source_path, meta.source_path
-                );
-                return Ok(());
-            }
+            && existing.source_path != meta.source_path
+        {
+            warn!(
+                "agent collision: name={} version={} existing={:?} ignored={:?}",
+                meta.name, meta.version, existing.source_path, meta.source_path
+            );
+            return Ok(());
+        }
 
         // Insert directly into live DashMaps (concurrent-safe)
         self.live
@@ -215,14 +216,16 @@ impl DiscoveryCatalog {
         // Descending iteration over BTreeSet (highest first)
         for version in versions_set.iter().rev() {
             if let Some(req) = version_req
-                && !req.matches(version) {
-                    continue;
-                }
+                && !req.matches(version)
+            {
+                continue;
+            }
             let key = (name.to_string(), version.clone());
             if let Some(entry) = self.live.entries.get(&key)
-                && matches!(entry.state, super::metadata::AgentState::Valid) {
-                    return Ok(entry.value().clone());
-                }
+                && matches!(entry.state, super::metadata::AgentState::Valid)
+            {
+                return Ok(entry.value().clone());
+            }
         }
 
         Err(DiscoveryError::AgentNotFound {

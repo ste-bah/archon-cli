@@ -539,7 +539,6 @@ pub struct LearningConfig {
     pub reflexion: ReflexionConfig,
 }
 
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ToggleConfig {
@@ -1029,6 +1028,31 @@ pub fn load_config_from(path: PathBuf) -> Result<ArchonConfig, ConfigError> {
     let config: ArchonConfig = toml::from_str(&content)?;
     validate(&config)?;
     Ok(config)
+}
+
+/// GHOST-008: persist `voice.enabled` to the HOME config file.
+///
+/// Loads the existing config (or default if file missing), updates
+/// `voice.enabled`, serializes back to TOML, and writes to
+/// `~/.config/archon/config.toml`. Uses full-rewrite (not surgical
+/// TOML edit) — the config file is machine-generated from defaults
+/// and does not carry hand-curated comments worth preserving.
+pub fn save_voice_enabled(enabled: bool) -> Result<(), ConfigError> {
+    let path = default_config_path();
+    let mut config = if path.exists() {
+        let content = fs::read_to_string(&path)?;
+        toml::from_str::<ArchonConfig>(&content)?
+    } else {
+        ArchonConfig::default()
+    };
+    config.voice.enabled = enabled;
+    let serialized = toml::to_string_pretty(&config)
+        .map_err(|e| ConfigError::ValidationError(format!("TOML serialize error: {e}")))?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(&path, serialized)?;
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------

@@ -68,9 +68,8 @@ use archon_llm::{ActiveProvider, LlmConfig as FlatLlmConfig};
 ///   `local`) stay on their hand-rolled constructors so the nested
 ///   `archon_core::config::LlmConfig` sub-fields are honored.
 /// - Any other provider string (`groq`, `deepseek`, `mistral`, `xai`,
-///   `gemini`, `azure`, `cohere`, `copilot`, `minimax`, `together`,
-///   `perplexity`, ...) is routed through `archon_llm::ActiveProvider`
-///   with a flat `archon_llm::LlmConfig`.
+///   `gemini`, `together`, `perplexity`, ...) is routed through
+///   `archon_llm::ActiveProvider` with a flat `archon_llm::LlmConfig`.
 ///
 /// Falls back to Anthropic (with a `tracing::warn!`) whenever the selected
 /// provider is missing required credentials, is unrecognised, or fails to
@@ -138,8 +137,8 @@ pub(crate) fn build_llm_provider(
 
         other => {
             // Flat-config descriptor path: groq, deepseek, mistral, xai,
-            // gemini, azure, cohere, copilot, minimax, together,
-            // perplexity, etc. Route through `archon_llm::ActiveProvider`
+            // gemini, together, perplexity, etc. Route through
+            // `archon_llm::ActiveProvider`
             // with a minimal flat LlmConfig; credentials come from the
             // descriptor's default env var (api_key_env override not
             // supported via nested archon_core::config::LlmConfig yet).
@@ -200,7 +199,10 @@ mod tests {
 
     #[test]
     fn unknown_provider_falls_back_to_anthropic() {
-        let cfg = LlmConfig { provider: "__ags699_unknown__".into(), ..Default::default() };
+        let cfg = LlmConfig {
+            provider: "__ags699_unknown__".into(),
+            ..Default::default()
+        };
         let provider = build_llm_provider(&cfg, make_test_client());
         assert_eq!(provider.name(), "anthropic");
     }
@@ -215,7 +217,10 @@ mod tests {
             std::env::remove_var("OPENAI_API_KEY");
         }
 
-        let mut cfg = LlmConfig { provider: "openai".into(), ..Default::default() };
+        let mut cfg = LlmConfig {
+            provider: "openai".into(),
+            ..Default::default()
+        };
         cfg.openai.api_key = None;
         let provider = build_llm_provider(&cfg, make_test_client());
         assert_eq!(provider.name(), "anthropic");
@@ -230,7 +235,10 @@ mod tests {
 
     #[test]
     fn bedrock_with_missing_region_falls_back_to_anthropic() {
-        let mut cfg = LlmConfig { provider: "bedrock".into(), ..Default::default() };
+        let mut cfg = LlmConfig {
+            provider: "bedrock".into(),
+            ..Default::default()
+        };
         cfg.bedrock.region = String::new();
         let provider = build_llm_provider(&cfg, make_test_client());
         assert_eq!(provider.name(), "anthropic");
@@ -241,7 +249,10 @@ mod tests {
     #[test]
     fn test_anthropic_provider_explicit_returns_anthropic() {
         let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let cfg = LlmConfig { provider: "anthropic".to_string(), ..Default::default() };
+        let cfg = LlmConfig {
+            provider: "anthropic".to_string(),
+            ..Default::default()
+        };
         let provider = build_llm_provider(&cfg, make_test_client());
         assert_eq!(provider.name(), "anthropic");
     }
@@ -249,7 +260,10 @@ mod tests {
     #[test]
     fn test_local_provider_constructs_without_fallback() {
         let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let cfg = LlmConfig { provider: "local".to_string(), ..Default::default() };
+        let cfg = LlmConfig {
+            provider: "local".to_string(),
+            ..Default::default()
+        };
         let provider = build_llm_provider(&cfg, make_test_client());
         // LocalProvider::name() returns "local" (verified in
         // crates/archon-llm/src/providers/local.rs ~line 227).

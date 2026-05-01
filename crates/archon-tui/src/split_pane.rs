@@ -48,8 +48,7 @@ impl std::fmt::Display for PaneContent {
 // ---------------------------------------------------------------------------
 
 /// How the terminal area is divided.
-#[derive(Debug, Clone, PartialEq)]
-#[derive(Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub enum PaneLayout {
     /// Single pane (default). No split.
     #[default]
@@ -59,7 +58,6 @@ pub enum PaneLayout {
     /// Vertical split: top / bottom. Ratio is the top pane's percentage (10-90).
     VerticalSplit { ratio: u16 },
 }
-
 
 impl PaneLayout {
     /// Whether we're in a split view.
@@ -251,9 +249,10 @@ impl SplitPaneManager {
     /// Get a mutable reference to the currently focused pane.
     pub fn focused_pane_mut(&mut self) -> &mut PaneState {
         if self.focus == 1
-            && let Some(ref mut sec) = self.secondary {
-                return sec;
-            }
+            && let Some(ref mut sec) = self.secondary
+        {
+            return sec;
+        }
         &mut self.primary
     }
 

@@ -646,10 +646,7 @@ impl Agent {
     /// async-Mutex guard. The binary captures a sync-Mutex mirror of
     /// InnerVoice so a panic hook (which has no tokio runtime) can read
     /// the latest state to build a snapshot.
-    pub fn set_inner_voice_change_callback(
-        &mut self,
-        cb: Arc<dyn Fn(&InnerVoice) + Send + Sync>,
-    ) {
+    pub fn set_inner_voice_change_callback(&mut self, cb: Arc<dyn Fn(&InnerVoice) + Send + Sync>) {
         self.inner_voice_change_callback = Some(cb);
     }
 
@@ -1402,15 +1399,14 @@ impl Agent {
                         join_set.spawn(async move {
                             let _permit = sem_clone.acquire().await.expect("semaphore closed");
                             // GHOST-006: sandbox pre-check (main-agent direct path).
-                            let result =
-                                if let Some(ref backend) = ctx_clone.sandbox {
-                                    match backend.check(tool.name(), &input) {
-                                        Err(reason) => ToolResult::error(reason),
-                                        Ok(()) => tool.execute(input, &ctx_clone).await,
-                                    }
-                                } else {
-                                    tool.execute(input, &ctx_clone).await
-                                };
+                            let result = if let Some(ref backend) = ctx_clone.sandbox {
+                                match backend.check(tool.name(), &input) {
+                                    Err(reason) => ToolResult::error(reason),
+                                    Ok(()) => tool.execute(input, &ctx_clone).await,
+                                }
+                            } else {
+                                tool.execute(input, &ctx_clone).await
+                            };
                             (idx, result)
                         });
                     }
@@ -1445,15 +1441,14 @@ impl Agent {
                     let mut results = Vec::with_capacity(allowed.len());
                     for pre in &allowed {
                         // GHOST-006: sandbox pre-check (main-agent sequential path).
-                        let result =
-                            if let Some(ref backend) = ctx.sandbox {
-                                match backend.check(pre.tool_arc.name(), &pre.input) {
-                                    Err(reason) => ToolResult::error(reason),
-                                    Ok(()) => pre.tool_arc.execute(pre.input.clone(), &ctx).await,
-                                }
-                            } else {
-                                pre.tool_arc.execute(pre.input.clone(), &ctx).await
-                            };
+                        let result = if let Some(ref backend) = ctx.sandbox {
+                            match backend.check(pre.tool_arc.name(), &pre.input) {
+                                Err(reason) => ToolResult::error(reason),
+                                Ok(()) => pre.tool_arc.execute(pre.input.clone(), &ctx).await,
+                            }
+                        } else {
+                            pre.tool_arc.execute(pre.input.clone(), &ctx).await
+                        };
                         results.push(result);
                     }
                     results
@@ -1939,28 +1934,28 @@ impl Agent {
                     // CRIT-06: Fire CwdChanged if a Bash tool call changed the working directory
                     if pre.tool_name == "Bash"
                         && let Some(cmd) = pre.input.get("command").and_then(|v| v.as_str())
-                            && (cmd.trim_start().starts_with("cd ")
-                                || cmd.contains(" && cd ")
-                                || cmd.contains("; cd "))
-                            {
-                                let cwd_agg = self
-                                    .fire_hook(
-                                        crate::hooks::HookEvent::CwdChanged,
-                                        serde_json::json!({
-                                            "hook_event": "CwdChanged",
-                                            "command": cmd,
-                                        }),
-                                    )
-                                    .await;
-                                // Consume watch_paths from CwdChanged hooks (REQ-HOOK-017)
-                                if !cwd_agg.watch_paths.is_empty() {
-                                    tracing::info!(
-                                        "Hook returned {} watch paths",
-                                        cwd_agg.watch_paths.len()
-                                    );
-                                    self.file_watch_manager.add_watch_paths(cwd_agg.watch_paths);
-                                }
-                            }
+                        && (cmd.trim_start().starts_with("cd ")
+                            || cmd.contains(" && cd ")
+                            || cmd.contains("; cd "))
+                    {
+                        let cwd_agg = self
+                            .fire_hook(
+                                crate::hooks::HookEvent::CwdChanged,
+                                serde_json::json!({
+                                    "hook_event": "CwdChanged",
+                                    "command": cmd,
+                                }),
+                            )
+                            .await;
+                        // Consume watch_paths from CwdChanged hooks (REQ-HOOK-017)
+                        if !cwd_agg.watch_paths.is_empty() {
+                            tracing::info!(
+                                "Hook returned {} watch paths",
+                                cwd_agg.watch_paths.len()
+                            );
+                            self.file_watch_manager.add_watch_paths(cwd_agg.watch_paths);
+                        }
+                    }
 
                     // CRIT-06: Fire WorktreeCreate/WorktreeRemove based on tool name
                     if pre.tool_name == "EnterWorktree" {
@@ -2004,31 +1999,33 @@ impl Agent {
                     }
 
                     // Wire 3: Track plan step progress on Write/Edit completions.
-                    if !result.is_error && (pre.tool_name == "Write" || pre.tool_name == "Edit")
-                        && let Some(ref plan_store) = self.plan_store {
-                            let sid = self.config.session_id.clone();
-                            if let Ok(Some(plan)) = plan_store.load_latest_plan(&sid)
-                                && (plan.status == "active" || plan.status == "draft")
-                                && let Some(ref fp) = pre.file_path
-                            {
-                                        for step in &plan.steps {
-                                            if step.status
-                                                == archon_session::plan::PlanStepStatus::Pending
-                                                && step
-                                                    .affected_files
-                                                    .iter()
-                                                    .any(|f| fp.ends_with(f) || f.ends_with(fp))
-                                                && let Err(e) = plan_store.update_step_status(
-                                                    &sid,
-                                                    &plan.id,
-                                                    step.number,
-                                                    archon_session::plan::PlanStepStatus::InProgress,
-                                                ) {
-                                                    tracing::debug!("plan step update failed: {e}");
-                                                }
-                                        }
-                                    }
+                    if !result.is_error
+                        && (pre.tool_name == "Write" || pre.tool_name == "Edit")
+                        && let Some(ref plan_store) = self.plan_store
+                    {
+                        let sid = self.config.session_id.clone();
+                        if let Ok(Some(plan)) = plan_store.load_latest_plan(&sid)
+                            && (plan.status == "active" || plan.status == "draft")
+                            && let Some(ref fp) = pre.file_path
+                        {
+                            for step in &plan.steps {
+                                if step.status == archon_session::plan::PlanStepStatus::Pending
+                                    && step
+                                        .affected_files
+                                        .iter()
+                                        .any(|f| fp.ends_with(f) || f.ends_with(fp))
+                                    && let Err(e) = plan_store.update_step_status(
+                                        &sid,
+                                        &plan.id,
+                                        step.number,
+                                        archon_session::plan::PlanStepStatus::InProgress,
+                                    )
+                                {
+                                    tracing::debug!("plan step update failed: {e}");
+                                }
                             }
+                        }
+                    }
 
                     self.state
                         .add_tool_result(&pre.tool_id, &result.content, result.is_error);
@@ -2043,18 +2040,19 @@ impl Agent {
                 // Check max_turns limit before looping
                 agentic_iterations += 1;
                 if let Some(max) = self.config.max_turns
-                    && agentic_iterations >= max {
-                        tracing::info!(
-                            "max_turns limit reached ({}/{}), stopping agentic loop",
-                            agentic_iterations,
-                            max
-                        );
-                        self.send_event(AgentEvent::Error(format!(
-                            "Agentic turn limit reached ({max} turns). Stopping."
-                        )))
-                        .await;
-                        break;
-                    }
+                    && agentic_iterations >= max
+                {
+                    tracing::info!(
+                        "max_turns limit reached ({}/{}), stopping agentic loop",
+                        agentic_iterations,
+                        max
+                    );
+                    self.send_event(AgentEvent::Error(format!(
+                        "Agentic turn limit reached ({max} turns). Stopping."
+                    )))
+                    .await;
+                    break;
+                }
 
                 // Loop back to send tool results to the API
                 continue;
@@ -2095,12 +2093,13 @@ impl Agent {
 
             // CRIT-14 (ITEM 4): Decay rule scores every 50 turns.
             if self.turn_number.is_multiple_of(50)
-                && let Some(ref graph) = self.memory {
-                    let engine = RulesEngine::new(graph.as_ref());
-                    if let Err(e) = engine.decay_scores(1.0) {
-                        tracing::warn!("rules decay_scores failed: {e}");
-                    }
+                && let Some(ref graph) = self.memory
+            {
+                let engine = RulesEngine::new(graph.as_ref());
+                if let Err(e) = engine.decay_scores(1.0) {
+                    tracing::warn!("rules decay_scores failed: {e}");
                 }
+            }
 
             // Detect user corrections and record them in the memory graph.
             if let Some(ref graph) = self.memory {
@@ -2334,9 +2333,10 @@ impl Agent {
                     && let Some(plan_ctx) = archon_session::plan::plan_context_for_compaction(
                         plan_store,
                         &self.config.session_id,
-                    ) {
-                        summary_text.push_str(&plan_ctx);
-                    }
+                    )
+                {
+                    summary_text.push_str(&plan_ctx);
+                }
 
                 match effective_strategy {
                     archon_context::boundary::CompactionStrategy::Micro => {
@@ -2387,17 +2387,18 @@ impl Agent {
             );
             // Persist snapshot so it can be restored via InnerVoice::from_snapshot on resume.
             if let Some(ref graph) = self.memory
-                && let Ok(json) = serde_json::to_string(&snapshot) {
-                    let _ = graph.store_memory(
-                        &json,
-                        "inner_voice_snapshot",
-                        archon_memory::types::MemoryType::Fact,
-                        90.0,
-                        &["inner_voice_snapshot".to_string()],
-                        "agent",
-                        "",
-                    );
-                }
+                && let Ok(json) = serde_json::to_string(&snapshot)
+            {
+                let _ = graph.store_memory(
+                    &json,
+                    "inner_voice_snapshot",
+                    archon_memory::types::MemoryType::Fact,
+                    90.0,
+                    &["inner_voice_snapshot".to_string()],
+                    "agent",
+                    "",
+                );
+            }
         }
 
         // Compute post-compaction token count
@@ -2656,14 +2657,15 @@ impl Agent {
 
         // CRIT-15 (ITEM 5): Notify inner voice of user correction.
         if let Some(ref iv) = self.inner_voice
-            && let Ok(mut iv) = iv.try_lock() {
-                iv.on_user_correction();
-                // TASK #245: keep panic-mirror in lock-step (inside the same
-                // try_lock guard, so mirror cannot drift relative to actual).
-                if let Some(ref cb) = self.inner_voice_change_callback {
-                    cb(&iv);
-                }
+            && let Ok(mut iv) = iv.try_lock()
+        {
+            iv.on_user_correction();
+            // TASK #245: keep panic-mirror in lock-step (inside the same
+            // try_lock guard, so mirror cannot drift relative to actual).
+            if let Some(ref cb) = self.inner_voice_change_callback {
+                cb(&iv);
             }
+        }
 
         // CRIT-14 (ITEM 4): Reinforce rules related to the correction.
         // When the user corrects us, reinforce the top matching rule so it
@@ -2671,9 +2673,10 @@ impl Agent {
         let engine = RulesEngine::new(graph.as_ref());
         if let Ok(rules) = engine.get_rules_sorted()
             && let Some(top) = rules.first()
-                && let Err(e) = engine.reinforce_rule(&top.id) {
-                    tracing::debug!("reinforce_rule failed: {e}");
-                }
+            && let Err(e) = engine.reinforce_rule(&top.id)
+        {
+            tracing::debug!("reinforce_rule failed: {e}");
+        }
     }
 
     /// GAP 5: Trigger memory extraction in the background.
@@ -2861,15 +2864,16 @@ fn parse_plan_from_text(text: &str) -> archon_session::plan::PlanDocument {
                     trimmed.strip_prefix("- ").map(|s| s.trim())
                 };
                 if let Some(desc) = desc
-                    && !desc.is_empty() {
-                        step_num += 1;
-                        steps.push(PlanStep {
-                            number: step_num,
-                            description: desc.to_string(),
-                            affected_files: Vec::new(),
-                            status: PlanStepStatus::Pending,
-                        });
-                    }
+                    && !desc.is_empty()
+                {
+                    step_num += 1;
+                    steps.push(PlanStep {
+                        number: step_num,
+                        description: desc.to_string(),
+                        affected_files: Vec::new(),
+                        status: PlanStepStatus::Pending,
+                    });
+                }
             }
             Section::Risks => {
                 if let Some(r) = trimmed.strip_prefix("- ") {

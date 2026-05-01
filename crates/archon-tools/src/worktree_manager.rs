@@ -199,25 +199,24 @@ impl WorktreeManager {
             }
             let meta_path = path.join(".archon-worktree.json");
             if let Ok(contents) = fs::read_to_string(&meta_path)
-                && let Ok(meta) = serde_json::from_str::<serde_json::Value>(&contents) {
-                    let info = WorktreeInfo {
-                        session_id: meta["session_id"].as_str().unwrap_or_default().to_string(),
-                        branch_name: meta["branch_name"].as_str().unwrap_or_default().to_string(),
-                        worktree_path: path.clone(),
-                        original_dir: PathBuf::from(
-                            meta["original_dir"].as_str().unwrap_or_default(),
-                        ),
-                        original_branch: meta["original_branch"]
-                            .as_str()
-                            .unwrap_or_default()
-                            .to_string(),
-                        created_at: meta["created_at"]
-                            .as_str()
-                            .and_then(|s| s.parse::<DateTime<Utc>>().ok())
-                            .unwrap_or_else(Utc::now),
-                    };
-                    result.push(info);
-                }
+                && let Ok(meta) = serde_json::from_str::<serde_json::Value>(&contents)
+            {
+                let info = WorktreeInfo {
+                    session_id: meta["session_id"].as_str().unwrap_or_default().to_string(),
+                    branch_name: meta["branch_name"].as_str().unwrap_or_default().to_string(),
+                    worktree_path: path.clone(),
+                    original_dir: PathBuf::from(meta["original_dir"].as_str().unwrap_or_default()),
+                    original_branch: meta["original_branch"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .to_string(),
+                    created_at: meta["created_at"]
+                        .as_str()
+                        .and_then(|s| s.parse::<DateTime<Utc>>().ok())
+                        .unwrap_or_else(Utc::now),
+                };
+                result.push(info);
+            }
         }
 
         result
@@ -257,9 +256,10 @@ impl WorktreeManager {
                 }
                 // Ignore our own metadata file
                 if let Some(path) = s.path()
-                    && path == ".archon-worktree.json" {
-                        return false;
-                    }
+                    && path == ".archon-worktree.json"
+                {
+                    return false;
+                }
                 true
             });
 

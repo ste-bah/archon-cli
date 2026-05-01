@@ -213,9 +213,10 @@ fn substitute_string(
 
             // File-ref preservation: return as-is.
             if let Value::Object(map) = &resolved
-                && map.contains_key("__archon_file_ref__") {
-                    return Ok(resolved);
-                }
+                && map.contains_key("__archon_file_ref__")
+            {
+                return Ok(resolved);
+            }
 
             return Ok(resolved);
         }

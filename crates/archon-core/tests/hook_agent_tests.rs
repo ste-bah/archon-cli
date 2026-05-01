@@ -31,6 +31,7 @@ fn agent_hook_config(command: &str, timeout: Option<u32>) -> HookConfig {
         status_message: None,
         headers: Default::default(),
         allowed_env_vars: Vec::new(),
+        enabled: true,
     }
 }
 
@@ -46,6 +47,7 @@ fn command_hook_config(command: &str) -> HookConfig {
         status_message: None,
         headers: Default::default(),
         allowed_env_vars: Vec::new(),
+        enabled: true,
     }
 }
 

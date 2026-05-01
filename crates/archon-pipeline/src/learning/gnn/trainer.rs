@@ -319,11 +319,10 @@ impl GnnTrainer {
             && no_improvement_epochs >= self.config.early_stopping_patience;
 
         // Restore best-epoch weights when early stopping fired
-        if stopped_early
-            && let Some((l1, l2, l3)) = best_epoch_weights.take() {
-                enhancer.set_weights(l1, l2, l3);
-                enhancer.clear_cache();
-            }
+        if stopped_early && let Some((l1, l2, l3)) = best_epoch_weights.take() {
+            enhancer.set_weights(l1, l2, l3);
+            enhancer.clear_cache();
+        }
 
         enhancer.clear_cache();
         let final_embeddings = Self::forward_all(enhancer, samples);
@@ -340,9 +339,10 @@ impl GnnTrainer {
                     initial_loss, final_loss, weight_version_before
                 );
                 if let Some(ref ws) = self.weight_store
-                    && weight_version_before > 0 {
-                        let _ = ws.load_version(weight_version_before);
-                    }
+                    && weight_version_before > 0
+                {
+                    let _ = ws.load_version(weight_version_before);
+                }
                 true
             } else if final_loss < initial_loss {
                 if let Some(ref ws) = self.weight_store {
@@ -505,41 +505,42 @@ impl GnnTrainer {
 
             // Backprop through GNN for anchor embedding
             if let Some(caches) = activations.get(&triplet.anchor)
-                && caches.len() == 3 {
-                    let (l1, l2, l3) = enhancer.get_weights();
-                    let grads = backprop::full_backward(
-                        caches,
-                        [&l1, &l2, &l3],
-                        &loss_result.grad_anchor,
-                        [
-                            ActivationType::LeakyRelu,
-                            ActivationType::LeakyRelu,
-                            ActivationType::Tanh,
-                        ],
-                    );
+                && caches.len() == 3
+            {
+                let (l1, l2, l3) = enhancer.get_weights();
+                let grads = backprop::full_backward(
+                    caches,
+                    [&l1, &l2, &l3],
+                    &loss_result.grad_anchor,
+                    [
+                        ActivationType::LeakyRelu,
+                        ActivationType::LeakyRelu,
+                        ActivationType::Tanh,
+                    ],
+                );
 
-                    let layer_grads: Vec<(Vec<Vec<f32>>, Vec<f32>)> =
-                        grads.into_iter().map(|g| (g.dw, g.db)).collect();
+                let layer_grads: Vec<(Vec<Vec<f32>>, Vec<f32>)> =
+                    grads.into_iter().map(|g| (g.dw, g.db)).collect();
 
-                    // Accumulate
-                    match &mut accumulated_grads {
-                        Some(acc) => {
-                            for (i, (dw, db)) in layer_grads.iter().enumerate() {
-                                for (row_a, row_g) in acc[i].0.iter_mut().zip(dw.iter()) {
-                                    for (a, g) in row_a.iter_mut().zip(row_g.iter()) {
-                                        *a += *g;
-                                    }
-                                }
-                                for (a, g) in acc[i].1.iter_mut().zip(db.iter()) {
+                // Accumulate
+                match &mut accumulated_grads {
+                    Some(acc) => {
+                        for (i, (dw, db)) in layer_grads.iter().enumerate() {
+                            for (row_a, row_g) in acc[i].0.iter_mut().zip(dw.iter()) {
+                                for (a, g) in row_a.iter_mut().zip(row_g.iter()) {
                                     *a += *g;
                                 }
                             }
-                        }
-                        None => {
-                            accumulated_grads = Some(layer_grads);
+                            for (a, g) in acc[i].1.iter_mut().zip(db.iter()) {
+                                *a += *g;
+                            }
                         }
                     }
+                    None => {
+                        accumulated_grads = Some(layer_grads);
+                    }
                 }
+            }
         }
 
         let batch_size = batch.len() as f32;

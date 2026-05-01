@@ -3,8 +3,7 @@
 //! All functions are pure compute on Vec<f32>. No async, no alloc beyond results.
 
 /// Activation function types.
-#[derive(Debug, Clone, Copy, PartialEq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum ActivationType {
     #[default]
     Relu,
@@ -12,7 +11,6 @@ pub enum ActivationType {
     Sigmoid,
     LeakyRelu,
 }
-
 
 #[allow(clippy::needless_range_loop)]
 /// Element-wise vector addition. Result length is max(a.len(), b.len()).

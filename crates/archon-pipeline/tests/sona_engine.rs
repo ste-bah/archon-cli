@@ -5,8 +5,9 @@
 //! step capture, weight math accuracy.
 
 use archon_pipeline::learning::sona::{
-    DriftStatus, FeedbackInput, SonaConfig, SonaEngine, StepCaptureService, calculate_gradient, calculate_reward,
-    calculate_weight_update, cosine_similarity, crc32_checksum, update_fisher_information,
+    DriftStatus, FeedbackInput, SonaConfig, SonaEngine, StepCaptureService, calculate_gradient,
+    calculate_reward, calculate_weight_update, cosine_similarity, crc32_checksum,
+    update_fisher_information,
 };
 
 // ---------------------------------------------------------------------------

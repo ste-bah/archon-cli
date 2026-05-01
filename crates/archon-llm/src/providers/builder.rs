@@ -45,7 +45,6 @@ use crate::secrets::ApiKey;
 use super::descriptor::{AuthFlavor, CompatKind, ProviderDescriptor};
 use super::error::ProviderError;
 use super::local::LocalProvider;
-use super::native_gap::{AzureProvider, CohereProvider, CopilotProvider, MinimaxProvider};
 use super::openai::OpenAiProvider;
 use super::openai_compat::OpenAiCompatProvider;
 
@@ -98,9 +97,8 @@ pub fn build_llm_provider_with_policy(
 }
 
 /// The **one** allowed `match descriptor.id` site in the whole providers
-/// module. Native impls are legitimately different concrete types (5
-/// hand-rolled + 4 TASK-AGS-704 stubs) and cannot be unified under a
-/// single parametric constructor.
+/// module. Native impls are legitimately different concrete types and
+/// cannot be unified under a single parametric constructor.
 ///
 /// Validation Criterion 8: `grep -c 'match.*descriptor.id'` on this file
 /// MUST return exactly 1 — that is this match, right below.
@@ -116,12 +114,6 @@ fn dispatch_native(
     api_key: ApiKey,
 ) -> Result<Arc<dyn LlmProvider>, ProviderError> {
     match descriptor.id.as_str() {
-        // --- 4 TASK-AGS-704 stubs: uniform (descriptor, http, api_key) ---
-        "azure" => Ok(Arc::new(AzureProvider::new(descriptor, http, api_key))),
-        "cohere" => Ok(Arc::new(CohereProvider::new(descriptor, http, api_key))),
-        "copilot" => Ok(Arc::new(CopilotProvider::new(descriptor, http, api_key))),
-        "minimax" => Ok(Arc::new(MinimaxProvider::new(descriptor, http, api_key))),
-
         // --- openai: hand-rolled native, simplest constructor ---
         "openai" => {
             let default_model = descriptor.default_model.clone();

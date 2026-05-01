@@ -28,6 +28,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::RwLock;
 use std::sync::atomic::AtomicBool;
 
 use archon_tui::app::TuiEvent;
@@ -1005,6 +1006,21 @@ pub struct CommandContext {
     /// GHOST-006: shared sandbox flag, cloned from SlashCommandContext.
     /// Toggled by /sandbox on/off; read by both tool-execution dispatch paths.
     pub(crate) sandbox_flag: Option<Arc<std::sync::atomic::AtomicBool>>,
+    /// GHOST-004: shared hook registry for /hooks enable/disable/reload.
+    /// Cloned from SlashCommandContext via DIRECT pattern. The handler calls
+    /// `set_enabled` / `reload` through this Arc.
+    pub(crate) hook_registry: Option<Arc<archon_core::hooks::HookRegistry>>,
+    /// GHOST-005: shared plugin enable/disable state. Threaded from
+    /// SlashCommandContext via the DIRECT pattern. Keyed by plugin name.
+    pub(crate) plugin_enable_state: Option<Arc<RwLock<HashMap<String, bool>>>>,
+    /// GHOST-007: late-init slot for AgentHandle (cancel token firing).
+    /// Populated inside run_session_loop; None means no session loop active.
+    pub(crate) cancel_handle:
+        Option<Arc<std::sync::Mutex<Option<Arc<crate::agent_handle::AgentHandle>>>>>,
+    /// GHOST-007: AgentDispatcher for is_busy() + cancel_current(). Wrapped
+    /// in std::sync::Mutex because cancel_current() takes &mut self and
+    /// CommandHandler::execute is sync.
+    pub(crate) agent_dispatcher: Option<Arc<std::sync::Mutex<archon_tui::AgentDispatcher>>>,
 }
 
 // TASK-AGS-POST-6-TRY-SEND: wraps `tui_tx.try_send` at every handler
@@ -1811,10 +1827,10 @@ pub(crate) fn default_registry() -> Registry {
         "extra-usage",
         Arc::new(crate::command::extra_usage::ExtraUsageHandler),
     );
-    // TASK-#210 SLASH-PROVIDERS: /providers lists 40 registered LLM
-    // providers (9 native + 31 OpenAI-compat) by reading the static
+    // TASK-#210 SLASH-PROVIDERS: /providers lists 36 registered LLM
+    // providers (5 native + 31 OpenAI-compat) by reading the static
     // archon_llm::providers::{list_native, list_compat} registries.
-    // No CommandContext field needed — registries are static.
+    // GHOST-003: 4 stub providers removed. No CommandContext field needed.
     b.insert_primary(
         "providers",
         Arc::new(crate::command::providers::ProvidersHandler),
@@ -3032,6 +3048,10 @@ mod tests {
             // Test fixture — emit() doesn't touch this field.
             auto_trainer: None,
             sandbox_flag: None,
+            hook_registry: None,
+            plugin_enable_state: None,
+            cancel_handle: None,
+            agent_dispatcher: None,
         }
     }
 

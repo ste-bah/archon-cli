@@ -45,6 +45,7 @@ fn make_registry_with_type(
                 status_message: None,
                 headers: Default::default(),
                 allowed_env_vars: Default::default(),
+                enabled: true,
             }],
         }],
         None,
@@ -67,6 +68,7 @@ fn make_multi_hook_registry(event: HookEvent, hooks: Vec<(&str, HookCommandType)
             status_message: None,
             headers: Default::default(),
             allowed_env_vars: Default::default(),
+            enabled: true,
         })
         .collect();
     registry.register_matchers(
@@ -132,6 +134,7 @@ async fn test_phase2_http_hook_end_to_end() {
         status_message: None,
         headers: Default::default(),
         allowed_env_vars: Default::default(),
+        enabled: true,
     };
 
     let result =

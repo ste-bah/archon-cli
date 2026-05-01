@@ -58,17 +58,20 @@ impl TaskStateStore for InMemoryTaskStateStore {
             .map(|r| r.value().clone())
             .filter(|snap| {
                 if let Some(state) = &filter.state
-                    && snap.state != *state {
-                        return false;
-                    }
+                    && snap.state != *state
+                {
+                    return false;
+                }
                 if let Some(agent) = &filter.agent_name
-                    && snap.agent_name != *agent {
-                        return false;
-                    }
+                    && snap.agent_name != *agent
+                {
+                    return false;
+                }
                 if let Some(since) = &filter.since
-                    && snap.created_at < *since {
-                        return false;
-                    }
+                    && snap.created_at < *since
+                {
+                    return false;
+                }
                 true
             })
             .collect();
@@ -215,11 +218,8 @@ impl SqliteTaskStateStore {
 
     fn write_snapshot_to_disk(&self, task: &Task) -> Result<(), TaskError> {
         let snapshot = TaskSnapshot::from(task);
-        let json_bytes = serde_json::to_vec_pretty(&snapshot).map_err(|e| {
-            TaskError::Io(std::io::Error::other(
-                e.to_string(),
-            ))
-        })?;
+        let json_bytes = serde_json::to_vec_pretty(&snapshot)
+            .map_err(|e| TaskError::Io(std::io::Error::other(e.to_string())))?;
 
         // CRC32 header.
         let mut hasher = Hasher::new();
@@ -276,9 +276,7 @@ impl SqliteTaskStateStore {
 
 /// Helper to convert a `sqlite::Error` into a `TaskError::Io`.
 fn sqlite_err(e: sqlite::Error) -> TaskError {
-    TaskError::Io(std::io::Error::other(
-        e.to_string(),
-    ))
+    TaskError::Io(std::io::Error::other(e.to_string()))
 }
 
 impl TaskStateStore for SqliteTaskStateStore {
@@ -296,17 +294,20 @@ impl TaskStateStore for SqliteTaskStateStore {
             .map(|r| r.value().clone())
             .filter(|snap| {
                 if let Some(state) = &filter.state
-                    && snap.state != *state {
-                        return false;
-                    }
+                    && snap.state != *state
+                {
+                    return false;
+                }
                 if let Some(agent) = &filter.agent_name
-                    && snap.agent_name != *agent {
-                        return false;
-                    }
+                    && snap.agent_name != *agent
+                {
+                    return false;
+                }
                 if let Some(since) = &filter.since
-                    && snap.created_at < *since {
-                        return false;
-                    }
+                    && snap.created_at < *since
+                {
+                    return false;
+                }
                 true
             })
             .collect();

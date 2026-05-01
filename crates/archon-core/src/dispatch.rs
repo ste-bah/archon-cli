@@ -87,9 +87,10 @@ impl ToolRegistry {
     ) -> ToolResult {
         // GHOST-006: sandbox pre-check (subagent path — BOTH dispatch sites must gate).
         if let Some(ref backend) = ctx.sandbox
-            && let Err(reason) = backend.check(tool_name, &input) {
-                return ToolResult::error(reason);
-            }
+            && let Err(reason) = backend.check(tool_name, &input)
+        {
+            return ToolResult::error(reason);
+        }
 
         // Check if tool is allowed in current mode
         if !is_tool_allowed_in_mode(tool_name, ctx.mode) {

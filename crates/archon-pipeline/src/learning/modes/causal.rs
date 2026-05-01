@@ -33,15 +33,16 @@ impl CausalEngine {
                 continue;
             }
             if let Some(rest) = trimmed.strip_prefix("cause:")
-                && let Some((cause, effect)) = rest.split_once("->") {
-                    let effect = effect.trim();
-                    let effect = effect.strip_prefix("effect:").unwrap_or(effect);
-                    links.push(CausalLink {
-                        cause: cause.trim().to_string(),
-                        effect: effect.trim().to_string(),
-                    });
-                    continue;
-                }
+                && let Some((cause, effect)) = rest.split_once("->")
+            {
+                let effect = effect.trim();
+                let effect = effect.strip_prefix("effect:").unwrap_or(effect);
+                links.push(CausalLink {
+                    cause: cause.trim().to_string(),
+                    effect: effect.trim().to_string(),
+                });
+                continue;
+            }
             if let Some((cause, effect)) = trimmed.split_once(" causes ") {
                 links.push(CausalLink {
                     cause: cause.trim().to_string(),

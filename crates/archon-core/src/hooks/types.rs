@@ -97,6 +97,14 @@ pub struct HookConfig {
     /// Env var names allowed for interpolation in header values.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub allowed_env_vars: Vec<String>,
+    /// Whether this hook is enabled. Default `true`. Can be overridden per-id
+    /// via `[overrides]` in `.archon/hooks.local.toml`.
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
+}
+
+fn default_enabled() -> bool {
+    true
 }
 
 // ---------------------------------------------------------------------------
@@ -355,24 +363,22 @@ impl AggregatedHookResult {
 
         // permission_behavior: policy wins; non-policy cannot Allow blocked tools (REQ-HOOK-004a)
         if let Some(ref pb) = result.permission_behavior
-            && *pb != PermissionBehavior::Passthrough {
-                let is_policy = result.source_authority == Some(SourceAuthority::Policy);
-                match pb {
-                    PermissionBehavior::Allow if !is_policy => {
-                        // Non-policy hook cannot grant Allow — silently dropped
-                        tracing::warn!(
-                            "non-policy hook attempted permission_behavior=allow; dropped"
-                        );
-                    }
-                    _ => {
-                        self.permission_behavior = Some(pb.clone());
-                        if result.permission_decision_reason.is_some() {
-                            self.permission_decision_reason =
-                                result.permission_decision_reason.clone();
-                        }
+            && *pb != PermissionBehavior::Passthrough
+        {
+            let is_policy = result.source_authority == Some(SourceAuthority::Policy);
+            match pb {
+                PermissionBehavior::Allow if !is_policy => {
+                    // Non-policy hook cannot grant Allow — silently dropped
+                    tracing::warn!("non-policy hook attempted permission_behavior=allow; dropped");
+                }
+                _ => {
+                    self.permission_behavior = Some(pb.clone());
+                    if result.permission_decision_reason.is_some() {
+                        self.permission_decision_reason = result.permission_decision_reason.clone();
                     }
                 }
             }
+        }
 
         // prevent_continuation: any true wins
         if result.prevent_continuation == Some(true) {

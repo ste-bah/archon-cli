@@ -46,11 +46,7 @@ pub fn walk_agents_dir(root: &Path) -> Result<Vec<DiscoveredFile>, DiscoveryErro
                 .unwrap_or(false)
         })
     {
-        let entry = entry.map_err(|e| {
-            DiscoveryError::Io(std::io::Error::other(
-                e.to_string(),
-            ))
-        })?;
+        let entry = entry.map_err(|e| DiscoveryError::Io(std::io::Error::other(e.to_string())))?;
 
         // Only process files, not directories
         if !entry.file_type().is_file() {

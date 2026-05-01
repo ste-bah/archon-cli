@@ -18,8 +18,7 @@ pub enum PermissionLevel {
 // Agent mode
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum AgentMode {
     /// Normal mode -- all tools available.
     #[default]
@@ -27,7 +26,6 @@ pub enum AgentMode {
     /// Plan mode -- only read-only tools allowed.
     Plan,
 }
-
 
 // ---------------------------------------------------------------------------
 // Tool context -- passed to every tool execution

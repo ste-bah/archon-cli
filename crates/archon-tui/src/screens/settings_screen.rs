@@ -74,10 +74,11 @@ impl SettingsScreen {
     pub fn toggle_selected(&mut self) {
         let idx = self.list.selected_index();
         if idx < self.fields.len()
-            && let SettingField::Toggle { ref mut value, .. } = self.fields[idx] {
-                *value = !*value;
-                self.list.set_items(self.fields.clone());
-            }
+            && let SettingField::Toggle { ref mut value, .. } = self.fields[idx]
+        {
+            *value = !*value;
+            self.list.set_items(self.fields.clone());
+        }
     }
 
     pub fn move_up(&mut self) {

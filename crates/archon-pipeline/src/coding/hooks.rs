@@ -118,38 +118,39 @@ impl PreToolUseHook {
 
         // 3. Bash: check dangerous command patterns (any phase)
         if tool_name == "Bash"
-            && let Some(cmd) = tool_input.get("command").and_then(|v| v.as_str()) {
-                for pattern in &self.dangerous_patterns {
-                    if pattern.is_match(cmd) {
-                        return HookDecision::Block {
-                            reason: format!(
-                                "Dangerous command blocked: matches pattern '{}'",
-                                pattern.as_str()
-                            ),
-                        };
-                    }
+            && let Some(cmd) = tool_input.get("command").and_then(|v| v.as_str())
+        {
+            for pattern in &self.dangerous_patterns {
+                if pattern.is_match(cmd) {
+                    return HookDecision::Block {
+                        reason: format!(
+                            "Dangerous command blocked: matches pattern '{}'",
+                            pattern.as_str()
+                        ),
+                    };
                 }
             }
+        }
 
         // 4. Write/Edit: check file scope
         if matches!(tool_name, "Write" | "Edit")
             && let Some(file_path) = tool_input.get("file_path").and_then(|v| v.as_str())
-                && !self.affected_files.is_empty()
-                    && !self.affected_files.iter().any(|af| file_path.contains(af))
-                {
-                    if self.current_phase <= 3 {
-                        return HookDecision::Block {
-                            reason: format!("File '{}' is outside affected_files scope", file_path),
-                        };
-                    } else {
-                        return HookDecision::Warn {
-                            message: format!(
-                                "WARNING: Writing to '{}' which is outside the contract's affected_files list",
-                                file_path
-                            ),
-                        };
-                    }
-                }
+            && !self.affected_files.is_empty()
+            && !self.affected_files.iter().any(|af| file_path.contains(af))
+        {
+            if self.current_phase <= 3 {
+                return HookDecision::Block {
+                    reason: format!("File '{}' is outside affected_files scope", file_path),
+                };
+            } else {
+                return HookDecision::Warn {
+                    message: format!(
+                        "WARNING: Writing to '{}' which is outside the contract's affected_files list",
+                        file_path
+                    ),
+                };
+            }
+        }
 
         HookDecision::Allow
     }

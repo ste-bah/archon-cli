@@ -227,9 +227,10 @@ impl PermissionStore for RuntimePermissionStore {
             let rules_set: HashSet<&str> = rules.iter().map(|s| s.as_str()).collect();
             Self::modify_settings_file(path, |json| {
                 if let Some(perms) = json.get_mut("permissions")
-                    && let Some(arr) = perms.get_mut("rules").and_then(|v| v.as_array_mut()) {
-                        arr.retain(|v| !v.as_str().map(|s| rules_set.contains(s)).unwrap_or(false));
-                    }
+                    && let Some(arr) = perms.get_mut("rules").and_then(|v| v.as_array_mut())
+                {
+                    arr.retain(|v| !v.as_str().map(|s| rules_set.contains(s)).unwrap_or(false));
+                }
             })
         } else {
             let mut session = self.session_rules.write().map_err(|e| e.to_string())?;
@@ -304,9 +305,10 @@ impl PermissionStore for RuntimePermissionStore {
             let dirs_set: HashSet<&str> = dirs.iter().map(|s| s.as_str()).collect();
             Self::modify_settings_file(path, |json| {
                 if let Some(perms) = json.get_mut("permissions")
-                    && let Some(arr) = perms.get_mut("directories").and_then(|v| v.as_array_mut()) {
-                        arr.retain(|v| !v.as_str().map(|s| dirs_set.contains(s)).unwrap_or(false));
-                    }
+                    && let Some(arr) = perms.get_mut("directories").and_then(|v| v.as_array_mut())
+                {
+                    arr.retain(|v| !v.as_str().map(|s| dirs_set.contains(s)).unwrap_or(false));
+                }
             })
         } else {
             let mut session_dirs = self

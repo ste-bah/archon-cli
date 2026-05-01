@@ -25,10 +25,9 @@ impl CommandHandler for SandboxHandler {
     fn execute(&self, ctx: &mut CommandContext, args: &[String]) -> anyhow::Result<()> {
         use std::sync::atomic::Ordering;
 
-        let flag = ctx
-            .sandbox_flag
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("sandbox flag not initialised — session boot wiring gap"))?;
+        let flag = ctx.sandbox_flag.as_ref().ok_or_else(|| {
+            anyhow::anyhow!("sandbox flag not initialised — session boot wiring gap")
+        })?;
 
         let cmd = args.first().map(|s| s.as_str().trim()).unwrap_or("status");
         let message = match cmd {

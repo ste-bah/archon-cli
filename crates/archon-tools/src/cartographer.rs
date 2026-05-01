@@ -170,10 +170,11 @@ fn op_scan(input: &serde_json::Value, ctx: &ToolContext) -> ToolResult {
             // Skip if mtime unchanged vs cache.
             if let Some(cached_mtime_map) = cached_mtimes
                 && let Some(&cached_m) = cached_mtime_map.get(rel_path)
-                    && cached_m == current_mtime {
-                        skipped_cached += 1;
-                        return;
-                    }
+                && cached_m == current_mtime
+            {
+                skipped_cached += 1;
+                return;
+            }
 
             let source = match std::fs::read_to_string(abs_path) {
                 Ok(s) => s,

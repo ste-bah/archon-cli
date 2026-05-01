@@ -309,15 +309,17 @@ impl PipelineFacade for ResearchFacade {
         // Store output at agent's primary memory key — persisted via
         // CozoDB + HNSW with tags per REQ-RESEARCH-008.
         if let Some(research_agent) = get_agent_by_key(&agent.key)
-            && let Some(&primary_key) = research_agent.memory_keys.first() {
-                self.store_memory(primary_key, result.output.clone());
-            }
+            && let Some(&primary_key) = research_agent.memory_keys.first()
+        {
+            self.store_memory(primary_key, result.output.clone());
+        }
 
         // Feed quality to PhD learning subsystem
         if let Some(ref learning_mutex) = self.learning
-            && let Ok(mut learning) = learning_mutex.lock() {
-                learning.record_citation_quality(&agent.key, quality.overall);
-            }
+            && let Ok(mut learning) = learning_mutex.lock()
+        {
+            learning.record_citation_quality(&agent.key, quality.overall);
+        }
 
         // Emit per-agent progress to TUI if sender is attached.
         if let Some(ref tx) = *self.tui_sender.lock().expect("tui_sender lock") {

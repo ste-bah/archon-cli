@@ -32,19 +32,21 @@ impl LspConfig {
     pub fn load(project_root: &Path) -> Self {
         let new_path = project_root.join(".archon").join("lsp-config.json");
         if let Ok(s) = std::fs::read_to_string(&new_path)
-            && let Ok(cfg) = serde_json::from_str(&s) {
-                return cfg;
-            }
+            && let Ok(cfg) = serde_json::from_str(&s)
+        {
+            return cfg;
+        }
         let old_path = project_root.join(".claude").join("lsp-config.json");
         if let Ok(s) = std::fs::read_to_string(&old_path)
-            && let Ok(cfg) = serde_json::from_str(&s) {
-                tracing::warn!(
-                    "Loading from deprecated path {}. Rename to {} to suppress this warning.",
-                    old_path.display(),
-                    new_path.display()
-                );
-                return cfg;
-            }
+            && let Ok(cfg) = serde_json::from_str(&s)
+        {
+            tracing::warn!(
+                "Loading from deprecated path {}. Rename to {} to suppress this warning.",
+                old_path.display(),
+                new_path.display()
+            );
+            return cfg;
+        }
         Self::default()
     }
 }
@@ -95,10 +97,11 @@ impl LspServerManager {
     pub fn detect_language_server(&self) -> Option<(String, Vec<String>)> {
         // 1. Custom config overrides
         if let Some(server) = self.config.servers.first()
-            && let Some(cmd) = &server.command {
-                let args = server.args.clone().unwrap_or_default();
-                return Some((cmd.clone(), args));
-            }
+            && let Some(cmd) = &server.command
+        {
+            let args = server.args.clone().unwrap_or_default();
+            return Some((cmd.clone(), args));
+        }
 
         // 2. Cargo.toml → rust-analyzer
         if self.project_root.join("Cargo.toml").exists() {

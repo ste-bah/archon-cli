@@ -88,6 +88,9 @@ pub struct CtxBuilder {
     cozo_db: Option<Arc<cozo::DbInstance>>,
     // GHOST-006: sandbox flag for /sandbox handler tests.
     sandbox_flag: Option<Arc<AtomicBool>>,
+    // GHOST-007: cancel handle + dispatcher for /cancel handler tests.
+    cancel_handle: Option<Arc<std::sync::Mutex<Option<Arc<crate::agent_handle::AgentHandle>>>>>,
+    agent_dispatcher: Option<Arc<std::sync::Mutex<archon_tui::AgentDispatcher>>>,
 }
 
 #[allow(dead_code)]
@@ -125,13 +128,12 @@ impl CtxBuilder {
             agent_registry: None,
             cozo_db: None,
             sandbox_flag: None,
+            cancel_handle: None,
+            agent_dispatcher: None,
         }
     }
 
-    pub fn with_status_snapshot(
-        mut self,
-        s: crate::command::status::StatusSnapshot,
-    ) -> Self {
+    pub fn with_status_snapshot(mut self, s: crate::command::status::StatusSnapshot) -> Self {
         self.status_snapshot = Some(s);
         self
     }
@@ -162,10 +164,7 @@ impl CtxBuilder {
         self
     }
 
-    pub fn with_cost_snapshot_opt(
-        mut self,
-        s: Option<crate::command::cost::CostSnapshot>,
-    ) -> Self {
+    pub fn with_cost_snapshot_opt(mut self, s: Option<crate::command::cost::CostSnapshot>) -> Self {
         self.cost_snapshot = s;
         self
     }
@@ -175,10 +174,7 @@ impl CtxBuilder {
         self
     }
 
-    pub fn with_mcp_snapshot_opt(
-        mut self,
-        s: Option<crate::command::mcp::McpSnapshot>,
-    ) -> Self {
+    pub fn with_mcp_snapshot_opt(mut self, s: Option<crate::command::mcp::McpSnapshot>) -> Self {
         self.mcp_snapshot = s;
         self
     }
@@ -214,10 +210,7 @@ impl CtxBuilder {
         self
     }
 
-    pub fn with_memory_opt(
-        mut self,
-        memory: Option<Arc<dyn archon_memory::MemoryTrait>>,
-    ) -> Self {
+    pub fn with_memory_opt(mut self, memory: Option<Arc<dyn archon_memory::MemoryTrait>>) -> Self {
         self.memory = memory;
         self
     }
@@ -255,18 +248,12 @@ impl CtxBuilder {
         self
     }
 
-    pub fn with_skill_registry(
-        mut self,
-        reg: Arc<archon_core::skills::SkillRegistry>,
-    ) -> Self {
+    pub fn with_skill_registry(mut self, reg: Arc<archon_core::skills::SkillRegistry>) -> Self {
         self.skill_registry = Some(reg);
         self
     }
 
-    pub fn with_denial_snapshot(
-        mut self,
-        s: crate::command::denials::DenialSnapshot,
-    ) -> Self {
+    pub fn with_denial_snapshot(mut self, s: crate::command::denials::DenialSnapshot) -> Self {
         self.denial_snapshot = Some(s);
         self
     }
@@ -279,10 +266,7 @@ impl CtxBuilder {
         self
     }
 
-    pub fn with_effort_snapshot(
-        mut self,
-        s: crate::command::effort::EffortSnapshot,
-    ) -> Self {
+    pub fn with_effort_snapshot(mut self, s: crate::command::effort::EffortSnapshot) -> Self {
         self.effort_snapshot = Some(s);
         self
     }
@@ -316,18 +300,12 @@ impl CtxBuilder {
         self
     }
 
-    pub fn with_copy_snapshot_opt(
-        mut self,
-        s: Option<crate::command::copy::CopySnapshot>,
-    ) -> Self {
+    pub fn with_copy_snapshot_opt(mut self, s: Option<crate::command::copy::CopySnapshot>) -> Self {
         self.copy_snapshot = s;
         self
     }
 
-    pub fn with_doctor_snapshot(
-        mut self,
-        s: crate::command::doctor::DoctorSnapshot,
-    ) -> Self {
+    pub fn with_doctor_snapshot(mut self, s: crate::command::doctor::DoctorSnapshot) -> Self {
         self.doctor_snapshot = Some(s);
         self
     }
@@ -373,10 +351,7 @@ impl CtxBuilder {
         self
     }
 
-    pub fn with_pending_effect(
-        mut self,
-        e: crate::command::registry::CommandEffect,
-    ) -> Self {
+    pub fn with_pending_effect(mut self, e: crate::command::registry::CommandEffect) -> Self {
         self.pending_effect = Some(e);
         self
     }
@@ -453,6 +428,10 @@ impl CtxBuilder {
                 leann: None,
                 cozo_db: self.cozo_db.clone(),
                 sandbox_flag: self.sandbox_flag,
+                hook_registry: None,
+                plugin_enable_state: None,
+                cancel_handle: self.cancel_handle,
+                agent_dispatcher: self.agent_dispatcher,
                 // Reference: archon-pipeline/src/learning/gnn/auto_trainer.rs.
                 // Tests don't need a real auto-trainer; learning_status's
                 // status branch falls back to config-only display when None.
@@ -585,9 +564,7 @@ pub fn make_bug_ctx() -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
 /// `Arc<AtomicBool>`; the helper itself never reads or stores.
 ///
 /// V2: thin wrapper over `CtxBuilder` (deferred cleanup).
-pub fn make_thinking_ctx(
-    initial: bool,
-) -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
+pub fn make_thinking_ctx(initial: bool) -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
     CtxBuilder::new()
         .with_show_thinking(Arc::new(AtomicBool::new(initial)))
         .build()

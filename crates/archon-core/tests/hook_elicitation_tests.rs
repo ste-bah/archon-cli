@@ -164,6 +164,7 @@ fn make_elicitation_registry(event: HookEvent, cmd: &str) -> HookRegistry {
                 status_message: None,
                 headers: Default::default(),
                 allowed_env_vars: Default::default(),
+                enabled: true,
             }],
         }],
         None,

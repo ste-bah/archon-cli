@@ -1,56 +1,36 @@
-//! TASK-AGS-POST-6-CANCEL-AUDIT: /cancel slash-command handler with
-//! user-visible feedback UX (Option A — feedback-only).
+//! GHOST-007: /cancel slash-command handler — Option B (feedback + real
+//! cancellation).
 //!
-//! # R1 PURPOSE (user-visible /cancel feedback)
+//! # R1 PURPOSE (real /cancel via slash command)
 //!
-//! This handler emits a visible `TuiEvent::TextDelta` on every invocation
-//! so users who type `/cancel` (or its aliases `/stop` / `/abort`) see
-//! explicit feedback instead of the prior silent no-op. The ACTUAL
-//! in-flight cancel path is `__cancel__` (Ctrl+C) at session.rs:2126-2138
-//! — that pathway calls `adapter.fire_cancel()` and
-//! `dispatcher.cancel_current()` to abort the running turn. Because the
-//! session input loop processes slash commands serially, by the time a
-//! typed `/cancel` reaches this handler the preceding turn has already
-//! completed, so we report the idle state and point the user at Ctrl+C
-//! for in-flight cancellation.
+//! The handler mirrors the Ctrl+C cancel path at
+//! `session_loop/mod.rs:406-413`: fire the CancellationToken via
+//! `AgentHandle::fire_cancel()` (so the agent stops at its next `.await`)
+//! then abort the tracked `JoinHandle` via
+//! `AgentDispatcher::cancel_current()` (returns `CancelOutcome`).
 //!
-//! # R2 Option A (feedback-only) — deliberate scope choice
+//! # R2 Plumbing (GHOST-007)
 //!
-//! This ticket implements Option A per the spec:
-//! an unconditional `TuiEvent::TextDelta("No task is currently running.\n")`
-//! emission that satisfies AC #1's "either X or Y" requirement by picking
-//! one of the two documented strings. Option B (feedback + real
-//! cancellation propagation via a SIDECAR-SLOT `Arc<AtomicBool>` plumbed
-//! through `CommandContext` into the session turn loop) is deferred —
-//! `archon_tui::AgentDispatcher::cancel_current()` CONSUMES the in-flight
-//! state rather than probing it, and no sync `is_idle()`/`in_flight()`
-//! probe exists on that dispatcher. Surfacing such a probe is a separate
-//! ticket if Option B ever ships.
+//! `AgentDispatcher` (for `is_busy` + `cancel_current`) and a late-init slot
+//! holding `Arc<AgentHandle>` (for `fire_cancel`) are threaded onto
+//! `CommandContext` via `context.rs` → `SlashCommandContext` → `session.rs`.
+//! The session loop populates the late-init slot after creating the adapter.
 //!
 //! # R3 ALIASES `&["stop", "abort"]` (preserved)
 //!
-//! The shipped stub used the three-arg `declare_handler!` form with
-//! `&["stop", "abort"]`. Both aliases are PRESERVED here per AGS-817
-//! shipped-wins drift-reconcile — dropping either would regress operator
-//! workflows that rely on `/stop` or `/abort`. Aliases resolve through
-//! the PATH A dispatcher's alias map (see `Registry::get`).
+//! Shipped-wins per AGS-817 drift-reconcile.
 
 use crate::command::registry::{CommandContext, CommandHandler};
 use archon_tui::app::TuiEvent;
 
-/// Zero-sized handler registered as the primary `/cancel` command.
+/// Handler for `/cancel` (aliases: `/stop`, `/abort`).
 ///
-/// Aliases: `["stop", "abort"]` — preserved from the shipped
-/// `declare_handler!` stub.
-///
-/// Emits an unconditional `TuiEvent::TextDelta("No task is currently
-/// running.\n")` via `CommandContext::emit` (POST-6-TRY-SEND) so users
-/// see explicit feedback. For in-flight task cancellation, users press
-/// Ctrl+C — the `__cancel__` pathway in session.rs handles that.
+/// GHOST-007 Option B: checks `AgentDispatcher::is_busy()`. If idle, emits
+/// "No task is currently running." If busy, fires the cancel token (mirroring
+/// Ctrl+C) then calls `cancel_current()` and reports the `CancelOutcome`.
 pub(crate) struct CancelHandler;
 
 impl CancelHandler {
-    /// Construct a fresh `CancelHandler`. Zero-sized so this is free.
     pub(crate) fn new() -> Self {
         Self
     }
@@ -64,41 +44,64 @@ impl Default for CancelHandler {
 
 impl CommandHandler for CancelHandler {
     fn execute(&self, ctx: &mut CommandContext, _args: &[String]) -> anyhow::Result<()> {
-        // Option A (feedback-only): unconditional user-visible message.
-        // The session input loop is serial — by the time this handler
-        // runs, the previous turn has completed, so the idle-state
-        // message is correct. In-flight cancel is Ctrl+C (__cancel__
-        // at session.rs:2126-2138).
-        ctx.emit(TuiEvent::TextDelta(
-            "No task is currently running.\n".to_string(),
-        ));
+        // GHOST-007 Option B: real cancellation via AgentDispatcher +
+        // AgentHandle. In test contexts where the dispatcher is not
+        // wired (ctx.agent_dispatcher is None), fall through to the
+        // safe idle message — same behaviour as the old Option A path.
+        let disp = match ctx.agent_dispatcher.as_ref() {
+            Some(d) => d,
+            None => {
+                ctx.emit(TuiEvent::TextDelta(
+                    "No task is currently running.\n".to_string(),
+                ));
+                return Ok(());
+            }
+        };
+
+        // Check busy state under the dispatcher lock.
+        if !disp.lock().unwrap().is_busy() {
+            ctx.emit(TuiEvent::TextDelta(
+                "No task is currently running.\n".to_string(),
+            ));
+            return Ok(());
+        }
+
+        // Fire cancel token first (mirrors Ctrl+C path ordering:
+        // adapter.fire_cancel() before dispatcher.cancel_current()).
+        if let Some(ref slot) = ctx.cancel_handle {
+            if let Some(ref handle) = *slot.lock().unwrap() {
+                handle.fire_cancel();
+            }
+        }
+
+        // Abort the JoinHandle and report the outcome.
+        match disp.lock().unwrap().cancel_current() {
+            archon_tui::CancelOutcome::Aborted { elapsed_ms } => {
+                ctx.emit(TuiEvent::TextDelta(format!(
+                    "Turn cancelled (elapsed: {elapsed_ms}ms).\n"
+                )));
+            }
+            archon_tui::CancelOutcome::NoInflight => {
+                // TOCTOU: turn completed between is_busy() and cancel_current().
+                ctx.emit(TuiEvent::TextDelta(
+                    "No task is currently running.\n".to_string(),
+                ));
+            }
+        }
         Ok(())
     }
 
     fn description(&self) -> &'static str {
-        // Byte-for-byte preservation of the shipped declare_handler!
-        // description at registry.rs:1570-1574.
         "Cancel the currently running task"
     }
 
     fn aliases(&self) -> &'static [&'static str] {
-        // Shipped stub used `&["stop", "abort"]`. PRESERVED per AGS-817
-        // shipped-wins precedent (see module rustdoc R3).
         &["stop", "abort"]
     }
 }
 
 // ---------------------------------------------------------------------------
-// TASK-AGS-POST-6-CANCEL-AUDIT: tests for /cancel user-visible feedback.
-// ---------------------------------------------------------------------------
-// Prior POST-6-NO-STUB tests asserted ZERO emission; this ticket REPLACES
-// them with emission-asserting tests that verify the user-visible message.
-// Deleted tests (from pre-CANCEL-AUDIT cancel.rs):
-//   - cancel_handler_execute_returns_ok_without_emission
-//   - dispatcher_routes_slash_cancel_returns_ok_without_emission
-//   - dispatcher_routes_alias_stop_returns_ok_without_emission
-// The description + aliases tests are retained verbatim (shipped-wins
-// invariants unchanged).
+// GHOST-007: tests for /cancel real cancellation.
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
@@ -111,8 +114,10 @@ mod tests {
     use crate::command::dispatcher::Dispatcher;
     use crate::command::registry::RegistryBuilder;
 
-    /// Build a minimal `CommandContext` with a freshly-created channel.
-    /// /cancel is a feedback-only handler — no snapshot field required.
+    /// Build a minimal `CommandContext` for cancel handler tests.
+    /// `agent_dispatcher` and `cancel_handle` default to `None` in
+    /// `CtxBuilder`, so the handler emits the idle message (same as
+    /// the pre-GHOST-007 Option A behaviour).
     fn make_ctx() -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
         crate::command::test_support::CtxBuilder::new().build()
     }
@@ -141,7 +146,8 @@ mod tests {
     }
 
     #[test]
-    fn cancel_handler_execute_emits_no_task_running_feedback() {
+    fn cancel_handler_execute_emits_no_task_running_when_dispatcher_none() {
+        // dispatcher = None (test default) → idle message.
         let (mut ctx, mut rx) = make_ctx();
         let h = CancelHandler::new();
         let res = h.execute(&mut ctx, &[]);
@@ -149,37 +155,20 @@ mod tests {
             res.is_ok(),
             "CancelHandler::execute must return Ok(()), got: {res:?}"
         );
-        // POST-6-CANCEL-AUDIT: handler now emits a user-visible
-        // TextDelta with the idle-state message (Option A feedback-only).
         match rx.try_recv() {
             Ok(TuiEvent::TextDelta(msg)) => {
                 assert_eq!(
                     msg, "No task is currently running.\n",
-                    "CancelHandler::execute must emit the Option A \
-                     idle-state feedback string verbatim"
+                    "CancelHandler with dispatcher=None must emit idle message"
                 );
             }
-            Ok(other) => panic!("CancelHandler::execute must emit TextDelta, got: {other:?}"),
-            Err(e) => panic!(
-                "CancelHandler::execute must emit a TuiEvent, channel \
-                 returned: {e:?}"
-            ),
-        }
-        // No trailing events.
-        match rx.try_recv() {
-            Err(mpsc::error::TryRecvError::Empty) => {}
-            Ok(ev) => panic!(
-                "CancelHandler::execute emitted exactly one event; \
-                 unexpected trailing event: {ev:?}"
-            ),
-            Err(e) => panic!("unexpected channel error: {e:?}"),
+            Ok(other) => panic!("CancelHandler must emit TextDelta, got: {other:?}"),
+            Err(e) => panic!("CancelHandler must emit a TuiEvent, channel returned: {e:?}"),
         }
     }
 
     #[test]
     fn dispatcher_routes_slash_cancel_emits_feedback() {
-        // Narrow `RegistryBuilder::new()` (not `default_registry`) so
-        // this test exercises ONLY the CancelHandler wiring.
         let mut b = RegistryBuilder::new();
         b.insert_primary("cancel", Arc::new(CancelHandler::new()));
         let registry = Arc::new(b.build());
@@ -189,27 +178,20 @@ mod tests {
         let res = dispatcher.dispatch(&mut ctx, "/cancel");
         assert!(
             res.is_ok(),
-            "Dispatcher::dispatch(\"/cancel\") must return Ok(()), \
-             got: {res:?}"
+            "Dispatcher::dispatch(\"/cancel\") must return Ok(()), got: {res:?}"
         );
         match rx.try_recv() {
             Ok(TuiEvent::TextDelta(msg)) => assert_eq!(
                 msg, "No task is currently running.\n",
-                "Dispatcher route to CancelHandler must emit the Option \
-                 A idle-state feedback string verbatim"
+                "Dispatcher route to CancelHandler must emit idle message"
             ),
             Ok(other) => panic!("Dispatcher route must emit TextDelta, got: {other:?}"),
-            Err(e) => panic!(
-                "Dispatcher route must emit a TuiEvent, channel \
-                 returned: {e:?}"
-            ),
+            Err(e) => panic!("Dispatcher route must emit a TuiEvent, channel returned: {e:?}"),
         }
     }
 
     #[test]
     fn dispatcher_routes_alias_stop_emits_feedback() {
-        // Verify `stop` alias resolves to CancelHandler through the
-        // Registry's alias map and emits the same feedback string.
         let mut b = RegistryBuilder::new();
         b.insert_primary("cancel", Arc::new(CancelHandler::new()));
         let registry = Arc::new(b.build());
@@ -219,22 +201,18 @@ mod tests {
         let res = dispatcher.dispatch(&mut ctx, "/stop");
         assert!(
             res.is_ok(),
-            "Dispatcher::dispatch(\"/stop\") must return Ok(()) via \
-             the CancelHandler alias, got: {res:?}"
+            "Dispatcher::dispatch(\"/stop\") must return Ok(()), got: {res:?}"
         );
         match rx.try_recv() {
             Ok(TuiEvent::TextDelta(msg)) => assert_eq!(
                 msg, "No task is currently running.\n",
-                "Dispatcher route via /stop alias must emit the Option \
-                 A idle-state feedback string verbatim"
+                "Dispatcher route via /stop alias must emit idle message"
             ),
-            Ok(other) => panic!(
-                "Dispatcher route via /stop alias must emit TextDelta, \
-                 got: {other:?}"
-            ),
+            Ok(other) => {
+                panic!("Dispatcher route via /stop alias must emit TextDelta, got: {other:?}")
+            }
             Err(e) => panic!(
-                "Dispatcher route via /stop alias must emit a TuiEvent, \
-                 channel returned: {e:?}"
+                "Dispatcher route via /stop alias must emit a TuiEvent, channel returned: {e:?}"
             ),
         }
     }

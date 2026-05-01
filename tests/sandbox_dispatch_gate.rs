@@ -25,18 +25,18 @@ impl SandboxBackend for FakeSandboxBackend {
             return Ok(());
         }
         match tool {
-            "Write" | "Edit" | "NotebookEdit" => {
-                Err(format!("sandbox: {tool} is blocked (write operations disabled)"))
-            }
-            "Bash" | "Shell" => {
-                Err(format!("sandbox: {tool} is blocked (shell operations disabled)"))
-            }
-            "WebFetch" | "WebSearch" => {
-                Err(format!("sandbox: {tool} is blocked (network operations disabled)"))
-            }
-            "TaskCreate" | "TaskUpdate" | "Agent" => {
-                Err(format!("sandbox: {tool} is blocked (agent spawning disabled)"))
-            }
+            "Write" | "Edit" | "NotebookEdit" => Err(format!(
+                "sandbox: {tool} is blocked (write operations disabled)"
+            )),
+            "Bash" | "Shell" => Err(format!(
+                "sandbox: {tool} is blocked (shell operations disabled)"
+            )),
+            "WebFetch" | "WebSearch" => Err(format!(
+                "sandbox: {tool} is blocked (network operations disabled)"
+            )),
+            "TaskCreate" | "TaskUpdate" | "Agent" => Err(format!(
+                "sandbox: {tool} is blocked (agent spawning disabled)"
+            )),
             _ => Ok(()),
         }
     }
@@ -98,14 +98,20 @@ async fn subpath_a_dispatch_blocked_when_sandbox_on() {
     let res = registry
         .dispatch("Write", serde_json::json!({"file_path": "/tmp/x"}), &ctx)
         .await;
-    assert!(!res.is_error, "expected success when sandbox is off; got: {res:?}");
+    assert!(
+        !res.is_error,
+        "expected success when sandbox is off; got: {res:?}"
+    );
 
     // flag = true → blocked
     flag.store(true, Ordering::SeqCst);
     let res = registry
         .dispatch("Write", serde_json::json!({"file_path": "/tmp/x"}), &ctx)
         .await;
-    assert!(res.is_error, "expected error when sandbox is on; got: {res:?}");
+    assert!(
+        res.is_error,
+        "expected error when sandbox is on; got: {res:?}"
+    );
     assert!(
         res.content.starts_with("Error: sandbox:"),
         "expected 'sandbox:' prefix in error; got: {}",
@@ -145,7 +151,10 @@ async fn subpath_b_direct_execute_blocked_when_sandbox_on() {
     let res = tool
         .execute(serde_json::json!({"file_path": "/tmp/x"}), &ctx)
         .await;
-    assert!(!res.is_error, "expected success when sandbox is off; got: {res:?}");
+    assert!(
+        !res.is_error,
+        "expected success when sandbox is off; got: {res:?}"
+    );
 
     // flag = true → blocked — simulate agent.rs sandbox pre-check
     flag.store(true, Ordering::SeqCst);
@@ -200,8 +209,14 @@ async fn subpath_b_full_roundtrip() {
         match backend.check("Write", &serde_json::json!({"file_path": "/tmp/x"})) {
             Ok(()) => panic!("expected block when sandbox on"),
             Err(reason) => {
-                assert!(reason.contains("sandbox"), "expected sandbox in reason; got: {reason}");
-                assert!(reason.contains("Write"), "expected tool name in reason; got: {reason}");
+                assert!(
+                    reason.contains("sandbox"),
+                    "expected sandbox in reason; got: {reason}"
+                );
+                assert!(
+                    reason.contains("Write"),
+                    "expected tool name in reason; got: {reason}"
+                );
             }
         }
     }

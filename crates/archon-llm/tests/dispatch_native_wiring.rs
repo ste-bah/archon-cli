@@ -9,8 +9,8 @@
 //! TASK-AGS-710 SPEC DEVIATION (Gate 1 tests subset):
 //!   The original test plan included `test_dispatch_local_wired` and
 //!   `test_dispatch_vertex_arch_error`. Neither `local` nor `vertex` is
-//!   present in `NATIVE_REGISTRY` (verified: the 9 native entries are
-//!   openai/anthropic/gemini/xai/bedrock/azure/cohere/copilot/minimax) nor
+//!   present in `NATIVE_REGISTRY` (verified: the 5 native entries are
+//!   openai/anthropic/gemini/xai/bedrock) nor
 //!   in `OPENAI_COMPAT_REGISTRY`, so `resolve_descriptor()` fails with
 //!   `MissingCredential { var: "unknown provider: local|vertex" }` BEFORE
 //!   `dispatch_native` is ever reached. Those two tests would therefore

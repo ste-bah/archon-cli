@@ -375,14 +375,15 @@ fn find_references(stem: &str, project_root: &Path, skip_file: &Path) -> Vec<Str
         }
 
         if let Ok(content) = std::fs::read_to_string(path)
-            && pattern.is_match(&content) {
-                let rel = path
-                    .strip_prefix(project_root)
-                    .unwrap_or(path)
-                    .display()
-                    .to_string();
-                references.push(rel);
-            }
+            && pattern.is_match(&content)
+        {
+            let rel = path
+                .strip_prefix(project_root)
+                .unwrap_or(path)
+                .display()
+                .to_string();
+            references.push(rel);
+        }
     });
 
     references

@@ -78,9 +78,10 @@ impl ConstraintEngine {
         while let Some((xi, xj)) = queue.pop() {
             if Self::revise(csp, &xi, &xj) {
                 if let Some(domain) = csp.variables.get(&xi)
-                    && domain.is_empty() {
-                        return false; // Domain wiped out — unsatisfiable.
-                    }
+                    && domain.is_empty()
+                {
+                    return false; // Domain wiped out — unsatisfiable.
+                }
                 // Add all neighbors of xi (except xj) back to queue.
                 for constraint in &csp.constraints {
                     let neighbor = match constraint {

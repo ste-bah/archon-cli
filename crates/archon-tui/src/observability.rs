@@ -123,7 +123,10 @@ mod tui_drain_metric_tests {
     fn drain_updates_timestamp() {
         record_tui_event_drain();
         let stamped = TUI_EVENT_LAST_DRAIN_UNIX_MS.load(Ordering::Relaxed);
-        assert!(stamped > 0, "last-drain timestamp must be non-zero after drain");
+        assert!(
+            stamped > 0,
+            "last-drain timestamp must be non-zero after drain"
+        );
     }
 
     #[test]

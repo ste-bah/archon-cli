@@ -195,34 +195,36 @@ impl TaskManager {
     /// Set the status of a task. Invalid transitions are silently ignored.
     pub fn set_status(&self, id: &str, status: TaskStatus) {
         if let Ok(mut tasks) = self.tasks.lock()
-            && let Some(info) = tasks.get_mut(id) {
-                if !is_valid_transition(&info.status, &status) {
-                    return;
-                }
-                info.status = status.clone();
-                if status == TaskStatus::Completed
-                    || status == TaskStatus::Failed
-                    || status == TaskStatus::Stopped
-                {
-                    info.completed_at = Some(Utc::now());
-                }
+            && let Some(info) = tasks.get_mut(id)
+        {
+            if !is_valid_transition(&info.status, &status) {
+                return;
             }
+            info.status = status.clone();
+            if status == TaskStatus::Completed
+                || status == TaskStatus::Failed
+                || status == TaskStatus::Stopped
+            {
+                info.completed_at = Some(Utc::now());
+            }
+        }
     }
 
     /// Append text to a task's output buffer, capped at 1 MB.
     pub fn append_output(&self, id: &str, text: &str) {
         if let Ok(mut tasks) = self.tasks.lock()
-            && let Some(info) = tasks.get_mut(id) {
-                let remaining = MAX_OUTPUT_BYTES.saturating_sub(info.output.len());
-                if remaining > 0 {
-                    let to_append = if text.len() > remaining {
-                        &text[..remaining]
-                    } else {
-                        text
-                    };
-                    info.output.push_str(to_append);
-                }
+            && let Some(info) = tasks.get_mut(id)
+        {
+            let remaining = MAX_OUTPUT_BYTES.saturating_sub(info.output.len());
+            if remaining > 0 {
+                let to_append = if text.len() > remaining {
+                    &text[..remaining]
+                } else {
+                    text
+                };
+                info.output.push_str(to_append);
             }
+        }
     }
 
     /// Check if a task's cancellation token has been set.

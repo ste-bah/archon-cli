@@ -105,21 +105,22 @@ impl LearningIntegration {
 
         // Create SONA trajectory
         if let Some(ref mut sona) = self.sona
-            && self.config.track_trajectories {
-                let route = format!("{}{}/{}", self.config.route_prefix, phase, agent_name);
-                let session = if pipeline_id.is_empty() {
-                    &self.session_id
-                } else {
-                    pipeline_id
-                };
-                let traj: Trajectory = sona.create_trajectory(&route, agent_name, session);
-                ctx.sona_context = format!(
-                    "trajectory_id={}, route={}, agent={}",
-                    traj.trajectory_id, traj.route, traj.agent_key
-                );
-                self.active_trajectories
-                    .insert(agent_name.to_string(), traj.trajectory_id);
-            }
+            && self.config.track_trajectories
+        {
+            let route = format!("{}{}/{}", self.config.route_prefix, phase, agent_name);
+            let session = if pipeline_id.is_empty() {
+                &self.session_id
+            } else {
+                pipeline_id
+            };
+            let traj: Trajectory = sona.create_trajectory(&route, agent_name, session);
+            ctx.sona_context = format!(
+                "trajectory_id={}, route={}, agent={}",
+                traj.trajectory_id, traj.route, traj.agent_key
+            );
+            self.active_trajectories
+                .insert(agent_name.to_string(), traj.trajectory_id);
+        }
 
         // Query ReasoningBank for context
         if let Some(ref mut rb) = self.reasoning_bank {

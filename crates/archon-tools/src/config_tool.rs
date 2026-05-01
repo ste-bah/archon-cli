@@ -271,8 +271,11 @@ impl ConfigTool {
     fn handle_get(&self, key: &str) -> ToolResult {
         // personality.* namespace — read-only, no overlay
         if key.starts_with("personality.") {
-            return ToolResult::success("personality.* keys are read-only and not available through the runtime overlay. \
-                 Edit the config file or personality profile directly.".to_string());
+            return ToolResult::success(
+                "personality.* keys are read-only and not available through the runtime overlay. \
+                 Edit the config file or personality profile directly."
+                    .to_string(),
+            );
         }
 
         let registry = key_registry();

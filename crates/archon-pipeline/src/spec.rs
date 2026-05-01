@@ -145,7 +145,6 @@ pub enum BackoffKind {
     Exponential,
 }
 
-
 /// Policy applied when a step fails.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -157,7 +156,6 @@ pub enum OnFailurePolicy {
     Skip,
     Fail,
 }
-
 
 /// Supported pipeline definition formats.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

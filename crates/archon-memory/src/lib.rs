@@ -15,4 +15,6 @@ pub mod vector_search;
 pub use access::{MemoryAccess, MemoryTrait, open_memory};
 pub use graph::MemoryGraph;
 pub use injection::MemoryInjector;
-pub use types::{Memory, MemoryError, MemoryType, RelType, Relationship, SearchFilter, StoreMemoryRequest};
+pub use types::{
+    Memory, MemoryError, MemoryType, RelType, Relationship, SearchFilter, StoreMemoryRequest,
+};

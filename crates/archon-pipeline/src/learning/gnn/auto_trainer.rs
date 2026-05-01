@@ -361,9 +361,10 @@ impl AutoTrainer {
 
         // Throttle: enforce minimum time between runs
         if let Some(last) = *state.last_train_time.read().unwrap()
-            && (last.elapsed().as_millis() as u64) < config.min_throttle_ms {
-                return false;
-            }
+            && (last.elapsed().as_millis() as u64) < config.min_throttle_ms
+        {
+            return false;
+        }
 
         // First run
         if training_count == 0 && total >= config.first_run_threshold {
@@ -382,9 +383,10 @@ impl AutoTrainer {
 
         // Time-based
         if let Some(last) = *state.last_train_time.read().unwrap()
-            && (last.elapsed().as_millis() as u64) >= config.trigger_elapsed_ms {
-                return true;
-            }
+            && (last.elapsed().as_millis() as u64) >= config.trigger_elapsed_ms
+        {
+            return true;
+        }
 
         false
     }

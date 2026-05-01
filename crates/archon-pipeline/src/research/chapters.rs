@@ -83,12 +83,13 @@ impl ChapterStructureLoader {
         // 2) Try raw JSON — find first '{' to last '}'
         if let Some(start) = content.find('{')
             && let Some(end) = content.rfind('}')
-                && end > start {
-                    let json_str = &content[start..=end];
-                    if let Ok(val) = serde_json::from_str::<serde_json::Value>(json_str) {
-                        return Self::normalize_structure(val);
-                    }
-                }
+            && end > start
+        {
+            let json_str = &content[start..=end];
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(json_str) {
+                return Self::normalize_structure(val);
+            }
+        }
 
         // 3) Markdown fallback
         Self::parse_from_markdown(content)
