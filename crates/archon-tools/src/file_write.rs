@@ -48,12 +48,11 @@ impl Tool for WriteTool {
         let path = Path::new(file_path);
 
         // Create parent directories
-        if let Some(parent) = path.parent() {
-            if !parent.exists() {
-                if let Err(e) = fs::create_dir_all(parent) {
-                    return ToolResult::error(format!("Failed to create parent directory: {e}"));
-                }
-            }
+        if let Some(parent) = path.parent()
+            && !parent.exists()
+            && let Err(e) = fs::create_dir_all(parent)
+        {
+            return ToolResult::error(format!("Failed to create parent directory: {e}"));
         }
 
         match fs::write(path, content) {

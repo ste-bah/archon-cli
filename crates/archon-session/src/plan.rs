@@ -23,6 +23,7 @@ impl std::fmt::Display for PlanStepStatus {
 }
 
 impl PlanStepStatus {
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Self {
         match s {
             "in_progress" => Self::InProgress,
@@ -133,7 +134,7 @@ pub struct PlanStore {
 }
 
 fn db_err(e: impl std::fmt::Display) -> std::io::Error {
-    std::io::Error::new(std::io::ErrorKind::Other, e.to_string())
+    std::io::Error::other(e.to_string())
 }
 
 fn empty_rows() -> NamedRows {

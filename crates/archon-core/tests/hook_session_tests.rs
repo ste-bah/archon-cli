@@ -43,6 +43,7 @@ fn make_hook_config(exit_code: i32) -> HookConfig {
         status_message: None,
         headers: HashMap::new(),
         allowed_env_vars: Vec::new(),
+        enabled: true,
     }
 }
 
@@ -186,7 +187,7 @@ async fn test_session_hooks_isolated_between_sessions() {
 
 #[tokio::test]
 async fn test_session_hooks_merged_with_persistent() {
-    let mut registry = HookRegistry::new();
+    let registry = HookRegistry::new();
 
     // Register a persistent hook that adds additional_context
     // (we use a command that prints JSON to stdout for this)
@@ -205,6 +206,7 @@ async fn test_session_hooks_merged_with_persistent() {
                 status_message: None,
                 headers: HashMap::new(),
                 allowed_env_vars: Vec::new(),
+                enabled: true,
             }],
         }],
         None,

@@ -3,20 +3,16 @@
 //! All functions are pure compute on Vec<f32>. No async, no alloc beyond results.
 
 /// Activation function types.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum ActivationType {
+    #[default]
     Relu,
     Tanh,
     Sigmoid,
     LeakyRelu,
 }
 
-impl Default for ActivationType {
-    fn default() -> Self {
-        ActivationType::Relu
-    }
-}
-
+#[allow(clippy::needless_range_loop)]
 /// Element-wise vector addition. Result length is max(a.len(), b.len()).
 /// Missing elements are treated as 0.
 pub fn add_vectors(a: &[f32], b: &[f32]) -> Vec<f32> {
@@ -86,6 +82,7 @@ pub fn apply_activation(v: &[f32], activation: ActivationType) -> Vec<f32> {
         .collect()
 }
 
+#[allow(clippy::needless_range_loop)]
 /// Learned projection: result[o] = sum_i weights[o][i] * input[i].
 /// No bias term — matches TS project().
 pub fn project(input: &[f32], weights: &[Vec<f32>], output_dim: usize) -> Vec<f32> {

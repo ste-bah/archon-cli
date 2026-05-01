@@ -180,7 +180,7 @@ fn execute_insert(
 }
 
 fn execute_replace(
-    cells: &mut Vec<serde_json::Value>,
+    cells: &mut [serde_json::Value],
     index: usize,
     input: &serde_json::Value,
 ) -> Result<String, String> {

@@ -89,11 +89,11 @@ impl ResearchPromptBuilder {
         let mut prompt = parts.join("\n\n");
 
         // Phase 6: inject style guidelines
-        if agent.phase == 6 {
-            if let Some(style) = style_prompt {
-                let injector = StyleInjector::new();
-                prompt = injector.build_styled_prompt(&prompt, style);
-            }
+        if agent.phase == 6
+            && let Some(style) = style_prompt
+        {
+            let injector = StyleInjector::new();
+            prompt = injector.build_styled_prompt(&prompt, style);
         }
 
         prompt
@@ -106,16 +106,16 @@ impl ResearchPromptBuilder {
     fn build_agent_instructions(&self, agent: &super::agents::ResearchAgent) -> String {
         // Try to load from file, parsing frontmatter to get just the body
         let path = agent.prompt_source_path;
-        if let Ok(content) = std::fs::read_to_string(path) {
-            if !content.trim().is_empty() {
-                if let Ok((_frontmatter, body)) = crate::agent_loader::parse_frontmatter(&content) {
-                    if !body.trim().is_empty() {
-                        return body;
-                    }
-                }
-                // Fallback: if frontmatter parsing fails, use raw content
-                return content;
+        if let Ok(content) = std::fs::read_to_string(path)
+            && !content.trim().is_empty()
+        {
+            if let Ok((_frontmatter, body)) = crate::agent_loader::parse_frontmatter(&content)
+                && !body.trim().is_empty()
+            {
+                return body;
             }
+            // Fallback: if frontmatter parsing fails, use raw content
+            return content;
         }
         format!(
             "You are the {} agent for the PhD research pipeline.",

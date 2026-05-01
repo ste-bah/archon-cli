@@ -169,13 +169,13 @@ impl TaskService for DefaultTaskService {
         self.seq_counters.insert(task_id, AtomicU64::new(0));
 
         // 6. Enqueue into per-agent queue when configured.
-        if let Some(ref queue) = self.queue {
-            if let Err(e) = queue.enqueue(task_id, &task.agent_name) {
-                // Roll back the in-memory inserts on queue failure.
-                self.tasks.remove(&task_id);
-                self.seq_counters.remove(&task_id);
-                return Err(e);
-            }
+        if let Some(ref queue) = self.queue
+            && let Err(e) = queue.enqueue(task_id, &task.agent_name)
+        {
+            // Roll back the in-memory inserts on queue failure.
+            self.tasks.remove(&task_id);
+            self.seq_counters.remove(&task_id);
+            return Err(e);
         }
 
         Ok(task_id)

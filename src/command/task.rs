@@ -1,3 +1,5 @@
+#![allow(clippy::ptr_arg)]
+
 use std::path::PathBuf;
 use std::sync::Arc;
 

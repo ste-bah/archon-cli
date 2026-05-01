@@ -94,7 +94,7 @@ pub fn count_tokens(text: &str) -> usize {
     if len == 0 {
         return 0;
     }
-    (len + 3) / 4
+    len.div_ceil(4)
 }
 
 /// Truncate content to approximately `target_tokens` tokens by keeping the
@@ -201,7 +201,7 @@ pub fn truncate_prompt(
                 .enumerate()
                 .filter(|(_, l)| l.required)
                 .map(|(i, _)| i)
-                .last()
+                .next_back()
                 .expect("at least one required layer must exist")
         });
 

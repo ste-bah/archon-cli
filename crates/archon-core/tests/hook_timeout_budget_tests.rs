@@ -31,6 +31,7 @@ fn cmd_hook(command: &str, timeout: Option<u32>) -> HookConfig {
         status_message: None,
         headers: HashMap::new(),
         allowed_env_vars: Vec::new(),
+        enabled: true,
     }
 }
 
@@ -71,7 +72,7 @@ async fn test_skipped_count_incremented_on_budget_exhaustion() {
     let config = HookExecutionConfig {
         aggregate_timeout_ms: 1,
     };
-    let mut registry = HookRegistry::with_config(config);
+    let registry = HookRegistry::with_config(config);
 
     // Register 3 hooks: one fast, two slow.
     // The fast one might complete, but the slow ones should be skipped
@@ -107,7 +108,7 @@ async fn test_skipped_count_incremented_on_budget_exhaustion() {
 #[tokio::test]
 async fn test_fast_hooks_all_complete_within_budget() {
     // Default budget (30s) with fast hooks.
-    let mut registry = HookRegistry::new();
+    let registry = HookRegistry::new();
 
     registry.register_matchers(
         HookEvent::PreToolUse,
@@ -142,7 +143,7 @@ async fn test_per_hook_timeout_clamped_to_remaining_budget() {
     let config = HookExecutionConfig {
         aggregate_timeout_ms: 2_000,
     };
-    let mut registry = HookRegistry::with_config(config);
+    let registry = HookRegistry::with_config(config);
 
     registry.register_matchers(
         HookEvent::PreToolUse,
@@ -177,7 +178,7 @@ async fn test_budget_exhausted_returns_success_failopen() {
     let config = HookExecutionConfig {
         aggregate_timeout_ms: 1,
     };
-    let mut registry = HookRegistry::with_config(config);
+    let registry = HookRegistry::with_config(config);
 
     // Register a hook that would block (exit 2) if it ran.
     // But since budget is exhausted, it should be skipped with Success (fail-open).

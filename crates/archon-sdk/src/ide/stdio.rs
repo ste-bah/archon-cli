@@ -90,13 +90,12 @@ impl StdioTransport {
                 event = event_rx.recv() => {
                     match event {
                         Some(evt) => {
-                            if let Some(notification) = event_to_notification(session_id, &evt.inner) {
-                                if let Ok(json) = serde_json::to_string(&notification) {
+                            if let Some(notification) = event_to_notification(session_id, &evt.inner)
+                                && let Ok(json) = serde_json::to_string(&notification) {
                                     stdout.write_all(json.as_bytes()).await?;
                                     stdout.write_all(b"\n").await?;
                                     stdout.flush().await?;
                                 }
-                            }
                         }
                         None => break, // Channel closed
                     }

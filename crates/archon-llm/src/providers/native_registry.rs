@@ -1,12 +1,9 @@
-//! TASK-AGS-704: NATIVE_REGISTRY — descriptor metadata for the 9 native
-//! providers (openai, anthropic, gemini, xai, bedrock, azure, cohere,
-//! copilot, minimax). Mirror of TASK-AGS-702's OPENAI_COMPAT_REGISTRY but
-//! for Native compat_kind. Pairs with native_gap.rs for the 4 stub impls.
-//!
-//! Spec deviation (inherited from TASK-AGS-703 greenlit 2026-04-13): the
-//! stubs in native_gap.rs surface "Open Question #3" via LlmError::Unsupported
-//! rather than ProviderError::InvalidResponse. The sentinel string is
-//! preserved — grep 'Open Question #3' still finds all gap-fillers.
+//! GHOST-003: NATIVE_REGISTRY — descriptor metadata for the 5 native
+//! providers (openai, anthropic, gemini, xai, bedrock). Mirror of
+//! TASK-AGS-702's OPENAI_COMPAT_REGISTRY but for Native compat_kind.
+//! The 4 stub providers (azure, cohere, copilot, minimax) were removed
+//! per GHOST-003 Option B — they returned LlmError::Unsupported and
+//! had no real wire implementations.
 
 use std::collections::HashMap;
 
@@ -146,85 +143,10 @@ pub static NATIVE_REGISTRY: Lazy<HashMap<&'static str, ProviderDescriptor>> = La
         },
     );
 
-    // 6-9: STUB natives (gap providers — pending Open Question #3)
-    //     Impls live in providers/native_gap.rs
-
-    // 6. azure
-    m.insert(
-        "azure",
-        ProviderDescriptor {
-            id: "azure".into(),
-            display_name: "Azure OpenAI".into(),
-            base_url: parse_url("https://example.openai.azure.com/openai"),
-            auth_flavor: AuthFlavor::Custom("api-key".into()),
-            env_key_var: "AZURE_OPENAI_API_KEY".into(),
-            compat_kind: CompatKind::Native,
-            default_model: "gpt-4o".into(),
-            supports: ProviderFeatures::chat_only(),
-            headers: HashMap::new(),
-            quirks: ProviderQuirks::DEFAULT,
-            is_gap: true,
-        },
-    );
-
-    // 7. cohere
-    m.insert(
-        "cohere",
-        ProviderDescriptor {
-            id: "cohere".into(),
-            display_name: "Cohere".into(),
-            base_url: parse_url("https://api.cohere.com/v1"),
-            auth_flavor: AuthFlavor::BearerApiKey,
-            env_key_var: "COHERE_API_KEY".into(),
-            compat_kind: CompatKind::Native,
-            default_model: "command-r-plus".into(),
-            supports: ProviderFeatures::chat_only(),
-            headers: HashMap::new(),
-            quirks: ProviderQuirks::DEFAULT,
-            is_gap: true,
-        },
-    );
-
-    // 8. copilot (GitHub Copilot)
-    m.insert(
-        "copilot",
-        ProviderDescriptor {
-            id: "copilot".into(),
-            display_name: "GitHub Copilot".into(),
-            base_url: parse_url("https://api.githubcopilot.com"),
-            auth_flavor: AuthFlavor::BearerApiKey,
-            env_key_var: "GITHUB_TOKEN".into(),
-            compat_kind: CompatKind::Native,
-            default_model: "gpt-4o".into(),
-            supports: ProviderFeatures::chat_only(),
-            headers: HashMap::new(),
-            quirks: ProviderQuirks::DEFAULT,
-            is_gap: true,
-        },
-    );
-
-    // 9. minimax
-    m.insert(
-        "minimax",
-        ProviderDescriptor {
-            id: "minimax".into(),
-            display_name: "MiniMax".into(),
-            base_url: parse_url("https://api.minimax.chat/v1"),
-            auth_flavor: AuthFlavor::BearerApiKey,
-            env_key_var: "MINIMAX_API_KEY".into(),
-            compat_kind: CompatKind::Native,
-            default_model: "abab6.5s-chat".into(),
-            supports: ProviderFeatures::chat_only(),
-            headers: HashMap::new(),
-            quirks: ProviderQuirks::DEFAULT,
-            is_gap: true,
-        },
-    );
-
     debug_assert_eq!(
         m.len(),
-        9,
-        "TASK-AGS-704: NATIVE_REGISTRY must have 9 entries"
+        5,
+        "GHOST-003: NATIVE_REGISTRY must have 5 entries (4 stubs removed)"
     );
     m
 });

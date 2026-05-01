@@ -84,6 +84,17 @@ pub(crate) fn build_command_context<'a>(
             // refcount increment); the handler reads + atomically stores
             // through it to toggle fast mode.
             fast_mode_shared: Some(Arc::clone(&slash_ctx.fast_mode_shared)),
+            // GHOST-006: sandbox flag, same DIRECT pattern as fast_mode_shared.
+            // Toggled by /sandbox on/off; read by dispatch paths via SandboxBackend.
+            sandbox_flag: Some(Arc::clone(&slash_ctx.sandbox_flag)),
+            // GHOST-004: hook registry for /hooks enable/disable/reload.
+            // Populated UNCONDITIONALLY (DIRECT pattern). The handler calls
+            // set_enabled / reload through this Arc.
+            hook_registry: slash_ctx.hook_registry.as_ref().map(Arc::clone),
+            plugin_enable_state: Some(Arc::clone(&slash_ctx.plugin_enable_state)),
+            // GHOST-007: cancel handle + dispatcher for /cancel real cancellation.
+            cancel_handle: Some(Arc::clone(&slash_ctx.cancel_handle)),
+            agent_dispatcher: Some(Arc::clone(&slash_ctx.agent_dispatcher)),
             // TASK-AGS-POST-6-BODIES-B02-THINKING: /thinking DIRECT-pattern
             // consumer. Populated UNCONDITIONALLY here (not gated on the
             // primary name, same as AGS-815 session_id, AGS-817 memory,

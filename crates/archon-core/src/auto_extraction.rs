@@ -64,7 +64,7 @@ impl AutoExtractor {
             if self.is_duplicate(&fact).await {
                 continue;
             }
-            match self.memory.store_memory(
+            if let Ok(id) = self.memory.store_memory(
                 &fact,
                 &fact.chars().take(80).collect::<String>(),
                 archon_memory::types::MemoryType::Fact,
@@ -73,8 +73,7 @@ impl AutoExtractor {
                 "auto_extraction",
                 "",
             ) {
-                Ok(id) => stored_ids.push(id),
-                Err(_) => {}
+                stored_ids.push(id)
             }
         }
 

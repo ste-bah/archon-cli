@@ -151,7 +151,7 @@ impl Tool for SkillTool {
                     .and_then(|v| v.as_array())
                     .map(|arr| arr.iter().filter_map(|x| x.as_str()).collect())
                     .unwrap_or_default();
-                if args.iter().any(|a| *a == "-m") {
+                if args.contains(&"-m") {
                     return PermissionLevel::Dangerous;
                 }
                 PermissionLevel::Safe

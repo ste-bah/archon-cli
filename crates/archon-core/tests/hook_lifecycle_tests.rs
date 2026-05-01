@@ -14,7 +14,7 @@ use archon_core::hooks::{HookCommandType, HookConfig, HookEvent, HookMatcher, Ho
 // ---------------------------------------------------------------------------
 
 fn make_test_registry(event: HookEvent) -> HookRegistry {
-    let mut reg = HookRegistry::new();
+    let reg = HookRegistry::new();
     reg.register_matchers(
         event,
         vec![HookMatcher {
@@ -30,6 +30,7 @@ fn make_test_registry(event: HookEvent) -> HookRegistry {
                 status_message: None,
                 headers: HashMap::new(),
                 allowed_env_vars: Vec::new(),
+                enabled: true,
             }],
         }],
         None,

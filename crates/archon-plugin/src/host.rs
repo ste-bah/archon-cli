@@ -3,7 +3,7 @@
 //! TASK-CLI-500: Added `WasmRuntime` to hold a live Store+Instance after loading,
 //! and `dispatch_tool()` to call into the WASM guest for tool invocations.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use wasmtime::{Caller, Config, Engine, Extern, Instance, Linker, Module, Store};
 
@@ -394,7 +394,7 @@ fn call_wasm_tool(
 fn verify_required_exports(
     instance: &Instance,
     store: &mut Store<PluginData>,
-    path: &PathBuf,
+    path: &Path,
 ) -> Result<(), PluginError> {
     let export_names: Vec<String> = instance
         .exports(store)
@@ -404,7 +404,7 @@ fn verify_required_exports(
     for required in &["alloc", "dealloc", "archon_guest_api_version", "memory"] {
         if !export_names.iter().any(|n| n == required) {
             return Err(PluginError::ComponentLoadFailed {
-                path: path.clone(),
+                path: path.to_path_buf(),
                 reason: format!("missing export '{required}'"),
             });
         }

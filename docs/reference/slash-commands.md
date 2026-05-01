@@ -90,7 +90,7 @@ Beyond the 65 primaries, archon-cli ships **55 built-in skills** (21 in `crates/
 |---|---|---|
 | `/mcp` | — | Show MCP server status |
 | `/connect` | — | List configured MCP servers (`/connect <name>` shows connection hint) |
-| `/plugin` | — | List/inspect WASM plugins (enable/disable/install/reload not yet implemented) |
+| `/plugin` | — | Manage WASM plugins (`list`, `info`, `enable`, `disable`, `install`, `reload`) |
 | `/reload-plugins` | — | Re-scan plugin directories from disk |
 | `/hooks` | — | List hook registrations (enable/disable/reload not yet implemented) |
 | `/voice` | — | Show voice input configuration (enable/disable/switch not yet implemented) |

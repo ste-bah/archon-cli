@@ -188,6 +188,7 @@ async fn static_handler(
 // Auth helper
 // ---------------------------------------------------------------------------
 
+#[allow(clippy::result_large_err)]
 fn check_auth(state: &AppState, headers: &HeaderMap) -> Result<(), Response> {
     let Some(ref required) = state.token else {
         return Ok(());

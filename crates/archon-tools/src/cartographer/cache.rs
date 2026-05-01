@@ -48,11 +48,11 @@ pub fn save_cache(project_path: &Path, index: &CachedIndex) {
         }
     };
 
-    if let Some(parent) = path.parent() {
-        if let Err(e) = std::fs::create_dir_all(parent) {
-            tracing::warn!("Failed to create cartographer cache dir: {e}");
-            return;
-        }
+    if let Some(parent) = path.parent()
+        && let Err(e) = std::fs::create_dir_all(parent)
+    {
+        tracing::warn!("Failed to create cartographer cache dir: {e}");
+        return;
     }
 
     match serde_json::to_string_pretty(index) {

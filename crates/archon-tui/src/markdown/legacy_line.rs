@@ -2,7 +2,7 @@
 //!
 //! Relocated from `src/markdown.rs` (legacy-renderer section, lines 359-474
 //! + tests 510-537) per REM-2c. Private to the `markdown` module; public
-//! entry via [`render_markdown_line`] re-exported from `markdown::mod`.
+//!   entry via [`render_markdown_line`] re-exported from `markdown::mod`.
 //!
 //! Retained for backward compatibility with the streaming output display
 //! in `app.rs`. For full-document rendering prefer

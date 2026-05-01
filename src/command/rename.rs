@@ -380,15 +380,16 @@ mod tests {
     /// XDG_DATA_HOME/HOME, which must not race.
     #[tokio::test]
     async fn execute_with_session_id_success_path_emits_events() {
-        let _env_guard = env_lock().lock().expect("env_lock");
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let _env = EnvGuard::set(tmp.path());
-
         let sid = "test-session-b17-direct";
         let (mut ctx, mut rx) = make_rename_ctx(Some(sid.to_string()));
         let h = RenameHandler::new();
-        let res = h.execute(&mut ctx, &["mynewname".to_string()]);
-        assert!(res.is_ok(), "execute must return Ok(()), got: {res:?}");
+        {
+            let _env_guard = env_lock().lock().expect("env_lock");
+            let tmp = tempfile::tempdir().expect("tempdir");
+            let _env = EnvGuard::set(tmp.path());
+            let res = h.execute(&mut ctx, &["mynewname".to_string()]);
+            assert!(res.is_ok(), "execute must return Ok(()), got: {res:?}");
+        }
 
         let ev1 = rx
             .recv()
@@ -428,23 +429,25 @@ mod tests {
     /// `execute_with_session_id_success_path_emits_events`.
     #[tokio::test]
     async fn dispatcher_routes_slash_rename_with_session_id_emits_expected_events() {
-        let _env_guard = env_lock().lock().expect("env_lock");
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let _env = EnvGuard::set(tmp.path());
-
-        let mut builder = RegistryBuilder::new();
-        builder.insert_primary("rename", Arc::new(RenameHandler::new()));
-        let registry = Arc::new(builder.build());
-        let dispatcher = Dispatcher::new(registry);
-
         let sid = "test-session-b17-dispatch";
         let (mut ctx, mut rx) = make_rename_ctx(Some(sid.to_string()));
-        let res = dispatcher.dispatch(&mut ctx, "/rename dispatchedname");
-        assert!(
-            res.is_ok(),
-            "dispatcher.dispatch must return Ok(()) for the success \
-             path, got: {res:?}"
-        );
+        {
+            let _env_guard = env_lock().lock().expect("env_lock");
+            let tmp = tempfile::tempdir().expect("tempdir");
+            let _env = EnvGuard::set(tmp.path());
+
+            let mut builder = RegistryBuilder::new();
+            builder.insert_primary("rename", Arc::new(RenameHandler::new()));
+            let registry = Arc::new(builder.build());
+            let dispatcher = Dispatcher::new(registry);
+
+            let res = dispatcher.dispatch(&mut ctx, "/rename dispatchedname");
+            assert!(
+                res.is_ok(),
+                "dispatcher.dispatch must return Ok(()) for the success \
+                 path, got: {res:?}"
+            );
+        }
 
         let ev1 = rx.recv().await.expect("SessionRenamed must be emitted");
         match ev1 {

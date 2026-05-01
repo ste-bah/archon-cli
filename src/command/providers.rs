@@ -1,11 +1,15 @@
 //! TASK-#210 SLASH-PROVIDERS — `/providers` slash-command handler.
 //!
-//! Lists every LLM provider registered in the workspace (40 total =
-//! 9 native + 31 OpenAI-compatible) by reading the static
+//! Lists every LLM provider registered in the workspace (36 total =
+//! 5 native + 31 OpenAI-compatible) by reading the static
 //! `archon_llm::providers::{list_native, list_compat}` registries.
 //! No session state is touched — both registries are
 //! `lazy_static`-style readonly statics, so the handler runs entirely
 //! synchronously without populating a `CommandContext` snapshot.
+//!
+//! GHOST-003: 4 stub native providers (azure, cohere, copilot, minimax)
+//! were removed — they returned LlmError::Unsupported with no real wire
+//! implementations. The registry now has 5 real native entries.
 //!
 //! Output is a single `TuiEvent::TextDelta` carrying a two-section
 //! aligned table (NATIVE then OPENAI-COMPAT) — matches the
@@ -190,7 +194,7 @@ mod tests {
     fn execute_emits_total_count_line() {
         let body = render();
         assert!(
-            body.contains("40 total: 9 native + 31 openai-compat"),
+            body.contains("36 total: 5 native + 31 openai-compat"),
             "totals line missing or wrong; body:\n{}",
             body
         );
@@ -199,7 +203,7 @@ mod tests {
     #[test]
     fn execute_lists_both_section_headers() {
         let body = render();
-        assert!(body.contains("NATIVE (9)"), "missing NATIVE header");
+        assert!(body.contains("NATIVE (5)"), "missing NATIVE header");
         assert!(
             body.contains("OPENAI-COMPAT (31)"),
             "missing OPENAI-COMPAT header"
@@ -209,18 +213,8 @@ mod tests {
     #[test]
     fn execute_lists_known_native_providers() {
         let body = render();
-        // Spot-check the 9 native providers.
-        for id in [
-            "openai",
-            "anthropic",
-            "gemini",
-            "xai",
-            "bedrock",
-            "azure",
-            "cohere",
-            "copilot",
-            "minimax",
-        ] {
+        // Spot-check the 5 native providers (GHOST-003: 4 stubs removed).
+        for id in ["openai", "anthropic", "gemini", "xai", "bedrock"] {
             assert!(
                 body.contains(id),
                 "native provider id `{}` missing from output; body:\n{}",
@@ -264,8 +258,8 @@ mod tests {
             .filter(|l| l.starts_with("  ") && !l.starts_with("  -") && !l.starts_with("  id "))
             .count();
         assert_eq!(
-            row_count, 40,
-            "expected exactly 40 provider rows; got {}; body:\n{}",
+            row_count, 36,
+            "expected exactly 36 provider rows; got {}; body:\n{}",
             row_count, body
         );
     }
@@ -375,8 +369,8 @@ mod tests {
             TuiEvent::TextDelta(s) => s.clone(),
             other => panic!("expected TextDelta, got {:?}", other),
         };
-        assert!(body.contains("40 total"));
-        assert!(body.contains("NATIVE (9)"));
+        assert!(body.contains("36 total"));
+        assert!(body.contains("NATIVE (5)"));
         assert!(body.contains("OPENAI-COMPAT (31)"));
     }
 }

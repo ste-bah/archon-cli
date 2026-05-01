@@ -150,6 +150,7 @@ fn hook_config_all_optional_fields() {
         status_message: Some("Checking...".into()),
         headers: Default::default(),
         allowed_env_vars: Default::default(),
+        enabled: true,
     };
     assert_eq!(cfg.command, "echo hello");
     assert_eq!(cfg.if_condition.as_deref(), Some("Bash(git *)"));
@@ -169,6 +170,7 @@ fn hook_config_minimal() {
         status_message: None,
         headers: Default::default(),
         allowed_env_vars: Default::default(),
+        enabled: true,
     };
     assert!(cfg.if_condition.is_none());
     assert!(cfg.once.is_none());
@@ -191,6 +193,7 @@ fn hook_config_no_blocking_field() {
         status_message: None,
         headers: Default::default(),
         allowed_env_vars: Default::default(),
+        enabled: true,
     })
     .unwrap();
     assert!(
@@ -212,6 +215,7 @@ fn hook_config_no_priority_field() {
         status_message: None,
         headers: Default::default(),
         allowed_env_vars: Default::default(),
+        enabled: true,
     })
     .unwrap();
     assert!(
@@ -239,6 +243,7 @@ fn hook_matcher_with_matcher_string() {
             status_message: None,
             headers: Default::default(),
             allowed_env_vars: Default::default(),
+            enabled: true,
         }],
     };
     assert_eq!(m.matcher.as_deref(), Some("Bash"));
@@ -358,7 +363,7 @@ fn hook_result_serialization_roundtrip() {
 
 #[test]
 fn hook_outcome_four_variants() {
-    let variants = vec![
+    let variants = [
         HookOutcome::Success,
         HookOutcome::Blocking,
         HookOutcome::NonBlockingError,
@@ -393,7 +398,7 @@ fn hook_outcome_serialization() {
 
 #[test]
 fn permission_behavior_four_variants() {
-    let variants = vec![
+    let variants = [
         PermissionBehavior::Allow,
         PermissionBehavior::Deny,
         PermissionBehavior::Ask,
@@ -428,7 +433,7 @@ fn permission_behavior_serialization() {
 
 #[test]
 fn source_authority_four_variants() {
-    let variants = vec![
+    let variants = [
         SourceAuthority::User,
         SourceAuthority::Project,
         SourceAuthority::Local,
@@ -864,7 +869,7 @@ async fn hooks_execute_in_config_order() {
     // Normalize backslashes so `sh -c` on Windows doesn't eat them.
     let out_path = tmp.path().to_string_lossy().replace('\\', "/");
 
-    let mut registry = HookRegistry::new();
+    let registry = HookRegistry::new();
     registry.register_matchers(
         HookEvent::SessionStart,
         vec![
@@ -881,6 +886,7 @@ async fn hooks_execute_in_config_order() {
                     status_message: None,
                     headers: Default::default(),
                     allowed_env_vars: Default::default(),
+                    enabled: true,
                 }],
             },
             HookMatcher {
@@ -896,6 +902,7 @@ async fn hooks_execute_in_config_order() {
                     status_message: None,
                     headers: Default::default(),
                     allowed_env_vars: Default::default(),
+                    enabled: true,
                 }],
             },
         ],
@@ -925,7 +932,7 @@ async fn hooks_execute_in_config_order() {
 fn no_hook_callback_trait_in_api() {
     // HookRegistry must not expose any trait object taking Fn callbacks.
     // This test verifies by attempting to use the API without any callbacks.
-    let mut registry = HookRegistry::new();
+    let registry = HookRegistry::new();
     registry.register_matchers(HookEvent::PreToolUse, vec![], None);
     // If a HookCallback trait existed and was required, this would fail to compile.
 }
@@ -940,7 +947,7 @@ fn make_registry_with_command(
     if_condition: Option<String>,
     once: Option<bool>,
 ) -> HookRegistry {
-    let mut registry = HookRegistry::new();
+    let registry = HookRegistry::new();
     registry.register_matchers(
         event,
         vec![HookMatcher {
@@ -956,6 +963,7 @@ fn make_registry_with_command(
                 status_message: None,
                 headers: Default::default(),
                 allowed_env_vars: Default::default(),
+                enabled: true,
             }],
         }],
         None,
@@ -968,7 +976,7 @@ fn make_registry_with_command_and_timeout(
     cmd: &str,
     timeout_secs: u32,
 ) -> HookRegistry {
-    let mut registry = HookRegistry::new();
+    let registry = HookRegistry::new();
     registry.register_matchers(
         event,
         vec![HookMatcher {
@@ -984,6 +992,7 @@ fn make_registry_with_command_and_timeout(
                 status_message: None,
                 headers: Default::default(),
                 allowed_env_vars: Default::default(),
+                enabled: true,
             }],
         }],
         None,
@@ -997,7 +1006,7 @@ fn make_registry_with_async_command(
     is_async: bool,
     is_rewake: bool,
 ) -> HookRegistry {
-    let mut registry = HookRegistry::new();
+    let registry = HookRegistry::new();
     registry.register_matchers(
         event,
         vec![HookMatcher {
@@ -1013,6 +1022,7 @@ fn make_registry_with_async_command(
                 status_message: None,
                 headers: Default::default(),
                 allowed_env_vars: Default::default(),
+                enabled: true,
             }],
         }],
         None,
@@ -1115,7 +1125,7 @@ async fn multiple_hooks_all_run_no_short_circuit() {
 
     // First hook: blocks (exit 2) and writes "first" to file
     // Second hook: also writes "second" to file (would be skipped in old short-circuit)
-    let mut registry = HookRegistry::new();
+    let registry = HookRegistry::new();
     registry.register_matchers(
         HookEvent::PreToolUse,
         vec![
@@ -1132,6 +1142,7 @@ async fn multiple_hooks_all_run_no_short_circuit() {
                     status_message: None,
                     headers: Default::default(),
                     allowed_env_vars: Default::default(),
+                    enabled: true,
                 }],
             },
             HookMatcher {
@@ -1147,6 +1158,7 @@ async fn multiple_hooks_all_run_no_short_circuit() {
                     status_message: None,
                     headers: Default::default(),
                     allowed_env_vars: Default::default(),
+                    enabled: true,
                 }],
             },
         ],

@@ -219,6 +219,7 @@ fn make_runner(provider: Arc<CapturingMockProvider>, identity: IdentityProvider)
         in_fork: false,
         nested: false,
         cancel_parent: None,
+        sandbox: None,
     };
     SubagentRunner::new(
         provider,

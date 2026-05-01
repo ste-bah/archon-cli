@@ -142,8 +142,10 @@ impl Ingester {
         source: &str,
         domain_tag: &str,
     ) -> Result<IngestResult> {
-        let mut result = IngestResult::default();
-        result.chunks_processed = chunks.len();
+        let mut result = IngestResult {
+            chunks_processed: chunks.len(),
+            ..Default::default()
+        };
 
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

@@ -753,6 +753,7 @@ dependencies = [
  "archon-llm",
  "archon-memory",
  "archon-observability",
+ "archon-permissions",
  "archon-session",
  "archon-tools",
  "async-trait",

@@ -131,14 +131,14 @@ impl DiscoveryCatalog {
         let key: AgentKey = (meta.name.clone(), meta.version.clone());
 
         // Collision detection: same (name, version) from different path
-        if let Some(existing) = self.live.entries.get(&key) {
-            if existing.source_path != meta.source_path {
-                warn!(
-                    "agent collision: name={} version={} existing={:?} ignored={:?}",
-                    meta.name, meta.version, existing.source_path, meta.source_path
-                );
-                return Ok(());
-            }
+        if let Some(existing) = self.live.entries.get(&key)
+            && existing.source_path != meta.source_path
+        {
+            warn!(
+                "agent collision: name={} version={} existing={:?} ignored={:?}",
+                meta.name, meta.version, existing.source_path, meta.source_path
+            );
+            return Ok(());
         }
 
         // Insert directly into live DashMaps (concurrent-safe)
@@ -215,16 +215,16 @@ impl DiscoveryCatalog {
 
         // Descending iteration over BTreeSet (highest first)
         for version in versions_set.iter().rev() {
-            if let Some(req) = version_req {
-                if !req.matches(version) {
-                    continue;
-                }
+            if let Some(req) = version_req
+                && !req.matches(version)
+            {
+                continue;
             }
             let key = (name.to_string(), version.clone());
-            if let Some(entry) = self.live.entries.get(&key) {
-                if matches!(entry.state, super::metadata::AgentState::Valid) {
-                    return Ok(entry.value().clone());
-                }
+            if let Some(entry) = self.live.entries.get(&key)
+                && matches!(entry.state, super::metadata::AgentState::Valid)
+            {
+                return Ok(entry.value().clone());
             }
         }
 
@@ -274,7 +274,7 @@ impl DiscoveryCatalog {
                 let dep_req = &dep.version_req;
                 if let Ok(dep_meta) = self.resolve(&dep.name, Some(dep_req)) {
                     let dep_key = (dep_meta.name.clone(), dep_meta.version.clone());
-                    if !resolved.iter().any(|k| *k == dep_key) {
+                    if !resolved.contains(&dep_key) {
                         self.dfs_dependencies(&dep.name, resolved, visiting, path)?;
                         resolved.push(dep_key);
                     }

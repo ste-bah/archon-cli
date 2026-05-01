@@ -15,7 +15,7 @@ pub struct VirtualList<T> {
 
 impl<T> VirtualList<T> {
     pub fn new(items: Vec<T>, viewport_height: usize) -> Self {
-        let selected = if items.is_empty() { 0 } else { 0 };
+        let selected = 0;
         Self {
             items,
             selected,

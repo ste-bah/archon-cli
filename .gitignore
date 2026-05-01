@@ -21,6 +21,7 @@ Thumbs.db
 
 # Local config overrides (never commit secrets or machine-local config)
 config.local.toml
+.archon/hooks.local.toml
 .env
 .env.*
 !.env.example

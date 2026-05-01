@@ -1,7 +1,7 @@
 //! PluginLoader — discover, validate, and load plugins from directories.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::cache::WasmCache;
 use crate::capability::PluginCapability;
@@ -179,12 +179,7 @@ impl PluginLoader {
     }
 
     /// Attempt to load one plugin. Returns the outcome.
-    fn load_one(
-        &self,
-        dir_name: &str,
-        plugin_dir: &PathBuf,
-        loaded_names: &[String],
-    ) -> LoadOutcome {
+    fn load_one(&self, dir_name: &str, plugin_dir: &Path, loaded_names: &[String]) -> LoadOutcome {
         // 1. Load manifest (None = no manifest file = silent skip)
         let manifest = match load_manifest(plugin_dir) {
             None => return LoadOutcome::Skip,
@@ -286,17 +281,17 @@ fn capability_from_str(cap: &str) -> PluginCapability {
 
 /// Check if a granted capability covers the requested capability string.
 fn capability_matches(granted: &PluginCapability, requested: &str) -> bool {
-    match (granted, requested) {
-        (PluginCapability::ReadFs(_), "ReadFs") => true,
-        (PluginCapability::WriteFs(_), "WriteFs") => true,
-        (PluginCapability::Network(_), "Network") => true,
-        (PluginCapability::ToolRegister, "ToolRegister") => true,
-        (PluginCapability::HookRegister, "HookRegister") => true,
-        (PluginCapability::CommandRegister, "CommandRegister") => true,
-        (PluginCapability::LspRegister, "LspRegister") => true,
-        (PluginCapability::DataDirWrite, "DataDirWrite") => true,
-        _ => false,
-    }
+    matches!(
+        (granted, requested),
+        (PluginCapability::ReadFs(_), "ReadFs")
+            | (PluginCapability::WriteFs(_), "WriteFs")
+            | (PluginCapability::Network(_), "Network")
+            | (PluginCapability::ToolRegister, "ToolRegister")
+            | (PluginCapability::HookRegister, "HookRegister")
+            | (PluginCapability::CommandRegister, "CommandRegister")
+            | (PluginCapability::LspRegister, "LspRegister")
+            | (PluginCapability::DataDirWrite, "DataDirWrite")
+    )
 }
 
 // ── instantiate_wasm_plugins ──────────────────────────────────────────────────

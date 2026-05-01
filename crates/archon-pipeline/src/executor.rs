@@ -436,10 +436,10 @@ impl PipelineExecutor {
             let run = run_lock.lock().await;
             let mut outputs: HashMap<String, serde_json::Value> = HashMap::new();
             for (sid, srun) in &run.steps {
-                if srun.state == StepRunState::Finished {
-                    if let Some(ref output) = srun.output {
-                        outputs.insert(sid.clone(), output.clone());
-                    }
+                if srun.state == StepRunState::Finished
+                    && let Some(ref output) = srun.output
+                {
+                    outputs.insert(sid.clone(), output.clone());
                 }
             }
             let resolved = vars::substitute(&step.input, &outputs)?;
@@ -560,7 +560,7 @@ impl PipelineExecutor {
                     let output = match result_stream {
                         archon_core::tasks::TaskResultStream::Inline(s) => {
                             serde_json::from_str::<serde_json::Value>(&s)
-                                .unwrap_or_else(|_| serde_json::Value::String(s))
+                                .unwrap_or(serde_json::Value::String(s))
                         }
                         archon_core::tasks::TaskResultStream::File(path) => {
                             serde_json::json!({"__archon_file_ref__": path.to_string_lossy()})

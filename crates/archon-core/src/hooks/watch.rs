@@ -61,12 +61,11 @@ impl FileWatchManager {
                 break;
             }
             let path = PathBuf::from(&path_str);
-            if watched.insert(path.clone()) {
-                if let Some(ref mut w) = *watcher_guard {
-                    if let Err(e) = w.watch(&path, RecursiveMode::NonRecursive) {
-                        tracing::warn!(path = %path_str, error = %e, "failed to watch path");
-                    }
-                }
+            if watched.insert(path.clone())
+                && let Some(ref mut w) = *watcher_guard
+                && let Err(e) = w.watch(&path, RecursiveMode::NonRecursive)
+            {
+                tracing::warn!(path = %path_str, error = %e, "failed to watch path");
             }
         }
     }

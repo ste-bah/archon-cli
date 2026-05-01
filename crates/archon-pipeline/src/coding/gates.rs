@@ -374,15 +374,15 @@ fn find_references(stem: &str, project_root: &Path, skip_file: &Path) -> Vec<Str
             return;
         }
 
-        if let Ok(content) = std::fs::read_to_string(path) {
-            if pattern.is_match(&content) {
-                let rel = path
-                    .strip_prefix(project_root)
-                    .unwrap_or(path)
-                    .display()
-                    .to_string();
-                references.push(rel);
-            }
+        if let Ok(content) = std::fs::read_to_string(path)
+            && pattern.is_match(&content)
+        {
+            let rel = path
+                .strip_prefix(project_root)
+                .unwrap_or(path)
+                .display()
+                .to_string();
+            references.push(rel);
         }
     });
 
@@ -610,7 +610,7 @@ impl E2ESmokeTestGate {
         // Check if ANY test pattern matches
         let has_test_pattern = test_patterns
             .iter()
-            .any(|p| Regex::new(p).map_or(false, |re| re.is_match(output)));
+            .any(|p| Regex::new(p).is_ok_and(|re| re.is_match(output)));
 
         if !has_test_pattern {
             return false;

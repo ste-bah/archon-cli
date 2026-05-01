@@ -13,6 +13,12 @@ use super::{ReasoningEngine, ReasoningItem, ReasoningOutput, ReasoningRequest, R
 /// Decomposition reasoning: divide and conquer.
 pub struct DecompositionEngine;
 
+impl Default for DecompositionEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DecompositionEngine {
     pub fn new() -> Self {
         Self
@@ -86,6 +92,7 @@ impl DecompositionEngine {
         (subproblems, dependencies)
     }
 
+    #[allow(clippy::needless_range_loop)]
     /// Topological sort using Kahn's algorithm.
     fn topological_sort(
         subproblems: &[Subproblem],

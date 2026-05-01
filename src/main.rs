@@ -1,3 +1,7 @@
+#![allow(clippy::doc_lazy_continuation)]
+#![allow(clippy::doc_overindented_list_items)]
+#![allow(clippy::empty_line_after_doc_comments)]
+
 mod agent_handle;
 pub(crate) mod cli_args;
 mod command;

@@ -51,10 +51,10 @@ impl Tool for TaskUpdateTool {
 
         // Update description if provided
         let new_desc = input.get("description").and_then(|v| v.as_str());
-        if let Some(desc) = new_desc {
-            if let Err(e) = mgr.update_task(task_id, Some(desc)) {
-                return ToolResult::error(e);
-            }
+        if let Some(desc) = new_desc
+            && let Err(e) = mgr.update_task(task_id, Some(desc))
+        {
+            return ToolResult::error(e);
         }
 
         // Update status if provided

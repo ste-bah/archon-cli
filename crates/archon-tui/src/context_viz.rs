@@ -113,7 +113,7 @@ impl Widget for ContextViz {
 
         // Filled gauge cells
         for x in 0..fill_cells {
-            let cell = if x as u16 == fill_cells - 1 && pct < 100.0 {
+            let cell = if x == fill_cells - 1 && pct < 100.0 {
                 "▓"
             } else {
                 "█"

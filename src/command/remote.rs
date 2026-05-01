@@ -130,14 +130,16 @@ pub async fn handle_remote_command(
         use archon_sdk::ide::handler::IdeProtocolHandler;
         use std::sync::Arc;
         use tokio::sync::Mutex;
-        let mut srv_cfg = WsServerConfig::default();
-        srv_cfg.port = *port;
-        srv_cfg.tls_cert = config.ws_remote.tls_cert.as_ref().map(PathBuf::from);
-        srv_cfg.tls_key = config.ws_remote.tls_key.as_ref().map(PathBuf::from);
-        if let Some(tp) = token_path {
-            if let Ok(tok) = std::fs::read_to_string(tp) {
-                srv_cfg.token = Some(tok.trim().to_string());
-            }
+        let mut srv_cfg = WsServerConfig {
+            port: *port,
+            tls_cert: config.ws_remote.tls_cert.as_ref().map(PathBuf::from),
+            tls_key: config.ws_remote.tls_key.as_ref().map(PathBuf::from),
+            ..Default::default()
+        };
+        if let Some(tp) = token_path
+            && let Ok(tok) = std::fs::read_to_string(tp)
+        {
+            srv_cfg.token = Some(tok.trim().to_string());
         }
         let ide_proto = IdeProtocolHandler::new(env!("CARGO_PKG_VERSION"));
         let ide_handler: IdeHandlerFn = Arc::new(Mutex::new(Box::new({

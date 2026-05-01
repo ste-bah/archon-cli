@@ -85,23 +85,13 @@ pub fn install_sigwinch(tx: tokio::sync::mpsc::UnboundedSender<TuiEvent>) {
             }
         };
 
-        loop {
-            match sigwinch.recv().await {
-                Some(()) => {
-                    // Get the new terminal size
-                    let (cols, rows) = crossterm::terminal::size()
-                        .map(|(c, r)| (c as u16, r as u16))
-                        .unwrap_or((80, 24));
+        while let Some(()) = sigwinch.recv().await {
+            // Get the new terminal size
+            let (cols, rows) = crossterm::terminal::size().unwrap_or((80, 24));
 
-                    if tx.send(TuiEvent::Resize { cols, rows }).is_err() {
-                        // Receiver dropped - the TUI is shutting down
-                        break;
-                    }
-                }
-                None => {
-                    // Signal stream ended (should not happen for SIGWINCH)
-                    break;
-                }
+            if tx.send(TuiEvent::Resize { cols, rows }).is_err() {
+                // Receiver dropped - the TUI is shutting down
+                break;
             }
         }
     });

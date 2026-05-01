@@ -11,6 +11,12 @@ use super::{ReasoningEngine, ReasoningItem, ReasoningOutput, ReasoningRequest, R
 /// Analogical reasoning: structural mapping between domains.
 pub struct AnalogicalEngine;
 
+impl Default for AnalogicalEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AnalogicalEngine {
     pub fn new() -> Self {
         Self

@@ -19,6 +19,7 @@ impl OutputFormat {
     /// Parse an output format string.
     ///
     /// Accepted values: `"text"`, `"json"`, `"stream-json"`.
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Result<Self, String> {
         match s {
             "text" => Ok(Self::Text),

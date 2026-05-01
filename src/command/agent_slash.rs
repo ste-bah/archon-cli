@@ -19,8 +19,8 @@
 //! comfortably under the 500-line ceiling and avoids touching the
 //! independently-tested CLI path.
 
-use std::sync::Arc;
-use std::sync::RwLock;
+#[allow(unused_imports)]
+use std::sync::{Arc, RwLock};
 
 use archon_core::agents::AgentRegistry;
 use archon_core::agents::definition::CustomAgentDefinition;

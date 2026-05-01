@@ -59,9 +59,6 @@ pub(crate) fn run_session_loop(
     api_url: Option<String>,
     input_tui_tx: tokio::sync::mpsc::UnboundedSender<TuiEvent>,
     mut user_input_rx: tokio::sync::mpsc::Receiver<String>,
-    agent_event_tx_for_dispatcher: tokio::sync::mpsc::UnboundedSender<
-        archon_core::agent::TimestampedEvent,
-    >,
     session_store_for_input: Arc<archon_session::storage::SessionStore>,
     session_id_for_input: String,
     persist_personality: bool,
@@ -77,6 +74,11 @@ pub(crate) fn run_session_loop(
     // Reference: archon-pipeline/src/learning/gnn/auto_trainer_runtime.rs.
     // Forwarded to AgentHandle so the auto-capture site can call record_memory.
     auto_trainer: Option<Arc<archon_pipeline::learning::gnn::auto_trainer::AutoTrainer>>,
+    // GHOST-007: shared AgentDispatcher for /cancel is_busy() + cancel_current().
+    agent_dispatcher: Arc<std::sync::Mutex<archon_tui::AgentDispatcher>>,
+    // GHOST-007: late-init slot for AgentHandle. Populated here so /cancel
+    // can call fire_cancel() on the in-flight turn.
+    cancel_handle_slot: Arc<std::sync::Mutex<Option<Arc<crate::agent_handle::AgentHandle>>>>,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> {
     Box::pin(async move {
         let agent = Arc::new(tokio::sync::Mutex::new(agent));
@@ -97,18 +99,18 @@ pub(crate) fn run_session_loop(
         let mut initial_prompt_pending: Option<String> =
             agent_def.as_ref().and_then(|d| d.initial_prompt.clone());
 
-        // TASK-TUI-107: AgentDispatcher owns the in-flight turn lifecycle,
-        // queues overflow prompts FIFO, and polls completion without
-        // blocking. AgentHandle bridges `Arc<Mutex<Agent>>` to TurnRunner.
+        // TASK-TUI-107: AgentHandle bridges `Arc<Mutex<Agent>>` to TurnRunner.
+        // Created here (needs Arc<Mutex<Agent>> which is wrapped above).
+        // GHOST-007: published to cancel_handle_slot so /cancel can fire_cancel.
         let adapter = Arc::new(crate::agent_handle::AgentHandle::new(
             Arc::clone(&agent),
             auto_capture,
             auto_trainer.clone(),
         ));
-        let router: Arc<dyn archon_tui::AgentRouter> =
-            Arc::new(crate::agent_handle::NoopAgentRouter);
-        let mut dispatcher =
-            archon_tui::AgentDispatcher::new(router, agent_event_tx_for_dispatcher);
+        *cancel_handle_slot.lock().unwrap() = Some(Arc::clone(&adapter));
+
+        // GHOST-007: agent_dispatcher is constructed in session.rs and shared
+        // via Arc<Mutex<>> so /cancel can call is_busy() + cancel_current().
         // Per-turn post-completion actions: pushed in dispatch order,
         // popped on each `poll_completion()` outcome. Replaces the
         // per-spawn tail logic that used to live inside the deleted
@@ -143,7 +145,8 @@ pub(crate) fn run_session_loop(
             let input = tokio::select! {
                 biased;
                 _ = poll_tick.tick() => {
-                    if let Some(outcome) = dispatcher.poll_completion() {
+                    let outcome = agent_dispatcher.lock().unwrap().poll_completion();
+                    if let Some(outcome) = outcome {
                         tracing::debug!("dispatcher turn outcome: {}",
                             match &outcome {
                                 archon_tui::TurnOutcome::Completed => "completed",
@@ -158,8 +161,8 @@ pub(crate) fn run_session_loop(
                                 for (idx, msg) in
                                     guard.conversation_state().messages.iter().enumerate()
                                 {
-                                    if let Ok(json_str) = serde_json::to_string(msg) {
-                                        if let Err(e) = session_store_for_input
+                                    if let Ok(json_str) = serde_json::to_string(msg)
+                                        && let Err(e) = session_store_for_input
                                             .save_message(
                                                 &session_id_for_input,
                                                 idx as u64,
@@ -168,16 +171,14 @@ pub(crate) fn run_session_loop(
                                         {
                                             tracing::warn!("save_message idx {idx}: {e}");
                                         }
-                                    }
                                 }
                             }
                             Some(PostTurnAction::SkillComplete { reload_registry_for }) => {
-                                if reload_registry_for.as_deref() == Some("create-agent") {
-                                    if let Ok(mut reg) = cmd_ctx.agent_registry.write() {
+                                if reload_registry_for.as_deref() == Some("create-agent")
+                                    && let Ok(mut reg) = cmd_ctx.agent_registry.write() {
                                         reg.reload(&cmd_ctx.working_dir);
                                         tracing::info!("agent registry reloaded");
                                     }
-                                }
                                 let _ = input_tui_tx
                                     .send(TuiEvent::SlashCommandComplete);
                             }
@@ -404,7 +405,7 @@ pub(crate) fn run_session_loop(
             // Both operations are non-blocking.
             if input == "__cancel__" {
                 adapter.fire_cancel();
-                match dispatcher.cancel_current() {
+                match agent_dispatcher.lock().unwrap().cancel_current() {
                     archon_tui::CancelOutcome::NoInflight => {
                         tracing::debug!("Ctrl+C: no in-flight turn to cancel");
                     }
@@ -676,7 +677,7 @@ pub(crate) fn run_session_loop(
                             // optional registry reload) is pushed onto
                             // post_turn_queue and runs when poll_completion
                             // observes this turn's outcome.
-                            match dispatcher.spawn_turn(
+                            match agent_dispatcher.lock().unwrap().spawn_turn(
                                 prompt.clone(),
                                 adapter.clone() as std::sync::Arc<dyn archon_tui::TurnRunner>,
                             ) {
@@ -741,7 +742,7 @@ pub(crate) fn run_session_loop(
             // prompts drain via poll_completion. Session persistence is
             // pushed onto post_turn_queue and runs when poll_completion
             // observes this turn's outcome.
-            match dispatcher.spawn_turn(
+            match agent_dispatcher.lock().unwrap().spawn_turn(
                 effective_input,
                 adapter.clone() as std::sync::Arc<dyn archon_tui::TurnRunner>,
             ) {
@@ -762,25 +763,26 @@ pub(crate) fn run_session_loop(
         // AGT-015: Increment agent invocation count on session end.
         // Wired ONLY here (not at /exit) to avoid double-counting — the Stop
         // hook fires on ALL exit paths (/exit, /quit, Ctrl-C, channel close).
-        if let Some(ref def) = agent_def {
-            if let Some(ref base_dir) = def.base_dir {
-                let agent_dir = std::path::Path::new(base_dir);
-                if let Err(e) = archon_core::agents::memory::increment_invocation_count(agent_dir) {
-                    tracing::warn!(
-                        agent = def.agent_type.as_str(),
-                        "failed to increment invocation count: {e}"
-                    );
-                }
+        if let Some(ref def) = agent_def
+            && let Some(ref base_dir) = def.base_dir
+        {
+            let agent_dir = std::path::Path::new(base_dir);
+            if let Err(e) = archon_core::agents::memory::increment_invocation_count(agent_dir) {
+                tracing::warn!(
+                    agent = def.agent_type.as_str(),
+                    "failed to increment invocation count: {e}"
+                );
             }
         }
 
         // TASK-TUI-107: drain in-flight turn + queue before the Stop hook.
         let drain_deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-        while (dispatcher.is_busy() || dispatcher.queue_len() > 0)
+        while (agent_dispatcher.lock().unwrap().is_busy()
+            || agent_dispatcher.lock().unwrap().queue_len() > 0)
             && std::time::Instant::now() < drain_deadline
         {
             tokio::time::sleep(std::time::Duration::from_millis(16)).await;
-            let _ = dispatcher.poll_completion();
+            let _ = agent_dispatcher.lock().unwrap().poll_completion();
         }
 
         // CRIT-06: Fire Stop hook when the input channel closes (session ending)

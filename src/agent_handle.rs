@@ -74,11 +74,11 @@ impl AgentHandle {
     /// any. Synchronous / non-blocking; uses `try_lock` so Ctrl+C never
     /// waits on a contended lock.
     pub fn fire_cancel(&self) {
-        if let Ok(guard) = self.cancel_slot.try_lock() {
-            if let Some(ref token) = *guard {
-                token.cancel();
-                tracing::info!("AgentHandle: fired CancellationToken on current turn");
-            }
+        if let Ok(guard) = self.cancel_slot.try_lock()
+            && let Some(ref token) = *guard
+        {
+            token.cancel();
+            tracing::info!("AgentHandle: fired CancellationToken on current turn");
         }
     }
 }
@@ -108,7 +108,7 @@ impl TurnRunner for AgentHandle {
                     let mut recent: Vec<archon_pipeline::capture::CapturedMemory> = Vec::new();
                     for mem in captured {
                         if !AutoCapture::is_duplicate(&mem, &recent) {
-                            if let Some(ref memory) = guard.memory_handle() {
+                            if let Some(memory) = guard.memory_handle() {
                                 let stored = memory.store_memory(
                                     &mem.content,
                                     &mem.content.chars().take(80).collect::<String>(),
@@ -121,10 +121,10 @@ impl TurnRunner for AgentHandle {
                                 // Reference: auto_trainer.rs::record_memory.
                                 // Only count successful stores so triggers reflect
                                 // real memory accumulation.
-                                if stored.is_ok() {
-                                    if let Some(ref at) = self.auto_trainer {
-                                        at.record_memory();
-                                    }
+                                if stored.is_ok()
+                                    && let Some(ref at) = self.auto_trainer
+                                {
+                                    at.record_memory();
                                 }
                             }
                             recent.push(mem);

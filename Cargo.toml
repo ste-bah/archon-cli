@@ -168,6 +168,9 @@ tempfile.workspace = true
 async-trait.workspace = true
 regex.workspace = true
 
+[features]
+test-support = []
+
 [profile.release]
 lto = true
 strip = true

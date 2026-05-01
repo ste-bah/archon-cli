@@ -21,10 +21,10 @@ pub fn current_branch(repo: &Repository) -> Result<String, String> {
         .head()
         .map_err(|e| format!("Failed to get HEAD: {e}"))?;
 
-    if head.is_branch() {
-        if let Some(name) = head.shorthand() {
-            return Ok(name.to_string());
-        }
+    if head.is_branch()
+        && let Some(name) = head.shorthand()
+    {
+        return Ok(name.to_string());
     }
 
     // Detached HEAD — return short hash

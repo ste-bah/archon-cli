@@ -130,8 +130,6 @@ pub(crate) fn parse_layer_filter(sources: &[String]) -> Vec<ConfigLayer> {
 }
 
 /// Apply `--tools` (whitelist) and `--disallowed-tools` (blacklist) from
-
-/// Apply `--tools` (whitelist) and `--disallowed-tools` (blacklist) from
 /// resolved CLI flags to the tool registry.
 pub(crate) fn apply_tool_filters(
     registry: &mut archon_core::dispatch::ToolRegistry,
@@ -349,13 +347,13 @@ async fn build_session_agent(
             );
         }
 
-        if let Some(ref skills) = def.skills {
-            if !skills.is_empty() {
-                let skills_list = skills.join(", ");
-                agent_prompt = format!(
-                    "{agent_prompt}\n\n<available-skills>\nThe following skills are available to you: {skills_list}\nInvoke them by name when relevant to the task.\n</available-skills>"
-                );
-            }
+        if let Some(ref skills) = def.skills
+            && !skills.is_empty()
+        {
+            let skills_list = skills.join(", ");
+            agent_prompt = format!(
+                "{agent_prompt}\n\n<available-skills>\nThe following skills are available to you: {skills_list}\nInvoke them by name when relevant to the task.\n</available-skills>"
+            );
         }
 
         if !def.leann_queries.is_empty() {
@@ -423,6 +421,8 @@ async fn build_session_agent(
     let tool_defs = registry.tool_definitions();
 
     let fast_mode_shared = Arc::new(AtomicBool::new(cli.fast));
+    // GHOST-006: shared sandbox flag — toggled by /sandbox on/off, read by dispatch.
+    let sandbox_flag = Arc::new(AtomicBool::new(false));
     let initial_effort = if let Some(ref effort_arg) = cli.effort {
         archon_llm::effort::parse_level(effort_arg).unwrap_or(EffortLevel::Medium)
     } else {
@@ -455,14 +455,18 @@ async fn build_session_agent(
         max_tool_concurrency: config.tools.max_concurrency as usize,
         max_turns: None,
         cancel_token: None,
+        // GHOST-006: SandboxBackend wraps the shared flag for dispatch gating.
+        sandbox: Some(std::sync::Arc::new(
+            archon_tui::sandbox::SharedSandboxFlag::with_flag(sandbox_flag.clone()),
+        )),
     };
 
     if let Some(ref def) = agent_def {
-        if let Some(ref m) = def.model {
-            if m != "inherit" {
-                agent_config.model = m.clone();
-                *agent_config.model_override.lock().await = m.clone();
-            }
+        if let Some(ref m) = def.model
+            && m != "inherit"
+        {
+            agent_config.model = m.clone();
+            *agent_config.model_override.lock().await = m.clone();
         }
         if let Some(ref e) = def.effort {
             if let Ok(level) = e.parse::<archon_llm::effort::EffortLevel>() {
@@ -533,18 +537,18 @@ async fn build_session_agent(
         let arc = std::sync::Arc::new(hook_registry);
         agent.set_hook_registry(Arc::clone(&arc));
 
-        if let Some(ref def) = agent_def {
-            if let Some(ref hooks_json) = def.hooks {
-                match archon_core::agents::loader::parse_agent_hooks(hooks_json) {
-                    Ok(hook_pairs) => {
-                        for (event, config) in hook_pairs {
-                            arc.register_session_hook(session_id, event, config);
-                        }
-                        tracing::info!(agent = %def.agent_type, "registered agent session-scoped hooks");
+        if let Some(ref def) = agent_def
+            && let Some(ref hooks_json) = def.hooks
+        {
+            match archon_core::agents::loader::parse_agent_hooks(hooks_json) {
+                Ok(hook_pairs) => {
+                    for (event, config) in hook_pairs {
+                        arc.register_session_hook(session_id, event, config);
                     }
-                    Err(e) => {
-                        tracing::warn!(agent = %def.agent_type, error = %e, "failed to parse agent hooks")
-                    }
+                    tracing::info!(agent = %def.agent_type, "registered agent session-scoped hooks");
+                }
+                Err(e) => {
+                    tracing::warn!(agent = %def.agent_type, error = %e, "failed to parse agent hooks")
                 }
             }
         }
@@ -558,10 +562,10 @@ async fn build_session_agent(
 
     agent.install_subagent_executor();
 
-    if let Some(ref def) = agent_def {
-        if let Some(ref reminder) = def.critical_system_reminder {
-            agent.set_critical_system_reminder(reminder.clone());
-        }
+    if let Some(ref def) = agent_def
+        && let Some(ref reminder) = def.critical_system_reminder
+    {
+        agent.set_critical_system_reminder(reminder.clone());
     }
 
     Ok(BuiltAgent {
@@ -593,10 +597,10 @@ pub(crate) async fn run_print_mode_session(
 
     // AGT-011: Prepend initial_prompt to the query in print mode
     let mut print_config = print_config;
-    if let Some(ref def) = agent_def {
-        if let Some(ref prefix) = def.initial_prompt {
-            print_config.query = format!("{prefix}\n\n{}", print_config.query);
-        }
+    if let Some(ref def) = agent_def
+        && let Some(ref prefix) = def.initial_prompt
+    {
+        print_config.query = format!("{prefix}\n\n{}", print_config.query);
     }
 
     run_print_mode(print_config, config, &mut agent, event_rx).await
@@ -608,6 +612,7 @@ pub(crate) async fn run_print_mode_session(
 /// Each `UserMessage` line triggers a full agent invocation
 /// (`process_message`). `TextDelta` events are collected into an
 /// `AssistantMessage` reply. `Ping` → `Pong`. The loop exits on EOF.
+#[allow(dead_code)]
 pub(crate) async fn run_headless_session(
     config: &archon_core::config::ArchonConfig,
     session_id: &str,
@@ -911,6 +916,8 @@ pub(crate) async fn run_interactive_session(
     // ── Phase 2: Initialize fast mode (CLI-118) ─────────────────
     // Shared atomic so slash commands and the agent see the same state
     let fast_mode_shared = Arc::new(AtomicBool::new(cli.fast));
+    // GHOST-006: shared sandbox flag for second boot path.
+    let sandbox_flag = Arc::new(AtomicBool::new(false));
     let fast_mode = FastModeState::new_with(cli.fast);
     if cli.fast {
         tracing::info!("fast mode enabled via --fast flag");
@@ -933,12 +940,9 @@ pub(crate) async fn run_interactive_session(
         }
     } else {
         // Use config default (medium unless overridden in config)
-        match effort::parse_level(&config.api.default_effort) {
-            Ok(level) => {
-                effort_state.set_level(level);
-                initial_effort = level;
-            }
-            Err(_) => {} // default is Medium, already set
+        if let Ok(level) = effort::parse_level(&config.api.default_effort) {
+            effort_state.set_level(level);
+            initial_effort = level;
         }
     }
     let effort_level_shared = Arc::new(tokio::sync::Mutex::new(initial_effort));
@@ -1386,12 +1390,11 @@ pub(crate) async fn run_interactive_session(
                 prompt = format!("{prompt}\n\n<tool-guidance>\n{}\n</tool-guidance>", a.tool_guidance);
             }
             // Inject skills into agent system prompt
-            if let Some(ref skills) = a.skills {
-                if !skills.is_empty() {
+            if let Some(ref skills) = a.skills
+                && !skills.is_empty() {
                     let skills_list = skills.join(", ");
                     prompt = format!("{prompt}\n\n<available-skills>\nThe following skills are available to you: {skills_list}\nInvoke them by name when relevant to the task.\n</available-skills>");
                 }
-            }
             // Inject LEANN queries and memory tags
             if !a.leann_queries.is_empty() {
                 let queries = a.leann_queries.join(", ");
@@ -1437,10 +1440,10 @@ pub(crate) async fn run_interactive_session(
                 // Gated by config.context.prompt_cache (TASK-WIRE-003) — when
                 // disabled, we omit the cache_control hint entirely so the API
                 // treats every block as non-cacheable.
-                if config.context.prompt_cache {
-                    if let Some(ref cc) = section.cache_control {
-                        block["cache_control"] = serde_json::json!({ "type": cc });
-                    }
+                if config.context.prompt_cache
+                    && let Some(ref cc) = section.cache_control
+                {
+                    block["cache_control"] = serde_json::json!({ "type": cc });
                 }
                 block
             })
@@ -1541,16 +1544,20 @@ pub(crate) async fn run_interactive_session(
         max_tool_concurrency: config.tools.max_concurrency as usize,
         max_turns: None,
         cancel_token: None,
+        // GHOST-006: SandboxBackend wraps the shared flag for dispatch gating.
+        sandbox: Some(std::sync::Arc::new(
+            archon_tui::sandbox::SharedSandboxFlag::with_flag(sandbox_flag.clone()),
+        )),
     };
 
     // Apply agent execution config overrides
     if let Some(ref def) = agent_def {
         // AC-113: model="inherit" means use parent model (skip override)
-        if let Some(ref m) = def.model {
-            if m != "inherit" {
-                agent_config.model = m.clone();
-                *agent_config.model_override.lock().await = m.clone();
-            }
+        if let Some(ref m) = def.model
+            && m != "inherit"
+        {
+            agent_config.model = m.clone();
+            *agent_config.model_override.lock().await = m.clone();
         }
         if let Some(ref e) = def.effort {
             if let Ok(level) = e.parse::<archon_llm::effort::EffortLevel>() {
@@ -1953,20 +1960,17 @@ pub(crate) async fn run_interactive_session(
         }
 
         // Generate personality briefing for first turn.
-        if let Ok(trends) = archon_consciousness::persistence::compute_trends(memory.as_ref(), 10) {
-            if let Ok(Some(last)) =
+        if let Ok(trends) = archon_consciousness::persistence::compute_trends(memory.as_ref(), 10)
+            && let Ok(Some(last)) =
                 archon_consciousness::persistence::load_latest_snapshot(memory.as_ref())
-            {
-                if trends.total_sessions > 0 {
-                    let briefing =
-                        archon_consciousness::persistence::generate_briefing(&trends, &last);
-                    agent.set_personality_briefing(briefing);
-                    tracing::info!(
-                        sessions = trends.total_sessions,
-                        "personality: briefing generated for first turn"
-                    );
-                }
-            }
+            && trends.total_sessions > 0
+        {
+            let briefing = archon_consciousness::persistence::generate_briefing(&trends, &last);
+            agent.set_personality_briefing(briefing);
+            tracing::info!(
+                sessions = trends.total_sessions,
+                "personality: briefing generated for first turn"
+            );
         }
     }
 
@@ -2073,21 +2077,17 @@ pub(crate) async fn run_interactive_session(
         // CRIT-15 (ITEM 5): Restore inner voice from snapshot on session resume.
         if archon_consciousness::inner_voice::InnerVoice::is_enabled(
             config.consciousness.inner_voice,
-        ) {
-            if let Ok(memories) = memory.recall_memories("inner_voice_snapshot", 1) {
-                if let Some(m) = memories.first() {
-                    if let Ok(snapshot) = serde_json::from_str::<
-                        archon_consciousness::inner_voice::InnerVoiceSnapshot,
-                    >(&m.content)
-                    {
-                        let iv = Arc::new(tokio::sync::Mutex::new(
-                            archon_consciousness::inner_voice::InnerVoice::from_snapshot(snapshot),
-                        ));
-                        agent.set_inner_voice(iv);
-                        tracing::info!("inner voice state restored from snapshot");
-                    }
-                }
-            }
+        ) && let Ok(memories) = memory.recall_memories("inner_voice_snapshot", 1)
+            && let Some(m) = memories.first()
+            && let Ok(snapshot) = serde_json::from_str::<
+                archon_consciousness::inner_voice::InnerVoiceSnapshot,
+            >(&m.content)
+        {
+            let iv = Arc::new(tokio::sync::Mutex::new(
+                archon_consciousness::inner_voice::InnerVoice::from_snapshot(snapshot),
+            ));
+            agent.set_inner_voice(iv);
+            tracing::info!("inner voice state restored from snapshot");
         }
     }
 
@@ -2325,6 +2325,22 @@ pub(crate) async fn run_interactive_session(
         crate::command::dispatcher::Dispatcher::new(std::sync::Arc::clone(&registry)),
     );
 
+    // GHOST-007: AgentDispatcher constructed early so it can be shared with
+    // SlashCommandContext → CommandContext for /cancel real cancellation.
+    // The session loop uses it via Arc<Mutex<>> instead of owning it directly.
+    let agent_dispatcher_shared: Arc<std::sync::Mutex<archon_tui::AgentDispatcher>> =
+        Arc::new(std::sync::Mutex::new(archon_tui::AgentDispatcher::new(
+            Arc::new(crate::agent_handle::NoopAgentRouter),
+            agent_event_tx_for_dispatcher.clone(),
+        )));
+
+    // GHOST-007: late-init slot for AgentHandle. Populated inside
+    // run_session_loop after the adapter is created (needs Arc<Mutex<Agent>>
+    // which is wrapped inside the session loop). /cancel reads fire_cancel()
+    // from this slot; None means the session loop hasn't started yet.
+    let cancel_handle_slot: Arc<std::sync::Mutex<Option<Arc<crate::agent_handle::AgentHandle>>>> =
+        Arc::new(std::sync::Mutex::new(None));
+
     let cmd_ctx = SlashCommandContext {
         fast_mode_shared: Arc::clone(&fast_mode_shared),
         effort_level_shared: Arc::clone(&effort_level_shared),
@@ -2387,6 +2403,16 @@ pub(crate) async fn run_interactive_session(
         // Initial value is None — no export queued until the handler
         // stashes one.
         pending_export_shared: Arc::new(std::sync::Mutex::new(None)),
+        // GHOST-006: shared sandbox flag for /sandbox handler ↔ dispatch gating.
+        sandbox_flag: Arc::clone(&sandbox_flag),
+        // GHOST-004: hook registry for /hooks enable/disable/reload.
+        hook_registry: Some(Arc::clone(&hook_registry_arc)),
+        // GHOST-005: load persisted plugin enable/disable state.
+        plugin_enable_state: crate::command::plugin::load_plugin_enable_state(),
+        // GHOST-007: cancel handle (late-init slot, populated inside
+        // run_session_loop) + agent dispatcher for /cancel real cancellation.
+        cancel_handle: Arc::clone(&cancel_handle_slot),
+        agent_dispatcher: Arc::clone(&agent_dispatcher_shared),
         // GNN/learning CozoDB — persistent store for weights, trajectories,
         // Adam state, and training runs. Created once at bootstrap, shared
         // across commands via the DIRECT pattern (same as memory/leann).
@@ -2462,7 +2488,6 @@ pub(crate) async fn run_interactive_session(
         api_url,
         input_tui_tx,
         user_input_rx,
-        agent_event_tx_for_dispatcher,
         session_store_for_input,
         session_id_for_input,
         persist_personality,
@@ -2476,6 +2501,8 @@ pub(crate) async fn run_interactive_session(
         mcp_lifecycle_tx,
         auto_capture,
         auto_trainer.clone(),
+        agent_dispatcher_shared,
+        cancel_handle_slot,
     ));
 
     // Build splash screen config with recent activity from session store
@@ -2531,7 +2558,6 @@ pub(crate) async fn run_interactive_session(
         let btw_model = config.api.default_model.clone();
         let btw_max_tokens = config.api.thinking_budget;
         // Use the pre-cloned system prompt so /btw shares the prompt cache
-        let btw_system_prompt = btw_system_prompt;
         tokio::spawn(async move {
             while let Some(question) = btw_rx.recv().await {
                 let tui_tx = btw_tui_tx.clone();

@@ -330,10 +330,10 @@ pub(crate) async fn post_pump_task(
             post = post.header(name.clone(), value.clone());
         }
         // Inject cached Mcp-Session-Id if present.
-        if let Some(id) = session_id.read().await.clone() {
-            if let Ok(v) = HeaderValue::from_str(&id) {
-                post = post.header(MCP_SESSION_ID_HEADER, v);
-            }
+        if let Some(id) = session_id.read().await.clone()
+            && let Ok(v) = HeaderValue::from_str(&id)
+        {
+            post = post.header(MCP_SESSION_ID_HEADER, v);
         }
 
         match post.send().await {

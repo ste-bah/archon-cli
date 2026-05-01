@@ -12,6 +12,12 @@ use super::{ReasoningEngine, ReasoningItem, ReasoningOutput, ReasoningRequest, R
 /// Causal reasoning: cause-effect chain analysis.
 pub struct CausalEngine;
 
+impl Default for CausalEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CausalEngine {
     pub fn new() -> Self {
         Self
@@ -26,16 +32,16 @@ impl CausalEngine {
             if trimmed.is_empty() {
                 continue;
             }
-            if let Some(rest) = trimmed.strip_prefix("cause:") {
-                if let Some((cause, effect)) = rest.split_once("->") {
-                    let effect = effect.trim();
-                    let effect = effect.strip_prefix("effect:").unwrap_or(effect);
-                    links.push(CausalLink {
-                        cause: cause.trim().to_string(),
-                        effect: effect.trim().to_string(),
-                    });
-                    continue;
-                }
+            if let Some(rest) = trimmed.strip_prefix("cause:")
+                && let Some((cause, effect)) = rest.split_once("->")
+            {
+                let effect = effect.trim();
+                let effect = effect.strip_prefix("effect:").unwrap_or(effect);
+                links.push(CausalLink {
+                    cause: cause.trim().to_string(),
+                    effect: effect.trim().to_string(),
+                });
+                continue;
             }
             if let Some((cause, effect)) = trimmed.split_once(" causes ") {
                 links.push(CausalLink {

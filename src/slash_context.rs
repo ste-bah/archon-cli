@@ -1,8 +1,10 @@
 //! Slash command context — shared state for all slash command handlers.
 //! Extracted from main.rs to enable modular handler extraction.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::RwLock;
 use std::sync::atomic::AtomicBool;
 
 use archon_core::agent::SessionStats;
@@ -100,4 +102,21 @@ pub(crate) struct SlashCommandContext {
     /// across any lock. Single-shot per dispatch by construction.
     pub(crate) pending_export_shared:
         Arc<std::sync::Mutex<Option<crate::command::export::ExportDescriptor>>>,
+    /// GHOST-006: shared sandbox flag toggled by /sandbox on/off and read by
+    /// both tool-execution dispatch paths through the SandboxBackend trait.
+    pub(crate) sandbox_flag: Arc<AtomicBool>,
+    /// GHOST-004: shared hook registry for /hooks enable/disable/reload.
+    /// Loaded at session bootstrap; cloned into CommandContext per-dispatch
+    /// via the DIRECT pattern.
+    pub(crate) hook_registry: Option<Arc<archon_core::hooks::HookRegistry>>,
+    /// GHOST-005: shared plugin enable/disable state map. Persisted to
+    /// ~/.local/state/archon/plugin-state.json. Keyed by plugin name.
+    pub(crate) plugin_enable_state: Arc<RwLock<HashMap<String, bool>>>,
+    /// GHOST-007: late-init slot for the session loop's AgentHandle.
+    /// Populated inside run_session_loop after the adapter is created.
+    /// /cancel reads fire_cancel() from this slot; None means no session.
+    pub(crate) cancel_handle: Arc<std::sync::Mutex<Option<Arc<crate::agent_handle::AgentHandle>>>>,
+    /// GHOST-007: AgentDispatcher for is_busy() + cancel_current().
+    /// Wrapped in std::sync::Mutex for interior mutability.
+    pub(crate) agent_dispatcher: Arc<std::sync::Mutex<archon_tui::AgentDispatcher>>,
 }

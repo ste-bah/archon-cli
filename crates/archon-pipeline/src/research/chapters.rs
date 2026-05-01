@@ -57,6 +57,12 @@ pub enum ChapterStructureError {
 
 pub struct ChapterStructureLoader;
 
+impl Default for ChapterStructureLoader {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ChapterStructureLoader {
     pub fn new() -> Self {
         Self
@@ -75,14 +81,13 @@ impl ChapterStructureLoader {
         }
 
         // 2) Try raw JSON — find first '{' to last '}'
-        if let Some(start) = content.find('{') {
-            if let Some(end) = content.rfind('}') {
-                if end > start {
-                    let json_str = &content[start..=end];
-                    if let Ok(val) = serde_json::from_str::<serde_json::Value>(json_str) {
-                        return Self::normalize_structure(val);
-                    }
-                }
+        if let Some(start) = content.find('{')
+            && let Some(end) = content.rfind('}')
+            && end > start
+        {
+            let json_str = &content[start..=end];
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(json_str) {
+                return Self::normalize_structure(val);
             }
         }
 
@@ -342,6 +347,12 @@ impl ChapterStructureLoader {
 // ---------------------------------------------------------------------------
 
 pub struct DynamicAgentGenerator;
+
+impl Default for DynamicAgentGenerator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl DynamicAgentGenerator {
     pub fn new() -> Self {

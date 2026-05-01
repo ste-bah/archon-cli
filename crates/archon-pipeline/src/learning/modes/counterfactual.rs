@@ -11,6 +11,12 @@ use super::{ReasoningEngine, ReasoningItem, ReasoningOutput, ReasoningRequest, R
 /// Counterfactual reasoning: exploring hypothetical alternatives.
 pub struct CounterfactualEngine;
 
+impl Default for CounterfactualEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CounterfactualEngine {
     pub fn new() -> Self {
         Self

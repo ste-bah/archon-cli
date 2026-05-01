@@ -7,6 +7,14 @@
 //! `ReloadPluginsHandler` in `reload_plugins.rs`) can call the same
 //! resolver as the CLI surface — avoids drift in plugins-dir / cache-
 //! dir / seed-dir resolution between the two surfaces.
+//!
+//! GHOST-005: Adds plugin enable/disable state persistence to
+//! ~/.local/state/archon/plugin-state.json and a
+//! `load_plugins_from_default_dirs_with_state` variant that passes
+//! enable state through to `PluginLoader::with_enabled_state`.
+
+use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
 
 use crate::cli_args::PluginAction;
 
@@ -45,6 +53,73 @@ pub(crate) fn load_plugins_from_default_dirs() -> archon_plugin::result::PluginL
         loader = loader.with_seed_dirs(seed_dirs);
     }
     loader.load_all()
+}
+
+/// GHOST-005: Same as `load_plugins_from_default_dirs` but passes
+/// plugin enable/disable state via `PluginLoader::with_enabled_state`.
+pub(crate) fn load_plugins_from_default_dirs_with_state(
+    state: &HashMap<String, bool>,
+) -> archon_plugin::result::PluginLoadResult {
+    use archon_plugin::loader::PluginLoader;
+
+    let plugins_dir = dirs::data_local_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("archon")
+        .join("plugins");
+
+    let seed_dirs: Vec<std::path::PathBuf> = std::env::var("ARCHON_PLUGIN_SEED_DIR")
+        .unwrap_or_default()
+        .split(':')
+        .filter(|s| !s.is_empty())
+        .map(std::path::PathBuf::from)
+        .collect();
+
+    let cache_dir = dirs::cache_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from(".cache"))
+        .join("archon")
+        .join("wasm");
+    let mut loader =
+        PluginLoader::new(plugins_dir).with_cache(archon_plugin::cache::WasmCache::new(cache_dir));
+    if !seed_dirs.is_empty() {
+        loader = loader.with_seed_dirs(seed_dirs);
+    }
+    loader.with_enabled_state(state.clone()).load_all()
+}
+
+// ---------------------------------------------------------------------------
+// GHOST-005: plugin enable/disable state persistence
+// ---------------------------------------------------------------------------
+
+/// Path to the plugin state JSON file.
+fn plugin_state_path() -> std::path::PathBuf {
+    dirs::state_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("archon")
+        .join("plugin-state.json")
+}
+
+/// Load persisted plugin enable/disable state from
+/// `~/.local/state/archon/plugin-state.json`. Returns an empty map on
+/// missing file or parse error (fail-open).
+pub(crate) fn load_plugin_enable_state() -> Arc<RwLock<HashMap<String, bool>>> {
+    let path = plugin_state_path();
+    let state = match std::fs::read_to_string(&path) {
+        Ok(content) => serde_json::from_str::<HashMap<String, bool>>(&content).unwrap_or_default(),
+        Err(_) => HashMap::new(),
+    };
+    Arc::new(RwLock::new(state))
+}
+
+/// Persist plugin enable/disable state to disk. Creates the parent
+/// directory if needed.
+pub(crate) fn save_plugin_enable_state(state: &HashMap<String, bool>) -> Result<(), String> {
+    let path = plugin_state_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("mkdir: {e}"))?;
+    }
+    let json = serde_json::to_string_pretty(state).map_err(|e| format!("json: {e}"))?;
+    std::fs::write(&path, &json).map_err(|e| format!("write: {e}"))?;
+    Ok(())
 }
 
 pub fn handle_plugin_command(action: PluginAction) -> anyhow::Result<()> {

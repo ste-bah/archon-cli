@@ -83,12 +83,16 @@ fn test_watch_paths_field_on_hook_result() {
 fn test_watch_paths_aggregated() {
     let mut agg = AggregatedHookResult::new();
 
-    let mut r1 = HookResult::default();
-    r1.watch_paths = vec!["/tmp/a.txt".into()];
+    let r1 = HookResult {
+        watch_paths: vec!["/tmp/a.txt".into()],
+        ..HookResult::default()
+    };
     agg.merge(r1);
 
-    let mut r2 = HookResult::default();
-    r2.watch_paths = vec!["/tmp/b.txt".into()];
+    let r2 = HookResult {
+        watch_paths: vec!["/tmp/b.txt".into()],
+        ..HookResult::default()
+    };
     agg.merge(r2);
 
     assert_eq!(agg.watch_paths.len(), 2);

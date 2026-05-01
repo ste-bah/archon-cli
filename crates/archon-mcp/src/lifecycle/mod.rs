@@ -7,8 +7,8 @@
 //! Module layout (#204 HYGIENE-MCP-FILE-SIZES split):
 //!   * this `mod.rs` — `McpServerManager` + state + backoff + Default
 //!   * `connect.rs`  — per-transport dispatch (stdio/http/ws/sse) + WS adapter
-//!                     + the `#[doc(hidden)] pub` `connect_server_for_test`
-//!                     wrapper used by integration tests
+//!     + the `#[doc(hidden)] pub` `connect_server_for_test`
+//!       wrapper used by integration tests
 //!   * `tests.rs`    — unit tests for the Manager + backoff
 
 use std::collections::{HashMap, HashSet};

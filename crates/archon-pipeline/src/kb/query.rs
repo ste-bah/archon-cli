@@ -235,10 +235,10 @@ impl QueryEngine {
                 let node = row_to_kb_node(row);
 
                 // Apply type filter if specified
-                if let Some(filter) = type_filter {
-                    if !filter.contains(&node.node_type) {
-                        return None;
-                    }
+                if let Some(filter) = type_filter
+                    && !filter.contains(&node.node_type)
+                {
+                    return None;
                 }
 
                 // Calculate relevance score based on title vs content match

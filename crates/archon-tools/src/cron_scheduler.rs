@@ -68,10 +68,10 @@ fn validate_field(field: &str, min: u32, max: u32, name: &str) -> anyhow::Result
                     anyhow::bail!("{name} range {lo}-{hi} out of {min}-{max}");
                 }
             }
-        } else if let Ok(n) = part.parse::<u32>() {
-            if n < min || n > max {
-                anyhow::bail!("{name} value {n} out of range {min}-{max}");
-            }
+        } else if let Ok(n) = part.parse::<u32>()
+            && (n < min || n > max)
+        {
+            anyhow::bail!("{name} value {n} out of range {min}-{max}");
         }
     }
     Ok(())

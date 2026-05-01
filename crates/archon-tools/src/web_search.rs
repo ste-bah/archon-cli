@@ -123,8 +123,7 @@ pub(crate) fn parse_results(html: &str, max_results: usize) -> Vec<SearchResult>
 
     let count = links.len().min(max_results);
     let mut results = Vec::with_capacity(count);
-    for i in 0..count {
-        let (url, title) = &links[i];
+    for (i, (url, title)) in links.iter().take(count).enumerate() {
         let snippet = snippets.get(i).cloned().unwrap_or_default();
         results.push(SearchResult {
             title: title.clone(),
@@ -157,7 +156,7 @@ pub(crate) fn clamp_max_results(input: &serde_json::Value) -> usize {
         .get("max_results")
         .and_then(|v| v.as_i64())
         .unwrap_or(5);
-    (v.max(1).min(20)) as usize
+    v.clamp(1, 20) as usize
 }
 
 #[async_trait::async_trait]

@@ -315,10 +315,10 @@ pub(super) async fn handle_key_event(
                         return;
                     }
                     KeyCode::Enter => {
-                        if let Some(menu) = app.skills_menu.take() {
-                            if let Some(skill) = menu.selected() {
-                                app.input.set_text(&format!("/{} ", skill.name));
-                            }
+                        if let Some(menu) = app.skills_menu.take()
+                            && let Some(skill) = menu.selected()
+                        {
+                            app.input.set_text(&format!("/{} ", skill.name));
                         }
                         return;
                     }
@@ -349,10 +349,10 @@ pub(super) async fn handle_key_event(
                         return;
                     }
                     KeyCode::Enter => {
-                        if let Some(sr) = app.search_results.take() {
-                            if let Some(file) = sr.selected() {
-                                app.input.set_text(&format!("@{} ", file.path.display()));
-                            }
+                        if let Some(sr) = app.search_results.take()
+                            && let Some(file) = sr.selected()
+                        {
+                            app.input.set_text(&format!("@{} ", file.path.display()));
                         }
                         return;
                     }
@@ -398,10 +398,10 @@ pub(super) async fn handle_key_event(
                         } else {
                             // File pick — take ownership, inject `@<path>`,
                             // drop the picker.
-                            if let Some(picker) = app.file_picker.take() {
-                                if let Some(file) = picker.selected() {
-                                    app.input.set_text(&format!("@{} ", file.path.display()));
-                                }
+                            if let Some(picker) = app.file_picker.take()
+                                && let Some(file) = picker.selected()
+                            {
+                                app.input.set_text(&format!("@{} ", file.path.display()));
                             }
                         }
                         return;

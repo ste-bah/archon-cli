@@ -366,15 +366,16 @@ mod tests {
     /// CheckpointStore opens a fresh, empty sqlite DB.
     #[tokio::test]
     async fn execute_list_empty_emits_no_checkpoints_textdelta() {
-        let _env_guard = env_lock().lock().expect("env_lock");
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let _env = EnvGuard::set(tmp.path());
-
         let sid = "test-b21-list-empty";
         let (mut ctx, mut rx) = make_ckpt_ctx(Some(sid.to_string()));
         let h = CheckpointHandler::new();
-        let res = h.execute(&mut ctx, &["list".to_string()]);
-        assert!(res.is_ok(), "execute must return Ok(()), got: {res:?}");
+        {
+            let _env_guard = env_lock().lock().expect("env_lock");
+            let tmp = tempfile::tempdir().expect("tempdir");
+            let _env = EnvGuard::set(tmp.path());
+            let res = h.execute(&mut ctx, &["list".to_string()]);
+            assert!(res.is_ok(), "execute must return Ok(()), got: {res:?}");
+        }
 
         let ev = rx
             .recv()
@@ -397,32 +398,34 @@ mod tests {
     /// Seeds the store via the public `snapshot()` API.
     #[tokio::test]
     async fn execute_list_non_empty_emits_formatted_textdelta() {
-        let _env_guard = env_lock().lock().expect("env_lock");
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let _env = EnvGuard::set(tmp.path());
-
         let sid = "test-b21-list-nonempty";
-
-        // Seed the real store at the same path the handler will open.
-        // Mirror the handler's ckpt_path construction.
-        let ckpt_path = dirs::data_dir()
-            .unwrap_or_else(|| std::path::PathBuf::from("."))
-            .join("archon")
-            .join("checkpoints.db");
-        let seed_file = tmp.path().join("seed.txt");
-        std::fs::write(&seed_file, b"hello").expect("seed file write");
-        {
-            let store = archon_session::checkpoint::CheckpointStore::open(&ckpt_path)
-                .expect("open seed store");
-            store
-                .snapshot(sid, seed_file.to_str().expect("utf8"), 1, "Edit")
-                .expect("seed snapshot");
-        }
-
         let (mut ctx, mut rx) = make_ckpt_ctx(Some(sid.to_string()));
         let h = CheckpointHandler::new();
-        let res = h.execute(&mut ctx, &["list".to_string()]);
-        assert!(res.is_ok(), "execute must return Ok(()), got: {res:?}");
+        let seed_file;
+        {
+            let _env_guard = env_lock().lock().expect("env_lock");
+            let tmp = tempfile::tempdir().expect("tempdir");
+            let _env = EnvGuard::set(tmp.path());
+
+            // Seed the real store at the same path the handler will open.
+            // Mirror the handler's ckpt_path construction.
+            let ckpt_path = dirs::data_dir()
+                .unwrap_or_else(|| std::path::PathBuf::from("."))
+                .join("archon")
+                .join("checkpoints.db");
+            seed_file = tmp.path().join("seed.txt");
+            std::fs::write(&seed_file, b"hello").expect("seed file write");
+            {
+                let store = archon_session::checkpoint::CheckpointStore::open(&ckpt_path)
+                    .expect("open seed store");
+                store
+                    .snapshot(sid, seed_file.to_str().expect("utf8"), 1, "Edit")
+                    .expect("seed snapshot");
+            }
+
+            let res = h.execute(&mut ctx, &["list".to_string()]);
+            assert!(res.is_ok(), "execute must return Ok(()), got: {res:?}");
+        }
 
         let ev = rx
             .recv()
@@ -498,23 +501,25 @@ mod tests {
     /// `execute_list_empty_emits_no_checkpoints_textdelta`.
     #[tokio::test]
     async fn dispatcher_routes_slash_checkpoint_list_with_session_emits_textdelta() {
-        let _env_guard = env_lock().lock().expect("env_lock");
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let _env = EnvGuard::set(tmp.path());
-
-        let mut builder = RegistryBuilder::new();
-        builder.insert_primary("checkpoint", Arc::new(CheckpointHandler::new()));
-        let registry = Arc::new(builder.build());
-        let dispatcher = Dispatcher::new(registry);
-
         let sid = "test-b21-dispatch-list";
         let (mut ctx, mut rx) = make_ckpt_ctx(Some(sid.to_string()));
-        let res = dispatcher.dispatch(&mut ctx, "/checkpoint list");
-        assert!(
-            res.is_ok(),
-            "dispatcher.dispatch must return Ok(()) for list/empty, got: \
-             {res:?}"
-        );
+        {
+            let _env_guard = env_lock().lock().expect("env_lock");
+            let tmp = tempfile::tempdir().expect("tempdir");
+            let _env = EnvGuard::set(tmp.path());
+
+            let mut builder = RegistryBuilder::new();
+            builder.insert_primary("checkpoint", Arc::new(CheckpointHandler::new()));
+            let registry = Arc::new(builder.build());
+            let dispatcher = Dispatcher::new(registry);
+
+            let res = dispatcher.dispatch(&mut ctx, "/checkpoint list");
+            assert!(
+                res.is_ok(),
+                "dispatcher.dispatch must return Ok(()) for list/empty, got: \
+                 {res:?}"
+            );
+        }
 
         let ev = rx
             .recv()

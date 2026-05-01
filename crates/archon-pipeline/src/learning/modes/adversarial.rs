@@ -11,6 +11,12 @@ use super::{ReasoningEngine, ReasoningItem, ReasoningOutput, ReasoningRequest, R
 /// Adversarial reasoning: systematic counter-argument generation.
 pub struct AdversarialEngine;
 
+impl Default for AdversarialEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AdversarialEngine {
     pub fn new() -> Self {
         Self

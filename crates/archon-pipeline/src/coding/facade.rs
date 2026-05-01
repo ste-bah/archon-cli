@@ -199,21 +199,17 @@ impl CodingFacade {
         // L1.5: agent instructions from .md file (optional, can be truncated)
         if let Some(ca) = coding_agent {
             let md_path = std::path::Path::new(ca.prompt_source_path);
-            if md_path.exists() {
-                if let Ok(content) = std::fs::read_to_string(md_path) {
-                    if let Ok((_frontmatter, body)) =
-                        crate::agent_loader::parse_frontmatter(&content)
-                    {
-                        if !body.trim().is_empty() {
-                            layers.push(PromptLayer {
-                                name: "agent_instructions".to_string(),
-                                content: body,
-                                priority: TruncationPriority::AgentInstructions,
-                                required: false,
-                            });
-                        }
-                    }
-                }
+            if md_path.exists()
+                && let Ok(content) = std::fs::read_to_string(md_path)
+                && let Ok((_frontmatter, body)) = crate::agent_loader::parse_frontmatter(&content)
+                && !body.trim().is_empty()
+            {
+                layers.push(PromptLayer {
+                    name: "agent_instructions".to_string(),
+                    content: body,
+                    priority: TruncationPriority::AgentInstructions,
+                    required: false,
+                });
             }
         }
 
@@ -246,48 +242,48 @@ impl CodingFacade {
         }
 
         // L5-L9: learning system layers (graceful degradation when None)
-        if let Some(ref learning_mutex) = self.learning {
-            if let Ok(mut learning) = learning_mutex.lock() {
-                let ctx = learning.get_learning_context(&session.task);
-                // L5: DESC episodes
-                if !ctx.desc_episodes.is_empty() {
-                    let desc_text = ctx.desc_episodes.join("\n\n");
-                    layers.push(PromptLayer {
-                        name: "desc_episodes".to_string(),
-                        content: desc_text,
-                        priority: TruncationPriority::DescEpisodes,
-                        required: false,
-                    });
-                }
-                // L6: SONA patterns
-                if !ctx.sona_context.is_empty() {
-                    layers.push(PromptLayer {
-                        name: "sona_patterns".to_string(),
-                        content: ctx.sona_context,
-                        priority: TruncationPriority::SonaPatterns,
-                        required: false,
-                    });
-                }
-                // L7: Reflexion trajectories
-                if let Some(ref reflexion) = ctx.reflexion {
-                    if !reflexion.is_empty() {
-                        layers.push(PromptLayer {
-                            name: "reflexion_trajectories".to_string(),
-                            content: reflexion.clone(),
-                            priority: TruncationPriority::ReflexionTrajectories,
-                            required: false,
-                        });
-                    }
-                }
-                // L8: Reasoning context as pattern matcher results
-                if !ctx.reasoning_context.is_empty() {
-                    layers.push(PromptLayer {
-                        name: "pattern_matcher_results".to_string(),
-                        content: ctx.reasoning_context,
-                        priority: TruncationPriority::PatternMatcherResults,
-                        required: false,
-                    });
-                }
+        if let Some(ref learning_mutex) = self.learning
+            && let Ok(mut learning) = learning_mutex.lock()
+        {
+            let ctx = learning.get_learning_context(&session.task);
+            // L5: DESC episodes
+            if !ctx.desc_episodes.is_empty() {
+                let desc_text = ctx.desc_episodes.join("\n\n");
+                layers.push(PromptLayer {
+                    name: "desc_episodes".to_string(),
+                    content: desc_text,
+                    priority: TruncationPriority::DescEpisodes,
+                    required: false,
+                });
+            }
+            // L6: SONA patterns
+            if !ctx.sona_context.is_empty() {
+                layers.push(PromptLayer {
+                    name: "sona_patterns".to_string(),
+                    content: ctx.sona_context,
+                    priority: TruncationPriority::SonaPatterns,
+                    required: false,
+                });
+            }
+            // L7: Reflexion trajectories
+            if let Some(ref reflexion) = ctx.reflexion
+                && !reflexion.is_empty()
+            {
+                layers.push(PromptLayer {
+                    name: "reflexion_trajectories".to_string(),
+                    content: reflexion.clone(),
+                    priority: TruncationPriority::ReflexionTrajectories,
+                    required: false,
+                });
+            }
+            // L8: Reasoning context as pattern matcher results
+            if !ctx.reasoning_context.is_empty() {
+                layers.push(PromptLayer {
+                    name: "pattern_matcher_results".to_string(),
+                    content: ctx.reasoning_context,
+                    priority: TruncationPriority::PatternMatcherResults,
+                    required: false,
+                });
             }
         }
 
@@ -431,10 +427,10 @@ impl PipelineFacade for CodingFacade {
         }
 
         // Feed quality score to learning subsystem
-        if let Some(ref learning_mutex) = self.learning {
-            if let Ok(mut learning) = learning_mutex.lock() {
-                learning.on_agent_complete(&agent.key, quality.overall, &result.output);
-            }
+        if let Some(ref learning_mutex) = self.learning
+            && let Ok(mut learning) = learning_mutex.lock()
+        {
+            learning.on_agent_complete(&agent.key, quality.overall, &result.output);
         }
 
         // Emit per-agent progress to TUI if sender is attached.

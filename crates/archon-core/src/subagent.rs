@@ -427,6 +427,7 @@ pub mod runner {
     }
 
     impl SubagentRunner {
+        #[allow(clippy::too_many_arguments)]
         pub fn new(
             provider: Arc<dyn LlmProvider>,
             system_prompt: String,
@@ -728,10 +729,10 @@ pub mod runner {
                             index,
                             partial_json,
                         } => {
-                            if Some(index) == current_tool_index {
-                                if let Some(tool) = pending_tools.last_mut() {
-                                    tool.input_json.push_str(&partial_json);
-                                }
+                            if Some(index) == current_tool_index
+                                && let Some(tool) = pending_tools.last_mut()
+                            {
+                                tool.input_json.push_str(&partial_json);
                             }
                         }
                         StreamEvent::ContentBlockStop { .. } => {
@@ -746,30 +747,29 @@ pub mod runner {
                         StreamEvent::MessageStart { ref usage, .. } => {
                             // TASK-T3 (G4): accumulate Usage from message_start.
                             // Lock guard MUST NOT cross an .await — only sync work in here.
-                            if let Some(ref t) = self.progress {
-                                if let Ok(mut g) = t.lock() {
-                                    g.cumulative_input_tokens += usage.input_tokens;
-                                    g.cumulative_output_tokens += usage.output_tokens;
-                                    g.cumulative_cache_creation_tokens +=
-                                        usage.cache_creation_input_tokens;
-                                    g.cumulative_cache_read_tokens += usage.cache_read_input_tokens;
-                                    g.last_update = chrono::Utc::now();
-                                }
+                            if let Some(ref t) = self.progress
+                                && let Ok(mut g) = t.lock()
+                            {
+                                g.cumulative_input_tokens += usage.input_tokens;
+                                g.cumulative_output_tokens += usage.output_tokens;
+                                g.cumulative_cache_creation_tokens +=
+                                    usage.cache_creation_input_tokens;
+                                g.cumulative_cache_read_tokens += usage.cache_read_input_tokens;
+                                g.last_update = chrono::Utc::now();
                             }
                         }
                         StreamEvent::MessageDelta {
                             usage: Some(ref u), ..
                         } => {
                             // TASK-T3 (G4): accumulate Usage from message_delta.
-                            if let Some(ref t) = self.progress {
-                                if let Ok(mut g) = t.lock() {
-                                    g.cumulative_input_tokens += u.input_tokens;
-                                    g.cumulative_output_tokens += u.output_tokens;
-                                    g.cumulative_cache_creation_tokens +=
-                                        u.cache_creation_input_tokens;
-                                    g.cumulative_cache_read_tokens += u.cache_read_input_tokens;
-                                    g.last_update = chrono::Utc::now();
-                                }
+                            if let Some(ref t) = self.progress
+                                && let Ok(mut g) = t.lock()
+                            {
+                                g.cumulative_input_tokens += u.input_tokens;
+                                g.cumulative_output_tokens += u.output_tokens;
+                                g.cumulative_cache_creation_tokens += u.cache_creation_input_tokens;
+                                g.cumulative_cache_read_tokens += u.cache_read_input_tokens;
+                                g.last_update = chrono::Utc::now();
                             }
                         }
                         _ => {} // ThinkingDelta, SignatureDelta, MessageDelta{usage:None}, MessageStop, Ping, etc.
@@ -861,18 +861,18 @@ pub mod runner {
                 let mut tool_results: Vec<serde_json::Value> = Vec::with_capacity(prepared.len());
                 for (p, result) in prepared.iter().zip(exec_results.into_iter()) {
                     // Progress update — sync only, lock never crosses .await
-                    if let Some(ref t) = self.progress {
-                        if let Ok(mut g) = t.lock() {
-                            g.tool_use_count += 1;
-                            if g.recent_activities.len() >= 5 {
-                                g.recent_activities.pop_front();
-                            }
-                            g.recent_activities.push_back(super::ToolActivity {
-                                tool_name: p.name.clone(),
-                                timestamp: chrono::Utc::now(),
-                            });
-                            g.last_update = chrono::Utc::now();
+                    if let Some(ref t) = self.progress
+                        && let Ok(mut g) = t.lock()
+                    {
+                        g.tool_use_count += 1;
+                        if g.recent_activities.len() >= 5 {
+                            g.recent_activities.pop_front();
                         }
+                        g.recent_activities.push_back(super::ToolActivity {
+                            tool_name: p.name.clone(),
+                            timestamp: chrono::Utc::now(),
+                        });
+                        g.last_update = chrono::Utc::now();
                     }
                     tool_results.push(serde_json::json!({
                         "type": "tool_result",

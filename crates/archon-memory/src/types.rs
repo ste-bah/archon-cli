@@ -118,6 +118,21 @@ impl RelType {
     }
 }
 
+/// Bundled parameters for [`super::MemoryTrait::store_memory`].
+///
+/// Reduces the argument count so clippy's `too_many_arguments` lint
+/// does not fire on the trait or its impls.
+#[derive(Debug, Clone)]
+pub struct StoreMemoryRequest<'a> {
+    pub content: &'a str,
+    pub title: &'a str,
+    pub memory_type: MemoryType,
+    pub importance: f64,
+    pub tags: &'a [String],
+    pub source_type: &'a str,
+    pub project_path: &'a str,
+}
+
 /// Filter criteria for structured memory search.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]

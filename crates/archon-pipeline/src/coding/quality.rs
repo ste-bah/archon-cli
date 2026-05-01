@@ -63,6 +63,7 @@ pub struct CodingQualityCalculator {
 
 impl CodingQualityCalculator {
     /// Create a new calculator with pre-compiled regex patterns.
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         Self {
             re_unwrap: Regex::new(r"\.unwrap\(\)").expect("valid regex"),
@@ -350,7 +351,7 @@ impl CodingQualityCalculator {
             let mut documented = 0_usize;
             for (i, line) in lines.iter().enumerate() {
                 if self.re_pub_item.is_match(line) {
-                    let start = if i >= 3 { i - 3 } else { 0 };
+                    let start = i.saturating_sub(3);
                     let preceding = &lines[start..i];
                     if preceding
                         .iter()

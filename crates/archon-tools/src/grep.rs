@@ -110,7 +110,7 @@ impl Tool for GrepTool {
                 "count" => {
                     results.push(format!("{path_str}:{}", matches.len()));
                 }
-                "content" | _ => {
+                _ => {
                     for (line_num, line) in &matches {
                         results.push(format!("{path_str}:{}:{}", line_num + 1, line));
                     }

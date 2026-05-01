@@ -350,7 +350,7 @@ mod tests {
         );
         let path_arg = dir.to_string_lossy().to_string();
 
-        let res = h.execute(&mut ctx, &[path_arg.clone()]);
+        let res = h.execute(&mut ctx, std::slice::from_ref(&path_arg));
         assert!(
             res.is_ok(),
             "AddDirHandler::execute(valid) must return Ok(()), got: {res:?}"

@@ -68,7 +68,7 @@ impl NotificationQueue {
         while self
             .notifications
             .front()
-            .map_or(false, |n| n.expires_at <= now)
+            .is_some_and(|n| n.expires_at <= now)
         {
             self.notifications.pop_front();
         }

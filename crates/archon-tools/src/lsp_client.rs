@@ -187,7 +187,7 @@ impl LspClient {
             .map_err(|_| LspError::Protocol(format!("invalid file path: {}", file_path)))?;
 
         if !self.open_files.contains(&uri) {
-            let text = std::fs::read_to_string(file_path).map_err(|e| LspError::Io(e))?;
+            let text = std::fs::read_to_string(file_path).map_err(LspError::Io)?;
 
             let language_id = detect_language_id(file_path);
 

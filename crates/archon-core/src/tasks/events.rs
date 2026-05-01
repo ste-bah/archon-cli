@@ -38,12 +38,8 @@ impl EventLog {
     pub async fn append(&self, event: TaskEvent) -> Result<(), TaskError> {
         use tokio::io::AsyncWriteExt;
 
-        let json = serde_json::to_vec(&event).map_err(|e| {
-            TaskError::Io(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                e.to_string(),
-            ))
-        })?;
+        let json = serde_json::to_vec(&event)
+            .map_err(|e| TaskError::Io(std::io::Error::other(e.to_string())))?;
 
         let len = json.len() as u32;
         let mut writer = self.writer.lock().await;
@@ -78,10 +74,10 @@ impl EventLog {
                 break; // truncated record — stop here
             }
 
-            if let Ok(event) = serde_json::from_slice::<TaskEvent>(&data[cursor..cursor + len]) {
-                if event.seq >= from_seq {
-                    events.push(event);
-                }
+            if let Ok(event) = serde_json::from_slice::<TaskEvent>(&data[cursor..cursor + len])
+                && event.seq >= from_seq
+            {
+                events.push(event);
             }
             cursor += len;
         }

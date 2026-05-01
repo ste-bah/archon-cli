@@ -212,10 +212,10 @@ fn substitute_string(
             let resolved = resolve_ref(step_id, &path, outputs)?;
 
             // File-ref preservation: return as-is.
-            if let Value::Object(map) = &resolved {
-                if map.contains_key("__archon_file_ref__") {
-                    return Ok(resolved);
-                }
+            if let Value::Object(map) = &resolved
+                && map.contains_key("__archon_file_ref__")
+            {
+                return Ok(resolved);
             }
 
             return Ok(resolved);

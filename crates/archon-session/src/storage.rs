@@ -616,12 +616,11 @@ impl SessionStore {
                         "session '{session_id}' not found"
                     )));
                 }
-                1 => {
-                    let mut nr = cozo::NamedRows::default();
-                    nr.rows = matches;
-                    nr.headers = all.headers;
-                    nr
-                }
+                1 => cozo::NamedRows {
+                    rows: matches,
+                    headers: all.headers,
+                    ..Default::default()
+                },
                 n => {
                     return Err(SessionError::NotFound(format!(
                         "ambiguous session prefix '{session_id}' matches {n} sessions — use more characters"
