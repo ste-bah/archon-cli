@@ -298,6 +298,13 @@ pub fn register_builtins() -> SkillRegistry {
     registry.register(Box::new(super::engineering_pack::TddSkill));
     registry.register(Box::new(super::engineering_pack::ZoomOutSkill));
 
+    // Phase 3 archon-specific skills
+    registry.register(Box::new(super::archon_pack::SpecToTasksSkill));
+    registry.register(Box::new(super::archon_pack::ComposePipelineSkill));
+    registry.register(Box::new(super::archon_pack::CiGateWalkerSkill));
+    registry.register(Box::new(super::archon_pack::SetupArchonSkillsSkill));
+    registry.register(Box::new(super::archon_pack::WriteASkillSkill));
+
     // Agent management skills (PRD-AGENTS-001)
     registry.register(Box::new(super::agent_skills::CreateAgentSkill));
     registry.register(Box::new(super::agent_skills::ListAgentsSkill));

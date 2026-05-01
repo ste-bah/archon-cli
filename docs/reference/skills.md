@@ -13,9 +13,9 @@ Skills are slash commands resolved through the Skill registry rather than the pr
 
 When you type `/foo`, archon first checks the primary registry. If no primary matches, it falls back to the skill registry.
 
-## Built-in skills (55 total)
+## Built-in skills (67 total)
 
-21 in `builtin.rs`, 34 in `expanded.rs`. Highlights:
+21 in `builtin.rs`, 34 in `expanded.rs`, 12 embedded prompt-template skills. Highlights:
 
 | Skill | Description |
 |---|---|
@@ -36,10 +36,68 @@ When you type `/foo`, archon first checks the primary registry. If no primary ma
 | `/remote-control` | Show remote control mode info |
 | `/btw` | Aside marker (tangent, don't change focus) |
 | `/refresh-identity` | Clear beta header cache & reprobe |
+| `/to-prd` | Generate a PRD from a feature description using ai-agent-prd template |
+| `/prd-to-spec` | Convert a PRD to a phased task specification |
+| `/grill-me` | Non-code alignment session — relentlessly interviews you about a plan |
+| `/grill-with-docs` | Alignment + documentation — builds context glossary and ADRs |
+| `/diagnose` | Systematic 6-phase debugging workflow |
+| `/tdd` | Test-first red-green-refactor workflow |
+| `/zoom-out` | Strategic re-grounding when lost in the weeds |
+| `/spec-to-tasks` | Refine task tree into atomic dev-flow-ready task files |
+| `/compose-pipeline` | Chain /to-prd → /prd-to-spec → /spec-to-tasks in one command |
+| `/ci-gate-walker` | Run CI gate script and surface findings |
+| `/setup-archon-skills` | Interactive 8-prompt first-run configuration wizard |
+| `/write-a-skill` | Meta-skill for authoring new SKILL.md skills |
 
 For the complete list, run `/skills` in the TUI.
 
+## Embedded prompt-template skills (v0.1.33+)
+
+12 skills (5 engineering + 5 archon + 2 foundation) are embedded at compile time via `include_str!()`. Their SKILL.md bodies ship in the binary and emit `Prompt` output — the agent executes the instructions using its own tools.
+
+### Override system
+
+Users can replace any embedded skill body without recompiling. The loader checks, in order:
+
+1. `<workdir>/.archon/skills/<name>.md` (flat-file project)
+2. `<workdir>/.archon/skills/<name>/SKILL.md` (subdir project)
+3. `~/.config/archon/skills/<name>.md` (flat-file user)
+4. `~/.config/archon/skills/<name>/SKILL.md` (subdir user)
+5. Embedded fallback (binary)
+
+This means a project can pin a custom `/ci-gate-walker` that runs its own gate script, or a user can tweak `/tdd` globally for their workflow — all without recompiling archon-cli.
+
 ## User-authored skills
+
+Two formats are supported:
+
+### SKILL.md format (recommended)
+
+Drop a SKILL.md file in `<workdir>/.archon/skills/<name>.md` (flat) or `<workdir>/.archon/skills/<name>/SKILL.md` (subdir):
+
+```markdown
+---
+name: deploy-staging
+description: Deploy current branch to staging. Use when you want to push to staging.
+---
+
+# Deploy Staging
+
+## Process
+
+### 1. Verify build
+Run `cargo build --release`
+
+### 2. Run tests
+Run `cargo test --workspace`
+
+### 3. Push and deploy
+Push to staging and trigger webhook.
+```
+
+Use `/write-a-skill` for an interactive authoring wizard.
+
+### TOML format (legacy)
 
 Drop a TOML file in `<workdir>/.archon/skills/<name>.toml`:
 
@@ -101,6 +159,13 @@ template_path = "templates/my-skill.md"
 See [Plugins](../integrations/plugins.md) for the full plugin manifest schema.
 
 ## Discovery
+
+Skills are loaded via a two-pass scan at startup:
+
+1. **Subdir layout** — `<name>/SKILL.md` — scanned first
+2. **Flat-file layout** — `<name>.md` — scanned second; skipped if subdir already registered the same name
+
+This means subdir layout always wins on collision. Both project-local (`.archon/skills/`) and user-global (`~/.config/archon/skills/`) paths are scanned, with project taking precedence.
 
 ```bash
 # In TUI

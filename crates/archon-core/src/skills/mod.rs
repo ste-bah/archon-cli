@@ -1,4 +1,5 @@
 pub mod agent_skills;
+pub mod archon_pack;
 pub mod builtin;
 pub mod discovery;
 pub mod embedded_skill_md;

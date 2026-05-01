@@ -36,6 +36,7 @@ In the TUI:
 
 ```
 /help                  # list all 65 primary slash commands
+/setup-archon-skills   # interactive 8-prompt config wizard
 /status                # session info: model, effort, tokens used
 /cost                  # estimated session cost
 /themes                # cycle theme
