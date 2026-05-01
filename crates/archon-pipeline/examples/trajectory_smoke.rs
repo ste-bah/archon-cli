@@ -67,7 +67,10 @@ fn main() {
 
     // Query for training — should skip t2 (empty embedding)
     let results = query_trajectories_for_training(&db, 4).expect("query trajectories");
-    println!("Queried {} trajectories for training (expected 2)", results.len());
+    println!(
+        "Queried {} trajectories for training (expected 2)",
+        results.len()
+    );
     assert_eq!(results.len(), 2, "should skip empty-embedding row");
     assert!(results.iter().any(|t| t.trajectory_id == "smoke-t1"));
     assert!(results.iter().any(|t| t.trajectory_id == "smoke-t3"));
@@ -97,5 +100,7 @@ fn main() {
     // Verify idempotent — second init is no-op
     initialize_learning_schemas(&db).expect("second init");
 
-    println!("\nSMOKE TEST PASSED — Trajectory embeddings: store, query, filter, migration verified end-to-end.");
+    println!(
+        "\nSMOKE TEST PASSED — Trajectory embeddings: store, query, filter, migration verified end-to-end."
+    );
 }
