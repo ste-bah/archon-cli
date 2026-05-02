@@ -136,6 +136,7 @@ archon-permissions = { path = "crates/archon-permissions" }
 archon-plugin = { path = "crates/archon-plugin" }
 archon-sdk = { path = "crates/archon-sdk" }
 archon-session = { path = "crates/archon-session" }
+archon-docs = { path = "crates/archon-docs" }
 archon-pipeline = { path = "crates/archon-pipeline" }
 archon-leann = { path = "crates/archon-leann" }
 archon-tools = { path = "crates/archon-tools" }

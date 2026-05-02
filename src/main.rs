@@ -278,6 +278,9 @@ async fn main() -> Result<()> {
         Some(Commands::Kb { ref action }) => {
             let _ = handle_kb_action(action.clone()).await;
         }
+        Some(Commands::Docs { ref action }) => {
+            return crate::command::docs::handle_docs_command(action.clone()).await;
+        }
         None => {}
     }
 

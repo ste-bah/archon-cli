@@ -448,6 +448,11 @@ pub enum Commands {
         #[command(subcommand)]
         action: KbAction,
     },
+    /// Manage document ingestion, inspection, and status
+    Docs {
+        #[command(subcommand)]
+        action: DocsAction,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -567,6 +572,34 @@ pub enum KbAction {
     },
     /// Show knowledge base statistics
     Stats,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum DocsAction {
+    /// Ingest a file or directory
+    Ingest {
+        /// Path to file or directory to ingest
+        path: String,
+    },
+    /// List all ingested documents
+    List,
+    /// Show detailed information about a document
+    Show {
+        /// Document ID
+        document_id: String,
+    },
+    /// Show document status summary
+    Status,
+    /// List chunks for a document
+    Chunks {
+        /// Document ID
+        document_id: String,
+    },
+    /// Full inspection of a document (pages, chunks, OCR runs, provenance)
+    Inspect {
+        /// Document ID
+        document_id: String,
+    },
 }
 
 #[derive(Subcommand, Debug)]

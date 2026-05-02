@@ -323,6 +323,7 @@ dependencies = [
  "anyhow",
  "archon-consciousness",
  "archon-core",
+ "archon-docs",
  "archon-leann",
  "archon-llm",
  "archon-mcp",
@@ -443,6 +444,26 @@ dependencies = [
  "wasmtime",
  "wat",
  "wiremock",
+]
+
+[[package]]
+name = "archon-docs"
+version = "0.1.36"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "cozo-ce",
+ "hex",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
+ "walkdir",
 ]
 
 [[package]]
