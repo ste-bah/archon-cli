@@ -56,7 +56,7 @@ use tokio::sync::{RwLock, mpsc};
 use tokio_stream::wrappers::ReceiverStream;
 use url::Url;
 
-use crate::sse_reconnect::{ReconnectConfig, pump_sse_stream_with_reconnect};
+use crate::sse_reconnect::ReconnectConfig;
 use crate::sse_transport::SseFrame;
 use crate::types::McpError;
 
@@ -113,6 +113,8 @@ pub(crate) struct SseInboundSetup {
     pub header_map: HashMap<HeaderName, HeaderValue>,
     /// Receiver that yields SSE frames AFTER the endpoint frame has been consumed.
     pub frame_rx: mpsc::Receiver<SseFrame>,
+    /// Lifecycle guard for the spawned SSE reconnect pump.
+    pub sse_shutdown: crate::sse_reconnect::SseShutdown,
 }
 
 /// Open the SSE GET stream, wait for the `event: endpoint` frame, and return
@@ -143,38 +145,47 @@ pub(crate) async fn setup_sse_inbound(
     //    (#202 MCP-SSE-HARDEN-RETRY). If the initial connect + all retries
     //    fail, the endpoint-frame timeout below will surface the error.
     let (frame_tx, mut frame_rx) = mpsc::channel::<SseFrame>(SSE_CHANNEL_BUFFER);
-    tokio::spawn(pump_sse_stream_with_reconnect(
+    let sse_shutdown = crate::sse_reconnect::spawn_sse_pump(
         http_client.clone(),
         sse_url.to_string(),
         header_map.clone(),
         frame_tx,
         ReconnectConfig::default(),
-    ));
+    );
 
     // 5. Consume frames until `event: endpoint` arrives.
-    let endpoint_frame = tokio::time::timeout(ENDPOINT_HANDSHAKE_TIMEOUT, async {
-        loop {
-            match frame_rx.recv().await {
-                None => {
-                    return Err(McpError::Transport(
-                        "sse: stream closed before endpoint frame arrived".into(),
-                    ));
-                }
-                Some(frame) => {
-                    if frame.event.as_deref() == Some("endpoint") {
-                        return Ok(frame);
+    //    Wrapped in a cancel-aware select! so a shutdown-during-handshake
+    //    does not trigger the tokio runtime timer panic.
+    let shutdown_clone = sse_shutdown.shutdown_notify();
+    let endpoint_frame = tokio::select! {
+        biased;
+        _ = shutdown_clone.notified() => {
+            return Err(McpError::Transport("sse: shutdown during handshake".into()));
+        }
+        res = tokio::time::timeout(ENDPOINT_HANDSHAKE_TIMEOUT, async {
+            loop {
+                match frame_rx.recv().await {
+                    None => {
+                        return Err(McpError::Transport(
+                            "sse: stream closed before endpoint frame arrived".into(),
+                        ));
                     }
-                    tracing::debug!(event = ?frame.event, "sse: pre-endpoint frame ignored");
+                    Some(frame) => {
+                        if frame.event.as_deref() == Some("endpoint") {
+                            return Ok(frame);
+                        }
+                        tracing::debug!(event = ?frame.event, "sse: pre-endpoint frame ignored");
+                    }
                 }
             }
+        }) => {
+            res.map_err(|_| {
+                McpError::Transport(format!(
+                    "sse: endpoint frame not received within {ENDPOINT_HANDSHAKE_TIMEOUT:?}"
+                ))
+            })??
         }
-    })
-    .await
-    .map_err(|_| {
-        McpError::Transport(format!(
-            "sse: endpoint frame not received within {ENDPOINT_HANDSHAKE_TIMEOUT:?}"
-        ))
-    })??;
+    };
 
     // 6. Resolve POST URL.
     let post_url_str = endpoint_frame.data.trim().to_string();
@@ -198,6 +209,7 @@ pub(crate) async fn setup_sse_inbound(
         post_url,
         header_map,
         frame_rx,
+        sse_shutdown,
     })
 }
 
@@ -258,9 +270,14 @@ pub async fn connect_mcp(
         post_url,
         header_map,
         frame_rx,
+        sse_shutdown,
     } = setup_sse_inbound(sse_url, headers, connect_timeout).await?;
 
     let rx_stream_boxed = build_inbound_stream(frame_rx);
+    let guarded: SseMcpStream = Box::pin(crate::sse_reconnect::SseGuardedStream::new(
+        rx_stream_boxed,
+        sse_shutdown,
+    ));
 
     // Outbound Sink: POST each message to the endpoint URL via a background
     // task. The Sink side is a `futures_util::sink::unfold` over a tokio mpsc
@@ -292,7 +309,7 @@ pub async fn connect_mcp(
     );
     let sink_boxed: SseMcpSink = Box::pin(sink);
 
-    Ok((sink_boxed, rx_stream_boxed))
+    Ok((sink_boxed, guarded))
 }
 
 /// Background task that drains the outbound channel and POSTs each message

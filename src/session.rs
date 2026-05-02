@@ -1201,18 +1201,13 @@ pub(crate) async fn run_interactive_session(
         }
     }
 
-    // ── Fix 4: Spawn cron scheduler background task ───────────────────────────
-    let _cron_cancel = {
+    // ── Spawn cron scheduler background task (lifecycle-guarded) ────────────
+    let cron_shutdown = {
         let cron_store_path = dirs::data_dir()
             .unwrap_or_else(|| PathBuf::from("."))
             .join("archon")
             .join("scheduled_tasks.json");
-        let cancel = Arc::new(AtomicBool::new(false));
-        tokio::spawn(archon_tools::cron_scheduler::run_scheduler_loop(
-            cron_store_path,
-            Arc::clone(&cancel),
-        ));
-        cancel
+        archon_tools::cron_shutdown::spawn_scheduler(cron_store_path)
     };
 
     // Register memory tools backed by the CozoDB graph — gated by config.memory.enabled (TASK-WIRE-002)
@@ -2643,6 +2638,10 @@ pub(crate) async fn run_interactive_session(
     if let Some(at) = auto_trainer.as_ref() {
         at.shutdown();
     }
+
+    // ── Phase 1: Graceful cron scheduler shutdown ───────────────
+    cron_shutdown.shutdown().await;
+    tracing::info!("cron scheduler shut down");
 
     // ── Phase 2: Graceful MCP shutdown ──────────────────────────
     mcp_manager.shutdown_all().await;
