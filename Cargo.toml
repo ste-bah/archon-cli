@@ -98,6 +98,7 @@ walkdir = "2"
 moka = { version = "0.12", features = ["sync"] }
 strsim = "0.11"
 globset = "0.4"
+ndarray = "0.16"
 rayon = "1"
 # TASK-AGS-OBS-901 (Stage 10): promoted from archon-tui/Cargo.toml direct pins
 # so archon-observability (new owning crate for ChannelMetrics) and archon-tui

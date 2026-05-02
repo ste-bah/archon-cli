@@ -600,6 +600,32 @@ pub enum DocsAction {
         /// Document ID
         document_id: String,
     },
+    /// Search for chunks relevant to a query
+    Search {
+        /// Search query
+        query: String,
+        /// Show debug output (embedding details, distances, provenance)
+        #[arg(long)]
+        debug: bool,
+    },
+    /// Answer a question using document evidence
+    Answer {
+        /// Question to answer
+        query: String,
+    },
+    /// Show provenance chain for a chunk or answer component
+    Provenance {
+        /// Chunk ID or answer component ID
+        chunk_or_answer_id: String,
+    },
+    /// Index document chunks (embed and store vectors)
+    Index {
+        /// Re-index all chunks regardless of status
+        #[arg(long)]
+        all: bool,
+    },
+    /// Report embedding model and backend status
+    ModelStatus,
 }
 
 #[derive(Subcommand, Debug)]

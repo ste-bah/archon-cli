@@ -35,9 +35,28 @@ pub enum DocsError {
     #[error("Embedding error: {message}")]
     Embedding { message: String },
 
+    #[error("Retrieval error: {message}")]
+    Retrieval { message: String },
+
+    #[error("Model not configured: {message}")]
+    ModelNotConfigured { message: String },
+
     #[error("VLM policy denied: {message}")]
     VlmPolicyDenied { message: String },
 
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 }
+
+// ---------------------------------------------------------------------------
+// CozoDB version-coupled string matchers
+// ---------------------------------------------------------------------------
+
+/// Substring that Cozo 0.7.x returns when a queried relation does not exist.
+/// If Cozo changes phrasing in a future version, update here only.
+pub const COZO_RELATION_NOT_FOUND: &str = "Cannot find requested stored relation";
+
+/// Phrases Cozo 0.7.x uses for "relation already exists" errors.
+/// Used by `run_create` to suppress idempotent-create errors.
+pub const COZO_RELATION_ALREADY_EXISTS: &[&str] =
+    &["conflicts with an existing", "already exists"];

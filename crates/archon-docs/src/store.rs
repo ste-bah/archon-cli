@@ -6,7 +6,7 @@
 use std::collections::BTreeMap;
 
 use anyhow::Result;
-use cozo::{DataValue, DbInstance, ScriptMutability};
+use cozo::{DataValue, DbInstance, ScriptMutability, Vector};
 
 use crate::models::{
     ChunkArtifact, DocumentStatus, OcrRun, OcrStatus, PageArtifact, ProcessingJob,
@@ -393,6 +393,38 @@ pub fn list_chunks_for_doc(db: &DbInstance, document_id: &str) -> Result<Vec<Chu
         .collect())
 }
 
+/// Look up a single chunk by its chunk_id across all documents.
+pub fn get_chunk_by_id(db: &DbInstance, chunk_id: &str) -> Result<Option<ChunkArtifact>> {
+    let mut params = BTreeMap::new();
+    params.insert("cid".into(), DataValue::from(chunk_id));
+
+    let result = db
+        .run_script(
+            "?[chunk_id, document_id, artifact_id, chunk_index, page_start, page_end, content, content_hash, embedding_status] \
+             := *doc_chunks{chunk_id, document_id, artifact_id, chunk_index, page_start, page_end, content, content_hash, embedding_status}, \
+             chunk_id = $cid",
+            params,
+            ScriptMutability::Immutable,
+        )
+        .map_err(|e| anyhow::anyhow!("get chunk by id failed: {e}"))?;
+
+    if result.rows.is_empty() {
+        return Ok(None);
+    }
+    let row = &result.rows[0];
+    Ok(Some(ChunkArtifact {
+        chunk_id: row[0].get_str().unwrap_or("").to_string(),
+        document_id: row[1].get_str().unwrap_or("").to_string(),
+        artifact_id: row[2].get_str().unwrap_or("").to_string(),
+        chunk_index: row[3].get_int().unwrap_or(0) as u32,
+        page_start: row[4].get_int().unwrap_or(0) as u32,
+        page_end: row[5].get_int().unwrap_or(0) as u32,
+        content: row[6].get_str().unwrap_or("").to_string(),
+        content_hash: row[7].get_str().unwrap_or("").to_string(),
+        embedding_status: row[8].get_str().unwrap_or("pending").to_string(),
+    }))
+}
+
 pub fn chunk_hash_exists(db: &DbInstance, content_hash: &str) -> Result<bool> {
     let mut params = BTreeMap::new();
     params.insert("ch".into(), DataValue::from(content_hash));
@@ -570,6 +602,117 @@ pub fn insert_processing_job(db: &DbInstance, job: &ProcessingJob) -> Result<()>
     )
     .map_err(|e| anyhow::anyhow!("insert processing job failed: {e}"))?;
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Vector operations (vec_text_chunks)
+// ---------------------------------------------------------------------------
+
+/// Store (or upsert) an embedding for a chunk.
+pub fn insert_chunk_embedding(
+    db: &DbInstance,
+    chunk_id: &str,
+    embedding: &[f32],
+    provider: &str,
+) -> Result<()> {
+    let arr = ndarray::Array1::from_vec(embedding.to_vec());
+
+    let mut params = BTreeMap::new();
+    params.insert("cid".into(), DataValue::from(chunk_id));
+    params.insert("emb".into(), DataValue::Vec(Vector::F32(arr)));
+    params.insert("prov".into(), DataValue::from(provider));
+
+    db.run_script(
+        "?[chunk_id, embedding, provider] <- [[$cid, $emb, $prov]]
+         :put vec_text_chunks { chunk_id => embedding, provider }",
+        params,
+        ScriptMutability::Mutable,
+    )
+    .map_err(|e| anyhow::anyhow!("insert chunk embedding failed: {e}"))?;
+    Ok(())
+}
+
+/// Read back a stored embedding for a chunk. Returns None if not found.
+pub fn get_chunk_embedding(db: &DbInstance, chunk_id: &str) -> Result<Option<Vec<f32>>> {
+    let mut params = BTreeMap::new();
+    params.insert("cid".into(), DataValue::from(chunk_id));
+
+    let result = db
+        .run_script(
+            "?[embedding] := *vec_text_chunks{chunk_id, embedding}, chunk_id = $cid",
+            params,
+            ScriptMutability::Immutable,
+        )
+        .map_err(|e| anyhow::anyhow!("get chunk embedding failed: {e}"))?;
+
+    if result.rows.is_empty() {
+        return Ok(None);
+    }
+    // Extract the embedding from the first row
+    let emb = &result.rows[0][0];
+    match emb {
+        DataValue::Vec(Vector::F32(arr)) => Ok(Some(arr.to_vec())),
+        DataValue::Vec(_) => Err(anyhow::anyhow!("unexpected vector dtype in vec_text_chunks")),
+        _ => Err(anyhow::anyhow!("expected vector data in vec_text_chunks for chunk {chunk_id}")),
+    }
+}
+
+/// Update the embedding_status field for a chunk.
+///
+/// Reads the full chunk row, modifies only the status, and re-inserts.
+/// Returns Ok(()) even if the chunk doesn't exist (no-op).
+pub fn update_chunk_embedding_status(
+    db: &DbInstance,
+    chunk_id: &str,
+    status: &str,
+) -> Result<()> {
+    // Read the full chunk first — :put requires all non-default columns.
+    let chunk = get_chunk_by_id(db, chunk_id)?;
+    if let Some(mut chunk) = chunk {
+        chunk.embedding_status = status.to_string();
+        insert_chunk(db, &chunk)?;
+    }
+    Ok(())
+}
+
+/// Count chunks with embedding_status = "pending".
+pub fn count_pending_chunks(db: &DbInstance) -> Result<usize> {
+    let result = db
+        .run_script(
+            "?[count(chunk_id)] := *doc_chunks{chunk_id, embedding_status}, embedding_status = \"pending\"",
+            Default::default(),
+            ScriptMutability::Immutable,
+        )
+        .map_err(|e| anyhow::anyhow!("count pending chunks failed: {e}"))?;
+    if result.rows.is_empty() {
+        return Ok(0);
+    }
+    Ok(result.rows[0][0].get_int().unwrap_or(0) as usize)
+}
+
+/// Count embeddings currently stored.
+pub fn count_embeddings(db: &DbInstance) -> Result<usize> {
+    let result = db.run_script(
+        "?[count(chunk_id)] := *vec_text_chunks{chunk_id}",
+        Default::default(),
+        ScriptMutability::Immutable,
+    );
+    match result {
+        Ok(result) => {
+            if result.rows.is_empty() {
+                return Ok(0);
+            }
+            Ok(result.rows[0][0].get_int().unwrap_or(0) as usize)
+        }
+        Err(e) => {
+            let msg = e.to_string();
+            if msg.contains(crate::errors::COZO_RELATION_NOT_FOUND) {
+                Ok(0)
+            } else {
+                Err(anyhow::anyhow!("count embeddings failed: {msg}"))
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -776,6 +919,42 @@ mod tests {
 
         let found = get_doc_by_hash(&db, "abc123").unwrap().unwrap();
         assert_eq!(found.document_id, "hash-doc");
+    }
+
+    #[test]
+    fn test_insert_and_readback_vector() {
+        let db = test_db();
+        crate::schema::ensure_doc_schema(&db).unwrap();
+        crate::schema::ensure_vec_schema(&db, 3).unwrap();
+
+        let emb = vec![1.0_f32, 0.0, 0.0];
+        insert_chunk_embedding(&db, "chunk-vec-1", &emb, "test-provider").unwrap();
+
+        let got = get_chunk_embedding(&db, "chunk-vec-1").unwrap().unwrap();
+        assert_eq!(got.len(), 3);
+        assert!((got[0] - 1.0).abs() < 1e-6);
+
+        let count = count_embeddings(&db).unwrap();
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn test_vector_roundtrip_preserves_norm() {
+        let db = test_db();
+        // Dimension 4 to test L2 norm explicitly
+        crate::schema::ensure_doc_schema(&db).unwrap();
+        crate::schema::ensure_vec_schema(&db, 4).unwrap();
+
+        // Embedding with L2 norm = 5.0 (3-4-5 triangle in 2D plus zeros)
+        let emb = vec![3.0_f32, 4.0_f32, 0.0, 0.0];
+        // Normalise before storing (caller responsibility)
+        let norm = (emb.iter().map(|x| x * x).sum::<f32>()).sqrt();
+        let normalized: Vec<f32> = emb.iter().map(|x| x / norm).collect();
+        insert_chunk_embedding(&db, "chunk-norm-1", &normalized, "test").unwrap();
+
+        let got = get_chunk_embedding(&db, "chunk-norm-1").unwrap().unwrap();
+        let got_norm: f32 = got.iter().map(|x| x * x).sum::<f32>().sqrt();
+        assert!((got_norm - 1.0).abs() < 1e-6, "stored vector must be unit length");
     }
 
     #[test]

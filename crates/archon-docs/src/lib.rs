@@ -10,3 +10,8 @@ pub mod provenance;
 pub mod ingest;
 pub mod status;
 pub mod inspect;
+
+pub mod embed;
+pub mod rerank;
+pub mod retrieval;
+pub mod answer;

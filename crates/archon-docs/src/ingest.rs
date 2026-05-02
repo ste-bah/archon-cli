@@ -25,6 +25,9 @@ use crate::provenance::build_doc_lineage_edges;
 use crate::schema::ensure_doc_schema;
 use crate::store::{self, hash_exists_in_sources};
 
+use crate::embed;
+use crate::retrieval;
+
 /// Result of a single-file ingest.
 #[derive(Clone, Debug)]
 pub struct IngestFileResult {
@@ -315,6 +318,21 @@ async fn run_ingest_pipeline(
         store::insert_provenance_edge(db, edge).map_err(|e| DocsError::Storage {
             message: e.to_string(),
         })?;
+    }
+
+    // 8. Eager indexing: embed and store vectors if a provider is configured.
+    if let Some(_provider) = embed::get_provider() {
+        for chunk in &chunk_artifacts {
+            if let Err(e) = retrieval::index_chunk(db, chunk) {
+                tracing::warn!(
+                    chunk_id = %chunk.chunk_id,
+                    error = %e,
+                    "failed to index chunk during ingest"
+                );
+            }
+        }
+    } else {
+        tracing::info!("no embedding provider configured; skipping eager indexing during ingest");
     }
 
     Ok(())
@@ -625,5 +643,159 @@ mod tests {
             DocumentStatus::Failed,
             "pipeline failure must set Failed status"
         );
+    }
+
+    // ── BLOCKER #1: Eager indexing tests ─────────────────────────────
+
+    use crate::embed::{self, LocalEmbeddingProvider};
+
+    struct IndexingMockProvider {
+        dim: usize,
+        // If set, embed_chunks returns this error.
+        fail_with: Option<String>,
+    }
+
+    impl LocalEmbeddingProvider for IndexingMockProvider {
+        fn embed_chunks(&self, chunks: &[String]) -> Result<Vec<Vec<f32>>, DocsError> {
+            if let Some(ref msg) = self.fail_with {
+                return Err(DocsError::Embedding { message: msg.clone() });
+            }
+            Ok(chunks
+                .iter()
+                .enumerate()
+                .map(|(i, c)| {
+                    let mut v = vec![0.0_f32; self.dim];
+                    for (j, b) in c.bytes().enumerate() {
+                        v[j % self.dim] = (b as f32) / 255.0;
+                    }
+                    v[0] = (i as f32 + 1.0) * 0.5;
+                    let norm: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt().max(1e-12);
+                    v.iter_mut().for_each(|x| *x /= norm);
+                    v
+                })
+                .collect())
+        }
+
+        fn embed_query(&self, query: &str) -> Result<Vec<f32>, DocsError> {
+            let mut results = self.embed_chunks(&[query.to_string()])?;
+            Ok(results.remove(0))
+        }
+
+        fn dimension(&self) -> usize {
+            self.dim
+        }
+
+        fn backend_name(&self) -> &'static str {
+            "mock-indexing"
+        }
+    }
+
+    #[tokio::test]
+    async fn test_ingest_indexes_chunks_when_provider_set() {
+        let db = test_db();
+        let dir = tempfile::tempdir().unwrap();
+        // Multi-chunk fixture: enough content for several chunks
+        let content = (0..50)
+            .map(|i| format!("Paragraph {} with enough text content to fill multiple chunks in the pipeline.\n", i))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let file_path = dir.path().join("multi.txt");
+        fs::write(&file_path, &content).unwrap();
+
+        embed::set_provider(Box::new(IndexingMockProvider { dim: 4, fail_with: None }));
+
+        let r = ingest_file(&db, &file_path).await.unwrap();
+        assert!(r.was_new);
+
+        let chunks = store::list_chunks_for_doc(&db, &r.document_id).unwrap();
+        assert!(!chunks.is_empty(), "expected at least one chunk");
+        for chunk in &chunks {
+            assert_eq!(
+                chunk.embedding_status, "indexed",
+                "chunk {} should be indexed, got {}",
+                chunk.chunk_id, chunk.embedding_status
+            );
+        }
+        let count = store::count_embeddings(&db).unwrap();
+        assert_eq!(count, chunks.len(), "all chunks should have embeddings");
+    }
+
+    #[tokio::test]
+    async fn test_ingest_succeeds_without_provider() {
+        let db = test_db();
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("noprov.txt");
+        fs::write(&file_path, "Some content for a document without embedding provider.\n").unwrap();
+
+        // Ensure no provider is set
+        embed::clear_provider();
+
+        let r = ingest_file(&db, &file_path).await.unwrap();
+        assert!(r.was_new);
+
+        let chunks = store::list_chunks_for_doc(&db, &r.document_id).unwrap();
+        assert!(!chunks.is_empty());
+        for chunk in &chunks {
+            assert_eq!(chunk.embedding_status, "pending");
+        }
+        assert_eq!(store::count_embeddings(&db).unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_second_ingest_indexes_new_chunks() {
+        let db = test_db();
+        embed::set_provider(Box::new(IndexingMockProvider { dim: 4, fail_with: None }));
+
+        // Doc A
+        let dir = tempfile::tempdir().unwrap();
+        let path_a = dir.path().join("doc_a.txt");
+        fs::write(&path_a, "Document A content with some text for chunking.\n").unwrap();
+        let r_a = ingest_file(&db, &path_a).await.unwrap();
+        assert!(r_a.was_new);
+
+        let chunks_a = store::list_chunks_for_doc(&db, &r_a.document_id).unwrap();
+        let count_after_a = store::count_embeddings(&db).unwrap();
+        assert_eq!(count_after_a, chunks_a.len());
+
+        // Doc B
+        let path_b = dir.path().join("doc_b.txt");
+        fs::write(&path_b, "Document B with different content for another ingest test.\n").unwrap();
+        let r_b = ingest_file(&db, &path_b).await.unwrap();
+        assert!(r_b.was_new);
+
+        let chunks_b = store::list_chunks_for_doc(&db, &r_b.document_id).unwrap();
+        let count_after_b = store::count_embeddings(&db).unwrap();
+        assert_eq!(count_after_b, chunks_a.len() + chunks_b.len(), "both doc A and B chunks should be embedded");
+
+        for chunk in &chunks_b {
+            assert_eq!(chunk.embedding_status, "indexed");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_index_failure_marks_chunk_failed() {
+        let db = test_db();
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("fail.txt");
+        fs::write(&file_path, "Content that will fail to embed.\n").unwrap();
+
+        embed::set_provider(Box::new(IndexingMockProvider {
+            dim: 4,
+            fail_with: Some("simulated embedding failure".into()),
+        }));
+
+        let r = ingest_file(&db, &file_path).await.unwrap();
+        assert!(r.was_new);
+
+        let chunks = store::list_chunks_for_doc(&db, &r.document_id).unwrap();
+        assert!(!chunks.is_empty());
+        for chunk in &chunks {
+            assert_eq!(
+                chunk.embedding_status, "failed",
+                "chunk {} should be marked failed after embed error, got {}",
+                chunk.chunk_id, chunk.embedding_status
+            );
+        }
+        assert_eq!(store::count_embeddings(&db).unwrap(), 0);
     }
 }
