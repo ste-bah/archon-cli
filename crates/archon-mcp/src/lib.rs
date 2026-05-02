@@ -11,6 +11,7 @@ pub mod oauth_pkce;
 pub mod sse_mcp_transport;
 pub mod sse_oauth_transport;
 pub mod sse_reconnect;
+pub mod sse_shutdown;
 pub mod sse_transport;
 pub mod tool_bridge;
 pub mod transport;

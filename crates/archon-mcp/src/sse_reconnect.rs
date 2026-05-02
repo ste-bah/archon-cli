@@ -21,12 +21,13 @@
 //!   that's #203 and lives in `sse_mcp_transport`.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 
 use futures_util::StreamExt;
 use http::{HeaderName, HeaderValue};
 use rand::Rng;
-use tokio::sync::mpsc;
+use tokio::sync::{Notify, mpsc};
 
 use crate::sse_transport::{SseFrame, SseFrameBuilder};
 
@@ -109,12 +110,31 @@ enum PumpOutcome {
 
 /// Reconnecting SSE pump. Runs until the caller drops the `tx` receiver
 /// or `config.max_retries` is exhausted on consecutive failures.
+///
+/// This is a backward-compat wrapper. Production code should use
+/// [`spawn_sse_pump`] which wires a real `Notify` for prompt cancel.
 pub async fn pump_sse_stream_with_reconnect(
     client: reqwest::Client,
     url: String,
     base_headers: HashMap<HeaderName, HeaderValue>,
     tx: mpsc::Sender<SseFrame>,
     config: ReconnectConfig,
+) {
+    let shutdown = Arc::new(Notify::new());
+    pump_sse_stream_with_reconnect_with_shutdown(client, url, base_headers, tx, config, shutdown)
+        .await
+}
+
+/// Cancel-aware variant. The 5-arg [`pump_sse_stream_with_reconnect`]
+/// delegates to this with a never-fired Notify for backward compat
+/// with existing test callers.
+pub async fn pump_sse_stream_with_reconnect_with_shutdown(
+    client: reqwest::Client,
+    url: String,
+    base_headers: HashMap<HeaderName, HeaderValue>,
+    tx: mpsc::Sender<SseFrame>,
+    config: ReconnectConfig,
+    shutdown: Arc<Notify>,
 ) {
     let mut state = ReconnectState {
         retry_ms: config.default_retry_ms,
@@ -150,7 +170,14 @@ pub async fn pump_sse_stream_with_reconnect(
                     return;
                 }
                 let delay = compute_backoff(state.retry_ms, attempt, config.jitter_ratio);
-                tokio::time::sleep(delay).await;
+                tokio::select! {
+                    biased;
+                    _ = shutdown.notified() => {
+                        tracing::debug!("sse reconnect: shutdown notified, exiting");
+                        return;
+                    }
+                    _ = tokio::time::sleep(delay) => {}
+                }
                 continue;
             }
             Err(e) => {
@@ -164,7 +191,14 @@ pub async fn pump_sse_stream_with_reconnect(
                     return;
                 }
                 let delay = compute_backoff(state.retry_ms, attempt, config.jitter_ratio);
-                tokio::time::sleep(delay).await;
+                tokio::select! {
+                    biased;
+                    _ = shutdown.notified() => {
+                        tracing::debug!("sse reconnect: shutdown notified, exiting");
+                        return;
+                    }
+                    _ = tokio::time::sleep(delay) => {}
+                }
                 continue;
             }
         };
@@ -190,7 +224,14 @@ pub async fn pump_sse_stream_with_reconnect(
                     last_event_id = ?state.last_event_id,
                     "SSE reconnecting after stream end"
                 );
-                tokio::time::sleep(delay).await;
+                tokio::select! {
+                    biased;
+                    _ = shutdown.notified() => {
+                        tracing::debug!("sse reconnect: shutdown notified, exiting");
+                        return;
+                    }
+                    _ = tokio::time::sleep(delay) => {}
+                }
             }
         }
     }
@@ -270,6 +311,9 @@ async fn pump_one_stream_with_state(
 
     PumpOutcome::StreamEnded
 }
+
+// Re-exported from sse_shutdown module (split for file-size budget).
+pub use crate::sse_shutdown::{SseGuardedStream, SseShutdown, spawn_sse_pump};
 
 #[cfg(test)]
 mod tests {

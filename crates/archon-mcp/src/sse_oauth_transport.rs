@@ -67,6 +67,10 @@ pub async fn connect_mcp_with_oauth(
     let setup = setup_sse_inbound(sse_url, Some(&initial_headers), connect_timeout).await?;
 
     let rx_stream = build_inbound_stream(setup.frame_rx);
+    let guarded = Box::pin(crate::sse_reconnect::SseGuardedStream::new(
+        rx_stream,
+        setup.sse_shutdown,
+    ));
 
     // User-supplied headers (none in this minimal-viable signature) would go
     // through `extra_headers`. The per-POST Bearer is injected fresh inside
@@ -111,7 +115,7 @@ pub async fn connect_mcp_with_oauth(
         headers: None,
     };
 
-    McpClient::initialize(&config, (sink_boxed, rx_stream)).await
+    McpClient::initialize(&config, (sink_boxed, guarded)).await
 }
 
 /// Background task that drains the outbound channel and POSTs each message

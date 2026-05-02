@@ -275,62 +275,11 @@ pub async fn run_scheduler_loop(
     store_path: std::path::PathBuf,
     cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) {
-    use std::sync::atomic::Ordering;
-
-    let store = crate::cron_task::CronStore::new(store_path.clone());
-
-    loop {
-        if cancel.load(Ordering::Relaxed) {
-            tracing::debug!("cron scheduler: cancel signal received, exiting");
-            break;
-        }
-
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-
-        if cancel.load(Ordering::Relaxed) {
-            break;
-        }
-
-        let now = chrono::Utc::now();
-
-        let tasks = match store.load() {
-            Ok(t) => t,
-            Err(e) => {
-                tracing::warn!("cron scheduler: failed to load tasks: {e}");
-                continue;
-            }
-        };
-
-        if tasks.is_empty() {
-            continue;
-        }
-
-        let scheduler = CronScheduler::new(store_path.clone());
-        let due = scheduler.due_tasks(&tasks, now);
-
-        if due.is_empty() {
-            continue;
-        }
-
-        let mut deleted_ids: Vec<String> = Vec::new();
-        for task in &due {
-            tracing::info!(
-                task_id = %task.id,
-                cron = %task.cron,
-                "cron.fire: scheduled task fired"
-            );
-            if is_one_shot(task) {
-                deleted_ids.push(task.id.clone());
-            }
-        }
-
-        // Delete one-shot tasks (fail-open).
-        for id in &deleted_ids {
-            if let Err(e) = store.delete(id) {
-                tracing::warn!("cron scheduler: failed to delete one-shot task {id}: {e}");
-            }
-        }
-    }
+    // Backward-compat wrapper for tests. Production code should use
+    // [`crate::cron_shutdown::spawn_scheduler`] which wires a real Notify
+    // for prompt cancel.
+    let notify = std::sync::Arc::new(tokio::sync::Notify::new());
+    crate::cron_shutdown::run_scheduler_loop_with_notify(store_path, cancel, notify).await
 }
 
 #[cfg(test)]

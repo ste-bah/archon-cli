@@ -54,6 +54,7 @@ pub mod cron_create;
 pub mod cron_delete;
 pub mod cron_list;
 pub mod cron_scheduler;
+pub mod cron_shutdown;
 pub mod cron_task;
 pub mod mcp_resources;
 pub mod memory;
