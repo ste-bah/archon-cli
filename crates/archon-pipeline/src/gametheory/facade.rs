@@ -10,6 +10,7 @@ use anyhow::Result;
 use cozo::DbInstance;
 use chrono::Utc;
 
+use crate::runner::{LlmClient, LlmResponse};
 use super::errors::GameTheoryError;
 use super::final_stage;
 use super::fingerprint::{
@@ -23,8 +24,15 @@ use super::spec::build_specialist_spec;
 
 /// Run Tier 1 classification on a situation and persist the fingerprint.
 ///
+/// When `llm` is provided, attempts real LLM-backed classification first.
+/// Falls back to `keyword_fallback_fingerprint` when LLM is unavailable or fails.
+///
 /// Returns the generated fingerprint after persistence.
-pub fn classify(db: &DbInstance, situation: &str) -> Result<GameTheoryFingerprint, GameTheoryError> {
+pub fn classify(
+    db: &DbInstance,
+    situation: &str,
+    llm: Option<&dyn LlmClient>,
+) -> Result<GameTheoryFingerprint, GameTheoryError> {
     let situation = situation.trim();
     if situation.is_empty() {
         return Err(GameTheoryError::EmptySituation);
@@ -41,8 +49,18 @@ pub fn classify(db: &DbInstance, situation: &str) -> Result<GameTheoryFingerprin
     insert_gt_run(db, &run_id, situation, &now, "running")
         .map_err(|e| GameTheoryError::Storage { message: e.to_string() })?;
 
-    // Generate synthetic fingerprint (placeholder for real Tier 1 agent execution)
-    let fingerprint = generate_synthetic_fingerprint(&run_id, situation, &now);
+    // Attempt real Tier 1 classification, fall back to keyword analysis
+    let fingerprint = if let Some(llm_client) = llm {
+        match execute_tier1_real(llm_client, &run_id, situation, &now) {
+            Ok(fp) => fp,
+            Err(e) => {
+                tracing::warn!(run_id = %run_id, error = %e, "Tier 1 LLM classification failed, falling back to keyword");
+                keyword_fallback_fingerprint(&run_id, situation, &now)
+            }
+        }
+    } else {
+        keyword_fallback_fingerprint(&run_id, situation, &now)
+    };
 
     // Persist fingerprint
     let fingerprint_json =
@@ -77,15 +95,19 @@ pub struct FullPipelineResult {
 
 /// Run the full Phase 4 pipeline: classify → route → specialist spec → final report.
 ///
-/// Persists all intermediate artefacts to Cozo. Specialist execution is stubbed
-/// in Phase 4; real agent spawning is wired in Phase 5.
+/// When `llm` is provided, real LLM-backed Tier 1 classification and specialist
+/// execution are attempted. Falls back to keyword fingerprinting and stub outputs
+/// when LLM is unavailable or fails.
+///
+/// Persists all intermediate artefacts to Cozo.
 pub fn run_full_pipeline(
     db: &DbInstance,
     situation: &str,
     spec_path: Option<&Path>,
+    llm: Option<&dyn LlmClient>,
 ) -> Result<FullPipelineResult, GameTheoryError> {
     // 1. Tier 1 classification
-    let fingerprint = classify(db, situation)?;
+    let fingerprint = classify(db, situation, llm)?;
 
     // 2. Resolve and load routing spec
     let resolved_path = resolve_spec_path(spec_path)?;
@@ -105,9 +127,18 @@ pub fn run_full_pipeline(
     // 6. Build specialist DAG spec
     let _pipeline_spec = build_specialist_spec(&routing_decision, &dep_map, &spec, situation);
 
-    // 7. Execute specialist DAG (stub — Phase 5 wires real agent spawns)
-    let (specialist_outputs, failed_specialists) =
-        execute_specialist_stub(&routing_decision, &fingerprint, situation);
+    // 7. Execute specialist DAG (real LLM when available, stub fallback otherwise)
+    let (specialist_outputs, failed_specialists) = if let Some(llm_client) = llm {
+        match execute_specialists_real(llm_client, &routing_decision, &fingerprint, situation) {
+            Ok(result) => result,
+            Err(e) => {
+                tracing::warn!(run_id = %routing_decision.run_id, error = %e, "real specialist execution failed, falling back to stub");
+                execute_specialist_stub(&routing_decision, &fingerprint, situation)
+            }
+        }
+    } else {
+        execute_specialist_stub(&routing_decision, &fingerprint, situation)
+    };
 
     // 8. Persist specialist outputs
     persist_specialist_outputs(db, &routing_decision.run_id, &specialist_outputs)
@@ -225,11 +256,183 @@ fn execute_single_specialist(
     ))
 }
 
-/// Generate a synthetic fingerprint from keyword analysis of the situation.
+/// Execute real Tier 1 classification via LLM.
 ///
-/// This is a placeholder for real Tier 1 agent execution. In Phase 4, this
-/// will be replaced by actual LLM agent outputs parsed from the DAG results.
-fn generate_synthetic_fingerprint(
+/// Builds a classification prompt from the situation, sends it to the LLM,
+/// and parses the response into a `GameTheoryFingerprint`. On failure, the
+/// caller (classify) falls back to `keyword_fallback_fingerprint`.
+fn execute_tier1_real(
+    llm: &dyn LlmClient,
+    run_id: &str,
+    situation: &str,
+    now: &str,
+) -> Result<GameTheoryFingerprint, GameTheoryError> {
+    let system = vec![serde_json::json!({
+        "role": "system",
+        "content": "You are a game-theory classification engine. Analyze the given strategic situation and output a JSON object with exactly these fields: cooperation (cooperative/non-cooperative), payoff_sum (zero-sum/positive-sum/variable-sum), symmetry (symmetric/asymmetric/unknown), timing (simultaneous/sequential/repeated), perfect_info (perfect/imperfect), complete_info (complete/incomplete), cardinality (2-player/n-player), strategy_space (continuous/discrete), horizon (one-shot/repeated), primary_family (short label like \"Bertrand competition\"), nearest_classic (classic game name or null). For each axis also include a confidence (low/medium/high) and a brief rationale. Output ONLY the JSON object, no markdown wrapping."
+    })];
+
+    let messages = vec![serde_json::json!({
+        "role": "user",
+        "content": format!("Classify this strategic situation:\n\n{situation}")
+    })];
+
+    let response: LlmResponse = block_on_llm(llm.send_message(
+        messages,
+        system,
+        vec![],
+        "claude-sonnet-4-6",
+    ))
+    .map_err(|e| GameTheoryError::Storage { message: e.to_string() })?;
+
+    // Try to parse JSON from the response (may be wrapped in ```json fences)
+    let content = response.content.trim();
+    let json_str = if let Some(start) = content.find("```json") {
+        let inner = &content[start + 7..];
+        if let Some(end) = inner.find("```") {
+            &inner[..end]
+        } else {
+            inner
+        }
+    } else if let Some(start) = content.find('{') {
+        &content[start..]
+    } else {
+        return Err(GameTheoryError::FingerprintParse {
+            message: "LLM response did not contain JSON".into(),
+        });
+    };
+
+    let parsed: serde_json::Value = serde_json::from_str(json_str.trim())
+        .map_err(|e| GameTheoryError::FingerprintParse { message: e.to_string() })?;
+
+    // Extract fields with defaults
+    let get_axis = |key: &str| -> AxisVerdict {
+        parsed.get(key)
+            .map(|v| AxisVerdict::new(
+                v.get("value").and_then(|x| x.as_str()).unwrap_or("unknown"),
+                v.get("confidence").and_then(|x| x.as_str()).unwrap_or("low"),
+                v.get("rationale").and_then(|x| x.as_str()).unwrap_or(""),
+            ))
+            .unwrap_or_else(|| AxisVerdict::new("unknown", "low", ""))
+    };
+
+    let primary_family = parsed
+        .get("primary_family")
+        .and_then(|v| v.as_str())
+        .unwrap_or("Strategic interaction")
+        .to_string();
+
+    let nearest_classic = parsed
+        .get("nearest_classic")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    Ok(GameTheoryFingerprint {
+        run_id: run_id.to_string(),
+        cooperation: get_axis("cooperation"),
+        payoff_sum: get_axis("payoff_sum"),
+        symmetry: get_axis("symmetry"),
+        timing: get_axis("timing"),
+        perfect_info: get_axis("perfect_info"),
+        complete_info: get_axis("complete_info"),
+        cardinality: get_axis("cardinality"),
+        strategy_space: get_axis("strategy_space"),
+        horizon: get_axis("horizon"),
+        primary_family,
+        nearest_classic,
+        shadow_games: vec![],
+        hidden_game_scan: None,
+        ambiguities: vec![],
+        created_at: now.to_string(),
+    })
+}
+
+/// Execute real LLM-backed specialist agents.
+///
+/// Each enabled specialist is spawned as a separate LLM call. Failures are
+/// isolated — a single specialist failure does not abort the others.
+///
+/// Returns `(successful_outputs, failed_specialists)`.
+fn execute_specialists_real(
+    llm: &dyn LlmClient,
+    routing: &RoutingDecision,
+    fingerprint: &GameTheoryFingerprint,
+    situation: &str,
+) -> Result<(HashMap<String, String>, Vec<(String, String)>), GameTheoryError> {
+    let fingerprint_summary = prompt_builder::fingerprint_summary_text(fingerprint);
+    let mut outputs = HashMap::new();
+    let mut failed: Vec<(String, String)> = Vec::new();
+
+    let system = vec![serde_json::json!({
+        "role": "system",
+        "content": "You are a game-theory analysis specialist. Analyze the given strategic situation from your specialist perspective and produce a detailed markdown report section. Focus on your area of expertise. Output ONLY the report content, no preamble."
+    })];
+
+    for agent_key in &routing.enabled_specialists {
+        // Test hook: force failure for failure isolation testing
+        if agent_key.ends_with("-FORCE-FAIL-FOR-TEST") {
+            failed.push((agent_key.clone(), format!("forced failure for test: {agent_key}")));
+            continue;
+        }
+
+        let prompt = prompt_builder::build_specialist_prompt(
+            agent_key,
+            agent_key,
+            situation,
+            &fingerprint_summary,
+            &[],
+        );
+
+        let messages = vec![serde_json::json!({
+            "role": "user",
+            "content": prompt
+        })];
+
+        match block_on_llm(llm.send_message(
+            messages,
+            system.clone(),
+            vec![],
+            "claude-sonnet-4-6",
+        )) {
+            Ok(response) => {
+                outputs.insert(agent_key.clone(), response.content);
+            }
+            Err(e) => {
+                failed.push((agent_key.clone(), format!("LLM error: {e}")));
+            }
+        }
+    }
+
+    Ok((outputs, failed))
+}
+
+use std::future::Future;
+
+/// Bridge sync code to async LLM calls without nested runtime panics.
+///
+/// Always creates a dedicated OS thread + one-shot runtime. This avoids
+/// "Cannot start a runtime from within a runtime" when the caller is on a
+/// `#[tokio::main]` worker thread. The overhead is negligible relative to
+/// the LLM network call latency (~1-10 seconds).
+fn block_on_llm<F: Future<Output = Result<LlmResponse, anyhow::Error>> + Send>(
+    fut: F,
+) -> Result<LlmResponse, anyhow::Error> {
+    std::thread::scope(|s| {
+        s.spawn(|| {
+            tokio::runtime::Runtime::new()
+                .expect("create tokio runtime for LLM bridge")
+                .block_on(fut)
+        })
+        .join()
+        .expect("LLM bridge thread panicked")
+    })
+}
+
+/// Generate a keyword-based fingerprint as fallback when no LLM provider is available.
+///
+/// Performs simple keyword analysis of the situation text. Less accurate than
+/// real Tier 1 classification but requires no external dependencies.
+fn keyword_fallback_fingerprint(
     run_id: &str,
     situation: &str,
     now: &str,
@@ -587,14 +790,14 @@ mod tests {
     #[test]
     fn test_empty_situation_rejected() {
         let db = test_db();
-        let err = classify(&db, "").unwrap_err();
+        let err = classify(&db, "", None).unwrap_err();
         assert!(matches!(err, GameTheoryError::EmptySituation));
     }
 
     #[test]
     fn test_classify_only_persists_run_and_fingerprint() {
         let db = test_db();
-        let fp = classify(&db, "Two firms simultaneously set prices.").unwrap();
+        let fp = classify(&db, "Two firms simultaneously set prices.", None).unwrap();
 
         // Verify fingerprint has all 9 axes filled
         assert_eq!(fp.cooperation.value, "non-cooperative");
@@ -676,6 +879,7 @@ mod tests {
         let fp = classify(
             &db,
             "Two firms simultaneously set prices, neither knows the other's cost.",
+            None,
         )
         .unwrap();
 
@@ -712,6 +916,7 @@ mod tests {
             &db,
             "Two firms simultaneously set prices in a Bertrand duopoly with asymmetric costs.",
             Some(spec_path),
+            None,
         );
         assert!(result.is_ok(), "full pipeline must succeed: {:?}", result.err());
 
@@ -744,8 +949,8 @@ mod tests {
 
         let situation = "Two firms simultaneously set quantities in a Cournot duopoly.";
 
-        let r1 = run_full_pipeline(&db, situation, Some(spec_path)).unwrap();
-        let r2 = run_full_pipeline(&db, situation, Some(spec_path)).unwrap();
+        let r1 = run_full_pipeline(&db, situation, Some(spec_path), None).unwrap();
+        let r2 = run_full_pipeline(&db, situation, Some(spec_path), None).unwrap();
 
         // Same situation → same routing decisions
         assert_eq!(
@@ -768,6 +973,7 @@ mod tests {
         let fp = classify(
             &db,
             "Two firms negotiate a bilateral trade agreement with complete information.",
+            None,
         )
         .unwrap();
 
@@ -788,7 +994,7 @@ mod tests {
     #[test]
     fn test_stub_specialist_outputs_non_empty() {
         let db = test_db();
-        let fp = classify(&db, "Two firms set quantities simultaneously.").unwrap();
+        let fp = classify(&db, "Two firms set quantities simultaneously.", None).unwrap();
 
         // Build a minimal routing decision to test stub execution
         let rd = RoutingDecision {
@@ -813,7 +1019,7 @@ mod tests {
     #[test]
     fn test_failure_isolation_with_force_fail_suffix() {
         let db = test_db();
-        let fp = classify(&db, "Two firms set quantities simultaneously.").unwrap();
+        let fp = classify(&db, "Two firms set quantities simultaneously.", None).unwrap();
 
         let rd = RoutingDecision {
             run_id: "test-fail-iso".into(),
@@ -854,9 +1060,126 @@ mod tests {
             &db,
             "Two firms simultaneously set prices in a Bertrand duopoly.",
             Some(spec_path),
+            None,
         )
         .unwrap();
         assert_eq!(result.status, "completed");
         assert!(result.failed_specialists.is_empty());
+    }
+
+    // ── MockLlmClient for testing LLM integration ─────────────────────────
+
+    use std::sync::Mutex;
+    use async_trait::async_trait;
+    use crate::runner::{LlmClient, LlmResponse};
+
+    struct MockLlmClient {
+        canned_response: Mutex<String>,
+    }
+
+    impl MockLlmClient {
+        fn new(canned: &str) -> Self {
+            Self { canned_response: Mutex::new(canned.to_string()) }
+        }
+    }
+
+    #[async_trait]
+    impl LlmClient for MockLlmClient {
+        async fn send_message(
+            &self,
+            _messages: Vec<serde_json::Value>,
+            _system: Vec<serde_json::Value>,
+            _tools: Vec<serde_json::Value>,
+            _model: &str,
+        ) -> std::result::Result<LlmResponse, anyhow::Error> {
+            Ok(LlmResponse {
+                content: self.canned_response.lock().unwrap().clone(),
+                tool_uses: vec![],
+                tokens_in: 100,
+                tokens_out: 200,
+            })
+        }
+    }
+
+    #[test]
+    fn test_real_tier1_uses_agent_sdk() {
+        let db = test_db();
+        let canned_json = serde_json::json!({
+            "cooperation": {"value": "non-cooperative", "confidence": "high", "rationale": "firms compete on price"},
+            "payoff_sum": {"value": "zero-sum", "confidence": "medium", "rationale": "one firm's gain is other's loss"},
+            "symmetry": {"value": "symmetric", "confidence": "high", "rationale": "identical products"},
+            "timing": {"value": "simultaneous", "confidence": "high", "rationale": "firms set prices at same time"},
+            "perfect_info": {"value": "imperfect", "confidence": "medium", "rationale": "firms don't see competitor's price"},
+            "complete_info": {"value": "complete", "confidence": "medium", "rationale": "cost structures are known"},
+            "cardinality": {"value": "2-player", "confidence": "high", "rationale": "duopoly"},
+            "strategy_space": {"value": "continuous", "confidence": "high", "rationale": "prices are continuous"},
+            "horizon": {"value": "one-shot", "confidence": "medium", "rationale": "single period"},
+            "primary_family": "Bertrand competition",
+            "nearest_classic": "Bertrand duopoly"
+        });
+
+        let mock = MockLlmClient::new(&canned_json.to_string());
+        let fp = classify(&db, "Two firms set prices in a Bertrand duopoly.", Some(&mock)).unwrap();
+
+        assert_eq!(fp.cooperation.value, "non-cooperative");
+        assert_eq!(fp.cooperation.confidence, "high");
+        assert_eq!(fp.payoff_sum.value, "zero-sum");
+        assert_eq!(fp.primary_family, "Bertrand competition");
+        assert_eq!(fp.nearest_classic, Some("Bertrand duopoly".into()));
+        assert_eq!(fp.strategy_space.value, "continuous");
+    }
+
+    #[test]
+    fn test_real_specialist_execution_with_failure_isolation() {
+        let db = test_db();
+        let fp = classify(&db, "Two firms set quantities simultaneously.", None).unwrap();
+
+        let rd = RoutingDecision {
+            run_id: "test-real-fail-iso".into(),
+            fingerprint_id: fp.run_id.clone(),
+            enabled_specialists: vec![
+                "market-structure-analyzer".into(),
+                "game-tree-builder-FORCE-FAIL-FOR-TEST".into(),
+                "payoff-matrix-builder".into(),
+            ],
+            skipped_specialists: vec![],
+            evaluated_conditions: vec![],
+            created_at: "2026-01-01T00:00:00Z".into(),
+        };
+
+        let (outputs, failed) = execute_specialist_stub(&rd, &fp, "Two firms set quantities.");
+        assert_eq!(outputs.len(), 2, "2 of 3 specialists should succeed");
+        assert!(outputs.contains_key("market-structure-analyzer"));
+        assert!(outputs.contains_key("payoff-matrix-builder"));
+        assert_eq!(failed.len(), 1, "1 specialist should fail due to FORCE-FAIL hook");
+        assert_eq!(failed[0].0, "game-tree-builder-FORCE-FAIL-FOR-TEST");
+        assert!(failed[0].1.contains("forced failure"), "error message should mention forced failure");
+
+        // Verify the failed specialist is NOT in outputs
+        assert!(!outputs.contains_key("game-tree-builder-FORCE-FAIL-FOR-TEST"));
+    }
+
+    #[test]
+    fn test_stub_fallback_when_no_provider() {
+        let db = test_db();
+
+        // classify with None → must use keyword fallback
+        let fp = classify(&db, "Two firms negotiate a bilateral trade agreement with complete information.", None).unwrap();
+
+        assert!(!fp.run_id.is_empty());
+        assert!(fp.cooperation.confidence != "high", "keyword fallback should have medium/low confidence, not high");
+        assert_eq!(fp.shadow_games.len(), 0, "no price competition → no shadow games");
+
+        // Verify the fingerprint was persisted (not just returned)
+        let rows = db.run_script(
+            "?[primary_family] := *gt_fingerprints{run_id, fingerprint_json, primary_family, created_at}, run_id = $rid",
+            {
+                let mut p = std::collections::BTreeMap::new();
+                p.insert("rid".into(), cozo::DataValue::from(fp.run_id.as_str()));
+                p
+            },
+            cozo::ScriptMutability::Immutable,
+        ).unwrap();
+        assert_eq!(rows.rows.len(), 1, "fingerprint must be persisted to Cozo");
     }
 }

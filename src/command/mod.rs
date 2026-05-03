@@ -45,6 +45,7 @@ pub(crate) mod fast;
 pub(crate) mod files;
 pub(crate) mod fork;
 pub(crate) mod gametheory;
+pub(crate) mod completion;
 pub(crate) mod garden;
 pub(crate) mod help;
 pub(crate) mod hooks;

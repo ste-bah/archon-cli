@@ -458,6 +458,11 @@ pub enum Commands {
         #[command(subcommand)]
         action: GametheoryAction,
     },
+    /// Completion-integrity checks (TSPEC §10)
+    Completion {
+        #[command(subcommand)]
+        action: CompletionAction,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -492,6 +497,38 @@ pub enum GametheoryAction {
         /// Path to gametheory spec YAML (searches known locations if omitted)
         #[arg(long, value_name = "PATH")]
         spec_path: Option<String>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum CompletionAction {
+    /// Run full completion-integrity check on a pipeline run
+    Inspect {
+        /// Run ID to inspect
+        run_id: String,
+        /// Task type for claim extraction (default: "pipeline-output")
+        #[arg(long, default_value = "pipeline-output")]
+        task_type: String,
+    },
+    /// List completion-sensitive claims for a run
+    Claims {
+        /// Run ID
+        run_id: String,
+    },
+    /// List evidence records for a run
+    Evidence {
+        /// Run ID
+        run_id: String,
+    },
+    /// List all false-completion incidents
+    Incidents,
+    /// Quick verify: run check and return pass/fail exit code
+    Verify {
+        /// Run ID to verify
+        run_id: String,
+        /// Task type for claim extraction
+        #[arg(long, default_value = "pipeline-output")]
+        task_type: String,
     },
 }
 

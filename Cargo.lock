@@ -321,6 +321,7 @@ name = "archon-cli-workspace"
 version = "0.1.36"
 dependencies = [
  "anyhow",
+ "archon-completion",
  "archon-consciousness",
  "archon-core",
  "archon-docs",
@@ -355,6 +356,24 @@ dependencies = [
  "tracing",
  "uuid",
  "walkdir",
+]
+
+[[package]]
+name = "archon-completion"
+version = "0.1.36"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "cozo-ce",
+ "regex",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]

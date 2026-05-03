@@ -2,44 +2,103 @@
 //!
 //! Subcommands: run, list-runs, show, inspect-routing, replay.
 
+use std::sync::Arc;
+
 use anyhow::Result;
 use cozo::DbInstance;
 
+use archon_core::config::ArchonConfig;
+use archon_core::env_vars::ArchonEnvVars;
 use archon_pipeline::gametheory;
+use archon_pipeline::llm_adapter::AnthropicLlmAdapter;
+use archon_pipeline::runner::LlmClient;
 use crate::cli_args::GametheoryAction;
 
 /// Dispatch the gametheory subcommand.
-pub fn handle_gametheory(action: &GametheoryAction) -> Result<()> {
+pub fn handle_gametheory(
+    action: &GametheoryAction,
+    config: &ArchonConfig,
+    env_vars: &ArchonEnvVars,
+) -> Result<()> {
     match action {
         GametheoryAction::Run {
             situation,
             classify_only,
             spec_path,
-        } => handle_run(situation, *classify_only, spec_path.as_deref()),
+        } => handle_run(situation, *classify_only, spec_path.as_deref(), config, env_vars),
         GametheoryAction::ListRuns => handle_list_runs(),
         GametheoryAction::Show { run_id } => handle_show(run_id),
         GametheoryAction::InspectRouting { run_id } => handle_inspect_routing(run_id),
-        GametheoryAction::Replay { run_id, spec_path } => handle_replay(run_id, spec_path.as_deref()),
+        GametheoryAction::Replay { run_id, spec_path } => handle_replay(run_id, spec_path.as_deref(), config, env_vars),
     }
+}
+
+/// Build an LLM client adapter from config. Returns None and logs a warning if auth fails.
+fn build_llm_client(config: &ArchonConfig, env_vars: &ArchonEnvVars) -> Option<AnthropicLlmAdapter> {
+    let auth = match archon_llm::auth::resolve_auth_with_keys(
+        env_vars.anthropic_api_key.as_deref(),
+        env_vars.archon_api_key.as_deref(),
+        env_vars.archon_oauth_token.as_deref(),
+        std::env::var("ANTHROPIC_AUTH_TOKEN").ok().as_deref(),
+    ) {
+        Ok(a) => a,
+        Err(e) => {
+            tracing::warn!("LLM auth unavailable for gametheory: {e}. Using keyword fallback.");
+            return None;
+        }
+    };
+
+    let identity = archon_llm::identity::IdentityProvider::new(
+        archon_llm::identity::IdentityMode::Clean,
+        uuid::Uuid::new_v4().to_string(),
+        "gametheory-device".to_string(),
+        String::new(),
+    );
+
+    let api_url = std::env::var("ANTHROPIC_BASE_URL")
+        .ok()
+        .or_else(|| config.api.base_url.clone());
+
+    let client = archon_llm::anthropic::AnthropicClient::new(auth, identity, api_url);
+    Some(AnthropicLlmAdapter::new(Arc::new(client)))
 }
 
 // ── run ──────────────────────────────────────────────────────────────────────
 
-fn handle_run(situation: &str, classify_only: bool, spec_path: Option<&str>) -> Result<()> {
+fn handle_run(
+    situation: &str,
+    classify_only: bool,
+    spec_path: Option<&str>,
+    config: &ArchonConfig,
+    env_vars: &ArchonEnvVars,
+) -> Result<()> {
     let db = open_db()?;
-
+    let _llm = build_llm_client(config, env_vars);
     if classify_only {
-        run_classify_only(&db, situation)
+        run_classify_only(&db, situation, config, env_vars)
     } else {
-        run_full(&db, situation, spec_path)
+        run_full(&db, situation, spec_path, config, env_vars)
     }
 }
 
-fn run_classify_only(db: &DbInstance, situation: &str) -> Result<()> {
-    match gametheory::classify(db, situation) {
+fn run_classify_only(
+    db: &DbInstance,
+    situation: &str,
+    config: &ArchonConfig,
+    env_vars: &ArchonEnvVars,
+) -> Result<()> {
+    let llm = build_llm_client(config, env_vars);
+    let llm_ref: Option<&dyn LlmClient> = llm.as_ref().map(|a| a as &dyn LlmClient);
+
+    match gametheory::classify(db, situation, llm_ref) {
         Ok(fp) => {
             print_fingerprint(&fp);
             println!("Fingerprint persisted to Cozo (gt_runs, gt_fingerprints).");
+            if llm.is_none() {
+                println!("NOTE: LLM client unavailable, using keyword fallback. Set ANTHROPIC_API_KEY for real agent execution.");
+            } else {
+                println!("NOTE: real LLM agent execution (Phase 5).");
+            }
             Ok(())
         }
         Err(gametheory::GameTheoryError::EmptySituation) => {
@@ -51,10 +110,18 @@ fn run_classify_only(db: &DbInstance, situation: &str) -> Result<()> {
     }
 }
 
-fn run_full(db: &DbInstance, situation: &str, spec_path: Option<&str>) -> Result<()> {
+fn run_full(
+    db: &DbInstance,
+    situation: &str,
+    spec_path: Option<&str>,
+    config: &ArchonConfig,
+    env_vars: &ArchonEnvVars,
+) -> Result<()> {
+    let llm = build_llm_client(config, env_vars);
+    let llm_ref: Option<&dyn LlmClient> = llm.as_ref().map(|a| a as &dyn LlmClient);
     let path = spec_path.map(std::path::Path::new);
 
-    match gametheory::run_full_pipeline(db, situation, path) {
+    match gametheory::run_full_pipeline(db, situation, path, llm_ref) {
         Ok(result) => {
             println!("Game-Theory Strategic Analysis — Full Pipeline");
             println!("==============================================");
@@ -83,8 +150,11 @@ fn run_full(db: &DbInstance, situation: &str, spec_path: Option<&str>) -> Result
                 println!();
             }
 
-            println!("NOTE: Phase 4 specialist execution uses keyword-heuristic stubs.");
-            println!("Real LLM agent spawning is wired in Phase 5.");
+            if llm.is_none() {
+                println!("NOTE: LLM client unavailable, using keyword fallback. Set ANTHROPIC_API_KEY for real agent execution.");
+            } else {
+                println!("NOTE: real LLM agent execution (Phase 5).");
+            }
             println!();
             println!("Report persisted to Cozo (gt_runs, gt_routing_decisions, gt_specialist_outputs, gt_sections, gt_final_reports).");
             Ok(())
@@ -255,7 +325,12 @@ fn handle_inspect_routing(run_id: &str) -> Result<()> {
 
 // ── replay ───────────────────────────────────────────────────────────────────
 
-fn handle_replay(run_id: &str, spec_path: Option<&str>) -> Result<()> {
+fn handle_replay(
+    run_id: &str,
+    spec_path: Option<&str>,
+    _config: &ArchonConfig,
+    _env_vars: &ArchonEnvVars,
+) -> Result<()> {
     let db = open_db()?;
     gametheory::schema::ensure_gametheory_schema(&db)
         .map_err(|e| anyhow::anyhow!("schema init failed: {e}"))?;
@@ -308,9 +383,6 @@ fn handle_replay(run_id: &str, spec_path: Option<&str>) -> Result<()> {
             println!("  - {agent}: {reason}");
         }
     }
-    println!();
-    println!("NOTE: Phase 4 specialist execution uses keyword-heuristic stubs.");
-    println!("Real LLM agent spawning is wired in Phase 5.");
     println!();
     Ok(())
 }
