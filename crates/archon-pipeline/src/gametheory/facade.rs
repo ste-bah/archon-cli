@@ -28,7 +28,7 @@ use super::spec::build_specialist_spec;
 /// Falls back to `keyword_fallback_fingerprint` when LLM is unavailable or fails.
 ///
 /// Returns the generated fingerprint after persistence.
-pub fn classify(
+pub async fn classify(
     db: &DbInstance,
     situation: &str,
     llm: Option<&dyn LlmClient>,
@@ -51,7 +51,7 @@ pub fn classify(
 
     // Attempt real Tier 1 classification, fall back to keyword analysis
     let fingerprint = if let Some(llm_client) = llm {
-        match execute_tier1_real(llm_client, &run_id, situation, &now) {
+        match execute_tier1_real(llm_client, &run_id, situation, &now).await {
             Ok(fp) => fp,
             Err(e) => {
                 tracing::warn!(run_id = %run_id, error = %e, "Tier 1 LLM classification failed, falling back to keyword");
@@ -100,14 +100,14 @@ pub struct FullPipelineResult {
 /// when LLM is unavailable or fails.
 ///
 /// Persists all intermediate artefacts to Cozo.
-pub fn run_full_pipeline(
+pub async fn run_full_pipeline(
     db: &DbInstance,
     situation: &str,
     spec_path: Option<&Path>,
     llm: Option<&dyn LlmClient>,
 ) -> Result<FullPipelineResult, GameTheoryError> {
     // 1. Tier 1 classification
-    let fingerprint = classify(db, situation, llm)?;
+    let fingerprint = classify(db, situation, llm).await?;
 
     // 2. Resolve and load routing spec
     let resolved_path = resolve_spec_path(spec_path)?;
@@ -129,7 +129,7 @@ pub fn run_full_pipeline(
 
     // 7. Execute specialist DAG (real LLM when available, stub fallback otherwise)
     let (specialist_outputs, failed_specialists) = if let Some(llm_client) = llm {
-        match execute_specialists_real(llm_client, &routing_decision, &fingerprint, situation) {
+        match execute_specialists_real(llm_client, &routing_decision, &fingerprint, situation).await {
             Ok(result) => result,
             Err(e) => {
                 tracing::warn!(run_id = %routing_decision.run_id, error = %e, "real specialist execution failed, falling back to stub");
@@ -261,7 +261,7 @@ fn execute_single_specialist(
 /// Builds a classification prompt from the situation, sends it to the LLM,
 /// and parses the response into a `GameTheoryFingerprint`. On failure, the
 /// caller (classify) falls back to `keyword_fallback_fingerprint`.
-fn execute_tier1_real(
+async fn execute_tier1_real(
     llm: &dyn LlmClient,
     run_id: &str,
     situation: &str,
@@ -277,12 +277,13 @@ fn execute_tier1_real(
         "content": format!("Classify this strategic situation:\n\n{situation}")
     })];
 
-    let response: LlmResponse = block_on_llm(llm.send_message(
+    let response: LlmResponse = llm.send_message(
         messages,
         system,
         vec![],
         "claude-sonnet-4-6",
-    ))
+    )
+    .await
     .map_err(|e| GameTheoryError::Storage { message: e.to_string() })?;
 
     // Try to parse JSON from the response (may be wrapped in ```json fences)
@@ -353,7 +354,7 @@ fn execute_tier1_real(
 /// isolated — a single specialist failure does not abort the others.
 ///
 /// Returns `(successful_outputs, failed_specialists)`.
-fn execute_specialists_real(
+async fn execute_specialists_real(
     llm: &dyn LlmClient,
     routing: &RoutingDecision,
     fingerprint: &GameTheoryFingerprint,
@@ -388,12 +389,14 @@ fn execute_specialists_real(
             "content": prompt
         })];
 
-        match block_on_llm(llm.send_message(
+        match llm.send_message(
             messages,
             system.clone(),
             vec![],
             "claude-sonnet-4-6",
-        )) {
+        )
+        .await
+        {
             Ok(response) => {
                 outputs.insert(agent_key.clone(), response.content);
             }
@@ -404,28 +407,6 @@ fn execute_specialists_real(
     }
 
     Ok((outputs, failed))
-}
-
-use std::future::Future;
-
-/// Bridge sync code to async LLM calls without nested runtime panics.
-///
-/// Always creates a dedicated OS thread + one-shot runtime. This avoids
-/// "Cannot start a runtime from within a runtime" when the caller is on a
-/// `#[tokio::main]` worker thread. The overhead is negligible relative to
-/// the LLM network call latency (~1-10 seconds).
-fn block_on_llm<F: Future<Output = Result<LlmResponse, anyhow::Error>> + Send>(
-    fut: F,
-) -> Result<LlmResponse, anyhow::Error> {
-    std::thread::scope(|s| {
-        s.spawn(|| {
-            tokio::runtime::Runtime::new()
-                .expect("create tokio runtime for LLM bridge")
-                .block_on(fut)
-        })
-        .join()
-        .expect("LLM bridge thread panicked")
-    })
 }
 
 /// Generate a keyword-based fingerprint as fallback when no LLM provider is available.
@@ -782,6 +763,10 @@ fn insert_gt_fingerprint(
 mod tests {
     use super::*;
 
+    fn block_on<F: std::future::Future>(f: F) -> F::Output {
+        tokio::runtime::Runtime::new().unwrap().block_on(f)
+    }
+
     fn test_db() -> DbInstance {
         let path = format!("/tmp/test-gt-facade-{}.db", uuid::Uuid::new_v4());
         DbInstance::new("sqlite", &path, "").unwrap()
@@ -790,14 +775,14 @@ mod tests {
     #[test]
     fn test_empty_situation_rejected() {
         let db = test_db();
-        let err = classify(&db, "", None).unwrap_err();
+        let err = block_on(classify(&db, "", None)).unwrap_err();
         assert!(matches!(err, GameTheoryError::EmptySituation));
     }
 
     #[test]
     fn test_classify_only_persists_run_and_fingerprint() {
         let db = test_db();
-        let fp = classify(&db, "Two firms simultaneously set prices.", None).unwrap();
+        let fp = block_on(classify(&db, "Two firms simultaneously set prices.", None)).unwrap();
 
         // Verify fingerprint has all 9 axes filled
         assert_eq!(fp.cooperation.value, "non-cooperative");
@@ -876,11 +861,11 @@ mod tests {
     #[test]
     fn test_fingerprint_has_all_nine_axes() {
         let db = test_db();
-        let fp = classify(
+        let fp = block_on(classify(
             &db,
             "Two firms simultaneously set prices, neither knows the other's cost.",
             None,
-        )
+        ))
         .unwrap();
 
         // All 9 axes must have non-empty values
@@ -912,12 +897,12 @@ mod tests {
             return;
         }
 
-        let result = run_full_pipeline(
+        let result = block_on(run_full_pipeline(
             &db,
             "Two firms simultaneously set prices in a Bertrand duopoly with asymmetric costs.",
             Some(spec_path),
             None,
-        );
+        ));
         assert!(result.is_ok(), "full pipeline must succeed: {:?}", result.err());
 
         let r = result.unwrap();
@@ -949,8 +934,8 @@ mod tests {
 
         let situation = "Two firms simultaneously set quantities in a Cournot duopoly.";
 
-        let r1 = run_full_pipeline(&db, situation, Some(spec_path), None).unwrap();
-        let r2 = run_full_pipeline(&db, situation, Some(spec_path), None).unwrap();
+        let r1 = block_on(run_full_pipeline(&db, situation, Some(spec_path), None)).unwrap();
+        let r2 = block_on(run_full_pipeline(&db, situation, Some(spec_path), None)).unwrap();
 
         // Same situation → same routing decisions
         assert_eq!(
@@ -967,14 +952,14 @@ mod tests {
 
     #[test]
     fn test_full_pipeline_classify_only_mode() {
-        // classify() is the classify-only entrypoint — it persists fingerprint
+        // block_on(classify() is the classify-only entrypoint — it persists fingerprint
         // but does not run routing or specialists
         let db = test_db();
-        let fp = classify(
+        let fp = block_on(classify(
             &db,
             "Two firms negotiate a bilateral trade agreement with complete information.",
             None,
-        )
+        ))
         .unwrap();
 
         assert!(!fp.run_id.is_empty());
@@ -994,7 +979,7 @@ mod tests {
     #[test]
     fn test_stub_specialist_outputs_non_empty() {
         let db = test_db();
-        let fp = classify(&db, "Two firms set quantities simultaneously.", None).unwrap();
+        let fp = block_on(classify(&db, "Two firms set quantities simultaneously.", None)).unwrap();
 
         // Build a minimal routing decision to test stub execution
         let rd = RoutingDecision {
@@ -1019,7 +1004,7 @@ mod tests {
     #[test]
     fn test_failure_isolation_with_force_fail_suffix() {
         let db = test_db();
-        let fp = classify(&db, "Two firms set quantities simultaneously.", None).unwrap();
+        let fp = block_on(classify(&db, "Two firms set quantities simultaneously.", None)).unwrap();
 
         let rd = RoutingDecision {
             run_id: "test-fail-iso".into(),
@@ -1056,12 +1041,12 @@ mod tests {
         }
 
         // No forced failure → completed
-        let result = run_full_pipeline(
+        let result = block_on(run_full_pipeline(
             &db,
             "Two firms simultaneously set prices in a Bertrand duopoly.",
             Some(spec_path),
             None,
-        )
+        ))
         .unwrap();
         assert_eq!(result.status, "completed");
         assert!(result.failed_specialists.is_empty());
@@ -1119,7 +1104,7 @@ mod tests {
         });
 
         let mock = MockLlmClient::new(&canned_json.to_string());
-        let fp = classify(&db, "Two firms set prices in a Bertrand duopoly.", Some(&mock)).unwrap();
+        let fp = block_on(classify(&db, "Two firms set prices in a Bertrand duopoly.", Some(&mock))).unwrap();
 
         assert_eq!(fp.cooperation.value, "non-cooperative");
         assert_eq!(fp.cooperation.confidence, "high");
@@ -1132,7 +1117,7 @@ mod tests {
     #[test]
     fn test_real_specialist_execution_with_failure_isolation() {
         let db = test_db();
-        let fp = classify(&db, "Two firms set quantities simultaneously.", None).unwrap();
+        let fp = block_on(classify(&db, "Two firms set quantities simultaneously.", None)).unwrap();
 
         let rd = RoutingDecision {
             run_id: "test-real-fail-iso".into(),
@@ -1164,7 +1149,7 @@ mod tests {
         let db = test_db();
 
         // classify with None → must use keyword fallback
-        let fp = classify(&db, "Two firms negotiate a bilateral trade agreement with complete information.", None).unwrap();
+        let fp = block_on(classify(&db, "Two firms negotiate a bilateral trade agreement with complete information.", None)).unwrap();
 
         assert!(!fp.run_id.is_empty());
         assert!(fp.cooperation.confidence != "high", "keyword fallback should have medium/low confidence, not high");

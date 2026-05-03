@@ -15,7 +15,7 @@ use archon_pipeline::runner::LlmClient;
 use crate::cli_args::GametheoryAction;
 
 /// Dispatch the gametheory subcommand.
-pub fn handle_gametheory(
+pub async fn handle_gametheory(
     action: &GametheoryAction,
     config: &ArchonConfig,
     env_vars: &ArchonEnvVars,
@@ -25,7 +25,7 @@ pub fn handle_gametheory(
             situation,
             classify_only,
             spec_path,
-        } => handle_run(situation, *classify_only, spec_path.as_deref(), config, env_vars),
+        } => handle_run(situation, *classify_only, spec_path.as_deref(), config, env_vars).await,
         GametheoryAction::ListRuns => handle_list_runs(),
         GametheoryAction::Show { run_id } => handle_show(run_id),
         GametheoryAction::InspectRouting { run_id } => handle_inspect_routing(run_id),
@@ -65,7 +65,7 @@ fn build_llm_client(config: &ArchonConfig, env_vars: &ArchonEnvVars) -> Option<A
 
 // ── run ──────────────────────────────────────────────────────────────────────
 
-fn handle_run(
+async fn handle_run(
     situation: &str,
     classify_only: bool,
     spec_path: Option<&str>,
@@ -75,13 +75,13 @@ fn handle_run(
     let db = open_db()?;
     let _llm = build_llm_client(config, env_vars);
     if classify_only {
-        run_classify_only(&db, situation, config, env_vars)
+        run_classify_only(&db, situation, config, env_vars).await
     } else {
-        run_full(&db, situation, spec_path, config, env_vars)
+        run_full(&db, situation, spec_path, config, env_vars).await
     }
 }
 
-fn run_classify_only(
+async fn run_classify_only(
     db: &DbInstance,
     situation: &str,
     config: &ArchonConfig,
@@ -90,7 +90,7 @@ fn run_classify_only(
     let llm = build_llm_client(config, env_vars);
     let llm_ref: Option<&dyn LlmClient> = llm.as_ref().map(|a| a as &dyn LlmClient);
 
-    match gametheory::classify(db, situation, llm_ref) {
+    match gametheory::classify(db, situation, llm_ref).await {
         Ok(fp) => {
             print_fingerprint(&fp);
             println!("Fingerprint persisted to Cozo (gt_runs, gt_fingerprints).");
@@ -110,7 +110,7 @@ fn run_classify_only(
     }
 }
 
-fn run_full(
+async fn run_full(
     db: &DbInstance,
     situation: &str,
     spec_path: Option<&str>,
@@ -121,7 +121,7 @@ fn run_full(
     let llm_ref: Option<&dyn LlmClient> = llm.as_ref().map(|a| a as &dyn LlmClient);
     let path = spec_path.map(std::path::Path::new);
 
-    match gametheory::run_full_pipeline(db, situation, path, llm_ref) {
+    match gametheory::run_full_pipeline(db, situation, path, llm_ref).await {
         Ok(result) => {
             println!("Game-Theory Strategic Analysis — Full Pipeline");
             println!("==============================================");
