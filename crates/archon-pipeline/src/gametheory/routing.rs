@@ -534,6 +534,7 @@ pub fn evaluate_routing(
     created_at: &str,
 ) -> Result<RoutingDecision, GameTheoryError> {
     let mut enabled: Vec<String> = Vec::new();
+    let mut enabled_set: HashSet<String> = HashSet::new();
     let mut skipped: Vec<(String, String)> = Vec::new();
     let mut evaluated: Vec<(String, bool)> = Vec::new();
 
@@ -585,10 +586,16 @@ pub fn evaluate_routing(
     for tier in &spec.tiers {
         for agent in &tier.agents {
             if agent.mandatory {
-                enabled.push(agent.key.clone());
-                enabled_count += 1;
-                if agent.key.contains("nash") {
-                    nash_count += 1;
+                if let Some(reason) = unmet_dependency_reason(agent, &enabled_set) {
+                    skipped.push((agent.key.clone(), reason));
+                } else {
+                    enable_agent(
+                        &agent.key,
+                        &mut enabled,
+                        &mut enabled_set,
+                        &mut enabled_count,
+                        &mut nash_count,
+                    );
                 }
                 continue;
             }
@@ -596,11 +603,17 @@ pub fn evaluate_routing(
             let condition = match &agent.condition {
                 Some(c) => c.clone(),
                 None => {
-                    // No condition = always enabled
-                    enabled.push(agent.key.clone());
-                    enabled_count += 1;
-                    if agent.key.contains("nash") {
-                        nash_count += 1;
+                    // No condition = enabled when its dependency chain is enabled.
+                    if let Some(reason) = unmet_dependency_reason(agent, &enabled_set) {
+                        skipped.push((agent.key.clone(), reason));
+                    } else {
+                        enable_agent(
+                            &agent.key,
+                            &mut enabled,
+                            &mut enabled_set,
+                            &mut enabled_count,
+                            &mut nash_count,
+                        );
                     }
                     continue;
                 }
@@ -615,10 +628,16 @@ pub fn evaluate_routing(
             match parse_condition(&condition).and_then(|expr| eval_expr(&expr, &ctx)) {
                 Ok(true) => {
                     evaluated.push((condition.clone(), true));
-                    enabled.push(agent.key.clone());
-                    enabled_count += 1;
-                    if agent.key.contains("nash") {
-                        nash_count += 1;
+                    if let Some(reason) = unmet_dependency_reason(agent, &enabled_set) {
+                        skipped.push((agent.key.clone(), reason));
+                    } else {
+                        enable_agent(
+                            &agent.key,
+                            &mut enabled,
+                            &mut enabled_set,
+                            &mut enabled_count,
+                            &mut nash_count,
+                        );
                     }
                 }
                 Ok(false) => {
@@ -643,6 +662,36 @@ pub fn evaluate_routing(
         evaluated_conditions: evaluated,
         created_at: created_at.to_string(),
     })
+}
+
+fn enable_agent(
+    key: &str,
+    enabled: &mut Vec<String>,
+    enabled_set: &mut HashSet<String>,
+    enabled_count: &mut i64,
+    nash_count: &mut i64,
+) {
+    enabled.push(key.to_string());
+    enabled_set.insert(key.to_string());
+    *enabled_count += 1;
+    if key.contains("nash") {
+        *nash_count += 1;
+    }
+}
+
+fn unmet_dependency_reason(agent: &AgentEntry, enabled_set: &HashSet<String>) -> Option<String> {
+    let missing: Vec<&str> = agent
+        .depends_on
+        .iter()
+        .filter(|dep| !enabled_set.contains(dep.as_str()))
+        .map(String::as_str)
+        .collect();
+
+    if missing.is_empty() {
+        None
+    } else {
+        Some(format!("dependency not enabled: {}", missing.join(", ")))
+    }
 }
 
 /// Load the gametheory spec from the canonical YAML path.
@@ -929,6 +978,41 @@ mod tests {
             assert_eq!(first.enabled_specialists, subsequent.enabled_specialists);
             assert_eq!(first.skipped_specialists, subsequent.skipped_specialists);
         }
+    }
+
+    #[test]
+    fn test_routing_skips_agent_when_dependency_was_not_enabled() {
+        let fp = make_fingerprint(&[]);
+        let spec = make_two_tier_spec(vec![
+            AgentEntry {
+                key: "gt-disabled-dependency".into(),
+                condition: Some("fingerprint.cooperation == 'cooperative'".into()),
+                mandatory: false,
+                depends_on: vec![],
+            },
+            AgentEntry {
+                key: "gt-dependent".into(),
+                condition: Some("fingerprint.payoff_sum == 'zero-sum'".into()),
+                mandatory: false,
+                depends_on: vec!["gt-disabled-dependency".into()],
+            },
+        ]);
+
+        let decision = evaluate_routing(&spec, &fp, "run-deps", "2026-01-01T00:00:00Z").unwrap();
+
+        assert!(
+            !decision
+                .enabled_specialists
+                .contains(&"gt-dependent".to_string()),
+            "dependent specialist must not run when its dependency was skipped"
+        );
+        assert!(
+            decision.skipped_specialists.iter().any(|(key, reason)| {
+                key == "gt-dependent" && reason.contains("gt-disabled-dependency")
+            }),
+            "skip reason must name the unmet dependency: {:?}",
+            decision.skipped_specialists
+        );
     }
 
     // ── Test 3: Invalid expression → ConditionError ─────────────────────

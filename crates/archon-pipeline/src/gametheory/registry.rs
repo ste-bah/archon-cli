@@ -1532,6 +1532,48 @@ mod tests {
         crate::gametheory::routing::load_spec(&yaml_path).expect("must load gametheory.yaml")
     }
 
+    fn test_fingerprint(
+        run_id: &str,
+        cooperation: &str,
+        payoff_sum: &str,
+        timing: &str,
+        cardinality: &str,
+        horizon: &str,
+    ) -> crate::gametheory::fingerprint::GameTheoryFingerprint {
+        crate::gametheory::fingerprint::GameTheoryFingerprint {
+            run_id: run_id.into(),
+            cooperation: crate::gametheory::fingerprint::AxisVerdict::new(
+                cooperation, "high", "",
+            ),
+            payoff_sum: crate::gametheory::fingerprint::AxisVerdict::new(
+                payoff_sum, "high", "",
+            ),
+            symmetry: crate::gametheory::fingerprint::AxisVerdict::new(
+                "asymmetric", "medium", "",
+            ),
+            timing: crate::gametheory::fingerprint::AxisVerdict::new(timing, "high", ""),
+            perfect_info: crate::gametheory::fingerprint::AxisVerdict::new(
+                "imperfect", "medium", "",
+            ),
+            complete_info: crate::gametheory::fingerprint::AxisVerdict::new(
+                "incomplete", "medium", "",
+            ),
+            cardinality: crate::gametheory::fingerprint::AxisVerdict::new(
+                cardinality, "high", "",
+            ),
+            strategy_space: crate::gametheory::fingerprint::AxisVerdict::new(
+                "discrete", "medium", "",
+            ),
+            horizon: crate::gametheory::fingerprint::AxisVerdict::new(horizon, "high", ""),
+            primary_family: "test".into(),
+            nearest_classic: None,
+            shadow_games: vec![],
+            hidden_game_scan: None,
+            ambiguities: vec![],
+            created_at: "2026-05-03T00:00:00Z".into(),
+        }
+    }
+
     /// Every registry agent key must appear in the YAML spec.
     #[test]
     fn test_yaml_covers_all_84_agents() {
@@ -1632,6 +1674,80 @@ mod tests {
                     "routing must enable at least the 4 mandatory Tier 1 agents");
             }
             Err(e) => panic!("YAML spec has errors (possibly a cycle): {e:?}"),
+        }
+    }
+
+    #[test]
+    fn test_yaml_routing_never_enables_unmet_dependencies() {
+        let spec = load_yaml_spec();
+        let dep_map: std::collections::HashMap<&str, Vec<&str>> = spec
+            .tiers
+            .iter()
+            .flat_map(|tier| {
+                tier.agents.iter().map(|agent| {
+                    (
+                        agent.key.as_str(),
+                        agent.depends_on.iter().map(String::as_str).collect::<Vec<_>>(),
+                    )
+                })
+            })
+            .collect();
+        let fingerprints = [
+            test_fingerprint(
+                "noncoop-repeated",
+                "non-cooperative",
+                "non-zero-sum",
+                "simultaneous",
+                "2-player",
+                "repeated",
+            ),
+            test_fingerprint(
+                "coop-nplayer",
+                "cooperative",
+                "non-zero-sum",
+                "simultaneous",
+                "n-player",
+                "repeated",
+            ),
+            test_fingerprint(
+                "sequential-zero-sum",
+                "non-cooperative",
+                "zero-sum",
+                "sequential",
+                "2-player",
+                "one-shot",
+            ),
+        ];
+
+        for fp in &fingerprints {
+            let decision = crate::gametheory::routing::evaluate_routing(
+                &spec,
+                fp,
+                &fp.run_id,
+                "2026-05-03T00:00:00Z",
+            )
+            .expect("YAML routing must evaluate");
+            let enabled: std::collections::HashSet<&str> = decision
+                .enabled_specialists
+                .iter()
+                .map(String::as_str)
+                .collect();
+
+            for agent_key in &decision.enabled_specialists {
+                let missing: Vec<&str> = dep_map
+                    .get(agent_key.as_str())
+                    .into_iter()
+                    .flat_map(|deps| deps.iter().copied())
+                    .filter(|dep| !enabled.contains(dep))
+                    .collect();
+                assert!(
+                    missing.is_empty(),
+                    "run {} enabled '{}' with unmet dependencies {:?}",
+                    fp.run_id,
+                    agent_key,
+                    missing
+                );
+            }
         }
     }
 
