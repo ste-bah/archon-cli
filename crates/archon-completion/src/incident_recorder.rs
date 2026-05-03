@@ -248,4 +248,42 @@ mod tests {
             .unwrap();
         assert_eq!(events.rows.len(), 1);
     }
+
+    #[test]
+    fn test_learning_event_id_set_for_phase6_consumption() {
+        let db = test_db();
+        let claim = CompletionClaim {
+            claim_id: "cl-3".into(),
+            run_id: "run-3".into(),
+            agent_key: Some("test-agent".into()),
+            model: None,
+            task_type: "coding".into(),
+            claim_text: "All done".into(),
+            claim_kind: CompletionClaimKind::Done,
+            required_evidence: vec![],
+            linked_evidence_ids: vec![],
+            verified: false,
+            contradiction_ids: vec![],
+            created_at: "2026-01-01T00:00:00Z".into(),
+        };
+
+        let incident = record_false_completion(
+            &db,
+            &claim,
+            CompletionState::NotRun,
+            vec![EvidenceKind::TestRun],
+            Some("Incomplete work"),
+        )
+        .unwrap();
+
+        // Phase 6 consume_incident_events depends on learning_event_id being set
+        assert!(
+            !incident.learning_event_id.is_empty(),
+            "learning_event_id must be set for Phase 6 consumption"
+        );
+        assert!(
+            incident.learning_event_id.starts_with("le-"),
+            "learning_event_id must be set (Phase 5 uses le- prefix)"
+        );
+    }
 }

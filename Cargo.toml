@@ -143,6 +143,7 @@ archon-completion = { path = "crates/archon-completion" }
 archon-leann = { path = "crates/archon-leann" }
 archon-tools = { path = "crates/archon-tools" }
 archon-tui = { path = "crates/archon-tui" }
+archon-learning = { path = "crates/archon-learning" }
 reqwest.workspace = true
 openssl.workspace = true
 chrono.workspace = true

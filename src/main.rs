@@ -199,6 +199,10 @@ async fn main() -> Result<()> {
             use crate::command::web::handle_web_command;
             return handle_web_command(port, bind_address, no_open, &config).await;
         }
+        Some(Commands::Behaviour { action }) => {
+            use crate::command::behaviour::handle_behaviour_command;
+            return handle_behaviour_command(&action, &config).await;
+        }
         Some(Commands::Pipeline { action }) => {
             use crate::command::pipeline::handle_pipeline_command;
             return handle_pipeline_command(&action, &config, &env_vars).await;

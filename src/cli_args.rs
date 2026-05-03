@@ -359,6 +359,11 @@ pub enum Commands {
         #[arg(long)]
         detach: bool,
     },
+    /// Manage governed learning behaviour
+    Behaviour {
+        #[command(subcommand)]
+        action: BehaviourAction,
+    },
     /// Check status of an async task
     TaskStatus {
         /// Task ID (UUID)
@@ -713,6 +718,57 @@ pub enum PluginAction {
     Info {
         /// Plugin name
         name: String,
+    },
+}
+
+/// Subcommands for `archon behaviour`
+#[derive(Subcommand, Debug)]
+pub enum BehaviourAction {
+    /// List behaviour proposals (alias: proposals)
+    #[command(alias = "proposals")]
+    ListProposals,
+    /// List learning events (optionally filtered by type)
+    ListEvents {
+        /// Filter by event type (e.g., FalseCompletionDetected, ManifestApplied)
+        #[arg(short, long)]
+        event_type: Option<String>,
+    },
+    /// Show details for a proposal, event, or manifest version
+    Show {
+        /// ID of the item to show (proposal_id, event_id, or version_id)
+        id: String,
+    },
+    /// Auto-apply a pending proposal (without human review)
+    Apply {
+        /// Proposal ID to apply
+        proposal_id: String,
+    },
+    /// Show version history for a manifest kind
+    History {
+        /// Manifest kind (RetrievalProfile, SourceQualityProfile, etc.)
+        kind: String,
+    },
+    /// Generate proposals from recent learning events
+    GenerateProposals,
+    /// Show learning system status and statistics
+    Status,
+    /// Approve a pending proposal (human-in-the-loop)
+    Approve {
+        /// Proposal ID to approve
+        proposal_id: String,
+    },
+    /// Deny a pending proposal
+    Deny {
+        /// Proposal ID to deny
+        proposal_id: String,
+    },
+    /// Rollback a manifest to a previous version
+    Rollback {
+        /// Target version ID to rollback to
+        version_id: String,
+        /// Reason for rollback
+        #[arg(short, long)]
+        reason: Option<String>,
     },
 }
 

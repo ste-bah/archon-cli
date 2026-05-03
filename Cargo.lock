@@ -326,6 +326,7 @@ dependencies = [
  "archon-core",
  "archon-docs",
  "archon-leann",
+ "archon-learning",
  "archon-llm",
  "archon-mcp",
  "archon-memory",
@@ -514,6 +515,20 @@ dependencies = [
  "tree-sitter-typescript",
  "uuid",
  "walkdir",
+]
+
+[[package]]
+name = "archon-learning"
+version = "0.1.36"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "cozo-ce",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "uuid",
 ]
 
 [[package]]
