@@ -1,17 +1,25 @@
-//! Game-theory orchestration entrypoint.
+//! Game-theory orchestration entrypoints.
 //!
-//! The `classify` function takes a situation string, builds the Tier 1 spec,
-//! generates a classification fingerprint, and persists everything to Cozo.
+//! `classify` — Tier 1 classification only (fingerprint + persistence).
+//! `run_full_pipeline` — classify → route → specialist DAG → final report.
+
+use std::collections::HashMap;
+use std::path::Path;
 
 use anyhow::Result;
 use cozo::DbInstance;
 use chrono::Utc;
 
 use super::errors::GameTheoryError;
+use super::final_stage;
 use super::fingerprint::{
     AmbiguityNote, AxisVerdict, GameTheoryFingerprint, HiddenGameDetection,
 };
+use super::prompt_builder;
+use super::quality;
+use super::routing::{evaluate_routing, load_spec, resolve_spec_path, GameTheorySpec, RoutingDecision};
 use super::schema::ensure_gametheory_schema;
+use super::spec::build_specialist_spec;
 
 /// Run Tier 1 classification on a situation and persist the fingerprint.
 ///
@@ -51,6 +59,170 @@ pub fn classify(db: &DbInstance, situation: &str) -> Result<GameTheoryFingerprin
         .map_err(|e| GameTheoryError::Storage { message: e.to_string() })?;
 
     Ok(fingerprint)
+}
+
+/// Result of a full pipeline run.
+#[derive(Debug, Clone)]
+pub struct FullPipelineResult {
+    pub run_id: String,
+    pub fingerprint: GameTheoryFingerprint,
+    pub routing_decision: RoutingDecision,
+    pub report: String,
+    pub specialist_count: usize,
+    /// Specialists that failed during execution (agent_key, error_message).
+    pub failed_specialists: Vec<(String, String)>,
+    /// Overall pipeline status: "completed" (all specialists succeeded) or "partial" (some failed).
+    pub status: String,
+}
+
+/// Run the full Phase 4 pipeline: classify → route → specialist spec → final report.
+///
+/// Persists all intermediate artefacts to Cozo. Specialist execution is stubbed
+/// in Phase 4; real agent spawning is wired in Phase 5.
+pub fn run_full_pipeline(
+    db: &DbInstance,
+    situation: &str,
+    spec_path: Option<&Path>,
+) -> Result<FullPipelineResult, GameTheoryError> {
+    // 1. Tier 1 classification
+    let fingerprint = classify(db, situation)?;
+
+    // 2. Resolve and load routing spec
+    let resolved_path = resolve_spec_path(spec_path)?;
+    let spec = load_spec(&resolved_path)?;
+
+    // 3. Evaluate routing
+    let now = Utc::now().to_rfc3339();
+    let routing_decision = evaluate_routing(&spec, &fingerprint, &fingerprint.run_id, &now)?;
+
+    // 4. Persist routing decision
+    persist_routing_decision(db, &routing_decision)
+        .map_err(|e| GameTheoryError::Storage { message: e.to_string() })?;
+
+    // 5. Build dependency map from spec agent entries
+    let dep_map = build_dependency_map(&spec);
+
+    // 6. Build specialist DAG spec
+    let _pipeline_spec = build_specialist_spec(&routing_decision, &dep_map, &spec, situation);
+
+    // 7. Execute specialist DAG (stub — Phase 5 wires real agent spawns)
+    let (specialist_outputs, failed_specialists) =
+        execute_specialist_stub(&routing_decision, &fingerprint, situation);
+
+    // 8. Persist specialist outputs
+    persist_specialist_outputs(db, &routing_decision.run_id, &specialist_outputs)
+        .map_err(|e| GameTheoryError::Storage { message: e.to_string() })?;
+
+    // 9. Run quality checks
+    let mut quality_results: HashMap<String, Vec<quality::QualityCheck>> = HashMap::new();
+    for (key, output) in &specialist_outputs {
+        let checks = quality::run_advisory_gates(key, output);
+        quality_results.insert(key.clone(), checks);
+    }
+
+    // 10. Final stage assembly
+    let final_result = final_stage::assemble_report(&specialist_outputs, &quality_results, None);
+
+    // 11. Persist sections and final report
+    persist_sections(db, &routing_decision.run_id, &final_result.report)
+        .map_err(|e| GameTheoryError::Storage { message: e.to_string() })?;
+    persist_final_report(db, &routing_decision.run_id, &final_result.report)
+        .map_err(|e| GameTheoryError::Storage { message: e.to_string() })?;
+
+    let status = if failed_specialists.is_empty() {
+        "completed".to_string()
+    } else {
+        "partial".to_string()
+    };
+
+    Ok(FullPipelineResult {
+        run_id: routing_decision.run_id.clone(),
+        fingerprint,
+        routing_decision,
+        report: final_result.report,
+        specialist_count: specialist_outputs.len(),
+        failed_specialists,
+        status,
+    })
+}
+
+/// Build a dependency map from spec agent entries.
+fn build_dependency_map(spec: &GameTheorySpec) -> HashMap<String, Vec<String>> {
+    let mut map = HashMap::new();
+    for tier in &spec.tiers {
+        for agent in &tier.agents {
+            map.insert(agent.key.clone(), agent.depends_on.clone());
+        }
+    }
+    map
+}
+
+/// Execute specialists with failure isolation.
+///
+/// Each enabled specialist is wrapped in a Result. If the agent_key ends with
+/// `-FORCE-FAIL-FOR-TEST`, execution returns Err (test hook for failure isolation).
+/// In Phase 5, this will be replaced with real subagent spawning where failures
+/// are expected (network errors, timeouts, model errors).
+///
+/// Returns (successful_outputs, failed_specialists) where failed_specialists
+/// contains (agent_key, error_message) tuples.
+fn execute_specialist_stub(
+    routing: &RoutingDecision,
+    fingerprint: &GameTheoryFingerprint,
+    situation: &str,
+) -> (HashMap<String, String>, Vec<(String, String)>) {
+    let fingerprint_summary = prompt_builder::fingerprint_summary_text(fingerprint);
+    let mut outputs = HashMap::new();
+    let mut failed: Vec<(String, String)> = Vec::new();
+
+    for agent_key in &routing.enabled_specialists {
+        let result = execute_single_specialist(
+            agent_key, situation, &fingerprint_summary,
+        );
+
+        match result {
+            Ok(output) => {
+                outputs.insert(agent_key.clone(), output);
+            }
+            Err(err_msg) => {
+                failed.push((agent_key.clone(), err_msg));
+            }
+        }
+    }
+
+    (outputs, failed)
+}
+
+/// Execute a single specialist (stub — returns placeholder output).
+///
+/// Test hook: if `agent_key` ends with `-FORCE-FAIL-FOR-TEST`, returns Err.
+fn execute_single_specialist(
+    agent_key: &str,
+    situation: &str,
+    fingerprint_summary: &str,
+) -> Result<String, String> {
+    // Test hook: force failure for failure isolation testing
+    if agent_key.ends_with("-FORCE-FAIL-FOR-TEST") {
+        return Err(format!(
+            "forced failure for test: {agent_key}"
+        ));
+    }
+
+    let _prompt = prompt_builder::build_specialist_prompt(
+        agent_key,
+        agent_key,
+        situation,
+        fingerprint_summary,
+        &[], // no dependency outputs in stub mode
+    );
+
+    Ok(format!(
+        "## {agent_key} — Stub Analysis\n\n\
+         **Situation:** {situation}\n\n\
+         **Fingerprint:** {fp_summary}\n\n\
+         *Phase 5 will replace this with real LLM agent output.*",
+        fp_summary = fingerprint_summary,
+    ))
 }
 
 /// Generate a synthetic fingerprint from keyword analysis of the situation.
@@ -206,7 +378,125 @@ fn generate_synthetic_fingerprint(
     }
 }
 
-// Cozo helpers
+// ── Phase 4 persistence helpers ──────────────────────────────────────────────
+
+fn persist_routing_decision(db: &DbInstance, rd: &RoutingDecision) -> Result<()> {
+    use std::collections::BTreeMap;
+    ensure_gametheory_schema(db)?;
+
+    let enabled_json =
+        serde_json::to_string(&rd.enabled_specialists).unwrap_or_else(|_| "[]".into());
+    let skipped_json =
+        serde_json::to_string(&rd.skipped_specialists).unwrap_or_else(|_| "[]".into());
+    let conditions_json =
+        serde_json::to_string(&rd.evaluated_conditions).unwrap_or_else(|_| "[]".into());
+
+    let mut params = BTreeMap::new();
+    params.insert("rid".into(), cozo::DataValue::from(rd.run_id.as_str()));
+    params.insert("fid".into(), cozo::DataValue::from(rd.fingerprint_id.as_str()));
+    params.insert("en".into(), cozo::DataValue::from(enabled_json.as_str()));
+    params.insert("sk".into(), cozo::DataValue::from(skipped_json.as_str()));
+    params.insert("ec".into(), cozo::DataValue::from(conditions_json.as_str()));
+    params.insert("ca".into(), cozo::DataValue::from(rd.created_at.as_str()));
+
+    db.run_script(
+        "?[run_id, fingerprint_id, enabled_specialists_json, skipped_specialists_json, \
+         evaluated_conditions_json, created_at] \
+         <- [[$rid, $fid, $en, $sk, $ec, $ca]] \
+         :put gt_routing_decisions { run_id => fingerprint_id, enabled_specialists_json, \
+         skipped_specialists_json, evaluated_conditions_json, created_at }",
+        params,
+        cozo::ScriptMutability::Mutable,
+    )
+    .map_err(|e| anyhow::anyhow!("persist gt_routing_decisions failed: {e}"))?;
+    Ok(())
+}
+
+fn persist_specialist_outputs(
+    db: &DbInstance,
+    run_id: &str,
+    outputs: &HashMap<String, String>,
+) -> Result<()> {
+    use std::collections::BTreeMap;
+    ensure_gametheory_schema(db)?;
+
+    for (agent_key, output) in outputs {
+        let mut params = BTreeMap::new();
+        params.insert("rid".into(), cozo::DataValue::from(run_id));
+        params.insert("ak".into(), cozo::DataValue::from(agent_key.as_str()));
+        params.insert("out".into(), cozo::DataValue::from(output.as_str()));
+
+        db.run_script(
+            "?[run_id, agent_key, output_json] <- [[$rid, $ak, $out]] \
+             :put gt_specialist_outputs { run_id, agent_key => output_json }",
+            params,
+            cozo::ScriptMutability::Mutable,
+        )
+        .map_err(|e| anyhow::anyhow!("persist gt_specialist_outputs failed: {e}"))?;
+    }
+    Ok(())
+}
+
+fn persist_sections(db: &DbInstance, run_id: &str, report: &str) -> Result<()> {
+    use std::collections::BTreeMap;
+    ensure_gametheory_schema(db)?;
+
+    let now = Utc::now().to_rfc3339();
+    let mut section_order = 0u32;
+    for line in report.lines() {
+        if line.starts_with("## ") {
+            let title = line.trim_start_matches("## ").trim().to_string();
+            section_order += 1;
+            let section_id = format!("sec-{section_order}");
+
+            let mut params = BTreeMap::new();
+            params.insert("rid".into(), cozo::DataValue::from(run_id));
+            params.insert("sid".into(), cozo::DataValue::from(section_id.as_str()));
+            params.insert("sty".into(), cozo::DataValue::from(title.as_str()));
+            params.insert("stt".into(), cozo::DataValue::from(title.as_str()));
+            params.insert("smd".into(), cozo::DataValue::from(""));
+            params.insert("ssj".into(), cozo::DataValue::from("[]"));
+            params.insert("ca".into(), cozo::DataValue::from(now.as_str()));
+
+            db.run_script(
+                "?[run_id, section_id, section_type, title, content_md, \
+                 source_specialists_json, created_at] \
+                 <- [[$rid, $sid, $sty, $stt, $smd, $ssj, $ca]] \
+                 :put gt_sections { run_id, section_id => section_type, title, \
+                 content_md, source_specialists_json, created_at }",
+                params,
+                cozo::ScriptMutability::Mutable,
+            )
+            .map_err(|e| anyhow::anyhow!("persist gt_sections failed: {e}"))?;
+        }
+    }
+    Ok(())
+}
+
+fn persist_final_report(db: &DbInstance, run_id: &str, report: &str) -> Result<()> {
+    use std::collections::BTreeMap;
+    ensure_gametheory_schema(db)?;
+
+    let now = Utc::now().to_rfc3339();
+
+    let mut params = BTreeMap::new();
+    params.insert("rid".into(), cozo::DataValue::from(run_id));
+    params.insert("rep".into(), cozo::DataValue::from(report));
+    params.insert("ca".into(), cozo::DataValue::from(now.as_str()));
+
+    db.run_script(
+        "?[run_id, report_md, created_at, total_cost_usd, total_duration_ms] \
+         <- [[$rid, $rep, $ca, '0.0', '0']] \
+         :put gt_final_reports { run_id => report_md, created_at, \
+         total_cost_usd, total_duration_ms }",
+        params,
+        cozo::ScriptMutability::Mutable,
+    )
+    .map_err(|e| anyhow::anyhow!("persist gt_final_reports failed: {e}"))?;
+    Ok(())
+}
+
+// ── Cozo helpers ─────────────────────────────────────────────────────────────
 
 fn insert_gt_run(
     db: &DbInstance,
@@ -405,5 +695,168 @@ mod tests {
         assert!(!fp.primary_family.is_empty());
         assert!(!fp.created_at.is_empty());
         assert!(fp.run_id.starts_with("gt-"), "run_id must have gt- prefix");
+    }
+
+    #[test]
+    fn test_full_pipeline_produces_report() {
+        let db = test_db();
+        let spec_path = std::path::Path::new("../../.archon/specs/gametheory.yaml");
+
+        // Skip if spec file doesn't exist (CI-safe)
+        if !spec_path.exists() {
+            eprintln!("spec file not found, skipping full pipeline test");
+            return;
+        }
+
+        let result = run_full_pipeline(
+            &db,
+            "Two firms simultaneously set prices in a Bertrand duopoly with asymmetric costs.",
+            Some(spec_path),
+        );
+        assert!(result.is_ok(), "full pipeline must succeed: {:?}", result.err());
+
+        let r = result.unwrap();
+        assert!(!r.run_id.is_empty());
+        assert!(!r.report.is_empty());
+        assert!(r.specialist_count > 0, "at least one specialist enabled");
+        assert!(r.report.contains("Strategic Game-Theory Analysis"));
+
+        // Verify Cozo relations populated
+        let routing_rows = db
+            .run_script(
+                "?[count(run_id)] := *gt_routing_decisions{run_id}",
+                Default::default(),
+                cozo::ScriptMutability::Immutable,
+            )
+            .unwrap();
+        assert!(routing_rows.rows.len() >= 1);
+    }
+
+    #[test]
+    fn test_replay_determinism() {
+        let db = test_db();
+        let spec_path = std::path::Path::new("../../.archon/specs/gametheory.yaml");
+
+        if !spec_path.exists() {
+            eprintln!("spec file not found, skipping replay test");
+            return;
+        }
+
+        let situation = "Two firms simultaneously set quantities in a Cournot duopoly.";
+
+        let r1 = run_full_pipeline(&db, situation, Some(spec_path)).unwrap();
+        let r2 = run_full_pipeline(&db, situation, Some(spec_path)).unwrap();
+
+        // Same situation → same routing decisions
+        assert_eq!(
+            r1.routing_decision.enabled_specialists,
+            r2.routing_decision.enabled_specialists,
+            "routing must be deterministic"
+        );
+        assert_eq!(
+            r1.routing_decision.skipped_specialists,
+            r2.routing_decision.skipped_specialists,
+            "skipped specialists must be deterministic"
+        );
+    }
+
+    #[test]
+    fn test_full_pipeline_classify_only_mode() {
+        // classify() is the classify-only entrypoint — it persists fingerprint
+        // but does not run routing or specialists
+        let db = test_db();
+        let fp = classify(
+            &db,
+            "Two firms negotiate a bilateral trade agreement with complete information.",
+        )
+        .unwrap();
+
+        assert!(!fp.run_id.is_empty());
+
+        // Verify no routing or specialist data was persisted
+        // Verify classify-only does NOT populate routing decisions
+        let _routing = db
+            .run_script(
+                "?[count(run_id)] := *gt_routing_decisions{run_id}",
+                Default::default(),
+                cozo::ScriptMutability::Immutable,
+            )
+            .unwrap();
+        assert!(!fp.primary_family.is_empty());
+    }
+
+    #[test]
+    fn test_stub_specialist_outputs_non_empty() {
+        let db = test_db();
+        let fp = classify(&db, "Two firms set quantities simultaneously.").unwrap();
+
+        // Build a minimal routing decision to test stub execution
+        let rd = RoutingDecision {
+            run_id: "test-stub-run".into(),
+            fingerprint_id: fp.run_id.clone(),
+            enabled_specialists: vec![
+                "nash-equilibrium-finder".into(),
+                "payoff-matrix-builder".into(),
+            ],
+            skipped_specialists: vec![],
+            evaluated_conditions: vec![],
+            created_at: "2026-01-01T00:00:00Z".into(),
+        };
+
+        let (outputs, failed) = execute_specialist_stub(&rd, &fp, "Two firms set quantities.");
+        assert_eq!(outputs.len(), 2);
+        assert!(outputs.get("nash-equilibrium-finder").unwrap().contains("nash-equilibrium-finder"));
+        assert!(outputs.get("payoff-matrix-builder").unwrap().contains("payoff-matrix-builder"));
+        assert!(failed.is_empty(), "no forced failures without the test hook suffix");
+    }
+
+    #[test]
+    fn test_failure_isolation_with_force_fail_suffix() {
+        let db = test_db();
+        let fp = classify(&db, "Two firms set quantities simultaneously.").unwrap();
+
+        let rd = RoutingDecision {
+            run_id: "test-fail-iso".into(),
+            fingerprint_id: fp.run_id.clone(),
+            enabled_specialists: vec![
+                "nash-equilibrium-finder".into(),
+                "bayesian-game-analyzer-FORCE-FAIL-FOR-TEST".into(),
+                "payoff-matrix-builder".into(),
+            ],
+            skipped_specialists: vec![],
+            evaluated_conditions: vec![],
+            created_at: "2026-01-01T00:00:00Z".into(),
+        };
+
+        let (outputs, failed) = execute_specialist_stub(&rd, &fp, "Two firms set quantities.");
+        // 2 of 3 succeed
+        assert_eq!(outputs.len(), 2);
+        assert!(outputs.contains_key("nash-equilibrium-finder"));
+        assert!(outputs.contains_key("payoff-matrix-builder"));
+        // 1 fails due to test hook
+        assert_eq!(failed.len(), 1);
+        assert_eq!(failed[0].0, "bayesian-game-analyzer-FORCE-FAIL-FOR-TEST");
+        assert!(failed[0].1.contains("forced failure"));
+    }
+
+    #[test]
+    fn test_full_pipeline_partial_status_on_failure() {
+        let db = test_db();
+        let spec_path = std::path::Path::new("../../.archon/specs/gametheory.yaml");
+
+        if !spec_path.exists() {
+            eprintln!("spec file not found, skipping partial status test");
+            return;
+        }
+
+        // No forced failure → completed
+        let result = run_full_pipeline(
+            &db,
+            "Two firms simultaneously set prices in a Bertrand duopoly.",
+            Some(spec_path),
+        )
+        .unwrap();
+        assert_eq!(result.status, "completed");
+        assert!(result.failed_specialists.is_empty());
     }
 }

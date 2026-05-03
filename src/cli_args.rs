@@ -455,11 +455,43 @@ pub enum Commands {
     },
     /// Game-theory strategic analysis
     Gametheory {
+        #[command(subcommand)]
+        action: GametheoryAction,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum GametheoryAction {
+    /// Run full pipeline: classify → route → specialists → report
+    Run {
         /// The strategic situation to analyze
         situation: String,
-        /// Classify only (Tier 1) — forward-compat, same as default behavior
+        /// Tier 1 classification only (skip routing and specialists)
         #[arg(long)]
         classify_only: bool,
+        /// Path to gametheory spec YAML (searches known locations if omitted)
+        #[arg(long, value_name = "PATH")]
+        spec_path: Option<String>,
+    },
+    /// List all persisted game-theory runs
+    ListRuns,
+    /// Show full details for a specific run
+    Show {
+        /// Run ID
+        run_id: String,
+    },
+    /// Inspect the routing decision for a run
+    InspectRouting {
+        /// Run ID
+        run_id: String,
+    },
+    /// Replay a run (re-evaluate routing from persisted fingerprint)
+    Replay {
+        /// Run ID
+        run_id: String,
+        /// Path to gametheory spec YAML (searches known locations if omitted)
+        #[arg(long, value_name = "PATH")]
+        spec_path: Option<String>,
     },
 }
 

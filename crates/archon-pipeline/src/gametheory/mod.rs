@@ -1,19 +1,25 @@
 //! Game-theory pipeline module.
 //!
 //! Provides the curated 84-agent game-theory arsenal, Tier 1 parallel
-//! classification, 9-axis fingerprint, and Cozo persistence for runs
-//! and fingerprints.
+//! classification, 9-axis fingerprint, routing, specialist execution,
+//! final-stage report synthesis, and Cozo persistence for all artefacts.
 
 pub mod agents;
 pub mod errors;
 pub mod facade;
+pub mod final_stage;
 pub mod fingerprint;
+pub mod prompt_builder;
+pub mod quality;
 pub mod registry;
+pub mod routing;
 pub mod schema;
+pub mod sections;
 pub mod spec;
 
 pub use agents::{GameTheoryAgent, GameTheoryTier, GameTheoryToolAccess};
 pub use errors::GameTheoryError;
-pub use facade::classify;
+pub use facade::{classify, run_full_pipeline, FullPipelineResult};
 pub use fingerprint::GameTheoryFingerprint;
 pub use registry::{GAMETHEORY_AGENTS, GAMETHEORY_TIERS};
+pub use routing::{evaluate_routing, load_spec, resolve_spec_path, GameTheorySpec, RoutingDecision};

@@ -281,11 +281,8 @@ async fn main() -> Result<()> {
         Some(Commands::Docs { ref action }) => {
             return crate::command::docs::handle_docs_command(action.clone()).await;
         }
-        Some(Commands::Gametheory {
-            ref situation,
-            classify_only: _,
-        }) => {
-            return crate::command::gametheory::handle_gametheory(situation);
+        Some(Commands::Gametheory { ref action }) => {
+            return crate::command::gametheory::handle_gametheory(action);
         }
         None => {}
     }
