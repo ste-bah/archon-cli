@@ -37,7 +37,18 @@ pub struct Citation {
 /// Returns a structured error if no embedding provider is configured
 /// or no documents are indexed.
 pub fn answer(db: &DbInstance, query: &str, top_k: usize) -> Result<Answer, DocsError> {
-    let search_results = search(db, query, top_k)?;
+    let search_results = match search(db, query, top_k) {
+        Ok(results) => results,
+        Err(DocsError::Embedding { message }) => {
+            return Ok(Answer {
+                query: query.to_string(),
+                text: message,
+                citations: Vec::new(),
+                sources: Vec::new(),
+            });
+        }
+        Err(e) => return Err(e),
+    };
 
     if search_results.total_indexed_chunks == 0 {
         return Ok(Answer {

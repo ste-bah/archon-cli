@@ -675,6 +675,21 @@ pub fn update_chunk_embedding_status(
     Ok(())
 }
 
+/// Count chunks with embedding_status = "failed".
+pub fn count_failed_chunks(db: &DbInstance) -> Result<usize> {
+    let result = db
+        .run_script(
+            "?[count(chunk_id)] := *doc_chunks{chunk_id, embedding_status}, embedding_status = \"failed\"",
+            Default::default(),
+            ScriptMutability::Immutable,
+        )
+        .map_err(|e| anyhow::anyhow!("count failed chunks failed: {e}"))?;
+    if result.rows.is_empty() {
+        return Ok(0);
+    }
+    Ok(result.rows[0][0].get_int().unwrap_or(0) as usize)
+}
+
 /// Count chunks with embedding_status = "pending".
 pub fn count_pending_chunks(db: &DbInstance) -> Result<usize> {
     let result = db
@@ -994,5 +1009,41 @@ mod tests {
             runs[0].completed_at.as_deref(),
             Some("2026-01-01T00:00:05Z")
         );
+    }
+
+    #[test]
+    fn test_count_failed_chunks_roundtrip() {
+        let db = test_db();
+        crate::schema::ensure_doc_schema(&db).unwrap();
+
+        assert_eq!(count_failed_chunks(&db).unwrap(), 0);
+
+        let chunk = ChunkArtifact {
+            chunk_id: "failed-chunk-1".into(),
+            document_id: "test-doc".into(),
+            artifact_id: "art-1".into(),
+            chunk_index: 0,
+            page_start: 1,
+            page_end: 1,
+            content: "test".into(),
+            content_hash: "abc".into(),
+            embedding_status: "failed".into(),
+        };
+        insert_chunk(&db, &chunk).unwrap();
+        assert_eq!(count_failed_chunks(&db).unwrap(), 1);
+
+        let chunk2 = ChunkArtifact {
+            chunk_id: "failed-chunk-2".into(),
+            document_id: "test-doc".into(),
+            artifact_id: "art-1".into(),
+            chunk_index: 1,
+            page_start: 1,
+            page_end: 1,
+            content: "test2".into(),
+            content_hash: "def".into(),
+            embedding_status: "failed".into(),
+        };
+        insert_chunk(&db, &chunk2).unwrap();
+        assert_eq!(count_failed_chunks(&db).unwrap(), 2);
     }
 }

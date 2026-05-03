@@ -220,6 +220,9 @@ async fn handle_search(query: &str, debug: bool) -> Result<()> {
                 println!("\nUse --debug for full content and provenance details.");
             }
         }
+        Err(archon_docs::errors::DocsError::Embedding { message }) => {
+            println!("{message}");
+        }
         Err(archon_docs::errors::DocsError::ModelNotConfigured { message }) => {
             let mut msg = format!("Error: {message}");
             if let Some(init_err) = archon_docs::embed::last_init_error() {
@@ -257,6 +260,9 @@ async fn handle_answer(query: &str) -> Result<()> {
                     );
                 }
             }
+        }
+        Err(archon_docs::errors::DocsError::Embedding { message }) => {
+            println!("{message}");
         }
         Err(archon_docs::errors::DocsError::ModelNotConfigured { message }) => {
             let mut msg = format!("Error: {message}");

@@ -54,6 +54,16 @@ pub fn search(
     })?;
 
     if total == 0 {
+        let failed_count = store::count_failed_chunks(db).map_err(|e| DocsError::Retrieval {
+            message: e.to_string(),
+        })?;
+        if failed_count > 0 {
+            return Err(DocsError::Embedding {
+                message: format!(
+                    "{failed_count} chunks failed indexing. Run 'archon docs model-status' for diagnostics."
+                ),
+            });
+        }
         return Ok(SearchResults {
             results: Vec::new(),
             query: query.to_string(),
@@ -367,6 +377,44 @@ mod tests {
         let results = search(&db, "test query", 5).unwrap();
         assert!(results.results.is_empty());
         assert_eq!(results.total_indexed_chunks, 0);
+    }
+
+    #[test]
+    fn test_search_surfaces_failed_indexing() {
+        let db = test_db();
+        setup_with_provider(&db, 4);
+
+        // Insert chunks with embedding_status = "failed" — no embeddings indexed
+        let chunk1 = ChunkArtifact {
+            chunk_id: "failed-chunk-a".into(),
+            document_id: "doc-failed".into(),
+            artifact_id: "art-1".into(),
+            chunk_index: 0,
+            page_start: 1,
+            page_end: 1,
+            content: "content a".into(),
+            content_hash: "hash-a".into(),
+            embedding_status: "failed".into(),
+        };
+        let chunk2 = ChunkArtifact {
+            chunk_id: "failed-chunk-b".into(),
+            document_id: "doc-failed".into(),
+            artifact_id: "art-1".into(),
+            chunk_index: 1,
+            page_start: 1,
+            page_end: 1,
+            content: "content b".into(),
+            content_hash: "hash-b".into(),
+            embedding_status: "failed".into(),
+        };
+        store::insert_chunk(&db, &chunk1).unwrap();
+        store::insert_chunk(&db, &chunk2).unwrap();
+
+        // No embeddings exist -> total == 0, but failed_count == 2
+        let err = search(&db, "test query", 5).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("2 chunks failed"), "expected '2 chunks failed', got: {msg}");
+        assert!(msg.contains("archon docs model-status"), "expected diagnostic hint, got: {msg}");
     }
 
     #[test]
