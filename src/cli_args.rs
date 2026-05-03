@@ -453,6 +453,14 @@ pub enum Commands {
         #[command(subcommand)]
         action: DocsAction,
     },
+    /// Game-theory strategic analysis
+    Gametheory {
+        /// The strategic situation to analyze
+        situation: String,
+        /// Classify only (Tier 1) — forward-compat, same as default behavior
+        #[arg(long)]
+        classify_only: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]

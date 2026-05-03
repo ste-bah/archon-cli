@@ -44,6 +44,7 @@ pub(crate) mod fast;
 // TASK-#207 SLASH-FILES: /files file-picker overlay.
 pub(crate) mod files;
 pub(crate) mod fork;
+pub(crate) mod gametheory;
 pub(crate) mod garden;
 pub(crate) mod help;
 pub(crate) mod hooks;

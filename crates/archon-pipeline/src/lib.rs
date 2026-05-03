@@ -14,6 +14,7 @@ pub mod manifest;
 pub mod memory;
 pub mod prompt_cap;
 pub mod rehydration;
+pub mod gametheory;
 pub mod research;
 pub mod retry;
 pub mod runner;
