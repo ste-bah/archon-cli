@@ -14,7 +14,7 @@ pub async fn handle_completion(action: &CompletionAction) -> Result<()> {
         CompletionAction::Claims { run_id } => handle_claims(run_id),
         CompletionAction::Evidence { run_id } => handle_evidence(run_id),
         CompletionAction::Incidents => handle_incidents(),
-        CompletionAction::Verify { run_id, task_type } => handle_verify(run_id, task_type).await,
+        CompletionAction::Verify { run_id, task_type, require_claims } => handle_verify(run_id, task_type, *require_claims).await,
     }
 }
 
@@ -196,8 +196,17 @@ fn handle_incidents() -> Result<()> {
 
 // ── verify ─────────────────────────────────────────────────────────────────────
 
-async fn handle_verify(run_id: &str, task_type: &str) -> Result<()> {
+async fn handle_verify(run_id: &str, task_type: &str, require_claims: bool) -> Result<()> {
     let db = open_db()?;
+
+    // If --require-claims, verify at least one claim exists for this run
+    if require_claims {
+        let claims = archon_completion::store::get_completion_claims_by_run(&db, run_id)
+            .map_err(|e| anyhow::anyhow!("query claims failed: {e}"))?;
+        if claims.is_empty() {
+            anyhow::bail!("--require-claims: no claims found for run '{run_id}'");
+        }
+    }
 
     // Read output text from stdin if available
     let output_text = if !std::io::IsTerminal::is_terminal(&std::io::stdin()) {

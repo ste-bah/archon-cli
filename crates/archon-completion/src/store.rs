@@ -586,6 +586,14 @@ mod tests {
     }
 
     #[test]
+    fn test_get_claims_by_nonexistent_run_returns_empty() {
+        let db = test_db();
+        crate::schema::ensure_completion_schema(&db).unwrap();
+        let claims = get_completion_claims_by_run(&db, "nonexistent-run").unwrap();
+        assert!(claims.is_empty(), "nonexistent run should return empty claims");
+    }
+
+    #[test]
     fn test_insert_and_readback_claim() {
         let db = test_db();
         let claim = make_claim("run-1", CompletionClaimKind::TestsPass, "All tests pass.");

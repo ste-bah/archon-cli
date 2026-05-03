@@ -534,6 +534,9 @@ pub enum CompletionAction {
         /// Task type for claim extraction
         #[arg(long, default_value = "pipeline-output")]
         task_type: String,
+        /// Require at least one claim to exist (fail if none found)
+        #[arg(long, default_value_t = false)]
+        require_claims: bool,
     },
 }
 

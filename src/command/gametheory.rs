@@ -36,10 +36,10 @@ pub async fn handle_gametheory(
 /// Build an LLM client adapter from config. Returns None and logs a warning if auth fails.
 fn build_llm_client(config: &ArchonConfig, env_vars: &ArchonEnvVars) -> Option<AnthropicLlmAdapter> {
     let auth = match archon_llm::auth::resolve_auth_with_keys(
-        env_vars.anthropic_api_key.as_deref(),
-        env_vars.archon_api_key.as_deref(),
-        env_vars.archon_oauth_token.as_deref(),
-        std::env::var("ANTHROPIC_AUTH_TOKEN").ok().as_deref(),
+        non_empty(env_vars.anthropic_api_key.as_deref()),
+        non_empty(env_vars.archon_api_key.as_deref()),
+        non_empty(env_vars.archon_oauth_token.as_deref()),
+        non_empty(std::env::var("ANTHROPIC_AUTH_TOKEN").ok().as_deref()),
     ) {
         Ok(a) => a,
         Err(e) => {
@@ -389,6 +389,14 @@ fn handle_replay(
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
+/// Filter empty strings to None so they don't shadow real credentials.
+fn non_empty(s: Option<&str>) -> Option<&str> {
+    match s {
+        Some("") => None,
+        other => other,
+    }
+}
+
 fn print_fingerprint(fp: &gametheory::GameTheoryFingerprint) {
     println!("Game-Theory Fingerprint");
     println!("=======================");
@@ -443,4 +451,22 @@ fn open_db() -> Result<DbInstance> {
     let path_str = path.to_string_lossy().to_string();
     DbInstance::new("sqlite", &path_str, "")
         .map_err(|e| anyhow::anyhow!("Failed to open gametheory store at {path_str}: {e}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_non_empty_filters_empty_string() {
+        assert_eq!(non_empty(Some("")), None);
+        assert_eq!(non_empty(Some("key")), Some("key"));
+        assert_eq!(non_empty(None), None);
+    }
+
+    #[test]
+    fn test_non_empty_preserves_valid_values() {
+        assert_eq!(non_empty(Some("sk-ant-123")), Some("sk-ant-123"));
+        assert_eq!(non_empty(Some(" ")), Some(" ")); // whitespace is NOT empty
+    }
 }
