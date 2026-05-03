@@ -20,6 +20,7 @@ pub fn ensure_gametheory_schema(db: &DbInstance) -> Result<()> {
     ensure_gt_sections(db)?;
     ensure_gt_final_reports(db)?;
     ensure_gt_provenance_edges(db)?;
+    ensure_gt_specimen_library(db)?;
     Ok(())
 }
 
@@ -218,6 +219,27 @@ fn ensure_gt_provenance_edges(db: &DbInstance) -> Result<()> {
             to_artifact_id: String,
             edge_type: String,
             created_at: String,
+        }"#,
+    )
+}
+
+fn ensure_gt_specimen_library(db: &DbInstance) -> Result<()> {
+    run_create(
+        db,
+        r#":create gt_specimen_library {
+            specimen_id: String =>
+            situation_type: String,
+            cooperation: String,
+            payoff_sum: String,
+            symmetry: String,
+            timing: String,
+            perfect_info: String,
+            complete_info: String,
+            cardinality: String,
+            strategy_space: String,
+            horizon: String,
+            primary_family: String,
+            notes: String default "",
         }"#,
     )
 }

@@ -49,6 +49,9 @@ pub async fn handle_gametheory(
         GametheoryAction::Replay { run_id, spec_path } => {
             handle_replay(run_id, spec_path.as_deref(), config, env_vars)
         }
+        GametheoryAction::Specimens { filter, ingest } => {
+            handle_specimens(filter.as_deref(), *ingest)
+        }
     }
 }
 
@@ -480,6 +483,37 @@ fn handle_replay(
         }
     }
     println!();
+    Ok(())
+}
+
+// ── specimens ────────────────────────────────────────────────────────────────
+
+fn handle_specimens(filter: Option<&str>, ingest: bool) -> Result<()> {
+    let db = open_db()?;
+    let load = gametheory::specimens::ensure_specimen_library_loaded(&db, ingest)
+        .map_err(|e| anyhow::anyhow!("specimen ingest failed: {e}"))?;
+    let records = gametheory::specimens::list_specimens(&db, filter)
+        .map_err(|e| anyhow::anyhow!("specimen query failed: {e}"))?;
+
+    println!("Game-Theory Specimen Library");
+    println!("============================");
+    println!("Rows:       {}", records.len());
+    println!("Inserted:   {}", load.inserted);
+    if let Some(filter) = filter {
+        println!("Filter:     {filter}");
+    }
+    println!();
+
+    for record in records {
+        println!(
+            "  {}  cooperation={} payoff_sum={} timing={} horizon={}",
+            record.situation_type,
+            record.cooperation,
+            record.payoff_sum,
+            record.timing,
+            record.horizon
+        );
+    }
     Ok(())
 }
 

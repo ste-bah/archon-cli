@@ -515,6 +515,15 @@ pub enum GametheoryAction {
         #[arg(long, value_name = "PATH")]
         spec_path: Option<String>,
     },
+    /// List or ingest the known-fingerprint specimen library
+    Specimens {
+        /// Filter rows by axis=value, e.g. cooperation=cooperative
+        #[arg(long, value_name = "AXIS=VALUE")]
+        filter: Option<String>,
+        /// Force re-ingest from the canonical markdown source
+        #[arg(long)]
+        ingest: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]

@@ -15,6 +15,7 @@ pub mod registry;
 pub mod routing;
 pub mod schema;
 pub mod sections;
+pub mod specimens;
 pub mod spec;
 
 pub use agents::{GameTheoryAgent, GameTheoryTier, GameTheoryToolAccess};
