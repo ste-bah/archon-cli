@@ -1519,4 +1519,147 @@ mod tests {
             simplifier_path.display()
         );
     }
+
+    // ── Group 2: Full 12-tier YAML coverage tests ────────────────────────────
+
+    fn load_yaml_spec() -> crate::gametheory::routing::GameTheorySpec {
+        let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap();
+        let yaml_path = workspace_root.join(".archon/specs/gametheory.yaml");
+        crate::gametheory::routing::load_spec(&yaml_path).expect("must load gametheory.yaml")
+    }
+
+    /// Every registry agent key must appear in the YAML spec.
+    #[test]
+    fn test_yaml_covers_all_84_agents() {
+        let spec = load_yaml_spec();
+        let yaml_keys: std::collections::HashSet<&str> = spec
+            .tiers
+            .iter()
+            .flat_map(|t| t.agents.iter().map(|a| a.key.as_str()))
+            .collect();
+
+        let registry_keys: std::collections::HashSet<&str> =
+            GAMETHEORY_AGENTS.iter().map(|a| a.key).collect();
+
+        let missing: Vec<_> = registry_keys
+            .difference(&yaml_keys)
+            .copied()
+            .collect();
+
+        assert!(
+            missing.is_empty(),
+            "YAML spec is missing {} registry agent(s): {:?}",
+            missing.len(),
+            missing
+        );
+        assert_eq!(yaml_keys.len(), 84, "YAML must cover exactly 84 agents");
+    }
+
+    /// Every YAML agent key must have a matching registry entry.
+    #[test]
+    fn test_yaml_no_orphan_agents() {
+        let spec = load_yaml_spec();
+        let registry_keys: std::collections::HashSet<&str> =
+            GAMETHEORY_AGENTS.iter().map(|a| a.key).collect();
+
+        for tier in &spec.tiers {
+            for agent in &tier.agents {
+                assert!(
+                    registry_keys.contains(agent.key.as_str()),
+                    "YAML agent '{}' in tier {} has no matching registry entry",
+                    agent.key,
+                    tier.id
+                );
+            }
+        }
+    }
+
+    /// The full spec depends_on graph must contain no cycles.
+    #[test]
+    fn test_yaml_no_cycles() {
+        let spec = load_yaml_spec();
+        let fp = crate::gametheory::fingerprint::GameTheoryFingerprint {
+            run_id: "cycle-check".into(),
+            cooperation: crate::gametheory::fingerprint::AxisVerdict::new(
+                "non-cooperative", "high", "",
+            ),
+            payoff_sum: crate::gametheory::fingerprint::AxisVerdict::new(
+                "non-zero-sum", "high", "",
+            ),
+            symmetry: crate::gametheory::fingerprint::AxisVerdict::new(
+                "asymmetric", "high", "",
+            ),
+            timing: crate::gametheory::fingerprint::AxisVerdict::new(
+                "simultaneous", "high", "",
+            ),
+            perfect_info: crate::gametheory::fingerprint::AxisVerdict::new(
+                "imperfect", "high", "",
+            ),
+            complete_info: crate::gametheory::fingerprint::AxisVerdict::new(
+                "incomplete", "high", "",
+            ),
+            cardinality: crate::gametheory::fingerprint::AxisVerdict::new(
+                "2-player", "high", "",
+            ),
+            strategy_space: crate::gametheory::fingerprint::AxisVerdict::new(
+                "discrete", "high", "",
+            ),
+            horizon: crate::gametheory::fingerprint::AxisVerdict::new(
+                "repeated", "high", "",
+            ),
+            primary_family: "test".into(),
+            nearest_classic: None,
+            shadow_games: vec![],
+            hidden_game_scan: None,
+            ambiguities: vec![],
+            created_at: "2026-05-03T00:00:00Z".into(),
+        };
+
+        let result = crate::gametheory::routing::evaluate_routing(
+            &spec,
+            &fp,
+            "cycle-check",
+            "2026-05-03T00:00:00Z",
+        );
+
+        match result {
+            Ok(decision) => {
+                assert!(!decision.enabled_specialists.is_empty(),
+                    "routing must enable at least the 4 mandatory Tier 1 agents");
+            }
+            Err(e) => panic!("YAML spec has errors (possibly a cycle): {e:?}"),
+        }
+    }
+
+    /// Every condition expression in the YAML must parse successfully.
+    #[test]
+    fn test_yaml_conditions_parse() {
+        let spec = load_yaml_spec();
+        let mut failed = Vec::new();
+
+        for tier in &spec.tiers {
+            for agent in &tier.agents {
+                if let Some(ref cond) = agent.condition {
+                    if let Err(e) = crate::gametheory::routing::parse_condition(cond) {
+                        failed.push((agent.key.clone(), cond.clone(), e));
+                    }
+                }
+            }
+        }
+
+        assert!(
+            failed.is_empty(),
+            "{} condition(s) failed to parse:\n{}",
+            failed.len(),
+            failed
+                .iter()
+                .map(|(key, cond, err)| format!("  {key}: '{cond}' → {err}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+    }
 }

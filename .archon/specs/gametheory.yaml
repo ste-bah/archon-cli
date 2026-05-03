@@ -1,13 +1,20 @@
 # Archon Game-Theory Routing Specification
 # Declarative spec defining tiers, agents, conditions, and dependencies.
 # Evaluated by the routing engine against the Tier 1 fingerprint.
+# Covers all 84 agents across 12 tiers per gametheory README.
 version: "1.0"
 spec_id: gametheory-routing-v1
 cost_cap_usd: 5.0
 
 tiers:
+  # ═══════════════════════════════════════════════════════════════════════════
+  # TIER 1 — Core Analysts (start here for any analysis)
+  # Before solving, classify. Before classifying, elicit payoffs.
+  # 4 mandatory canonical agents produce the 9-axis fingerprint.
+  # 2 conditional agents for extensive-form and normal-form modeling.
+  # ═══════════════════════════════════════════════════════════════════════════
   - id: 1
-    name: "Foundation"
+    name: "Core Analysts"
     description: "Mandatory Tier 1 classification agents — always run"
     concurrency_cap: 4
     agents:
@@ -23,43 +30,434 @@ tiers:
       - key: information-structure-mapper
         mandatory: true
         depends_on: []
+      - key: extensive-form-modeler
+        condition: "fingerprint.timing == 'sequential'"
+        mandatory: false
+        depends_on: [game-classifier, strategy-space-enumerator]
+      - key: payoff-matrix-builder
+        condition: "fingerprint.cooperation == 'non-cooperative'"
+        mandatory: false
+        depends_on: [payoff-elicitor, strategy-space-enumerator]
 
+  # ═══════════════════════════════════════════════════════════════════════════
+  # TIER 2 — Equilibrium Finders
+  # Once a game is specified, these agents solve it.
+  # ═══════════════════════════════════════════════════════════════════════════
   - id: 2
-    name: "Equilibrium Analysis"
+    name: "Equilibrium Finders"
     description: "Conditional equilibrium-finding specialists"
-    concurrency_cap: 3
+    concurrency_cap: 4
     agents:
       - key: nash-equilibrium-finder
-        condition: "fingerprint.cooperation == 'non-cooperative' && fingerprint.strategy_space == 'continuous'"
+        condition: "fingerprint.cooperation == 'non-cooperative'"
         mandatory: false
-        depends_on: [payoff-elicitor]
-
+        depends_on: [game-classifier, payoff-elicitor]
       - key: dominant-strategy-identifier
         condition: "fingerprint.cooperation == 'non-cooperative' && fingerprint.cardinality == '2-player'"
         mandatory: false
-        depends_on: [payoff-elicitor]
-
+        depends_on: [payoff-elicitor, strategy-space-enumerator]
       - key: mixed-strategy-calculator
         condition: "fingerprint.strategy_space == 'discrete' && nash_count > 0"
         mandatory: false
         depends_on: [nash-equilibrium-finder]
-
+      - key: subgame-perfect-analyzer
+        condition: "fingerprint.timing == 'sequential'"
+        mandatory: false
+        depends_on: [extensive-form-modeler, game-classifier]
       - key: bayesian-equilibrium-analyst
         condition: "fingerprint.complete_info == 'incomplete' || fingerprint.perfect_info == 'imperfect'"
         mandatory: false
-        depends_on: [payoff-elicitor]
-
-  - id: 3
-    name: "Refinement and Recommendations"
-    description: "Post-equilibrium refinement and strategic recommendations"
-    concurrency_cap: 2
-    agents:
+        depends_on: [information-structure-mapper, payoff-elicitor]
+      - key: correlated-equilibrium-designer
+        condition: "fingerprint.cooperation == 'cooperative' || fingerprint.shadow_games_count > 0"
+        mandatory: false
+        depends_on: [nash-equilibrium-finder]
       - key: trembling-hand-refiner
-        condition: "enabled_count >= 3 && fingerprint.strategy_space == 'discrete'"
+        condition: "enabled_count >= 5 && fingerprint.strategy_space == 'discrete'"
         mandatory: false
         depends_on: [nash-equilibrium-finder, mixed-strategy-calculator]
 
-      - key: correlated-equilibrium-designer
-        condition: "fingerprint.cooperation != 'non-cooperative'"
+  # ═══════════════════════════════════════════════════════════════════════════
+  # TIER 3 — Cooperative Game Specialists
+  # When binding agreements are possible: coalitions, fair division, stability.
+  # ═══════════════════════════════════════════════════════════════════════════
+  - id: 3
+    name: "Cooperative Game Specialists"
+    description: "Coalition, fairness, and stability analysis"
+    concurrency_cap: 3
+    agents:
+      - key: shapley-value-calculator
+        condition: "fingerprint.cooperation == 'cooperative'"
         mandatory: false
-        depends_on: [bayesian-equilibrium-analyst]
+        depends_on: [game-classifier, payoff-elicitor]
+      - key: core-stability-analyst
+        condition: "fingerprint.cooperation == 'cooperative'"
+        mandatory: false
+        depends_on: [shapley-value-calculator]
+      - key: coalition-formation-strategist
+        condition: "fingerprint.cooperation == 'cooperative' && fingerprint.cardinality == 'n-player'"
+        mandatory: false
+        depends_on: [core-stability-analyst]
+      - key: banzhaf-power-auditor
+        condition: "fingerprint.cooperation == 'cooperative'"
+        mandatory: false
+        depends_on: [game-classifier, strategy-space-enumerator]
+      - key: nucleolus-calculator
+        condition: "fingerprint.cooperation == 'cooperative'"
+        mandatory: false
+        depends_on: [core-stability-analyst, shapley-value-calculator]
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # TIER 4 — Classic Game Pattern Recognizers
+  # Most real situations match a classic game — these agents recognize the pattern.
+  # ═══════════════════════════════════════════════════════════════════════════
+  - id: 4
+    name: "Classic Game Pattern Recognizers"
+    description: "Detect classic game structures and apply matching solutions"
+    concurrency_cap: 4
+    agents:
+      - key: prisoners-dilemma-detector
+        condition: "fingerprint.cooperation == 'non-cooperative' && fingerprint.payoff_sum != 'zero-sum'"
+        mandatory: false
+        depends_on: [game-classifier, payoff-elicitor]
+      - key: stag-hunt-analyst
+        condition: "fingerprint.cooperation == 'cooperative' && fingerprint.cardinality == '2-player'"
+        mandatory: false
+        depends_on: [game-classifier, payoff-elicitor]
+      - key: chicken-brinksmanship-tactician
+        condition: "fingerprint.cooperation == 'non-cooperative' && fingerprint.symmetry == 'symmetric'"
+        mandatory: false
+        depends_on: [game-classifier, strategy-space-enumerator]
+      - key: battle-of-sexes-coordinator
+        condition: "fingerprint.cooperation == 'cooperative' && fingerprint.symmetry == 'asymmetric'"
+        mandatory: false
+        depends_on: [game-classifier, payoff-elicitor]
+      - key: ultimatum-bargainer
+        condition: "fingerprint.timing == 'sequential' && fingerprint.cardinality == '2-player'"
+        mandatory: false
+        depends_on: [game-classifier, payoff-elicitor]
+      - key: public-goods-diagnostician
+        condition: "fingerprint.cardinality == 'n-player' && fingerprint.cooperation == 'cooperative'"
+        mandatory: false
+        depends_on: [game-classifier, payoff-elicitor]
+      - key: tragedy-commons-analyst
+        condition: "fingerprint.cardinality == 'n-player' && fingerprint.horizon != 'one-shot'"
+        mandatory: false
+        depends_on: [public-goods-diagnostician]
+      - key: matching-pennies-randomizer
+        condition: "fingerprint.payoff_sum == 'zero-sum' && fingerprint.strategy_space == 'discrete'"
+        mandatory: false
+        depends_on: [game-classifier, strategy-space-enumerator]
+      - key: centipede-game-analyst
+        condition: "fingerprint.timing == 'sequential' && fingerprint.horizon != 'one-shot'"
+        mandatory: false
+        depends_on: [extensive-form-modeler]
+      - key: trust-game-analyst
+        condition: "fingerprint.timing == 'sequential' && fingerprint.cooperation == 'cooperative'"
+        mandatory: false
+        depends_on: [game-classifier, payoff-elicitor]
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # TIER 5 — Dynamic & Repeated Games
+  # When the same game is played repeatedly, cooperation becomes possible.
+  # ═══════════════════════════════════════════════════════════════════════════
+  - id: 5
+    name: "Dynamic & Repeated Games"
+    description: "Repeated interactions, reputation, and time-dimension analysis"
+    concurrency_cap: 3
+    agents:
+      - key: backward-induction-solver
+        condition: "fingerprint.timing == 'sequential' && fingerprint.horizon == 'one-shot'"
+        mandatory: false
+        depends_on: [extensive-form-modeler, game-classifier]
+      - key: folk-theorem-applier
+        condition: "fingerprint.horizon == 'repeated' || fingerprint.horizon == 'infinite'"
+        mandatory: false
+        depends_on: [nash-equilibrium-finder, game-classifier]
+      - key: tit-for-tat-strategist
+        condition: "fingerprint.horizon == 'repeated' || fingerprint.horizon == 'infinite'"
+        mandatory: false
+        depends_on: [folk-theorem-applier, prisoners-dilemma-detector]
+      - key: reputation-game-modeler
+        condition: "fingerprint.horizon == 'repeated' || fingerprint.complete_info == 'incomplete'"
+        mandatory: false
+        depends_on: [folk-theorem-applier, bayesian-equilibrium-analyst]
+      - key: cooperation-emergence-analyst
+        condition: "fingerprint.horizon == 'repeated' || fingerprint.horizon == 'infinite'"
+        mandatory: false
+        depends_on: [folk-theorem-applier, evolutionary-strategy-analyst]
+      - key: stochastic-game-analyst
+        condition: "fingerprint.horizon == 'repeated' || fingerprint.horizon == 'infinite'"
+        mandatory: false
+        depends_on: [nash-equilibrium-finder, extensive-form-modeler]
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # TIER 6 — Information & Bayesian Games
+  # Games where what players know is the key variable.
+  # ═══════════════════════════════════════════════════════════════════════════
+  - id: 6
+    name: "Information & Bayesian Games"
+    description: "Signaling, screening, belief updating, and asymmetric information"
+    concurrency_cap: 3
+    agents:
+      - key: signaling-game-analyst
+        condition: "fingerprint.complete_info == 'incomplete' || fingerprint.perfect_info == 'imperfect'"
+        mandatory: false
+        depends_on: [information-structure-mapper, bayesian-equilibrium-analyst]
+      - key: cheap-talk-evaluator
+        condition: "fingerprint.complete_info == 'incomplete' || fingerprint.perfect_info == 'imperfect'"
+        mandatory: false
+        depends_on: [information-structure-mapper, signaling-game-analyst]
+      - key: asymmetric-info-detective
+        condition: "fingerprint.complete_info == 'incomplete' && fingerprint.cardinality == '2-player'"
+        mandatory: false
+        depends_on: [information-structure-mapper, payoff-elicitor]
+      - key: credibility-assessor
+        condition: "fingerprint.cooperation == 'non-cooperative' || fingerprint.complete_info == 'incomplete'"
+        mandatory: false
+        depends_on: [information-structure-mapper, game-classifier]
+      - key: bayesian-belief-updater
+        condition: "fingerprint.complete_info == 'incomplete' || fingerprint.perfect_info == 'imperfect'"
+        mandatory: false
+        depends_on: [information-structure-mapper, bayesian-equilibrium-analyst]
+      - key: screening-mechanism-designer
+        condition: "fingerprint.complete_info == 'incomplete' && fingerprint.cardinality == '2-player'"
+        mandatory: false
+        depends_on: [asymmetric-info-detective, mechanism-designer]
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # TIER 7 — Mechanism Design & Auctions
+  # Inverse game theory: given a desired outcome, design the rules.
+  # ═══════════════════════════════════════════════════════════════════════════
+  - id: 7
+    name: "Mechanism Design & Auctions"
+    description: "Engineering rules, auctions, matching, and incentives"
+    concurrency_cap: 3
+    agents:
+      - key: mechanism-designer
+        condition: "enabled_count >= 8"
+        mandatory: false
+        depends_on: [game-classifier, nash-equilibrium-finder, bayesian-equilibrium-analyst]
+      - key: auction-strategist
+        condition: "enabled_count >= 8 && fingerprint.cardinality == 'n-player'"
+        mandatory: false
+        depends_on: [mechanism-designer, payoff-elicitor]
+      - key: vcg-architect
+        condition: "enabled_count >= 10"
+        mandatory: false
+        depends_on: [mechanism-designer, auction-strategist]
+      - key: incentive-compatibility-auditor
+        condition: "enabled_count >= 8"
+        mandatory: false
+        depends_on: [mechanism-designer, screening-mechanism-designer]
+      - key: matching-market-designer
+        condition: "enabled_count >= 6 && fingerprint.cardinality == 'n-player'"
+        mandatory: false
+        depends_on: [mechanism-designer, coalition-formation-strategist]
+      - key: revenue-equivalence-analyst
+        condition: "enabled_count >= 8"
+        mandatory: false
+        depends_on: [auction-strategist, mechanism-designer]
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # TIER 8 — Behavioral & Evolutionary Games
+  # How real agents deviate from and converge to game-theoretic predictions.
+  # ═══════════════════════════════════════════════════════════════════════════
+  - id: 8
+    name: "Behavioral & Evolutionary Games"
+    description: "Population dynamics, bounded rationality, and behavioral deviations"
+    concurrency_cap: 4
+    agents:
+      - key: evolutionary-strategy-analyst
+        condition: "fingerprint.horizon == 'repeated' || fingerprint.horizon == 'infinite' || fingerprint.cardinality == 'n-player'"
+        mandatory: false
+        depends_on: [game-classifier, nash-equilibrium-finder]
+      - key: ess-detector
+        condition: "fingerprint.horizon == 'repeated' || fingerprint.horizon == 'infinite'"
+        mandatory: false
+        depends_on: [evolutionary-strategy-analyst]
+      - key: behavioral-bias-detector
+        condition: "enabled_count >= 6"
+        mandatory: false
+        depends_on: [game-classifier, payoff-elicitor]
+      - key: level-k-reasoning-profiler
+        condition: "enabled_count >= 6 && fingerprint.cardinality == '2-player'"
+        mandatory: false
+        depends_on: [behavioral-bias-detector]
+      - key: quantal-response-modeler
+        condition: "enabled_count >= 8 && fingerprint.strategy_space == 'discrete'"
+        mandatory: false
+        depends_on: [nash-equilibrium-finder, behavioral-bias-detector]
+      - key: fairness-preferences-analyst
+        condition: "enabled_count >= 6"
+        mandatory: false
+        depends_on: [behavioral-bias-detector, payoff-elicitor]
+      - key: loss-aversion-analyst
+        condition: "enabled_count >= 6"
+        mandatory: false
+        depends_on: [behavioral-bias-detector, payoff-elicitor]
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # TIER 9 — Strategic Tactics & Conflict
+  # Concrete tactical playbooks: negotiation, brinkmanship, deterrence.
+  # ═══════════════════════════════════════════════════════════════════════════
+  - id: 9
+    name: "Strategic Tactics & Conflict"
+    description: "Negotiation, brinkmanship, deterrence, commitment, and bluffing"
+    concurrency_cap: 4
+    agents:
+      - key: negotiation-strategist
+        condition: "fingerprint.cooperation == 'non-cooperative' || fingerprint.cooperation == 'cooperative'"
+        mandatory: false
+        depends_on: [game-classifier, payoff-elicitor]
+      - key: brinkmanship-tactician
+        condition: "fingerprint.cooperation == 'non-cooperative' && fingerprint.symmetry == 'symmetric'"
+        mandatory: false
+        depends_on: [chicken-brinksmanship-tactician, game-classifier]
+      - key: deterrence-theorist
+        condition: "fingerprint.cooperation == 'non-cooperative'"
+        mandatory: false
+        depends_on: [game-classifier, brinkmanship-tactician]
+      - key: commitment-device-engineer
+        condition: "fingerprint.timing == 'sequential' || fingerprint.cooperation == 'non-cooperative'"
+        mandatory: false
+        depends_on: [game-classifier, negotiation-strategist]
+      - key: focal-point-identifier
+        condition: "enabled_count >= 6 && fingerprint.cooperation == 'cooperative'"
+        mandatory: false
+        depends_on: [game-classifier, battle-of-sexes-coordinator]
+      - key: coopetition-strategist
+        condition: "fingerprint.cooperation == 'cooperative' && fingerprint.payoff_sum != 'zero-sum'"
+        mandatory: false
+        depends_on: [game-classifier, coalition-formation-strategist]
+      - key: first-mover-analyst
+        condition: "fingerprint.timing == 'sequential'"
+        mandatory: false
+        depends_on: [extensive-form-modeler, game-classifier]
+      - key: threat-credibility-assessor
+        condition: "fingerprint.cooperation == 'non-cooperative'"
+        mandatory: false
+        depends_on: [deterrence-theorist, credibility-assessor]
+      - key: bluff-and-deception-analyst
+        condition: "fingerprint.complete_info == 'incomplete' || fingerprint.perfect_info == 'imperfect'"
+        mandatory: false
+        depends_on: [signaling-game-analyst, credibility-assessor]
+      - key: war-of-attrition-analyst
+        condition: "fingerprint.cooperation == 'non-cooperative' && fingerprint.horizon == 'repeated'"
+        mandatory: false
+        depends_on: [game-classifier, brinkmanship-tactician]
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # TIER 10 — Applied Domains
+  # Game theory specialized to specific application areas.
+  # ═══════════════════════════════════════════════════════════════════════════
+  - id: 10
+    name: "Applied Game Theory"
+    description: "Domain-specific applications: business, geopolitics, voting, markets"
+    concurrency_cap: 3
+    agents:
+      - key: geopolitical-game-analyst
+        condition: "enabled_count >= 8"
+        mandatory: false
+        depends_on: [game-classifier, nash-equilibrium-finder]
+      - key: business-strategy-gamifier
+        condition: "enabled_count >= 6"
+        mandatory: false
+        depends_on: [game-classifier, market-competition-modeler]
+      - key: market-competition-modeler
+        condition: "enabled_count >= 6 && fingerprint.cardinality == '2-player'"
+        mandatory: false
+        depends_on: [game-classifier, nash-equilibrium-finder, payoff-elicitor]
+      - key: voting-strategy-analyst
+        condition: "enabled_count >= 6 && fingerprint.cardinality == 'n-player'"
+        mandatory: false
+        depends_on: [game-classifier, coalition-formation-strategist]
+      - key: social-interaction-gamifier
+        condition: "enabled_count >= 8"
+        mandatory: false
+        depends_on: [game-classifier, behavioral-bias-detector, fairness-preferences-analyst]
+      - key: conflict-resolution-theorist
+        condition: "enabled_count >= 6"
+        mandatory: false
+        depends_on: [negotiation-strategist, mechanism-designer]
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # TIER 11 — Civilizational / Historical (Jiang frameworks)
+  # Long-arc patterns: empires, succession, revolutions, narrative warfare.
+  # Gated behind policy — these are high-level strategic pattern recognizers.
+  # ═══════════════════════════════════════════════════════════════════════════
+  - id: 11
+    name: "Civilizational & Historical"
+    description: "Jiang frameworks: long-arc civilizational patterns (policy-gated)"
+    concurrency_cap: 2
+    agents:
+      - key: myth-making-strategist
+        condition: "enabled_count >= 10"
+        mandatory: false
+        depends_on: [game-classifier, signaling-game-analyst]
+      - key: father-son-dynastic-analyst
+        condition: "enabled_count >= 10 && fingerprint.horizon != 'one-shot'"
+        mandatory: false
+        depends_on: [game-classifier, power-transition-analyst]
+      - key: cohesion-discipline-devotion-auditor
+        condition: "enabled_count >= 10"
+        mandatory: false
+        depends_on: [game-classifier, power-transition-analyst]
+      - key: power-transition-analyst
+        condition: "enabled_count >= 8 && fingerprint.horizon != 'one-shot'"
+        mandatory: false
+        depends_on: [geopolitical-game-analyst, game-classifier]
+      - key: elite-overproduction-diagnostician
+        condition: "enabled_count >= 10"
+        mandatory: false
+        depends_on: [power-transition-analyst, game-classifier]
+      - key: dialectic-tension-mapper
+        condition: "enabled_count >= 10"
+        mandatory: false
+        depends_on: [game-classifier, conflict-resolution-theorist]
+      - key: legitimacy-crisis-analyst
+        condition: "enabled_count >= 8"
+        mandatory: false
+        depends_on: [power-transition-analyst, game-classifier]
+      - key: diaspora-dynamics-analyst
+        condition: "enabled_count >= 12"
+        mandatory: false
+        depends_on: [power-transition-analyst, game-classifier]
+      - key: poor-conquers-rich-analyst
+        condition: "enabled_count >= 10"
+        mandatory: false
+        depends_on: [cohesion-discipline-devotion-auditor, power-transition-analyst]
+      - key: propaganda-detector
+        condition: "enabled_count >= 8"
+        mandatory: false
+        depends_on: [myth-making-strategist, signaling-game-analyst, cheap-talk-evaluator]
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # TIER 12 — Meta-Game & Synthesis
+  # Higher-order agents: change the game, simulate alternatives, select equilibria.
+  # ═══════════════════════════════════════════════════════════════════════════
+  - id: 12
+    name: "Meta-Game & Synthesis"
+    description: "Game reconstruction, equilibrium selection, counterfactual simulation"
+    concurrency_cap: 3
+    agents:
+      - key: meta-game-designer
+        condition: "enabled_count >= 12"
+        mandatory: false
+        depends_on: [nash-equilibrium-finder, mechanism-designer, game-classifier]
+      - key: counterfactual-simulator
+        condition: "enabled_count >= 10"
+        mandatory: false
+        depends_on: [game-classifier, nash-equilibrium-finder, extensive-form-modeler]
+      - key: equilibrium-selector
+        condition: "enabled_count >= 8 && nash_count > 1"
+        mandatory: false
+        depends_on: [nash-equilibrium-finder, trembling-hand-refiner, focal-point-identifier]
+      - key: game-tree-archaeologist
+        condition: "enabled_count >= 8"
+        mandatory: false
+        depends_on: [game-classifier, extensive-form-modeler, backward-induction-solver]
+      - key: common-knowledge-analyst
+        condition: "enabled_count >= 8"
+        mandatory: false
+        depends_on: [information-structure-mapper, game-classifier, focal-point-identifier]
