@@ -11,16 +11,16 @@ tiers:
     description: "Mandatory Tier 1 classification agents — always run"
     concurrency_cap: 4
     agents:
-      - key: game-tree-archaeologist
+      - key: game-classifier
         mandatory: true
         depends_on: []
-      - key: legitimacy-crisis-analyst
+      - key: payoff-elicitor
         mandatory: true
         depends_on: []
-      - key: payoff-matrix-builder
+      - key: strategy-space-enumerator
         mandatory: true
         depends_on: []
-      - key: subgame-perfect-analyzer
+      - key: information-structure-mapper
         mandatory: true
         depends_on: []
 
@@ -32,12 +32,12 @@ tiers:
       - key: nash-equilibrium-finder
         condition: "fingerprint.cooperation == 'non-cooperative' && fingerprint.strategy_space == 'continuous'"
         mandatory: false
-        depends_on: [payoff-matrix-builder]
+        depends_on: [payoff-elicitor]
 
       - key: dominant-strategy-identifier
         condition: "fingerprint.cooperation == 'non-cooperative' && fingerprint.cardinality == '2-player'"
         mandatory: false
-        depends_on: [payoff-matrix-builder]
+        depends_on: [payoff-elicitor]
 
       - key: mixed-strategy-calculator
         condition: "fingerprint.strategy_space == 'discrete' && nash_count > 0"
@@ -47,14 +47,7 @@ tiers:
       - key: bayesian-equilibrium-analyst
         condition: "fingerprint.complete_info == 'incomplete' || fingerprint.perfect_info == 'imperfect'"
         mandatory: false
-        depends_on: [payoff-matrix-builder]
-
-      - key: shadow-game-detector
-        # Always runs: mandatory agents bypass condition evaluation.
-        # The shadow_games_count axis is computed by Tier 1 classification
-        # regardless and remains available for other conditional agents.
-        mandatory: true
-        depends_on: [game-tree-archaeologist]
+        depends_on: [payoff-elicitor]
 
   - id: 3
     name: "Refinement and Recommendations"
@@ -70,8 +63,3 @@ tiers:
         condition: "fingerprint.cooperation != 'non-cooperative'"
         mandatory: false
         depends_on: [bayesian-equilibrium-analyst]
-
-      - key: strategic-recommendations
-        condition: "enabled_count >= 2"
-        mandatory: true
-        depends_on: [nash-equilibrium-finder, dominant-strategy-identifier, shadow-game-detector]

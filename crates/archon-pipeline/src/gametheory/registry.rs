@@ -1454,4 +1454,69 @@ mod tests {
         );
         assert!(gt_parts[3].ends_with(".md"), "last segment must be .md file");
     }
+
+    #[test]
+    fn test_yaml_tier1_matches_registry_mandatory_set() {
+        let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap();
+        let yaml_path = workspace_root.join(".archon/specs/gametheory.yaml");
+        assert!(
+            yaml_path.exists(),
+            "gametheory.yaml not found at {}",
+            yaml_path.display()
+        );
+
+        let spec =
+            crate::gametheory::routing::load_spec(&yaml_path).expect("must load gametheory.yaml");
+
+        // Collect Tier 1 mandatory agents from YAML
+        let yaml_tier1: std::collections::HashSet<&str> = spec
+            .tiers
+            .iter()
+            .filter(|t| t.id == 1)
+            .flat_map(|t| t.agents.iter())
+            .filter(|a| a.mandatory)
+            .map(|a| a.key.as_str())
+            .collect();
+
+        // Collect mandatory agents from registry
+        let registry_mandatory: std::collections::HashSet<&str> = GAMETHEORY_AGENTS
+            .iter()
+            .filter(|a| a.mandatory)
+            .map(|a| a.key)
+            .collect();
+
+        assert_eq!(
+            yaml_tier1, registry_mandatory,
+            "YAML Tier 1 mandatory agents must exactly match registry mandatory agents.\n\
+             YAML Tier 1 mandatory: {:?}\n\
+             Registry mandatory:    {:?}",
+            yaml_tier1, registry_mandatory
+        );
+    }
+
+    #[test]
+    fn test_no_excluded_agent_files_present() {
+        let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap();
+        let sherlock_path = workspace_root.join(".archon/agents/gametheory/sherlock-holmes.md");
+        let simplifier_path = workspace_root.join(".archon/agents/gametheory/code-simplifier.md");
+
+        assert!(
+            !sherlock_path.exists(),
+            "sherlock-holmes.md must NOT exist at {} — it is a non-game-theory agent excluded per OQ-GT-001",
+            sherlock_path.display()
+        );
+        assert!(
+            !simplifier_path.exists(),
+            "code-simplifier.md must NOT exist at {} — it is a non-game-theory agent excluded per OQ-GT-001",
+            simplifier_path.display()
+        );
+    }
 }
