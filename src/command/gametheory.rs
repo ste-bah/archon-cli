@@ -26,12 +26,18 @@ pub async fn handle_gametheory(
             classify_only,
             spec_path,
             debug_memory,
+            budget,
+            max_concurrent,
+            style,
         } => {
             handle_run(
                 situation,
                 *classify_only,
                 spec_path.as_deref(),
                 *debug_memory,
+                *budget,
+                *max_concurrent,
+                style,
                 config,
                 env_vars,
             )
@@ -96,6 +102,9 @@ async fn handle_run(
     classify_only: bool,
     spec_path: Option<&str>,
     debug_memory: bool,
+    budget: f64,
+    max_concurrent: usize,
+    style: &str,
     config: &ArchonConfig,
     env_vars: &ArchonEnvVars,
 ) -> Result<()> {
@@ -104,7 +113,18 @@ async fn handle_run(
     if classify_only {
         run_classify_only(&db, situation, config, env_vars).await
     } else {
-        run_full(&db, situation, spec_path, debug_memory, config, env_vars).await
+        run_full(
+            &db,
+            situation,
+            spec_path,
+            debug_memory,
+            budget,
+            max_concurrent,
+            style,
+            config,
+            env_vars,
+        )
+        .await
     }
 }
 
@@ -144,6 +164,9 @@ async fn run_full(
     situation: &str,
     spec_path: Option<&str>,
     debug_memory: bool,
+    budget: f64,
+    max_concurrent: usize,
+    style: &str,
     config: &ArchonConfig,
     env_vars: &ArchonEnvVars,
 ) -> Result<()> {
@@ -151,8 +174,16 @@ async fn run_full(
     let llm_ref: Option<&dyn LlmClient> = llm.as_ref().map(|a| a as &dyn LlmClient);
     let path = spec_path.map(std::path::Path::new);
     let memory_ctx = open_memory_context(debug_memory)?;
+    let options = gametheory::GameTheoryRunOptions {
+        budget_usd: budget,
+        max_concurrent,
+        style_profile_id: Some(style.to_string()),
+    };
 
-    match gametheory::run_full_pipeline_with_memory(db, situation, path, llm_ref, memory_ctx).await
+    match gametheory::run_full_pipeline_with_options(
+        db, situation, path, llm_ref, memory_ctx, options,
+    )
+    .await
     {
         Ok(result) => {
             println!("Game-Theory Strategic Analysis — Full Pipeline");
@@ -169,6 +200,11 @@ async fn run_full(
                 result.routing_decision.skipped_specialists.len()
             );
             println!("Specialist Count:  {}", result.specialist_count);
+            println!("Estimated Cost:    ${:.6}", result.total_cost_usd);
+            println!("Budget Cap:        ${budget:.2}");
+            println!("Max Concurrent:    {max_concurrent}");
+            println!("Observed Concurrent: {}", result.max_observed_concurrent);
+            println!("Style:             {style}");
             println!(
                 "Report Length:     {} words",
                 result.report.split_whitespace().count()
@@ -208,7 +244,9 @@ async fn run_full(
                 println!();
             }
 
-            if llm.is_none() {
+            if result.status == "BudgetExceeded" {
+                println!("NOTE: budget cap halted specialist execution.");
+            } else if llm.is_none() {
                 println!(
                     "NOTE: LLM client unavailable, using keyword fallback. Set ANTHROPIC_API_KEY for real agent execution."
                 );

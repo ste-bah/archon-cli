@@ -485,6 +485,15 @@ pub enum GametheoryAction {
         /// Print per-agent gametheory memory recall counts
         #[arg(long)]
         debug_memory: bool,
+        /// Stop specialist execution when estimated model spend reaches this USD cap
+        #[arg(long, default_value_t = 20.0)]
+        budget: f64,
+        /// Maximum specialist concurrency requested for this run
+        #[arg(long, default_value_t = 4)]
+        max_concurrent: usize,
+        /// Report style: executive, academic, or technical
+        #[arg(long, default_value = "executive")]
+        style: String,
     },
     /// List all persisted game-theory runs
     ListRuns,

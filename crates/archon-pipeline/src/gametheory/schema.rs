@@ -11,6 +11,7 @@ const COZO_RELATION_ALREADY_EXISTS: &[&str] = &["conflicts with an existing", "a
 /// Ensure all game-theory relations exist. Idempotent.
 pub fn ensure_gametheory_schema(db: &DbInstance) -> Result<()> {
     ensure_gt_runs(db)?;
+    migrate_gt_runs_cost_usd(db)?;
     ensure_gt_fingerprints(db)?;
     ensure_gt_routing_decisions(db)?;
     ensure_gt_enabled_specialists(db)?;
@@ -49,8 +50,70 @@ fn ensure_gt_runs(db: &DbInstance) -> Result<()> {
             started_at: String,
             completed_at: String default "",
             status: String,
+            cost_usd: String default "0.0",
         }"#,
     )
+}
+
+fn migrate_gt_runs_cost_usd(db: &DbInstance) -> Result<()> {
+    if gt_runs_has_cost_usd(db)? {
+        return Ok(());
+    }
+
+    let rows = db.run_script(
+        "?[run_id, situation, started_at, completed_at, status] := \
+         *gt_runs{run_id, situation, started_at, completed_at, status}",
+        Default::default(),
+        ScriptMutability::Immutable,
+    )
+    .map_err(|e| anyhow::anyhow!("snapshot gt_runs before migration failed: {e}"))?;
+
+    db.run_script(
+        "{::remove gt_runs}",
+        Default::default(),
+        ScriptMutability::Mutable,
+    )
+    .map_err(|e| anyhow::anyhow!("remove old gt_runs relation failed: {e}"))?;
+    ensure_gt_runs(db)?;
+
+    for row in rows.rows {
+        let mut params = std::collections::BTreeMap::new();
+        params.insert("rid".into(), row[0].clone());
+        params.insert("sit".into(), row[1].clone());
+        params.insert("sa".into(), row[2].clone());
+        params.insert("ca".into(), row[3].clone());
+        params.insert("st".into(), row[4].clone());
+        params.insert("cost".into(), cozo::DataValue::from("0.000000"));
+
+        db.run_script(
+            "?[run_id, situation, started_at, completed_at, status, cost_usd] \
+             <- [[$rid, $sit, $sa, $ca, $st, $cost]] \
+             :put gt_runs { run_id => situation, started_at, completed_at, status, cost_usd }",
+            params,
+            ScriptMutability::Mutable,
+        )
+        .map_err(|e| anyhow::anyhow!("reinsert migrated gt_runs row failed: {e}"))?;
+    }
+
+    Ok(())
+}
+
+fn gt_runs_has_cost_usd(db: &DbInstance) -> Result<bool> {
+    match db.run_script(
+        "?[cost] := *gt_runs{cost_usd: cost}",
+        Default::default(),
+        ScriptMutability::Immutable,
+    ) {
+        Ok(_) => Ok(true),
+        Err(e) => {
+            let msg = e.to_string();
+            if msg.contains("cost_usd") {
+                Ok(false)
+            } else {
+                Err(anyhow::anyhow!("failed to inspect gt_runs schema: {msg}"))
+            }
+        }
+    }
 }
 
 fn ensure_gt_fingerprints(db: &DbInstance) -> Result<()> {
@@ -184,14 +247,16 @@ mod tests {
             <- [["run-1", "Test situation", "2026-01-01T00:00:00Z", "", "running"]]
             :put gt_runs { run_id => situation, started_at, completed_at, status }
         "#;
-        db.run_script(script, Default::default(), ScriptMutability::Mutable).unwrap();
+        db.run_script(script, Default::default(), ScriptMutability::Mutable)
+            .unwrap();
 
         let script2 = r#"
             ?[run_id, situation, started_at, completed_at, status]
             <- [["run-1", "Test situation updated", "2026-01-01T00:00:00Z", "2026-01-01T00:00:05Z", "completed"]]
             :put gt_runs { run_id => situation, started_at, completed_at, status }
         "#;
-        db.run_script(script2, Default::default(), ScriptMutability::Mutable).unwrap();
+        db.run_script(script2, Default::default(), ScriptMutability::Mutable)
+            .unwrap();
 
         let result = db
             .run_script(
@@ -201,6 +266,46 @@ mod tests {
             )
             .unwrap();
         assert_eq!(result.rows.len(), 1, ":put must upsert, not duplicate");
+    }
+
+    #[test]
+    fn test_gt_runs_cost_usd_migration_preserves_existing_rows() {
+        let db = test_db();
+
+        db.run_script(
+            r#":create gt_runs {
+                run_id: String =>
+                situation: String,
+                started_at: String,
+                completed_at: String default "",
+                status: String,
+            }"#,
+            Default::default(),
+            ScriptMutability::Mutable,
+        )
+        .unwrap();
+        db.run_script(
+            r#"
+            ?[run_id, situation, started_at, completed_at, status]
+            <- [["run-old", "Old situation", "2026-01-01T00:00:00Z", "", "running"]]
+            :put gt_runs { run_id => situation, started_at, completed_at, status }
+            "#,
+            Default::default(),
+            ScriptMutability::Mutable,
+        )
+        .unwrap();
+
+        ensure_gametheory_schema(&db).unwrap();
+
+        let rows = db
+            .run_script(
+                "?[status, cost] := *gt_runs{run_id, status, cost_usd: cost}, run_id = \"run-old\"",
+                Default::default(),
+                ScriptMutability::Immutable,
+            )
+            .unwrap();
+        assert_eq!(rows.rows[0][0].get_str().unwrap(), "running");
+        assert_eq!(rows.rows[0][1].get_str().unwrap(), "0.000000");
     }
 
     #[test]
@@ -309,7 +414,8 @@ mod tests {
             );
             // gt_provenance_edges uses edge_id, not run_id
             let query = if rel == "gt_provenance_edges" {
-                "?[count(edge_id)] := *gt_provenance_edges{edge_id}, edge_id = \"edge-1\"".to_string()
+                "?[count(edge_id)] := *gt_provenance_edges{edge_id}, edge_id = \"edge-1\""
+                    .to_string()
             } else {
                 query
             };

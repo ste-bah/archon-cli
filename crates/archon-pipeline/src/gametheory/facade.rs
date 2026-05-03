@@ -3,7 +3,7 @@
 //! `classify` — Tier 1 classification only (fingerprint + persistence).
 //! `run_full_pipeline` — classify → route → specialist DAG → final report.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -56,6 +56,24 @@ impl GameTheoryMemoryContext {
     }
 }
 
+/// Runtime controls for a full game-theory run.
+#[derive(Debug, Clone)]
+pub struct GameTheoryRunOptions {
+    pub budget_usd: f64,
+    pub max_concurrent: usize,
+    pub style_profile_id: Option<String>,
+}
+
+impl Default for GameTheoryRunOptions {
+    fn default() -> Self {
+        Self {
+            budget_usd: 20.0,
+            max_concurrent: 4,
+            style_profile_id: None,
+        }
+    }
+}
+
 /// Source-of-truth audit for memory recall performed before an agent call.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MemoryRecallAudit {
@@ -69,6 +87,18 @@ pub struct MemoryRecallAudit {
 struct RecalledContext {
     text: String,
     audit: MemoryRecallAudit,
+}
+
+#[derive(Debug, Clone, Default)]
+struct SpecialistExecutionOutcome {
+    outputs: HashMap<String, String>,
+    failed: Vec<(String, String)>,
+    memory_audits: Vec<MemoryRecallAudit>,
+    costs_usd: HashMap<String, f64>,
+    total_cost_usd: f64,
+    tier_costs_usd: BTreeMap<u8, f64>,
+    budget_exceeded: bool,
+    max_observed_concurrent: usize,
 }
 
 /// Run Tier 1 classification on a situation and persist the fingerprint.
@@ -151,11 +181,18 @@ async fn classify_internal(
 
     // Update run status to completed
     let completed_at = Utc::now().to_rfc3339();
-    update_gt_run_status(db, &run_id, situation, &now, &completed_at, "completed").map_err(
-        |e| GameTheoryError::Storage {
-            message: e.to_string(),
-        },
-    )?;
+    update_gt_run_status(
+        db,
+        &run_id,
+        situation,
+        &now,
+        &completed_at,
+        "completed",
+        0.0,
+    )
+    .map_err(|e| GameTheoryError::Storage {
+        message: e.to_string(),
+    })?;
 
     Ok((fingerprint, memory_audits))
 }
@@ -172,6 +209,14 @@ pub struct FullPipelineResult {
     pub failed_specialists: Vec<(String, String)>,
     /// Per-agent memory recall evidence collected during real LLM execution.
     pub memory_recall: Vec<MemoryRecallAudit>,
+    /// Total estimated model cost for successful specialist calls.
+    pub total_cost_usd: f64,
+    /// Per-specialist estimated model cost.
+    pub specialist_costs_usd: HashMap<String, f64>,
+    /// Per-tier estimated model cost, keyed by game-theory tier.
+    pub tier_costs_usd: BTreeMap<u8, f64>,
+    /// Maximum observed specialist concurrency for this run.
+    pub max_observed_concurrent: usize,
     /// Overall pipeline status: "completed" (all specialists succeeded) or "partial" (some failed).
     pub status: String,
 }
@@ -206,6 +251,25 @@ pub async fn run_full_pipeline_with_memory(
     llm: Option<&dyn LlmClient>,
     memory_ctx: GameTheoryMemoryContext,
 ) -> Result<FullPipelineResult, GameTheoryError> {
+    run_full_pipeline_with_options(
+        db,
+        situation,
+        spec_path,
+        llm,
+        memory_ctx,
+        GameTheoryRunOptions::default(),
+    )
+    .await
+}
+
+pub async fn run_full_pipeline_with_options(
+    db: &DbInstance,
+    situation: &str,
+    spec_path: Option<&Path>,
+    llm: Option<&dyn LlmClient>,
+    memory_ctx: GameTheoryMemoryContext,
+    options: GameTheoryRunOptions,
+) -> Result<FullPipelineResult, GameTheoryError> {
     // 1. Tier 1 classification
     let (fingerprint, mut memory_recall) =
         classify_internal(db, situation, llm, &memory_ctx).await?;
@@ -230,60 +294,89 @@ pub async fn run_full_pipeline_with_memory(
     let _pipeline_spec = build_specialist_spec(&routing_decision, &dep_map, &spec, situation);
 
     // 7. Execute specialist DAG (real LLM when available, stub fallback otherwise)
-    let (specialist_outputs, failed_specialists, specialist_memory_recall) = if let Some(
-        llm_client,
-    ) = llm
-    {
-        match execute_specialists_real(
+    let specialist_outcome = if let Some(llm_client) = llm {
+        match execute_specialists_real_with_options(
             llm_client,
             &routing_decision,
             &fingerprint,
             situation,
             &memory_ctx,
+            &options,
         )
         .await
         {
             Ok(result) => result,
             Err(e) => {
                 tracing::warn!(run_id = %routing_decision.run_id, error = %e, "real specialist execution failed, falling back to stub");
-                execute_specialist_stub(&routing_decision, &fingerprint, situation, &memory_ctx)
+                execute_specialist_stub_with_options(
+                    &routing_decision,
+                    &fingerprint,
+                    situation,
+                    &memory_ctx,
+                    &options,
+                )
             }
         }
     } else {
-        execute_specialist_stub(&routing_decision, &fingerprint, situation, &memory_ctx)
+        execute_specialist_stub_with_options(
+            &routing_decision,
+            &fingerprint,
+            situation,
+            &memory_ctx,
+            &options,
+        )
     };
-    memory_recall.extend(specialist_memory_recall);
+    memory_recall.extend(specialist_outcome.memory_audits.clone());
 
     // 8. Persist specialist outputs
-    persist_specialist_outputs(db, &routing_decision.run_id, &specialist_outputs).map_err(|e| {
-        GameTheoryError::Storage {
-            message: e.to_string(),
-        }
+    persist_specialist_outputs(
+        db,
+        &routing_decision.run_id,
+        &specialist_outcome.outputs,
+        &specialist_outcome.costs_usd,
+    )
+    .map_err(|e| GameTheoryError::Storage {
+        message: e.to_string(),
     })?;
 
     // 9. Run quality checks
     let mut quality_results: HashMap<String, Vec<quality::QualityCheck>> = HashMap::new();
-    for (key, output) in &specialist_outputs {
+    for (key, output) in &specialist_outcome.outputs {
         let checks = quality::run_advisory_gates(key, output);
         quality_results.insert(key.clone(), checks);
     }
 
     // 10. Final stage assembly
-    let final_result = final_stage::assemble_report(&specialist_outputs, &quality_results, None);
+    let final_result = final_stage::assemble_report(
+        &specialist_outcome.outputs,
+        &quality_results,
+        options.style_profile_id.as_deref(),
+    );
+    let report = if specialist_outcome.budget_exceeded {
+        format!("[BUDGET-EXCEEDED]\n\n{}", final_result.report)
+    } else {
+        final_result.report.clone()
+    };
 
     // 11. Persist sections and final report
-    persist_sections(db, &routing_decision.run_id, &final_result.report).map_err(|e| {
+    persist_sections(db, &routing_decision.run_id, &report).map_err(|e| {
         GameTheoryError::Storage {
             message: e.to_string(),
         }
     })?;
-    persist_final_report(db, &routing_decision.run_id, &final_result.report).map_err(|e| {
-        GameTheoryError::Storage {
-            message: e.to_string(),
-        }
+    persist_final_report(
+        db,
+        &routing_decision.run_id,
+        &report,
+        specialist_outcome.total_cost_usd,
+    )
+    .map_err(|e| GameTheoryError::Storage {
+        message: e.to_string(),
     })?;
 
-    let status = if failed_specialists.is_empty() {
+    let status = if specialist_outcome.budget_exceeded {
+        "BudgetExceeded".to_string()
+    } else if specialist_outcome.failed.is_empty() {
         "completed".to_string()
     } else {
         "partial".to_string()
@@ -296,6 +389,7 @@ pub async fn run_full_pipeline_with_memory(
         &fingerprint.created_at,
         &completed_at,
         &status,
+        specialist_outcome.total_cost_usd,
     )
     .map_err(|e| GameTheoryError::Storage {
         message: e.to_string(),
@@ -305,10 +399,14 @@ pub async fn run_full_pipeline_with_memory(
         run_id: routing_decision.run_id.clone(),
         fingerprint,
         routing_decision,
-        report: final_result.report,
-        specialist_count: specialist_outputs.len(),
-        failed_specialists,
+        report,
+        specialist_count: specialist_outcome.outputs.len(),
+        failed_specialists: specialist_outcome.failed,
         memory_recall,
+        total_cost_usd: specialist_outcome.total_cost_usd,
+        specialist_costs_usd: specialist_outcome.costs_usd,
+        tier_costs_usd: specialist_outcome.tier_costs_usd,
+        max_observed_concurrent: specialist_outcome.max_observed_concurrent,
         status,
     })
 }
@@ -333,6 +431,7 @@ fn build_dependency_map(spec: &GameTheorySpec) -> HashMap<String, Vec<String>> {
 ///
 /// Returns (successful_outputs, failed_specialists) where failed_specialists
 /// contains (agent_key, error_message) tuples.
+#[cfg(test)]
 fn execute_specialist_stub(
     routing: &RoutingDecision,
     fingerprint: &GameTheoryFingerprint,
@@ -343,28 +442,49 @@ fn execute_specialist_stub(
     Vec<(String, String)>,
     Vec<MemoryRecallAudit>,
 ) {
+    let outcome = execute_specialist_stub_with_options(
+        routing,
+        fingerprint,
+        situation,
+        memory_ctx,
+        &GameTheoryRunOptions::default(),
+    );
+    (outcome.outputs, outcome.failed, outcome.memory_audits)
+}
+
+fn execute_specialist_stub_with_options(
+    routing: &RoutingDecision,
+    fingerprint: &GameTheoryFingerprint,
+    situation: &str,
+    memory_ctx: &GameTheoryMemoryContext,
+    options: &GameTheoryRunOptions,
+) -> SpecialistExecutionOutcome {
     let fingerprint_summary = prompt_builder::fingerprint_summary_text(fingerprint);
-    let mut outputs = HashMap::new();
-    let mut failed: Vec<(String, String)> = Vec::new();
-    let mut memory_audits = Vec::new();
+    let mut outcome = SpecialistExecutionOutcome::default();
 
     for agent_key in &routing.enabled_specialists {
+        if outcome.total_cost_usd >= options.budget_usd {
+            outcome.budget_exceeded = true;
+            break;
+        }
+        outcome.max_observed_concurrent = outcome.max_observed_concurrent.max(1);
         let recalled = recall_prior_context_for_agent(agent_key, memory_ctx);
-        memory_audits.push(recalled.audit.clone());
+        outcome.memory_audits.push(recalled.audit.clone());
         let result =
             execute_single_specialist(agent_key, situation, &fingerprint_summary, &recalled.text);
 
         match result {
             Ok(output) => {
-                outputs.insert(agent_key.clone(), output);
+                outcome.outputs.insert(agent_key.clone(), output);
+                outcome.costs_usd.insert(agent_key.clone(), 0.0);
             }
             Err(err_msg) => {
-                failed.push((agent_key.clone(), err_msg));
+                outcome.failed.push((agent_key.clone(), err_msg));
             }
         }
     }
 
-    (outputs, failed, memory_audits)
+    outcome
 }
 
 /// Execute a single specialist (stub — returns placeholder output).
@@ -592,6 +712,7 @@ async fn execute_tier1_real(
 /// isolated — a single specialist failure does not abort the others.
 ///
 /// Returns `(successful_outputs, failed_specialists)`.
+#[cfg(test)]
 async fn execute_specialists_real(
     llm: &dyn LlmClient,
     routing: &RoutingDecision,
@@ -606,10 +727,28 @@ async fn execute_specialists_real(
     ),
     GameTheoryError,
 > {
+    let outcome = execute_specialists_real_with_options(
+        llm,
+        routing,
+        fingerprint,
+        situation,
+        memory_ctx,
+        &GameTheoryRunOptions::default(),
+    )
+    .await?;
+    Ok((outcome.outputs, outcome.failed, outcome.memory_audits))
+}
+
+async fn execute_specialists_real_with_options(
+    llm: &dyn LlmClient,
+    routing: &RoutingDecision,
+    fingerprint: &GameTheoryFingerprint,
+    situation: &str,
+    memory_ctx: &GameTheoryMemoryContext,
+    options: &GameTheoryRunOptions,
+) -> Result<SpecialistExecutionOutcome, GameTheoryError> {
     let fingerprint_summary = prompt_builder::fingerprint_summary_text(fingerprint);
-    let mut outputs = HashMap::new();
-    let mut failed: Vec<(String, String)> = Vec::new();
-    let mut memory_audits = Vec::new();
+    let mut outcome = SpecialistExecutionOutcome::default();
 
     let system = vec![serde_json::json!({
         "role": "system",
@@ -617,9 +756,15 @@ async fn execute_specialists_real(
     })];
 
     for agent_key in &routing.enabled_specialists {
+        if outcome.total_cost_usd >= options.budget_usd {
+            outcome.budget_exceeded = true;
+            break;
+        }
+        outcome.max_observed_concurrent = outcome.max_observed_concurrent.max(1);
+
         // Test hook: force failure for failure isolation testing
         if agent_key.ends_with("-FORCE-FAIL-FOR-TEST") {
-            failed.push((
+            outcome.failed.push((
                 agent_key.clone(),
                 format!("forced failure for test: {agent_key}"),
             ));
@@ -627,7 +772,7 @@ async fn execute_specialists_real(
         }
 
         let recalled = recall_prior_context_for_agent(agent_key, memory_ctx);
-        memory_audits.push(recalled.audit.clone());
+        outcome.memory_audits.push(recalled.audit.clone());
 
         let prompt = prompt_builder::build_specialist_prompt_with_prior_context(
             agent_key,
@@ -648,15 +793,56 @@ async fn execute_specialists_real(
             .await
         {
             Ok(response) => {
-                outputs.insert(agent_key.clone(), response.content);
+                let cost = estimate_llm_cost_usd(
+                    "claude-sonnet-4-6",
+                    response.tokens_in,
+                    response.tokens_out,
+                );
+                record_agent_cost(&mut outcome, agent_key, cost);
+                outcome.outputs.insert(agent_key.clone(), response.content);
             }
             Err(e) => {
-                failed.push((agent_key.clone(), format!("LLM error: {e}")));
+                outcome
+                    .failed
+                    .push((agent_key.clone(), format!("LLM error: {e}")));
             }
         }
     }
 
-    Ok((outputs, failed, memory_audits))
+    Ok(outcome)
+}
+
+fn record_agent_cost(outcome: &mut SpecialistExecutionOutcome, agent_key: &str, cost: f64) {
+    outcome.total_cost_usd += cost;
+    outcome.costs_usd.insert(agent_key.to_string(), cost);
+    if let Some(tier) = agent_tier(agent_key) {
+        *outcome.tier_costs_usd.entry(tier).or_insert(0.0) += cost;
+    }
+}
+
+fn agent_tier(agent_key: &str) -> Option<u8> {
+    GAMETHEORY_AGENTS
+        .iter()
+        .find(|agent| agent.key == agent_key)
+        .map(|agent| agent.tier)
+}
+
+/// Estimate API cost from token usage.
+///
+/// Rates are documented here to keep Group 5 deterministic in tests:
+/// Claude Sonnet family is estimated at $3 / 1M input tokens and $15 / 1M
+/// output tokens. Unknown models fall back to the same conservative rate.
+fn estimate_llm_cost_usd(model: &str, tokens_in: u64, tokens_out: u64) -> f64 {
+    let (input_per_million, output_per_million) = if model.contains("sonnet") {
+        (3.0, 15.0)
+    } else if model.contains("opus") {
+        (15.0, 75.0)
+    } else {
+        (3.0, 15.0)
+    };
+
+    (tokens_in as f64 / 1_000_000.0 * input_per_million)
+        + (tokens_out as f64 / 1_000_000.0 * output_per_million)
 }
 
 /// Generate a keyword-based fingerprint as fallback when no LLM provider is available.
@@ -913,6 +1099,7 @@ fn persist_specialist_outputs(
     db: &DbInstance,
     run_id: &str,
     outputs: &HashMap<String, String>,
+    costs_usd: &HashMap<String, f64>,
 ) -> Result<()> {
     use std::collections::BTreeMap;
     ensure_gametheory_schema(db)?;
@@ -922,10 +1109,12 @@ fn persist_specialist_outputs(
         params.insert("rid".into(), cozo::DataValue::from(run_id));
         params.insert("ak".into(), cozo::DataValue::from(agent_key.as_str()));
         params.insert("out".into(), cozo::DataValue::from(output.as_str()));
+        let cost = format!("{:.6}", costs_usd.get(agent_key).copied().unwrap_or(0.0));
+        params.insert("cost".into(), cozo::DataValue::from(cost.as_str()));
 
         db.run_script(
-            "?[run_id, agent_key, output_json] <- [[$rid, $ak, $out]] \
-             :put gt_specialist_outputs { run_id, agent_key => output_json }",
+            "?[run_id, agent_key, output_json, cost_usd] <- [[$rid, $ak, $out, $cost]] \
+             :put gt_specialist_outputs { run_id, agent_key => output_json, cost_usd }",
             params,
             cozo::ScriptMutability::Mutable,
         )
@@ -970,7 +1159,12 @@ fn persist_sections(db: &DbInstance, run_id: &str, report: &str) -> Result<()> {
     Ok(())
 }
 
-fn persist_final_report(db: &DbInstance, run_id: &str, report: &str) -> Result<()> {
+fn persist_final_report(
+    db: &DbInstance,
+    run_id: &str,
+    report: &str,
+    total_cost_usd: f64,
+) -> Result<()> {
     use std::collections::BTreeMap;
     ensure_gametheory_schema(db)?;
 
@@ -980,10 +1174,12 @@ fn persist_final_report(db: &DbInstance, run_id: &str, report: &str) -> Result<(
     params.insert("rid".into(), cozo::DataValue::from(run_id));
     params.insert("rep".into(), cozo::DataValue::from(report));
     params.insert("ca".into(), cozo::DataValue::from(now.as_str()));
+    let cost = format!("{total_cost_usd:.6}");
+    params.insert("cost".into(), cozo::DataValue::from(cost.as_str()));
 
     db.run_script(
         "?[run_id, report_md, created_at, total_cost_usd, total_duration_ms] \
-         <- [[$rid, $rep, $ca, '0.0', '0']] \
+         <- [[$rid, $rep, $ca, $cost, '0']] \
          :put gt_final_reports { run_id => report_md, created_at, \
          total_cost_usd, total_duration_ms }",
         params,
@@ -1010,9 +1206,9 @@ fn insert_gt_run(
     params.insert("st".into(), cozo::DataValue::from(status));
 
     db.run_script(
-        "?[run_id, situation, started_at, completed_at, status] \
-         <- [[$rid, $sit, $sa, \"\", $st]] \
-         :put gt_runs { run_id => situation, started_at, completed_at, status }",
+        "?[run_id, situation, started_at, completed_at, status, cost_usd] \
+         <- [[$rid, $sit, $sa, \"\", $st, \"0.000000\"]] \
+         :put gt_runs { run_id => situation, started_at, completed_at, status, cost_usd }",
         params,
         cozo::ScriptMutability::Mutable,
     )
@@ -1027,6 +1223,7 @@ fn update_gt_run_status(
     started_at: &str,
     completed_at: &str,
     status: &str,
+    cost_usd: f64,
 ) -> Result<()> {
     use std::collections::BTreeMap;
     let mut params = BTreeMap::new();
@@ -1035,11 +1232,13 @@ fn update_gt_run_status(
     params.insert("sa".into(), cozo::DataValue::from(started_at));
     params.insert("ca".into(), cozo::DataValue::from(completed_at));
     params.insert("st".into(), cozo::DataValue::from(status));
+    let cost = format!("{cost_usd:.6}");
+    params.insert("cost".into(), cozo::DataValue::from(cost.as_str()));
 
     db.run_script(
-        "?[run_id, situation, started_at, completed_at, status] \
-         <- [[$rid, $sit, $sa, $ca, $st]] \
-         :put gt_runs { run_id => situation, started_at, completed_at, status }",
+        "?[run_id, situation, started_at, completed_at, status, cost_usd] \
+         <- [[$rid, $sit, $sa, $ca, $st, $cost]] \
+         :put gt_runs { run_id => situation, started_at, completed_at, status, cost_usd }",
         params,
         cozo::ScriptMutability::Mutable,
     )
@@ -1684,6 +1883,157 @@ mod tests {
         assert_eq!(audits[0].leann_hits, 0);
         assert_eq!(leann.calls(), 0);
         assert!(!llm.prompts()[0].contains("## Prior Context"));
+    }
+
+    #[test]
+    fn test_cost_tracked_per_specialist() {
+        let llm = canned_specialist_llm();
+        let rd = RoutingDecision {
+            run_id: "run-cost".into(),
+            fingerprint_id: "fp-cost".into(),
+            enabled_specialists: vec!["nash-equilibrium-finder".into()],
+            skipped_specialists: vec![],
+            evaluated_conditions: vec![],
+            created_at: "2026-05-03T00:00:00Z".into(),
+        };
+
+        let outcome = block_on(execute_specialists_real_with_options(
+            &llm,
+            &rd,
+            &test_fingerprint("fp-cost"),
+            "Two firms choose prices.",
+            &GameTheoryMemoryContext::default(),
+            &GameTheoryRunOptions::default(),
+        ))
+        .unwrap();
+
+        let cost = outcome.costs_usd["nash-equilibrium-finder"];
+        assert!(cost > 0.0);
+        assert!((outcome.total_cost_usd - cost).abs() < f64::EPSILON);
+        assert!((outcome.tier_costs_usd[&2] - cost).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_budget_cap_halts_pipeline_gracefully_with_partial_report() {
+        let db = test_db();
+        let spec_path = std::path::Path::new("../../.archon/specs/gametheory.yaml");
+        if !spec_path.exists() {
+            eprintln!("spec file not found, skipping budget cap test");
+            return;
+        }
+
+        let llm = canned_specialist_llm();
+        let result = block_on(run_full_pipeline_with_options(
+            &db,
+            "Two firms simultaneously set prices in a Bertrand duopoly with asymmetric costs.",
+            Some(spec_path),
+            Some(&llm),
+            GameTheoryMemoryContext::default(),
+            GameTheoryRunOptions {
+                budget_usd: 0.0001,
+                max_concurrent: 1,
+                style_profile_id: Some("executive".to_string()),
+            },
+        ))
+        .unwrap();
+
+        assert_eq!(result.status, "BudgetExceeded");
+        assert!(result.report.contains("[BUDGET-EXCEEDED]"));
+        assert!(result.specialist_count < result.routing_decision.enabled_specialists.len());
+
+        let mut params = std::collections::BTreeMap::new();
+        params.insert("rid".into(), cozo::DataValue::from(result.run_id.as_str()));
+        let rows = db
+            .run_script(
+                "?[status, cost] := *gt_runs{run_id, status, cost_usd: cost}, run_id = $rid",
+                params,
+                cozo::ScriptMutability::Immutable,
+            )
+            .unwrap();
+        assert_eq!(rows.rows[0][0].get_str().unwrap(), "BudgetExceeded");
+        assert_eq!(rows.rows[0][1].get_str().unwrap(), "0.003300");
+
+        let mut params = std::collections::BTreeMap::new();
+        params.insert("rid".into(), cozo::DataValue::from(result.run_id.as_str()));
+        let specialist_rows = db
+            .run_script(
+                "?[cost] := *gt_specialist_outputs{run_id, agent_key, cost_usd: cost}, run_id = $rid",
+                params,
+                cozo::ScriptMutability::Immutable,
+            )
+            .unwrap();
+        assert_eq!(specialist_rows.rows.len(), result.specialist_count);
+        assert_eq!(specialist_rows.rows[0][0].get_str().unwrap(), "0.003300");
+
+        let mut params = std::collections::BTreeMap::new();
+        params.insert("rid".into(), cozo::DataValue::from(result.run_id.as_str()));
+        let report_rows = db
+            .run_script(
+                "?[cost] := *gt_final_reports{run_id, total_cost_usd: cost}, run_id = $rid",
+                params,
+                cozo::ScriptMutability::Immutable,
+            )
+            .unwrap();
+        assert_eq!(report_rows.rows[0][0].get_str().unwrap(), "0.003300");
+    }
+
+    #[test]
+    fn test_concurrency_cap_respected_per_run_flag() {
+        let llm = canned_specialist_llm();
+        let rd = RoutingDecision {
+            run_id: "run-concurrency".into(),
+            fingerprint_id: "fp-concurrency".into(),
+            enabled_specialists: vec![
+                "nash-equilibrium-finder".into(),
+                "payoff-matrix-builder".into(),
+            ],
+            skipped_specialists: vec![],
+            evaluated_conditions: vec![],
+            created_at: "2026-05-03T00:00:00Z".into(),
+        };
+
+        let outcome = block_on(execute_specialists_real_with_options(
+            &llm,
+            &rd,
+            &test_fingerprint("fp-concurrency"),
+            "Two firms choose prices.",
+            &GameTheoryMemoryContext::default(),
+            &GameTheoryRunOptions {
+                budget_usd: 20.0,
+                max_concurrent: 1,
+                style_profile_id: None,
+            },
+        ))
+        .unwrap();
+
+        assert!(outcome.max_observed_concurrent <= 1);
+        assert_eq!(outcome.outputs.len(), 2);
+    }
+
+    #[test]
+    fn test_style_flag_applied_to_section_writers() {
+        let db = test_db();
+        let spec_path = std::path::Path::new("../../.archon/specs/gametheory.yaml");
+        if !spec_path.exists() {
+            eprintln!("spec file not found, skipping style flag test");
+            return;
+        }
+
+        let result = block_on(run_full_pipeline_with_options(
+            &db,
+            "Two firms simultaneously set quantities in a Cournot duopoly.",
+            Some(spec_path),
+            None,
+            GameTheoryMemoryContext::default(),
+            GameTheoryRunOptions {
+                budget_usd: 20.0,
+                max_concurrent: 1,
+                style_profile_id: Some("technical".to_string()),
+            },
+        ))
+        .unwrap();
+
+        assert!(result.report.contains("Style: technical"));
     }
 
     #[test]
