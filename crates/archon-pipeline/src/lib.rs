@@ -7,6 +7,7 @@ pub mod coding;
 pub mod compression;
 pub mod kb;
 pub mod layered_context;
+pub mod leann_searcher;
 pub mod learning;
 pub mod ledgers;
 pub mod llm_adapter;

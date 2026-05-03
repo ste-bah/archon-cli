@@ -5,22 +5,71 @@
 
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Arc;
 
 use anyhow::Result;
-use cozo::DbInstance;
 use chrono::Utc;
+use cozo::DbInstance;
 
-use crate::runner::{LlmClient, LlmResponse};
 use super::errors::GameTheoryError;
 use super::final_stage;
-use super::fingerprint::{
-    AmbiguityNote, AxisVerdict, GameTheoryFingerprint, HiddenGameDetection,
-};
+use super::fingerprint::{AmbiguityNote, AxisVerdict, GameTheoryFingerprint, HiddenGameDetection};
 use super::prompt_builder;
 use super::quality;
-use super::routing::{evaluate_routing, load_spec, resolve_spec_path, GameTheorySpec, RoutingDecision};
+use super::registry::GAMETHEORY_AGENTS;
+use super::routing::{
+    GameTheorySpec, RoutingDecision, evaluate_routing, load_spec, resolve_spec_path,
+};
 use super::schema::ensure_gametheory_schema;
 use super::spec::build_specialist_spec;
+use crate::leann_searcher::LeannSearcher;
+use crate::runner::{LlmClient, LlmResponse};
+use archon_memory::{MemoryTrait, SearchFilter};
+
+const TAG_GAMETHEORY_PIPELINE: &str = "gametheory-pipeline";
+const TIER1_MEMORY_AGENT_KEYS: &[&str] = &[
+    "game-classifier",
+    "payoff-elicitor",
+    "strategy-space-enumerator",
+    "information-structure-mapper",
+];
+
+/// Optional memory backends used for gametheory prompt enrichment.
+#[derive(Clone, Default)]
+pub struct GameTheoryMemoryContext {
+    pub memory: Option<Arc<dyn MemoryTrait>>,
+    pub leann_searcher: Option<Arc<dyn LeannSearcher>>,
+    pub debug: bool,
+}
+
+impl GameTheoryMemoryContext {
+    pub fn new(
+        memory: Arc<dyn MemoryTrait>,
+        leann_searcher: Option<Arc<dyn LeannSearcher>>,
+        debug: bool,
+    ) -> Self {
+        Self {
+            memory: Some(memory),
+            leann_searcher,
+            debug,
+        }
+    }
+}
+
+/// Source-of-truth audit for memory recall performed before an agent call.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MemoryRecallAudit {
+    pub agent_key: String,
+    pub memory_keys: Vec<String>,
+    pub cozo_hits: usize,
+    pub leann_hits: usize,
+}
+
+#[derive(Debug, Clone)]
+struct RecalledContext {
+    text: String,
+    audit: MemoryRecallAudit,
+}
 
 /// Run Tier 1 classification on a situation and persist the fingerprint.
 ///
@@ -33,6 +82,17 @@ pub async fn classify(
     situation: &str,
     llm: Option<&dyn LlmClient>,
 ) -> Result<GameTheoryFingerprint, GameTheoryError> {
+    let (fingerprint, _) =
+        classify_internal(db, situation, llm, &GameTheoryMemoryContext::default()).await?;
+    Ok(fingerprint)
+}
+
+async fn classify_internal(
+    db: &DbInstance,
+    situation: &str,
+    llm: Option<&dyn LlmClient>,
+    memory_ctx: &GameTheoryMemoryContext,
+) -> Result<(GameTheoryFingerprint, Vec<MemoryRecallAudit>), GameTheoryError> {
     let situation = situation.trim();
     if situation.is_empty() {
         return Err(GameTheoryError::EmptySituation);
@@ -42,17 +102,27 @@ pub async fn classify(
         message: e.to_string(),
     })?;
 
-    let run_id = format!("gt-{}", uuid::Uuid::new_v4().to_string().replace('-', "")[..12].to_string());
+    let run_id = format!(
+        "gt-{}",
+        uuid::Uuid::new_v4().to_string().replace('-', "")[..12].to_string()
+    );
     let now = Utc::now().to_rfc3339();
 
     // Insert run with status "running"
-    insert_gt_run(db, &run_id, situation, &now, "running")
-        .map_err(|e| GameTheoryError::Storage { message: e.to_string() })?;
+    insert_gt_run(db, &run_id, situation, &now, "running").map_err(|e| {
+        GameTheoryError::Storage {
+            message: e.to_string(),
+        }
+    })?;
 
     // Attempt real Tier 1 classification, fall back to keyword analysis
+    let mut memory_audits = Vec::new();
     let fingerprint = if let Some(llm_client) = llm {
-        match execute_tier1_real(llm_client, &run_id, situation, &now).await {
-            Ok(fp) => fp,
+        match execute_tier1_real(llm_client, &run_id, situation, &now, memory_ctx).await {
+            Ok((fp, audits)) => {
+                memory_audits.extend(audits);
+                fp
+            }
             Err(e) => {
                 tracing::warn!(run_id = %run_id, error = %e, "Tier 1 LLM classification failed, falling back to keyword");
                 keyword_fallback_fingerprint(&run_id, situation, &now)
@@ -68,15 +138,26 @@ pub async fn classify(
             message: e.to_string(),
         })?;
 
-    insert_gt_fingerprint(db, &run_id, &fingerprint_json, &fingerprint.primary_family, &now)
-        .map_err(|e| GameTheoryError::Storage { message: e.to_string() })?;
+    insert_gt_fingerprint(
+        db,
+        &run_id,
+        &fingerprint_json,
+        &fingerprint.primary_family,
+        &now,
+    )
+    .map_err(|e| GameTheoryError::Storage {
+        message: e.to_string(),
+    })?;
 
     // Update run status to completed
     let completed_at = Utc::now().to_rfc3339();
-    update_gt_run_status(db, &run_id, situation, &now, &completed_at, "completed")
-        .map_err(|e| GameTheoryError::Storage { message: e.to_string() })?;
+    update_gt_run_status(db, &run_id, situation, &now, &completed_at, "completed").map_err(
+        |e| GameTheoryError::Storage {
+            message: e.to_string(),
+        },
+    )?;
 
-    Ok(fingerprint)
+    Ok((fingerprint, memory_audits))
 }
 
 /// Result of a full pipeline run.
@@ -89,6 +170,8 @@ pub struct FullPipelineResult {
     pub specialist_count: usize,
     /// Specialists that failed during execution (agent_key, error_message).
     pub failed_specialists: Vec<(String, String)>,
+    /// Per-agent memory recall evidence collected during real LLM execution.
+    pub memory_recall: Vec<MemoryRecallAudit>,
     /// Overall pipeline status: "completed" (all specialists succeeded) or "partial" (some failed).
     pub status: String,
 }
@@ -106,8 +189,26 @@ pub async fn run_full_pipeline(
     spec_path: Option<&Path>,
     llm: Option<&dyn LlmClient>,
 ) -> Result<FullPipelineResult, GameTheoryError> {
+    run_full_pipeline_with_memory(
+        db,
+        situation,
+        spec_path,
+        llm,
+        GameTheoryMemoryContext::default(),
+    )
+    .await
+}
+
+pub async fn run_full_pipeline_with_memory(
+    db: &DbInstance,
+    situation: &str,
+    spec_path: Option<&Path>,
+    llm: Option<&dyn LlmClient>,
+    memory_ctx: GameTheoryMemoryContext,
+) -> Result<FullPipelineResult, GameTheoryError> {
     // 1. Tier 1 classification
-    let fingerprint = classify(db, situation, llm).await?;
+    let (fingerprint, mut memory_recall) =
+        classify_internal(db, situation, llm, &memory_ctx).await?;
 
     // 2. Resolve and load routing spec
     let resolved_path = resolve_spec_path(spec_path)?;
@@ -118,8 +219,9 @@ pub async fn run_full_pipeline(
     let routing_decision = evaluate_routing(&spec, &fingerprint, &fingerprint.run_id, &now)?;
 
     // 4. Persist routing decision
-    persist_routing_decision(db, &routing_decision)
-        .map_err(|e| GameTheoryError::Storage { message: e.to_string() })?;
+    persist_routing_decision(db, &routing_decision).map_err(|e| GameTheoryError::Storage {
+        message: e.to_string(),
+    })?;
 
     // 5. Build dependency map from spec agent entries
     let dep_map = build_dependency_map(&spec);
@@ -128,21 +230,36 @@ pub async fn run_full_pipeline(
     let _pipeline_spec = build_specialist_spec(&routing_decision, &dep_map, &spec, situation);
 
     // 7. Execute specialist DAG (real LLM when available, stub fallback otherwise)
-    let (specialist_outputs, failed_specialists) = if let Some(llm_client) = llm {
-        match execute_specialists_real(llm_client, &routing_decision, &fingerprint, situation).await {
+    let (specialist_outputs, failed_specialists, specialist_memory_recall) = if let Some(
+        llm_client,
+    ) = llm
+    {
+        match execute_specialists_real(
+            llm_client,
+            &routing_decision,
+            &fingerprint,
+            situation,
+            &memory_ctx,
+        )
+        .await
+        {
             Ok(result) => result,
             Err(e) => {
                 tracing::warn!(run_id = %routing_decision.run_id, error = %e, "real specialist execution failed, falling back to stub");
-                execute_specialist_stub(&routing_decision, &fingerprint, situation)
+                execute_specialist_stub(&routing_decision, &fingerprint, situation, &memory_ctx)
             }
         }
     } else {
-        execute_specialist_stub(&routing_decision, &fingerprint, situation)
+        execute_specialist_stub(&routing_decision, &fingerprint, situation, &memory_ctx)
     };
+    memory_recall.extend(specialist_memory_recall);
 
     // 8. Persist specialist outputs
-    persist_specialist_outputs(db, &routing_decision.run_id, &specialist_outputs)
-        .map_err(|e| GameTheoryError::Storage { message: e.to_string() })?;
+    persist_specialist_outputs(db, &routing_decision.run_id, &specialist_outputs).map_err(|e| {
+        GameTheoryError::Storage {
+            message: e.to_string(),
+        }
+    })?;
 
     // 9. Run quality checks
     let mut quality_results: HashMap<String, Vec<quality::QualityCheck>> = HashMap::new();
@@ -155,16 +272,34 @@ pub async fn run_full_pipeline(
     let final_result = final_stage::assemble_report(&specialist_outputs, &quality_results, None);
 
     // 11. Persist sections and final report
-    persist_sections(db, &routing_decision.run_id, &final_result.report)
-        .map_err(|e| GameTheoryError::Storage { message: e.to_string() })?;
-    persist_final_report(db, &routing_decision.run_id, &final_result.report)
-        .map_err(|e| GameTheoryError::Storage { message: e.to_string() })?;
+    persist_sections(db, &routing_decision.run_id, &final_result.report).map_err(|e| {
+        GameTheoryError::Storage {
+            message: e.to_string(),
+        }
+    })?;
+    persist_final_report(db, &routing_decision.run_id, &final_result.report).map_err(|e| {
+        GameTheoryError::Storage {
+            message: e.to_string(),
+        }
+    })?;
 
     let status = if failed_specialists.is_empty() {
         "completed".to_string()
     } else {
         "partial".to_string()
     };
+    let completed_at = Utc::now().to_rfc3339();
+    update_gt_run_status(
+        db,
+        &routing_decision.run_id,
+        situation,
+        &fingerprint.created_at,
+        &completed_at,
+        &status,
+    )
+    .map_err(|e| GameTheoryError::Storage {
+        message: e.to_string(),
+    })?;
 
     Ok(FullPipelineResult {
         run_id: routing_decision.run_id.clone(),
@@ -173,6 +308,7 @@ pub async fn run_full_pipeline(
         report: final_result.report,
         specialist_count: specialist_outputs.len(),
         failed_specialists,
+        memory_recall,
         status,
     })
 }
@@ -201,15 +337,22 @@ fn execute_specialist_stub(
     routing: &RoutingDecision,
     fingerprint: &GameTheoryFingerprint,
     situation: &str,
-) -> (HashMap<String, String>, Vec<(String, String)>) {
+    memory_ctx: &GameTheoryMemoryContext,
+) -> (
+    HashMap<String, String>,
+    Vec<(String, String)>,
+    Vec<MemoryRecallAudit>,
+) {
     let fingerprint_summary = prompt_builder::fingerprint_summary_text(fingerprint);
     let mut outputs = HashMap::new();
     let mut failed: Vec<(String, String)> = Vec::new();
+    let mut memory_audits = Vec::new();
 
     for agent_key in &routing.enabled_specialists {
-        let result = execute_single_specialist(
-            agent_key, situation, &fingerprint_summary,
-        );
+        let recalled = recall_prior_context_for_agent(agent_key, memory_ctx);
+        memory_audits.push(recalled.audit.clone());
+        let result =
+            execute_single_specialist(agent_key, situation, &fingerprint_summary, &recalled.text);
 
         match result {
             Ok(output) => {
@@ -221,7 +364,7 @@ fn execute_specialist_stub(
         }
     }
 
-    (outputs, failed)
+    (outputs, failed, memory_audits)
 }
 
 /// Execute a single specialist (stub — returns placeholder output).
@@ -231,29 +374,96 @@ fn execute_single_specialist(
     agent_key: &str,
     situation: &str,
     fingerprint_summary: &str,
+    prior_context: &str,
 ) -> Result<String, String> {
     // Test hook: force failure for failure isolation testing
     if agent_key.ends_with("-FORCE-FAIL-FOR-TEST") {
-        return Err(format!(
-            "forced failure for test: {agent_key}"
-        ));
+        return Err(format!("forced failure for test: {agent_key}"));
     }
 
-    let _prompt = prompt_builder::build_specialist_prompt(
+    let _prompt = prompt_builder::build_specialist_prompt_with_prior_context(
         agent_key,
         agent_key,
         situation,
         fingerprint_summary,
+        prior_context,
         &[], // no dependency outputs in stub mode
     );
+
+    let prior_context_section = if prior_context.trim().is_empty() {
+        String::new()
+    } else {
+        format!("\n\n**Prior Context:**\n\n{prior_context}")
+    };
 
     Ok(format!(
         "## {agent_key} — Stub Analysis\n\n\
          **Situation:** {situation}\n\n\
-         **Fingerprint:** {fp_summary}\n\n\
+         **Fingerprint:** {fp_summary}{prior_context_section}\n\n\
          *Phase 5 will replace this with real LLM agent output.*",
         fp_summary = fingerprint_summary,
     ))
+}
+
+fn agent_memory_keys(agent_key: &str) -> &'static [&'static str] {
+    GAMETHEORY_AGENTS
+        .iter()
+        .find(|agent| agent.key == agent_key)
+        .map(|agent| agent.memory_keys)
+        .unwrap_or(&[])
+}
+
+fn recall_prior_context_for_agent(
+    agent_key: &str,
+    memory_ctx: &GameTheoryMemoryContext,
+) -> RecalledContext {
+    let memory_keys = agent_memory_keys(agent_key);
+    let mut cozo_hits = 0usize;
+    let mut leann_hits = 0usize;
+    let mut parts = Vec::new();
+
+    for &memory_key in memory_keys {
+        let mut key_parts = Vec::new();
+
+        if let Some(memory) = memory_ctx.memory.as_ref() {
+            let filter = SearchFilter {
+                tags: vec![TAG_GAMETHEORY_PIPELINE.to_string()],
+                ..Default::default()
+            };
+            if let Ok(memories) = memory.search_memories(&filter) {
+                for m in memories {
+                    if m.title == memory_key {
+                        cozo_hits += 1;
+                        key_parts.push(m.content);
+                    }
+                }
+            }
+        }
+
+        if key_parts.is_empty() {
+            if let Some(leann) = memory_ctx.leann_searcher.as_ref() {
+                let fallback = leann.search(memory_key);
+                if !fallback.trim().is_empty() {
+                    leann_hits += 1;
+                    key_parts.push(fallback);
+                }
+            }
+        }
+
+        if !key_parts.is_empty() {
+            parts.push(format!("#### {memory_key}\n\n{}", key_parts.join("\n\n")));
+        }
+    }
+
+    RecalledContext {
+        text: parts.join("\n\n---\n\n"),
+        audit: MemoryRecallAudit {
+            agent_key: agent_key.to_string(),
+            memory_keys: memory_keys.iter().map(|key| key.to_string()).collect(),
+            cozo_hits,
+            leann_hits,
+        },
+    }
 }
 
 /// Execute real Tier 1 classification via LLM.
@@ -266,25 +476,43 @@ async fn execute_tier1_real(
     run_id: &str,
     situation: &str,
     now: &str,
-) -> Result<GameTheoryFingerprint, GameTheoryError> {
+    memory_ctx: &GameTheoryMemoryContext,
+) -> Result<(GameTheoryFingerprint, Vec<MemoryRecallAudit>), GameTheoryError> {
+    let mut audits = Vec::new();
+    let mut prior_context_parts = Vec::new();
+    for agent_key in TIER1_MEMORY_AGENT_KEYS {
+        let recalled = recall_prior_context_for_agent(agent_key, memory_ctx);
+        if !recalled.text.is_empty() {
+            prior_context_parts.push(format!("### {agent_key}\n\n{}", recalled.text));
+        }
+        audits.push(recalled.audit);
+    }
+    let prior_context = prior_context_parts.join("\n\n---\n\n");
+
     let system = vec![serde_json::json!({
         "role": "system",
         "content": "You are a game-theory classification engine. Analyze the given strategic situation and output a JSON object with exactly these fields: cooperation (cooperative/non-cooperative), payoff_sum (zero-sum/positive-sum/variable-sum), symmetry (symmetric/asymmetric/unknown), timing (simultaneous/sequential/repeated), perfect_info (perfect/imperfect), complete_info (complete/incomplete), cardinality (2-player/n-player), strategy_space (continuous/discrete), horizon (one-shot/repeated), primary_family (short label like \"Bertrand competition\"), nearest_classic (classic game name or null). For each axis also include a confidence (low/medium/high) and a brief rationale. Output ONLY the JSON object, no markdown wrapping."
     })];
 
+    let user_content = if prior_context.is_empty() {
+        format!("Classify this strategic situation:\n\n{situation}")
+    } else {
+        format!(
+            "Classify this strategic situation:\n\n{situation}\n\n## Recalled Prior Context\n\n{prior_context}"
+        )
+    };
+
     let messages = vec![serde_json::json!({
         "role": "user",
-        "content": format!("Classify this strategic situation:\n\n{situation}")
+        "content": user_content
     })];
 
-    let response: LlmResponse = llm.send_message(
-        messages,
-        system,
-        vec![],
-        "claude-sonnet-4-6",
-    )
-    .await
-    .map_err(|e| GameTheoryError::Storage { message: e.to_string() })?;
+    let response: LlmResponse = llm
+        .send_message(messages, system, vec![], "claude-sonnet-4-6")
+        .await
+        .map_err(|e| GameTheoryError::Storage {
+            message: e.to_string(),
+        })?;
 
     // Try to parse JSON from the response (may be wrapped in ```json fences)
     let content = response.content.trim();
@@ -303,17 +531,24 @@ async fn execute_tier1_real(
         });
     };
 
-    let parsed: serde_json::Value = serde_json::from_str(json_str.trim())
-        .map_err(|e| GameTheoryError::FingerprintParse { message: e.to_string() })?;
+    let parsed: serde_json::Value =
+        serde_json::from_str(json_str.trim()).map_err(|e| GameTheoryError::FingerprintParse {
+            message: e.to_string(),
+        })?;
 
     // Extract fields with defaults
     let get_axis = |key: &str| -> AxisVerdict {
-        parsed.get(key)
-            .map(|v| AxisVerdict::new(
-                v.get("value").and_then(|x| x.as_str()).unwrap_or("unknown"),
-                v.get("confidence").and_then(|x| x.as_str()).unwrap_or("low"),
-                v.get("rationale").and_then(|x| x.as_str()).unwrap_or(""),
-            ))
+        parsed
+            .get(key)
+            .map(|v| {
+                AxisVerdict::new(
+                    v.get("value").and_then(|x| x.as_str()).unwrap_or("unknown"),
+                    v.get("confidence")
+                        .and_then(|x| x.as_str())
+                        .unwrap_or("low"),
+                    v.get("rationale").and_then(|x| x.as_str()).unwrap_or(""),
+                )
+            })
             .unwrap_or_else(|| AxisVerdict::new("unknown", "low", ""))
     };
 
@@ -328,24 +563,27 @@ async fn execute_tier1_real(
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
 
-    Ok(GameTheoryFingerprint {
-        run_id: run_id.to_string(),
-        cooperation: get_axis("cooperation"),
-        payoff_sum: get_axis("payoff_sum"),
-        symmetry: get_axis("symmetry"),
-        timing: get_axis("timing"),
-        perfect_info: get_axis("perfect_info"),
-        complete_info: get_axis("complete_info"),
-        cardinality: get_axis("cardinality"),
-        strategy_space: get_axis("strategy_space"),
-        horizon: get_axis("horizon"),
-        primary_family,
-        nearest_classic,
-        shadow_games: vec![],
-        hidden_game_scan: None,
-        ambiguities: vec![],
-        created_at: now.to_string(),
-    })
+    Ok((
+        GameTheoryFingerprint {
+            run_id: run_id.to_string(),
+            cooperation: get_axis("cooperation"),
+            payoff_sum: get_axis("payoff_sum"),
+            symmetry: get_axis("symmetry"),
+            timing: get_axis("timing"),
+            perfect_info: get_axis("perfect_info"),
+            complete_info: get_axis("complete_info"),
+            cardinality: get_axis("cardinality"),
+            strategy_space: get_axis("strategy_space"),
+            horizon: get_axis("horizon"),
+            primary_family,
+            nearest_classic,
+            shadow_games: vec![],
+            hidden_game_scan: None,
+            ambiguities: vec![],
+            created_at: now.to_string(),
+        },
+        audits,
+    ))
 }
 
 /// Execute real LLM-backed specialist agents.
@@ -359,10 +597,19 @@ async fn execute_specialists_real(
     routing: &RoutingDecision,
     fingerprint: &GameTheoryFingerprint,
     situation: &str,
-) -> Result<(HashMap<String, String>, Vec<(String, String)>), GameTheoryError> {
+    memory_ctx: &GameTheoryMemoryContext,
+) -> Result<
+    (
+        HashMap<String, String>,
+        Vec<(String, String)>,
+        Vec<MemoryRecallAudit>,
+    ),
+    GameTheoryError,
+> {
     let fingerprint_summary = prompt_builder::fingerprint_summary_text(fingerprint);
     let mut outputs = HashMap::new();
     let mut failed: Vec<(String, String)> = Vec::new();
+    let mut memory_audits = Vec::new();
 
     let system = vec![serde_json::json!({
         "role": "system",
@@ -372,15 +619,22 @@ async fn execute_specialists_real(
     for agent_key in &routing.enabled_specialists {
         // Test hook: force failure for failure isolation testing
         if agent_key.ends_with("-FORCE-FAIL-FOR-TEST") {
-            failed.push((agent_key.clone(), format!("forced failure for test: {agent_key}")));
+            failed.push((
+                agent_key.clone(),
+                format!("forced failure for test: {agent_key}"),
+            ));
             continue;
         }
 
-        let prompt = prompt_builder::build_specialist_prompt(
+        let recalled = recall_prior_context_for_agent(agent_key, memory_ctx);
+        memory_audits.push(recalled.audit.clone());
+
+        let prompt = prompt_builder::build_specialist_prompt_with_prior_context(
             agent_key,
             agent_key,
             situation,
             &fingerprint_summary,
+            &recalled.text,
             &[],
         );
 
@@ -389,13 +643,9 @@ async fn execute_specialists_real(
             "content": prompt
         })];
 
-        match llm.send_message(
-            messages,
-            system.clone(),
-            vec![],
-            "claude-sonnet-4-6",
-        )
-        .await
+        match llm
+            .send_message(messages, system.clone(), vec![], "claude-sonnet-4-6")
+            .await
         {
             Ok(response) => {
                 outputs.insert(agent_key.clone(), response.content);
@@ -406,33 +656,38 @@ async fn execute_specialists_real(
         }
     }
 
-    Ok((outputs, failed))
+    Ok((outputs, failed, memory_audits))
 }
 
 /// Generate a keyword-based fingerprint as fallback when no LLM provider is available.
 ///
 /// Performs simple keyword analysis of the situation text. Less accurate than
 /// real Tier 1 classification but requires no external dependencies.
-fn keyword_fallback_fingerprint(
-    run_id: &str,
-    situation: &str,
-    now: &str,
-) -> GameTheoryFingerprint {
+fn keyword_fallback_fingerprint(run_id: &str, situation: &str, now: &str) -> GameTheoryFingerprint {
     let s = situation.to_lowercase();
 
-    let cooperation = if s.contains("collaborate") || s.contains("cooperate") || s.contains("alliance") || s.contains("cartel") {
+    let cooperation = if s.contains("collaborate")
+        || s.contains("cooperate")
+        || s.contains("alliance")
+        || s.contains("cartel")
+    {
         AxisVerdict::new("cooperative", "medium", "cooperation keywords detected")
     } else {
-        AxisVerdict::new("non-cooperative", "medium", "default for unmarked situations")
+        AxisVerdict::new(
+            "non-cooperative",
+            "medium",
+            "default for unmarked situations",
+        )
     };
 
-    let payoff_sum = if s.contains("zero-sum") || s.contains("winner-take") || s.contains("all or nothing") {
-        AxisVerdict::new("zero-sum", "medium", "zero-sum keywords detected")
-    } else if s.contains("win-win") || s.contains("mutual gain") || s.contains("positive-sum") {
-        AxisVerdict::new("positive-sum", "medium", "positive-sum keywords detected")
-    } else {
-        AxisVerdict::new("variable-sum", "low", "insufficient payoff information")
-    };
+    let payoff_sum =
+        if s.contains("zero-sum") || s.contains("winner-take") || s.contains("all or nothing") {
+            AxisVerdict::new("zero-sum", "medium", "zero-sum keywords detected")
+        } else if s.contains("win-win") || s.contains("mutual gain") || s.contains("positive-sum") {
+            AxisVerdict::new("positive-sum", "medium", "positive-sum keywords detected")
+        } else {
+            AxisVerdict::new("variable-sum", "low", "insufficient payoff information")
+        };
 
     let symmetry = if s.contains("symmetric") || s.contains("identical") || s.contains("same") {
         AxisVerdict::new("symmetric", "medium", "symmetry keywords detected")
@@ -452,33 +707,67 @@ fn keyword_fallback_fingerprint(
         AxisVerdict::new("simultaneous", "low", "default assumption")
     };
 
-    let perfect_info = if s.contains("perfect information") || s.contains("knows everything") || s.contains("full information") {
+    let perfect_info = if s.contains("perfect information")
+        || s.contains("knows everything")
+        || s.contains("full information")
+    {
         AxisVerdict::new("perfect", "medium", "perfect information keywords")
     } else if s.contains("imperfect") || s.contains("hidden") || s.contains("private") {
         AxisVerdict::new("imperfect", "medium", "imperfect information keywords")
     } else {
-        AxisVerdict::new("imperfect", "low", "most real situations have imperfect info")
+        AxisVerdict::new(
+            "imperfect",
+            "low",
+            "most real situations have imperfect info",
+        )
     };
 
-    let complete_info = if s.contains("incomplete") || s.contains("doesn't know") || s.contains("unknown") || s.contains("private type") || s.contains("asymmetric information") {
+    let complete_info = if s.contains("incomplete")
+        || s.contains("doesn't know")
+        || s.contains("unknown")
+        || s.contains("private type")
+        || s.contains("asymmetric information")
+    {
         AxisVerdict::new("incomplete", "medium", "incomplete information keywords")
     } else if s.contains("complete information") || s.contains("knows everything about") {
         AxisVerdict::new("complete", "medium", "complete information keywords")
     } else {
-        AxisVerdict::new("incomplete", "low", "most real situations have incomplete info")
+        AxisVerdict::new(
+            "incomplete",
+            "low",
+            "most real situations have incomplete info",
+        )
     };
 
-    let cardinality = if s.contains("two player") || s.contains("two firm") || s.contains("bilateral") || s.contains("duopoly") || (s.contains("two") && s.contains("player")) {
+    let cardinality = if s.contains("two player")
+        || s.contains("two firm")
+        || s.contains("bilateral")
+        || s.contains("duopoly")
+        || (s.contains("two") && s.contains("player"))
+    {
         AxisVerdict::new("2-player", "medium", "two-player keywords")
-    } else if s.contains("n-player") || s.contains("multi") || s.contains("many") || s.contains("oligopoly") || s.contains("market") {
+    } else if s.contains("n-player")
+        || s.contains("multi")
+        || s.contains("many")
+        || s.contains("oligopoly")
+        || s.contains("market")
+    {
         AxisVerdict::new("n-player", "medium", "multi-player keywords")
     } else {
         AxisVerdict::new("2-player", "low", "default assumption")
     };
 
-    let strategy_space = if s.contains("continuous") || s.contains("price") || s.contains("quantity") || s.contains("amount") {
+    let strategy_space = if s.contains("continuous")
+        || s.contains("price")
+        || s.contains("quantity")
+        || s.contains("amount")
+    {
         AxisVerdict::new("continuous", "medium", "continuous strategy indicators")
-    } else if s.contains("discrete") || s.contains("binary") || s.contains("yes/no") || s.contains("choice") {
+    } else if s.contains("discrete")
+        || s.contains("binary")
+        || s.contains("yes/no")
+        || s.contains("choice")
+    {
         AxisVerdict::new("discrete", "medium", "discrete strategy indicators")
     } else {
         AxisVerdict::new("discrete", "low", "default assumption")
@@ -486,24 +775,40 @@ fn keyword_fallback_fingerprint(
 
     let horizon = if s.contains("one-shot") || s.contains("once") || s.contains("single") {
         AxisVerdict::new("one-shot", "medium", "one-shot keywords")
-    } else if s.contains("repeated") || s.contains("ongoing") || s.contains("infinitely") || s.contains("recurrent") {
+    } else if s.contains("repeated")
+        || s.contains("ongoing")
+        || s.contains("infinitely")
+        || s.contains("recurrent")
+    {
         AxisVerdict::new("repeated", "medium", "repeated keywords")
     } else {
         AxisVerdict::new("one-shot", "low", "default assumption")
     };
 
     let (primary_family, nearest_classic) = if s.contains("price") && s.contains("simultaneous") {
-        ("Bertrand competition".into(), Some("Bertrand duopoly".into()))
+        (
+            "Bertrand competition".into(),
+            Some("Bertrand duopoly".into()),
+        )
     } else if s.contains("quantity") && s.contains("simultaneous") {
         ("Cournot competition".into(), Some("Cournot duopoly".into()))
     } else if s.contains("price") && s.contains("sequential") {
-        ("Stackelberg price leadership".into(), Some("Stackelberg duopoly".into()))
+        (
+            "Stackelberg price leadership".into(),
+            Some("Stackelberg duopoly".into()),
+        )
     } else if s.contains("dilemma") || s.contains("defect") || s.contains("cooperate vs") {
         ("Social dilemma".into(), Some("Prisoner's Dilemma".into()))
     } else if s.contains("coordinate") || s.contains("standard") || s.contains("compatible") {
-        ("Coordination game".into(), Some("Battle of the Sexes".into()))
+        (
+            "Coordination game".into(),
+            Some("Battle of the Sexes".into()),
+        )
     } else if s.contains("auction") || s.contains("bid") {
-        ("Auction".into(), Some("First-price sealed-bid auction".into()))
+        (
+            "Auction".into(),
+            Some("First-price sealed-bid auction".into()),
+        )
     } else if s.contains("negotiate") || s.contains("bargain") || s.contains("offer") {
         ("Bargaining".into(), Some("Ultimatum Game".into()))
     } else if s.contains("deter") || s.contains("threat") || s.contains("retaliate") {
@@ -517,7 +822,11 @@ fn keyword_fallback_fingerprint(
             axis: "all".into(),
             note: "situation too brief for confident classification".into(),
         }]
-    } else if !s.contains("payoff") && !s.contains("utility") && !s.contains("profit") && !s.contains("cost") {
+    } else if !s.contains("payoff")
+        && !s.contains("utility")
+        && !s.contains("profit")
+        && !s.contains("cost")
+    {
         vec![AmbiguityNote {
             axis: "payoff_sum".into(),
             note: "no payoff or utility information provided".into(),
@@ -526,11 +835,12 @@ fn keyword_fallback_fingerprint(
         vec![]
     };
 
-    let shadow_games: Vec<String> = if s.contains("price") && !s.contains("collude") && !s.contains("cartel") {
-        vec!["Prisoner's Dilemma (tacit collusion shadow)".into()]
-    } else {
-        vec![]
-    };
+    let shadow_games: Vec<String> =
+        if s.contains("price") && !s.contains("collude") && !s.contains("cartel") {
+            vec!["Prisoner's Dilemma (tacit collusion shadow)".into()]
+        } else {
+            vec![]
+        };
 
     let hidden_game_scan = if !shadow_games.is_empty() {
         Some(HiddenGameDetection {
@@ -577,7 +887,10 @@ fn persist_routing_decision(db: &DbInstance, rd: &RoutingDecision) -> Result<()>
 
     let mut params = BTreeMap::new();
     params.insert("rid".into(), cozo::DataValue::from(rd.run_id.as_str()));
-    params.insert("fid".into(), cozo::DataValue::from(rd.fingerprint_id.as_str()));
+    params.insert(
+        "fid".into(),
+        cozo::DataValue::from(rd.fingerprint_id.as_str()),
+    );
     params.insert("en".into(), cozo::DataValue::from(enabled_json.as_str()));
     params.insert("sk".into(), cozo::DataValue::from(skipped_json.as_str()));
     params.insert("ec".into(), cozo::DataValue::from(conditions_json.as_str()));
@@ -903,7 +1216,11 @@ mod tests {
             Some(spec_path),
             None,
         ));
-        assert!(result.is_ok(), "full pipeline must succeed: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "full pipeline must succeed: {:?}",
+            result.err()
+        );
 
         let r = result.unwrap();
         assert!(!r.run_id.is_empty());
@@ -911,7 +1228,19 @@ mod tests {
         assert!(r.specialist_count > 0, "at least one specialist enabled");
         assert!(r.report.contains("Strategic Game-Theory Analysis"));
 
-        // Verify Cozo relations populated
+        // Verify Cozo source-of-truth relations populated and status matches
+        // the returned pipeline outcome.
+        let mut params = std::collections::BTreeMap::new();
+        params.insert("rid".into(), cozo::DataValue::from(r.run_id.as_str()));
+        let run_rows = db
+            .run_script(
+                "?[status] := *gt_runs{run_id, situation, started_at, completed_at, status}, run_id = $rid",
+                params,
+                cozo::ScriptMutability::Immutable,
+            )
+            .unwrap();
+        assert_eq!(run_rows.rows[0][0].get_str().unwrap(), r.status);
+
         let routing_rows = db
             .run_script(
                 "?[count(run_id)] := *gt_routing_decisions{run_id}",
@@ -939,13 +1268,11 @@ mod tests {
 
         // Same situation → same routing decisions
         assert_eq!(
-            r1.routing_decision.enabled_specialists,
-            r2.routing_decision.enabled_specialists,
+            r1.routing_decision.enabled_specialists, r2.routing_decision.enabled_specialists,
             "routing must be deterministic"
         );
         assert_eq!(
-            r1.routing_decision.skipped_specialists,
-            r2.routing_decision.skipped_specialists,
+            r1.routing_decision.skipped_specialists, r2.routing_decision.skipped_specialists,
             "skipped specialists must be deterministic"
         );
     }
@@ -979,7 +1306,12 @@ mod tests {
     #[test]
     fn test_stub_specialist_outputs_non_empty() {
         let db = test_db();
-        let fp = block_on(classify(&db, "Two firms set quantities simultaneously.", None)).unwrap();
+        let fp = block_on(classify(
+            &db,
+            "Two firms set quantities simultaneously.",
+            None,
+        ))
+        .unwrap();
 
         // Build a minimal routing decision to test stub execution
         let rd = RoutingDecision {
@@ -994,17 +1326,41 @@ mod tests {
             created_at: "2026-01-01T00:00:00Z".into(),
         };
 
-        let (outputs, failed) = execute_specialist_stub(&rd, &fp, "Two firms set quantities.");
+        let (outputs, failed, audits) = execute_specialist_stub(
+            &rd,
+            &fp,
+            "Two firms set quantities.",
+            &GameTheoryMemoryContext::default(),
+        );
         assert_eq!(outputs.len(), 2);
-        assert!(outputs.get("nash-equilibrium-finder").unwrap().contains("nash-equilibrium-finder"));
-        assert!(outputs.get("payoff-matrix-builder").unwrap().contains("payoff-matrix-builder"));
-        assert!(failed.is_empty(), "no forced failures without the test hook suffix");
+        assert!(
+            outputs
+                .get("nash-equilibrium-finder")
+                .unwrap()
+                .contains("nash-equilibrium-finder")
+        );
+        assert!(
+            outputs
+                .get("payoff-matrix-builder")
+                .unwrap()
+                .contains("payoff-matrix-builder")
+        );
+        assert!(
+            failed.is_empty(),
+            "no forced failures without the test hook suffix"
+        );
+        assert_eq!(audits.len(), 2);
     }
 
     #[test]
     fn test_failure_isolation_with_force_fail_suffix() {
         let db = test_db();
-        let fp = block_on(classify(&db, "Two firms set quantities simultaneously.", None)).unwrap();
+        let fp = block_on(classify(
+            &db,
+            "Two firms set quantities simultaneously.",
+            None,
+        ))
+        .unwrap();
 
         let rd = RoutingDecision {
             run_id: "test-fail-iso".into(),
@@ -1019,7 +1375,12 @@ mod tests {
             created_at: "2026-01-01T00:00:00Z".into(),
         };
 
-        let (outputs, failed) = execute_specialist_stub(&rd, &fp, "Two firms set quantities.");
+        let (outputs, failed, audits) = execute_specialist_stub(
+            &rd,
+            &fp,
+            "Two firms set quantities.",
+            &GameTheoryMemoryContext::default(),
+        );
         // 2 of 3 succeed
         assert_eq!(outputs.len(), 2);
         assert!(outputs.contains_key("nash-equilibrium-finder"));
@@ -1028,6 +1389,7 @@ mod tests {
         assert_eq!(failed.len(), 1);
         assert_eq!(failed[0].0, "bayesian-game-analyzer-FORCE-FAIL-FOR-TEST");
         assert!(failed[0].1.contains("forced failure"));
+        assert_eq!(audits.len(), 3);
     }
 
     #[test]
@@ -1054,9 +1416,9 @@ mod tests {
 
     // ── MockLlmClient for testing LLM integration ─────────────────────────
 
-    use std::sync::Mutex;
-    use async_trait::async_trait;
     use crate::runner::{LlmClient, LlmResponse};
+    use async_trait::async_trait;
+    use std::sync::Mutex;
 
     struct MockLlmClient {
         canned_response: Mutex<String>,
@@ -1064,7 +1426,9 @@ mod tests {
 
     impl MockLlmClient {
         fn new(canned: &str) -> Self {
-            Self { canned_response: Mutex::new(canned.to_string()) }
+            Self {
+                canned_response: Mutex::new(canned.to_string()),
+            }
         }
     }
 
@@ -1086,6 +1450,242 @@ mod tests {
         }
     }
 
+    struct CapturingLlmClient {
+        canned_response: String,
+        prompts: Mutex<Vec<String>>,
+    }
+
+    impl CapturingLlmClient {
+        fn new(canned: &str) -> Self {
+            Self {
+                canned_response: canned.to_string(),
+                prompts: Mutex::new(Vec::new()),
+            }
+        }
+
+        fn prompts(&self) -> Vec<String> {
+            self.prompts.lock().unwrap().clone()
+        }
+    }
+
+    #[async_trait]
+    impl LlmClient for CapturingLlmClient {
+        async fn send_message(
+            &self,
+            messages: Vec<serde_json::Value>,
+            _system: Vec<serde_json::Value>,
+            _tools: Vec<serde_json::Value>,
+            _model: &str,
+        ) -> std::result::Result<LlmResponse, anyhow::Error> {
+            let prompt = messages
+                .first()
+                .and_then(|m| m.get("content"))
+                .and_then(|c| c.as_str())
+                .unwrap_or("")
+                .to_string();
+            self.prompts.lock().unwrap().push(prompt);
+            Ok(LlmResponse {
+                content: self.canned_response.clone(),
+                tool_uses: vec![],
+                tokens_in: 100,
+                tokens_out: 200,
+            })
+        }
+    }
+
+    struct MockLeannSearcher {
+        response: String,
+        calls: std::sync::atomic::AtomicUsize,
+    }
+
+    impl MockLeannSearcher {
+        fn new(response: &str) -> Self {
+            Self {
+                response: response.to_string(),
+                calls: std::sync::atomic::AtomicUsize::new(0),
+            }
+        }
+
+        fn calls(&self) -> usize {
+            self.calls.load(std::sync::atomic::Ordering::SeqCst)
+        }
+    }
+
+    impl LeannSearcher for MockLeannSearcher {
+        fn search(&self, _query: &str) -> String {
+            self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.response.clone()
+        }
+    }
+
+    fn canned_specialist_llm() -> CapturingLlmClient {
+        CapturingLlmClient::new("specialist output")
+    }
+
+    fn test_fingerprint(run_id: &str) -> GameTheoryFingerprint {
+        GameTheoryFingerprint {
+            run_id: run_id.into(),
+            cooperation: AxisVerdict::new("non-cooperative", "high", ""),
+            payoff_sum: AxisVerdict::new("zero-sum", "medium", ""),
+            symmetry: AxisVerdict::new("asymmetric", "medium", ""),
+            timing: AxisVerdict::new("simultaneous", "high", ""),
+            perfect_info: AxisVerdict::new("imperfect", "medium", ""),
+            complete_info: AxisVerdict::new("complete", "medium", ""),
+            cardinality: AxisVerdict::new("2-player", "high", ""),
+            strategy_space: AxisVerdict::new("discrete", "medium", ""),
+            horizon: AxisVerdict::new("one-shot", "medium", ""),
+            primary_family: "test".into(),
+            nearest_classic: None,
+            shadow_games: vec![],
+            hidden_game_scan: None,
+            ambiguities: vec![],
+            created_at: "2026-05-03T00:00:00Z".into(),
+        }
+    }
+
+    #[test]
+    fn test_facade_recalls_memory_for_specialist_keys() {
+        let graph = archon_memory::MemoryGraph::in_memory().unwrap();
+        graph
+            .store_memory(
+                "stored payoff prior context",
+                "gametheory/tier1/payoffs",
+                archon_memory::MemoryType::Fact,
+                0.9,
+                &[TAG_GAMETHEORY_PIPELINE.to_string()],
+                "test",
+                "workspace",
+            )
+            .unwrap();
+        let memory: std::sync::Arc<dyn archon_memory::MemoryTrait> = std::sync::Arc::new(graph);
+        let ctx = GameTheoryMemoryContext::new(memory, None, true);
+        let llm = canned_specialist_llm();
+        let rd = RoutingDecision {
+            run_id: "run-memory".into(),
+            fingerprint_id: "fp-memory".into(),
+            enabled_specialists: vec!["nash-equilibrium-finder".into()],
+            skipped_specialists: vec![],
+            evaluated_conditions: vec![],
+            created_at: "2026-05-03T00:00:00Z".into(),
+        };
+
+        let (_outputs, failed, audits) = block_on(execute_specialists_real(
+            &llm,
+            &rd,
+            &test_fingerprint("fp-memory"),
+            "Two firms choose prices.",
+            &ctx,
+        ))
+        .unwrap();
+
+        assert!(failed.is_empty());
+        assert!(llm.prompts()[0].contains("stored payoff prior context"));
+        assert_eq!(audits[0].agent_key, "nash-equilibrium-finder");
+        assert_eq!(audits[0].cozo_hits, 1);
+        assert_eq!(audits[0].leann_hits, 0);
+    }
+
+    #[test]
+    fn test_stub_fallback_recalls_memory_for_debug_path() {
+        let graph = archon_memory::MemoryGraph::in_memory().unwrap();
+        graph
+            .store_memory(
+                "stored no-provider prior context",
+                "gametheory/tier1/payoffs",
+                archon_memory::MemoryType::Fact,
+                0.9,
+                &[TAG_GAMETHEORY_PIPELINE.to_string()],
+                "test",
+                "workspace",
+            )
+            .unwrap();
+        let memory: std::sync::Arc<dyn archon_memory::MemoryTrait> = std::sync::Arc::new(graph);
+        let ctx = GameTheoryMemoryContext::new(memory, None, true);
+        let rd = RoutingDecision {
+            run_id: "run-stub-memory".into(),
+            fingerprint_id: "fp-stub-memory".into(),
+            enabled_specialists: vec!["nash-equilibrium-finder".into()],
+            skipped_specialists: vec![],
+            evaluated_conditions: vec![],
+            created_at: "2026-05-03T00:00:00Z".into(),
+        };
+
+        let (outputs, failed, audits) = execute_specialist_stub(
+            &rd,
+            &test_fingerprint("fp-stub-memory"),
+            "Two firms choose prices.",
+            &ctx,
+        );
+
+        assert!(failed.is_empty());
+        assert!(outputs["nash-equilibrium-finder"].contains("stored no-provider prior context"));
+        assert_eq!(audits[0].cozo_hits, 1);
+        assert_eq!(audits[0].leann_hits, 0);
+    }
+
+    #[test]
+    fn test_facade_falls_back_to_leann_when_cozo_empty() {
+        let graph = archon_memory::MemoryGraph::in_memory().unwrap();
+        let memory: std::sync::Arc<dyn archon_memory::MemoryTrait> = std::sync::Arc::new(graph);
+        let leann = std::sync::Arc::new(MockLeannSearcher::new("leann semantic prior"));
+        let ctx = GameTheoryMemoryContext::new(memory, Some(leann.clone()), true);
+        let llm = canned_specialist_llm();
+        let rd = RoutingDecision {
+            run_id: "run-leann".into(),
+            fingerprint_id: "fp-leann".into(),
+            enabled_specialists: vec!["nash-equilibrium-finder".into()],
+            skipped_specialists: vec![],
+            evaluated_conditions: vec![],
+            created_at: "2026-05-03T00:00:00Z".into(),
+        };
+
+        let (_outputs, _failed, audits) = block_on(execute_specialists_real(
+            &llm,
+            &rd,
+            &test_fingerprint("fp-leann"),
+            "Two firms choose prices.",
+            &ctx,
+        ))
+        .unwrap();
+
+        assert!(llm.prompts()[0].contains("leann semantic prior"));
+        assert_eq!(audits[0].cozo_hits, 0);
+        assert_eq!(audits[0].leann_hits, 2);
+        assert_eq!(leann.calls(), 2);
+    }
+
+    #[test]
+    fn test_no_recall_when_memory_keys_empty() {
+        let graph = archon_memory::MemoryGraph::in_memory().unwrap();
+        let memory: std::sync::Arc<dyn archon_memory::MemoryTrait> = std::sync::Arc::new(graph);
+        let leann = std::sync::Arc::new(MockLeannSearcher::new("should not be used"));
+        let ctx = GameTheoryMemoryContext::new(memory, Some(leann.clone()), true);
+        let llm = canned_specialist_llm();
+        let rd = RoutingDecision {
+            run_id: "run-empty".into(),
+            fingerprint_id: "fp-empty".into(),
+            enabled_specialists: vec!["agent-with-no-memory-keys".into()],
+            skipped_specialists: vec![],
+            evaluated_conditions: vec![],
+            created_at: "2026-05-03T00:00:00Z".into(),
+        };
+
+        let (_outputs, _failed, audits) = block_on(execute_specialists_real(
+            &llm,
+            &rd,
+            &test_fingerprint("fp-empty"),
+            "Two firms choose prices.",
+            &ctx,
+        ))
+        .unwrap();
+
+        assert_eq!(audits[0].memory_keys.len(), 0);
+        assert_eq!(audits[0].cozo_hits, 0);
+        assert_eq!(audits[0].leann_hits, 0);
+        assert_eq!(leann.calls(), 0);
+        assert!(!llm.prompts()[0].contains("## Prior Context"));
+    }
+
     #[test]
     fn test_real_tier1_uses_agent_sdk() {
         let db = test_db();
@@ -1104,7 +1704,12 @@ mod tests {
         });
 
         let mock = MockLlmClient::new(&canned_json.to_string());
-        let fp = block_on(classify(&db, "Two firms set prices in a Bertrand duopoly.", Some(&mock))).unwrap();
+        let fp = block_on(classify(
+            &db,
+            "Two firms set prices in a Bertrand duopoly.",
+            Some(&mock),
+        ))
+        .unwrap();
 
         assert_eq!(fp.cooperation.value, "non-cooperative");
         assert_eq!(fp.cooperation.confidence, "high");
@@ -1117,7 +1722,12 @@ mod tests {
     #[test]
     fn test_real_specialist_execution_with_failure_isolation() {
         let db = test_db();
-        let fp = block_on(classify(&db, "Two firms set quantities simultaneously.", None)).unwrap();
+        let fp = block_on(classify(
+            &db,
+            "Two firms set quantities simultaneously.",
+            None,
+        ))
+        .unwrap();
 
         let rd = RoutingDecision {
             run_id: "test-real-fail-iso".into(),
@@ -1132,16 +1742,29 @@ mod tests {
             created_at: "2026-01-01T00:00:00Z".into(),
         };
 
-        let (outputs, failed) = execute_specialist_stub(&rd, &fp, "Two firms set quantities.");
+        let (outputs, failed, audits) = execute_specialist_stub(
+            &rd,
+            &fp,
+            "Two firms set quantities.",
+            &GameTheoryMemoryContext::default(),
+        );
         assert_eq!(outputs.len(), 2, "2 of 3 specialists should succeed");
         assert!(outputs.contains_key("market-structure-analyzer"));
         assert!(outputs.contains_key("payoff-matrix-builder"));
-        assert_eq!(failed.len(), 1, "1 specialist should fail due to FORCE-FAIL hook");
+        assert_eq!(
+            failed.len(),
+            1,
+            "1 specialist should fail due to FORCE-FAIL hook"
+        );
         assert_eq!(failed[0].0, "game-tree-builder-FORCE-FAIL-FOR-TEST");
-        assert!(failed[0].1.contains("forced failure"), "error message should mention forced failure");
+        assert!(
+            failed[0].1.contains("forced failure"),
+            "error message should mention forced failure"
+        );
 
         // Verify the failed specialist is NOT in outputs
         assert!(!outputs.contains_key("game-tree-builder-FORCE-FAIL-FOR-TEST"));
+        assert_eq!(audits.len(), 3);
     }
 
     #[test]
@@ -1149,11 +1772,23 @@ mod tests {
         let db = test_db();
 
         // classify with None → must use keyword fallback
-        let fp = block_on(classify(&db, "Two firms negotiate a bilateral trade agreement with complete information.", None)).unwrap();
+        let fp = block_on(classify(
+            &db,
+            "Two firms negotiate a bilateral trade agreement with complete information.",
+            None,
+        ))
+        .unwrap();
 
         assert!(!fp.run_id.is_empty());
-        assert!(fp.cooperation.confidence != "high", "keyword fallback should have medium/low confidence, not high");
-        assert_eq!(fp.shadow_games.len(), 0, "no price competition → no shadow games");
+        assert!(
+            fp.cooperation.confidence != "high",
+            "keyword fallback should have medium/low confidence, not high"
+        );
+        assert_eq!(
+            fp.shadow_games.len(),
+            0,
+            "no price competition → no shadow games"
+        );
 
         // Verify the fingerprint was persisted (not just returned)
         let rows = db.run_script(

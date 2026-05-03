@@ -19,7 +19,12 @@ pub mod spec;
 
 pub use agents::{GameTheoryAgent, GameTheoryTier, GameTheoryToolAccess};
 pub use errors::GameTheoryError;
-pub use facade::{classify, run_full_pipeline, FullPipelineResult};
+pub use facade::{
+    FullPipelineResult, GameTheoryMemoryContext, MemoryRecallAudit, classify, run_full_pipeline,
+    run_full_pipeline_with_memory,
+};
 pub use fingerprint::GameTheoryFingerprint;
 pub use registry::{GAMETHEORY_AGENTS, GAMETHEORY_TIERS};
-pub use routing::{evaluate_routing, load_spec, resolve_spec_path, GameTheorySpec, RoutingDecision};
+pub use routing::{
+    GameTheorySpec, RoutingDecision, evaluate_routing, load_spec, resolve_spec_path,
+};

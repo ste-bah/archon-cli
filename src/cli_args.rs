@@ -482,6 +482,9 @@ pub enum GametheoryAction {
         /// Path to gametheory spec YAML (searches known locations if omitted)
         #[arg(long, value_name = "PATH")]
         spec_path: Option<String>,
+        /// Print per-agent gametheory memory recall counts
+        #[arg(long)]
+        debug_memory: bool,
     },
     /// List all persisted game-theory runs
     ListRuns,

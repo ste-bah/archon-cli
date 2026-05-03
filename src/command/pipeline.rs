@@ -9,7 +9,7 @@ use archon_core::env_vars::ArchonEnvVars;
 use archon_llm::auth::resolve_auth_with_keys;
 use archon_llm::identity::{IdentityMode, IdentityProvider};
 use archon_memory::{MemoryTrait, graph::MemoryGraph};
-use archon_pipeline::coding::rlm::LeannSearcher;
+use archon_pipeline::leann_searcher::LeannSearcher;
 
 use crate::cli_args::PipelineAction;
 

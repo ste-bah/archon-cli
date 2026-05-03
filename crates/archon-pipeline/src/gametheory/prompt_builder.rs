@@ -18,6 +18,25 @@ pub fn build_specialist_prompt(
     fingerprint_summary: &str,
     dependency_outputs: &[(&str, &str)], // (dep_agent_key, dep_output)
 ) -> String {
+    build_specialist_prompt_with_prior_context(
+        agent_key,
+        agent_display_name,
+        situation,
+        fingerprint_summary,
+        "",
+        dependency_outputs,
+    )
+}
+
+/// Assemble a specialist prompt with recalled prior context.
+pub fn build_specialist_prompt_with_prior_context(
+    agent_key: &str,
+    agent_display_name: &str,
+    situation: &str,
+    fingerprint_summary: &str,
+    prior_context: &str,
+    dependency_outputs: &[(&str, &str)], // (dep_agent_key, dep_output)
+) -> String {
     let mut parts = Vec::new();
 
     // Part 1: Role
@@ -28,22 +47,26 @@ pub fn build_specialist_prompt(
     ));
 
     // Part 2: Situation
-    parts.push(format!(
-        "## Situation\n\n{situation}"
-    ));
+    parts.push(format!("## Situation\n\n{situation}"));
 
     // Part 3: Tier 1 classification
     parts.push(format!(
         "## Strategic Classification\n\n{fingerprint_summary}"
     ));
 
+    // Part 4: Recalled memory context
+    if !prior_context.trim().is_empty() {
+        parts.push(format!(
+            "## Prior Context\n\n{}",
+            safe_truncate(prior_context, 10_000)
+        ));
+    }
+
     // Part 4: Dependency outputs
     if !dependency_outputs.is_empty() {
         let mut dep_section = String::from("## Preceding Analysis\n\n");
         for (dep_key, dep_output) in dependency_outputs {
-            dep_section.push_str(&format!(
-                "### {dep_key}\n\n{dep_output}\n\n---\n\n"
-            ));
+            dep_section.push_str(&format!("### {dep_key}\n\n{dep_output}\n\n---\n\n"));
         }
         parts.push(dep_section);
     }
@@ -59,6 +82,16 @@ pub fn build_specialist_prompt(
     ));
 
     parts.join("\n\n")
+}
+
+fn safe_truncate(text: &str, max_chars: usize) -> String {
+    if text.chars().count() <= max_chars {
+        return text.to_string();
+    }
+
+    let mut out: String = text.chars().take(max_chars).collect();
+    out.push_str("\n\n[truncated]");
+    out
 }
 
 /// Generate a fingerprint summary string for use in prompts.
@@ -130,6 +163,21 @@ mod tests {
 
         assert!(prompt.contains("gt-standalone"));
         assert!(!prompt.contains("## Preceding Analysis"));
+    }
+
+    #[test]
+    fn test_build_specialist_prompt_includes_prior_context() {
+        let prompt = build_specialist_prompt_with_prior_context(
+            "nash-equilibrium-finder",
+            "Nash Equilibrium Finder",
+            "Two firms set prices.",
+            "Primary family: Bertrand competition",
+            "Prior payoff evidence from memory",
+            &[],
+        );
+
+        assert!(prompt.contains("## Prior Context"));
+        assert!(prompt.contains("Prior payoff evidence from memory"));
     }
 
     #[test]

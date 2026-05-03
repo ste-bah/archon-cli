@@ -7,12 +7,12 @@ use std::sync::Arc;
 use anyhow::Result;
 use cozo::DbInstance;
 
+use crate::cli_args::GametheoryAction;
 use archon_core::config::ArchonConfig;
 use archon_core::env_vars::ArchonEnvVars;
 use archon_pipeline::gametheory;
 use archon_pipeline::llm_adapter::AnthropicLlmAdapter;
 use archon_pipeline::runner::LlmClient;
-use crate::cli_args::GametheoryAction;
 
 /// Dispatch the gametheory subcommand.
 pub async fn handle_gametheory(
@@ -25,16 +25,32 @@ pub async fn handle_gametheory(
             situation,
             classify_only,
             spec_path,
-        } => handle_run(situation, *classify_only, spec_path.as_deref(), config, env_vars).await,
+            debug_memory,
+        } => {
+            handle_run(
+                situation,
+                *classify_only,
+                spec_path.as_deref(),
+                *debug_memory,
+                config,
+                env_vars,
+            )
+            .await
+        }
         GametheoryAction::ListRuns => handle_list_runs(),
         GametheoryAction::Show { run_id } => handle_show(run_id),
         GametheoryAction::InspectRouting { run_id } => handle_inspect_routing(run_id),
-        GametheoryAction::Replay { run_id, spec_path } => handle_replay(run_id, spec_path.as_deref(), config, env_vars),
+        GametheoryAction::Replay { run_id, spec_path } => {
+            handle_replay(run_id, spec_path.as_deref(), config, env_vars)
+        }
     }
 }
 
 /// Build an LLM client adapter from config. Returns None and logs a warning if auth fails.
-fn build_llm_client(config: &ArchonConfig, env_vars: &ArchonEnvVars) -> Option<AnthropicLlmAdapter> {
+fn build_llm_client(
+    config: &ArchonConfig,
+    env_vars: &ArchonEnvVars,
+) -> Option<AnthropicLlmAdapter> {
     let auth = match archon_llm::auth::resolve_auth_with_keys(
         non_empty(env_vars.anthropic_api_key.as_deref()),
         non_empty(env_vars.archon_api_key.as_deref()),
@@ -63,12 +79,23 @@ fn build_llm_client(config: &ArchonConfig, env_vars: &ArchonEnvVars) -> Option<A
     Some(AnthropicLlmAdapter::new(Arc::new(client)))
 }
 
+fn open_memory_context(debug: bool) -> Result<gametheory::GameTheoryMemoryContext> {
+    let memory = archon_memory::MemoryGraph::open_default()
+        .map_err(|e| anyhow::anyhow!("failed to open archon memory graph: {e}"))?;
+    Ok(gametheory::GameTheoryMemoryContext::new(
+        Arc::new(memory),
+        None,
+        debug,
+    ))
+}
+
 // ── run ──────────────────────────────────────────────────────────────────────
 
 async fn handle_run(
     situation: &str,
     classify_only: bool,
     spec_path: Option<&str>,
+    debug_memory: bool,
     config: &ArchonConfig,
     env_vars: &ArchonEnvVars,
 ) -> Result<()> {
@@ -77,7 +104,7 @@ async fn handle_run(
     if classify_only {
         run_classify_only(&db, situation, config, env_vars).await
     } else {
-        run_full(&db, situation, spec_path, config, env_vars).await
+        run_full(&db, situation, spec_path, debug_memory, config, env_vars).await
     }
 }
 
@@ -95,7 +122,9 @@ async fn run_classify_only(
             print_fingerprint(&fp);
             println!("Fingerprint persisted to Cozo (gt_runs, gt_fingerprints).");
             if llm.is_none() {
-                println!("NOTE: LLM client unavailable, using keyword fallback. Set ANTHROPIC_API_KEY for real agent execution.");
+                println!(
+                    "NOTE: LLM client unavailable, using keyword fallback. Set ANTHROPIC_API_KEY for real agent execution."
+                );
             } else {
                 println!("NOTE: real LLM agent execution (Phase 5).");
             }
@@ -114,24 +143,36 @@ async fn run_full(
     db: &DbInstance,
     situation: &str,
     spec_path: Option<&str>,
+    debug_memory: bool,
     config: &ArchonConfig,
     env_vars: &ArchonEnvVars,
 ) -> Result<()> {
     let llm = build_llm_client(config, env_vars);
     let llm_ref: Option<&dyn LlmClient> = llm.as_ref().map(|a| a as &dyn LlmClient);
     let path = spec_path.map(std::path::Path::new);
+    let memory_ctx = open_memory_context(debug_memory)?;
 
-    match gametheory::run_full_pipeline(db, situation, path, llm_ref).await {
+    match gametheory::run_full_pipeline_with_memory(db, situation, path, llm_ref, memory_ctx).await
+    {
         Ok(result) => {
             println!("Game-Theory Strategic Analysis — Full Pipeline");
             println!("==============================================");
             println!("Run ID:            {}", result.run_id);
             println!("Status:            {}", result.status);
             println!("Primary Family:    {}", result.fingerprint.primary_family);
-            println!("Enabled Specialists: {}", result.routing_decision.enabled_specialists.len());
-            println!("Skipped Specialists: {}", result.routing_decision.skipped_specialists.len());
+            println!(
+                "Enabled Specialists: {}",
+                result.routing_decision.enabled_specialists.len()
+            );
+            println!(
+                "Skipped Specialists: {}",
+                result.routing_decision.skipped_specialists.len()
+            );
             println!("Specialist Count:  {}", result.specialist_count);
-            println!("Report Length:     {} words", result.report.split_whitespace().count());
+            println!(
+                "Report Length:     {} words",
+                result.report.split_whitespace().count()
+            );
             println!();
 
             if !result.failed_specialists.is_empty() {
@@ -150,13 +191,34 @@ async fn run_full(
                 println!();
             }
 
+            if debug_memory {
+                println!("Memory Recall:");
+                for audit in &result.memory_recall {
+                    println!(
+                        "  - {}: keys={}, cozo_hits={}, leann_hits={}",
+                        audit.agent_key,
+                        audit.memory_keys.len(),
+                        audit.cozo_hits,
+                        audit.leann_hits
+                    );
+                }
+                if result.memory_recall.is_empty() {
+                    println!("  - no real LLM memory recall performed");
+                }
+                println!();
+            }
+
             if llm.is_none() {
-                println!("NOTE: LLM client unavailable, using keyword fallback. Set ANTHROPIC_API_KEY for real agent execution.");
+                println!(
+                    "NOTE: LLM client unavailable, using keyword fallback. Set ANTHROPIC_API_KEY for real agent execution."
+                );
             } else {
                 println!("NOTE: real LLM agent execution (Phase 5).");
             }
             println!();
-            println!("Report persisted to Cozo (gt_runs, gt_routing_decisions, gt_specialist_outputs, gt_sections, gt_final_reports).");
+            println!(
+                "Report persisted to Cozo (gt_runs, gt_routing_decisions, gt_specialist_outputs, gt_sections, gt_final_reports)."
+            );
             Ok(())
         }
         Err(e) => anyhow::bail!("full pipeline failed: {e}"),
@@ -271,18 +333,19 @@ fn handle_inspect_routing(run_id: &str) -> Result<()> {
     gametheory::schema::ensure_gametheory_schema(&db)
         .map_err(|e| anyhow::anyhow!("schema init failed: {e}"))?;
 
-    let result = db.run_script(
-        "?[enabled_specialists_json, skipped_specialists_json, evaluated_conditions_json] \
+    let result = db
+        .run_script(
+            "?[enabled_specialists_json, skipped_specialists_json, evaluated_conditions_json] \
          := *gt_routing_decisions{run_id, fingerprint_id, enabled_specialists_json, \
          skipped_specialists_json, evaluated_conditions_json, created_at}, run_id = $rid",
-        {
-            let mut p = std::collections::BTreeMap::new();
-            p.insert("rid".into(), cozo::DataValue::from(run_id));
-            p
-        },
-        cozo::ScriptMutability::Immutable,
-    )
-    .map_err(|e| anyhow::anyhow!("query gt_routing_decisions failed: {e}"))?;
+            {
+                let mut p = std::collections::BTreeMap::new();
+                p.insert("rid".into(), cozo::DataValue::from(run_id));
+                p
+            },
+            cozo::ScriptMutability::Immutable,
+        )
+        .map_err(|e| anyhow::anyhow!("query gt_routing_decisions failed: {e}"))?;
 
     if result.rows.is_empty() {
         println!("No routing decision found for run '{run_id}'.");
@@ -362,13 +425,8 @@ fn handle_replay(
     let spec = gametheory::load_spec(&resolved)
         .map_err(|e| anyhow::anyhow!("failed to load spec: {e}"))?;
 
-    let rd = gametheory::evaluate_routing(
-        &spec,
-        &fingerprint,
-        run_id,
-        &fingerprint.created_at,
-    )
-    .map_err(|e| anyhow::anyhow!("routing evaluation failed: {e}"))?;
+    let rd = gametheory::evaluate_routing(&spec, &fingerprint, run_id, &fingerprint.created_at)
+        .map_err(|e| anyhow::anyhow!("routing evaluation failed: {e}"))?;
 
     println!("Replay Routing for {run_id}");
     println!("============================");
@@ -407,15 +465,42 @@ fn print_fingerprint(fp: &gametheory::GameTheoryFingerprint) {
     }
     println!();
     println!("Axes:");
-    println!("  Cooperation:    {:20} ({})", fp.cooperation.value, fp.cooperation.confidence);
-    println!("  Payoff Sum:     {:20} ({})", fp.payoff_sum.value, fp.payoff_sum.confidence);
-    println!("  Symmetry:       {:20} ({})", fp.symmetry.value, fp.symmetry.confidence);
-    println!("  Timing:         {:20} ({})", fp.timing.value, fp.timing.confidence);
-    println!("  Perfect Info:   {:20} ({})", fp.perfect_info.value, fp.perfect_info.confidence);
-    println!("  Complete Info:  {:20} ({})", fp.complete_info.value, fp.complete_info.confidence);
-    println!("  Cardinality:    {:20} ({})", fp.cardinality.value, fp.cardinality.confidence);
-    println!("  Strategy Space: {:20} ({})", fp.strategy_space.value, fp.strategy_space.confidence);
-    println!("  Horizon:        {:20} ({})", fp.horizon.value, fp.horizon.confidence);
+    println!(
+        "  Cooperation:    {:20} ({})",
+        fp.cooperation.value, fp.cooperation.confidence
+    );
+    println!(
+        "  Payoff Sum:     {:20} ({})",
+        fp.payoff_sum.value, fp.payoff_sum.confidence
+    );
+    println!(
+        "  Symmetry:       {:20} ({})",
+        fp.symmetry.value, fp.symmetry.confidence
+    );
+    println!(
+        "  Timing:         {:20} ({})",
+        fp.timing.value, fp.timing.confidence
+    );
+    println!(
+        "  Perfect Info:   {:20} ({})",
+        fp.perfect_info.value, fp.perfect_info.confidence
+    );
+    println!(
+        "  Complete Info:  {:20} ({})",
+        fp.complete_info.value, fp.complete_info.confidence
+    );
+    println!(
+        "  Cardinality:    {:20} ({})",
+        fp.cardinality.value, fp.cardinality.confidence
+    );
+    println!(
+        "  Strategy Space: {:20} ({})",
+        fp.strategy_space.value, fp.strategy_space.confidence
+    );
+    println!(
+        "  Horizon:        {:20} ({})",
+        fp.horizon.value, fp.horizon.confidence
+    );
 
     if !fp.shadow_games.is_empty() {
         println!();
