@@ -221,6 +221,17 @@ pub struct FullPipelineResult {
     pub status: String,
 }
 
+/// Result of replaying one specialist against a stored Tier 1 fingerprint.
+#[derive(Debug, Clone)]
+pub struct ReplaySpecialistResult {
+    pub run_id: String,
+    pub agent_key: String,
+    pub status: String,
+    pub output_summary: String,
+    pub cost_usd: f64,
+    pub memory_recall: Vec<MemoryRecallAudit>,
+}
+
 /// Run the full Phase 4 pipeline: classify → route → specialist spec → final report.
 ///
 /// When `llm` is provided, real LLM-backed Tier 1 classification and specialist
@@ -408,6 +419,124 @@ pub async fn run_full_pipeline_with_options(
         tier_costs_usd: specialist_outcome.tier_costs_usd,
         max_observed_concurrent: specialist_outcome.max_observed_concurrent,
         status,
+    })
+}
+
+/// Re-evaluate routing from the stored Tier 1 fingerprint and persist the
+/// refreshed routing decision for inspection/replay auditability.
+pub fn replay_routing_from_stored_fingerprint(
+    db: &DbInstance,
+    run_id: &str,
+    spec_path: Option<&Path>,
+) -> Result<RoutingDecision, GameTheoryError> {
+    ensure_gametheory_schema(db).map_err(|e| GameTheoryError::Storage {
+        message: e.to_string(),
+    })?;
+    let fingerprint = load_stored_fingerprint(db, run_id)?;
+    let resolved_path = resolve_spec_path(spec_path)?;
+    let spec = load_spec(&resolved_path)?;
+    let now = Utc::now().to_rfc3339();
+    let routing_decision = evaluate_routing(&spec, &fingerprint, run_id, &now)?;
+    persist_routing_decision(db, &routing_decision).map_err(|e| GameTheoryError::Storage {
+        message: e.to_string(),
+    })?;
+    Ok(routing_decision)
+}
+
+/// Re-run exactly one specialist using a stored Tier 1 fingerprint.
+///
+/// This is the CLI-backed source-of-truth implementation for
+/// `archon gametheory replay --rerun-specialist <key>`.
+pub async fn replay_single_specialist(
+    db: &DbInstance,
+    run_id: &str,
+    agent_key: &str,
+    llm: Option<&dyn LlmClient>,
+    memory_ctx: GameTheoryMemoryContext,
+    options: GameTheoryRunOptions,
+) -> Result<ReplaySpecialistResult, GameTheoryError> {
+    if !GAMETHEORY_AGENTS.iter().any(|agent| agent.key == agent_key) {
+        return Err(GameTheoryError::AgentNotFound {
+            key: agent_key.to_string(),
+        });
+    }
+
+    let situation = load_run_situation(db, run_id)?;
+    let fingerprint = load_stored_fingerprint(db, run_id)?;
+    let now = Utc::now().to_rfc3339();
+    let routing = RoutingDecision {
+        run_id: run_id.to_string(),
+        fingerprint_id: fingerprint.run_id.clone(),
+        enabled_specialists: vec![agent_key.to_string()],
+        skipped_specialists: vec![],
+        evaluated_conditions: vec![],
+        created_at: now,
+    };
+
+    let outcome = if let Some(llm_client) = llm {
+        execute_specialists_real_with_options(
+            llm_client,
+            &routing,
+            &fingerprint,
+            &situation,
+            &memory_ctx,
+            &options,
+        )
+        .await
+        .unwrap_or_else(|_| {
+            execute_specialist_stub_with_options(
+                &routing,
+                &fingerprint,
+                &situation,
+                &memory_ctx,
+                &options,
+            )
+        })
+    } else {
+        execute_specialist_stub_with_options(
+            &routing,
+            &fingerprint,
+            &situation,
+            &memory_ctx,
+            &options,
+        )
+    };
+
+    if let Some(output) = outcome.outputs.get(agent_key) {
+        persist_specialist_outputs(db, run_id, &outcome.outputs, &outcome.costs_usd).map_err(
+            |e| GameTheoryError::Storage {
+                message: e.to_string(),
+            },
+        )?;
+        let cost = outcome.costs_usd.get(agent_key).copied().unwrap_or(0.0);
+        return Ok(ReplaySpecialistResult {
+            run_id: run_id.to_string(),
+            agent_key: agent_key.to_string(),
+            status: "completed".to_string(),
+            output_summary: summarize_output(output),
+            cost_usd: cost,
+            memory_recall: outcome.memory_audits,
+        });
+    }
+
+    let message = outcome
+        .failed
+        .iter()
+        .find(|(key, _)| key == agent_key)
+        .map(|(_, err)| err.clone())
+        .unwrap_or_else(|| "budget cap prevented specialist replay".to_string());
+    persist_specialist_failure(db, run_id, agent_key, &message).map_err(|e| {
+        GameTheoryError::Storage {
+            message: e.to_string(),
+        }
+    })?;
+    Ok(ReplaySpecialistResult {
+        run_id: run_id.to_string(),
+        agent_key: agent_key.to_string(),
+        status: "failed".to_string(),
+        output_summary: summarize_output(&message),
+        cost_usd: 0.0,
+        memory_recall: outcome.memory_audits,
     })
 }
 
@@ -1103,23 +1232,59 @@ fn persist_specialist_outputs(
 ) -> Result<()> {
     use std::collections::BTreeMap;
     ensure_gametheory_schema(db)?;
+    let now = Utc::now().to_rfc3339();
 
     for (agent_key, output) in outputs {
         let mut params = BTreeMap::new();
         params.insert("rid".into(), cozo::DataValue::from(run_id));
         params.insert("ak".into(), cozo::DataValue::from(agent_key.as_str()));
         params.insert("out".into(), cozo::DataValue::from(output.as_str()));
+        params.insert("status".into(), cozo::DataValue::from("completed"));
+        params.insert("started".into(), cozo::DataValue::from(now.as_str()));
+        params.insert("completed".into(), cozo::DataValue::from(now.as_str()));
+        params.insert("duration".into(), cozo::DataValue::from("0"));
         let cost = format!("{:.6}", costs_usd.get(agent_key).copied().unwrap_or(0.0));
         params.insert("cost".into(), cozo::DataValue::from(cost.as_str()));
 
         db.run_script(
-            "?[run_id, agent_key, output_json, cost_usd] <- [[$rid, $ak, $out, $cost]] \
-             :put gt_specialist_outputs { run_id, agent_key => output_json, cost_usd }",
+            "?[run_id, agent_key, output_json, status, started_at, completed_at, \
+             duration_ms, cost_usd] <- [[$rid, $ak, $out, $status, $started, \
+             $completed, $duration, $cost]] \
+             :put gt_specialist_outputs { run_id, agent_key => output_json, status, \
+             started_at, completed_at, duration_ms, cost_usd }",
             params,
             cozo::ScriptMutability::Mutable,
         )
         .map_err(|e| anyhow::anyhow!("persist gt_specialist_outputs failed: {e}"))?;
     }
+    Ok(())
+}
+
+fn persist_specialist_failure(
+    db: &DbInstance,
+    run_id: &str,
+    agent_key: &str,
+    message: &str,
+) -> Result<()> {
+    use std::collections::BTreeMap;
+    ensure_gametheory_schema(db)?;
+    let now = Utc::now().to_rfc3339();
+    let mut params = BTreeMap::new();
+    params.insert("rid".into(), cozo::DataValue::from(run_id));
+    params.insert("ak".into(), cozo::DataValue::from(agent_key));
+    params.insert("out".into(), cozo::DataValue::from(message));
+    params.insert("status".into(), cozo::DataValue::from("failed"));
+    params.insert("now".into(), cozo::DataValue::from(now.as_str()));
+
+    db.run_script(
+        "?[run_id, agent_key, output_json, status, started_at, completed_at, duration_ms, cost_usd] \
+         <- [[$rid, $ak, $out, $status, $now, $now, '0', '0.000000']] \
+         :put gt_specialist_outputs { run_id, agent_key => output_json, status, \
+         started_at, completed_at, duration_ms, cost_usd }",
+        params,
+        cozo::ScriptMutability::Mutable,
+    )
+    .map_err(|e| anyhow::anyhow!("persist failed gt_specialist_outputs failed: {e}"))?;
     Ok(())
 }
 
@@ -1190,6 +1355,77 @@ fn persist_final_report(
 }
 
 // ── Cozo helpers ─────────────────────────────────────────────────────────────
+
+fn load_run_situation(db: &DbInstance, run_id: &str) -> Result<String, GameTheoryError> {
+    ensure_gametheory_schema(db).map_err(|e| GameTheoryError::Storage {
+        message: e.to_string(),
+    })?;
+    let mut params = BTreeMap::new();
+    params.insert("rid".into(), cozo::DataValue::from(run_id));
+    let rows = db
+        .run_script(
+            "?[situation] := *gt_runs{run_id, situation, started_at, completed_at, status}, \
+             run_id = $rid",
+            params,
+            cozo::ScriptMutability::Immutable,
+        )
+        .map_err(|e| GameTheoryError::Storage {
+            message: format!("query gt_runs failed: {e}"),
+        })?;
+    rows.rows
+        .first()
+        .and_then(|row| row[0].get_str())
+        .map(str::to_string)
+        .ok_or_else(|| GameTheoryError::Storage {
+            message: format!("run not found: {run_id}"),
+        })
+}
+
+fn load_stored_fingerprint(
+    db: &DbInstance,
+    run_id: &str,
+) -> Result<GameTheoryFingerprint, GameTheoryError> {
+    ensure_gametheory_schema(db).map_err(|e| GameTheoryError::Storage {
+        message: e.to_string(),
+    })?;
+    let mut params = BTreeMap::new();
+    params.insert("rid".into(), cozo::DataValue::from(run_id));
+    let rows = db
+        .run_script(
+            "?[fingerprint_json] := *gt_fingerprints{run_id, fingerprint_json, \
+             primary_family, created_at}, run_id = $rid",
+            params,
+            cozo::ScriptMutability::Immutable,
+        )
+        .map_err(|e| GameTheoryError::Storage {
+            message: format!("query gt_fingerprints failed: {e}"),
+        })?;
+    let json = rows
+        .rows
+        .first()
+        .and_then(|row| row[0].get_str())
+        .ok_or_else(|| GameTheoryError::Storage {
+            message: format!("fingerprint not found for run: {run_id}"),
+        })?;
+    serde_json::from_str(json).map_err(|e| GameTheoryError::FingerprintParse {
+        message: e.to_string(),
+    })
+}
+
+fn summarize_output(output: &str) -> String {
+    let summary: String = output
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(160)
+        .collect();
+    if output.chars().count() > summary.chars().count() {
+        format!("{summary}...")
+    } else {
+        summary
+    }
+}
 
 fn insert_gt_run(
     db: &DbInstance,
@@ -1474,6 +1710,85 @@ mod tests {
             r1.routing_decision.skipped_specialists, r2.routing_decision.skipped_specialists,
             "skipped specialists must be deterministic"
         );
+    }
+
+    #[test]
+    fn test_replay_routing_persists_refreshed_decision() {
+        let db = test_db();
+        let spec_path = std::path::Path::new("../../.archon/specs/gametheory.yaml");
+        if !spec_path.exists() {
+            eprintln!("spec file not found, skipping replay routing test");
+            return;
+        }
+
+        let fp = block_on(classify(
+            &db,
+            "Two firms simultaneously set prices in a Bertrand duopoly.",
+            None,
+        ))
+        .unwrap();
+        let rd = replay_routing_from_stored_fingerprint(&db, &fp.run_id, Some(spec_path)).unwrap();
+        assert!(!rd.enabled_specialists.is_empty());
+
+        let rows = db
+            .run_script(
+                "?[enabled] := *gt_routing_decisions{run_id, fingerprint_id, \
+                 enabled_specialists_json: enabled, skipped_specialists_json, \
+                 evaluated_conditions_json, created_at}, run_id = $rid",
+                {
+                    let mut p = std::collections::BTreeMap::new();
+                    p.insert("rid".into(), cozo::DataValue::from(fp.run_id.as_str()));
+                    p
+                },
+                cozo::ScriptMutability::Immutable,
+            )
+            .unwrap();
+        assert_eq!(rows.rows.len(), 1);
+        assert!(
+            rows.rows[0][0]
+                .get_str()
+                .unwrap()
+                .contains("game-classifier")
+        );
+    }
+
+    #[test]
+    fn test_replay_single_specialist_updates_source_of_truth() {
+        let db = test_db();
+        let fp = block_on(classify(
+            &db,
+            "Two firms simultaneously set prices in a Bertrand duopoly.",
+            None,
+        ))
+        .unwrap();
+
+        let replayed = block_on(replay_single_specialist(
+            &db,
+            &fp.run_id,
+            "nash-equilibrium-finder",
+            None,
+            GameTheoryMemoryContext::default(),
+            GameTheoryRunOptions::default(),
+        ))
+        .unwrap();
+        assert_eq!(replayed.status, "completed");
+        assert!(replayed.output_summary.contains("nash-equilibrium-finder"));
+
+        let rows = db
+            .run_script(
+                "?[output, status] := *gt_specialist_outputs{run_id, agent_key, \
+                 output_json: output, status}, run_id = $rid, agent_key = 'nash-equilibrium-finder'",
+                {
+                    let mut p = std::collections::BTreeMap::new();
+                    p.insert("rid".into(), cozo::DataValue::from(fp.run_id.as_str()));
+                    p
+                },
+                cozo::ScriptMutability::Immutable,
+            )
+            .unwrap();
+        assert_eq!(rows.rows.len(), 1);
+        assert_eq!(rows.rows[0][1].get_str().unwrap(), "completed");
+        assert!(rows.rows[0][0].get_str().unwrap().contains("Stub Analysis"));
     }
 
     #[test]

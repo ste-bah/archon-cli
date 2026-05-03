@@ -1,6 +1,6 @@
 //! CLI handler for `archon gametheory` commands.
 //!
-//! Subcommands: run, list-runs, show, inspect-routing, replay.
+//! Subcommands: run, list-runs, show, status, inspect, inspect-routing, replay.
 
 use std::sync::Arc;
 
@@ -8,6 +8,7 @@ use anyhow::Result;
 use cozo::DbInstance;
 
 use crate::cli_args::GametheoryAction;
+use crate::command::gametheory_inspect;
 use archon_core::config::ArchonConfig;
 use archon_core::env_vars::ArchonEnvVars;
 use archon_pipeline::gametheory;
@@ -45,10 +46,27 @@ pub async fn handle_gametheory(
         }
         GametheoryAction::ListRuns => handle_list_runs(),
         GametheoryAction::Show { run_id } => handle_show(run_id),
+        GametheoryAction::Status { run_id } => handle_status(run_id.as_deref()),
+        GametheoryAction::Inspect { artifact_id } => handle_inspect(artifact_id),
+        GametheoryAction::InspectFingerprint { run_id } => handle_inspect_fingerprint(run_id),
         GametheoryAction::InspectRouting { run_id } => handle_inspect_routing(run_id),
-        GametheoryAction::Replay { run_id, spec_path } => {
-            handle_replay(run_id, spec_path.as_deref(), config, env_vars)
+        GametheoryAction::Replay {
+            run_id,
+            spec_path,
+            reclassify,
+            rerun_specialist,
+        } => {
+            handle_replay(
+                run_id,
+                spec_path.as_deref(),
+                *reclassify,
+                rerun_specialist.as_deref(),
+                config,
+                env_vars,
+            )
+            .await
         }
+        GametheoryAction::ListAgents { tier } => handle_list_agents(*tier),
         GametheoryAction::Specimens { filter, ingest } => {
             handle_specimens(filter.as_deref(), *ingest)
         }
@@ -270,30 +288,7 @@ async fn run_full(
 
 fn handle_list_runs() -> Result<()> {
     let db = open_db()?;
-    gametheory::schema::ensure_gametheory_schema(&db)
-        .map_err(|e| anyhow::anyhow!("schema init failed: {e}"))?;
-
-    let result = db.run_script(
-        "?[run_id, started_at, status] := *gt_runs{run_id, situation, started_at, completed_at, status}",
-        Default::default(),
-        cozo::ScriptMutability::Immutable,
-    )
-    .map_err(|e| anyhow::anyhow!("query gt_runs failed: {e}"))?;
-
-    if result.rows.is_empty() {
-        println!("No game-theory runs found.");
-        return Ok(());
-    }
-
-    println!("Game-Theory Runs");
-    println!("================");
-    for row in &result.rows {
-        let run_id = row[0].get_str().unwrap_or("?");
-        let started = row[1].get_str().unwrap_or("?");
-        let status = row[2].get_str().unwrap_or("?");
-        println!("  {run_id}  {started}  {status}");
-    }
-    println!("{} run(s)", result.rows.len());
+    print!("{}", gametheory_inspect::render_list_runs(&db)?);
     Ok(())
 }
 
@@ -301,69 +296,31 @@ fn handle_list_runs() -> Result<()> {
 
 fn handle_show(run_id: &str) -> Result<()> {
     let db = open_db()?;
-    gametheory::schema::ensure_gametheory_schema(&db)
-        .map_err(|e| anyhow::anyhow!("schema init failed: {e}"))?;
+    print!("{}", gametheory_inspect::render_show(&db, run_id)?);
+    Ok(())
+}
 
-    // Query run info
-    let runs = db.run_script(
-        "?[situation, started_at, status] := *gt_runs{run_id, situation, started_at, completed_at, status}, run_id = $rid",
-        {
-            let mut p = std::collections::BTreeMap::new();
-            p.insert("rid".into(), cozo::DataValue::from(run_id));
-            p
-        },
-        cozo::ScriptMutability::Immutable,
-    )
-    .map_err(|e| anyhow::anyhow!("query gt_runs failed: {e}"))?;
+fn handle_status(run_id: Option<&str>) -> Result<()> {
+    let db = open_db()?;
+    print!("{}", gametheory_inspect::render_status(&db, run_id)?);
+    Ok(())
+}
 
-    if runs.rows.is_empty() {
-        println!("Run '{run_id}' not found.");
-        return Ok(());
-    }
+fn handle_inspect(artifact_id: &str) -> Result<()> {
+    let db = open_db()?;
+    print!(
+        "{}",
+        gametheory_inspect::render_inspect_artifact(&db, artifact_id)?
+    );
+    Ok(())
+}
 
-    let situation = runs.rows[0][0].get_str().unwrap_or("?");
-    let started = runs.rows[0][1].get_str().unwrap_or("?");
-    let status = runs.rows[0][2].get_str().unwrap_or("?");
-
-    println!("Run: {run_id}");
-    println!("  Situation:  {situation}");
-    println!("  Started:    {started}");
-    println!("  Status:     {status}");
-
-    // Query fingerprint
-    let fps = db.run_script(
-        "?[primary_family, created_at] := *gt_fingerprints{run_id, fingerprint_json, primary_family, created_at}, run_id = $rid",
-        {
-            let mut p = std::collections::BTreeMap::new();
-            p.insert("rid".into(), cozo::DataValue::from(run_id));
-            p
-        },
-        cozo::ScriptMutability::Immutable,
-    )
-    .map_err(|e| anyhow::anyhow!("query gt_fingerprints failed: {e}"))?;
-
-    if !fps.rows.is_empty() {
-        println!("  Family:     {}", fps.rows[0][0].get_str().unwrap_or("?"));
-    }
-
-    // Query report if available
-    let reports = db.run_script(
-        "?[word_count, created_at] := *gt_final_reports{run_id, report_md, created_at, total_cost_usd, total_duration_ms}, run_id = $rid",
-        {
-            let mut p = std::collections::BTreeMap::new();
-            p.insert("rid".into(), cozo::DataValue::from(run_id));
-            p
-        },
-        cozo::ScriptMutability::Immutable,
-    )
-    .map_err(|e| anyhow::anyhow!("query gt_final_reports failed: {e}"))?;
-
-    if !reports.rows.is_empty() {
-        let word_count = reports.rows[0][0].get_str().unwrap_or("?");
-        println!("  Report:     {word_count} words");
-    }
-
-    println!();
+fn handle_inspect_fingerprint(run_id: &str) -> Result<()> {
+    let db = open_db()?;
+    print!(
+        "{}",
+        gametheory_inspect::render_inspect_fingerprint(&db, run_id)?
+    );
     Ok(())
 }
 
@@ -371,107 +328,81 @@ fn handle_show(run_id: &str) -> Result<()> {
 
 fn handle_inspect_routing(run_id: &str) -> Result<()> {
     let db = open_db()?;
-    gametheory::schema::ensure_gametheory_schema(&db)
-        .map_err(|e| anyhow::anyhow!("schema init failed: {e}"))?;
-
-    let result = db
-        .run_script(
-            "?[enabled_specialists_json, skipped_specialists_json, evaluated_conditions_json] \
-         := *gt_routing_decisions{run_id, fingerprint_id, enabled_specialists_json, \
-         skipped_specialists_json, evaluated_conditions_json, created_at}, run_id = $rid",
-            {
-                let mut p = std::collections::BTreeMap::new();
-                p.insert("rid".into(), cozo::DataValue::from(run_id));
-                p
-            },
-            cozo::ScriptMutability::Immutable,
-        )
-        .map_err(|e| anyhow::anyhow!("query gt_routing_decisions failed: {e}"))?;
-
-    if result.rows.is_empty() {
-        println!("No routing decision found for run '{run_id}'.");
-        return Ok(());
-    }
-
-    let enabled_json = result.rows[0][0].get_str().unwrap_or("[]");
-    let skipped_json = result.rows[0][1].get_str().unwrap_or("[]");
-    let conditions_json = result.rows[0][2].get_str().unwrap_or("[]");
-
-    let enabled: Vec<String> = serde_json::from_str(enabled_json).unwrap_or_default();
-    let skipped: Vec<(String, String)> = serde_json::from_str(skipped_json).unwrap_or_default();
-    let conditions: Vec<(String, bool)> = serde_json::from_str(conditions_json).unwrap_or_default();
-
-    println!("Routing Decision for {run_id}");
-    println!("==============================");
-    println!();
-    println!("Enabled Specialists ({}):", enabled.len());
-    for agent in &enabled {
-        println!("  - {agent}");
-    }
-    println!();
-    if !skipped.is_empty() {
-        println!("Skipped Specialists ({}):", skipped.len());
-        for (agent, reason) in &skipped {
-            println!("  - {agent}: {reason}");
-        }
-        println!();
-    }
-    if !conditions.is_empty() {
-        println!("Evaluated Conditions ({}):", conditions.len());
-        for (expr, result) in &conditions {
-            println!("  [{result}] {expr}");
-        }
-        println!();
-    }
-
+    print!(
+        "{}",
+        gametheory_inspect::render_inspect_routing(&db, run_id)?
+    );
     Ok(())
 }
 
 // ── replay ───────────────────────────────────────────────────────────────────
 
-fn handle_replay(
+async fn handle_replay(
     run_id: &str,
     spec_path: Option<&str>,
-    _config: &ArchonConfig,
-    _env_vars: &ArchonEnvVars,
+    reclassify: bool,
+    rerun_specialist: Option<&str>,
+    config: &ArchonConfig,
+    env_vars: &ArchonEnvVars,
 ) -> Result<()> {
+    if reclassify && rerun_specialist.is_some() {
+        anyhow::bail!("--reclassify and --rerun-specialist cannot be combined");
+    }
+
     let db = open_db()?;
-    gametheory::schema::ensure_gametheory_schema(&db)
-        .map_err(|e| anyhow::anyhow!("schema init failed: {e}"))?;
 
-    // Load fingerprint
-    let fps = db.run_script(
-        "?[fingerprint_json] := *gt_fingerprints{run_id, fingerprint_json, primary_family, created_at}, run_id = $rid",
-        {
-            let mut p = std::collections::BTreeMap::new();
-            p.insert("rid".into(), cozo::DataValue::from(run_id));
-            p
-        },
-        cozo::ScriptMutability::Immutable,
-    )
-    .map_err(|e| anyhow::anyhow!("query gt_fingerprints failed: {e}"))?;
+    if reclassify {
+        let Some(situation) = gametheory_inspect::load_run_situation(&db, run_id)? else {
+            println!("Run '{run_id}' not found.");
+            return Ok(());
+        };
+        return run_full(
+            &db,
+            &situation,
+            spec_path,
+            false,
+            20.0,
+            4,
+            "executive",
+            config,
+            env_vars,
+        )
+        .await;
+    }
 
-    if fps.rows.is_empty() {
-        println!("Run '{run_id}' not found.");
+    if let Some(agent_key) = rerun_specialist {
+        let llm = build_llm_client(config, env_vars);
+        let llm_ref: Option<&dyn LlmClient> = llm.as_ref().map(|a| a as &dyn LlmClient);
+        let result = gametheory::replay_single_specialist(
+            &db,
+            run_id,
+            agent_key,
+            llm_ref,
+            open_memory_context(false)?,
+            gametheory::GameTheoryRunOptions::default(),
+        )
+        .await
+        .map_err(|e| anyhow::anyhow!("specialist replay failed: {e}"))?;
+
+        println!("Replay Specialist for {run_id}");
+        println!("==============================");
+        println!("Agent:    {}", result.agent_key);
+        println!("Status:   {}", result.status);
+        println!("Cost USD: ${:.6}", result.cost_usd);
+        println!("Output:   {}", result.output_summary);
         return Ok(());
     }
 
-    let fp_json = fps.rows[0][0].get_str().unwrap_or("");
-    let fingerprint: gametheory::GameTheoryFingerprint = serde_json::from_str(fp_json)
-        .map_err(|e| anyhow::anyhow!("failed to parse fingerprint: {e}"))?;
-
-    // Resolve spec path (same resolution as run_full_pipeline)
-    let resolved = gametheory::resolve_spec_path(spec_path.map(std::path::Path::new))
-        .map_err(|e| anyhow::anyhow!("failed to resolve spec path: {e}"))?;
-    let spec = gametheory::load_spec(&resolved)
-        .map_err(|e| anyhow::anyhow!("failed to load spec: {e}"))?;
-
-    let rd = gametheory::evaluate_routing(&spec, &fingerprint, run_id, &fingerprint.created_at)
-        .map_err(|e| anyhow::anyhow!("routing evaluation failed: {e}"))?;
+    let rd = gametheory::replay_routing_from_stored_fingerprint(
+        &db,
+        run_id,
+        spec_path.map(std::path::Path::new),
+    )
+    .map_err(|e| anyhow::anyhow!("routing replay failed: {e}"))?;
 
     println!("Replay Routing for {run_id}");
     println!("============================");
-    println!("Spec:        {}", resolved.display());
+    println!("Fingerprint: preserved from stored Tier 1 record");
     println!("Enabled: {}", rd.enabled_specialists.len());
     for agent in &rd.enabled_specialists {
         println!("  - {agent}");
@@ -483,6 +414,11 @@ fn handle_replay(
         }
     }
     println!();
+    Ok(())
+}
+
+fn handle_list_agents(tier: Option<u8>) -> Result<()> {
+    print!("{}", gametheory_inspect::render_list_agents(tier)?);
     Ok(())
 }
 

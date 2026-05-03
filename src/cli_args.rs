@@ -502,6 +502,21 @@ pub enum GametheoryAction {
         /// Run ID
         run_id: String,
     },
+    /// Show status for one run, or status counts for all runs
+    Status {
+        /// Optional run ID
+        run_id: Option<String>,
+    },
+    /// Inspect a run, specialist output, section, fingerprint, routing, or final report artifact
+    Inspect {
+        /// Artifact ID, e.g. gt-123, fingerprint:gt-123, specialist:gt-123:nash-equilibrium-finder
+        artifact_id: String,
+    },
+    /// Inspect the Tier 1 fingerprint for a run
+    InspectFingerprint {
+        /// Run ID
+        run_id: String,
+    },
     /// Inspect the routing decision for a run
     InspectRouting {
         /// Run ID
@@ -514,6 +529,18 @@ pub enum GametheoryAction {
         /// Path to gametheory spec YAML (searches known locations if omitted)
         #[arg(long, value_name = "PATH")]
         spec_path: Option<String>,
+        /// Re-run Tier 1 classification instead of preserving the stored fingerprint
+        #[arg(long)]
+        reclassify: bool,
+        /// Re-run a single specialist using the stored Tier 1 fingerprint
+        #[arg(long, value_name = "KEY")]
+        rerun_specialist: Option<String>,
+    },
+    /// List curated game-theory agents
+    ListAgents {
+        /// Restrict output to a single tier
+        #[arg(long, value_name = "N")]
+        tier: Option<u8>,
     },
     /// List or ingest the known-fingerprint specimen library
     Specimens {
