@@ -49,6 +49,7 @@ pub(crate) mod completion;
 pub(crate) mod gametheory_inspect;
 #[cfg(test)]
 mod gametheory_inspect_tests;
+pub(crate) mod gametheory_slash;
 pub(crate) mod garden;
 pub(crate) mod help;
 pub(crate) mod hooks;

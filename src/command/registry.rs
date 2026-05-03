@@ -1907,6 +1907,10 @@ pub(crate) fn default_registry() -> Registry {
     // src/command/context.rs is widened to fire on
     // primary == "summary" alongside "usage" and "extra-usage".
     b.insert_primary("summary", Arc::new(crate::command::summary::SummaryHandler));
+    b.insert_primary(
+        "gametheory",
+        Arc::new(crate::command::gametheory_slash::GameTheorySlashHandler),
+    );
     // Aliases are collected from each handler's aliases() method
     // inside RegistryBuilder::build(). Collisions panic.
     b.build()
