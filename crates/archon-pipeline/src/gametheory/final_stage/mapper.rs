@@ -51,11 +51,10 @@ mod tests {
 
         let assignments = map_to_sections(&outputs);
 
-        // nash-equilibrium-finder → EquilibriumAnalysis + FormalAnalysis
+        // nash-equilibrium-finder → EquilibriumAnalysis
         let sections: Vec<SectionType> = assignments.iter().map(|a| a.section).collect();
         assert!(sections.contains(&SectionType::EquilibriumAnalysis));
-        assert!(sections.contains(&SectionType::FormalAnalysis));
-        assert_eq!(assignments.len(), 2, "two sections for nash-equilibrium-finder");
+        assert_eq!(assignments.len(), 1, "one canonical section for nash-equilibrium-finder");
         for a in &assignments {
             assert_eq!(a.agent_key, "nash-equilibrium-finder");
         }

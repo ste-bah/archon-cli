@@ -41,30 +41,43 @@ impl SectionWriterProvider {
 
         let mut sections = Vec::new();
         for section_type in SectionType::all_ordered() {
-            if let Some(assigns) = by_section.get(&section_type) {
-                let contributors: Vec<String> = assigns
-                    .iter()
-                    .map(|a| a.agent_key.clone())
-                    .collect();
+            let assigns = by_section.get(&section_type).cloned().unwrap_or_default();
+            let contributors: Vec<String> = assigns.iter().map(|a| a.agent_key.clone()).collect();
 
-                let body = assigns
+            let body = if section_type == SectionType::ProvenanceFooter {
+                provenance_footer_body(&contributors)
+            } else if assigns.is_empty() {
+                "No specialist output was assigned to this section in this run.".to_string()
+            } else {
+                assigns
                     .iter()
                     .map(|a| a.content.as_str())
                     .collect::<Vec<_>>()
-                    .join("\n\n");
+                    .join("\n\n")
+            };
 
-                let content = format!("## {}\n\n{}", section_type.title(), body);
+            let content = format!("## {}\n\n{}", section_type.title(), body);
 
-                sections.push(SectionContent {
-                    section: section_type,
-                    content,
-                    contributors,
-                });
-            }
+            sections.push(SectionContent {
+                section: section_type,
+                content,
+                contributors,
+            });
         }
 
         sections
     }
+}
+
+fn provenance_footer_body(contributors: &[String]) -> String {
+    let contributors = if contributors.is_empty() {
+        "none recorded".to_string()
+    } else {
+        contributors.join(", ")
+    };
+    format!(
+        "Lineage: situation -> fingerprint -> enabled specialists -> section drafts -> final report.\n\nContributors: {contributors}"
+    )
 }
 
 #[cfg(test)]
@@ -90,10 +103,11 @@ mod tests {
         let writer = SectionWriterProvider;
         let sections = writer.synthesize_sections(&assignments);
 
-        assert_eq!(sections.len(), 2);
-        assert_eq!(sections[0].section, SectionType::EquilibriumAnalysis);
-        assert_eq!(sections[1].section, SectionType::Recommendations);
-        assert!(sections[0].content.contains("Nash eq found."));
-        assert!(sections[1].content.contains("Cooperate on first move."));
+        assert_eq!(sections.len(), 11);
+        let eq = sections.iter().find(|s| s.section == SectionType::EquilibriumAnalysis).unwrap();
+        let rec = sections.iter().find(|s| s.section == SectionType::Recommendations).unwrap();
+        assert!(eq.content.contains("Nash eq found."));
+        assert!(rec.content.contains("Cooperate on first move."));
+        assert!(sections.iter().any(|s| s.section == SectionType::ProvenanceFooter));
     }
 }

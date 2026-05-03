@@ -19,6 +19,9 @@ pub fn combine_sections(sections: &[SectionContent]) -> String {
     }
     report.push('\n');
 
+    report.push_str("## Fingerprint Summary\n\n");
+    report.push_str("See the `9-Axis Fingerprint` section for the persisted Tier 1 strategic fingerprint.\n\n");
+
     // Sections in order
     for sec in sections {
         report.push_str(&format!("{}\n", sec.content));
@@ -82,13 +85,52 @@ mod tests {
     #[test]
     fn test_combine_sections_has_table_of_contents() {
         let sections = vec![SectionContent {
-            section: SectionType::FormalAnalysis,
-            content: "## Formal Game-Theoretic Analysis\n\nAnalysis text.".to_string(),
+            section: SectionType::PayoffAndStrategyStructure,
+            content: "## Payoff and Strategy Structure\n\nAnalysis text.".to_string(),
             contributors: vec!["payoff-matrix-builder".to_string()],
         }];
 
         let report = combine_sections(&sections);
-        assert!(report.contains("[Formal Game-Theoretic Analysis]"));
-        assert!(report.contains("(#formal-game-theoretic-analysis)"));
+        assert!(report.contains("[Payoff and Strategy Structure]"));
+        assert!(report.contains("(#payoff-and-strategy-structure)"));
+    }
+
+    #[test]
+    fn test_combiner_outputs_all_11_sections_in_order() {
+        let sections = SectionType::all_ordered()
+            .into_iter()
+            .map(|section| SectionContent {
+                section,
+                content: format!("## {}\n\nBody.", section.title()),
+                contributors: vec!["game-classifier".to_string()],
+            })
+            .collect::<Vec<_>>();
+
+        let report = combine_sections(&sections);
+        let mut last_pos = 0usize;
+        for section in SectionType::all_ordered() {
+            let heading = format!("## {}", section.title());
+            let pos = report.find(&heading).unwrap_or_else(|| panic!("missing {heading}"));
+            assert!(pos >= last_pos, "{heading} emitted out of order");
+            last_pos = pos;
+        }
+    }
+
+    #[test]
+    fn test_combiner_includes_toc_fingerprint_summary_provenance_footer() {
+        let sections = SectionType::all_ordered()
+            .into_iter()
+            .map(|section| SectionContent {
+                section,
+                content: format!("## {}\n\nBody.", section.title()),
+                contributors: vec!["game-classifier".to_string()],
+            })
+            .collect::<Vec<_>>();
+
+        let report = combine_sections(&sections);
+
+        assert!(report.contains("## Contents"));
+        assert!(report.contains("## Fingerprint Summary"));
+        assert!(report.contains("## Provenance Footer"));
     }
 }
