@@ -15,3 +15,4 @@ pub mod embed;
 pub mod rerank;
 pub mod retrieval;
 pub mod answer;
+pub mod vlm;

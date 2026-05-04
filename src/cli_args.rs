@@ -509,6 +509,9 @@ pub enum GametheoryAction {
         /// Report style: executive, academic, or technical
         #[arg(long, default_value = "executive")]
         style: String,
+        /// Enable Tier 11 specialists when policy.gametheory.enable_tier11 also allows it
+        #[arg(long)]
+        enable_tier11: bool,
     },
     /// List all persisted game-theory runs
     ListRuns,

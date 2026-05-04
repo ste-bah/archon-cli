@@ -417,6 +417,23 @@ async fn handle_model_status() -> Result<()> {
         }
     }
 
+    match std::env::current_dir()
+        .map_err(anyhow::Error::from)
+        .and_then(|cwd| {
+            archon_policy::load_policy_for_workspace(&cwd).map_err(anyhow::Error::from)
+        }) {
+        Ok(load) => {
+            let decision = load.policy.docs_vlm_decision();
+            println!();
+            println!(
+                "VLM policy:    {} ({})",
+                if decision.allowed { "allowed" } else { "denied" },
+                decision.reason
+            );
+        }
+        Err(e) => println!("VLM policy:    unable to load policy — {e}"),
+    }
+
     Ok(())
 }
 

@@ -141,6 +141,7 @@ archon-docs = { path = "crates/archon-docs" }
 archon-knowledge = { path = "crates/archon-knowledge" }
 archon-meaning = { path = "crates/archon-meaning" }
 archon-constellation = { path = "crates/archon-constellation" }
+archon-policy = { path = "crates/archon-policy" }
 archon-provenance = { path = "crates/archon-provenance" }
 archon-pipeline = { path = "crates/archon-pipeline" }
 archon-completion = { path = "crates/archon-completion" }

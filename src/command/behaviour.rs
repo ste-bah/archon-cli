@@ -160,10 +160,37 @@ fn cmd_show(db: &DbInstance, id: &str) -> Result<()> {
 }
 
 fn cmd_apply(db: &DbInstance, proposal_id: &str) -> Result<()> {
+    let cwd = std::env::current_dir()?;
+    cmd_apply_with_workspace(db, proposal_id, &cwd)
+}
+
+fn cmd_apply_with_workspace(
+    db: &DbInstance,
+    proposal_id: &str,
+    workspace_dir: &std::path::Path,
+) -> Result<()> {
+    let proposal = archon_learning::store::get_behaviour_proposal(db, proposal_id)
+        .map_err(|e| anyhow::anyhow!("{e}"))?
+        .ok_or_else(|| anyhow::anyhow!("proposal not found: {proposal_id}"))?;
+    let policy = archon_policy::load_effective_policy(workspace_dir)
+        .map_err(|e| anyhow::anyhow!("failed to load policy: {e}"))?;
+    let recent_incidents = recent_false_completion_count(db)?;
+    let (decision, _) = archon_learning::policy::evaluate_proposal_with_policy(
+        db,
+        &proposal,
+        &policy,
+        recent_incidents,
+    )
+    .map_err(|e| anyhow::anyhow!("{e}"))?;
+    if decision != archon_learning::models::PolicyDecision::AutoApplied {
+        anyhow::bail!(
+            "policy denied auto-apply for {proposal_id}; use 'archon behaviour approve {proposal_id}' for human approval"
+        );
+    }
     let result = archon_learning::apply::apply_decision(
         db,
         proposal_id,
-        archon_learning::models::PolicyDecision::AutoApplied,
+        decision,
         None,
         Some("cli"),
     )
@@ -179,6 +206,15 @@ fn cmd_apply(db: &DbInstance, proposal_id: &str) -> Result<()> {
             .unwrap_or("N/A"),
     );
     Ok(())
+}
+
+fn recent_false_completion_count(db: &DbInstance) -> Result<usize> {
+    let events =
+        archon_learning::store::list_all_learning_events(db).map_err(|e| anyhow::anyhow!("{e}"))?;
+    Ok(events
+        .iter()
+        .filter(|event| event.event_type.as_str() == "FalseCompletionDetected")
+        .count())
 }
 
 fn cmd_history(db: &DbInstance, kind: &str) -> Result<()> {
@@ -333,4 +369,69 @@ fn cmd_rollback(db: &DbInstance, version_id: &str, reason: Option<&str>) -> Resu
         ver = result.new_version.version_number,
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use archon_learning::models::{
+        BehaviourManifestKind, BehaviourProposal, PolicyDecision, ProposalStatus, RiskLevel,
+    };
+
+    fn test_db() -> DbInstance {
+        let path = format!("/tmp/test-behaviour-policy-{}.db", uuid::Uuid::new_v4());
+        let db = DbInstance::new("sqlite", &path, "").unwrap();
+        archon_learning::schema::ensure_learning_schema(&db).unwrap();
+        db
+    }
+
+    fn seed_low_risk_proposal(db: &DbInstance) {
+        let proposal = BehaviourProposal {
+            proposal_id: "proposal-policy".into(),
+            workspace_id: "workspace".into(),
+            manifest_kind: BehaviourManifestKind::RetrievalProfile,
+            current_version: "v1".into(),
+            proposed_version: "v2".into(),
+            diff: "raise trusted source weight".into(),
+            evidence_ids: vec!["evidence-1".into()],
+            risk_level: RiskLevel::Low,
+            policy_decision: PolicyDecision::PendingApproval,
+            status: ProposalStatus::Pending,
+            created_at: "2026-05-03T00:00:00Z".into(),
+        };
+        archon_learning::store::insert_behaviour_proposal(db, &proposal).unwrap();
+    }
+
+    #[test]
+    fn behaviour_apply_default_policy_denies_auto_apply() {
+        let db = test_db();
+        seed_low_risk_proposal(&db);
+        let workspace = tempfile::tempdir().unwrap();
+        let err = cmd_apply_with_workspace(&db, "proposal-policy", workspace.path()).unwrap_err();
+        assert!(err.to_string().contains("policy denied auto-apply"));
+        let stored = archon_learning::store::get_behaviour_proposal(&db, "proposal-policy")
+            .unwrap()
+            .unwrap();
+        assert_eq!(stored.status, ProposalStatus::Pending);
+    }
+
+    #[test]
+    fn behaviour_apply_uses_workspace_policy_to_auto_apply() {
+        let db = test_db();
+        seed_low_risk_proposal(&db);
+        let workspace = tempfile::tempdir().unwrap();
+        let policy_dir = workspace.path().join(".archon");
+        std::fs::create_dir_all(&policy_dir).unwrap();
+        std::fs::write(
+            policy_dir.join("policy.toml"),
+            "[policy.learning]\nauto_apply_low_risk = true\n",
+        )
+        .unwrap();
+        cmd_apply_with_workspace(&db, "proposal-policy", workspace.path()).unwrap();
+        let stored = archon_learning::store::get_behaviour_proposal(&db, "proposal-policy")
+            .unwrap()
+            .unwrap();
+        assert_eq!(stored.status, ProposalStatus::Applied);
+        assert_eq!(stored.policy_decision, PolicyDecision::AutoApplied);
+    }
 }

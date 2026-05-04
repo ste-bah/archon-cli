@@ -45,6 +45,7 @@ impl GameTheoryExecutor for PipelineGameTheoryExecutor {
                 budget_usd: request.budget_usd.unwrap_or(20.0),
                 max_concurrent: request.max_concurrent.unwrap_or(4),
                 style_profile_id: Some(request.style.unwrap_or_else(|| "executive".into())),
+                enable_tier11: false,
             },
         )
         .await?;

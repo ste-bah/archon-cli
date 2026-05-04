@@ -3,7 +3,7 @@
 //! `classify` — Tier 1 classification only (fingerprint + persistence).
 //! `run_full_pipeline` — classify → route → specialist DAG → final report.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -62,6 +62,7 @@ pub struct GameTheoryRunOptions {
     pub budget_usd: f64,
     pub max_concurrent: usize,
     pub style_profile_id: Option<String>,
+    pub enable_tier11: bool,
 }
 
 impl Default for GameTheoryRunOptions {
@@ -70,6 +71,7 @@ impl Default for GameTheoryRunOptions {
             budget_usd: 20.0,
             max_concurrent: 4,
             style_profile_id: None,
+            enable_tier11: false,
         }
     }
 }
@@ -291,7 +293,16 @@ pub async fn run_full_pipeline_with_options(
 
     // 3. Evaluate routing
     let now = Utc::now().to_rfc3339();
-    let routing_decision = evaluate_routing(&spec, &fingerprint, &fingerprint.run_id, &now)?;
+    let mut routing_decision = evaluate_routing(&spec, &fingerprint, &fingerprint.run_id, &now)?;
+
+    // Tier 11 agents are high-impact intervention/mechanism specialists and
+    // require both a CLI request and policy approval before they enter a run.
+    let dep_map = build_dependency_map(&spec);
+    apply_policy_gates_to_routing(
+        &mut routing_decision,
+        &dep_map,
+        options.enable_tier11,
+    );
 
     // 4. Persist routing decision
     persist_routing_decision(db, &routing_decision).map_err(|e| GameTheoryError::Storage {
@@ -299,7 +310,6 @@ pub async fn run_full_pipeline_with_options(
     })?;
 
     // 5. Build dependency map from spec agent entries
-    let dep_map = build_dependency_map(&spec);
 
     // 6. Build specialist DAG spec
     let _pipeline_spec = build_specialist_spec(&routing_decision, &dep_map, &spec, situation);
@@ -549,6 +559,44 @@ fn build_dependency_map(spec: &GameTheorySpec) -> HashMap<String, Vec<String>> {
         }
     }
     map
+}
+
+fn apply_policy_gates_to_routing(
+    routing: &mut RoutingDecision,
+    dep_map: &HashMap<String, Vec<String>>,
+    enable_tier11: bool,
+) {
+    let mut skipped = Vec::new();
+    let mut enabled: Vec<String> = routing.enabled_specialists.clone();
+    loop {
+        let enabled_set: HashSet<String> = enabled.iter().cloned().collect();
+        let before = enabled.len();
+        enabled.retain(|agent_key| {
+            if !enable_tier11 && agent_tier(agent_key) == Some(11) {
+                skipped.push((
+                    agent_key.clone(),
+                    "Tier 11 disabled: pass --enable-tier11 and set policy.gametheory.enable_tier11=true".to_string(),
+                ));
+                return false;
+            }
+            if let Some(missing_dep) = dep_map
+                .get(agent_key)
+                .and_then(|deps| deps.iter().find(|dep| !enabled_set.contains(*dep)))
+            {
+                skipped.push((
+                    agent_key.clone(),
+                    format!("dependency '{missing_dep}' was skipped by policy"),
+                ));
+                return false;
+            }
+            true
+        });
+        if enabled.len() == before {
+            break;
+        }
+    }
+    routing.enabled_specialists = enabled;
+    routing.skipped_specialists.extend(skipped);
 }
 
 /// Execute specialists with failure isolation.
@@ -1528,6 +1576,35 @@ mod tests {
     }
 
     #[test]
+    fn test_tier11_policy_gate_removes_agent_and_dependents() {
+        let mut routing = RoutingDecision {
+            run_id: "run-policy".into(),
+            fingerprint_id: "fp-policy".into(),
+            enabled_specialists: vec![
+                "cohesion-discipline-devotion-auditor".into(),
+                "dependent-agent".into(),
+            ],
+            skipped_specialists: vec![],
+            evaluated_conditions: vec![],
+            created_at: "2026-05-03T00:00:00Z".into(),
+        };
+        let mut deps = HashMap::new();
+        deps.insert(
+            "dependent-agent".to_string(),
+            vec!["cohesion-discipline-devotion-auditor".to_string()],
+        );
+        apply_policy_gates_to_routing(&mut routing, &deps, false);
+        assert!(routing.enabled_specialists.is_empty());
+        assert_eq!(routing.skipped_specialists.len(), 2);
+        assert!(
+            routing
+                .skipped_specialists
+                .iter()
+                .any(|(_, reason)| reason.contains("Tier 11 disabled"))
+        );
+    }
+
+    #[test]
     fn test_classify_only_persists_run_and_fingerprint() {
         let db = test_db();
         let fp = block_on(classify(&db, "Two firms simultaneously set prices.", None)).unwrap();
@@ -2248,6 +2325,7 @@ mod tests {
                 budget_usd: 0.0001,
                 max_concurrent: 1,
                 style_profile_id: Some("executive".to_string()),
+                enable_tier11: false,
             },
         ))
         .unwrap();
@@ -2317,6 +2395,7 @@ mod tests {
                 budget_usd: 20.0,
                 max_concurrent: 1,
                 style_profile_id: None,
+                enable_tier11: false,
             },
         ))
         .unwrap();
@@ -2344,6 +2423,7 @@ mod tests {
                 budget_usd: 20.0,
                 max_concurrent: 1,
                 style_profile_id: Some("technical".to_string()),
+                enable_tier11: false,
             },
         ))
         .unwrap();

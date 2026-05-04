@@ -118,6 +118,20 @@ pub fn evaluate_proposal(
     Ok((PolicyDecision::PendingApproval, outcomes))
 }
 
+/// Evaluate a proposal using the loaded Evidence Engine TOML policy.
+pub fn evaluate_proposal_with_policy(
+    db: &DbInstance,
+    proposal: &BehaviourProposal,
+    policy: &archon_policy::EffectivePolicy,
+    recent_incident_count: usize,
+) -> Result<(PolicyDecision, Vec<PolicyOutcome>), crate::errors::LearningError> {
+    let decision = policy.learning_auto_apply_decision(
+        proposal.manifest_kind.as_str(),
+        proposal.risk_level.as_str(),
+    );
+    evaluate_proposal(db, proposal, decision.allowed, recent_incident_count)
+}
+
 /// Record a single policy rule evaluation and its outcome.
 fn record_rule(
     db: &DbInstance,
@@ -252,5 +266,22 @@ mod tests {
         let rows = store::list_policy_decisions_for_proposal(&db, "test-prop-1").unwrap();
         assert!(!rows.is_empty());
         assert_eq!(rows[0].rule_name, outcomes[0].rule_name);
+    }
+
+    #[test]
+    fn test_loaded_policy_controls_auto_apply_gate() {
+        let db = test_db();
+        let proposal = make_proposal(
+            BehaviourManifestKind::RetrievalProfile,
+            RiskLevel::Low,
+        );
+        let denied = archon_policy::EffectivePolicy::default();
+        let (decision, _) = evaluate_proposal_with_policy(&db, &proposal, &denied, 0).unwrap();
+        assert_eq!(decision, PolicyDecision::PendingApproval);
+
+        let mut allowed = archon_policy::EffectivePolicy::default();
+        allowed.learning.auto_apply_low_risk = true;
+        let (decision, _) = evaluate_proposal_with_policy(&db, &proposal, &allowed, 0).unwrap();
+        assert_eq!(decision, PolicyDecision::AutoApplied);
     }
 }

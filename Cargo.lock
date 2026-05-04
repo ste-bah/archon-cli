@@ -336,6 +336,7 @@ dependencies = [
  "archon-permissions",
  "archon-pipeline",
  "archon-plugin",
+ "archon-policy",
  "archon-provenance",
  "archon-sdk",
  "archon-session",
@@ -492,6 +493,7 @@ name = "archon-docs"
 version = "0.1.36"
 dependencies = [
  "anyhow",
+ "archon-policy",
  "archon-provenance",
  "async-trait",
  "chrono",
@@ -563,6 +565,7 @@ name = "archon-learning"
 version = "0.1.36"
 dependencies = [
  "anyhow",
+ "archon-policy",
  "chrono",
  "cozo-ce",
  "serde",
@@ -760,6 +763,17 @@ dependencies = [
  "tracing",
  "wasmtime",
  "wat",
+]
+
+[[package]]
+name = "archon-policy"
+version = "0.1.36"
+dependencies = [
+ "dirs",
+ "serde",
+ "tempfile",
+ "thiserror 2.0.18",
+ "toml",
 ]
 
 [[package]]

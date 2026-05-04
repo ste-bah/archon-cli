@@ -30,6 +30,7 @@ pub async fn handle_gametheory(
             budget,
             max_concurrent,
             style,
+            enable_tier11,
         } => {
             handle_run(
                 situation,
@@ -39,6 +40,7 @@ pub async fn handle_gametheory(
                 *budget,
                 *max_concurrent,
                 style,
+                *enable_tier11,
                 config,
                 env_vars,
             )
@@ -126,6 +128,7 @@ async fn handle_run(
     budget: f64,
     max_concurrent: usize,
     style: &str,
+    enable_tier11: bool,
     config: &ArchonConfig,
     env_vars: &ArchonEnvVars,
 ) -> Result<()> {
@@ -142,6 +145,7 @@ async fn handle_run(
             budget,
             max_concurrent,
             style,
+            enable_tier11,
             config,
             env_vars,
         )
@@ -188,6 +192,7 @@ async fn run_full(
     budget: f64,
     max_concurrent: usize,
     style: &str,
+    enable_tier11: bool,
     config: &ArchonConfig,
     env_vars: &ArchonEnvVars,
 ) -> Result<()> {
@@ -195,10 +200,12 @@ async fn run_full(
     let llm_ref: Option<&dyn LlmClient> = llm.as_ref().map(|a| a as &dyn LlmClient);
     let path = spec_path.map(std::path::Path::new);
     let memory_ctx = open_memory_context(debug_memory)?;
+    let tier11_allowed = resolve_tier11_policy(enable_tier11)?;
     let options = gametheory::GameTheoryRunOptions {
         budget_usd: budget,
         max_concurrent,
         style_profile_id: Some(style.to_string()),
+        enable_tier11: tier11_allowed,
     };
 
     match gametheory::run_full_pipeline_with_options(
@@ -226,6 +233,7 @@ async fn run_full(
             println!("Max Concurrent:    {max_concurrent}");
             println!("Observed Concurrent: {}", result.max_observed_concurrent);
             println!("Style:             {style}");
+            println!("Tier 11:           {}", if tier11_allowed { "enabled" } else { "disabled" });
             println!(
                 "Report Length:     {} words",
                 result.report.split_whitespace().count()
@@ -364,6 +372,7 @@ async fn handle_replay(
             20.0,
             4,
             "executive",
+            false,
             config,
             env_vars,
         )
@@ -415,6 +424,27 @@ async fn handle_replay(
     }
     println!();
     Ok(())
+}
+
+fn resolve_tier11_policy(requested: bool) -> Result<bool> {
+    resolve_tier11_policy_for_workspace(requested, &std::env::current_dir()?)
+}
+
+fn resolve_tier11_policy_for_workspace(
+    requested: bool,
+    workspace_dir: &std::path::Path,
+) -> Result<bool> {
+    if !requested {
+        return Ok(false);
+    }
+    let load = archon_policy::load_policy_for_workspace(workspace_dir)
+        .map_err(|e| anyhow::anyhow!("failed to load policy: {e}"))?;
+    let decision = load.policy.gametheory_tier11_decision();
+    if decision.allowed {
+        Ok(true)
+    } else {
+        anyhow::bail!("--enable-tier11 denied: {}", decision.reason)
+    }
 }
 
 fn handle_list_agents(tier: Option<u8>) -> Result<()> {
@@ -561,5 +591,21 @@ mod tests {
     fn test_non_empty_preserves_valid_values() {
         assert_eq!(non_empty(Some("sk-ant-123")), Some("sk-ant-123"));
         assert_eq!(non_empty(Some(" ")), Some(" ")); // whitespace is NOT empty
+    }
+
+    #[test]
+    fn test_tier11_requires_policy_approval() {
+        let tmp = tempfile::tempdir().unwrap();
+        let denied = resolve_tier11_policy_for_workspace(true, tmp.path()).unwrap_err();
+        assert!(denied.to_string().contains("Tier 11 is disabled"));
+
+        let policy_dir = tmp.path().join(".archon");
+        std::fs::create_dir_all(&policy_dir).unwrap();
+        std::fs::write(
+            policy_dir.join("policy.toml"),
+            "[policy.gametheory]\nenable_tier11 = true\n",
+        )
+        .unwrap();
+        assert!(resolve_tier11_policy_for_workspace(true, tmp.path()).unwrap());
     }
 }

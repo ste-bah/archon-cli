@@ -5,6 +5,7 @@ edition.workspace = true
 publish = false
 
 [dependencies]
+archon-policy = { path = "../archon-policy" }
 cozo.workspace = true
 serde.workspace = true
 serde_json.workspace = true
