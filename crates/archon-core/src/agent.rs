@@ -851,6 +851,7 @@ impl Agent {
                     StreamEvent::SignatureDelta { signature, .. } => {
                         thinking_signature.push_str(&signature);
                     }
+                    StreamEvent::ReasoningEncrypted { .. } => {}
 
                     StreamEvent::Error {
                         error_type,

@@ -19,7 +19,10 @@ fn main() {
     let auth_url = client.build_authorize_url("challenge", "state");
     let account_id = decode_account_id_from_jwt(&synthetic_jwt("acct_smoke")).unwrap_or_default();
 
-    println!("auth_url_contains_client={}", auth_url.contains("client_id="));
+    println!(
+        "auth_url_contains_client={}",
+        auth_url.contains("client_id=")
+    );
     println!("decoded_account_id={account_id}");
     assert_eq!(account_id, "acct_smoke");
     println!("OK: codex oauth smoke");

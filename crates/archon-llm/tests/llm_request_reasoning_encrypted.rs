@@ -31,5 +31,8 @@ fn field_is_4kb_safe() {
     let request = LlmRequest::default().with_reasoning_encrypted(Some(blob.clone()));
 
     assert_eq!(request.reasoning_encrypted.as_deref(), Some(blob.as_str()));
-    assert_eq!(request.reasoning_encrypted.as_deref().map(str::len), Some(4096));
+    assert_eq!(
+        request.reasoning_encrypted.as_deref().map(str::len),
+        Some(4096)
+    );
 }

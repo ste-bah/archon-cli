@@ -49,6 +49,9 @@ pub enum StreamEvent {
         error_type: String,
         message: String,
     },
+    ReasoningEncrypted {
+        blob: String,
+    },
 }
 
 // ---------------------------------------------------------------------------

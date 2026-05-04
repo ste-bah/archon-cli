@@ -5,8 +5,8 @@ use base64::Engine;
 use chrono::Utc;
 
 fn jwt_with_payload(payload: serde_json::Value) -> String {
-    let header = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .encode(r#"{"alg":"none","typ":"JWT"}"#);
+    let header =
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(r#"{"alg":"none","typ":"JWT"}"#);
     let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(payload.to_string());
     format!("{header}.{payload}.signature")
 }
