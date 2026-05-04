@@ -70,12 +70,19 @@ fn splash_includes_activity_entries() {
 
 #[test]
 fn splash_has_logo() {
+    // v0.1.40: splash compact text logo replaces the literal "ARCHON" word
+    // with an ASCII figlet of A-R-C-H-O-N + tagline lines. Match on the
+    // tagline since the figlet glyphs alone are layout-noise. Source:
+    // crates/archon-tui/src/splash.rs::ASCII_FALLBACK.
     let lines = render_splash("m", "/tmp", &[]);
     let text: String = lines
         .iter()
         .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref()))
         .collect();
-    assert!(text.contains("ARCHON"), "splash should contain ASCII logo");
+    assert!(
+        text.contains("evidence + agents"),
+        "splash should contain ASCII logo tagline 'evidence + agents'; got:\n{text}"
+    );
 }
 
 // ── format_relative_time tests ────────────────────────────────────
@@ -191,12 +198,15 @@ fn draw_splash_shows_version() {
 
 #[test]
 fn draw_splash_shows_tips() {
+    // v0.1.40: tips refreshed away from /model toward auth-aware tips:
+    // /auth status, /agents, /docs ingest, /gametheory run.
+    // Source: crates/archon-tui/src/splash.rs ~line 259.
     let mut buf = Buffer::empty(Rect::new(0, 0, 80, 30));
     draw_splash(&mut buf, Rect::new(0, 0, 80, 30), "test", "/tmp", &[]);
     let content = buffer_to_string(&buf);
     assert!(
-        content.contains("/model to switch models") || content.contains("/model"),
-        "should contain tip about /model"
+        content.contains("/auth status") || content.contains("/docs ingest"),
+        "should contain at least one v0.1.40 tip (/auth status or /docs ingest); got:\n{content}"
     );
 }
 
@@ -344,7 +354,12 @@ fn halfblock_render_preserves_aspect_ratio_tall_area() {
 
 #[test]
 fn splash_image_area_height_is_12() {
-    // Render splash into 80×40 and verify we get 12 rows of image content.
+    // v0.1.40: splash now hard-uses ASCII fallback (use_ascii_fallback=true
+    // in src/splash.rs) — the halfblock U+2580 avatar renderer is retained
+    // for compatibility but unused at runtime. The image area is still
+    // image_area_height=12 rows; verify by counting non-blank rows in the
+    // ASCII logo region (rows 4-15 inclusive of `image_area_top..top+12`).
+    // Source: ASCII_FALLBACK is 8 lines + 4 padding rows = 12 rows total.
     let mut buf = Buffer::empty(Rect::new(0, 0, 80, 40));
     let activity = vec![ActivityEntry {
         when: "1h ago".into(),
@@ -358,27 +373,28 @@ fn splash_image_area_height_is_12() {
         &activity,
     );
 
-    // The image area starts at y=4 (image_area_top) and spans image_area_height=12 rows.
-    // Count cells in that region that contain halfblock U+2580 glyphs.
     let image_top = 4u16;
     let image_bot = image_top + 12;
-    let mut halfblock_rows = 0u32;
+    let mut content_rows = 0u32;
     for y in image_top..image_bot {
         let mut row_has_content = false;
         for x in 1..40u16 {
-            if let Some(cell) = buf.cell((x, y))
-                && cell.symbol().contains('▀')
-            {
-                row_has_content = true;
-                break;
+            if let Some(cell) = buf.cell((x, y)) {
+                let s = cell.symbol();
+                // Any non-space/non-border glyph counts as "content"
+                // (the ASCII fallback uses /, _, |, etc.).
+                if !s.is_empty() && s != " " && s != "│" && s != "┃" {
+                    row_has_content = true;
+                    break;
+                }
             }
         }
         if row_has_content {
-            halfblock_rows += 1;
+            content_rows += 1;
         }
     }
     assert!(
-        halfblock_rows >= 8,
-        "expected >= 8 rows with halfblock glyphs in image area, got {halfblock_rows}"
+        content_rows >= 8,
+        "expected >= 8 rows with ASCII logo content in image area (rows 4..16), got {content_rows}"
     );
 }

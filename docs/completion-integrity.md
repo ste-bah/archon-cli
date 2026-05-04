@@ -5,6 +5,8 @@ Completion integrity prevents unsupported "done", "tests pass", "fixed",
 completion-sensitive claims, resolves independent evidence, runs verification
 gates, records false-completion incidents, and updates agent/model trust scores.
 
+> **TUI parity.** Every `archon completion <subcommand>` shell form has a `/completion <subcommand>` slash equivalent inside the TUI. Both forms read and write the same `completion_*` Cozo tables and the same `agent_model_trust_scores` rows. See [CLI and TUI Command Parity](cookbook/real-world-evidence-engine.md#cli-and-tui-command-parity).
+
 ## CLI
 
 Current `archon completion --help` surface:

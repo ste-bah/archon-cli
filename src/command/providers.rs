@@ -1,6 +1,6 @@
 //! TASK-#210 SLASH-PROVIDERS — `/providers` slash-command handler.
 //!
-//! Lists every LLM provider registered in the workspace (36 total =
+//! Lists every LLM provider registered in the workspace (37 total =
 //! 5 native + 31 OpenAI-compatible) by reading the static
 //! `archon_llm::providers::{list_native, list_compat}` registries.
 //! No session state is touched — both registries are
@@ -194,7 +194,7 @@ mod tests {
     fn execute_emits_total_count_line() {
         let body = render();
         assert!(
-            body.contains("36 total: 5 native + 31 openai-compat"),
+            body.contains("37 total: 6 native + 31 openai-compat"),
             "totals line missing or wrong; body:\n{}",
             body
         );
@@ -203,7 +203,7 @@ mod tests {
     #[test]
     fn execute_lists_both_section_headers() {
         let body = render();
-        assert!(body.contains("NATIVE (5)"), "missing NATIVE header");
+        assert!(body.contains("NATIVE (6)"), "missing NATIVE header");
         assert!(
             body.contains("OPENAI-COMPAT (31)"),
             "missing OPENAI-COMPAT header"
@@ -213,8 +213,15 @@ mod tests {
     #[test]
     fn execute_lists_known_native_providers() {
         let body = render();
-        // Spot-check the 5 native providers (GHOST-003: 4 stubs removed).
-        for id in ["openai", "anthropic", "gemini", "xai", "bedrock"] {
+        // Spot-check the 6 native providers (GHOST-003: 4 stubs removed; v0.1.40: openai-codex added).
+        for id in [
+            "openai",
+            "anthropic",
+            "gemini",
+            "xai",
+            "bedrock",
+            "openai-codex",
+        ] {
             assert!(
                 body.contains(id),
                 "native provider id `{}` missing from output; body:\n{}",
@@ -251,15 +258,15 @@ mod tests {
     fn execute_total_row_count_matches_registry_size() {
         // Render and count the data rows (lines starting with two
         // spaces and a non-dash, non-`id` character — i.e. provider
-        // rows, not the header or divider). Must equal 40.
+        // rows, not the header or divider). Must equal 37 (6 native + 31 compat).
         let body = render();
         let row_count = body
             .lines()
             .filter(|l| l.starts_with("  ") && !l.starts_with("  -") && !l.starts_with("  id "))
             .count();
         assert_eq!(
-            row_count, 36,
-            "expected exactly 36 provider rows; got {}; body:\n{}",
+            row_count, 37,
+            "expected exactly 37 provider rows; got {}; body:\n{}",
             row_count, body
         );
     }
@@ -358,7 +365,7 @@ mod tests {
             TuiEvent::TextDelta(s) => s.clone(),
             other => panic!("expected TextDelta, got {:?}", other),
         };
-        assert!(body.contains("36 total"));
+        assert!(body.contains("37 total"));
         assert!(body.contains("NATIVE (5)"));
         assert!(body.contains("OPENAI-COMPAT (31)"));
     }

@@ -4,6 +4,8 @@ Provenance records why an artifact exists and how it traces back to source
 material. The Evidence Engine uses provenance for document chunks, answers,
 game-theory reports, completion evidence, and later build/code artifacts.
 
+> **TUI parity.** Every `archon prov <subcommand>` shell form has a `/prov <subcommand>` slash equivalent inside the TUI; same goes for `archon docs provenance` → `/docs provenance`. Both forms read the same persisted chain-hash and artifact-lineage rows. See [CLI and TUI Command Parity](cookbook/real-world-evidence-engine.md#cli-and-tui-command-parity).
+
 ## CLI
 
 Current `archon prov --help` surface:

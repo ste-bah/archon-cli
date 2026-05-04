@@ -2,6 +2,8 @@
 
 archon-cli is a 21-crate Cargo workspace. There are no precompiled binaries — clone, install Rust, build with `cargo build --release`. End-to-end build time is ~3-4 minutes on a modern laptop, longer on WSL2.
 
+> **After install: TUI parity.** All examples in the rest of the docs show shell commands like `archon docs ingest ./path`. Inside the TUI those become `/docs ingest ./path` (drop the `archon` and prefix with `/`). Both forms work; both go through the same crates and write to the same persisted state. See [CLI and TUI Command Parity](../cookbook/real-world-evidence-engine.md#cli-and-tui-command-parity).
+
 ## Prerequisites
 
 | Requirement | Minimum | Notes |

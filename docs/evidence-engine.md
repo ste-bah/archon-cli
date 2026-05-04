@@ -6,6 +6,8 @@ completion-integrity checks, learning signals, meaning datasets, and
 constellation centroids in queryable local state instead of leaving them as
 transient model output.
 
+> **TUI parity.** Every `archon X` shell command in this doc has a `/X` slash equivalent inside the TUI. Both forms drive the same crate machinery and the same Cozo source-of-truth tables. See [CLI and TUI Command Parity](cookbook/real-world-evidence-engine.md#cli-and-tui-command-parity). The end-to-end flow below shows the shell form for clarity; replace each `archon X` with `/X` to drive the same pipeline from inside the TUI.
+
 ## Combined architecture
 
 | Layer | Crate or module | Source of truth | Main commands |
@@ -51,6 +53,8 @@ flowchart TB
 
 ## End-to-end flow
 
+CLI form (e.g., scripted from a shell):
+
 ```bash
 archon docs ingest ./policy-pack
 archon docs index --all
@@ -58,6 +62,17 @@ archon kb process --claims --entities --contradictions
 archon gametheory run "Assess the incentive structure of this plugin marketplace design" --budget 20 --max-concurrent 4
 archon meaning build --from gametheory-runs
 archon constellation build --target strategic-workflow
+```
+
+TUI form (same flow, driven from inside an interactive session):
+
+```
+> /docs ingest ./policy-pack
+> /docs index --all
+> /kb process --claims --entities --contradictions
+> /gametheory run "Assess the incentive structure of this plugin marketplace design" --budget 20 --max-concurrent 4
+> /meaning build --from gametheory-runs
+> /constellation build --target strategic-workflow
 ```
 
 Every stage should leave physical evidence behind. Use the inspection commands

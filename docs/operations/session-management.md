@@ -2,6 +2,8 @@
 
 Sessions store full message history, git branch, working directory, token usage, cost, and a name in CozoDB at `~/.local/share/archon/sessions.db`.
 
+> **TUI parity.** The session-management commands shown below as `archon --resume`, `archon --continue-session`, etc. are all available inside the TUI as slash commands: `/resume`, `/sessions`, `/rename`, `/fork`, `/tag`. See [CLI and TUI Command Parity](../cookbook/real-world-evidence-engine.md#cli-and-tui-command-parity). The CLI flags exist primarily for fresh-launch invocations and scripting; in-session work prefers the slash forms.
+
 ## Auto-resume
 
 By default archon-cli auto-resumes the most recent session in the current working directory:

@@ -2,6 +2,8 @@
 
 archon-cli can be controlled remotely via WebSocket, SSH, web UI, or headless JSON-lines mode.
 
+> **TUI parity.** The bring-up commands here (`archon serve`, `archon remote ws`, `archon remote ssh`, `archon web`) are launch-time shell entry points. Once a remote session is established the slash command surface is identical to a local TUI session — every `/X` slash works the same over WebSocket / SSH / web as it does on the local terminal. See [CLI and TUI Command Parity](../cookbook/real-world-evidence-engine.md#cli-and-tui-command-parity).
+
 ## WebSocket server
 
 Start the server:
