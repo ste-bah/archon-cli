@@ -113,6 +113,175 @@ Interactive TUI users get one umbrella command:
 | `/gametheory list-agents [--tier N]` | List specialists |
 | `/gametheory specimens [--filter axis=value] [--ingest]` | Inspect specimen library |
 
+## End-to-end TUI walkthrough
+
+The pipeline is async — `/gametheory run` queues a run and returns immediately with a `run-id`. You then use the inspection commands to watch it progress. Here's a real session for evaluating a strategic decision.
+
+### Step 0 — ingest source material (optional but recommended)
+
+If the analysis depends on documents, ingest them first as a knowledge pack:
+
+```
+> /docs ingest --pack plugin-marketplace ./docs/research/marketplace-design.md ./docs/research/dev-incentives.md
+[ingest] 2 documents, 47 chunks, 12 entities, 38 claims persisted
+[ingest] pack id: plugin-marketplace
+```
+
+The pack id is what `--kb` consumes. Skip this step if you want a model-only analysis.
+
+### Step 1 — classify-only first (cheap fingerprint)
+
+Before paying for a full specialist run, see what the pipeline thinks the situation IS. `--classify-only` runs Tier 1 only:
+
+```
+> /gametheory classify-only "Assess whether a marketplace ranking algorithm creates incentives for plugin developers to game reviews instead of improve quality"
+[gametheory] queued run 01HYCDB7T2QM8R… (classify-only)
+[gametheory] Tier 1 fingerprint complete (3.4s, $0.012)
+```
+
+Inspect what came back:
+
+```
+> /gametheory inspect-fingerprint 01HYCDB7T2QM8R…
+─── Tier 1 Fingerprint ─────────────────────────────────────────
+  axes:
+    information.symmetry        = asymmetric
+    information.public_signals  = present (rankings, reviews)
+    moves.sequencing            = simultaneous
+    moves.commitment            = none
+    payoffs.alignment           = misaligned
+    payoffs.zero_sum            = false
+    actors.count                = many
+    actors.identity_known       = pseudonymous
+    repetition                  = repeated
+    horizon                     = infinite
+  hypothesis: principal-agent with hidden action; signal-jamming feasible
+─────────────────────────────────────────────────────────────────
+```
+
+Wrong axes? Stop here, refine the situation prompt, re-classify. Cheap.
+
+### Step 2 — full run with budget cap
+
+Once the fingerprint looks right, kick off the full pipeline:
+
+```
+> /gametheory run "Assess whether a marketplace ranking algorithm creates incentives for plugin developers to game reviews instead of improve quality" --kb plugin-marketplace --budget 15 --style executive
+[gametheory] queued run 01HYCDC4XKM91Y… (full)
+[gametheory] cost cap: $15.00, max-concurrent: 4, style: executive
+[gametheory] use /gametheory status 01HYCDC4XKM91Y… to monitor
+```
+
+The TUI returns to the prompt immediately. The pipeline runs in the background.
+
+### Step 3 — see what specialists got picked
+
+```
+> /gametheory inspect-routing 01HYCDC4XKM91Y…
+─── Routing Decision ───────────────────────────────────────────
+  enabled (7):
+    asymmetric-info-detective         (mandatory: information.symmetry=asymmetric)
+    behavioral-bias-detector          (cond: actors.count>3)
+    cheap-talk-evaluator              (cond: information.public_signals=present)
+    auction-strategist                (cond: payoffs.alignment=misaligned)
+    bayesian-belief-updater           (cond: repetition=repeated)
+    business-strategy-gamifier        (mandatory: domain=business)
+    bluff-and-deception-analyst       (cond: information.symmetry=asymmetric AND moves.commitment=none)
+  skipped (4):
+    backward-induction-solver         (skip: horizon=infinite, not finite)
+    centipede-game-analyst            (skip: actors.count>2 violated)
+    auction-format-comparer           (skip: domain≠auction)
+    coalition-stability-checker       (skip: payoffs.zero_sum=false AND actors.count>10)
+─────────────────────────────────────────────────────────────────
+```
+
+Don't like the routing? `replay --rerun-specialist <key>` after the run completes, or refine the spec YAML.
+
+### Step 4 — monitor live
+
+```
+> /gametheory status 01HYCDC4XKM91Y…
+─── Run 01HYCDC4XKM91Y… ────────────────────────────────────────
+  status:        InProgress
+  phase:         specialists
+  agents:        3/7 complete, 2 running, 2 queued
+  cost:          $4.18 / $15.00
+  started:       2026-05-04 19:34:12Z
+  elapsed:       00:02:48
+
+  agent breakdown:
+    asymmetric-info-detective    DONE     ($0.62, 18.4s)
+    behavioral-bias-detector     DONE     ($0.71, 22.1s)
+    cheap-talk-evaluator         DONE     ($0.55, 16.0s)
+    auction-strategist           RUNNING  ($1.24 so far, 41.2s)
+    bayesian-belief-updater      RUNNING  ($1.06 so far, 38.7s)
+    business-strategy-gamifier   QUEUED   —
+    bluff-and-deception-analyst  QUEUED   —
+─────────────────────────────────────────────────────────────────
+```
+
+### Step 5 — read the final report
+
+When `status` shows `Complete`:
+
+```
+> /gametheory show 01HYCDC4XKM91Y…
+[gametheory] writing report to .archon/gametheory/01HYCDC4XKM91Y…/report.md
+─── Final Report (executive style) ─────────────────────────────
+  # Marketplace Ranking — Strategic Risk Assessment
+  ...
+─────────────────────────────────────────────────────────────────
+```
+
+Inspect a single specialist's reasoning:
+
+```
+> /gametheory inspect specialist:01HYCDC4XKM91Y…:asymmetric-info-detective
+```
+
+### Step 6 — replay with a tweak
+
+You disagree with one specialist's reasoning. Re-run just that one without re-doing the rest:
+
+```
+> /gametheory replay 01HYCDC4XKM91Y… --rerun-specialist auction-strategist
+[gametheory] reusing fingerprint, routing decision, and 6 specialist outputs
+[gametheory] re-running auction-strategist (cost cap from original run still in force)
+```
+
+Or re-classify if you've refined the situation prompt:
+
+```
+> /gametheory replay 01HYCDC4XKM91Y… --reclassify
+```
+
+### Resume an interrupted run
+
+If a run was crashed mid-specialists (your machine slept, network blip, etc):
+
+```
+> /gametheory list-runs
+RUN ID                        STATUS       SITUATION (truncated)
+01HYCDC4XKM91Y…              Complete      Assess whether a marketplace ra…
+01HYCDB1YYXP3R…              InProgress    Evaluate competitor retaliation…
+
+> /gametheory resume 01HYCDB1YYXP3R…
+[gametheory] resuming from checkpoint stage:specialists (3/5 complete)
+```
+
+Cost cap from the original run carries over.
+
+### Pick a specialist tier to scope your inspection
+
+```
+> /gametheory list-agents --tier 4
+TIER 4 — bargaining and negotiation
+  bargaining-power-analyst
+  threat-credibility-assessor
+  reservation-value-estimator
+  …
+```
+
 ## Agent tools
 
 `archon-tools` registers these game-theory tools when a `GameTheoryExecutor` is
