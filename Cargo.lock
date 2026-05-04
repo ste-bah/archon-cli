@@ -330,6 +330,7 @@ dependencies = [
  "archon-learning",
  "archon-llm",
  "archon-mcp",
+ "archon-meaning",
  "archon-memory",
  "archon-permissions",
  "archon-pipeline",
@@ -623,6 +624,20 @@ dependencies = [
  "tracing",
  "url",
  "uuid",
+]
+
+[[package]]
+name = "archon-meaning"
+version = "0.1.36"
+dependencies = [
+ "chrono",
+ "cozo-ce",
+ "hex",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

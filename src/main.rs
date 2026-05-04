@@ -292,6 +292,9 @@ async fn main() -> Result<()> {
         Some(Commands::Prov { ref action }) => {
             return crate::command::prov::handle_prov_command(action.clone()).await;
         }
+        Some(Commands::Meaning { ref action }) => {
+            return crate::command::meaning::handle_meaning_command(action.clone()).await;
+        }
         Some(Commands::Gametheory { ref action }) => {
             return crate::command::gametheory::handle_gametheory(action, &config, &env_vars).await;
         }

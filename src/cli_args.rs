@@ -463,6 +463,11 @@ pub enum Commands {
         #[command(subcommand)]
         action: ProvAction,
     },
+    /// Build meaning samples, pairs, triplets, and eval data
+    Meaning {
+        #[command(subcommand)]
+        action: MeaningAction,
+    },
     /// Game-theory strategic analysis
     Gametheory {
         #[command(subcommand)]
@@ -808,6 +813,28 @@ pub enum ProvAction {
     Verify {
         /// Artifact ID to verify
         artifact_id: String,
+    },
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum MeaningAction {
+    /// Build meaning records from persisted learning signals
+    Build {
+        /// Source family to compile from
+        #[arg(long, default_value = "learning-events")]
+        from: String,
+    },
+    /// List derived samples
+    Samples,
+    /// List contrastive pairs
+    Contrastive,
+    /// List triplets
+    Triplets,
+    /// Export samples or triplets as JSONL
+    Export {
+        /// Dataset to export: samples or triplets
+        #[arg(long, default_value = "samples")]
+        kind: String,
     },
 }
 

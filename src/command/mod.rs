@@ -61,6 +61,7 @@ pub(crate) mod logout;
 // TASK-#212 SLASH-MANAGED-AGENTS: /managed-agents remote-registry status.
 pub(crate) mod managed_agents;
 pub(crate) mod mcp;
+pub(crate) mod meaning;
 pub(crate) mod memory;
 pub(crate) mod model;
 pub(crate) mod parser;
