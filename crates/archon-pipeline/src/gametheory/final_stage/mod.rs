@@ -1,9 +1,8 @@
 //! Final-stage report synthesis for game-theory pipeline.
 //!
 //! Takes specialist outputs, maps them to report sections via the deterministic
-//! [`super::sections::sections_for_specialist`] mapping, synthesizes section
-//! content (pass-through stub for now), and combines sections into a final
-//! report with provenance footnotes.
+//! [`super::sections::sections_for_specialist`] mapping, assembles section
+//! content, and combines sections into a final report with provenance footnotes.
 
 pub mod combiner;
 pub mod mapper;
@@ -45,7 +44,7 @@ pub fn assemble_report(
     // 2. Map
     let assignments = mapper::map_to_sections(&outputs);
 
-    // 3. Write (pass-through stub)
+    // 3. Write sections
     let provider = writer::SectionWriterProvider;
     let sections = provider.synthesize_sections(&assignments);
 

@@ -1,7 +1,8 @@
-//! Section writer — synthesizes section content from mapped specialist outputs.
+//! Section writer - assembles mapped specialist outputs into report sections.
 //!
-//! Currently a pass-through stub. Full LLM-driven section synthesis will be
-//! wired during Phase 5 hardening.
+//! The writer is intentionally deterministic: specialists produce the analysis,
+//! and this stage preserves their text while grouping it into the PRD's
+//! canonical report sections with provenance contributors.
 
 use std::collections::BTreeMap;
 
@@ -19,12 +20,10 @@ pub struct SectionContent {
     pub contributors: Vec<String>,
 }
 
-/// Provider that synthesizes section content from assignments.
+/// Provider that assembles section content from assignments.
 ///
-/// Currently a pass-through: content from all contributing specialists is
-/// concatenated under the section title.
-///
-/// Phase 5 will replace this with LLM-driven synthesis.
+/// Content from all contributing specialists is concatenated under the section
+/// title so the final report remains auditable back to exact specialist output.
 pub struct SectionWriterProvider;
 
 impl SectionWriterProvider {
@@ -36,7 +35,10 @@ impl SectionWriterProvider {
         let mut by_section: BTreeMap<SectionType, Vec<&SectionAssignment>> = BTreeMap::new();
 
         for assignment in assignments {
-            by_section.entry(assignment.section).or_default().push(assignment);
+            by_section
+                .entry(assignment.section)
+                .or_default()
+                .push(assignment);
         }
 
         let mut sections = Vec::new();
@@ -82,8 +84,8 @@ fn provenance_footer_body(contributors: &[String]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::mapper::SectionAssignment;
+    use super::*;
 
     #[test]
     fn test_synthesize_sections_groups_by_section() {
@@ -104,10 +106,20 @@ mod tests {
         let sections = writer.synthesize_sections(&assignments);
 
         assert_eq!(sections.len(), 11);
-        let eq = sections.iter().find(|s| s.section == SectionType::EquilibriumAnalysis).unwrap();
-        let rec = sections.iter().find(|s| s.section == SectionType::Recommendations).unwrap();
+        let eq = sections
+            .iter()
+            .find(|s| s.section == SectionType::EquilibriumAnalysis)
+            .unwrap();
+        let rec = sections
+            .iter()
+            .find(|s| s.section == SectionType::Recommendations)
+            .unwrap();
         assert!(eq.content.contains("Nash eq found."));
         assert!(rec.content.contains("Cooperate on first move."));
-        assert!(sections.iter().any(|s| s.section == SectionType::ProvenanceFooter));
+        assert!(
+            sections
+                .iter()
+                .any(|s| s.section == SectionType::ProvenanceFooter)
+        );
     }
 }

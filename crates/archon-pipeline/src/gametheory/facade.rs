@@ -103,10 +103,20 @@ struct SpecialistExecutionOutcome {
     max_observed_concurrent: usize,
 }
 
+fn require_llm<'a>(
+    llm: Option<&'a dyn LlmClient>,
+    operation: &str,
+) -> Result<&'a dyn LlmClient, GameTheoryError> {
+    llm.ok_or_else(|| GameTheoryError::LlmUnavailable {
+        operation: operation.to_string(),
+    })
+}
+
 /// Run Tier 1 classification on a situation and persist the fingerprint.
 ///
 /// When `llm` is provided, attempts real LLM-backed classification first.
-/// Falls back to `keyword_fallback_fingerprint` when LLM is unavailable or fails.
+/// Classify-only calls may use a labelled keyword fingerprint when LLM auth is
+/// unavailable; full pipeline calls disable that fallback.
 ///
 /// Returns the generated fingerprint after persistence.
 pub async fn classify(
@@ -114,8 +124,14 @@ pub async fn classify(
     situation: &str,
     llm: Option<&dyn LlmClient>,
 ) -> Result<GameTheoryFingerprint, GameTheoryError> {
-    let (fingerprint, _) =
-        classify_internal(db, situation, llm, &GameTheoryMemoryContext::default()).await?;
+    let (fingerprint, _) = classify_internal(
+        db,
+        situation,
+        llm,
+        &GameTheoryMemoryContext::default(),
+        true,
+    )
+    .await?;
     Ok(fingerprint)
 }
 
@@ -124,6 +140,7 @@ async fn classify_internal(
     situation: &str,
     llm: Option<&dyn LlmClient>,
     memory_ctx: &GameTheoryMemoryContext,
+    allow_keyword_fallback: bool,
 ) -> Result<(GameTheoryFingerprint, Vec<MemoryRecallAudit>), GameTheoryError> {
     let situation = situation.trim();
     if situation.is_empty() {
@@ -156,12 +173,22 @@ async fn classify_internal(
                 fp
             }
             Err(e) => {
-                tracing::warn!(run_id = %run_id, error = %e, "Tier 1 LLM classification failed, falling back to keyword");
-                keyword_fallback_fingerprint(&run_id, situation, &now)
+                if allow_keyword_fallback {
+                    tracing::warn!(run_id = %run_id, error = %e, "Tier 1 LLM classification failed, falling back to keyword");
+                    keyword_fallback_fingerprint(&run_id, situation, &now)
+                } else {
+                    return Err(GameTheoryError::Tier1Execution {
+                        message: e.to_string(),
+                    });
+                }
             }
         }
-    } else {
+    } else if allow_keyword_fallback {
         keyword_fallback_fingerprint(&run_id, situation, &now)
+    } else {
+        return Err(GameTheoryError::LlmUnavailable {
+            operation: "gametheory Tier 1 classification".to_string(),
+        });
     };
 
     // Persist fingerprint
@@ -261,9 +288,9 @@ struct StoredRunState {
 
 /// Run the full Phase 4 pipeline: classify → route → specialist spec → final report.
 ///
-/// When `llm` is provided, real LLM-backed Tier 1 classification and specialist
-/// execution are attempted. Falls back to keyword fingerprinting and stub outputs
-/// when LLM is unavailable or fails.
+/// Full specialist execution requires a real LLM provider. Classify-only may use
+/// the labelled keyword fallback, but full runs must not persist fabricated
+/// specialist outputs.
 ///
 /// Persists all intermediate artefacts to Cozo.
 pub async fn run_full_pipeline(
@@ -308,9 +335,10 @@ pub async fn run_full_pipeline_with_options(
     memory_ctx: GameTheoryMemoryContext,
     options: GameTheoryRunOptions,
 ) -> Result<FullPipelineResult, GameTheoryError> {
+    let llm_client = require_llm(llm, "gametheory full pipeline")?;
     // 1. Tier 1 classification
     let (fingerprint, mut memory_recall) =
-        classify_internal(db, situation, llm, &memory_ctx).await?;
+        classify_internal(db, situation, Some(llm_client), &memory_ctx, false).await?;
     update_gt_run_status(
         db,
         &fingerprint.run_id,
@@ -369,39 +397,18 @@ pub async fn run_full_pipeline_with_options(
     // 6. Build specialist DAG spec
     let _pipeline_spec = build_specialist_spec(&routing_decision, &dep_map, &spec, situation);
 
-    // 7. Execute specialist DAG (real LLM when available, stub fallback otherwise)
-    let specialist_outcome = if let Some(llm_client) = llm {
-        match execute_specialists_real_with_options(
-            llm_client,
-            &routing_decision,
-            &fingerprint,
-            situation,
-            &memory_ctx,
-            &options,
-        )
-        .await
-        {
-            Ok(result) => result,
-            Err(e) => {
-                tracing::warn!(run_id = %routing_decision.run_id, error = %e, "real specialist execution failed, falling back to stub");
-                execute_specialist_stub_with_options(
-                    &routing_decision,
-                    &fingerprint,
-                    situation,
-                    &memory_ctx,
-                    &options,
-                )
-            }
-        }
-    } else {
-        execute_specialist_stub_with_options(
-            &routing_decision,
-            &fingerprint,
-            situation,
-            &memory_ctx,
-            &options,
-        )
-    };
+    // 7. Execute specialist DAG with the configured LLM. Individual specialist
+    // failures are isolated inside the outcome; a provider-level failure is
+    // returned rather than replaced with fake output.
+    let specialist_outcome = execute_specialists_real_with_options(
+        llm_client,
+        &routing_decision,
+        &fingerprint,
+        situation,
+        &memory_ctx,
+        &options,
+    )
+    .await?;
     memory_recall.extend(specialist_outcome.memory_audits.clone());
 
     // 8. Persist specialist outputs
@@ -554,34 +561,16 @@ pub async fn replay_single_specialist(
         created_at: now,
     };
 
-    let outcome = if let Some(llm_client) = llm {
-        execute_specialists_real_with_options(
-            llm_client,
-            &routing,
-            &fingerprint,
-            &situation,
-            &memory_ctx,
-            &options,
-        )
-        .await
-        .unwrap_or_else(|_| {
-            execute_specialist_stub_with_options(
-                &routing,
-                &fingerprint,
-                &situation,
-                &memory_ctx,
-                &options,
-            )
-        })
-    } else {
-        execute_specialist_stub_with_options(
-            &routing,
-            &fingerprint,
-            &situation,
-            &memory_ctx,
-            &options,
-        )
-    };
+    let llm_client = require_llm(llm, "gametheory replay --rerun-specialist")?;
+    let outcome = execute_specialists_real_with_options(
+        llm_client,
+        &routing,
+        &fingerprint,
+        &situation,
+        &memory_ctx,
+        &options,
+    )
+    .await?;
 
     if let Some(output) = outcome.outputs.get(agent_key) {
         persist_specialist_outputs(db, run_id, &outcome.outputs, &outcome.costs_usd).map_err(
@@ -717,7 +706,8 @@ pub async fn resume_run_from_checkpoint(
 
     let outcome = if routing.enabled_specialists.is_empty() {
         SpecialistExecutionOutcome::default()
-    } else if let Some(llm_client) = llm {
+    } else {
+        let llm_client = require_llm(llm, "gametheory resume")?;
         execute_specialists_real_with_options(
             llm_client,
             &routing,
@@ -727,14 +717,6 @@ pub async fn resume_run_from_checkpoint(
             &options,
         )
         .await?
-    } else {
-        execute_specialist_stub_with_options(
-            &routing,
-            &fingerprint,
-            &situation,
-            &memory_ctx,
-            &options,
-        )
     };
     persist_specialist_outputs(db, run_id, &outcome.outputs, &outcome.costs_usd).map_err(|e| {
         GameTheoryError::Storage {
@@ -865,17 +847,9 @@ fn apply_policy_gates_to_routing(
     routing.skipped_specialists.extend(skipped);
 }
 
-/// Execute specialists with failure isolation.
-///
-/// Each enabled specialist is wrapped in a Result. If the agent_key ends with
-/// `-FORCE-FAIL-FOR-TEST`, execution returns Err (test hook for failure isolation).
-/// In Phase 5, this will be replaced with real subagent spawning where failures
-/// are expected (network errors, timeouts, model errors).
-///
-/// Returns (successful_outputs, failed_specialists) where failed_specialists
-/// contains (agent_key, error_message) tuples.
+/// Test-only deterministic specialist fixture with failure isolation.
 #[cfg(test)]
-fn execute_specialist_stub(
+fn execute_test_specialist_fixture(
     routing: &RoutingDecision,
     fingerprint: &GameTheoryFingerprint,
     situation: &str,
@@ -885,7 +859,7 @@ fn execute_specialist_stub(
     Vec<(String, String)>,
     Vec<MemoryRecallAudit>,
 ) {
-    let outcome = execute_specialist_stub_with_options(
+    let outcome = execute_test_specialist_fixture_with_options(
         routing,
         fingerprint,
         situation,
@@ -895,7 +869,8 @@ fn execute_specialist_stub(
     (outcome.outputs, outcome.failed, outcome.memory_audits)
 }
 
-fn execute_specialist_stub_with_options(
+#[cfg(test)]
+fn execute_test_specialist_fixture_with_options(
     routing: &RoutingDecision,
     fingerprint: &GameTheoryFingerprint,
     situation: &str,
@@ -913,8 +888,12 @@ fn execute_specialist_stub_with_options(
         outcome.max_observed_concurrent = outcome.max_observed_concurrent.max(1);
         let recalled = recall_prior_context_for_agent(agent_key, memory_ctx);
         outcome.memory_audits.push(recalled.audit.clone());
-        let result =
-            execute_single_specialist(agent_key, situation, &fingerprint_summary, &recalled.text);
+        let result = execute_single_specialist_fixture(
+            agent_key,
+            situation,
+            &fingerprint_summary,
+            &recalled.text,
+        );
 
         match result {
             Ok(output) => {
@@ -930,10 +909,11 @@ fn execute_specialist_stub_with_options(
     outcome
 }
 
-/// Execute a single specialist (stub — returns placeholder output).
+/// Execute a single deterministic specialist fixture.
 ///
 /// Test hook: if `agent_key` ends with `-FORCE-FAIL-FOR-TEST`, returns Err.
-fn execute_single_specialist(
+#[cfg(test)]
+fn execute_single_specialist_fixture(
     agent_key: &str,
     situation: &str,
     fingerprint_summary: &str,
@@ -950,7 +930,7 @@ fn execute_single_specialist(
         situation,
         fingerprint_summary,
         prior_context,
-        &[], // no dependency outputs in stub mode
+        &[],
     );
 
     let prior_context_section = if prior_context.trim().is_empty() {
@@ -960,10 +940,10 @@ fn execute_single_specialist(
     };
 
     Ok(format!(
-        "## {agent_key} — Stub Analysis\n\n\
+        "## {agent_key} - Fixture Analysis\n\n\
          **Situation:** {situation}\n\n\
          **Fingerprint:** {fp_summary}{prior_context_section}\n\n\
-         *Phase 5 will replace this with real LLM agent output.*",
+         *Test-only deterministic fixture output.*",
         fp_summary = fingerprint_summary,
     ))
 }
@@ -2229,11 +2209,12 @@ mod tests {
             return;
         }
 
+        let llm = canned_pipeline_llm();
         let result = block_on(run_full_pipeline(
             &db,
             "Two firms simultaneously set prices in a Bertrand duopoly with asymmetric costs.",
             Some(spec_path),
-            None,
+            Some(&llm),
         ));
         assert!(
             result.is_ok(),
@@ -2282,8 +2263,22 @@ mod tests {
 
         let situation = "Two firms simultaneously set quantities in a Cournot duopoly.";
 
-        let r1 = block_on(run_full_pipeline(&db, situation, Some(spec_path), None)).unwrap();
-        let r2 = block_on(run_full_pipeline(&db, situation, Some(spec_path), None)).unwrap();
+        let llm1 = canned_pipeline_llm();
+        let llm2 = canned_pipeline_llm();
+        let r1 = block_on(run_full_pipeline(
+            &db,
+            situation,
+            Some(spec_path),
+            Some(&llm1),
+        ))
+        .unwrap();
+        let r2 = block_on(run_full_pipeline(
+            &db,
+            situation,
+            Some(spec_path),
+            Some(&llm2),
+        ))
+        .unwrap();
 
         // Same situation → same routing decisions
         assert_eq!(
@@ -2345,18 +2340,19 @@ mod tests {
             None,
         ))
         .unwrap();
+        let llm = canned_pipeline_llm();
 
         let replayed = block_on(replay_single_specialist(
             &db,
             &fp.run_id,
             "nash-equilibrium-finder",
-            None,
+            Some(&llm),
             GameTheoryMemoryContext::default(),
             GameTheoryRunOptions::default(),
         ))
         .unwrap();
         assert_eq!(replayed.status, "completed");
-        assert!(replayed.output_summary.contains("nash-equilibrium-finder"));
+        assert!(replayed.output_summary.contains("specialist output"));
 
         let rows = db
             .run_script(
@@ -2372,7 +2368,53 @@ mod tests {
             .unwrap();
         assert_eq!(rows.rows.len(), 1);
         assert_eq!(rows.rows[0][1].get_str().unwrap(), "completed");
-        assert!(rows.rows[0][0].get_str().unwrap().contains("Stub Analysis"));
+        assert!(
+            rows.rows[0][0]
+                .get_str()
+                .unwrap()
+                .contains("specialist output")
+        );
+        assert!(
+            !rows.rows[0][0]
+                .get_str()
+                .unwrap()
+                .contains("Fixture Analysis")
+        );
+    }
+
+    #[test]
+    fn test_replay_single_specialist_requires_provider_and_writes_no_output() {
+        let db = test_db();
+        let fp = block_on(classify(
+            &db,
+            "Two firms simultaneously set prices in a Bertrand duopoly.",
+            None,
+        ))
+        .unwrap();
+
+        let err = block_on(replay_single_specialist(
+            &db,
+            &fp.run_id,
+            "nash-equilibrium-finder",
+            None,
+            GameTheoryMemoryContext::default(),
+            GameTheoryRunOptions::default(),
+        ))
+        .unwrap_err();
+        assert!(matches!(err, GameTheoryError::LlmUnavailable { .. }));
+
+        let rows = db
+            .run_script(
+                "?[count(agent_key)] := *gt_specialist_outputs{run_id, agent_key}, run_id = $rid",
+                {
+                    let mut p = std::collections::BTreeMap::new();
+                    p.insert("rid".into(), cozo::DataValue::from(fp.run_id.as_str()));
+                    p
+                },
+                cozo::ScriptMutability::Immutable,
+            )
+            .unwrap();
+        assert_eq!(rows.rows[0][0].get_int().unwrap(), 0);
     }
 
     #[test]
@@ -2448,11 +2490,12 @@ mod tests {
         let in_progress = list_in_progress_runs(&db).unwrap();
         assert_eq!(in_progress.len(), 1);
 
+        let llm = canned_pipeline_llm();
         let result = block_on(resume_run_from_checkpoint(
             &db,
             &fp.run_id,
             None,
-            None,
+            Some(&llm),
             GameTheoryMemoryContext::default(),
             GameTheoryRunOptions::default(),
         ))
@@ -2460,7 +2503,7 @@ mod tests {
         assert_eq!(result.resumed_specialists, 1);
         assert_eq!(result.skipped_completed_specialists, 1);
         assert_eq!(result.failed_specialists, 0);
-        assert_eq!(result.total_cost_usd, 1.25);
+        assert!((result.total_cost_usd - 1.2533).abs() < 0.000001);
 
         let rows = db
             .run_script(
@@ -2531,11 +2574,12 @@ mod tests {
         )
         .unwrap();
 
+        let llm = canned_specialist_llm();
         let result = block_on(resume_run_from_checkpoint(
             &db,
             &fp.run_id,
             None,
-            None,
+            Some(&llm),
             GameTheoryMemoryContext::default(),
             GameTheoryRunOptions::default(),
         ))
@@ -2661,7 +2705,7 @@ tiers:
     }
 
     #[test]
-    fn test_stub_specialist_outputs_non_empty() {
+    fn test_specialist_fixture_outputs_non_empty() {
         let db = test_db();
         let fp = block_on(classify(
             &db,
@@ -2670,9 +2714,9 @@ tiers:
         ))
         .unwrap();
 
-        // Build a minimal routing decision to test stub execution
+        // Build a minimal routing decision to test fixture execution.
         let rd = RoutingDecision {
-            run_id: "test-stub-run".into(),
+            run_id: "test-fixture-run".into(),
             fingerprint_id: fp.run_id.clone(),
             enabled_specialists: vec![
                 "nash-equilibrium-finder".into(),
@@ -2683,7 +2727,7 @@ tiers:
             created_at: "2026-01-01T00:00:00Z".into(),
         };
 
-        let (outputs, failed, audits) = execute_specialist_stub(
+        let (outputs, failed, audits) = execute_test_specialist_fixture(
             &rd,
             &fp,
             "Two firms set quantities.",
@@ -2732,7 +2776,7 @@ tiers:
             created_at: "2026-01-01T00:00:00Z".into(),
         };
 
-        let (outputs, failed, audits) = execute_specialist_stub(
+        let (outputs, failed, audits) = execute_test_specialist_fixture(
             &rd,
             &fp,
             "Two firms set quantities.",
@@ -2759,16 +2803,42 @@ tiers:
             return;
         }
 
-        // No forced failure → completed
+        let llm = canned_pipeline_llm();
+        // No forced failure -> completed
         let result = block_on(run_full_pipeline(
+            &db,
+            "Two firms simultaneously set prices in a Bertrand duopoly.",
+            Some(spec_path),
+            Some(&llm),
+        ))
+        .unwrap();
+        assert_eq!(result.status, "completed");
+        assert!(result.failed_specialists.is_empty());
+    }
+
+    #[test]
+    fn test_full_pipeline_requires_llm_provider_and_writes_no_run() {
+        let db = test_db();
+        ensure_gametheory_schema(&db).unwrap();
+        let spec_path = std::path::Path::new("../../.archon/specs/gametheory.yaml");
+
+        let err = block_on(run_full_pipeline(
             &db,
             "Two firms simultaneously set prices in a Bertrand duopoly.",
             Some(spec_path),
             None,
         ))
-        .unwrap();
-        assert_eq!(result.status, "completed");
-        assert!(result.failed_specialists.is_empty());
+        .unwrap_err();
+        assert!(matches!(err, GameTheoryError::LlmUnavailable { .. }));
+
+        let rows = db
+            .run_script(
+                "?[count(run_id)] := *gt_runs{run_id}",
+                Default::default(),
+                cozo::ScriptMutability::Immutable,
+            )
+            .unwrap();
+        assert_eq!(rows.rows[0][0].get_int().unwrap(), 0);
     }
 
     // ── MockLlmClient for testing LLM integration ─────────────────────────
@@ -2809,6 +2879,7 @@ tiers:
 
     struct CapturingLlmClient {
         canned_response: String,
+        classification_response: Option<String>,
         prompts: Mutex<Vec<String>>,
     }
 
@@ -2816,6 +2887,15 @@ tiers:
         fn new(canned: &str) -> Self {
             Self {
                 canned_response: canned.to_string(),
+                classification_response: None,
+                prompts: Mutex::new(Vec::new()),
+            }
+        }
+
+        fn with_classification(canned: &str, classification: String) -> Self {
+            Self {
+                canned_response: canned.to_string(),
+                classification_response: Some(classification),
                 prompts: Mutex::new(Vec::new()),
             }
         }
@@ -2840,9 +2920,16 @@ tiers:
                 .and_then(|c| c.as_str())
                 .unwrap_or("")
                 .to_string();
-            self.prompts.lock().unwrap().push(prompt);
+            self.prompts.lock().unwrap().push(prompt.clone());
+            let content = if prompt.starts_with("Classify this strategic situation") {
+                self.classification_response
+                    .clone()
+                    .unwrap_or_else(|| self.canned_response.clone())
+            } else {
+                self.canned_response.clone()
+            };
             Ok(LlmResponse {
-                content: self.canned_response.clone(),
+                content,
                 tool_uses: vec![],
                 tokens_in: 100,
                 tokens_out: 200,
@@ -2877,6 +2964,26 @@ tiers:
 
     fn canned_specialist_llm() -> CapturingLlmClient {
         CapturingLlmClient::new("specialist output")
+    }
+
+    fn canned_pipeline_llm() -> CapturingLlmClient {
+        CapturingLlmClient::with_classification(
+            "specialist output",
+            serde_json::json!({
+                "cooperation": {"value": "non-cooperative", "confidence": "high", "rationale": "firms compete"},
+                "payoff_sum": {"value": "variable-sum", "confidence": "medium", "rationale": "price outcomes vary"},
+                "symmetry": {"value": "asymmetric", "confidence": "medium", "rationale": "costs differ"},
+                "timing": {"value": "simultaneous", "confidence": "high", "rationale": "firms act at once"},
+                "perfect_info": {"value": "imperfect", "confidence": "medium", "rationale": "prices are not observed before choosing"},
+                "complete_info": {"value": "complete", "confidence": "medium", "rationale": "game form is known"},
+                "cardinality": {"value": "2-player", "confidence": "high", "rationale": "duopoly"},
+                "strategy_space": {"value": "continuous", "confidence": "high", "rationale": "prices or quantities are continuous"},
+                "horizon": {"value": "one-shot", "confidence": "medium", "rationale": "single interaction"},
+                "primary_family": "Bertrand competition",
+                "nearest_classic": "Bertrand duopoly"
+            })
+            .to_string(),
+        )
     }
 
     fn test_fingerprint(run_id: &str) -> GameTheoryFingerprint {
@@ -2916,7 +3023,7 @@ tiers:
             .unwrap();
         let memory: std::sync::Arc<dyn archon_memory::MemoryTrait> = std::sync::Arc::new(graph);
         let ctx = GameTheoryMemoryContext::new(memory, None, true);
-        let llm = canned_specialist_llm();
+        let llm = canned_pipeline_llm();
         let rd = RoutingDecision {
             run_id: "run-memory".into(),
             fingerprint_id: "fp-memory".into(),
@@ -2943,7 +3050,7 @@ tiers:
     }
 
     #[test]
-    fn test_stub_fallback_recalls_memory_for_debug_path() {
+    fn test_specialist_fixture_recalls_memory_for_debug_path() {
         let graph = archon_memory::MemoryGraph::in_memory().unwrap();
         graph
             .store_memory(
@@ -2959,17 +3066,17 @@ tiers:
         let memory: std::sync::Arc<dyn archon_memory::MemoryTrait> = std::sync::Arc::new(graph);
         let ctx = GameTheoryMemoryContext::new(memory, None, true);
         let rd = RoutingDecision {
-            run_id: "run-stub-memory".into(),
-            fingerprint_id: "fp-stub-memory".into(),
+            run_id: "run-fixture-memory".into(),
+            fingerprint_id: "fp-fixture-memory".into(),
             enabled_specialists: vec!["nash-equilibrium-finder".into()],
             skipped_specialists: vec![],
             evaluated_conditions: vec![],
             created_at: "2026-05-03T00:00:00Z".into(),
         };
 
-        let (outputs, failed, audits) = execute_specialist_stub(
+        let (outputs, failed, audits) = execute_test_specialist_fixture(
             &rd,
-            &test_fingerprint("fp-stub-memory"),
+            &test_fingerprint("fp-fixture-memory"),
             "Two firms choose prices.",
             &ctx,
         );
@@ -2986,7 +3093,7 @@ tiers:
         let memory: std::sync::Arc<dyn archon_memory::MemoryTrait> = std::sync::Arc::new(graph);
         let leann = std::sync::Arc::new(MockLeannSearcher::new("leann semantic prior"));
         let ctx = GameTheoryMemoryContext::new(memory, Some(leann.clone()), true);
-        let llm = canned_specialist_llm();
+        let llm = canned_pipeline_llm();
         let rd = RoutingDecision {
             run_id: "run-leann".into(),
             fingerprint_id: "fp-leann".into(),
@@ -3080,7 +3187,7 @@ tiers:
             return;
         }
 
-        let llm = canned_specialist_llm();
+        let llm = canned_pipeline_llm();
         let result = block_on(run_full_pipeline_with_options(
             &db,
             "Two firms simultaneously set prices in a Bertrand duopoly with asymmetric costs.",
@@ -3179,11 +3286,12 @@ tiers:
             return;
         }
 
+        let llm = canned_pipeline_llm();
         let result = block_on(run_full_pipeline_with_options(
             &db,
             "Two firms simultaneously set quantities in a Cournot duopoly.",
             Some(spec_path),
-            None,
+            Some(&llm),
             GameTheoryMemoryContext::default(),
             GameTheoryRunOptions {
                 budget_usd: 20.0,
@@ -3253,7 +3361,7 @@ tiers:
             created_at: "2026-01-01T00:00:00Z".into(),
         };
 
-        let (outputs, failed, audits) = execute_specialist_stub(
+        let (outputs, failed, audits) = execute_test_specialist_fixture(
             &rd,
             &fp,
             "Two firms set quantities.",
@@ -3279,7 +3387,7 @@ tiers:
     }
 
     #[test]
-    fn test_stub_fallback_when_no_provider() {
+    fn test_classify_only_keyword_fallback_when_no_provider() {
         let db = test_db();
 
         // classify with None → must use keyword fallback

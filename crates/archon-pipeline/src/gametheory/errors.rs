@@ -33,8 +33,16 @@ pub enum GameTheoryError {
     #[error("specialist '{agent_key}' failed: {message}")]
     SpecialistFailed { agent_key: String, message: String },
 
+    #[error(
+        "LLM provider required for {operation}; configure ANTHROPIC_API_KEY or an Anthropic auth token"
+    )]
+    LlmUnavailable { operation: String },
+
     #[error("section writer failed for '{section_title}': {message}")]
-    SectionWriterFailed { section_title: String, message: String },
+    SectionWriterFailed {
+        section_title: String,
+        message: String,
+    },
 
     #[error("validation error: {message}")]
     Validation { message: String },

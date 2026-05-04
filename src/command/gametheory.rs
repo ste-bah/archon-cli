@@ -110,7 +110,7 @@ pub(crate) fn build_llm_client(
     ) {
         Ok(a) => a,
         Err(e) => {
-            tracing::warn!("LLM auth unavailable for gametheory: {e}. Using keyword fallback.");
+            tracing::warn!("LLM auth unavailable for gametheory: {e}.");
             return None;
         }
     };
@@ -190,10 +190,10 @@ async fn run_classify_only(
             println!("Fingerprint persisted to Cozo (gt_runs, gt_fingerprints).");
             if llm.is_none() {
                 println!(
-                    "NOTE: LLM client unavailable, using keyword fallback. Set ANTHROPIC_API_KEY for real agent execution."
+                    "NOTE: LLM client unavailable; classify-only used the labelled keyword fallback. Set ANTHROPIC_API_KEY for real agent execution."
                 );
             } else {
-                println!("NOTE: real LLM agent execution (Phase 5).");
+                println!("NOTE: real LLM-backed classification.");
             }
             Ok(())
         }
@@ -304,12 +304,8 @@ async fn run_full(
 
             if result.status == "BudgetExceeded" {
                 println!("NOTE: budget cap halted specialist execution.");
-            } else if llm.is_none() {
-                println!(
-                    "NOTE: LLM client unavailable, using keyword fallback. Set ANTHROPIC_API_KEY for real agent execution."
-                );
             } else {
-                println!("NOTE: real LLM agent execution (Phase 5).");
+                println!("NOTE: real LLM-backed specialist execution.");
             }
             println!();
             println!(
