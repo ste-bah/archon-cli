@@ -1,7 +1,7 @@
 //! Slash handlers for Evidence Engine TUI inspection views.
 
 use anyhow::Result;
-use archon_tui::app::{TuiEvent, ViewId};
+use archon_tui::app::{EvidenceRowPayload, TuiEvent, ViewId};
 use cozo::DbInstance;
 
 use crate::command::registry::{CommandContext, CommandHandler};
@@ -27,10 +27,7 @@ impl CommandHandler for DocsViewHandler {
         let rest = if args.is_empty() { &[] } else { &args[1..] };
 
         match subcommand {
-            "open" | "view" => {
-                ctx.emit(TuiEvent::OpenView(ViewId::Docs));
-                Ok(())
-            }
+            "open" | "view" => emit_docs_event(ctx, open_docs_rows_event),
             "list" => emit_docs_db(ctx, |db| {
                 let sources = archon_docs::store::list_doc_sources(db)?;
                 Ok(archon_docs::inspect::format_list_output(&sources))
@@ -71,7 +68,14 @@ impl CommandHandler for LearningViewHandler {
             args.first().map(String::as_str),
             None | Some("open" | "view")
         ) {
-            ctx.emit(TuiEvent::OpenView(ViewId::Learning));
+            let event = match ctx.cozo_db.as_ref() {
+                Some(db) => open_learning_rows_event(db.as_ref())?,
+                None => {
+                    let db = open_learning_db()?;
+                    open_learning_rows_event(&db)?
+                }
+            };
+            ctx.emit(event);
             return Ok(());
         }
         ctx.emit(TuiEvent::TextDelta(
@@ -97,6 +101,58 @@ where
         }
     };
     emit(ctx, rendered)
+}
+
+fn emit_docs_event<F>(ctx: &mut CommandContext, render: F) -> Result<()>
+where
+    F: FnOnce(&DbInstance) -> Result<TuiEvent>,
+{
+    let event = match ctx.cozo_db.as_ref() {
+        Some(db) => render(db.as_ref())?,
+        None => {
+            let db = open_docs_db()?;
+            render(&db)?
+        }
+    };
+    ctx.emit(event);
+    Ok(())
+}
+
+fn open_docs_rows_event(db: &DbInstance) -> Result<TuiEvent> {
+    archon_docs::schema::ensure_doc_schema(db)?;
+    let rows = archon_docs::store::list_doc_sources(db)?
+        .into_iter()
+        .map(|source| EvidenceRowPayload {
+            id: source.document_id,
+            title: source.source_path,
+            status: format!("{:?}", source.status),
+            detail: format!("{} {}", source.media_type, source.content_hash),
+        })
+        .collect();
+    Ok(TuiEvent::OpenViewRows {
+        view_id: ViewId::Docs,
+        rows,
+    })
+}
+
+fn open_learning_rows_event(db: &DbInstance) -> Result<TuiEvent> {
+    archon_learning::schema::ensure_learning_schema(db)?;
+    let rows = archon_learning::store::list_behaviour_proposals(db, None)?
+        .into_iter()
+        .map(|proposal| EvidenceRowPayload {
+            id: proposal.proposal_id,
+            title: format!("{:?}", proposal.manifest_kind),
+            status: format!("{:?}", proposal.status),
+            detail: format!(
+                "{:?} {:?} {}",
+                proposal.risk_level, proposal.policy_decision, proposal.diff
+            ),
+        })
+        .collect();
+    Ok(TuiEvent::OpenViewRows {
+        view_id: ViewId::Learning,
+        rows,
+    })
 }
 
 fn emit(ctx: &mut CommandContext, msg: String) -> Result<()> {
@@ -127,6 +183,21 @@ fn open_docs_db() -> Result<DbInstance> {
     let db = DbInstance::new("sqlite", &path_str, "")
         .map_err(|e| anyhow::anyhow!("failed to open document store at {path_str}: {e}"))?;
     archon_docs::schema::ensure_doc_schema(&db)?;
+    Ok(db)
+}
+
+fn open_learning_db() -> Result<DbInstance> {
+    let path = dirs::data_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from(".local/share"))
+        .join("archon")
+        .join("learning.db");
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let path_str = path.to_string_lossy().to_string();
+    let db = DbInstance::new("sqlite", &path_str, "")
+        .map_err(|e| anyhow::anyhow!("failed to open learning store at {path_str}: {e}"))?;
+    archon_learning::schema::ensure_learning_schema(&db)?;
     Ok(db)
 }
 
@@ -230,25 +301,35 @@ mod tests {
     }
 
     #[test]
-    fn docs_view_handler_emits_open_view_event() {
-        let (mut ctx, mut rx) = CtxBuilder::new().build();
+    fn docs_view_handler_opens_rows_from_cozo_source_of_truth() {
+        let db = std::sync::Arc::new(test_docs_db());
+        seed_doc(&db);
+        let (mut ctx, mut rx) = CtxBuilder::new().with_cozo_db(db).build();
         DocsViewHandler.execute(&mut ctx, &[]).unwrap();
         let events = drain_tui_events(&mut rx);
-        assert!(matches!(
-            events.as_slice(),
-            [TuiEvent::OpenView(ViewId::Docs)]
-        ));
+        let [TuiEvent::OpenViewRows { view_id, rows }] = events.as_slice() else {
+            panic!("expected OpenViewRows, got {events:?}");
+        };
+        assert_eq!(*view_id, ViewId::Docs);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].id, "doc-slash");
+        assert!(rows[0].detail.contains("hash-slash"));
     }
 
     #[test]
-    fn learning_view_handler_emits_open_view_event() {
-        let (mut ctx, mut rx) = CtxBuilder::new().build();
+    fn learning_view_handler_opens_rows_from_cozo_source_of_truth() {
+        let db = std::sync::Arc::new(test_learning_db());
+        seed_learning_proposal(&db);
+        let (mut ctx, mut rx) = CtxBuilder::new().with_cozo_db(db).build();
         LearningViewHandler.execute(&mut ctx, &[]).unwrap();
         let events = drain_tui_events(&mut rx);
-        assert!(matches!(
-            events.as_slice(),
-            [TuiEvent::OpenView(ViewId::Learning)]
-        ));
+        let [TuiEvent::OpenViewRows { view_id, rows }] = events.as_slice() else {
+            panic!("expected OpenViewRows, got {events:?}");
+        };
+        assert_eq!(*view_id, ViewId::Learning);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].id, "proposal-slash");
+        assert_eq!(rows[0].status, "Pending");
     }
 
     #[test]
@@ -298,6 +379,33 @@ mod tests {
         let db = DbInstance::new("sqlite", &path, "").unwrap();
         archon_docs::schema::ensure_doc_schema(&db).unwrap();
         db
+    }
+
+    fn test_learning_db() -> DbInstance {
+        let path = format!("/tmp/test-learning-slash-{}.db", uuid::Uuid::new_v4());
+        let db = DbInstance::new("sqlite", &path, "").unwrap();
+        archon_learning::schema::ensure_learning_schema(&db).unwrap();
+        db
+    }
+
+    fn seed_learning_proposal(db: &DbInstance) {
+        archon_learning::store::insert_behaviour_proposal(
+            db,
+            &archon_learning::models::BehaviourProposal {
+                proposal_id: "proposal-slash".into(),
+                workspace_id: "workspace-slash".into(),
+                manifest_kind: archon_learning::models::BehaviourManifestKind::RetrievalProfile,
+                current_version: "v1".into(),
+                proposed_version: "v2".into(),
+                diff: "increase exact-search weight".into(),
+                evidence_ids: vec!["le-1".into()],
+                risk_level: archon_learning::models::RiskLevel::Low,
+                policy_decision: archon_learning::models::PolicyDecision::PendingApproval,
+                status: archon_learning::models::ProposalStatus::Pending,
+                created_at: "2026-05-04T00:00:00Z".into(),
+            },
+        )
+        .unwrap();
     }
 
     fn seed_doc(db: &DbInstance) {

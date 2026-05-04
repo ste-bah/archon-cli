@@ -136,6 +136,11 @@ pub(super) async fn handle_tui_event(
             app.open_view(view_id);
             tracing::info!(?view_id, "TuiEvent::OpenView opened view");
         }
+        TuiEvent::OpenViewRows { view_id, rows } => {
+            let row_count = rows.len();
+            app.open_view_with_rows(view_id, rows);
+            tracing::info!(?view_id, row_count, "TuiEvent::OpenViewRows opened view");
+        }
         TuiEvent::SetVimMode(enabled) => {
             if enabled {
                 app.vim_state = Some(VimState::new());

@@ -3,8 +3,8 @@
 use anyhow::Result;
 use archon_pipeline::gametheory;
 use archon_pipeline::runner::LlmClient;
-use archon_tui::app::{TuiEvent, ViewId};
-use cozo::DbInstance;
+use archon_tui::app::{EvidenceRowPayload, TuiEvent, ViewId};
+use cozo::{DbInstance, ScriptMutability};
 
 use crate::command::gametheory_inspect;
 use crate::command::registry::{CommandContext, CommandHandler};
@@ -70,10 +70,7 @@ impl CommandHandler for GameTheorySlashHandler {
                 gametheory_inspect::render_list_agents(parse_tier(rest)?)?,
             ),
             "specimens" => emit_db(ctx, |db| render_specimens(db, rest)),
-            "view" | "open" => {
-                ctx.emit(TuiEvent::OpenView(ViewId::GameTheory));
-                Ok(())
-            }
+            "view" | "open" => emit_db_event(ctx, open_gametheory_rows_event),
             other => emit(
                 ctx,
                 render_usage_line(&format!("unknown subcommand `{other}`")),
@@ -298,6 +295,52 @@ where
     emit(ctx, rendered)
 }
 
+fn emit_db_event<F>(ctx: &mut CommandContext, render: F) -> Result<()>
+where
+    F: FnOnce(&DbInstance) -> Result<TuiEvent>,
+{
+    let event = match ctx.cozo_db.as_ref() {
+        Some(db) => render(db.as_ref())?,
+        None => {
+            let db = open_db()?;
+            render(&db)?
+        }
+    };
+    ctx.emit(event);
+    Ok(())
+}
+
+fn open_gametheory_rows_event(db: &DbInstance) -> Result<TuiEvent> {
+    gametheory::schema::ensure_gametheory_schema(db)?;
+    let rows = db
+        .run_script(
+            "?[run_id, situation, started_at, status, cost] := \
+             *gt_runs{run_id, situation, started_at, completed_at, status, cost_usd: cost}",
+            Default::default(),
+            ScriptMutability::Immutable,
+        )
+        .map_err(|e| anyhow::anyhow!("query gt_runs for TUI view failed: {e}"))?;
+
+    let rows = rows
+        .rows
+        .iter()
+        .map(|row| EvidenceRowPayload {
+            id: row[0].get_str().unwrap_or("").to_string(),
+            title: row[1].get_str().unwrap_or("").to_string(),
+            status: row[3].get_str().unwrap_or("").to_string(),
+            detail: format!(
+                "{} ${}",
+                row[2].get_str().unwrap_or(""),
+                row[4].get_str().unwrap_or("0.0")
+            ),
+        })
+        .collect();
+    Ok(TuiEvent::OpenViewRows {
+        view_id: ViewId::GameTheory,
+        rows,
+    })
+}
+
 fn emit(ctx: &mut CommandContext, msg: String) -> Result<()> {
     ctx.emit(TuiEvent::TextDelta(msg));
     Ok(())
@@ -477,15 +520,28 @@ mod tests {
 
     #[test]
     fn test_gametheory_view_emits_open_view_event() {
-        let (mut ctx, mut rx) = CtxBuilder::new().build();
+        let db = std::sync::Arc::new(test_db());
+        gametheory::schema::ensure_gametheory_schema(db.as_ref()).unwrap();
+        seed_gt_run(
+            &db,
+            "gt-slash-view",
+            "marketplace incentives",
+            "completed",
+            "0.420000",
+        );
+        let (mut ctx, mut rx) = CtxBuilder::new().with_cozo_db(db).build();
         GameTheorySlashHandler
             .execute(&mut ctx, &[String::from("view")])
             .unwrap();
         let events = drain_tui_events(&mut rx);
-        assert!(matches!(
-            events.as_slice(),
-            [TuiEvent::OpenView(ViewId::GameTheory)]
-        ));
+        let [TuiEvent::OpenViewRows { view_id, rows }] = events.as_slice() else {
+            panic!("expected OpenViewRows, got {events:?}");
+        };
+        assert_eq!(*view_id, ViewId::GameTheory);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].id, "gt-slash-view");
+        assert_eq!(rows[0].status, "completed");
+        assert!(rows[0].detail.contains("$0.420000"));
     }
 
     #[test]
@@ -510,15 +566,13 @@ mod tests {
     fn test_gametheory_status_reads_cozo_source_of_truth() {
         let db = std::sync::Arc::new(test_db());
         gametheory::schema::ensure_gametheory_schema(db.as_ref()).unwrap();
-        db.run_script(
-            "?[run_id, situation, started_at, completed_at, status, cost_usd] <- \
-             [['gt-slash', 'slash source truth', '2026-05-03T00:00:00Z', \
-             '2026-05-03T00:00:01Z', 'completed', '0.010000']] \
-             :put gt_runs { run_id => situation, started_at, completed_at, status, cost_usd }",
-            Default::default(),
-            cozo::ScriptMutability::Mutable,
-        )
-        .unwrap();
+        seed_gt_run(
+            &db,
+            "gt-slash",
+            "slash source truth",
+            "completed",
+            "0.010000",
+        );
 
         let (mut ctx, mut rx) = CtxBuilder::new().with_cozo_db(db).build();
         let args = vec!["status".to_string(), "gt-slash".to_string()];
@@ -536,5 +590,22 @@ mod tests {
     fn test_db() -> DbInstance {
         let path = format!("/tmp/test-gt-slash-{}.db", uuid::Uuid::new_v4());
         DbInstance::new("sqlite", &path, "").unwrap()
+    }
+
+    fn seed_gt_run(db: &DbInstance, run_id: &str, situation: &str, status: &str, cost: &str) {
+        let mut params = std::collections::BTreeMap::new();
+        params.insert("rid".into(), cozo::DataValue::from(run_id));
+        params.insert("sit".into(), cozo::DataValue::from(situation));
+        params.insert("status".into(), cozo::DataValue::from(status));
+        params.insert("cost".into(), cozo::DataValue::from(cost));
+        db.run_script(
+            "?[run_id, situation, started_at, completed_at, status, cost_usd] \
+             <- [[$rid, $sit, \"2026-05-03T00:00:00Z\", \
+             \"2026-05-03T00:00:01Z\", $status, $cost]] \
+             :put gt_runs { run_id => situation, started_at, completed_at, status, cost_usd }",
+            params,
+            ScriptMutability::Mutable,
+        )
+        .unwrap();
     }
 }

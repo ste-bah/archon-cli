@@ -35,7 +35,8 @@ use crate::vim::VimState;
 // continue to import it unchanged. `events::TuiEvent` is the sole
 // canonical definition.
 pub use crate::events::{
-    FileEntry, McpServerEntry, MessageSummary, SessionPickerEntry, SkillEntry, TuiEvent, ViewId,
+    EvidenceRowPayload, FileEntry, McpServerEntry, MessageSummary, SessionPickerEntry, SkillEntry,
+    TuiEvent, ViewId,
 };
 
 // REM-2d: Modal overlay state types relocated to sibling module
@@ -257,6 +258,49 @@ impl App {
             )),
             _ => None,
         };
+    }
+
+    pub fn open_view_with_rows(&mut self, view_id: ViewId, rows: Vec<EvidenceRowPayload>) {
+        self.open_view(view_id);
+        match self.evidence_view.as_mut() {
+            Some(EvidenceViewState::Docs(screen)) => {
+                screen.set_rows(
+                    rows.into_iter()
+                        .map(|row| crate::screens::docs::DocsRow {
+                            id: row.id,
+                            title: row.title,
+                            status: row.status,
+                            summary: row.detail,
+                        })
+                        .collect(),
+                );
+            }
+            Some(EvidenceViewState::GameTheory(screen)) => {
+                screen.set_rows(
+                    rows.into_iter()
+                        .map(|row| crate::screens::gametheory::GameTheoryRow {
+                            id: row.id,
+                            label: row.title,
+                            status: row.status,
+                            detail: row.detail,
+                        })
+                        .collect(),
+                );
+            }
+            Some(EvidenceViewState::Learning(screen)) => {
+                screen.set_rows(
+                    rows.into_iter()
+                        .map(|row| crate::screens::learning::LearningRow {
+                            id: row.id,
+                            kind: row.title,
+                            state: row.status,
+                            evidence: row.detail,
+                        })
+                        .collect(),
+                );
+            }
+            None => {}
+        }
     }
 
     pub fn on_thinking_delta(&mut self, text: &str) {

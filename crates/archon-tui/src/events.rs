@@ -52,6 +52,15 @@ pub enum ViewId {
     Learning,
 }
 
+/// Source-of-truth row payload for Evidence Engine inspection overlays.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EvidenceRowPayload {
+    pub id: String,
+    pub title: String,
+    pub status: String,
+    pub detail: String,
+}
+
 /// Summary of a conversation message for the /rewind overlay list (TASK-TUI-620).
 ///
 /// Defined at layer 0 (events.rs) so that `TuiEvent::ShowMessageSelector` can
@@ -188,6 +197,12 @@ pub enum TuiEvent {
     /// overlay-opening variants (`ShowSessionPicker`, `ShowMcpManager`)
     /// so future readers locate overlay events in one place.
     OpenView(ViewId),
+    /// Open an Evidence Engine overlay with rows loaded by the slash handler
+    /// from the authoritative store.
+    OpenViewRows {
+        view_id: ViewId,
+        rows: Vec<EvidenceRowPayload>,
+    },
     SetVimMode(bool),
     VimToggle,
     VoiceText(String),

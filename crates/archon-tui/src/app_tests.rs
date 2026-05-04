@@ -216,6 +216,28 @@ fn open_view_sets_docs_evidence_overlay_source_of_truth() {
 }
 
 #[test]
+fn open_view_with_rows_sets_docs_rows_from_source_of_truth() {
+    let mut app = App::new();
+    app.open_view_with_rows(
+        ViewId::Docs,
+        vec![super::EvidenceRowPayload {
+            id: "doc-1".into(),
+            title: "Policy Pack".into(),
+            status: "Processed".into(),
+            detail: "12 chunks".into(),
+        }],
+    );
+
+    let view = app.evidence_view.as_ref().expect("view opened");
+    let EvidenceViewState::Docs(screen) = view else {
+        panic!("expected docs view");
+    };
+    assert_eq!(screen.len(), 1);
+    assert_eq!(screen.selected().unwrap().id, "doc-1");
+    assert_eq!(screen.selected().unwrap().summary, "12 chunks");
+}
+
+#[test]
 fn open_view_sets_gametheory_evidence_overlay_source_of_truth() {
     let mut app = App::new();
     app.open_view(ViewId::GameTheory);
