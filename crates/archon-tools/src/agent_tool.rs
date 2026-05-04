@@ -45,10 +45,28 @@ pub struct SubagentRequest {
 
 impl SubagentRequest {
     /// Default maximum turns when the caller does not specify one.
+    ///
+    /// 10 covers a typical chat-style subagent (coder, reviewer); heavy
+    /// survey agents (architecture-mapper, system-mapper, codebase-
+    /// implementation-analyzer) override this in their frontmatter or
+    /// per-spawn `max_turns` argument. The hard ceiling is `MAX_TURNS_HARD_CAP`.
     pub const DEFAULT_MAX_TURNS: u32 = 10;
 
-    /// Default timeout in seconds.
-    pub const DEFAULT_TIMEOUT_SECS: u64 = 300;
+    /// Hard upper bound for `max_turns`. Effectively unlimited — set
+    /// high enough that no realistic agent run will hit it. Runaway-loop
+    /// protection is the budget cap (`--max-budget-usd`), not this.
+    pub const MAX_TURNS_HARD_CAP: u32 = 100_000;
+
+    /// Default timeout in seconds — 24 hours.
+    ///
+    /// Was 300s (5 min). That was a footgun for survey/analysis agents
+    /// that legitimately need 10-30+ minutes to scan large codebases and
+    /// write structured findings to memory. Bumped to effectively-
+    /// unlimited because we already have a real runaway guard
+    /// (`--max-budget-usd`) and the wall-clock cap is double-jeopardy
+    /// that punishes correct behavior (slow because reading a lot)
+    /// without preventing the actual failure mode (stuck-in-a-loop).
+    pub const DEFAULT_TIMEOUT_SECS: u64 = 86_400;
 }
 
 // ---------------------------------------------------------------------------
@@ -203,10 +221,11 @@ impl AgentTool {
             .get("max_turns")
             .and_then(|v| v.as_u64())
             .map(|n| {
-                if n == 0 || n > 100 {
-                    Err(AgentToolError::InvalidInput(
-                        "max_turns must be between 1 and 100".into(),
-                    ))
+                let cap = u64::from(SubagentRequest::MAX_TURNS_HARD_CAP);
+                if n == 0 || n > cap {
+                    Err(AgentToolError::InvalidInput(format!(
+                        "max_turns must be between 1 and {cap}"
+                    )))
                 } else {
                     Ok(n as u32)
                 }
@@ -697,7 +716,7 @@ mod tests {
         assert_eq!(request.model.as_deref(), Some("claude-sonnet-4-6"));
         assert_eq!(request.allowed_tools, vec!["Read", "Glob"]);
         assert_eq!(request.max_turns, 5);
-        assert_eq!(request.timeout_secs, 300);
+        assert_eq!(request.timeout_secs, SubagentRequest::DEFAULT_TIMEOUT_SECS);
         assert!(!request.run_in_background);
         assert!(request.cwd.is_none());
     }
@@ -769,9 +788,9 @@ mod tests {
             .await;
         assert!(result.is_error);
 
-        // Over 100
+        // Over MAX_TURNS_HARD_CAP (100_000)
         let result = tool
-            .execute(json!({"prompt": "x", "max_turns": 101}), &make_ctx())
+            .execute(json!({"prompt": "x", "max_turns": 100_001}), &make_ctx())
             .await;
         assert!(result.is_error);
     }
