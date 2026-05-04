@@ -428,3 +428,83 @@ toggle_mode = false
 port = 8421
 bind_address = "127.0.0.1"
 open_browser = true
+
+
+# ----------------------------------------------------------------------------
+# [gametheory] — Strategic game-theory pipeline (archon gametheory ...)
+# ----------------------------------------------------------------------------
+# Pipeline defaults. Override per-run via CLI flags
+# (--budget, --max-concurrent, --style, --spec-path, --kb, --enable-tier11).
+[gametheory]
+# USD budget cap per run. 0.0 = no cap (NOT recommended). Halts gracefully on exceed.
+budget_usd = 20.0
+# Max concurrent specialists per wave (1..=16). Respect provider rate limits.
+max_concurrent = 4
+# Report style: "executive" | "academic" | "technical"
+style = "executive"
+# Spec resolution order:
+#   --spec-path CLI > $ARCHON_SPEC_PATH > <cwd>/.archon/specs/gametheory.yaml
+#   > $HOME/.archon/specs/gametheory.yaml > /etc/archon/specs/gametheory.yaml
+# spec_path = "/explicit/path/to/gametheory.yaml"
+# Agent file location (registry uses this; relative to workspace root)
+agents_dir = ".archon/agents/gametheory"
+# Output directory for run artifacts (final reports, section drafts)
+output_dir = "~/.local/share/archon/gametheory"
+# Default knowledge-base context tag (None = no KB binding).
+# Bind a run via CLI: `archon gametheory run "..." --kb policy-pack`
+# kb = "policy-pack"
+
+
+# ----------------------------------------------------------------------------
+# [completion] — Completion integrity verification (archon completion verify)
+# ----------------------------------------------------------------------------
+[completion]
+# When true, `archon completion verify` exits non-zero if zero completion-sensitive
+# claims are extracted from input. Useful in CI; less useful interactively.
+# Override per-invocation with --require-claims / --no-require-claims.
+require_claims = false
+# Verification gates active by default. Order does not matter.
+# Available: TestsPassGate, IngestedGate, AnswerGroundedGate
+gates = ["TestsPassGate", "IngestedGate", "AnswerGroundedGate"]
+
+
+# ----------------------------------------------------------------------------
+# [behaviour] — Governed learning manifests (archon behaviour ...)
+# ----------------------------------------------------------------------------
+# Manifest generation thresholds. Auto-apply policy lives in .archon/policy.toml
+# under [policy.learning]. See docs/governed-learning.md and docs/policy.md.
+[behaviour]
+# Days of LearningEvent history to scan when generating proposals
+generate_window_days = 7
+# Minimum aggregated event count before a SourceQualityProfile proposal is generated
+proposal_min_evidence = 3
+# Auto-archive Pending proposals not approved within N days
+proposal_stale_days = 30
+
+
+# ----------------------------------------------------------------------------
+# [policy] — POINTER ONLY. Real policy lives in .archon/policy.toml
+# ----------------------------------------------------------------------------
+# Workspace policy is loaded SEPARATELY from this file by archon-policy via:
+#
+#   /etc/archon/policy.toml              (system, lowest priority)
+#   ~/.archon/policy.toml                (user)
+#   <workspace>/.archon/policy.toml      (project, highest priority)
+#
+# A starter `.archon/policy.toml` with web search + MCP enabled for agents is
+# shipped in this repo. Edit that file (NOT this section) to change policy
+# gates such as web tool access, MCP exposure, VLM mode, Tier 11 enablement,
+# and governed-learning auto-apply. See `docs/policy.md` for the schema.
+#
+# Quick reference of the most-asked-about toggles in .archon/policy.toml:
+#
+#   [policy.network]
+#   allow_web_strategy_agents = true   # Tier 2-12 gametheory specialists may WebSearch/WebFetch
+#   allow_mcp_server_exposure = true   # MCP servers may be invoked by agents
+#
+#   [policy.workers]
+#   web_fetch = "allow-local"          # WebFetch tool enabled
+#
+#   [policy.gametheory]
+#   allow_web_tools = true             # gametheory specialists can use WebSearch/WebFetch
+#   enable_tier11 = false              # opt-in flag for Civilizational agents

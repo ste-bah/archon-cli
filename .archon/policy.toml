@@ -1,0 +1,91 @@
+# ============================================================================
+# Archon Policy — workspace defaults
+# ============================================================================
+# Loaded by archon-policy. See docs/policy.md for the full schema.
+#
+# Load order (later overrides earlier):
+#   1. /etc/archon/policy.toml           — system (lowest)
+#   2. ~/.archon/policy.toml             — user
+#   3. <workspace>/.archon/policy.toml   — project (this file, highest)
+#
+# Defaults below give new users a working setup with web search + MCP
+# enabled for agents (the common ask). Tighten by setting values to "deny"
+# or false. Sensitive surfaces (cloud VLM, Tier 11 civilizational agents,
+# governed-learning auto-apply) remain off by default.
+# ============================================================================
+
+
+# ----------------------------------------------------------------------------
+# [policy.network] — Outbound network + agent web tool access
+# ----------------------------------------------------------------------------
+[policy.network]
+# Default stance for outbound network: "allow" | "deny"
+default = "allow"
+# Cloud VLM (image description over the network) — off until you opt in
+allow_cloud_vlm = false
+# Game-theory Tier 2-12 specialists may invoke WebSearch / WebFetch
+allow_web_strategy_agents = true
+# MCP servers may be invoked by agents and subagents
+allow_mcp_server_exposure = true
+
+
+# ----------------------------------------------------------------------------
+# [policy.workers] — Per-worker enablement
+# ----------------------------------------------------------------------------
+# Modes per worker: "allow-local" | "allow-cloud" | "deny"
+[policy.workers]
+ocr = "allow-local"           # local OCR via pdftotext / tesseract
+embedding = "allow-local"     # fastembed (local) or OpenAI (cloud)
+vlm = "deny"                  # cloud VLM off until you set up a local model
+web_fetch = "allow-local"     # WebFetch tool enabled
+
+
+# ----------------------------------------------------------------------------
+# [policy.gametheory] — Strategic game-theory pipeline gates
+# ----------------------------------------------------------------------------
+[policy.gametheory]
+# Concurrency cap per analysis council
+max_agents_per_council = 12
+# Hard USD cap per `archon gametheory run`. Halts gracefully on exceed.
+max_cost_usd = 20.00
+# Civilizational / Jiang-frameworks agents (Tier 11) — opt-in only.
+# Politically sensitive domain; outputs are advisory not authoritative.
+enable_tier11 = false
+# Tier 2-12 specialists may use WebSearch / WebFetch in their analyses
+allow_web_tools = true
+
+
+# ----------------------------------------------------------------------------
+# [policy.learning] — Governed learning approval gates
+# ----------------------------------------------------------------------------
+# Defaults are CONSERVATIVE. All proposals require approval until you flip
+# auto_apply_low_risk to true. The four require_approval_for_* fields stay
+# true — they cover changes that can break agents in subtle ways.
+[policy.learning]
+auto_apply_low_risk = false
+require_approval_for_prompt_changes = true
+require_approval_for_blocking_gates = true
+require_approval_for_network_changes = true
+
+
+# ----------------------------------------------------------------------------
+# [policy.docs.vlm] — Document VLM (image description) gates
+# ----------------------------------------------------------------------------
+# Off by default. Flip enabled + mode to "local" once you have a local VLM,
+# or to "cloud" + allow_cloud = true if you've reviewed the privacy
+# implications of sending image bytes to a third-party API.
+[policy.docs.vlm]
+enabled = false
+mode = "disabled"  # "disabled" | "local" | "cloud" | "hybrid"
+allow_cloud = false
+require_user_confirmation_for_cloud = true
+
+
+# ----------------------------------------------------------------------------
+# [policy.docs.retrieval] — Hybrid search weighting
+# ----------------------------------------------------------------------------
+# Used by `archon docs search --mode hybrid` to blend FTS rank and HNSW
+# distance. Sum should be ~1.0; values are normalised.
+[policy.docs.retrieval]
+exact_weight = 0.45
+semantic_weight = 0.55
