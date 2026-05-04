@@ -463,7 +463,7 @@ pub async fn run_full_pipeline_with_options(
     };
 
     // 11. Persist sections and final report
-    persist_sections(db, &routing_decision.run_id, &report).map_err(|e| {
+    persist_sections(db, &routing_decision.run_id, &final_result.sections).map_err(|e| {
         GameTheoryError::Storage {
             message: e.to_string(),
         }
@@ -473,6 +473,15 @@ pub async fn run_full_pipeline_with_options(
         &routing_decision.run_id,
         &report,
         specialist_outcome.total_cost_usd,
+    )
+    .map_err(|e| GameTheoryError::Storage {
+        message: e.to_string(),
+    })?;
+    persist_provenance_edges_for_run(
+        db,
+        &routing_decision.run_id,
+        specialist_outcome.outputs.keys(),
+        &final_result.sections,
     )
     .map_err(|e| GameTheoryError::Storage {
         message: e.to_string(),
@@ -759,7 +768,7 @@ pub async fn resume_run_from_checkpoint(
         &quality_results,
         options.style_profile_id.as_deref(),
     );
-    persist_sections(db, run_id, &final_result.report).map_err(|e| GameTheoryError::Storage {
+    persist_sections(db, run_id, &final_result.sections).map_err(|e| GameTheoryError::Storage {
         message: e.to_string(),
     })?;
     let total_cost_usd = load_specialist_cost_total(db, run_id)?;
@@ -775,6 +784,10 @@ pub async fn resume_run_from_checkpoint(
             message: e.to_string(),
         }
     })?;
+    persist_provenance_edges_for_run(db, run_id, all_outputs.keys(), &final_result.sections)
+        .map_err(|e| GameTheoryError::Storage {
+            message: e.to_string(),
+        })?;
     update_gt_run_status(
         db,
         run_id,
@@ -1734,38 +1747,46 @@ fn persist_specialist_failure(
     Ok(())
 }
 
-fn persist_sections(db: &DbInstance, run_id: &str, report: &str) -> Result<()> {
+fn persist_sections(
+    db: &DbInstance,
+    run_id: &str,
+    sections: &[final_stage::writer::SectionContent],
+) -> Result<()> {
     use std::collections::BTreeMap;
     ensure_gametheory_schema(db)?;
 
     let now = Utc::now().to_rfc3339();
-    let mut section_order = 0u32;
-    for line in report.lines() {
-        if line.starts_with("## ") {
-            let title = line.trim_start_matches("## ").trim().to_string();
-            section_order += 1;
-            let section_id = format!("sec-{section_order}");
+    for (idx, section) in sections.iter().enumerate() {
+        let section_id = format!("sec-{:02}", idx + 1);
+        let title = section.section.title();
+        let contributors_json = serde_json::to_string(&section.contributors)
+            .map_err(|e| anyhow::anyhow!("serialize section contributors failed: {e}"))?;
 
-            let mut params = BTreeMap::new();
-            params.insert("rid".into(), cozo::DataValue::from(run_id));
-            params.insert("sid".into(), cozo::DataValue::from(section_id.as_str()));
-            params.insert("sty".into(), cozo::DataValue::from(title.as_str()));
-            params.insert("stt".into(), cozo::DataValue::from(title.as_str()));
-            params.insert("smd".into(), cozo::DataValue::from(""));
-            params.insert("ssj".into(), cozo::DataValue::from("[]"));
-            params.insert("ca".into(), cozo::DataValue::from(now.as_str()));
+        let mut params = BTreeMap::new();
+        params.insert("rid".into(), cozo::DataValue::from(run_id));
+        params.insert("sid".into(), cozo::DataValue::from(section_id.as_str()));
+        params.insert("sty".into(), cozo::DataValue::from(title));
+        params.insert("stt".into(), cozo::DataValue::from(title));
+        params.insert(
+            "smd".into(),
+            cozo::DataValue::from(section.content.as_str()),
+        );
+        params.insert(
+            "ssj".into(),
+            cozo::DataValue::from(contributors_json.as_str()),
+        );
+        params.insert("ca".into(), cozo::DataValue::from(now.as_str()));
 
-            db.run_script(
-                "?[run_id, section_id, section_type, title, content_md, \
-                 source_specialists_json, created_at] \
-                 <- [[$rid, $sid, $sty, $stt, $smd, $ssj, $ca]] \
-                 :put gt_sections { run_id, section_id => section_type, title, \
-                 content_md, source_specialists_json, created_at }",
-                params,
-                cozo::ScriptMutability::Mutable,
-            )
-            .map_err(|e| anyhow::anyhow!("persist gt_sections failed: {e}"))?;
-        }
+        db.run_script(
+            "?[run_id, section_id, section_type, title, content_md, \
+             source_specialists_json, created_at] \
+             <- [[$rid, $sid, $sty, $stt, $smd, $ssj, $ca]] \
+             :put gt_sections { run_id, section_id => section_type, title, \
+             content_md, source_specialists_json, created_at }",
+            params,
+            cozo::ScriptMutability::Mutable,
+        )
+        .map_err(|e| anyhow::anyhow!("persist gt_sections failed: {e}"))?;
     }
     Ok(())
 }
@@ -1797,6 +1818,81 @@ fn persist_final_report(
         cozo::ScriptMutability::Mutable,
     )
     .map_err(|e| anyhow::anyhow!("persist gt_final_reports failed: {e}"))?;
+    Ok(())
+}
+
+fn persist_provenance_edges_for_run<'a>(
+    db: &DbInstance,
+    run_id: &str,
+    specialist_keys: impl IntoIterator<Item = &'a String>,
+    sections: &[final_stage::writer::SectionContent],
+) -> Result<()> {
+    ensure_gametheory_schema(db)?;
+    let mut edges = Vec::new();
+
+    let situation = format!("situation:{run_id}");
+    let fingerprint = format!("fingerprint:{run_id}");
+    let routing = format!("routing:{run_id}");
+    let report = format!("report:{run_id}");
+    edges.push((situation, fingerprint.clone(), "produced_fingerprint"));
+    edges.push((fingerprint.clone(), routing.clone(), "produced_routing"));
+
+    for agent_key in specialist_keys {
+        let specialist = specialist_artifact_id(run_id, agent_key);
+        edges.push((routing.clone(), specialist, "enabled_specialist"));
+    }
+
+    for (idx, section) in sections.iter().enumerate() {
+        let section_id = section_artifact_id(run_id, idx);
+        for contributor in &section.contributors {
+            edges.push((
+                specialist_artifact_id(run_id, contributor),
+                section_id.clone(),
+                "contributed_to_section",
+            ));
+        }
+        edges.push((section_id, report.clone(), "assembled_into_report"));
+    }
+
+    for (idx, (from, to, edge_type)) in edges.iter().enumerate() {
+        persist_provenance_edge(db, run_id, idx + 1, from, to, edge_type)?;
+    }
+    Ok(())
+}
+
+fn specialist_artifact_id(run_id: &str, agent_key: &str) -> String {
+    format!("specialist:{run_id}:{agent_key}")
+}
+
+fn section_artifact_id(run_id: &str, zero_based_idx: usize) -> String {
+    format!("section:{run_id}:sec-{:02}", zero_based_idx + 1)
+}
+
+fn persist_provenance_edge(
+    db: &DbInstance,
+    run_id: &str,
+    edge_index: usize,
+    from: &str,
+    to: &str,
+    edge_type: &str,
+) -> Result<()> {
+    let now = Utc::now().to_rfc3339();
+    let edge_id = format!("{run_id}:edge-{edge_index:04}");
+    let mut params = BTreeMap::new();
+    params.insert("eid".into(), cozo::DataValue::from(edge_id.as_str()));
+    params.insert("from".into(), cozo::DataValue::from(from));
+    params.insert("to".into(), cozo::DataValue::from(to));
+    params.insert("typ".into(), cozo::DataValue::from(edge_type));
+    params.insert("ca".into(), cozo::DataValue::from(now.as_str()));
+
+    db.run_script(
+        "?[edge_id, from_artifact_id, to_artifact_id, edge_type, created_at] \
+         <- [[$eid, $from, $to, $typ, $ca]] \
+         :put gt_provenance_edges { edge_id => from_artifact_id, to_artifact_id, edge_type, created_at }",
+        params,
+        cozo::ScriptMutability::Mutable,
+    )
+    .map_err(|e| anyhow::anyhow!("persist gt_provenance_edges failed: {e}"))?;
     Ok(())
 }
 
@@ -2377,6 +2473,46 @@ mod tests {
             )
             .unwrap();
         assert!(routing_rows.rows.len() >= 1);
+
+        let mut params = std::collections::BTreeMap::new();
+        params.insert("rid".into(), cozo::DataValue::from(r.run_id.as_str()));
+        let section_rows = db
+            .run_script(
+                "?[section_id, content, sources] := *gt_sections{run_id, section_id, \
+                 content_md: content, source_specialists_json: sources}, run_id = $rid",
+                params,
+                cozo::ScriptMutability::Immutable,
+            )
+            .unwrap();
+        assert_eq!(section_rows.rows.len(), 11);
+        assert!(
+            section_rows
+                .rows
+                .iter()
+                .any(|row| !row[1].get_str().unwrap_or("").trim().is_empty()
+                    && row[2].get_str().unwrap_or("") != "[]"),
+            "persisted sections must retain content and source specialists"
+        );
+
+        let edge_rows = db
+            .run_script(
+                "?[edge_id, edge_type] := *gt_provenance_edges{edge_id, from_artifact_id, \
+                 to_artifact_id, edge_type}",
+                Default::default(),
+                cozo::ScriptMutability::Immutable,
+            )
+            .unwrap();
+        let edge_types: Vec<&str> = edge_rows
+            .rows
+            .iter()
+            .filter(|row| row[0].get_str().unwrap_or("").contains(&r.run_id))
+            .filter_map(|row| row[1].get_str())
+            .collect();
+        assert!(edge_types.contains(&"produced_fingerprint"));
+        assert!(edge_types.contains(&"produced_routing"));
+        assert!(edge_types.contains(&"enabled_specialist"));
+        assert!(edge_types.contains(&"contributed_to_section"));
+        assert!(edge_types.contains(&"assembled_into_report"));
     }
 
     #[test]

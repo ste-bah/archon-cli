@@ -13,6 +13,7 @@ pub mod writer;
 use std::collections::HashMap;
 
 use super::quality::QualityCheck;
+use writer::SectionContent;
 
 /// Result of running the final-stage assembly pipeline.
 #[derive(Debug, Clone)]
@@ -25,6 +26,8 @@ pub struct FinalStageResult {
     pub word_count: usize,
     /// Non-fatal warnings collected during assembly.
     pub warnings: Vec<String>,
+    /// Section records before final markdown combination.
+    pub sections: Vec<SectionContent>,
 }
 
 /// Run the full final-stage pipeline: scan → map → write → combine → style.
@@ -62,5 +65,6 @@ pub fn assemble_report(
         section_count,
         word_count,
         warnings,
+        sections,
     }
 }
