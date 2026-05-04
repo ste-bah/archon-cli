@@ -2,9 +2,11 @@
 
 All slash commands work in the interactive TUI. Type `/help` to see them in-app.
 
-As of v0.1.28 the registry contains **65 primary commands** (lockstep-tested at `EXPECTED_COMMAND_COUNT = 65` in `src/command/registry.rs`). Aliases come from each handler's `aliases()` method.
+As of v0.1.40 the registry contains **78 primary commands** (lockstep-tested at `EXPECTED_COMMAND_COUNT = 78` in `src/command/registry.rs` and `EXPECTED_PRIMARY_COUNT = 78` in `src/command/dispatcher.rs`). Aliases come from each handler's `aliases()` method.
 
-Beyond the 65 primaries, archon-cli ships **55 built-in skills** (21 in `crates/archon-core/src/skills/builtin.rs`, 34 in `expanded.rs`). Skills behave like slash commands but are resolved through the Skill registry — primary handlers take precedence at dispatch time.
+Beyond the 78 primaries, archon-cli ships **67 built-in skills** (33 in `crates/archon-core/src/skills/builtin.rs`, 34 in `expanded.rs`). Skills behave like slash commands but are resolved through the Skill registry — primary handlers take precedence at dispatch time.
+
+> **Version history.** v0.1.38 added 11 primaries (Evidence Engine: `/kb`, `/prov`, `/meaning`, `/constellation`, plus gametheory inspection subcommands and the slash mirror). v0.1.40 added 2 more (`/auth` and `/chat` for the OpenAI-Codex provider surface).
 
 ## Core & meta
 
@@ -64,7 +66,7 @@ Beyond the 65 primaries, archon-cli ships **55 built-in skills** (21 in `crates/
 |---|---|---|
 | `/agent` | — | Umbrella: `/agent list`, `/agent info <name>`, `/agent run <name>` |
 | `/run-agent` | — | Invoke a custom agent by name with a task description (async via TaskService) |
-| `/archon-code` | — | Run the 50-agent coding pipeline on a task |
+| `/archon-code` | — | Run the 48-agent coding pipeline on a task |
 | `/archon-research` | — | Run the 46-agent PhD research pipeline on a topic |
 | `/managed-agents` | — | Show managed-agent (remote-registry) status |
 | `/refresh` | — | Re-scan the agent registry from disk |
@@ -95,16 +97,42 @@ Beyond the 65 primaries, archon-cli ships **55 built-in skills** (21 in `crates/
 | `/hooks` | — | List or manage hook registrations (list, enable, disable, reload) |
 | `/voice` | — | Show or toggle voice input configuration (status, on, off) |
 
+## Authentication & providers (v0.1.40+)
+
+| Command | Aliases | Description |
+|---|---|---|
+| `/auth` | — | Provider authentication umbrella: `/auth login --provider <anthropic\|openai-codex>`, `/auth status`, `/auth logout` |
+| `/chat` | — | Single-turn chat against a selected provider: `/chat --provider openai-codex "<prompt>"`. Default provider is `anthropic`. |
+| `/login` | — | Re-authenticate the active Anthropic provider (preserved for backward compatibility — equivalent to `/auth login --provider anthropic`) |
+| `/logout` | — | Sign out the active Anthropic provider (preserved for backward compatibility) |
+| `/providers` | — | List registered LLM providers (5 native + 31 OpenAI-compatible = 36 total) |
+| `/refresh-identity` | — | Clear the `anthropic-beta` header cache and re-probe (skill, not primary) |
+
+See [Codex authentication](../getting-started/codex-auth.md) for the ChatGPT-subscription user setup, and [identity-spoofing.md](../integrations/identity-spoofing.md) for the spoof-mode mechanics.
+
+## Evidence Engine (v0.1.38+)
+
+Each command goes through the same persisted Cozo state as its `archon X` shell counterpart. See [evidence-engine.md](../evidence-engine.md) for the architecture.
+
+| Command | Aliases | Description |
+|---|---|---|
+| `/docs` | — | Document intelligence: `open`, `list`, `status`, `show`, `inspect`, `chunks`, `provenance`, `model-status`, `ingest`, `index`, `search`, `answer` |
+| `/kb` | — | Knowledge base: `ingest`, `list`, `search`, `process` (claims, entities, relations, contradictions), `claims`, `entities`, `relations`, `contradictions`, `stats` |
+| `/prov` | — | Provenance: `trace <artifact-id>`, `export <artifact-id>` (W3C PROV JSON-LD), `verify <artifact-id>` |
+| `/meaning` | — | Meaning compiler: `build --from learning-events|gametheory-runs`, `samples`, `contrastive`, `triplets`, `export --kind samples|triplets` |
+| `/constellation` | — | Centroid profiles: `build --target project|research-domain|strategic-workflow`, `score`, `drift`, `list` |
+| `/completion` | — | Completion integrity: `inspect <run-id>`, `claims`, `evidence`, `incidents`, `verify`, `trust` |
+| `/behaviour` | — | Governed learning: `list-events`, `list-proposals`, `show`, `apply`, `approve`, `deny`, `rollback`, `history`, `generate-proposals`, `status` |
+| `/gametheory` | — | Game-theory umbrella: `run`, `classify-only`, `status`, `inspect`, `inspect-fingerprint`, `inspect-routing`, `list-runs`, `show`, `replay`, `list-agents`, `specimens` |
+| `/learning-status` | — | Status pane for the 8 learning subsystems (separate from `/behaviour status`) |
+| `/learning` | — | Open the governed-learning TUI browser |
+
 ## Analysis & insights
 
 | Command | Aliases | Description |
 |---|---|---|
 | `/denials` | — | Show denied permissions in current session |
 | `/rules` | — | View or edit behavioral rules |
-| `/docs` | — | Open or inspect document evidence (`open`, `list`, `status`, `show`, `inspect`, `chunks`, `provenance`, `model-status`) |
-| `/learning-status` | — | Status of all 8 learning subsystems |
-| `/learning` | — | Open the governed-learning TUI browser |
-| `/gametheory` | — | Umbrella for game-theory run, classify-only, status, inspect, inspect-fingerprint, inspect-routing, list-runs, show, replay, list-agents, specimens |
 
 ## Utility
 
@@ -119,9 +147,21 @@ Beyond the 65 primaries, archon-cli ships **55 built-in skills** (21 in `crates/
 | `/bug` | — | Report bug (links to GitHub issues) |
 | `/teleport` | — | Jump to a named conversation location (hidden from `/help`) |
 
+## PRD-driven workflow skills
+
+These skills compose the PRD → spec → tasks → code arc. Each emits a prompt that asks the LLM to write its output via the `Write` tool — the skill itself doesn't write files. See [PRD-driven development](../cookbook/prd-driven-development.md) for the end-to-end TUI walkthrough.
+
+| Skill | Aliases | Description |
+|---|---|---|
+| `/to-prd` | `/prd` | Turn the current conversation context into a PRD using the `ai-agent-prd` framework. Writes to `prds/<slug>/PRD.md`. Optional positional args become "Additional input from the user". |
+| `/prd-to-spec <path>` | `/decompose-prd` | Decompose a PRD into atomic per-phase task specs using the `prdtospec` framework. Writes to `tasks/phase<N>/task<M>.md` plus `tasks/INDEX.md`. Requires the PRD path as a positional argument. |
+| `/spec-to-tasks` | — | Refine the task tree from `/prd-to-spec` into atomic, dev-flow-ready task files with verification checklists. Splits coarse tasks, adds acceptance criteria + test plans + files-to-modify. |
+| `/compose-pipeline` | — | Chain `/to-prd` → `/prd-to-spec` → `/spec-to-tasks` in one command. Stops before `/archon-code` so you can review the task tree before committing to a full pipeline run. |
+| `/tdd` | — | Test-driven development with red-green-refactor loop. Use when building features or fixing bugs test-first. |
+
 ## Built-in skills (selected)
 
-55 skills total. Highlights:
+67 skills total (33 in `crates/archon-core/src/skills/builtin.rs`, 34 in `expanded.rs`). Highlights:
 
 | Skill | Description |
 |---|---|
@@ -141,7 +181,10 @@ Beyond the 65 primaries, archon-cli ships **55 built-in skills** (21 in `crates/
 | `/schedule` | Create a scheduled task (delegates to `CronCreate`) |
 | `/remote-control` | Show remote control mode info |
 | `/btw` | Aside marker (tangent, don't change focus) |
-| `/refresh-identity` | Clear beta header cache & reprobe |
+| `/refresh-identity` | Clear `anthropic-beta` header cache & reprobe (Anthropic only) |
+| `/setup-archon-skills` | Interactive first-run wizard (8 prompts) for project bootstrapping |
+| `/write-a-skill` | Meta-skill that helps author new SKILL.md skills with proper structure |
+| `/zoom-out` | Tell the agent to give broader context or higher-level perspective |
 
 For the full list, run `/skills` in the TUI or read `crates/archon-core/src/skills/{builtin,expanded}.rs`.
 
