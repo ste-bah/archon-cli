@@ -1,7 +1,7 @@
-//! Phase 4 advisory quality gates for specialist outputs.
+//! Persisted quality checks for game-theory specialist outputs.
 //!
-//! All gates are advisory (log warnings); Phase 5 will harden them into
-//! blocking enforcement.
+//! Failed checks are logged and stored in `gt_quality_checks` so report
+//! assembly and operators can inspect missing evidence without silent success.
 
 /// Result of running a quality gate check.
 #[derive(Debug, Clone)]
@@ -58,7 +58,10 @@ pub fn check_citation_count(agent_key: &str, output: &str) -> QualityCheck {
     let lower = output.to_lowercase();
     let has_doi = lower.contains("doi:") || lower.contains("doi ");
     let has_url = lower.contains("http://") || lower.contains("https://");
-    let has_citation = lower.contains("[^") || lower.contains("[citation") || lower.contains("source:") || lower.contains("reference:");
+    let has_citation = lower.contains("[^")
+        || lower.contains("[citation")
+        || lower.contains("source:")
+        || lower.contains("reference:");
     let passed = has_citation || has_doi || has_url;
     QualityCheck {
         passed,
@@ -71,9 +74,9 @@ pub fn check_citation_count(agent_key: &str, output: &str) -> QualityCheck {
     }
 }
 
-/// Run all Phase 4 advisory quality gates against a specialist output.
+/// Run all persisted quality checks against a specialist output.
 ///
-/// Returns warnings for each failed gate. Phase 5 will make failures blocking.
+/// Returns every check result; callers persist failures and passes as evidence.
 pub fn run_advisory_gates(agent_key: &str, output: &str) -> Vec<QualityCheck> {
     vec![
         check_non_empty(agent_key, output),

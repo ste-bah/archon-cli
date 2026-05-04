@@ -13,8 +13,7 @@ use crate::retrieval::{SearchResult, search};
 pub struct Answer {
     pub answer_id: String,
     pub query: String,
-    /// The synthesised answer text (in Phase 2, this is assembled from
-    /// retrieved chunks; future phases will add LLM synthesis).
+    /// The synthesised answer text assembled from retrieved chunks.
     pub text: String,
     /// Citations linking claims to source chunks.
     pub citations: Vec<Citation>,
