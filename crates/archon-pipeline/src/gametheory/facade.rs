@@ -618,6 +618,11 @@ pub async fn run_full_pipeline_with_options(
         let checks = quality::run_advisory_gates(key, output);
         quality_results.insert(key.clone(), checks);
     }
+    persist_quality_checks(db, &routing_decision.run_id, &quality_results).map_err(|e| {
+        GameTheoryError::Storage {
+            message: e.to_string(),
+        }
+    })?;
 
     // 10. Final stage assembly
     let final_result = final_stage::assemble_report(
@@ -1960,6 +1965,41 @@ fn persist_sections(
     Ok(())
 }
 
+fn persist_quality_checks(
+    db: &DbInstance,
+    run_id: &str,
+    quality_results: &HashMap<String, Vec<quality::QualityCheck>>,
+) -> Result<()> {
+    let created_at = Utc::now().to_rfc3339();
+    for (agent_key, checks) in quality_results {
+        for check in checks {
+            let mut params = BTreeMap::new();
+            params.insert("rid".into(), cozo::DataValue::from(run_id));
+            params.insert("agent".into(), cozo::DataValue::from(agent_key.as_str()));
+            params.insert("gate".into(), cozo::DataValue::from(check.gate_name));
+            params.insert(
+                "passed".into(),
+                cozo::DataValue::from(if check.passed { "true" } else { "false" }),
+            );
+            params.insert(
+                "detail".into(),
+                cozo::DataValue::from(check.detail.as_str()),
+            );
+            params.insert("created".into(), cozo::DataValue::from(created_at.as_str()));
+
+            db.run_script(
+                "?[run_id, agent_key, gate_name, passed, detail, created_at] \
+                 <- [[$rid, $agent, $gate, $passed, $detail, $created]] \
+                 :put gt_quality_checks { run_id, agent_key, gate_name => passed, detail, created_at }",
+                params,
+                cozo::ScriptMutability::Mutable,
+            )
+            .map_err(|e| anyhow::anyhow!("persist gt_quality_checks failed: {e}"))?;
+        }
+    }
+    Ok(())
+}
+
 fn persist_final_report(
     db: &DbInstance,
     run_id: &str,
@@ -2661,6 +2701,30 @@ mod tests {
                 .any(|row| !row[1].get_str().unwrap_or("").trim().is_empty()
                     && row[2].get_str().unwrap_or("") != "[]"),
             "persisted sections must retain content and source specialists"
+        );
+
+        let mut params = std::collections::BTreeMap::new();
+        params.insert("rid".into(), cozo::DataValue::from(r.run_id.as_str()));
+        let quality_rows = db
+            .run_script(
+                "?[agent_key, gate_name, passed, detail] := *gt_quality_checks{run_id, \
+                 agent_key, gate_name, passed, detail}, run_id = $rid",
+                params,
+                cozo::ScriptMutability::Immutable,
+            )
+            .unwrap();
+        assert!(
+            quality_rows.rows.len() >= r.specialist_count * 3,
+            "each persisted specialist output must have all quality gate rows"
+        );
+        assert!(
+            quality_rows
+                .rows
+                .iter()
+                .any(|row| row[1].get_str().unwrap_or("") == "citation-count"
+                    && row[2].get_str().unwrap_or("") == "false"
+                    && !row[3].get_str().unwrap_or("").is_empty()),
+            "failed quality gates must persist auditable details"
         );
 
         let edge_rows = db

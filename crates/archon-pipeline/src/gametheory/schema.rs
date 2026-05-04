@@ -17,6 +17,7 @@ pub fn ensure_gametheory_schema(db: &DbInstance) -> Result<()> {
     ensure_gt_enabled_specialists(db)?;
     ensure_gt_skipped_specialists(db)?;
     ensure_gt_specialist_outputs(db)?;
+    ensure_gt_quality_checks(db)?;
     ensure_gt_run_checkpoints(db)?;
     ensure_gt_sections(db)?;
     ensure_gt_final_reports(db)?;
@@ -194,6 +195,18 @@ fn ensure_gt_specialist_outputs(db: &DbInstance) -> Result<()> {
             completed_at: String default "",
             duration_ms: String default "0",
             cost_usd: String default "0.0",
+        }"#,
+    )
+}
+
+fn ensure_gt_quality_checks(db: &DbInstance) -> Result<()> {
+    run_create(
+        db,
+        r#":create gt_quality_checks {
+            run_id: String, agent_key: String, gate_name: String =>
+            passed: String,
+            detail: String,
+            created_at: String,
         }"#,
     )
 }
@@ -400,6 +413,17 @@ mod tests {
             ScriptMutability::Mutable,
         ).unwrap();
 
+        // gt_quality_checks
+        db.run_script(
+            r#"
+            ?[run_id, agent_key, gate_name, passed, detail, created_at]
+            <- [["run-1", "gt-nash", "citation-count", "false", "missing citation", "2026-05-03T00:00:00Z"]]
+            :put gt_quality_checks { run_id, agent_key, gate_name => passed, detail, created_at }
+            "#,
+            Default::default(),
+            ScriptMutability::Mutable,
+        ).unwrap();
+
         // gt_sections
         db.run_script(
             r#"
@@ -439,6 +463,7 @@ mod tests {
             ("gt_enabled_specialists", "run_id"),
             ("gt_skipped_specialists", "run_id"),
             ("gt_specialist_outputs", "run_id"),
+            ("gt_quality_checks", "run_id"),
             ("gt_sections", "run_id"),
             ("gt_final_reports", "run_id"),
             ("gt_provenance_edges", "edge_id"),
