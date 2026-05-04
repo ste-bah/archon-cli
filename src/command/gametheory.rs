@@ -13,10 +13,9 @@ use crate::command::utils::fetch_account_uuid;
 use archon_core::config::ArchonConfig;
 use archon_core::env_vars::ArchonEnvVars;
 use archon_llm::auth::AuthProvider;
-use archon_llm::identity::{
-    IdentityMode, IdentityProvider, get_or_create_device_id, resolve_betas,
-    version_from_package_json,
-};
+#[cfg(test)]
+use archon_llm::identity::IdentityMode;
+use archon_llm::identity::{IdentityProvider, get_or_create_device_id, resolve_identity_mode};
 use archon_pipeline::gametheory;
 use archon_pipeline::llm_adapter::AnthropicLlmAdapter;
 use archon_pipeline::runner::LlmClient;
@@ -169,52 +168,13 @@ fn build_gametheory_identity(
     auth: &AuthProvider,
     account_uuid: String,
 ) -> IdentityProvider {
-    let mode = resolve_gametheory_identity_mode(config, auth);
+    let mode = resolve_identity_mode(auth, false, &config.identity.as_view());
     IdentityProvider::new(
         mode,
         uuid::Uuid::new_v4().to_string(),
         get_or_create_device_id(),
         account_uuid,
     )
-}
-
-fn resolve_gametheory_identity_mode(config: &ArchonConfig, auth: &AuthProvider) -> IdentityMode {
-    if matches!(
-        auth,
-        AuthProvider::OAuthToken(_) | AuthProvider::BearerToken(_)
-    ) {
-        return spoof_identity_mode(config);
-    }
-
-    match config.identity.mode.as_str() {
-        "spoof" => spoof_identity_mode(config),
-        "custom" => {
-            let custom = config.identity.custom.as_ref();
-            IdentityMode::Custom {
-                user_agent: custom
-                    .map(|c| c.user_agent.clone())
-                    .unwrap_or_else(|| concat!("archon-cli/", env!("CARGO_PKG_VERSION")).into()),
-                x_app: custom
-                    .map(|c| c.x_app.clone())
-                    .unwrap_or_else(|| "archon".into()),
-                extra_headers: custom
-                    .and_then(|c| c.extra_headers.clone())
-                    .unwrap_or_default(),
-            }
-        }
-        _ => IdentityMode::Clean,
-    }
-}
-
-fn spoof_identity_mode(config: &ArchonConfig) -> IdentityMode {
-    IdentityMode::Spoof {
-        version: version_from_package_json()
-            .unwrap_or_else(|| config.identity.spoof_version.clone()),
-        entrypoint: config.identity.spoof_entrypoint.clone(),
-        betas: resolve_betas(config.identity.spoof_betas.as_deref()),
-        workload: config.identity.workload.clone(),
-        anti_distillation: config.identity.anti_distillation,
-    }
 }
 
 pub(crate) fn open_memory_context(debug: bool) -> Result<gametheory::GameTheoryMemoryContext> {
@@ -776,7 +736,7 @@ mod tests {
         let auth = AuthProvider::BearerToken(archon_llm::types::Secret::new(
             "sk-ant-oat-test".to_string(),
         ));
-        let mode = resolve_gametheory_identity_mode(&config, &auth);
+        let mode = resolve_identity_mode(&auth, false, &config.identity.as_view());
 
         match mode {
             IdentityMode::Spoof { betas, .. } => {
@@ -795,7 +755,7 @@ mod tests {
         let auth = AuthProvider::BearerToken(archon_llm::types::Secret::new(
             "sk-ant-oat-test".to_string(),
         ));
-        let mode = resolve_gametheory_identity_mode(&config, &auth);
+        let mode = resolve_identity_mode(&auth, false, &config.identity.as_view());
         let identity = IdentityProvider::new(
             mode,
             "session-test".to_string(),
@@ -825,7 +785,7 @@ mod tests {
         let auth = AuthProvider::ApiKey(archon_llm::types::Secret::new(
             "sk-ant-api03-test".to_string(),
         ));
-        let mode = resolve_gametheory_identity_mode(&config, &auth);
+        let mode = resolve_identity_mode(&auth, false, &config.identity.as_view());
 
         assert!(
             matches!(mode, IdentityMode::Clean),
@@ -842,7 +802,7 @@ mod tests {
         let auth = AuthProvider::ApiKey(archon_llm::types::Secret::new(
             "sk-ant-api03-test".to_string(),
         ));
-        let mode = resolve_gametheory_identity_mode(&config, &auth);
+        let mode = resolve_identity_mode(&auth, false, &config.identity.as_view());
 
         match mode {
             IdentityMode::Spoof {

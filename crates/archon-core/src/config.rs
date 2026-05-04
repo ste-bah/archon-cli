@@ -427,6 +427,26 @@ impl Default for IdentityConfig {
     }
 }
 
+impl IdentityConfig {
+    pub fn as_view(&self) -> archon_llm::identity::IdentityConfigView<'_> {
+        archon_llm::identity::IdentityConfigView {
+            mode: &self.mode,
+            spoof_version: &self.spoof_version,
+            spoof_entrypoint: &self.spoof_entrypoint,
+            spoof_betas: self.spoof_betas.as_deref(),
+            anti_distillation: self.anti_distillation,
+            workload: self.workload.as_deref(),
+            custom: self.custom.as_ref().map(|custom| {
+                archon_llm::identity::CustomIdentityConfigView {
+                    user_agent: &custom.user_agent,
+                    x_app: &custom.x_app,
+                    extra_headers: custom.extra_headers.as_ref(),
+                }
+            }),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct CustomIdentityConfig {

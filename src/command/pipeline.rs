@@ -7,7 +7,7 @@ use std::sync::Arc;
 use archon_core::config::ArchonConfig;
 use archon_core::env_vars::ArchonEnvVars;
 use archon_llm::auth::resolve_auth_with_keys;
-use archon_llm::identity::{IdentityMode, IdentityProvider};
+use archon_llm::identity::{IdentityProvider, resolve_identity_mode};
 use archon_memory::{MemoryTrait, graph::MemoryGraph};
 use archon_pipeline::leann_searcher::LeannSearcher;
 
@@ -74,11 +74,21 @@ pub async fn handle_pipeline_command(
                     std::env::var("ANTHROPIC_AUTH_TOKEN").ok().as_deref(),
                 )
                 .map_err(|e| anyhow::anyhow!("Authentication failed: {e}"))?;
+                let identity_mode =
+                    resolve_identity_mode(&pipe_auth, false, &config.identity.as_view());
+                let account_uuid = if matches!(
+                    identity_mode,
+                    archon_llm::identity::IdentityMode::Spoof { .. }
+                ) {
+                    crate::command::utils::fetch_account_uuid(&pipe_auth).await
+                } else {
+                    String::new()
+                };
                 let identity = IdentityProvider::new(
-                    IdentityMode::Clean,
+                    identity_mode,
                     uuid::Uuid::new_v4().to_string(),
                     "pipeline-device".to_string(),
-                    String::new(),
+                    account_uuid,
                 );
                 let api_url = std::env::var("ANTHROPIC_BASE_URL")
                     .ok()
@@ -127,11 +137,21 @@ pub async fn handle_pipeline_command(
                     std::env::var("ANTHROPIC_AUTH_TOKEN").ok().as_deref(),
                 )
                 .map_err(|e| anyhow::anyhow!("Authentication failed: {e}"))?;
+                let identity_mode =
+                    resolve_identity_mode(&pipe_auth, false, &config.identity.as_view());
+                let account_uuid = if matches!(
+                    identity_mode,
+                    archon_llm::identity::IdentityMode::Spoof { .. }
+                ) {
+                    crate::command::utils::fetch_account_uuid(&pipe_auth).await
+                } else {
+                    String::new()
+                };
                 let identity = IdentityProvider::new(
-                    IdentityMode::Clean,
+                    identity_mode,
                     uuid::Uuid::new_v4().to_string(),
                     "pipeline-device".to_string(),
-                    String::new(),
+                    account_uuid,
                 );
                 let api_url = std::env::var("ANTHROPIC_BASE_URL")
                     .ok()
@@ -208,11 +228,21 @@ pub async fn handle_pipeline_command(
                         std::env::var("ANTHROPIC_AUTH_TOKEN").ok().as_deref(),
                     )
                     .map_err(|e| anyhow::anyhow!("Authentication failed: {e}"))?;
+                    let identity_mode =
+                        resolve_identity_mode(&pipe_auth, false, &config.identity.as_view());
+                    let account_uuid = if matches!(
+                        identity_mode,
+                        archon_llm::identity::IdentityMode::Spoof { .. }
+                    ) {
+                        crate::command::utils::fetch_account_uuid(&pipe_auth).await
+                    } else {
+                        String::new()
+                    };
                     let identity = IdentityProvider::new(
-                        IdentityMode::Clean,
+                        identity_mode,
                         uuid::Uuid::new_v4().to_string(),
                         "pipeline-device".to_string(),
-                        String::new(),
+                        account_uuid,
                     );
                     let api_url = std::env::var("ANTHROPIC_BASE_URL")
                         .ok()

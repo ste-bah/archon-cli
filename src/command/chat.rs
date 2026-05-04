@@ -45,9 +45,9 @@ async fn build_provider(
     config: &archon_core::config::ArchonConfig,
 ) -> Result<Arc<dyn LlmProvider>> {
     match args.provider.as_str() {
-        "anthropic" => Ok(Arc::new(AnthropicProvider::new(build_anthropic_client(
-            config,
-        )?))),
+        "anthropic" => Ok(Arc::new(AnthropicProvider::new(
+            build_anthropic_client(config).await?,
+        ))),
         "openai-codex" => {
             let codex_cfg =
                 crate::command::auth::codex_config_from_core(&config.providers.openai_codex);
@@ -84,7 +84,7 @@ async fn build_provider(
     }
 }
 
-fn build_anthropic_client(
+async fn build_anthropic_client(
     config: &archon_core::config::ArchonConfig,
 ) -> Result<archon_llm::anthropic::AnthropicClient> {
     let auth = archon_llm::auth::resolve_auth_with_keys(
@@ -94,11 +94,21 @@ fn build_anthropic_client(
         std::env::var("ANTHROPIC_AUTH_TOKEN").ok().as_deref(),
     )
     .context("Anthropic authentication unavailable")?;
+    let identity_mode =
+        archon_llm::identity::resolve_identity_mode(&auth, false, &config.identity.as_view());
+    let account_uuid = if matches!(
+        identity_mode,
+        archon_llm::identity::IdentityMode::Spoof { .. }
+    ) {
+        crate::command::utils::fetch_account_uuid(&auth).await
+    } else {
+        String::new()
+    };
     let identity = archon_llm::identity::IdentityProvider::new(
-        archon_llm::identity::IdentityMode::Clean,
+        identity_mode,
         uuid::Uuid::new_v4().to_string(),
         archon_llm::identity::get_or_create_device_id(),
-        String::new(),
+        account_uuid,
     );
     let api_url = std::env::var("ANTHROPIC_BASE_URL")
         .ok()

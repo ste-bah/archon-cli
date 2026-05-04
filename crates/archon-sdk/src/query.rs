@@ -100,7 +100,7 @@ async fn run_query(
     tx: &tokio::sync::mpsc::Sender<Result<SdkMessage, SdkError>>,
 ) -> Result<(), SdkError> {
     use archon_llm::anthropic::{AnthropicClient, MessageRequest};
-    use archon_llm::identity::{IdentityMode, IdentityProvider};
+    use archon_llm::identity::{IdentityConfigView, IdentityProvider, resolve_identity_mode};
     use archon_llm::streaming::StreamEvent;
     use archon_llm::types::ContentBlockType;
 
@@ -108,7 +108,7 @@ async fn run_query(
     let auth = build_auth_provider(&options.auth)?;
 
     let identity = IdentityProvider::new(
-        IdentityMode::Clean,
+        resolve_identity_mode(&auth, false, &IdentityConfigView::default()),
         uuid::Uuid::new_v4().to_string(),
         uuid::Uuid::new_v4().to_string(),
         String::new(),
@@ -230,13 +230,27 @@ fn build_auth_provider(auth: &SdkAuth) -> Result<archon_llm::auth::AuthProvider,
             if key.is_empty() {
                 return Err(SdkError::Auth("ANTHROPIC_API_KEY is empty".to_string()));
             }
-            Ok(AuthProvider::ApiKey(Secret::new(key)))
+            if matches!(
+                archon_llm::auth::classify_anthropic_credential(&key),
+                archon_llm::auth::AnthropicCredentialKind::OAuthToken
+            ) {
+                Ok(AuthProvider::BearerToken(Secret::new(key)))
+            } else {
+                Ok(AuthProvider::ApiKey(Secret::new(key)))
+            }
         }
         SdkAuth::ApiKey(key) => {
             if key.is_empty() {
                 return Err(SdkError::Auth("API key is empty".to_string()));
             }
-            Ok(AuthProvider::ApiKey(Secret::new(key.clone())))
+            if matches!(
+                archon_llm::auth::classify_anthropic_credential(key),
+                archon_llm::auth::AnthropicCredentialKind::OAuthToken
+            ) {
+                Ok(AuthProvider::BearerToken(Secret::new(key.clone())))
+            } else {
+                Ok(AuthProvider::ApiKey(Secret::new(key.clone())))
+            }
         }
         SdkAuth::BearerToken(token) => Ok(AuthProvider::BearerToken(Secret::new(token.clone()))),
     }

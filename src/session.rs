@@ -27,7 +27,7 @@ use archon_llm::effort::{self, EffortLevel, EffortState};
 use archon_llm::fast_mode::FastModeState;
 use archon_llm::identity::{
     IdentityMode, IdentityProvider, get_or_create_device_id, resolve_and_validate_betas,
-    resolve_betas, version_from_package_json,
+    resolve_identity_mode,
 };
 use archon_memory::{MemoryAccess, MemoryGraph, MemoryTrait};
 use archon_permissions::auto::{AutoModeConfig, AutoModeEvaluator};
@@ -223,24 +223,8 @@ async fn build_session_agent(
     };
 
     let device_id = get_or_create_device_id();
-    let betas = resolve_betas(config.identity.spoof_betas.as_deref());
-    let identity_mode = if cli.identity_spoof {
-        let resolved_version = version_from_package_json();
-        let (version, version_source) = match resolved_version {
-            Some(v) => (v, "package.json"),
-            None => (config.identity.spoof_version.clone(), "config"),
-        };
-        tracing::info!(version = %version, version_source = version_source, "Spoof version resolved");
-        IdentityMode::Spoof {
-            version,
-            entrypoint: config.identity.spoof_entrypoint.clone(),
-            betas,
-            workload: config.identity.workload.clone(),
-            anti_distillation: config.identity.anti_distillation,
-        }
-    } else {
-        IdentityMode::Clean
-    };
+    let identity_mode =
+        resolve_identity_mode(&auth, cli.identity_spoof, &config.identity.as_view());
 
     let account_uuid = fetch_account_uuid(&auth).await;
     let identity = IdentityProvider::new(
@@ -1080,46 +1064,8 @@ pub(crate) async fn run_interactive_session(
 
     // Build identity provider
     let device_id = get_or_create_device_id();
-    let betas = resolve_betas(config.identity.spoof_betas.as_deref());
-
-    let identity_mode = if cli.identity_spoof {
-        // --identity-spoof flag overrides everything
-        IdentityMode::Spoof {
-            version: version_from_package_json()
-                .unwrap_or_else(|| config.identity.spoof_version.clone()),
-            entrypoint: config.identity.spoof_entrypoint.clone(),
-            betas,
-            workload: config.identity.workload.clone(),
-            anti_distillation: config.identity.anti_distillation,
-        }
-    } else {
-        match config.identity.mode.as_str() {
-            "clean" => IdentityMode::Clean,
-            "custom" => {
-                let custom = config.identity.custom.as_ref();
-                IdentityMode::Custom {
-                    user_agent: custom.map(|c| c.user_agent.clone()).unwrap_or_else(|| {
-                        concat!("archon-cli/", env!("CARGO_PKG_VERSION")).into()
-                    }),
-                    x_app: custom
-                        .map(|c| c.x_app.clone())
-                        .unwrap_or_else(|| "archon".into()),
-                    extra_headers: custom
-                        .and_then(|c| c.extra_headers.clone())
-                        .unwrap_or_default(),
-                }
-            }
-            "spoof" => IdentityMode::Spoof {
-                version: version_from_package_json()
-                    .unwrap_or_else(|| config.identity.spoof_version.clone()),
-                entrypoint: config.identity.spoof_entrypoint.clone(),
-                betas: resolve_betas(config.identity.spoof_betas.as_deref()),
-                workload: config.identity.workload.clone(),
-                anti_distillation: config.identity.anti_distillation,
-            },
-            _ => IdentityMode::Clean,
-        }
-    };
+    let identity_mode =
+        resolve_identity_mode(&auth, cli.identity_spoof, &config.identity.as_view());
 
     tracing::debug!(
         "Identity mode: {}",
@@ -1741,11 +1687,24 @@ pub(crate) async fn run_interactive_session(
         .unwrap_or(archon_llm::auth::AuthProvider::ApiKey(
             archon_llm::types::Secret::new(String::new()),
         ));
+        let identity_mode = archon_llm::identity::resolve_identity_mode(
+            &pipe_auth,
+            false,
+            &config.identity.as_view(),
+        );
+        let account_uuid = if matches!(
+            identity_mode,
+            archon_llm::identity::IdentityMode::Spoof { .. }
+        ) {
+            crate::command::utils::fetch_account_uuid(&pipe_auth).await
+        } else {
+            String::new()
+        };
         let identity = archon_llm::identity::IdentityProvider::new(
-            archon_llm::identity::IdentityMode::Clean,
+            identity_mode,
             uuid::Uuid::new_v4().to_string(),
             "tui-pipeline-device".to_string(),
-            String::new(),
+            account_uuid,
         );
         let api_url = std::env::var("ANTHROPIC_BASE_URL")
             .ok()

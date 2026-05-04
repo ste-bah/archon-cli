@@ -4,6 +4,8 @@ use std::path::PathBuf;
 
 use sha2::{Digest, Sha256};
 
+use crate::auth::AuthProvider;
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -50,6 +52,203 @@ pub enum IdentityMode {
         x_app: String,
         extra_headers: HashMap<String, String>,
     },
+}
+
+// ---------------------------------------------------------------------------
+// Shared identity resolution
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy)]
+pub struct CustomIdentityConfigView<'a> {
+    pub user_agent: &'a str,
+    pub x_app: &'a str,
+    pub extra_headers: Option<&'a HashMap<String, String>>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct IdentityConfigView<'a> {
+    pub mode: &'a str,
+    pub spoof_version: &'a str,
+    pub spoof_entrypoint: &'a str,
+    pub spoof_betas: Option<&'a [String]>,
+    pub anti_distillation: bool,
+    pub workload: Option<&'a str>,
+    pub custom: Option<CustomIdentityConfigView<'a>>,
+}
+
+impl Default for IdentityConfigView<'static> {
+    fn default() -> Self {
+        Self {
+            mode: "clean",
+            spoof_version: "2.1.89",
+            spoof_entrypoint: "cli",
+            spoof_betas: None,
+            anti_distillation: false,
+            workload: None,
+            custom: None,
+        }
+    }
+}
+
+/// Resolve Anthropic identity mode from auth plus user configuration.
+///
+/// OAuth-shaped Anthropic credentials must always use the Claude Code identity
+/// envelope. The Messages API rejects those tokens when they are sent as a
+/// normal third-party API client, so auth kind has higher precedence than
+/// config or CLI identity flags. Codex OAuth is intentionally excluded because
+/// it targets the OpenAI Responses API, not Anthropic Messages.
+pub fn resolve_identity_mode(
+    auth: &AuthProvider,
+    force_spoof: bool,
+    config: &IdentityConfigView<'_>,
+) -> IdentityMode {
+    if matches!(
+        auth,
+        AuthProvider::OAuthToken(_) | AuthProvider::BearerToken(_)
+    ) || force_spoof
+        || config.mode == "spoof"
+    {
+        return spoof_identity_mode(config);
+    }
+
+    if config.mode == "custom" {
+        let custom = config.custom;
+        return IdentityMode::Custom {
+            user_agent: custom
+                .map(|c| c.user_agent.to_string())
+                .unwrap_or_else(|| concat!("archon-cli/", env!("CARGO_PKG_VERSION")).into()),
+            x_app: custom
+                .map(|c| c.x_app.to_string())
+                .unwrap_or_else(|| "archon".into()),
+            extra_headers: custom
+                .and_then(|c| c.extra_headers)
+                .cloned()
+                .unwrap_or_default(),
+        };
+    }
+
+    IdentityMode::Clean
+}
+
+fn spoof_identity_mode(config: &IdentityConfigView<'_>) -> IdentityMode {
+    IdentityMode::Spoof {
+        version: version_from_package_json().unwrap_or_else(|| config.spoof_version.to_string()),
+        entrypoint: config.spoof_entrypoint.to_string(),
+        betas: resolve_betas(config.spoof_betas),
+        workload: config.workload.map(str::to_string),
+        anti_distillation: config.anti_distillation,
+    }
+}
+
+#[cfg(test)]
+mod identity_resolution_tests {
+    use super::*;
+    use crate::auth::{CodexCredentials, OAuthCredentials};
+    use crate::types::Secret;
+
+    fn oauth_auth() -> AuthProvider {
+        AuthProvider::OAuthToken(OAuthCredentials {
+            access_token: Secret::new("sk-ant-oat-test".to_string()),
+            refresh_token: Secret::new("refresh".to_string()),
+            expires_at: chrono::Utc::now() + chrono::Duration::hours(1),
+            scopes: vec!["user".to_string()],
+            subscription_type: "pro".to_string(),
+        })
+    }
+
+    fn codex_auth() -> AuthProvider {
+        AuthProvider::CodexOAuthToken(CodexCredentials {
+            access_token: Secret::new("codex-access".to_string()),
+            refresh_token: Secret::new("codex-refresh".to_string()),
+            expires_at: chrono::Utc::now() + chrono::Duration::hours(1),
+            account_id: "acct".to_string(),
+        })
+    }
+
+    #[test]
+    fn oauth_token_forces_spoof_identity() {
+        let mode = resolve_identity_mode(&oauth_auth(), false, &IdentityConfigView::default());
+
+        match mode {
+            IdentityMode::Spoof { betas, .. } => assert!(
+                betas.iter().any(|beta| beta == "oauth-2025-04-20"),
+                "OAuth spoof mode must send the OAuth beta"
+            ),
+            other => panic!("OAuth auth must force spoof identity, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn bearer_token_forces_spoof_identity() {
+        let auth = AuthProvider::BearerToken(Secret::new("sk-ant-oat-test".to_string()));
+        let mode = resolve_identity_mode(&auth, false, &IdentityConfigView::default());
+
+        assert!(
+            matches!(mode, IdentityMode::Spoof { .. }),
+            "Bearer auth must force spoof identity because OAuth env tokens resolve as bearer"
+        );
+    }
+
+    #[test]
+    fn api_key_respects_clean_identity_config() {
+        let auth = AuthProvider::ApiKey(Secret::new("sk-ant-api03-test".to_string()));
+        let mode = resolve_identity_mode(&auth, false, &IdentityConfigView::default());
+
+        assert!(matches!(mode, IdentityMode::Clean));
+    }
+
+    #[test]
+    fn api_key_respects_custom_identity_config() {
+        let auth = AuthProvider::ApiKey(Secret::new("sk-ant-api03-test".to_string()));
+        let mut extra = HashMap::new();
+        extra.insert("x-extra".to_string(), "yes".to_string());
+        let custom = CustomIdentityConfigView {
+            user_agent: "custom-agent",
+            x_app: "custom-app",
+            extra_headers: Some(&extra),
+        };
+        let config = IdentityConfigView {
+            mode: "custom",
+            custom: Some(custom),
+            ..IdentityConfigView::default()
+        };
+
+        let mode = resolve_identity_mode(&auth, false, &config);
+
+        match mode {
+            IdentityMode::Custom {
+                user_agent,
+                x_app,
+                extra_headers,
+            } => {
+                assert_eq!(user_agent, "custom-agent");
+                assert_eq!(x_app, "custom-app");
+                assert_eq!(
+                    extra_headers.get("x-extra").map(String::as_str),
+                    Some("yes")
+                );
+            }
+            other => panic!("custom config should produce custom identity, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn force_spoof_overrides_clean_config() {
+        let auth = AuthProvider::ApiKey(Secret::new("sk-ant-api03-test".to_string()));
+        let mode = resolve_identity_mode(&auth, true, &IdentityConfigView::default());
+
+        assert!(matches!(mode, IdentityMode::Spoof { .. }));
+    }
+
+    #[test]
+    fn codex_oauth_does_not_force_anthropic_spoof() {
+        let mode = resolve_identity_mode(&codex_auth(), false, &IdentityConfigView::default());
+
+        assert!(
+            matches!(mode, IdentityMode::Clean),
+            "Codex OAuth is for OpenAI Responses and must not trigger Anthropic spoofing"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
