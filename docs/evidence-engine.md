@@ -73,6 +73,29 @@ Archon data directory. Some handlers also accept environment overrides:
 | Game-theory runs | same application data store used by the gametheory handler |
 | Policy | `/etc/archon/policy.toml`, `~/.archon/policy.toml`, `<workspace>/.archon/policy.toml` |
 
+## Project Initialisation
+
+For a new project, run:
+
+```bash
+sh scripts/archon-init.sh --target /path/to/project --archon-cli-repo /path/to/archon-cli
+```
+
+The initialiser creates the Evidence Engine project tree:
+
+| Path | Purpose |
+|---|---|
+| `.archon/policy.toml` | Safe local-first defaults for docs VLM, retrieval weights, learning gates, and game-theory Tier 11 |
+| `.archon/specs/` | Routing/spec files such as `gametheory.yaml` |
+| `.archon/docs/inbox/` | Optional drop zone for PDFs, DOCX, Markdown, text, and image files before `archon docs ingest` |
+| `.archon/evidence/` | Workspace-local evidence artifacts and manual verification transcripts |
+| `.archon/agents/` | Project agent definitions, including copied game-theory agents when available |
+| `prds/` and `tasks/` | PRD-driven work artifacts |
+
+Runtime databases still live in the application data directory by default; the
+workspace tree holds policy, specs, input files, agents, and verification
+artifacts.
+
 See the focused guides for command details:
 
 - [Document intelligence](docs.md)

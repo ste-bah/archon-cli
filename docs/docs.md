@@ -22,6 +22,66 @@ Current `archon docs --help` surface:
 | `index` | Embed and store vectors | `--all` re-indexes all chunks |
 | `model-status` | Report embedding backend | useful before ingest/index |
 
+## Add Documents And Images
+
+For a single file:
+
+```bash
+archon docs ingest ./policy-pack/marketplace-rules.pdf
+archon docs ingest ./policy-pack/scanned-page.png
+archon docs ingest ./policy-pack/research-notes.docx
+```
+
+For a directory:
+
+```bash
+archon docs ingest ./policy-pack
+```
+
+Supported inputs include Markdown, text, DOCX, PDF, PNG, JPEG, and TIFF. Native
+text is chunked directly. PDFs and images run through the local OCR provider
+when needed. Image files also record page/image hashes; optional VLM
+descriptions and image embeddings are policy-gated and should either persist
+real output or emit an explicit warning.
+
+After ingest, inspect the persisted source of truth:
+
+```bash
+archon docs status
+archon docs list
+archon docs inspect <document-id>
+archon docs chunks <document-id>
+archon docs provenance <chunk-or-answer-id>
+```
+
+Then index and search:
+
+```bash
+archon docs index --all
+archon docs search "known phrase from the fixture" --mode exact --debug
+archon docs search "similar meaning query" --mode semantic --debug
+archon docs search "mixed phrase and concept" --mode hybrid --debug
+```
+
+## TUI Document Browser
+
+Inside an interactive Archon session, use `/docs` for inspection:
+
+```text
+/docs open
+/docs status
+/docs list
+/docs inspect <document-id>
+/docs chunks <document-id>
+/docs provenance <chunk-or-artifact-id>
+/docs model-status
+```
+
+`/docs open` opens the TUI document/evidence browser and loads rows from the
+same persisted document store used by `archon docs ...`. Ingestion itself is a
+CLI operation today; the TUI is the read/inspection surface for checking what
+was actually stored.
+
 ## Retrieval modes
 
 | Mode | Behavior |

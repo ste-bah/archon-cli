@@ -117,6 +117,34 @@ sh scripts/archon-init.sh --target /path/to/your/project --archon-cli-repo $(pwd
 
 Creates `.archon/`, `prds/`, `tasks/` and wires `.gitignore`. Safe to re-run.
 
+Evidence Engine projects also get:
+
+| Path | Purpose |
+|---|---|
+| `.archon/policy.toml` | Safe local-first policy defaults for OCR, VLM, retrieval, learning, and game-theory gates |
+| `.archon/specs/` | Project routing/spec files; `gametheory.yaml` is copied when `--archon-cli-repo` points at this clone |
+| `.archon/docs/inbox/` | Optional drop zone for PDFs, DOCX, Markdown, text, PNG/JPEG/TIFF before `archon docs ingest` |
+| `.archon/evidence/` | Manual verification transcripts and evidence artifacts |
+
+Add documents with the CLI, then inspect them from CLI or TUI:
+
+```bash
+archon docs ingest .archon/docs/inbox
+archon docs status
+archon docs inspect <document-id>
+archon docs index --all
+archon docs search "known phrase" --mode hybrid --debug
+```
+
+Inside the TUI:
+
+```text
+/docs open
+/docs list
+/docs inspect <document-id>
+/docs provenance <chunk-or-artifact-id>
+```
+
 See [Project setup](project-setup.md) for full details — flags, scenarios, what's created vs not, exit codes, troubleshooting.
 
 For Windows native (PowerShell):
