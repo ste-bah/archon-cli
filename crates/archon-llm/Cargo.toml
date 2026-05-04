@@ -66,6 +66,7 @@ tokio = { workspace = true, features = ["test-util"] }
 # and `response::sse::{Sse, Event, KeepAlive}` without any extra deps.
 axum = { workspace = true }
 futures-util = { workspace = true }
+tempfile.workspace = true
 
 [features]
 test-support = []

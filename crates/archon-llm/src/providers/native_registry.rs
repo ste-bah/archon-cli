@@ -1,5 +1,5 @@
-//! GHOST-003: NATIVE_REGISTRY — descriptor metadata for the 5 native
-//! providers (openai, anthropic, gemini, xai, bedrock). Mirror of
+//! GHOST-003: NATIVE_REGISTRY — descriptor metadata for the native
+//! providers (openai, anthropic, gemini, xai, bedrock, openai-codex). Mirror of
 //! TASK-AGS-702's OPENAI_COMPAT_REGISTRY but for Native compat_kind.
 //! The 4 stub providers (azure, cohere, copilot, minimax) were removed
 //! per GHOST-003 Option B — they returned LlmError::Unsupported and
@@ -143,10 +143,34 @@ pub static NATIVE_REGISTRY: Lazy<HashMap<&'static str, ProviderDescriptor>> = La
         },
     );
 
+    // 6. openai-codex (ChatGPT subscription OAuth + Responses API)
+    m.insert(
+        "openai-codex",
+        ProviderDescriptor {
+            id: "openai-codex".into(),
+            display_name: "OpenAI Codex (ChatGPT Subscription)".into(),
+            base_url: parse_url("https://chatgpt.com/backend-api"),
+            auth_flavor: AuthFlavor::Custom("Authorization".into()),
+            env_key_var: "".into(),
+            compat_kind: CompatKind::Native,
+            default_model: "gpt-5.1-codex".into(),
+            supports: ProviderFeatures {
+                streaming: true,
+                tool_calling: true,
+                vision: true,
+                embeddings: false,
+                json_mode: false,
+            },
+            headers: HashMap::new(),
+            quirks: ProviderQuirks::DEFAULT,
+            is_gap: false,
+        },
+    );
+
     debug_assert_eq!(
         m.len(),
-        5,
-        "GHOST-003: NATIVE_REGISTRY must have 5 entries (4 stubs removed)"
+        6,
+        "GHOST-003/CDX-005: NATIVE_REGISTRY must have 6 entries"
     );
     m
 });

@@ -42,6 +42,12 @@ pub enum LlmError {
 
     #[error("provider '{name}' not found — available: [{available}]")]
     ProviderNotFound { name: String, available: String },
+
+    #[error("quota exceeded: {0}")]
+    QuotaExceeded(String),
+
+    #[error("request aborted")]
+    Aborted,
 }
 
 // ---------------------------------------------------------------------------

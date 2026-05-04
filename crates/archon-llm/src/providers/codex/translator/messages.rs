@@ -12,10 +12,10 @@ pub fn join_system_prompt(system: &[serde_json::Value]) -> Option<String> {
             tracing::warn!("Codex translator ignored non-text system block");
             continue;
         }
-        if let Some(text) = block.get("text").and_then(|v| v.as_str()) {
-            if !text.is_empty() {
-                parts.push(text.to_string());
-            }
+        if let Some(text) = block.get("text").and_then(|v| v.as_str())
+            && !text.is_empty()
+        {
+            parts.push(text.to_string());
         }
     }
     if parts.is_empty() {

@@ -77,6 +77,8 @@ pub fn classify(err: &LlmError) -> RetryDecision {
         LlmError::Server { status, .. } if *status >= 500 => RetryDecision::Retry,
 
         LlmError::Auth(_)
+        | LlmError::QuotaExceeded(_)
+        | LlmError::Aborted
         | LlmError::Serialize(_)
         | LlmError::Unsupported(_)
         | LlmError::Server { .. }

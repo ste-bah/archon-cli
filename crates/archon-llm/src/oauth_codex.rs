@@ -197,9 +197,7 @@ pub fn parse_callback_url(url: &str, expected_state: &str) -> Result<String, Aut
         .map(|(_, query)| query)
         .ok_or_else(|| AuthError::ParseError("callback URL has no query parameters".into()))?;
     let params = parse_query(query);
-    let state = params
-        .get("state")
-        .ok_or_else(|| AuthError::StateMismatch)?;
+    let state = params.get("state").ok_or(AuthError::StateMismatch)?;
     if state != expected_state {
         return Err(AuthError::StateMismatch);
     }

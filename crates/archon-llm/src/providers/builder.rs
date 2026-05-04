@@ -37,11 +37,14 @@
 
 use std::sync::Arc;
 
+use crate::auth::default_credentials_path;
 use crate::config::LlmConfig;
 use crate::provider::LlmProvider;
 use crate::retry::{RetryPolicy, RetryProvider};
 use crate::secrets::ApiKey;
 
+use super::codex::client::CodexProvider;
+use super::codex::spoof_default::SpoofConfig;
 use super::descriptor::{AuthFlavor, CompatKind, ProviderDescriptor};
 use super::error::ProviderError;
 use super::local::LocalProvider;
@@ -77,6 +80,7 @@ pub fn build_llm_provider_with_policy(
 
     let api_key = match descriptor.auth_flavor {
         AuthFlavor::None => ApiKey::new(String::new()),
+        _ if descriptor.id == "openai-codex" => ApiKey::new(String::new()),
         _ => {
             let var = cfg
                 .api_key_env
@@ -153,6 +157,25 @@ fn dispatch_native(
                 .clone()
                 .unwrap_or_else(|| descriptor.default_model.clone());
             Ok(Arc::new(LocalProvider::new(base_url, model, 300, true)))
+        }
+
+        "openai-codex" => {
+            let base_url = cfg
+                .base_url
+                .as_ref()
+                .map(|u| u.to_string())
+                .unwrap_or_else(|| descriptor.base_url.to_string());
+            let provider = CodexProvider::new_with_base_url(
+                default_credentials_path(),
+                SpoofConfig::default(),
+                (*http).clone(),
+                base_url,
+            )
+            .map_err(|e| ProviderError::InvalidResponse {
+                name: descriptor.display_name.clone(),
+                detail: e.to_string(),
+            })?;
+            Ok(Arc::new(provider))
         }
 
         // --- TASK-AGS-710: explicit architectural errors
