@@ -47,6 +47,9 @@ pub enum ViewId {
     MemoryBrowser,
     ModelPicker,
     Status,
+    GameTheory,
+    Docs,
+    Learning,
 }
 
 /// Summary of a conversation message for the /rewind overlay list (TASK-TUI-620).
