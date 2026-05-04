@@ -284,7 +284,7 @@ async fn main() -> Result<()> {
             return handle_agent_info(name, version, json, &working_dir_for_config).await;
         }
         Some(Commands::Kb { ref action }) => {
-            let _ = handle_kb_action(action.clone()).await;
+            return crate::command::kb::handle_kb_command(action.clone()).await;
         }
         Some(Commands::Docs { ref action }) => {
             return crate::command::docs::handle_docs_command(action.clone()).await;
@@ -508,61 +508,9 @@ async fn main() -> Result<()> {
 }
 
 // v0.1.23: Knowledge base CLI handler.
+#[cfg(test)]
 async fn handle_kb_action(action: cli_args::KbAction) -> Result<()> {
-    use archon_pipeline::kb::{IngestSource, KnowledgeBase};
-
-    let db = cozo::DbInstance::new("mem", "", "")
-        .map_err(|e| anyhow::anyhow!("Failed to open KB: {e}"))?;
-    let kb = KnowledgeBase::new(db)?;
-
-    match action {
-        cli_args::KbAction::Ingest { source, domain: _ } => {
-            let src = if source.starts_with("http://") || source.starts_with("https://") {
-                IngestSource::Url(source)
-            } else {
-                let path = std::path::PathBuf::from(&source);
-                if path.is_dir() {
-                    IngestSource::Directory(path)
-                } else {
-                    IngestSource::FilePath(path)
-                }
-            };
-            let result = kb.ingest(&src).await?;
-            println!(
-                "Ingested: {} nodes, {} chunks",
-                result.nodes_created, result.chunks_processed
-            );
-            if !result.errors.is_empty() {
-                for e in &result.errors {
-                    eprintln!("  Error: {e}");
-                }
-            }
-        }
-        cli_args::KbAction::List => {
-            let nodes = kb.list().await?;
-            for n in &nodes {
-                println!("{}  {:?}  {}", n.node_id, n.node_type, n.title);
-            }
-            println!("{} nodes", nodes.len());
-        }
-        cli_args::KbAction::Search { query, limit } => {
-            let results = kb.search(&query, limit).await?;
-            for n in &results {
-                println!("{}  {:?}  {}", n.node_id, n.node_type, n.title);
-            }
-            println!("{} results", results.len());
-        }
-        cli_args::KbAction::Stats => {
-            let stats = kb.stats().await?;
-            println!("Total nodes: {}", stats.total_nodes);
-            println!("Total edges: {}", stats.total_edges);
-            for (ntype, count) in &stats.nodes_by_type {
-                println!("  {ntype}: {count}");
-            }
-        }
-    }
-
-    Ok(())
+    crate::command::kb::handle_kb_command(action).await
 }
 
 #[cfg(test)]
@@ -601,21 +549,22 @@ mod wire_tests {
     // v0.1.23: KB CLI subcommand tests
     #[tokio::test]
     async fn kb_stats_on_empty_db() {
-        let result = handle_kb_action(cli_args::KbAction::Stats).await;
+        let result = run_kb_with_temp_store(cli_args::KbAction::Stats).await;
         assert!(result.is_ok(), "stats on empty DB must succeed");
     }
 
     #[tokio::test]
     async fn kb_list_on_empty_db() {
-        let result = handle_kb_action(cli_args::KbAction::List).await;
+        let result = run_kb_with_temp_store(cli_args::KbAction::List).await;
         assert!(result.is_ok(), "list on empty DB must succeed");
     }
 
     #[tokio::test]
     async fn kb_search_on_empty_db_returns_no_matches() {
-        let result = handle_kb_action(cli_args::KbAction::Search {
+        let result = run_kb_with_temp_store(cli_args::KbAction::Search {
             query: "nonexistent".into(),
             limit: 10,
+            mode: "exact".into(),
         })
         .await;
         assert!(result.is_ok(), "search on empty DB must succeed");
@@ -625,7 +574,22 @@ mod wire_tests {
     async fn kb_stats_default_subcommand_works() {
         // Verify the KbAction::Stats variant can be constructed and dispatched
         let action = cli_args::KbAction::Stats;
-        let result = handle_kb_action(action).await;
+        let result = run_kb_with_temp_store(action).await;
         assert!(result.is_ok());
+    }
+
+    async fn run_kb_with_temp_store(action: cli_args::KbAction) -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let db_path = dir.path().join("kb.db");
+        // Tests run with --test-threads=1 in this workstream, so mutating this
+        // process environment cannot race another KB test.
+        unsafe {
+            std::env::set_var("ARCHON_KB_DB_PATH", &db_path);
+        }
+        let result = handle_kb_action(action).await;
+        unsafe {
+            std::env::remove_var("ARCHON_KB_DB_PATH");
+        }
+        result
     }
 }

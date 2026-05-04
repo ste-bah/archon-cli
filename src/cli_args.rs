@@ -702,7 +702,33 @@ pub enum KbAction {
         /// Maximum results
         #[arg(long, default_value = "10")]
         limit: usize,
+        /// Retrieval mode: exact, semantic, or hybrid
+        #[arg(long, default_value = "hybrid")]
+        mode: String,
     },
+    /// Extract claims, entities, relations, source quality and contradictions from doc chunks
+    Process {
+        /// Extract claims from document chunks
+        #[arg(long)]
+        claims: bool,
+        /// Extract entities from document chunks
+        #[arg(long)]
+        entities: bool,
+        /// Infer the knowledge graph relations
+        #[arg(long, alias = "kg")]
+        relations: bool,
+        /// Scan claims for contradictions
+        #[arg(long)]
+        contradictions: bool,
+    },
+    /// List extracted claims
+    Claims,
+    /// List extracted entities
+    Entities,
+    /// List inferred relations
+    Relations,
+    /// List detected contradictions
+    Contradictions,
     /// Show knowledge base statistics
     Stats,
 }
