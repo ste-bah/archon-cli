@@ -369,6 +369,7 @@ name = "archon-completion"
 version = "0.1.36"
 dependencies = [
  "anyhow",
+ "archon-learning",
  "archon-provenance",
  "async-trait",
  "chrono",

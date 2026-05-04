@@ -1,10 +1,11 @@
 //! False-completion incident recorder.
 //!
 //! When a verified=false claim is contradicted by evidence or corrected by a user,
-//! creates a [`FalseCompletionIncident`] and a parallel learning event for Phase 6.
+//! creates a [`FalseCompletionIncident`] and a linked governed-learning event.
 
 use anyhow::Result;
-use cozo::DbInstance;
+use cozo::{DataValue, DbInstance, ScriptMutability};
+use std::collections::BTreeMap;
 
 use crate::errors::EvidenceEngineError;
 use crate::models::*;
@@ -59,12 +60,8 @@ pub fn record_false_completion(
         }
     })?;
 
-    // Also insert a placeholder learning event for Phase 6 to consume.
-    // Uses a raw Cozo script since the learning_events relation is in the gametheory schema.
-    insert_learning_event_pending(db, &learning_event_id, &incident).map_err(|e| {
-        EvidenceEngineError::Storage {
-            message: e.to_string(),
-        }
+    insert_canonical_learning_event(db, &incident).map_err(|e| EvidenceEngineError::Storage {
+        message: e.to_string(),
     })?;
 
     Ok(incident)
@@ -105,67 +102,66 @@ fn compute_severity(
     }
 }
 
-/// Insert a placeholder learning event row for Phase 6 consumption.
-fn insert_learning_event_pending(
+fn insert_canonical_learning_event(
     db: &DbInstance,
-    event_id: &str,
     incident: &FalseCompletionIncident,
 ) -> Result<()> {
-    use cozo::{DataValue, ScriptMutability};
-    use std::collections::BTreeMap;
+    archon_learning::schema::ensure_learning_schema(db)?;
+    let workspace_id = workspace_id_for_run(db, &incident.run_id)?;
+    let event = archon_learning::models::LearningEvent {
+        event_id: incident.learning_event_id.clone(),
+        workspace_id,
+        event_type: archon_learning::models::LearningEventType::FalseCompletionDetected,
+        source_artifact_id: incident.incident_id.clone(),
+        outcome_artifact_id: Some(incident.run_id.clone()),
+        signal: serde_json::json!({
+            "incident_id": incident.incident_id,
+            "run_id": incident.run_id,
+            "agent_key": incident.agent_key,
+            "model": incident.model,
+            "task_type": incident.task_type,
+            "claim_kind": incident.claimed_state,
+            "actual_state": format!("{:?}", incident.actual_state),
+            "severity": format!("{:?}", incident.severity),
+            "missing_evidence": incident.missing_evidence,
+            "contradiction_ids": incident.contradiction_ids,
+            "user_correction": incident.user_correction,
+        }),
+        confidence: 0.9,
+        provenance_record_id: String::new(),
+        created_at: incident.created_at.clone(),
+    };
+    archon_learning::store::insert_learning_event(db, &event)?;
+    Ok(())
+}
 
-    // Ensure the learn_events relation exists (it may be in gametheory schema).
-    // We try to insert; if the relation doesn't exist, this is non-fatal for Phase 5.
+fn workspace_id_for_run(db: &DbInstance, run_id: &str) -> Result<String> {
     let mut params = BTreeMap::new();
-    params.insert("eid".into(), DataValue::from(event_id));
-    params.insert("wid".into(), DataValue::from("default"));
-    params.insert("et".into(), DataValue::from("FalseCompletionDetected"));
-    params.insert("sid".into(), DataValue::from(""));
-    params.insert("oid".into(), DataValue::from(""));
-    params.insert(
-        "sig".into(),
-        DataValue::from(
-            serde_json::json!({
-                "incident_id": incident.incident_id,
-                "claim_kind": incident.claimed_state,
-                "actual_state": format!("{:?}", incident.actual_state),
-                "severity": format!("{:?}", incident.severity),
-            })
-            .to_string()
-            .as_str(),
-        ),
-    );
-    params.insert("cf".into(), DataValue::from(0.8_f64));
-    params.insert("prid".into(), DataValue::from(""));
-    params.insert("ca".into(), DataValue::from(incident.created_at.as_str()));
-
+    params.insert("rid".into(), DataValue::from(run_id));
     let result = db.run_script(
-        "?[event_id, workspace_id, event_type, source_artifact_id, \
-         outcome_artifact_id, signal, confidence, provenance_record_id, created_at] \
-         <- [[$eid, $wid, $et, $sid, $oid, $sig, $cf, $prid, $ca]] \
-         :put learn_events { event_id => workspace_id, event_type, \
-         source_artifact_id, outcome_artifact_id, signal, confidence, \
-         provenance_record_id, created_at }",
+        "?[workspace_id] := *completion_run_contexts{run_id, workspace_id}, run_id = $rid",
         params,
-        ScriptMutability::Mutable,
+        ScriptMutability::Immutable,
     );
 
-    // Non-fatal: relation may not exist until gametheory schema is set up.
-    if let Err(ref e) = result {
-        let msg = e.to_string();
-        if msg.contains("Cannot find requested stored relation") {
-            tracing::warn!(
-                event_id = %event_id,
-                "learn_events relation not found — learning event deferred to Phase 6"
-            );
-            return Ok(());
+    match result {
+        Ok(rows) => Ok(rows
+            .rows
+            .first()
+            .and_then(|row| row.first())
+            .and_then(|value| value.get_str())
+            .filter(|workspace| !workspace.is_empty())
+            .unwrap_or(crate::trust::DEFAULT_WORKSPACE_ID)
+            .to_string()),
+        Err(e) => {
+            let msg = e.to_string();
+            if msg.contains("Cannot find requested stored relation") {
+                Ok(crate::trust::DEFAULT_WORKSPACE_ID.to_string())
+            } else {
+                Err(anyhow::anyhow!("read completion run context failed: {msg}"))
+            }
         }
     }
-
-    result
-        .map(|_| ())
-        .map_err(|e| anyhow::anyhow!("insert learning event failed: {e}"))?;
-    Ok(())
 }
 
 #[cfg(test)]
@@ -175,18 +171,23 @@ mod tests {
     fn test_db() -> DbInstance {
         let path = format!("/tmp/test-incident-recorder-{}.db", uuid::Uuid::new_v4());
         let db = DbInstance::new("sqlite", &path, "").unwrap();
-        // Ensure completion schema
         crate::schema::ensure_completion_schema(&db).unwrap();
-        // Ensure learn_events exists (gametheory schema)
-        let _ = db.run_script(
-            ":create learn_events { event_id: String => workspace_id: String, event_type: String, \
-             source_artifact_id: String default \"\", outcome_artifact_id: String default \"\", \
-             signal: String default \"{}\", confidence: Float default 0.5, \
-             provenance_record_id: String default \"\", created_at: String }",
-            Default::default(),
-            cozo::ScriptMutability::Mutable,
-        );
+        archon_learning::schema::ensure_learning_schema(&db).unwrap();
         db
+    }
+
+    fn insert_run_context(db: &DbInstance, run_id: &str, workspace_id: &str) {
+        store::insert_completion_run_context(
+            db,
+            &CompletionRunContext {
+                run_id: run_id.to_string(),
+                workspace_id: workspace_id.to_string(),
+                agent_key: Some("ctx-agent".into()),
+                model: Some("ctx-model".into()),
+                updated_at: "2026-01-01T00:00:00Z".into(),
+            },
+        )
+        .unwrap();
     }
 
     #[test]
@@ -229,6 +230,7 @@ mod tests {
     #[test]
     fn test_links_learning_event() {
         let db = test_db();
+        insert_run_context(&db, "run-2", "workspace-alpha");
         let claim = CompletionClaim {
             claim_id: "cl-2".into(),
             run_id: "run-2".into(),
@@ -255,15 +257,18 @@ mod tests {
 
         assert_eq!(incident.severity, IncidentSeverity::Critical);
 
-        // Verify learning event was persisted
-        let events = db
-            .run_script(
-                "?[event_id] := *learn_events{event_id, event_type: \"FalseCompletionDetected\"}",
-                Default::default(),
-                cozo::ScriptMutability::Immutable,
-            )
-            .unwrap();
-        assert_eq!(events.rows.len(), 1);
+        let event = archon_learning::store::get_learning_event(&db, &incident.learning_event_id)
+            .unwrap()
+            .expect("canonical learning event must exist");
+        assert_eq!(event.event_id, incident.learning_event_id);
+        assert_eq!(event.workspace_id, "workspace-alpha");
+        assert_eq!(
+            event.event_type,
+            archon_learning::models::LearningEventType::FalseCompletionDetected
+        );
+        assert_eq!(event.source_artifact_id, incident.incident_id);
+        assert_eq!(event.outcome_artifact_id.as_deref(), Some("run-2"));
+        assert_eq!(event.signal["severity"], "Critical");
     }
 
     #[test]
@@ -293,14 +298,14 @@ mod tests {
         )
         .unwrap();
 
-        // Phase 6 consume_incident_events depends on learning_event_id being set
+        // Cross-crate consumers depend on learning_event_id being set.
         assert!(
             !incident.learning_event_id.is_empty(),
-            "learning_event_id must be set for Phase 6 consumption"
+            "learning_event_id must be set for downstream consumption"
         );
         assert!(
             incident.learning_event_id.starts_with("le-"),
-            "learning_event_id must be set (Phase 5 uses le- prefix)"
+            "learning_event_id must use the stable le- prefix"
         );
     }
 }

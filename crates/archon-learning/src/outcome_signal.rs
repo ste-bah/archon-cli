@@ -1,8 +1,8 @@
-//! Outcome signal translators — convert incoming events from Phase 5 sources
+//! Outcome signal translators — convert incoming events from completion-integrity sources
 //! into canonical LearningEvent records.
 //!
 //! Three signal sources:
-//! 1. Completion incidents (learn_events + false_completion_incidents)
+//! 1. Completion incidents (legacy learn_events + false_completion_incidents)
 //! 2. Gametheory gate/test outcomes
 //! 3. User CLI accept/reject
 
@@ -15,13 +15,15 @@ use crate::errors::COZO_RELATION_NOT_FOUND;
 use crate::models::*;
 use crate::store;
 
-/// Consume pending rows from the Phase 5 `learn_events` relation (written by
-/// incident_recorder.rs), translate them into canonical LearningEvent rows in
-/// the Phase 6 `learning_events` relation, then delete the consumed rows.
+/// Consume pending rows from the legacy `learn_events` bridge relation,
+/// translate them into canonical LearningEvent rows in `learning_events`, then
+/// delete the consumed rows.
 ///
 /// Returns the count of events consumed.
 pub fn consume_completion_events(db: &DbInstance) -> Result<usize> {
-    // Read all rows from the Phase 5 learn_events relation
+    crate::schema::ensure_learning_schema(db)?;
+
+    // Read all rows from the legacy learn_events relation.
     let pending = match read_learn_events(db) {
         Ok(rows) => rows,
         Err(e) => {
@@ -50,7 +52,7 @@ pub fn consume_completion_events(db: &DbInstance) -> Result<usize> {
     Ok(consumed)
 }
 
-/// Read raw rows from the Phase 5 `learn_events` relation.
+/// Read raw rows from the legacy `learn_events` relation.
 fn read_learn_events(db: &DbInstance) -> Result<Vec<Vec<DataValue>>> {
     let result = db
         .run_script(
@@ -66,23 +68,35 @@ fn read_learn_events(db: &DbInstance) -> Result<Vec<Vec<DataValue>>> {
     Ok(result.rows)
 }
 
-/// Translate a Phase 5 learn_events row into a LearningEvent.
+/// Translate a legacy learn_events row into a LearningEvent.
 fn translate_learn_event_row(row: &[DataValue]) -> LearningEvent {
     LearningEvent {
         event_id: format!(
             "lev-{}",
             uuid::Uuid::new_v4().to_string().replace('-', "")[..12].to_string()
         ),
-        workspace_id: row.get(1).and_then(|v| v.get_str()).unwrap_or("default").to_string(),
+        workspace_id: row
+            .get(1)
+            .and_then(|v| v.get_str())
+            .unwrap_or("default")
+            .to_string(),
         event_type: row
             .get(2)
             .and_then(|v| v.get_str())
             .and_then(LearningEventType::from_str)
             .unwrap_or(LearningEventType::FalseCompletionDetected),
-        source_artifact_id: row.get(3).and_then(|v| v.get_str()).unwrap_or("").to_string(),
+        source_artifact_id: row
+            .get(3)
+            .and_then(|v| v.get_str())
+            .unwrap_or("")
+            .to_string(),
         outcome_artifact_id: {
             let s = row.get(4).and_then(|v| v.get_str()).unwrap_or("");
-            if s.is_empty() { None } else { Some(s.to_string()) }
+            if s.is_empty() {
+                None
+            } else {
+                Some(s.to_string())
+            }
         },
         signal: row
             .get(5)
@@ -90,12 +104,20 @@ fn translate_learn_event_row(row: &[DataValue]) -> LearningEvent {
             .and_then(|s| serde_json::from_str(s).ok())
             .unwrap_or(serde_json::Value::Object(Default::default())),
         confidence: row.get(6).and_then(|v| v.get_float()).unwrap_or(0.5) as f32,
-        provenance_record_id: row.get(7).and_then(|v| v.get_str()).unwrap_or("").to_string(),
-        created_at: row.get(8).and_then(|v| v.get_str()).unwrap_or("").to_string(),
+        provenance_record_id: row
+            .get(7)
+            .and_then(|v| v.get_str())
+            .unwrap_or("")
+            .to_string(),
+        created_at: row
+            .get(8)
+            .and_then(|v| v.get_str())
+            .unwrap_or("")
+            .to_string(),
     }
 }
 
-/// Delete all rows from the Phase 5 `learn_events` relation after consumption.
+/// Delete all rows from the legacy `learn_events` relation after consumption.
 fn delete_learn_events(db: &DbInstance) -> Result<()> {
     // Cozo doesn't support :delete with conditions directly in all versions;
     // we remove by extracting all keys and then removing them.
@@ -123,19 +145,20 @@ fn delete_learn_events(db: &DbInstance) -> Result<()> {
 /// Only processes incidents that haven't already been translated (those without a
 /// corresponding learning event in the canonical `learning_events` relation).
 pub fn consume_incident_events(db: &DbInstance) -> Result<usize> {
+    crate::schema::ensure_learning_schema(db)?;
+
     // Read false_completion_incidents that have a non-empty learning_event_id
-    let result = db
-        .run_script(
-            "?[incident_id, run_id, agent_key, model, task_type, claimed_state, \
+    let result = db.run_script(
+        "?[incident_id, run_id, agent_key, model, task_type, claimed_state, \
              actual_state, missing_evidence_json, user_correction, severity, \
              learning_event_id, created_at] \
              := *false_completion_incidents{incident_id, run_id, agent_key, model, \
              task_type, claimed_state, actual_state, missing_evidence_json, \
              user_correction, severity, learning_event_id, created_at}, \
              learning_event_id != \"\"",
-            Default::default(),
-            ScriptMutability::Immutable,
-        );
+        Default::default(),
+        ScriptMutability::Immutable,
+    );
 
     let rows = match result {
         Ok(r) => r.rows,
@@ -153,13 +176,21 @@ pub fn consume_incident_events(db: &DbInstance) -> Result<usize> {
         let incident_id = row[0].get_str().unwrap_or("").to_string();
         let agent_key = row[2].get_str().map(|s| s.to_string());
         let severity = row[9].get_str().unwrap_or("Low").to_string();
+        let learning_event_id = row[10].get_str().unwrap_or("").to_string();
 
-        let event = crate::events::false_completion_detected(
+        if learning_event_id.is_empty()
+            || store::get_learning_event(db, &learning_event_id)?.is_some()
+        {
+            continue;
+        }
+
+        let mut event = crate::events::false_completion_detected(
             "default",
             &incident_id,
             agent_key.as_deref(),
             &severity,
         );
+        event.event_id = learning_event_id;
         store::insert_learning_event(db, &event)?;
         consumed += 1;
     }
@@ -210,7 +241,7 @@ mod tests {
         let path = format!("/tmp/test-outcome-signal-{}.db", uuid::Uuid::new_v4());
         let db = DbInstance::new("sqlite", &path, "").unwrap();
         crate::schema::ensure_learning_schema(&db).unwrap();
-        // Also create the Phase 5 learn_events relation for consume tests
+        // Also create the legacy learn_events relation for consume tests.
         create_phase5_learn_events(&db);
         db
     }
@@ -226,11 +257,60 @@ mod tests {
         );
     }
 
+    fn create_false_completion_incidents(db: &DbInstance) {
+        let _ = db.run_script(
+            ":create false_completion_incidents {
+                incident_id: String =>
+                run_id: String,
+                agent_key: String default \"\",
+                model: String default \"\",
+                task_type: String,
+                claimed_state: String,
+                actual_state: String,
+                missing_evidence_json: String default \"[]\",
+                user_correction: String default \"\",
+                severity: String,
+                learning_event_id: String default \"\",
+                created_at: String,
+            }",
+            Default::default(),
+            ScriptMutability::Mutable,
+        );
+    }
+
+    fn insert_incident(db: &DbInstance, incident_id: &str, event_id: &str) {
+        let mut params = BTreeMap::new();
+        params.insert("iid".into(), DataValue::from(incident_id));
+        params.insert("rid".into(), DataValue::from("run-incident-1"));
+        params.insert("ak".into(), DataValue::from("agent-alpha"));
+        params.insert("model".into(), DataValue::from("model-alpha"));
+        params.insert("tt".into(), DataValue::from("coding"));
+        params.insert("cs".into(), DataValue::from("Done"));
+        params.insert("actual".into(), DataValue::from("NotRun"));
+        params.insert("me".into(), DataValue::from("[\"TestRun\"]"));
+        params.insert("uc".into(), DataValue::from(""));
+        params.insert("sev".into(), DataValue::from("High"));
+        params.insert("leid".into(), DataValue::from(event_id));
+        params.insert("ca".into(), DataValue::from("2026-05-04T00:00:00Z"));
+        db.run_script(
+            "?[incident_id, run_id, agent_key, model, task_type, claimed_state, \
+             actual_state, missing_evidence_json, user_correction, severity, \
+             learning_event_id, created_at] \
+             <- [[$iid, $rid, $ak, $model, $tt, $cs, $actual, $me, $uc, $sev, $leid, $ca]] \
+             :put false_completion_incidents { incident_id => run_id, agent_key, model, \
+             task_type, claimed_state, actual_state, missing_evidence_json, \
+             user_correction, severity, learning_event_id, created_at }",
+            params,
+            ScriptMutability::Mutable,
+        )
+        .unwrap();
+    }
+
     #[test]
     fn test_consume_pending_translates_completion_events() {
         let db = test_db();
 
-        // Insert a row into Phase 5 learn_events
+        // Insert a row into legacy learn_events.
         let mut params = BTreeMap::new();
         params.insert("eid".into(), DataValue::from("le-phase5-001"));
         params.insert("wid".into(), DataValue::from("default"));
@@ -251,9 +331,10 @@ mod tests {
              provenance_record_id, created_at }",
             params,
             ScriptMutability::Mutable,
-        ).unwrap();
+        )
+        .unwrap();
 
-        // Before consumption: Phase 6 learning_events is empty, Phase 5 has 1 row
+        // Before consumption: canonical learning_events is empty, legacy bridge has 1 row.
         let before = store::list_all_learning_events(&db).unwrap();
         assert!(before.is_empty());
 
@@ -261,13 +342,67 @@ mod tests {
         let count = consume_completion_events(&db).unwrap();
         assert_eq!(count, 1, "should have consumed 1 event");
 
-        // After consumption: Phase 6 has 1 row, Phase 5 is empty
+        // After consumption: canonical learning_events has 1 row, legacy bridge is empty.
         let after = store::list_all_learning_events(&db).unwrap();
         assert_eq!(after.len(), 1);
-        assert_eq!(after[0].event_type, LearningEventType::FalseCompletionDetected);
+        assert_eq!(
+            after[0].event_type,
+            LearningEventType::FalseCompletionDetected
+        );
 
-        // Verify Phase 5 was drained
+        // Verify the legacy bridge was drained.
         let count2 = consume_completion_events(&db).unwrap();
-        assert_eq!(count2, 0, "Phase 5 should be empty after first consume");
+        assert_eq!(
+            count2, 0,
+            "legacy bridge should be empty after first consume"
+        );
+    }
+
+    #[test]
+    fn test_consume_incident_events_uses_linked_learning_event_id() {
+        let db = test_db();
+        create_false_completion_incidents(&db);
+        insert_incident(&db, "inc-legacy-1", "le-linked-1");
+
+        let consumed = consume_incident_events(&db).unwrap();
+        assert_eq!(consumed, 1);
+
+        let event = store::get_learning_event(&db, "le-linked-1")
+            .unwrap()
+            .expect("linked learning event must exist");
+        assert_eq!(event.event_id, "le-linked-1");
+        assert_eq!(event.event_type, LearningEventType::FalseCompletionDetected);
+        assert_eq!(event.source_artifact_id, "inc-legacy-1");
+        assert_eq!(event.signal["agent_key"], "agent-alpha");
+        assert_eq!(event.signal["severity"], "High");
+    }
+
+    #[test]
+    fn test_consume_incident_events_skips_already_canonical_event() {
+        let db = test_db();
+        create_false_completion_incidents(&db);
+        insert_incident(&db, "inc-legacy-2", "le-linked-2");
+        store::insert_learning_event(
+            &db,
+            &LearningEvent {
+                event_id: "le-linked-2".into(),
+                workspace_id: "default".into(),
+                event_type: LearningEventType::FalseCompletionDetected,
+                source_artifact_id: "inc-legacy-2".into(),
+                outcome_artifact_id: None,
+                signal: serde_json::json!({"already": true}),
+                confidence: 1.0,
+                provenance_record_id: String::new(),
+                created_at: "2026-05-04T00:00:00Z".into(),
+            },
+        )
+        .unwrap();
+
+        let consumed = consume_incident_events(&db).unwrap();
+        assert_eq!(consumed, 0);
+
+        let events = store::list_all_learning_events(&db).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].signal, serde_json::json!({"already": true}));
     }
 }
