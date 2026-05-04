@@ -624,8 +624,11 @@ mod tests {
     ///
     /// Sequence: 49 → 50 (#206) → 51 (#215) → 52 (#210) → 53 (#211)
     /// → 54 (#212) → 55 (#213) → 56 (#214) → 57 (#216) → 58 (#217)
-    /// → 59 (#207) → 60 (#208) → 61 (#209).
-    const EXPECTED_PRIMARY_COUNT: usize = 65;
+    /// → 59 (#207) → 60 (#208) → 61 (#209) → 65 (Phase 5+6: completion +
+    /// behaviour primaries) → 76 (v0.1.38 Evidence Engine: kb, prov,
+    /// meaning, constellation primaries + gametheory inspection
+    /// subcommands and slash mirrors).
+    const EXPECTED_PRIMARY_COUNT: usize = 76;
 
     /// Drain every currently-queued event from `rx` using `try_recv`
     /// until the channel reports empty, returning the drained events

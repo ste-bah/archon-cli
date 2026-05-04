@@ -2031,7 +2031,13 @@ mod tests {
     /// TASK-#209 SLASH-SUMMARY adds `/summary` as a new primary,
     /// bringing the total to 61. TASK-HOTFIX-V0.1.7 adds `/run-agent`
     /// as a new primary, bringing the total to 62.
-    const EXPECTED_COMMAND_COUNT: usize = 65;
+    ///
+    /// v0.1.38 Evidence Engine adds 11 primaries: /kb, /prov, /meaning,
+    /// /constellation primary commands + gametheory inspection
+    /// subcommands (inspect-fingerprint, inspect-routing, list-agents,
+    /// specimens, status, resume) + gametheory_slash mirror, taking
+    /// the total to 76.
+    const EXPECTED_COMMAND_COUNT: usize = 76;
 
     #[test]
     fn default_registry_contains_all_commands() {

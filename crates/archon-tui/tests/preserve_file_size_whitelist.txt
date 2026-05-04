@@ -45,3 +45,8 @@ src/command/rules.rs                               # expires 2026-05-15
 src/command/test_support.rs                        # expires 2026-05-15
 
 src/command/plugin_slash.rs # expires 2026-06-30  # GHOST-005 enable/disable/install/reload real impl
+
+# --- v0.1.38 Evidence Engine PRD-compliance pass ---
+src/command/docs.rs              # expires 2026-06-30  # Phase 2 docs CLI (ingest/search/index/inspect/answer/provenance/model-status/list/show/status/chunks/open)
+src/command/gametheory.rs        # expires 2026-06-30  # Phase 4 full gametheory CLI: 11 subcommands + spec resolution + KB binding + LLM client construction
+src/command/gametheory_slash.rs  # expires 2026-06-30  # Phase 4 /gametheory slash mirror covering all CLI subcommands

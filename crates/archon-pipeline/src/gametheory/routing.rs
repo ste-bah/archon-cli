@@ -1149,13 +1149,29 @@ mod tests {
 
         let result = resolve_spec_path(None);
         std::env::set_current_dir(&orig_cwd).unwrap();
-        std::fs::remove_dir_all(&temp).unwrap();
 
         assert!(
             result.is_ok(),
             "should find spec via upward walk: {:?}",
             result.err()
         );
-        assert_eq!(result.unwrap(), spec_file);
+
+        // Canonicalize BEFORE removing the temp dir — on macOS /tmp is
+        // symlinked through /var → /private/var, so the unresolved
+        // tempdir path and the looked-up path differ even though they
+        // point at the same inode. We must canonicalize while the
+        // files still exist (canonicalize() requires the path to
+        // resolve), then assert, then clean up.
+        let resolved = result.unwrap();
+        let resolved_canonical = resolved
+            .canonicalize()
+            .expect("resolved spec path must canonicalize while temp dir exists");
+        let expected_canonical = spec_file
+            .canonicalize()
+            .expect("expected spec path must canonicalize while temp dir exists");
+
+        std::fs::remove_dir_all(&temp).unwrap();
+
+        assert_eq!(resolved_canonical, expected_canonical);
     }
 }
