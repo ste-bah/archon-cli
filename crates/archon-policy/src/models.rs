@@ -97,9 +97,25 @@ impl Default for LearningPolicy {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct DocsPolicy {
     pub vlm: VlmPolicy,
+    pub retrieval: RetrievalPolicy,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RetrievalPolicy {
+    pub exact_weight: f64,
+    pub semantic_weight: f64,
+}
+
+impl Default for RetrievalPolicy {
+    fn default() -> Self {
+        Self {
+            exact_weight: 0.45,
+            semantic_weight: 0.55,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

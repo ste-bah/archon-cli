@@ -45,7 +45,7 @@ pub async fn handle_docs_command(action: DocsAction) -> Result<()> {
         DocsAction::Status => handle_status().await,
         DocsAction::Chunks { document_id } => handle_chunks(&document_id).await,
         DocsAction::Inspect { document_id } => handle_inspect(&document_id).await,
-        DocsAction::Search { query, debug } => handle_search(&query, debug).await,
+        DocsAction::Search { query, mode, debug } => handle_search(&query, &mode, debug).await,
         DocsAction::Answer { query } => handle_answer(&query).await,
         DocsAction::Provenance { chunk_or_answer_id } => {
             handle_provenance(&chunk_or_answer_id).await
@@ -208,27 +208,33 @@ async fn ensure_search_ready(db: &cozo::DbInstance) -> Result<()> {
     Ok(())
 }
 
-async fn handle_search(query: &str, debug: bool) -> Result<()> {
+async fn handle_search(query: &str, mode: &str, debug: bool) -> Result<()> {
     let db = open_db()?;
     ensure_search_ready(&db).await?;
+    let mode = retrieval::SearchMode::parse(mode).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let policy = std::env::current_dir()
+        .ok()
+        .and_then(|cwd| archon_policy::load_effective_policy(&cwd).ok())
+        .unwrap_or_default();
 
-    match retrieval::search(&db, query, 10) {
+    match retrieval::search_with_policy(&db, query, 10, mode, &policy) {
         Ok(results) => {
-            if results.total_indexed_chunks == 0 {
+            if results.results.is_empty() && results.total_chunks == 0 {
                 println!("No documents indexed. Use 'archon docs ingest <path>' first.");
                 return Ok(());
             }
             if results.results.is_empty() {
                 println!(
-                    "No results found. {} chunks indexed, but none matched your query.",
-                    results.total_indexed_chunks
+                    "No results found. {} chunks stored, {} chunks indexed, but none matched your query.",
+                    results.total_chunks, results.total_indexed_chunks
                 );
                 return Ok(());
             }
             println!(
-                "Found {} result(s) ({} chunks indexed):\n",
+                "Found {} result(s) ({} chunks indexed, mode={}):\n",
                 results.results.len(),
-                results.total_indexed_chunks
+                results.total_indexed_chunks,
+                results.mode.as_str()
             );
             for (i, r) in results.results.iter().enumerate() {
                 println!(
@@ -242,6 +248,8 @@ async fn handle_search(query: &str, debug: bool) -> Result<()> {
                 if debug {
                     println!("     document: {}", r.document_id);
                     println!("     distance: {:.4}", r.distance);
+                    println!("     exact:    {:.4}", r.exact_score);
+                    println!("     semantic: {:.4}", r.semantic_score);
                     println!(
                         "     content:  {}",
                         if r.content.len() > 120 {
@@ -251,6 +259,9 @@ async fn handle_search(query: &str, debug: bool) -> Result<()> {
                         }
                     );
                 }
+            }
+            for warning in &results.warnings {
+                println!("Warning: {warning}");
             }
             if !debug {
                 println!("\nUse --debug for full content and provenance details.");

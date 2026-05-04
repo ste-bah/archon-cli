@@ -781,6 +781,9 @@ pub enum DocsAction {
     Search {
         /// Search query
         query: String,
+        /// Retrieval mode: exact, semantic, or hybrid
+        #[arg(long, default_value = "hybrid")]
+        mode: String,
         /// Show debug output (embedding details, distances, provenance)
         #[arg(long)]
         debug: bool,

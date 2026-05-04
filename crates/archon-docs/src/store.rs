@@ -735,6 +735,31 @@ pub fn count_pending_chunks(db: &DbInstance) -> Result<usize> {
     Ok(result.rows[0][0].get_int().unwrap_or(0) as usize)
 }
 
+/// Count chunks currently stored.
+pub fn count_chunks(db: &DbInstance) -> Result<usize> {
+    let result = db.run_script(
+        "?[count(chunk_id)] := *doc_chunks{chunk_id}",
+        Default::default(),
+        ScriptMutability::Immutable,
+    );
+    match result {
+        Ok(result) => {
+            if result.rows.is_empty() {
+                return Ok(0);
+            }
+            Ok(result.rows[0][0].get_int().unwrap_or(0) as usize)
+        }
+        Err(e) => {
+            let msg = e.to_string();
+            if msg.contains(crate::errors::COZO_RELATION_NOT_FOUND) {
+                Ok(0)
+            } else {
+                Err(anyhow::anyhow!("count chunks failed: {msg}"))
+            }
+        }
+    }
+}
+
 /// Count embeddings currently stored.
 pub fn count_embeddings(db: &DbInstance) -> Result<usize> {
     let result = db.run_script(

@@ -46,6 +46,10 @@ enabled = false
 mode = "disabled" # disabled | local | cloud | hybrid
 allow_cloud = false
 require_user_confirmation_for_cloud = true
+
+[policy.docs.retrieval]
+exact_weight = 0.45
+semantic_weight = 0.55
 ```
 
 ## Current Gates
@@ -55,6 +59,9 @@ require_user_confirmation_for_cloud = true
 
 Document VLM descriptions are denied unless `[policy.docs.vlm]` enables a local,
 cloud, or hybrid provider and the matching worker/network policy allows it.
+
+Document search defaults to hybrid retrieval. `[policy.docs.retrieval]` controls
+the exact/semantic weighting used by `archon docs search --mode hybrid`.
 
 Governed-learning auto-apply is denied by default. Low-risk updates can only
 auto-apply when `policy.learning.auto_apply_low_risk = true`; prompt, blocking

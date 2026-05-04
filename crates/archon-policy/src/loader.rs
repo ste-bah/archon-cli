@@ -113,6 +113,13 @@ struct RawLearningPolicy {
 #[derive(Debug, Default, Deserialize)]
 struct RawDocsPolicy {
     vlm: Option<RawVlmPolicy>,
+    retrieval: Option<RawRetrievalPolicy>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct RawRetrievalPolicy {
+    exact_weight: Option<f64>,
+    semantic_weight: Option<f64>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -137,10 +144,13 @@ fn apply_raw(policy: &mut EffectivePolicy, root: RawPolicyRoot) {
         if let Some(learning) = raw.learning {
             apply_learning(&mut policy.learning, learning);
         }
-        if let Some(docs) = raw.docs
-            && let Some(vlm) = docs.vlm
-        {
-            apply_vlm(&mut policy.docs.vlm, vlm);
+        if let Some(docs) = raw.docs {
+            if let Some(vlm) = docs.vlm {
+                apply_vlm(&mut policy.docs.vlm, vlm);
+            }
+            if let Some(retrieval) = docs.retrieval {
+                apply_retrieval(&mut policy.docs.retrieval, retrieval);
+            }
         }
     }
     if let Some(legacy_vlm) = root.vlm {
@@ -220,5 +230,14 @@ fn apply_vlm(policy: &mut VlmPolicy, raw: RawVlmPolicy) {
     }
     if let Some(value) = raw.require_user_confirmation_for_cloud {
         policy.require_user_confirmation_for_cloud = value;
+    }
+}
+
+fn apply_retrieval(policy: &mut RetrievalPolicy, raw: RawRetrievalPolicy) {
+    if let Some(value) = raw.exact_weight {
+        policy.exact_weight = value;
+    }
+    if let Some(value) = raw.semantic_weight {
+        policy.semantic_weight = value;
     }
 }

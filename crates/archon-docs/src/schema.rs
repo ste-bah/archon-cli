@@ -14,6 +14,7 @@ pub fn ensure_doc_schema(db: &DbInstance) -> Result<()> {
     ensure_doc_artifacts(db)?;
     ensure_doc_pages(db)?;
     ensure_doc_chunks(db)?;
+    ensure_doc_chunk_fts(db)?;
     ensure_doc_provenance_edges(db)?;
     ensure_doc_processing_jobs(db)?;
     Ok(())
@@ -118,6 +119,18 @@ fn ensure_doc_chunks(db: &DbInstance) -> Result<()> {
             content: String,
             content_hash: String,
             embedding_status: String default "pending",
+        }"#,
+    )
+}
+
+fn ensure_doc_chunk_fts(db: &DbInstance) -> Result<()> {
+    run_create(
+        db,
+        r#"::fts create doc_chunks:chunk_content_fts {
+            extractor: content,
+            extract_filter: content != "",
+            tokenizer: Simple,
+            filters: [Lowercase, Stemmer('english'), Stopwords('en')],
         }"#,
     )
 }

@@ -6,7 +6,7 @@
 use cozo::DbInstance;
 
 use crate::errors::DocsError;
-use crate::retrieval::{search, SearchResult};
+use crate::retrieval::{SearchResult, search};
 
 /// An answer with supporting evidence citations.
 #[derive(Clone, Debug)]
@@ -50,7 +50,7 @@ pub fn answer(db: &DbInstance, query: &str, top_k: usize) -> Result<Answer, Docs
         Err(e) => return Err(e),
     };
 
-    if search_results.total_indexed_chunks == 0 {
+    if search_results.results.is_empty() && search_results.total_chunks == 0 {
         return Ok(Answer {
             query: query.to_string(),
             text: "No documents have been indexed. Ingest documents first using 'archon docs ingest <path>'.".into(),
@@ -63,8 +63,8 @@ pub fn answer(db: &DbInstance, query: &str, top_k: usize) -> Result<Answer, Docs
         return Ok(Answer {
             query: query.to_string(),
             text: format!(
-                "No relevant evidence found for query. {} chunks were searched but none matched closely enough.",
-                search_results.total_indexed_chunks
+                "No relevant evidence found for query. {} chunks are stored ({} indexed), but none matched closely enough.",
+                search_results.total_chunks, search_results.total_indexed_chunks
             ),
             citations: Vec::new(),
             sources: Vec::new(),
@@ -91,14 +91,10 @@ pub fn answer(db: &DbInstance, query: &str, top_k: usize) -> Result<Answer, Docs
     let text = if search_results.results.len() == 1 {
         format!(
             "Based on 1 source (score {:.2}):\n\n{}",
-            search_results.results[0].score,
-            search_results.results[0].content
+            search_results.results[0].score, search_results.results[0].content
         )
     } else {
-        let mut t = format!(
-            "Based on {} sources:\n",
-            search_results.results.len()
-        );
+        let mut t = format!("Based on {} sources:\n", search_results.results.len());
         for (i, r) in search_results.results.iter().enumerate() {
             t.push_str(&format!(
                 "\n[{}] (pages {}-{}, score {:.2}):\n{}\n",
@@ -126,14 +122,13 @@ pub fn answer(db: &DbInstance, query: &str, top_k: usize) -> Result<Answer, Docs
 pub fn verify_citations(db: &DbInstance, citations: &[Citation]) -> Result<Vec<usize>, DocsError> {
     let mut failed = Vec::new();
     for (i, c) in citations.iter().enumerate() {
-        let chunks = crate::store::list_chunks_for_doc(db, &c.document_id)
-            .map_err(|e| DocsError::Retrieval {
+        let chunks = crate::store::list_chunks_for_doc(db, &c.document_id).map_err(|e| {
+            DocsError::Retrieval {
                 message: e.to_string(),
-            })?;
+            }
+        })?;
         let found = chunks.iter().any(|ch| {
-            ch.chunk_id == c.chunk_id
-                && ch.page_start == c.page_start
-                && ch.page_end == c.page_end
+            ch.chunk_id == c.chunk_id && ch.page_start == c.page_start && ch.page_end == c.page_end
         });
         if !found {
             failed.push(i);
@@ -253,6 +248,9 @@ mod tests {
         assert!(!ans.citations.is_empty());
 
         let failures = verify_citations(&db, &ans.citations).unwrap();
-        assert!(failures.is_empty(), "all citations must resolve to real records");
+        assert!(
+            failures.is_empty(),
+            "all citations must resolve to real records"
+        );
     }
 }
