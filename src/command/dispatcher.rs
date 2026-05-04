@@ -627,8 +627,9 @@ mod tests {
     /// → 59 (#207) → 60 (#208) → 61 (#209) → 65 (Phase 5+6: completion +
     /// behaviour primaries) → 76 (v0.1.38 Evidence Engine: kb, prov,
     /// meaning, constellation primaries + gametheory inspection
-    /// subcommands and slash mirrors).
-    const EXPECTED_PRIMARY_COUNT: usize = 76;
+    /// subcommands and slash mirrors) → 78 (v0.1.40 Codex auth: /auth
+    /// + /chat primaries for the OpenAI-Codex provider surface).
+    const EXPECTED_PRIMARY_COUNT: usize = 78;
 
     /// Drain every currently-queued event from `rx` using `try_recv`
     /// until the channel reports empty, returning the drained events

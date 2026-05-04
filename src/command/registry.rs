@@ -2051,7 +2051,11 @@ mod tests {
     /// subcommands (inspect-fingerprint, inspect-routing, list-agents,
     /// specimens, status, resume) + gametheory_slash mirror, taking
     /// the total to 76.
-    const EXPECTED_COMMAND_COUNT: usize = 76;
+    ///
+    /// v0.1.40 Codex auth adds 2 primaries: /auth (provider login +
+    /// status) and /chat (provider-routed chat surface for the new
+    /// OpenAI-Codex provider), taking the total to 78.
+    const EXPECTED_COMMAND_COUNT: usize = 78;
 
     #[test]
     fn default_registry_contains_all_commands() {

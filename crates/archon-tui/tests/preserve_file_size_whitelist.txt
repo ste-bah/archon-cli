@@ -50,3 +50,6 @@ src/command/plugin_slash.rs # expires 2026-06-30  # GHOST-005 enable/disable/ins
 src/command/docs.rs              # expires 2026-06-30  # Phase 2 docs CLI (ingest/search/index/inspect/answer/provenance/model-status/list/show/status/chunks/open)
 src/command/gametheory.rs        # expires 2026-06-30  # Phase 4 full gametheory CLI: 11 subcommands + spec resolution + KB binding + LLM client construction
 src/command/gametheory_slash.rs  # expires 2026-06-30  # Phase 4 /gametheory slash mirror covering all CLI subcommands
+
+# --- v0.1.40 Codex OAuth provider ---
+crates/archon-llm/src/providers/codex/spoof.rs  # expires 2026-06-30  # Codex spoof manifest resolver: provider list, default model selection, header-set construction
