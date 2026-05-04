@@ -10,6 +10,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use chrono::Utc;
 use cozo::DbInstance;
+use futures_util::future::join_all;
 
 use super::errors::GameTheoryError;
 use super::final_stage;
@@ -101,6 +102,21 @@ struct SpecialistExecutionOutcome {
     tier_costs_usd: BTreeMap<u8, f64>,
     budget_exceeded: bool,
     max_observed_concurrent: usize,
+}
+
+#[derive(Debug, Clone)]
+struct Tier1AgentOutput {
+    agent_key: String,
+    content: String,
+}
+
+#[derive(Debug, Clone)]
+struct SpecialistCallOutput {
+    agent_key: String,
+    output: Option<String>,
+    error: Option<String>,
+    audit: MemoryRecallAudit,
+    cost_usd: f64,
 }
 
 fn require_llm<'a>(
@@ -1009,11 +1025,12 @@ fn recall_prior_context_for_agent(
     }
 }
 
-/// Execute real Tier 1 classification via LLM.
+/// Execute real Tier 1 classification via the four mandatory Tier 1 agents.
 ///
-/// Builds a classification prompt from the situation, sends it to the LLM,
-/// and parses the response into a `GameTheoryFingerprint`. On failure, the
-/// caller (classify) falls back to `keyword_fallback_fingerprint`.
+/// The PRD requires the mandatory foundation agents to run as one parallel
+/// wave. `game-classifier` is responsible for the machine-readable 9-axis
+/// fingerprint; the other foundation outputs are executed and available for
+/// audit/prompt evolution but do not overwrite the classifier JSON.
 async fn execute_tier1_real(
     llm: &dyn LlmClient,
     run_id: &str,
@@ -1032,16 +1049,52 @@ async fn execute_tier1_real(
     }
     let prior_context = prior_context_parts.join("\n\n---\n\n");
 
+    let tier1_calls = TIER1_MEMORY_AGENT_KEYS
+        .iter()
+        .map(|agent_key| execute_tier1_agent(llm, agent_key, situation, &prior_context));
+    let responses = join_all(tier1_calls).await;
+    let mut outputs = Vec::new();
+    let mut failures = Vec::new();
+    for response in responses {
+        match response {
+            Ok(output) => outputs.push(output),
+            Err(err) => failures.push(err.to_string()),
+        }
+    }
+    if !failures.is_empty() {
+        return Err(GameTheoryError::Tier1Execution {
+            message: failures.join("; "),
+        });
+    }
+
+    let classifier_output = outputs
+        .iter()
+        .find(|output| output.agent_key == "game-classifier")
+        .or_else(|| outputs.first())
+        .ok_or_else(|| GameTheoryError::Tier1Execution {
+            message: "no Tier 1 agent outputs were produced".to_string(),
+        })?;
+
+    let fingerprint = parse_tier1_fingerprint(run_id, now, &classifier_output.content)?;
+    Ok((fingerprint, audits))
+}
+
+async fn execute_tier1_agent(
+    llm: &dyn LlmClient,
+    agent_key: &str,
+    situation: &str,
+    prior_context: &str,
+) -> Result<Tier1AgentOutput, GameTheoryError> {
     let system = vec![serde_json::json!({
         "role": "system",
-        "content": "You are a game-theory classification engine. Analyze the given strategic situation and output a JSON object with exactly these fields: cooperation (cooperative/non-cooperative), payoff_sum (zero-sum/positive-sum/variable-sum), symmetry (symmetric/asymmetric/unknown), timing (simultaneous/sequential/repeated), perfect_info (perfect/imperfect), complete_info (complete/incomplete), cardinality (2-player/n-player), strategy_space (continuous/discrete), horizon (one-shot/repeated), primary_family (short label like \"Bertrand competition\"), nearest_classic (classic game name or null). For each axis also include a confidence (low/medium/high) and a brief rationale. Output ONLY the JSON object, no markdown wrapping."
+        "content": tier1_system_prompt(agent_key)
     })];
 
     let user_content = if prior_context.is_empty() {
-        format!("Classify this strategic situation:\n\n{situation}")
+        format!("Classify this strategic situation as Tier 1 agent `{agent_key}`:\n\n{situation}")
     } else {
         format!(
-            "Classify this strategic situation:\n\n{situation}\n\n## Recalled Prior Context\n\n{prior_context}"
+            "Classify this strategic situation as Tier 1 agent `{agent_key}`:\n\n{situation}\n\n## Recalled Prior Context\n\n{prior_context}"
         )
     };
 
@@ -1056,18 +1109,48 @@ async fn execute_tier1_real(
         .map_err(|e| GameTheoryError::Storage {
             message: e.to_string(),
         })?;
+    Ok(Tier1AgentOutput {
+        agent_key: agent_key.to_string(),
+        content: response.content,
+    })
+}
 
+fn tier1_system_prompt(agent_key: &str) -> &'static str {
+    match agent_key {
+        "game-classifier" => {
+            "You are the game-classifier Tier 1 foundation agent. Analyze the given strategic situation and output a JSON object with exactly these fields: cooperation (cooperative/non-cooperative), payoff_sum (zero-sum/positive-sum/variable-sum), symmetry (symmetric/asymmetric/unknown), timing (simultaneous/sequential/repeated), perfect_info (perfect/imperfect), complete_info (complete/incomplete), cardinality (2-player/n-player), strategy_space (continuous/discrete), horizon (one-shot/repeated), primary_family (short label like \"Bertrand competition\"), nearest_classic (classic game name or null). For each axis also include a confidence (low/medium/high) and a brief rationale. Output ONLY the JSON object, no markdown wrapping."
+        }
+        "payoff-elicitor" => {
+            "You are the payoff-elicitor Tier 1 foundation agent. Identify players, incentives, payoff dimensions, likely payoff conflicts, and missing payoff assumptions. Output concise markdown."
+        }
+        "strategy-space-enumerator" => {
+            "You are the strategy-space-enumerator Tier 1 foundation agent. Enumerate each player's feasible actions, strategies, constraints, and whether the strategy space is discrete or continuous. Output concise markdown."
+        }
+        "information-structure-mapper" => {
+            "You are the information-structure-mapper Tier 1 foundation agent. Map who knows what, what is hidden, signalling channels, beliefs, and information asymmetries. Output concise markdown."
+        }
+        _ => {
+            "You are a Tier 1 game-theory foundation agent. Analyze the strategic situation from your assigned perspective."
+        }
+    }
+}
+
+fn parse_tier1_fingerprint(
+    run_id: &str,
+    now: &str,
+    content: &str,
+) -> Result<GameTheoryFingerprint, GameTheoryError> {
     // Try to parse JSON from the response (may be wrapped in ```json fences)
-    let content = response.content.trim();
-    let json_str = if let Some(start) = content.find("```json") {
-        let inner = &content[start + 7..];
+    let trimmed = content.trim();
+    let json_str = if let Some(start) = trimmed.find("```json") {
+        let inner = &trimmed[start + 7..];
         if let Some(end) = inner.find("```") {
             &inner[..end]
         } else {
             inner
         }
-    } else if let Some(start) = content.find('{') {
-        &content[start..]
+    } else if let Some(start) = trimmed.find('{') {
+        &trimmed[start..]
     } else {
         return Err(GameTheoryError::FingerprintParse {
             message: "LLM response did not contain JSON".into(),
@@ -1106,27 +1189,24 @@ async fn execute_tier1_real(
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
 
-    Ok((
-        GameTheoryFingerprint {
-            run_id: run_id.to_string(),
-            cooperation: get_axis("cooperation"),
-            payoff_sum: get_axis("payoff_sum"),
-            symmetry: get_axis("symmetry"),
-            timing: get_axis("timing"),
-            perfect_info: get_axis("perfect_info"),
-            complete_info: get_axis("complete_info"),
-            cardinality: get_axis("cardinality"),
-            strategy_space: get_axis("strategy_space"),
-            horizon: get_axis("horizon"),
-            primary_family,
-            nearest_classic,
-            shadow_games: vec![],
-            hidden_game_scan: None,
-            ambiguities: vec![],
-            created_at: now.to_string(),
-        },
-        audits,
-    ))
+    Ok(GameTheoryFingerprint {
+        run_id: run_id.to_string(),
+        cooperation: get_axis("cooperation"),
+        payoff_sum: get_axis("payoff_sum"),
+        symmetry: get_axis("symmetry"),
+        timing: get_axis("timing"),
+        perfect_info: get_axis("perfect_info"),
+        complete_info: get_axis("complete_info"),
+        cardinality: get_axis("cardinality"),
+        strategy_space: get_axis("strategy_space"),
+        horizon: get_axis("horizon"),
+        primary_family,
+        nearest_classic,
+        shadow_games: vec![],
+        hidden_game_scan: None,
+        ambiguities: vec![],
+        created_at: now.to_string(),
+    })
 }
 
 /// Execute real LLM-backed specialist agents.
@@ -1172,74 +1252,122 @@ async fn execute_specialists_real_with_options(
 ) -> Result<SpecialistExecutionOutcome, GameTheoryError> {
     let fingerprint_summary = prompt_builder::fingerprint_summary_text(fingerprint);
     let mut outcome = SpecialistExecutionOutcome::default();
+    let max_concurrent = options.max_concurrent.max(1);
 
     let system = vec![serde_json::json!({
         "role": "system",
         "content": "You are a game-theory analysis specialist. Analyze the given strategic situation from your specialist perspective and produce a detailed markdown report section. Focus on your area of expertise. Output ONLY the report content, no preamble."
     })];
 
-    for agent_key in &routing.enabled_specialists {
+    for wave in routing.enabled_specialists.chunks(max_concurrent) {
         if outcome.total_cost_usd >= options.budget_usd {
             outcome.budget_exceeded = true;
             break;
         }
-        outcome.max_observed_concurrent = outcome.max_observed_concurrent.max(1);
 
-        // Test hook: force failure for failure isolation testing
-        if agent_key.ends_with("-FORCE-FAIL-FOR-TEST") {
-            outcome.failed.push((
-                agent_key.clone(),
-                format!("forced failure for test: {agent_key}"),
-            ));
-            continue;
+        let remaining_budget = options.budget_usd - outcome.total_cost_usd;
+        let affordable_slots = if outcome.total_cost_usd == 0.0 && remaining_budget > 0.0 {
+            1.max(wave.len())
+        } else if remaining_budget > 0.0 {
+            wave.len()
+        } else {
+            0
+        };
+        let active_wave = &wave[..affordable_slots.min(wave.len())];
+        if active_wave.is_empty() {
+            outcome.budget_exceeded = true;
+            break;
         }
+        outcome.max_observed_concurrent = outcome.max_observed_concurrent.max(active_wave.len());
 
-        let recalled = recall_prior_context_for_agent(agent_key, memory_ctx);
-        outcome.memory_audits.push(recalled.audit.clone());
-
-        let prompt = prompt_builder::build_specialist_prompt_with_prior_context(
-            agent_key,
-            agent_key,
-            situation,
-            &fingerprint_summary,
-            &recalled.text,
-            &[],
-        );
-
-        let messages = vec![serde_json::json!({
-            "role": "user",
-            "content": prompt
-        })];
-
-        match llm
-            .send_message(messages, system.clone(), vec![], "claude-sonnet-4-6")
-            .await
-        {
-            Ok(response) => {
-                let cost = estimate_llm_cost_usd(
-                    "claude-sonnet-4-6",
-                    response.tokens_in,
-                    response.tokens_out,
-                );
-                record_agent_cost(&mut outcome, agent_key, cost);
-                outcome.outputs.insert(agent_key.clone(), response.content);
-            }
-            Err(e) => {
+        let calls = active_wave.iter().map(|agent_key| {
+            execute_specialist_call(
+                llm,
+                agent_key,
+                situation,
+                &fingerprint_summary,
+                memory_ctx,
+                &system,
+            )
+        });
+        let results = join_all(calls).await;
+        for result in results {
+            outcome.memory_audits.push(result.audit);
+            if let Some(output) = result.output {
+                if let Some(tier) = agent_tier(&result.agent_key) {
+                    *outcome.tier_costs_usd.entry(tier).or_insert(0.0) += result.cost_usd;
+                }
+                outcome.total_cost_usd += result.cost_usd;
                 outcome
-                    .failed
-                    .push((agent_key.clone(), format!("LLM error: {e}")));
+                    .costs_usd
+                    .insert(result.agent_key.clone(), result.cost_usd);
+                outcome.outputs.insert(result.agent_key, output);
+            } else if let Some(error) = result.error {
+                outcome.failed.push((result.agent_key, error));
             }
+        }
+        if outcome.total_cost_usd >= options.budget_usd {
+            outcome.budget_exceeded = true;
         }
     }
 
     Ok(outcome)
 }
 
-fn record_agent_cost(outcome: &mut SpecialistExecutionOutcome, agent_key: &str, cost: f64) {
-    outcome.total_cost_usd += cost;
-    outcome.costs_usd.insert(agent_key.to_string(), cost);
-    if let Some(tier) = agent_tier(agent_key) {
-        *outcome.tier_costs_usd.entry(tier).or_insert(0.0) += cost;
+async fn execute_specialist_call(
+    llm: &dyn LlmClient,
+    agent_key: &str,
+    situation: &str,
+    fingerprint_summary: &str,
+    memory_ctx: &GameTheoryMemoryContext,
+    system: &[serde_json::Value],
+) -> SpecialistCallOutput {
+    let recalled = recall_prior_context_for_agent(agent_key, memory_ctx);
+    if agent_key.ends_with("-FORCE-FAIL-FOR-TEST") {
+        return SpecialistCallOutput {
+            agent_key: agent_key.to_string(),
+            output: None,
+            error: Some(format!("forced failure for test: {agent_key}")),
+            audit: recalled.audit,
+            cost_usd: 0.0,
+        };
+    }
+
+    let prompt = prompt_builder::build_specialist_prompt_with_prior_context(
+        agent_key,
+        agent_key,
+        situation,
+        fingerprint_summary,
+        &recalled.text,
+        &[],
+    );
+    let messages = vec![serde_json::json!({
+        "role": "user",
+        "content": prompt
+    })];
+
+    match llm
+        .send_message(messages, system.to_vec(), vec![], "claude-sonnet-4-6")
+        .await
+    {
+        Ok(response) => SpecialistCallOutput {
+            agent_key: agent_key.to_string(),
+            output: Some(response.content),
+            error: None,
+            audit: recalled.audit,
+            cost_usd: estimate_llm_cost_usd(
+                "claude-sonnet-4-6",
+                response.tokens_in,
+                response.tokens_out,
+            ),
+        },
+        Err(e) => SpecialistCallOutput {
+            agent_key: agent_key.to_string(),
+            output: None,
+            error: Some(format!("LLM error: {e}")),
+            audit: recalled.audit,
+            cost_usd: 0.0,
+        },
     }
 }
 
@@ -2962,28 +3090,91 @@ tiers:
         }
     }
 
+    struct SlowTier1LlmClient {
+        response: String,
+        active: std::sync::atomic::AtomicUsize,
+        max_active: std::sync::atomic::AtomicUsize,
+        prompts: Mutex<Vec<String>>,
+    }
+
+    impl SlowTier1LlmClient {
+        fn new(response: String) -> Self {
+            Self {
+                response,
+                active: std::sync::atomic::AtomicUsize::new(0),
+                max_active: std::sync::atomic::AtomicUsize::new(0),
+                prompts: Mutex::new(Vec::new()),
+            }
+        }
+
+        fn max_active(&self) -> usize {
+            self.max_active.load(std::sync::atomic::Ordering::SeqCst)
+        }
+
+        fn prompts(&self) -> Vec<String> {
+            self.prompts.lock().unwrap().clone()
+        }
+    }
+
+    #[async_trait]
+    impl LlmClient for SlowTier1LlmClient {
+        async fn send_message(
+            &self,
+            messages: Vec<serde_json::Value>,
+            _system: Vec<serde_json::Value>,
+            _tools: Vec<serde_json::Value>,
+            _model: &str,
+        ) -> std::result::Result<LlmResponse, anyhow::Error> {
+            let prompt = messages
+                .first()
+                .and_then(|m| m.get("content"))
+                .and_then(|c| c.as_str())
+                .unwrap_or("")
+                .to_string();
+            self.prompts.lock().unwrap().push(prompt);
+
+            let active = self
+                .active
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+                + 1;
+            self.max_active
+                .fetch_max(active, std::sync::atomic::Ordering::SeqCst);
+            tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+            self.active
+                .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+
+            Ok(LlmResponse {
+                content: self.response.clone(),
+                tool_uses: vec![],
+                tokens_in: 100,
+                tokens_out: 200,
+            })
+        }
+    }
+
     fn canned_specialist_llm() -> CapturingLlmClient {
         CapturingLlmClient::new("specialist output")
     }
 
+    fn canned_fingerprint_json() -> String {
+        serde_json::json!({
+            "cooperation": {"value": "non-cooperative", "confidence": "high", "rationale": "firms compete"},
+            "payoff_sum": {"value": "variable-sum", "confidence": "medium", "rationale": "price outcomes vary"},
+            "symmetry": {"value": "asymmetric", "confidence": "medium", "rationale": "costs differ"},
+            "timing": {"value": "simultaneous", "confidence": "high", "rationale": "firms act at once"},
+            "perfect_info": {"value": "imperfect", "confidence": "medium", "rationale": "prices are not observed before choosing"},
+            "complete_info": {"value": "complete", "confidence": "medium", "rationale": "game form is known"},
+            "cardinality": {"value": "2-player", "confidence": "high", "rationale": "duopoly"},
+            "strategy_space": {"value": "continuous", "confidence": "high", "rationale": "prices or quantities are continuous"},
+            "horizon": {"value": "one-shot", "confidence": "medium", "rationale": "single interaction"},
+            "primary_family": "Bertrand competition",
+            "nearest_classic": "Bertrand duopoly"
+        })
+        .to_string()
+    }
+
     fn canned_pipeline_llm() -> CapturingLlmClient {
-        CapturingLlmClient::with_classification(
-            "specialist output",
-            serde_json::json!({
-                "cooperation": {"value": "non-cooperative", "confidence": "high", "rationale": "firms compete"},
-                "payoff_sum": {"value": "variable-sum", "confidence": "medium", "rationale": "price outcomes vary"},
-                "symmetry": {"value": "asymmetric", "confidence": "medium", "rationale": "costs differ"},
-                "timing": {"value": "simultaneous", "confidence": "high", "rationale": "firms act at once"},
-                "perfect_info": {"value": "imperfect", "confidence": "medium", "rationale": "prices are not observed before choosing"},
-                "complete_info": {"value": "complete", "confidence": "medium", "rationale": "game form is known"},
-                "cardinality": {"value": "2-player", "confidence": "high", "rationale": "duopoly"},
-                "strategy_space": {"value": "continuous", "confidence": "high", "rationale": "prices or quantities are continuous"},
-                "horizon": {"value": "one-shot", "confidence": "medium", "rationale": "single interaction"},
-                "primary_family": "Bertrand competition",
-                "nearest_classic": "Bertrand duopoly"
-            })
-            .to_string(),
-        )
+        CapturingLlmClient::with_classification("specialist output", canned_fingerprint_json())
     }
 
     fn test_fingerprint(run_id: &str) -> GameTheoryFingerprint {
@@ -3278,6 +3469,50 @@ tiers:
     }
 
     #[test]
+    fn test_specialists_dispatch_in_parallel_waves() {
+        let llm = SlowTier1LlmClient::new("parallel specialist output".to_string());
+        let rd = RoutingDecision {
+            run_id: "run-specialist-parallel".into(),
+            fingerprint_id: "fp-specialist-parallel".into(),
+            enabled_specialists: vec![
+                "nash-equilibrium-finder".into(),
+                "payoff-matrix-builder".into(),
+                "dominant-strategy-identifier".into(),
+            ],
+            skipped_specialists: vec![],
+            evaluated_conditions: vec![],
+            created_at: "2026-05-03T00:00:00Z".into(),
+        };
+
+        let started = std::time::Instant::now();
+        let outcome = block_on(execute_specialists_real_with_options(
+            &llm,
+            &rd,
+            &test_fingerprint("fp-specialist-parallel"),
+            "Two firms choose prices.",
+            &GameTheoryMemoryContext::default(),
+            &GameTheoryRunOptions {
+                budget_usd: 20.0,
+                max_concurrent: 2,
+                style_profile_id: None,
+                enable_tier11: false,
+            },
+        ))
+        .unwrap();
+
+        assert_eq!(outcome.outputs.len(), 3);
+        assert_eq!(outcome.max_observed_concurrent, 2);
+        assert!(
+            llm.max_active() > 1,
+            "specialist calls must overlap when max_concurrent > 1"
+        );
+        assert!(
+            started.elapsed() < std::time::Duration::from_millis(320),
+            "three 120ms specialists with max_concurrent=2 should not run serially"
+        );
+    }
+
+    #[test]
     fn test_style_flag_applied_to_section_writers() {
         let db = test_db();
         let spec_path = std::path::Path::new("../../.archon/specs/gametheory.yaml");
@@ -3303,6 +3538,35 @@ tiers:
         .unwrap();
 
         assert!(result.report.contains("Style: technical"));
+    }
+
+    #[test]
+    fn test_tier1_foundation_agents_run_as_parallel_wave() {
+        let llm = SlowTier1LlmClient::new(canned_fingerprint_json());
+        let started = std::time::Instant::now();
+        let (fp, audits) = block_on(execute_tier1_real(
+            &llm,
+            "run-tier1-parallel",
+            "Two firms simultaneously set prices in a Bertrand duopoly.",
+            "2026-05-04T00:00:00Z",
+            &GameTheoryMemoryContext::default(),
+        ))
+        .unwrap();
+
+        assert_eq!(fp.primary_family, "Bertrand competition");
+        assert_eq!(audits.len(), TIER1_MEMORY_AGENT_KEYS.len());
+        assert!(
+            llm.max_active() > 1,
+            "Tier 1 mandatory agents must overlap in one parallel wave"
+        );
+        assert!(
+            started.elapsed() < std::time::Duration::from_millis(360),
+            "four 120ms Tier 1 calls should not run serially"
+        );
+        let prompts = llm.prompts().join("\n");
+        for agent_key in TIER1_MEMORY_AGENT_KEYS {
+            assert!(prompts.contains(agent_key));
+        }
     }
 
     #[test]
