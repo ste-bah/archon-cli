@@ -102,6 +102,7 @@ Beyond the 65 primaries, archon-cli ships **55 built-in skills** (21 in `crates/
 | `/denials` | — | Show denied permissions in current session |
 | `/rules` | — | View or edit behavioral rules |
 | `/learning-status` | — | Status of all 8 learning subsystems |
+| `/gametheory` | — | Umbrella for game-theory run, status, inspect, list-runs, show, replay, list-agents, specimens |
 
 ## Utility
 
@@ -164,3 +165,4 @@ See [Skills reference](skills.md) for the full TOML schema.
 - [Skills](skills.md) — full skills documentation
 - [CLI flags](cli-flags.md) — command-line flags (alternative to slash commands)
 - [Tools](tools.md) — what agents can call (different from slash commands)
+- [Game theory](../gametheory.md) — `/gametheory` subcommands and tool surface

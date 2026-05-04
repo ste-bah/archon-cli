@@ -3,6 +3,9 @@
 Archon policy is a TOML gate for features that can change behaviour, use
 networked providers, expose services, or auto-apply learned updates.
 
+There is currently no `archon policy` CLI namespace. Policy is loaded by the
+feature gates that need it.
+
 ## Locations
 
 Policy is loaded in this order, with later files overriding earlier files:
@@ -66,3 +69,20 @@ the exact/semantic weighting used by `archon docs search --mode hybrid`.
 Governed-learning auto-apply is denied by default. Low-risk updates can only
 auto-apply when `policy.learning.auto_apply_low_risk = true`; prompt, blocking
 gate, policy, and network changes remain approval-gated.
+
+## Full State Verification
+
+Policy verification is feature-specific:
+
+| Gate | Trigger | Expected source-of-truth read |
+|---|---|---|
+| Tier 11 | `archon gametheory run ... --enable-tier11` | routing output shows Tier 11 only when policy allows it |
+| VLM | `archon docs ingest <image-or-pdf>` | OCR/VLM rows show local/denied/provider state |
+| Hybrid retrieval | `archon docs search <query> --mode hybrid --debug` | debug output shows exact and semantic score components |
+| Governed learning | `archon behaviour apply <proposal-id>` | proposal decision and manifest history reflect policy outcome |
+
+Keep policy files in source control for project-level gates when possible:
+
+```text
+<workspace>/.archon/policy.toml
+```

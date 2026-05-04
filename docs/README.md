@@ -14,6 +14,17 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 - [Overview](architecture/overview.md) — workspace crates, request lifecycle, data flow
 - [Learning systems](architecture/learning-systems.md) — SONA, ReasoningBank (12 modes), GNN, CausalMemory, Provenance, DESC, Reflexion, AutoCapture
 - [Pipelines](architecture/pipelines.md) — god-code (50 agents), god-research (46 agents), agent loop, subagent spawning, multi-agent teams
+- [Evidence Engine](evidence-engine.md) — documents, knowledge, provenance, game theory, completion integrity, governed learning, meaning, constellations
+
+## Evidence Engine
+
+- [Document intelligence](docs.md) — ingest, OCR/VLM policy, embeddings, exact/semantic/hybrid retrieval
+- [Knowledge base](knowledge.md) — claims, entities, relations, source quality, contradictions
+- [Game theory](gametheory.md) — CLI, `/gametheory` slash command, tools, persisted run state
+- [Completion integrity](completion-integrity.md) — claims, evidence, incidents, trust scoring
+- [Governed learning](governed-learning.md) — learning events, proposals, manifests, approval gates
+- [Policy](policy.md) — layered TOML gates for VLM, Tier 11, retrieval, and auto-apply
+- [Provenance](provenance.md) — trace, export, verify, document provenance
 
 ## Reference
 
