@@ -1273,8 +1273,8 @@ async fn execute_tier1_agent(
     prior_context: &str,
 ) -> Result<Tier1AgentOutput, GameTheoryError> {
     let system = vec![serde_json::json!({
-        "role": "system",
-        "content": tier1_system_prompt(agent_key)
+        "type": "text",
+        "text": tier1_system_prompt(agent_key)
     })];
 
     let user_content = if prior_context.is_empty() {
@@ -1442,8 +1442,8 @@ async fn execute_specialists_real_with_options(
     let max_concurrent = options.max_concurrent.max(1);
 
     let system = vec![serde_json::json!({
-        "role": "system",
-        "content": "You are a game-theory analysis specialist. Analyze the given strategic situation from your specialist perspective and produce a detailed markdown report section. Focus on your area of expertise. Output ONLY the report content, no preamble."
+        "type": "text",
+        "text": "You are a game-theory analysis specialist. Analyze the given strategic situation from your specialist perspective and produce a detailed markdown report section. Focus on your area of expertise. Output ONLY the report content, no preamble."
     })];
 
     for wave in routing.enabled_specialists.chunks(max_concurrent) {
