@@ -1,0 +1,7 @@
+{
+  "access_token": "{{ACCESS_TOKEN}}",
+  "refresh_token": "{{REFRESH_TOKEN}}",
+  "id_token": "{{SYNTHETIC_JWT}}",
+  "expires_in": 3600,
+  "token_type": "Bearer"
+}

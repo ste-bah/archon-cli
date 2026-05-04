@@ -1,0 +1,47 @@
+{
+  "path": "/codex/responses",
+  "body": {
+    "model": "gpt-5.1-codex",
+    "store": false,
+    "stream": true,
+    "input": [
+      {
+        "type": "reasoning",
+        "encrypted_content": "{{REASONING_ENCRYPTED}}"
+      },
+      {
+        "type": "message",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "output_text",
+            "text": "previous answer"
+          }
+        ]
+      },
+      {
+        "type": "message",
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "continue"
+          }
+        ]
+      }
+    ],
+    "reasoning": {
+      "effort": "medium",
+      "summary": "auto"
+    },
+    "tool_choice": "auto",
+    "parallel_tool_calls": true,
+    "text": {
+      "verbosity": "low"
+    },
+    "include": [
+      "reasoning.encrypted_content"
+    ],
+    "prompt_cache_key": "{{UUID}}"
+  }
+}

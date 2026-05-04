@@ -1,0 +1,11 @@
+{
+  "accept": "text/event-stream",
+  "authorization": "Bearer {{ACCESS_TOKEN}}",
+  "chatgpt-account-id": "{{ACCOUNT_ID}}",
+  "content-type": "application/json",
+  "openai-beta": "responses=experimental",
+  "originator": "openclaw",
+  "session_id": "{{SESSION_ID}}",
+  "user-agent": "openclaw/0.42.1",
+  "x-client-request-id": "{{SESSION_ID}}"
+}
