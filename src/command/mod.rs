@@ -46,6 +46,7 @@ pub(crate) mod files;
 pub(crate) mod fork;
 pub(crate) mod gametheory;
 pub(crate) mod completion;
+pub(crate) mod constellation;
 pub(crate) mod gametheory_inspect;
 #[cfg(test)]
 mod gametheory_inspect_tests;

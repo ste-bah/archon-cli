@@ -460,8 +460,8 @@ fn doctor_shows_unset_for_missing_vars() {
 
 #[test]
 fn known_vars_list_has_correct_count() {
-    // 4 auth + 4 model/behavior + 4 feature control + 4 debugging (incl ARCHON_LOG) + 2 paths + 1 telemetry = 19
-    assert_eq!(KNOWN_ARCHON_VARS.len(), 19);
+    // 4 auth + 4 model/behavior + 4 feature control + 4 debugging + 6 paths + 1 telemetry = 23
+    assert_eq!(KNOWN_ARCHON_VARS.len(), 23);
 }
 
 #[test]
@@ -481,9 +481,14 @@ fn known_vars_contains_all_documented_vars() {
         "ARCHON_DISABLE_PERSONALITY",
         "ARCHON_DEBUG",
         "ARCHON_DEBUG_LOG_DIR",
+        "ARCHON_LOG",
         "ARCHON_VERBOSE",
         "ARCHON_CONFIG_DIR",
+        "ARCHON_CONSTELLATION_DB_PATH",
         "ARCHON_DATA_DIR",
+        "ARCHON_KB_DB_PATH",
+        "ARCHON_MEANING_DB_PATH",
+        "ARCHON_PROV_DB_PATH",
         "ARCHON_DISABLE_TELEMETRY",
     ];
 

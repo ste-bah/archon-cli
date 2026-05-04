@@ -323,6 +323,7 @@ dependencies = [
  "anyhow",
  "archon-completion",
  "archon-consciousness",
+ "archon-constellation",
  "archon-core",
  "archon-docs",
  "archon-knowledge",
@@ -394,6 +395,22 @@ dependencies = [
  "toml",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "archon-constellation"
+version = "0.1.36"
+dependencies = [
+ "archon-meaning",
+ "chrono",
+ "cozo-ce",
+ "hex",
+ "ndarray",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

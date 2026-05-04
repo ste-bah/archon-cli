@@ -468,6 +468,11 @@ pub enum Commands {
         #[command(subcommand)]
         action: MeaningAction,
     },
+    /// Build and inspect learned constellation centroids
+    Constellation {
+        #[command(subcommand)]
+        action: ConstellationAction,
+    },
     /// Game-theory strategic analysis
     Gametheory {
         #[command(subcommand)]
@@ -836,6 +841,45 @@ pub enum MeaningAction {
         #[arg(long, default_value = "samples")]
         kind: String,
     },
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum ConstellationAction {
+    /// Build a versioned centroid profile from positive meaning samples
+    Build {
+        /// Target profile: project, research-domain, or strategic-workflow
+        #[arg(long)]
+        target: String,
+    },
+    /// Score text or a file against the latest target centroid
+    Score {
+        /// Target profile to score against
+        #[arg(long, default_value = "project")]
+        target: String,
+        /// File containing the answer/output to score
+        #[arg(long)]
+        answer: Option<PathBuf>,
+        /// Inline text to score when --answer is not supplied
+        #[arg(long)]
+        text: Option<String>,
+    },
+    /// Detect whether text or a file has drifted from the target centroid
+    Drift {
+        /// Target profile to compare against
+        #[arg(long, default_value = "project")]
+        target: String,
+        /// File containing the answer/output to inspect
+        #[arg(long)]
+        answer: Option<PathBuf>,
+        /// Inline text to inspect when --answer is not supplied
+        #[arg(long)]
+        text: Option<String>,
+        /// Minimum accepted similarity before drift is reported
+        #[arg(long, default_value_t = 0.45)]
+        threshold: f64,
+    },
+    /// List persisted constellation centroids
+    List,
 }
 
 #[derive(Subcommand, Debug)]

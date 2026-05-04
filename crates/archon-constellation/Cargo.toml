@@ -1,0 +1,19 @@
+[package]
+name = "archon-constellation"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+archon-meaning = { path = "../archon-meaning" }
+chrono.workspace = true
+cozo.workspace = true
+hex.workspace = true
+ndarray.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
