@@ -11,8 +11,11 @@ use crate::command::registry::{CommandContext, CommandHandler};
 
 pub(crate) const GAMETHEORY_SUBCOMMANDS: &[&str] = &[
     "run",
+    "classify-only",
     "status",
     "inspect",
+    "inspect-fingerprint",
+    "inspect-routing",
     "list-runs",
     "show",
     "replay",
@@ -31,6 +34,7 @@ impl CommandHandler for GameTheorySlashHandler {
         match subcommand {
             "" | "help" => emit(ctx, render_usage()),
             "run" => start_run(ctx, rest),
+            "classify-only" => start_classify_only(ctx, rest),
             "status" => emit_db(ctx, |db| {
                 gametheory_inspect::render_status(db, rest.first().map(String::as_str))
             }),
@@ -39,6 +43,21 @@ impl CommandHandler for GameTheorySlashHandler {
                     gametheory_inspect::render_inspect_artifact(db, artifact_id)
                 }),
                 None => emit(ctx, render_usage_line("inspect requires <artifact-id>")),
+            },
+            "inspect-fingerprint" => match rest.first() {
+                Some(run_id) => emit_db(ctx, |db| {
+                    gametheory_inspect::render_inspect_fingerprint(db, run_id)
+                }),
+                None => emit(
+                    ctx,
+                    render_usage_line("inspect-fingerprint requires <run-id>"),
+                ),
+            },
+            "inspect-routing" => match rest.first() {
+                Some(run_id) => emit_db(ctx, |db| {
+                    gametheory_inspect::render_inspect_routing(db, run_id)
+                }),
+                None => emit(ctx, render_usage_line("inspect-routing requires <run-id>")),
             },
             "list-runs" => emit_db(ctx, gametheory_inspect::render_list_runs),
             "show" => match rest.first() {
@@ -68,14 +87,23 @@ impl CommandHandler for GameTheorySlashHandler {
 }
 
 fn start_run(ctx: &mut CommandContext, args: &[String]) -> Result<()> {
-    if args.is_empty() {
+    let kb_pack_id = parse_kb(args)?;
+    let situation_args = args_without_flag_value(args, "--kb");
+    if situation_args.is_empty() {
         return emit(ctx, render_usage_line("run requires <situation>"));
     }
 
-    let situation = args.join(" ");
+    let situation = situation_args.join(" ");
     let tui_tx = ctx.tui_tx.clone();
     let llm = ctx.llm_adapter.clone();
-    emit(ctx, format!("Starting game-theory run for: {situation}\n"))?;
+    let kb_note = kb_pack_id
+        .as_deref()
+        .map(|kb| format!(" using KB `{kb}`"))
+        .unwrap_or_default();
+    emit(
+        ctx,
+        format!("Starting game-theory run{kb_note} for: {situation}\n"),
+    )?;
 
     tokio::spawn(async move {
         let result = async {
@@ -87,7 +115,10 @@ fn start_run(ctx: &mut CommandContext, args: &[String]) -> Result<()> {
                 None,
                 llm_ref,
                 gametheory::GameTheoryMemoryContext::default(),
-                gametheory::GameTheoryRunOptions::default(),
+                gametheory::GameTheoryRunOptions {
+                    kb_pack_id,
+                    ..gametheory::GameTheoryRunOptions::default()
+                },
             )
             .await
             .map_err(|e| anyhow::anyhow!("{e}"))
@@ -104,6 +135,43 @@ fn start_run(ctx: &mut CommandContext, args: &[String]) -> Result<()> {
             ),
             Err(err) => format!("Game-theory run failed: {err}\n"),
         };
+        let _ = tui_tx.send(TuiEvent::TextDelta(msg));
+    });
+    Ok(())
+}
+
+fn start_classify_only(ctx: &mut CommandContext, args: &[String]) -> Result<()> {
+    if args.is_empty() {
+        return emit(ctx, render_usage_line("classify-only requires <situation>"));
+    }
+
+    let situation = args.join(" ");
+    let tui_tx = ctx.tui_tx.clone();
+    let llm = ctx.llm_adapter.clone();
+    emit(
+        ctx,
+        format!("Classifying game-theory situation: {situation}\n"),
+    )?;
+
+    tokio::spawn(async move {
+        let result = async {
+            let db = open_db()?;
+            let llm_ref = llm.as_ref().map(|arc| arc.as_ref() as &dyn LlmClient);
+            let fingerprint = gametheory::classify(&db, &situation, llm_ref)
+                .await
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+            Ok(format!(
+                "Game-theory classification persisted: run_id={} primary_family={} timing={} horizon={}\n",
+                fingerprint.run_id,
+                fingerprint.primary_family,
+                fingerprint.timing.value,
+                fingerprint.horizon.value
+            ))
+        }
+        .await;
+
+        let msg =
+            result.unwrap_or_else(|err: anyhow::Error| format!("Classification failed: {err}\n"));
         let _ = tui_tx.send(TuiEvent::TextDelta(msg));
     });
     Ok(())
@@ -257,6 +325,41 @@ fn parse_filter(args: &[String]) -> Option<String> {
     None
 }
 
+fn parse_kb(args: &[String]) -> Result<Option<String>> {
+    for (idx, arg) in args.iter().enumerate() {
+        if arg == "--kb" {
+            let Some(value) = args.get(idx + 1) else {
+                anyhow::bail!("--kb requires a knowledge-pack id");
+            };
+            return Ok(Some(value.clone()));
+        }
+        if let Some(value) = arg.strip_prefix("--kb=") {
+            return Ok(Some(value.to_string()));
+        }
+    }
+    Ok(None)
+}
+
+fn args_without_flag_value(args: &[String], flag: &str) -> Vec<String> {
+    let mut cleaned = Vec::new();
+    let mut skip_next = false;
+    for arg in args {
+        if skip_next {
+            skip_next = false;
+            continue;
+        }
+        if arg == flag {
+            skip_next = true;
+            continue;
+        }
+        if arg.starts_with(&format!("{flag}=")) {
+            continue;
+        }
+        cleaned.push(arg.clone());
+    }
+    cleaned
+}
+
 fn parse_rerun_specialist(args: &[String]) -> Result<Option<String>> {
     let Some(index) = args.iter().position(|arg| arg == "--rerun-specialist") else {
         return Ok(None);
@@ -269,7 +372,7 @@ fn parse_rerun_specialist(args: &[String]) -> Result<Option<String>> {
 
 fn render_usage() -> String {
     format!(
-        "/gametheory subcommands: {}\n\nUsage:\n  /gametheory run <situation>\n  /gametheory status [run-id]\n  /gametheory inspect <artifact-id>\n  /gametheory list-runs\n  /gametheory show <run-id>\n  /gametheory replay <run-id> [--reclassify] [--rerun-specialist <key>]\n  /gametheory list-agents [--tier N]\n  /gametheory specimens [--filter axis=value] [--ingest]\n  /gametheory view\n",
+        "/gametheory subcommands: {}\n\nUsage:\n  /gametheory run <situation> [--kb <pack>]\n  /gametheory classify-only <situation>\n  /gametheory status [run-id]\n  /gametheory inspect <artifact-id>\n  /gametheory inspect-fingerprint <run-id>\n  /gametheory inspect-routing <run-id>\n  /gametheory list-runs\n  /gametheory show <run-id>\n  /gametheory replay <run-id> [--reclassify] [--rerun-specialist <key>]\n  /gametheory list-agents [--tier N]\n  /gametheory specimens [--filter axis=value] [--ingest]\n  /gametheory view\n",
         GAMETHEORY_SUBCOMMANDS.join(", ")
     )
 }
@@ -301,8 +404,11 @@ mod tests {
             GAMETHEORY_SUBCOMMANDS,
             &[
                 "run",
+                "classify-only",
                 "status",
                 "inspect",
+                "inspect-fingerprint",
+                "inspect-routing",
                 "list-runs",
                 "show",
                 "replay",
@@ -336,6 +442,37 @@ mod tests {
         for subcommand in GAMETHEORY_SUBCOMMANDS {
             assert!(text.contains(subcommand), "missing {subcommand}");
         }
+    }
+
+    #[test]
+    fn test_gametheory_run_kb_args_are_parsed_out_of_situation() {
+        let args = vec![
+            "Assess".to_string(),
+            "marketplace".to_string(),
+            "--kb".to_string(),
+            "policy-pack".to_string(),
+        ];
+
+        assert_eq!(parse_kb(&args).unwrap().as_deref(), Some("policy-pack"));
+        assert_eq!(
+            args_without_flag_value(&args, "--kb"),
+            vec!["Assess".to_string(), "marketplace".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_gametheory_run_kb_equals_arg_is_parsed_out_of_situation() {
+        let args = vec![
+            "Assess".to_string(),
+            "--kb=policy-pack".to_string(),
+            "marketplace".to_string(),
+        ];
+
+        assert_eq!(parse_kb(&args).unwrap().as_deref(), Some("policy-pack"));
+        assert_eq!(
+            args_without_flag_value(&args, "--kb"),
+            vec!["Assess".to_string(), "marketplace".to_string()]
+        );
     }
 
     #[test]
