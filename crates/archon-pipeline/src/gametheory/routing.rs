@@ -1156,6 +1156,11 @@ mod tests {
             "should find spec via upward walk: {:?}",
             result.err()
         );
-        assert_eq!(result.unwrap(), spec_file);
+        // Compare canonicalized paths so /var ↔ /private/var symlink
+        // differences on macOS don't cause spurious failures.
+        let resolved = result.unwrap();
+        let resolved_canonical = resolved.canonicalize().unwrap_or(resolved);
+        let expected_canonical = spec_file.canonicalize().unwrap_or(spec_file);
+        assert_eq!(resolved_canonical, expected_canonical);
     }
 }
