@@ -46,6 +46,7 @@ impl GameTheoryExecutor for PipelineGameTheoryExecutor {
                 max_concurrent: request.max_concurrent.unwrap_or(4),
                 style_profile_id: Some(request.style.unwrap_or_else(|| "executive".into())),
                 enable_tier11: false,
+                kb_pack_id: None,
             },
         )
         .await?;

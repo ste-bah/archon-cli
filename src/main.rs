@@ -296,10 +296,36 @@ async fn main() -> Result<()> {
             return crate::command::meaning::handle_meaning_command(action.clone()).await;
         }
         Some(Commands::Constellation { ref action }) => {
-            return crate::command::constellation::handle_constellation_command(action.clone()).await;
+            return crate::command::constellation::handle_constellation_command(action.clone())
+                .await;
         }
-        Some(Commands::Gametheory { ref action }) => {
-            return crate::command::gametheory::handle_gametheory(action, &config, &env_vars).await;
+        Some(Commands::Gametheory {
+            ref situation,
+            classify_only,
+            ref kb,
+            ref spec_path,
+            debug_memory,
+            budget,
+            max_concurrent,
+            ref style,
+            enable_tier11,
+            ref action,
+        }) => {
+            return crate::command::gametheory::handle_gametheory(
+                action.as_ref(),
+                situation.as_deref(),
+                classify_only,
+                kb.as_deref(),
+                spec_path.as_deref(),
+                debug_memory,
+                budget,
+                max_concurrent,
+                style,
+                enable_tier11,
+                &config,
+                &env_vars,
+            )
+            .await;
         }
         Some(Commands::Completion { ref action }) => {
             return crate::command::completion::handle_completion(action).await;

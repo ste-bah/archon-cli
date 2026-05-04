@@ -17,26 +17,37 @@ use archon_pipeline::runner::LlmClient;
 
 /// Dispatch the gametheory subcommand.
 pub async fn handle_gametheory(
-    action: &GametheoryAction,
+    action: Option<&GametheoryAction>,
+    shorthand_situation: Option<&str>,
+    shorthand_classify_only: bool,
+    shorthand_kb: Option<&str>,
+    shorthand_spec_path: Option<&str>,
+    shorthand_debug_memory: bool,
+    shorthand_budget: f64,
+    shorthand_max_concurrent: usize,
+    shorthand_style: &str,
+    shorthand_enable_tier11: bool,
     config: &ArchonConfig,
     env_vars: &ArchonEnvVars,
 ) -> Result<()> {
     maybe_print_resume_hint(action)?;
     match action {
-        GametheoryAction::Run {
+        Some(GametheoryAction::Run {
             situation,
             classify_only,
             spec_path,
+            kb,
             debug_memory,
             budget,
             max_concurrent,
             style,
             enable_tier11,
-        } => {
+        }) => {
             handle_run(
                 situation,
                 *classify_only,
                 spec_path.as_deref(),
+                kb.as_deref(),
                 *debug_memory,
                 *budget,
                 *max_concurrent,
@@ -47,18 +58,18 @@ pub async fn handle_gametheory(
             )
             .await
         }
-        GametheoryAction::ListRuns => handle_list_runs(),
-        GametheoryAction::Show { run_id } => handle_show(run_id),
-        GametheoryAction::Status { run_id } => handle_status(run_id.as_deref()),
-        GametheoryAction::Inspect { artifact_id } => handle_inspect(artifact_id),
-        GametheoryAction::InspectFingerprint { run_id } => handle_inspect_fingerprint(run_id),
-        GametheoryAction::InspectRouting { run_id } => handle_inspect_routing(run_id),
-        GametheoryAction::Replay {
+        Some(GametheoryAction::ListRuns) => handle_list_runs(),
+        Some(GametheoryAction::Show { run_id }) => handle_show(run_id),
+        Some(GametheoryAction::Status { run_id }) => handle_status(run_id.as_deref()),
+        Some(GametheoryAction::Inspect { artifact_id }) => handle_inspect(artifact_id),
+        Some(GametheoryAction::InspectFingerprint { run_id }) => handle_inspect_fingerprint(run_id),
+        Some(GametheoryAction::InspectRouting { run_id }) => handle_inspect_routing(run_id),
+        Some(GametheoryAction::Replay {
             run_id,
             spec_path,
             reclassify,
             rerun_specialist,
-        } => {
+        }) => {
             handle_replay(
                 run_id,
                 spec_path.as_deref(),
@@ -69,18 +80,39 @@ pub async fn handle_gametheory(
             )
             .await
         }
-        GametheoryAction::Resume { run_id, spec_path } => {
+        Some(GametheoryAction::Resume { run_id, spec_path }) => {
             handle_resume(run_id, spec_path.as_deref(), config, env_vars).await
         }
-        GametheoryAction::ListAgents { tier } => handle_list_agents(*tier),
-        GametheoryAction::Specimens { filter, ingest } => {
+        Some(GametheoryAction::ListAgents { tier }) => handle_list_agents(*tier),
+        Some(GametheoryAction::Specimens { filter, ingest }) => {
             handle_specimens(filter.as_deref(), *ingest)
+        }
+        None => {
+            let situation = shorthand_situation.ok_or_else(|| {
+                anyhow::anyhow!(
+                    "Usage: archon gametheory \"<situation>\" [--kb <pack>] or archon gametheory run \"<situation>\""
+                )
+            })?;
+            handle_run(
+                situation,
+                shorthand_classify_only,
+                shorthand_spec_path,
+                shorthand_kb,
+                shorthand_debug_memory,
+                shorthand_budget,
+                shorthand_max_concurrent,
+                shorthand_style,
+                shorthand_enable_tier11,
+                config,
+                env_vars,
+            )
+            .await
         }
     }
 }
 
-fn maybe_print_resume_hint(action: &GametheoryAction) -> Result<()> {
-    if matches!(action, GametheoryAction::Resume { .. }) {
+fn maybe_print_resume_hint(action: Option<&GametheoryAction>) -> Result<()> {
+    if matches!(action, Some(GametheoryAction::Resume { .. })) {
         return Ok(());
     }
     let db = open_db()?;
@@ -146,6 +178,7 @@ async fn handle_run(
     situation: &str,
     classify_only: bool,
     spec_path: Option<&str>,
+    kb: Option<&str>,
     debug_memory: bool,
     budget: f64,
     max_concurrent: usize,
@@ -163,6 +196,7 @@ async fn handle_run(
             &db,
             situation,
             spec_path,
+            kb,
             debug_memory,
             budget,
             max_concurrent,
@@ -210,6 +244,7 @@ async fn run_full(
     db: &DbInstance,
     situation: &str,
     spec_path: Option<&str>,
+    kb: Option<&str>,
     debug_memory: bool,
     budget: f64,
     max_concurrent: usize,
@@ -228,6 +263,7 @@ async fn run_full(
         max_concurrent,
         style_profile_id: Some(style.to_string()),
         enable_tier11: tier11_allowed,
+        kb_pack_id: kb.map(str::to_string),
     };
 
     match gametheory::run_full_pipeline_with_options(
@@ -252,6 +288,9 @@ async fn run_full(
             println!("Specialist Count:  {}", result.specialist_count);
             println!("Estimated Cost:    ${:.6}", result.total_cost_usd);
             println!("Budget Cap:        ${budget:.2}");
+            if let Some(kb) = kb {
+                println!("Knowledge Pack:    {kb}");
+            }
             println!("Max Concurrent:    {max_concurrent}");
             println!("Observed Concurrent: {}", result.max_observed_concurrent);
             println!("Style:             {style}");
@@ -393,6 +432,7 @@ async fn handle_replay(
             &db,
             &situation,
             spec_path,
+            None,
             false,
             20.0,
             4,

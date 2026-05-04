@@ -64,6 +64,142 @@ pub struct GameTheoryRunOptions {
     pub max_concurrent: usize,
     pub style_profile_id: Option<String>,
     pub enable_tier11: bool,
+    pub kb_pack_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct KbRunContext {
+    pack_id: Option<String>,
+    text: String,
+    document_count: usize,
+    chunk_count: usize,
+    warning: Option<String>,
+}
+
+fn situation_with_kb_context(situation: &str, kb: &KbRunContext) -> String {
+    if kb.pack_id.is_none() {
+        return situation.to_string();
+    }
+
+    let pack = kb.pack_id.as_deref().unwrap_or("");
+    let warning = kb
+        .warning
+        .as_ref()
+        .map(|w| format!("\nWarning: {w}"))
+        .unwrap_or_default();
+    let context = if kb.text.trim().is_empty() {
+        "No matching document chunks were found.".to_string()
+    } else {
+        kb.text.clone()
+    };
+
+    format!("{situation}\n\n## Knowledge Base Context: {pack}\n{warning}\n\n{context}")
+}
+
+fn load_kb_run_context(db: &DbInstance, pack_id: Option<&str>) -> Result<KbRunContext> {
+    let Some(pack_id) = pack_id.map(str::trim).filter(|s| !s.is_empty()) else {
+        return Ok(KbRunContext::default());
+    };
+
+    let docs = match read_doc_source_matches(db, pack_id) {
+        Ok(docs) => docs,
+        Err(e) => {
+            return Ok(KbRunContext {
+                pack_id: Some(pack_id.to_string()),
+                warning: Some(format!("document store unavailable: {e}")),
+                ..KbRunContext::default()
+            });
+        }
+    };
+
+    let doc_ids: HashSet<String> = docs.iter().map(|(id, _)| id.clone()).collect();
+    let chunks = read_doc_chunks_for_pack(db, pack_id, &doc_ids)?;
+    let text = chunks
+        .iter()
+        .take(8)
+        .map(|(chunk_id, doc_id, content)| {
+            format!(
+                "### {doc_id} / {chunk_id}\n{}",
+                truncate_for_prompt(content, 700)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n");
+
+    let warning = if chunks.is_empty() {
+        Some(format!("no doc_chunks matched knowledge pack '{pack_id}'"))
+    } else {
+        None
+    };
+
+    Ok(KbRunContext {
+        pack_id: Some(pack_id.to_string()),
+        text,
+        document_count: docs.len(),
+        chunk_count: chunks.len(),
+        warning,
+    })
+}
+
+fn read_doc_source_matches(db: &DbInstance, pack_id: &str) -> Result<Vec<(String, String)>> {
+    let rows = db
+        .run_script(
+            "?[document_id, source_path] := *doc_sources{document_id, source_path}",
+            Default::default(),
+            cozo::ScriptMutability::Immutable,
+        )
+        .map_err(|e| anyhow::anyhow!("query doc_sources failed: {e}"))?;
+
+    Ok(rows
+        .rows
+        .iter()
+        .filter_map(|row| {
+            let document_id = row.first()?.get_str()?.to_string();
+            let source_path = row.get(1)?.get_str()?.to_string();
+            let haystack = format!("{document_id}\n{source_path}");
+            haystack
+                .contains(pack_id)
+                .then_some((document_id, source_path))
+        })
+        .collect())
+}
+
+fn read_doc_chunks_for_pack(
+    db: &DbInstance,
+    pack_id: &str,
+    doc_ids: &HashSet<String>,
+) -> Result<Vec<(String, String, String)>> {
+    let rows = db
+        .run_script(
+            "?[chunk_id, document_id, content] := *doc_chunks{chunk_id, document_id, content}",
+            Default::default(),
+            cozo::ScriptMutability::Immutable,
+        )
+        .map_err(|e| anyhow::anyhow!("query doc_chunks failed: {e}"))?;
+
+    Ok(rows
+        .rows
+        .iter()
+        .filter_map(|row| {
+            let chunk_id = row.first()?.get_str()?.to_string();
+            let document_id = row.get(1)?.get_str()?.to_string();
+            let content = row.get(2)?.get_str()?.to_string();
+            (doc_ids.contains(&document_id) || document_id.contains(pack_id)).then_some((
+                chunk_id,
+                document_id,
+                content,
+            ))
+        })
+        .collect())
+}
+
+fn truncate_for_prompt(text: &str, max_chars: usize) -> String {
+    if text.chars().count() <= max_chars {
+        return text.to_string();
+    }
+    let mut truncated = text.chars().take(max_chars).collect::<String>();
+    truncated.push_str("...");
+    truncated
 }
 
 impl Default for GameTheoryRunOptions {
@@ -73,6 +209,7 @@ impl Default for GameTheoryRunOptions {
             max_concurrent: 4,
             style_profile_id: None,
             enable_tier11: false,
+            kb_pack_id: None,
         }
     }
 }
@@ -352,13 +489,26 @@ pub async fn run_full_pipeline_with_options(
     options: GameTheoryRunOptions,
 ) -> Result<FullPipelineResult, GameTheoryError> {
     let llm_client = require_llm(llm, "gametheory full pipeline")?;
+    let kb_context = load_kb_run_context(db, options.kb_pack_id.as_deref()).map_err(|e| {
+        GameTheoryError::Storage {
+            message: e.to_string(),
+        }
+    })?;
+    let analysis_situation = situation_with_kb_context(situation, &kb_context);
+
     // 1. Tier 1 classification
-    let (fingerprint, mut memory_recall) =
-        classify_internal(db, situation, Some(llm_client), &memory_ctx, false).await?;
+    let (fingerprint, mut memory_recall) = classify_internal(
+        db,
+        &analysis_situation,
+        Some(llm_client),
+        &memory_ctx,
+        false,
+    )
+    .await?;
     update_gt_run_status(
         db,
         &fingerprint.run_id,
-        situation,
+        &analysis_situation,
         &fingerprint.created_at,
         "",
         "InProgress",
@@ -367,6 +517,24 @@ pub async fn run_full_pipeline_with_options(
     .map_err(|e| GameTheoryError::Storage {
         message: e.to_string(),
     })?;
+    if kb_context.pack_id.is_some() {
+        persist_run_checkpoint(
+            db,
+            &fingerprint.run_id,
+            "stage:kb-context",
+            "stage",
+            "completed",
+            serde_json::json!({
+                "kb": kb_context.pack_id,
+                "documents": kb_context.document_count,
+                "chunks": kb_context.chunk_count,
+                "warning": kb_context.warning,
+            }),
+        )
+        .map_err(|e| GameTheoryError::Storage {
+            message: e.to_string(),
+        })?;
+    }
     persist_run_checkpoint(
         db,
         &fingerprint.run_id,
@@ -411,7 +579,8 @@ pub async fn run_full_pipeline_with_options(
     // 5. Build dependency map from spec agent entries
 
     // 6. Build specialist DAG spec
-    let _pipeline_spec = build_specialist_spec(&routing_decision, &dep_map, &spec, situation);
+    let _pipeline_spec =
+        build_specialist_spec(&routing_decision, &dep_map, &spec, &analysis_situation);
 
     // 7. Execute specialist DAG with the configured LLM. Individual specialist
     // failures are isolated inside the outcome; a provider-level failure is
@@ -420,7 +589,7 @@ pub async fn run_full_pipeline_with_options(
         llm_client,
         &routing_decision,
         &fingerprint,
-        situation,
+        &analysis_situation,
         &memory_ctx,
         &options,
     )
@@ -3526,6 +3695,7 @@ tiers:
                 max_concurrent: 1,
                 style_profile_id: Some("executive".to_string()),
                 enable_tier11: false,
+                kb_pack_id: None,
             },
         ))
         .unwrap();
@@ -3596,6 +3766,7 @@ tiers:
                 max_concurrent: 1,
                 style_profile_id: None,
                 enable_tier11: false,
+                kb_pack_id: None,
             },
         ))
         .unwrap();
@@ -3632,6 +3803,7 @@ tiers:
                 max_concurrent: 2,
                 style_profile_id: None,
                 enable_tier11: false,
+                kb_pack_id: None,
             },
         ))
         .unwrap();
@@ -3669,11 +3841,122 @@ tiers:
                 max_concurrent: 1,
                 style_profile_id: Some("technical".to_string()),
                 enable_tier11: false,
+                kb_pack_id: None,
             },
         ))
         .unwrap();
 
         assert!(result.report.contains("Style: technical"));
+    }
+
+    #[test]
+    fn test_kb_flag_reads_doc_chunks_into_llm_context_and_checkpoint() {
+        let db = test_db();
+        seed_kb_pack(
+            &db,
+            "policy-pack",
+            "SYNTHETIC KB CONTEXT: marketplaces reward lock-in.",
+        );
+        let spec_path = std::path::Path::new("../../.archon/specs/gametheory.yaml");
+        if !spec_path.exists() {
+            eprintln!("spec file not found, skipping kb context test");
+            return;
+        }
+
+        let llm = canned_pipeline_llm();
+        let result = block_on(run_full_pipeline_with_options(
+            &db,
+            "Assess the incentive structure of this plugin marketplace design",
+            Some(spec_path),
+            Some(&llm),
+            GameTheoryMemoryContext::default(),
+            GameTheoryRunOptions {
+                budget_usd: 20.0,
+                max_concurrent: 1,
+                style_profile_id: Some("executive".to_string()),
+                enable_tier11: false,
+                kb_pack_id: Some("policy-pack".to_string()),
+            },
+        ))
+        .unwrap();
+
+        let prompts = llm.prompts().join("\n");
+        assert!(prompts.contains("Knowledge Base Context: policy-pack"));
+        assert!(prompts.contains("SYNTHETIC KB CONTEXT"));
+
+        let checkpoint = db
+            .run_script(
+                "?[detail_json] := *gt_run_checkpoints{run_id, checkpoint_key, detail_json}, \
+                 run_id = $rid, checkpoint_key = \"stage:kb-context\"",
+                std::collections::BTreeMap::from([(
+                    "rid".into(),
+                    cozo::DataValue::from(result.run_id.as_str()),
+                )]),
+                cozo::ScriptMutability::Immutable,
+            )
+            .unwrap();
+        assert_eq!(checkpoint.rows.len(), 1);
+        let detail: serde_json::Value =
+            serde_json::from_str(checkpoint.rows[0][0].get_str().unwrap()).unwrap();
+        assert_eq!(detail["kb"], "policy-pack");
+        assert_eq!(detail["documents"], 1);
+        assert_eq!(detail["chunks"], 1);
+    }
+
+    #[test]
+    fn test_kb_context_missing_doc_store_is_explicit_warning() {
+        let db = test_db();
+        let context = load_kb_run_context(&db, Some("missing-pack")).unwrap();
+
+        assert_eq!(context.pack_id.as_deref(), Some("missing-pack"));
+        assert_eq!(context.document_count, 0);
+        assert_eq!(context.chunk_count, 0);
+        assert!(
+            context
+                .warning
+                .as_deref()
+                .unwrap_or("")
+                .contains("document store unavailable")
+        );
+    }
+
+    fn seed_kb_pack(db: &DbInstance, pack_id: &str, content: &str) {
+        db.run_script(
+            ":create doc_sources { document_id: String => source_path: String }",
+            Default::default(),
+            cozo::ScriptMutability::Mutable,
+        )
+        .unwrap();
+        db.run_script(
+            ":create doc_chunks { chunk_id: String => document_id: String, content: String }",
+            Default::default(),
+            cozo::ScriptMutability::Mutable,
+        )
+        .unwrap();
+
+        db.run_script(
+            "?[document_id, source_path] <- [[$did, $path]] \
+             :put doc_sources { document_id => source_path }",
+            std::collections::BTreeMap::from([
+                ("did".into(), cozo::DataValue::from("doc-policy-pack")),
+                (
+                    "path".into(),
+                    cozo::DataValue::from(format!("./fixtures/{pack_id}/policy.md")),
+                ),
+            ]),
+            cozo::ScriptMutability::Mutable,
+        )
+        .unwrap();
+        db.run_script(
+            "?[chunk_id, document_id, content] <- [[\"chunk-policy-pack-0\", \"doc-policy-pack\", $content]] \
+             :put doc_chunks { chunk_id => document_id, content }",
+            std::collections::BTreeMap::from([(
+                "content".into(),
+                cozo::DataValue::from(content),
+            )]),
+            cozo::ScriptMutability::Mutable,
+        )
+        .unwrap();
     }
 
     #[test]

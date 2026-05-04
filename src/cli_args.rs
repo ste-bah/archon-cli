@@ -475,8 +475,34 @@ pub enum Commands {
     },
     /// Game-theory strategic analysis
     Gametheory {
+        /// PRD shorthand: `archon gametheory "<situation>"`
+        situation: Option<String>,
+        /// PRD shorthand: `archon gametheory --classify-only "<situation>"`
+        #[arg(long)]
+        classify_only: bool,
+        /// Bind the run to an ingested document/knowledge pack
+        #[arg(long, value_name = "PACK")]
+        kb: Option<String>,
+        /// Path to gametheory spec YAML (searches known locations if omitted)
+        #[arg(long, value_name = "PATH")]
+        spec_path: Option<String>,
+        /// Print per-agent gametheory memory recall counts
+        #[arg(long)]
+        debug_memory: bool,
+        /// Stop specialist execution when estimated model spend reaches this USD cap
+        #[arg(long, default_value_t = 20.0)]
+        budget: f64,
+        /// Maximum specialist concurrency requested for this run
+        #[arg(long, default_value_t = 4)]
+        max_concurrent: usize,
+        /// Report style: executive, academic, or technical
+        #[arg(long, default_value = "executive")]
+        style: String,
+        /// Enable Tier 11 specialists when policy.gametheory.enable_tier11 also allows it
+        #[arg(long)]
+        enable_tier11: bool,
         #[command(subcommand)]
-        action: GametheoryAction,
+        action: Option<GametheoryAction>,
     },
     /// Completion-integrity checks (TSPEC §10)
     Completion {
@@ -497,6 +523,9 @@ pub enum GametheoryAction {
         /// Path to gametheory spec YAML (searches known locations if omitted)
         #[arg(long, value_name = "PATH")]
         spec_path: Option<String>,
+        /// Bind the run to an ingested document/knowledge pack
+        #[arg(long, value_name = "PACK")]
+        kb: Option<String>,
         /// Print per-agent gametheory memory recall counts
         #[arg(long)]
         debug_memory: bool,
@@ -1094,5 +1123,86 @@ mod remote_url_parse_tests {
     fn remote_url_absent_when_not_supplied() {
         let cli = Cli::try_parse_from(["archon"]).expect("archon with no flags must parse");
         assert!(cli.remote_url.is_none());
+    }
+}
+
+#[cfg(test)]
+mod gametheory_prd_parse_tests {
+    use super::{Cli, Commands, GametheoryAction};
+    use clap::Parser;
+
+    #[test]
+    fn gametheory_prd_shorthand_parses_situation_and_kb() {
+        let cli = Cli::try_parse_from([
+            "archon",
+            "gametheory",
+            "Assess this plugin marketplace",
+            "--kb",
+            "policy-pack",
+        ])
+        .expect("PRD shorthand gametheory command must parse");
+
+        match cli.command {
+            Some(Commands::Gametheory {
+                situation,
+                kb,
+                action,
+                ..
+            }) => {
+                assert_eq!(situation.as_deref(), Some("Assess this plugin marketplace"));
+                assert_eq!(kb.as_deref(), Some("policy-pack"));
+                assert!(action.is_none());
+            }
+            other => panic!("expected gametheory command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn gametheory_prd_classify_only_shorthand_parses() {
+        let cli = Cli::try_parse_from([
+            "archon",
+            "gametheory",
+            "--classify-only",
+            "Assess a bargaining situation",
+        ])
+        .expect("PRD classify-only shorthand must parse");
+
+        match cli.command {
+            Some(Commands::Gametheory {
+                situation,
+                classify_only,
+                action,
+                ..
+            }) => {
+                assert_eq!(situation.as_deref(), Some("Assess a bargaining situation"));
+                assert!(classify_only);
+                assert!(action.is_none());
+            }
+            other => panic!("expected gametheory command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn gametheory_existing_run_subcommand_keeps_kb_flag() {
+        let cli = Cli::try_parse_from([
+            "archon",
+            "gametheory",
+            "run",
+            "Assess a deterrence game",
+            "--kb",
+            "policy-pack",
+        ])
+        .expect("existing run subcommand must still parse");
+
+        match cli.command {
+            Some(Commands::Gametheory {
+                action: Some(GametheoryAction::Run { situation, kb, .. }),
+                ..
+            }) => {
+                assert_eq!(situation, "Assess a deterrence game");
+                assert_eq!(kb.as_deref(), Some("policy-pack"));
+            }
+            other => panic!("expected gametheory run action, got {other:?}"),
+        }
     }
 }
