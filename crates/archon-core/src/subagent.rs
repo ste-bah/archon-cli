@@ -610,12 +610,26 @@ pub mod runner {
                     vec![user_msg]
                 };
 
-            let deadline = Instant::now() + Duration::from_secs(self.timeout_secs);
+            let started = Instant::now();
+            let deadline = started + Duration::from_secs(self.timeout_secs);
 
             for turn in 0..self.max_turns {
-                // Check timeout
+                // Check timeout. The error message reports BOTH wall-clock
+                // elapsed and turn counter so an LLM (or human) reading
+                // the failure can tell which cap actually fired — the
+                // pre-v0.1.42 message ("Subagent timed out after N turns")
+                // misled both LLMs and reviewers into thinking N was a
+                // turn cap when it was always a wall-clock cap. Default
+                // wall-clock is now 24h (DEFAULT_TIMEOUT_SECS = 86400).
                 if Instant::now() >= deadline {
-                    anyhow::bail!("Subagent timed out after {turn} turns");
+                    let elapsed = started.elapsed().as_secs();
+                    anyhow::bail!(
+                        "Subagent wall-clock timeout: {elapsed}s elapsed (cap: {}s) at turn {}/{} — \
+                         override per-spawn with timeout_secs:<seconds>, or per-agent in frontmatter",
+                        self.timeout_secs,
+                        turn,
+                        self.max_turns,
+                    );
                 }
 
                 // Check for graceful shutdown request

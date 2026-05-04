@@ -112,8 +112,11 @@ impl Tool for TaskCreateTool {
         };
 
         let max_turns = match input.get("max_turns").and_then(|v| v.as_u64()) {
-            Some(n) if n == 0 || n > 100 => {
-                return ToolResult::error("max_turns must be between 1 and 100");
+            Some(n) if n == 0 || n > u64::from(SubagentRequest::MAX_TURNS_HARD_CAP) => {
+                return ToolResult::error(format!(
+                    "max_turns must be between 1 and {}",
+                    SubagentRequest::MAX_TURNS_HARD_CAP
+                ));
             }
             Some(n) => n as u32,
             None => SubagentRequest::DEFAULT_MAX_TURNS,

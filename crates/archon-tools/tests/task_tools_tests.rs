@@ -272,19 +272,19 @@ async fn task_create_invalid_max_turns_errors() {
         .await;
     assert!(result.is_error, "max_turns=0 should error");
 
-    // max_turns: 101
+    // max_turns: 100_001 (over MAX_TURNS_HARD_CAP = 100_000)
     let result = tool
         .execute(
             serde_json::json!({
                 "subject": "bad turns",
                 "description": "test",
                 "prompt": "do stuff",
-                "max_turns": 101
+                "max_turns": 100_001
             }),
             &make_ctx(),
         )
         .await;
-    assert!(result.is_error, "max_turns=101 should error");
+    assert!(result.is_error, "max_turns=100_001 should error");
 }
 
 #[test]
