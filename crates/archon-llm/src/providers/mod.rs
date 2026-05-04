@@ -2,6 +2,7 @@
 pub mod anthropic;
 pub mod aws_auth;
 pub mod bedrock;
+pub mod codex;
 pub mod gcp_auth;
 pub mod local;
 pub mod openai;
