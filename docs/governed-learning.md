@@ -5,6 +5,8 @@ instead of letting the system silently rewrite itself. It is the safety layer
 between observed outcomes and changed manifests, prompts, policies, thresholds,
 or retrieval settings.
 
+> **TUI parity.** Every `archon behaviour <subcommand>` shell form has a `/behaviour <subcommand>` slash equivalent inside the TUI; the live status pane is `/learning-status`. Both forms read and write the same persisted learning-event, proposal, and manifest-version rows. See [CLI and TUI Command Parity](cookbook/real-world-evidence-engine.md#cli-and-tui-command-parity).
+
 ## CLI
 
 Current `archon behaviour --help` surface:

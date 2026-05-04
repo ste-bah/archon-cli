@@ -13,7 +13,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 
 - [Overview](architecture/overview.md) — workspace crates, request lifecycle, data flow
 - [Learning systems](architecture/learning-systems.md) — SONA, ReasoningBank (12 modes), GNN, CausalMemory, Provenance, DESC, Reflexion, AutoCapture
-- [Pipelines](architecture/pipelines.md) — god-code (50 agents), god-research (46 agents), agent loop, subagent spawning, multi-agent teams
+- [Pipelines](architecture/pipelines.md) — `/archon-code` (48 agents), `/archon-research` (46 agents), agent loop, subagent spawning, multi-agent teams
 - [Evidence Engine](evidence-engine.md) — documents, knowledge, provenance, game theory, completion integrity, governed learning, meaning, constellations
 
 ## Evidence Engine
@@ -50,7 +50,8 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 - [Strategic engagement research](cookbook/strategic-engagement.md) — 22-document intelligence package workflow
 - [Real-world Evidence Engine examples](cookbook/real-world-evidence-engine.md) — research, education, business, trading, coding, and strategic analysis workflows
 - [Memory-driven coding](cookbook/memory-driven-coding.md) — using SONA + ReasoningBank to inform decisions
-- [Running god-code pipelines](cookbook/god-code-pipeline.md) — 50-agent coding workflow end-to-end
+- [Coding pipeline (`/archon-code`)](cookbook/god-code-pipeline.md) — 48-agent coding workflow end-to-end inside the TUI
+- [Research pipeline (`/archon-research`)](cookbook/archon-research-pipeline.md) — 46-agent PhD research workflow end-to-end inside the TUI
 - [Custom agent workflows](cookbook/custom-agent-workflows.md) — `/create-agent`, `/run-agent`, `/evolve-agent`
 - [PRD-driven development](cookbook/prd-driven-development.md) — `/to-prd` → `/prd-to-spec` → `/spec-to-tasks` → `/archon-code`
 

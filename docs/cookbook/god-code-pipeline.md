@@ -1,6 +1,8 @@
-# Running the god-code pipeline
+# Running the coding pipeline (`/archon-code`)
 
-End-to-end walkthrough of the 48-agent coding pipeline.
+End-to-end walkthrough of the 48-agent coding pipeline. The TUI primary is `/archon-code` — equivalent to the shell command `archon pipeline code <task>`. Both forms drive the same pipeline machinery; the slash form just runs through the in-session command dispatcher.
+
+> **TUI parity.** Every `archon X` shell command in this doc has a `/X` slash equivalent inside the interactive TUI. See [CLI and TUI Command Parity](real-world-evidence-engine.md#cli-and-tui-command-parity).
 
 ## When to use
 
@@ -44,17 +46,29 @@ archon behaviour list-proposals
 
 ## Trigger
 
+Inside the TUI (recommended):
+
 ```
-/archon-code "implement OAuth2 token refresh with file locking"
+> /archon-code implement OAuth2 token refresh with file locking
+Starting coding pipeline for task: implement OAuth2 token refresh with file locking
+[task-analyzer] parsing task contract...
+[task-analyzer] complete (2.1s, $0.04)
+[requirement-extractor] extracting functional + non-functional requirements...
+…
 ```
 
-Or via CLI:
+The handler (`src/command/archon_code.rs:14`) spawns the pipeline async via `tokio::spawn`. Per-agent progress streams as `TextDelta` events through the facade's `tui_sender`. The conversation stays interactive — keep using other slash commands while the run is in flight.
+
+Equivalent CLI invocation (same persisted state, same outputs):
+
 ```bash
 archon pipeline code "implement OAuth2 token refresh with file locking"
 
-# Dry run (plan without executing)
+# Dry run (plan without executing) — only available via the CLI form
 archon pipeline code "..." --dry-run
 ```
+
+The CLI form supports `--dry-run` and `--max-budget-usd` flags. The slash form takes the task as positional arguments only — set the budget cap via `.archon/policy.toml`, or use the CLI form when you need per-run overrides.
 
 ## What happens
 
@@ -159,15 +173,10 @@ What driving a coding-pipeline run from inside the TUI actually looks like. Assu
 
 ### Discover-and-plan loop (recommended)
 
-Always dry-run first. The plan is cheap (no LLM cost) and tells you whether the pipeline understood your task before you spend $5-15 on a real run.
+Always dry-run first. The plan is cheap (no LLM cost) and tells you whether the pipeline understood your task before you spend $5-15 on a real run. The dry-run output is only available through the CLI form — use it from a second terminal:
 
-```
-> archon pipeline code "Add archon docs summarize <doc-id>: read persisted chunks, produce cited summaries, write provenance edges, add tests, update docs" --dry-run
-```
-
-What you see:
-
-```
+```bash
+$ archon pipeline code "Add archon docs summarize <doc-id>: read persisted chunks, produce cited summaries, write provenance edges, add tests, update docs" --dry-run
 === Coding Pipeline Dry Run ===
 Task: Add archon docs summarize <doc-id>: read persisted chunks, produce cited
       summaries, write provenance edges, add tests, update docs
@@ -183,15 +192,22 @@ Agent Sequence (48 agents):
 Estimated cost: ~$2.50-5.00 (varies by task complexity)
 ```
 
-Re-run without `--dry-run` to actually execute. Pin a budget cap:
+Then drive the actual run from inside the TUI:
 
 ```
-> archon pipeline code "Add archon docs summarize..." --max-budget-usd 20
+> /archon-code Add archon docs summarize <doc-id>: read persisted chunks, produce cited summaries, write provenance edges, add tests, update docs
+Starting coding pipeline for task: Add archon docs summarize <doc-id>: ...
+[task-analyzer] parsing task contract...
+[task-analyzer] complete (2.1s, $0.04)
+[requirement-extractor] extracting functional + non-functional requirements...
+[requirement-extractor] complete (3.8s, $0.07)
+[requirement-prioritizer] MoSCoW-ordering 14 requirements...
+…
 ```
 
 ### Live progress in the TUI
 
-Once the pipeline is running, the TUI Agent Activity rail (added in v0.1.40) shows the parent turn plus active subagent tool calls live:
+The Agent Activity rail (added in v0.1.40) shows the parent turn plus active subagent rows live:
 
 ```
 ─── Agent Activity ─────────────────────────────────────────────
@@ -202,17 +218,17 @@ Once the pipeline is running, the TUI Agent Activity rail (added in v0.1.40) sho
 ─────────────────────────────────────────────────────────────────
 ```
 
-The rail derives rows from existing `ToolStart` / `ToolComplete` events, so every spawned subagent appears as a `[AGENT]` row that moves `running → done | failed`.
+The rail derives rows from existing `ToolStart` / `ToolComplete` events; every spawned subagent appears as an `[AGENT]` row that moves `running → done | failed`.
 
-### Status from another TUI session (or the same one)
+### Status — from the same TUI session
 
-Don't lose your run. Open a second `archon` session in another terminal, or use the slash form in the same one:
+You don't need a second terminal. The slash form runs through the same dispatcher and queries the same persisted store:
 
 ```
 > /pipeline list
-SESSION ID                                 PHASE       STATUS    STARTED
-01HYCD3WSXKJ8R…                            phase-3     running   2026-05-04 19:12
-01HYCD0GMQ1YZP…                            phase-6     complete  2026-05-04 18:01
+SESSION ID                                 KIND    PHASE       STATUS    STARTED
+01HYCD3WSXKJ8R…                            coding  phase-3     running   2026-05-04 19:12
+01HYCD0GMQ1YZP…                            coding  phase-6     complete  2026-05-04 18:01
 
 > /pipeline status 01HYCD3WSXKJ8R…
 Status:    InProgress (phase 3 of 6)
@@ -225,7 +241,7 @@ Resumeable: yes
 
 ### Resume after a crash
 
-If archon dies mid-pipeline (Ctrl-C, OOM, network blip), restart it and pick up where you left off:
+If archon dies mid-pipeline (Ctrl-C, OOM, network blip), restart it and pick up where you left off — entirely from the TUI:
 
 ```
 $ archon
@@ -259,19 +275,19 @@ Agents run: 48 / 48
 Files modified: crates/archon-docs/src/summarize.rs (new), tests/docs_summarize_smoke.rs (new), 4 others
 ```
 
-Then verify the claims rather than trust the final paragraph:
+Then verify the claims from inside the TUI rather than trust the final paragraph:
 
 ```
-> archon completion verify 01HYCD0GMQ1YZP… --agent code-quality-improver --model sonnet
-> archon completion incidents
-> archon completion trust --agent code-quality-improver
+> /completion verify 01HYCD0GMQ1YZP… --agent code-quality-improver --model sonnet
+> /completion incidents
+> /completion trust --agent code-quality-improver
 ```
 
 If the run produced governed-learning events, review proposals before they auto-apply:
 
 ```
-> archon behaviour status
-> archon behaviour list-proposals
+> /behaviour status
+> /behaviour list-proposals
 ```
 
 ## See also
@@ -280,3 +296,4 @@ If the run produced governed-learning events, review proposals before they auto-
 - [Custom agents](custom-agent-workflows.md) — extending the pipeline
 - [Adding an agent](../development/adding-an-agent.md) — agent definition format
 - [PRD-driven development](prd-driven-development.md) — full PRD → code arc that ends in `/archon-code`
+- [Research pipeline (`/archon-research`)](archon-research-pipeline.md) — sibling 46-agent pipeline for prose instead of code

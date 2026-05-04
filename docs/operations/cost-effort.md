@@ -1,6 +1,8 @@
 # Cost, effort, and fast mode
 
-archon-cli surfaces token cost in real time and provides three knobs to tune latency and quality:
+archon-cli surfaces token cost in real time and provides three knobs to tune latency and quality.
+
+> **TUI parity.** Every CLI cost/effort flag (`--effort`, `--fast`, `--model`, `--max-budget-usd`) has a slash equivalent inside the TUI: `/effort`, `/fast`, `/model`, plus the per-session cost view at `/cost` and the aggregate breakdown at `/usage` / `/extra-usage` / `/stats`. See [CLI and TUI Command Parity](../cookbook/real-world-evidence-engine.md#cli-and-tui-command-parity). The CLI flags configure fresh launches; the slash forms toggle mid-session.
 
 ## Cost tracking
 

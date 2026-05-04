@@ -4,6 +4,8 @@ Document intelligence ingests local files and directories, extracts text/OCR
 evidence, chunks content, embeds chunks, and supports exact, semantic, and
 hybrid retrieval with provenance.
 
+> **TUI parity.** Every `archon docs <subcommand>` shell form has a `/docs <subcommand>` slash equivalent inside the TUI. Both forms read and write the same persisted Cozo state. See [CLI and TUI Command Parity](cookbook/real-world-evidence-engine.md#cli-and-tui-command-parity). When in the TUI, prefer the slash form — it runs through the in-session command dispatcher without leaving your conversation context.
+
 ## CLI
 
 Current `archon docs --help` surface:

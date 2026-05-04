@@ -4,6 +4,8 @@ The knowledge base extracts structured claims, entities, relations, source
 quality, and contradictions from document chunks. It is the bridge between raw
 document intelligence and higher-level reasoning pipelines.
 
+> **TUI parity.** Every `archon kb <subcommand>` shell form has a `/kb <subcommand>` slash equivalent inside the TUI. Both forms read and write the same persisted Cozo state. See [CLI and TUI Command Parity](cookbook/real-world-evidence-engine.md#cli-and-tui-command-parity). When inside an interactive session, prefer the slash form.
+
 ## CLI
 
 Current `archon kb --help` surface:
