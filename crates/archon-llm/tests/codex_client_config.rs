@@ -88,7 +88,7 @@ fn openai_codex_descriptor_is_in_native_registry() {
         "OpenAI Codex (ChatGPT Subscription)"
     );
     assert_eq!(descriptor.compat_kind, CompatKind::Native);
-    assert_eq!(descriptor.default_model, "gpt-5.1-codex");
+    assert_eq!(descriptor.default_model, "gpt-5.4");
     assert!(descriptor.supports.streaming);
     assert!(descriptor.supports.tool_calling);
     assert!(descriptor.supports.vision);

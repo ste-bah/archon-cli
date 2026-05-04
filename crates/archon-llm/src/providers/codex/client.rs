@@ -242,8 +242,8 @@ impl LlmProvider for CodexProvider {
 
     fn models(&self) -> Vec<ModelInfo> {
         vec![ModelInfo {
-            id: "gpt-5.1-codex".into(),
-            display_name: "GPT-5.1 Codex".into(),
+            id: "gpt-5.4".into(),
+            display_name: "GPT-5.4".into(),
             context_window: 200_000,
         }]
     }

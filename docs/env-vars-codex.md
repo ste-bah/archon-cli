@@ -6,6 +6,7 @@ manifest. These variables affect only the OpenAI Codex provider.
 | Variable | Type | Default | Introduced | Notes |
 | --- | --- | --- | --- | --- |
 | `ARCHON_CODEX_DISABLED` | bool | `false` | CDX-006 | `1`, `true`, or `yes` disables Codex provider resolution. |
+| `ARCHON_CODEX_BASE_URL` | URL | `https://chatgpt.com/backend-api` | CDX-009 | Test/smoke override for the Codex backend. Use only with local mocks or diagnostics. |
 | `ARCHON_CODEX_ORIGINATOR` | string | bundled manifest | CDX-006 | Overrides the `originator` spoof field. Must not impersonate OpenAI products. |
 | `ARCHON_CODEX_USER_AGENT` | string | bundled manifest | CDX-006 | Overrides the Codex user agent. Values matching `ChatGPT-*`, `ChatGPT/`, `OpenAI-*`, or `OpenAI/` are rejected. |
 | `ARCHON_CODEX_CLIENT_ID` | string | bundled manifest | CDX-006 | Overrides the OAuth client id. Must match `app_...`. |
@@ -15,7 +16,7 @@ manifest. These variables affect only the OpenAI Codex provider.
 | `ARCHON_CODEX_E2E` | bool | `false` | CDX-005 | Enables optional real-backend Codex smoke tests. Never set in CI without dedicated secrets. |
 | `ARCHON_CODEX_SMOKE_PROMPT` | string | task default | CDX-009 | Planned CI smoke prompt override. |
 | `ARCHON_CODEX_SMOKE_EXPECTED` | string | task default | CDX-009 | Planned CI smoke expected-output marker. |
-| `ARCHON_CODEX_SMOKE_MODEL` | string | `gpt-5.1-codex` | CDX-009 | Planned CI smoke model override. |
+| `ARCHON_CODEX_SMOKE_MODEL` | string | `gpt-5.4` | CDX-009 | Planned CI smoke model override. |
 
 Security note: never log OAuth access tokens or refresh tokens. The spoof
 manifest controls client posture headers only; credentials stay in

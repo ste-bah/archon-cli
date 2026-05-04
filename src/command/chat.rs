@@ -19,6 +19,10 @@ pub async fn handle_chat(args: ChatArgs, config: &archon_core::config::ArchonCon
             .clone()
             .unwrap_or_else(|| default_model(&args.provider, config)),
         max_tokens: args.max_tokens,
+        system: vec![serde_json::json!({
+            "type": "text",
+            "text": "You are Archon, a concise and helpful AI assistant."
+        })],
         messages: vec![serde_json::json!({
             "role": "user",
             "content": [{"type": "text", "text": args.prompt}]
@@ -50,11 +54,19 @@ async fn build_provider(
             let resolution = resolve(&codex_cfg, &reqwest::Client::new())
                 .await
                 .context("failed to resolve Codex spoof identity")?;
-            let provider = CodexProvider::new(
-                archon_llm::tokens::credentials_path(),
-                resolution.config,
-                reqwest::Client::new(),
-            )
+            let provider = match std::env::var("ARCHON_CODEX_BASE_URL").ok() {
+                Some(base_url) if !base_url.trim().is_empty() => CodexProvider::new_with_base_url(
+                    archon_llm::tokens::credentials_path(),
+                    resolution.config,
+                    reqwest::Client::new(),
+                    base_url,
+                ),
+                _ => CodexProvider::new(
+                    archon_llm::tokens::credentials_path(),
+                    resolution.config,
+                    reqwest::Client::new(),
+                ),
+            }
             .context("failed to construct Codex provider")?;
             Ok(Arc::new(provider))
         }
@@ -123,7 +135,7 @@ fn response_text(content: &[serde_json::Value]) -> String {
 fn default_model(provider: &str, config: &archon_core::config::ArchonConfig) -> String {
     match provider {
         "anthropic" => config.api.default_model.clone(),
-        "openai-codex" => "gpt-5.1-codex".into(),
+        "openai-codex" => "gpt-5.4".into(),
         other => archon_llm::providers::get_native(other)
             .or_else(|| archon_llm::providers::get_compat(other))
             .map(|d| d.default_model.clone())
@@ -149,7 +161,7 @@ mod tests {
     #[test]
     fn default_model_uses_codex_default_for_codex_provider() {
         let config = archon_core::config::ArchonConfig::default();
-        assert_eq!(default_model("openai-codex", &config), "gpt-5.1-codex");
+        assert_eq!(default_model("openai-codex", &config), "gpt-5.4");
     }
 
     #[test]

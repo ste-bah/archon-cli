@@ -38,7 +38,7 @@ fn write_creds(path: &std::path::Path) {
 
 fn request() -> LlmRequest {
     LlmRequest {
-        model: "gpt-5.1-codex".into(),
+        model: "gpt-5.4".into(),
         system: vec![serde_json::json!({"type": "text", "text": "You are helpful."})],
         messages: vec![serde_json::json!({
             "role": "user",
@@ -126,7 +126,7 @@ fn captured_tool_and_reasoning_fixtures_match_translator_shape() {
     .unwrap_or_else(|_| std::process::exit(1));
 
     let tool_req = LlmRequest {
-        model: "gpt-5.1-codex".into(),
+        model: "gpt-5.4".into(),
         messages: vec![serde_json::json!({
             "role": "user",
             "content": [{"type": "text", "text": "call the tool"}]
@@ -155,7 +155,7 @@ fn captured_tool_and_reasoning_fixtures_match_translator_shape() {
     );
 
     let reasoning_req = LlmRequest {
-        model: "gpt-5.1-codex".into(),
+        model: "gpt-5.4".into(),
         effort: Some("medium".into()),
         reasoning_encrypted: Some("encrypted-blob".into()),
         messages: vec![

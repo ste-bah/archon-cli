@@ -1,0 +1,157 @@
+name: Codex Daily Smoke
+
+on:
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build archon-cli
+        run: CARGO_BUILD_JOBS=2 cargo build --release --bin archon -j1
+
+      - name: Mask secrets
+        run: |
+          echo "::add-mask::${{ secrets.CODEX_TEST_REFRESH_TOKEN }}"
+          echo "::add-mask::${{ secrets.CODEX_TEST_ACCOUNT_ID }}"
+
+      - name: Restore Codex test credentials
+        env:
+          REFRESH_TOKEN: ${{ secrets.CODEX_TEST_REFRESH_TOKEN }}
+          ACCOUNT_ID: ${{ secrets.CODEX_TEST_ACCOUNT_ID }}
+        run: |
+          test -n "$REFRESH_TOKEN"
+          test -n "$ACCOUNT_ID"
+          mkdir -p ~/.archon
+          jq -n \
+            --arg accessToken "EXPIRED_PLACEHOLDER" \
+            --arg refreshToken "$REFRESH_TOKEN" \
+            --arg expiresAt "2020-01-01T00:00:00Z" \
+            --arg accountId "$ACCOUNT_ID" \
+            '{openaiCodexOauth: {accessToken: $accessToken, refreshToken: $refreshToken, expiresAt: $expiresAt, accountId: $accountId}}' \
+            > ~/.archon/.credentials.json
+          chmod 600 ~/.archon/.credentials.json
+          printf 'acknowledged_at: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > ~/.archon/codex-tos-ack
+
+      - name: Smoke test
+        id: smoke
+        env:
+          ARCHON_CODEX_SMOKE_PROMPT: "Echo the literal string ARCHON_SMOKE_OK_42 verbatim, no other text."
+          ARCHON_CODEX_SMOKE_EXPECTED: "ARCHON_SMOKE_OK_42"
+          ARCHON_CODEX_SMOKE_MODEL: "gpt-5.4"
+        run: |
+          OUTPUT=$(./target/release/archon chat \
+            --provider openai-codex \
+            --model "$ARCHON_CODEX_SMOKE_MODEL" \
+            --no-stream \
+            --max-tokens 16 \
+            "$ARCHON_CODEX_SMOKE_PROMPT" 2>&1)
+          echo "$OUTPUT" > smoke-output.txt
+          if echo "$OUTPUT" | grep -qF "$ARCHON_CODEX_SMOKE_EXPECTED"; then
+            echo "result=pass" >> "$GITHUB_OUTPUT"
+            echo "Smoke: PASS"
+          else
+            echo "result=fail" >> "$GITHUB_OUTPUT"
+            echo "Smoke: FAIL"
+            echo "Expected substring: $ARCHON_CODEX_SMOKE_EXPECTED"
+            echo "Actual output (first 500 chars):"
+            echo "$OUTPUT" | head -c 500
+          fi
+
+      - name: Verify auth status
+        run: ./target/release/archon auth status
+
+      - name: Open or update issue on failure
+        if: steps.smoke.outputs.result == 'fail'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const output = fs.readFileSync('smoke-output.txt', 'utf8');
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: 'codex-smoke-broken',
+              state: 'open',
+              creator: 'github-actions[bot]',
+              per_page: 1,
+            });
+            const body = `Daily Codex smoke test failed at ${new Date().toISOString()}.\n\n` +
+              `**Workflow run**: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}\n\n` +
+              `**Output (first 4000 chars):**\n\`\`\`\n${output.substring(0, 4000)}\n\`\`\`\n\n` +
+              `**Action items:**\n` +
+              `- Verify the Codex backend still accepts the current spoof identity\n` +
+              `- Check openclaw for originator / User-Agent / OpenAI-Beta drift\n` +
+              `- Update \`crates/archon-llm/resources/codex-compat.json\` if drift detected\n` +
+              `- Re-capture fixtures per TASK-CDX-008 if request shape changed`;
+            if (issues.length > 0) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issues[0].number,
+                body,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: 'Codex smoke test broken',
+                body,
+                labels: ['codex-smoke-broken', 'priority:high'],
+              });
+            }
+
+      - name: Close recovered issue on success
+        if: steps.smoke.outputs.result == 'pass'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: 'codex-smoke-broken',
+              state: 'open',
+              creator: 'github-actions[bot]',
+              per_page: 1,
+            });
+            if (issues.length > 0) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issues[0].number,
+                body: `Smoke recovered at ${new Date().toISOString()}. Closing.`,
+              });
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issues[0].number,
+                state: 'closed',
+              });
+            }
+
+      - name: Upload smoke artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-output
+          path: smoke-output.txt
+          retention-days: 14
+
+      - name: Fail workflow if smoke failed
+        if: steps.smoke.outputs.result == 'fail'
+        run: exit 1

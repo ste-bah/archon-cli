@@ -153,7 +153,7 @@ pub static NATIVE_REGISTRY: Lazy<HashMap<&'static str, ProviderDescriptor>> = La
             auth_flavor: AuthFlavor::Custom("Authorization".into()),
             env_key_var: "".into(),
             compat_kind: CompatKind::Native,
-            default_model: "gpt-5.1-codex".into(),
+            default_model: "gpt-5.4".into(),
             supports: ProviderFeatures {
                 streaming: true,
                 tool_calling: true,

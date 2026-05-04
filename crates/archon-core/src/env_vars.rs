@@ -24,6 +24,7 @@ pub const KNOWN_ARCHON_VARS: &[&str] = &[
     "ARCHON_API_KEY",
     "ARCHON_OAUTH_TOKEN",
     // Codex / ChatGPT subscription auth and compatibility posture
+    "ARCHON_CODEX_BASE_URL",
     "ARCHON_CODEX_BETA",
     "ARCHON_CODEX_CLIENT_ID",
     "ARCHON_CODEX_DISABLED",
@@ -48,8 +49,10 @@ pub const KNOWN_ARCHON_VARS: &[&str] = &[
     // Debugging
     "ARCHON_DEBUG",
     "ARCHON_DEBUG_LOG_DIR",
+    "ARCHON_GIT_HASH",
     "ARCHON_VERBOSE",
     "ARCHON_LOG",
+    "ARCHON_LOG_DIR",
     // Paths
     "ARCHON_CONFIG_DIR",
     "ARCHON_CONSTELLATION_DB_PATH",

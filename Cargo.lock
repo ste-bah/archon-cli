@@ -362,6 +362,7 @@ dependencies = [
  "tracing",
  "uuid",
  "walkdir",
+ "wiremock",
 ]
 
 [[package]]

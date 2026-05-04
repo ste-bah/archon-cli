@@ -1,7 +1,7 @@
 {
   "path": "/codex/responses",
   "body": {
-    "model": "gpt-5.1-codex",
+    "model": "gpt-5.4",
     "store": false,
     "stream": true,
     "input": [
