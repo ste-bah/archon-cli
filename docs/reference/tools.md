@@ -1,6 +1,6 @@
 # Tools reference
 
-Tools are callable by the LLM during agent turns. **43 registered tools across 13 categories** (verified at `crates/archon-core/src/dispatch.rs:142`).
+Tools are callable by the LLM during agent turns. **65 registered tools across 16 categories** (verified at `crates/archon-core/src/dispatch.rs`).
 
 Permission level is per-tool:
 - **Safe** — auto-approved by default
@@ -71,6 +71,43 @@ Permission level is per-tool:
 |---|---|---|
 | `memory_store` | Safe | Persist a memory in CozoDB (Fact / Decision / Rule / etc.) |
 | `memory_recall` | Safe | Hybrid BM25 + vector search over the memory graph |
+
+## Evidence documents
+
+| Tool | Permission | Purpose |
+|---|---|---|
+| `DocIngest` | Risky | Ingest a file or directory into the document evidence store |
+| `DocList` | Safe | List ingested documents |
+| `DocGet` | Safe | Show a document by id |
+| `DocStatus` | Safe | Show document processing/indexing status |
+| `DocSearch` | Safe | Search chunks with exact, semantic, or hybrid retrieval |
+| `DocAnswer` | Safe | Answer from document evidence with citations |
+| `DocProvenance` | Safe | Trace document/chunk provenance |
+| `DocInspect` | Safe | Inspect pages, chunks, OCR runs, and provenance for a document |
+| `DocModelStatus` | Safe | Show embedding backend/vector status |
+
+## Game theory
+
+| Tool | Permission | Purpose |
+|---|---|---|
+| `GameTheoryRun` | Risky | Run the game-theory pipeline and persist run state |
+| `GameTheoryStatus` | Safe | Read persisted run status |
+| `GameTheoryListAgents` | Safe | List curated game-theory specialists |
+| `GameTheorySpecimens` | Safe | List or ingest the known-fingerprint specimen library |
+| `GameTheoryInspect` | Safe | Inspect run, fingerprint, routing, specialist, section, or report artefacts |
+| `GameTheoryReplay` | Risky | Replay routing, reclassification, or a specialist from stored state |
+| `GameTheoryClassify` | Risky | Persist a Tier 1 fingerprint for a situation |
+| `GameTheoryCallSpecialist` | Risky | Re-run one specialist against a stored fingerprint |
+
+## Governed learning
+
+| Tool | Permission | Purpose |
+|---|---|---|
+| `LearningStatus` | Safe | Show governed-learning status and proposal counts |
+| `LearningInspect` | Safe | Inspect a learning event, behaviour proposal, or manifest |
+| `BehaviourProposals` | Safe | List pending behaviour proposals |
+| `BehaviourApprove` | Risky | Approve and apply a proposal |
+| `BehaviourRollback` | Risky | Roll back to a previous manifest version |
 
 ## Code intelligence
 

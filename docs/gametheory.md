@@ -11,7 +11,8 @@ Current `archon gametheory --help` surface:
 
 | Command | Purpose | Important flags |
 |---|---|---|
-| `run <situation>` | Run classify, route, specialists, final report | `--classify-only`, `--spec-path`, `--debug-memory`, `--budget`, `--max-concurrent`, `--style`, `--enable-tier11` |
+| `<situation>` | PRD shorthand for classify, route, specialists, final report | `--kb`, `--classify-only`, `--spec-path`, `--debug-memory`, `--budget`, `--max-concurrent`, `--style`, `--enable-tier11` |
+| `run <situation>` | Explicit form of the same full pipeline | `--kb`, `--classify-only`, `--spec-path`, `--debug-memory`, `--budget`, `--max-concurrent`, `--style`, `--enable-tier11` |
 | `list-runs` | List persisted runs | none |
 | `show <run-id>` | Show full run details | none |
 | `status [run-id]` | Show one run or aggregate status counts | optional run id |
@@ -26,7 +27,10 @@ Current `archon gametheory --help` surface:
 Example:
 
 ```bash
+archon gametheory "Assess this plugin marketplace design" --kb policy-pack
+
 archon gametheory run "Assess this plugin marketplace design" \
+  --kb policy-pack \
   --budget 20 \
   --max-concurrent 4 \
   --style executive \
@@ -48,6 +52,11 @@ The pipeline persists real state into Cozo relations including:
 | `gt_run_checkpoints` | resume/replay checkpoints |
 | `gt_specimen_library` | lazy-loaded known fingerprints |
 
+When `--kb <pack>` is supplied, the run reads matching `doc_sources` and
+`doc_chunks` from the document evidence store, injects the retrieved chunks into
+Tier 1 and specialist prompts, and writes a `stage:kb-context` checkpoint with
+the pack id plus document/chunk counts.
+
 Full State Verification should read these through CLI inspection commands:
 
 ```bash
@@ -64,9 +73,12 @@ Interactive TUI users get one umbrella command:
 
 | Slash form | Equivalent intent |
 |---|---|
-| `/gametheory run <situation>` | Start an async game-theory run |
+| `/gametheory run <situation> [--kb <pack>]` | Start an async game-theory run |
+| `/gametheory classify-only <situation>` | Persist a Tier 1 fingerprint only |
 | `/gametheory status [run-id]` | Show status |
 | `/gametheory inspect <artifact-id>` | Inspect an artifact |
+| `/gametheory inspect-fingerprint <run-id>` | Inspect the Tier 1 fingerprint |
+| `/gametheory inspect-routing <run-id>` | Inspect the routing decision |
 | `/gametheory list-runs` | List persisted runs |
 | `/gametheory show <run-id>` | Show run details |
 | `/gametheory replay <run-id> [--reclassify|--rerun-specialist <key>]` | Replay a run |

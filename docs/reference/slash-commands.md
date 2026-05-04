@@ -101,8 +101,10 @@ Beyond the 65 primaries, archon-cli ships **55 built-in skills** (21 in `crates/
 |---|---|---|
 | `/denials` | — | Show denied permissions in current session |
 | `/rules` | — | View or edit behavioral rules |
+| `/docs` | — | Open or inspect document evidence (`open`, `list`, `status`, `show`, `inspect`, `chunks`, `provenance`, `model-status`) |
 | `/learning-status` | — | Status of all 8 learning subsystems |
-| `/gametheory` | — | Umbrella for game-theory run, status, inspect, list-runs, show, replay, list-agents, specimens |
+| `/learning` | — | Open the governed-learning TUI browser |
+| `/gametheory` | — | Umbrella for game-theory run, classify-only, status, inspect, inspect-fingerprint, inspect-routing, list-runs, show, replay, list-agents, specimens |
 
 ## Utility
 
@@ -166,3 +168,4 @@ See [Skills reference](skills.md) for the full TOML schema.
 - [CLI flags](cli-flags.md) — command-line flags (alternative to slash commands)
 - [Tools](tools.md) — what agents can call (different from slash commands)
 - [Game theory](../gametheory.md) — `/gametheory` subcommands and tool surface
+- [Document intelligence](../docs.md) — `/docs` command family and evidence inspection

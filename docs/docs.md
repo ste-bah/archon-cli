@@ -41,6 +41,24 @@ archon docs search "policy marketplace incentives" --mode hybrid --debug
 `--debug` prints retrieval internals such as query embedding norm, raw scores,
 rerank scores when present, and citation/provenance chains.
 
+## Slash commands
+
+Interactive sessions expose the document evidence browser through `/docs`:
+
+| Slash form | Intent |
+|---|---|
+| `/docs open` | Open the TUI document/evidence browser |
+| `/docs list` | List ingested documents |
+| `/docs status` | Show persisted document/chunk/page counts |
+| `/docs show <document-id>` | Inspect a document |
+| `/docs inspect <document-id>` | Inspect a document |
+| `/docs chunks <document-id>` | List persisted chunks |
+| `/docs provenance <chunk-or-artifact-id>` | Show incoming/outgoing provenance edges |
+| `/docs model-status` | Show embedding backend/vector state |
+
+The read-side slash commands inspect the same Cozo source of truth as
+`archon docs ...`; they are not canned TUI labels.
+
 ## Multimodal policy
 
 Image OCR is local-provider first. Optional VLM descriptions are controlled by
