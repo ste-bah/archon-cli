@@ -23,6 +23,7 @@ pub fn ensure_doc_schema(db: &DbInstance) -> Result<()> {
 /// `dim` must be the dimension from the embedding provider.
 pub fn ensure_vec_schema(db: &DbInstance, dim: usize) -> Result<()> {
     ensure_vec_text_chunks(db, dim)?;
+    ensure_vec_page_images(db, dim)?;
     Ok(())
 }
 
@@ -32,7 +33,10 @@ fn run_create(db: &DbInstance, script: &str) -> Result<()> {
         Ok(_) => Ok(()),
         Err(e) => {
             let msg = e.to_string();
-            if crate::errors::COZO_RELATION_ALREADY_EXISTS.iter().any(|phrase| msg.contains(phrase)) {
+            if crate::errors::COZO_RELATION_ALREADY_EXISTS
+                .iter()
+                .any(|phrase| msg.contains(phrase))
+            {
                 Ok(())
             } else {
                 Err(anyhow::anyhow!("schema creation failed: {msg}"))
@@ -174,6 +178,32 @@ fn ensure_vec_text_chunks(db: &DbInstance, dim: usize) -> Result<()> {
     Ok(())
 }
 
+fn ensure_vec_page_images(db: &DbInstance, dim: usize) -> Result<()> {
+    let create_rel = format!(
+        ":create vec_page_images {{
+            page_id: String
+            =>
+            embedding: <F32; {dim}>,
+            provider: String
+        }}"
+    );
+    run_create(db, &create_rel)?;
+
+    let create_idx = format!(
+        "::hnsw create vec_page_images:page_image_embedding_idx {{
+            dim: {dim},
+            m: 50,
+            dtype: F32,
+            fields: [embedding],
+            distance: Cosine,
+            ef_construction: 200
+        }}"
+    );
+    run_create(db, &create_idx)?;
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -229,7 +259,10 @@ mod tests {
         let mut params = std::collections::BTreeMap::new();
         let v = ndarray::Array1::from_vec(vec![0.0_f32; 768]);
         params.insert("cid".to_string(), cozo::DataValue::from("test-chunk"));
-        params.insert("emb".to_string(), cozo::DataValue::Vec(cozo::Vector::F32(v)));
+        params.insert(
+            "emb".to_string(),
+            cozo::DataValue::Vec(cozo::Vector::F32(v)),
+        );
         params.insert("prov".to_string(), cozo::DataValue::from("test"));
         let before = db.run_script(
             "?[chunk_id, embedding, provider] <- [[$cid, $emb, $prov]]
@@ -237,7 +270,10 @@ mod tests {
             params.clone(),
             cozo::ScriptMutability::Mutable,
         );
-        assert!(before.is_err(), "vector insert must fail before ensure_vec_schema");
+        assert!(
+            before.is_err(),
+            "vector insert must fail before ensure_vec_schema"
+        );
 
         // Now create vec schema
         ensure_vec_schema(&db, 768).unwrap();
@@ -249,7 +285,10 @@ mod tests {
             params,
             cozo::ScriptMutability::Mutable,
         );
-        assert!(after.is_ok(), "vector insert must succeed after ensure_vec_schema");
+        assert!(
+            after.is_ok(),
+            "vector insert must succeed after ensure_vec_schema"
+        );
     }
 
     #[test]
@@ -261,7 +300,10 @@ mod tests {
         let mut params = std::collections::BTreeMap::new();
         let wrong_vec = ndarray::Array1::from_vec(vec![0.0_f32; 384]);
         params.insert("cid".to_string(), cozo::DataValue::from("test-chunk"));
-        params.insert("emb".to_string(), cozo::DataValue::Vec(cozo::Vector::F32(wrong_vec)));
+        params.insert(
+            "emb".to_string(),
+            cozo::DataValue::Vec(cozo::Vector::F32(wrong_vec)),
+        );
         params.insert("prov".to_string(), cozo::DataValue::from("test"));
         let result = db.run_script(
             "?[chunk_id, embedding, provider] <- [[$cid, $emb, $prov]]

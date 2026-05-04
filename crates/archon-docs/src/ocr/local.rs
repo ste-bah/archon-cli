@@ -1,10 +1,10 @@
-//! Local OCR provider — direct text passthrough for native-text PDFs
-//! and plain-text files. Scanned/image PDFs return an error directing users
-//! to configure an OCR backend (e.g. ocrmypdf, tesseract).
+//! Local OCR provider — direct text passthrough for native-text PDFs,
+//! plain-text files, and image OCR through a local `tesseract` binary.
 
 use async_trait::async_trait;
 use std::fs;
 use std::path::Path;
+use std::time::Instant;
 
 use super::provider::{OcrExtractResult, OcrProvider, OcrRequest};
 use crate::errors::DocsError;
@@ -32,11 +32,58 @@ impl OcrProvider for LocalOcrProvider {
         match ext.as_str() {
             "txt" | "md" | "markdown" => extract_text_file(path),
             "pdf" => extract_pdf_native(path).await,
-            _ => Err(DocsError::UnsupportedMediaType {
-                media_type: ext,
-            }),
+            "png" | "jpg" | "jpeg" | "tif" | "tiff" => {
+                extract_image_with_tesseract(path, request.language_hint.as_deref()).await
+            }
+            _ => Err(DocsError::UnsupportedMediaType { media_type: ext }),
         }
     }
+}
+
+async fn extract_image_with_tesseract(
+    path: &Path,
+    language_hint: Option<&str>,
+) -> Result<OcrExtractResult, DocsError> {
+    let started = Instant::now();
+    let mut command = tokio::process::Command::new("tesseract");
+    command.arg(path).arg("stdout");
+    if let Some(language) = language_hint.filter(|s| !s.trim().is_empty()) {
+        command.arg("-l").arg(language);
+    }
+
+    let output = command.output().await.map_err(|e| DocsError::OcrApi {
+        message: format!(
+            "tesseract not found or failed to start for image OCR. Install tesseract-ocr. ({e})"
+        ),
+        status_code: None,
+    })?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(DocsError::OcrApi {
+            message: format!("tesseract image OCR failed: {}", stderr.trim()),
+            status_code: Some(output.status.code().unwrap_or(1) as u16),
+        });
+    }
+
+    let text = String::from_utf8_lossy(&output.stdout).to_string();
+    if text.trim().is_empty() {
+        return Err(DocsError::OcrApi {
+            message: "tesseract image OCR produced no text".into(),
+            status_code: None,
+        });
+    }
+
+    Ok(OcrExtractResult {
+        page_count: 1,
+        page_offsets: vec![PageOffset {
+            page: 1,
+            char_start: 0,
+            char_end: text.len(),
+        }],
+        full_text: text,
+        processing_duration_ms: started.elapsed().as_millis() as u64,
+    })
 }
 
 fn extract_text_file(path: &Path) -> Result<OcrExtractResult, DocsError> {
@@ -70,10 +117,9 @@ async fn extract_pdf_native(path: &Path) -> Result<OcrExtractResult, DocsError> 
             let text = String::from_utf8_lossy(&out.stdout).to_string();
             if text.trim().is_empty() {
                 return Err(DocsError::OcrApi {
-                    message:
-                        "PDF produced no extractable text — may be image-only. \
+                    message: "PDF produced no extractable text — may be image-only. \
                          Install ocrmypdf or tesseract for OCR."
-                            .into(),
+                        .into(),
                     status_code: None,
                 });
             }

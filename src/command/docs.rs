@@ -2,8 +2,8 @@
 //!
 //! Wires `archon docs` subcommands to the archon-docs crate.
 
-use std::path::PathBuf;
 use std::fs;
+use std::path::PathBuf;
 
 use anyhow::Result;
 use cozo::DbInstance;
@@ -58,6 +58,10 @@ pub async fn handle_docs_command(action: DocsAction) -> Result<()> {
 async fn handle_ingest(path_str: &str) -> Result<()> {
     let db = open_db()?;
     let _ = init_embedding(&db); // Eager indexing if model is available
+    let policy = std::env::current_dir()
+        .ok()
+        .and_then(|cwd| archon_policy::load_effective_policy(&cwd).ok())
+        .unwrap_or_default();
     let path = PathBuf::from(path_str);
 
     if !path.exists() {
@@ -65,16 +69,19 @@ async fn handle_ingest(path_str: &str) -> Result<()> {
     }
 
     if path.is_dir() {
-        let result = ingest::ingest_directory(&db, &path).await?;
+        let result = ingest::ingest_directory_with_policy(&db, &path, &policy).await?;
         println!("Ingested: {} sources", result.sources_registered);
         if result.sources_skipped_duplicate > 0 {
             println!("Skipped: {} duplicates", result.sources_skipped_duplicate);
         }
         if result.images_skipped > 0 {
-            println!(
-                "Note: {} image file(s) registered without OCR (not yet implemented in Phase 1)",
-                result.images_skipped
-            );
+            println!("Skipped OCR: {} image file(s)", result.images_skipped);
+        }
+        if result.image_ocr_completed > 0 {
+            println!("Image OCR: {} image file(s)", result.image_ocr_completed);
+        }
+        for warning in &result.warnings {
+            println!("Warning: {warning}");
         }
         if result.sources_failed > 0 {
             println!("Failed: {} sources", result.sources_failed);
@@ -83,12 +90,34 @@ async fn handle_ingest(path_str: &str) -> Result<()> {
             }
         }
     } else {
-        match ingest::ingest_file(&db, &path).await {
-            Ok(r) if r.was_new && r.ocr_skipped => println!(
-                "Ingested: {}  (Note: image OCR not yet implemented in Phase 1; registered without text extraction)",
-                r.document_id
-            ),
-            Ok(r) if r.was_new => println!("Ingested: {}", r.document_id),
+        match ingest::ingest_file_with_policy(&db, &path, &policy).await {
+            Ok(r) if r.pipeline_failed => {
+                println!(
+                    "Registered: {}  (processing failed; document status is Failed)",
+                    r.document_id
+                );
+                for warning in &r.warnings {
+                    println!("Warning: {warning}");
+                }
+            }
+            Ok(r) if r.was_new && r.ocr_skipped => {
+                println!("Ingested: {}  (OCR skipped)", r.document_id);
+                for warning in &r.warnings {
+                    println!("Warning: {warning}");
+                }
+            }
+            Ok(r) if r.was_new => {
+                println!("Ingested: {}", r.document_id);
+                if r.vlm_descriptions > 0 {
+                    println!("VLM descriptions: {}", r.vlm_descriptions);
+                }
+                if r.image_embeddings_stored > 0 {
+                    println!("Image embeddings: {}", r.image_embeddings_stored);
+                }
+                for warning in &r.warnings {
+                    println!("Warning: {warning}");
+                }
+            }
             Ok(_) => println!("Skipped: duplicate (same content hash)"),
             Err(e) => anyhow::bail!("Ingest failed: {e}"),
         }
@@ -161,7 +190,10 @@ fn init_embedding(_db: &cozo::DbInstance) -> Result<()> {
         match embed::init_default_provider() {
             Ok(()) => {
                 let provider = embed::get_provider().expect("just set");
-                tracing::info!("embedding provider initialised: {}", provider.backend_name());
+                tracing::info!(
+                    "embedding provider initialised: {}",
+                    provider.backend_name()
+                );
             }
             Err(e) => {
                 tracing::warn!("embedding provider not available: {e}");
@@ -193,7 +225,11 @@ async fn handle_search(query: &str, debug: bool) -> Result<()> {
                 );
                 return Ok(());
             }
-            println!("Found {} result(s) ({} chunks indexed):\n", results.results.len(), results.total_indexed_chunks);
+            println!(
+                "Found {} result(s) ({} chunks indexed):\n",
+                results.results.len(),
+                results.total_indexed_chunks
+            );
             for (i, r) in results.results.iter().enumerate() {
                 println!(
                     "  {}. {}  pages {}-{}  score={:.3}",
@@ -290,7 +326,10 @@ async fn handle_provenance(chunk_or_answer_id: &str) -> Result<()> {
             println!("Chunk: {}", chunk.chunk_id);
             println!("  Document:  {}", chunk.document_id);
             println!("  Pages:     {}-{}", chunk.page_start, chunk.page_end);
-            println!("  Content:   {}", &chunk.content[..chunk.content.len().min(200)]);
+            println!(
+                "  Content:   {}",
+                &chunk.content[..chunk.content.len().min(200)]
+            );
             println!("  Hash:      {}", chunk.content_hash);
             println!("  Embedding: {}", chunk.embedding_status);
         }
@@ -301,8 +340,8 @@ async fn handle_provenance(chunk_or_answer_id: &str) -> Result<()> {
     }
 
     // Always try to trace provenance edges
-    let edges = archon_docs::store::list_provenance_from(&db, chunk_or_answer_id)
-        .unwrap_or_default();
+    let edges =
+        archon_docs::store::list_provenance_from(&db, chunk_or_answer_id).unwrap_or_default();
     if !edges.is_empty() {
         println!("\nProvenance edges (outgoing):");
         for e in &edges {
@@ -313,8 +352,8 @@ async fn handle_provenance(chunk_or_answer_id: &str) -> Result<()> {
         }
     }
 
-    let edges_to = archon_docs::store::list_provenance_to(&db, chunk_or_answer_id)
-        .unwrap_or_default();
+    let edges_to =
+        archon_docs::store::list_provenance_to(&db, chunk_or_answer_id).unwrap_or_default();
     if !edges_to.is_empty() {
         println!("\nProvenance edges (incoming):");
         for e in &edges_to {
@@ -392,14 +431,19 @@ async fn handle_model_status() -> Result<()> {
             // HNSW index check (read-only — uses Cozo ::relations system query)
             match check_hnsw_index(&db, provider.dimension()) {
                 Ok(true) => println!("HNSW index:    present"),
-                Ok(false) => println!("HNSW index:    not yet created (will be created on first ingest with provider)"),
+                Ok(false) => println!(
+                    "HNSW index:    not yet created (will be created on first ingest with provider)"
+                ),
                 Err(e) => println!("HNSW index:    unable to check — {}", e),
             }
         }
         None => {
             println!("Backend:       not-configured");
             println!("Dimension:     n/a");
-            println!("Init result:   failed (took {}ms)", init_elapsed.as_millis());
+            println!(
+                "Init result:   failed (took {}ms)",
+                init_elapsed.as_millis()
+            );
             println!();
             println!("No embedding model is configured. To enable local embeddings:");
             println!("  1. Ensure the fastembed model is available (BGE-base-en-v1.5 quantized).");
@@ -419,15 +463,18 @@ async fn handle_model_status() -> Result<()> {
 
     match std::env::current_dir()
         .map_err(anyhow::Error::from)
-        .and_then(|cwd| {
-            archon_policy::load_policy_for_workspace(&cwd).map_err(anyhow::Error::from)
-        }) {
+        .and_then(|cwd| archon_policy::load_policy_for_workspace(&cwd).map_err(anyhow::Error::from))
+    {
         Ok(load) => {
             let decision = load.policy.docs_vlm_decision();
             println!();
             println!(
                 "VLM policy:    {} ({})",
-                if decision.allowed { "allowed" } else { "denied" },
+                if decision.allowed {
+                    "allowed"
+                } else {
+                    "denied"
+                },
                 decision.reason
             );
         }
@@ -449,7 +496,10 @@ async fn handle_index(force_all: bool) -> Result<()> {
 
     println!("Indexed: {} chunks", result.indexed);
     if result.failed > 0 {
-        println!("Failed:  {} chunks (use 'archon docs model-status' for diagnostics)", result.failed);
+        println!(
+            "Failed:  {} chunks (use 'archon docs model-status' for diagnostics)",
+            result.failed
+        );
     }
     if result.skipped > 0 {
         println!("Skipped: {} chunks (already indexed)", result.skipped);
@@ -467,7 +517,9 @@ fn check_hnsw_index(db: &cozo::DbInstance, _dim: usize) -> Result<bool> {
     ) {
         Ok(_) => Ok(true),
         Err(e) => {
-            if e.to_string().contains(archon_docs::errors::COZO_RELATION_NOT_FOUND) {
+            if e.to_string()
+                .contains(archon_docs::errors::COZO_RELATION_NOT_FOUND)
+            {
                 Ok(false)
             } else {
                 Err(anyhow::anyhow!("failed to query vec_text_chunks: {e}"))

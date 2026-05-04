@@ -9,8 +9,8 @@ use anyhow::Result;
 use cozo::{DataValue, DbInstance, ScriptMutability, Vector};
 
 use crate::models::{
-    ChunkArtifact, DocumentStatus, OcrRun, OcrStatus, PageArtifact, ProcessingJob,
-    ProvenanceEdge, SourceDocument,
+    ChunkArtifact, DocumentStatus, OcrRun, OcrStatus, PageArtifact, ProcessingJob, ProvenanceEdge,
+    SourceDocument,
 };
 
 // ---------------------------------------------------------------------------
@@ -151,13 +151,19 @@ pub fn insert_ocr_run(db: &DbInstance, run: &OcrRun) -> Result<()> {
     params.insert("did".into(), DataValue::from(run.document_id.as_str()));
     params.insert("prov".into(), DataValue::from(run.provider.as_str()));
     params.insert("mode".into(), DataValue::from(run.mode.as_str()));
-    params.insert("status".into(), DataValue::from(ocr_status_str(&run.status)));
+    params.insert(
+        "status".into(),
+        DataValue::from(ocr_status_str(&run.status)),
+    );
     params.insert("sat".into(), DataValue::from(run.started_at.as_str()));
     params.insert(
         "cat".into(),
         DataValue::from(run.completed_at.as_deref().unwrap_or("")),
     );
-    params.insert("dur".into(), DataValue::from(run.duration_ms.unwrap_or(0) as i64));
+    params.insert(
+        "dur".into(),
+        DataValue::from(run.duration_ms.unwrap_or(0) as i64),
+    );
 
     db.run_script(
         "?[ocr_run_id, document_id, provider, mode, status, started_at, completed_at, duration_ms] \
@@ -186,7 +192,11 @@ pub fn update_ocr_run_completion(
         .ok_or_else(|| anyhow::anyhow!("OCR run not found: {ocr_run_id}"))?;
     run.status = status.clone();
     run.completed_at = Some(completed_at.to_string());
-    run.duration_ms = if duration_ms == 0 { None } else { Some(duration_ms) };
+    run.duration_ms = if duration_ms == 0 {
+        None
+    } else {
+        Some(duration_ms)
+    };
     insert_ocr_run(db, &run)
 }
 
@@ -215,7 +225,11 @@ fn list_ocr_runs_for_ocr_id(db: &DbInstance, ocr_run_id: &str) -> Result<Vec<Ocr
             started_at: row[5].get_str().unwrap_or("").to_string(),
             completed_at: {
                 let s = row[6].get_str().unwrap_or("");
-                if s.is_empty() { None } else { Some(s.to_string()) }
+                if s.is_empty() {
+                    None
+                } else {
+                    Some(s.to_string())
+                }
             },
             duration_ms: {
                 let d = row[7].get_int().unwrap_or(0);
@@ -251,7 +265,11 @@ pub fn list_ocr_runs_for_doc(db: &DbInstance, document_id: &str) -> Result<Vec<O
             started_at: row[5].get_str().unwrap_or("").to_string(),
             completed_at: {
                 let s = row[6].get_str().unwrap_or("");
-                if s.is_empty() { None } else { Some(s.to_string()) }
+                if s.is_empty() {
+                    None
+                } else {
+                    Some(s.to_string())
+                }
             },
             duration_ms: {
                 let d = row[7].get_int().unwrap_or(0);
@@ -278,8 +296,14 @@ pub fn insert_page(db: &DbInstance, page: &PageArtifact) -> Result<()> {
         "ihash".into(),
         DataValue::from(page.image_hash.as_deref().unwrap_or("")),
     );
-    params.insert("w".into(), DataValue::from(page.width.unwrap_or(0.0) as f64));
-    params.insert("h".into(), DataValue::from(page.height.unwrap_or(0.0) as f64));
+    params.insert(
+        "w".into(),
+        DataValue::from(page.width.unwrap_or(0.0) as f64),
+    );
+    params.insert(
+        "h".into(),
+        DataValue::from(page.height.unwrap_or(0.0) as f64),
+    );
     params.insert(
         "prov".into(),
         DataValue::from(page.provenance_record_id.as_str()),
@@ -451,7 +475,10 @@ pub fn insert_artifact(db: &DbInstance, art: &ArtifactRecord) -> Result<()> {
     params.insert("atype".into(), DataValue::from(art.artifact_type.as_str()));
     params.insert("hash".into(), DataValue::from(art.content_hash.as_str()));
     params.insert("cat".into(), DataValue::from(art.created_at.as_str()));
-    params.insert("prov".into(), DataValue::from(art.provenance_record_id.as_str()));
+    params.insert(
+        "prov".into(),
+        DataValue::from(art.provenance_record_id.as_str()),
+    );
 
     db.run_script(
         "?[artifact_id, document_id, artifact_type, content_hash, created_at, provenance_record_id] \
@@ -497,9 +524,15 @@ pub fn list_artifacts_for_doc(db: &DbInstance, document_id: &str) -> Result<Vec<
 pub fn insert_provenance_edge(db: &DbInstance, edge: &ProvenanceEdge) -> Result<()> {
     let mut params = BTreeMap::new();
     params.insert("eid".into(), DataValue::from(edge.edge_id.as_str()));
-    params.insert("from".into(), DataValue::from(edge.from_artifact_id.as_str()));
+    params.insert(
+        "from".into(),
+        DataValue::from(edge.from_artifact_id.as_str()),
+    );
     params.insert("to".into(), DataValue::from(edge.to_artifact_id.as_str()));
-    params.insert("etype".into(), DataValue::from(edge_type_str(&edge.edge_type)));
+    params.insert(
+        "etype".into(),
+        DataValue::from(edge_type_str(&edge.edge_type)),
+    );
     params.insert("cat".into(), DataValue::from(edge.created_at.as_str()));
 
     db.run_script(
@@ -543,10 +576,7 @@ pub fn list_provenance_from(
         .collect())
 }
 
-pub fn list_provenance_to(
-    db: &DbInstance,
-    to_artifact_id: &str,
-) -> Result<Vec<ProvenanceEdge>> {
+pub fn list_provenance_to(db: &DbInstance, to_artifact_id: &str) -> Result<Vec<ProvenanceEdge>> {
     let mut params = BTreeMap::new();
     params.insert("taid".into(), DataValue::from(to_artifact_id));
 
@@ -652,8 +682,12 @@ pub fn get_chunk_embedding(db: &DbInstance, chunk_id: &str) -> Result<Option<Vec
     let emb = &result.rows[0][0];
     match emb {
         DataValue::Vec(Vector::F32(arr)) => Ok(Some(arr.to_vec())),
-        DataValue::Vec(_) => Err(anyhow::anyhow!("unexpected vector dtype in vec_text_chunks")),
-        _ => Err(anyhow::anyhow!("expected vector data in vec_text_chunks for chunk {chunk_id}")),
+        DataValue::Vec(_) => Err(anyhow::anyhow!(
+            "unexpected vector dtype in vec_text_chunks"
+        )),
+        _ => Err(anyhow::anyhow!(
+            "expected vector data in vec_text_chunks for chunk {chunk_id}"
+        )),
     }
 }
 
@@ -661,11 +695,7 @@ pub fn get_chunk_embedding(db: &DbInstance, chunk_id: &str) -> Result<Option<Vec
 ///
 /// Reads the full chunk row, modifies only the status, and re-inserts.
 /// Returns Ok(()) even if the chunk doesn't exist (no-op).
-pub fn update_chunk_embedding_status(
-    db: &DbInstance,
-    chunk_id: &str,
-    status: &str,
-) -> Result<()> {
+pub fn update_chunk_embedding_status(db: &DbInstance, chunk_id: &str, status: &str) -> Result<()> {
     // Read the full chunk first — :put requires all non-default columns.
     let chunk = get_chunk_by_id(db, chunk_id)?;
     if let Some(mut chunk) = chunk {
@@ -725,6 +755,55 @@ pub fn count_embeddings(db: &DbInstance) -> Result<usize> {
                 Ok(0)
             } else {
                 Err(anyhow::anyhow!("count embeddings failed: {msg}"))
+            }
+        }
+    }
+}
+
+/// Store (or upsert) an embedding for an image-backed page.
+pub fn insert_page_image_embedding(
+    db: &DbInstance,
+    page_id: &str,
+    embedding: &[f32],
+    provider: &str,
+) -> Result<()> {
+    let arr = ndarray::Array1::from_vec(embedding.to_vec());
+
+    let mut params = BTreeMap::new();
+    params.insert("pid".into(), DataValue::from(page_id));
+    params.insert("emb".into(), DataValue::Vec(Vector::F32(arr)));
+    params.insert("prov".into(), DataValue::from(provider));
+
+    db.run_script(
+        "?[page_id, embedding, provider] <- [[$pid, $emb, $prov]]
+         :put vec_page_images { page_id => embedding, provider }",
+        params,
+        ScriptMutability::Mutable,
+    )
+    .map_err(|e| anyhow::anyhow!("insert page image embedding failed: {e}"))?;
+    Ok(())
+}
+
+/// Count image page embeddings currently stored.
+pub fn count_page_image_embeddings(db: &DbInstance) -> Result<usize> {
+    let result = db.run_script(
+        "?[count(page_id)] := *vec_page_images{page_id}",
+        Default::default(),
+        ScriptMutability::Immutable,
+    );
+    match result {
+        Ok(result) => {
+            if result.rows.is_empty() {
+                return Ok(0);
+            }
+            Ok(result.rows[0][0].get_int().unwrap_or(0) as usize)
+        }
+        Err(e) => {
+            let msg = e.to_string();
+            if msg.contains(crate::errors::COZO_RELATION_NOT_FOUND) {
+                Ok(0)
+            } else {
+                Err(anyhow::anyhow!("count page image embeddings failed: {msg}"))
             }
         }
     }
@@ -798,7 +877,11 @@ fn parse_edge_type(s: &str) -> crate::models::ProvenanceEdgeType {
 }
 
 fn optional_str(s: &str) -> Option<String> {
-    if s.is_empty() { None } else { Some(s.to_string()) }
+    if s.is_empty() {
+        None
+    } else {
+        Some(s.to_string())
+    }
 }
 
 #[cfg(test)]
@@ -842,7 +925,11 @@ mod tests {
         update_doc_status(&db, "update-status", &DocumentStatus::Ingested).unwrap();
 
         let got = get_doc_source(&db, "update-status").unwrap().unwrap();
-        assert_eq!(got.status, DocumentStatus::Ingested, ":update must change status");
+        assert_eq!(
+            got.status,
+            DocumentStatus::Ingested,
+            ":update must change status"
+        );
     }
 
     #[test]
@@ -969,7 +1056,10 @@ mod tests {
 
         let got = get_chunk_embedding(&db, "chunk-norm-1").unwrap().unwrap();
         let got_norm: f32 = got.iter().map(|x| x * x).sum::<f32>().sqrt();
-        assert!((got_norm - 1.0).abs() < 1e-6, "stored vector must be unit length");
+        assert!(
+            (got_norm - 1.0).abs() < 1e-6,
+            "stored vector must be unit length"
+        );
     }
 
     #[test]

@@ -1,6 +1,7 @@
 //! OCR provider trait — per TSPEC §6.1.
 
 use async_trait::async_trait;
+use std::sync::{Arc, RwLock};
 
 use crate::errors::DocsError;
 use crate::models::PageOffset;
@@ -37,4 +38,26 @@ pub trait OcrProvider: Send + Sync {
 
     /// Human-readable provider name.
     fn name(&self) -> &'static str;
+}
+
+static PROVIDER: RwLock<Option<Arc<dyn OcrProvider>>> = RwLock::new(None);
+
+/// Get the currently configured OCR provider, if one has been installed.
+pub fn get_provider() -> Option<Arc<dyn OcrProvider>> {
+    PROVIDER.read().ok().and_then(|guard| guard.clone())
+}
+
+/// Replace the active OCR provider. Primarily used by tests and local adapters.
+pub fn set_provider(provider: Box<dyn OcrProvider>) {
+    if let Ok(mut guard) = PROVIDER.write() {
+        *guard = Some(Arc::from(provider));
+    }
+}
+
+/// Remove the active OCR provider, falling back to `LocalOcrProvider`.
+#[cfg(test)]
+pub fn clear_provider() {
+    if let Ok(mut guard) = PROVIDER.write() {
+        *guard = None;
+    }
 }

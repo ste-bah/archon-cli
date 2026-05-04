@@ -1,7 +1,15 @@
 use crate::errors::DocsError;
+use std::sync::{Arc, RwLock};
 
-pub trait VlmDescriptionProvider {
+pub trait VlmDescriptionProvider: Send + Sync {
     fn describe_image(&self, image_bytes: &[u8]) -> Result<String, DocsError>;
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum VlmDescriptionOutcome {
+    Disabled(String),
+    NoProvider,
+    Described(String),
 }
 
 pub fn describe_image_with_policy(
@@ -16,6 +24,41 @@ pub fn describe_image_with_policy(
         });
     }
     provider.describe_image(image_bytes)
+}
+
+static PROVIDER: RwLock<Option<Arc<dyn VlmDescriptionProvider>>> = RwLock::new(None);
+
+pub fn get_provider() -> Option<Arc<dyn VlmDescriptionProvider>> {
+    PROVIDER.read().ok().and_then(|guard| guard.clone())
+}
+
+pub fn set_provider(provider: Box<dyn VlmDescriptionProvider>) {
+    if let Ok(mut guard) = PROVIDER.write() {
+        *guard = Some(Arc::from(provider));
+    }
+}
+
+#[cfg(test)]
+pub fn clear_provider() {
+    if let Ok(mut guard) = PROVIDER.write() {
+        *guard = None;
+    }
+}
+
+pub fn describe_registered_image(
+    policy: &archon_policy::EffectivePolicy,
+    image_bytes: &[u8],
+) -> Result<VlmDescriptionOutcome, DocsError> {
+    let decision = policy.docs_vlm_decision();
+    if !decision.allowed {
+        return Ok(VlmDescriptionOutcome::Disabled(decision.reason));
+    }
+    let Some(provider) = get_provider() else {
+        return Ok(VlmDescriptionOutcome::NoProvider);
+    };
+    provider
+        .describe_image(image_bytes)
+        .map(VlmDescriptionOutcome::Described)
 }
 
 #[cfg(test)]

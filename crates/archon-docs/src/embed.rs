@@ -23,6 +23,13 @@ pub trait LocalEmbeddingProvider: Send + Sync {
     /// Returns a single L2-normalised vector.
     fn embed_query(&self, query: &str) -> Result<Vec<f32>, DocsError>;
 
+    /// Embed raw image bytes if this provider is multimodal.
+    /// Text-only providers return `Ok(None)` so ingest can skip image
+    /// vectors with an explicit warning instead of pretending they exist.
+    fn embed_image(&self, _image_bytes: &[u8]) -> Result<Option<Vec<f32>>, DocsError> {
+        Ok(None)
+    }
+
     /// Vector dimension produced by this provider.
     fn dimension(&self) -> usize;
 
@@ -73,7 +80,9 @@ impl FastembedProvider {
         })
     }
 
-    fn ensure_model(&self) -> Result<std::sync::MutexGuard<'_, Option<fastembed::TextEmbedding>>, DocsError> {
+    fn ensure_model(
+        &self,
+    ) -> Result<std::sync::MutexGuard<'_, Option<fastembed::TextEmbedding>>, DocsError> {
         let mut guard = self.model.lock().map_err(|e| DocsError::Embedding {
             message: format!("embedding model lock poisoned: {e}"),
         })?;
@@ -82,15 +91,13 @@ impl FastembedProvider {
                 cache_dir = %self.cache_dir.display(),
                 "loading local embedding model BGE-base-en-v1.5 (quantized)"
             );
-            let options =
-                fastembed::InitOptions::new(fastembed::EmbeddingModel::BGEBaseENV15Q)
-                    .with_cache_dir(self.cache_dir.clone())
-                    .with_show_download_progress(false);
-            let model = fastembed::TextEmbedding::try_new(options).map_err(|e| {
-                DocsError::Embedding {
+            let options = fastembed::InitOptions::new(fastembed::EmbeddingModel::BGEBaseENV15Q)
+                .with_cache_dir(self.cache_dir.clone())
+                .with_show_download_progress(false);
+            let model =
+                fastembed::TextEmbedding::try_new(options).map_err(|e| DocsError::Embedding {
                     message: format!("failed to load fastembed model: {e}"),
-                }
-            })?;
+                })?;
             *guard = Some(model);
         }
         Ok(guard)
@@ -130,9 +137,11 @@ impl LocalEmbeddingProvider for FastembedProvider {
             .iter()
             .map(|c| format!("{PREFIX_DOCUMENT}{c}"))
             .collect();
-        let raw = model.embed(prefixed, None).map_err(|e| DocsError::Embedding {
-            message: format!("fastembed embed_chunks failed: {e}"),
-        })?;
+        let raw = model
+            .embed(prefixed, None)
+            .map_err(|e| DocsError::Embedding {
+                message: format!("fastembed embed_chunks failed: {e}"),
+            })?;
         Ok(normalise_batch(&raw))
     }
 
@@ -342,18 +351,34 @@ mod tests {
 
     struct StubProviderA;
     impl LocalEmbeddingProvider for StubProviderA {
-        fn embed_chunks(&self, _: &[String]) -> Result<Vec<Vec<f32>>, DocsError> { Ok(vec![]) }
-        fn embed_query(&self, _: &str) -> Result<Vec<f32>, DocsError> { Ok(vec![]) }
-        fn dimension(&self) -> usize { 1 }
-        fn backend_name(&self) -> &'static str { "stub-a" }
+        fn embed_chunks(&self, _: &[String]) -> Result<Vec<Vec<f32>>, DocsError> {
+            Ok(vec![])
+        }
+        fn embed_query(&self, _: &str) -> Result<Vec<f32>, DocsError> {
+            Ok(vec![])
+        }
+        fn dimension(&self) -> usize {
+            1
+        }
+        fn backend_name(&self) -> &'static str {
+            "stub-a"
+        }
     }
 
     struct StubProviderB;
     impl LocalEmbeddingProvider for StubProviderB {
-        fn embed_chunks(&self, _: &[String]) -> Result<Vec<Vec<f32>>, DocsError> { Ok(vec![]) }
-        fn embed_query(&self, _: &str) -> Result<Vec<f32>, DocsError> { Ok(vec![]) }
-        fn dimension(&self) -> usize { 1 }
-        fn backend_name(&self) -> &'static str { "stub-b" }
+        fn embed_chunks(&self, _: &[String]) -> Result<Vec<Vec<f32>>, DocsError> {
+            Ok(vec![])
+        }
+        fn embed_query(&self, _: &str) -> Result<Vec<f32>, DocsError> {
+            Ok(vec![])
+        }
+        fn dimension(&self) -> usize {
+            1
+        }
+        fn backend_name(&self) -> &'static str {
+            "stub-b"
+        }
     }
 
     #[test]
@@ -362,7 +387,13 @@ mod tests {
         assert!(try_set_provider(Box::new(StubProviderA)).is_ok());
         let err = try_set_provider(Box::new(StubProviderB)).unwrap_err();
         let msg = format!("{err}");
-        assert!(msg.contains("provider already set"), "expected 'provider already set' in: {msg}");
-        assert!(msg.contains("stub-a"), "expected existing backend name in: {msg}");
+        assert!(
+            msg.contains("provider already set"),
+            "expected 'provider already set' in: {msg}"
+        );
+        assert!(
+            msg.contains("stub-a"),
+            "expected existing backend name in: {msg}"
+        );
     }
 }
