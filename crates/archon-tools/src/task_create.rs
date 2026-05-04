@@ -52,7 +52,7 @@ impl Tool for TaskCreateTool {
                 },
                 "max_turns": {
                     "type": "integer",
-                    "description": "Maximum conversation turns for the subagent (default 10, max 100)"
+                    "description": "Maximum conversation turns for the subagent (default 10, max 100000)"
                 },
                 "subagent_type": {
                     "type": "string",
