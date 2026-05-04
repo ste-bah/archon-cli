@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::PathBuf;
 
@@ -30,6 +30,8 @@ pub enum ConfigError {
 pub struct ArchonConfig {
     pub api: ApiConfig,
     pub llm: LlmConfig,
+    #[serde(default)]
+    pub providers: ProvidersConfig,
     pub identity: IdentityConfig,
     pub tools: ToolsConfig,
     pub permissions: PermissionsConfig,
@@ -64,6 +66,59 @@ pub struct ArchonConfig {
     /// Web UI configuration.
     #[serde(default)]
     pub web: WebConfig,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ProvidersConfig {
+    #[serde(rename = "openai-codex")]
+    pub openai_codex: CodexProviderConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CodexProviderConfig {
+    pub enabled: bool,
+    pub spoof: CodexSpoofPartialConfig,
+    pub manifest: CodexManifestConfig,
+}
+
+impl Default for CodexProviderConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            spoof: CodexSpoofPartialConfig::default(),
+            manifest: CodexManifestConfig::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CodexSpoofPartialConfig {
+    pub originator: Option<String>,
+    pub user_agent: Option<String>,
+    pub client_id: Option<String>,
+    pub openai_beta: Option<String>,
+    pub extra_headers: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CodexManifestConfig {
+    pub fetch_url: String,
+    pub ttl_seconds: u64,
+    pub cache_dir: String,
+}
+
+impl Default for CodexManifestConfig {
+    fn default() -> Self {
+        Self {
+            fetch_url: "https://raw.githubusercontent.com/ste-bah/archon-cli/main/crates/archon-llm/resources/codex-compat.json".into(),
+            ttl_seconds: 21_600,
+            cache_dir: "~/.archon/cache/codex-compat".into(),
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

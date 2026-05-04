@@ -44,7 +44,7 @@ use crate::retry::{RetryPolicy, RetryProvider};
 use crate::secrets::ApiKey;
 
 use super::codex::client::CodexProvider;
-use super::codex::spoof_default::SpoofConfig;
+use super::codex::spoof::SpoofConfig;
 use super::descriptor::{AuthFlavor, CompatKind, ProviderDescriptor};
 use super::error::ProviderError;
 use super::local::LocalProvider;

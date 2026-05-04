@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "codex_cli_version": "0.34.1",
+  "openclaw_version": "2026.5.1-beta.2",
+  "spoof": {
+    "originator": "openclaw",
+    "user_agent": "openclaw/2026.5.1-beta.2",
+    "client_id": "app_EMoamEEZ73f0CkXaXp7hrann",
+    "openai_beta": "responses=experimental",
+    "extra_headers": {}
+  },
+  "compatible_through": "2026-09-30",
+  "minimum_archon_version": "0.1.38"
+}

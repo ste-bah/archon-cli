@@ -18,7 +18,7 @@ use crate::tokens_codex::{
 };
 use crate::types::Usage;
 
-use super::spoof_default::SpoofConfig;
+use super::spoof::SpoofConfig;
 use super::translator::{
     StreamAccumulator, join_system_prompt, messages_to_responses_input, tools_to_responses_tools,
 };

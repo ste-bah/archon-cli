@@ -71,6 +71,33 @@ provider = "anthropic"
 
 
 # ----------------------------------------------------------------------------
+# [providers.openai-codex] — Codex (ChatGPT subscription) provider
+# ----------------------------------------------------------------------------
+# Codex authentication uses ChatGPT subscription OAuth tokens against
+# https://chatgpt.com/backend-api/codex/responses. All spoof fields are
+# optional; missing fields fall through to fetched/bundled manifest values.
+# Legal guardrail: Archon rejects user agents or custom header values matching
+# ChatGPT-* / ChatGPT/ or OpenAI-* / OpenAI/ to avoid impersonating OpenAI's
+# own products.
+[providers.openai-codex]
+enabled = true
+
+[providers.openai-codex.spoof]
+# originator  = "openclaw"
+# user_agent  = "openclaw/2026.5.1-beta.2"
+# client_id   = "app_EMoamEEZ73f0CkXaXp7hrann"
+# openai_beta = "responses=experimental"
+
+[providers.openai-codex.spoof.extra_headers]
+# "x-codex-version" = "0.34.1"
+
+[providers.openai-codex.manifest]
+# fetch_url   = "https://raw.githubusercontent.com/ste-bah/archon-cli/main/crates/archon-llm/resources/codex-compat.json"
+# ttl_seconds = 21600
+# cache_dir   = "~/.archon/cache/codex-compat"
+
+
+# ----------------------------------------------------------------------------
 # [identity] — Request header / anti-distillation controls
 # ----------------------------------------------------------------------------
 [identity]
