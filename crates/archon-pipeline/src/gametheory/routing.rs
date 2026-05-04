@@ -715,7 +715,9 @@ pub fn load_spec(path: &Path) -> Result<GameTheorySpec, GameTheoryError> {
 ///
 /// Returns the first path that exists, or a `SpecNotFound` error listing all
 /// locations searched.
-pub fn resolve_spec_path(explicit_path: Option<&Path>) -> Result<std::path::PathBuf, GameTheoryError> {
+pub fn resolve_spec_path(
+    explicit_path: Option<&Path>,
+) -> Result<std::path::PathBuf, GameTheoryError> {
     let mut searched = Vec::new();
 
     // 1. Explicit CLI flag
@@ -932,21 +934,53 @@ mod tests {
         assert_eq!(decision.evaluated_conditions.len(), 8);
 
         // && test: both true → enabled
-        assert!(decision.enabled_specialists.contains(&"gt-and-test".to_string()));
+        assert!(
+            decision
+                .enabled_specialists
+                .contains(&"gt-and-test".to_string())
+        );
         // || test: payoff_sum is zero-sum → enabled
-        assert!(decision.enabled_specialists.contains(&"gt-or-test".to_string()));
+        assert!(
+            decision
+                .enabled_specialists
+                .contains(&"gt-or-test".to_string())
+        );
         // ! test: cooperation is non-cooperative, so !(cooperative) → true → enabled
-        assert!(decision.enabled_specialists.contains(&"gt-not-test".to_string()));
+        assert!(
+            decision
+                .enabled_specialists
+                .contains(&"gt-not-test".to_string())
+        );
         // != test: 2-player != n-player → true → enabled
-        assert!(decision.enabled_specialists.contains(&"gt-neq-test".to_string()));
+        assert!(
+            decision
+                .enabled_specialists
+                .contains(&"gt-neq-test".to_string())
+        );
         // < test: "2-player" < "n-player" lexicographically → true → enabled
-        assert!(decision.enabled_specialists.contains(&"gt-lt-test".to_string()));
+        assert!(
+            decision
+                .enabled_specialists
+                .contains(&"gt-lt-test".to_string())
+        );
         // >= test: "2-player" >= "2-player" → true → enabled
-        assert!(decision.enabled_specialists.contains(&"gt-gte-test".to_string()));
+        assert!(
+            decision
+                .enabled_specialists
+                .contains(&"gt-gte-test".to_string())
+        );
         // nash_count >= 0 → true → enabled
-        assert!(decision.enabled_specialists.contains(&"gt-nash-count-test".to_string()));
+        assert!(
+            decision
+                .enabled_specialists
+                .contains(&"gt-nash-count-test".to_string())
+        );
         // enabled_count >= 2 (2 mandatory agents already counted) → true → enabled
-        assert!(decision.enabled_specialists.contains(&"gt-enabled-count-test".to_string()));
+        assert!(
+            decision
+                .enabled_specialists
+                .contains(&"gt-enabled-count-test".to_string())
+        );
 
         // 2 mandatory + 8 conditional = 10 enabled
         assert_eq!(decision.enabled_specialists.len(), 10);
@@ -1029,7 +1063,10 @@ mod tests {
 
         let err = evaluate_routing(&spec, &fp, "run-bad", "2026-01-01T00:00:00Z").unwrap_err();
         match err {
-            GameTheoryError::ConditionError { expression, message: _ } => {
+            GameTheoryError::ConditionError {
+                expression,
+                message: _,
+            } => {
                 assert!(
                     expression.contains("fingerprint.cooperation"),
                     "error must include the offending expression"
@@ -1093,7 +1130,11 @@ mod tests {
         let spec_dir = temp.join(".archon").join("specs");
         std::fs::create_dir_all(&spec_dir).unwrap();
         let spec_file = spec_dir.join("gametheory.yaml");
-        std::fs::write(&spec_file, "version: \"1.0\"\nspec_id: test\ncost_cap_usd: 1.0\ntiers: []\n").unwrap();
+        std::fs::write(
+            &spec_file,
+            "version: \"1.0\"\nspec_id: test\ncost_cap_usd: 1.0\ntiers: []\n",
+        )
+        .unwrap();
 
         // Create nested dirs: temp/a/b/c/ (3 levels deep)
         let deep = temp.join("a").join("b").join("c");
@@ -1110,7 +1151,11 @@ mod tests {
         std::env::set_current_dir(&orig_cwd).unwrap();
         std::fs::remove_dir_all(&temp).unwrap();
 
-        assert!(result.is_ok(), "should find spec via upward walk: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "should find spec via upward walk: {:?}",
+            result.err()
+        );
         assert_eq!(result.unwrap(), spec_file);
     }
 }

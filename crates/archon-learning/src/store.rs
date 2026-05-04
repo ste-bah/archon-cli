@@ -18,14 +18,23 @@ pub fn insert_learning_event(db: &DbInstance, event: &LearningEvent) -> Result<(
     params.insert("eid".into(), DataValue::from(event.event_id.as_str()));
     params.insert("wid".into(), DataValue::from(event.workspace_id.as_str()));
     params.insert("et".into(), DataValue::from(event.event_type.as_str()));
-    params.insert("sid".into(), DataValue::from(event.source_artifact_id.as_str()));
+    params.insert(
+        "sid".into(),
+        DataValue::from(event.source_artifact_id.as_str()),
+    );
     params.insert(
         "oid".into(),
         DataValue::from(event.outcome_artifact_id.as_deref().unwrap_or("")),
     );
-    params.insert("sig".into(), DataValue::from(event.signal.to_string().as_str()));
+    params.insert(
+        "sig".into(),
+        DataValue::from(event.signal.to_string().as_str()),
+    );
     params.insert("cf".into(), DataValue::from(event.confidence as f64));
-    params.insert("prid".into(), DataValue::from(event.provenance_record_id.as_str()));
+    params.insert(
+        "prid".into(),
+        DataValue::from(event.provenance_record_id.as_str()),
+    );
     params.insert("ca".into(), DataValue::from(event.created_at.as_str()));
 
     db.run_script(
@@ -181,7 +190,11 @@ fn row_to_learning_event(row: &[DataValue]) -> LearningEvent {
         source_artifact_id: row[3].get_str().unwrap_or("").to_string(),
         outcome_artifact_id: {
             let s = row[4].get_str().unwrap_or("");
-            if s.is_empty() { None } else { Some(s.to_string()) }
+            if s.is_empty() {
+                None
+            } else {
+                Some(s.to_string())
+            }
         },
         signal: {
             let s = row[5].get_str().unwrap_or("{}");
@@ -198,17 +211,36 @@ fn row_to_learning_event(row: &[DataValue]) -> LearningEvent {
 pub fn insert_behaviour_proposal(db: &DbInstance, proposal: &BehaviourProposal) -> Result<()> {
     let mut params = BTreeMap::new();
     params.insert("pid".into(), DataValue::from(proposal.proposal_id.as_str()));
-    params.insert("wid".into(), DataValue::from(proposal.workspace_id.as_str()));
-    params.insert("mk".into(), DataValue::from(proposal.manifest_kind.as_str()));
-    params.insert("cv".into(), DataValue::from(proposal.current_version.as_str()));
-    params.insert("pv".into(), DataValue::from(proposal.proposed_version.as_str()));
+    params.insert(
+        "wid".into(),
+        DataValue::from(proposal.workspace_id.as_str()),
+    );
+    params.insert(
+        "mk".into(),
+        DataValue::from(proposal.manifest_kind.as_str()),
+    );
+    params.insert(
+        "cv".into(),
+        DataValue::from(proposal.current_version.as_str()),
+    );
+    params.insert(
+        "pv".into(),
+        DataValue::from(proposal.proposed_version.as_str()),
+    );
     params.insert("diff".into(), DataValue::from(proposal.diff.as_str()));
     params.insert(
         "evids".into(),
-        DataValue::from(serde_json::to_string(&proposal.evidence_ids).unwrap().as_str()),
+        DataValue::from(
+            serde_json::to_string(&proposal.evidence_ids)
+                .unwrap()
+                .as_str(),
+        ),
     );
     params.insert("rl".into(), DataValue::from(proposal.risk_level.as_str()));
-    params.insert("pd".into(), DataValue::from(proposal.policy_decision.as_str()));
+    params.insert(
+        "pd".into(),
+        DataValue::from(proposal.policy_decision.as_str()),
+    );
     params.insert("status".into(), DataValue::from(proposal.status.as_str()));
     params.insert("ca".into(), DataValue::from(proposal.created_at.as_str()));
 
@@ -283,11 +315,7 @@ pub fn list_behaviour_proposals(
         )
     };
     let result = result.map_err(|e| anyhow::anyhow!("list behaviour_proposals failed: {e}"))?;
-    Ok(result
-        .rows
-        .iter()
-        .map(|row| row_to_proposal(row))
-        .collect())
+    Ok(result.rows.iter().map(|row| row_to_proposal(row)).collect())
 }
 
 fn row_to_proposal(row: &[DataValue]) -> BehaviourProposal {
@@ -300,7 +328,8 @@ fn row_to_proposal(row: &[DataValue]) -> BehaviourProposal {
         proposed_version: row[4].get_str().unwrap_or("").to_string(),
         diff: row[5].get_str().unwrap_or("").to_string(),
         evidence_ids: serde_json::from_str(row[6].get_str().unwrap_or("[]")).unwrap_or_default(),
-        risk_level: RiskLevel::from_str(row[7].get_str().unwrap_or("Low")).unwrap_or(RiskLevel::Low),
+        risk_level: RiskLevel::from_str(row[7].get_str().unwrap_or("Low"))
+            .unwrap_or(RiskLevel::Low),
         policy_decision: PolicyDecision::from_str(row[8].get_str().unwrap_or("PendingApproval"))
             .unwrap_or(PolicyDecision::PendingApproval),
         status: ProposalStatus::from_str(row[9].get_str().unwrap_or("Pending"))
@@ -325,10 +354,7 @@ pub fn update_proposal_status(
 
 // ── BehaviourManifestVersion ───────────────────────────────────────────────────
 
-pub fn insert_manifest_version(
-    db: &DbInstance,
-    version: &BehaviourManifestVersion,
-) -> Result<()> {
+pub fn insert_manifest_version(db: &DbInstance, version: &BehaviourManifestVersion) -> Result<()> {
     let mut params = BTreeMap::new();
     params.insert("vid".into(), DataValue::from(version.version_id.as_str()));
     params.insert("mk".into(), DataValue::from(version.manifest_kind.as_str()));
@@ -337,10 +363,7 @@ pub fn insert_manifest_version(
         "content".into(),
         DataValue::from(version.content.to_string().as_str()),
     );
-    params.insert(
-        "diff".into(),
-        DataValue::from(version.diff.as_str()),
-    );
+    params.insert("diff".into(), DataValue::from(version.diff.as_str()));
     params.insert(
         "pvid".into(),
         DataValue::from(version.parent_version_id.as_deref().unwrap_or("")),
@@ -349,10 +372,7 @@ pub fn insert_manifest_version(
         "cbid".into(),
         DataValue::from(version.created_by_proposal_id.as_deref().unwrap_or("")),
     );
-    params.insert(
-        "rt".into(),
-        DataValue::from(version.is_rollback_target),
-    );
+    params.insert("rt".into(), DataValue::from(version.is_rollback_target));
     params.insert("ca".into(), DataValue::from(version.created_at.as_str()));
 
     db.run_script(
@@ -469,11 +489,19 @@ fn row_to_manifest_version(row: &[DataValue]) -> BehaviourManifestVersion {
         diff: row[4].get_str().unwrap_or("").to_string(),
         parent_version_id: {
             let s = row[5].get_str().unwrap_or("");
-            if s.is_empty() { None } else { Some(s.to_string()) }
+            if s.is_empty() {
+                None
+            } else {
+                Some(s.to_string())
+            }
         },
         created_by_proposal_id: {
             let s = row[6].get_str().unwrap_or("");
-            if s.is_empty() { None } else { Some(s.to_string()) }
+            if s.is_empty() {
+                None
+            } else {
+                Some(s.to_string())
+            }
         },
         is_rollback_target: row[7].get_bool().unwrap_or(false),
         created_at: row[8].get_str().unwrap_or("").to_string(),
@@ -498,7 +526,10 @@ pub fn insert_policy_decision(
     params.insert("rn".into(), DataValue::from(rule_name));
     params.insert("outcome".into(), DataValue::from(outcome.as_str()));
     params.insert("reason".into(), DataValue::from(reason));
-    params.insert("ei".into(), DataValue::from(evaluated_inputs.to_string().as_str()));
+    params.insert(
+        "ei".into(),
+        DataValue::from(evaluated_inputs.to_string().as_str()),
+    );
     params.insert("ca".into(), DataValue::from(created_at));
 
     db.run_script(
@@ -553,7 +584,10 @@ pub fn insert_approval(db: &DbInstance, approval: &BehaviourApproval) -> Result<
     let mut params = BTreeMap::new();
     params.insert("aid".into(), DataValue::from(approval.approval_id.as_str()));
     params.insert("pid".into(), DataValue::from(approval.proposal_id.as_str()));
-    params.insert("approver".into(), DataValue::from(approval.approver.as_str()));
+    params.insert(
+        "approver".into(),
+        DataValue::from(approval.approver.as_str()),
+    );
     params.insert("approved".into(), DataValue::from(approval.approved));
     params.insert("comment".into(), DataValue::from(approval.comment.as_str()));
     params.insert("ca".into(), DataValue::from(approval.created_at.as_str()));
@@ -610,7 +644,10 @@ mod tests {
         assert_eq!(retrieved.event_type, LearningEventType::GatePassed);
         assert_eq!(retrieved.source_artifact_id, "gate-sherlock");
         assert_eq!(retrieved.outcome_artifact_id, Some("out-1".into()));
-        assert_eq!(retrieved.signal, serde_json::json!({"passed": true, "score": 0.95}));
+        assert_eq!(
+            retrieved.signal,
+            serde_json::json!({"passed": true, "score": 0.95})
+        );
         assert!((retrieved.confidence - 0.92).abs() < 0.001);
         assert_eq!(retrieved.provenance_record_id, "prov-1");
     }

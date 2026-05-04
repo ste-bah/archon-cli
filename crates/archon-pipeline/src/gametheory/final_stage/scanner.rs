@@ -53,8 +53,16 @@ mod tests {
         let scanned = scan_outputs(&outputs, &quality);
 
         assert_eq!(scanned.len(), 2);
-        assert!(scanned.iter().any(|s| s.agent_key == "gt-nash" && s.content == "Equilibrium found."));
-        assert!(scanned.iter().any(|s| s.agent_key == "gt-payoff" && s.content == "Payoff matrix built."));
+        assert!(
+            scanned
+                .iter()
+                .any(|s| s.agent_key == "gt-nash" && s.content == "Equilibrium found.")
+        );
+        assert!(
+            scanned
+                .iter()
+                .any(|s| s.agent_key == "gt-payoff" && s.content == "Payoff matrix built.")
+        );
     }
 
     #[test]

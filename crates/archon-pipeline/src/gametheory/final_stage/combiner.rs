@@ -15,19 +15,30 @@ pub fn combine_sections(sections: &[SectionContent]) -> String {
     // Table of Contents
     report.push_str("## Contents\n\n");
     for sec in sections {
-        report.push_str(&format!("- [{}](#{})\n", sec.section.title(), anchor(sec.section.title())));
+        report.push_str(&format!(
+            "- [{}](#{})\n",
+            sec.section.title(),
+            anchor(sec.section.title())
+        ));
     }
     report.push('\n');
 
     report.push_str("## Fingerprint Summary\n\n");
-    report.push_str("See the `9-Axis Fingerprint` section for the persisted Tier 1 strategic fingerprint.\n\n");
+    report.push_str(
+        "See the `9-Axis Fingerprint` section for the persisted Tier 1 strategic fingerprint.\n\n",
+    );
 
     // Sections in order
     for sec in sections {
         report.push_str(&format!("{}\n", sec.content));
 
         // Provenance footnote
-        let contributors = sec.contributors.iter().map(|c| format!("`{}`", c)).collect::<Vec<_>>().join(", ");
+        let contributors = sec
+            .contributors
+            .iter()
+            .map(|c| format!("`{}`", c))
+            .collect::<Vec<_>>()
+            .join(", ");
         report.push_str(&format!(
             "\n*Provenance: {} — contributed by {contributors}.*\n\n",
             sec.section.title(),
@@ -45,9 +56,9 @@ fn anchor(title: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::super::sections::SectionType;
     use super::super::writer::SectionContent;
+    use super::*;
 
     #[test]
     fn test_combine_sections_includes_provenance() {
@@ -110,7 +121,9 @@ mod tests {
         let mut last_pos = 0usize;
         for section in SectionType::all_ordered() {
             let heading = format!("## {}", section.title());
-            let pos = report.find(&heading).unwrap_or_else(|| panic!("missing {heading}"));
+            let pos = report
+                .find(&heading)
+                .unwrap_or_else(|| panic!("missing {heading}"));
             assert!(pos >= last_pos, "{heading} emitted out of order");
             last_pos = pos;
         }

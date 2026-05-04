@@ -46,10 +46,8 @@ fn check_source_contradictions(events: &[LearningEvent]) -> Vec<BehaviourProposa
 
     for (source_id, source_events) in &source_counts {
         if source_events.len() >= 3 {
-            let evidence_ids: Vec<String> = source_events
-                .iter()
-                .map(|e| e.event_id.clone())
-                .collect();
+            let evidence_ids: Vec<String> =
+                source_events.iter().map(|e| e.event_id.clone()).collect();
 
             let new_weight = 0.85_f32.powi(source_events.len() as i32).max(0.1);
 
@@ -61,7 +59,10 @@ fn check_source_contradictions(events: &[LearningEvent]) -> Vec<BehaviourProposa
                 workspace_id: source_events[0].workspace_id.clone(),
                 manifest_kind: BehaviourManifestKind::SourceQualityProfile,
                 current_version: String::new(), // filled by apply step
-                proposed_version: format!("v-{}", uuid::Uuid::new_v4().to_string().replace('-', "")[..8].to_string()),
+                proposed_version: format!(
+                    "v-{}",
+                    uuid::Uuid::new_v4().to_string().replace('-', "")[..8].to_string()
+                ),
                 diff: format!(
                     "--- SourceQualityProfile: {source}\n\
                      +++ SourceQualityProfile: {source}\n\
@@ -101,10 +102,8 @@ fn check_gate_failures(events: &[LearningEvent]) -> Vec<BehaviourProposal> {
 
     for (gate_name, gate_events) in &gate_counts {
         if gate_events.len() >= 3 {
-            let evidence_ids: Vec<String> = gate_events
-                .iter()
-                .map(|e| e.event_id.clone())
-                .collect();
+            let evidence_ids: Vec<String> =
+                gate_events.iter().map(|e| e.event_id.clone()).collect();
 
             let proposal = BehaviourProposal {
                 proposal_id: format!(
@@ -114,7 +113,10 @@ fn check_gate_failures(events: &[LearningEvent]) -> Vec<BehaviourProposal> {
                 workspace_id: gate_events[0].workspace_id.clone(),
                 manifest_kind: BehaviourManifestKind::PipelineGates,
                 current_version: String::new(),
-                proposed_version: format!("v-{}", uuid::Uuid::new_v4().to_string().replace('-', "")[..8].to_string()),
+                proposed_version: format!(
+                    "v-{}",
+                    uuid::Uuid::new_v4().to_string().replace('-', "")[..8].to_string()
+                ),
                 diff: format!(
                     "--- PipelineGates: {gate}\n\
                      +++ PipelineGates: {gate}\n\
@@ -169,7 +171,10 @@ mod tests {
         ];
         let proposals = generate_proposals(&events);
         assert_eq!(proposals.len(), 1);
-        assert_eq!(proposals[0].manifest_kind, BehaviourManifestKind::SourceQualityProfile);
+        assert_eq!(
+            proposals[0].manifest_kind,
+            BehaviourManifestKind::SourceQualityProfile
+        );
         assert_eq!(proposals[0].evidence_ids.len(), 3);
     }
 
@@ -207,6 +212,9 @@ mod tests {
         ];
         let proposals = generate_proposals(&events);
         assert_eq!(proposals.len(), 1);
-        assert_eq!(proposals[0].manifest_kind, BehaviourManifestKind::PipelineGates);
+        assert_eq!(
+            proposals[0].manifest_kind,
+            BehaviourManifestKind::PipelineGates
+        );
     }
 }

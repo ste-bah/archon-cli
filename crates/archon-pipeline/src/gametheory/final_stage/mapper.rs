@@ -1,7 +1,7 @@
 //! Section mapper — assigns specialist outputs to report sections using the
 //! deterministic mapping from [`super::super::sections::sections_for_specialist`].
 
-use super::super::sections::{sections_for_specialist, SectionType};
+use super::super::sections::{SectionType, sections_for_specialist};
 use super::scanner::SpecialistOutput;
 
 /// A specialist output assigned to a specific section.
@@ -38,8 +38,8 @@ pub fn map_to_sections(outputs: &[SpecialistOutput]) -> Vec<SectionAssignment> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::scanner::SpecialistOutput;
+    use super::*;
 
     #[test]
     fn test_map_known_agent_to_correct_sections() {
@@ -54,7 +54,11 @@ mod tests {
         // nash-equilibrium-finder → EquilibriumAnalysis
         let sections: Vec<SectionType> = assignments.iter().map(|a| a.section).collect();
         assert!(sections.contains(&SectionType::EquilibriumAnalysis));
-        assert_eq!(assignments.len(), 1, "one canonical section for nash-equilibrium-finder");
+        assert_eq!(
+            assignments.len(),
+            1,
+            "one canonical section for nash-equilibrium-finder"
+        );
         for a in &assignments {
             assert_eq!(a.agent_key, "nash-equilibrium-finder");
         }
@@ -69,6 +73,9 @@ mod tests {
         }];
 
         let assignments = map_to_sections(&outputs);
-        assert!(assignments.is_empty(), "unknown agent has no section mapping");
+        assert!(
+            assignments.is_empty(),
+            "unknown agent has no section mapping"
+        );
     }
 }

@@ -81,14 +81,8 @@ pub fn format_inspect_output(output: &DocInspectOutput) -> String {
     lines.push(format!("  Path:         {}", output.document.source_path));
     lines.push(format!("  Media Type:   {}", output.document.media_type));
     lines.push(format!("  Content Hash: {}", output.document.content_hash));
-    lines.push(format!(
-        "  Status:       {:?}",
-        output.document.status
-    ));
-    lines.push(format!(
-        "  Discovered:   {}",
-        output.document.discovered_at
-    ));
+    lines.push(format!("  Status:       {:?}", output.document.status));
+    lines.push(format!("  Discovered:   {}", output.document.discovered_at));
 
     if !output.pages.is_empty() {
         lines.push(String::new());
@@ -155,10 +149,7 @@ pub fn format_list_output(documents: &[SourceDocument]) -> String {
         return "No documents ingested.".to_string();
     }
 
-    let mut lines = vec![format!(
-        "{} document(s):",
-        documents.len()
-    )];
+    let mut lines = vec![format!("{} document(s):", documents.len())];
 
     for doc in documents {
         lines.push(format!(

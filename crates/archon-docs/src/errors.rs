@@ -58,5 +58,4 @@ pub const COZO_RELATION_NOT_FOUND: &str = "Cannot find requested stored relation
 
 /// Phrases Cozo 0.7.x uses for "relation already exists" errors.
 /// Used by `run_create` to suppress idempotent-create errors.
-pub const COZO_RELATION_ALREADY_EXISTS: &[&str] =
-    &["conflicts with an existing", "already exists"];
+pub const COZO_RELATION_ALREADY_EXISTS: &[&str] = &["conflicts with an existing", "already exists"];

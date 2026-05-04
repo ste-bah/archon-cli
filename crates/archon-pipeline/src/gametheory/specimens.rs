@@ -39,10 +39,7 @@ pub struct SpecimenLoadResult {
 
 /// Ensure the specimen table is populated, lazily loading from the canonical
 /// markdown source only when the table is empty or `force` is true.
-pub fn ensure_specimen_library_loaded(
-    db: &DbInstance,
-    force: bool,
-) -> Result<SpecimenLoadResult> {
+pub fn ensure_specimen_library_loaded(db: &DbInstance, force: bool) -> Result<SpecimenLoadResult> {
     ensure_gametheory_schema(db)?;
     let existing = count_specimens(db)?;
     if existing > 0 && !force {
@@ -216,17 +213,32 @@ fn stable_specimen_id(situation_type: &str) -> String {
 fn insert_specimen(db: &DbInstance, record: &SpecimenRecord) -> Result<()> {
     let mut params = BTreeMap::new();
     params.insert("id".into(), DataValue::from(record.specimen_id.as_str()));
-    params.insert("sit".into(), DataValue::from(record.situation_type.as_str()));
+    params.insert(
+        "sit".into(),
+        DataValue::from(record.situation_type.as_str()),
+    );
     params.insert("coop".into(), DataValue::from(record.cooperation.as_str()));
     params.insert("pay".into(), DataValue::from(record.payoff_sum.as_str()));
     params.insert("sym".into(), DataValue::from(record.symmetry.as_str()));
     params.insert("timing".into(), DataValue::from(record.timing.as_str()));
-    params.insert("perfect".into(), DataValue::from(record.perfect_info.as_str()));
-    params.insert("complete".into(), DataValue::from(record.complete_info.as_str()));
+    params.insert(
+        "perfect".into(),
+        DataValue::from(record.perfect_info.as_str()),
+    );
+    params.insert(
+        "complete".into(),
+        DataValue::from(record.complete_info.as_str()),
+    );
     params.insert("card".into(), DataValue::from(record.cardinality.as_str()));
-    params.insert("space".into(), DataValue::from(record.strategy_space.as_str()));
+    params.insert(
+        "space".into(),
+        DataValue::from(record.strategy_space.as_str()),
+    );
     params.insert("horizon".into(), DataValue::from(record.horizon.as_str()));
-    params.insert("family".into(), DataValue::from(record.primary_family.as_str()));
+    params.insert(
+        "family".into(),
+        DataValue::from(record.primary_family.as_str()),
+    );
     params.insert("notes".into(), DataValue::from(record.notes.as_str()));
 
     db.run_script(

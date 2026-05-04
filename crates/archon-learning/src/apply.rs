@@ -31,8 +31,8 @@ pub fn apply_decision(
     approver: Option<&str>,
 ) -> Result<ApplyResult, LearningError> {
     // Concurrency check: re-read proposal, must still be Pending
-    let proposal = store::get_behaviour_proposal(db, proposal_id)?
-        .ok_or(LearningError::ProposalNotFound {
+    let proposal =
+        store::get_behaviour_proposal(db, proposal_id)?.ok_or(LearningError::ProposalNotFound {
             proposal_id: proposal_id.to_string(),
         })?;
 
@@ -321,14 +321,8 @@ mod tests {
         let db = test_db();
         make_pending_proposal(&db);
 
-        let result = apply_decision(
-            &db,
-            "test-prop-apply",
-            PolicyDecision::Denied,
-            None,
-            None,
-        )
-        .unwrap();
+        let result =
+            apply_decision(&db, "test-prop-apply", PolicyDecision::Denied, None, None).unwrap();
 
         assert_eq!(result.proposal.status, ProposalStatus::Denied);
     }
@@ -474,17 +468,18 @@ mod tests {
 
         let all_events = store::list_all_learning_events(&db).unwrap();
         let proposals = crate::proposal::generate_proposals(&all_events);
-        assert!(!proposals.is_empty(), "3 contradictions should trigger a proposal");
+        assert!(
+            !proposals.is_empty(),
+            "3 contradictions should trigger a proposal"
+        );
 
         let proposal = &proposals[0];
         store::insert_behaviour_proposal(&db, proposal).unwrap();
 
         // 3. Run policy evaluation
         let (decision, _outcomes) = crate::policy::evaluate_proposal(
-            &db,
-            proposal,
-            true,  // allow auto-apply
-            0,     // no recent incidents
+            &db, proposal, true, // allow auto-apply
+            0,    // no recent incidents
         )
         .unwrap();
         assert_eq!(decision, PolicyDecision::AutoApplied);
@@ -500,7 +495,12 @@ mod tests {
         .unwrap();
         assert_eq!(apply_result.proposal.status, ProposalStatus::Applied);
         assert!(apply_result.new_version.is_some());
-        let version_id = apply_result.new_version.as_ref().unwrap().version_id.clone();
+        let version_id = apply_result
+            .new_version
+            .as_ref()
+            .unwrap()
+            .version_id
+            .clone();
 
         // 5. Rollback the applied version
         let rollback_result = crate::rollback::rollback_to_version(
@@ -516,11 +516,13 @@ mod tests {
         let all_events = store::list_all_learning_events(&db).unwrap();
         let manifest_events: Vec<_> = all_events
             .iter()
-            .filter(|e| matches!(
-                e.event_type,
-                crate::models::LearningEventType::ManifestApplied
-                    | crate::models::LearningEventType::ManifestRolledBack
-            ))
+            .filter(|e| {
+                matches!(
+                    e.event_type,
+                    crate::models::LearningEventType::ManifestApplied
+                        | crate::models::LearningEventType::ManifestRolledBack
+                )
+            })
             .collect();
         assert!(
             manifest_events.len() >= 2,

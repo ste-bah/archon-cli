@@ -55,8 +55,11 @@ pub fn record_event(
         confidence,
         provenance_record_id,
     );
-    store::insert_learning_event(db, &event)
-        .map_err(|e| crate::errors::LearningError::Storage { message: e.to_string() })?;
+    store::insert_learning_event(db, &event).map_err(|e| {
+        crate::errors::LearningError::Storage {
+            message: e.to_string(),
+        }
+    })?;
     Ok(event)
 }
 
@@ -160,11 +163,7 @@ pub fn user_accepted(workspace_id: &str, artifact_id: &str) -> LearningEvent {
     )
 }
 
-pub fn user_corrected(
-    workspace_id: &str,
-    artifact_id: &str,
-    correction: &str,
-) -> LearningEvent {
+pub fn user_corrected(workspace_id: &str, artifact_id: &str, correction: &str) -> LearningEvent {
     new_event(
         workspace_id,
         LearningEventType::UserCorrected,

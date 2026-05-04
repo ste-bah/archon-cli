@@ -33,9 +33,7 @@ fn run_create(db: &DbInstance, script: &str) -> Result<()> {
             {
                 Ok(())
             } else {
-                Err(anyhow::anyhow!(
-                    "learning schema creation failed: {msg}"
-                ))
+                Err(anyhow::anyhow!("learning schema creation failed: {msg}"))
             }
         }
     }

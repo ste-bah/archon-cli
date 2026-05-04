@@ -18,9 +18,15 @@ fn seed_sample(
     let mut params = BTreeMap::new();
     params.insert("id".into(), DataValue::from(id));
     params.insert("wid".into(), DataValue::from(workspace));
-    params.insert("aid".into(), DataValue::from(format!("artifact-{id}").as_str()));
+    params.insert(
+        "aid".into(),
+        DataValue::from(format!("artifact-{id}").as_str()),
+    );
     params.insert("label".into(), DataValue::from(label));
-    params.insert("eid".into(), DataValue::from(format!("event-{id}").as_str()));
+    params.insert(
+        "eid".into(),
+        DataValue::from(format!("event-{id}").as_str()),
+    );
     params.insert("et".into(), DataValue::from(event_type));
     params.insert("txt".into(), DataValue::from(text));
     params.insert("meta".into(), DataValue::from("{}"));
@@ -38,8 +44,22 @@ fn seed_sample(
 #[test]
 fn build_creates_centroid_from_positive_samples() {
     let db = db();
-    seed_sample(&db, "p1", "workspace", "positive", "UserAccepted", "secure tested patch");
-    seed_sample(&db, "p2", "workspace", "positive", "CompletionClaimVerified", "secure permission boundary");
+    seed_sample(
+        &db,
+        "p1",
+        "workspace",
+        "positive",
+        "UserAccepted",
+        "secure tested patch",
+    );
+    seed_sample(
+        &db,
+        "p2",
+        "workspace",
+        "positive",
+        "CompletionClaimVerified",
+        "secure permission boundary",
+    );
     let report = archon_constellation::build_constellation(&db, "project").unwrap();
     assert_eq!(report.sample_count, 2);
     assert_eq!(report.vector_rows, 1);
@@ -49,8 +69,22 @@ fn build_creates_centroid_from_positive_samples() {
 #[test]
 fn build_ignores_negative_samples() {
     let db = db();
-    seed_sample(&db, "p1", "workspace", "positive", "UserAccepted", "stable retry policy");
-    seed_sample(&db, "n1", "workspace", "negative", "UserCorrected", "broken unsafe shortcut");
+    seed_sample(
+        &db,
+        "p1",
+        "workspace",
+        "positive",
+        "UserAccepted",
+        "stable retry policy",
+    );
+    seed_sample(
+        &db,
+        "n1",
+        "workspace",
+        "negative",
+        "UserCorrected",
+        "broken unsafe shortcut",
+    );
     let report = archon_constellation::build_constellation(&db, "project").unwrap();
     let centroids = archon_constellation::list_centroids(&db).unwrap();
     assert_eq!(report.sample_count, 1);
@@ -68,25 +102,50 @@ fn empty_store_produces_no_centroid() {
 #[test]
 fn score_returns_high_similarity_for_matching_text() {
     let db = db();
-    seed_sample(&db, "p1", "workspace", "positive", "UserAccepted", "permission boundary regression tests");
+    seed_sample(
+        &db,
+        "p1",
+        "workspace",
+        "positive",
+        "UserAccepted",
+        "permission boundary regression tests",
+    );
     archon_constellation::build_constellation(&db, "project").unwrap();
-    let score = archon_constellation::score_text(&db, "project", "permission boundary regression tests").unwrap();
+    let score =
+        archon_constellation::score_text(&db, "project", "permission boundary regression tests")
+            .unwrap();
     assert!(score.similarity > 0.7);
 }
 
 #[test]
 fn drift_flags_far_text_below_threshold() {
     let db = db();
-    seed_sample(&db, "p1", "workspace", "positive", "UserAccepted", "permission boundary regression tests");
+    seed_sample(
+        &db,
+        "p1",
+        "workspace",
+        "positive",
+        "UserAccepted",
+        "permission boundary regression tests",
+    );
     archon_constellation::build_constellation(&db, "project").unwrap();
-    let report = archon_constellation::detect_drift(&db, "project", "banana invoice watercolor", 0.8).unwrap();
+    let report =
+        archon_constellation::detect_drift(&db, "project", "banana invoice watercolor", 0.8)
+            .unwrap();
     assert!(report.drifted);
 }
 
 #[test]
 fn list_centroids_reads_persisted_rows() {
     let db = db();
-    seed_sample(&db, "p1", "gametheory-runs", "positive", "GameTheoryFinalReport", "auction incentive mechanism");
+    seed_sample(
+        &db,
+        "p1",
+        "gametheory-runs",
+        "positive",
+        "GameTheoryFinalReport",
+        "auction incentive mechanism",
+    );
     archon_constellation::build_constellation(&db, "strategic-workflow").unwrap();
     let centroids = archon_constellation::list_centroids(&db).unwrap();
     assert_eq!(centroids.len(), 1);
@@ -96,7 +155,14 @@ fn list_centroids_reads_persisted_rows() {
 #[test]
 fn build_versions_repeat_centroids() {
     let db = db();
-    seed_sample(&db, "p1", "workspace", "positive", "UserAccepted", "secure tested output");
+    seed_sample(
+        &db,
+        "p1",
+        "workspace",
+        "positive",
+        "UserAccepted",
+        "secure tested output",
+    );
     let first = archon_constellation::build_constellation(&db, "project").unwrap();
     let second = archon_constellation::build_constellation(&db, "project").unwrap();
     assert_eq!(first.version, Some(1));
@@ -114,9 +180,20 @@ fn missing_centroid_is_reported_for_score() {
 #[test]
 fn typo_target_does_not_build_broad_centroid() {
     let db = db();
-    seed_sample(&db, "p1", "workspace", "positive", "UserAccepted", "secure tested output");
+    seed_sample(
+        &db,
+        "p1",
+        "workspace",
+        "positive",
+        "UserAccepted",
+        "secure tested output",
+    );
     let err = archon_constellation::build_constellation(&db, "projct").unwrap_err();
     assert!(err.to_string().contains("invalid constellation target"));
     archon_constellation::ensure_schema(&db).unwrap();
-    assert!(archon_constellation::list_centroids(&db).unwrap().is_empty());
+    assert!(
+        archon_constellation::list_centroids(&db)
+            .unwrap()
+            .is_empty()
+    );
 }

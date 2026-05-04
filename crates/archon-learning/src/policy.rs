@@ -68,10 +68,7 @@ pub fn evaluate_proposal(
     }
 
     // Rule 2: Low risk + low incidents + auto-apply allowed → AutoApplied
-    if !proposal.risk_level.is_high_risk()
-        && allow_auto_apply
-        && recent_incident_count < 5
-    {
+    if !proposal.risk_level.is_high_risk() && allow_auto_apply && recent_incident_count < 5 {
         let outcome = record_rule(
             db,
             proposal,
@@ -157,7 +154,9 @@ fn record_rule(
         evaluated_inputs,
         &created_at,
     )
-    .map_err(|e| crate::errors::LearningError::Storage { message: e.to_string() })?;
+    .map_err(|e| crate::errors::LearningError::Storage {
+        message: e.to_string(),
+    })?;
 
     Ok(PolicyOutcome {
         rule_name: rule_name.to_string(),
@@ -197,34 +196,33 @@ mod tests {
     #[test]
     fn test_policy_override_always_pending_approval() {
         let db = test_db();
-        let proposal = make_proposal(
-            BehaviourManifestKind::PolicyOverride,
-            RiskLevel::Critical,
-        );
+        let proposal = make_proposal(BehaviourManifestKind::PolicyOverride, RiskLevel::Critical);
         let (decision, outcomes) = evaluate_proposal(&db, &proposal, true, 0).unwrap();
         assert_eq!(decision, PolicyDecision::PendingApproval);
-        assert!(outcomes.iter().any(|o| o.rule_name == "policy_override_critical"));
+        assert!(
+            outcomes
+                .iter()
+                .any(|o| o.rule_name == "policy_override_critical")
+        );
     }
 
     #[test]
     fn test_high_risk_requires_approval() {
         let db = test_db();
-        let proposal = make_proposal(
-            BehaviourManifestKind::PromptProfile,
-            RiskLevel::High,
-        );
+        let proposal = make_proposal(BehaviourManifestKind::PromptProfile, RiskLevel::High);
         let (decision, outcomes) = evaluate_proposal(&db, &proposal, true, 0).unwrap();
         assert_eq!(decision, PolicyDecision::PendingApproval);
-        assert!(outcomes.iter().any(|o| o.rule_name == "high_risk_requires_approval"));
+        assert!(
+            outcomes
+                .iter()
+                .any(|o| o.rule_name == "high_risk_requires_approval")
+        );
     }
 
     #[test]
     fn test_low_risk_auto_applies() {
         let db = test_db();
-        let proposal = make_proposal(
-            BehaviourManifestKind::RetrievalProfile,
-            RiskLevel::Low,
-        );
+        let proposal = make_proposal(BehaviourManifestKind::RetrievalProfile, RiskLevel::Low);
         let (decision, _outcomes) = evaluate_proposal(&db, &proposal, true, 0).unwrap();
         assert_eq!(decision, PolicyDecision::AutoApplied);
     }
@@ -232,10 +230,7 @@ mod tests {
     #[test]
     fn test_low_risk_high_incidents_requires_approval() {
         let db = test_db();
-        let proposal = make_proposal(
-            BehaviourManifestKind::RetrievalProfile,
-            RiskLevel::Low,
-        );
+        let proposal = make_proposal(BehaviourManifestKind::RetrievalProfile, RiskLevel::Low);
         let (decision, _outcomes) = evaluate_proposal(&db, &proposal, true, 10).unwrap();
         assert_eq!(decision, PolicyDecision::PendingApproval);
     }
@@ -243,10 +238,7 @@ mod tests {
     #[test]
     fn test_low_risk_auto_apply_disabled_requires_approval() {
         let db = test_db();
-        let proposal = make_proposal(
-            BehaviourManifestKind::RetrievalProfile,
-            RiskLevel::Low,
-        );
+        let proposal = make_proposal(BehaviourManifestKind::RetrievalProfile, RiskLevel::Low);
         let (decision, _outcomes) = evaluate_proposal(&db, &proposal, false, 0).unwrap();
         assert_eq!(decision, PolicyDecision::PendingApproval);
     }
@@ -254,10 +246,7 @@ mod tests {
     #[test]
     fn test_policy_explainability_records_outcomes() {
         let db = test_db();
-        let proposal = make_proposal(
-            BehaviourManifestKind::RetrievalProfile,
-            RiskLevel::Low,
-        );
+        let proposal = make_proposal(BehaviourManifestKind::RetrievalProfile, RiskLevel::Low);
         let (_decision, outcomes) = evaluate_proposal(&db, &proposal, true, 0).unwrap();
         assert!(!outcomes.is_empty());
         assert!(!outcomes[0].reason.is_empty());
@@ -271,10 +260,7 @@ mod tests {
     #[test]
     fn test_loaded_policy_controls_auto_apply_gate() {
         let db = test_db();
-        let proposal = make_proposal(
-            BehaviourManifestKind::RetrievalProfile,
-            RiskLevel::Low,
-        );
+        let proposal = make_proposal(BehaviourManifestKind::RetrievalProfile, RiskLevel::Low);
         let denied = archon_policy::EffectivePolicy::default();
         let (decision, _) = evaluate_proposal_with_policy(&db, &proposal, &denied, 0).unwrap();
         assert_eq!(decision, PolicyDecision::PendingApproval);

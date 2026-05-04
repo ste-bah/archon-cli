@@ -47,5 +47,4 @@ impl From<anyhow::Error> for LearningError {
 pub const COZO_RELATION_NOT_FOUND: &str = "Cannot find requested stored relation";
 
 /// Phrases Cozo uses for "relation already exists" errors.
-pub const COZO_RELATION_ALREADY_EXISTS: &[&str] =
-    &["conflicts with an existing", "already exists"];
+pub const COZO_RELATION_ALREADY_EXISTS: &[&str] = &["conflicts with an existing", "already exists"];

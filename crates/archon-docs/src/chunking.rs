@@ -18,10 +18,7 @@ pub struct PageChunk {
 ///
 /// Uses blank-line paragraph splitting with minimum chunk size ~200 chars.
 /// Page offsets determine which page(s) each chunk spans.
-pub fn chunk_with_page_anchors(
-    text: &str,
-    page_offsets: &[PageOffset],
-) -> Vec<PageChunk> {
+pub fn chunk_with_page_anchors(text: &str, page_offsets: &[PageOffset]) -> Vec<PageChunk> {
     // Collect paragraphs with their actual byte offsets in the original text.
     // Uses a running cursor rather than `text.find(para)` so repeated
     // paragraph text (headers, "Yes", short labels) resolves to the
@@ -209,10 +206,7 @@ mod tests {
         // Content should have both Headers (joined by \n\n)
         assert!(chunks[0].content.contains("Header"));
         // Two occurrences
-        assert_eq!(
-            chunks[0].content.matches("Header").count(),
-            2
-        );
+        assert_eq!(chunks[0].content.matches("Header").count(), 2);
     }
 
     #[test]
@@ -241,13 +235,21 @@ mod tests {
 
         let chunks = chunk_with_page_anchors(&text, &offsets);
         // Should produce at least 2 chunks (one per page)
-        assert!(chunks.len() >= 2, "expected ≥2 chunks, got {}", chunks.len());
+        assert!(
+            chunks.len() >= 2,
+            "expected ≥2 chunks, got {}",
+            chunks.len()
+        );
 
         // Find the chunk containing the second "Header" — it must be on page 2
         let second_header_chunk = chunks
             .iter()
             .find(|c| c.content.contains("Header") && c.page_start == 2)
-            .or_else(|| chunks.iter().find(|c| c.content.contains("Header") && c.page_end == 2));
+            .or_else(|| {
+                chunks
+                    .iter()
+                    .find(|c| c.content.contains("Header") && c.page_end == 2)
+            });
         assert!(
             second_header_chunk.is_some(),
             "second Header must be in a chunk assigned to page 2"

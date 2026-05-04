@@ -9,7 +9,9 @@ use std::collections::BTreeMap;
 use super::registry::GAMETHEORY_AGENTS;
 
 /// The standard sections in a strategic game-theory report.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 pub enum SectionType {
     ExecutiveSummary,
     SituationAndAssumptions,
@@ -147,7 +149,11 @@ mod tests {
     #[test]
     fn test_section_ordering() {
         let ordered = SectionType::all_ordered();
-        assert_eq!(ordered[0], SectionType::ExecutiveSummary, "exec summary first");
+        assert_eq!(
+            ordered[0],
+            SectionType::ExecutiveSummary,
+            "exec summary first"
+        );
         assert_eq!(
             ordered.last(),
             Some(&SectionType::ProvenanceFooter),
@@ -185,7 +191,11 @@ mod tests {
         let map = specialist_section_map();
         for agent in GAMETHEORY_AGENTS {
             let sections = map.get(agent.key).expect("agent must be in section map");
-            assert!(!sections.is_empty(), "{} must map to a report section", agent.key);
+            assert!(
+                !sections.is_empty(),
+                "{} must map to a report section",
+                agent.key
+            );
         }
         assert_eq!(map.len(), GAMETHEORY_AGENTS.len());
     }

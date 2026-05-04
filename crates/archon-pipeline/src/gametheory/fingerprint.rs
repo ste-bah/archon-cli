@@ -17,7 +17,11 @@ pub struct AxisVerdict {
 }
 
 impl AxisVerdict {
-    pub fn new(value: impl Into<String>, confidence: impl Into<String>, rationale: impl Into<String>) -> Self {
+    pub fn new(
+        value: impl Into<String>,
+        confidence: impl Into<String>,
+        rationale: impl Into<String>,
+    ) -> Self {
         Self {
             value: value.into(),
             confidence: confidence.into(),

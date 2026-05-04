@@ -333,7 +333,10 @@ impl AnthropicClient {
         // prefix) so the request is recognised as Claude Code traffic. Idempotent:
         // skip prepending if the caller already provided the identity prefix.
         let mut system_blocks: Vec<serde_json::Value> = Vec::new();
-        if matches!(self.identity.mode, crate::identity::IdentityMode::Spoof { .. }) {
+        if matches!(
+            self.identity.mode,
+            crate::identity::IdentityMode::Spoof { .. }
+        ) {
             let already_has_identity = request.system.iter().any(|b| {
                 b.get("text")
                     .and_then(|t| t.as_str())

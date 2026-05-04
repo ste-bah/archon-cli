@@ -84,11 +84,19 @@ pub fn list_processing_jobs(db: &DbInstance) -> Result<Vec<ProcessingJob>> {
             started_at: row[4].get_str().unwrap_or("").to_string(),
             completed_at: {
                 let s = row[5].get_str().unwrap_or("");
-                if s.is_empty() { None } else { Some(s.to_string()) }
+                if s.is_empty() {
+                    None
+                } else {
+                    Some(s.to_string())
+                }
             },
             error_message: {
                 let s = row[6].get_str().unwrap_or("");
-                if s.is_empty() { None } else { Some(s.to_string()) }
+                if s.is_empty() {
+                    None
+                } else {
+                    Some(s.to_string())
+                }
             },
         })
         .collect())

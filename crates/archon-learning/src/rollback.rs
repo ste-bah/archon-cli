@@ -27,25 +27,23 @@ pub fn rollback_to_version(
     workspace_id: &str,
     reason: &str,
 ) -> Result<RollbackResult, LearningError> {
-    let target = store::get_manifest_version(db, target_version_id)?
-        .ok_or(LearningError::RollbackTargetUnreachable {
+    let target = store::get_manifest_version(db, target_version_id)?.ok_or(
+        LearningError::RollbackTargetUnreachable {
             version_id: target_version_id.to_string(),
-        })?;
+        },
+    )?;
 
     let manifest_kind = target.manifest_kind.clone();
 
-    let current_head = store::get_latest_manifest_version(db, manifest_kind.as_str())
-        .map_err(|e| LearningError::Storage {
-            message: e.to_string(),
+    let current_head =
+        store::get_latest_manifest_version(db, manifest_kind.as_str()).map_err(|e| {
+            LearningError::Storage {
+                message: e.to_string(),
+            }
         })?;
 
-    let proposal = create_rollback_proposal(
-        db,
-        workspace_id,
-        &manifest_kind,
-        target_version_id,
-        reason,
-    )?;
+    let proposal =
+        create_rollback_proposal(db, workspace_id, &manifest_kind, target_version_id, reason)?;
 
     let version_id = format!(
         "bmv-{}",
@@ -195,13 +193,22 @@ mod tests {
     #[test]
     fn test_rollback_creates_new_version() {
         let db = test_db();
-        seed_version(&db, "bmv-v1", "RetrievalProfile", 1, serde_json::json!({"weight": 1.0}));
+        seed_version(
+            &db,
+            "bmv-v1",
+            "RetrievalProfile",
+            1,
+            serde_json::json!({"weight": 1.0}),
+        );
 
         let result = rollback_to_version(&db, "bmv-v1", "ws-test", "test rollback").unwrap();
 
         assert_eq!(result.rolled_back_from_version_id, "bmv-v1");
         assert!(result.new_version.is_rollback_target);
-        assert_eq!(result.new_version.content, serde_json::json!({"weight": 1.0}));
+        assert_eq!(
+            result.new_version.content,
+            serde_json::json!({"weight": 1.0})
+        );
         assert!(result.new_version.version_number > 1);
     }
 
@@ -215,7 +222,13 @@ mod tests {
     #[test]
     fn test_rollback_creates_proposal_audit_trail() {
         let db = test_db();
-        seed_version(&db, "bmv-v1", "RetrievalProfile", 1, serde_json::json!({"weight": 0.8}));
+        seed_version(
+            &db,
+            "bmv-v1",
+            "RetrievalProfile",
+            1,
+            serde_json::json!({"weight": 0.8}),
+        );
 
         let result = rollback_to_version(&db, "bmv-v1", "ws-test", "audit test").unwrap();
 
@@ -232,7 +245,13 @@ mod tests {
     #[test]
     fn test_rollback_logs_learning_event() {
         let db = test_db();
-        seed_version(&db, "bmv-v1", "RetrievalProfile", 1, serde_json::json!({"weight": 0.9}));
+        seed_version(
+            &db,
+            "bmv-v1",
+            "RetrievalProfile",
+            1,
+            serde_json::json!({"weight": 0.9}),
+        );
 
         rollback_to_version(&db, "bmv-v1", "ws-test", "event log test").unwrap();
 

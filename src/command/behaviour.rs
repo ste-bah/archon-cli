@@ -19,9 +19,7 @@ pub async fn handle_behaviour_command(
 
     match action {
         BehaviourAction::ListProposals => cmd_list_proposals(&db),
-        BehaviourAction::ListEvents { event_type } => {
-            cmd_list_events(&db, event_type.as_deref())
-        }
+        BehaviourAction::ListEvents { event_type } => cmd_list_events(&db, event_type.as_deref()),
         BehaviourAction::Show { id } => cmd_show(&db, id),
         BehaviourAction::Apply { proposal_id } => cmd_apply(&db, proposal_id),
         BehaviourAction::History { kind } => cmd_history(&db, kind),
@@ -29,10 +27,9 @@ pub async fn handle_behaviour_command(
         BehaviourAction::Status => cmd_status(&db),
         BehaviourAction::Approve { proposal_id } => cmd_approve(&db, proposal_id),
         BehaviourAction::Deny { proposal_id } => cmd_deny(&db, proposal_id),
-        BehaviourAction::Rollback {
-            version_id,
-            reason,
-        } => cmd_rollback(&db, version_id, reason.as_deref()),
+        BehaviourAction::Rollback { version_id, reason } => {
+            cmd_rollback(&db, version_id, reason.as_deref())
+        }
     }
 }
 
@@ -82,8 +79,7 @@ fn cmd_list_events(db: &DbInstance, event_type: Option<&str>) -> Result<()> {
         archon_learning::store::list_learning_events_by_type(db, et)
             .map_err(|e| anyhow::anyhow!("{e}"))?
     } else {
-        archon_learning::store::list_all_learning_events(db)
-            .map_err(|e| anyhow::anyhow!("{e}"))?
+        archon_learning::store::list_all_learning_events(db).map_err(|e| anyhow::anyhow!("{e}"))?
     };
 
     if events.is_empty() {
@@ -187,14 +183,9 @@ fn cmd_apply_with_workspace(
             "policy denied auto-apply for {proposal_id}; use 'archon behaviour approve {proposal_id}' for human approval"
         );
     }
-    let result = archon_learning::apply::apply_decision(
-        db,
-        proposal_id,
-        decision,
-        None,
-        Some("cli"),
-    )
-    .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let result =
+        archon_learning::apply::apply_decision(db, proposal_id, decision, None, Some("cli"))
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
 
     println!(
         "Proposal {id} auto-applied. New version: {ver}",
@@ -227,8 +218,10 @@ fn cmd_history(db: &DbInstance, kind: &str) -> Result<()> {
     }
 
     println!("Version history for {kind}:");
-    println!("{:<25} {:<8} {:<20} {:<8} {:<10} {}",
-        "version_id", "v#", "created_by", "parent", "rollback", "created_at");
+    println!(
+        "{:<25} {:<8} {:<20} {:<8} {:<10} {}",
+        "version_id", "v#", "created_by", "parent", "rollback", "created_at"
+    );
     for v in &versions {
         println!(
             "{vid:<25} {vn:<8} {cbid:<20} {pvid:<8} {rt:<10} {ca}",
@@ -245,8 +238,8 @@ fn cmd_history(db: &DbInstance, kind: &str) -> Result<()> {
 }
 
 fn cmd_generate_proposals(db: &DbInstance) -> Result<()> {
-    let events = archon_learning::store::list_all_learning_events(db)
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let events =
+        archon_learning::store::list_all_learning_events(db).map_err(|e| anyhow::anyhow!("{e}"))?;
 
     let proposals = archon_learning::proposal::generate_proposals(&events);
 
@@ -256,7 +249,11 @@ fn cmd_generate_proposals(db: &DbInstance) -> Result<()> {
         return Ok(());
     }
 
-    println!("Generated {} proposal(s) from {} event(s):", proposals.len(), events.len());
+    println!(
+        "Generated {} proposal(s) from {} event(s):",
+        proposals.len(),
+        events.len()
+    );
     for p in &proposals {
         println!(
             "  {id}  {kind:30}  risk={risk}  evidence={n}",
@@ -267,7 +264,10 @@ fn cmd_generate_proposals(db: &DbInstance) -> Result<()> {
         );
         // Persist the proposal
         if let Err(e) = archon_learning::store::insert_behaviour_proposal(db, p) {
-            eprintln!("  WARNING: failed to persist proposal {}: {e}", p.proposal_id);
+            eprintln!(
+                "  WARNING: failed to persist proposal {}: {e}",
+                p.proposal_id
+            );
         }
     }
     Ok(())
@@ -277,22 +277,45 @@ fn cmd_status(db: &DbInstance) -> Result<()> {
     let proposals = archon_learning::store::list_behaviour_proposals(db, None)
         .map_err(|e| anyhow::anyhow!("{e}"))?;
 
-    let pending = proposals.iter().filter(|p| p.status == archon_learning::models::ProposalStatus::Pending).count();
-    let applied = proposals.iter().filter(|p| p.status == archon_learning::models::ProposalStatus::Applied).count();
-    let denied = proposals.iter().filter(|p| p.status == archon_learning::models::ProposalStatus::Denied).count();
-    let rolled_back = proposals.iter().filter(|p| p.status == archon_learning::models::ProposalStatus::RolledBack).count();
+    let pending = proposals
+        .iter()
+        .filter(|p| p.status == archon_learning::models::ProposalStatus::Pending)
+        .count();
+    let applied = proposals
+        .iter()
+        .filter(|p| p.status == archon_learning::models::ProposalStatus::Applied)
+        .count();
+    let denied = proposals
+        .iter()
+        .filter(|p| p.status == archon_learning::models::ProposalStatus::Denied)
+        .count();
+    let rolled_back = proposals
+        .iter()
+        .filter(|p| p.status == archon_learning::models::ProposalStatus::RolledBack)
+        .count();
 
-    let events = archon_learning::store::list_learning_events_by_type(db, "FalseCompletionDetected")
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let events =
+        archon_learning::store::list_learning_events_by_type(db, "FalseCompletionDetected")
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
 
-    let all_events = archon_learning::store::list_all_learning_events(db)
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let all_events =
+        archon_learning::store::list_all_learning_events(db).map_err(|e| anyhow::anyhow!("{e}"))?;
 
     println!("Learning System Status");
     println!("======================");
-    println!("Learning events: {} total ({} false completions)", all_events.len(), events.len());
-    println!("Proposals:  {} total ({} pending, {} applied, {} denied, {} rolled back)",
-        proposals.len(), pending, applied, denied, rolled_back);
+    println!(
+        "Learning events: {} total ({} false completions)",
+        all_events.len(),
+        events.len()
+    );
+    println!(
+        "Proposals:  {} total ({} pending, {} applied, {} denied, {} rolled back)",
+        proposals.len(),
+        pending,
+        applied,
+        denied,
+        rolled_back
+    );
 
     // Show latest manifest versions
     for kind in &[
