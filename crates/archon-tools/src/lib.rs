@@ -13,6 +13,8 @@ pub use background_agents::{
 pub mod bash;
 pub mod concurrency;
 pub mod config_tool;
+pub mod docs;
+pub mod evidence_cli;
 pub mod file_edit;
 pub mod file_read;
 pub mod file_write;
@@ -79,6 +81,7 @@ pub mod cartographer;
 
 pub mod leann_find_similar;
 pub mod leann_search;
+pub mod learning;
 
 // Stubs for tools implemented in later tasks
 pub mod agent {}
