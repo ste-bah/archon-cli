@@ -17,6 +17,7 @@ pub(crate) mod bug;
 pub(crate) mod cancel;
 pub(crate) mod checkpoint;
 pub(crate) mod clear;
+pub(crate) mod cli_mirror;
 pub(crate) mod color;
 // TASK-TUI-624: /commit AI git-commit prompt builder.
 pub(crate) mod commit;
@@ -31,9 +32,11 @@ pub(crate) mod cost;
 pub(crate) mod denials;
 pub(crate) mod diff;
 pub(crate) mod dispatcher;
+pub(crate) mod docs;
 pub(crate) mod doctor;
 pub(crate) mod effort;
 pub(crate) mod errors;
+pub(crate) mod evidence_view;
 // TASK-#206 SLASH-EXIT: /exit handler + /q alias.
 pub(crate) mod exit;
 pub(crate) mod export;
@@ -41,18 +44,27 @@ pub(crate) mod export;
 pub(crate) mod extra_usage;
 pub(crate) mod fast;
 // TASK-#207 SLASH-FILES: /files file-picker overlay.
+pub(crate) mod completion;
+pub(crate) mod constellation;
 pub(crate) mod files;
 pub(crate) mod fork;
+pub(crate) mod gametheory;
+pub(crate) mod gametheory_inspect;
+#[cfg(test)]
+mod gametheory_inspect_tests;
+pub(crate) mod gametheory_slash;
 pub(crate) mod garden;
 pub(crate) mod help;
 pub(crate) mod hooks;
 pub(crate) mod ide_stdio;
+pub(crate) mod kb;
 pub(crate) mod learning_status;
 pub(crate) mod login;
 pub(crate) mod logout;
 // TASK-#212 SLASH-MANAGED-AGENTS: /managed-agents remote-registry status.
 pub(crate) mod managed_agents;
 pub(crate) mod mcp;
+pub(crate) mod meaning;
 pub(crate) mod memory;
 pub(crate) mod model;
 pub(crate) mod parser;
@@ -66,6 +78,7 @@ pub(crate) mod plugin;
 // TASK-#216 SLASH-PLUGIN: /plugin umbrella (list/info/hint subcommands).
 pub(crate) mod plugin_slash;
 // TASK-#210 SLASH-PROVIDERS: /providers list registered LLM providers.
+pub(crate) mod prov;
 pub(crate) mod providers;
 // TASK-#217 SLASH-RELOAD-PLUGINS: /reload-plugins disk re-scan.
 pub(crate) mod recall;
@@ -108,6 +121,7 @@ pub(crate) mod team;
 pub(crate) mod tag;
 // TASK-TUI-621: hidden stub `/teleport` command (no is_visible() on
 // trait — visibility handled by omission from archon-tui commands.rs).
+pub(crate) mod behaviour;
 pub(crate) mod teleport;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;

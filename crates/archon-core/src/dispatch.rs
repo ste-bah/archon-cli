@@ -227,6 +227,38 @@ pub fn create_default_registry(
     // Web search via DuckDuckGo.
     registry.register(Box::new(archon_tools::web_search::WebSearchTool));
 
+    // Evidence Engine document-intelligence tool surface. These tools execute
+    // the same CLI command paths users exercise, then return the observed
+    // command output to the agent.
+    registry.register(Box::new(archon_tools::docs::DocIngest));
+    registry.register(Box::new(archon_tools::docs::DocList));
+    registry.register(Box::new(archon_tools::docs::DocGet));
+    registry.register(Box::new(archon_tools::docs::DocStatus));
+    registry.register(Box::new(archon_tools::docs::DocSearch));
+    registry.register(Box::new(archon_tools::docs::DocAnswer));
+    registry.register(Box::new(archon_tools::docs::DocProvenance));
+    registry.register(Box::new(archon_tools::docs::DocInspect));
+    registry.register(Box::new(archon_tools::docs::DocModelStatus));
+
+    // Game-theory evidence engine tool surface. The concrete executor is
+    // installed by the binary layer to avoid archon-tools -> archon-pipeline
+    // dependency cycles.
+    registry.register(Box::new(archon_tools::gametheory::GameTheoryRun));
+    registry.register(Box::new(archon_tools::gametheory::GameTheoryStatus));
+    registry.register(Box::new(archon_tools::gametheory::GameTheoryListAgents));
+    registry.register(Box::new(archon_tools::gametheory::GameTheorySpecimens));
+    registry.register(Box::new(archon_tools::gametheory::GameTheoryInspect));
+    registry.register(Box::new(archon_tools::gametheory::GameTheoryReplay));
+    registry.register(Box::new(archon_tools::gametheory::GameTheoryClassify));
+    registry.register(Box::new(archon_tools::gametheory::GameTheoryCallSpecialist));
+
+    // Governed-learning tool surface required by the Evidence Engine TSPEC.
+    registry.register(Box::new(archon_tools::learning::LearningStatus));
+    registry.register(Box::new(archon_tools::learning::LearningInspect));
+    registry.register(Box::new(archon_tools::learning::BehaviourProposals));
+    registry.register(Box::new(archon_tools::learning::BehaviourApprove));
+    registry.register(Box::new(archon_tools::learning::BehaviourRollback));
+
     // Code Cartographer — symbol indexing and codebase navigation.
     registry.register(Box::new(archon_tools::cartographer::CartographerTool));
 
@@ -331,7 +363,52 @@ mod tests {
             names.contains(&"CartographerScan"),
             "missing CartographerScan tool (TASK-CLI-410)"
         );
+        for name in archon_tools::gametheory::GAMETHEORY_TOOL_NAMES {
+            assert!(names.contains(name), "missing {name} tool (Group 9)");
+        }
+        for name in archon_tools::docs::DOC_TOOL_NAMES {
+            assert!(names.contains(name), "missing {name} tool (TSPEC §12)");
+        }
+        for name in archon_tools::learning::LEARNING_TOOL_NAMES {
+            assert!(names.contains(name), "missing {name} tool (TSPEC §12)");
+        }
         assert!(names.contains(&"ToolSearch"), "missing ToolSearch tool");
+    }
+
+    #[test]
+    fn test_all_8_gametheory_tools_registered() {
+        let registry = create_default_registry(std::env::temp_dir(), None);
+        let names = registry.tool_names();
+        let registered: Vec<_> = archon_tools::gametheory::GAMETHEORY_TOOL_NAMES
+            .iter()
+            .filter(|name| names.contains(name))
+            .copied()
+            .collect();
+
+        assert_eq!(
+            registered,
+            archon_tools::gametheory::GAMETHEORY_TOOL_NAMES,
+            "all Group 9 gametheory tools must be discoverable from the runtime registry"
+        );
+    }
+
+    #[test]
+    fn test_evidence_engine_tools_registered() {
+        let registry = create_default_registry(std::env::temp_dir(), None);
+        let names = registry.tool_names();
+
+        for name in archon_tools::docs::DOC_TOOL_NAMES {
+            assert!(
+                names.contains(name),
+                "Doc tool {name} must be discoverable from the runtime registry"
+            );
+        }
+        for name in archon_tools::learning::LEARNING_TOOL_NAMES {
+            assert!(
+                names.contains(name),
+                "Learning tool {name} must be discoverable from the runtime registry"
+            );
+        }
     }
 
     #[test]

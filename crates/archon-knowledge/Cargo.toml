@@ -1,0 +1,22 @@
+[package]
+name = "archon-knowledge"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+anyhow.workspace = true
+chrono.workspace = true
+cozo.workspace = true
+hex.workspace = true
+ndarray.workspace = true
+regex.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+archon-docs = { path = "../archon-docs" }
+tempfile.workspace = true

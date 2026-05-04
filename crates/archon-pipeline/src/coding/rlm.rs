@@ -9,15 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
 
-// ---------------------------------------------------------------------------
-// LeannSearcher trait (injectable for testing)
-// ---------------------------------------------------------------------------
-
-/// Trait for LEANN semantic search fallback when a namespace is missing.
-pub trait LeannSearcher: Send + Sync {
-    /// Search LEANN index for content matching the given query.
-    fn search(&self, query: &str) -> String;
-}
+pub use crate::leann_searcher::LeannSearcher;
 
 // ---------------------------------------------------------------------------
 // RlmStore

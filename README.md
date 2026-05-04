@@ -4,7 +4,9 @@
   <img src="archon-avatar.png" alt="Archon Avatar" width="600" />
 </div>
 
-A strategic engineering CLI built in Rust. Self-learning agent platform with persistent memory, multi-agent pipelines, and identity-aware Anthropic API integration.
+A strategic engineering CLI built in Rust. Self-learning agent platform with
+persistent memory, multi-agent pipelines, Evidence Engine provenance, document
+intelligence, governed learning, and identity-aware Anthropic API integration.
 
 > **Documentation has moved.** This README is now a landing page. The full structured docs live in [`docs/`](docs/README.md) — start there.
 
@@ -39,9 +41,11 @@ Full installation guide: [`docs/getting-started/installation.md`](docs/getting-s
 |---|---|---|
 | Runtime | TypeScript / Bun | Rust 1.85+ |
 | Memory | markdown files | CozoDB graph + embeddings |
-| Pipelines | Single-agent loop | 50-agent coding + 46-agent research |
+| Documents | ad hoc file reads | OCR, image ingest, chunks, embeddings, hybrid retrieval, citations |
+| Pipelines | Single-agent loop | 50-agent coding + 46-agent research + 84-specialist game theory |
 | Reasoning | Direct LLM call | 12 reasoning modes (deductive, inductive, abductive, analogical, adversarial, counterfactual, temporal, constraint, decomposition, first-principles, causal, contextual) |
 | Learning | None | 8 subsystems: SONA, ReasoningBank, GNN, CausalMemory, Provenance, DESC, Reflexion, AutoCapture |
+| Verification | model self-report | completion evidence, false-completion incidents, trust scores, provenance traces |
 | Identity | Native | Spoof (Claude Code mimicry) or native |
 
 archon-cli is **not affiliated with Anthropic**. It uses the Anthropic Claude API and requires a valid API key or Claude.ai subscription.
@@ -53,10 +57,11 @@ The docs are organised by user goal:
 | Section | Find this here |
 |---|---|
 | **Getting started** | [`docs/getting-started/`](docs/getting-started/) — install, first run, quick start |
-| **Architecture** | [`docs/architecture/`](docs/architecture/) — overview, learning systems, pipelines |
+| **Architecture** | [`docs/architecture/`](docs/architecture/) — overview, learning systems, pipelines, Evidence Engine diagrams |
+| **Evidence Engine** | [`docs/evidence-engine.md`](docs/evidence-engine.md) — documents, KB, provenance, game theory, completion integrity, governed learning |
 | **Reference** | [`docs/reference/`](docs/reference/) — slash commands (65), tools (43), skills (55), permissions (7 modes), config schema, CLI flags, env vars |
 | **Integrations** | [`docs/integrations/`](docs/integrations/) — MCP, plugins, hooks, identity spoofing, LSP, IDE extensions |
-| **Cookbook** | [`docs/cookbook/`](docs/cookbook/) — strategic engagement, memory-driven coding, god-code pipeline, custom agents |
+| **Cookbook** | [`docs/cookbook/`](docs/cookbook/) — real-world evidence workflows, strategic engagement, memory-driven coding, god-code pipeline, custom agents |
 | **Operations** | [`docs/operations/`](docs/operations/) — sessions, TUI, cost, compaction, cron, remote control, troubleshooting, data locations |
 | **Development** | [`docs/development/`](docs/development/) — contributing, dev flow gates, adding tools/skills/agents, release process |
 | **Release notes** | [`docs/release-notes/`](docs/release-notes/) — per-version changelogs |
@@ -66,7 +71,7 @@ The docs are organised by user goal:
 ```
 archon-cli/
 ├── src/                       # binary entry point + CLI layer
-├── crates/                    # 21-crate workspace
+├── crates/                    # 26-crate workspace
 │   ├── archon-cli-workspace/  # binary
 │   ├── archon-tui/            # ratatui terminal UI
 │   ├── archon-core/           # agent loop, tools, skills
@@ -77,7 +82,15 @@ archon-cli/
 │   ├── archon-tools/          # 43 built-in tools
 │   ├── archon-permissions/    # 7 permission modes
 │   ├── archon-mcp/            # MCP transport
-│   ├── archon-pipeline/       # 50+46 agent pipelines + learning systems
+│   ├── archon-pipeline/       # 50+46 agent pipelines + game theory + learning systems
+│   ├── archon-docs/           # document intelligence, OCR, retrieval
+│   ├── archon-knowledge/      # claims, entities, contradictions
+│   ├── archon-provenance/     # chain hashes, W3C PROV export
+│   ├── archon-completion/     # completion integrity and trust
+│   ├── archon-learning/       # governed learning events/manifests
+│   ├── archon-meaning/        # labels, contrastive pairs, triplets
+│   ├── archon-constellation/  # centroids, scoring, drift
+│   ├── archon-policy/         # policy gates
 │   ├── archon-leann/          # semantic code search
 │   ├── archon-plugin/         # dynamic plugin loading
 │   ├── archon-sdk/            # embedding API + IDE bridge
@@ -90,9 +103,9 @@ archon-cli/
 
 ## Status
 
-- Current version: **v0.1.35** ([release notes](docs/release-notes/v0.1.35.md))
+- Current version: **v0.1.38** ([release notes](docs/release-notes/v0.1.38.md))
 - Active development; pre-1.0 means breaking changes can land in minor versions
-- Phase 6 complete (pipelines + learning systems wired); see release notes for the v0.1.6 → v0.1.35 stabilisation arc
+- Phase 6 complete (pipelines + learning systems wired) + Evidence Engine PRD compliance pass; see release notes for the v0.1.6 → v0.1.38 stabilisation arc
 
 ## Contributing
 

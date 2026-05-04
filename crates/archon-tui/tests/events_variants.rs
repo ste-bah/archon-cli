@@ -257,3 +257,12 @@ fn view_id_status() {
     let cloned = v;
     assert_eq!(v, cloned);
 }
+
+#[test]
+fn view_id_evidence_engine_screens() {
+    use archon_tui::app::ViewId;
+    for v in [ViewId::GameTheory, ViewId::Docs, ViewId::Learning] {
+        let cloned = v;
+        assert_eq!(v, cloned);
+    }
+}

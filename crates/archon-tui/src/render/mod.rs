@@ -20,6 +20,7 @@
 pub mod body;
 pub mod chrome;
 pub mod cursor;
+pub mod evidence;
 pub mod layout;
 
 pub use layout::{Layout, compute_layout};
@@ -77,4 +78,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
 
     // Overlays: search results (TASK-#208 /search)
     body::draw_search_results(frame, app);
+
+    // Overlays: Evidence Engine inspection views.
+    evidence::draw_evidence_view(frame, app);
 }

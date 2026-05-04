@@ -12,6 +12,36 @@ The pipeline shines on:
 
 For one-off edits, just chat normally — the pipeline overhead isn't worth it for trivial changes.
 
+## Evidence-Aware Coding Example
+
+Use the coding pipeline when the implementation must leave proof behind:
+
+```bash
+archon pipeline code \
+  "Add archon docs summarize <document-id>. It must read persisted chunks, produce cited summaries, write answer provenance edges, add tests, and update docs." \
+  --dry-run
+
+archon pipeline code \
+  "Add archon docs summarize <document-id>. It must read persisted chunks, produce cited summaries, write answer provenance edges, add tests, and update docs." \
+  --max-budget-usd 20
+```
+
+After it finishes, inspect the claims instead of trusting the final paragraph:
+
+```bash
+archon completion verify <run-id> --agent code-quality-improver --model sonnet
+archon completion incidents
+archon completion trust --agent code-quality-improver
+```
+
+If the run creates learning events, review them:
+
+```bash
+archon behaviour status
+archon behaviour generate-proposals
+archon behaviour list-proposals
+```
+
 ## Trigger
 
 ```

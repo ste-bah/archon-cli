@@ -42,6 +42,10 @@ const DEFAULT_SAFE_TOOLS: &[&str] = &[
     // ----- Read-only catalog/discovery -----
     "CronList",
     "ListMcpResources",
+    // ----- Read-only evidence-engine inspection -----
+    "GameTheoryStatus",
+    "GameTheoryListAgents",
+    "GameTheoryInspect",
     // ----- LEANN semantic code search (read-only) -----
     "LeannSearch",
     "LeannFindSimilar",

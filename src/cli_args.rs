@@ -359,6 +359,11 @@ pub enum Commands {
         #[arg(long)]
         detach: bool,
     },
+    /// Manage governed learning behaviour
+    Behaviour {
+        #[command(subcommand)]
+        action: BehaviourAction,
+    },
     /// Check status of an async task
     TaskStatus {
         /// Task ID (UUID)
@@ -447,6 +452,212 @@ pub enum Commands {
     Kb {
         #[command(subcommand)]
         action: KbAction,
+    },
+    /// Manage document ingestion, inspection, and status
+    Docs {
+        #[command(subcommand)]
+        action: DocsAction,
+    },
+    /// Inspect and export provenance traces
+    Prov {
+        #[command(subcommand)]
+        action: ProvAction,
+    },
+    /// Build meaning samples, pairs, triplets, and eval data
+    Meaning {
+        #[command(subcommand)]
+        action: MeaningAction,
+    },
+    /// Build and inspect learned constellation centroids
+    Constellation {
+        #[command(subcommand)]
+        action: ConstellationAction,
+    },
+    /// Game-theory strategic analysis
+    Gametheory {
+        /// PRD shorthand: `archon gametheory "<situation>"`
+        situation: Option<String>,
+        /// PRD shorthand: `archon gametheory --classify-only "<situation>"`
+        #[arg(long)]
+        classify_only: bool,
+        /// Bind the run to an ingested document/knowledge pack
+        #[arg(long, value_name = "PACK")]
+        kb: Option<String>,
+        /// Path to gametheory spec YAML (searches known locations if omitted)
+        #[arg(long, value_name = "PATH")]
+        spec_path: Option<String>,
+        /// Print per-agent gametheory memory recall counts
+        #[arg(long)]
+        debug_memory: bool,
+        /// Stop specialist execution when estimated model spend reaches this USD cap
+        #[arg(long, default_value_t = 20.0)]
+        budget: f64,
+        /// Maximum specialist concurrency requested for this run
+        #[arg(long, default_value_t = 4)]
+        max_concurrent: usize,
+        /// Report style: executive, academic, or technical
+        #[arg(long, default_value = "executive")]
+        style: String,
+        /// Enable Tier 11 specialists when policy.gametheory.enable_tier11 also allows it
+        #[arg(long)]
+        enable_tier11: bool,
+        #[command(subcommand)]
+        action: Option<GametheoryAction>,
+    },
+    /// Completion-integrity checks (TSPEC §10)
+    Completion {
+        #[command(subcommand)]
+        action: CompletionAction,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum GametheoryAction {
+    /// Run full pipeline: classify → route → specialists → report
+    Run {
+        /// The strategic situation to analyze
+        situation: String,
+        /// Tier 1 classification only (skip routing and specialists)
+        #[arg(long)]
+        classify_only: bool,
+        /// Path to gametheory spec YAML (searches known locations if omitted)
+        #[arg(long, value_name = "PATH")]
+        spec_path: Option<String>,
+        /// Bind the run to an ingested document/knowledge pack
+        #[arg(long, value_name = "PACK")]
+        kb: Option<String>,
+        /// Print per-agent gametheory memory recall counts
+        #[arg(long)]
+        debug_memory: bool,
+        /// Stop specialist execution when estimated model spend reaches this USD cap
+        #[arg(long, default_value_t = 20.0)]
+        budget: f64,
+        /// Maximum specialist concurrency requested for this run
+        #[arg(long, default_value_t = 4)]
+        max_concurrent: usize,
+        /// Report style: executive, academic, or technical
+        #[arg(long, default_value = "executive")]
+        style: String,
+        /// Enable Tier 11 specialists when policy.gametheory.enable_tier11 also allows it
+        #[arg(long)]
+        enable_tier11: bool,
+    },
+    /// List all persisted game-theory runs
+    ListRuns,
+    /// Show full details for a specific run
+    Show {
+        /// Run ID
+        run_id: String,
+    },
+    /// Show status for one run, or status counts for all runs
+    Status {
+        /// Optional run ID
+        run_id: Option<String>,
+    },
+    /// Inspect a run, specialist output, section, fingerprint, routing, or final report artifact
+    Inspect {
+        /// Artifact ID, e.g. gt-123, fingerprint:gt-123, specialist:gt-123:nash-equilibrium-finder
+        artifact_id: String,
+    },
+    /// Inspect the Tier 1 fingerprint for a run
+    InspectFingerprint {
+        /// Run ID
+        run_id: String,
+    },
+    /// Inspect the routing decision for a run
+    InspectRouting {
+        /// Run ID
+        run_id: String,
+    },
+    /// Replay a run (re-evaluate routing from persisted fingerprint)
+    Replay {
+        /// Run ID
+        run_id: String,
+        /// Path to gametheory spec YAML (searches known locations if omitted)
+        #[arg(long, value_name = "PATH")]
+        spec_path: Option<String>,
+        /// Re-run Tier 1 classification instead of preserving the stored fingerprint
+        #[arg(long)]
+        reclassify: bool,
+        /// Re-run a single specialist using the stored Tier 1 fingerprint
+        #[arg(long, value_name = "KEY")]
+        rerun_specialist: Option<String>,
+    },
+    /// Resume an interrupted InProgress run from persisted checkpoints
+    Resume {
+        /// Run ID
+        run_id: String,
+        /// Path to gametheory spec YAML (searches known locations if omitted)
+        #[arg(long, value_name = "PATH")]
+        spec_path: Option<String>,
+    },
+    /// List curated game-theory agents
+    ListAgents {
+        /// Restrict output to a single tier
+        #[arg(long, value_name = "N")]
+        tier: Option<u8>,
+    },
+    /// List or ingest the known-fingerprint specimen library
+    Specimens {
+        /// Filter rows by axis=value, e.g. cooperation=cooperative
+        #[arg(long, value_name = "AXIS=VALUE")]
+        filter: Option<String>,
+        /// Force re-ingest from the canonical markdown source
+        #[arg(long)]
+        ingest: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum CompletionAction {
+    /// Run full completion-integrity check on a pipeline run
+    Inspect {
+        /// Run ID to inspect
+        run_id: String,
+        /// Task type for claim extraction (default: "pipeline-output")
+        #[arg(long, default_value = "pipeline-output")]
+        task_type: String,
+    },
+    /// List completion-sensitive claims for a run
+    Claims {
+        /// Run ID
+        run_id: String,
+    },
+    /// List evidence records for a run
+    Evidence {
+        /// Run ID
+        run_id: String,
+    },
+    /// List all false-completion incidents
+    Incidents,
+    /// Quick verify: run check and return pass/fail exit code
+    Verify {
+        /// Run ID to verify
+        run_id: String,
+        /// Task type for claim extraction
+        #[arg(long, default_value = "pipeline-output")]
+        task_type: String,
+        /// Agent key responsible for the completion output
+        #[arg(long, value_name = "KEY")]
+        agent: Option<String>,
+        /// Model responsible for the completion output
+        #[arg(long, value_name = "NAME")]
+        model: Option<String>,
+        /// Workspace identifier for trust-score grouping
+        #[arg(long, value_name = "ID")]
+        workspace_id: Option<String>,
+        /// Require at least one claim to exist (fail if none found)
+        #[arg(long, default_value_t = false)]
+        require_claims: bool,
+    },
+    /// Show persisted agent/model trust scores from completion verification history
+    Trust {
+        /// Filter to one agent key
+        #[arg(long, value_name = "KEY")]
+        agent: Option<String>,
+        /// Filter to one model name
+        #[arg(long, value_name = "NAME")]
+        model: Option<String>,
     },
 }
 
@@ -564,9 +775,172 @@ pub enum KbAction {
         /// Maximum results
         #[arg(long, default_value = "10")]
         limit: usize,
+        /// Retrieval mode: exact, semantic, or hybrid
+        #[arg(long, default_value = "hybrid")]
+        mode: String,
     },
+    /// Extract claims, entities, relations, source quality and contradictions from doc chunks
+    Process {
+        /// Extract claims from document chunks
+        #[arg(long)]
+        claims: bool,
+        /// Extract entities from document chunks
+        #[arg(long)]
+        entities: bool,
+        /// Infer the knowledge graph relations
+        #[arg(long, alias = "kg")]
+        relations: bool,
+        /// Scan claims for contradictions
+        #[arg(long)]
+        contradictions: bool,
+    },
+    /// List extracted claims
+    Claims,
+    /// List extracted entities
+    Entities,
+    /// List inferred relations
+    Relations,
+    /// List detected contradictions
+    Contradictions,
     /// Show knowledge base statistics
     Stats,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum DocsAction {
+    /// Ingest a file or directory
+    Ingest {
+        /// Path to file or directory to ingest
+        path: String,
+    },
+    /// List all ingested documents
+    List,
+    /// Show detailed information about a document
+    Show {
+        /// Document ID
+        document_id: String,
+    },
+    /// Show document status summary
+    Status,
+    /// List chunks for a document
+    Chunks {
+        /// Document ID
+        document_id: String,
+    },
+    /// Full inspection of a document (pages, chunks, OCR runs, provenance)
+    Inspect {
+        /// Document ID
+        document_id: String,
+    },
+    /// Search for chunks relevant to a query
+    Search {
+        /// Search query
+        query: String,
+        /// Retrieval mode: exact, semantic, or hybrid
+        #[arg(long, default_value = "hybrid")]
+        mode: String,
+        /// Show debug output (embedding details, distances, provenance)
+        #[arg(long)]
+        debug: bool,
+    },
+    /// Answer a question using document evidence
+    Answer {
+        /// Question to answer
+        query: String,
+    },
+    /// Show provenance chain for a chunk or answer component
+    Provenance {
+        /// Chunk ID or answer component ID
+        chunk_or_answer_id: String,
+    },
+    /// Index document chunks (embed and store vectors)
+    Index {
+        /// Re-index all chunks regardless of status
+        #[arg(long)]
+        all: bool,
+    },
+    /// Report embedding model and backend status
+    ModelStatus,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum ProvAction {
+    /// Trace an artifact to its source lineage
+    Trace {
+        /// Artifact ID to trace
+        artifact_id: String,
+    },
+    /// Export an artifact trace as W3C PROV JSON-LD
+    Export {
+        /// Artifact ID to export
+        artifact_id: String,
+    },
+    /// Verify an artifact trace reaches source provenance
+    Verify {
+        /// Artifact ID to verify
+        artifact_id: String,
+    },
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum MeaningAction {
+    /// Build meaning records from persisted learning signals
+    Build {
+        /// Source family to compile from
+        #[arg(long, default_value = "learning-events")]
+        from: String,
+    },
+    /// List derived samples
+    Samples,
+    /// List contrastive pairs
+    Contrastive,
+    /// List triplets
+    Triplets,
+    /// Export samples or triplets as JSONL
+    Export {
+        /// Dataset to export: samples or triplets
+        #[arg(long, default_value = "samples")]
+        kind: String,
+    },
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum ConstellationAction {
+    /// Build a versioned centroid profile from positive meaning samples
+    Build {
+        /// Target profile: project, research-domain, or strategic-workflow
+        #[arg(long)]
+        target: String,
+    },
+    /// Score text or a file against the latest target centroid
+    Score {
+        /// Target profile to score against
+        #[arg(long, default_value = "project")]
+        target: String,
+        /// File containing the answer/output to score
+        #[arg(long)]
+        answer: Option<PathBuf>,
+        /// Inline text to score when --answer is not supplied
+        #[arg(long)]
+        text: Option<String>,
+    },
+    /// Detect whether text or a file has drifted from the target centroid
+    Drift {
+        /// Target profile to compare against
+        #[arg(long, default_value = "project")]
+        target: String,
+        /// File containing the answer/output to inspect
+        #[arg(long)]
+        answer: Option<PathBuf>,
+        /// Inline text to inspect when --answer is not supplied
+        #[arg(long)]
+        text: Option<String>,
+        /// Minimum accepted similarity before drift is reported
+        #[arg(long, default_value_t = 0.45)]
+        threshold: f64,
+    },
+    /// List persisted constellation centroids
+    List,
 }
 
 #[derive(Subcommand, Debug)]
@@ -577,6 +951,57 @@ pub enum PluginAction {
     Info {
         /// Plugin name
         name: String,
+    },
+}
+
+/// Subcommands for `archon behaviour`
+#[derive(Subcommand, Debug)]
+pub enum BehaviourAction {
+    /// List behaviour proposals (alias: proposals)
+    #[command(alias = "proposals")]
+    ListProposals,
+    /// List learning events (optionally filtered by type)
+    ListEvents {
+        /// Filter by event type (e.g., FalseCompletionDetected, ManifestApplied)
+        #[arg(short, long)]
+        event_type: Option<String>,
+    },
+    /// Show details for a proposal, event, or manifest version
+    Show {
+        /// ID of the item to show (proposal_id, event_id, or version_id)
+        id: String,
+    },
+    /// Auto-apply a pending proposal (without human review)
+    Apply {
+        /// Proposal ID to apply
+        proposal_id: String,
+    },
+    /// Show version history for a manifest kind
+    History {
+        /// Manifest kind (RetrievalProfile, SourceQualityProfile, etc.)
+        kind: String,
+    },
+    /// Generate proposals from recent learning events
+    GenerateProposals,
+    /// Show learning system status and statistics
+    Status,
+    /// Approve a pending proposal (human-in-the-loop)
+    Approve {
+        /// Proposal ID to approve
+        proposal_id: String,
+    },
+    /// Deny a pending proposal
+    Deny {
+        /// Proposal ID to deny
+        proposal_id: String,
+    },
+    /// Rollback a manifest to a previous version
+    Rollback {
+        /// Target version ID to rollback to
+        version_id: String,
+        /// Reason for rollback
+        #[arg(short, long)]
+        reason: Option<String>,
     },
 }
 
@@ -698,5 +1123,86 @@ mod remote_url_parse_tests {
     fn remote_url_absent_when_not_supplied() {
         let cli = Cli::try_parse_from(["archon"]).expect("archon with no flags must parse");
         assert!(cli.remote_url.is_none());
+    }
+}
+
+#[cfg(test)]
+mod gametheory_prd_parse_tests {
+    use super::{Cli, Commands, GametheoryAction};
+    use clap::Parser;
+
+    #[test]
+    fn gametheory_prd_shorthand_parses_situation_and_kb() {
+        let cli = Cli::try_parse_from([
+            "archon",
+            "gametheory",
+            "Assess this plugin marketplace",
+            "--kb",
+            "policy-pack",
+        ])
+        .expect("PRD shorthand gametheory command must parse");
+
+        match cli.command {
+            Some(Commands::Gametheory {
+                situation,
+                kb,
+                action,
+                ..
+            }) => {
+                assert_eq!(situation.as_deref(), Some("Assess this plugin marketplace"));
+                assert_eq!(kb.as_deref(), Some("policy-pack"));
+                assert!(action.is_none());
+            }
+            other => panic!("expected gametheory command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn gametheory_prd_classify_only_shorthand_parses() {
+        let cli = Cli::try_parse_from([
+            "archon",
+            "gametheory",
+            "--classify-only",
+            "Assess a bargaining situation",
+        ])
+        .expect("PRD classify-only shorthand must parse");
+
+        match cli.command {
+            Some(Commands::Gametheory {
+                situation,
+                classify_only,
+                action,
+                ..
+            }) => {
+                assert_eq!(situation.as_deref(), Some("Assess a bargaining situation"));
+                assert!(classify_only);
+                assert!(action.is_none());
+            }
+            other => panic!("expected gametheory command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn gametheory_existing_run_subcommand_keeps_kb_flag() {
+        let cli = Cli::try_parse_from([
+            "archon",
+            "gametheory",
+            "run",
+            "Assess a deterrence game",
+            "--kb",
+            "policy-pack",
+        ])
+        .expect("existing run subcommand must still parse");
+
+        match cli.command {
+            Some(Commands::Gametheory {
+                action: Some(GametheoryAction::Run { situation, kb, .. }),
+                ..
+            }) => {
+                assert_eq!(situation, "Assess a deterrence game");
+                assert_eq!(kb.as_deref(), Some("policy-pack"));
+            }
+            other => panic!("expected gametheory run action, got {other:?}"),
+        }
     }
 }

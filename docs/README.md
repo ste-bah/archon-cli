@@ -14,6 +14,17 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 - [Overview](architecture/overview.md) — workspace crates, request lifecycle, data flow
 - [Learning systems](architecture/learning-systems.md) — SONA, ReasoningBank (12 modes), GNN, CausalMemory, Provenance, DESC, Reflexion, AutoCapture
 - [Pipelines](architecture/pipelines.md) — god-code (50 agents), god-research (46 agents), agent loop, subagent spawning, multi-agent teams
+- [Evidence Engine](evidence-engine.md) — documents, knowledge, provenance, game theory, completion integrity, governed learning, meaning, constellations
+
+## Evidence Engine
+
+- [Document intelligence](docs.md) — ingest, OCR/VLM policy, embeddings, exact/semantic/hybrid retrieval
+- [Knowledge base](knowledge.md) — claims, entities, relations, source quality, contradictions
+- [Game theory](gametheory.md) — CLI, `/gametheory` slash command, tools, persisted run state
+- [Completion integrity](completion-integrity.md) — claims, evidence, incidents, trust scoring
+- [Governed learning](governed-learning.md) — learning events, proposals, manifests, approval gates
+- [Policy](policy.md) — layered TOML gates for VLM, Tier 11, retrieval, and auto-apply
+- [Provenance](provenance.md) — trace, export, verify, document provenance
 
 ## Reference
 
@@ -37,6 +48,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 ## Cookbook
 
 - [Strategic engagement research](cookbook/strategic-engagement.md) — 22-document intelligence package workflow
+- [Real-world Evidence Engine examples](cookbook/real-world-evidence-engine.md) — research, education, business, trading, coding, and strategic analysis workflows
 - [Memory-driven coding](cookbook/memory-driven-coding.md) — using SONA + ReasoningBank to inform decisions
 - [Running god-code pipelines](cookbook/god-code-pipeline.md) — 50-agent coding workflow end-to-end
 - [Custom agent workflows](cookbook/custom-agent-workflows.md) — `/create-agent`, `/run-agent`, `/evolve-agent`
@@ -65,6 +77,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 
 ## Release notes
 
+- [v0.1.36](release-notes/v0.1.36.md) — trajectory embeddings + persistence
 - [v0.1.35](release-notes/v0.1.35.md) — Archon skills pack + project installer
 - [v0.1.34](release-notes/v0.1.34.md) — Engineering skills pack
 - [v0.1.33](release-notes/v0.1.33.md) — Skills foundation (embedded templates, /to-prd, /prd-to-spec)

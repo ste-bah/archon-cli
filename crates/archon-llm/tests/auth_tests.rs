@@ -1,4 +1,7 @@
-use archon_llm::auth::{AuthError, AuthProvider, parse_credentials_json, resolve_auth};
+use archon_llm::auth::{
+    AnthropicCredentialKind, AuthError, AuthProvider, classify_anthropic_credential,
+    parse_credentials_json, resolve_auth, resolve_auth_with_keys,
+};
 use archon_llm::types::Secret;
 
 // -----------------------------------------------------------------------
@@ -212,6 +215,59 @@ fn resolve_auth_api_key_over_bearer() {
         matches!(provider, AuthProvider::ApiKey(_)),
         "API key should win over bearer token"
     );
+}
+
+#[test]
+fn classify_anthropic_credential_recognizes_oauth_token() {
+    assert_eq!(
+        classify_anthropic_credential("sk-ant-oat-test-token"),
+        AnthropicCredentialKind::OAuthToken
+    );
+}
+
+#[test]
+fn classify_anthropic_credential_recognizes_api_key() {
+    assert_eq!(
+        classify_anthropic_credential("sk-ant-api03-test-key"),
+        AnthropicCredentialKind::ApiKey
+    );
+}
+
+#[test]
+fn classify_anthropic_credential_handles_absent_and_unknown() {
+    assert_eq!(
+        classify_anthropic_credential(""),
+        AnthropicCredentialKind::Absent
+    );
+    assert_eq!(
+        classify_anthropic_credential("sk-or-v1-test"),
+        AnthropicCredentialKind::Unknown
+    );
+}
+
+#[test]
+fn resolve_auth_with_keys_treats_oauth_shaped_api_key_as_bearer() {
+    let provider = resolve_auth_with_keys(Some("sk-ant-oat-test-token"), None, None, None)
+        .expect("oauth-shaped token should resolve");
+    match provider {
+        AuthProvider::BearerToken(token) => assert_eq!(token.expose(), "sk-ant-oat-test-token"),
+        other => panic!("expected BearerToken, got {other:?}"),
+    }
+}
+
+#[test]
+fn resolve_auth_with_keys_prefers_explicit_oauth_over_api_key() {
+    let provider = resolve_auth_with_keys(
+        Some("sk-ant-api03-test-key"),
+        None,
+        Some("sk-ant-oat-explicit"),
+        None,
+    )
+    .expect("explicit OAuth token should resolve");
+    match provider {
+        AuthProvider::BearerToken(token) => assert_eq!(token.expose(), "sk-ant-oat-explicit"),
+        other => panic!("expected BearerToken, got {other:?}"),
+    }
 }
 
 #[test]

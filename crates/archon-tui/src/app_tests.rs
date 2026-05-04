@@ -5,7 +5,7 @@
 //! exercise `App` methods — no event-loop coverage here (that lives in
 //! `tests/event_loop_smoke.rs` and `tests/app_run_e2e.rs`).
 
-use super::App;
+use super::{App, EvidenceViewState, ViewId};
 
 #[test]
 fn app_text_delta() {
@@ -203,4 +203,56 @@ fn unrecognized_slash_command_fallthrough() {
 
     app.on_turn_complete();
     assert!(!app.is_generating);
+}
+
+#[test]
+fn open_view_sets_docs_evidence_overlay_source_of_truth() {
+    let mut app = App::new();
+    app.open_view(ViewId::Docs);
+
+    let view = app.evidence_view.as_ref().expect("view opened");
+    assert_eq!(view.view_id(), ViewId::Docs);
+    assert!(matches!(view, EvidenceViewState::Docs(_)));
+}
+
+#[test]
+fn open_view_with_rows_sets_docs_rows_from_source_of_truth() {
+    let mut app = App::new();
+    app.open_view_with_rows(
+        ViewId::Docs,
+        vec![super::EvidenceRowPayload {
+            id: "doc-1".into(),
+            title: "Policy Pack".into(),
+            status: "Processed".into(),
+            detail: "12 chunks".into(),
+        }],
+    );
+
+    let view = app.evidence_view.as_ref().expect("view opened");
+    let EvidenceViewState::Docs(screen) = view else {
+        panic!("expected docs view");
+    };
+    assert_eq!(screen.len(), 1);
+    assert_eq!(screen.selected().unwrap().id, "doc-1");
+    assert_eq!(screen.selected().unwrap().summary, "12 chunks");
+}
+
+#[test]
+fn open_view_sets_gametheory_evidence_overlay_source_of_truth() {
+    let mut app = App::new();
+    app.open_view(ViewId::GameTheory);
+
+    let view = app.evidence_view.as_ref().expect("view opened");
+    assert_eq!(view.view_id(), ViewId::GameTheory);
+    assert!(matches!(view, EvidenceViewState::GameTheory(_)));
+}
+
+#[test]
+fn open_view_sets_learning_evidence_overlay_source_of_truth() {
+    let mut app = App::new();
+    app.open_view(ViewId::Learning);
+
+    let view = app.evidence_view.as_ref().expect("view opened");
+    assert_eq!(view.view_id(), ViewId::Learning);
+    assert!(matches!(view, EvidenceViewState::Learning(_)));
 }

@@ -19,12 +19,20 @@ trap 'rm -rf "$TMPDIR"' EXIT
 
 echo "=== Test 1: basic init ==="
 bash "$INIT_SCRIPT" --target "$TMPDIR"
-for dir in .archon .archon/skills .archon/templates .archon/adr .archon/context .archon/agents prds tasks; do
+for dir in .archon .archon/skills .archon/templates .archon/adr .archon/context .archon/specs .archon/docs .archon/docs/inbox .archon/evidence .archon/agents prds tasks; do
     if [ ! -d "$TMPDIR/$dir" ]; then
         echo "FAIL: missing $dir"
         exit 1
     fi
 done
+if [ ! -f "$TMPDIR/.archon/policy.toml" ]; then
+    echo "FAIL: missing .archon/policy.toml"
+    exit 1
+fi
+if ! grep -q '\[policy.docs.vlm\]' "$TMPDIR/.archon/policy.toml"; then
+    echo "FAIL: policy.toml missing docs VLM policy"
+    exit 1
+fi
 echo "PASS"
 
 echo "=== Test 2: idempotent re-run ==="
@@ -39,12 +47,16 @@ if [ -d "$TMPDIR2/.archon/agents" ]; then
     echo "FAIL: agents dir exists but --no-agents was given"
     exit 1
 fi
-for dir in .archon .archon/skills .archon/templates .archon/adr .archon/context prds tasks; do
+for dir in .archon .archon/skills .archon/templates .archon/adr .archon/context .archon/specs .archon/docs .archon/docs/inbox .archon/evidence prds tasks; do
     if [ ! -d "$TMPDIR2/$dir" ]; then
         echo "FAIL: missing $dir"
         exit 1
     fi
 done
+if [ ! -f "$TMPDIR2/.archon/policy.toml" ]; then
+    echo "FAIL: missing .archon/policy.toml"
+    exit 1
+fi
 echo "PASS"
 
 echo "=== Test 4: .gitignore created with .archon entry ==="

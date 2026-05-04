@@ -52,6 +52,27 @@ pub enum AuthProvider {
     BearerToken(Secret<String>),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AnthropicCredentialKind {
+    Absent,
+    ApiKey,
+    OAuthToken,
+    Unknown,
+}
+
+pub fn classify_anthropic_credential(value: &str) -> AnthropicCredentialKind {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        AnthropicCredentialKind::Absent
+    } else if trimmed.starts_with("sk-ant-oat-") {
+        AnthropicCredentialKind::OAuthToken
+    } else if trimmed.starts_with("sk-ant-api") {
+        AnthropicCredentialKind::ApiKey
+    } else {
+        AnthropicCredentialKind::Unknown
+    }
+}
+
 impl AuthProvider {
     /// Returns the HTTP header `(name, value)` for this auth method.
     pub fn header(&self) -> (String, String) {
@@ -210,8 +231,12 @@ pub fn resolve_auth(
     auth_token: Option<&str>,
     credentials_json: Option<&str>,
 ) -> Result<AuthProvider, AuthError> {
-    // Priority 1: API key
+    // Priority 1: API key, unless ANTHROPIC_API_KEY contains a Claude
+    // subscription OAuth token copied from Claude Code.
     if let Some(key) = api_key {
+        if classify_anthropic_credential(key) == AnthropicCredentialKind::OAuthToken {
+            return Ok(AuthProvider::BearerToken(Secret::new(key.to_string())));
+        }
         return Ok(AuthProvider::ApiKey(Secret::new(key.to_string())));
     }
 
@@ -234,35 +259,44 @@ pub fn resolve_auth(
 
 /// Resolve authentication from pre-parsed values.
 ///
-/// Priority: `api_key` > `archon_api_key` > `archon_oauth_token`
-/// > `auth_token` (legacy) > OAuth credential file.
+/// Priority: OAuth bearer tokens > API keys > OAuth credential file.
+///
+/// Claude subscription tokens copied from Claude Code often appear in
+/// `ANTHROPIC_API_KEY` as `sk-ant-oat-*`. Those must be sent as Bearer
+/// tokens and paired with spoof identity headers by callers.
 pub fn resolve_auth_with_keys(
     api_key: Option<&str>,
     archon_api_key: Option<&str>,
     archon_oauth_token: Option<&str>,
     auth_token: Option<&str>,
 ) -> Result<AuthProvider, AuthError> {
-    // Priority 1: ANTHROPIC_API_KEY
-    if let Some(key) = api_key.filter(|k| !k.trim().is_empty()) {
-        return Ok(AuthProvider::ApiKey(Secret::new(key.to_string())));
-    }
-
-    // Priority 2: ARCHON_API_KEY (alias)
-    if let Some(key) = archon_api_key.filter(|k| !k.trim().is_empty()) {
-        return Ok(AuthProvider::ApiKey(Secret::new(key.to_string())));
-    }
-
-    // Priority 3: ARCHON_OAUTH_TOKEN — pre-set OAuth token (skip login flow)
+    // Priority 1: explicit OAuth bearer tokens.
     if let Some(token) = archon_oauth_token.filter(|t| !t.trim().is_empty()) {
         return Ok(AuthProvider::BearerToken(Secret::new(token.to_string())));
     }
 
-    // Priority 4: Legacy ANTHROPIC_AUTH_TOKEN
     if let Some(token) = auth_token.filter(|t| !t.trim().is_empty()) {
         return Ok(AuthProvider::BearerToken(Secret::new(token.to_string())));
     }
 
-    // Priority 5: OAuth credential file
+    if let Some(token) = api_key
+        .filter(|k| !k.trim().is_empty())
+        .filter(|k| classify_anthropic_credential(k) == AnthropicCredentialKind::OAuthToken)
+    {
+        return Ok(AuthProvider::BearerToken(Secret::new(token.to_string())));
+    }
+
+    // Priority 2: ANTHROPIC_API_KEY
+    if let Some(key) = api_key.filter(|k| !k.trim().is_empty()) {
+        return Ok(AuthProvider::ApiKey(Secret::new(key.to_string())));
+    }
+
+    // Priority 3: ARCHON_API_KEY (alias)
+    if let Some(key) = archon_api_key.filter(|k| !k.trim().is_empty()) {
+        return Ok(AuthProvider::ApiKey(Secret::new(key.to_string())));
+    }
+
+    // Priority 4: OAuth credential file
     let cred_path = default_credentials_path();
     if cred_path.exists() {
         let creds = load_credentials_file(&cred_path)?;
@@ -277,8 +311,7 @@ pub fn resolve_auth_with_keys(
 
 /// Convenience: resolve auth from environment and default credential file.
 ///
-/// Priority: `ANTHROPIC_API_KEY` > `ARCHON_API_KEY` > `ARCHON_OAUTH_TOKEN`
-/// > `ANTHROPIC_AUTH_TOKEN` > OAuth credential file.
+/// Priority: OAuth bearer tokens > API keys > OAuth credential file.
 pub fn resolve_auth_from_env() -> Result<AuthProvider, AuthError> {
     let api_key = std::env::var("ANTHROPIC_API_KEY").ok();
     let archon_api_key = std::env::var("ARCHON_API_KEY").ok();

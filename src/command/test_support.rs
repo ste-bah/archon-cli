@@ -392,6 +392,11 @@ impl CtxBuilder {
         self
     }
 
+    pub fn with_cozo_db(mut self, db: Arc<cozo::DbInstance>) -> Self {
+        self.cozo_db = Some(db);
+        self
+    }
+
     /// Consume the builder and return `(CommandContext, Receiver)`.
     pub fn build(self) -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
         (

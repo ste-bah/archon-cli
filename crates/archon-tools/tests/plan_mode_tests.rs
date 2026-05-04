@@ -39,6 +39,42 @@ fn ask_user_allowed_in_plan_mode() {
 }
 
 #[test]
+fn gametheory_inspection_allowed_in_plan_mode() {
+    for tool in [
+        "GameTheoryStatus",
+        "GameTheoryListAgents",
+        "GameTheoryInspect",
+    ] {
+        assert!(
+            is_tool_allowed_in_mode(tool, AgentMode::Plan),
+            "{tool} should be allowed in plan mode"
+        );
+    }
+}
+
+#[test]
+fn evidence_inspection_allowed_in_plan_mode() {
+    for tool in [
+        "DocList",
+        "DocGet",
+        "DocStatus",
+        "DocSearch",
+        "DocAnswer",
+        "DocProvenance",
+        "DocInspect",
+        "DocModelStatus",
+        "LearningStatus",
+        "LearningInspect",
+        "BehaviourProposals",
+    ] {
+        assert!(
+            is_tool_allowed_in_mode(tool, AgentMode::Plan),
+            "{tool} should be allowed in plan mode"
+        );
+    }
+}
+
+#[test]
 fn write_blocked_in_plan_mode() {
     assert!(!is_tool_allowed_in_mode("Write", AgentMode::Plan));
 }
@@ -51,6 +87,32 @@ fn edit_blocked_in_plan_mode() {
 #[test]
 fn bash_blocked_in_plan_mode() {
     assert!(!is_tool_allowed_in_mode("Bash", AgentMode::Plan));
+}
+
+#[test]
+fn gametheory_mutating_tools_blocked_in_plan_mode() {
+    for tool in [
+        "GameTheoryRun",
+        "GameTheorySpecimens",
+        "GameTheoryReplay",
+        "GameTheoryClassify",
+        "GameTheoryCallSpecialist",
+    ] {
+        assert!(
+            !is_tool_allowed_in_mode(tool, AgentMode::Plan),
+            "{tool} should be blocked in plan mode"
+        );
+    }
+}
+
+#[test]
+fn evidence_mutating_tools_blocked_in_plan_mode() {
+    for tool in ["DocIngest", "BehaviourApprove", "BehaviourRollback"] {
+        assert!(
+            !is_tool_allowed_in_mode(tool, AgentMode::Plan),
+            "{tool} should be blocked in plan mode"
+        );
+    }
 }
 
 #[test]

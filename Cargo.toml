@@ -8,7 +8,7 @@ publish = false
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.1.37"
+version = "0.1.38"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT"
@@ -98,6 +98,7 @@ walkdir = "2"
 moka = { version = "0.12", features = ["sync"] }
 strsim = "0.11"
 globset = "0.4"
+ndarray = "0.16"
 rayon = "1"
 # TASK-AGS-OBS-901 (Stage 10): promoted from archon-tui/Cargo.toml direct pins
 # so archon-observability (new owning crate for ChannelMetrics) and archon-tui
@@ -136,10 +137,18 @@ archon-permissions = { path = "crates/archon-permissions" }
 archon-plugin = { path = "crates/archon-plugin" }
 archon-sdk = { path = "crates/archon-sdk" }
 archon-session = { path = "crates/archon-session" }
+archon-docs = { path = "crates/archon-docs" }
+archon-knowledge = { path = "crates/archon-knowledge" }
+archon-meaning = { path = "crates/archon-meaning" }
+archon-constellation = { path = "crates/archon-constellation" }
+archon-policy = { path = "crates/archon-policy" }
+archon-provenance = { path = "crates/archon-provenance" }
 archon-pipeline = { path = "crates/archon-pipeline" }
+archon-completion = { path = "crates/archon-completion" }
 archon-leann = { path = "crates/archon-leann" }
 archon-tools = { path = "crates/archon-tools" }
 archon-tui = { path = "crates/archon-tui" }
+archon-learning = { path = "crates/archon-learning" }
 reqwest.workspace = true
 openssl.workspace = true
 chrono.workspace = true
@@ -151,6 +160,7 @@ tokio-util.workspace = true
 walkdir.workspace = true
 tracing.workspace = true
 anyhow.workspace = true
+async-trait.workspace = true
 uuid.workspace = true
 semver.workspace = true
 globset.workspace = true

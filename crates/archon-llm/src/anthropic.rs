@@ -328,8 +328,42 @@ impl AnthropicClient {
             "messages": request.messages,
         });
 
-        if !request.system.is_empty() {
-            body["system"] = serde_json::json!(request.system);
+        // Build the system field. When in Spoof mode (e.g. OAuth token), prepend
+        // the canonical Claude Code identity blocks (billing header + identity
+        // prefix) so the request is recognised as Claude Code traffic. Idempotent:
+        // skip prepending if the caller already provided the identity prefix.
+        let mut system_blocks: Vec<serde_json::Value> = Vec::new();
+        if matches!(self.identity.mode, crate::identity::IdentityMode::Spoof { .. }) {
+            let already_has_identity = request.system.iter().any(|b| {
+                b.get("text")
+                    .and_then(|t| t.as_str())
+                    .map(|s| s.starts_with("You are Claude Code,"))
+                    .unwrap_or(false)
+            });
+            if !already_has_identity {
+                let first_user_msg = request
+                    .messages
+                    .first()
+                    .and_then(|m| m.get("content"))
+                    .and_then(|c| c.as_str())
+                    .unwrap_or("");
+                if let Some(billing) = self.identity.billing_header(first_user_msg) {
+                    system_blocks.push(serde_json::json!({
+                        "type": "text",
+                        "text": billing,
+                        "cache_control": { "type": "ephemeral" }
+                    }));
+                }
+                system_blocks.push(serde_json::json!({
+                    "type": "text",
+                    "text": "You are Claude Code, Anthropic's official CLI for Claude.",
+                    "cache_control": { "type": "ephemeral", "scope": "org" }
+                }));
+            }
+        }
+        system_blocks.extend(request.system.iter().cloned());
+        if !system_blocks.is_empty() {
+            body["system"] = serde_json::json!(system_blocks);
         }
 
         if !request.tools.is_empty() {

@@ -28,6 +28,39 @@ graph TB
     AC --> CM
 ```
 
+## Memory And Self-Learning Loop
+
+Archon has two loops that reinforce each other. The first loop improves
+reasoning during agent and pipeline execution. The second loop turns verified
+outcomes into governed, inspectable system changes.
+
+```mermaid
+flowchart TB
+    TURN["Agent turn / pipeline step"] --> CAPTURE["AutoCapture<br/>facts, trajectory, outcome"]
+    CAPTURE --> MEMORY["Memory graph<br/>entities, relations, embeddings"]
+    CAPTURE --> SONA2["SONA trajectories"]
+    MEMORY --> RB2["ReasoningBank<br/>12 modes + Hybrid"]
+    SONA2 --> RB2
+    RB2 --> NEXT["Next prompt/context"]
+    NEXT --> TURN
+
+    CAPTURE --> EVENTS["Learning events"]
+    EVENTS --> PROPOSALS["Behaviour proposals"]
+    PROPOSALS --> POLICY["Policy gate<br/>default deny"]
+    POLICY --> MANIFESTS["Versioned manifests"]
+    MANIFESTS --> NEXT
+    EVENTS --> MEANING["Meaning compiler<br/>samples/pairs/triplets"]
+    MEANING --> GNN2["GNN training / enhancement"]
+    GNN2 --> MEMORY
+    MEANING --> CONST["Constellation centroids"]
+    CONST --> NEXT
+```
+
+Practically, this means Archon can remember useful prior work, retrieve it
+semantically, detect contradictions, learn from false completions or accepted
+outputs, and suggest behaviour changes without silently rewriting itself.
+Risky changes go through governed learning and policy gates.
+
 ## System details
 
 ### SONA (Self-Organizing Network Architecture)
@@ -175,6 +208,28 @@ ReasoningBank
 [other systems...]
 ```
 
+## Evidence Engine Learning Commands
+
+The Evidence Engine adds CLI surfaces for inspecting learning state beyond the
+pipeline telemetry view:
+
+```bash
+archon completion incidents
+archon completion trust --agent verifier --model sonnet
+archon behaviour status
+archon behaviour list-events
+archon behaviour generate-proposals
+archon behaviour approve <proposal-id>
+archon behaviour history <manifest-kind>
+archon meaning build --from learning-events
+archon meaning triplets
+archon constellation build --target strategic-workflow
+archon constellation drift --target strategic-workflow --text "new workflow description"
+```
+
+Use these when you want to know not just "what did the model say?", but "what
+did Archon store, learn, propose, apply, or reject?"
+
 ## Configuration
 
 ```toml
@@ -246,3 +301,4 @@ min_confidence = 0.6
 - [Pipelines](pipelines.md) — how the learning systems integrate with the 50-agent and 46-agent pipelines
 - [Configuration](../reference/config.md) — full config schema
 - [Memory cookbook](../cookbook/memory-driven-coding.md) — using SONA + ReasoningBank in practice
+- [Governed learning](../governed-learning.md) — proposal, approval, and rollback workflow

@@ -1,0 +1,42 @@
+# Knowledge Base
+
+The knowledge base extracts structured claims, entities, relations, source
+quality, and contradictions from document chunks. It is the bridge between raw
+document intelligence and higher-level reasoning pipelines.
+
+## CLI
+
+Current `archon kb --help` surface:
+
+| Command | Purpose | Important flags |
+|---|---|---|
+| `ingest <source>` | Ingest a file, URL, or directory into the KB | `--domain` |
+| `list` | List all nodes | none |
+| `search <query>` | Search nodes | `--limit`, `--mode exact|semantic|hybrid` |
+| `process` | Extract structured intelligence from doc chunks | `--claims`, `--entities`, `--relations`, `--contradictions` |
+| `claims` | List extracted claims | none |
+| `entities` | List extracted entities | none |
+| `relations` | List inferred relations | none |
+| `contradictions` | List detected contradictions | none |
+| `stats` | Show KB statistics | none |
+
+## Source of truth
+
+The expected persisted relations are claims, entities, relations, source-quality
+records, and contradictions. `archon kb process` should write those rows from
+real document chunks, and the list/search commands should read them back.
+
+## Full State Verification
+
+```bash
+archon docs ingest ./fixtures/policy-pack
+archon kb process --claims --entities --relations --contradictions
+archon kb claims
+archon kb entities
+archon kb relations
+archon kb contradictions
+archon kb stats
+```
+
+Edge cases should include empty document stores, duplicate chunks, invalid
+source paths, contradictory fixture claims, and searches with no matches.

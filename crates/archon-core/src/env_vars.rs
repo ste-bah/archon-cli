@@ -40,7 +40,11 @@ pub const KNOWN_ARCHON_VARS: &[&str] = &[
     "ARCHON_LOG",
     // Paths
     "ARCHON_CONFIG_DIR",
+    "ARCHON_CONSTELLATION_DB_PATH",
     "ARCHON_DATA_DIR",
+    "ARCHON_KB_DB_PATH",
+    "ARCHON_MEANING_DB_PATH",
+    "ARCHON_PROV_DB_PATH",
     // Telemetry (recognized but no-op)
     "ARCHON_DISABLE_TELEMETRY",
 ];

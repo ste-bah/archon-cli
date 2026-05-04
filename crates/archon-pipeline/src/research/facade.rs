@@ -20,7 +20,7 @@ use async_trait::async_trait;
 
 use archon_memory::{MemoryTrait, MemoryType, SearchFilter};
 
-use crate::coding::rlm::LeannSearcher;
+use crate::leann_searcher::LeannSearcher;
 use crate::runner::{
     AgentInfo, AgentResult, NextAgent, PipelineFacade, PipelineResult, PipelineSession,
     PipelineType, QualityScore, ToolAccessLevel,

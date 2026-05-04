@@ -1,6 +1,30 @@
 # Pipelines
 
-archon-cli ships two production pipelines: a 50-agent coding pipeline and a 46-agent research pipeline. Both are stateful, resumable, and integrate with the learning systems.
+archon-cli ships three production pipeline families: a 50-agent coding pipeline,
+a 46-agent research pipeline, and the Evidence Engine game-theory pipeline.
+They are stateful, resumable, and integrate with memory, provenance, and
+governed learning.
+
+```mermaid
+flowchart TB
+    USER["User task"] --> CHOOSE{"Pipeline type"}
+    CHOOSE --> CODE["Coding pipeline<br/>50 agents / 6 phases"]
+    CHOOSE --> RESEARCH["Research pipeline<br/>46 agents / 7 phases"]
+    CHOOSE --> GT["Game-theory pipeline<br/>84 specialists / 12 tiers"]
+
+    CODE --> ART["Structured artifacts<br/>spec, exploration, architecture, implementation, quality, signoff"]
+    RESEARCH --> PAPERS["Research artifacts<br/>questions, literature map, synthesis, methodology, manuscript"]
+    GT --> STRAT["Strategic artifacts<br/>fingerprint, routing, specialist outputs, sections, report"]
+
+    ART --> PROV["Provenance and completion integrity"]
+    PAPERS --> PROV
+    STRAT --> PROV
+    PROV --> LEARN["Learning events and governed proposals"]
+    LEARN --> RB["ReasoningBank / memory / constellations"]
+    RB --> CODE
+    RB --> RESEARCH
+    RB --> GT
+```
 
 ## Coding pipeline (50 agents)
 
@@ -89,6 +113,37 @@ Triggered by `/archon-research` (or `archon pipeline research <topic>`). 7 phase
 
 46 total agents. Backed by DESC episodic memory across phases.
 
+## Game-Theory Evidence Pipeline
+
+Triggered by `archon gametheory ...` or `/gametheory run ...`. It classifies a
+strategic situation, builds a 9-axis fingerprint, routes through the
+project-local `.archon/specs/gametheory.yaml`, executes selected specialists in
+dependency-respecting parallel waves, and persists the report.
+
+Use it for:
+
+- Incentive design and mechanism-design questions
+- Marketplace and platform strategy
+- Competitive retaliation or coordination risks
+- Negotiation, bargaining, and principal-agent problems
+- Strategic policy, governance, and ecosystem design
+
+Example:
+
+```bash
+archon gametheory \
+  "Assess the incentive structure of this plugin marketplace design" \
+  --kb policy-pack \
+  --budget 20 \
+  --max-concurrent 4 \
+  --style executive \
+  --debug-memory
+```
+
+State is persisted to `gt_runs`, `gt_fingerprints`,
+`gt_routing_decisions`, `gt_specialist_outputs`, `gt_sections`,
+`gt_final_reports`, and `gt_run_checkpoints`.
+
 ## Pipeline execution
 
 ```bash
@@ -99,6 +154,9 @@ archon pipeline code "implement OAuth2 token refresh with file locking"
 # Research
 archon pipeline research "literature review on graph attention networks" --dry-run
 archon pipeline research "literature review on graph attention networks"
+
+# Game theory
+archon gametheory "Assess this marketplace incentive design" --kb policy-pack
 
 # Status
 archon pipeline status <session-id>
@@ -182,3 +240,5 @@ Modes:
 - [god-code cookbook](../cookbook/god-code-pipeline.md) — full coding-pipeline walkthrough
 - [Custom agents](../cookbook/custom-agent-workflows.md) — writing your own agents
 - [Adding an agent](../development/adding-an-agent.md) — agent definition format
+- [Game theory](../gametheory.md) — strategic Evidence Engine pipeline
+- [Real-world examples](../cookbook/real-world-evidence-engine.md)
