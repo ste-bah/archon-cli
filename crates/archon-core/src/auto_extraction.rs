@@ -110,6 +110,7 @@ impl AutoExtractor {
             effort: None,
             extra: serde_json::Value::Null,
             request_origin: Some("auto_extraction".into()),
+            reasoning_encrypted: None,
         };
 
         let response: LlmResponse = self

@@ -86,6 +86,8 @@ pub struct LlmRequest {
     pub extra: serde_json::Value,
     /// Diagnostic marker for tracing: "main_session", "subagent", or None.
     pub request_origin: Option<String>,
+    /// Opaque Codex Responses API reasoning blob to round-trip across turns.
+    pub reasoning_encrypted: Option<String>,
 }
 
 impl Default for LlmRequest {
@@ -101,7 +103,15 @@ impl Default for LlmRequest {
             effort: None,
             extra: serde_json::Value::Null,
             request_origin: None,
+            reasoning_encrypted: None,
         }
+    }
+}
+
+impl LlmRequest {
+    pub fn with_reasoning_encrypted(mut self, blob: Option<String>) -> Self {
+        self.reasoning_encrypted = blob;
+        self
     }
 }
 
@@ -119,6 +129,7 @@ impl From<MessageRequest> for LlmRequest {
             effort: mr.effort,
             extra: serde_json::Value::Null,
             request_origin: None,
+            reasoning_encrypted: None,
         }
     }
 }

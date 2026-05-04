@@ -174,6 +174,7 @@ async fn deepseek_chat_response_with_logprobs_parses_ok() {
         effort: None,
         extra: serde_json::Value::Null,
         request_origin: None,
+        reasoning_encrypted: None,
     };
 
     let resp = provider
@@ -240,6 +241,7 @@ async fn default_quirks_provider_parses_vanilla_body() {
         effort: None,
         extra: serde_json::Value::Null,
         request_origin: None,
+        reasoning_encrypted: None,
     };
     let resp = provider.complete(req).await.expect("default quirks path");
     assert_eq!(resp.content[0]["text"].as_str(), Some("plain"));

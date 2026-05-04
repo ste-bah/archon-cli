@@ -692,6 +692,7 @@ pub mod runner {
                     effort,
                     extra: serde_json::Value::Null,
                     request_origin: Some("subagent".into()),
+                    reasoning_encrypted: None,
                 };
 
                 // Stream the response

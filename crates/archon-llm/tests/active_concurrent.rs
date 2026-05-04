@@ -69,6 +69,7 @@ fn sample_request() -> LlmRequest {
         effort: None,
         extra: serde_json::Value::Null,
         request_origin: None,
+        reasoning_encrypted: None,
     }
 }
 
