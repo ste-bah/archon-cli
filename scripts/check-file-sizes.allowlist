@@ -254,3 +254,6 @@ crates/archon-pipeline/src/gametheory/schema.rs
 src/command/docs.rs
 src/command/gametheory.rs
 src/command/gametheory_slash.rs
+
+# --- v0.1.40 Codex OAuth provider ---
+crates/archon-llm/src/providers/codex/spoof.rs
