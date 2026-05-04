@@ -20,6 +20,24 @@ pub enum AuthError {
 
     #[error("no credentials found: {0}")]
     NoCredentials(String),
+
+    #[error("OAuth state mismatch (CSRF protection)")]
+    StateMismatch,
+
+    #[error("JWT decode failed: {0}")]
+    JwtDecodeFailed(String),
+
+    #[error("token exchange failed (HTTP {status}): {body}")]
+    TokenExchangeFailed { status: u16, body: String },
+
+    #[error("token refresh failed (HTTP {status}): {body}")]
+    RefreshFailed { status: u16, body: String },
+
+    #[error("callback server bind failed: {0}")]
+    CallbackBindFailed(String),
+
+    #[error("OAuth login timed out after {0}s")]
+    CallbackTimeout(u64),
 }
 
 // ---------------------------------------------------------------------------
@@ -44,11 +62,29 @@ impl OAuthCredentials {
     }
 }
 
+/// Parsed Codex OAuth credentials from `openaiCodexOauth`.
+#[derive(Debug, Clone)]
+pub struct CodexCredentials {
+    pub access_token: Secret<String>,
+    pub refresh_token: Secret<String>,
+    pub expires_at: DateTime<Utc>,
+    pub account_id: String,
+}
+
+impl CodexCredentials {
+    /// Returns true if the token is expired or within the 5-minute refresh buffer.
+    pub fn is_expired(&self) -> bool {
+        let buffer = chrono::Duration::minutes(5);
+        Utc::now() + buffer >= self.expires_at
+    }
+}
+
 /// The resolved authentication method.
 #[derive(Debug, Clone)]
 pub enum AuthProvider {
     ApiKey(Secret<String>),
     OAuthToken(OAuthCredentials),
+    CodexOAuthToken(CodexCredentials),
     BearerToken(Secret<String>),
 }
 
@@ -82,6 +118,10 @@ impl AuthProvider {
                 "Authorization".to_string(),
                 format!("Bearer {}", creds.access_token.expose()),
             ),
+            AuthProvider::CodexOAuthToken(creds) => (
+                "Authorization".to_string(),
+                format!("Bearer {}", creds.access_token.expose()),
+            ),
             AuthProvider::BearerToken(token) => (
                 "Authorization".to_string(),
                 format!("Bearer {}", token.expose()),
@@ -98,6 +138,8 @@ impl AuthProvider {
 struct CredentialFile {
     #[serde(rename = "claudeAiOauth")]
     claude_ai_oauth: Option<RawOAuthCredentials>,
+    #[serde(rename = "openaiCodexOauth")]
+    openai_codex_oauth: Option<RawCodexCredentials>,
 }
 
 #[derive(Deserialize)]
@@ -112,6 +154,19 @@ struct RawOAuthCredentials {
     scopes: Vec<String>,
     #[serde(rename = "subscriptionType")]
     subscription_type: String,
+}
+
+#[derive(Deserialize)]
+struct RawCodexCredentials {
+    #[serde(rename = "accessToken")]
+    access_token: String,
+    #[serde(rename = "refreshToken")]
+    refresh_token: String,
+    #[serde(rename = "expiresAt")]
+    #[serde(deserialize_with = "deserialize_expires_at")]
+    expires_at: DateTime<Utc>,
+    #[serde(rename = "accountId")]
+    account_id: String,
 }
 
 /// Deserialize `expiresAt` from either epoch-ms integer or RFC 3339 string.
@@ -171,6 +226,23 @@ pub fn parse_credentials_json(json: &str) -> Result<OAuthCredentials, AuthError>
         expires_at: raw.expires_at,
         scopes: raw.scopes,
         subscription_type: raw.subscription_type,
+    })
+}
+
+/// Parse a credential JSON string into `CodexCredentials`.
+pub fn parse_codex_credentials_json(json: &str) -> Result<CodexCredentials, AuthError> {
+    let file: CredentialFile = serde_json::from_str(json)
+        .map_err(|e| AuthError::ParseError(format!("invalid JSON: {e}")))?;
+
+    let raw = file
+        .openai_codex_oauth
+        .ok_or_else(|| AuthError::ParseError("missing openaiCodexOauth key".into()))?;
+
+    Ok(CodexCredentials {
+        access_token: Secret::new(raw.access_token),
+        refresh_token: Secret::new(raw.refresh_token),
+        expires_at: raw.expires_at,
+        account_id: raw.account_id,
     })
 }
 

@@ -1066,6 +1066,10 @@ pub(crate) async fn run_interactive_session(
                 tracing::info!("authenticated via bearer token");
                 a
             }
+            archon_llm::auth::AuthProvider::CodexOAuthToken(_) => {
+                tracing::info!("authenticated via Codex OAuth token");
+                a
+            }
         },
         Err(e) => {
             eprintln!("Authentication failed: {e}");
@@ -2303,6 +2307,7 @@ pub(crate) async fn run_interactive_session(
         std::env::var("ANTHROPIC_AUTH_TOKEN").ok().as_deref(),
     ) {
         Ok(archon_llm::auth::AuthProvider::OAuthToken(_)) => "OAuth".to_string(),
+        Ok(archon_llm::auth::AuthProvider::CodexOAuthToken(_)) => "Codex OAuth".to_string(),
         Ok(archon_llm::auth::AuthProvider::ApiKey(_)) => "API key".to_string(),
         Ok(archon_llm::auth::AuthProvider::BearerToken(_)) => "Bearer token".to_string(),
         Err(_) => "none".to_string(),

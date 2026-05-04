@@ -52,6 +52,7 @@ arc-swap.workspace = true
 async-trait.workspace = true
 uuid.workspace = true
 reqwest = { workspace = true, features = ["blocking"] }
+serial_test.workspace = true
 # TASK-AGS-703: wiremock HTTP mock server for OpenAiCompatProvider integration tests.
 wiremock = { workspace = true }
 # TASK-AGS-706: TOML round-trip tests for LlmConfig.
@@ -65,3 +66,6 @@ tokio = { workspace = true, features = ["test-util"] }
 # and `response::sse::{Sse, Event, KeepAlive}` without any extra deps.
 axum = { workspace = true }
 futures-util = { workspace = true }
+
+[features]
+test-support = []
