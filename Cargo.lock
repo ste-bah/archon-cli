@@ -334,6 +334,7 @@ dependencies = [
  "archon-permissions",
  "archon-pipeline",
  "archon-plugin",
+ "archon-provenance",
  "archon-sdk",
  "archon-session",
  "archon-tools",
@@ -365,6 +366,7 @@ name = "archon-completion"
 version = "0.1.36"
 dependencies = [
  "anyhow",
+ "archon-provenance",
  "async-trait",
  "chrono",
  "cozo-ce",
@@ -472,6 +474,7 @@ name = "archon-docs"
 version = "0.1.36"
 dependencies = [
  "anyhow",
+ "archon-provenance",
  "async-trait",
  "chrono",
  "cozo-ce",
@@ -725,6 +728,21 @@ dependencies = [
  "tracing",
  "wasmtime",
  "wat",
+]
+
+[[package]]
+name = "archon-provenance"
+version = "0.1.36"
+dependencies = [
+ "chrono",
+ "cozo-ce",
+ "hex",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 2.0.18",
+ "uuid",
 ]
 
 [[package]]

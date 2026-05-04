@@ -21,6 +21,7 @@ walkdir = "2"
 fastembed.workspace = true
 ndarray.workspace = true
 dirs.workspace = true
+archon-provenance = { path = "../archon-provenance" }
 
 [dev-dependencies]
 tempfile = "3"

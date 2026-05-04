@@ -74,6 +74,7 @@ pub(crate) mod plugin;
 // TASK-#216 SLASH-PLUGIN: /plugin umbrella (list/info/hint subcommands).
 pub(crate) mod plugin_slash;
 // TASK-#210 SLASH-PROVIDERS: /providers list registered LLM providers.
+pub(crate) mod prov;
 pub(crate) mod providers;
 // TASK-#217 SLASH-RELOAD-PLUGINS: /reload-plugins disk re-scan.
 pub(crate) mod recall;

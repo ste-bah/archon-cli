@@ -4,8 +4,6 @@
 //!   chain_hash = SHA256(parent_hashes | operation | input_hashes | output_hash
 //!                        | tool | model | parameters_json)
 
-use sha2::{Digest, Sha256};
-
 use crate::models::{ProvenanceEdge, ProvenanceEdgeType};
 
 /// Create a provenance link between two artifacts.
@@ -38,21 +36,15 @@ pub fn chain_hash(
     model: Option<&str>,
     parameters_json: &str,
 ) -> String {
-    let mut hasher = Sha256::new();
-
-    for ph in parent_hashes {
-        hasher.update(ph.as_bytes());
-    }
-    hasher.update(operation.as_bytes());
-    for ih in input_hashes {
-        hasher.update(ih.as_bytes());
-    }
-    hasher.update(output_hash.as_bytes());
-    hasher.update(tool.unwrap_or(""));
-    hasher.update(model.unwrap_or(""));
-    hasher.update(parameters_json.as_bytes());
-
-    hex::encode(hasher.finalize())
+    archon_provenance::chain::chain_hash_from_str(
+        parent_hashes,
+        operation,
+        input_hashes,
+        output_hash,
+        tool,
+        model,
+        parameters_json,
+    )
 }
 
 /// Build a provenance chain for document → page → chunk.

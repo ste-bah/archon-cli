@@ -189,9 +189,51 @@ fn find_ingestion_evidence(db: &DbInstance, run_id: &str) -> Result<Vec<Completi
     Ok(evidence)
 }
 
-/// Find citation evidence — check vec_text_chunks for relevant chunks.
-fn find_citation_evidence(_db: &DbInstance, run_id: &str) -> Result<Vec<CompletionEvidence>> {
-    Ok(vec![missing_evidence_record(run_id, EvidenceKind::CitationTrace, "citation trace resolution deferred to Phase 6")])
+/// Find citation evidence via the shared provenance traversal API.
+fn find_citation_evidence(db: &DbInstance, run_id: &str) -> Result<Vec<CompletionEvidence>> {
+    let trace = archon_provenance::traverse::trace_artifact(db, run_id)?;
+    if trace.edges.is_empty() {
+        return Ok(vec![missing_evidence_record(
+            run_id,
+            EvidenceKind::CitationTrace,
+            "no provenance trace found for completion artifact",
+        )]);
+    }
+
+    let now = chrono::Utc::now().to_rfc3339();
+    Ok(vec![CompletionEvidence {
+        evidence_id: format!(
+            "ev-{}",
+            uuid::Uuid::new_v4().to_string().replace('-', "")[..12].to_string()
+        ),
+        run_id: run_id.to_string(),
+        evidence_kind: EvidenceKind::CitationTrace,
+        producer: "archon-provenance".into(),
+        command_or_operation: Some("trace_artifact".into()),
+        status: if trace.reaches_source() {
+            EvidenceStatus::Passed
+        } else {
+            EvidenceStatus::Unknown
+        },
+        exit_code: Some(if trace.reaches_source() { 0 } else { 1 }),
+        input_hash: None,
+        output_hash: None,
+        stdout_summary: Some(format!(
+            "provenance trace: {} node(s), {} edge(s), reaches_source={}",
+            trace.nodes.len(),
+            trace.edges.len(),
+            trace.reaches_source()
+        )),
+        stderr_summary: None,
+        artifact_ids: trace
+            .nodes
+            .iter()
+            .map(|node| node.artifact_id.clone())
+            .collect(),
+        provenance_record_id: run_id.to_string(),
+        started_at: now.clone(),
+        completed_at: Some(now),
+    }])
 }
 
 /// Find file diff / generated artifact evidence.

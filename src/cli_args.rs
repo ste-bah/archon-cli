@@ -458,6 +458,11 @@ pub enum Commands {
         #[command(subcommand)]
         action: DocsAction,
     },
+    /// Inspect and export provenance traces
+    Prov {
+        #[command(subcommand)]
+        action: ProvAction,
+    },
     /// Game-theory strategic analysis
     Gametheory {
         #[command(subcommand)]
@@ -785,6 +790,25 @@ pub enum DocsAction {
     },
     /// Report embedding model and backend status
     ModelStatus,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum ProvAction {
+    /// Trace an artifact to its source lineage
+    Trace {
+        /// Artifact ID to trace
+        artifact_id: String,
+    },
+    /// Export an artifact trace as W3C PROV JSON-LD
+    Export {
+        /// Artifact ID to export
+        artifact_id: String,
+    },
+    /// Verify an artifact trace reaches source provenance
+    Verify {
+        /// Artifact ID to verify
+        artifact_id: String,
+    },
 }
 
 #[derive(Subcommand, Debug)]
