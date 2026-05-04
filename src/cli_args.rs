@@ -5,7 +5,7 @@
 
 use std::path::PathBuf;
 
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 
 /// Archon CLI -- Rust-native AI agent runtime
 #[derive(Parser, Debug)]
@@ -291,8 +291,12 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
-    /// Authenticate with Anthropic via OAuth PKCE flow
+    /// Authenticate with Anthropic via OAuth PKCE flow (deprecated alias for `auth login`)
     Login,
+    /// Manage provider authentication
+    Auth(AuthArgs),
+    /// Single-turn chat completion against a selected provider
+    Chat(ChatArgs),
     /// Manage plugins
     Plugin {
         #[command(subcommand)]
@@ -509,6 +513,52 @@ pub enum Commands {
         #[command(subcommand)]
         action: CompletionAction,
     },
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct AuthArgs {
+    #[command(subcommand)]
+    pub command: AuthSubcommand,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum AuthSubcommand {
+    Login {
+        #[arg(long, value_enum, default_value = "anthropic")]
+        provider: AuthProviderKind,
+        #[arg(long, help = "Skip TOS warning prompt for this invocation only")]
+        accept_tos: bool,
+    },
+    Status,
+    Logout {
+        #[arg(long, value_enum)]
+        provider: Option<AuthProviderKind>,
+    },
+}
+
+#[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuthProviderKind {
+    Anthropic,
+    #[value(name = "openai-codex")]
+    OpenaiCodex,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct ChatArgs {
+    /// Provider id (e.g. "anthropic", "openai-codex")
+    #[arg(long, default_value = "anthropic")]
+    pub provider: String,
+    /// Model id override
+    #[arg(long)]
+    pub model: Option<String>,
+    /// Disable streaming; print full response after completion
+    #[arg(long)]
+    pub no_stream: bool,
+    /// Maximum output tokens
+    #[arg(long, default_value_t = 1024)]
+    pub max_tokens: u32,
+    /// User prompt
+    pub prompt: String,
 }
 
 #[derive(Subcommand, Debug)]

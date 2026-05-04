@@ -174,7 +174,22 @@ async fn main() -> Result<()> {
     // Handle subcommands
     match cli.command {
         Some(Commands::Login) => {
-            return crate::command::login::handle_login(&config).await;
+            return crate::command::auth::handle_auth(
+                crate::cli_args::AuthArgs {
+                    command: crate::cli_args::AuthSubcommand::Login {
+                        provider: crate::cli_args::AuthProviderKind::Anthropic,
+                        accept_tos: true,
+                    },
+                },
+                &config,
+            )
+            .await;
+        }
+        Some(Commands::Auth(args)) => {
+            return crate::command::auth::handle_auth(args, &config).await;
+        }
+        Some(Commands::Chat(args)) => {
+            return crate::command::chat::handle_chat(args, &config).await;
         }
         Some(Commands::Plugin { action }) => {
             return crate::command::plugin::handle_plugin_command(action);

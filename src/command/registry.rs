@@ -1855,6 +1855,20 @@ pub(crate) fn default_registry() -> Registry {
             "Run pipeline CLI commands from inside the TUI",
         )),
     );
+    b.insert_primary(
+        "auth",
+        Arc::new(crate::command::cli_mirror::CliMirrorHandler::prefixed(
+            "auth",
+            "Run auth CLI commands from inside the TUI",
+        )),
+    );
+    b.insert_primary(
+        "chat",
+        Arc::new(crate::command::cli_mirror::CliMirrorHandler::prefixed(
+            "chat",
+            "Run chat CLI commands from inside the TUI",
+        )),
+    );
     b.insert_primary("fork", Arc::new(ForkHandler));
     b.insert_primary("checkpoint", Arc::new(CheckpointHandler::new()));
     b.insert_primary("add-dir", Arc::new(AddDirHandler));
