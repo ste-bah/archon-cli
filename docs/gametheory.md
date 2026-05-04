@@ -37,6 +37,34 @@ archon gametheory run "Assess this plugin marketplace design" \
   --debug-memory
 ```
 
+## Real-World Uses
+
+Good prompts include the strategic actors, the decision being made, and the
+source pack to ground the analysis:
+
+```bash
+archon gametheory \
+  "Assess whether a marketplace ranking algorithm creates incentives for plugin developers to game reviews instead of improve quality" \
+  --kb plugin-marketplace \
+  --style executive
+
+archon gametheory \
+  "Analyze bargaining power between a SaaS platform, enterprise buyers, and third-party integration vendors" \
+  --kb partner-diligence \
+  --style academic \
+  --debug-memory
+
+archon gametheory \
+  "Evaluate whether competitors are likely to retaliate against a price cut in this infrastructure market" \
+  --kb market-thesis \
+  --style technical \
+  --budget 15
+```
+
+Use `--style executive` for board-level recommendations, `--style academic`
+for theory-heavy reasoning, and `--style technical` for mechanism details and
+assumptions.
+
 ## Source of truth
 
 The pipeline persists real state into Cozo relations including:
@@ -103,3 +131,6 @@ installed:
 
 These tools call the same persisted machinery as the CLI. They should not print
 canned text without writing or reading the expected Cozo state.
+
+See [Real-world Evidence Engine examples](cookbook/real-world-evidence-engine.md)
+for business, trading-research, education, coding, and research workflows.

@@ -48,6 +48,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 ## Cookbook
 
 - [Strategic engagement research](cookbook/strategic-engagement.md) — 22-document intelligence package workflow
+- [Real-world Evidence Engine examples](cookbook/real-world-evidence-engine.md) — research, education, business, trading, coding, and strategic analysis workflows
 - [Memory-driven coding](cookbook/memory-driven-coding.md) — using SONA + ReasoningBank to inform decisions
 - [Running god-code pipelines](cookbook/god-code-pipeline.md) — 50-agent coding workflow end-to-end
 - [Custom agent workflows](cookbook/custom-agent-workflows.md) — `/create-agent`, `/run-agent`, `/evolve-agent`
@@ -76,6 +77,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 
 ## Release notes
 
+- [v0.1.36](release-notes/v0.1.36.md) — trajectory embeddings + persistence
 - [v0.1.35](release-notes/v0.1.35.md) — Archon skills pack + project installer
 - [v0.1.34](release-notes/v0.1.34.md) — Engineering skills pack
 - [v0.1.33](release-notes/v0.1.33.md) — Skills foundation (embedded templates, /to-prd, /prd-to-spec)

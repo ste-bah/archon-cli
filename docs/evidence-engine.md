@@ -20,6 +20,35 @@ transient model output.
 | Constellation | `archon-constellation` | versioned centroid profiles | `archon constellation ...` |
 | Policy | `archon-policy` | layered TOML policy files | read by feature gates |
 
+```mermaid
+flowchart TB
+    subgraph Inputs
+        FILES["PDF / DOCX / Markdown / text"]
+        IMAGES["PNG / JPEG / TIFF / scanned pages"]
+        CODE["Code and pipeline artifacts"]
+        FEEDBACK["User corrections and verified outcomes"]
+    end
+
+    FILES --> DOCS["Document Intelligence"]
+    IMAGES --> DOCS
+    DOCS --> KB["Knowledge Extraction"]
+    DOCS --> RET["Hybrid Retrieval"]
+    DOCS --> PROV["Document Provenance"]
+
+    KB --> GT["Game-Theory Pipeline"]
+    RET --> GT
+    CODE --> COMP["Completion Integrity"]
+    GT --> REPORT["Strategic Report"]
+    RET --> ANSWER["Grounded Answer"]
+    ANSWER --> PROV
+    REPORT --> PROV
+    COMP --> LEARN["Governed Learning"]
+    FEEDBACK --> LEARN
+    LEARN --> MEAN["Meaning Compiler"]
+    MEAN --> CONST["Constellation Centroids"]
+    CONST --> GT
+```
+
 ## End-to-end flow
 
 ```bash
@@ -105,6 +134,7 @@ See the focused guides for command details:
 - [Governed learning](governed-learning.md)
 - [Policy](policy.md)
 - [Provenance](provenance.md)
+- [Real-world examples](cookbook/real-world-evidence-engine.md)
 
 ## Derived learning commands
 

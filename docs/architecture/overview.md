@@ -1,6 +1,9 @@
 # Architecture overview
 
-archon-cli is a Cargo workspace of 21 crates organized in 5 layers. The `archon` binary is the integration point.
+archon-cli is a Cargo workspace organized around one integration binary,
+long-lived local state, multi-agent pipelines, and the Evidence Engine. The
+`archon` binary is the integration point for CLI commands, slash commands,
+TUI screens, agent tools, and background jobs.
 
 ## Layered crate structure
 
@@ -27,6 +30,16 @@ graph TB
             PIPE["archon-pipeline<br/>(50 coding + 46 research agents)"]
             LEANN["archon-leann<br/>(semantic code search)"]
         end
+        subgraph evidence["Evidence Engine Layer"]
+            DOCS["archon-docs<br/>docs / OCR / retrieval"]
+            KB["archon-knowledge<br/>claims / entities / contradictions"]
+            PROV["archon-provenance<br/>lineage / W3C PROV"]
+            COMP["archon-completion<br/>claim verification / trust"]
+            LEARN["archon-learning<br/>events / proposals / manifests"]
+            MEAN["archon-meaning<br/>samples / pairs / triplets"]
+            CONST["archon-constellation<br/>centroids / drift"]
+            POLICY["archon-policy<br/>default-deny gates"]
+        end
         subgraph infra["Infrastructure Layer"]
             PLUGIN["archon-plugin<br/>(dyn loading)"]
             SDK["archon-sdk<br/>(embedding / IDE)"]
@@ -44,6 +57,23 @@ graph TB
     PIPE --> LLM
     PIPE --> LEANN
     PIPE --> MEMORY
+    CORE --> DOCS
+    CORE --> KB
+    CORE --> PROV
+    CORE --> COMP
+    CORE --> LEARN
+    CORE --> MEAN
+    CORE --> CONST
+    DOCS --> KB
+    DOCS --> PROV
+    KB --> PIPE
+    PIPE --> PROV
+    COMP --> LEARN
+    LEARN --> MEAN
+    MEAN --> CONST
+    POLICY --> DOCS
+    POLICY --> PIPE
+    POLICY --> LEARN
     CONSC --> MEMORY
     TOOLS --> MCP
     TOOLS --> PERMS
@@ -63,17 +93,50 @@ graph TB
 | `archon-session` | Per-session checkpoint store (CozoDB) |
 | `archon-memory` | Memory graph with embeddings (CozoDB) |
 | `archon-llm` | Claude API client + identity spoofing |
-| `archon-tools` | 43 built-in tools |
+| `archon-tools` | Built-in tools, including Evidence Engine and game-theory tools |
 | `archon-permissions` | 7 permission modes + rule lists + sandboxing |
 | `archon-mcp` | Model Context Protocol transport |
-| `archon-pipeline` | 50-agent coding pipeline + 46-agent research pipeline + learning systems |
+| `archon-pipeline` | 50-agent coding pipeline, 46-agent research pipeline, game-theory pipeline, learning systems |
 | `archon-leann` | LEANN semantic code search |
+| `archon-docs` | Document ingest, OCR, VLM policy, embeddings, exact/semantic/hybrid retrieval |
+| `archon-knowledge` | Claims, entities, relations, source quality, contradiction scanning |
+| `archon-provenance` | Chain hashes, provenance traversal, W3C PROV JSON-LD export |
+| `archon-completion` | Completion claim extraction, evidence gates, incidents, trust scores |
+| `archon-learning` | Learning events, behaviour proposals, manifests, approval/rollback |
+| `archon-meaning` | Derived labels, contrastive pairs, triplets, evaluation datasets |
+| `archon-constellation` | Project/research/workflow centroids, scoring, drift detection |
+| `archon-policy` | Layered TOML policy gates for risky behaviour |
 | `archon-plugin` | Plugin loading + manifest parsing |
 | `archon-sdk` | Embedding API + IDE bridge |
 | `archon-context` | Context compaction |
 | `archon-observability` | Metrics, tracing, structured logs |
 
-The remaining 5 crates are internal helpers (`archon-config`, `archon-types`, etc.).
+The remaining crates are internal helpers and test/observability support.
+
+## Evidence Engine Flow
+
+The Evidence Engine adds a durable reasoning loop on top of the agent loop:
+
+```mermaid
+flowchart LR
+    INPUT["Files, images, PDFs, prompts, code, user feedback"] --> INGEST["Ingest / Capture"]
+    INGEST --> DOCROWS["Document rows<br/>pages, chunks, OCR, hashes"]
+    DOCROWS --> RETRIEVE["Exact + semantic + hybrid retrieval"]
+    DOCROWS --> KBROWS["Knowledge rows<br/>claims, entities, relations, contradictions"]
+    RETRIEVE --> AGENTS["Agents / pipelines / game theory"]
+    KBROWS --> AGENTS
+    AGENTS --> OUTPUTS["Reports, answers, code, decisions"]
+    OUTPUTS --> PROVROWS["Provenance edges<br/>answer→chunk→page→source<br/>report→section→specialist→fingerprint"]
+    OUTPUTS --> COMPROWS["Completion evidence<br/>claims, gates, incidents, trust"]
+    COMPROWS --> LEARNROWS["Learning events<br/>proposals, manifests, rollbacks"]
+    LEARNROWS --> MEANING["Meaning datasets<br/>samples, pairs, triplets"]
+    MEANING --> CONSTELLATION["Constellations<br/>centroids, scoring, drift"]
+    CONSTELLATION --> AGENTS
+    LEARNROWS --> AGENTS
+```
+
+The key principle is full-state verification: every important claim should have
+a source of truth you can inspect separately from the model response.
 
 ## Request lifecycle
 
@@ -108,7 +171,12 @@ Built on tokio multi-thread runtime. Critical constraints:
 |---|---|---|
 | Session checkpoints | CozoDB (mem + disk) | Per-session message journal, fork lineage, recovery state |
 | Memory graph | CozoDB | Semantic memories, relationships, embeddings |
-| Knowledge base | CozoDB | LEANN indexed code chunks, KB ingest documents |
+| Document evidence | CozoDB | Document sources, OCR runs, pages, chunks, embeddings, answer provenance |
+| Knowledge base | CozoDB | Claims, entities, relations, source quality, contradictions |
+| Game-theory runs | CozoDB | Fingerprints, routing, specialists, sections, reports, checkpoints |
+| Completion integrity | CozoDB | Claims, evidence, gate results, false-completion incidents, trust scores |
+| Governed learning | CozoDB | Learning events, proposals, manifests, policy decisions, rollbacks |
+| Meaning and constellations | CozoDB | Samples, contrastive pairs, triplets, centroids, drift reports |
 | Learning telemetry | CozoDB | GNN weights, training runs, ReasoningBank patterns, SONA trajectories |
 | Logs | flat text files | Per-session human-readable logs |
 | Config | TOML | User + project layered config |
@@ -137,7 +205,14 @@ See [Identity & spoofing](../integrations/identity-spoofing.md) for full details
 
 ## Learning systems
 
-8 interconnected learning subsystems (see [Learning systems](learning-systems.md) for details):
+The self-learning layer has two complementary halves:
+
+- Pipeline learning systems optimize reasoning behaviour from trajectories,
+  memories, graph structure, and corrections.
+- Evidence Engine governed learning converts verified outcomes into reviewable
+  proposals, manifests, meaning datasets, and constellation centroids.
+
+8 interconnected pipeline learning subsystems (see [Learning systems](learning-systems.md) for details):
 
 1. **SONA** — Self-Organizing Network Architecture (trajectory-based pattern store)
 2. **ReasoningBank** — 12 reasoning modes (deductive, inductive, abductive, analogical, adversarial, counterfactual, temporal, constraint, decomposition, first-principles, causal, contextual)
@@ -148,8 +223,17 @@ See [Identity & spoofing](../integrations/identity-spoofing.md) for full details
 7. **Reflexion** — 3-attempt retry loop with self-critique
 8. **AutoCapture** — automatic fact extraction from agent transcripts
 
+Evidence Engine learning surfaces:
+
+1. **Learning events** — retrieval, routing, completion, correction, and outcome signals
+2. **Behaviour proposals** — suggested changes generated from evidence
+3. **Versioned manifests** — applied prompt/policy/threshold/routing changes with rollback
+4. **Meaning compiler** — labels, contrastive pairs, triplets, and eval datasets
+5. **Constellations** — project/domain/workflow centroids for scoring and drift detection
+
 ## See also
 
 - [Learning systems](learning-systems.md) — full deep dive on the 8 subsystems
 - [Pipelines](pipelines.md) — 50-agent coding + 46-agent research orchestration
+- [Evidence Engine](../evidence-engine.md) — durable evidence, provenance, and governed learning
 - [Crate-level diagrams](https://github.com/ste-bah/archon-cli) — code layout in the repo itself
