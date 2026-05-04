@@ -103,9 +103,9 @@ archon-cli/
 
 ## Status
 
-- Current version: **v0.1.38** ([release notes](docs/release-notes/v0.1.38.md))
+- Current version: **v0.1.39** ([release notes](docs/release-notes/v0.1.39.md))
 - Active development; pre-1.0 means breaking changes can land in minor versions
-- Phase 6 complete (pipelines + learning systems wired) + Evidence Engine PRD compliance pass; see release notes for the v0.1.6 → v0.1.38 stabilisation arc
+- Phase 6 complete (pipelines + learning systems wired) + Evidence Engine PRD compliance pass; see release notes for the v0.1.6 → v0.1.39 stabilisation arc
 
 ## Contributing
 
