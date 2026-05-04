@@ -15,6 +15,7 @@ use archon_docs::inspect;
 use archon_docs::retrieval;
 use archon_docs::schema::ensure_doc_schema;
 use archon_docs::status;
+use archon_docs::store;
 
 use crate::cli_args::DocsAction;
 
@@ -236,6 +237,13 @@ async fn handle_search(query: &str, mode: &str, debug: bool) -> Result<()> {
                 results.total_indexed_chunks,
                 results.mode.as_str()
             );
+            if debug {
+                match results.query_embedding_norm {
+                    Some(norm) => println!("Query embedding norm: {:.6}", norm),
+                    None => println!("Query embedding norm: n/a"),
+                }
+                println!("Top-k raw scores and citation chains:");
+            }
             for (i, r) in results.results.iter().enumerate() {
                 println!(
                     "  {}. {}  pages {}-{}  score={:.3}",
@@ -247,9 +255,12 @@ async fn handle_search(query: &str, mode: &str, debug: bool) -> Result<()> {
                 );
                 if debug {
                     println!("     document: {}", r.document_id);
-                    println!("     distance: {:.4}", r.distance);
-                    println!("     exact:    {:.4}", r.exact_score);
-                    println!("     semantic: {:.4}", r.semantic_score);
+                    println!("     raw distance:        {:.4}", r.distance);
+                    println!("     raw exact score:     {:.4}", r.exact_score);
+                    println!("     raw semantic score:  {:.4}", r.semantic_score);
+                    println!("     post-rerank score:   n/a");
+                    println!("     final score:         {:.4}", r.score);
+                    print_citation_chain(&db, &r.chunk_id)?;
                     println!(
                         "     content:  {}",
                         if r.content.len() > 120 {
@@ -537,4 +548,20 @@ fn check_hnsw_index(db: &cozo::DbInstance, _dim: usize) -> Result<bool> {
             }
         }
     }
+}
+
+fn print_citation_chain(db: &DbInstance, chunk_id: &str) -> Result<()> {
+    let outgoing = store::list_provenance_from(db, chunk_id)?;
+    let incoming = store::list_provenance_to(db, chunk_id)?;
+    if outgoing.is_empty() && incoming.is_empty() {
+        println!("     citation chain: none recorded");
+        return Ok(());
+    }
+    for edge in outgoing.iter().chain(incoming.iter()) {
+        println!(
+            "     citation chain: {} --{:?}--> {}",
+            edge.from_artifact_id, edge.edge_type, edge.to_artifact_id
+        );
+    }
+    Ok(())
 }

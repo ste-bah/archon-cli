@@ -36,6 +36,7 @@ pub struct SearchResult {
 pub struct SearchResults {
     pub results: Vec<SearchResult>,
     pub query: String,
+    pub query_embedding_norm: Option<f64>,
     pub total_chunks: usize,
     pub total_indexed_chunks: usize,
     pub mode: SearchMode,
@@ -156,6 +157,7 @@ pub fn search_with_mode(
         return Ok(SearchResults {
             results: Vec::new(),
             query: query.to_string(),
+            query_embedding_norm: None,
             total_chunks,
             total_indexed_chunks: 0,
             mode,
@@ -164,10 +166,26 @@ pub fn search_with_mode(
     }
 
     let mut warnings = Vec::new();
+    let mut query_embedding_norm = None;
     let results = match mode {
         SearchMode::Exact => exact_search(db, query, top_k)?,
-        SearchMode::Semantic => semantic_search(db, query, top_k)?,
-        SearchMode::Hybrid => hybrid_search(db, query, top_k, weights, total, &mut warnings)?,
+        SearchMode::Semantic => {
+            let semantic = semantic_search_with_norm(db, query, top_k)?;
+            query_embedding_norm = Some(semantic.query_embedding_norm);
+            semantic.results
+        }
+        SearchMode::Hybrid => {
+            let semantic_norm = &mut query_embedding_norm;
+            hybrid_search(
+                db,
+                query,
+                top_k,
+                weights,
+                total,
+                &mut warnings,
+                semantic_norm,
+            )?
+        }
     };
     if !matches!(mode, SearchMode::Exact) && total == 0 && results.is_empty() {
         let failed_count = store::count_failed_chunks(db).map_err(|e| DocsError::Retrieval {
@@ -185,6 +203,7 @@ pub fn search_with_mode(
     Ok(SearchResults {
         results,
         query: query.to_string(),
+        query_embedding_norm,
         total_chunks,
         total_indexed_chunks: total,
         mode,
@@ -192,17 +211,28 @@ pub fn search_with_mode(
     })
 }
 
-fn semantic_search(
+#[derive(Debug)]
+struct SemanticSearch {
+    results: Vec<SearchResult>,
+    query_embedding_norm: f64,
+}
+
+fn semantic_search_with_norm(
     db: &DbInstance,
     query: &str,
     top_k: usize,
-) -> Result<Vec<SearchResult>, DocsError> {
+) -> Result<SemanticSearch, DocsError> {
     let provider = get_provider().ok_or_else(|| DocsError::ModelNotConfigured {
         message: "no embedding provider configured. Run 'archon docs model-status' for details."
             .into(),
     })?;
     let query_vec = provider.embed_query(query)?;
-    hnsw_search(db, &query_vec, top_k)
+    let query_embedding_norm = l2_norm(&query_vec);
+    let results = hnsw_search(db, &query_vec, top_k)?;
+    Ok(SemanticSearch {
+        results,
+        query_embedding_norm,
+    })
 }
 
 fn exact_search(
@@ -253,6 +283,7 @@ fn hybrid_search(
     weights: RetrievalWeights,
     total_indexed_chunks: usize,
     warnings: &mut Vec<String>,
+    query_embedding_norm: &mut Option<f64>,
 ) -> Result<Vec<SearchResult>, DocsError> {
     if top_k == 0 {
         return Ok(Vec::new());
@@ -262,8 +293,11 @@ fn hybrid_search(
         warnings.push("semantic retrieval skipped: no indexed vectors".into());
         Vec::new()
     } else {
-        match semantic_search(db, query, top_k.saturating_mul(3).max(top_k)) {
-            Ok(results) => results,
+        match semantic_search_with_norm(db, query, top_k.saturating_mul(3).max(top_k)) {
+            Ok(semantic) => {
+                *query_embedding_norm = Some(semantic.query_embedding_norm);
+                semantic.results
+            }
             Err(DocsError::ModelNotConfigured { message }) => {
                 warnings.push(format!(
                     "semantic retrieval skipped: no embedding provider configured ({message})"
@@ -412,6 +446,17 @@ fn normalize_exact_query(query: &str) -> String {
         .unwrap_or(trimmed)
         .trim()
         .to_string()
+}
+
+fn l2_norm(values: &[f32]) -> f64 {
+    values
+        .iter()
+        .map(|value| {
+            let value = f64::from(*value);
+            value * value
+        })
+        .sum::<f64>()
+        .sqrt()
 }
 
 fn exact_result_from_chunk(chunk: ChunkArtifact, score: f64) -> SearchResult {
@@ -906,6 +951,7 @@ mod tests {
         assert_eq!(results.mode, SearchMode::Semantic);
         assert_eq!(results.results[0].chunk_id, "chunk-car");
         assert!(results.results[0].semantic_score > 0.9);
+        assert!(results.query_embedding_norm.unwrap_or(0.0) > 0.0);
     }
 
     #[test]
@@ -946,6 +992,7 @@ mod tests {
         assert_eq!(exact.results[0].chunk_id, "chunk-exact");
         assert_eq!(semantic.results[0].chunk_id, "chunk-semantic");
         assert_eq!(hybrid.results[0].chunk_id, "chunk-hybrid");
+        assert!(hybrid.query_embedding_norm.unwrap_or(0.0) > 0.0);
         assert!(hybrid.results[0].exact_score > 0.0);
         assert!(hybrid.results[0].semantic_score > 0.0);
         assert!(hybrid.results[0].score > hybrid.results[1].score);

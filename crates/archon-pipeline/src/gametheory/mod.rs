@@ -21,10 +21,10 @@ pub mod specimens;
 pub use agents::{GameTheoryAgent, GameTheoryTier, GameTheoryToolAccess};
 pub use errors::GameTheoryError;
 pub use facade::{
-    FullPipelineResult, GameTheoryMemoryContext, GameTheoryRunOptions, MemoryRecallAudit,
-    ReplaySpecialistResult, classify, replay_routing_from_stored_fingerprint,
-    replay_single_specialist, run_full_pipeline, run_full_pipeline_with_memory,
-    run_full_pipeline_with_options,
+    FullPipelineResult, GameTheoryMemoryContext, GameTheoryRunOptions, InProgressRun,
+    MemoryRecallAudit, ReplaySpecialistResult, ResumeRunResult, classify, list_in_progress_runs,
+    replay_routing_from_stored_fingerprint, replay_single_specialist, resume_run_from_checkpoint,
+    run_full_pipeline, run_full_pipeline_with_memory, run_full_pipeline_with_options,
 };
 pub use fingerprint::{AxisVerdict, GameTheoryFingerprint};
 pub use registry::{GAMETHEORY_AGENTS, GAMETHEORY_TIERS};

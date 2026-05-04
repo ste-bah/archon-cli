@@ -554,6 +554,14 @@ pub enum GametheoryAction {
         #[arg(long, value_name = "KEY")]
         rerun_specialist: Option<String>,
     },
+    /// Resume an interrupted InProgress run from persisted checkpoints
+    Resume {
+        /// Run ID
+        run_id: String,
+        /// Path to gametheory spec YAML (searches known locations if omitted)
+        #[arg(long, value_name = "PATH")]
+        spec_path: Option<String>,
+    },
     /// List curated game-theory agents
     ListAgents {
         /// Restrict output to a single tier

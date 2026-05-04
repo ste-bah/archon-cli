@@ -234,6 +234,31 @@ pub struct ReplaySpecialistResult {
     pub memory_recall: Vec<MemoryRecallAudit>,
 }
 
+#[derive(Debug, Clone)]
+pub struct InProgressRun {
+    pub run_id: String,
+    pub situation: String,
+    pub started_at: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct ResumeRunResult {
+    pub run_id: String,
+    pub resumed_specialists: usize,
+    pub skipped_completed_specialists: usize,
+    pub failed_specialists: usize,
+    pub status: String,
+    pub total_cost_usd: f64,
+    pub report_words: usize,
+}
+
+#[derive(Debug, Clone)]
+struct StoredRunState {
+    situation: String,
+    started_at: String,
+    status: String,
+}
+
 /// Run the full Phase 4 pipeline: classify → route → specialist spec → final report.
 ///
 /// When `llm` is provided, real LLM-backed Tier 1 classification and specialist
@@ -286,6 +311,29 @@ pub async fn run_full_pipeline_with_options(
     // 1. Tier 1 classification
     let (fingerprint, mut memory_recall) =
         classify_internal(db, situation, llm, &memory_ctx).await?;
+    update_gt_run_status(
+        db,
+        &fingerprint.run_id,
+        situation,
+        &fingerprint.created_at,
+        "",
+        "InProgress",
+        0.0,
+    )
+    .map_err(|e| GameTheoryError::Storage {
+        message: e.to_string(),
+    })?;
+    persist_run_checkpoint(
+        db,
+        &fingerprint.run_id,
+        "stage:tier1",
+        "stage",
+        "completed",
+        serde_json::json!({"fingerprint_id": fingerprint.run_id}),
+    )
+    .map_err(|e| GameTheoryError::Storage {
+        message: e.to_string(),
+    })?;
 
     // 2. Resolve and load routing spec
     let resolved_path = resolve_spec_path(spec_path)?;
@@ -298,14 +346,21 @@ pub async fn run_full_pipeline_with_options(
     // Tier 11 agents are high-impact intervention/mechanism specialists and
     // require both a CLI request and policy approval before they enter a run.
     let dep_map = build_dependency_map(&spec);
-    apply_policy_gates_to_routing(
-        &mut routing_decision,
-        &dep_map,
-        options.enable_tier11,
-    );
+    apply_policy_gates_to_routing(&mut routing_decision, &dep_map, options.enable_tier11);
 
     // 4. Persist routing decision
     persist_routing_decision(db, &routing_decision).map_err(|e| GameTheoryError::Storage {
+        message: e.to_string(),
+    })?;
+    persist_run_checkpoint(
+        db,
+        &routing_decision.run_id,
+        "stage:routing",
+        "stage",
+        "completed",
+        serde_json::json!({"enabled": routing_decision.enabled_specialists.len()}),
+    )
+    .map_err(|e| GameTheoryError::Storage {
         message: e.to_string(),
     })?;
 
@@ -359,6 +414,11 @@ pub async fn run_full_pipeline_with_options(
     .map_err(|e| GameTheoryError::Storage {
         message: e.to_string(),
     })?;
+    persist_tier_checkpoints(db, &routing_decision.run_id, &specialist_outcome.outputs).map_err(
+        |e| GameTheoryError::Storage {
+            message: e.to_string(),
+        },
+    )?;
 
     // 9. Run quality checks
     let mut quality_results: HashMap<String, Vec<quality::QualityCheck>> = HashMap::new();
@@ -390,6 +450,17 @@ pub async fn run_full_pipeline_with_options(
         &routing_decision.run_id,
         &report,
         specialist_outcome.total_cost_usd,
+    )
+    .map_err(|e| GameTheoryError::Storage {
+        message: e.to_string(),
+    })?;
+    persist_run_checkpoint(
+        db,
+        &routing_decision.run_id,
+        "stage:final-report",
+        "stage",
+        "completed",
+        serde_json::json!({"words": report.split_whitespace().count()}),
     )
     .map_err(|e| GameTheoryError::Storage {
         message: e.to_string(),
@@ -547,6 +618,201 @@ pub async fn replay_single_specialist(
         output_summary: summarize_output(&message),
         cost_usd: 0.0,
         memory_recall: outcome.memory_audits,
+    })
+}
+
+pub fn list_in_progress_runs(db: &DbInstance) -> Result<Vec<InProgressRun>, GameTheoryError> {
+    ensure_gametheory_schema(db).map_err(|e| GameTheoryError::Storage {
+        message: e.to_string(),
+    })?;
+    let rows = db
+        .run_script(
+            "?[run_id, situation, started_at] := *gt_runs{run_id, situation, started_at, completed_at, status}, status = 'InProgress'",
+            Default::default(),
+            cozo::ScriptMutability::Immutable,
+        )
+        .map_err(|e| GameTheoryError::Storage {
+            message: format!("query in-progress gt_runs failed: {e}"),
+        })?;
+    Ok(rows
+        .rows
+        .iter()
+        .map(|row| InProgressRun {
+            run_id: row[0].get_str().unwrap_or("").to_string(),
+            situation: row[1].get_str().unwrap_or("").to_string(),
+            started_at: row[2].get_str().unwrap_or("").to_string(),
+        })
+        .collect())
+}
+
+pub async fn resume_run_from_checkpoint(
+    db: &DbInstance,
+    run_id: &str,
+    spec_path: Option<&Path>,
+    llm: Option<&dyn LlmClient>,
+    memory_ctx: GameTheoryMemoryContext,
+    options: GameTheoryRunOptions,
+) -> Result<ResumeRunResult, GameTheoryError> {
+    ensure_gametheory_schema(db).map_err(|e| GameTheoryError::Storage {
+        message: e.to_string(),
+    })?;
+    let run_state = load_run_state(db, run_id)?;
+    if run_state.status != "InProgress" {
+        return Err(GameTheoryError::Validation {
+            message: format!(
+                "run {run_id} has status '{}' and is not resumable",
+                run_state.status
+            ),
+        });
+    }
+    let situation = run_state.situation.clone();
+    let fingerprint = load_stored_fingerprint(db, run_id)?;
+    let mut routing = match load_stored_routing(db, run_id)? {
+        Some(routing) => routing,
+        None => {
+            let resolved_path = resolve_spec_path(spec_path)?;
+            let spec = load_spec(&resolved_path)?;
+            let mut routing =
+                evaluate_routing(&spec, &fingerprint, run_id, &Utc::now().to_rfc3339())?;
+            let dep_map = build_dependency_map(&spec);
+            apply_policy_gates_to_routing(&mut routing, &dep_map, options.enable_tier11);
+            persist_routing_decision(db, &routing).map_err(|e| GameTheoryError::Storage {
+                message: e.to_string(),
+            })?;
+            persist_run_checkpoint(
+                db,
+                run_id,
+                "stage:routing",
+                "stage",
+                "completed",
+                serde_json::json!({"enabled": routing.enabled_specialists.len(), "recovered": true}),
+            )
+            .map_err(|e| GameTheoryError::Storage {
+                message: e.to_string(),
+            })?;
+            routing
+        }
+    };
+    let completed = load_completed_specialist_keys(db, run_id)?;
+    let skipped_completed = routing
+        .enabled_specialists
+        .iter()
+        .filter(|key| completed.contains(*key))
+        .count();
+    routing
+        .enabled_specialists
+        .retain(|key| !completed.contains(key));
+
+    persist_run_checkpoint(
+        db,
+        run_id,
+        "stage:resume-start",
+        "stage",
+        "completed",
+        serde_json::json!({"remaining": routing.enabled_specialists.len()}),
+    )
+    .map_err(|e| GameTheoryError::Storage {
+        message: e.to_string(),
+    })?;
+
+    let outcome = if routing.enabled_specialists.is_empty() {
+        SpecialistExecutionOutcome::default()
+    } else if let Some(llm_client) = llm {
+        execute_specialists_real_with_options(
+            llm_client,
+            &routing,
+            &fingerprint,
+            &situation,
+            &memory_ctx,
+            &options,
+        )
+        .await?
+    } else {
+        execute_specialist_stub_with_options(
+            &routing,
+            &fingerprint,
+            &situation,
+            &memory_ctx,
+            &options,
+        )
+    };
+    persist_specialist_outputs(db, run_id, &outcome.outputs, &outcome.costs_usd).map_err(|e| {
+        GameTheoryError::Storage {
+            message: e.to_string(),
+        }
+    })?;
+    for (agent_key, message) in &outcome.failed {
+        persist_specialist_failure(db, run_id, agent_key, message).map_err(|e| {
+            GameTheoryError::Storage {
+                message: e.to_string(),
+            }
+        })?;
+    }
+    persist_tier_checkpoints(db, run_id, &outcome.outputs).map_err(|e| {
+        GameTheoryError::Storage {
+            message: e.to_string(),
+        }
+    })?;
+
+    let all_outputs = load_completed_specialist_outputs(db, run_id)?;
+    let quality_results = HashMap::new();
+    let final_result = final_stage::assemble_report(
+        &all_outputs,
+        &quality_results,
+        options.style_profile_id.as_deref(),
+    );
+    persist_sections(db, run_id, &final_result.report).map_err(|e| GameTheoryError::Storage {
+        message: e.to_string(),
+    })?;
+    let total_cost_usd = load_specialist_cost_total(db, run_id)?;
+    let status = if outcome.budget_exceeded {
+        "BudgetExceeded"
+    } else if outcome.failed.is_empty() {
+        "completed"
+    } else {
+        "partial"
+    };
+    persist_final_report(db, run_id, &final_result.report, total_cost_usd).map_err(|e| {
+        GameTheoryError::Storage {
+            message: e.to_string(),
+        }
+    })?;
+    update_gt_run_status(
+        db,
+        run_id,
+        &situation,
+        &run_state.started_at,
+        &Utc::now().to_rfc3339(),
+        status,
+        total_cost_usd,
+    )
+    .map_err(|e| GameTheoryError::Storage {
+        message: e.to_string(),
+    })?;
+    persist_run_checkpoint(
+        db,
+        run_id,
+        "stage:resume-complete",
+        "stage",
+        status,
+        serde_json::json!({
+            "resumed": outcome.outputs.len(),
+            "failed": outcome.failed.len(),
+            "total_cost_usd": total_cost_usd,
+        }),
+    )
+    .map_err(|e| GameTheoryError::Storage {
+        message: e.to_string(),
+    })?;
+
+    Ok(ResumeRunResult {
+        run_id: run_id.to_string(),
+        resumed_specialists: outcome.outputs.len(),
+        skipped_completed_specialists: skipped_completed,
+        failed_specialists: outcome.failed.len(),
+        status: status.to_string(),
+        total_cost_usd,
+        report_words: final_result.report.split_whitespace().count(),
     })
 }
 
@@ -1304,6 +1570,18 @@ fn persist_specialist_outputs(
             cozo::ScriptMutability::Mutable,
         )
         .map_err(|e| anyhow::anyhow!("persist gt_specialist_outputs failed: {e}"))?;
+        persist_run_checkpoint(
+            db,
+            run_id,
+            &format!("specialist:{agent_key}"),
+            "specialist",
+            "completed",
+            serde_json::json!({
+                "agent_key": agent_key,
+                "tier": agent_tier(agent_key),
+                "cost_usd": cost,
+            }),
+        )?;
     }
     Ok(())
 }
@@ -1333,6 +1611,18 @@ fn persist_specialist_failure(
         cozo::ScriptMutability::Mutable,
     )
     .map_err(|e| anyhow::anyhow!("persist failed gt_specialist_outputs failed: {e}"))?;
+    persist_run_checkpoint(
+        db,
+        run_id,
+        &format!("specialist:{agent_key}"),
+        "specialist",
+        "failed",
+        serde_json::json!({
+            "agent_key": agent_key,
+            "tier": agent_tier(agent_key),
+            "message": message,
+        }),
+    )?;
     Ok(())
 }
 
@@ -1402,7 +1692,92 @@ fn persist_final_report(
     Ok(())
 }
 
+fn persist_run_checkpoint(
+    db: &DbInstance,
+    run_id: &str,
+    checkpoint_key: &str,
+    checkpoint_type: &str,
+    status: &str,
+    detail: serde_json::Value,
+) -> Result<()> {
+    ensure_gametheory_schema(db)?;
+    let detail_json = serde_json::to_string(&detail)
+        .map_err(|e| anyhow::anyhow!("serialize checkpoint detail failed: {e}"))?;
+    let created_at = Utc::now().to_rfc3339();
+
+    let mut params = BTreeMap::new();
+    params.insert("rid".into(), cozo::DataValue::from(run_id));
+    params.insert("ck".into(), cozo::DataValue::from(checkpoint_key));
+    params.insert("ct".into(), cozo::DataValue::from(checkpoint_type));
+    params.insert("st".into(), cozo::DataValue::from(status));
+    params.insert("dj".into(), cozo::DataValue::from(detail_json.as_str()));
+    params.insert("ca".into(), cozo::DataValue::from(created_at.as_str()));
+
+    db.run_script(
+        "?[run_id, checkpoint_key, checkpoint_type, status, detail_json, created_at] \
+         <- [[$rid, $ck, $ct, $st, $dj, $ca]] \
+         :put gt_run_checkpoints { run_id, checkpoint_key => checkpoint_type, status, detail_json, created_at }",
+        params,
+        cozo::ScriptMutability::Mutable,
+    )
+    .map_err(|e| anyhow::anyhow!("persist gt_run_checkpoints failed: {e}"))?;
+    Ok(())
+}
+
+fn persist_tier_checkpoints(
+    db: &DbInstance,
+    run_id: &str,
+    outputs: &HashMap<String, String>,
+) -> Result<()> {
+    let mut by_tier: BTreeMap<u8, Vec<&str>> = BTreeMap::new();
+    for agent_key in outputs.keys() {
+        if let Some(tier) = agent_tier(agent_key) {
+            by_tier.entry(tier).or_default().push(agent_key.as_str());
+        }
+    }
+
+    for (tier, agents) in by_tier {
+        persist_run_checkpoint(
+            db,
+            run_id,
+            &format!("tier:{tier}"),
+            "tier",
+            "completed",
+            serde_json::json!({"tier": tier, "completed_agents": agents}),
+        )?;
+    }
+    Ok(())
+}
+
 // ── Cozo helpers ─────────────────────────────────────────────────────────────
+
+fn load_run_state(db: &DbInstance, run_id: &str) -> Result<StoredRunState, GameTheoryError> {
+    ensure_gametheory_schema(db).map_err(|e| GameTheoryError::Storage {
+        message: e.to_string(),
+    })?;
+    let mut params = BTreeMap::new();
+    params.insert("rid".into(), cozo::DataValue::from(run_id));
+    let rows = db
+        .run_script(
+            "?[situation, started_at, status] := *gt_runs{run_id, situation, started_at, completed_at, status}, \
+             run_id = $rid",
+            params,
+            cozo::ScriptMutability::Immutable,
+        )
+        .map_err(|e| GameTheoryError::Storage {
+            message: format!("query gt_runs failed: {e}"),
+        })?;
+    rows.rows
+        .first()
+        .map(|row| StoredRunState {
+            situation: row[0].get_str().unwrap_or("").to_string(),
+            started_at: row[1].get_str().unwrap_or("").to_string(),
+            status: row[2].get_str().unwrap_or("").to_string(),
+        })
+        .ok_or_else(|| GameTheoryError::Storage {
+            message: format!("run not found: {run_id}"),
+        })
+}
 
 fn load_run_situation(db: &DbInstance, run_id: &str) -> Result<String, GameTheoryError> {
     ensure_gametheory_schema(db).map_err(|e| GameTheoryError::Storage {
@@ -1457,6 +1832,138 @@ fn load_stored_fingerprint(
         })?;
     serde_json::from_str(json).map_err(|e| GameTheoryError::FingerprintParse {
         message: e.to_string(),
+    })
+}
+
+fn load_stored_routing(
+    db: &DbInstance,
+    run_id: &str,
+) -> Result<Option<RoutingDecision>, GameTheoryError> {
+    ensure_gametheory_schema(db).map_err(|e| GameTheoryError::Storage {
+        message: e.to_string(),
+    })?;
+    let mut params = BTreeMap::new();
+    params.insert("rid".into(), cozo::DataValue::from(run_id));
+    let rows = db
+        .run_script(
+            "?[fingerprint_id, enabled, skipped, conditions, created_at] := \
+             *gt_routing_decisions{run_id, fingerprint_id, enabled_specialists_json: enabled, \
+             skipped_specialists_json: skipped, evaluated_conditions_json: conditions, created_at}, \
+             run_id = $rid",
+            params,
+            cozo::ScriptMutability::Immutable,
+        )
+        .map_err(|e| GameTheoryError::Storage {
+            message: format!("query gt_routing_decisions failed: {e}"),
+        })?;
+    let Some(row) = rows.rows.first() else {
+        return Ok(None);
+    };
+
+    let enabled = serde_json::from_str(row[1].get_str().unwrap_or("[]")).map_err(|e| {
+        GameTheoryError::Storage {
+            message: format!("parse enabled specialists failed: {e}"),
+        }
+    })?;
+    let skipped = serde_json::from_str(row[2].get_str().unwrap_or("[]")).map_err(|e| {
+        GameTheoryError::Storage {
+            message: format!("parse skipped specialists failed: {e}"),
+        }
+    })?;
+    let conditions = serde_json::from_str(row[3].get_str().unwrap_or("[]")).map_err(|e| {
+        GameTheoryError::Storage {
+            message: format!("parse evaluated conditions failed: {e}"),
+        }
+    })?;
+
+    Ok(Some(RoutingDecision {
+        run_id: run_id.to_string(),
+        fingerprint_id: row[0].get_str().unwrap_or("").to_string(),
+        enabled_specialists: enabled,
+        skipped_specialists: skipped,
+        evaluated_conditions: conditions,
+        created_at: row[4].get_str().unwrap_or("").to_string(),
+    }))
+}
+
+fn load_completed_specialist_keys(
+    db: &DbInstance,
+    run_id: &str,
+) -> Result<HashSet<String>, GameTheoryError> {
+    ensure_gametheory_schema(db).map_err(|e| GameTheoryError::Storage {
+        message: e.to_string(),
+    })?;
+    let mut params = BTreeMap::new();
+    params.insert("rid".into(), cozo::DataValue::from(run_id));
+    let rows = db
+        .run_script(
+            "?[agent_key] := *gt_specialist_outputs{run_id, agent_key, status}, \
+             run_id = $rid, status = 'completed'",
+            params,
+            cozo::ScriptMutability::Immutable,
+        )
+        .map_err(|e| GameTheoryError::Storage {
+            message: format!("query completed specialists failed: {e}"),
+        })?;
+    Ok(rows
+        .rows
+        .iter()
+        .filter_map(|row| row[0].get_str().map(str::to_string))
+        .collect())
+}
+
+fn load_completed_specialist_outputs(
+    db: &DbInstance,
+    run_id: &str,
+) -> Result<HashMap<String, String>, GameTheoryError> {
+    ensure_gametheory_schema(db).map_err(|e| GameTheoryError::Storage {
+        message: e.to_string(),
+    })?;
+    let mut params = BTreeMap::new();
+    params.insert("rid".into(), cozo::DataValue::from(run_id));
+    let rows = db
+        .run_script(
+            "?[agent_key, output] := *gt_specialist_outputs{run_id, agent_key, output_json: output, status}, \
+             run_id = $rid, status = 'completed'",
+            params,
+            cozo::ScriptMutability::Immutable,
+        )
+        .map_err(|e| GameTheoryError::Storage {
+            message: format!("query completed specialist outputs failed: {e}"),
+        })?;
+    Ok(rows
+        .rows
+        .iter()
+        .filter_map(|row| {
+            let key = row[0].get_str()?;
+            let output = row[1].get_str()?;
+            Some((key.to_string(), output.to_string()))
+        })
+        .collect())
+}
+
+fn load_specialist_cost_total(db: &DbInstance, run_id: &str) -> Result<f64, GameTheoryError> {
+    ensure_gametheory_schema(db).map_err(|e| GameTheoryError::Storage {
+        message: e.to_string(),
+    })?;
+    let mut params = BTreeMap::new();
+    params.insert("rid".into(), cozo::DataValue::from(run_id));
+    let rows = db
+        .run_script(
+            "?[cost] := *gt_specialist_outputs{run_id, agent_key, cost_usd: cost}, run_id = $rid",
+            params,
+            cozo::ScriptMutability::Immutable,
+        )
+        .map_err(|e| GameTheoryError::Storage {
+            message: format!("query specialist costs failed: {e}"),
+        })?;
+    rows.rows.iter().try_fold(0.0, |total, row| {
+        let cost = row[0].get_str().unwrap_or("0");
+        cost.parse::<f64>()
+            .map(|parsed| total + parsed)
+            .map_err(|e| GameTheoryError::Storage {
+                message: format!("parse specialist cost '{cost}' failed: {e}"),
+            })
     })
 }
 
@@ -1866,6 +2373,265 @@ mod tests {
         assert_eq!(rows.rows.len(), 1);
         assert_eq!(rows.rows[0][1].get_str().unwrap(), "completed");
         assert!(rows.rows[0][0].get_str().unwrap().contains("Stub Analysis"));
+    }
+
+    #[test]
+    fn test_specialist_completion_writes_checkpoint_source_of_truth() {
+        let db = test_db();
+        ensure_gametheory_schema(&db).unwrap();
+        let mut outputs = HashMap::new();
+        outputs.insert(
+            "nash-equilibrium-finder".to_string(),
+            "analysis".to_string(),
+        );
+        persist_specialist_outputs(&db, "run-checkpoint", &outputs, &HashMap::new()).unwrap();
+
+        let rows = db
+            .run_script(
+                "?[checkpoint_type, status, detail] := *gt_run_checkpoints{run_id, checkpoint_key, checkpoint_type, status, detail_json: detail}, \
+                 run_id = 'run-checkpoint', checkpoint_key = 'specialist:nash-equilibrium-finder'",
+                Default::default(),
+                cozo::ScriptMutability::Immutable,
+            )
+            .unwrap();
+        assert_eq!(rows.rows.len(), 1);
+        assert_eq!(rows.rows[0][0].get_str().unwrap(), "specialist");
+        assert_eq!(rows.rows[0][1].get_str().unwrap(), "completed");
+        assert!(
+            rows.rows[0][2]
+                .get_str()
+                .unwrap()
+                .contains("nash-equilibrium-finder")
+        );
+    }
+
+    #[test]
+    fn test_resume_run_completes_missing_specialists_from_checkpoint() {
+        let db = test_db();
+        let fp = block_on(classify(
+            &db,
+            "Two firms simultaneously set prices in a Bertrand duopoly.",
+            None,
+        ))
+        .unwrap();
+        let routing = RoutingDecision {
+            run_id: fp.run_id.clone(),
+            fingerprint_id: fp.run_id.clone(),
+            enabled_specialists: vec![
+                "nash-equilibrium-finder".into(),
+                "payoff-matrix-builder".into(),
+            ],
+            skipped_specialists: vec![],
+            evaluated_conditions: vec![],
+            created_at: fp.created_at.clone(),
+        };
+        persist_routing_decision(&db, &routing).unwrap();
+        let mut completed = HashMap::new();
+        completed.insert(
+            "nash-equilibrium-finder".to_string(),
+            "already completed".to_string(),
+        );
+        let mut costs = HashMap::new();
+        costs.insert("nash-equilibrium-finder".to_string(), 1.25);
+        persist_specialist_outputs(&db, &fp.run_id, &completed, &costs).unwrap();
+        update_gt_run_status(
+            &db,
+            &fp.run_id,
+            "Two firms simultaneously set prices in a Bertrand duopoly.",
+            &fp.created_at,
+            "",
+            "InProgress",
+            0.0,
+        )
+        .unwrap();
+
+        let in_progress = list_in_progress_runs(&db).unwrap();
+        assert_eq!(in_progress.len(), 1);
+
+        let result = block_on(resume_run_from_checkpoint(
+            &db,
+            &fp.run_id,
+            None,
+            None,
+            GameTheoryMemoryContext::default(),
+            GameTheoryRunOptions::default(),
+        ))
+        .unwrap();
+        assert_eq!(result.resumed_specialists, 1);
+        assert_eq!(result.skipped_completed_specialists, 1);
+        assert_eq!(result.failed_specialists, 0);
+        assert_eq!(result.total_cost_usd, 1.25);
+
+        let rows = db
+            .run_script(
+                "?[agent_key, status] := *gt_specialist_outputs{run_id, agent_key, status}, run_id = $rid",
+                {
+                    let mut p = std::collections::BTreeMap::new();
+                    p.insert("rid".into(), cozo::DataValue::from(fp.run_id.as_str()));
+                    p
+                },
+                cozo::ScriptMutability::Immutable,
+            )
+            .unwrap();
+        let completed_count = rows
+            .rows
+            .iter()
+            .filter(|row| row[1].get_str() == Some("completed"))
+            .count();
+        assert_eq!(completed_count, 2);
+    }
+
+    #[test]
+    fn test_resume_rejects_non_in_progress_run() {
+        let db = test_db();
+        let fp = block_on(classify(
+            &db,
+            "Two firms simultaneously set prices in a Bertrand duopoly.",
+            None,
+        ))
+        .unwrap();
+        let err = block_on(resume_run_from_checkpoint(
+            &db,
+            &fp.run_id,
+            None,
+            None,
+            GameTheoryMemoryContext::default(),
+            GameTheoryRunOptions::default(),
+        ))
+        .unwrap_err();
+        assert!(err.to_string().contains("not resumable"));
+    }
+
+    #[test]
+    fn test_resume_failure_marks_run_partial_in_source_of_truth() {
+        let db = test_db();
+        let fp = block_on(classify(
+            &db,
+            "Two firms simultaneously set prices in a Bertrand duopoly.",
+            None,
+        ))
+        .unwrap();
+        let routing = RoutingDecision {
+            run_id: fp.run_id.clone(),
+            fingerprint_id: fp.run_id.clone(),
+            enabled_specialists: vec!["game-tree-builder-FORCE-FAIL-FOR-TEST".into()],
+            skipped_specialists: vec![],
+            evaluated_conditions: vec![],
+            created_at: fp.created_at.clone(),
+        };
+        persist_routing_decision(&db, &routing).unwrap();
+        update_gt_run_status(
+            &db,
+            &fp.run_id,
+            "Two firms simultaneously set prices in a Bertrand duopoly.",
+            &fp.created_at,
+            "",
+            "InProgress",
+            0.0,
+        )
+        .unwrap();
+
+        let result = block_on(resume_run_from_checkpoint(
+            &db,
+            &fp.run_id,
+            None,
+            None,
+            GameTheoryMemoryContext::default(),
+            GameTheoryRunOptions::default(),
+        ))
+        .unwrap();
+        assert_eq!(result.status, "partial");
+        assert_eq!(result.failed_specialists, 1);
+
+        let rows = db
+            .run_script(
+                "?[status] := *gt_runs{run_id, situation, started_at, completed_at, status}, run_id = $rid",
+                {
+                    let mut p = std::collections::BTreeMap::new();
+                    p.insert("rid".into(), cozo::DataValue::from(fp.run_id.as_str()));
+                    p
+                },
+                cozo::ScriptMutability::Immutable,
+            )
+            .unwrap();
+        assert_eq!(rows.rows[0][0].get_str().unwrap(), "partial");
+
+        let checkpoints = db
+            .run_script(
+                "?[status, detail] := *gt_run_checkpoints{run_id, checkpoint_key, status, detail_json: detail}, \
+                 run_id = $rid, checkpoint_key = 'stage:resume-complete'",
+                {
+                    let mut p = std::collections::BTreeMap::new();
+                    p.insert("rid".into(), cozo::DataValue::from(fp.run_id.as_str()));
+                    p
+                },
+                cozo::ScriptMutability::Immutable,
+            )
+            .unwrap();
+        assert_eq!(checkpoints.rows[0][0].get_str().unwrap(), "partial");
+        assert!(
+            checkpoints.rows[0][1]
+                .get_str()
+                .unwrap()
+                .contains("\"failed\":1")
+        );
+    }
+
+    #[test]
+    fn test_resume_fallback_routing_applies_tier11_policy_gate() {
+        let db = test_db();
+        let fp = block_on(classify(
+            &db,
+            "Two firms simultaneously set prices in a Bertrand duopoly.",
+            None,
+        ))
+        .unwrap();
+        update_gt_run_status(
+            &db,
+            &fp.run_id,
+            "Two firms simultaneously set prices in a Bertrand duopoly.",
+            &fp.created_at,
+            "",
+            "InProgress",
+            0.0,
+        )
+        .unwrap();
+
+        let dir = tempfile::tempdir().unwrap();
+        let spec_path = dir.path().join("gametheory.yaml");
+        std::fs::write(
+            &spec_path,
+            r#"
+version: "test"
+spec_id: "tier11-resume-test"
+tiers:
+  - id: 11
+    name: "Tier 11"
+    concurrency_cap: 1
+    agents:
+      - key: "cohesion-discipline-devotion-auditor"
+        mandatory: true
+        depends_on: []
+"#,
+        )
+        .unwrap();
+
+        let result = block_on(resume_run_from_checkpoint(
+            &db,
+            &fp.run_id,
+            Some(&spec_path),
+            None,
+            GameTheoryMemoryContext::default(),
+            GameTheoryRunOptions::default(),
+        ))
+        .unwrap();
+        assert_eq!(result.resumed_specialists, 0);
+
+        let routing = load_stored_routing(&db, &fp.run_id).unwrap().unwrap();
+        assert!(routing.enabled_specialists.is_empty());
+        assert!(routing.skipped_specialists.iter().any(|(key, reason)| key
+            == "cohesion-discipline-devotion-auditor"
+            && reason.contains("Tier 11 disabled")));
     }
 
     #[test]

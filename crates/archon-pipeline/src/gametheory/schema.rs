@@ -17,11 +17,25 @@ pub fn ensure_gametheory_schema(db: &DbInstance) -> Result<()> {
     ensure_gt_enabled_specialists(db)?;
     ensure_gt_skipped_specialists(db)?;
     ensure_gt_specialist_outputs(db)?;
+    ensure_gt_run_checkpoints(db)?;
     ensure_gt_sections(db)?;
     ensure_gt_final_reports(db)?;
     ensure_gt_provenance_edges(db)?;
     ensure_gt_specimen_library(db)?;
     Ok(())
+}
+
+fn ensure_gt_run_checkpoints(db: &DbInstance) -> Result<()> {
+    run_create(
+        db,
+        r#":create gt_run_checkpoints {
+            run_id: String, checkpoint_key: String =>
+            checkpoint_type: String,
+            status: String,
+            detail_json: String default "{}",
+            created_at: String,
+        }"#,
+    )
 }
 
 /// Run a `:create` script, ignoring "already exists" errors only.
@@ -61,13 +75,14 @@ fn migrate_gt_runs_cost_usd(db: &DbInstance) -> Result<()> {
         return Ok(());
     }
 
-    let rows = db.run_script(
-        "?[run_id, situation, started_at, completed_at, status] := \
+    let rows = db
+        .run_script(
+            "?[run_id, situation, started_at, completed_at, status] := \
          *gt_runs{run_id, situation, started_at, completed_at, status}",
-        Default::default(),
-        ScriptMutability::Immutable,
-    )
-    .map_err(|e| anyhow::anyhow!("snapshot gt_runs before migration failed: {e}"))?;
+            Default::default(),
+            ScriptMutability::Immutable,
+        )
+        .map_err(|e| anyhow::anyhow!("snapshot gt_runs before migration failed: {e}"))?;
 
     db.run_script(
         "{::remove gt_runs}",

@@ -21,6 +21,7 @@ pub async fn handle_gametheory(
     config: &ArchonConfig,
     env_vars: &ArchonEnvVars,
 ) -> Result<()> {
+    maybe_print_resume_hint(action)?;
     match action {
         GametheoryAction::Run {
             situation,
@@ -68,11 +69,32 @@ pub async fn handle_gametheory(
             )
             .await
         }
+        GametheoryAction::Resume { run_id, spec_path } => {
+            handle_resume(run_id, spec_path.as_deref(), config, env_vars).await
+        }
         GametheoryAction::ListAgents { tier } => handle_list_agents(*tier),
         GametheoryAction::Specimens { filter, ingest } => {
             handle_specimens(filter.as_deref(), *ingest)
         }
     }
+}
+
+fn maybe_print_resume_hint(action: &GametheoryAction) -> Result<()> {
+    if matches!(action, GametheoryAction::Resume { .. }) {
+        return Ok(());
+    }
+    let db = open_db()?;
+    let runs = gametheory::list_in_progress_runs(&db)
+        .map_err(|e| anyhow::anyhow!("failed to scan in-progress gametheory runs: {e}"))?;
+    if let Some(run) = runs.first() {
+        eprintln!(
+            "Resume available: archon gametheory resume {}  (started {}, situation: {})",
+            run.run_id,
+            run.started_at,
+            truncate(&run.situation, 80)
+        );
+    }
+    Ok(())
 }
 
 /// Build an LLM client adapter from config. Returns None and logs a warning if auth fails.
@@ -233,7 +255,14 @@ async fn run_full(
             println!("Max Concurrent:    {max_concurrent}");
             println!("Observed Concurrent: {}", result.max_observed_concurrent);
             println!("Style:             {style}");
-            println!("Tier 11:           {}", if tier11_allowed { "enabled" } else { "disabled" });
+            println!(
+                "Tier 11:           {}",
+                if tier11_allowed {
+                    "enabled"
+                } else {
+                    "disabled"
+                }
+            );
             println!(
                 "Report Length:     {} words",
                 result.report.split_whitespace().count()
@@ -424,6 +453,48 @@ async fn handle_replay(
     }
     println!();
     Ok(())
+}
+
+async fn handle_resume(
+    run_id: &str,
+    spec_path: Option<&str>,
+    config: &ArchonConfig,
+    env_vars: &ArchonEnvVars,
+) -> Result<()> {
+    let db = open_db()?;
+    let llm = build_llm_client(config, env_vars);
+    let llm_ref: Option<&dyn LlmClient> = llm.as_ref().map(|a| a as &dyn LlmClient);
+    let result = gametheory::resume_run_from_checkpoint(
+        &db,
+        run_id,
+        spec_path.map(std::path::Path::new),
+        llm_ref,
+        open_memory_context(false)?,
+        gametheory::GameTheoryRunOptions::default(),
+    )
+    .await
+    .map_err(|e| anyhow::anyhow!("gametheory resume failed: {e}"))?;
+
+    println!("Resume Run {}", result.run_id);
+    println!("==============================");
+    println!("Status:                     {}", result.status);
+    println!("Resumed Specialists:        {}", result.resumed_specialists);
+    println!("Failed Specialists:         {}", result.failed_specialists);
+    println!(
+        "Skipped Completed:         {}",
+        result.skipped_completed_specialists
+    );
+    println!("Total Cost USD:             ${:.6}", result.total_cost_usd);
+    println!("Report Length:              {} words", result.report_words);
+    Ok(())
+}
+
+fn truncate(value: &str, max_chars: usize) -> String {
+    let mut truncated: String = value.chars().take(max_chars).collect();
+    if value.chars().count() > max_chars {
+        truncated.push_str("...");
+    }
+    truncated
 }
 
 fn resolve_tier11_policy(requested: bool) -> Result<bool> {
