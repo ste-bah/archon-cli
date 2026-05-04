@@ -74,7 +74,7 @@ pub async fn handle_gametheory(
 }
 
 /// Build an LLM client adapter from config. Returns None and logs a warning if auth fails.
-fn build_llm_client(
+pub(crate) fn build_llm_client(
     config: &ArchonConfig,
     env_vars: &ArchonEnvVars,
 ) -> Option<AnthropicLlmAdapter> {
@@ -106,7 +106,7 @@ fn build_llm_client(
     Some(AnthropicLlmAdapter::new(Arc::new(client)))
 }
 
-fn open_memory_context(debug: bool) -> Result<gametheory::GameTheoryMemoryContext> {
+pub(crate) fn open_memory_context(debug: bool) -> Result<gametheory::GameTheoryMemoryContext> {
     let memory = archon_memory::MemoryGraph::open_default()
         .map_err(|e| anyhow::anyhow!("failed to open archon memory graph: {e}"))?;
     Ok(gametheory::GameTheoryMemoryContext::new(
@@ -535,7 +535,7 @@ fn print_fingerprint(fp: &gametheory::GameTheoryFingerprint) {
     println!();
 }
 
-fn open_db() -> Result<DbInstance> {
+pub(crate) fn open_db() -> Result<DbInstance> {
     let data_dir = dirs::data_dir()
         .unwrap_or_else(|| std::path::PathBuf::from(".local/share"))
         .join("archon");

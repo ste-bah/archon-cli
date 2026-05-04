@@ -17,6 +17,9 @@ const ALL_NEWLY_SAFE: &[&str] = &[
     "CartographerScan",
     "CronList",
     "ListMcpResources",
+    "GameTheoryStatus",
+    "GameTheoryListAgents",
+    "GameTheoryInspect",
     "LeannSearch",
     "LeannFindSimilar",
     "TaskGet",
@@ -64,6 +67,11 @@ fn dangerous_tools_still_gated_in_default() {
         "Edit",
         "RemoteTrigger",
         "CronCreate",
+        "GameTheoryRun",
+        "GameTheoryReplay",
+        "GameTheoryClassify",
+        "GameTheoryCallSpecialist",
+        "GameTheorySpecimens",
     ] {
         let decision = checker.check(tool, "test", r#"{"command":"ls"}"#);
         assert!(

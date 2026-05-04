@@ -155,6 +155,7 @@ tokio-util.workspace = true
 walkdir.workspace = true
 tracing.workspace = true
 anyhow.workspace = true
+async-trait.workspace = true
 uuid.workspace = true
 semver.workspace = true
 globset.workspace = true

@@ -227,6 +227,18 @@ pub fn create_default_registry(
     // Web search via DuckDuckGo.
     registry.register(Box::new(archon_tools::web_search::WebSearchTool));
 
+    // Game-theory evidence engine tool surface. The concrete executor is
+    // installed by the binary layer to avoid archon-tools -> archon-pipeline
+    // dependency cycles.
+    registry.register(Box::new(archon_tools::gametheory::GameTheoryRun));
+    registry.register(Box::new(archon_tools::gametheory::GameTheoryStatus));
+    registry.register(Box::new(archon_tools::gametheory::GameTheoryListAgents));
+    registry.register(Box::new(archon_tools::gametheory::GameTheorySpecimens));
+    registry.register(Box::new(archon_tools::gametheory::GameTheoryInspect));
+    registry.register(Box::new(archon_tools::gametheory::GameTheoryReplay));
+    registry.register(Box::new(archon_tools::gametheory::GameTheoryClassify));
+    registry.register(Box::new(archon_tools::gametheory::GameTheoryCallSpecialist));
+
     // Code Cartographer — symbol indexing and codebase navigation.
     registry.register(Box::new(archon_tools::cartographer::CartographerTool));
 
@@ -331,7 +343,27 @@ mod tests {
             names.contains(&"CartographerScan"),
             "missing CartographerScan tool (TASK-CLI-410)"
         );
+        for name in archon_tools::gametheory::GAMETHEORY_TOOL_NAMES {
+            assert!(names.contains(name), "missing {name} tool (Group 9)");
+        }
         assert!(names.contains(&"ToolSearch"), "missing ToolSearch tool");
+    }
+
+    #[test]
+    fn test_all_8_gametheory_tools_registered() {
+        let registry = create_default_registry(std::env::temp_dir(), None);
+        let names = registry.tool_names();
+        let registered: Vec<_> = archon_tools::gametheory::GAMETHEORY_TOOL_NAMES
+            .iter()
+            .filter(|name| names.contains(name))
+            .copied()
+            .collect();
+
+        assert_eq!(
+            registered,
+            archon_tools::gametheory::GAMETHEORY_TOOL_NAMES,
+            "all Group 9 gametheory tools must be discoverable from the runtime registry"
+        );
     }
 
     #[test]

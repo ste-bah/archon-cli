@@ -16,6 +16,7 @@ pub mod config_tool;
 pub mod file_edit;
 pub mod file_read;
 pub mod file_write;
+pub mod gametheory;
 pub mod glob_tool;
 pub mod grep;
 pub mod monitor;

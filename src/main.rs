@@ -5,6 +5,7 @@
 mod agent_handle;
 pub(crate) mod cli_args;
 mod command;
+mod gametheory_tool_executor;
 mod panic_save;
 mod runtime;
 pub(crate) mod session;
@@ -164,6 +165,9 @@ async fn main() -> Result<()> {
         config.context.compact_threshold,
         config.context.max_tokens,
     );
+
+    gametheory_tool_executor::install(config.clone(), env_vars.clone());
+
     // TODO(TUI-330): app::TuiEvent moves to archon_tui::events::TuiEvent
     let voice_event_rx = crate::command::tui_helpers::setup_voice_pipeline(&config).await;
 
