@@ -133,12 +133,8 @@ pub(super) async fn handle_tui_event(
             ));
         }
         TuiEvent::OpenView(view_id) => {
-            // TASK-AGS-822: placeholder handler. Full view rendering
-            // deferred to Stage 7+ UI tickets. Log the open request
-            // so tests and tracing observers can confirm the event
-            // landed. Clustered with ShowMcpManager / ShowSessionPicker
-            // (other overlay-opening arms) for locality.
-            tracing::info!(?view_id, "TuiEvent::OpenView received (placeholder)");
+            app.open_view(view_id);
+            tracing::info!(?view_id, "TuiEvent::OpenView opened view");
         }
         TuiEvent::SetVimMode(enabled) => {
             if enabled {

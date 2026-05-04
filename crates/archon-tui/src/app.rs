@@ -73,6 +73,23 @@ pub struct AppConfig {
     pub command_catalog: Vec<crate::commands::CommandInfo>,
 }
 
+/// Active Evidence Engine inspection overlay.
+pub enum EvidenceViewState {
+    Docs(crate::screens::docs::DocsScreen),
+    GameTheory(crate::screens::gametheory::GameTheoryScreen),
+    Learning(crate::screens::learning::LearningScreen),
+}
+
+impl EvidenceViewState {
+    pub fn view_id(&self) -> ViewId {
+        match self {
+            Self::Docs(_) => ViewId::Docs,
+            Self::GameTheory(_) => ViewId::GameTheory,
+            Self::Learning(_) => ViewId::Learning,
+        }
+    }
+}
+
 /// Thin entry point that sets up terminal infrastructure and delegates to
 /// [`crate::event_loop::run_inner`]. The public API called from `main.rs`.
 pub async fn run(config: AppConfig) -> Result<(), io::Error> {
@@ -163,6 +180,8 @@ pub struct App {
     pub file_picker: Option<crate::screens::file_picker::FilePicker>,
     /// TASK-#208 SLASH-SEARCH: active search-results modal (shown by /search).
     pub search_results: Option<crate::screens::search_results::SearchResults>,
+    /// Evidence Engine inspection overlay opened by TuiEvent::OpenView.
+    pub evidence_view: Option<EvidenceViewState>,
     /// Vim keybinding state — Some when vim mode is active, None otherwise.
     pub vim_state: Option<VimState>,
     /// Split pane layout and state manager.
@@ -197,6 +216,7 @@ impl Default for App {
             skills_menu: None,
             file_picker: None,
             search_results: None,
+            evidence_view: None,
             vim_state: None,
             panes: SplitPaneManager::new(),
         }
@@ -222,6 +242,21 @@ impl App {
             self.finish_thinking();
         }
         self.output.append(text);
+    }
+
+    pub fn open_view(&mut self, view_id: ViewId) {
+        self.evidence_view = match view_id {
+            ViewId::Docs => Some(EvidenceViewState::Docs(
+                crate::screens::docs::DocsScreen::documents(),
+            )),
+            ViewId::GameTheory => Some(EvidenceViewState::GameTheory(
+                crate::screens::gametheory::GameTheoryScreen::main(),
+            )),
+            ViewId::Learning => Some(EvidenceViewState::Learning(
+                crate::screens::learning::LearningScreen::proposals(),
+            )),
+            _ => None,
+        };
     }
 
     pub fn on_thinking_delta(&mut self, text: &str) {

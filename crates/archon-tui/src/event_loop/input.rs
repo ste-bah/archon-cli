@@ -419,6 +419,17 @@ pub(super) async fn handle_key_event(
                     _ => return, // swallow other keys while overlay is up
                 }
             }
+            // Handle Evidence Engine inspection overlay. Data navigation is
+            // screen-local; Esc closes the overlay so it never traps the user.
+            if app.evidence_view.is_some() {
+                match key.code {
+                    KeyCode::Esc => {
+                        app.evidence_view = None;
+                        return;
+                    }
+                    _ => return,
+                }
+            }
             // Vim mode key routing — Ctrl+D / Ctrl+C fall through to normal handling
             let is_ctrl_quit = key.modifiers == KeyModifiers::CONTROL
                 && matches!(key.code, KeyCode::Char('d') | KeyCode::Char('c'));

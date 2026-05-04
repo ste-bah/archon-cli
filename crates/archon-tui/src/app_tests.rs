@@ -5,7 +5,7 @@
 //! exercise `App` methods — no event-loop coverage here (that lives in
 //! `tests/event_loop_smoke.rs` and `tests/app_run_e2e.rs`).
 
-use super::App;
+use super::{App, EvidenceViewState, ViewId};
 
 #[test]
 fn app_text_delta() {
@@ -203,4 +203,34 @@ fn unrecognized_slash_command_fallthrough() {
 
     app.on_turn_complete();
     assert!(!app.is_generating);
+}
+
+#[test]
+fn open_view_sets_docs_evidence_overlay_source_of_truth() {
+    let mut app = App::new();
+    app.open_view(ViewId::Docs);
+
+    let view = app.evidence_view.as_ref().expect("view opened");
+    assert_eq!(view.view_id(), ViewId::Docs);
+    assert!(matches!(view, EvidenceViewState::Docs(_)));
+}
+
+#[test]
+fn open_view_sets_gametheory_evidence_overlay_source_of_truth() {
+    let mut app = App::new();
+    app.open_view(ViewId::GameTheory);
+
+    let view = app.evidence_view.as_ref().expect("view opened");
+    assert_eq!(view.view_id(), ViewId::GameTheory);
+    assert!(matches!(view, EvidenceViewState::GameTheory(_)));
+}
+
+#[test]
+fn open_view_sets_learning_evidence_overlay_source_of_truth() {
+    let mut app = App::new();
+    app.open_view(ViewId::Learning);
+
+    let view = app.evidence_view.as_ref().expect("view opened");
+    assert_eq!(view.view_id(), ViewId::Learning);
+    assert!(matches!(view, EvidenceViewState::Learning(_)));
 }

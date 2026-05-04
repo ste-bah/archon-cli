@@ -3,7 +3,7 @@
 use anyhow::Result;
 use archon_pipeline::gametheory;
 use archon_pipeline::runner::LlmClient;
-use archon_tui::app::TuiEvent;
+use archon_tui::app::{TuiEvent, ViewId};
 use cozo::DbInstance;
 
 use crate::command::gametheory_inspect;
@@ -18,6 +18,7 @@ pub(crate) const GAMETHEORY_SUBCOMMANDS: &[&str] = &[
     "replay",
     "list-agents",
     "specimens",
+    "view",
 ];
 
 pub(crate) struct GameTheorySlashHandler;
@@ -50,6 +51,10 @@ impl CommandHandler for GameTheorySlashHandler {
                 gametheory_inspect::render_list_agents(parse_tier(rest)?)?,
             ),
             "specimens" => emit_db(ctx, |db| render_specimens(db, rest)),
+            "view" | "open" => {
+                ctx.emit(TuiEvent::OpenView(ViewId::GameTheory));
+                Ok(())
+            }
             other => emit(
                 ctx,
                 render_usage_line(&format!("unknown subcommand `{other}`")),
@@ -264,7 +269,7 @@ fn parse_rerun_specialist(args: &[String]) -> Result<Option<String>> {
 
 fn render_usage() -> String {
     format!(
-        "/gametheory subcommands: {}\n\nUsage:\n  /gametheory run <situation>\n  /gametheory status [run-id]\n  /gametheory inspect <artifact-id>\n  /gametheory list-runs\n  /gametheory show <run-id>\n  /gametheory replay <run-id> [--reclassify] [--rerun-specialist <key>]\n  /gametheory list-agents [--tier N]\n  /gametheory specimens [--filter axis=value] [--ingest]\n",
+        "/gametheory subcommands: {}\n\nUsage:\n  /gametheory run <situation>\n  /gametheory status [run-id]\n  /gametheory inspect <artifact-id>\n  /gametheory list-runs\n  /gametheory show <run-id>\n  /gametheory replay <run-id> [--reclassify] [--rerun-specialist <key>]\n  /gametheory list-agents [--tier N]\n  /gametheory specimens [--filter axis=value] [--ingest]\n  /gametheory view\n",
         GAMETHEORY_SUBCOMMANDS.join(", ")
     )
 }
@@ -302,7 +307,8 @@ mod tests {
                 "show",
                 "replay",
                 "list-agents",
-                "specimens"
+                "specimens",
+                "view"
             ]
         );
     }
@@ -330,6 +336,19 @@ mod tests {
         for subcommand in GAMETHEORY_SUBCOMMANDS {
             assert!(text.contains(subcommand), "missing {subcommand}");
         }
+    }
+
+    #[test]
+    fn test_gametheory_view_emits_open_view_event() {
+        let (mut ctx, mut rx) = CtxBuilder::new().build();
+        GameTheorySlashHandler
+            .execute(&mut ctx, &[String::from("view")])
+            .unwrap();
+        let events = drain_tui_events(&mut rx);
+        assert!(matches!(
+            events.as_slice(),
+            [TuiEvent::OpenView(ViewId::GameTheory)]
+        ));
     }
 
     #[test]

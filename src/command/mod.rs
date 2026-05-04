@@ -35,6 +35,7 @@ pub(crate) mod doctor;
 pub(crate) mod docs;
 pub(crate) mod effort;
 pub(crate) mod errors;
+pub(crate) mod evidence_view;
 // TASK-#206 SLASH-EXIT: /exit handler + /q alias.
 pub(crate) mod exit;
 pub(crate) mod export;
