@@ -193,6 +193,19 @@ fn notification_timeout_variant() {
     let _e = TuiEvent::NotificationTimeout(5000);
 }
 
+#[test]
+fn agent_activity_variant() {
+    use archon_tui::events::{AgentActivityRole, AgentActivityStatus, AgentActivityUpdate};
+    let _e = TuiEvent::AgentActivity(AgentActivityUpdate {
+        id: "agent-1".into(),
+        name: "Subagent 1".into(),
+        role: AgentActivityRole::Subagent,
+        status: AgentActivityStatus::Running,
+        current_tool: Some("Read".into()),
+        detail: Some("reading source".into()),
+    });
+}
+
 // -----------------------------------------------------------------
 // TASK-AGS-822: OpenView(ViewId) round-trip + per-variant ViewId
 // coverage. `ViewId` is defined at layer 0 (events.rs) and re-exported

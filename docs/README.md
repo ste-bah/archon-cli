@@ -77,6 +77,8 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 
 ## Release notes
 
+- [v0.1.40](release-notes/v0.1.40.md) — Codex OAuth docs, Claude OAuth spoof continuity, TUI agent activity rail
+- [v0.1.39](release-notes/v0.1.39.md) — Evidence Engine PRD compliance pass
 - [v0.1.36](release-notes/v0.1.36.md) — trajectory embeddings + persistence
 - [v0.1.35](release-notes/v0.1.35.md) — Archon skills pack + project installer
 - [v0.1.34](release-notes/v0.1.34.md) — Engineering skills pack

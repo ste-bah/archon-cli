@@ -1,6 +1,17 @@
 # Identity & spoofing
 
-archon-cli can identify itself to the Anthropic API as either Claude Code (`spoof`) or as itself (`native`). Spoofing is on by default and is what lets archon use Claude.ai subscriptions transparently.
+archon-cli can identify itself to the Anthropic API as either Claude Code (`spoof`) or as itself (`native`). Spoofing is on by default and is what lets archon use Claude.ai subscriptions transparently. Codex OAuth is separate: it authenticates the OpenAI Codex provider and does not reuse Anthropic headers.
+
+## Auth options
+
+| Path | Command or setting | Used by |
+|---|---|---|
+| Anthropic OAuth | `archon auth login --provider anthropic` | Claude-backed TUI sessions, pipelines, subagents |
+| Anthropic API key | `ANTHROPIC_API_KEY=sk-ant-api...` | Native Anthropic Messages API calls |
+| Anthropic-compatible proxy | Anthropic base URL + compatible key | OpenRouter, DeepSeek, LiteLLM, or similar routes |
+| Codex OAuth | `archon auth login --provider openai-codex` | `archon chat --provider openai-codex` and future Codex-backed agents |
+
+Run `archon auth status` to inspect both stored OAuth credentials and the active spoof identity. The command redacts account and client IDs and never prints full tokens.
 
 ## The spoof layers
 
@@ -42,6 +53,20 @@ spoof_version = "2.1.89"          # Fallback when no Claude Code install detecte
 anti_distillation = false         # Inject anti-distillation field
 ```
 
+Codex OAuth provider configuration lives under `[providers.openai-codex]`:
+
+```toml
+[providers.openai-codex]
+enabled = true
+
+[providers.openai-codex.spoof]
+# Defaults ship in the binary and can be refreshed from a manifest.
+# Override only when the upstream Codex client identity changes.
+
+[providers.openai-codex.manifest]
+ttl_seconds = 21600
+```
+
 ## Slash commands
 
 | Command | Purpose |
@@ -52,6 +77,10 @@ anti_distillation = false         # Inject anti-distillation field
 
 ```bash
 archon --identity-spoof          # force spoof mode for this invocation
+archon auth login --provider anthropic
+archon auth login --provider openai-codex
+archon auth status
+archon chat --provider openai-codex "explain the current task"
 ```
 
 ## How beta header probing works
@@ -77,7 +106,25 @@ No spoofing, no beta header probing, no Claude Code mimicry. Use this when:
 
 The OAuth flow archon-cli uses matches the original Claude Code client (`redirect_uri = http://localhost:{port}/callback`), so existing Claude Code tokens on the same machine work transparently. The spoofing layer extends this — Anthropic's API (and its quotas/billing) treats spoofed requests as Claude Code requests, which is exactly what you want for a Claude.ai subscription.
 
-If your account has API-key billing or you use a proxy, you can switch to `native` mode without losing functionality.
+If your account has API-key billing or you use a proxy, you can switch to `native` mode without losing functionality. If `ANTHROPIC_API_KEY` is an OAuth-shaped Claude token (`sk-ant-oat-...`), Archon keeps the Claude Code spoof identity on the wire instead of treating it like a raw API key.
+
+## Codex OAuth
+
+Codex OAuth credentials are stored in `~/.archon/.credentials.json` under a separate `openaiCodexOauth` entry. This means a machine can be logged in to both Claude and Codex at the same time:
+
+```bash
+archon auth login --provider anthropic
+archon auth login --provider openai-codex
+archon auth status
+```
+
+Select the Codex provider explicitly when you want to route through it:
+
+```bash
+archon chat --provider openai-codex "write a migration plan"
+```
+
+The Codex kill switch is `ARCHON_CODEX_DISABLED=1`; when set, `archon auth status` reports Codex as disabled and provider construction fails closed.
 
 ## Auditing what gets sent
 

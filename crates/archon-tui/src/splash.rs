@@ -1,8 +1,8 @@
 //! Startup splash screen for the Archon TUI.
 //!
-//! Renders the archon-avatar.png pixel art using unicode halfblock characters
-//! alongside model info, recent activity, and tips. Falls back to ASCII box
-//! art on tiny terminals where the image would be illegible.
+//! Renders a compact Archon logo alongside model info, recent activity, and
+//! tips. The halfblock avatar renderer is retained for compatibility tests,
+//! but the startup screen now prefers text art so it stays crisp on WSL TTYs.
 
 use std::sync::OnceLock;
 
@@ -122,11 +122,14 @@ fn render_halfblock_image(buf: &mut Buffer, area: Rect, img: &image::DynamicImag
 // ---------------------------------------------------------------------------
 
 pub(crate) const ASCII_FALLBACK: &[&str] = &[
-    "      ╔═══╗        ",
-    "      ║ ◈ ║        ",
-    "    ╔═╩═══╩═╗      ",
-    "    ║ ARCHON ║      ",
-    "    ╚════════╝      ",
+    "        ___  ____   ____ _   _ ",
+    "       / _ \\|  _ \\ / ___| | | |",
+    "      | |_| | |_) | |   | |_| |",
+    "      |  _  |  _ <| |___|  _  |",
+    "      |_| |_|_| \\_\\\\____|_| |_|",
+    "          evidence + agents     ",
+    "          memory + learning     ",
+    "          codex + claude oauth  ",
 ];
 
 // ---------------------------------------------------------------------------
@@ -184,8 +187,8 @@ pub fn format_relative_time(rfc3339: &str) -> String {
 /// Render the splash screen directly into a ratatui `Frame`.
 ///
 /// The caller (body.rs) passes the full output area. This function splits
-/// the area: left column for the avatar image, right column for text
-/// (activity, model, tips).
+/// the area: left column for the logo, right column for text (activity,
+/// model, tips).
 pub fn draw_splash(
     buf: &mut Buffer,
     area: Rect,
@@ -197,7 +200,7 @@ pub fn draw_splash(
         return;
     }
     let t = intj_theme();
-    let use_ascii_fallback = area.width < 40;
+    let use_ascii_fallback = true;
 
     let inner_w = area.width.saturating_sub(2) as usize;
     let half = inner_w / 2;
@@ -254,10 +257,10 @@ pub fn draw_splash(
 
     // Working dir + tip lines
     let tips = [
-        "/model to switch models",
-        "/help for all commands",
-        "Type ultrathink for deep",
-        "... /help for more",
+        "/auth status for OAuth",
+        "/agents shows activity",
+        "/docs ingest <path>",
+        "/gametheory run ...",
     ];
     let dir_display = truncate_path(working_dir, 24);
     let mut tip_lines: Vec<Line<'_>> = Vec::with_capacity(4);

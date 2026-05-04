@@ -20,9 +20,13 @@ git clone https://github.com/ste-bah/archon-cli
 cd archon-cli
 cargo build --release --bin archon
 
-# Authenticate
-export ANTHROPIC_API_KEY="sk-ant-..."
-# or: ./target/release/archon login
+# Authenticate with Claude/Anthropic OAuth or API-key billing
+./target/release/archon auth login --provider anthropic
+# or: export ANTHROPIC_API_KEY="sk-ant-api..."
+
+# Optional: authenticate with a ChatGPT/Codex subscription
+./target/release/archon auth login --provider openai-codex
+./target/release/archon auth status
 
 # Run interactive TUI
 ./target/release/archon
@@ -46,9 +50,29 @@ Full installation guide: [`docs/getting-started/installation.md`](docs/getting-s
 | Reasoning | Direct LLM call | 12 reasoning modes (deductive, inductive, abductive, analogical, adversarial, counterfactual, temporal, constraint, decomposition, first-principles, causal, contextual) |
 | Learning | None | 8 subsystems: SONA, ReasoningBank, GNN, CausalMemory, Provenance, DESC, Reflexion, AutoCapture |
 | Verification | model self-report | completion evidence, false-completion incidents, trust scores, provenance traces |
-| Identity | Native | Spoof (Claude Code mimicry) or native |
+| Identity | Native | Claude Code spoof, Anthropic OAuth/API keys, or Codex OAuth |
 
-archon-cli is **not affiliated with Anthropic**. It uses the Anthropic Claude API and requires a valid API key or Claude.ai subscription.
+archon-cli is **not affiliated with Anthropic or OpenAI**. It can use an Anthropic API key, Anthropic/Claude OAuth with Claude Code identity spoofing, or OpenAI Codex OAuth where that provider is selected.
+
+## Authentication
+
+Archon has two subscription-auth paths plus normal API keys:
+
+```bash
+# Claude / Anthropic OAuth, stored in ~/.archon/.credentials.json
+archon auth login --provider anthropic
+
+# OpenAI Codex OAuth, stored beside the Anthropic token
+archon auth login --provider openai-codex
+
+# Inspect both without printing secrets
+archon auth status
+
+# Use Codex explicitly for one-shot chat
+archon chat --provider openai-codex "summarize this repository"
+```
+
+Anthropic OAuth requests use the same Claude Code identity-spoof path as the agent and pipeline runners. API-key users can set `ANTHROPIC_API_KEY=sk-ant-api...`; proxy users can still point the Anthropic-compatible URL at OpenRouter, DeepSeek, LiteLLM, or another compatible endpoint and use native/API-key mode.
 
 ## Documentation map
 
@@ -103,9 +127,9 @@ archon-cli/
 
 ## Status
 
-- Current version: **v0.1.39** ([release notes](docs/release-notes/v0.1.39.md))
+- Current version: **v0.1.40** ([release notes](docs/release-notes/v0.1.40.md))
 - Active development; pre-1.0 means breaking changes can land in minor versions
-- Phase 6 complete (pipelines + learning systems wired) + Evidence Engine PRD compliance pass; see release notes for the v0.1.6 → v0.1.39 stabilisation arc
+- Phase 6 complete (pipelines + learning systems wired) + Evidence Engine PRD compliance pass; see release notes for the v0.1.6 → v0.1.40 stabilisation arc
 
 ## Contributing
 
@@ -115,4 +139,4 @@ See [`docs/development/contributing.md`](docs/development/contributing.md). Ever
 
 See [`LICENSE`](LICENSE).
 
-archon-cli proxies the Anthropic Claude API. You must have a valid API key or active subscription and comply with Anthropic's usage policies.
+archon-cli can proxy Anthropic Claude and OpenAI Codex-compatible APIs. You must have valid credentials or an active subscription and comply with the relevant provider usage policies.

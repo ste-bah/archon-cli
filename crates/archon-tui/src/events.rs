@@ -61,6 +61,36 @@ pub struct EvidenceRowPayload {
     pub detail: String,
 }
 
+/// Role badge for the compact activity rail at the bottom of the TUI.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentActivityRole {
+    Parent,
+    Subagent,
+    Background,
+}
+
+/// Lifecycle state for a parent agent, foreground subagent, or background task.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentActivityStatus {
+    Running,
+    WaitingForTool,
+    Complete,
+    Failed,
+}
+
+/// External activity update payload. The App also derives rows from
+/// ToolStart/ToolComplete so existing sessions get useful feedback without
+/// requiring a deeper core-runner bridge.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentActivityUpdate {
+    pub id: String,
+    pub name: String,
+    pub role: AgentActivityRole,
+    pub status: AgentActivityStatus,
+    pub current_tool: Option<String>,
+    pub detail: Option<String>,
+}
+
 /// Summary of a conversation message for the /rewind overlay list (TASK-TUI-620).
 ///
 /// Defined at layer 0 (events.rs) so that `TuiEvent::ShowMessageSelector` can
@@ -203,6 +233,8 @@ pub enum TuiEvent {
         view_id: ViewId,
         rows: Vec<EvidenceRowPayload>,
     },
+    /// Update a visible parent/subagent/background activity row.
+    AgentActivity(AgentActivityUpdate),
     SetVimMode(bool),
     VimToggle,
     VoiceText(String),

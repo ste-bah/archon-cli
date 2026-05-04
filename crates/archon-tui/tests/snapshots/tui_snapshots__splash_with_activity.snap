@@ -3,7 +3,7 @@ source: crates/archon-tui/tests/tui_snapshots.rs
 expression: lines
 ---
 [
-    Line::from(Span::from("╭─── Archon v0.1.39 ────────────────────────────────────────────╮").fg(Color::Rgb(80, 120, 220))),
+    Line::from(Span::from("╭─── Archon v0.1.40 ────────────────────────────────────────────╮").fg(Color::Rgb(80, 120, 220))),
     Line::from_iter([
         Span::from("│").fg(Color::Rgb(80, 120, 220)),
         Span::from("                                                              "),
@@ -22,31 +22,49 @@ expression: lines
     ]),
     Line::from_iter([
         Span::from("│").fg(Color::Rgb(80, 120, 220)),
-        Span::from("      ╔═══╗                    ").fg(Color::Rgb(0, 220, 220)),
+        Span::from("        ___  ____   ____ _   _ ").fg(Color::Rgb(0, 220, 220)),
         Span::from("1m ago   Chat session          ").dark_gray(),
         Span::from("│").fg(Color::Rgb(80, 120, 220)),
     ]),
     Line::from_iter([
         Span::from("│").fg(Color::Rgb(80, 120, 220)),
-        Span::from("      ║ ◈ ║                    ").fg(Color::Rgb(0, 220, 220)),
+        Span::from("       / _ \\|  _ \\ / ___| | | |").fg(Color::Rgb(0, 220, 220)),
         Span::from("2h ago   Code review           ").dark_gray(),
         Span::from("│").fg(Color::Rgb(80, 120, 220)),
     ]),
     Line::from_iter([
         Span::from("│").fg(Color::Rgb(80, 120, 220)),
-        Span::from("    ╔═╩═══╩═╗                  ").fg(Color::Rgb(0, 220, 220)),
+        Span::from("      | |_| | |_) | |   | |_| |").fg(Color::Rgb(0, 220, 220)),
         Span::from("1d ago   Refactor pass         ").dark_gray(),
         Span::from("│").fg(Color::Rgb(80, 120, 220)),
     ]),
     Line::from_iter([
         Span::from("│").fg(Color::Rgb(80, 120, 220)),
-        Span::from("    ║ ARCHON ║                 ").fg(Color::Rgb(0, 220, 220)),
+        Span::from("      |  _  |  _ <| |___|  _  |").fg(Color::Rgb(0, 220, 220)),
         Span::from("                               ").dark_gray(),
         Span::from("│").fg(Color::Rgb(80, 120, 220)),
     ]),
     Line::from_iter([
         Span::from("│").fg(Color::Rgb(80, 120, 220)),
-        Span::from("    ╚════════╝                 ").fg(Color::Rgb(0, 220, 220)),
+        Span::from("      |_| |_|_| \\_\\\\____|_| |_|").fg(Color::Rgb(0, 220, 220)),
+        Span::from("                               ").dark_gray(),
+        Span::from("│").fg(Color::Rgb(80, 120, 220)),
+    ]),
+    Line::from_iter([
+        Span::from("│").fg(Color::Rgb(80, 120, 220)),
+        Span::from("          evidence + agents     ").fg(Color::Rgb(0, 220, 220)),
+        Span::from("                               ").dark_gray(),
+        Span::from("│").fg(Color::Rgb(80, 120, 220)),
+    ]),
+    Line::from_iter([
+        Span::from("│").fg(Color::Rgb(80, 120, 220)),
+        Span::from("          memory + learning     ").fg(Color::Rgb(0, 220, 220)),
+        Span::from("                               ").dark_gray(),
+        Span::from("│").fg(Color::Rgb(80, 120, 220)),
+    ]),
+    Line::from_iter([
+        Span::from("│").fg(Color::Rgb(80, 120, 220)),
+        Span::from("          codex + claude oauth  ").fg(Color::Rgb(0, 220, 220)),
         Span::from("                               ").dark_gray(),
         Span::from("│").fg(Color::Rgb(80, 120, 220)),
     ]),
@@ -64,25 +82,25 @@ expression: lines
     Line::from_iter([
         Span::from("│").fg(Color::Rgb(80, 120, 220)),
         Span::from("   /home/user/archon           ").dark_gray(),
-        Span::from("/model to switch models        ").dark_gray(),
+        Span::from("/auth status for OAuth         ").dark_gray(),
         Span::from("│").fg(Color::Rgb(80, 120, 220)),
     ]),
     Line::from_iter([
         Span::from("│").fg(Color::Rgb(80, 120, 220)),
         Span::from("                               ").dark_gray(),
-        Span::from("/help for all commands         ").dark_gray(),
+        Span::from("/agents shows activity         ").dark_gray(),
         Span::from("│").fg(Color::Rgb(80, 120, 220)),
     ]),
     Line::from_iter([
         Span::from("│").fg(Color::Rgb(80, 120, 220)),
         Span::from("                               ").dark_gray(),
-        Span::from("Type ultrathink for deep       ").dark_gray(),
+        Span::from("/docs ingest <path>            ").dark_gray(),
         Span::from("│").fg(Color::Rgb(80, 120, 220)),
     ]),
     Line::from_iter([
         Span::from("│").fg(Color::Rgb(80, 120, 220)),
         Span::from("                               ").dark_gray(),
-        Span::from("... /help for more             ").dark_gray(),
+        Span::from("/gametheory run ...            ").dark_gray(),
         Span::from("│").fg(Color::Rgb(80, 120, 220)),
     ]),
     Line::from_iter([
