@@ -304,9 +304,11 @@ async fn handle_answer(query: &str) -> Result<()> {
 
     match answer::answer(&db, query, 5) {
         Ok(ans) => {
+            let edge_count = answer::persist_answer_provenance(&db, &ans)?;
+            println!("Answer ID: {}\n", ans.answer_id);
             println!("{}\n", ans.text);
             if !ans.citations.is_empty() {
-                println!("Citations:");
+                println!("Citations ({edge_count} provenance edge(s)):");
                 for (i, c) in ans.citations.iter().enumerate() {
                     println!(
                         "  [{}] {}  pages {}-{}  doc={}",

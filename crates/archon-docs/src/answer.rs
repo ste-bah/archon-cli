@@ -11,6 +11,7 @@ use crate::retrieval::{SearchResult, search};
 /// An answer with supporting evidence citations.
 #[derive(Clone, Debug)]
 pub struct Answer {
+    pub answer_id: String,
     pub query: String,
     /// The synthesised answer text (in Phase 2, this is assembled from
     /// retrieved chunks; future phases will add LLM synthesis).
@@ -37,10 +38,12 @@ pub struct Citation {
 /// Returns a structured error if no embedding provider is configured
 /// or no documents are indexed.
 pub fn answer(db: &DbInstance, query: &str, top_k: usize) -> Result<Answer, DocsError> {
+    let answer_id = new_answer_id();
     let search_results = match search(db, query, top_k) {
         Ok(results) => results,
         Err(DocsError::Embedding { message }) => {
             return Ok(Answer {
+                answer_id,
                 query: query.to_string(),
                 text: message,
                 citations: Vec::new(),
@@ -52,6 +55,7 @@ pub fn answer(db: &DbInstance, query: &str, top_k: usize) -> Result<Answer, Docs
 
     if search_results.results.is_empty() && search_results.total_chunks == 0 {
         return Ok(Answer {
+            answer_id,
             query: query.to_string(),
             text: "No documents have been indexed. Ingest documents first using 'archon docs ingest <path>'.".into(),
             citations: Vec::new(),
@@ -61,6 +65,7 @@ pub fn answer(db: &DbInstance, query: &str, top_k: usize) -> Result<Answer, Docs
 
     if search_results.results.is_empty() {
         return Ok(Answer {
+            answer_id,
             query: query.to_string(),
             text: format!(
                 "No relevant evidence found for query. {} chunks are stored ({} indexed), but none matched closely enough.",
@@ -109,11 +114,40 @@ pub fn answer(db: &DbInstance, query: &str, top_k: usize) -> Result<Answer, Docs
     };
 
     Ok(Answer {
+        answer_id,
         query: query.to_string(),
         text,
         citations,
         sources: search_results.results,
     })
+}
+
+/// Persist answer -> cited chunk edges so `/docs provenance <answer-id>` can
+/// traverse from answer to source chunks/pages/documents.
+pub fn persist_answer_provenance(db: &DbInstance, answer: &Answer) -> Result<usize, DocsError> {
+    let now = chrono::Utc::now().to_rfc3339();
+    let mut inserted = 0;
+    for citation in &answer.citations {
+        let edge = crate::models::ProvenanceEdge {
+            edge_id: format!("edge-{}-{}", answer.answer_id, citation.chunk_id),
+            from_artifact_id: answer.answer_id.clone(),
+            to_artifact_id: citation.chunk_id.clone(),
+            edge_type: crate::models::ProvenanceEdgeType::Cites,
+            created_at: now.clone(),
+        };
+        crate::store::insert_provenance_edge(db, &edge).map_err(|e| DocsError::Storage {
+            message: e.to_string(),
+        })?;
+        inserted += 1;
+    }
+    Ok(inserted)
+}
+
+fn new_answer_id() -> String {
+    format!(
+        "answer-{}",
+        uuid::Uuid::new_v4().to_string().replace('-', "")[..12].to_string()
+    )
 }
 
 /// Verify that every citation resolves to a real record.
@@ -223,6 +257,37 @@ mod tests {
         assert!(!ans.citations.is_empty());
         assert_eq!(ans.citations[0].chunk_id, "chunk-ans-1");
         assert_eq!(ans.citations[0].page_start, 1);
+    }
+
+    #[test]
+    fn test_answer_provenance_edges_are_persisted() {
+        let db = test_db();
+        setup(&db);
+
+        let chunk = crate::models::ChunkArtifact {
+            chunk_id: "chunk-prov-1".into(),
+            document_id: "doc-prov".into(),
+            artifact_id: "art-prov-1".into(),
+            chunk_index: 0,
+            page_start: 2,
+            page_end: 2,
+            content: "Policy marketplaces need citation-backed governance.".into(),
+            content_hash: "hash-prov-1".into(),
+            embedding_status: "pending".into(),
+        };
+        crate::store::insert_chunk(&db, &chunk).unwrap();
+        crate::retrieval::index_chunk(&db, &chunk).unwrap();
+
+        let ans = answer(&db, "citation backed governance", 5).unwrap();
+        assert!(ans.answer_id.starts_with("answer-"));
+        let inserted = persist_answer_provenance(&db, &ans).unwrap();
+        assert_eq!(inserted, ans.citations.len());
+
+        let edges = crate::store::list_provenance_from(&db, &ans.answer_id).unwrap();
+        assert_eq!(edges.len(), ans.citations.len());
+        assert_eq!(edges[0].from_artifact_id, ans.answer_id);
+        assert_eq!(edges[0].to_artifact_id, "chunk-prov-1");
+        assert_eq!(edges[0].edge_type, crate::models::ProvenanceEdgeType::Cites);
     }
 
     #[test]
