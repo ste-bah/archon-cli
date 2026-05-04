@@ -2,29 +2,66 @@
 
 use anyhow::Result;
 use archon_tui::app::{TuiEvent, ViewId};
+use cozo::DbInstance;
 
 use crate::command::registry::{CommandContext, CommandHandler};
+
+const DOCS_SUBCOMMANDS: &[&str] = &[
+    "open",
+    "view",
+    "list",
+    "status",
+    "show",
+    "inspect",
+    "chunks",
+    "provenance",
+    "model-status",
+];
 
 pub(crate) struct DocsViewHandler;
 pub(crate) struct LearningViewHandler;
 
 impl CommandHandler for DocsViewHandler {
     fn execute(&self, ctx: &mut CommandContext, args: &[String]) -> Result<()> {
-        if matches!(
-            args.first().map(String::as_str),
-            None | Some("open" | "view")
-        ) {
-            ctx.emit(TuiEvent::OpenView(ViewId::Docs));
-            return Ok(());
+        let subcommand = args.first().map(String::as_str).unwrap_or("open");
+        let rest = if args.is_empty() { &[] } else { &args[1..] };
+
+        match subcommand {
+            "open" | "view" => {
+                ctx.emit(TuiEvent::OpenView(ViewId::Docs));
+                Ok(())
+            }
+            "list" => emit_docs_db(ctx, |db| {
+                let sources = archon_docs::store::list_doc_sources(db)?;
+                Ok(archon_docs::inspect::format_list_output(&sources))
+            }),
+            "status" => emit_docs_db(ctx, render_docs_status),
+            "show" | "inspect" => match rest.first() {
+                Some(document_id) => emit_docs_db(ctx, |db| render_doc_inspect(db, document_id)),
+                None => emit(ctx, docs_usage_line("show requires <document-id>")),
+            },
+            "chunks" => match rest.first() {
+                Some(document_id) => emit_docs_db(ctx, |db| render_doc_chunks(db, document_id)),
+                None => emit(ctx, docs_usage_line("chunks requires <document-id>")),
+            },
+            "provenance" => match rest.first() {
+                Some(artifact_id) => emit_docs_db(ctx, |db| render_doc_provenance(db, artifact_id)),
+                None => emit(
+                    ctx,
+                    docs_usage_line("provenance requires <chunk-or-artifact-id>"),
+                ),
+            },
+            "model-status" => emit_docs_db(ctx, render_docs_model_status),
+            "help" => emit(ctx, docs_usage()),
+            other => emit(
+                ctx,
+                docs_usage_line(&format!("unknown subcommand `{other}`")),
+            ),
         }
-        ctx.emit(TuiEvent::TextDelta(
-            "Usage: /docs [open|view]\nOpens the document/evidence TUI browser.".into(),
-        ));
-        Ok(())
     }
 
     fn description(&self) -> &str {
-        "Open the document/evidence TUI browser"
+        "Open and inspect the document/evidence browser"
     }
 }
 
@@ -48,17 +85,148 @@ impl CommandHandler for LearningViewHandler {
     }
 }
 
+fn emit_docs_db<F>(ctx: &mut CommandContext, render: F) -> Result<()>
+where
+    F: FnOnce(&DbInstance) -> Result<String>,
+{
+    let rendered = match ctx.cozo_db.as_ref() {
+        Some(db) => render(db.as_ref())?,
+        None => {
+            let db = open_docs_db()?;
+            render(&db)?
+        }
+    };
+    emit(ctx, rendered)
+}
+
+fn emit(ctx: &mut CommandContext, msg: String) -> Result<()> {
+    ctx.emit(TuiEvent::TextDelta(msg));
+    Ok(())
+}
+
+fn docs_usage() -> String {
+    format!(
+        "/docs subcommands: {}\n\nUsage:\n  /docs open\n  /docs list\n  /docs status\n  /docs show <document-id>\n  /docs inspect <document-id>\n  /docs chunks <document-id>\n  /docs provenance <chunk-or-artifact-id>\n  /docs model-status\n",
+        DOCS_SUBCOMMANDS.join(", ")
+    )
+}
+
+fn docs_usage_line(reason: &str) -> String {
+    format!("{reason}\n\n{}", docs_usage())
+}
+
+fn open_docs_db() -> Result<DbInstance> {
+    let path = dirs::data_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from(".local/share"))
+        .join("archon")
+        .join("docs.db");
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let path_str = path.to_string_lossy().to_string();
+    let db = DbInstance::new("sqlite", &path_str, "")
+        .map_err(|e| anyhow::anyhow!("failed to open document store at {path_str}: {e}"))?;
+    archon_docs::schema::ensure_doc_schema(&db)?;
+    Ok(db)
+}
+
+fn render_docs_status(db: &DbInstance) -> Result<String> {
+    let summary = archon_docs::status::get_status_summary(db)?;
+    Ok(format!(
+        "Document Status\n===============\nTotal sources: {}\nProcessed:     {}\nFailed:        {}\nTotal chunks:  {}\nTotal pages:   {}\n",
+        summary.total_sources,
+        summary.processed,
+        summary.failed,
+        summary.total_chunks,
+        summary.total_pages
+    ))
+}
+
+fn render_doc_inspect(db: &DbInstance, document_id: &str) -> Result<String> {
+    let output = archon_docs::inspect::inspect_document(db, document_id)?;
+    Ok(archon_docs::inspect::format_inspect_output(&output))
+}
+
+fn render_doc_chunks(db: &DbInstance, document_id: &str) -> Result<String> {
+    let chunks = archon_docs::store::list_chunks_for_doc(db, document_id)?;
+    if chunks.is_empty() {
+        return Ok(format!("No chunks for document {document_id}"));
+    }
+
+    let mut out = format!("{} chunk(s) for document {document_id}:\n", chunks.len());
+    for chunk in chunks {
+        out.push_str(&format!(
+            "  {} pages {}-{} embed={}\n",
+            chunk.chunk_id, chunk.page_start, chunk.page_end, chunk.embedding_status
+        ));
+    }
+    Ok(out)
+}
+
+fn render_doc_provenance(db: &DbInstance, artifact_id: &str) -> Result<String> {
+    let outgoing = archon_docs::store::list_provenance_from(db, artifact_id).unwrap_or_default();
+    let incoming = archon_docs::store::list_provenance_to(db, artifact_id).unwrap_or_default();
+    if outgoing.is_empty() && incoming.is_empty() {
+        return Ok(format!("No provenance edges found for {artifact_id}"));
+    }
+
+    let mut out = format!("Provenance for {artifact_id}\n====================\n");
+    for edge in outgoing {
+        out.push_str(&format!(
+            "  {} {:?} -> {}\n",
+            edge.edge_id, edge.edge_type, edge.to_artifact_id
+        ));
+    }
+    for edge in incoming {
+        out.push_str(&format!(
+            "  {} {:?} <- {}\n",
+            edge.edge_id, edge.edge_type, edge.from_artifact_id
+        ));
+    }
+    Ok(out)
+}
+
+fn render_docs_model_status(db: &DbInstance) -> Result<String> {
+    let provider = archon_docs::embed::get_provider();
+    let vectors = archon_docs::store::count_embeddings(db).unwrap_or(0);
+    let pending = archon_docs::store::count_pending_chunks(db).unwrap_or(0);
+    let backend = provider
+        .as_ref()
+        .map(|p| p.backend_name().to_string())
+        .unwrap_or_else(|| "not configured".to_string());
+    Ok(format!(
+        "Document Model Status\n=====================\nBackend: {backend}\nVectors: {vectors}\nPending chunks: {pending}\n"
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::command::registry::default_registry;
     use crate::command::test_support::{CtxBuilder, drain_tui_events};
+    use archon_docs::models::{ChunkArtifact, DocumentStatus, SourceDocument};
 
     #[test]
     fn default_registry_registers_evidence_view_primaries() {
         let registry = default_registry();
         assert!(registry.is_primary("docs"));
         assert!(registry.is_primary("learning"));
+    }
+
+    #[test]
+    fn docs_usage_lists_prd_command_family() {
+        let (mut ctx, mut rx) = CtxBuilder::new().build();
+        DocsViewHandler
+            .execute(&mut ctx, &[String::from("help")])
+            .unwrap();
+        let events = drain_tui_events(&mut rx);
+        let text = match &events[0] {
+            TuiEvent::TextDelta(text) => text,
+            other => panic!("expected TextDelta, got {other:?}"),
+        };
+        for subcommand in DOCS_SUBCOMMANDS {
+            assert!(text.contains(subcommand), "missing {subcommand}");
+        }
     }
 
     #[test]
@@ -81,5 +249,84 @@ mod tests {
             events.as_slice(),
             [TuiEvent::OpenView(ViewId::Learning)]
         ));
+    }
+
+    #[test]
+    fn docs_status_reads_document_cozo_source_of_truth() {
+        let db = std::sync::Arc::new(test_docs_db());
+        seed_doc(&db);
+
+        let (mut ctx, mut rx) = CtxBuilder::new().with_cozo_db(db).build();
+        DocsViewHandler
+            .execute(&mut ctx, &[String::from("status")])
+            .unwrap();
+        let events = drain_tui_events(&mut rx);
+        let text = match &events[0] {
+            TuiEvent::TextDelta(text) => text,
+            other => panic!("expected TextDelta, got {other:?}"),
+        };
+
+        assert!(text.contains("Total sources: 1"));
+        assert!(text.contains("Processed:     1"));
+        assert!(text.contains("Total chunks:  1"));
+    }
+
+    #[test]
+    fn docs_chunks_reads_document_cozo_source_of_truth() {
+        let db = std::sync::Arc::new(test_docs_db());
+        seed_doc(&db);
+
+        let (mut ctx, mut rx) = CtxBuilder::new().with_cozo_db(db).build();
+        DocsViewHandler
+            .execute(
+                &mut ctx,
+                &[String::from("chunks"), String::from("doc-slash")],
+            )
+            .unwrap();
+        let events = drain_tui_events(&mut rx);
+        let text = match &events[0] {
+            TuiEvent::TextDelta(text) => text,
+            other => panic!("expected TextDelta, got {other:?}"),
+        };
+
+        assert!(text.contains("chunk-slash"));
+        assert!(text.contains("pages 1-1"));
+    }
+
+    fn test_docs_db() -> DbInstance {
+        let path = format!("/tmp/test-docs-slash-{}.db", uuid::Uuid::new_v4());
+        let db = DbInstance::new("sqlite", &path, "").unwrap();
+        archon_docs::schema::ensure_doc_schema(&db).unwrap();
+        db
+    }
+
+    fn seed_doc(db: &DbInstance) {
+        archon_docs::store::insert_doc_source(
+            db,
+            &SourceDocument {
+                document_id: "doc-slash".into(),
+                source_path: "/tmp/slash.md".into(),
+                media_type: "text/markdown".into(),
+                content_hash: "hash-slash".into(),
+                discovered_at: "2026-05-04T00:00:00Z".into(),
+                status: DocumentStatus::Processed,
+            },
+        )
+        .unwrap();
+        archon_docs::store::insert_chunk(
+            db,
+            &ChunkArtifact {
+                chunk_id: "chunk-slash".into(),
+                document_id: "doc-slash".into(),
+                artifact_id: "artifact-slash".into(),
+                chunk_index: 0,
+                page_start: 1,
+                page_end: 1,
+                content: "slash source of truth content".into(),
+                content_hash: "chunk-hash".into(),
+                embedding_status: "pending".into(),
+            },
+        )
+        .unwrap();
     }
 }
