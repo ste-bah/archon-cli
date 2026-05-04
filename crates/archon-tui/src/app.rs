@@ -7,6 +7,8 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
+use crate::agent_activity::AgentActivityRow;
+use crate::events::AgentActivityUpdate;
 use crate::input::InputHandler;
 use crate::output::{OutputBuffer, ThinkingState, ToolOutputState};
 use crate::splash::ActivityEntry;
@@ -16,27 +18,11 @@ use crate::terminal::TerminalGuard;
 use crate::theme::{Theme, intj_theme};
 use crate::vim::VimState;
 
-// TUI-330: Re-export entry types from their canonical location in
-// `crate::events` (layer 0). Moved here from `app.rs` to satisfy the
-// module-direction invariant (events.rs may not import from app.rs).
-// External consumers that reference `archon_tui::app::McpServerEntry` or
-// `archon_tui::app::SessionPickerEntry` remain unbroken via these re-exports.
-// TASK-AGS-822: `ViewId` added to the re-export list for the same
-// layer-0 reasoning as `McpServerEntry` / `SessionPickerEntry` —
-// external consumers (bin-crate command handlers, integration tests)
-// reach the enum via `archon_tui::app::ViewId`.
-// TASK-#246 SLASH-CLEANUP-DUAL-TUIEVENT (2026-04-26): `TuiEvent` was a
-// duplicate of `crate::events::TuiEvent` predating the events.rs
-// extraction (TUI-330). #207/#208 kept the duplication going by adding
-// `ShowFilePicker` + `ShowSearchResults` variants to BOTH enums, which
-// pushed app.rs past the 500-line TUI lint ceiling. This commit
-// retires `app::TuiEvent` — the path `archon_tui::app::TuiEvent` is
-// preserved for API stability via the `pub use` below so 50+ consumers
-// continue to import it unchanged. `events::TuiEvent` is the sole
-// canonical definition.
+// Re-export layer-0 event payloads so existing `archon_tui::app::*` imports
+// remain stable while `crate::events` stays the canonical source.
 pub use crate::events::{
-    EvidenceRowPayload, FileEntry, McpServerEntry, MessageSummary, SessionPickerEntry, SkillEntry,
-    TuiEvent, ViewId,
+    AgentActivityRole, EvidenceRowPayload, FileEntry, McpServerEntry, MessageSummary,
+    SessionPickerEntry, SkillEntry, TuiEvent, ViewId,
 };
 
 // REM-2d: Modal overlay state types relocated to sibling module
@@ -44,10 +30,6 @@ pub use crate::events::{
 // `archon_tui::app::{SessionPicker, McpManager, McpManagerView, SplashConfig}`
 // path is preserved via this re-export so downstream callers are untouched.
 pub use crate::app_modals::{McpManager, McpManagerView, SessionPicker, SplashConfig};
-
-// `enum TuiEvent` was DELETED here as part of TASK-#246. The 115-line
-// duplicate is gone; consumers reach the canonical definition via
-// `crate::events::TuiEvent` (re-exported above).
 
 /// Callback type for sending user input to the agent loop.
 pub type InputSender = tokio::sync::mpsc::Sender<String>;
@@ -148,6 +130,8 @@ pub struct App {
     pub active_tool: Option<String>,
     /// Collapsible tool output blocks for the current turn.
     pub tool_outputs: Vec<ToolOutputState>,
+    /// Compact parent/subagent activity rows shown above the input.
+    pub agent_activity: Vec<AgentActivityRow>,
     /// Whether to display thinking text (toggle with /thinking).
     pub show_thinking: bool,
     /// Timestamp of last Esc press for double-Esc cancel detection.
@@ -201,6 +185,7 @@ impl Default for App {
             is_generating: false,
             active_tool: None,
             tool_outputs: Vec::new(),
+            agent_activity: Vec::new(),
             show_thinking: false,
             last_esc: None,
             show_splash: true,
@@ -323,6 +308,7 @@ impl App {
         // is_generating is already set by GenerationStarted — not set here.
         self.active_tool = Some(name.to_string());
         self.tool_outputs.push(ToolOutputState::new(name, id));
+        crate::agent_activity::tool_started(&mut self.agent_activity, name, id);
     }
 
     pub fn on_tool_complete(&mut self, name: &str, id: &str, success: bool, output: &str) {
@@ -334,6 +320,7 @@ impl App {
         if let Some(tool_state) = self.tool_outputs.iter_mut().rev().find(|t| t.tool_id == id) {
             tool_state.complete(output, !success);
         }
+        crate::agent_activity::tool_completed(&mut self.agent_activity, name, id, success);
         if !success {
             let truncated: String = output.chars().take(200).collect();
             self.output
@@ -358,6 +345,7 @@ impl App {
         }
         self.is_generating = false;
         self.output.append_line("");
+        crate::agent_activity::turn_completed(&mut self.agent_activity);
         // Reset thinking for the next turn.
         self.thinking.reset();
     }
@@ -368,6 +356,7 @@ impl App {
         }
         self.output.append_line(&format!("[error] {message}"));
         self.is_generating = false;
+        crate::agent_activity::turn_failed(&mut self.agent_activity);
     }
 
     pub fn submit_input(&mut self) -> String {
@@ -383,10 +372,15 @@ impl App {
 
     pub fn on_generation_started(&mut self) {
         self.is_generating = true;
+        crate::agent_activity::turn_started(&mut self.agent_activity);
     }
 
     pub fn on_slash_command_complete(&mut self) {
         self.is_generating = false;
+    }
+
+    pub fn on_agent_activity(&mut self, update: AgentActivityUpdate) {
+        crate::agent_activity::apply_update(&mut self.agent_activity, update);
     }
 
     /// Finalize the current thinking block. The summary is rendered as a
@@ -474,13 +468,6 @@ impl App {
     }
 }
 
-// TUI-330: `SessionPickerEntry` and `McpServerEntry` moved to `crate::events`
-// to honor the layer-0 direction invariant. Both types are re-exported via
-// `pub use crate::events::{...}` at the top of this file so the public API
-// (`archon_tui::app::SessionPickerEntry` / `archon_tui::app::McpServerEntry`)
-// is preserved for `src/session.rs`, `src/command/slash.rs`, and existing
-// integration tests.
-//
 // REM-2d: `SessionPicker`, `McpManagerView`, `McpManager`, `SplashConfig`
 // relocated to sibling module `crate::app_modals` to keep `app.rs` under
 // the 500-line ceiling. See the `pub use crate::app_modals::{...}` at the

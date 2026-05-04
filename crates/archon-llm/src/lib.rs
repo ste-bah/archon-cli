@@ -11,6 +11,7 @@ pub mod identity;
 // TASK-P0-B.1a (#178): Multi-modal content helpers (image, future PDF/audio).
 pub mod multimodal;
 pub mod oauth;
+pub mod oauth_codex;
 pub mod provider;
 pub mod providers;
 // TASK-AGS-708: RetryProvider<P> decorator with exponential backoff.
@@ -19,6 +20,7 @@ pub mod secrets;
 pub mod streaming;
 pub mod thinking;
 pub mod tokens;
+pub mod tokens_codex;
 pub mod types;
 
 // TASK-AGS-706: re-export LlmConfig at crate root for call sites that

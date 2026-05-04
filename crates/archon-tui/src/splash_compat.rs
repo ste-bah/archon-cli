@@ -72,10 +72,10 @@ pub fn render_splash<'a>(
     ));
 
     let tips = [
-        "/model to switch models",
-        "/help for all commands",
-        "Type ultrathink for deep",
-        "... /help for more",
+        "/auth status for OAuth",
+        "/agents shows activity",
+        "/docs ingest <path>",
+        "/gametheory run ...",
     ];
 
     let dir_display = truncate_path(working_dir, 24);

@@ -1,0 +1,47 @@
+{
+  "path": "/codex/responses",
+  "body": {
+    "model": "gpt-5.4",
+    "store": false,
+    "stream": true,
+    "input": [
+      {
+        "type": "message",
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "call the tool"
+          }
+        ]
+      }
+    ],
+    "tools": [
+      {
+        "type": "function",
+        "name": "lookup",
+        "description": "Lookup a value",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "query"
+          ]
+        }
+      }
+    ],
+    "tool_choice": "auto",
+    "parallel_tool_calls": true,
+    "text": {
+      "verbosity": "low"
+    },
+    "include": [
+      "reasoning.encrypted_content"
+    ],
+    "prompt_cache_key": "{{UUID}}"
+  }
+}

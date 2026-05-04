@@ -118,6 +118,7 @@ impl LlmClient for AnthropicLlmAdapter {
                 }
                 StreamEvent::ThinkingDelta { .. }
                 | StreamEvent::SignatureDelta { .. }
+                | StreamEvent::ReasoningEncrypted { .. }
                 | StreamEvent::MessageStop
                 | StreamEvent::Ping
                 | StreamEvent::Error { .. } => {}

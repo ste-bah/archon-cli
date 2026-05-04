@@ -1,0 +1,10 @@
+{
+  "path": "/oauth/token",
+  "body": {
+    "grant_type": "authorization_code",
+    "code": "{{OAUTH_CODE}}",
+    "code_verifier": "{{OAUTH_CODE_VERIFIER}}",
+    "client_id": "{{CLIENT_ID}}",
+    "redirect_uri": "http://127.0.0.1:1455/callback"
+  }
+}

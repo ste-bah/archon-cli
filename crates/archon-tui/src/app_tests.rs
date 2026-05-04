@@ -5,7 +5,8 @@
 //! exercise `App` methods — no event-loop coverage here (that lives in
 //! `tests/event_loop_smoke.rs` and `tests/app_run_e2e.rs`).
 
-use super::{App, EvidenceViewState, ViewId};
+use super::{AgentActivityRole, App, EvidenceViewState, ViewId};
+use crate::events::{AgentActivityStatus, AgentActivityUpdate};
 
 #[test]
 fn app_text_delta() {
@@ -44,6 +45,48 @@ fn app_tool_lifecycle() {
     // But the tool output state is tracked
     assert_eq!(app.tool_outputs.len(), 1);
     assert_eq!(app.tool_outputs[0].tool_name, "Read");
+    assert!(
+        app.agent_activity
+            .iter()
+            .any(|row| row.id == "parent" && row.status == AgentActivityStatus::Running)
+    );
+}
+
+#[test]
+fn app_agent_tool_lifecycle_updates_subagent_activity_row() {
+    let mut app = App::new();
+    app.on_generation_started();
+    app.on_tool_start("Agent", "agent-tool-1");
+    assert!(app.agent_activity.iter().any(|row| {
+        row.id == "agent-tool-1"
+            && row.role == AgentActivityRole::Subagent
+            && row.status == AgentActivityStatus::Running
+    }));
+
+    app.on_tool_complete("Agent", "agent-tool-1", true, "subagent result");
+    assert!(
+        app.agent_activity
+            .iter()
+            .any(|row| { row.id == "agent-tool-1" && row.status == AgentActivityStatus::Complete })
+    );
+}
+
+#[test]
+fn app_applies_external_agent_activity_update() {
+    let mut app = App::new();
+    app.on_agent_activity(AgentActivityUpdate {
+        id: "bg-1".into(),
+        name: "Background reviewer".into(),
+        role: AgentActivityRole::Background,
+        status: AgentActivityStatus::WaitingForTool,
+        current_tool: Some("Read".into()),
+        detail: Some("auditing".into()),
+    });
+
+    let row = app.agent_activity.first().expect("activity row");
+    assert_eq!(row.id, "bg-1");
+    assert_eq!(row.role, AgentActivityRole::Background);
+    assert_eq!(row.current_tool.as_deref(), Some("Read"));
 }
 
 #[test]

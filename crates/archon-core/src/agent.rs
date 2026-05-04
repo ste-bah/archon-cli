@@ -757,6 +757,7 @@ impl Agent {
                 effort,
                 extra: serde_json::Value::Null,
                 request_origin: Some("main_session".into()),
+                reasoning_encrypted: None,
             };
 
             self.send_event(AgentEvent::ApiCallStarted {
@@ -850,6 +851,7 @@ impl Agent {
                     StreamEvent::SignatureDelta { signature, .. } => {
                         thinking_signature.push_str(&signature);
                     }
+                    StreamEvent::ReasoningEncrypted { .. } => {}
 
                     StreamEvent::Error {
                         error_type,
@@ -2470,6 +2472,7 @@ impl Agent {
             effort: Some("low".to_string()),
             extra: serde_json::Value::Null,
             request_origin: None,
+            reasoning_encrypted: None,
         };
 
         match self.client.stream(request).await {
@@ -2738,6 +2741,7 @@ impl Agent {
                 effort: Some("low".to_string()),
                 extra: serde_json::Value::Null,
                 request_origin: None,
+                reasoning_encrypted: None,
             };
 
             match client.stream(request).await {

@@ -1,0 +1,49 @@
+use archon_core::config::ArchonConfig;
+
+#[test]
+fn archon_config_defaults_codex_provider_enabled() {
+    let cfg = ArchonConfig::default();
+
+    assert!(cfg.providers.openai_codex.enabled);
+    assert_eq!(cfg.providers.openai_codex.manifest.ttl_seconds, 21_600);
+}
+
+#[test]
+fn archon_config_parses_openai_codex_provider_section() {
+    let cfg: ArchonConfig = toml::from_str(
+        r#"
+        [providers.openai-codex]
+        enabled = true
+
+        [providers.openai-codex.spoof]
+        originator = "cfgorigin"
+        user_agent = "cfgagent/1"
+        client_id = "app_EMoamEEZ73f0CkXaXp7hrann"
+        openai_beta = "responses=experimental"
+
+        [providers.openai-codex.spoof.extra_headers]
+        x-test = "one"
+
+        [providers.openai-codex.manifest]
+        fetch_url = "https://example.invalid/codex-compat.json"
+        ttl_seconds = 10
+        cache_dir = "/tmp/archon-codex-cache"
+        "#,
+    )
+    .expect("config parses");
+
+    assert_eq!(
+        cfg.providers.openai_codex.spoof.originator.as_deref(),
+        Some("cfgorigin")
+    );
+    assert_eq!(cfg.providers.openai_codex.manifest.ttl_seconds, 10);
+    assert_eq!(
+        cfg.providers
+            .openai_codex
+            .spoof
+            .extra_headers
+            .get("x-test")
+            .map(String::as_str),
+        Some("one")
+    );
+}

@@ -1,24 +1,12 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct EffectivePolicy {
     pub network: NetworkPolicy,
     pub workers: WorkersPolicy,
     pub gametheory: GameTheoryPolicy,
     pub learning: LearningPolicy,
     pub docs: DocsPolicy,
-}
-
-impl Default for EffectivePolicy {
-    fn default() -> Self {
-        Self {
-            network: NetworkPolicy::default(),
-            workers: WorkersPolicy::default(),
-            gametheory: GameTheoryPolicy::default(),
-            learning: LearningPolicy::default(),
-            docs: DocsPolicy::default(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

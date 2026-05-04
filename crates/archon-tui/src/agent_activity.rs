@@ -1,0 +1,283 @@
+//! Compact parent/subagent activity rail for the TUI.
+//!
+//! This deliberately mirrors the event-shape idea used by richer agent UIs
+//! without copying their implementation: Archon keeps a tiny source-of-truth
+//! row per active actor and renders it from local TUI state.
+
+use ratatui::{
+    Frame,
+    layout::{Constraint, Direction, Layout, Rect},
+    style::{Color, Modifier, Style},
+    text::{Line, Span},
+    widgets::{Block, Borders, Paragraph},
+};
+
+use crate::events::{AgentActivityRole, AgentActivityStatus, AgentActivityUpdate};
+use crate::theme::Theme;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentActivityRow {
+    pub id: String,
+    pub name: String,
+    pub role: AgentActivityRole,
+    pub status: AgentActivityStatus,
+    pub current_tool: Option<String>,
+    pub detail: Option<String>,
+}
+
+impl AgentActivityRow {
+    pub fn new(
+        id: impl Into<String>,
+        name: impl Into<String>,
+        role: AgentActivityRole,
+        status: AgentActivityStatus,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            name: name.into(),
+            role,
+            status,
+            current_tool: None,
+            detail: None,
+        }
+    }
+
+    pub fn from_update(update: AgentActivityUpdate) -> Self {
+        Self {
+            id: update.id,
+            name: update.name,
+            role: update.role,
+            status: update.status,
+            current_tool: update.current_tool,
+            detail: update.detail,
+        }
+    }
+}
+
+pub fn apply_update(rows: &mut Vec<AgentActivityRow>, update: AgentActivityUpdate) {
+    if let Some(row) = rows.iter_mut().find(|row| row.id == update.id) {
+        row.name = update.name;
+        row.role = update.role;
+        row.status = update.status;
+        row.current_tool = update.current_tool;
+        row.detail = update.detail;
+    } else {
+        rows.push(AgentActivityRow::from_update(update));
+    }
+    trim_rows(rows);
+}
+
+pub fn turn_started(rows: &mut Vec<AgentActivityRow>) {
+    upsert_parent(
+        rows,
+        AgentActivityStatus::Running,
+        None,
+        "model turn started",
+    );
+}
+
+pub fn turn_completed(rows: &mut Vec<AgentActivityRow>) {
+    upsert_parent(rows, AgentActivityStatus::Complete, None, "turn complete");
+}
+
+pub fn turn_failed(rows: &mut Vec<AgentActivityRow>) {
+    upsert_parent(rows, AgentActivityStatus::Failed, None, "turn failed");
+}
+
+pub fn tool_started(rows: &mut Vec<AgentActivityRow>, name: &str, id: &str) {
+    upsert_parent(
+        rows,
+        AgentActivityStatus::WaitingForTool,
+        Some(name.to_string()),
+        "processing turn",
+    );
+    if name.eq_ignore_ascii_case("agent") {
+        upsert_subagent(
+            rows,
+            id,
+            AgentActivityStatus::Running,
+            "spawned from parent turn",
+        );
+    }
+}
+
+pub fn tool_completed(rows: &mut Vec<AgentActivityRow>, name: &str, id: &str, success: bool) {
+    upsert_parent(
+        rows,
+        AgentActivityStatus::Running,
+        None,
+        "awaiting model response",
+    );
+    if name.eq_ignore_ascii_case("agent") {
+        upsert_subagent(
+            rows,
+            id,
+            if success {
+                AgentActivityStatus::Complete
+            } else {
+                AgentActivityStatus::Failed
+            },
+            if success {
+                "subagent completed"
+            } else {
+                "subagent failed"
+            },
+        );
+    }
+}
+
+pub fn render_rail_if_needed(
+    frame: &mut Frame,
+    rows: &[AgentActivityRow],
+    area: Rect,
+    theme: &Theme,
+) -> Rect {
+    if rows.is_empty() || area.height < 10 {
+        return area;
+    }
+    let rail_height = (rows.len() as u16 + 2).clamp(3, 6);
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Min(3),
+            Constraint::Length(rail_height.min(area.height.saturating_sub(3))),
+        ])
+        .split(area);
+    render(frame, rows, chunks[1], theme);
+    chunks[0]
+}
+
+fn upsert_parent(
+    rows: &mut Vec<AgentActivityRow>,
+    status: AgentActivityStatus,
+    current_tool: Option<String>,
+    detail: impl Into<String>,
+) {
+    upsert_row(
+        rows,
+        AgentActivityRow {
+            id: "parent".into(),
+            name: "Parent".into(),
+            role: AgentActivityRole::Parent,
+            status,
+            current_tool,
+            detail: Some(detail.into()),
+        },
+    );
+}
+
+fn upsert_subagent(
+    rows: &mut Vec<AgentActivityRow>,
+    id: &str,
+    status: AgentActivityStatus,
+    detail: impl Into<String>,
+) {
+    upsert_row(
+        rows,
+        AgentActivityRow {
+            id: id.into(),
+            name: short_subagent_name(id),
+            role: AgentActivityRole::Subagent,
+            status,
+            current_tool: None,
+            detail: Some(detail.into()),
+        },
+    );
+}
+
+pub fn render(frame: &mut Frame, rows: &[AgentActivityRow], area: Rect, theme: &Theme) {
+    if rows.is_empty() || area.height == 0 || area.width < 24 {
+        return;
+    }
+
+    let visible_rows = area.height.saturating_sub(2) as usize;
+    let lines: Vec<Line<'_>> = rows
+        .iter()
+        .rev()
+        .take(visible_rows)
+        .rev()
+        .map(|row| render_row(row, theme, area.width.saturating_sub(2) as usize))
+        .collect();
+
+    let panel = Paragraph::new(lines).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" Agent Activity ")
+            .border_style(Style::default().fg(theme.border_active)),
+    );
+    frame.render_widget(panel, area);
+}
+
+fn upsert_row(rows: &mut Vec<AgentActivityRow>, row: AgentActivityRow) {
+    if let Some(existing) = rows.iter_mut().find(|existing| existing.id == row.id) {
+        *existing = row;
+    } else {
+        rows.push(row);
+    }
+    trim_rows(rows);
+}
+
+fn trim_rows(rows: &mut Vec<AgentActivityRow>) {
+    const MAX_ROWS: usize = 8;
+    if rows.len() > MAX_ROWS {
+        rows.drain(0..rows.len() - MAX_ROWS);
+    }
+}
+
+fn render_row<'a>(row: &AgentActivityRow, theme: &Theme, width: usize) -> Line<'a> {
+    let badge = match row.role {
+        AgentActivityRole::Parent => "[PARENT]",
+        AgentActivityRole::Subagent => "[AGENT]",
+        AgentActivityRole::Background => "[BG]",
+    };
+    let (status, color) = match row.status {
+        AgentActivityStatus::Running => ("running", theme.accent),
+        AgentActivityStatus::WaitingForTool => ("tool", Color::Yellow),
+        AgentActivityStatus::Complete => ("done", Color::Green),
+        AgentActivityStatus::Failed => ("failed", Color::Red),
+    };
+    let mut detail = row.detail.clone().unwrap_or_default();
+    if let Some(tool) = &row.current_tool {
+        detail = format!("{detail} tool={tool}");
+    }
+    let text = format!(
+        "{badge:<8} {status:<7} {:<18} {}",
+        row.name,
+        truncate(&detail, width.saturating_sub(38))
+    );
+
+    Line::from(vec![Span::styled(
+        text,
+        Style::default()
+            .fg(color)
+            .add_modifier(if matches!(row.role, AgentActivityRole::Parent) {
+                Modifier::BOLD
+            } else {
+                Modifier::empty()
+            }),
+    )])
+}
+
+fn short_subagent_name(id: &str) -> String {
+    let suffix: String = id
+        .chars()
+        .rev()
+        .take(6)
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect();
+    format!("Subagent {suffix}")
+}
+
+fn truncate(value: &str, max_chars: usize) -> String {
+    if max_chars == 0 {
+        return String::new();
+    }
+    if value.chars().count() <= max_chars {
+        return value.to_string();
+    }
+    let mut out: String = value.chars().take(max_chars.saturating_sub(1)).collect();
+    out.push_str("...");
+    out
+}

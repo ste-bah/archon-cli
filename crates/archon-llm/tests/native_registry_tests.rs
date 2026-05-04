@@ -1,11 +1,11 @@
-//! GHOST-003: integration tests for `NATIVE_REGISTRY` — 5 native
-//! providers (openai, anthropic, gemini, xai, bedrock). The 4 stub
+//! GHOST-003/CDX-005: integration tests for `NATIVE_REGISTRY` — 6 native
+//! providers (openai, anthropic, gemini, xai, bedrock, openai-codex). The 4 stub
 //! providers (azure, cohere, copilot, minimax) were removed per
 //! GHOST-003 Option B.
 //!
 //! Validation criteria:
-//!   (2) NATIVE_REGISTRY has exactly 5 entries
-//!   (3) all 5 ids retrievable
+//!   (2) NATIVE_REGISTRY has exactly 6 entries
+//!   (3) all 6 ids retrievable
 //!   (4) combined breadth >= 36
 //!   (6) every entry has CompatKind::Native
 
@@ -15,20 +15,27 @@ use archon_llm::providers::{CompatKind, NATIVE_REGISTRY, count_compat, count_nat
 // Expected native ids (GHOST-003: 4 stubs removed)
 // ---------------------------------------------------------------------------
 
-const EXPECTED_NATIVE_IDS: &[&str] = &["openai", "anthropic", "gemini", "xai", "bedrock"];
+const EXPECTED_NATIVE_IDS: &[&str] = &[
+    "openai",
+    "anthropic",
+    "gemini",
+    "xai",
+    "bedrock",
+    "openai-codex",
+];
 
 // ---------------------------------------------------------------------------
 // Registry shape / breadth tests
 // ---------------------------------------------------------------------------
 
 #[test]
-fn native_registry_has_5_entries() {
+fn native_registry_has_6_entries() {
     assert_eq!(
         NATIVE_REGISTRY.len(),
-        5,
-        "GHOST-003 requires exactly 5 native descriptors (openai, anthropic, gemini, xai, bedrock)"
+        6,
+        "GHOST-003/CDX-005 requires exactly 6 native descriptors"
     );
-    assert_eq!(count_native(), 5);
+    assert_eq!(count_native(), 6);
 }
 
 #[test]
@@ -36,7 +43,7 @@ fn all_native_ids_present() {
     for id in EXPECTED_NATIVE_IDS {
         assert!(
             NATIVE_REGISTRY.contains_key(*id),
-            "native registry missing id `{id}` — GHOST-003 requires all 5"
+            "native registry missing id `{id}` — GHOST-003/CDX-005 requires all 6"
         );
     }
 }
@@ -44,7 +51,7 @@ fn all_native_ids_present() {
 #[test]
 fn list_native_returns_all_entries() {
     let all = list_native();
-    assert_eq!(all.len(), 5);
+    assert_eq!(all.len(), 6);
     for id in EXPECTED_NATIVE_IDS {
         assert!(
             all.iter().any(|d| d.id == *id),

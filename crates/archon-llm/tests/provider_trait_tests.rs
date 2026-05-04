@@ -146,6 +146,7 @@ fn llm_request_from_message_request_round_trip() {
 
     assert_eq!(llm_req.model, "claude-sonnet-4-6");
     assert_eq!(llm_req.max_tokens, 4096);
+    assert_eq!(llm_req.reasoning_encrypted, None);
     assert_eq!(llm_req.system.len(), 1);
     assert_eq!(llm_req.messages.len(), 1);
     assert!(llm_req.thinking.is_some());

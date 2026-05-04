@@ -1,0 +1,30 @@
+{
+  "path": "/codex/responses",
+  "body": {
+    "model": "gpt-5.4",
+    "store": false,
+    "stream": true,
+    "instructions": "You are helpful.",
+    "input": [
+      {
+        "type": "message",
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "hi"
+          }
+        ]
+      }
+    ],
+    "tool_choice": "auto",
+    "parallel_tool_calls": true,
+    "text": {
+      "verbosity": "low"
+    },
+    "include": [
+      "reasoning.encrypted_content"
+    ],
+    "prompt_cache_key": "{{UUID}}"
+  }
+}

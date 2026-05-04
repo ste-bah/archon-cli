@@ -140,6 +140,8 @@ mod tests {
             "completion",
             "behaviour",
             "pipeline",
+            "auth",
+            "chat",
         ] {
             assert!(
                 registry.is_primary(primary),

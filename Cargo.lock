@@ -311,14 +311,14 @@ dependencies = [
 
 [[package]]
 name = "archon-bench"
-version = "0.1.39"
+version = "0.1.40"
 dependencies = [
  "criterion",
 ]
 
 [[package]]
 name = "archon-cli-workspace"
-version = "0.1.39"
+version = "0.1.40"
 dependencies = [
  "anyhow",
  "archon-completion",
@@ -362,11 +362,12 @@ dependencies = [
  "tracing",
  "uuid",
  "walkdir",
+ "wiremock",
 ]
 
 [[package]]
 name = "archon-completion"
-version = "0.1.39"
+version = "0.1.40"
 dependencies = [
  "anyhow",
  "archon-learning",
@@ -386,7 +387,7 @@ dependencies = [
 
 [[package]]
 name = "archon-consciousness"
-version = "0.1.39"
+version = "0.1.40"
 dependencies = [
  "anyhow",
  "archon-memory",
@@ -401,7 +402,7 @@ dependencies = [
 
 [[package]]
 name = "archon-constellation"
-version = "0.1.39"
+version = "0.1.40"
 dependencies = [
  "archon-meaning",
  "chrono",
@@ -417,7 +418,7 @@ dependencies = [
 
 [[package]]
 name = "archon-context"
-version = "0.1.39"
+version = "0.1.40"
 dependencies = [
  "anyhow",
  "chrono",
@@ -429,7 +430,7 @@ dependencies = [
 
 [[package]]
 name = "archon-core"
-version = "0.1.39"
+version = "0.1.40"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -491,7 +492,7 @@ dependencies = [
 
 [[package]]
 name = "archon-docs"
-version = "0.1.39"
+version = "0.1.40"
 dependencies = [
  "anyhow",
  "archon-policy",
@@ -516,7 +517,7 @@ dependencies = [
 
 [[package]]
 name = "archon-knowledge"
-version = "0.1.39"
+version = "0.1.40"
 dependencies = [
  "anyhow",
  "archon-docs",
@@ -535,7 +536,7 @@ dependencies = [
 
 [[package]]
 name = "archon-leann"
-version = "0.1.39"
+version = "0.1.40"
 dependencies = [
  "anyhow",
  "archon-memory",
@@ -563,7 +564,7 @@ dependencies = [
 
 [[package]]
 name = "archon-learning"
-version = "0.1.39"
+version = "0.1.40"
 dependencies = [
  "anyhow",
  "archon-policy",
@@ -578,7 +579,7 @@ dependencies = [
 
 [[package]]
 name = "archon-llm"
-version = "0.1.39"
+version = "0.1.40"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -604,7 +605,9 @@ dependencies = [
  "secrecy",
  "serde",
  "serde_json",
+ "serial_test",
  "sha2 0.10.9",
+ "tempfile",
  "thiserror 2.0.18",
  "tiny_http",
  "tokio",
@@ -619,7 +622,7 @@ dependencies = [
 
 [[package]]
 name = "archon-mcp"
-version = "0.1.39"
+version = "0.1.40"
 dependencies = [
  "anyhow",
  "archon-tools",
@@ -649,7 +652,7 @@ dependencies = [
 
 [[package]]
 name = "archon-meaning"
-version = "0.1.39"
+version = "0.1.40"
 dependencies = [
  "chrono",
  "cozo-ce",
@@ -663,7 +666,7 @@ dependencies = [
 
 [[package]]
 name = "archon-memory"
-version = "0.1.39"
+version = "0.1.40"
 dependencies = [
  "anyhow",
  "chrono",
@@ -684,7 +687,7 @@ dependencies = [
 
 [[package]]
 name = "archon-observability"
-version = "0.1.39"
+version = "0.1.40"
 dependencies = [
  "anyhow",
  "axum",
@@ -704,7 +707,7 @@ dependencies = [
 
 [[package]]
 name = "archon-permissions"
-version = "0.1.39"
+version = "0.1.40"
 dependencies = [
  "anyhow",
  "glob",
@@ -717,7 +720,7 @@ dependencies = [
 
 [[package]]
 name = "archon-pipeline"
-version = "0.1.39"
+version = "0.1.40"
 dependencies = [
  "anyhow",
  "archon-core",
@@ -750,7 +753,7 @@ dependencies = [
 
 [[package]]
 name = "archon-plugin"
-version = "0.1.39"
+version = "0.1.40"
 dependencies = [
  "anyhow",
  "archon-core",
@@ -768,7 +771,7 @@ dependencies = [
 
 [[package]]
 name = "archon-policy"
-version = "0.1.39"
+version = "0.1.40"
 dependencies = [
  "dirs",
  "serde",
@@ -779,7 +782,7 @@ dependencies = [
 
 [[package]]
 name = "archon-provenance"
-version = "0.1.39"
+version = "0.1.40"
 dependencies = [
  "chrono",
  "cozo-ce",
@@ -794,7 +797,7 @@ dependencies = [
 
 [[package]]
 name = "archon-sdk"
-version = "0.1.39"
+version = "0.1.40"
 dependencies = [
  "anyhow",
  "archon-core",
@@ -817,7 +820,7 @@ dependencies = [
 
 [[package]]
 name = "archon-session"
-version = "0.1.39"
+version = "0.1.40"
 dependencies = [
  "anyhow",
  "chrono",
@@ -834,7 +837,7 @@ dependencies = [
 
 [[package]]
 name = "archon-test-support"
-version = "0.1.39"
+version = "0.1.40"
 dependencies = [
  "anyhow",
  "archon-memory",
@@ -848,7 +851,7 @@ dependencies = [
 
 [[package]]
 name = "archon-tools"
-version = "0.1.39"
+version = "0.1.40"
 dependencies = [
  "anyhow",
  "archon-leann",
@@ -889,7 +892,7 @@ dependencies = [
 
 [[package]]
 name = "archon-tui"
-version = "0.1.39"
+version = "0.1.40"
 dependencies = [
  "anyhow",
  "archon-core",
@@ -939,7 +942,7 @@ dependencies = [
 
 [[package]]
 name = "archon-tui-test-support"
-version = "0.1.39"
+version = "0.1.40"
 dependencies = [
  "criterion",
  "dashmap 5.5.3",

@@ -1,0 +1,9 @@
+data: {"type":"response.created","response":{"id":"resp_1","status":"in_progress","model":"gpt-5.4"}}
+
+data: {"type":"response.output_item.added","output_index":0,"item":{"type":"message","id":"msg_1","status":"in_progress","role":"assistant","content":[]}}
+
+data: {"type":"response.output_text.delta","item_id":"msg_1","output_index":0,"content_index":0,"delta":"ARCHON_SMOKE_OK_42"}
+
+data: {"type":"response.completed","response":{"id":"resp_1","status":"completed","model":"gpt-5.4","usage":{"input_tokens":8,"output_tokens":5,"total_tokens":13}}}
+
+data: [DONE]

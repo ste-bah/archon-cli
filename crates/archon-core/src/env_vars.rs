@@ -23,6 +23,19 @@ pub const KNOWN_ARCHON_VARS: &[&str] = &[
     "ANTHROPIC_AUTH_TOKEN",
     "ARCHON_API_KEY",
     "ARCHON_OAUTH_TOKEN",
+    // Codex / ChatGPT subscription auth and compatibility posture
+    "ARCHON_CODEX_BASE_URL",
+    "ARCHON_CODEX_BETA",
+    "ARCHON_CODEX_CLIENT_ID",
+    "ARCHON_CODEX_DISABLED",
+    "ARCHON_CODEX_E2E",
+    "ARCHON_CODEX_FETCH_URL",
+    "ARCHON_CODEX_ORIGINATOR",
+    "ARCHON_CODEX_SMOKE_EXPECTED",
+    "ARCHON_CODEX_SMOKE_MODEL",
+    "ARCHON_CODEX_SMOKE_PROMPT",
+    "ARCHON_CODEX_SPOOF_ALLOW_MIXED",
+    "ARCHON_CODEX_USER_AGENT",
     // Model & behavior
     "ARCHON_MODEL",
     "ARCHON_EFFORT",
@@ -36,8 +49,10 @@ pub const KNOWN_ARCHON_VARS: &[&str] = &[
     // Debugging
     "ARCHON_DEBUG",
     "ARCHON_DEBUG_LOG_DIR",
+    "ARCHON_GIT_HASH",
     "ARCHON_VERBOSE",
     "ARCHON_LOG",
+    "ARCHON_LOG_DIR",
     // Paths
     "ARCHON_CONFIG_DIR",
     "ARCHON_CONSTELLATION_DB_PATH",

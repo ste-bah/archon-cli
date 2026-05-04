@@ -12,9 +12,12 @@
 //! entry point — every assertion reads the rendered buffer. A broken
 //! render helper would leave the asserted cell empty and fail the test.
 
+use archon_tui::agent_activity::AgentActivityRow;
 use archon_tui::app::{
-    App, McpManager, McpManagerView, McpServerEntry, SessionPicker, SessionPickerEntry,
+    AgentActivityRole, App, McpManager, McpManagerView, McpServerEntry, SessionPicker,
+    SessionPickerEntry,
 };
+use archon_tui::events::AgentActivityStatus;
 use archon_tui::render;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
@@ -100,6 +103,31 @@ fn output_with_thinking_active_renders_dots() {
     let rendered = render_once(&mut app);
     // "Thinking" label is inserted into the output area.
     assert!(rendered.contains("Thinking"), "buffer:\n{rendered}");
+}
+
+#[test]
+fn agent_activity_panel_renders_parent_and_subagent_rows() {
+    let mut app = App::new();
+    app.show_splash = false;
+    app.output.append_line("assistant response in progress");
+    app.agent_activity = vec![
+        AgentActivityRow::new(
+            "parent",
+            "Parent",
+            AgentActivityRole::Parent,
+            AgentActivityStatus::WaitingForTool,
+        ),
+        AgentActivityRow::new(
+            "agent-1",
+            "Subagent 1",
+            AgentActivityRole::Subagent,
+            AgentActivityStatus::Running,
+        ),
+    ];
+    let rendered = render_once(&mut app);
+    assert!(rendered.contains("Agent Activity"), "buffer:\n{rendered}");
+    assert!(rendered.contains("[PARENT]"), "buffer:\n{rendered}");
+    assert!(rendered.contains("[AGENT]"), "buffer:\n{rendered}");
 }
 
 // ───────────────────────────────────────────────────────────────────────

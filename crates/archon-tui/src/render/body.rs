@@ -1,4 +1,4 @@
-//! Body rendering — output area, input area, overlays (core TUI draw pipeline).
+//! Body rendering.
 
 use ratatui::{
     Frame,
@@ -22,7 +22,6 @@ use super::cursor::set_input_cursor;
 pub fn draw_output_area(frame: &mut Frame, app: &App, area: Rect) {
     let t = &app.theme;
 
-    // Output area — splash or buffer lines + thinking indicator
     if app.show_splash {
         splash::draw_splash(
             frame.buffer_mut(),
@@ -33,6 +32,9 @@ pub fn draw_output_area(frame: &mut Frame, app: &App, area: Rect) {
         );
         return;
     }
+
+    let output_area =
+        crate::agent_activity::render_rail_if_needed(frame, &app.agent_activity, area, &app.theme);
 
     let output_lines: Vec<Line<'_>> = {
         let mut lines: Vec<Line<'_>> = app
@@ -45,8 +47,8 @@ pub fn draw_output_area(frame: &mut Frame, app: &App, area: Rect) {
         lines
     };
 
-    let visible_height = area.height;
-    let output_width = area.width.saturating_sub(1); // -1 for scrollbar
+    let visible_height = output_area.height;
+    let output_width = output_area.width.saturating_sub(1); // -1 for scrollbar
     let raw_strings: Vec<String> = output_lines
         .iter()
         .map(|l| {
@@ -61,7 +63,6 @@ pub fn draw_output_area(frame: &mut Frame, app: &App, area: Rect) {
 
     let scroll_y = app.output.effective_scroll(total_wrapped, visible_height);
 
-    // Border color signals when the user is scrolled away from bottom
     let border_style = if app.output.scroll_locked {
         Style::default().fg(t.warning)
     } else {
@@ -72,16 +73,15 @@ pub fn draw_output_area(frame: &mut Frame, app: &App, area: Rect) {
         .block(Block::default().borders(Borders::NONE).style(border_style))
         .wrap(Wrap { trim: false })
         .scroll((scroll_y, 0));
-    frame.render_widget(output_widget, area);
+    frame.render_widget(output_widget, output_area);
 
-    // Scrollbar — only shown when content exceeds visible area
     if total_wrapped > visible_height {
         let mut scrollbar_state =
             ScrollbarState::new(total_wrapped.saturating_sub(visible_height) as usize)
                 .position(scroll_y as usize);
         let scrollbar =
             Scrollbar::new(ScrollbarOrientation::VerticalRight).style(Style::default().fg(t.muted));
-        frame.render_stateful_widget(scrollbar, area, &mut scrollbar_state);
+        frame.render_stateful_widget(scrollbar, output_area, &mut scrollbar_state);
     }
 }
 
