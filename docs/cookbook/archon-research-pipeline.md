@@ -222,6 +222,6 @@ A project-local agent definition takes precedence over the built-in. Useful when
 
 - [PRD-driven development](prd-driven-development.md) — `/to-prd` → `/prd-to-spec` → `/spec-to-tasks` → `/archon-code`
 - [Coding pipeline (`/archon-code`)](god-code-pipeline.md) — sibling 48-agent pipeline for code instead of prose
-- [Game theory pipeline (`/gametheory`)](../gametheory.md) — strategic situation analysis
+- [Game-theory pipeline (`/gametheory`)](gametheory-pipeline.md) — sibling pipeline for strategic situation analysis (Tier 1 fingerprint → routing → specialists → report)
 - [Real-world Evidence Engine](real-world-evidence-engine.md) — composing docs + KB + research + provenance + governed learning
 - [Pipelines architecture](../architecture/pipelines.md)
