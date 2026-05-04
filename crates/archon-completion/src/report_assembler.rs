@@ -36,9 +36,15 @@ pub fn assemble_report(
         CompletionState::NotRun
     } else if failed_gates.is_empty() {
         CompletionState::Verified
-    } else if gate_results.iter().any(|g| g.resulting_state == CompletionState::Failed) {
+    } else if gate_results
+        .iter()
+        .any(|g| g.resulting_state == CompletionState::Failed)
+    {
         CompletionState::Failed
-    } else if gate_results.iter().any(|g| g.resulting_state == CompletionState::NotRun) {
+    } else if gate_results
+        .iter()
+        .any(|g| g.resulting_state == CompletionState::NotRun)
+    {
         if claims.iter().any(|c| c.verified) {
             CompletionState::Partial
         } else {
@@ -96,7 +102,10 @@ fn build_calibrated_summary(
         for claim in claims {
             let status = if claim.verified {
                 "VERIFIED"
-            } else if gate_results.iter().any(|g| g.blocked_claims.contains(&claim.claim_id)) {
+            } else if gate_results
+                .iter()
+                .any(|g| g.blocked_claims.contains(&claim.claim_id))
+            {
                 "BLOCKED"
             } else {
                 "UNCHECKED"
@@ -149,30 +158,22 @@ fn build_calibrated_summary(
     summary.push_str("### Calibrated Assessment\n\n");
     match final_state {
         CompletionState::Verified => {
-            summary.push_str(
-                "All completion-sensitive claims are supported by evidence.\n",
-            );
+            summary.push_str("All completion-sensitive claims are supported by evidence.\n");
         }
         CompletionState::Partial => {
             summary.push_str(
-                "Some claims are supported by evidence, but others could not be verified. "
+                "Some claims are supported by evidence, but others could not be verified. ",
             );
-            summary.push_str(
-                "Claims without evidence should be treated as unconfirmed.\n",
-            );
+            summary.push_str("Claims without evidence should be treated as unconfirmed.\n");
         }
         CompletionState::Attempted => {
             summary.push_str(
                 "Completion-sensitive claims were detected but evidence is insufficient to verify them. "
             );
-            summary.push_str(
-                "The claims represent intent or attempt, not confirmed completion.\n",
-            );
+            summary.push_str("The claims represent intent or attempt, not confirmed completion.\n");
         }
         CompletionState::Failed => {
-            summary.push_str(
-                "One or more completion claims are contradicted by evidence. "
-            );
+            summary.push_str("One or more completion claims are contradicted by evidence. ");
             summary.push_str(
                 "Claims of completion should not be relied upon without additional verification.\n",
             );

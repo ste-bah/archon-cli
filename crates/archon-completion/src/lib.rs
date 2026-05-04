@@ -15,6 +15,7 @@
 //! - `verification_gates` — `VerificationGate` trait + concrete gates
 //! - `report_assembler` — Produces `CompletionReport` with calibrated summary
 //! - `incident_recorder` — Records `FalseCompletionIncident` + learning events
+//! - `trust` — Computes persisted agent/model/task trust scores
 
 pub mod errors;
 pub mod models;
@@ -23,12 +24,30 @@ pub mod store;
 
 pub mod claim_extractor;
 pub mod evidence_resolver;
-pub mod verification_gates;
-pub mod report_assembler;
 pub mod incident_recorder;
+pub mod report_assembler;
+pub mod trust;
+pub mod verification_gates;
 
 use anyhow::Result;
 use cozo::DbInstance;
+
+#[derive(Clone, Debug)]
+pub struct CompletionContext {
+    pub workspace_id: String,
+    pub agent_key: Option<String>,
+    pub model: Option<String>,
+}
+
+impl Default for CompletionContext {
+    fn default() -> Self {
+        Self {
+            workspace_id: trust::DEFAULT_WORKSPACE_ID.to_string(),
+            agent_key: None,
+            model: None,
+        }
+    }
+}
 
 /// Run the full completion integrity check against a pipeline run.
 ///
@@ -43,12 +62,53 @@ pub async fn check_completion(
     output_text: &str,
     task_type: &str,
 ) -> Result<models::CompletionReport> {
+    check_completion_with_context(
+        db,
+        run_id,
+        output_text,
+        task_type,
+        CompletionContext::default(),
+    )
+    .await
+}
+
+pub async fn check_completion_with_context(
+    db: &DbInstance,
+    run_id: &str,
+    output_text: &str,
+    task_type: &str,
+    context: CompletionContext,
+) -> Result<models::CompletionReport> {
     // Ensure schema
-    schema::ensure_completion_schema(db)
-        .map_err(|e| errors::EvidenceEngineError::Storage { message: e.to_string() })?;
+    schema::ensure_completion_schema(db).map_err(|e| errors::EvidenceEngineError::Storage {
+        message: e.to_string(),
+    })?;
+
+    store::insert_completion_run_context(
+        db,
+        &models::CompletionRunContext {
+            run_id: run_id.to_string(),
+            workspace_id: context.workspace_id.clone(),
+            agent_key: context.agent_key.clone(),
+            model: context.model.clone(),
+            updated_at: chrono::Utc::now().to_rfc3339(),
+        },
+    )
+    .map_err(|e| errors::EvidenceEngineError::Storage {
+        message: e.to_string(),
+    })?;
 
     // 1. Extract claims
     let mut claims = claim_extractor::extract_claims(output_text, run_id);
+    for claim in &mut claims {
+        claim.task_type = task_type.to_string();
+        if claim.agent_key.is_none() {
+            claim.agent_key = context.agent_key.clone();
+        }
+        if claim.model.is_none() {
+            claim.model = context.model.clone();
+        }
+    }
 
     // 2. Resolve evidence
     let evidence = evidence_resolver::resolve_evidence(db, &claims)?;
@@ -66,30 +126,47 @@ pub async fn check_completion(
     }
 
     // 5. Assemble report
-    let report =
-        report_assembler::assemble_report(claims.clone(), evidence, &gate_results, run_id, Some(output_text))?;
+    let report = report_assembler::assemble_report(
+        claims.clone(),
+        evidence,
+        &gate_results,
+        run_id,
+        Some(output_text),
+    )?;
 
     // 6. Persist claims
     for claim in &report.claims {
-        store::insert_completion_claim(db, claim)
-            .map_err(|e| errors::EvidenceEngineError::Storage { message: e.to_string() })?;
+        store::insert_completion_claim(db, claim).map_err(|e| {
+            errors::EvidenceEngineError::Storage {
+                message: e.to_string(),
+            }
+        })?;
     }
 
     // 7. Persist evidence
     for ev in &report.evidence {
-        store::insert_completion_evidence(db, ev)
-            .map_err(|e| errors::EvidenceEngineError::Storage { message: e.to_string() })?;
+        store::insert_completion_evidence(db, ev).map_err(|e| {
+            errors::EvidenceEngineError::Storage {
+                message: e.to_string(),
+            }
+        })?;
     }
 
     // 8. Persist gate results
     for gr in &gate_results {
-        store::insert_gate_result(db, gr, run_id)
-            .map_err(|e| errors::EvidenceEngineError::Storage { message: e.to_string() })?;
+        store::insert_gate_result(db, gr, run_id).map_err(|e| {
+            errors::EvidenceEngineError::Storage {
+                message: e.to_string(),
+            }
+        })?;
     }
 
     // 9. Persist report
-    store::insert_completion_report(db, &report)
-        .map_err(|e| errors::EvidenceEngineError::Storage { message: e.to_string() })?;
+    store::insert_completion_report(db, &report).map_err(|e| {
+        errors::EvidenceEngineError::Storage {
+            message: e.to_string(),
+        }
+    })?;
 
     // 10. Record false-completion incidents for any blocked claims with Failed state
     for claim in &report.claims {
@@ -119,6 +196,13 @@ pub async fn check_completion(
             }
         }
     }
+
+    // 11. Update trust scores from the source-of-truth claims/incidents rows.
+    trust::recompute_trust_scores_for_run(db, run_id).map_err(|e| {
+        errors::EvidenceEngineError::Storage {
+            message: e.to_string(),
+        }
+    })?;
 
     Ok(report)
 }
@@ -152,7 +236,19 @@ mod tests {
 
         let output = "Task complete. All tests pass. Implementation is done. Build passes cleanly.";
 
-        let report = check_completion(&db, run_id, output, "coding").await.unwrap();
+        let report = check_completion_with_context(
+            &db,
+            run_id,
+            output,
+            "coding",
+            CompletionContext {
+                workspace_id: "workspace-test".into(),
+                agent_key: Some("agent-test".into()),
+                model: Some("model-test".into()),
+            },
+        )
+        .await
+        .unwrap();
 
         assert_eq!(report.run_id, run_id);
         assert!(!report.claims.is_empty(), "must extract claims from output");
@@ -162,6 +258,16 @@ mod tests {
         // Verify all 4 relations have rows
         let claims = store::get_completion_claims_by_run(&db, run_id).unwrap();
         assert!(!claims.is_empty(), "completion_claims must have rows");
+
+        let trust_scores = store::find_trust_scores(&db, None, None).unwrap();
+        assert!(
+            !trust_scores.is_empty(),
+            "completion verify must update agent_model_trust_scores"
+        );
+        assert_eq!(trust_scores[0].task_type, "coding");
+        assert_eq!(trust_scores[0].workspace_id, "workspace-test");
+        assert_eq!(trust_scores[0].agent_key.as_deref(), Some("agent-test"));
+        assert_eq!(trust_scores[0].model.as_deref(), Some("model-test"));
 
         let evidence = store::get_evidence_by_run(&db, run_id).unwrap();
         assert!(!evidence.is_empty(), "completion_evidence must have rows");

@@ -29,7 +29,11 @@ pub fn record_false_completion(
     );
 
     // Compute severity based on claim kind and evidence gap
-    let severity = compute_severity(&claim.claim_kind, &missing_evidence, user_correction.is_some());
+    let severity = compute_severity(
+        &claim.claim_kind,
+        &missing_evidence,
+        user_correction.is_some(),
+    );
 
     let claimed_state = format!("{:?}", claim.claim_kind);
 
@@ -49,13 +53,19 @@ pub fn record_false_completion(
         created_at: now,
     };
 
-    store::insert_false_completion_incident(db, &incident)
-        .map_err(|e| EvidenceEngineError::Storage { message: e.to_string() })?;
+    store::insert_false_completion_incident(db, &incident).map_err(|e| {
+        EvidenceEngineError::Storage {
+            message: e.to_string(),
+        }
+    })?;
 
     // Also insert a placeholder learning event for Phase 6 to consume.
     // Uses a raw Cozo script since the learning_events relation is in the gametheory schema.
-    insert_learning_event_pending(db, &learning_event_id, &incident)
-        .map_err(|e| EvidenceEngineError::Storage { message: e.to_string() })?;
+    insert_learning_event_pending(db, &learning_event_id, &incident).map_err(|e| {
+        EvidenceEngineError::Storage {
+            message: e.to_string(),
+        }
+    })?;
 
     Ok(incident)
 }
@@ -75,7 +85,9 @@ fn compute_severity(
                 IncidentSeverity::Low
             }
         }
-        CompletionClaimKind::Done | CompletionClaimKind::Implemented | CompletionClaimKind::Fixed => {
+        CompletionClaimKind::Done
+        | CompletionClaimKind::Implemented
+        | CompletionClaimKind::Fixed => {
             if user_corrected {
                 IncidentSeverity::Critical
             } else {
@@ -99,8 +111,8 @@ fn insert_learning_event_pending(
     event_id: &str,
     incident: &FalseCompletionIncident,
 ) -> Result<()> {
-    use std::collections::BTreeMap;
     use cozo::{DataValue, ScriptMutability};
+    use std::collections::BTreeMap;
 
     // Ensure the learn_events relation exists (it may be in gametheory schema).
     // We try to insert; if the relation doesn't exist, this is non-fatal for Phase 5.
@@ -110,16 +122,19 @@ fn insert_learning_event_pending(
     params.insert("et".into(), DataValue::from("FalseCompletionDetected"));
     params.insert("sid".into(), DataValue::from(""));
     params.insert("oid".into(), DataValue::from(""));
-    params.insert("sig".into(), DataValue::from(
-        serde_json::json!({
-            "incident_id": incident.incident_id,
-            "claim_kind": incident.claimed_state,
-            "actual_state": format!("{:?}", incident.actual_state),
-            "severity": format!("{:?}", incident.severity),
-        })
-        .to_string()
-        .as_str(),
-    ));
+    params.insert(
+        "sig".into(),
+        DataValue::from(
+            serde_json::json!({
+                "incident_id": incident.incident_id,
+                "claim_kind": incident.claimed_state,
+                "actual_state": format!("{:?}", incident.actual_state),
+                "severity": format!("{:?}", incident.severity),
+            })
+            .to_string()
+            .as_str(),
+        ),
+    );
     params.insert("cf".into(), DataValue::from(0.8_f64));
     params.insert("prid".into(), DataValue::from(""));
     params.insert("ca".into(), DataValue::from(incident.created_at.as_str()));
@@ -147,7 +162,9 @@ fn insert_learning_event_pending(
         }
     }
 
-    result.map(|_| ()).map_err(|e| anyhow::anyhow!("insert learning event failed: {e}"))?;
+    result
+        .map(|_| ())
+        .map_err(|e| anyhow::anyhow!("insert learning event failed: {e}"))?;
     Ok(())
 }
 

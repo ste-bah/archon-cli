@@ -3,9 +3,9 @@
 //! Each gate evaluates whether a specific claim kind is supported by evidence.
 //! Gates are small, testable, and isolated.
 
-use async_trait::async_trait;
 use crate::errors::EvidenceEngineError;
 use crate::models::*;
+use async_trait::async_trait;
 
 /// Trait for verification gates per TSPEC §10.5.
 #[async_trait]
@@ -73,7 +73,9 @@ impl VerificationGate for TestsPassGate {
         }
 
         // Check if any evidence has Failed status
-        let has_failed = test_evidence.iter().any(|e| e.status == EvidenceStatus::Failed);
+        let has_failed = test_evidence
+            .iter()
+            .any(|e| e.status == EvidenceStatus::Failed);
         if has_failed {
             return Ok(VerificationGateResult {
                 gate_id,
@@ -88,7 +90,9 @@ impl VerificationGate for TestsPassGate {
         }
 
         // Check if any evidence is Missing (not yet collected)
-        let has_missing = test_evidence.iter().any(|e| e.status == EvidenceStatus::Missing);
+        let has_missing = test_evidence
+            .iter()
+            .any(|e| e.status == EvidenceStatus::Missing);
         if has_missing {
             return Ok(VerificationGateResult {
                 gate_id,
@@ -103,7 +107,9 @@ impl VerificationGate for TestsPassGate {
         }
 
         // Check that all evidence is Passed (not Skipped, Unknown, etc.)
-        let all_passed = test_evidence.iter().all(|e| e.status == EvidenceStatus::Passed);
+        let all_passed = test_evidence
+            .iter()
+            .all(|e| e.status == EvidenceStatus::Passed);
         if !all_passed {
             return Ok(VerificationGateResult {
                 gate_id,
@@ -192,7 +198,9 @@ impl VerificationGate for IngestedGate {
             });
         }
 
-        let has_failed = ingest_evidence.iter().any(|e| e.status == EvidenceStatus::Failed);
+        let has_failed = ingest_evidence
+            .iter()
+            .any(|e| e.status == EvidenceStatus::Failed);
         if has_failed {
             return Ok(VerificationGateResult {
                 gate_id,
@@ -206,7 +214,9 @@ impl VerificationGate for IngestedGate {
             });
         }
 
-        let has_missing = ingest_evidence.iter().any(|e| e.status == EvidenceStatus::Missing);
+        let has_missing = ingest_evidence
+            .iter()
+            .any(|e| e.status == EvidenceStatus::Missing);
         if has_missing {
             return Ok(VerificationGateResult {
                 gate_id,
@@ -215,12 +225,15 @@ impl VerificationGate for IngestedGate {
                 resulting_state: CompletionState::NotRun,
                 blocked_claims: ingest_claims.iter().map(|c| c.claim_id.clone()).collect(),
                 required_missing_evidence: vec![EvidenceKind::IngestionJob],
-                explanation: "IngestionJob evidence is missing — no ingestion results available".into(),
+                explanation: "IngestionJob evidence is missing — no ingestion results available"
+                    .into(),
                 provenance_record_id: String::new(),
             });
         }
 
-        let all_passed = ingest_evidence.iter().all(|e| e.status == EvidenceStatus::Passed);
+        let all_passed = ingest_evidence
+            .iter()
+            .all(|e| e.status == EvidenceStatus::Passed);
         if !all_passed {
             return Ok(VerificationGateResult {
                 gate_id,
@@ -292,7 +305,11 @@ impl VerificationGate for AnswerGroundedGate {
             });
         }
 
-        if citation_evidence.is_empty() || citation_evidence.iter().all(|e| e.status == EvidenceStatus::Missing) {
+        if citation_evidence.is_empty()
+            || citation_evidence
+                .iter()
+                .all(|e| e.status == EvidenceStatus::Missing)
+        {
             return Ok(VerificationGateResult {
                 gate_id,
                 gate_name: self.name().into(),
@@ -372,7 +389,12 @@ mod tests {
         }
     }
 
-    fn make_evidence(id: &str, run_id: &str, kind: EvidenceKind, status: EvidenceStatus) -> CompletionEvidence {
+    fn make_evidence(
+        id: &str,
+        run_id: &str,
+        kind: EvidenceKind,
+        status: EvidenceStatus,
+    ) -> CompletionEvidence {
         CompletionEvidence {
             evidence_id: id.into(),
             run_id: run_id.into(),
@@ -396,7 +418,12 @@ mod tests {
     async fn test_tests_pass_gate_passes_with_evidence() {
         let gate = TestsPassGate;
         let claims = vec![make_claim("cl-1", "run-1", CompletionClaimKind::TestsPass)];
-        let evidence = vec![make_evidence("ev-1", "run-1", EvidenceKind::TestRun, EvidenceStatus::Passed)];
+        let evidence = vec![make_evidence(
+            "ev-1",
+            "run-1",
+            EvidenceKind::TestRun,
+            EvidenceStatus::Passed,
+        )];
         let req = VerificationGateRequest {
             run_id: "run-1".into(),
             task_type: "test".into(),
@@ -430,7 +457,12 @@ mod tests {
     async fn test_tests_pass_gate_fails_with_failed_evidence() {
         let gate = TestsPassGate;
         let claims = vec![make_claim("cl-1", "run-1", CompletionClaimKind::TestsPass)];
-        let evidence = vec![make_evidence("ev-1", "run-1", EvidenceKind::TestRun, EvidenceStatus::Failed)];
+        let evidence = vec![make_evidence(
+            "ev-1",
+            "run-1",
+            EvidenceKind::TestRun,
+            EvidenceStatus::Failed,
+        )];
         let req = VerificationGateRequest {
             run_id: "run-1".into(),
             task_type: "test".into(),
@@ -447,7 +479,12 @@ mod tests {
     async fn test_ingested_gate_requires_ingestion_job() {
         let gate = IngestedGate;
         let claims = vec![make_claim("cl-1", "run-1", CompletionClaimKind::Ingested)];
-        let evidence = vec![make_evidence("ev-1", "run-1", EvidenceKind::IngestionJob, EvidenceStatus::Passed)];
+        let evidence = vec![make_evidence(
+            "ev-1",
+            "run-1",
+            EvidenceKind::IngestionJob,
+            EvidenceStatus::Passed,
+        )];
         let req = VerificationGateRequest {
             run_id: "run-1".into(),
             task_type: "test".into(),
@@ -473,8 +510,17 @@ mod tests {
     #[tokio::test]
     async fn test_answer_grounded_gate_requires_citations() {
         let gate = AnswerGroundedGate;
-        let claims = vec![make_claim("cl-1", "run-1", CompletionClaimKind::AnswerGrounded)];
-        let evidence = vec![make_evidence("ev-1", "run-1", EvidenceKind::CitationTrace, EvidenceStatus::Passed)];
+        let claims = vec![make_claim(
+            "cl-1",
+            "run-1",
+            CompletionClaimKind::AnswerGrounded,
+        )];
+        let evidence = vec![make_evidence(
+            "ev-1",
+            "run-1",
+            EvidenceKind::CitationTrace,
+            EvidenceStatus::Passed,
+        )];
         let req = VerificationGateRequest {
             run_id: "run-1".into(),
             task_type: "test".into(),

@@ -32,18 +32,35 @@ pub fn insert_completion_claim(db: &DbInstance, claim: &CompletionClaim) -> Resu
     let mut params = BTreeMap::new();
     params.insert("cid".into(), DataValue::from(claim.claim_id.as_str()));
     params.insert("rid".into(), DataValue::from(claim.run_id.as_str()));
-    params.insert("ak".into(), DataValue::from(claim.agent_key.as_deref().unwrap_or("")));
-    params.insert("md".into(), DataValue::from(claim.model.as_deref().unwrap_or("")));
+    params.insert(
+        "ak".into(),
+        DataValue::from(claim.agent_key.as_deref().unwrap_or("")),
+    );
+    params.insert(
+        "md".into(),
+        DataValue::from(claim.model.as_deref().unwrap_or("")),
+    );
     params.insert("tt".into(), DataValue::from(claim.task_type.as_str()));
-    params.insert("ck".into(), DataValue::from(claim_kind_str(&claim.claim_kind)));
+    params.insert(
+        "ck".into(),
+        DataValue::from(claim_kind_str(&claim.claim_kind)),
+    );
     params.insert("ct".into(), DataValue::from(claim.claim_text.as_str()));
     params.insert(
         "rej".into(),
-        DataValue::from(serde_json::to_string(&claim.required_evidence).unwrap_or_default().as_str()),
+        DataValue::from(
+            serde_json::to_string(&claim.required_evidence)
+                .unwrap_or_default()
+                .as_str(),
+        ),
     );
     params.insert(
         "lej".into(),
-        DataValue::from(serde_json::to_string(&claim.linked_evidence_ids).unwrap_or_default().as_str()),
+        DataValue::from(
+            serde_json::to_string(&claim.linked_evidence_ids)
+                .unwrap_or_default()
+                .as_str(),
+        ),
     );
     params.insert("v".into(), DataValue::from(claim.verified));
     params.insert("ca".into(), DataValue::from(claim.created_at.as_str()));
@@ -66,16 +83,17 @@ pub fn get_completion_claims_by_run(db: &DbInstance, run_id: &str) -> Result<Vec
     let mut params = BTreeMap::new();
     params.insert("rid".into(), DataValue::from(run_id));
 
-    let result = db.run_script(
-        "?[claim_id, agent_key, model, task_type, claim_kind, claim_text, \
+    let result = db
+        .run_script(
+            "?[claim_id, agent_key, model, task_type, claim_kind, claim_text, \
          required_evidence_json, linked_evidence_json, verified, created_at] \
          := *completion_claims{claim_id, run_id: $rid, agent_key, model, \
          task_type, claim_kind, claim_text, required_evidence_json, \
          linked_evidence_json, verified, created_at}",
-        params,
-        ScriptMutability::Immutable,
-    )
-    .map_err(|e| anyhow::anyhow!("query completion_claims failed: {e}"))?;
+            params,
+            ScriptMutability::Immutable,
+        )
+        .map_err(|e| anyhow::anyhow!("query completion_claims failed: {e}"))?;
 
     result
         .rows
@@ -99,6 +117,96 @@ pub fn get_completion_claims_by_run(db: &DbInstance, run_id: &str) -> Result<Vec
         .collect()
 }
 
+pub fn get_all_completion_claims(db: &DbInstance) -> Result<Vec<CompletionClaim>> {
+    ensure_completion_schema(db)?;
+    let result = db
+        .run_script(
+            "?[claim_id, run_id, agent_key, model, task_type, claim_kind, claim_text, \
+             required_evidence_json, linked_evidence_json, verified, created_at] \
+             := *completion_claims{claim_id, run_id, agent_key, model, task_type, \
+             claim_kind, claim_text, required_evidence_json, linked_evidence_json, \
+             verified, created_at}",
+            Default::default(),
+            ScriptMutability::Immutable,
+        )
+        .map_err(|e| anyhow::anyhow!("query all completion_claims failed: {e}"))?;
+
+    result
+        .rows
+        .iter()
+        .map(|row| {
+            Ok(CompletionClaim {
+                claim_id: req_str(row, 0)?.to_string(),
+                run_id: req_str(row, 1)?.to_string(),
+                agent_key: opt_str(&row[2]),
+                model: opt_str(&row[3]),
+                task_type: req_str(row, 4)?.to_string(),
+                claim_kind: parse_claim_kind(req_str(row, 5)?),
+                claim_text: req_str(row, 6)?.to_string(),
+                required_evidence: parse_evidence_kinds(req_str(row, 7)?),
+                linked_evidence_ids: parse_string_list(req_str(row, 8)?),
+                verified: row[9].get_bool().unwrap_or(false),
+                contradiction_ids: vec![],
+                created_at: req_str(row, 10)?.to_string(),
+            })
+        })
+        .collect()
+}
+
+// ── CompletionRunContext ─────────────────────────────────────────────────────
+
+pub fn insert_completion_run_context(db: &DbInstance, ctx: &CompletionRunContext) -> Result<()> {
+    ensure_completion_schema(db)?;
+    let mut params = BTreeMap::new();
+    params.insert("rid".into(), DataValue::from(ctx.run_id.as_str()));
+    params.insert("wid".into(), DataValue::from(ctx.workspace_id.as_str()));
+    params.insert(
+        "ak".into(),
+        DataValue::from(ctx.agent_key.as_deref().unwrap_or("")),
+    );
+    params.insert(
+        "md".into(),
+        DataValue::from(ctx.model.as_deref().unwrap_or("")),
+    );
+    params.insert("ua".into(), DataValue::from(ctx.updated_at.as_str()));
+
+    db.run_script(
+        "?[run_id, workspace_id, agent_key, model, updated_at] \
+         <- [[$rid, $wid, $ak, $md, $ua]] \
+         :put completion_run_contexts { run_id => workspace_id, agent_key, model, updated_at }",
+        params,
+        ScriptMutability::Mutable,
+    )
+    .map_err(|e| anyhow::anyhow!("insert completion_run_contexts failed: {e}"))?;
+    Ok(())
+}
+
+pub fn get_all_completion_run_contexts(db: &DbInstance) -> Result<Vec<CompletionRunContext>> {
+    ensure_completion_schema(db)?;
+    let result = db
+        .run_script(
+            "?[run_id, workspace_id, agent_key, model, updated_at] \
+             := *completion_run_contexts{run_id, workspace_id, agent_key, model, updated_at}",
+            Default::default(),
+            ScriptMutability::Immutable,
+        )
+        .map_err(|e| anyhow::anyhow!("query completion_run_contexts failed: {e}"))?;
+
+    result
+        .rows
+        .iter()
+        .map(|row| {
+            Ok(CompletionRunContext {
+                run_id: req_str(row, 0)?.to_string(),
+                workspace_id: req_str(row, 1)?.to_string(),
+                agent_key: opt_str(&row[2]),
+                model: opt_str(&row[3]),
+                updated_at: req_str(row, 4)?.to_string(),
+            })
+        })
+        .collect()
+}
+
 // ── CompletionEvidence ───────────────────────────────────────────────────────
 
 pub fn insert_completion_evidence(db: &DbInstance, ev: &CompletionEvidence) -> Result<()> {
@@ -106,19 +214,44 @@ pub fn insert_completion_evidence(db: &DbInstance, ev: &CompletionEvidence) -> R
     let mut params = BTreeMap::new();
     params.insert("eid".into(), DataValue::from(ev.evidence_id.as_str()));
     params.insert("rid".into(), DataValue::from(ev.run_id.as_str()));
-    params.insert("ek".into(), DataValue::from(evidence_kind_str(&ev.evidence_kind)));
+    params.insert(
+        "ek".into(),
+        DataValue::from(evidence_kind_str(&ev.evidence_kind)),
+    );
     params.insert("pr".into(), DataValue::from(ev.producer.as_str()));
-    params.insert("st".into(), DataValue::from(evidence_status_str(&ev.status)));
-    params.insert("ec".into(), DataValue::from(ev.exit_code.unwrap_or(0) as i64));
-    params.insert("ih".into(), DataValue::from(ev.input_hash.as_deref().unwrap_or("")));
-    params.insert("oh".into(), DataValue::from(ev.output_hash.as_deref().unwrap_or("")));
+    params.insert(
+        "st".into(),
+        DataValue::from(evidence_status_str(&ev.status)),
+    );
+    params.insert(
+        "ec".into(),
+        DataValue::from(ev.exit_code.unwrap_or(0) as i64),
+    );
+    params.insert(
+        "ih".into(),
+        DataValue::from(ev.input_hash.as_deref().unwrap_or("")),
+    );
+    params.insert(
+        "oh".into(),
+        DataValue::from(ev.output_hash.as_deref().unwrap_or("")),
+    );
     params.insert(
         "aj".into(),
-        DataValue::from(serde_json::to_string(&ev.artifact_ids).unwrap_or_default().as_str()),
+        DataValue::from(
+            serde_json::to_string(&ev.artifact_ids)
+                .unwrap_or_default()
+                .as_str(),
+        ),
     );
-    params.insert("prid".into(), DataValue::from(ev.provenance_record_id.as_str()));
+    params.insert(
+        "prid".into(),
+        DataValue::from(ev.provenance_record_id.as_str()),
+    );
     params.insert("sa".into(), DataValue::from(ev.started_at.as_str()));
-    params.insert("coa".into(), DataValue::from(ev.completed_at.as_deref().unwrap_or("")));
+    params.insert(
+        "coa".into(),
+        DataValue::from(ev.completed_at.as_deref().unwrap_or("")),
+    );
 
     db.run_script(
         "?[evidence_id, run_id, evidence_kind, producer, status, exit_code, \
@@ -139,17 +272,18 @@ pub fn get_evidence_by_run(db: &DbInstance, run_id: &str) -> Result<Vec<Completi
     let mut params = BTreeMap::new();
     params.insert("rid".into(), DataValue::from(run_id));
 
-    let result = db.run_script(
-        "?[evidence_id, evidence_kind, producer, status, exit_code, \
+    let result = db
+        .run_script(
+            "?[evidence_id, evidence_kind, producer, status, exit_code, \
          input_hash, output_hash, artifact_ids_json, provenance_record_id, \
          started_at, completed_at] \
          := *completion_evidence{evidence_id, run_id: $rid, evidence_kind, \
          producer, status, exit_code, input_hash, output_hash, \
          artifact_ids_json, provenance_record_id, started_at, completed_at}",
-        params,
-        ScriptMutability::Immutable,
-    )
-    .map_err(|e| anyhow::anyhow!("query completion_evidence failed: {e}"))?;
+            params,
+            ScriptMutability::Immutable,
+        )
+        .map_err(|e| anyhow::anyhow!("query completion_evidence failed: {e}"))?;
 
     result
         .rows
@@ -183,25 +317,50 @@ pub fn insert_completion_report(db: &DbInstance, report: &CompletionReport) -> R
     let mut params = BTreeMap::new();
     params.insert("rid".into(), DataValue::from(report.report_id.as_str()));
     params.insert("runid".into(), DataValue::from(report.run_id.as_str()));
-    params.insert("fs".into(), DataValue::from(completion_state_str(&report.final_state)));
+    params.insert(
+        "fs".into(),
+        DataValue::from(completion_state_str(&report.final_state)),
+    );
     params.insert(
         "cj".into(),
-        DataValue::from(serde_json::to_string(&report.claims).unwrap_or_default().as_str()),
+        DataValue::from(
+            serde_json::to_string(&report.claims)
+                .unwrap_or_default()
+                .as_str(),
+        ),
     );
     params.insert(
         "ej".into(),
-        DataValue::from(serde_json::to_string(&report.evidence).unwrap_or_default().as_str()),
+        DataValue::from(
+            serde_json::to_string(&report.evidence)
+                .unwrap_or_default()
+                .as_str(),
+        ),
     );
     params.insert(
         "fgj".into(),
-        DataValue::from(serde_json::to_string(&report.failed_gates).unwrap_or_default().as_str()),
+        DataValue::from(
+            serde_json::to_string(&report.failed_gates)
+                .unwrap_or_default()
+                .as_str(),
+        ),
     );
     params.insert(
         "ucj".into(),
-        DataValue::from(serde_json::to_string(&report.unverified_claims).unwrap_or_default().as_str()),
+        DataValue::from(
+            serde_json::to_string(&report.unverified_claims)
+                .unwrap_or_default()
+                .as_str(),
+        ),
     );
-    params.insert("cs".into(), DataValue::from(report.calibrated_summary.as_str()));
-    params.insert("prid".into(), DataValue::from(report.provenance_record_id.as_str()));
+    params.insert(
+        "cs".into(),
+        DataValue::from(report.calibrated_summary.as_str()),
+    );
+    params.insert(
+        "prid".into(),
+        DataValue::from(report.provenance_record_id.as_str()),
+    );
     params.insert("ca".into(), DataValue::from(report.created_at.as_str()));
 
     db.run_script(
@@ -223,16 +382,17 @@ pub fn get_completion_report(db: &DbInstance, report_id: &str) -> Result<Option<
     let mut params = BTreeMap::new();
     params.insert("rid".into(), DataValue::from(report_id));
 
-    let result = db.run_script(
-        "?[run_id, final_state, claims_json, evidence_json, failed_gates_json, \
+    let result = db
+        .run_script(
+            "?[run_id, final_state, claims_json, evidence_json, failed_gates_json, \
          unverified_claims_json, calibrated_summary, provenance_record_id, created_at] \
          := *completion_reports{report_id: $rid, run_id, final_state, claims_json, \
          evidence_json, failed_gates_json, unverified_claims_json, \
          calibrated_summary, provenance_record_id, created_at}",
-        params,
-        ScriptMutability::Immutable,
-    )
-    .map_err(|e| anyhow::anyhow!("query completion_reports failed: {e}"))?;
+            params,
+            ScriptMutability::Immutable,
+        )
+        .map_err(|e| anyhow::anyhow!("query completion_reports failed: {e}"))?;
 
     if result.rows.is_empty() {
         return Ok(None);
@@ -255,17 +415,28 @@ pub fn get_completion_report(db: &DbInstance, report_id: &str) -> Result<Option<
 
 // ── VerificationGateResult ───────────────────────────────────────────────────
 
-pub fn insert_gate_result(db: &DbInstance, gr: &VerificationGateResult, run_id: &str) -> Result<()> {
+pub fn insert_gate_result(
+    db: &DbInstance,
+    gr: &VerificationGateResult,
+    run_id: &str,
+) -> Result<()> {
     ensure_completion_schema(db)?;
     let mut params = BTreeMap::new();
     params.insert("gid".into(), DataValue::from(gr.gate_id.as_str()));
     params.insert("rid".into(), DataValue::from(run_id));
     params.insert("gn".into(), DataValue::from(gr.gate_name.as_str()));
     params.insert("p".into(), DataValue::from(gr.passed));
-    params.insert("rs".into(), DataValue::from(completion_state_str(&gr.resulting_state)));
+    params.insert(
+        "rs".into(),
+        DataValue::from(completion_state_str(&gr.resulting_state)),
+    );
     params.insert(
         "bcj".into(),
-        DataValue::from(serde_json::to_string(&gr.blocked_claims).unwrap_or_default().as_str()),
+        DataValue::from(
+            serde_json::to_string(&gr.blocked_claims)
+                .unwrap_or_default()
+                .as_str(),
+        ),
     );
     params.insert(
         "rmej".into(),
@@ -276,8 +447,14 @@ pub fn insert_gate_result(db: &DbInstance, gr: &VerificationGateResult, run_id: 
         ),
     );
     params.insert("ex".into(), DataValue::from(gr.explanation.as_str()));
-    params.insert("prid".into(), DataValue::from(gr.provenance_record_id.as_str()));
-    params.insert("ca".into(), DataValue::from(chrono::Utc::now().to_rfc3339().as_str()));
+    params.insert(
+        "prid".into(),
+        DataValue::from(gr.provenance_record_id.as_str()),
+    );
+    params.insert(
+        "ca".into(),
+        DataValue::from(chrono::Utc::now().to_rfc3339().as_str()),
+    );
 
     db.run_script(
         "?[gate_id, run_id, gate_name, passed, resulting_state, \
@@ -304,11 +481,23 @@ pub fn insert_false_completion_incident(
     let mut params = BTreeMap::new();
     params.insert("iid".into(), DataValue::from(incident.incident_id.as_str()));
     params.insert("rid".into(), DataValue::from(incident.run_id.as_str()));
-    params.insert("ak".into(), DataValue::from(incident.agent_key.as_deref().unwrap_or("")));
-    params.insert("md".into(), DataValue::from(incident.model.as_deref().unwrap_or("")));
+    params.insert(
+        "ak".into(),
+        DataValue::from(incident.agent_key.as_deref().unwrap_or("")),
+    );
+    params.insert(
+        "md".into(),
+        DataValue::from(incident.model.as_deref().unwrap_or("")),
+    );
     params.insert("tt".into(), DataValue::from(incident.task_type.as_str()));
-    params.insert("cs".into(), DataValue::from(incident.claimed_state.as_str()));
-    params.insert("as_".into(), DataValue::from(completion_state_str(&incident.actual_state)));
+    params.insert(
+        "cs".into(),
+        DataValue::from(incident.claimed_state.as_str()),
+    );
+    params.insert(
+        "as_".into(),
+        DataValue::from(completion_state_str(&incident.actual_state)),
+    );
     params.insert(
         "mej".into(),
         DataValue::from(
@@ -317,9 +506,18 @@ pub fn insert_false_completion_incident(
                 .as_str(),
         ),
     );
-    params.insert("uc".into(), DataValue::from(incident.user_correction.as_deref().unwrap_or("")));
-    params.insert("sv".into(), DataValue::from(incident_severity_str(&incident.severity)));
-    params.insert("lei".into(), DataValue::from(incident.learning_event_id.as_str()));
+    params.insert(
+        "uc".into(),
+        DataValue::from(incident.user_correction.as_deref().unwrap_or("")),
+    );
+    params.insert(
+        "sv".into(),
+        DataValue::from(incident_severity_str(&incident.severity)),
+    );
+    params.insert(
+        "lei".into(),
+        DataValue::from(incident.learning_event_id.as_str()),
+    );
     params.insert("ca".into(), DataValue::from(incident.created_at.as_str()));
 
     db.run_script(
@@ -338,17 +536,18 @@ pub fn insert_false_completion_incident(
 }
 
 pub fn get_all_incidents(db: &DbInstance) -> Result<Vec<FalseCompletionIncident>> {
-    let result = db.run_script(
-        "?[incident_id, run_id, agent_key, model, task_type, claimed_state, \
+    let result = db
+        .run_script(
+            "?[incident_id, run_id, agent_key, model, task_type, claimed_state, \
          actual_state, missing_evidence_json, user_correction, severity, \
          learning_event_id, created_at] \
          := *false_completion_incidents{incident_id, run_id, agent_key, model, \
          task_type, claimed_state, actual_state, missing_evidence_json, \
          user_correction, severity, learning_event_id, created_at}",
-        Default::default(),
-        ScriptMutability::Immutable,
-    )
-    .map_err(|e| anyhow::anyhow!("query false_completion_incidents failed: {e}"))?;
+            Default::default(),
+            ScriptMutability::Immutable,
+        )
+        .map_err(|e| anyhow::anyhow!("query false_completion_incidents failed: {e}"))?;
 
     result
         .rows
@@ -380,13 +579,28 @@ pub fn insert_trust_score(db: &DbInstance, score: &AgentModelTrustScore) -> Resu
     let mut params = BTreeMap::new();
     params.insert("sid".into(), DataValue::from(score.score_id.as_str()));
     params.insert("wid".into(), DataValue::from(score.workspace_id.as_str()));
-    params.insert("ak".into(), DataValue::from(score.agent_key.as_deref().unwrap_or("")));
-    params.insert("md".into(), DataValue::from(score.model.as_deref().unwrap_or("")));
+    params.insert(
+        "ak".into(),
+        DataValue::from(score.agent_key.as_deref().unwrap_or("")),
+    );
+    params.insert(
+        "md".into(),
+        DataValue::from(score.model.as_deref().unwrap_or("")),
+    );
     params.insert("tt".into(), DataValue::from(score.task_type.as_str()));
-    params.insert("cr".into(), DataValue::from(score.completion_reliability as f64));
+    params.insert(
+        "cr".into(),
+        DataValue::from(score.completion_reliability as f64),
+    );
     params.insert("eq".into(), DataValue::from(score.evidence_quality as f64));
-    params.insert("fc".into(), DataValue::from(score.false_completion_count as i64));
-    params.insert("vc".into(), DataValue::from(score.verified_completion_count as i64));
+    params.insert(
+        "fc".into(),
+        DataValue::from(score.false_completion_count as i64),
+    );
+    params.insert(
+        "vc".into(),
+        DataValue::from(score.verified_completion_count as i64),
+    );
     params.insert("lu".into(), DataValue::from(score.last_updated.as_str()));
 
     db.run_script(
@@ -402,6 +616,60 @@ pub fn insert_trust_score(db: &DbInstance, score: &AgentModelTrustScore) -> Resu
     )
     .map_err(|e| anyhow::anyhow!("insert agent_model_trust_scores failed: {e}"))?;
     Ok(())
+}
+
+pub fn get_all_trust_scores(db: &DbInstance) -> Result<Vec<AgentModelTrustScore>> {
+    ensure_completion_schema(db)?;
+    let result = db
+        .run_script(
+            "?[score_id, workspace_id, agent_key, model, task_type, completion_reliability, \
+             evidence_quality, false_completion_count, verified_completion_count, last_updated] \
+             := *agent_model_trust_scores{score_id, workspace_id, agent_key, model, \
+             task_type, completion_reliability, evidence_quality, false_completion_count, \
+             verified_completion_count, last_updated}",
+            Default::default(),
+            ScriptMutability::Immutable,
+        )
+        .map_err(|e| anyhow::anyhow!("query agent_model_trust_scores failed: {e}"))?;
+
+    result
+        .rows
+        .iter()
+        .map(|row| {
+            Ok(AgentModelTrustScore {
+                score_id: req_str(row, 0)?.to_string(),
+                workspace_id: req_str(row, 1)?.to_string(),
+                agent_key: opt_str(&row[2]),
+                model: opt_str(&row[3]),
+                task_type: req_str(row, 4)?.to_string(),
+                completion_reliability: row[5].get_float().unwrap_or(0.5) as f32,
+                evidence_quality: row[6].get_float().unwrap_or(0.5) as f32,
+                false_completion_count: row[7].get_int().unwrap_or(0).max(0) as u32,
+                verified_completion_count: row[8].get_int().unwrap_or(0).max(0) as u32,
+                last_updated: req_str(row, 9)?.to_string(),
+            })
+        })
+        .collect()
+}
+
+pub fn find_trust_scores(
+    db: &DbInstance,
+    agent_filter: Option<&str>,
+    model_filter: Option<&str>,
+) -> Result<Vec<AgentModelTrustScore>> {
+    let mut scores = get_all_trust_scores(db)?;
+    if let Some(agent) = agent_filter {
+        scores.retain(|score| score.agent_key.as_deref() == Some(agent));
+    }
+    if let Some(model) = model_filter {
+        scores.retain(|score| score.model.as_deref() == Some(model));
+    }
+    scores.sort_by(|a, b| {
+        b.completion_reliability
+            .partial_cmp(&a.completion_reliability)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    Ok(scores)
 }
 
 // ── String conversion helpers ────────────────────────────────────────────────
@@ -565,7 +833,11 @@ mod tests {
         }
     }
 
-    fn make_evidence(run_id: &str, kind: EvidenceKind, status: EvidenceStatus) -> CompletionEvidence {
+    fn make_evidence(
+        run_id: &str,
+        kind: EvidenceKind,
+        status: EvidenceStatus,
+    ) -> CompletionEvidence {
         CompletionEvidence {
             evidence_id: format!("ev-{}", uuid::Uuid::new_v4()),
             run_id: run_id.to_string(),
@@ -590,7 +862,10 @@ mod tests {
         let db = test_db();
         crate::schema::ensure_completion_schema(&db).unwrap();
         let claims = get_completion_claims_by_run(&db, "nonexistent-run").unwrap();
-        assert!(claims.is_empty(), "nonexistent run should return empty claims");
+        assert!(
+            claims.is_empty(),
+            "nonexistent run should return empty claims"
+        );
     }
 
     #[test]
@@ -603,6 +878,26 @@ mod tests {
         assert_eq!(claims.len(), 1);
         assert_eq!(claims[0].claim_kind, CompletionClaimKind::TestsPass);
         assert_eq!(claims[0].claim_text, "All tests pass.");
+    }
+
+    #[test]
+    fn test_insert_and_readback_run_context() {
+        let db = test_db();
+        let ctx = CompletionRunContext {
+            run_id: "run-ctx".into(),
+            workspace_id: "workspace-a".into(),
+            agent_key: Some("agent-a".into()),
+            model: Some("model-a".into()),
+            updated_at: chrono::Utc::now().to_rfc3339(),
+        };
+
+        insert_completion_run_context(&db, &ctx).unwrap();
+
+        let contexts = get_all_completion_run_contexts(&db).unwrap();
+        assert_eq!(contexts.len(), 1);
+        assert_eq!(contexts[0].workspace_id, "workspace-a");
+        assert_eq!(contexts[0].agent_key.as_deref(), Some("agent-a"));
+        assert_eq!(contexts[0].model.as_deref(), Some("model-a"));
     }
 
     #[test]
@@ -635,7 +930,9 @@ mod tests {
         };
 
         insert_completion_report(&db, &report).unwrap();
-        let retrieved = get_completion_report(&db, "rep-1").unwrap().expect("must exist");
+        let retrieved = get_completion_report(&db, "rep-1")
+            .unwrap()
+            .expect("must exist");
         assert_eq!(retrieved.final_state, CompletionState::Verified);
         assert_eq!(retrieved.calibrated_summary, "All claims verified.");
     }

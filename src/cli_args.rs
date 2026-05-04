@@ -608,9 +608,27 @@ pub enum CompletionAction {
         /// Task type for claim extraction
         #[arg(long, default_value = "pipeline-output")]
         task_type: String,
+        /// Agent key responsible for the completion output
+        #[arg(long, value_name = "KEY")]
+        agent: Option<String>,
+        /// Model responsible for the completion output
+        #[arg(long, value_name = "NAME")]
+        model: Option<String>,
+        /// Workspace identifier for trust-score grouping
+        #[arg(long, value_name = "ID")]
+        workspace_id: Option<String>,
         /// Require at least one claim to exist (fail if none found)
         #[arg(long, default_value_t = false)]
         require_claims: bool,
+    },
+    /// Show persisted agent/model trust scores from completion verification history
+    Trust {
+        /// Filter to one agent key
+        #[arg(long, value_name = "KEY")]
+        agent: Option<String>,
+        /// Filter to one model name
+        #[arg(long, value_name = "NAME")]
+        model: Option<String>,
     },
 }
 

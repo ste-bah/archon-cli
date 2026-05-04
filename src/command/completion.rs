@@ -1,6 +1,6 @@
 //! CLI handler for `archon completion` commands — TSPEC §10.
 //!
-//! Subcommands: inspect, claims, evidence, incidents, verify.
+//! Subcommands: inspect, claims, evidence, incidents, verify, trust.
 
 use anyhow::Result;
 use cozo::DbInstance;
@@ -14,7 +14,27 @@ pub async fn handle_completion(action: &CompletionAction) -> Result<()> {
         CompletionAction::Claims { run_id } => handle_claims(run_id),
         CompletionAction::Evidence { run_id } => handle_evidence(run_id),
         CompletionAction::Incidents => handle_incidents(),
-        CompletionAction::Verify { run_id, task_type, require_claims } => handle_verify(run_id, task_type, *require_claims).await,
+        CompletionAction::Verify {
+            run_id,
+            task_type,
+            agent,
+            model,
+            workspace_id,
+            require_claims,
+        } => {
+            handle_verify(
+                run_id,
+                task_type,
+                agent.as_deref(),
+                model.as_deref(),
+                workspace_id.as_deref(),
+                *require_claims,
+            )
+            .await
+        }
+        CompletionAction::Trust { agent, model } => {
+            handle_trust(agent.as_deref(), model.as_deref())
+        }
     }
 }
 
@@ -73,19 +93,20 @@ fn handle_inspect(run_id: &str) -> Result<()> {
     println!();
 
     // Report summary (if persisted)
-    let result = db.run_script(
-        "?[report_id, final_state, calibrated_summary, created_at] \
+    let result = db
+        .run_script(
+            "?[report_id, final_state, calibrated_summary, created_at] \
          := *completion_reports{report_id, run_id, final_state, claims_json, \
          evidence_json, failed_gates_json, unverified_claims_json, \
          calibrated_summary, provenance_record_id, created_at}, run_id = $rid",
-        {
-            let mut p = std::collections::BTreeMap::new();
-            p.insert("rid".into(), cozo::DataValue::from(run_id));
-            p
-        },
-        cozo::ScriptMutability::Immutable,
-    )
-    .map_err(|e| anyhow::anyhow!("query completion_reports failed: {e}"))?;
+            {
+                let mut p = std::collections::BTreeMap::new();
+                p.insert("rid".into(), cozo::DataValue::from(run_id));
+                p
+            },
+            cozo::ScriptMutability::Immutable,
+        )
+        .map_err(|e| anyhow::anyhow!("query completion_reports failed: {e}"))?;
 
     if !result.rows.is_empty() {
         let state = result.rows[0][1].get_str().unwrap_or("?");
@@ -194,9 +215,56 @@ fn handle_incidents() -> Result<()> {
     Ok(())
 }
 
+// ── trust ─────────────────────────────────────────────────────────────────────
+
+fn handle_trust(agent: Option<&str>, model: Option<&str>) -> Result<()> {
+    let db = open_db()?;
+    archon_completion::schema::ensure_completion_schema(&db)
+        .map_err(|e| anyhow::anyhow!("schema init failed: {e}"))?;
+
+    archon_completion::trust::recompute_all_trust_scores(&db)
+        .map_err(|e| anyhow::anyhow!("recompute trust scores failed: {e}"))?;
+    let scores = archon_completion::store::find_trust_scores(&db, agent, model)
+        .map_err(|e| anyhow::anyhow!("query trust scores failed: {e}"))?;
+
+    if scores.is_empty() {
+        println!("No agent/model trust scores recorded.");
+        println!("Run `archon completion verify <run-id>` to create completion history.");
+        return Ok(());
+    }
+
+    println!("Agent/Model Trust Scores ({})", scores.len());
+    println!("================================");
+    for score in &scores {
+        let agent = score.agent_key.as_deref().unwrap_or("(unknown-agent)");
+        let model = score.model.as_deref().unwrap_or("(unknown-model)");
+        println!(
+            "  agent={agent} model={model} task={task} reliability={rel:.3} evidence_quality={eq:.3}",
+            task = score.task_type,
+            rel = score.completion_reliability,
+            eq = score.evidence_quality,
+        );
+        println!(
+            "    verified={} false={} updated={} score_id={}",
+            score.verified_completion_count,
+            score.false_completion_count,
+            score.last_updated,
+            score.score_id,
+        );
+    }
+    Ok(())
+}
+
 // ── verify ─────────────────────────────────────────────────────────────────────
 
-async fn handle_verify(run_id: &str, task_type: &str, require_claims: bool) -> Result<()> {
+async fn handle_verify(
+    run_id: &str,
+    task_type: &str,
+    agent: Option<&str>,
+    model: Option<&str>,
+    workspace_id: Option<&str>,
+    require_claims: bool,
+) -> Result<()> {
     let db = open_db()?;
 
     // If --require-claims, verify at least one claim exists for this run
@@ -225,9 +293,22 @@ async fn handle_verify(run_id: &str, task_type: &str, require_claims: bool) -> R
         anyhow::bail!("output text is empty");
     }
 
-    let report = archon_completion::check_completion(&db, run_id, &output_text, task_type)
-        .await
-        .map_err(|e| anyhow::anyhow!("completion check failed: {e}"))?;
+    let context = archon_completion::CompletionContext {
+        workspace_id: workspace_id
+            .map(str::to_string)
+            .unwrap_or_else(default_workspace_id),
+        agent_key: agent.map(str::to_string),
+        model: model.map(str::to_string),
+    };
+    let report = archon_completion::check_completion_with_context(
+        &db,
+        run_id,
+        &output_text,
+        task_type,
+        context,
+    )
+    .await
+    .map_err(|e| anyhow::anyhow!("completion check failed: {e}"))?;
 
     println!(
         "{report_id} [{state:?}]",
@@ -263,4 +344,12 @@ fn open_db() -> Result<DbInstance> {
     let path_str = path.to_string_lossy().to_string();
     DbInstance::new("sqlite", &path_str, "")
         .map_err(|e| anyhow::anyhow!("Failed to open completion store at {path_str}: {e}"))
+}
+
+fn default_workspace_id() -> String {
+    std::env::current_dir()
+        .ok()
+        .map(|path| path.to_string_lossy().to_string())
+        .filter(|path| !path.is_empty())
+        .unwrap_or_else(|| "default".to_string())
 }

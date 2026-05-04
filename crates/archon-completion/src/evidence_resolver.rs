@@ -6,7 +6,7 @@
 use anyhow::Result;
 use cozo::{DataValue, DbInstance, ScriptMutability};
 
-use super::models::{CompletionEvidence, CompletionClaim, EvidenceKind, EvidenceStatus};
+use super::models::{CompletionClaim, CompletionEvidence, EvidenceKind, EvidenceStatus};
 
 /// Resolve evidence for each claim by querying Cozo state.
 pub fn resolve_evidence(
@@ -23,7 +23,8 @@ pub fn resolve_evidence(
             super::models::CompletionClaimKind::BuildPasses => {
                 evidence.extend(find_build_evidence(db, &claim.run_id)?);
             }
-            super::models::CompletionClaimKind::Ingested | super::models::CompletionClaimKind::Indexed => {
+            super::models::CompletionClaimKind::Ingested
+            | super::models::CompletionClaimKind::Indexed => {
                 evidence.extend(find_ingestion_evidence(db, &claim.run_id)?);
             }
             super::models::CompletionClaimKind::AnswerGrounded => {
@@ -83,7 +84,10 @@ fn find_test_run_evidence(db: &DbInstance, run_id: &str) -> Result<Vec<Completio
         };
 
         evidence.push(CompletionEvidence {
-            evidence_id: format!("ev-{}", uuid::Uuid::new_v4().to_string().replace('-', "")[..12].to_string()),
+            evidence_id: format!(
+                "ev-{}",
+                uuid::Uuid::new_v4().to_string().replace('-', "")[..12].to_string()
+            ),
             run_id: run_id.to_string(),
             evidence_kind: EvidenceKind::TestRun,
             producer: "gt_runs".into(),
@@ -102,7 +106,11 @@ fn find_test_run_evidence(db: &DbInstance, run_id: &str) -> Result<Vec<Completio
     }
 
     if evidence.is_empty() {
-        evidence.push(missing_evidence_record(run_id, EvidenceKind::TestRun, "no test run evidence found"));
+        evidence.push(missing_evidence_record(
+            run_id,
+            EvidenceKind::TestRun,
+            "no test run evidence found",
+        ));
     }
 
     Ok(evidence)
@@ -112,7 +120,10 @@ fn find_test_run_evidence(db: &DbInstance, run_id: &str) -> Result<Vec<Completio
 fn missing_evidence_record(run_id: &str, kind: EvidenceKind, summary: &str) -> CompletionEvidence {
     let now = chrono::Utc::now().to_rfc3339();
     CompletionEvidence {
-        evidence_id: format!("ev-{}", uuid::Uuid::new_v4().to_string().replace('-', "")[..12].to_string()),
+        evidence_id: format!(
+            "ev-{}",
+            uuid::Uuid::new_v4().to_string().replace('-', "")[..12].to_string()
+        ),
         run_id: run_id.to_string(),
         evidence_kind: kind,
         producer: "evidence_resolver".into(),
@@ -160,10 +171,17 @@ fn find_ingestion_evidence(db: &DbInstance, run_id: &str) -> Result<Vec<Completi
                     "failed" => EvidenceStatus::Failed,
                     _ => EvidenceStatus::Unknown,
                 };
-                let exit_code = if ev_status_new == EvidenceStatus::Passed { 0 } else { 1 };
+                let exit_code = if ev_status_new == EvidenceStatus::Passed {
+                    0
+                } else {
+                    1
+                };
 
                 evidence.push(CompletionEvidence {
-                    evidence_id: format!("ev-{}", uuid::Uuid::new_v4().to_string().replace('-', "")[..12].to_string()),
+                    evidence_id: format!(
+                        "ev-{}",
+                        uuid::Uuid::new_v4().to_string().replace('-', "")[..12].to_string()
+                    ),
                     run_id: run_id.to_string(),
                     evidence_kind: EvidenceKind::IngestionJob,
                     producer: "doc_processing_jobs".into(),
@@ -182,7 +200,11 @@ fn find_ingestion_evidence(db: &DbInstance, run_id: &str) -> Result<Vec<Completi
             }
         }
         Err(_) => {
-            evidence.push(missing_evidence_record(run_id, EvidenceKind::IngestionJob, "no ingestion job evidence found"));
+            evidence.push(missing_evidence_record(
+                run_id,
+                EvidenceKind::IngestionJob,
+                "no ingestion job evidence found",
+            ));
         }
     }
 
@@ -238,19 +260,27 @@ fn find_citation_evidence(db: &DbInstance, run_id: &str) -> Result<Vec<Completio
 
 /// Find file diff / generated artifact evidence.
 fn find_diff_evidence(_db: &DbInstance, run_id: &str) -> Result<Vec<CompletionEvidence>> {
-    Ok(vec![missing_evidence_record(run_id, EvidenceKind::FileDiff, "diff evidence resolution deferred to Phase 6")])
+    Ok(vec![missing_evidence_record(
+        run_id,
+        EvidenceKind::FileDiff,
+        "diff evidence resolution deferred to Phase 6",
+    )])
 }
 
 /// Find gate result evidence.
 fn find_gate_evidence(_db: &DbInstance, run_id: &str) -> Result<Vec<CompletionEvidence>> {
-    Ok(vec![missing_evidence_record(run_id, EvidenceKind::GateResult, "gate evidence resolution deferred to Phase 6")])
+    Ok(vec![missing_evidence_record(
+        run_id,
+        EvidenceKind::GateResult,
+        "gate evidence resolution deferred to Phase 6",
+    )])
 }
 
 #[cfg(test)]
 mod tests {
-    use cozo::DbInstance;
     use super::*;
     use crate::models::CompletionClaimKind;
+    use cozo::DbInstance;
 
     fn test_db() -> DbInstance {
         let path = format!("/tmp/test-evidence-resolver-{}.db", uuid::Uuid::new_v4());

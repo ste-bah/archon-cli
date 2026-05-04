@@ -16,6 +16,7 @@ pub fn ensure_completion_schema(db: &DbInstance) -> Result<()> {
     ensure_completion_reports(db)?;
     ensure_verification_gate_results(db)?;
     ensure_false_completion_incidents(db)?;
+    ensure_completion_run_contexts(db)?;
     ensure_agent_model_trust_scores(db)?;
     Ok(())
 }
@@ -32,9 +33,7 @@ fn run_create(db: &DbInstance, script: &str) -> Result<()> {
             {
                 Ok(())
             } else {
-                Err(anyhow::anyhow!(
-                    "completion schema creation failed: {msg}"
-                ))
+                Err(anyhow::anyhow!("completion schema creation failed: {msg}"))
             }
         }
     }
@@ -131,6 +130,19 @@ fn ensure_false_completion_incidents(db: &DbInstance) -> Result<()> {
             severity: String,
             learning_event_id: String default "",
             created_at: String,
+        }"#,
+    )
+}
+
+fn ensure_completion_run_contexts(db: &DbInstance) -> Result<()> {
+    run_create(
+        db,
+        r#":create completion_run_contexts {
+            run_id: String =>
+            workspace_id: String,
+            agent_key: String default "",
+            model: String default "",
+            updated_at: String,
         }"#,
     )
 }

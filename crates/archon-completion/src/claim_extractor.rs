@@ -147,7 +147,11 @@ mod tests {
     #[test]
     fn test_recognizes_tests_pass() {
         let claims = extract_claims("All tests pass.", "run-1");
-        assert!(claims.iter().any(|c| c.claim_kind == CompletionClaimKind::TestsPass));
+        assert!(
+            claims
+                .iter()
+                .any(|c| c.claim_kind == CompletionClaimKind::TestsPass)
+        );
     }
 
     #[test]
@@ -166,30 +170,68 @@ mod tests {
 
         let claims = extract_claims(text, "run-1");
         let kinds: Vec<CompletionClaimKind> = claims.iter().map(|c| c.claim_kind.clone()).collect();
-        assert!(kinds.contains(&CompletionClaimKind::TestsPass), "must detect TestsPass");
-        assert!(kinds.contains(&CompletionClaimKind::BuildPasses), "must detect BuildPasses");
-        assert!(kinds.contains(&CompletionClaimKind::Implemented), "must detect Implemented");
-        assert!(kinds.contains(&CompletionClaimKind::Fixed), "must detect Fixed");
-        assert!(kinds.contains(&CompletionClaimKind::Indexed), "must detect Indexed");
-        assert!(kinds.contains(&CompletionClaimKind::Ingested), "must detect Ingested");
-        assert!(kinds.contains(&CompletionClaimKind::AnswerGrounded), "must detect AnswerGrounded");
-        assert!(kinds.contains(&CompletionClaimKind::Done), "must detect Done");
-        assert!(kinds.contains(&CompletionClaimKind::Verified), "must detect Verified");
-        assert!(kinds.contains(&CompletionClaimKind::Documented), "must detect Documented");
+        assert!(
+            kinds.contains(&CompletionClaimKind::TestsPass),
+            "must detect TestsPass"
+        );
+        assert!(
+            kinds.contains(&CompletionClaimKind::BuildPasses),
+            "must detect BuildPasses"
+        );
+        assert!(
+            kinds.contains(&CompletionClaimKind::Implemented),
+            "must detect Implemented"
+        );
+        assert!(
+            kinds.contains(&CompletionClaimKind::Fixed),
+            "must detect Fixed"
+        );
+        assert!(
+            kinds.contains(&CompletionClaimKind::Indexed),
+            "must detect Indexed"
+        );
+        assert!(
+            kinds.contains(&CompletionClaimKind::Ingested),
+            "must detect Ingested"
+        );
+        assert!(
+            kinds.contains(&CompletionClaimKind::AnswerGrounded),
+            "must detect AnswerGrounded"
+        );
+        assert!(
+            kinds.contains(&CompletionClaimKind::Done),
+            "must detect Done"
+        );
+        assert!(
+            kinds.contains(&CompletionClaimKind::Verified),
+            "must detect Verified"
+        );
+        assert!(
+            kinds.contains(&CompletionClaimKind::Documented),
+            "must detect Documented"
+        );
     }
 
     #[test]
     fn test_ignores_negated_phrases() {
         let claims = extract_claims("Tests do not pass. The tests don't pass.", "run-1");
-        assert!(!claims.iter().any(|c| c.claim_kind == CompletionClaimKind::TestsPass),
-            "negated tests-pass must not produce claims");
+        assert!(
+            !claims
+                .iter()
+                .any(|c| c.claim_kind == CompletionClaimKind::TestsPass),
+            "negated tests-pass must not produce claims"
+        );
     }
 
     #[test]
     fn test_ignores_failed_to_patterns() {
         let claims = extract_claims("Failed to implement the feature.", "run-1");
-        assert!(!claims.iter().any(|c| c.claim_kind == CompletionClaimKind::Implemented),
-            "failed-to must not produce Implemented claim");
+        assert!(
+            !claims
+                .iter()
+                .any(|c| c.claim_kind == CompletionClaimKind::Implemented),
+            "failed-to must not produce Implemented claim"
+        );
     }
 
     #[test]

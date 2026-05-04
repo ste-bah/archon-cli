@@ -62,6 +62,15 @@ pub struct CompletionClaim {
     pub created_at: String,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CompletionRunContext {
+    pub run_id: String,
+    pub workspace_id: String,
+    pub agent_key: Option<String>,
+    pub model: Option<String>,
+    pub updated_at: String,
+}
+
 // ── CompletionEvidence (§10.3) ───────────────────────────────────────────────
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
