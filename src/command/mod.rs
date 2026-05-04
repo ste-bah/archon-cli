@@ -17,6 +17,7 @@ pub(crate) mod bug;
 pub(crate) mod cancel;
 pub(crate) mod checkpoint;
 pub(crate) mod clear;
+pub(crate) mod cli_mirror;
 pub(crate) mod color;
 // TASK-TUI-624: /commit AI git-commit prompt builder.
 pub(crate) mod commit;
@@ -31,8 +32,8 @@ pub(crate) mod cost;
 pub(crate) mod denials;
 pub(crate) mod diff;
 pub(crate) mod dispatcher;
-pub(crate) mod doctor;
 pub(crate) mod docs;
+pub(crate) mod doctor;
 pub(crate) mod effort;
 pub(crate) mod errors;
 pub(crate) mod evidence_view;
@@ -43,11 +44,11 @@ pub(crate) mod export;
 pub(crate) mod extra_usage;
 pub(crate) mod fast;
 // TASK-#207 SLASH-FILES: /files file-picker overlay.
+pub(crate) mod completion;
+pub(crate) mod constellation;
 pub(crate) mod files;
 pub(crate) mod fork;
 pub(crate) mod gametheory;
-pub(crate) mod completion;
-pub(crate) mod constellation;
 pub(crate) mod gametheory_inspect;
 #[cfg(test)]
 mod gametheory_inspect_tests;
@@ -120,6 +121,7 @@ pub(crate) mod team;
 pub(crate) mod tag;
 // TASK-TUI-621: hidden stub `/teleport` command (no is_visible() on
 // trait — visibility handled by omission from archon-tui commands.rs).
+pub(crate) mod behaviour;
 pub(crate) mod teleport;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;
@@ -131,7 +133,6 @@ pub(crate) mod usage;
 pub(crate) mod utils;
 pub(crate) mod vim;
 pub(crate) mod voice;
-pub(crate) mod behaviour;
 pub(crate) mod web;
 
 // TASK-AGS-800 (Stage 6, Q1=A): spec-name discoverability shim.

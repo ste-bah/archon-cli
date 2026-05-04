@@ -1800,8 +1800,61 @@ pub(crate) fn default_registry() -> Registry {
     // TASK-AGS-812: NEW /hooks primary (gap-fix Q4=A, no aliases).
     b.insert_primary("hooks", Arc::new(HooksHandler));
     b.insert_primary("learning-status", Arc::new(LearningStatusHandler));
+    b.insert_primary(
+        "archon",
+        Arc::new(crate::command::cli_mirror::CliMirrorHandler::archon()),
+    );
     b.insert_primary("docs", Arc::new(DocsViewHandler));
     b.insert_primary("learning", Arc::new(LearningViewHandler));
+    b.insert_primary(
+        "kb",
+        Arc::new(crate::command::cli_mirror::CliMirrorHandler::prefixed(
+            "kb",
+            "Run knowledge-base CLI commands from inside the TUI",
+        )),
+    );
+    b.insert_primary(
+        "prov",
+        Arc::new(crate::command::cli_mirror::CliMirrorHandler::prefixed(
+            "prov",
+            "Run provenance CLI commands from inside the TUI",
+        )),
+    );
+    b.insert_primary(
+        "meaning",
+        Arc::new(crate::command::cli_mirror::CliMirrorHandler::prefixed(
+            "meaning",
+            "Run meaning compiler CLI commands from inside the TUI",
+        )),
+    );
+    b.insert_primary(
+        "constellation",
+        Arc::new(crate::command::cli_mirror::CliMirrorHandler::prefixed(
+            "constellation",
+            "Run constellation CLI commands from inside the TUI",
+        )),
+    );
+    b.insert_primary(
+        "completion",
+        Arc::new(crate::command::cli_mirror::CliMirrorHandler::prefixed(
+            "completion",
+            "Run completion-integrity CLI commands from inside the TUI",
+        )),
+    );
+    b.insert_primary(
+        "behaviour",
+        Arc::new(crate::command::cli_mirror::CliMirrorHandler::prefixed(
+            "behaviour",
+            "Run governed-learning behaviour CLI commands from inside the TUI",
+        )),
+    );
+    b.insert_primary(
+        "pipeline",
+        Arc::new(crate::command::cli_mirror::CliMirrorHandler::prefixed(
+            "pipeline",
+            "Run pipeline CLI commands from inside the TUI",
+        )),
+    );
     b.insert_primary("fork", Arc::new(ForkHandler));
     b.insert_primary("checkpoint", Arc::new(CheckpointHandler::new()));
     b.insert_primary("add-dir", Arc::new(AddDirHandler));

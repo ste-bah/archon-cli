@@ -33,7 +33,7 @@ pub(crate) fn install(config: ArchonConfig, env_vars: ArchonEnvVars) {
 impl GameTheoryExecutor for PipelineGameTheoryExecutor {
     async fn run(&self, request: GameTheoryRunRequest) -> Result<String> {
         let db = cli_gametheory::open_db()?;
-        let llm = self.build_llm();
+        let llm = self.build_llm().await;
         let llm_ref = llm.as_ref().map(|client| client as &dyn LlmClient);
         let result = gametheory::run_full_pipeline_with_options(
             &db,
@@ -113,7 +113,7 @@ impl GameTheoryExecutor for PipelineGameTheoryExecutor {
 
     async fn classify(&self, request: GameTheoryClassifyRequest) -> Result<String> {
         let db = cli_gametheory::open_db()?;
-        let llm = self.build_llm();
+        let llm = self.build_llm().await;
         let llm_ref = llm.as_ref().map(|client| client as &dyn LlmClient);
         let fingerprint = gametheory::classify(&db, &request.situation, llm_ref).await?;
         let artifact_id = format!("fingerprint:{}", fingerprint.run_id);
@@ -131,8 +131,8 @@ impl GameTheoryExecutor for PipelineGameTheoryExecutor {
 }
 
 impl PipelineGameTheoryExecutor {
-    fn build_llm(&self) -> Option<archon_pipeline::llm_adapter::AnthropicLlmAdapter> {
-        cli_gametheory::build_llm_client(&self.config, &self.env_vars)
+    async fn build_llm(&self) -> Option<archon_pipeline::llm_adapter::AnthropicLlmAdapter> {
+        cli_gametheory::build_llm_client(&self.config, &self.env_vars).await
     }
 
     async fn reclassify_run(&self, run_id: &str) -> Result<String> {
@@ -151,7 +151,7 @@ impl PipelineGameTheoryExecutor {
 
     async fn rerun_specialist(&self, run_id: &str, agent_key: &str) -> Result<String> {
         let db = cli_gametheory::open_db()?;
-        let llm = self.build_llm();
+        let llm = self.build_llm().await;
         let llm_ref = llm.as_ref().map(|client| client as &dyn LlmClient);
         let result = gametheory::replay_single_specialist(
             &db,

@@ -9,8 +9,14 @@ use cozo::DbInstance;
 
 use crate::cli_args::GametheoryAction;
 use crate::command::gametheory_inspect;
+use crate::command::utils::fetch_account_uuid;
 use archon_core::config::ArchonConfig;
 use archon_core::env_vars::ArchonEnvVars;
+use archon_llm::auth::AuthProvider;
+use archon_llm::identity::{
+    IdentityMode, IdentityProvider, get_or_create_device_id, resolve_betas,
+    version_from_package_json,
+};
 use archon_pipeline::gametheory;
 use archon_pipeline::llm_adapter::AnthropicLlmAdapter;
 use archon_pipeline::runner::LlmClient;
@@ -130,7 +136,7 @@ fn maybe_print_resume_hint(action: Option<&GametheoryAction>) -> Result<()> {
 }
 
 /// Build an LLM client adapter from config. Returns None and logs a warning if auth fails.
-pub(crate) fn build_llm_client(
+pub(crate) async fn build_llm_client(
     config: &ArchonConfig,
     env_vars: &ArchonEnvVars,
 ) -> Option<AnthropicLlmAdapter> {
@@ -147,12 +153,8 @@ pub(crate) fn build_llm_client(
         }
     };
 
-    let identity = archon_llm::identity::IdentityProvider::new(
-        archon_llm::identity::IdentityMode::Clean,
-        uuid::Uuid::new_v4().to_string(),
-        "gametheory-device".to_string(),
-        String::new(),
-    );
+    let account_uuid = fetch_account_uuid(&auth).await;
+    let identity = build_gametheory_identity(config, &auth, account_uuid);
 
     let api_url = std::env::var("ANTHROPIC_BASE_URL")
         .ok()
@@ -160,6 +162,59 @@ pub(crate) fn build_llm_client(
 
     let client = archon_llm::anthropic::AnthropicClient::new(auth, identity, api_url);
     Some(AnthropicLlmAdapter::new(Arc::new(client)))
+}
+
+fn build_gametheory_identity(
+    config: &ArchonConfig,
+    auth: &AuthProvider,
+    account_uuid: String,
+) -> IdentityProvider {
+    let mode = resolve_gametheory_identity_mode(config, auth);
+    IdentityProvider::new(
+        mode,
+        uuid::Uuid::new_v4().to_string(),
+        get_or_create_device_id(),
+        account_uuid,
+    )
+}
+
+fn resolve_gametheory_identity_mode(config: &ArchonConfig, auth: &AuthProvider) -> IdentityMode {
+    if matches!(
+        auth,
+        AuthProvider::OAuthToken(_) | AuthProvider::BearerToken(_)
+    ) {
+        return spoof_identity_mode(config);
+    }
+
+    match config.identity.mode.as_str() {
+        "spoof" => spoof_identity_mode(config),
+        "custom" => {
+            let custom = config.identity.custom.as_ref();
+            IdentityMode::Custom {
+                user_agent: custom
+                    .map(|c| c.user_agent.clone())
+                    .unwrap_or_else(|| concat!("archon-cli/", env!("CARGO_PKG_VERSION")).into()),
+                x_app: custom
+                    .map(|c| c.x_app.clone())
+                    .unwrap_or_else(|| "archon".into()),
+                extra_headers: custom
+                    .and_then(|c| c.extra_headers.clone())
+                    .unwrap_or_default(),
+            }
+        }
+        _ => IdentityMode::Clean,
+    }
+}
+
+fn spoof_identity_mode(config: &ArchonConfig) -> IdentityMode {
+    IdentityMode::Spoof {
+        version: version_from_package_json()
+            .unwrap_or_else(|| config.identity.spoof_version.clone()),
+        entrypoint: config.identity.spoof_entrypoint.clone(),
+        betas: resolve_betas(config.identity.spoof_betas.as_deref()),
+        workload: config.identity.workload.clone(),
+        anti_distillation: config.identity.anti_distillation,
+    }
 }
 
 pub(crate) fn open_memory_context(debug: bool) -> Result<gametheory::GameTheoryMemoryContext> {
@@ -188,7 +243,6 @@ async fn handle_run(
     env_vars: &ArchonEnvVars,
 ) -> Result<()> {
     let db = open_db()?;
-    let _llm = build_llm_client(config, env_vars);
     if classify_only {
         run_classify_only(&db, situation, config, env_vars).await
     } else {
@@ -215,7 +269,7 @@ async fn run_classify_only(
     config: &ArchonConfig,
     env_vars: &ArchonEnvVars,
 ) -> Result<()> {
-    let llm = build_llm_client(config, env_vars);
+    let llm = build_llm_client(config, env_vars).await;
     let llm_ref: Option<&dyn LlmClient> = llm.as_ref().map(|a| a as &dyn LlmClient);
 
     match gametheory::classify(db, situation, llm_ref).await {
@@ -253,7 +307,7 @@ async fn run_full(
     config: &ArchonConfig,
     env_vars: &ArchonEnvVars,
 ) -> Result<()> {
-    let llm = build_llm_client(config, env_vars);
+    let llm = build_llm_client(config, env_vars).await;
     let llm_ref: Option<&dyn LlmClient> = llm.as_ref().map(|a| a as &dyn LlmClient);
     let path = spec_path.map(std::path::Path::new);
     let memory_ctx = open_memory_context(debug_memory)?;
@@ -445,7 +499,7 @@ async fn handle_replay(
     }
 
     if let Some(agent_key) = rerun_specialist {
-        let llm = build_llm_client(config, env_vars);
+        let llm = build_llm_client(config, env_vars).await;
         let llm_ref: Option<&dyn LlmClient> = llm.as_ref().map(|a| a as &dyn LlmClient);
         let result = gametheory::replay_single_specialist(
             &db,
@@ -498,7 +552,7 @@ async fn handle_resume(
     env_vars: &ArchonEnvVars,
 ) -> Result<()> {
     let db = open_db()?;
-    let llm = build_llm_client(config, env_vars);
+    let llm = build_llm_client(config, env_vars).await;
     let llm_ref: Option<&dyn LlmClient> = llm.as_ref().map(|a| a as &dyn LlmClient);
     let result = gametheory::resume_run_from_checkpoint(
         &db,
@@ -714,5 +768,93 @@ mod tests {
         )
         .unwrap();
         assert!(resolve_tier11_policy_for_workspace(true, tmp.path()).unwrap());
+    }
+
+    #[test]
+    fn test_gametheory_oauth_auth_forces_spoof_identity() {
+        let config = ArchonConfig::default();
+        let auth = AuthProvider::BearerToken(archon_llm::types::Secret::new(
+            "sk-ant-oat-test".to_string(),
+        ));
+        let mode = resolve_gametheory_identity_mode(&config, &auth);
+
+        match mode {
+            IdentityMode::Spoof { betas, .. } => {
+                assert!(
+                    betas.iter().any(|beta| beta == "oauth-2025-04-20"),
+                    "spoof identity must include the OAuth beta"
+                );
+            }
+            other => panic!("OAuth/Bearer auth must use spoof identity, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_gametheory_oauth_spoof_identity_emits_claude_code_headers() {
+        let config = ArchonConfig::default();
+        let auth = AuthProvider::BearerToken(archon_llm::types::Secret::new(
+            "sk-ant-oat-test".to_string(),
+        ));
+        let mode = resolve_gametheory_identity_mode(&config, &auth);
+        let identity = IdentityProvider::new(
+            mode,
+            "session-test".to_string(),
+            "device-test".to_string(),
+            "account-test".to_string(),
+        );
+        let headers = identity.request_headers("request-test");
+
+        assert_eq!(headers.get("x-app").map(String::as_str), Some("cli"));
+        assert!(
+            headers
+                .get("User-Agent")
+                .is_some_and(|value| value.starts_with("claude-cli/")),
+            "spoof identity must use the Claude Code user agent"
+        );
+        assert!(
+            headers
+                .get("anthropic-beta")
+                .is_some_and(|value| value.contains("oauth-2025-04-20")),
+            "spoof identity must send the OAuth beta"
+        );
+    }
+
+    #[test]
+    fn test_gametheory_api_key_respects_clean_identity_config() {
+        let config = ArchonConfig::default();
+        let auth = AuthProvider::ApiKey(archon_llm::types::Secret::new(
+            "sk-ant-api03-test".to_string(),
+        ));
+        let mode = resolve_gametheory_identity_mode(&config, &auth);
+
+        assert!(
+            matches!(mode, IdentityMode::Clean),
+            "API key auth should respect the default clean identity mode"
+        );
+    }
+
+    #[test]
+    fn test_gametheory_api_key_respects_spoof_identity_config() {
+        let mut config = ArchonConfig::default();
+        config.identity.mode = "spoof".to_string();
+        config.identity.spoof_version = "9.9.9".to_string();
+        config.identity.spoof_entrypoint = "cli".to_string();
+        let auth = AuthProvider::ApiKey(archon_llm::types::Secret::new(
+            "sk-ant-api03-test".to_string(),
+        ));
+        let mode = resolve_gametheory_identity_mode(&config, &auth);
+
+        match mode {
+            IdentityMode::Spoof {
+                entrypoint, betas, ..
+            } => {
+                assert_eq!(entrypoint, "cli");
+                assert!(
+                    betas.iter().any(|beta| beta == "claude-code-20250219"),
+                    "spoof identity must include the Claude Code identity beta"
+                );
+            }
+            other => panic!("spoof config should produce spoof identity, got {other:?}"),
+        }
     }
 }

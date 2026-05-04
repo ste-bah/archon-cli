@@ -19,6 +19,29 @@ flowchart LR
 Use synthetic fixtures or known facts first. If you know what should be found,
 you can prove the system is working before trusting it on messy real material.
 
+## CLI And TUI Command Parity
+
+Every Evidence Engine CLI surface is available inside the TUI. Use the direct
+slash family when one exists, or use `/archon` as the universal in-TUI mirror of
+the OS command line.
+
+| OS command | TUI command |
+| --- | --- |
+| `archon docs ...` | `/docs ...` |
+| `archon kb ...` | `/kb ...` |
+| `archon gametheory ...` | `/gametheory ...` |
+| `archon pipeline ...` | `/pipeline ...` or `/archon-code` / `/archon-research` |
+| `archon completion ...` | `/completion ...` |
+| `archon behaviour ...` | `/behaviour ...` |
+| `archon meaning ...` | `/meaning ...` |
+| `archon constellation ...` | `/constellation ...` |
+| `archon prov ...` | `/prov ...` |
+| any other `archon ...` command | `/archon ...` |
+
+Example: `archon docs ingest .archon/docs/inbox` from a shell is
+`/docs ingest .archon/docs/inbox` inside the TUI. If a new CLI command lands
+before a dedicated slash wrapper exists, run it as `/archon <same args>`.
+
 ## Project Setup
 
 ```bash
@@ -45,10 +68,13 @@ archon docs index --all
 Inside the TUI, use:
 
 ```text
+/docs ingest .archon/docs/inbox
+/docs status
 /docs open
 /docs list
 /docs inspect <document-id>
 /docs provenance <chunk-or-artifact-id>
+/docs index --all
 ```
 
 ## Research Workflow
@@ -69,6 +95,17 @@ archon docs search "chain of custody for derived data" --mode hybrid --debug
 archon kb process --claims --entities --relations --contradictions
 archon kb contradictions
 archon docs answer "What are the strongest claims about OCR provenance?"
+```
+
+TUI equivalent:
+
+```text
+/docs ingest .archon/docs/inbox/provenance
+/docs index --all
+/docs search "chain of custody for derived data" --mode hybrid --debug
+/kb process --claims --entities --relations --contradictions
+/kb contradictions
+/docs answer "What are the strongest claims about OCR provenance?"
 ```
 
 Then run the research pipeline:
@@ -92,6 +129,15 @@ archon kb entities
 archon kb stats
 ```
 
+TUI equivalent:
+
+```text
+/docs provenance <answer-id-or-chunk-id>
+/kb claims
+/kb entities
+/kb stats
+```
+
 Expected outcome: a research synthesis that cites local document chunks, flags
 contradictions, and leaves inspectable document, KB, and provenance rows.
 
@@ -112,6 +158,14 @@ archon docs index --all
 archon kb process --claims --entities --relations
 ```
 
+TUI equivalent:
+
+```text
+/docs ingest .archon/docs/inbox/economics-101
+/docs index --all
+/kb process --claims --entities --relations
+```
+
 Ask grounded questions:
 
 ```bash
@@ -125,6 +179,8 @@ Use the TUI as a study browser:
 /docs open
 /docs list
 /docs chunks <document-id>
+/docs answer "Explain price elasticity using only the course material."
+/docs search "deadweight loss" --mode hybrid --debug
 ```
 
 Use governed learning to capture corrections:
@@ -133,6 +189,14 @@ Use governed learning to capture corrections:
 archon behaviour list-events
 archon behaviour generate-proposals
 archon behaviour list-proposals
+```
+
+TUI equivalent:
+
+```text
+/behaviour list-events
+/behaviour generate-proposals
+/behaviour list-proposals
 ```
 
 Expected outcome: a local tutor that answers from the ingested class material,
@@ -164,6 +228,15 @@ archon gametheory \
   --debug-memory
 ```
 
+TUI equivalent:
+
+```text
+/docs ingest .archon/docs/inbox/plugin-marketplace
+/docs index --all
+/kb process --claims --entities --relations --contradictions
+/gametheory run Assess the incentive structure of this plugin marketplace design --kb plugin-marketplace
+```
+
 Inspect the persisted report:
 
 ```bash
@@ -172,6 +245,16 @@ archon gametheory status <run-id>
 archon gametheory inspect-fingerprint <run-id>
 archon gametheory inspect-routing <run-id>
 archon gametheory show <run-id>
+```
+
+TUI equivalent:
+
+```text
+/gametheory list-runs
+/gametheory status <run-id>
+/gametheory inspect-fingerprint <run-id>
+/gametheory inspect-routing <run-id>
+/gametheory show <run-id>
 ```
 
 Use the strategic engagement agent when you need an outreach package:
@@ -220,6 +303,14 @@ archon docs provenance <answer-id-or-chunk-id>
 archon gametheory inspect-routing <run-id>
 ```
 
+TUI equivalent:
+
+```text
+/kb contradictions
+/docs provenance <answer-id-or-chunk-id>
+/gametheory inspect-routing <run-id>
+```
+
 Expected outcome: a grounded thesis brief with source-backed claims and
 contradictions. The human still owns judgement, risk management, and any trade.
 
@@ -244,6 +335,7 @@ In the TUI:
 
 ```text
 /archon-code Implement archon docs summarize <document-id> using persisted chunks, citations, tests, and provenance edges
+/pipeline code "Implement archon docs summarize <document-id> using persisted chunks, citations, tests, and provenance edges" --max-budget-usd 20
 ```
 
 Use completion integrity around claims of success:
@@ -252,6 +344,14 @@ Use completion integrity around claims of success:
 archon completion verify <run-id> --agent code-quality-improver --model sonnet
 archon completion incidents
 archon completion trust --agent code-quality-improver
+```
+
+TUI equivalent:
+
+```text
+/completion verify <run-id> --agent code-quality-improver --model sonnet
+/completion incidents
+/completion trust --agent code-quality-improver
 ```
 
 Expected outcome: a structured coding run with requirements, exploration,
@@ -278,6 +378,15 @@ Recommended preparation:
 archon docs ingest .archon/docs/inbox/legal-ocr
 archon docs index --all
 archon kb process --claims --entities --relations --contradictions
+```
+
+TUI equivalent:
+
+```text
+/archon-research Research how provenance-aware OCR systems can support legal discovery workflows
+/docs ingest .archon/docs/inbox/legal-ocr
+/docs index --all
+/kb process --claims --entities --relations --contradictions
 ```
 
 Expected outcome: a multi-agent research package that can reuse local evidence
@@ -319,6 +428,15 @@ archon gametheory inspect specialist:<run-id>:payoff-matrix-builder
 archon gametheory show <run-id>
 ```
 
+TUI equivalent:
+
+```text
+/gametheory inspect-fingerprint <run-id>
+/gametheory inspect-routing <run-id>
+/gametheory inspect specialist:<run-id>:payoff-matrix-builder
+/gametheory show <run-id>
+```
+
 Expected outcome: a specialist-routed strategic report with a 9-axis
 fingerprint, auditable routing decision, per-specialist outputs, report
 sections, cost tracking, and provenance.
@@ -341,6 +459,20 @@ archon constellation score --target strategic-workflow --text "new strategic wor
 archon constellation drift --target strategic-workflow --text "changed workflow description"
 ```
 
+TUI equivalent:
+
+```text
+/behaviour status
+/behaviour generate-proposals
+/behaviour list-proposals
+/meaning build --from learning-events
+/meaning build --from gametheory-runs
+/meaning triplets
+/constellation build --target strategic-workflow
+/constellation score --target strategic-workflow --text "new strategic workflow description"
+/constellation drift --target strategic-workflow --text "changed workflow description"
+```
+
 If a proposal is safe and wanted:
 
 ```bash
@@ -348,10 +480,23 @@ archon behaviour approve <proposal-id>
 archon behaviour history <manifest-kind>
 ```
 
+TUI equivalent:
+
+```text
+/behaviour approve <proposal-id>
+/behaviour history <manifest-kind>
+```
+
 If it was wrong:
 
 ```bash
 archon behaviour rollback <version-id> --reason "proposal degraded research quality"
+```
+
+TUI equivalent:
+
+```text
+/behaviour rollback <version-id> --reason "proposal degraded research quality"
 ```
 
 ## Operator Checklist
