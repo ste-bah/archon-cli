@@ -44,6 +44,9 @@
 //!     re-exports from this module; archon-core re-exports
 //!     `ChannelMetricSink` from here so every existing `archon_core::
 //!     ChannelMetricSink` call site stays byte-identical.
+//!   * [`task_registry`] — named Tokio task spawning and shutdown snapshots.
+//!     Used to identify detached background tasks that survive cooperative
+//!     cancellation during TUI shutdown.
 //!
 //! Post-LIFT wiring (OBS-901-WIRE):
 //!
@@ -80,6 +83,7 @@ pub mod activity;
 pub mod file_init;
 pub mod metrics;
 pub mod redaction;
+pub mod task_registry;
 pub mod tracing;
 
 pub use activity::{
@@ -92,6 +96,10 @@ pub use metrics::{
     serve_metrics_on,
 };
 pub use redaction::RedactionLayer;
+pub use task_registry::{
+    TaskSnapshot, abort_alive_tasks, log_alive_tasks_after_cancel, register_abort_handle,
+    reset_task_registry_for_tests, spawn_blocking_named, spawn_named, task_snapshots,
+};
 pub use tracing::{init_tracing, span_agent_turn, span_channel_send, span_slash_dispatch};
 
 /// Workspace version string — pinned to `CARGO_PKG_VERSION` at build time so

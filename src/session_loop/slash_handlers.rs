@@ -135,7 +135,7 @@ pub(super) async fn handle_refresh_identity_command(
     };
     let refresh_api_url = api_url.clone();
     let refresh_tui_tx = input_tui_tx.clone();
-    tokio::spawn(async move {
+    archon_observability::spawn_named("identity-refresh", async move {
         let refresh_client = archon_llm::anthropic::AnthropicClient::new(
             refresh_auth,
             refresh_identity,

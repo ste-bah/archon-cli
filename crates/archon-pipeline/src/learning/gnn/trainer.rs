@@ -271,6 +271,8 @@ impl GnnTrainer {
                 &mut samples_processed,
                 cancel,
             );
+            let cancelled_after_epoch =
+                cancel.map(|c| c.load(std::sync::atomic::Ordering::Relaxed)) == Some(true);
 
             // Collect per-epoch layer-norm metrics
             let layer_norms = compute_layer_norms(enhancer);
@@ -282,6 +284,11 @@ impl GnnTrainer {
             });
 
             epochs_completed += 1;
+
+            if cancelled_after_epoch {
+                cancelled = true;
+                break;
+            }
 
             // Early stopping check
             let patience = self.config.early_stopping_patience;
@@ -313,6 +320,31 @@ impl GnnTrainer {
                 best_epoch = epoch;
                 best_train_loss = epoch_result.train_loss;
             }
+        }
+
+        if cancelled {
+            enhancer.clear_cache();
+            let best_loss = if best_loss == f32::MAX {
+                initial_loss
+            } else {
+                best_loss
+            };
+            return TrainingOutcome {
+                epochs_completed,
+                batches_processed,
+                samples_processed,
+                initial_loss,
+                final_loss: initial_loss,
+                best_loss,
+                validation_loss: None,
+                stopped_early: false,
+                timed_out,
+                cancelled: true,
+                best_epoch,
+                best_val_loss: best_loss,
+                best_train_loss,
+                epoch_metrics,
+            };
         }
 
         let stopped_early = self.config.early_stopping_patience > 0

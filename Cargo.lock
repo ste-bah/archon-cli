@@ -736,6 +736,7 @@ dependencies = [
  "archon-leann",
  "archon-llm",
  "archon-memory",
+ "archon-observability",
  "async-trait",
  "cel-interpreter",
  "chrono",

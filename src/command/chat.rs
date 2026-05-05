@@ -127,7 +127,9 @@ async fn stream_response(provider: Arc<dyn LlmProvider>, request: LlmRequest) ->
     let capabilities = ProviderCapabilitySet::from_llm_provider(provider.as_ref());
     let adapter = LlmProviderAgenticAdapter::new(provider, provider_id, model_id, capabilities);
     let (sink, mut events) = TurnEventSink::channel(256);
-    let task = tokio::spawn(async move { adapter.stream_turn(request.into(), sink).await });
+    let task = archon_observability::spawn_named("chat-stream", async move {
+        adapter.stream_turn(request.into(), sink).await
+    });
 
     while let Some(event) = events.recv().await {
         match event {

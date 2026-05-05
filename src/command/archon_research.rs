@@ -54,7 +54,7 @@ impl CommandHandler for ArchonResearchHandler {
         let (string_tx, mut string_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
         research.set_tui_sender(string_tx);
         let fwd_tx = tui_tx.clone();
-        tokio::spawn(async move {
+        archon_observability::spawn_named("archon-research-progress-forwarder", async move {
             while let Some(msg) = string_rx.recv().await {
                 let _ = fwd_tx.send(TuiEvent::TextDelta(msg));
             }
@@ -64,7 +64,7 @@ impl CommandHandler for ArchonResearchHandler {
             "Starting research pipeline for topic: {topic}\n",
         )));
 
-        tokio::spawn(async move {
+        archon_observability::spawn_named("archon-research-pipeline", async move {
             match run_pipeline(
                 research.as_ref(),
                 llm.as_ref(),

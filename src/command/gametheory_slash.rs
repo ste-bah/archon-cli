@@ -102,7 +102,7 @@ fn start_run(ctx: &mut CommandContext, args: &[String]) -> Result<()> {
         format!("Starting game-theory run{kb_note} for: {situation}\n"),
     )?;
 
-    tokio::spawn(async move {
+    archon_observability::spawn_named("gametheory-slash-run", async move {
         let result = async {
             let db = open_db()?;
             let llm_ref = llm.as_ref().map(|arc| arc.as_ref() as &dyn LlmClient);
@@ -150,7 +150,7 @@ fn start_classify_only(ctx: &mut CommandContext, args: &[String]) -> Result<()> 
         format!("Classifying game-theory situation: {situation}\n"),
     )?;
 
-    tokio::spawn(async move {
+    archon_observability::spawn_named("gametheory-slash-classify", async move {
         let result = async {
             let db = open_db()?;
             let llm_ref = llm.as_ref().map(|arc| arc.as_ref() as &dyn LlmClient);
@@ -209,7 +209,7 @@ fn start_async_replay(
     let llm = ctx.llm_adapter.clone();
     emit(ctx, format!("Starting game-theory replay for {run_id}\n"))?;
 
-    tokio::spawn(async move {
+    archon_observability::spawn_named("gametheory-slash-replay", async move {
         let result = async {
             let db = open_db()?;
             if reclassify {

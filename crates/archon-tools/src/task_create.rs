@@ -177,7 +177,7 @@ impl Tool for TaskCreateTool {
                 let sid_spawn = subagent_id.clone();
                 let cancel = CancellationToken::new();
                 let ctx_spawn = nested_ctx.clone();
-                tokio::spawn(async move {
+                archon_observability::spawn_named("task-create-subagent-background", async move {
                     let _ = run_subagent(sid_spawn, request, cancel, ctx_spawn).await;
                 });
                 let response = json!({

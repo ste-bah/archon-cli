@@ -41,8 +41,9 @@ impl CommandHandler for CliMirrorHandler {
         let label = format!("archon {}", cli_args.join(" "));
         ctx.emit(TuiEvent::TextDelta(format!("Running `{label}`...\n")));
         let tui_tx = ctx.tui_tx.clone();
+        let task_name = format!("cli-mirror:{label}");
 
-        tokio::spawn(async move {
+        archon_observability::spawn_named(task_name, async move {
             let output = run_archon(cli_args).await;
             let rendered = match output {
                 Ok(rendered) => format!("`{label}` completed\n\n{rendered}"),

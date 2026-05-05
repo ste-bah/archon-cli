@@ -26,6 +26,10 @@
 pub use archon_observability::metrics::{
     ChannelMetrics, ChannelMetricsSnapshot, format_prometheus, serve_metrics, serve_metrics_on,
 };
+pub use archon_observability::task_registry::{
+    TaskSnapshot, abort_alive_tasks, log_alive_tasks_after_cancel, register_abort_handle,
+    reset_task_registry_for_tests, spawn_blocking_named, spawn_named, task_snapshots,
+};
 
 // OBS-905 / OBS-906 tracing surface. Re-exported from the in-tree
 // observability_tracing shim so `archon_tui::observability::{init_tracing,

@@ -384,35 +384,43 @@ impl Tool for AgentTool {
         let result_slot_child = Arc::clone(&result_slot);
         let ctx_clone = ctx.clone();
         let sid_spawn = subagent_id.clone();
-        let subagent_type = request.subagent_type.clone();
+        let subagent_type = request
+            .subagent_type
+            .clone()
+            .unwrap_or_else(|| "default".to_string());
 
-        let join = tokio::spawn(async move {
-            let outcome = run_subagent(sid_spawn.clone(), request, cancel_child, ctx_clone).await;
-            let (final_status, payload) = match &outcome {
-                SubagentOutcome::Completed(text) => (AgentStatus::Finished, Ok(text.clone())),
-                SubagentOutcome::Failed(err) => (AgentStatus::Failed, Err(err.clone())),
-                SubagentOutcome::AutoBackgrounded => {
-                    // The runner is still executing — mark Running here
-                    // so registry watchers don't see a premature
-                    // terminal state. on_inner_complete will still fire
-                    // from the runner's tail when it eventually finishes.
-                    (
-                        AgentStatus::Running,
-                        Ok(format!("auto-backgrounded:{sid_spawn}")),
-                    )
-                }
-                SubagentOutcome::Cancelled => {
-                    (AgentStatus::Failed, Err("subagent cancelled".into()))
-                }
-            };
-            *status_child
-                .lock()
-                .expect("status mutex poisoned in AgentTool::execute spawn") = final_status;
-            *result_slot_child
-                .lock()
-                .expect("result_slot mutex poisoned in AgentTool::execute spawn") = Some(payload);
-            outcome
-        });
+        let join = archon_observability::spawn_named(
+            format!("subagent-runner:{subagent_type}"),
+            async move {
+                let outcome =
+                    run_subagent(sid_spawn.clone(), request, cancel_child, ctx_clone).await;
+                let (final_status, payload) = match &outcome {
+                    SubagentOutcome::Completed(text) => (AgentStatus::Finished, Ok(text.clone())),
+                    SubagentOutcome::Failed(err) => (AgentStatus::Failed, Err(err.clone())),
+                    SubagentOutcome::AutoBackgrounded => {
+                        // The runner is still executing — mark Running here
+                        // so registry watchers don't see a premature
+                        // terminal state. on_inner_complete will still fire
+                        // from the runner's tail when it eventually finishes.
+                        (
+                            AgentStatus::Running,
+                            Ok(format!("auto-backgrounded:{sid_spawn}")),
+                        )
+                    }
+                    SubagentOutcome::Cancelled => {
+                        (AgentStatus::Failed, Err("subagent cancelled".into()))
+                    }
+                };
+                *status_child
+                    .lock()
+                    .expect("status mutex poisoned in AgentTool::execute spawn") = final_status;
+                *result_slot_child
+                    .lock()
+                    .expect("result_slot mutex poisoned in AgentTool::execute spawn") =
+                    Some(payload);
+                outcome
+            },
+        );
 
         // Background path: detach the JoinHandle (we can't await it from
         // here without blocking), register the handle with a placeholder
@@ -420,9 +428,10 @@ impl Tool for AgentTool {
         // tokio::spawn to give BackgroundAgentHandle a `JoinHandle<()>`
         // since the inner join returns `SubagentOutcome`.
         if matches!(classification, SubagentClassification::ExplicitBackground) {
-            let adapter = tokio::spawn(async move {
-                let _ = join.await;
-            });
+            let adapter =
+                archon_observability::spawn_named("subagent-background-adapter", async move {
+                    let _ = join.await;
+                });
 
             // TASK-AGS-108 ERR-ARCH-01: keep a clone for retry on collision.
             let result_slot_retry = Arc::clone(&result_slot);
@@ -499,14 +508,16 @@ impl Tool for AgentTool {
             // as an adapter target that never fires, keeping the adapter
             // task alive until the real join completes.
             drop(reg_cancel_tx);
-            let reg_adapter = tokio::spawn(async move {
-                let _ = reg_cancel_rx.await; // never resolves; task is idle
-            });
+            let reg_adapter =
+                archon_observability::spawn_named("subagent-registry-adapter", async move {
+                    let _ = reg_cancel_rx.await; // never resolves; task is idle
+                });
             // Immediately abort the idle adapter — the foreground path
             // does not actually need it once we've awaited the real
             // outcome. We pre-register a nominal handle for symmetry.
             reg_adapter.abort();
-            let noop_join: tokio::task::JoinHandle<()> = tokio::spawn(async {});
+            let noop_join: tokio::task::JoinHandle<()> =
+                archon_observability::spawn_named("subagent-noop-registration", async {});
 
             BackgroundAgentHandle {
                 agent_id,
@@ -608,7 +619,7 @@ pub async fn run_subagent(
     let auto_bg_ms = exec.auto_background_ms();
 
     let nested = ctx.nested;
-    let join = tokio::spawn({
+    let join = archon_observability::spawn_named("subagent-executor", {
         let exec = Arc::clone(&exec);
         let cancel = cancel.clone();
         let ctx = ctx.clone();

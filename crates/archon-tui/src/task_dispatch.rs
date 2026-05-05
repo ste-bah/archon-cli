@@ -163,7 +163,9 @@ impl AgentDispatcher {
         // runner. The `&self` borrow in `TurnRunner::run_turn` is tied to
         // the Arc's lifetime; tokio::spawn requires 'static, hence the clone.
         let runner_clone = Arc::clone(&runner);
-        let handle = tokio::spawn(async move { runner_clone.run_turn(prompt).await });
+        let handle = crate::observability::spawn_named("tui-agent-turn", async move {
+            runner_clone.run_turn(prompt).await
+        });
         self.current_query = Some(handle);
         DispatchResult::Running { spawned_at }
     }

@@ -97,7 +97,7 @@ pub fn fire_trigger_for_hotkey() {
         }
         HotkeyAction::PushToTalk => {
             fire_trigger(VoiceTrigger::Toggle);
-            tokio::spawn(async {
+            crate::observability::spawn_named("voice-push-to-talk-auto-stop", async {
                 tokio::time::sleep(PUSH_TO_TALK_WINDOW).await;
                 fire_trigger(VoiceTrigger::Toggle);
             });
