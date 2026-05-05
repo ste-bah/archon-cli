@@ -2,7 +2,6 @@ use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
-use crate::auto_extraction::AutoExtractor;
 use archon_consciousness::corrections::{CorrectionTracker, CorrectionType};
 use archon_consciousness::inner_voice::InnerVoice;
 use archon_consciousness::rules::RulesEngine;
@@ -15,6 +14,9 @@ use archon_memory::extraction::{
     should_extract, store_extracted,
 };
 use archon_memory::injection::MemoryInjector;
+use archon_observability::{
+    AgentActivityEvent, AgentActivityKind, AgentActivitySink, AgentActivityStatus,
+};
 use archon_permissions::auto::{AutoDecision, AutoModeEvaluator};
 use archon_permissions::is_default_safe_tool;
 use archon_session::checkpoint::CheckpointStore;
@@ -28,6 +30,7 @@ use tokio::task::JoinSet;
 
 use crate::ChannelMetricSink;
 use crate::agents::AgentRegistry;
+use crate::auto_extraction::AutoExtractor;
 use crate::dispatch::ToolRegistry;
 use crate::subagent::SubagentManager;
 
@@ -36,6 +39,24 @@ use crate::subagent::SubagentManager;
 /// Called by the lockstep regression test.
 pub fn is_safe_in_default_mode(name: &str) -> bool {
     is_default_safe_tool(name)
+}
+
+fn emit_tool_result_activity(ctx: &ToolContext, tool_name: &str, result: &ToolResult) {
+    if result.is_error {
+        crate::dispatch::emit_tool_activity(
+            ctx,
+            tool_name,
+            AgentActivityKind::ToolFailed,
+            AgentActivityStatus::Failed,
+        );
+    } else {
+        crate::dispatch::emit_tool_activity(
+            ctx,
+            tool_name,
+            AgentActivityKind::ToolCompleted,
+            AgentActivityStatus::Completed,
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -180,6 +201,9 @@ pub struct AgentConfig {
     /// boot, threaded into ToolContext, and consulted by both tool-execution
     /// dispatch paths. Toggled at runtime via `/sandbox on/off`.
     pub sandbox: Option<std::sync::Arc<dyn archon_permissions::SandboxBackend>>,
+    /// Canonical activity event sink shared by parent, subagent, and tool
+    /// execution paths.
+    pub activity_sink: Option<Arc<dyn AgentActivitySink>>,
 }
 
 impl AgentConfig {
@@ -225,6 +249,7 @@ impl Default for AgentConfig {
             max_turns: None,
             cancel_token: None,
             sandbox: None,
+            activity_sink: None,
         }
     }
 }
@@ -675,6 +700,11 @@ impl Agent {
     /// Returns when the LLM produces a final text response (no more tool calls).
     pub async fn process_message(&mut self, user_input: &str) -> Result<(), AgentLoopError> {
         self.turn_number += 1;
+        self.emit_activity(
+            AgentActivityKind::ParentTurnStarted,
+            AgentActivityStatus::Running,
+            format!("turn {} started", self.turn_number),
+        );
         self.state.add_user_message(user_input);
 
         // v0.1.23: AutoExtraction — LLM-driven fact extraction every N turns.
@@ -766,11 +796,17 @@ impl Agent {
             .await;
 
             // Send request and get streaming events
-            let mut rx = self
-                .client
-                .stream(request)
-                .await
-                .map_err(|e| AgentLoopError::ApiError(format!("{e}")))?;
+            let mut rx = match self.client.stream(request).await {
+                Ok(rx) => rx,
+                Err(e) => {
+                    self.emit_activity(
+                        AgentActivityKind::ParentTurnCompleted,
+                        AgentActivityStatus::Failed,
+                        format!("turn {} failed: {e}", self.turn_number),
+                    );
+                    return Err(AgentLoopError::ApiError(format!("{e}")));
+                }
+            };
 
             // Process the stream
             let mut text_content = String::new();
@@ -869,6 +905,11 @@ impl Agent {
                         .await;
                         self.send_event(AgentEvent::Error(format!("{error_type}: {message}")))
                             .await;
+                        self.emit_activity(
+                            AgentActivityKind::ParentTurnCompleted,
+                            AgentActivityStatus::Failed,
+                            format!("turn {} failed: {error_type}: {message}", self.turn_number),
+                        );
                         return Err(AgentLoopError::ApiError(format!("{error_type}: {message}")));
                     }
                 }
@@ -943,7 +984,7 @@ impl Agent {
                     // GHOST-006: sandbox backend from session boot, checked at
                     // both dispatch sites.
                     sandbox: self.config.sandbox.clone(),
-                    activity_sink: None,
+                    activity_sink: self.config.activity_sink.clone(),
                 };
 
                 // -------------------------------------------------------
@@ -1404,11 +1445,37 @@ impl Agent {
                             // GHOST-006: sandbox pre-check (main-agent direct path).
                             let result = if let Some(ref backend) = ctx_clone.sandbox {
                                 match backend.check(tool.name(), &input) {
-                                    Err(reason) => ToolResult::error(reason),
-                                    Ok(()) => tool.execute(input, &ctx_clone).await,
+                                    Err(reason) => {
+                                        crate::dispatch::emit_tool_activity(
+                                            &ctx_clone,
+                                            tool.name(),
+                                            AgentActivityKind::ToolFailed,
+                                            AgentActivityStatus::Failed,
+                                        );
+                                        ToolResult::error(reason)
+                                    }
+                                    Ok(()) => {
+                                        crate::dispatch::emit_tool_activity(
+                                            &ctx_clone,
+                                            tool.name(),
+                                            AgentActivityKind::ToolStarted,
+                                            AgentActivityStatus::Running,
+                                        );
+                                        let result = tool.execute(input, &ctx_clone).await;
+                                        emit_tool_result_activity(&ctx_clone, tool.name(), &result);
+                                        result
+                                    }
                                 }
                             } else {
-                                tool.execute(input, &ctx_clone).await
+                                crate::dispatch::emit_tool_activity(
+                                    &ctx_clone,
+                                    tool.name(),
+                                    AgentActivityKind::ToolStarted,
+                                    AgentActivityStatus::Running,
+                                );
+                                let result = tool.execute(input, &ctx_clone).await;
+                                emit_tool_result_activity(&ctx_clone, tool.name(), &result);
+                                result
                             };
                             (idx, result)
                         });
@@ -1446,11 +1513,38 @@ impl Agent {
                         // GHOST-006: sandbox pre-check (main-agent sequential path).
                         let result = if let Some(ref backend) = ctx.sandbox {
                             match backend.check(pre.tool_arc.name(), &pre.input) {
-                                Err(reason) => ToolResult::error(reason),
-                                Ok(()) => pre.tool_arc.execute(pre.input.clone(), &ctx).await,
+                                Err(reason) => {
+                                    crate::dispatch::emit_tool_activity(
+                                        &ctx,
+                                        pre.tool_arc.name(),
+                                        AgentActivityKind::ToolFailed,
+                                        AgentActivityStatus::Failed,
+                                    );
+                                    ToolResult::error(reason)
+                                }
+                                Ok(()) => {
+                                    crate::dispatch::emit_tool_activity(
+                                        &ctx,
+                                        pre.tool_arc.name(),
+                                        AgentActivityKind::ToolStarted,
+                                        AgentActivityStatus::Running,
+                                    );
+                                    let result =
+                                        pre.tool_arc.execute(pre.input.clone(), &ctx).await;
+                                    emit_tool_result_activity(&ctx, pre.tool_arc.name(), &result);
+                                    result
+                                }
                             }
                         } else {
-                            pre.tool_arc.execute(pre.input.clone(), &ctx).await
+                            crate::dispatch::emit_tool_activity(
+                                &ctx,
+                                pre.tool_arc.name(),
+                                AgentActivityKind::ToolStarted,
+                                AgentActivityStatus::Running,
+                            );
+                            let result = pre.tool_arc.execute(pre.input.clone(), &ctx).await;
+                            emit_tool_result_activity(&ctx, pre.tool_arc.name(), &result);
+                            result
                         };
                         results.push(result);
                     }
@@ -1578,7 +1672,7 @@ impl Agent {
                                                     nested: false,
                                                     cancel_parent: self.config.cancel_token.clone(),
                                                     sandbox: self.config.sandbox.clone(),
-                                                    activity_sink: None,
+                                                    activity_sink: self.config.activity_sink.clone(),
                                                 };
                                                 match archon_tools::agent_tool::run_subagent(
                                                     resume_sid,
@@ -2123,7 +2217,28 @@ impl Agent {
             break;
         }
 
+        self.emit_activity(
+            AgentActivityKind::ParentTurnCompleted,
+            AgentActivityStatus::Completed,
+            format!("turn {} completed", self.turn_number),
+        );
         Ok(())
+    }
+
+    fn emit_activity(
+        &self,
+        kind: AgentActivityKind,
+        status: AgentActivityStatus,
+        message: impl Into<String>,
+    ) {
+        if let Some(sink) = &self.config.activity_sink {
+            sink.emit(AgentActivityEvent::new(
+                self.config.session_id.clone(),
+                kind,
+                status,
+                message,
+            ));
+        }
     }
 
     async fn send_event(&self, event: AgentEvent) {

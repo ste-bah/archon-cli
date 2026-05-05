@@ -173,7 +173,7 @@ impl ToolRegistry {
     }
 }
 
-fn emit_tool_activity(
+pub(crate) fn emit_tool_activity(
     ctx: &ToolContext,
     tool_name: &str,
     kind: AgentActivityKind,

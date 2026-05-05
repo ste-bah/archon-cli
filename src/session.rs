@@ -41,6 +41,14 @@ use crate::setup::strip_cache_control_if_disabled;
 
 use archon_core::remote::protocol::AgentMessage;
 
+fn session_activity_sink(
+    session_id: &str,
+) -> Option<Arc<dyn archon_observability::AgentActivitySink>> {
+    let base_dir = dirs::home_dir()?.join(".archon/sessions");
+    let path = archon_observability::activity_jsonl_path(base_dir, session_id);
+    Some(Arc::new(archon_observability::JsonlActivitySink::new(path)))
+}
+
 /// Result of [`build_session_agent`] — a fully constructed Agent plus
 /// the event receiver, resolved agent definition, and channel metrics.
 #[allow(dead_code)]
@@ -512,6 +520,7 @@ async fn build_session_agent(
         sandbox: Some(std::sync::Arc::new(
             archon_tui::sandbox::SharedSandboxFlag::with_flag(sandbox_flag.clone()),
         )),
+        activity_sink: session_activity_sink(session_id),
     };
 
     if let Some(ref def) = agent_def {
@@ -1586,6 +1595,7 @@ pub(crate) async fn run_interactive_session(
         sandbox: Some(std::sync::Arc::new(
             archon_tui::sandbox::SharedSandboxFlag::with_flag(sandbox_flag.clone()),
         )),
+        activity_sink: session_activity_sink(session_id),
     };
 
     // Apply agent execution config overrides

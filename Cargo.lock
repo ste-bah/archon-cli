@@ -333,6 +333,7 @@ dependencies = [
  "archon-mcp",
  "archon-meaning",
  "archon-memory",
+ "archon-observability",
  "archon-permissions",
  "archon-pipeline",
  "archon-plugin",

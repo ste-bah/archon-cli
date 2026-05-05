@@ -212,7 +212,7 @@ impl AgentActivityEvent {
 }
 
 /// Sink interface for activity-event consumers.
-pub trait AgentActivitySink: Send + Sync {
+pub trait AgentActivitySink: std::fmt::Debug + Send + Sync {
     /// Emit one activity event.
     fn emit(&self, event: AgentActivityEvent);
 }
