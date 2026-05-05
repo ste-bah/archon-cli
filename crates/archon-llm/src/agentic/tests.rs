@@ -190,6 +190,43 @@ async fn adapter_maps_tool_call_lifecycle() {
     }));
 }
 
+#[tokio::test]
+async fn adapter_errors_on_malformed_tool_arguments() {
+    let provider = adapter(vec![
+        StreamEvent::ContentBlockStart {
+            index: 0,
+            block_type: ContentBlockType::ToolUse,
+            tool_use_id: Some("toolu_bad".into()),
+            tool_name: Some("Lookup".into()),
+        },
+        StreamEvent::InputJsonDelta {
+            index: 0,
+            partial_json: "{\"query\":".into(),
+        },
+        StreamEvent::ContentBlockStop { index: 0 },
+        StreamEvent::MessageStop,
+    ]);
+    let (sink, mut events) = TurnEventSink::channel(16);
+
+    let err = provider
+        .stream_turn(request(), sink)
+        .await
+        .expect_err("malformed tool arguments should fail the turn");
+    let mut saw_provider_error = false;
+    while let Some(event) = events.recv().await {
+        if matches!(
+            event,
+            AgenticTurnEvent::ProviderError { message }
+                if message.contains("malformed tool arguments")
+        ) {
+            saw_provider_error = true;
+        }
+    }
+
+    assert!(err.to_string().contains("malformed tool arguments"));
+    assert!(saw_provider_error);
+}
+
 #[test]
 fn capability_set_reports_supported_features() {
     let set =

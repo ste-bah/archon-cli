@@ -210,10 +210,11 @@ impl AgenticTurnState {
 
     async fn content_stop(&mut self, index: u32, sink: &TurnEventSink) -> Result<(), LlmError> {
         if let Some(tool) = self.active_tools.remove(&index) {
+            let arguments = parse_tool_arguments(&tool, sink).await?;
             let call = AgenticToolCall {
                 id: tool.id,
                 name: tool.name,
-                arguments: serde_json::from_str(&tool.arguments_raw).ok(),
+                arguments,
                 arguments_raw: tool.arguments_raw,
             };
             self.tool_calls.push(call.clone());
@@ -251,6 +252,29 @@ impl AgenticTurnState {
             usage: self.usage,
             stop_reason: self.stop_reason,
             reasoning_encrypted: self.reasoning_encrypted,
+        }
+    }
+}
+
+async fn parse_tool_arguments(
+    tool: &ActiveToolCall,
+    sink: &TurnEventSink,
+) -> Result<Option<serde_json::Value>, LlmError> {
+    if tool.arguments_raw.trim().is_empty() {
+        return Ok(None);
+    }
+    match serde_json::from_str(&tool.arguments_raw) {
+        Ok(arguments) => Ok(Some(arguments)),
+        Err(err) => {
+            let message = format!(
+                "malformed tool arguments for `{}` ({}): {err}",
+                tool.name, tool.id
+            );
+            sink.emit(AgenticTurnEvent::ProviderError {
+                message: message.clone(),
+            })
+            .await?;
+            Err(LlmError::Serialize(message))
         }
     }
 }
