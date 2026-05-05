@@ -13,8 +13,10 @@ use crate::providers::ProviderCapability;
 use crate::types::Usage;
 
 mod adapter;
+mod turn_loop;
 
 pub use adapter::LlmProviderAgenticAdapter;
+pub use turn_loop::{AgenticLoopConfig, AgenticToolExecutor, run_agentic_tool_loop};
 
 #[cfg(test)]
 mod tests;
@@ -187,7 +189,10 @@ pub trait AgenticLlmProvider: Send + Sync {
     fn model_id(&self) -> &str;
 }
 
-fn append_tool_results(messages: &mut Vec<serde_json::Value>, results: &[AgenticToolResult]) {
+pub(crate) fn append_tool_results(
+    messages: &mut Vec<serde_json::Value>,
+    results: &[AgenticToolResult],
+) {
     if results.is_empty() {
         return;
     }
