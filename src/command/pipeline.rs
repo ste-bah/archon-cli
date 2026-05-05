@@ -12,6 +12,7 @@ use archon_memory::{MemoryTrait, graph::MemoryGraph};
 use archon_pipeline::leann_searcher::LeannSearcher;
 
 use crate::cli_args::PipelineAction;
+use crate::command::provider_gate::ensure_active_provider_supports;
 
 /// LEANN searcher backed by a real [`archon_leann::CodeIndex`].
 ///
@@ -67,6 +68,11 @@ pub async fn handle_pipeline_command(
                 println!("  Phase 6: final-refactorer, sign-off-approver");
                 println!("\nEstimated cost: ~$2.50-5.00 (varies by task complexity)");
             } else {
+                ensure_active_provider_supports(
+                    config,
+                    archon_llm::providers::ProviderCapability::PipelineCoding,
+                    "archon pipeline code",
+                )?;
                 let pipe_auth = resolve_auth_with_keys(
                     env_vars.anthropic_api_key.as_deref(),
                     env_vars.archon_api_key.as_deref(),
@@ -130,6 +136,11 @@ pub async fn handle_pipeline_command(
                 println!("  Phase 8: final-stage-orchestrator");
                 println!("\nEstimated cost: ~$3.00-8.00 (varies by topic complexity)");
             } else {
+                ensure_active_provider_supports(
+                    config,
+                    archon_llm::providers::ProviderCapability::PipelineResearch,
+                    "archon pipeline research",
+                )?;
                 let pipe_auth = resolve_auth_with_keys(
                     env_vars.anthropic_api_key.as_deref(),
                     env_vars.archon_api_key.as_deref(),
@@ -217,6 +228,11 @@ pub async fn handle_pipeline_command(
             }
         }
         PipelineAction::Resume { session_id } => {
+            ensure_active_provider_supports(
+                config,
+                archon_llm::providers::ProviderCapability::PipelineCoding,
+                "archon pipeline resume",
+            )?;
             match archon_pipeline::session::resume(session_id, &cwd) {
                 Ok(session) => {
                     println!("Resumed session: {}", session.session_id);

@@ -74,6 +74,7 @@ pub(crate) mod model;
 pub(crate) mod parser;
 pub(crate) mod permissions;
 pub(crate) mod pipeline;
+pub(crate) mod provider_gate;
 // TASK-TUI-626: /plan Plan Mode toggle via SNAPSHOT+EFFECT pattern.
 pub(crate) mod plan;
 // TASK-P0-B.3 (#174): plan-file I/O shim (re-exports from archon_core).
