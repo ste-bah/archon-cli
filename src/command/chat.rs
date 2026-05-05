@@ -2,12 +2,15 @@ use std::io::{self, Write};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use archon_llm::agentic::{
+    AgenticLlmProvider, AgenticTurnEvent, LlmProviderAgenticAdapter, ProviderCapabilitySet,
+    TurnEventSink,
+};
 use archon_llm::provider::{LlmProvider, LlmRequest};
 use archon_llm::providers::anthropic::AnthropicProvider;
 use archon_llm::providers::build_llm_provider;
 use archon_llm::providers::codex::client::CodexProvider;
 use archon_llm::providers::codex::spoof::resolve;
-use archon_llm::streaming::StreamEvent;
 
 use crate::cli_args::ChatArgs;
 
@@ -35,7 +38,7 @@ pub async fn handle_chat(args: ChatArgs, config: &archon_core::config::ArchonCon
         let response = provider.complete(request).await?;
         println!("{}", response_text(&response.content));
     } else {
-        stream_response(provider.as_ref(), request).await?;
+        stream_response(provider, request).await?;
     }
     Ok(())
 }
@@ -118,19 +121,26 @@ async fn build_anthropic_client(
     ))
 }
 
-async fn stream_response(provider: &dyn LlmProvider, request: LlmRequest) -> Result<()> {
-    let mut rx = provider.stream(request).await?;
-    while let Some(event) = rx.recv().await {
+async fn stream_response(provider: Arc<dyn LlmProvider>, request: LlmRequest) -> Result<()> {
+    let provider_id = provider.name().to_string();
+    let model_id = request.model.clone();
+    let capabilities = ProviderCapabilitySet::from_llm_provider(provider.as_ref());
+    let adapter = LlmProviderAgenticAdapter::new(provider, provider_id, model_id, capabilities);
+    let (sink, mut events) = TurnEventSink::channel(256);
+    let task = tokio::spawn(async move { adapter.stream_turn(request.into(), sink).await });
+
+    while let Some(event) = events.recv().await {
         match event {
-            StreamEvent::TextDelta { text, .. } => {
+            AgenticTurnEvent::TextDelta { text } => {
                 print!("{text}");
                 io::stdout().flush()?;
             }
-            StreamEvent::Error { message, .. } => return Err(anyhow::anyhow!(message)),
-            StreamEvent::MessageStop => break,
+            AgenticTurnEvent::ProviderError { .. } => {}
+            AgenticTurnEvent::TurnCompleted { .. } => {}
             _ => {}
         }
     }
+    task.await.context("agentic chat stream task failed")??;
     Ok(())
 }
 

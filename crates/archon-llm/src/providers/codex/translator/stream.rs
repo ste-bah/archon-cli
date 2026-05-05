@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::provider::LlmError;
 use crate::providers::codex::types::{ResponseOutputItem, ResponseStreamEvent, ResponseUsage};
@@ -8,6 +8,7 @@ use crate::types::{ContentBlockType, Usage};
 #[derive(Debug, Default)]
 pub struct StreamAccumulator {
     indexes: HashMap<String, u32>,
+    items_with_argument_delta: HashSet<String>,
     captured_reasoning_blob: Option<String>,
     next_block_index: u32,
 }
@@ -28,8 +29,7 @@ impl StreamAccumulator {
                 })
             }
             ResponseStreamEvent::OutputTextDone { item_id, .. }
-            | ResponseStreamEvent::ReasoningDone { item_id, .. }
-            | ResponseStreamEvent::FunctionCallArgumentsDone { item_id, .. } => {
+            | ResponseStreamEvent::ReasoningDone { item_id, .. } => {
                 self.indexed(item_id, |index| StreamEvent::ContentBlockStop { index })
             }
             ResponseStreamEvent::ReasoningDelta { item_id, delta, .. } => {
@@ -39,11 +39,15 @@ impl StreamAccumulator {
                 })
             }
             ResponseStreamEvent::FunctionCallArgumentsDelta { item_id, delta, .. } => {
+                self.items_with_argument_delta.insert(item_id.clone());
                 self.indexed(item_id, |index| StreamEvent::InputJsonDelta {
                     index,
                     partial_json: delta,
                 })
             }
+            ResponseStreamEvent::FunctionCallArgumentsDone {
+                item_id, arguments, ..
+            } => self.function_call_arguments_done(item_id, arguments),
             ResponseStreamEvent::OutputItemDone { item, .. } => {
                 if let ResponseOutputItem::Reasoning {
                     encrypted_content: Some(blob),
@@ -153,6 +157,26 @@ impl StreamAccumulator {
             events.push(Ok(StreamEvent::ReasoningEncrypted { blob }));
         }
         events.push(Ok(StreamEvent::MessageStop));
+        events
+    }
+
+    fn function_call_arguments_done(
+        &mut self,
+        item_id: String,
+        arguments: String,
+    ) -> Vec<Result<StreamEvent, LlmError>> {
+        let Some(index) = self.indexes.get(&item_id).copied() else {
+            return Vec::new();
+        };
+        let saw_delta = self.items_with_argument_delta.remove(&item_id);
+        let mut events = Vec::new();
+        if !saw_delta && !arguments.is_empty() {
+            events.push(Ok(StreamEvent::InputJsonDelta {
+                index,
+                partial_json: arguments,
+            }));
+        }
+        events.push(Ok(StreamEvent::ContentBlockStop { index }));
         events
     }
 }

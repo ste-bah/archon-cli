@@ -4,6 +4,12 @@ End-to-end walkthrough of the 48-agent coding pipeline. The TUI primary is `/arc
 
 > **TUI parity.** Every `archon X` shell command in this doc has a `/X` slash equivalent inside the interactive TUI. See [CLI and TUI Command Parity](real-world-evidence-engine.md#cli-and-tui-command-parity).
 
+> **Provider parity.** The pipeline uses the active provider. Anthropic
+> OAuth/API-key/proxy remains the default; set `[llm].provider =
+> "openai-codex"` after `archon auth login --provider openai-codex` to run the
+> same coding workflow through Codex. Activity rows show provider/model/cost
+> where the backend reports it.
+
 ## When to use
 
 The pipeline shines on:
@@ -57,7 +63,7 @@ Starting coding pipeline for task: implement OAuth2 token refresh with file lock
 …
 ```
 
-The handler (`src/command/archon_code.rs:14`) spawns the pipeline async via `tokio::spawn`. Per-agent progress streams as `TextDelta` events through the facade's `tui_sender`. The conversation stays interactive — keep using other slash commands while the run is in flight.
+The handler (`src/command/archon_code.rs:14`) spawns the pipeline async via `tokio::spawn`. Per-agent progress streams through canonical activity events and conversation output. The conversation stays interactive — keep using other slash commands while the run is in flight.
 
 Equivalent CLI invocation (same persisted state, same outputs):
 
@@ -207,18 +213,20 @@ Starting coding pipeline for task: Add archon docs summarize <doc-id>: ...
 
 ### Live progress in the TUI
 
-The Agent Activity rail (added in v0.1.40) shows the parent turn plus active subagent rows live:
+The Agent Activity rail shows the parent turn plus active subagent rows live,
+including provider/model/cost metadata where known:
 
 ```
 ─── Agent Activity ─────────────────────────────────────────────
-  ▶ pipeline-coordinator                         running   00:42
-    └─ [AGENT] task-analyzer                     done       3.1s
+  ▶ pipeline-coordinator   openai-codex/gpt-5.4 running   00:42
+    └─ [AGENT] task-analyzer       openai-codex/gpt-5.4 done       3.1s
     └─ [AGENT] requirement-extractor             done       4.8s
     └─ [AGENT] requirement-prioritizer           running    1.2s
 ─────────────────────────────────────────────────────────────────
 ```
 
-The rail derives rows from existing `ToolStart` / `ToolComplete` events; every spawned subagent appears as an `[AGENT]` row that moves `running → done | failed`.
+The rail derives rows from canonical activity events; every spawned subagent
+appears as an `[AGENT]` row that moves `running → done | failed`.
 
 ### Status — from the same TUI session
 

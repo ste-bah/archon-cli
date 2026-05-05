@@ -52,14 +52,83 @@
 
 use std::sync::Arc;
 
-use archon_core::config::LlmConfig;
+use anyhow::{Context, Result};
+use archon_core::config::{ArchonConfig, LlmConfig};
+use archon_core::env_vars::ArchonEnvVars;
 use archon_llm::anthropic::AnthropicClient;
+use archon_llm::auth::resolve_auth_with_keys;
+use archon_llm::identity::{IdentityProvider, get_or_create_device_id, resolve_identity_mode};
 use archon_llm::provider::LlmProvider;
 use archon_llm::providers::{
     AnthropicProvider, BedrockProvider, LocalProvider, OpenAiProvider, ProviderError,
     VertexProvider,
 };
 use archon_llm::{ActiveProvider, LlmConfig as FlatLlmConfig};
+
+/// Build the configured provider for command surfaces that can choose
+/// Anthropic, Codex, or an OpenAI-compatible provider.
+pub(crate) async fn build_configured_llm_provider(
+    config: &ArchonConfig,
+    env_vars: &ArchonEnvVars,
+    origin: &str,
+) -> Result<Arc<dyn LlmProvider>> {
+    if config.llm.provider == "openai-codex" {
+        return build_codex_provider(config).await;
+    }
+
+    let auth = resolve_auth_with_keys(
+        env_vars.anthropic_api_key.as_deref(),
+        env_vars.archon_api_key.as_deref(),
+        env_vars.archon_oauth_token.as_deref(),
+        std::env::var("ANTHROPIC_AUTH_TOKEN").ok().as_deref(),
+    )
+    .map_err(|e| anyhow::anyhow!("Authentication failed: {e}"))?;
+    let identity_mode = resolve_identity_mode(&auth, false, &config.identity.as_view());
+    let account_uuid = if matches!(
+        identity_mode,
+        archon_llm::identity::IdentityMode::Spoof { .. }
+    ) {
+        crate::command::utils::fetch_account_uuid(&auth).await
+    } else {
+        String::new()
+    };
+    let identity = IdentityProvider::new(
+        identity_mode,
+        format!("{origin}-{}", uuid::Uuid::new_v4()),
+        get_or_create_device_id(),
+        account_uuid,
+    );
+    let api_url = std::env::var("ANTHROPIC_BASE_URL")
+        .ok()
+        .or_else(|| config.api.base_url.clone());
+    let client = AnthropicClient::new(auth, identity, api_url);
+    Ok(build_llm_provider(&config.llm, client))
+}
+
+async fn build_codex_provider(config: &ArchonConfig) -> Result<Arc<dyn LlmProvider>> {
+    let codex_cfg = crate::command::auth::codex_config_from_core(&config.providers.openai_codex);
+    let http = reqwest::Client::new();
+    let resolution = archon_llm::providers::codex::spoof::resolve(&codex_cfg, &http)
+        .await
+        .context("failed to resolve Codex spoof identity")?;
+    let provider = match std::env::var("ARCHON_CODEX_BASE_URL").ok() {
+        Some(base_url) if !base_url.trim().is_empty() => {
+            archon_llm::providers::codex::client::CodexProvider::new_with_base_url(
+                archon_llm::tokens::credentials_path(),
+                resolution.config,
+                http,
+                base_url,
+            )
+        }
+        _ => archon_llm::providers::codex::client::CodexProvider::new(
+            archon_llm::tokens::credentials_path(),
+            resolution.config,
+            http,
+        ),
+    }
+    .context("failed to construct Codex provider")?;
+    Ok(Arc::new(provider))
+}
 
 /// Build the active LLM provider from the `[llm]` config section.
 ///

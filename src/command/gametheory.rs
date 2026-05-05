@@ -10,15 +10,17 @@ use cozo::DbInstance;
 use crate::cli_args::GametheoryAction;
 use crate::command::gametheory_inspect;
 use crate::command::provider_gate::ensure_active_provider_supports;
-use crate::command::utils::fetch_account_uuid;
+use crate::runtime::llm::build_configured_llm_provider;
 use archon_core::config::ArchonConfig;
 use archon_core::env_vars::ArchonEnvVars;
+#[cfg(test)]
 use archon_llm::auth::AuthProvider;
 #[cfg(test)]
 use archon_llm::identity::IdentityMode;
-use archon_llm::identity::{IdentityProvider, get_or_create_device_id, resolve_identity_mode};
+#[cfg(test)]
+use archon_llm::identity::{IdentityProvider, resolve_identity_mode};
 use archon_pipeline::gametheory;
-use archon_pipeline::llm_adapter::AnthropicLlmAdapter;
+use archon_pipeline::llm_adapter::ProviderLlmAdapter;
 use archon_pipeline::runner::LlmClient;
 
 /// Dispatch the gametheory subcommand.
@@ -139,43 +141,14 @@ fn maybe_print_resume_hint(action: Option<&GametheoryAction>) -> Result<()> {
 pub(crate) async fn build_llm_client(
     config: &ArchonConfig,
     env_vars: &ArchonEnvVars,
-) -> Option<AnthropicLlmAdapter> {
-    let auth = match archon_llm::auth::resolve_auth_with_keys(
-        non_empty(env_vars.anthropic_api_key.as_deref()),
-        non_empty(env_vars.archon_api_key.as_deref()),
-        non_empty(env_vars.archon_oauth_token.as_deref()),
-        non_empty(std::env::var("ANTHROPIC_AUTH_TOKEN").ok().as_deref()),
-    ) {
-        Ok(a) => a,
+) -> Option<ProviderLlmAdapter> {
+    match build_configured_llm_provider(config, env_vars, "gametheory").await {
+        Ok(provider) => Some(ProviderLlmAdapter::new(provider).with_origin("gametheory")),
         Err(e) => {
             tracing::warn!("LLM auth unavailable for gametheory: {e}.");
-            return None;
+            None
         }
-    };
-
-    let account_uuid = fetch_account_uuid(&auth).await;
-    let identity = build_gametheory_identity(config, &auth, account_uuid);
-
-    let api_url = std::env::var("ANTHROPIC_BASE_URL")
-        .ok()
-        .or_else(|| config.api.base_url.clone());
-
-    let client = archon_llm::anthropic::AnthropicClient::new(auth, identity, api_url);
-    Some(AnthropicLlmAdapter::new(Arc::new(client)))
-}
-
-fn build_gametheory_identity(
-    config: &ArchonConfig,
-    auth: &AuthProvider,
-    account_uuid: String,
-) -> IdentityProvider {
-    let mode = resolve_identity_mode(auth, false, &config.identity.as_view());
-    IdentityProvider::new(
-        mode,
-        uuid::Uuid::new_v4().to_string(),
-        get_or_create_device_id(),
-        account_uuid,
-    )
+    }
 }
 
 pub(crate) fn open_memory_context(debug: bool) -> Result<gametheory::GameTheoryMemoryContext> {
@@ -613,6 +586,7 @@ fn handle_specimens(filter: Option<&str>, ingest: bool) -> Result<()> {
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 /// Filter empty strings to None so they don't shadow real credentials.
+#[cfg(test)]
 fn non_empty(s: Option<&str>) -> Option<&str> {
     match s {
         Some("") => None,

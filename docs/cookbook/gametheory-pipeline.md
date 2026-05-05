@@ -4,6 +4,12 @@ End-to-end TUI walkthrough of the strategic game-theory pipeline. The TUI primar
 
 > **TUI parity.** Every `archon gametheory <subcommand>` shell form has a `/gametheory <subcommand>` slash equivalent inside the TUI. Both forms read and write the same persisted state. See [CLI and TUI Command Parity](real-world-evidence-engine.md#cli-and-tui-command-parity).
 
+> **Provider parity.** Gametheory uses the active provider for Tier 1 and
+> specialist calls. Anthropic OAuth/API-key/proxy remains the default; set
+> `[llm].provider = "openai-codex"` after `archon auth login --provider
+> openai-codex` to run the same workflow through Codex. Missing exact Codex cost
+> metadata is shown honestly rather than fabricated.
+
 ## When to use
 
 The game-theory pipeline is the right tool for:
@@ -100,12 +106,14 @@ A report-writer agent assembles the specialist sections into a coherent final re
 
 ## Live progress in the TUI
 
-The TUI Agent Activity rail (added in v0.1.40) shows the parent gametheory orchestrator plus active specialist rows live:
+The TUI Agent Activity rail shows the parent gametheory orchestrator plus
+active specialist rows live, including provider/model/cost metadata where
+known:
 
 ```
 ─── Agent Activity ─────────────────────────────────────────────
-  ▶ gametheory-orchestrator                       running   01:48
-    └─ [AGENT] tier1-classifier                   done       3.2s
+  ▶ gametheory-orchestrator openai-codex/gpt-5.4 running   01:48
+    └─ [AGENT] tier1-classifier openai-codex/gpt-5.4 done  3.2s
     └─ [AGENT] asymmetric-info-detective          done      18.4s
     └─ [AGENT] behavioral-bias-detector           done      22.1s
     └─ [AGENT] cheap-talk-evaluator               done      16.0s
@@ -116,7 +124,8 @@ The TUI Agent Activity rail (added in v0.1.40) shows the parent gametheory orche
 ─────────────────────────────────────────────────────────────────
 ```
 
-Rows derive from existing `ToolStart` / `ToolComplete` events; each spawned specialist appears as an `[AGENT]` row that moves `running → done | failed`.
+Rows derive from canonical activity events; each spawned specialist appears as
+an `[AGENT]` row that moves `running → done | failed`.
 
 ## Cheap pre-flight: classify-only
 

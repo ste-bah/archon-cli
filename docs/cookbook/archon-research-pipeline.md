@@ -2,6 +2,12 @@
 
 End-to-end TUI walkthrough of the 46-agent PhD research pipeline. The TUI primary is `/archon-research` — equivalent to the shell command `archon pipeline research <topic>` but driven from inside an interactive session.
 
+> **Provider parity.** The research pipeline uses the active provider. Anthropic
+> OAuth/API-key/proxy remains the default; set `[llm].provider =
+> "openai-codex"` after `archon auth login --provider openai-codex` to run the
+> same research workflow through Codex. The provider capability matrix is the
+> source of truth if a backend limitation appears.
+
 ## When to use
 
 The research pipeline is the right tool for:
@@ -27,7 +33,7 @@ Starting research pipeline for topic: impact of transformer architectures on ret
 …
 ```
 
-The handler (`src/command/archon_research.rs:14`) spawns the pipeline async via `tokio::spawn`. Per-agent progress streams to the TUI as `TextDelta` events through the facade's `tui_sender`. The conversation stays interactive — you can keep using other slash commands while the run is in flight.
+The handler (`src/command/archon_research.rs:14`) spawns the pipeline async via `tokio::spawn`. Per-agent progress streams to the TUI through canonical activity events and conversation output. The conversation stays interactive — you can keep using other slash commands while the run is in flight.
 
 Equivalent CLI invocation (same persisted state, same outputs):
 
@@ -95,12 +101,13 @@ Output: `phase8-final.md`. Pipeline marks the session as complete.
 
 ## Live progress in the TUI
 
-The Agent Activity rail (added in v0.1.40) shows the parent turn plus active subagent rows live:
+The Agent Activity rail shows the parent turn plus active subagent rows live,
+including provider/model/cost metadata where known:
 
 ```
 ─── Agent Activity ─────────────────────────────────────────────
-  ▶ research-orchestrator                          running   01:23
-    └─ [AGENT] research-planner                    done       3.4s
+  ▶ research-orchestrator   openai-codex/gpt-5.4  running   01:23
+    └─ [AGENT] research-planner   openai-codex/gpt-5.4 done 3.4s
     └─ [AGENT] gap-hunter                          done       4.1s
     └─ [AGENT] step-back-analyzer                  done       2.8s
     └─ [AGENT] methodology-scanner                 done       3.0s
@@ -110,7 +117,8 @@ The Agent Activity rail (added in v0.1.40) shows the parent turn plus active sub
 ─────────────────────────────────────────────────────────────────
 ```
 
-Rows derive from existing `ToolStart` / `ToolComplete` events; each spawned subagent appears as an `[AGENT]` row that moves `running → done | failed`.
+Rows derive from canonical activity events; each spawned subagent appears as an
+`[AGENT]` row that moves `running → done | failed`.
 
 ## Status from another session
 

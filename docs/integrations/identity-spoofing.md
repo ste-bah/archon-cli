@@ -9,7 +9,7 @@ archon-cli can identify itself to the Anthropic API as either Claude Code (`spoo
 | Anthropic OAuth | `archon auth login --provider anthropic` | Claude-backed TUI sessions, pipelines, subagents |
 | Anthropic API key | `ANTHROPIC_API_KEY=sk-ant-api...` | Native Anthropic Messages API calls |
 | Anthropic-compatible proxy | Anthropic base URL + compatible key | OpenRouter, DeepSeek, LiteLLM, or similar routes |
-| Codex OAuth | `archon auth login --provider openai-codex` | `archon chat --provider openai-codex` and TUI sessions with `[llm].provider = "openai-codex"` |
+| Codex OAuth | `archon auth login --provider openai-codex` | Chat, TUI sessions, tool use, subagents, `/btw`, team runs, and provider-neutral pipelines with `[llm].provider = "openai-codex"` |
 
 Run `archon auth status` to inspect both stored OAuth credentials and the active spoof identity. The command redacts account and client IDs and never prints full tokens.
 
@@ -136,7 +136,7 @@ If your account has API-key billing or you use a proxy, you can switch to `clean
 
 ## Codex OAuth
 
-Codex OAuth credentials are stored in `~/.archon/.credentials.json` under a separate `openaiCodexOauth` entry. This means a machine can be logged in to both Claude and Codex at the same time:
+Codex OAuth credentials are stored in `~/.archon/.credentials.json` under a separate `openaiCodexOauth` entry. If that entry is absent, Archon can also read the official Codex CLI's `~/.codex/auth.json` as a read-only fallback. This means a machine can be logged in to both Claude and Codex at the same time:
 
 ```bash
 archon auth login --provider anthropic
@@ -160,7 +160,7 @@ provider = "openai-codex"
 default_model = "gpt-5.4"
 ```
 
-When `[llm].provider = "openai-codex"`, the TUI skips Anthropic auth bootstrap entirely and constructs a Codex provider from the stored `openaiCodexOauth` credentials. `/btw` remains Anthropic-only for now; use the main prompt in Codex-backed sessions.
+When `[llm].provider = "openai-codex"`, the TUI skips Anthropic auth bootstrap entirely and constructs a Codex provider from the stored `openaiCodexOauth` credentials. `/btw`, subagent turns, team agents, and provider-neutral pipelines use the same active provider, so Codex-backed sessions do not silently create an Anthropic client.
 
 The Codex kill switch is `ARCHON_CODEX_DISABLED=1`; when set, `archon auth status` reports Codex as disabled and provider construction fails closed.
 

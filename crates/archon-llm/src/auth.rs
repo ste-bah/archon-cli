@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::PathBuf;
 
+use base64::Engine;
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 
@@ -169,6 +170,20 @@ struct RawCodexCredentials {
     account_id: String,
 }
 
+#[derive(Deserialize)]
+struct CodexCliCredentialFile {
+    tokens: RawCodexCliTokens,
+}
+
+#[derive(Deserialize)]
+struct RawCodexCliTokens {
+    access_token: String,
+    refresh_token: String,
+    account_id: Option<String>,
+}
+
+const CODEX_ACCOUNT_CLAIM_PATH: &str = "https://api.openai.com/auth";
+
 /// Deserialize `expiresAt` from either epoch-ms integer or RFC 3339 string.
 /// Real Claude Code credentials use epoch-ms integers.
 fn deserialize_expires_at<'de, D>(deserializer: D) -> Result<DateTime<Utc>, D::Error>
@@ -244,6 +259,61 @@ pub fn parse_codex_credentials_json(json: &str) -> Result<CodexCredentials, Auth
         expires_at: raw.expires_at,
         account_id: raw.account_id,
     })
+}
+
+/// Parse the official Codex CLI credential shape from `~/.codex/auth.json`.
+///
+/// Archon stores its own Codex OAuth credentials under `openaiCodexOauth`, but
+/// users often already have a valid Codex CLI login. This parser lets Archon
+/// consume that credential as a read-only fallback without copying or logging
+/// token values.
+pub fn parse_codex_cli_credentials_json(json: &str) -> Result<CodexCredentials, AuthError> {
+    let file: CodexCliCredentialFile = serde_json::from_str(json)
+        .map_err(|e| AuthError::ParseError(format!("invalid Codex CLI JSON: {e}")))?;
+    let payload = decode_jwt_payload(&file.tokens.access_token)?;
+    let expires_at = jwt_expiry(&payload)?;
+    let account_id = file
+        .tokens
+        .account_id
+        .filter(|id| !id.trim().is_empty())
+        .or_else(|| jwt_account_id(&payload))
+        .ok_or_else(|| AuthError::JwtDecodeFailed("missing chatgpt_account_id claim".into()))?;
+
+    Ok(CodexCredentials {
+        access_token: Secret::new(file.tokens.access_token),
+        refresh_token: Secret::new(file.tokens.refresh_token),
+        expires_at,
+        account_id,
+    })
+}
+
+fn decode_jwt_payload(jwt: &str) -> Result<serde_json::Value, AuthError> {
+    let payload = jwt
+        .split('.')
+        .nth(1)
+        .ok_or_else(|| AuthError::JwtDecodeFailed("JWT has no payload segment".into()))?;
+    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(payload)
+        .map_err(|e| AuthError::JwtDecodeFailed(format!("payload base64 decode failed: {e}")))?;
+    serde_json::from_slice(&bytes)
+        .map_err(|e| AuthError::JwtDecodeFailed(format!("payload JSON parse failed: {e}")))
+}
+
+fn jwt_expiry(payload: &serde_json::Value) -> Result<DateTime<Utc>, AuthError> {
+    let exp = payload
+        .get("exp")
+        .and_then(|value| value.as_i64())
+        .ok_or_else(|| AuthError::JwtDecodeFailed("missing exp claim".into()))?;
+    DateTime::from_timestamp(exp, 0)
+        .ok_or_else(|| AuthError::JwtDecodeFailed(format!("invalid exp claim: {exp}")))
+}
+
+fn jwt_account_id(payload: &serde_json::Value) -> Option<String> {
+    payload
+        .get(CODEX_ACCOUNT_CLAIM_PATH)
+        .and_then(|value| value.get("chatgpt_account_id"))
+        .and_then(|value| value.as_str())
+        .map(str::to_string)
 }
 
 /// Default credential file path: `~/.archon/.credentials.json`

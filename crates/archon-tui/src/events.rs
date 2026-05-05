@@ -85,7 +85,7 @@ pub enum AgentActivityStatus {
 /// External activity update payload. The App also derives rows from
 /// ToolStart/ToolComplete so existing sessions get useful feedback without
 /// requiring a deeper core-runner bridge.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct AgentActivityUpdate {
     pub id: String,
     pub name: String,
@@ -96,6 +96,9 @@ pub struct AgentActivityUpdate {
     pub run_id: Option<String>,
     pub parent_id: Option<String>,
     pub artifact_id: Option<String>,
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    pub cost_usd: Option<f64>,
 }
 
 impl From<archon_observability::AgentActivityEvent> for AgentActivityUpdate {
@@ -121,6 +124,9 @@ impl From<archon_observability::AgentActivityEvent> for AgentActivityUpdate {
             run_id: event.run_id,
             parent_id: event.parent_id,
             artifact_id: event.artifact_id,
+            provider: event.provider,
+            model: event.model,
+            cost_usd: event.cost_usd,
         }
     }
 }
@@ -351,4 +357,82 @@ pub enum TuiEvent {
     Done,
     /// Notification overlay with a duration in milliseconds (TUI-330).
     NotificationTimeout(u64),
+}
+
+impl TuiEvent {
+    pub fn variant_name(&self) -> &'static str {
+        match self {
+            Self::TextDelta(_) => "TextDelta",
+            Self::ThinkingDelta(_) => "ThinkingDelta",
+            Self::ToolStart { .. } => "ToolStart",
+            Self::ToolComplete { .. } => "ToolComplete",
+            Self::TurnComplete { .. } => "TurnComplete",
+            Self::Error(_) => "Error",
+            Self::GenerationStarted => "GenerationStarted",
+            Self::SlashCommandComplete => "SlashCommandComplete",
+            Self::ThinkingToggle(_) => "ThinkingToggle",
+            Self::ModelChanged(_) => "ModelChanged",
+            Self::BtwResponse(_) => "BtwResponse",
+            Self::PermissionPrompt { .. } => "PermissionPrompt",
+            Self::SessionRenamed(_) => "SessionRenamed",
+            Self::PermissionModeChanged(_) => "PermissionModeChanged",
+            Self::ShowSessionPicker(_) => "ShowSessionPicker",
+            Self::SetAccentColor(_) => "SetAccentColor",
+            Self::SetTheme(_) => "SetTheme",
+            Self::ShowMcpManager(_) => "ShowMcpManager",
+            Self::UpdateMcpManager(_) => "UpdateMcpManager",
+            Self::ShowMessageSelector(_) => "ShowMessageSelector",
+            Self::ShowSkillsMenu(_) => "ShowSkillsMenu",
+            Self::ShowFilePicker { .. } => "ShowFilePicker",
+            Self::ShowSearchResults { .. } => "ShowSearchResults",
+            Self::OpenView(_) => "OpenView",
+            Self::OpenViewRows { .. } => "OpenViewRows",
+            Self::AgentActivity(_) => "AgentActivity",
+            Self::SetVimMode(_) => "SetVimMode",
+            Self::VimToggle => "VimToggle",
+            Self::VoiceText(_) => "VoiceText",
+            Self::SetAgentInfo { .. } => "SetAgentInfo",
+            Self::Resize { .. } => "Resize",
+            Self::UserInput(_) => "UserInput",
+            Self::SlashCancel => "SlashCancel",
+            Self::SlashAgent(_) => "SlashAgent",
+            Self::Done => "Done",
+            Self::NotificationTimeout(_) => "NotificationTimeout",
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn variant_name_labels_events_used_in_drain_forensics() {
+        assert_eq!(
+            TuiEvent::TextDelta("hello".into()).variant_name(),
+            "TextDelta"
+        );
+        assert_eq!(
+            TuiEvent::SessionRenamed("session".into()).variant_name(),
+            "SessionRenamed"
+        );
+        assert_eq!(
+            TuiEvent::AgentActivity(AgentActivityUpdate {
+                id: "agent-1".into(),
+                name: "Agent".into(),
+                role: AgentActivityRole::Subagent,
+                status: AgentActivityStatus::Running,
+                current_tool: None,
+                detail: None,
+                run_id: None,
+                parent_id: None,
+                artifact_id: None,
+                provider: Some("openai-codex".into()),
+                model: Some("gpt-5.4".into()),
+                cost_usd: Some(0.01),
+            })
+            .variant_name(),
+            "AgentActivity"
+        );
+    }
 }

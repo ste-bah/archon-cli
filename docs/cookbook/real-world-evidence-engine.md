@@ -42,6 +42,41 @@ Example: `archon docs ingest .archon/docs/inbox` from a shell is
 `/docs ingest .archon/docs/inbox` inside the TUI. If a new CLI command lands
 before a dedicated slash wrapper exists, run it as `/archon <same args>`.
 
+## Provider Choice
+
+Archon can run the same command surfaces through Anthropic or Codex. Anthropic
+OAuth/API-key/proxy is the default path. To use a ChatGPT/Codex subscription for
+agentic work:
+
+```bash
+archon auth login --provider openai-codex
+archon auth status
+```
+
+```toml
+[llm]
+provider = "openai-codex"
+
+[api]
+default_model = "gpt-5.4"
+```
+
+After that, the TUI, `/btw`, `/run-agent`, `/archon-code`,
+`/archon-research`, `/gametheory`, and team-driven agentic flows use Codex
+instead of Anthropic. Verify capability support at any time with:
+
+```bash
+archon providers capabilities
+archon providers doctor
+```
+
+TUI equivalent:
+
+```text
+/providers capabilities
+/providers doctor
+```
+
 ## Project Setup
 
 ```bash

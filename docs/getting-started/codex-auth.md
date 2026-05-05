@@ -11,11 +11,14 @@ Setup guide for users with a ChatGPT subscription who want to route some of thei
 | `/chat --provider openai-codex` | ✅ supported | Single-turn prompt, streaming or `--no-stream` response |
 | `archon chat --provider openai-codex` | ✅ supported | Same as the slash form, run from a shell |
 | `archon` (interactive TUI session) | ✅ supported when `[llm].provider = "openai-codex"` | The main conversational session uses Codex OAuth instead of Anthropic OAuth |
-| `/archon-code` and `/archon-research` | ❌ Anthropic only | Multi-agent pipelines route through Anthropic |
-| `/gametheory`, `/team`, `/run-agent` | ❌ Anthropic only | All multi-agent surfaces |
+| `/archon-code` and `/archon-research` | ✅ supported when `[llm].provider = "openai-codex"` | Provider-neutral pipeline adapter routes through the active provider |
+| `/gametheory` | ✅ supported when `[llm].provider = "openai-codex"` | Classification and specialist calls use the active provider |
+| `/run-agent`, `Agent` tool, subagents | ✅ supported when `[llm].provider = "openai-codex"` | Provider-neutral subagent runner uses the active provider and Codex tool-result continuation |
+| `archon team run` | ✅ supported when `[llm].provider = "openai-codex"` | Team execution builds the configured provider through the shared runtime router |
+| `archon completion ...` | ✅ provider-neutral | Completion integrity currently verifies persisted evidence/trust state rather than calling a provider |
 | `archon auth login/status/logout --provider openai-codex` | ✅ supported | Manage the credential lifecycle |
 
-In short: **Codex can back the main interactive TUI and one-shot chat surfaces.** Multi-agent pipelines and agent-callable tool surfaces still require Anthropic credentials today. You can keep both sets of credentials on the same machine and choose the provider per surface.
+In short: **Codex can back chat, the main interactive TUI, tool use, subagents, `/btw`, provider-neutral pipelines, and team runs.** Exact cost metadata still stays honest: if the backend does not expose pricing/usage, Archon marks cost metadata unsupported instead of inventing it. You can keep both Anthropic and Codex credentials on the same machine and choose the provider per surface.
 
 For the generated source-of-truth matrix, run `archon providers capabilities` or `/providers capabilities`, or read [Provider capabilities](../generated/provider-capabilities.md).
 
@@ -28,6 +31,13 @@ For the generated source-of-truth matrix, run `archon providers capabilities` or
 ## Read this BEFORE you log in
 
 archon-cli surfaces the following warning before the first Codex login. Read it. Run `archon auth login --provider openai-codex --accept-tos` only after you have done so.
+
+If you already authenticated the official Codex CLI on the same machine, Archon
+can read `~/.codex/auth.json` as a read-only fallback. `archon auth login
+--provider openai-codex` is still the preferred Archon-native setup because it
+stores credentials in `~/.archon/.credentials.json`, but a valid Codex CLI login
+is enough for `archon auth status`, `archon providers doctor`, chat, TUI
+sessions, tools, subagents, `/btw`, and provider-neutral pipelines.
 
 ```
 WARNING: Codex authentication via archon-cli
@@ -82,6 +92,14 @@ If you want to skip the TOS prompt for scripted use after you've read it once:
 archon auth login --provider openai-codex --accept-tos
 ```
 
+If the official Codex CLI is already logged in, you can check whether Archon can
+see it without starting a new browser flow:
+
+```bash
+archon auth status
+archon providers doctor
+```
+
 ## Verify the login took
 
 ```
@@ -111,7 +129,7 @@ Codex (OpenAI ChatGPT subscription)
     client-id:      app_***************
     openai-beta:    responses=experimental
   Manifest:         https://archon-public.s3.amazonaws.com/codex-compat.json
-  Kill-switch:      enabled (set ARCHON_CODEX_DISABLED=1 to disable)
+  Provider:         enabled (set ARCHON_CODEX_DISABLED=1 to disable)
 ```
 
 `account_id` is partially redacted (`acct_*****d2f1`) and the OAuth client ID is also redacted (`app_***************`). archon-cli **never** prints raw tokens.
@@ -161,7 +179,7 @@ archon
 
 In this mode Archon skips the Anthropic auth bootstrap and builds the session agent from the stored `openaiCodexOauth` credentials. If `default_model` is still a Claude-shaped value, Archon automatically uses `gpt-5.4` for the Codex-backed session.
 
-Current limitation: `/btw` side questions are Anthropic-only. In Codex-backed sessions, use the main prompt for side questions or switch `[llm].provider` back to `"anthropic"`.
+`/btw` side questions use the same active session provider. In a Codex-backed TUI session, `/btw what did you just decide?` is sent through Codex OAuth; in an Anthropic-backed session, the same command is sent through Anthropic OAuth/API key/proxy.
 
 ## Logout
 
@@ -280,9 +298,9 @@ You (or your shell rc) set the kill switch. Unset it:
 unset ARCHON_CODEX_DISABLED
 ```
 
-## Daily smoke / CI
+## Manual smoke / CI
 
-The Codex daily smoke runbook lives at [docs/maintenance/codex-smoke.md](../maintenance/codex-smoke.md). It exercises credential restore, OAuth refresh, `archon auth status`, and `archon chat --provider openai-codex` against a dedicated ChatGPT Plus test account. Use it as the reference for how to validate Codex auth in your own CI.
+The Codex smoke runbook lives at [docs/maintenance/codex-smoke.md](../maintenance/codex-smoke.md). It exercises credential restore, OAuth refresh, `archon auth status`, `archon chat --provider openai-codex`, and local fake-provider tests for Codex tool/subagent parity. Live smoke is manual-only because it can spend provider quota; do not schedule it with cron.
 
 ## Where credentials live
 
@@ -307,5 +325,5 @@ For the deeper mechanics of how OAuth credentials become wire headers, see [iden
 
 - [Identity & spoofing](../integrations/identity-spoofing.md) — the spoof-mode mechanics for both providers
 - [Codex environment variables](../env-vars-codex.md) — full `ARCHON_CODEX_*` env var reference
-- [Codex daily smoke runbook](../maintenance/codex-smoke.md) — CI/operational reference
+- [Codex smoke runbook](../maintenance/codex-smoke.md) — manual CI/operational reference
 - [Slash commands reference](../reference/slash-commands.md) — `/auth`, `/chat`, `/providers`

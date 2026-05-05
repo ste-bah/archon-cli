@@ -117,9 +117,11 @@ fn render_provider_registry() -> String {
 fn render_provider_doctor(live: bool) -> String {
     let path = archon_llm::tokens::credentials_path();
     let credentials_json = std::fs::read_to_string(&path).ok();
+    let codex_status = codex_status_from_disk(&path);
     render_provider_doctor_with_pinger(
         path.exists(),
         credentials_json.as_deref(),
+        codex_status,
         codex_disabled(),
         live,
         local_provider_env(),
@@ -136,6 +138,7 @@ fn render_provider_doctor_from_json(
     render_provider_doctor_with_pinger(
         credentials_file_exists,
         credentials_json,
+        None,
         codex_disabled,
         false,
         ProviderDoctorEnv::default(),
@@ -146,6 +149,7 @@ fn render_provider_doctor_from_json(
 fn render_provider_doctor_with_pinger(
     credentials_file_exists: bool,
     credentials_json: Option<&str>,
+    codex_status_override: Option<&'static str>,
     codex_disabled: bool,
     live: bool,
     env: ProviderDoctorEnv,
@@ -156,7 +160,8 @@ fn render_provider_doctor_with_pinger(
         .map(|creds| credential_status(creds.expires_at.timestamp_millis()));
     let codex = credentials_json
         .and_then(|json| archon_llm::auth::parse_codex_credentials_json(json).ok())
-        .map(|creds| credential_status(creds.expires_at.timestamp_millis()));
+        .map(|creds| credential_status(creds.expires_at.timestamp_millis()))
+        .or(codex_status_override);
 
     let mut out = String::new();
     if live {
@@ -211,6 +216,12 @@ fn render_provider_doctor_with_pinger(
     render_live_provider_pings(&mut out, live, anthropic, codex, codex_disabled, pinger);
     render_remediation_hints(&mut out, anthropic, codex, codex_disabled, env);
     out
+}
+
+fn codex_status_from_disk(path: &std::path::Path) -> Option<&'static str> {
+    archon_llm::tokens_codex::read_codex_credentials_locked(path)
+        .ok()
+        .map(|(creds, _mtime)| credential_status(creds.expires_at.timestamp_millis()))
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -630,12 +641,12 @@ mod tests {
     }
 
     #[test]
-    fn execute_capabilities_lists_codex_tui_but_not_pipelines() {
+    fn execute_capabilities_lists_codex_agentic_surface_support() {
         let body = render_args(&["capabilities"]);
         assert!(body.contains("Archon provider capability matrix"));
         assert!(body.contains("| `openai-codex` |"));
-        assert!(body.contains("Backs one-shot chat and full TUI sessions"));
-        assert!(body.contains("pipelines/subagents are not wired yet"));
+        assert!(body.contains("provider-neutral pipelines"));
+        assert!(body.contains("subagents, /btw"));
     }
 
     #[test]
@@ -716,6 +727,7 @@ mod tests {
         let body = render_provider_doctor_with_pinger(
             true,
             Some(&json),
+            None,
             false,
             true,
             ProviderDoctorEnv::default(),
@@ -734,6 +746,7 @@ mod tests {
         let body = render_provider_doctor_with_pinger(
             false,
             None,
+            None,
             true,
             true,
             ProviderDoctorEnv::default(),
@@ -741,6 +754,26 @@ mod tests {
         );
         assert!(body.contains("Anthropic skipped: credentials missing"));
         assert!(body.contains("Codex     skipped: disabled by ARCHON_CODEX_DISABLED"));
+    }
+
+    #[test]
+    fn render_provider_doctor_uses_codex_cli_fallback_status() {
+        let pinger = FakeLivePinger { outcome: Ok(()) };
+        let body = render_provider_doctor_with_pinger(
+            false,
+            None,
+            Some("present"),
+            false,
+            false,
+            ProviderDoctorEnv::default(),
+            &pinger,
+        );
+        assert!(body.contains("Codex OAuth:     present"));
+        assert!(body.contains(
+            "Codex spoof identity: loaded from bundled/config/env spoof identity at runtime"
+        ));
+        assert!(!body.contains("accessToken"));
+        assert!(!body.contains("refreshToken"));
     }
 
     #[test]
@@ -763,6 +796,7 @@ mod tests {
         let body = render_provider_doctor_with_pinger(
             true,
             Some(&json),
+            None,
             false,
             true,
             ProviderDoctorEnv::default(),
@@ -782,7 +816,8 @@ mod tests {
             anthropic_base_url_set: true,
             proxy_env_set: true,
         };
-        let body = render_provider_doctor_with_pinger(false, None, false, false, env, &pinger);
+        let body =
+            render_provider_doctor_with_pinger(false, None, None, false, false, env, &pinger);
         assert!(body.contains("ANTHROPIC_API_KEY env: OAuth token shaped"));
         assert!(body.contains("Anthropic base URL: custom via ANTHROPIC_BASE_URL"));
         assert!(body.contains("Proxy env:       set"));

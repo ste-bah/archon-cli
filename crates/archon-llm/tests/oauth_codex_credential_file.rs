@@ -1,9 +1,13 @@
 use std::fs;
 use std::path::PathBuf;
 
-use archon_llm::auth::{CodexCredentials, parse_codex_credentials_json, parse_credentials_json};
+use archon_llm::auth::{
+    CodexCredentials, parse_codex_cli_credentials_json, parse_codex_credentials_json,
+    parse_credentials_json,
+};
 use archon_llm::tokens_codex::{read_codex_credentials_locked, write_codex_credentials_atomic};
 use archon_llm::types::Secret;
+use base64::Engine;
 use chrono::{TimeZone, Utc};
 
 fn temp_dir() -> PathBuf {
@@ -21,6 +25,15 @@ fn sample_codex() -> CodexCredentials {
         expires_at: Utc.with_ymd_and_hms(2099, 1, 1, 0, 0, 0).unwrap(),
         account_id: "acct_codex".into(),
     }
+}
+
+fn unsigned_jwt(payload: serde_json::Value) -> String {
+    let header = serde_json::json!({ "alg": "none" });
+    let header = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .encode(serde_json::to_vec(&header).expect("encode header"));
+    let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .encode(serde_json::to_vec(&payload).expect("encode payload"));
+    format!("{header}.{payload}.")
 }
 
 #[test]
@@ -52,6 +65,31 @@ fn parse_codex_credentials_epoch_ms() {
 
     let creds = parse_codex_credentials_json(json).expect("parse epoch");
     assert_eq!(creds.account_id, "acct_epoch");
+}
+
+#[test]
+fn parse_codex_cli_credentials_reads_official_auth_json_shape() {
+    let exp = Utc::now() + chrono::Duration::hours(1);
+    let access_token = unsigned_jwt(serde_json::json!({
+        "exp": exp.timestamp(),
+        "https://api.openai.com/auth": {
+            "chatgpt_account_id": "acct_from_jwt"
+        }
+    }));
+    let json = serde_json::json!({
+        "auth_mode": "chatgpt",
+        "tokens": {
+            "access_token": access_token,
+            "refresh_token": "refresh",
+            "account_id": "acct_from_file"
+        }
+    })
+    .to_string();
+
+    let creds = parse_codex_cli_credentials_json(&json).expect("parse Codex CLI auth");
+    assert_eq!(creds.account_id, "acct_from_file");
+    assert_eq!(creds.refresh_token.expose(), "refresh");
+    assert!(creds.expires_at > Utc::now());
 }
 
 #[test]

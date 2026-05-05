@@ -206,6 +206,9 @@ fn agent_activity_variant() {
         run_id: None,
         parent_id: None,
         artifact_id: None,
+        provider: Some("openai-codex".into()),
+        model: Some("gpt-5.4".into()),
+        cost_usd: None,
     });
 }
 

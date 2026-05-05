@@ -41,6 +41,20 @@ pub fn is_safe_in_default_mode(name: &str) -> bool {
     is_default_safe_tool(name)
 }
 
+#[derive(Debug)]
+struct ProviderModelActivitySink {
+    inner: Arc<dyn AgentActivitySink>,
+    provider: String,
+    model: String,
+}
+
+impl AgentActivitySink for ProviderModelActivitySink {
+    fn emit(&self, event: AgentActivityEvent) {
+        self.inner
+            .emit(event.with_provider_model(self.provider.clone(), self.model.clone()));
+    }
+}
+
 fn emit_tool_result_activity(ctx: &ToolContext, tool_name: &str, result: &ToolResult) {
     if result.is_error {
         crate::dispatch::emit_tool_activity(
@@ -984,7 +998,7 @@ impl Agent {
                     // GHOST-006: sandbox backend from session boot, checked at
                     // both dispatch sites.
                     sandbox: self.config.sandbox.clone(),
-                    activity_sink: self.config.activity_sink.clone(),
+                    activity_sink: self.provider_model_activity_sink(&active_model),
                 };
 
                 // -------------------------------------------------------
@@ -1672,7 +1686,7 @@ impl Agent {
                                                     nested: false,
                                                     cancel_parent: self.config.cancel_token.clone(),
                                                     sandbox: self.config.sandbox.clone(),
-                                                    activity_sink: self.config.activity_sink.clone(),
+                                                    activity_sink: self.provider_model_activity_sink(&active_model),
                                                 };
                                                 match archon_tools::agent_tool::run_subagent(
                                                     resume_sid,
@@ -2232,13 +2246,21 @@ impl Agent {
         message: impl Into<String>,
     ) {
         if let Some(sink) = &self.config.activity_sink {
-            sink.emit(AgentActivityEvent::new(
-                self.config.session_id.clone(),
-                kind,
-                status,
-                message,
-            ));
+            sink.emit(
+                AgentActivityEvent::new(self.config.session_id.clone(), kind, status, message)
+                    .with_provider_model(self.client.name().to_string(), self.config.model.clone()),
+            );
         }
+    }
+
+    fn provider_model_activity_sink(&self, model: &str) -> Option<Arc<dyn AgentActivitySink>> {
+        self.config.activity_sink.as_ref().map(|sink| {
+            Arc::new(ProviderModelActivitySink {
+                inner: Arc::clone(sink),
+                provider: self.client.name().to_string(),
+                model: model.to_string(),
+            }) as Arc<dyn AgentActivitySink>
+        })
     }
 
     async fn send_event(&self, event: AgentEvent) {

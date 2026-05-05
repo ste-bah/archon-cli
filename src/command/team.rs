@@ -6,7 +6,7 @@ use archon_core::env_vars::ArchonEnvVars;
 use archon_core::orchestrator::{Orchestrator, RealSubtaskExecutor};
 
 use crate::cli_args::TeamAction;
-use crate::runtime::llm::build_llm_provider;
+use crate::runtime::llm::build_configured_llm_provider;
 
 pub(crate) async fn handle_team_command(
     action: &TeamAction,
@@ -17,45 +17,9 @@ pub(crate) async fn handle_team_command(
         TeamAction::Run { team, goal } => {
             let orch = Orchestrator::new(config.orchestrator.clone());
             let (tx, mut rx) = tokio::sync::mpsc::channel(64);
-            // Build LLM provider for team execution
-            let team_auth = match archon_llm::auth::resolve_auth_with_keys(
-                env_vars.anthropic_api_key.as_deref(),
-                env_vars.archon_api_key.as_deref(),
-                env_vars.archon_oauth_token.as_deref(),
-                std::env::var("ANTHROPIC_AUTH_TOKEN").ok().as_deref(),
-            ) {
-                Ok(a) => a,
-                Err(e) => {
-                    eprintln!("Authentication failed for team execution: {e}");
-                    eprintln!("Run `archon login` or set ANTHROPIC_API_KEY.");
-                    std::process::exit(1);
-                }
-            };
-            let identity_mode = archon_llm::identity::resolve_identity_mode(
-                &team_auth,
-                false,
-                &config.identity.as_view(),
-            );
-            let account_uuid = if matches!(
-                identity_mode,
-                archon_llm::identity::IdentityMode::Spoof { .. }
-            ) {
-                crate::command::utils::fetch_account_uuid(&team_auth).await
-            } else {
-                String::new()
-            };
-            let team_identity = archon_llm::identity::IdentityProvider::new(
-                identity_mode,
-                uuid::Uuid::new_v4().to_string(),
-                "team-device".to_string(),
-                account_uuid,
-            );
-            let team_api_url = std::env::var("ANTHROPIC_BASE_URL")
-                .ok()
-                .or_else(|| config.api.base_url.clone());
-            let team_client =
-                archon_llm::anthropic::AnthropicClient::new(team_auth, team_identity, team_api_url);
-            let team_provider = build_llm_provider(&config.llm, team_client);
+            let team_provider = build_configured_llm_provider(config, env_vars, "team")
+                .await
+                .map_err(|e| anyhow::anyhow!("Authentication failed for team execution: {e}"))?;
             let cwd = std::env::current_dir().unwrap_or_default();
             let team_agent_registry = Arc::new(std::sync::RwLock::new(AgentRegistry::load(&cwd)));
             let executor = Arc::new(RealSubtaskExecutor::new(

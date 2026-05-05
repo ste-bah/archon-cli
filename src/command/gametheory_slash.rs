@@ -285,13 +285,11 @@ fn emit_db<F>(ctx: &mut CommandContext, render: F) -> Result<()>
 where
     F: FnOnce(&DbInstance) -> Result<String>,
 {
-    let rendered = match ctx.cozo_db.as_ref() {
-        Some(db) => render(db.as_ref())?,
-        None => {
-            let db = open_db()?;
-            render(&db)?
-        }
-    };
+    // Gametheory slash writers open fresh DbInstance handles inside spawned
+    // tasks. Mirror that on reads so same-session inspect commands see rows
+    // committed by sibling Cozo/SQLite connections.
+    let db = open_db()?;
+    let rendered = render(&db)?;
     emit(ctx, rendered)
 }
 
@@ -299,13 +297,10 @@ fn emit_db_event<F>(ctx: &mut CommandContext, render: F) -> Result<()>
 where
     F: FnOnce(&DbInstance) -> Result<TuiEvent>,
 {
-    let event = match ctx.cozo_db.as_ref() {
-        Some(db) => render(db.as_ref())?,
-        None => {
-            let db = open_db()?;
-            render(&db)?
-        }
-    };
+    // Same fresh-read rule as emit_db; ctx.cozo_db can be a stale session
+    // snapshot for gametheory rows written by background slash tasks.
+    let db = open_db()?;
+    let event = render(&db)?;
     ctx.emit(event);
     Ok(())
 }
@@ -440,6 +435,10 @@ mod tests {
     use super::*;
     use crate::command::registry::{CommandHandler, default_registry};
     use crate::command::test_support::{CtxBuilder, drain_tui_events};
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn test_gametheory_slash_declares_required_subcommands() {
@@ -520,28 +519,30 @@ mod tests {
 
     #[test]
     fn test_gametheory_view_emits_open_view_event() {
-        let db = std::sync::Arc::new(test_db());
-        gametheory::schema::ensure_gametheory_schema(db.as_ref()).unwrap();
-        seed_gt_run(
-            &db,
-            "gt-slash-view",
-            "marketplace incentives",
-            "completed",
-            "0.420000",
-        );
-        let (mut ctx, mut rx) = CtxBuilder::new().with_cozo_db(db).build();
-        GameTheorySlashHandler
-            .execute(&mut ctx, &[String::from("view")])
-            .unwrap();
-        let events = drain_tui_events(&mut rx);
-        let [TuiEvent::OpenViewRows { view_id, rows }] = events.as_slice() else {
-            panic!("expected OpenViewRows, got {events:?}");
-        };
-        assert_eq!(*view_id, ViewId::GameTheory);
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].id, "gt-slash-view");
-        assert_eq!(rows[0].status, "completed");
-        assert!(rows[0].detail.contains("$0.420000"));
+        with_temp_data_home(|| {
+            let db = open_db().unwrap();
+            gametheory::schema::ensure_gametheory_schema(&db).unwrap();
+            seed_gt_run(
+                &db,
+                "gt-slash-view",
+                "marketplace incentives",
+                "completed",
+                "0.420000",
+            );
+            let (mut ctx, mut rx) = CtxBuilder::new().build();
+            GameTheorySlashHandler
+                .execute(&mut ctx, &[String::from("view")])
+                .unwrap();
+            let events = drain_tui_events(&mut rx);
+            let [TuiEvent::OpenViewRows { view_id, rows }] = events.as_slice() else {
+                panic!("expected OpenViewRows, got {events:?}");
+            };
+            assert_eq!(*view_id, ViewId::GameTheory);
+            assert_eq!(rows.len(), 1);
+            assert_eq!(rows[0].id, "gt-slash-view");
+            assert_eq!(rows[0].status, "completed");
+            assert!(rows[0].detail.contains("$0.420000"));
+        });
     }
 
     #[test]
@@ -564,27 +565,97 @@ mod tests {
 
     #[test]
     fn test_gametheory_status_reads_cozo_source_of_truth() {
-        let db = std::sync::Arc::new(test_db());
-        gametheory::schema::ensure_gametheory_schema(db.as_ref()).unwrap();
-        seed_gt_run(
-            &db,
-            "gt-slash",
-            "slash source truth",
-            "completed",
-            "0.010000",
-        );
+        with_temp_data_home(|| {
+            let db = open_db().unwrap();
+            gametheory::schema::ensure_gametheory_schema(&db).unwrap();
+            seed_gt_run(
+                &db,
+                "gt-slash",
+                "slash source truth",
+                "completed",
+                "0.010000",
+            );
 
-        let (mut ctx, mut rx) = CtxBuilder::new().with_cozo_db(db).build();
-        let args = vec!["status".to_string(), "gt-slash".to_string()];
-        GameTheorySlashHandler.execute(&mut ctx, &args).unwrap();
-        let events = drain_tui_events(&mut rx);
-        let text = match &events[0] {
-            TuiEvent::TextDelta(text) => text,
-            other => panic!("expected TextDelta, got {other:?}"),
-        };
-        assert!(text.contains("Run ID:    gt-slash"));
-        assert!(text.contains("Status:    completed"));
-        assert!(text.contains("Cost USD:  $0.010000"));
+            let stale_ctx_db = Arc::new(test_db());
+            let (mut ctx, mut rx) = CtxBuilder::new().with_cozo_db(stale_ctx_db).build();
+            let args = vec!["status".to_string(), "gt-slash".to_string()];
+            GameTheorySlashHandler.execute(&mut ctx, &args).unwrap();
+            let events = drain_tui_events(&mut rx);
+            let text = match &events[0] {
+                TuiEvent::TextDelta(text) => text,
+                other => panic!("expected TextDelta, got {other:?}"),
+            };
+            assert!(text.contains("Run ID:    gt-slash"));
+            assert!(text.contains("Status:    completed"));
+            assert!(text.contains("Cost USD:  $0.010000"));
+        });
+    }
+
+    #[test]
+    fn test_gametheory_classify_then_status_same_session_reads_fresh_db() {
+        with_temp_data_home(|| {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+
+            runtime.block_on(async {
+                let stale_ctx_db = Arc::new(test_db());
+                let (mut ctx, mut rx) = CtxBuilder::new().with_cozo_db(stale_ctx_db).build();
+                let classify_args = vec![
+                    "classify-only".to_string(),
+                    "Two".to_string(),
+                    "firms".to_string(),
+                    "simultaneously".to_string(),
+                    "set".to_string(),
+                    "prices".to_string(),
+                ];
+
+                GameTheorySlashHandler
+                    .execute(&mut ctx, &classify_args)
+                    .unwrap();
+
+                let started = rx.recv().await.expect("classification start event");
+                assert!(
+                    matches!(started, TuiEvent::TextDelta(ref text) if text.contains("Classifying game-theory situation"))
+                );
+
+                let completed = tokio::time::timeout(Duration::from_secs(5), async {
+                    loop {
+                        match rx.recv().await.expect("classification completion event") {
+                            TuiEvent::TextDelta(text)
+                                if text.contains("Game-theory classification persisted") =>
+                            {
+                                break text;
+                            }
+                            _ => continue,
+                        }
+                    }
+                })
+                .await
+                .expect("classification should complete");
+                let run_id = completed
+                    .split("run_id=")
+                    .nth(1)
+                    .and_then(|rest| rest.split_whitespace().next())
+                    .expect("completion event should include run_id")
+                    .to_string();
+
+                let status_args = vec!["status".to_string(), run_id.clone()];
+                GameTheorySlashHandler.execute(&mut ctx, &status_args).unwrap();
+                let status_event = rx.recv().await.expect("status event");
+                let TuiEvent::TextDelta(status_text) = status_event else {
+                    panic!("expected status TextDelta");
+                };
+
+                assert!(status_text.contains(&format!("Run ID:    {run_id}")));
+                assert!(status_text.contains("Status:    completed"));
+                assert!(
+                    !status_text.contains("not found"),
+                    "same-session status must inspect the fresh Cozo source of truth"
+                );
+            });
+        });
     }
 
     fn test_db() -> DbInstance {
@@ -607,5 +678,25 @@ mod tests {
             ScriptMutability::Mutable,
         )
         .unwrap();
+    }
+
+    fn with_temp_data_home<T>(f: impl FnOnce() -> T) -> T {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let prev = std::env::var_os("XDG_DATA_HOME");
+        let root = std::env::temp_dir().join(format!("archon-gt-slash-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        // SAFETY: `ENV_LOCK` serialises this module's XDG_DATA_HOME mutations.
+        unsafe {
+            std::env::set_var("XDG_DATA_HOME", &root);
+        }
+        let result = f();
+        // SAFETY: same lock-protected scope as above; restore original env.
+        unsafe {
+            match prev {
+                Some(value) => std::env::set_var("XDG_DATA_HOME", value),
+                None => std::env::remove_var("XDG_DATA_HOME"),
+            }
+        }
+        result
     }
 }

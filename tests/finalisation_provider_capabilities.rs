@@ -17,16 +17,18 @@ fn generated_provider_capabilities_doc_matches_code() {
 }
 
 #[test]
-fn provider_capability_matrix_documents_codex_tui_but_not_pipelines() {
+fn provider_capability_matrix_documents_codex_agentic_surfaces() {
     let codex = capabilities_for("openai-codex").expect("openai-codex capability row");
     assert!(codex.supports(ProviderCapability::OneShotChat));
     assert!(codex.supports(ProviderCapability::InteractiveSession));
     assert!(codex.supports(ProviderCapability::Streaming));
-    assert!(!codex.supports(ProviderCapability::Subagents));
-    assert!(!codex.supports(ProviderCapability::PipelineCoding));
-    assert!(!codex.supports(ProviderCapability::PipelineResearch));
-    assert!(!codex.supports(ProviderCapability::PipelineGametheory));
-    assert!(!codex.supports(ProviderCapability::BtwSideQuestion));
+    assert!(codex.supports(ProviderCapability::ToolUse));
+    assert!(codex.supports(ProviderCapability::Subagents));
+    assert!(codex.supports(ProviderCapability::BtwSideQuestion));
+    assert!(codex.supports(ProviderCapability::PipelineCoding));
+    assert!(codex.supports(ProviderCapability::PipelineResearch));
+    assert!(codex.supports(ProviderCapability::PipelineGametheory));
+    assert!(!codex.supports(ProviderCapability::CostMetadata));
 }
 
 #[test]
@@ -73,5 +75,36 @@ fn cli_parses_providers_doctor_live_flag() {
             action: Some(ProvidersAction::Doctor { live: true }),
         }) => {}
         other => panic!("expected providers doctor --live command, got {other:?}"),
+    }
+}
+
+#[test]
+fn github_workflows_do_not_schedule_paid_provider_smokes() {
+    let workflows_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(".github/workflows");
+    let entries = std::fs::read_dir(&workflows_dir)
+        .unwrap_or_else(|err| panic!("failed to read {}: {err}", workflows_dir.display()));
+
+    for entry in entries {
+        let path = entry.expect("workflow entry").path();
+        if !matches!(
+            path.extension().and_then(|ext| ext.to_str()),
+            Some("yml" | "yaml")
+        ) {
+            continue;
+        }
+        let text = std::fs::read_to_string(&path)
+            .unwrap_or_else(|err| panic!("failed to read {}: {err}", path.display()));
+        assert!(
+            !text.lines().any(|line| line.trim_start() == "schedule:"),
+            "{} must not use scheduled workflow triggers for live provider checks",
+            path.display()
+        );
+        assert!(
+            !text
+                .lines()
+                .any(|line| line.trim_start().starts_with("- cron:")),
+            "{} must not use cron triggers for live provider checks",
+            path.display()
+        );
     }
 }

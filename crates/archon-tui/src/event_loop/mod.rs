@@ -233,7 +233,7 @@ where
             // observability + stall detection. The sender side now bounds the
             // queue and counts shed progress events; this drain counter still
             // tells operators whether rendering is returning to event drain.
-            crate::observability::record_tui_event_drain();
+            crate::observability::record_tui_event_drain(tui_event.variant_name());
             tui_events::handle_tui_event(&mut app, tui_event, &input_tx).await;
         }
 

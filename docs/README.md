@@ -6,7 +6,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 
 - [Quick start](getting-started/quick-start.md) — install, authenticate, run your first agent in 5 minutes
 - [Installation](getting-started/installation.md) — full build instructions for macOS, Linux, Windows, WSL2
-- [Codex authentication](getting-started/codex-auth.md) — ChatGPT/Codex OAuth, TUI provider mode, one-shot chat
+- [Codex authentication](getting-started/codex-auth.md) — ChatGPT/Codex OAuth, TUI provider mode, tool use, subagents, pipelines
 - [Project setup](getting-started/project-setup.md) — bootstrap a project with `archon-init.sh` (flags, scenarios, troubleshooting)
 - [First run](getting-started/first-run.md) — what to expect, where data lives, common gotchas
 

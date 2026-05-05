@@ -9,6 +9,18 @@
 | `ANTHROPIC_AUTH_TOKEN` | Legacy bearer token alias |
 | `OPENAI_API_KEY` | OpenAI API key for embeddings, LLM provider, and STT |
 | `ARCHON_MEMORY_OPENAIKEY` | Alias for `OPENAI_API_KEY` (memory embeddings only) |
+| `ARCHON_CODEX_DISABLED` | Disable Codex provider resolution when set to `1`, `true`, or `yes` |
+| `ARCHON_CODEX_BASE_URL` | Override Codex backend URL for local mocks or diagnostics |
+| `ARCHON_CODEX_ORIGINATOR` | Override Codex spoof `originator` field |
+| `ARCHON_CODEX_USER_AGENT` | Override Codex spoof user agent, subject to anti-impersonation validation |
+| `ARCHON_CODEX_CLIENT_ID` | Override Codex OAuth client id (`app_...`) |
+| `ARCHON_CODEX_BETA` | Override Codex `OpenAI-Beta` header |
+| `ARCHON_CODEX_FETCH_URL` | Reserved Codex manifest fetch override |
+| `ARCHON_CODEX_SPOOF_ALLOW_MIXED` | Dev-only Codex spoof-source mixing escape hatch |
+| `ARCHON_CODEX_E2E` | Enables opt-in real-backend Codex tests; never use in scheduled CI |
+| `ARCHON_CODEX_SMOKE_PROMPT` | Manual Codex smoke prompt override |
+| `ARCHON_CODEX_SMOKE_EXPECTED` | Manual Codex smoke expected marker |
+| `ARCHON_CODEX_SMOKE_MODEL` | Manual Codex smoke model override |
 | `ARCHON_CONFIG` | Override config file path |
 | `ARCHON_LOG` | Override log level |
 | `RUST_LOG` | Tracing subscriber filter |
@@ -39,6 +51,21 @@
 
 If none are set, archon uses local fastembed for embeddings (no network calls) and disables OpenAI-dependent features.
 
+## Codex OAuth and provider parity
+
+Codex subscription credentials are stored in `~/.archon/.credentials.json` under
+`openaiCodexOauth` after:
+
+```bash
+archon auth login --provider openai-codex
+```
+
+Set `[llm].provider = "openai-codex"` in config to make the TUI, tool use,
+subagents, `/btw`, team runs, coding/research pipelines, and gametheory use the
+Codex provider instead of Anthropic. The `ARCHON_CODEX_*` variables only affect
+the Codex provider; Anthropic OAuth/API-key/proxy settings remain separate.
+Never print access or refresh tokens in transcripts.
+
 ## Logging filters
 
 `RUST_LOG` accepts standard `tracing` filter syntax:
@@ -60,4 +87,5 @@ ARCHON_LOG=trace archon
 
 - [CLI flags](cli-flags.md)
 - [Configuration](config.md)
+- [Codex environment variables](../env-vars-codex.md)
 - [Authentication setup](../getting-started/installation.md)
