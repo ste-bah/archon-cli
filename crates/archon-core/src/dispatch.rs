@@ -426,6 +426,58 @@ mod tests {
         }
     }
 
+    #[test]
+    fn docs_do_not_reference_unknown_tools() {
+        let documented = documented_tool_names();
+        let registry = create_default_registry(std::env::temp_dir(), None);
+        let mut registered: std::collections::HashSet<String> = registry
+            .tool_names()
+            .into_iter()
+            .map(str::to_string)
+            .collect();
+
+        // Session-wired tools need runtime dependencies (the memory graph);
+        // they are still real tools and are registered by src/session.rs.
+        registered.insert("memory_store".to_string());
+        registered.insert("memory_recall".to_string());
+
+        // LEANN tools are conditional because they require an available index
+        // at startup. The docs explicitly mark them as conditional.
+        let conditional = ["LeannSearch", "LeannFindSimilar"];
+
+        let unknown: Vec<_> = documented
+            .into_iter()
+            .filter(|name| !registered.contains(name) && !conditional.contains(&name.as_str()))
+            .collect();
+
+        assert!(
+            unknown.is_empty(),
+            "docs/reference/tools.md references unknown tools: {unknown:?}"
+        );
+    }
+
+    fn documented_tool_names() -> Vec<String> {
+        let path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/reference/tools.md");
+        let markdown = std::fs::read_to_string(path).expect("tool docs exist");
+
+        markdown
+            .lines()
+            .filter_map(|line| {
+                let trimmed = line.trim();
+                if !trimmed.starts_with("| `") {
+                    return None;
+                }
+                let cell = trimmed.split('|').nth(1)?;
+                let start = cell.find('`')? + 1;
+                let rest = &cell[start..];
+                let end = rest.find('`')?;
+                Some(rest[..end].to_string())
+            })
+            .filter(|name| name != "Tool")
+            .collect()
+    }
+
     #[tokio::test]
     async fn dispatch_unknown_tool_returns_error() {
         let registry = create_default_registry(std::env::temp_dir(), None);

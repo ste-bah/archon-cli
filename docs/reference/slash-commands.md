@@ -6,7 +6,7 @@ As of v0.1.40 the registry contains **78 primary commands** (lockstep-tested at 
 
 For shell/TUI parity, see the generated [command surface matrix](../generated/command-surface-matrix.md). It is backed by `src/command/surface_matrix.rs` and has tests that fail when registered slash primaries drift.
 
-Beyond the 78 primaries, archon-cli ships **67 built-in skills** (33 in `crates/archon-core/src/skills/builtin.rs`, 34 in `expanded.rs`). Skills behave like slash commands but are resolved through the Skill registry — primary handlers take precedence at dispatch time.
+Beyond the 78 primaries, archon-cli ships **68 built-in skills** (33 in `crates/archon-core/src/skills/builtin.rs`, 35 in `expanded.rs`). Skills behave like slash commands but are resolved through the Skill registry — primary handlers take precedence at dispatch time.
 
 > **Version history.** v0.1.38 added 11 primaries (Evidence Engine: `/kb`, `/prov`, `/meaning`, `/constellation`, plus gametheory inspection subcommands and the slash mirror). v0.1.40 added 2 more (`/auth` and `/chat` for the OpenAI-Codex provider surface).
 
@@ -163,7 +163,7 @@ These skills compose the PRD → spec → tasks → code arc. Each emits a promp
 
 ## Built-in skills (selected)
 
-67 skills total (33 in `crates/archon-core/src/skills/builtin.rs`, 34 in `expanded.rs`). Highlights:
+68 skills total (33 in `crates/archon-core/src/skills/builtin.rs`, 35 in `expanded.rs`). Highlights:
 
 | Skill | Description |
 |---|---|

@@ -35,6 +35,8 @@ pub(crate) mod denials;
 pub(crate) mod diff;
 pub(crate) mod dispatcher;
 pub(crate) mod docs;
+#[cfg(test)]
+pub(crate) mod docs_drift;
 pub(crate) mod doctor;
 pub(crate) mod effort;
 pub(crate) mod errors;

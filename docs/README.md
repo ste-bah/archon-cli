@@ -31,7 +31,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 
 - [Slash commands](reference/slash-commands.md) — 65 primary commands grouped by purpose
 - [Tools](reference/tools.md) — 43 built-in tools available to agents
-- [Skills](reference/skills.md) — 67 built-in skills (composable command sequences)
+- [Skills](reference/skills.md) — 68 built-in skills (composable command sequences)
 - [Permissions](reference/permissions.md) — 7 permission modes, rule lists, sandboxing
 - [Configuration](reference/config.md) — `config.toml` schema, precedence, every section
 - [CLI flags](reference/cli-flags.md) — every command-line argument

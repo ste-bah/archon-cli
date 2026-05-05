@@ -15,7 +15,8 @@ fn make_ctx() -> SkillContext {
 fn all_expanded_skills_registered() {
     let reg = register_builtins();
     let all = reg.list_all();
-    // Builtins (13) + expanded (33) = 46 unique skills
+    // The exact count also includes embedded prompt-template skills; keep this
+    // as a lower-bound smoke test so new skills do not require churn here.
     assert!(
         all.len() >= 45,
         "Expected at least 45 skills total, got {}: {:?}",
@@ -75,6 +76,15 @@ fn btw_skill_exists() {
     assert!(
         reg.resolve("btw").is_some(),
         "btw skill should be registered"
+    );
+}
+
+#[test]
+fn refresh_identity_skill_exists() {
+    let reg = register_builtins();
+    assert!(
+        reg.resolve("refresh-identity").is_some(),
+        "refresh-identity skill should be registered because the docs advertise it"
     );
 }
 

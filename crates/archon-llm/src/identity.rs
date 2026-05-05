@@ -741,6 +741,22 @@ fn validated_beta_cache_path() -> PathBuf {
         .join("validated_betas.json")
 }
 
+/// Clear cached Claude/Anthropic beta-header discovery files.
+///
+/// This backs the `/refresh-identity` skill. The next Anthropic request will
+/// re-discover and re-validate the accepted beta headers.
+pub fn clear_beta_caches() -> std::io::Result<Vec<PathBuf>> {
+    let mut removed = Vec::new();
+    for path in [beta_cache_path(), validated_beta_cache_path()] {
+        match fs::remove_file(&path) {
+            Ok(()) => removed.push(path),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => return Err(err),
+        }
+    }
+    Ok(removed)
+}
+
 /// Discover betas from the installed Claude Code binary, validate them
 /// against the API, save the validated set to cache, and return it.
 ///

@@ -5,7 +5,7 @@ Built-in skills are Rust-implemented composable command sequences. User-authored
 ## Where built-in skills live
 
 - `crates/archon-core/src/skills/builtin.rs` — 21 core skills + `register_builtins()` assembly
-- `crates/archon-core/src/skills/expanded.rs` — 34 expanded skills
+- `crates/archon-core/src/skills/expanded.rs` — 35 expanded skills
 - `crates/archon-core/src/skills/engineering_pack.rs` — 5 Phase 2 skills via `engineering_skill!` macro
 - `crates/archon-core/src/skills/archon_pack.rs` — 5 Phase 3 skills via `archon_skill!` macro
 - `crates/archon-core/src/skills/embedded_skill_md.rs` — `include_str!()` constants for embedded SKILL.md bodies
