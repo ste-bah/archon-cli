@@ -166,6 +166,67 @@ impl MemoryGraph {
         Ok(())
     }
 
+    /// Re-embed every memory in the graph using the currently-configured
+    /// embedding provider, overwriting any existing vectors.
+    ///
+    /// Use after swapping the embedding model (different model variant,
+    /// dimension change, or recovery from a corrupted prior model). Each
+    /// memory's `content` field is sent through `provider.embed(...)`
+    /// and the resulting vector is upserted into `memory_embeddings`.
+    /// Memories shorter than `MIN_EMBED_CHARS` are skipped (mirrors the
+    /// per-write `embed_and_store` policy).
+    ///
+    /// Returns `(reindexed, skipped, failed)` counts.
+    pub fn reindex_all_embeddings(&self) -> Result<(usize, usize, usize), MemoryError> {
+        let provider = {
+            let guard = self.embedding_provider.read().map_err(|e| {
+                MemoryError::Database(format!("embedding provider lock poisoned: {e}"))
+            })?;
+            guard
+                .clone()
+                .ok_or_else(|| MemoryError::Database("no embedding provider configured".into()))?
+        };
+
+        let raw_rows = read_all_memories(&self.db)?;
+        let mut reindexed = 0usize;
+        let mut skipped = 0usize;
+        let mut failed = 0usize;
+
+        for raw in raw_rows {
+            if raw.content.len() < MIN_EMBED_CHARS {
+                skipped += 1;
+                continue;
+            }
+            match provider.embed(&[raw.content.clone()]) {
+                Ok(vecs) if !vecs.is_empty() => {
+                    match crate::vector_search::store_embedding(
+                        &self.db,
+                        &raw.id,
+                        &vecs[0],
+                        "auto",
+                        provider.dimensions(),
+                    ) {
+                        Ok(()) => reindexed += 1,
+                        Err(e) => {
+                            tracing::warn!(memory_id = %raw.id, error = %e, "store_embedding failed");
+                            failed += 1;
+                        }
+                    }
+                }
+                Ok(_) => {
+                    tracing::warn!(memory_id = %raw.id, "embed returned empty vec");
+                    failed += 1;
+                }
+                Err(e) => {
+                    tracing::warn!(memory_id = %raw.id, error = %e, "embed failed");
+                    failed += 1;
+                }
+            }
+        }
+
+        Ok((reindexed, skipped, failed))
+    }
+
     /// Set the hybrid alpha for keyword/vector blending.
     pub fn set_hybrid_alpha(&self, alpha: f32) {
         if let Ok(mut guard) = self.hybrid_alpha.write() {

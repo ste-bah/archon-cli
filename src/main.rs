@@ -317,6 +317,9 @@ async fn main() -> Result<()> {
             return crate::command::constellation::handle_constellation_command(action.clone())
                 .await;
         }
+        Some(Commands::Memory { ref action }) => {
+            return crate::command::memory_cli::handle_memory_command(action.clone()).await;
+        }
         Some(Commands::Gametheory {
             ref situation,
             classify_only,
