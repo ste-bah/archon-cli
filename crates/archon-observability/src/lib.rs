@@ -84,7 +84,7 @@ pub mod tracing;
 
 pub use activity::{
     AgentActivityEvent, AgentActivityKind, AgentActivitySink, AgentActivityStatus,
-    InMemoryActivitySink,
+    InMemoryActivitySink, JsonlActivitySink, activity_jsonl_path, read_activity_jsonl,
 };
 pub use file_init::{LogGuard, LoggingError, init_tracing_file};
 pub use metrics::{

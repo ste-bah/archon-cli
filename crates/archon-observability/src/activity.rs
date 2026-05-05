@@ -3,10 +3,15 @@
 //! The TUI can render these events, logs can persist them, and tests can assert
 //! exact lifecycle order without scraping human-facing strings.
 
+use std::fs::{File, OpenOptions};
+use std::io::{BufRead, BufReader, Write};
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+
+use crate::redaction::redact;
 
 /// Lifecycle event categories emitted by Archon runtime surfaces.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -255,6 +260,97 @@ impl AgentActivitySink for InMemoryActivitySink {
     }
 }
 
+/// JSONL-backed activity sink for durable session timelines.
+#[derive(Debug, Clone)]
+pub struct JsonlActivitySink {
+    path: PathBuf,
+    writer_lock: Arc<Mutex<()>>,
+}
+
+impl JsonlActivitySink {
+    /// Construct a JSONL sink at the given file path.
+    pub fn new(path: impl Into<PathBuf>) -> Self {
+        Self {
+            path: path.into(),
+            writer_lock: Arc::new(Mutex::new(())),
+        }
+    }
+
+    /// Return the backing JSONL file path.
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl AgentActivitySink for JsonlActivitySink {
+    fn emit(&self, event: AgentActivityEvent) {
+        if let Err(error) = append_activity_event(&self.path, &self.writer_lock, event) {
+            tracing::warn!(
+                error = %error,
+                path = %self.path.display(),
+                "failed to persist activity event"
+            );
+        }
+    }
+}
+
+/// Build the canonical session activity JSONL path.
+pub fn activity_jsonl_path(base_dir: impl AsRef<Path>, session_id: &str) -> PathBuf {
+    base_dir
+        .as_ref()
+        .join(session_id)
+        .join("activity")
+        .join("events.jsonl")
+}
+
+/// Read all persisted activity events from a JSONL file.
+pub fn read_activity_jsonl(path: impl AsRef<Path>) -> anyhow::Result<Vec<AgentActivityEvent>> {
+    let file = File::open(path.as_ref())?;
+    let reader = BufReader::new(file);
+    let mut events = Vec::new();
+    for line in reader.lines() {
+        let line = line?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        events.push(serde_json::from_str(&line)?);
+    }
+    Ok(events)
+}
+
+fn append_activity_event(
+    path: &Path,
+    writer_lock: &Mutex<()>,
+    event: AgentActivityEvent,
+) -> anyhow::Result<()> {
+    let _guard = writer_lock
+        .lock()
+        .expect("activity jsonl writer mutex poisoned");
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let mut file = OpenOptions::new().create(true).append(true).open(path)?;
+    let redacted = redact_activity_event(event);
+    serde_json::to_writer(&mut file, &redacted)?;
+    file.write_all(b"\n")?;
+    Ok(())
+}
+
+fn redact_activity_event(mut event: AgentActivityEvent) -> AgentActivityEvent {
+    event.session_id = redact(&event.session_id);
+    event.run_id = event.run_id.map(|value| redact(&value));
+    event.parent_id = event.parent_id.map(|value| redact(&value));
+    event.agent_id = event.agent_id.map(|value| redact(&value));
+    event.subagent_id = event.subagent_id.map(|value| redact(&value));
+    event.agent_key = event.agent_key.map(|value| redact(&value));
+    event.subagent_type = event.subagent_type.map(|value| redact(&value));
+    event.message = redact(&event.message);
+    event.artifact_id = event.artifact_id.map(|value| redact(&value));
+    event.provider = event.provider.map(|value| redact(&value));
+    event.model = event.model.map(|value| redact(&value));
+    event
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -329,5 +425,73 @@ mod tests {
         ));
 
         assert_eq!(sink.len(), 1);
+    }
+
+    #[test]
+    fn jsonl_sink_persists_events_for_restart_readback() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = activity_jsonl_path(dir.path(), "session-1");
+        let sink = JsonlActivitySink::new(path.clone());
+
+        sink.emit(AgentActivityEvent::new(
+            "session-1",
+            AgentActivityKind::AgentSpawned,
+            AgentActivityStatus::Running,
+            "spawned researcher",
+        ));
+        sink.emit(AgentActivityEvent::new(
+            "session-1",
+            AgentActivityKind::AgentCompleted,
+            AgentActivityStatus::Completed,
+            "completed researcher",
+        ));
+
+        let events = read_activity_jsonl(path).expect("read persisted events");
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].kind, AgentActivityKind::AgentSpawned);
+        assert_eq!(events[1].status, AgentActivityStatus::Completed);
+    }
+
+    #[test]
+    fn jsonl_sink_redacts_secret_shapes_before_write() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = activity_jsonl_path(dir.path(), "session-2");
+        let sink = JsonlActivitySink::new(path.clone());
+        let secret = "sk-ant-api03-abcdefghijklmnopqrstuvwxyz";
+
+        sink.emit(AgentActivityEvent::new(
+            "session-2",
+            AgentActivityKind::ToolFailed,
+            AgentActivityStatus::Failed,
+            format!("provider failed with {secret}"),
+        ));
+
+        let raw = std::fs::read_to_string(&path).expect("raw jsonl");
+        assert!(!raw.contains(secret));
+        assert!(raw.contains("***REDACTED***"));
+        let events = read_activity_jsonl(path).expect("read persisted events");
+        assert_eq!(events[0].message, "provider failed with ***REDACTED***");
+    }
+
+    #[test]
+    fn jsonl_reader_ignores_blank_lines() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = activity_jsonl_path(dir.path(), "session-3");
+        std::fs::create_dir_all(path.parent().expect("activity dir")).expect("mkdir");
+        let event = AgentActivityEvent::new(
+            "session-3",
+            AgentActivityKind::Cancelled,
+            AgentActivityStatus::Cancelled,
+            "cancelled",
+        );
+        std::fs::write(
+            &path,
+            format!("\n{}\n\n", serde_json::to_string(&event).expect("json")),
+        )
+        .expect("write jsonl");
+
+        let events = read_activity_jsonl(path).expect("read persisted events");
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, AgentActivityKind::Cancelled);
     }
 }
