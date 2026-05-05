@@ -691,11 +691,13 @@ version = "0.1.43"
 dependencies = [
  "anyhow",
  "axum",
+ "chrono",
  "hdrhistogram",
  "once_cell",
  "parking_lot",
  "regex",
  "reqwest 0.12.28",
+ "serde",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
@@ -703,6 +705,7 @@ dependencies = [
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]

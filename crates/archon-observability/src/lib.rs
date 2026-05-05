@@ -76,11 +76,16 @@
 #![deny(missing_docs)]
 #![deny(unsafe_code)]
 
+pub mod activity;
 pub mod file_init;
 pub mod metrics;
 pub mod redaction;
 pub mod tracing;
 
+pub use activity::{
+    AgentActivityEvent, AgentActivityKind, AgentActivitySink, AgentActivityStatus,
+    InMemoryActivitySink,
+};
 pub use file_init::{LogGuard, LoggingError, init_tracing_file};
 pub use metrics::{
     ChannelMetricSink, ChannelMetrics, ChannelMetricsSnapshot, format_prometheus, serve_metrics,

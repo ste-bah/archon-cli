@@ -90,6 +90,29 @@ fn app_applies_external_agent_activity_update() {
 }
 
 #[test]
+fn app_accepts_canonical_activity_event_via_update_bridge() {
+    let mut app = App::new();
+    let update = AgentActivityUpdate::from(
+        archon_observability::AgentActivityEvent::new(
+            "session-1",
+            archon_observability::AgentActivityKind::AgentSpawned,
+            archon_observability::AgentActivityStatus::Running,
+            "spawned explore",
+        )
+        .with_subagent_id("subagent-1")
+        .with_agent_key("explore"),
+    );
+
+    app.on_agent_activity(update);
+
+    let row = app.agent_activity.first().expect("activity row");
+    assert_eq!(row.id, "subagent-1");
+    assert_eq!(row.name, "explore");
+    assert_eq!(row.role, AgentActivityRole::Subagent);
+    assert_eq!(row.status, AgentActivityStatus::Running);
+}
+
+#[test]
 fn app_tool_failure_shows_in_output() {
     let mut app = App::new();
     app.on_tool_start("Bash", "tool-456");
