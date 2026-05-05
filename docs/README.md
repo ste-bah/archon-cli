@@ -37,6 +37,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 - [CLI flags](reference/cli-flags.md) — every command-line argument
 - [Environment variables](reference/env-vars.md) — `ARCHON_*` overrides
 - [Provider capabilities](generated/provider-capabilities.md) — generated Anthropic/Codex surface-support matrix
+- [Command surface matrix](generated/command-surface-matrix.md) — generated CLI/slash/TUI parity matrix
 
 ## Integrations
 

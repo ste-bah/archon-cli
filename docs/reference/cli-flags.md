@@ -2,6 +2,8 @@
 
 Run `archon --help` for the live, authoritative listing. Every flag below is verified against `src/cli_args.rs`.
 
+For which shell command families are mirrored into slash/TUI flows, see the generated [command surface matrix](../generated/command-surface-matrix.md).
+
 ## Subcommands
 
 | Subcommand | Synopsis |
