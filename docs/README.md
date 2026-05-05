@@ -56,6 +56,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 - [Coding pipeline (`/archon-code`)](cookbook/god-code-pipeline.md) — 48-agent coding workflow end-to-end inside the TUI
 - [Research pipeline (`/archon-research`)](cookbook/archon-research-pipeline.md) — 46-agent PhD research workflow end-to-end inside the TUI
 - [Game-theory pipeline (`/gametheory`)](cookbook/gametheory-pipeline.md) — Tier 1 classify → route → specialists → report end-to-end inside the TUI
+- [Trading and asset analysis with `/gametheory`](cookbook/trading-with-gametheory.md) — applying the game-theory pipeline to pre-trade assessment, post-event decomposition, counterparty analysis, strategy-viability tests, and macro reaction-function modelling
 - [Custom agent workflows](cookbook/custom-agent-workflows.md) — `/create-agent`, `/run-agent`, `/evolve-agent`
 - [PRD-driven development](cookbook/prd-driven-development.md) — `/to-prd` → `/prd-to-spec` → `/spec-to-tasks` → `/archon-code`
 
