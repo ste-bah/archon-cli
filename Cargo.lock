@@ -859,6 +859,7 @@ dependencies = [
  "anyhow",
  "archon-leann",
  "archon-memory",
+ "archon-observability",
  "archon-permissions",
  "async-lsp",
  "async-trait",

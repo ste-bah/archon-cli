@@ -699,6 +699,7 @@ impl SubagentExecutor for AgentSubagentExecutor {
             cancel_parent: ctx.cancel_parent.clone(),
             // GHOST-006: propagate sandbox backend to subagent tool calls.
             sandbox: ctx.sandbox.clone(),
+            activity_sink: ctx.activity_sink.clone(),
         };
 
         let mut runner = crate::subagent::runner::SubagentRunner::new(

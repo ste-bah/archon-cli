@@ -943,6 +943,7 @@ impl Agent {
                     // GHOST-006: sandbox backend from session boot, checked at
                     // both dispatch sites.
                     sandbox: self.config.sandbox.clone(),
+                    activity_sink: None,
                 };
 
                 // -------------------------------------------------------
@@ -1577,6 +1578,7 @@ impl Agent {
                                                     nested: false,
                                                     cancel_parent: self.config.cancel_token.clone(),
                                                     sandbox: self.config.sandbox.clone(),
+                                                    activity_sink: None,
                                                 };
                                                 match archon_tools::agent_tool::run_subagent(
                                                     resume_sid,

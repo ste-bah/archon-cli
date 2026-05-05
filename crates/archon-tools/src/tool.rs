@@ -1,5 +1,7 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 
+use archon_observability::AgentActivitySink;
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 
@@ -31,7 +33,7 @@ pub enum AgentMode {
 // Tool context -- passed to every tool execution
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct ToolContext {
     pub working_dir: PathBuf,
     pub session_id: String,
@@ -62,7 +64,29 @@ pub struct ToolContext {
     /// GHOST-006: sandbox enforcement backend. When set, both dispatch paths
     /// (agent.rs direct execute + dispatch.rs subagent path) check this
     /// before running a tool. Toggled via `/sandbox on/off`.
-    pub sandbox: Option<std::sync::Arc<dyn archon_permissions::SandboxBackend>>,
+    pub sandbox: Option<Arc<dyn archon_permissions::SandboxBackend>>,
+    /// Canonical activity stream for TUI/log/persistence consumers. Tools do
+    /// not need to know about rendering; dispatch emits lifecycle events here.
+    pub activity_sink: Option<Arc<dyn AgentActivitySink>>,
+}
+
+impl std::fmt::Debug for ToolContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ToolContext")
+            .field("working_dir", &self.working_dir)
+            .field("session_id", &self.session_id)
+            .field("mode", &self.mode)
+            .field("extra_dirs", &self.extra_dirs)
+            .field("in_fork", &self.in_fork)
+            .field("nested", &self.nested)
+            .field("cancel_parent", &self.cancel_parent)
+            .field("sandbox", &self.sandbox.as_ref().map(|_| "<sandbox>"))
+            .field(
+                "activity_sink",
+                &self.activity_sink.as_ref().map(|_| "<activity_sink>"),
+            )
+            .finish()
+    }
 }
 
 // ---------------------------------------------------------------------------
