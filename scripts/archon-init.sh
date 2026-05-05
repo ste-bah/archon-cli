@@ -178,3 +178,20 @@ if [ "$NO_AGENTS" = false ]; then
 fi
 echo "  prds/"
 echo "  tasks/"
+
+# ---------------------------------------------------------------------------
+# Helpful hint about the system-deps installer (separate concern from this
+# per-project init — this script never touches system packages or sudo).
+# Verifies build-essential / pdftotext / tesseract are available; if any
+# are missing, prints the one-liner to install them.
+# ---------------------------------------------------------------------------
+SCRIPT_DIR=$(dirname "$0")
+DEPS_SCRIPT="$SCRIPT_DIR/install-system-deps.sh"
+if [ -x "$DEPS_SCRIPT" ]; then
+    if ! "$DEPS_SCRIPT" --check >/dev/null 2>&1; then
+        echo
+        echo "archon-init: system packages missing (build deps / pdftotext / tesseract)."
+        echo "             To install them: sudo $DEPS_SCRIPT"
+        echo "             To check: $DEPS_SCRIPT --check"
+    fi
+fi
