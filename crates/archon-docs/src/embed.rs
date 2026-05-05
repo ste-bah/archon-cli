@@ -89,9 +89,9 @@ impl FastembedProvider {
         if guard.is_none() {
             tracing::info!(
                 cache_dir = %self.cache_dir.display(),
-                "loading local embedding model BGE-base-en-v1.5 (quantized)"
+                "loading local embedding model BGE-base-en-v1.5"
             );
-            let options = fastembed::InitOptions::new(fastembed::EmbeddingModel::BGEBaseENV15Q)
+            let options = fastembed::InitOptions::new(fastembed::EmbeddingModel::BGEBaseENV15)
                 .with_cache_dir(self.cache_dir.clone())
                 .with_show_download_progress(false);
             let model =

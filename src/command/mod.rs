@@ -68,6 +68,7 @@ pub(crate) mod managed_agents;
 pub(crate) mod mcp;
 pub(crate) mod meaning;
 pub(crate) mod memory;
+pub(crate) mod memory_cli;
 pub(crate) mod model;
 pub(crate) mod parser;
 pub(crate) mod permissions;

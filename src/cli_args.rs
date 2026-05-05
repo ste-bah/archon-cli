@@ -477,6 +477,11 @@ pub enum Commands {
         #[command(subcommand)]
         action: ConstellationAction,
     },
+    /// Manage the persistent memory graph
+    Memory {
+        #[command(subcommand)]
+        action: MemoryAction,
+    },
     /// Game-theory strategic analysis
     Gametheory {
         /// PRD shorthand: `archon gametheory "<situation>"`
@@ -951,6 +956,19 @@ pub enum MeaningAction {
         /// Dataset to export: samples or triplets
         #[arg(long, default_value = "samples")]
         kind: String,
+    },
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum MemoryAction {
+    /// Re-embed every memory in the graph using the currently-configured
+    /// embedding model. Use after swapping models or recovering from a
+    /// corrupted prior model. Existing vectors are overwritten in place.
+    Reindex {
+        /// Confirm a full re-embed (required — implicit guard against
+        /// accidentally re-running an expensive operation).
+        #[arg(long)]
+        all: bool,
     },
 }
 
