@@ -72,10 +72,14 @@ pub enum AgentActivityRole {
 /// Lifecycle state for a parent agent, foreground subagent, or background task.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AgentActivityStatus {
+    Queued,
     Running,
+    Waiting,
     WaitingForTool,
+    Backgrounded,
     Complete,
     Failed,
+    Cancelled,
 }
 
 /// External activity update payload. The App also derives rows from
@@ -89,12 +93,15 @@ pub struct AgentActivityUpdate {
     pub status: AgentActivityStatus,
     pub current_tool: Option<String>,
     pub detail: Option<String>,
+    pub run_id: Option<String>,
+    pub parent_id: Option<String>,
+    pub artifact_id: Option<String>,
 }
 
 impl From<archon_observability::AgentActivityEvent> for AgentActivityUpdate {
     fn from(event: archon_observability::AgentActivityEvent) -> Self {
         let role = activity_role(&event);
-        let status = activity_status(event.status);
+        let status = activity_status(&event);
         let id = activity_id(&event);
         let name = activity_name(&event, role);
         let current_tool = match event.kind {
@@ -111,6 +118,9 @@ impl From<archon_observability::AgentActivityEvent> for AgentActivityUpdate {
             status,
             current_tool,
             detail: Some(event.message),
+            run_id: event.run_id,
+            parent_id: event.parent_id,
+            artifact_id: event.artifact_id,
         }
     }
 }
@@ -128,17 +138,30 @@ fn activity_role(event: &archon_observability::AgentActivityEvent) -> AgentActiv
     }
 }
 
-fn activity_status(status: archon_observability::AgentActivityStatus) -> AgentActivityStatus {
-    match status {
-        archon_observability::AgentActivityStatus::Queued
-        | archon_observability::AgentActivityStatus::Running => AgentActivityStatus::Running,
-        archon_observability::AgentActivityStatus::Waiting
-        | archon_observability::AgentActivityStatus::Backgrounded => {
-            AgentActivityStatus::WaitingForTool
+fn activity_status(event: &archon_observability::AgentActivityEvent) -> AgentActivityStatus {
+    match event.kind {
+        archon_observability::AgentActivityKind::ToolStarted => {
+            return AgentActivityStatus::WaitingForTool;
+        }
+        archon_observability::AgentActivityKind::ToolCompleted => {
+            return AgentActivityStatus::Complete;
+        }
+        archon_observability::AgentActivityKind::ToolFailed => {
+            return AgentActivityStatus::Failed;
+        }
+        _ => {}
+    }
+
+    match event.status {
+        archon_observability::AgentActivityStatus::Queued => AgentActivityStatus::Queued,
+        archon_observability::AgentActivityStatus::Running => AgentActivityStatus::Running,
+        archon_observability::AgentActivityStatus::Waiting => AgentActivityStatus::Waiting,
+        archon_observability::AgentActivityStatus::Backgrounded => {
+            AgentActivityStatus::Backgrounded
         }
         archon_observability::AgentActivityStatus::Completed => AgentActivityStatus::Complete,
-        archon_observability::AgentActivityStatus::Failed
-        | archon_observability::AgentActivityStatus::Cancelled => AgentActivityStatus::Failed,
+        archon_observability::AgentActivityStatus::Failed => AgentActivityStatus::Failed,
+        archon_observability::AgentActivityStatus::Cancelled => AgentActivityStatus::Cancelled,
     }
 }
 

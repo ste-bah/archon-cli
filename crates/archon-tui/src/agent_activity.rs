@@ -23,6 +23,9 @@ pub struct AgentActivityRow {
     pub status: AgentActivityStatus,
     pub current_tool: Option<String>,
     pub detail: Option<String>,
+    pub run_id: Option<String>,
+    pub parent_id: Option<String>,
+    pub artifact_id: Option<String>,
 }
 
 impl AgentActivityRow {
@@ -39,6 +42,9 @@ impl AgentActivityRow {
             status,
             current_tool: None,
             detail: None,
+            run_id: None,
+            parent_id: None,
+            artifact_id: None,
         }
     }
 
@@ -50,6 +56,9 @@ impl AgentActivityRow {
             status: update.status,
             current_tool: update.current_tool,
             detail: update.detail,
+            run_id: update.run_id,
+            parent_id: update.parent_id,
+            artifact_id: update.artifact_id,
         }
     }
 }
@@ -61,6 +70,9 @@ pub fn apply_update(rows: &mut Vec<AgentActivityRow>, update: AgentActivityUpdat
         row.status = update.status;
         row.current_tool = update.current_tool;
         row.detail = update.detail;
+        row.run_id = update.run_id;
+        row.parent_id = update.parent_id;
+        row.artifact_id = update.artifact_id;
     } else {
         rows.push(AgentActivityRow::from_update(update));
     }
@@ -135,7 +147,7 @@ pub fn render_rail_if_needed(
     if rows.is_empty() || area.height < 10 {
         return area;
     }
-    let rail_height = (rows.len() as u16 + 2).clamp(3, 6);
+    let rail_height = (rows.len() as u16 + 2).clamp(3, 10);
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -162,6 +174,9 @@ fn upsert_parent(
             status,
             current_tool,
             detail: Some(detail.into()),
+            run_id: None,
+            parent_id: None,
+            artifact_id: None,
         },
     );
 }
@@ -181,6 +196,9 @@ fn upsert_subagent(
             status,
             current_tool: None,
             detail: Some(detail.into()),
+            run_id: None,
+            parent_id: Some("parent".into()),
+            artifact_id: None,
         },
     );
 }
@@ -218,7 +236,7 @@ fn upsert_row(rows: &mut Vec<AgentActivityRow>, row: AgentActivityRow) {
 }
 
 fn trim_rows(rows: &mut Vec<AgentActivityRow>) {
-    const MAX_ROWS: usize = 8;
+    const MAX_ROWS: usize = 12;
     if rows.len() > MAX_ROWS {
         rows.drain(0..rows.len() - MAX_ROWS);
     }
@@ -231,14 +249,24 @@ fn render_row<'a>(row: &AgentActivityRow, theme: &Theme, width: usize) -> Line<'
         AgentActivityRole::Background => "[BG]",
     };
     let (status, color) = match row.status {
+        AgentActivityStatus::Queued => ("queued", Color::DarkGray),
         AgentActivityStatus::Running => ("running", theme.accent),
+        AgentActivityStatus::Waiting => ("waiting", Color::Yellow),
         AgentActivityStatus::WaitingForTool => ("tool", Color::Yellow),
+        AgentActivityStatus::Backgrounded => ("bg", Color::Cyan),
         AgentActivityStatus::Complete => ("done", Color::Green),
         AgentActivityStatus::Failed => ("failed", Color::Red),
+        AgentActivityStatus::Cancelled => ("cancel", Color::DarkGray),
     };
     let mut detail = row.detail.clone().unwrap_or_default();
     if let Some(tool) = &row.current_tool {
         detail = format!("{detail} tool={tool}");
+    }
+    if let Some(run_id) = &row.run_id {
+        detail = format!("{detail} run={run_id}");
+    }
+    if let Some(artifact_id) = &row.artifact_id {
+        detail = format!("{detail} artifact={artifact_id}");
     }
     let text = format!(
         "{badge:<8} {status:<7} {:<18} {}",

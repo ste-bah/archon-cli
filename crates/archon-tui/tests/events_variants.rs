@@ -203,6 +203,9 @@ fn agent_activity_variant() {
         status: AgentActivityStatus::Running,
         current_tool: Some("Read".into()),
         detail: Some("reading source".into()),
+        run_id: None,
+        parent_id: None,
+        artifact_id: None,
     });
 }
 

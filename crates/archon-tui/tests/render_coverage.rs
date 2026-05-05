@@ -130,6 +130,68 @@ fn agent_activity_panel_renders_parent_and_subagent_rows() {
     assert!(rendered.contains("[AGENT]"), "buffer:\n{rendered}");
 }
 
+#[test]
+fn agent_activity_panel_renders_canonical_states_and_artifacts() {
+    let mut app = App::new();
+    app.show_splash = false;
+    app.output.append_line("activity source of truth");
+    app.agent_activity = vec![
+        AgentActivityRow::new(
+            "queued",
+            "queued-agent",
+            AgentActivityRole::Subagent,
+            AgentActivityStatus::Queued,
+        ),
+        AgentActivityRow::new(
+            "running",
+            "running-agent",
+            AgentActivityRole::Subagent,
+            AgentActivityStatus::Running,
+        ),
+        AgentActivityRow::new(
+            "waiting",
+            "waiting-agent",
+            AgentActivityRole::Subagent,
+            AgentActivityStatus::Waiting,
+        ),
+        AgentActivityRow::new(
+            "backgrounded",
+            "backgrounded",
+            AgentActivityRole::Background,
+            AgentActivityStatus::Backgrounded,
+        ),
+        AgentActivityRow::new(
+            "failed",
+            "failed-agent",
+            AgentActivityRole::Subagent,
+            AgentActivityStatus::Failed,
+        ),
+        AgentActivityRow::new(
+            "completed",
+            "done-agent",
+            AgentActivityRole::Subagent,
+            AgentActivityStatus::Complete,
+        ),
+    ];
+    app.agent_activity[5].artifact_id = Some("artifact-report-1".into());
+
+    let rendered = render_once(&mut app);
+    for expected in [
+        "queued",
+        "running",
+        "waiting",
+        "[BG]",
+        "failed",
+        "done",
+        "artifact-report-1",
+    ] {
+        assert!(
+            rendered.contains(expected),
+            "missing {expected}; buffer:\n{rendered}"
+        );
+    }
+}
+
 // ───────────────────────────────────────────────────────────────────────
 // Input area branches
 // ───────────────────────────────────────────────────────────────────────
