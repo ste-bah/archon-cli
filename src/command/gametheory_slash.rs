@@ -436,6 +436,7 @@ mod tests {
     use crate::command::registry::{CommandHandler, default_registry};
     use crate::command::test_support::{CtxBuilder, drain_tui_events};
     use std::sync::{Arc, Mutex};
+    use std::time::Duration;
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
 
@@ -587,6 +588,73 @@ mod tests {
             assert!(text.contains("Run ID:    gt-slash"));
             assert!(text.contains("Status:    completed"));
             assert!(text.contains("Cost USD:  $0.010000"));
+        });
+    }
+
+    #[test]
+    fn test_gametheory_classify_then_status_same_session_reads_fresh_db() {
+        with_temp_data_home(|| {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+
+            runtime.block_on(async {
+                let stale_ctx_db = Arc::new(test_db());
+                let (mut ctx, mut rx) = CtxBuilder::new().with_cozo_db(stale_ctx_db).build();
+                let classify_args = vec![
+                    "classify-only".to_string(),
+                    "Two".to_string(),
+                    "firms".to_string(),
+                    "simultaneously".to_string(),
+                    "set".to_string(),
+                    "prices".to_string(),
+                ];
+
+                GameTheorySlashHandler
+                    .execute(&mut ctx, &classify_args)
+                    .unwrap();
+
+                let started = rx.recv().await.expect("classification start event");
+                assert!(
+                    matches!(started, TuiEvent::TextDelta(ref text) if text.contains("Classifying game-theory situation"))
+                );
+
+                let completed = tokio::time::timeout(Duration::from_secs(5), async {
+                    loop {
+                        match rx.recv().await.expect("classification completion event") {
+                            TuiEvent::TextDelta(text)
+                                if text.contains("Game-theory classification persisted") =>
+                            {
+                                break text;
+                            }
+                            _ => continue,
+                        }
+                    }
+                })
+                .await
+                .expect("classification should complete");
+                let run_id = completed
+                    .split("run_id=")
+                    .nth(1)
+                    .and_then(|rest| rest.split_whitespace().next())
+                    .expect("completion event should include run_id")
+                    .to_string();
+
+                let status_args = vec!["status".to_string(), run_id.clone()];
+                GameTheorySlashHandler.execute(&mut ctx, &status_args).unwrap();
+                let status_event = rx.recv().await.expect("status event");
+                let TuiEvent::TextDelta(status_text) = status_event else {
+                    panic!("expected status TextDelta");
+                };
+
+                assert!(status_text.contains(&format!("Run ID:    {run_id}")));
+                assert!(status_text.contains("Status:    completed"));
+                assert!(
+                    !status_text.contains("not found"),
+                    "same-session status must inspect the fresh Cozo source of truth"
+                );
+            });
         });
     }
 
