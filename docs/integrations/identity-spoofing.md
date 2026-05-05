@@ -9,7 +9,7 @@ archon-cli can identify itself to the Anthropic API as either Claude Code (`spoo
 | Anthropic OAuth | `archon auth login --provider anthropic` | Claude-backed TUI sessions, pipelines, subagents |
 | Anthropic API key | `ANTHROPIC_API_KEY=sk-ant-api...` | Native Anthropic Messages API calls |
 | Anthropic-compatible proxy | Anthropic base URL + compatible key | OpenRouter, DeepSeek, LiteLLM, or similar routes |
-| Codex OAuth | `archon auth login --provider openai-codex` | `archon chat --provider openai-codex` and future Codex-backed agents |
+| Codex OAuth | `archon auth login --provider openai-codex` | `archon chat --provider openai-codex` and TUI sessions with `[llm].provider = "openai-codex"` |
 
 Run `archon auth status` to inspect both stored OAuth credentials and the active spoof identity. The command redacts account and client IDs and never prints full tokens.
 
@@ -149,6 +149,18 @@ Select the Codex provider explicitly when you want to route through it:
 ```bash
 archon chat --provider openai-codex "write a migration plan"
 ```
+
+Or make the main interactive TUI session Codex-backed:
+
+```toml
+[llm]
+provider = "openai-codex"
+
+[api]
+default_model = "gpt-5.4"
+```
+
+When `[llm].provider = "openai-codex"`, the TUI skips Anthropic auth bootstrap entirely and constructs a Codex provider from the stored `openaiCodexOauth` credentials. `/btw` remains Anthropic-only for now; use the main prompt in Codex-backed sessions.
 
 The Codex kill switch is `ARCHON_CODEX_DISABLED=1`; when set, `archon auth status` reports Codex as disabled and provider construction fails closed.
 

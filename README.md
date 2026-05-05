@@ -72,7 +72,17 @@ archon auth status
 archon chat --provider openai-codex "summarize this repository"
 ```
 
-Anthropic OAuth requests use the same Claude Code identity-spoof path as the agent and pipeline runners. API-key users can set `ANTHROPIC_API_KEY=sk-ant-api...`; proxy users can still point the Anthropic-compatible URL at OpenRouter, DeepSeek, LiteLLM, or another compatible endpoint and use native/API-key mode.
+To make the full interactive TUI use Codex, set:
+
+```toml
+[llm]
+provider = "openai-codex"
+
+[api]
+default_model = "gpt-5.4" # optional; Archon uses this automatically if the old default is Claude-shaped
+```
+
+Anthropic OAuth requests use the same Claude Code identity-spoof path as the agent and pipeline runners. Codex OAuth requests use the OpenAI Codex provider. API-key users can set `ANTHROPIC_API_KEY=sk-ant-api...`; proxy users can still point the Anthropic-compatible URL at OpenRouter, DeepSeek, LiteLLM, or another compatible endpoint and use native/API-key mode.
 
 ## Documentation map
 

@@ -9,6 +9,7 @@ use cozo::DbInstance;
 
 use crate::cli_args::GametheoryAction;
 use crate::command::gametheory_inspect;
+use crate::command::provider_gate::ensure_active_provider_supports;
 use crate::command::utils::fetch_account_uuid;
 use archon_core::config::ArchonConfig;
 use archon_core::env_vars::ArchonEnvVars;
@@ -206,6 +207,11 @@ async fn handle_run(
     if classify_only {
         run_classify_only(&db, situation, config, env_vars).await
     } else {
+        ensure_active_provider_supports(
+            config,
+            archon_llm::providers::ProviderCapability::PipelineGametheory,
+            "archon gametheory run",
+        )?;
         run_full(
             &db,
             situation,

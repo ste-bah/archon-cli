@@ -40,7 +40,7 @@ use crate::slash_context::SlashCommandContext;
 /// error via its own path.
 pub(crate) fn build_command_context<'a>(
     input: &'a str,
-    tui_tx: tokio::sync::mpsc::UnboundedSender<TuiEvent>,
+    tui_tx: archon_tui::event_channel::TuiEventSender,
     slash_ctx: &'a SlashCommandContext,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = CommandContext> + Send + 'a>> {
     Box::pin(async move {
@@ -390,7 +390,7 @@ pub(crate) fn build_command_context<'a>(
 pub(crate) fn apply_effect<'a>(
     effect: CommandEffect,
     slash_ctx: &'a SlashCommandContext,
-    tui_tx: &'a tokio::sync::mpsc::UnboundedSender<TuiEvent>,
+    tui_tx: &'a archon_tui::event_channel::TuiEventSender,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
     Box::pin(async move {
         match effect {

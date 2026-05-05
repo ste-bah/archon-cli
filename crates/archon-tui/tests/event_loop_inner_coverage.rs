@@ -51,7 +51,7 @@ fn buffer_nonempty(terminal: &Terminal<TestBackend>) -> bool {
 #[serial_test::serial]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn run_with_backend_walks_wide_event_surface() {
-    let (event_tx, event_rx) = mpsc::unbounded_channel::<TuiEvent>();
+    let (event_tx, event_rx) = archon_tui::event_channel::bounded_tui_event_channel();
     let (input_tx, _input_rx) = mpsc::channel::<String>(16);
 
     let config = AppConfig {

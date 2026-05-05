@@ -52,4 +52,5 @@ src/command/gametheory.rs        # expires 2026-06-30  # Phase 4 full gametheory
 src/command/gametheory_slash.rs  # expires 2026-06-30  # Phase 4 /gametheory slash mirror covering all CLI subcommands
 
 # --- v0.1.40 Codex OAuth provider ---
+src/command/providers.rs                         # expires 2026-06-30  # Codex provider doctor/capability slash surface; split after provider command crate extraction
 crates/archon-llm/src/providers/codex/spoof.rs  # expires 2026-06-30  # Codex spoof manifest resolver: provider list, default model selection, header-set construction

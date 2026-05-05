@@ -68,7 +68,6 @@
 //! so future readers do not have to chase the re-export. `TuiEvent`
 //! stays on `archon_tui::app` to match the AGS-806/807/808/809 import
 //! style — switching TuiEvent's path is out of scope.
-
 use archon_tui::app::TuiEvent;
 use archon_tui::events::SessionPickerEntry;
 
@@ -175,14 +174,12 @@ impl CommandHandler for ResumeHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use archon_tui::app::TuiEvent;
-    use tokio::sync::mpsc;
 
     /// Build a `CommandContext` with a freshly-created channel.
     /// /resume is a DIRECT-pattern handler — no snapshot, no effect
     /// slot — so every optional field stays `None`. Mirrors the
     /// make_ctx fixtures in task.rs / cost.rs / model.rs / status.rs.
-    fn make_ctx() -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
+    fn make_ctx() -> (CommandContext, archon_tui::event_channel::TuiEventReceiver) {
         // TASK-AGS-POST-6-SHARED-FIXTURES-V2: migrated to CtxBuilder.
         crate::command::test_support::CtxBuilder::new().build()
     }

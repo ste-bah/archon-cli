@@ -111,7 +111,7 @@ mod tests {
 
     fn make_ctx() -> (
         crate::command::registry::CommandContext,
-        tokio::sync::mpsc::UnboundedReceiver<TuiEvent>,
+        archon_tui::event_channel::TuiEventReceiver,
     ) {
         CtxBuilder::new().build()
     }

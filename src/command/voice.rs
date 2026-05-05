@@ -14,9 +14,8 @@
 //!
 //! `stt_api_key` is masked as `(set)` / `(empty)` — never emitted raw.
 
-use archon_tui::app::TuiEvent;
-
 use crate::command::registry::{CommandContext, CommandHandler};
+use archon_tui::app::TuiEvent;
 
 pub(crate) struct VoiceHandler;
 
@@ -113,10 +112,8 @@ fn render_status(voice: &archon_core::config::VoiceConfig) -> String {
 mod tests {
     use super::*;
     use archon_core::config::VoiceConfig;
-    use archon_tui::app::TuiEvent;
-    use tokio::sync::mpsc;
 
-    fn make_ctx() -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
+    fn make_ctx() -> (CommandContext, archon_tui::event_channel::TuiEventReceiver) {
         crate::command::test_support::CtxBuilder::new().build()
     }
 

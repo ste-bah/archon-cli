@@ -1,8 +1,6 @@
-name: Codex Daily Smoke
+name: Codex Smoke
 
 on:
-  schedule:
-    - cron: '17 6 * * *'
   workflow_dispatch:
 
 permissions:
@@ -91,7 +89,7 @@ jobs:
               creator: 'github-actions[bot]',
               per_page: 1,
             });
-            const body = `Daily Codex smoke test failed at ${new Date().toISOString()}.\n\n` +
+            const body = `Codex smoke test failed at ${new Date().toISOString()}.\n\n` +
               `**Workflow run**: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}\n\n` +
               `**Output (first 4000 chars):**\n\`\`\`\n${output.substring(0, 4000)}\n\`\`\`\n\n` +
               `**Action items:**\n` +

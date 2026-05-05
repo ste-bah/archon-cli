@@ -6,7 +6,7 @@ use std::sync::atomic::AtomicBool;
 
 use crate::cli_args::Cli;
 use crate::slash_context::SlashCommandContext;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use archon_consciousness::assembler::{AssemblyInput, BudgetConfig, SystemPromptAssembler};
 use archon_consciousness::defaults::load_configured_defaults;
 use archon_consciousness::rules::RulesEngine;
@@ -33,6 +33,7 @@ use archon_memory::{MemoryAccess, MemoryGraph, MemoryTrait};
 use archon_permissions::auto::{AutoModeConfig, AutoModeEvaluator};
 use archon_tui::app::TuiEvent;
 use archon_tui::commands::CommandInfo;
+use archon_tui::event_channel::TuiEventSender;
 use archon_tui::observability;
 
 use crate::command::registry::default_registry;
@@ -40,6 +41,46 @@ use crate::runtime::llm::build_llm_provider;
 use crate::setup::strip_cache_control_if_disabled;
 
 use archon_core::remote::protocol::AgentMessage;
+
+#[derive(Debug, Clone)]
+struct SessionActivitySink {
+    jsonl: archon_observability::JsonlActivitySink,
+    tui_tx: Option<TuiEventSender>,
+}
+
+impl archon_observability::AgentActivitySink for SessionActivitySink {
+    fn emit(&self, event: archon_observability::AgentActivityEvent) {
+        archon_observability::AgentActivitySink::emit(&self.jsonl, event.clone());
+        if let Some(tx) = &self.tui_tx {
+            let _ = tx.send(TuiEvent::AgentActivity(event.into()));
+        }
+    }
+}
+
+fn session_activity_sink(
+    session_id: &str,
+) -> Option<Arc<dyn archon_observability::AgentActivitySink>> {
+    session_activity_sink_inner(session_id, None)
+}
+
+fn session_activity_sink_with_tui(
+    session_id: &str,
+    tui_tx: TuiEventSender,
+) -> Option<Arc<dyn archon_observability::AgentActivitySink>> {
+    session_activity_sink_inner(session_id, Some(tui_tx))
+}
+
+fn session_activity_sink_inner(
+    session_id: &str,
+    tui_tx: Option<TuiEventSender>,
+) -> Option<Arc<dyn archon_observability::AgentActivitySink>> {
+    let base_dir = dirs::home_dir()?.join(".archon/sessions");
+    let path = archon_observability::activity_jsonl_path(base_dir, session_id);
+    Some(Arc::new(SessionActivitySink {
+        jsonl: archon_observability::JsonlActivitySink::new(path),
+        tui_tx,
+    }))
+}
 
 /// Result of [`build_session_agent`] — a fully constructed Agent plus
 /// the event receiver, resolved agent definition, and channel metrics.
@@ -49,6 +90,45 @@ struct BuiltAgent {
     event_rx: tokio::sync::mpsc::UnboundedReceiver<TimestampedEvent>,
     agent_def: Option<archon_core::agents::definition::CustomAgentDefinition>,
     metrics: std::sync::Arc<archon_tui::observability::ChannelMetrics>,
+}
+
+fn is_codex_session(config: &archon_core::config::ArchonConfig) -> bool {
+    config.llm.provider == "openai-codex"
+}
+
+fn active_session_model(config: &archon_core::config::ArchonConfig) -> String {
+    if is_codex_session(config) && config.api.default_model.starts_with("claude") {
+        "gpt-5.4".into()
+    } else {
+        config.api.default_model.clone()
+    }
+}
+
+async fn build_codex_session_provider(
+    config: &archon_core::config::ArchonConfig,
+) -> Result<Arc<dyn archon_llm::provider::LlmProvider>> {
+    let codex_cfg = crate::command::auth::codex_config_from_core(&config.providers.openai_codex);
+    let http = reqwest::Client::new();
+    let resolution = archon_llm::providers::codex::spoof::resolve(&codex_cfg, &http)
+        .await
+        .context("failed to resolve Codex spoof identity for TUI session")?;
+    let provider = match std::env::var("ARCHON_CODEX_BASE_URL").ok() {
+        Some(base_url) if !base_url.trim().is_empty() => {
+            archon_llm::providers::codex::client::CodexProvider::new_with_base_url(
+                archon_llm::tokens::credentials_path(),
+                resolution.config,
+                http,
+                base_url,
+            )
+        }
+        _ => archon_llm::providers::codex::client::CodexProvider::new(
+            archon_llm::tokens::credentials_path(),
+            resolution.config,
+            http,
+        ),
+    }
+    .context("failed to construct Codex provider for TUI session")?;
+    Ok(Arc::new(provider))
 }
 
 /// Spawn the Prometheus `/metrics` exporter when `--metrics-port PORT` is
@@ -110,6 +190,36 @@ fn spawn_metrics_exporter(
     });
     tracing::info!(port, "Prometheus /metrics exporter bound on 127.0.0.1");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn active_session_model_uses_codex_default_when_claude_default_would_leak() {
+        let mut config = archon_core::config::ArchonConfig::default();
+        config.llm.provider = "openai-codex".into();
+        config.api.default_model = "claude-sonnet-4-6".into();
+
+        assert_eq!(active_session_model(&config), "gpt-5.4");
+    }
+
+    #[test]
+    fn active_session_model_preserves_explicit_codex_model_override() {
+        let mut config = archon_core::config::ArchonConfig::default();
+        config.llm.provider = "openai-codex".into();
+        config.api.default_model = "gpt-5.4-codex-test".into();
+
+        assert_eq!(active_session_model(&config), "gpt-5.4-codex-test");
+    }
+
+    #[test]
+    fn active_session_model_preserves_anthropic_default() {
+        let config = archon_core::config::ArchonConfig::default();
+
+        assert_eq!(active_session_model(&config), config.api.default_model);
+    }
 }
 
 /// Parse `--setting-sources` names into [`ConfigLayer`] variants, warning on
@@ -443,6 +553,7 @@ async fn build_session_agent(
         sandbox: Some(std::sync::Arc::new(
             archon_tui::sandbox::SharedSandboxFlag::with_flag(sandbox_flag.clone()),
         )),
+        activity_sink: session_activity_sink(session_id),
     };
 
     if let Some(ref def) = agent_def {
@@ -1010,107 +1121,130 @@ pub(crate) async fn run_interactive_session(
         Vec::new()
     };
 
-    // ── Resolve authentication ──────────────────────────────────
-    let auth = match resolve_auth_with_keys(
-        env_vars.anthropic_api_key.as_deref(),
-        env_vars.archon_api_key.as_deref(),
-        env_vars.archon_oauth_token.as_deref(),
-        std::env::var("ANTHROPIC_AUTH_TOKEN").ok().as_deref(),
-    ) {
-        Ok(a) => match &a {
-            archon_llm::auth::AuthProvider::OAuthToken(creds) => {
-                tracing::info!(
-                    "authenticated via OAuth (subscription: {})",
-                    creds.subscription_type
-                );
-                if creds.is_expired() {
-                    tracing::warn!("OAuth token is expired, attempting refresh...");
-                    let http = reqwest::Client::new();
-                    let cred_path = archon_llm::tokens::credentials_path();
-                    match archon_llm::tokens::refresh_if_needed(&cred_path, &http).await {
-                        Ok(refreshed) => {
-                            tracing::info!("OAuth token refreshed successfully");
-                            archon_llm::auth::AuthProvider::OAuthToken(refreshed)
-                        }
-                        Err(e) => {
-                            eprintln!("Token refresh failed: {e}");
-                            eprintln!("Run `archon login` to re-authenticate.");
-                            std::process::exit(1);
+    let (provider_override, anthropic_client, btw_context, session_api_url, prompt_identity) =
+        if is_codex_session(config) {
+            tracing::info!(
+                "LLM provider selected: openai-codex (skipping Anthropic auth bootstrap)"
+            );
+            let prompt_identity = IdentityProvider::new(
+                IdentityMode::Clean,
+                session_id.to_string(),
+                get_or_create_device_id(),
+                String::new(),
+            );
+            (
+                Some(build_codex_session_provider(config).await?),
+                None,
+                None::<(
+                    archon_llm::auth::AuthProvider,
+                    IdentityProvider,
+                    Option<String>,
+                )>,
+                None,
+                prompt_identity,
+            )
+        } else {
+            // ── Resolve Anthropic authentication ─────────────────────
+            let auth = match resolve_auth_with_keys(
+                env_vars.anthropic_api_key.as_deref(),
+                env_vars.archon_api_key.as_deref(),
+                env_vars.archon_oauth_token.as_deref(),
+                std::env::var("ANTHROPIC_AUTH_TOKEN").ok().as_deref(),
+            ) {
+                Ok(a) => match &a {
+                    archon_llm::auth::AuthProvider::OAuthToken(creds) => {
+                        tracing::info!(
+                            "authenticated via OAuth (subscription: {})",
+                            creds.subscription_type
+                        );
+                        if creds.is_expired() {
+                            tracing::warn!("OAuth token is expired, attempting refresh...");
+                            let http = reqwest::Client::new();
+                            let cred_path = archon_llm::tokens::credentials_path();
+                            match archon_llm::tokens::refresh_if_needed(&cred_path, &http).await {
+                                Ok(refreshed) => {
+                                    tracing::info!("OAuth token refreshed successfully");
+                                    archon_llm::auth::AuthProvider::OAuthToken(refreshed)
+                                }
+                                Err(e) => {
+                                    eprintln!("Token refresh failed: {e}");
+                                    eprintln!("Run `archon login` to re-authenticate.");
+                                    std::process::exit(1);
+                                }
+                            }
+                        } else {
+                            a
                         }
                     }
-                } else {
-                    a
+                    archon_llm::auth::AuthProvider::ApiKey(_) => {
+                        tracing::info!("authenticated via API key (fallback)");
+                        a
+                    }
+                    archon_llm::auth::AuthProvider::BearerToken(_) => {
+                        tracing::info!("authenticated via bearer token");
+                        a
+                    }
+                    archon_llm::auth::AuthProvider::CodexOAuthToken(_) => {
+                        tracing::info!("authenticated via Codex OAuth token");
+                        a
+                    }
+                },
+                Err(e) => {
+                    eprintln!("Authentication failed: {e}");
+                    eprintln!("Run `archon login` or set ANTHROPIC_API_KEY.");
+                    std::process::exit(1);
                 }
-            }
-            archon_llm::auth::AuthProvider::ApiKey(_) => {
-                tracing::info!("authenticated via API key (fallback)");
-                a
-            }
-            archon_llm::auth::AuthProvider::BearerToken(_) => {
-                tracing::info!("authenticated via bearer token");
-                a
-            }
-            archon_llm::auth::AuthProvider::CodexOAuthToken(_) => {
-                tracing::info!("authenticated via Codex OAuth token");
-                a
-            }
-        },
-        Err(e) => {
-            eprintln!("Authentication failed: {e}");
-            eprintln!("Run `archon login` or set ANTHROPIC_API_KEY.");
-            std::process::exit(1);
-        }
-    };
+            };
 
-    // Build identity provider
-    let device_id = get_or_create_device_id();
-    let identity_mode =
-        resolve_identity_mode(&auth, cli.identity_spoof, &config.identity.as_view());
+            let device_id = get_or_create_device_id();
+            let identity_mode =
+                resolve_identity_mode(&auth, cli.identity_spoof, &config.identity.as_view());
 
-    tracing::debug!(
-        "Identity mode: {}",
-        match &identity_mode {
-            IdentityMode::Clean => "clean",
-            IdentityMode::Spoof { .. } => "spoof",
-            IdentityMode::Custom { .. } => "custom",
-        }
-    );
-
-    // Fetch account_uuid from OAuth profile
-    let account_uuid = fetch_account_uuid(&auth).await;
-
-    let identity = IdentityProvider::new(
-        identity_mode,
-        session_id.to_string(),
-        device_id,
-        account_uuid,
-    );
-
-    // Resolve API base URL: env var > config > hardcoded default (inside AnthropicClient::new)
-    let api_url = std::env::var("ANTHROPIC_BASE_URL")
-        .ok()
-        .or_else(|| config.api.base_url.clone());
-
-    // Create API client (clone auth/identity for /btw side questions)
-    let btw_auth = auth.clone();
-    let btw_identity = identity.clone();
-    let api_client = AnthropicClient::new(auth, identity.clone(), api_url.clone());
-
-    // In spoof mode without explicit betas: background-discover and validate betas for next startup.
-    // We spawn this AFTER building the client so the probe uses the same auth.
-    // The current session uses the betas already resolved above; the validated cache will be
-    // used on the NEXT startup, ensuring the probe never blocks interactive startup.
-    if matches!(identity.mode, IdentityMode::Spoof { .. }) && config.identity.spoof_betas.is_none()
-    {
-        let client_for_discovery = api_client.clone();
-        tokio::spawn(async move {
-            let validated = resolve_and_validate_betas(&client_for_discovery, None).await;
-            tracing::info!(
-                "Background beta discovery complete: {} betas validated",
-                validated.len()
+            tracing::debug!(
+                "Identity mode: {}",
+                match &identity_mode {
+                    IdentityMode::Clean => "clean",
+                    IdentityMode::Spoof { .. } => "spoof",
+                    IdentityMode::Custom { .. } => "custom",
+                }
             );
-        });
-    }
+
+            let account_uuid = fetch_account_uuid(&auth).await;
+            let identity = IdentityProvider::new(
+                identity_mode,
+                session_id.to_string(),
+                device_id,
+                account_uuid,
+            );
+            let api_url = std::env::var("ANTHROPIC_BASE_URL")
+                .ok()
+                .or_else(|| config.api.base_url.clone());
+
+            let btw_context = Some((auth.clone(), identity.clone(), api_url.clone()));
+            let session_api_url = api_url.clone();
+            let api_client = AnthropicClient::new(auth, identity.clone(), api_url);
+
+            if matches!(identity.mode, IdentityMode::Spoof { .. })
+                && config.identity.spoof_betas.is_none()
+            {
+                let client_for_discovery = api_client.clone();
+                tokio::spawn(async move {
+                    let validated = resolve_and_validate_betas(&client_for_discovery, None).await;
+                    tracing::info!(
+                        "Background beta discovery complete: {} betas validated",
+                        validated.len()
+                    );
+                });
+            }
+
+            (
+                None,
+                Some(api_client),
+                btw_context,
+                session_api_url,
+                identity,
+            )
+        };
 
     // Build tool registry and get tool definitions for API
     let leann_index = init_leann_index(&working_dir);
@@ -1267,13 +1401,14 @@ pub(crate) async fn run_interactive_session(
     let git_info = archon_core::git::detect_git_info(&working_dir);
     let git_branch = git_info.as_ref().map(|g| g.branch.as_str());
     let env_section = build_environment_section(&working_dir, git_branch);
+    let active_model = active_session_model(config);
 
     // Register this session in the session store
     if let Err(e) = session_store.register_session(
         session_id,
         &working_dir.display().to_string(),
         git_branch,
-        &config.api.default_model,
+        &active_model,
     ) {
         tracing::warn!("failed to register session: {e}");
     }
@@ -1288,7 +1423,7 @@ pub(crate) async fn run_interactive_session(
     }
 
     // Build identity blocks as a text string for the assembler
-    let identity_blocks = identity.system_prompt_blocks("", &archon_md, &env_section);
+    let identity_blocks = prompt_identity.system_prompt_blocks("", &archon_md, &env_section);
     let identity_text = identity_blocks
         .iter()
         .filter_map(|b| b.get("text").and_then(|v| v.as_str()))
@@ -1474,7 +1609,7 @@ pub(crate) async fn run_interactive_session(
 
     // Build agent config with shared fast_mode + effort state (GAP 3 & 4)
     let mut agent_config = AgentConfig {
-        model: config.api.default_model.clone(),
+        model: active_model.clone(),
         max_tokens: config.api.thinking_budget,
         thinking_budget: config.api.thinking_budget,
         system_prompt,
@@ -1493,6 +1628,7 @@ pub(crate) async fn run_interactive_session(
         sandbox: Some(std::sync::Arc::new(
             archon_tui::sandbox::SharedSandboxFlag::with_flag(sandbox_flag.clone()),
         )),
+        activity_sink: session_activity_sink(session_id),
     };
 
     // Apply agent execution config overrides
@@ -1543,22 +1679,11 @@ pub(crate) async fn run_interactive_session(
     // Create channels
     let (agent_event_tx, mut agent_event_rx) =
         tokio::sync::mpsc::unbounded_channel::<TimestampedEvent>();
-    // TASK-SESSION-LOOP-EXTRACT (A-2): TuiEvent channel flipped to
-    // `UnboundedSender<TuiEvent>`. This is the final Send-bound
-    // holdout that blocked `archon-cli-workspace` bin builds on CI —
-    // rustc's HRTB check could not prove `for<'a> &'a Sender<T>: Send`
-    // across await suspension for the ~45 `&Sender<TuiEvent>` borrows
-    // held across `.await` in `session_loop::run_session_loop`
-    // (rust-lang/rust#102211). `UnboundedSender::send` is synchronous,
-    // so no `&Sender` is held across any `.await` — Send is trivially
-    // satisfied. Rationale: (1) consistency with `AgentEvent` which
-    // is already `UnboundedSender` (spawn-everything philosophy,
-    // PRD-2 D10); (2) OBS-914 10k events/sec load test never showed
-    // `TuiEvent` saturation — local CLI + <1ms render = no realistic
-    // producer-faster-than-consumer scenario. Follow-up #218
-    // TUI-EVENT-BACKPRESSURE-MONITORING will add runtime channel-depth
-    // metrics via the existing ChannelMetrics infra (OBS-901).
-    let (tui_event_tx, tui_event_rx) = tokio::sync::mpsc::unbounded_channel::<TuiEvent>();
+    // The producer-facing TuiEvent channel is bounded but still exposes a
+    // synchronous send() API. This preserves the no-await Send-bound fix while
+    // preventing a slow render loop from accumulating unbounded RSS.
+    let (tui_event_tx, tui_event_rx) = archon_tui::event_channel::bounded_tui_event_channel();
+    agent_config.activity_sink = session_activity_sink_with_tui(session_id, tui_event_tx.clone());
 
     // TASK #218 TUI-EVENT-BACKPRESSURE-MONITORING: spawn a periodic stall
     // detector. Drain counter + last-drain timestamp updated at the
@@ -1586,7 +1711,17 @@ pub(crate) async fn run_interactive_session(
     let (user_input_tx, user_input_rx) = tokio::sync::mpsc::channel::<String>(16);
 
     // Create agent
-    let provider = build_llm_provider(&config.llm, api_client);
+    let provider = match provider_override {
+        Some(provider) => provider,
+        None => match anthropic_client {
+            Some(client) => build_llm_provider(&config.llm, client),
+            None => {
+                return Err(anyhow::anyhow!(
+                    "missing Anthropic client for session provider"
+                ));
+            }
+        },
+    };
     tracing::info!("LLM provider: {}", provider.name());
 
     // Load custom agent registry (built-in + project + user agents)
@@ -2304,7 +2439,7 @@ pub(crate) async fn run_interactive_session(
         fast_mode_shared: Arc::clone(&fast_mode_shared),
         effort_level_shared: Arc::clone(&effort_level_shared),
         model_override_shared: Arc::clone(&model_override_shared),
-        default_model: config.api.default_model.clone(),
+        default_model: active_model.clone(),
         show_thinking: Arc::clone(&show_thinking),
         session_stats: Arc::clone(&session_stats_shared),
         permission_mode: Arc::clone(&permission_mode_shared),
@@ -2429,8 +2564,6 @@ pub(crate) async fn run_interactive_session(
         agent.set_inner_voice_change_callback(cb);
     }
 
-    // Clone api_url for the btw_tx background task (line ~1683); the spawn below consumes it.
-    let api_url_for_btw = api_url.clone();
     // TASK-TUI-107: old `handle.await`-prior serialization slot deleted.
     // Turn lifecycle now lives in `AgentDispatcher` (constructed below).
     //
@@ -2444,7 +2577,7 @@ pub(crate) async fn run_interactive_session(
     tokio::spawn(crate::session_loop::run_session_loop(
         agent,
         agent_def,
-        api_url,
+        session_api_url,
         input_tui_tx,
         user_input_rx,
         session_store_for_input,
@@ -2502,19 +2635,19 @@ pub(crate) async fn run_interactive_session(
         None
     } else {
         Some(archon_tui::app::SplashConfig {
-            model: config.api.default_model.clone(),
+            model: active_model.clone(),
             working_dir: working_dir.display().to_string(),
             activity,
         })
     };
 
-    // Set up /btw side question channel — uses same auth/identity/model as main agent
+    // Set up /btw side question channel.
     let (btw_tx, mut btw_rx) = tokio::sync::mpsc::channel::<String>(8);
-    {
+    if let Some((btw_auth, btw_identity, api_url_for_btw)) = btw_context {
         let btw_tui_tx = tui_event_tx.clone();
         // Clone the same client the agent uses — same auth, identity, headers
         let btw_client = AnthropicClient::new(btw_auth, btw_identity, api_url_for_btw);
-        let btw_model = config.api.default_model.clone();
+        let btw_model = active_model.clone();
         let btw_max_tokens = config.api.thinking_budget;
         // Use the pre-cloned system prompt so /btw shares the prompt cache
         tokio::spawn(async move {
@@ -2568,6 +2701,15 @@ pub(crate) async fn run_interactive_session(
                         }
                     }
                 });
+            }
+        });
+    } else {
+        let btw_tui_tx = tui_event_tx.clone();
+        tokio::spawn(async move {
+            while btw_rx.recv().await.is_some() {
+                let _ = btw_tui_tx.send(TuiEvent::BtwResponse(
+                    "/btw side questions are not available in Codex-backed sessions yet. Use the main prompt or switch [llm].provider to \"anthropic\".".into(),
+                ));
             }
         });
     }

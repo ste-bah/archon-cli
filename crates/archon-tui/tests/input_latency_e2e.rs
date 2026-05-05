@@ -71,7 +71,7 @@ impl AgentRouter for NoopRouter {
 /// dropped mid-test. Each test owns its own runtime state.
 fn make_cfg() -> (
     EventLoopConfig,
-    mpsc::UnboundedSender<TuiEvent>,
+    archon_tui::event_channel::TuiEventSender,
     mpsc::UnboundedReceiver<TimestampedEvent>,
     Arc<Mutex<Vec<(String, Instant)>>>,
 ) {
@@ -79,7 +79,7 @@ fn make_cfg() -> (
     let runner: Arc<dyn TurnRunner> = Arc::new(TimestampedRunner { log: log.clone() });
     let router: Arc<dyn AgentRouter> = Arc::new(NoopRouter);
 
-    let (tui_event_tx, tui_event_rx) = mpsc::unbounded_channel::<TuiEvent>();
+    let (tui_event_tx, tui_event_rx) = archon_tui::event_channel::bounded_tui_event_channel();
     let (agent_event_tx, agent_event_rx) = mpsc::unbounded_channel::<TimestampedEvent>();
 
     let cfg = EventLoopConfig {

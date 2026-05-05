@@ -169,10 +169,9 @@
 //! handler-unit paths under the sync interface and does NOT invoke the
 //! legacy arm.
 
-use archon_tui::app::TuiEvent;
-
 use crate::command::registry::{CommandContext, CommandEffect, CommandHandler};
 use crate::slash_context::SlashCommandContext;
+use archon_tui::app::TuiEvent;
 
 /// Owned snapshot of the two values the /permissions handler needs from
 /// shared state. Built at the dispatch site (where `.await` is allowed)
@@ -353,8 +352,6 @@ impl CommandHandler for PermissionsHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use archon_tui::app::TuiEvent;
-    use tokio::sync::mpsc;
 
     /// Build a `CommandContext` with a freshly-created channel and an
     /// optional [`PermissionsSnapshot`]. All other optional fields
@@ -362,7 +359,7 @@ mod tests {
     /// add_dir.rs.
     fn make_ctx(
         snapshot: Option<PermissionsSnapshot>,
-    ) -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
+    ) -> (CommandContext, archon_tui::event_channel::TuiEventReceiver) {
         // TASK-AGS-POST-6-SHARED-FIXTURES-V2: migrated to CtxBuilder.
         crate::command::test_support::CtxBuilder::new()
             .with_permissions_snapshot_opt(snapshot)
@@ -370,7 +367,7 @@ mod tests {
     }
 
     /// Drain every event currently pending in the channel.
-    fn drain(rx: &mut mpsc::UnboundedReceiver<TuiEvent>) -> Vec<TuiEvent> {
+    fn drain(rx: &mut archon_tui::event_channel::TuiEventReceiver) -> Vec<TuiEvent> {
         let mut events = Vec::new();
         while let Ok(ev) = rx.try_recv() {
             events.push(ev);

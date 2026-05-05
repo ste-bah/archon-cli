@@ -66,11 +66,11 @@ impl Drop for TerminalGuard {
 ///
 /// # Example
 /// ```ignore
-/// let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+/// let (tx, rx) = archon_tui::event_channel::bounded_tui_event_channel();
 /// install_sigwinch(tx);
 /// ```
 #[cfg(unix)]
-pub fn install_sigwinch(tx: tokio::sync::mpsc::UnboundedSender<TuiEvent>) {
+pub fn install_sigwinch(tx: crate::event_channel::TuiEventSender) {
     tokio::spawn(async move {
         use tokio::signal::unix::Signal;
         use tokio::signal::unix::{SignalKind, signal};
@@ -103,7 +103,7 @@ pub fn install_sigwinch(tx: tokio::sync::mpsc::UnboundedSender<TuiEvent>) {
 /// Windows. Resize events on Windows arrive via `crossterm::event::Event::Resize`
 /// from the input loop, so no signal handler is needed here.
 #[cfg(not(unix))]
-pub fn install_sigwinch(_tx: tokio::sync::mpsc::UnboundedSender<TuiEvent>) {
+pub fn install_sigwinch(_tx: crate::event_channel::TuiEventSender) {
     tracing::debug!("install_sigwinch: skipped on non-Unix (Windows uses crossterm Resize event)");
 }
 

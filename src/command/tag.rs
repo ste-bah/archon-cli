@@ -216,10 +216,7 @@ mod tests {
 
     /// Build a ctx with session_id populated. `make_bug_ctx` returns a
     /// ctx with session_id=None; we need to override.
-    fn ctx_with_session() -> (
-        CommandContext,
-        tokio::sync::mpsc::UnboundedReceiver<TuiEvent>,
-    ) {
+    fn ctx_with_session() -> (CommandContext, archon_tui::event_channel::TuiEventReceiver) {
         let (mut ctx, rx) = make_bug_ctx();
         ctx.session_id = Some("test-session-123".to_string());
         (ctx, rx)

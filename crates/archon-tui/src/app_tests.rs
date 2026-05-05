@@ -81,12 +81,93 @@ fn app_applies_external_agent_activity_update() {
         status: AgentActivityStatus::WaitingForTool,
         current_tool: Some("Read".into()),
         detail: Some("auditing".into()),
+        run_id: Some("run-1".into()),
+        parent_id: Some("parent".into()),
+        artifact_id: Some("artifact-1".into()),
     });
 
     let row = app.agent_activity.first().expect("activity row");
     assert_eq!(row.id, "bg-1");
     assert_eq!(row.role, AgentActivityRole::Background);
     assert_eq!(row.current_tool.as_deref(), Some("Read"));
+    assert_eq!(row.artifact_id.as_deref(), Some("artifact-1"));
+}
+
+#[test]
+fn app_accepts_canonical_activity_event_via_update_bridge() {
+    let mut app = App::new();
+    let update = AgentActivityUpdate::from(
+        archon_observability::AgentActivityEvent::new(
+            "session-1",
+            archon_observability::AgentActivityKind::AgentSpawned,
+            archon_observability::AgentActivityStatus::Running,
+            "spawned explore",
+        )
+        .with_subagent_id("subagent-1")
+        .with_agent_key("explore"),
+    );
+
+    app.on_agent_activity(update);
+
+    let row = app.agent_activity.first().expect("activity row");
+    assert_eq!(row.id, "subagent-1");
+    assert_eq!(row.name, "explore");
+    assert_eq!(row.role, AgentActivityRole::Subagent);
+    assert_eq!(row.status, AgentActivityStatus::Running);
+}
+
+#[test]
+fn app_maps_canonical_activity_statuses_without_collapsing_state() {
+    let cases = [
+        (
+            archon_observability::AgentActivityStatus::Queued,
+            AgentActivityStatus::Queued,
+        ),
+        (
+            archon_observability::AgentActivityStatus::Waiting,
+            AgentActivityStatus::Waiting,
+        ),
+        (
+            archon_observability::AgentActivityStatus::Backgrounded,
+            AgentActivityStatus::Backgrounded,
+        ),
+        (
+            archon_observability::AgentActivityStatus::Cancelled,
+            AgentActivityStatus::Cancelled,
+        ),
+    ];
+
+    for (source, expected) in cases {
+        let update = AgentActivityUpdate::from(
+            archon_observability::AgentActivityEvent::new(
+                "session-1",
+                archon_observability::AgentActivityKind::AgentRunning,
+                source,
+                "state update",
+            )
+            .with_subagent_id(format!("sub-{expected:?}")),
+        );
+        assert_eq!(update.status, expected);
+    }
+}
+
+#[test]
+fn app_keeps_artifact_and_run_metadata_from_canonical_activity() {
+    let update = AgentActivityUpdate::from(
+        archon_observability::AgentActivityEvent::new(
+            "session-1",
+            archon_observability::AgentActivityKind::ArtifactCreated,
+            archon_observability::AgentActivityStatus::Completed,
+            "report ready",
+        )
+        .with_run_id("gt-run-1")
+        .with_parent_id("parent-turn-1")
+        .with_artifact_id("artifact-report-1"),
+    );
+
+    assert_eq!(update.run_id.as_deref(), Some("gt-run-1"));
+    assert_eq!(update.parent_id.as_deref(), Some("parent-turn-1"));
+    assert_eq!(update.artifact_id.as_deref(), Some("artifact-report-1"));
 }
 
 #[test]

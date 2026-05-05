@@ -6,9 +6,9 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 
 - [Quick start](getting-started/quick-start.md) — install, authenticate, run your first agent in 5 minutes
 - [Installation](getting-started/installation.md) — full build instructions for macOS, Linux, Windows, WSL2
+- [Codex authentication](getting-started/codex-auth.md) — ChatGPT/Codex OAuth, TUI provider mode, one-shot chat
 - [Project setup](getting-started/project-setup.md) — bootstrap a project with `archon-init.sh` (flags, scenarios, troubleshooting)
 - [First run](getting-started/first-run.md) — what to expect, where data lives, common gotchas
-- [Codex authentication](getting-started/codex-auth.md) — ChatGPT-subscription users: setup, capabilities, kill switch, troubleshooting
 
 ## Architecture
 
@@ -31,11 +31,13 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 
 - [Slash commands](reference/slash-commands.md) — 65 primary commands grouped by purpose
 - [Tools](reference/tools.md) — 43 built-in tools available to agents
-- [Skills](reference/skills.md) — 67 built-in skills (composable command sequences)
+- [Skills](reference/skills.md) — 68 built-in skills (composable command sequences)
 - [Permissions](reference/permissions.md) — 7 permission modes, rule lists, sandboxing
 - [Configuration](reference/config.md) — `config.toml` schema, precedence, every section
 - [CLI flags](reference/cli-flags.md) — every command-line argument
 - [Environment variables](reference/env-vars.md) — `ARCHON_*` overrides
+- [Provider capabilities](generated/provider-capabilities.md) — generated Anthropic/Codex surface-support matrix
+- [Command surface matrix](generated/command-surface-matrix.md) — generated CLI/slash/TUI parity matrix
 
 ## Integrations
 

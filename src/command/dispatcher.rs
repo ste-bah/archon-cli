@@ -158,7 +158,7 @@ mod tests {
     /// Build a fresh `CommandContext` backed by a bounded channel the
     /// test can drain via `try_recv`. Capacity of 8 matches the real
     /// input pipeline order of magnitude while leaving headroom.
-    fn make_ctx() -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
+    fn make_ctx() -> (CommandContext, archon_tui::event_channel::TuiEventReceiver) {
         // TASK-AGS-POST-6-SHARED-FIXTURES-V2: migrated to CtxBuilder.
         // The builder uses capacity 16 (was 8); dispatcher tests emit
         // at most a handful of events, so observational behavior is
@@ -637,7 +637,7 @@ mod tests {
     /// dispatch so handler-emitted events do not leak into the next
     /// iteration.
     fn drain_events(
-        rx: &mut mpsc::UnboundedReceiver<archon_tui::app::TuiEvent>,
+        rx: &mut archon_tui::event_channel::TuiEventReceiver,
     ) -> Vec<archon_tui::app::TuiEvent> {
         let mut out = Vec::new();
         loop {

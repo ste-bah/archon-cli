@@ -15,7 +15,7 @@ When you type `/foo`, archon first checks the primary registry. If no primary ma
 
 ## Built-in skills (67 total)
 
-21 in `builtin.rs`, 34 in `expanded.rs`, 12 embedded prompt-template skills. Highlights:
+21 in `builtin.rs`, 35 in `expanded.rs`, 12 embedded prompt-template skills. Highlights:
 
 | Skill | Description |
 |---|---|

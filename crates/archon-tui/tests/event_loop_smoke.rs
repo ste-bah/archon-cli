@@ -76,7 +76,7 @@ async fn test_event_loop_user_input_spawns_turn() {
     let runner: Arc<dyn TurnRunner> = Arc::new(MockRunner { log: log.clone() });
     let router: Arc<dyn AgentRouter> = Arc::new(NoopRouter);
 
-    let (tui_event_tx, tui_event_rx) = unbounded_channel::<TuiEvent>();
+    let (tui_event_tx, tui_event_rx) = archon_tui::event_channel::bounded_tui_event_channel();
     let (agent_event_tx, _agent_event_rx) = unbounded_channel::<TimestampedEvent>();
 
     let cfg = EventLoopConfig {
@@ -116,7 +116,7 @@ async fn test_event_loop_cancel_aborts_running_turn() {
     let runner: Arc<dyn TurnRunner> = Arc::new(SlowRunner);
     let router: Arc<dyn AgentRouter> = Arc::new(NoopRouter);
 
-    let (tui_event_tx, tui_event_rx) = unbounded_channel::<TuiEvent>();
+    let (tui_event_tx, tui_event_rx) = archon_tui::event_channel::bounded_tui_event_channel();
     let (agent_event_tx, _agent_event_rx) = unbounded_channel::<TimestampedEvent>();
 
     let cfg = EventLoopConfig {
@@ -165,7 +165,7 @@ async fn test_event_loop_drains_queue_after_completion() {
     let runner: Arc<dyn TurnRunner> = Arc::new(MockRunner { log: log.clone() });
     let router: Arc<dyn AgentRouter> = Arc::new(NoopRouter);
 
-    let (tui_event_tx, tui_event_rx) = unbounded_channel::<TuiEvent>();
+    let (tui_event_tx, tui_event_rx) = archon_tui::event_channel::bounded_tui_event_channel();
     let (agent_event_tx, _agent_event_rx) = unbounded_channel::<TimestampedEvent>();
 
     let cfg = EventLoopConfig {

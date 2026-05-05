@@ -703,6 +703,25 @@ expanded_skill!(
     }
 );
 
+expanded_skill!(
+    RefreshIdentitySkill,
+    "refresh-identity",
+    "Clear Anthropic beta-header cache and re-probe on next request",
+    |_args, _ctx| {
+        match archon_llm::identity::clear_beta_caches() {
+            Ok(paths) if paths.is_empty() => SkillOutput::Text(
+                "No cached Anthropic beta headers were present. The next Anthropic request will probe normally."
+                    .to_string(),
+            ),
+            Ok(paths) => SkillOutput::Text(format!(
+                "Cleared {} Anthropic beta-header cache file(s). The next Anthropic request will re-probe accepted headers.",
+                paths.len()
+            )),
+            Err(err) => SkillOutput::Error(format!("Failed to clear identity cache: {err}")),
+        }
+    }
+);
+
 // ---------------------------------------------------------------------------
 // Auth
 // ---------------------------------------------------------------------------
@@ -774,6 +793,7 @@ pub fn register_expanded_skills(registry: &mut SkillRegistry) {
     registry.register(Box::new(ReleaseNotesSkill));
     registry.register(Box::new(ScheduleSkill));
     registry.register(Box::new(RemoteControlSkill));
+    registry.register(Box::new(RefreshIdentitySkill));
 
     // Meta
     registry.register(Box::new(BugSkill));

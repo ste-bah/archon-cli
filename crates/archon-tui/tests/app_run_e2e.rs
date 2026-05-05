@@ -63,7 +63,7 @@ async fn app_run_drives_session_end_to_end() {
     // events from event_rx and forwards user input on input_tx.
     // We don't drive input_tx in this test — the legacy run_tui path
     // doesn't process UserInput from the channel.
-    let (event_tx, event_rx) = mpsc::unbounded_channel::<TuiEvent>();
+    let (event_tx, event_rx) = archon_tui::event_channel::bounded_tui_event_channel();
     let (input_tx, _input_rx) = mpsc::channel::<String>(16);
 
     // The assistant response the TUI will render. Shape matches

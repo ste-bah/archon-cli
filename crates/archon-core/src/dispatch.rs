@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use archon_observability::{AgentActivityEvent, AgentActivityKind, AgentActivityStatus};
 use archon_tools::plan_mode::is_tool_allowed_in_mode;
 use archon_tools::tool::{Tool, ToolContext, ToolResult};
 
@@ -89,6 +90,12 @@ impl ToolRegistry {
         if let Some(ref backend) = ctx.sandbox
             && let Err(reason) = backend.check(tool_name, &input)
         {
+            emit_tool_activity(
+                ctx,
+                tool_name,
+                AgentActivityKind::ToolFailed,
+                AgentActivityStatus::Failed,
+            );
             return ToolResult::error(reason);
         }
 
@@ -110,6 +117,12 @@ impl ToolRegistry {
                     "failed to append intercepted tool call to plan file"
                 );
             }
+            emit_tool_activity(
+                ctx,
+                tool_name,
+                AgentActivityKind::ToolFailed,
+                AgentActivityStatus::Failed,
+            );
             return ToolResult::error(format!(
                 "Tool '{tool_name}' is not available in plan mode. Only read-only tools are allowed. \
                  The call has been queued in the plan file for review — use `/plan` to view or `/plan open` to edit."
@@ -120,6 +133,12 @@ impl ToolRegistry {
         let tool = match self.get(tool_name) {
             Some(t) => t,
             None => {
+                emit_tool_activity(
+                    ctx,
+                    tool_name,
+                    AgentActivityKind::ToolFailed,
+                    AgentActivityStatus::Failed,
+                );
                 return ToolResult::error(format!(
                     "Unknown tool: '{tool_name}'. Available tools: {}",
                     self.tool_names().join(", ")
@@ -128,7 +147,45 @@ impl ToolRegistry {
         };
 
         // Execute
-        tool.execute(input, ctx).await
+        emit_tool_activity(
+            ctx,
+            tool_name,
+            AgentActivityKind::ToolStarted,
+            AgentActivityStatus::Running,
+        );
+        let result = tool.execute(input, ctx).await;
+        if result.is_error {
+            emit_tool_activity(
+                ctx,
+                tool_name,
+                AgentActivityKind::ToolFailed,
+                AgentActivityStatus::Failed,
+            );
+        } else {
+            emit_tool_activity(
+                ctx,
+                tool_name,
+                AgentActivityKind::ToolCompleted,
+                AgentActivityStatus::Completed,
+            );
+        }
+        result
+    }
+}
+
+pub(crate) fn emit_tool_activity(
+    ctx: &ToolContext,
+    tool_name: &str,
+    kind: AgentActivityKind,
+    status: AgentActivityStatus,
+) {
+    if let Some(sink) = &ctx.activity_sink {
+        sink.emit(AgentActivityEvent::new(
+            ctx.session_id.clone(),
+            kind,
+            status,
+            tool_name.to_string(),
+        ));
     }
 }
 
@@ -286,6 +343,7 @@ pub fn create_default_registry(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use archon_observability::{AgentActivityKind, InMemoryActivitySink};
     use archon_tools::tool::AgentMode;
 
     #[test]
@@ -426,6 +484,58 @@ mod tests {
         }
     }
 
+    #[test]
+    fn docs_do_not_reference_unknown_tools() {
+        let documented = documented_tool_names();
+        let registry = create_default_registry(std::env::temp_dir(), None);
+        let mut registered: std::collections::HashSet<String> = registry
+            .tool_names()
+            .into_iter()
+            .map(str::to_string)
+            .collect();
+
+        // Session-wired tools need runtime dependencies (the memory graph);
+        // they are still real tools and are registered by src/session.rs.
+        registered.insert("memory_store".to_string());
+        registered.insert("memory_recall".to_string());
+
+        // LEANN tools are conditional because they require an available index
+        // at startup. The docs explicitly mark them as conditional.
+        let conditional = ["LeannSearch", "LeannFindSimilar"];
+
+        let unknown: Vec<_> = documented
+            .into_iter()
+            .filter(|name| !registered.contains(name) && !conditional.contains(&name.as_str()))
+            .collect();
+
+        assert!(
+            unknown.is_empty(),
+            "docs/reference/tools.md references unknown tools: {unknown:?}"
+        );
+    }
+
+    fn documented_tool_names() -> Vec<String> {
+        let path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/reference/tools.md");
+        let markdown = std::fs::read_to_string(path).expect("tool docs exist");
+
+        markdown
+            .lines()
+            .filter_map(|line| {
+                let trimmed = line.trim();
+                if !trimmed.starts_with("| `") {
+                    return None;
+                }
+                let cell = trimmed.split('|').nth(1)?;
+                let start = cell.find('`')? + 1;
+                let rest = &cell[start..];
+                let end = rest.find('`')?;
+                Some(rest[..end].to_string())
+            })
+            .filter(|name| name != "Tool")
+            .collect()
+    }
+
     #[tokio::test]
     async fn dispatch_unknown_tool_returns_error() {
         let registry = create_default_registry(std::env::temp_dir(), None);
@@ -443,6 +553,74 @@ mod tests {
 
         assert!(result.is_error);
         assert!(result.content.contains("Unknown tool"));
+    }
+
+    #[tokio::test]
+    async fn dispatch_success_emits_started_and_completed_activity() {
+        let mut registry = ToolRegistry::new();
+        registry.register(Box::new(ActivityTestTool::success("ActivityEcho")));
+        let sink = Arc::new(InMemoryActivitySink::new());
+        let ctx = activity_ctx(sink.clone());
+
+        let result = registry
+            .dispatch("ActivityEcho", serde_json::json!({}), &ctx)
+            .await;
+
+        assert!(!result.is_error);
+        let events = sink.events();
+        let kinds: Vec<_> = events.iter().map(|event| event.kind).collect();
+        assert_eq!(
+            kinds,
+            vec![
+                AgentActivityKind::ToolStarted,
+                AgentActivityKind::ToolCompleted
+            ]
+        );
+        assert!(events.iter().all(|event| event.message == "ActivityEcho"));
+        assert!(
+            events
+                .iter()
+                .all(|event| event.session_id == "activity-test")
+        );
+    }
+
+    #[tokio::test]
+    async fn dispatch_tool_error_emits_started_and_failed_activity() {
+        let mut registry = ToolRegistry::new();
+        registry.register(Box::new(ActivityTestTool::failure("ActivityFail")));
+        let sink = Arc::new(InMemoryActivitySink::new());
+        let ctx = activity_ctx(sink.clone());
+
+        let result = registry
+            .dispatch("ActivityFail", serde_json::json!({}), &ctx)
+            .await;
+
+        assert!(result.is_error);
+        let kinds: Vec<_> = sink.events().iter().map(|event| event.kind).collect();
+        assert_eq!(
+            kinds,
+            vec![
+                AgentActivityKind::ToolStarted,
+                AgentActivityKind::ToolFailed
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn dispatch_unknown_tool_emits_failed_activity() {
+        let registry = ToolRegistry::new();
+        let sink = Arc::new(InMemoryActivitySink::new());
+        let ctx = activity_ctx(sink.clone());
+
+        let result = registry
+            .dispatch("MissingActivityTool", serde_json::json!({}), &ctx)
+            .await;
+
+        assert!(result.is_error);
+        let events = sink.events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, AgentActivityKind::ToolFailed);
+        assert_eq!(events[0].message, "MissingActivityTool");
     }
 
     #[test]
@@ -507,5 +685,65 @@ mod tests {
 
         assert!(result.is_error);
         assert!(result.content.contains("plan mode"));
+    }
+
+    fn activity_ctx(sink: Arc<InMemoryActivitySink>) -> ToolContext {
+        ToolContext {
+            working_dir: std::env::temp_dir(),
+            session_id: "activity-test".to_string(),
+            activity_sink: Some(sink),
+            ..Default::default()
+        }
+    }
+
+    struct ActivityTestTool {
+        name: &'static str,
+        succeeds: bool,
+    }
+
+    impl ActivityTestTool {
+        fn success(name: &'static str) -> Self {
+            Self {
+                name,
+                succeeds: true,
+            }
+        }
+
+        fn failure(name: &'static str) -> Self {
+            Self {
+                name,
+                succeeds: false,
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl Tool for ActivityTestTool {
+        fn name(&self) -> &str {
+            self.name
+        }
+
+        fn description(&self) -> &str {
+            "activity test tool"
+        }
+
+        fn input_schema(&self) -> serde_json::Value {
+            serde_json::json!({ "type": "object" })
+        }
+
+        async fn execute(&self, _input: serde_json::Value, _ctx: &ToolContext) -> ToolResult {
+            if self.succeeds {
+                ToolResult::success("ok")
+            } else {
+                ToolResult::error("failed")
+            }
+        }
+
+        fn permission_level(
+            &self,
+            _input: &serde_json::Value,
+        ) -> archon_tools::tool::PermissionLevel {
+            archon_tools::tool::PermissionLevel::Safe
+        }
     }
 }

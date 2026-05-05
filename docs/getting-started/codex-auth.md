@@ -10,12 +10,14 @@ Setup guide for users with a ChatGPT subscription who want to route some of thei
 |---|---|---|
 | `/chat --provider openai-codex` | ✅ supported | Single-turn prompt, streaming or `--no-stream` response |
 | `archon chat --provider openai-codex` | ✅ supported | Same as the slash form, run from a shell |
-| `archon` (interactive TUI session) | ❌ Anthropic only | The conversational session uses the Anthropic Messages API |
+| `archon` (interactive TUI session) | ✅ supported when `[llm].provider = "openai-codex"` | The main conversational session uses Codex OAuth instead of Anthropic OAuth |
 | `/archon-code` and `/archon-research` | ❌ Anthropic only | Multi-agent pipelines route through Anthropic |
 | `/gametheory`, `/team`, `/run-agent` | ❌ Anthropic only | All multi-agent surfaces |
 | `archon auth login/status/logout --provider openai-codex` | ✅ supported | Manage the credential lifecycle |
 
-In short: **Codex is currently a one-shot chat surface.** The full archon-cli experience (interactive TUI, multi-agent pipelines, agent-callable tools) requires Anthropic credentials. You can keep both sets of credentials on the same machine and use Codex for the specific tasks where you want to spend ChatGPT-subscription quota instead of Anthropic quota.
+In short: **Codex can back the main interactive TUI and one-shot chat surfaces.** Multi-agent pipelines and agent-callable tool surfaces still require Anthropic credentials today. You can keep both sets of credentials on the same machine and choose the provider per surface.
+
+For the generated source-of-truth matrix, run `archon providers capabilities` or `/providers capabilities`, or read [Provider capabilities](../generated/provider-capabilities.md).
 
 ## Prerequisites
 
@@ -137,7 +139,29 @@ Flags:
 | `--no-stream` | streaming on | Print the full response after completion instead of streaming. |
 | `--max-tokens` | `1024` | Maximum output tokens for this single turn. |
 
-The `chat` surface is intentionally minimal: one user prompt → one assistant response, no session history, no tool use, no agents. For richer interaction, drop into the full TUI (`archon`) — that path uses the Anthropic Messages API.
+The `chat` surface is intentionally minimal: one user prompt → one assistant response, no session history, no tool use, no agents. For richer interaction, drop into the full TUI (`archon`) and choose the backing provider with `[llm].provider`.
+
+## Use Codex for the full TUI session
+
+To make the main interactive TUI use Codex, set the session provider in `config.toml`:
+
+```toml
+[llm]
+provider = "openai-codex"
+
+[api]
+default_model = "gpt-5.4"
+```
+
+Then start Archon normally:
+
+```bash
+archon
+```
+
+In this mode Archon skips the Anthropic auth bootstrap and builds the session agent from the stored `openaiCodexOauth` credentials. If `default_model` is still a Claude-shaped value, Archon automatically uses `gpt-5.4` for the Codex-backed session.
+
+Current limitation: `/btw` side questions are Anthropic-only. In Codex-backed sessions, use the main prompt for side questions or switch `[llm].provider` back to `"anthropic"`.
 
 ## Logout
 

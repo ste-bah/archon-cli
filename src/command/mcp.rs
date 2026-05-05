@@ -60,10 +60,9 @@
 //! `TASK-AGS-811.md` does not list any new aliases either. `aliases()`
 //! returns `&[]`. No drift to reconcile.
 
-use archon_tui::app::TuiEvent;
-
 use crate::command::registry::{CommandContext, CommandHandler};
 use crate::slash_context::SlashCommandContext;
+use archon_tui::app::TuiEvent;
 
 /// Owned snapshot of every value the /mcp body reads from shared state.
 /// Built at the dispatch site (where `.await` is allowed) and threaded
@@ -196,7 +195,6 @@ impl CommandHandler for McpHandler {
 mod tests {
     use super::*;
     use archon_tui::app::{McpServerEntry, TuiEvent};
-    use tokio::sync::mpsc;
 
     /// Minimal fixture snapshot with one Ready server and one Disabled
     /// server. Values are chosen so the round-trip through the event
@@ -231,7 +229,7 @@ mod tests {
     /// `Some(McpSnapshot { .. })`.
     fn make_ctx(
         snapshot: Option<McpSnapshot>,
-    ) -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
+    ) -> (CommandContext, archon_tui::event_channel::TuiEventReceiver) {
         // TASK-AGS-POST-6-SHARED-FIXTURES-V2: migrated to CtxBuilder.
         crate::command::test_support::CtxBuilder::new()
             .with_mcp_snapshot_opt(snapshot)

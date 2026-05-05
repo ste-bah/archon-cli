@@ -55,6 +55,10 @@ tokio = { workspace = true }
 # pre-LIFT archon_core::logging::LoggingError surface).
 tracing-appender = { workspace = true }
 thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
 
 [dev-dependencies]
 # tests/tracing_smoke.rs installs a local subscriber via

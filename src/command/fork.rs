@@ -68,9 +68,8 @@
 //! `fork_session` (anonymous fork). Single-token args pass through
 //! unchanged.
 
-use archon_tui::app::TuiEvent;
-
 use crate::command::registry::{CommandContext, CommandHandler};
+use archon_tui::app::TuiEvent;
 
 /// Zero-sized handler registered as the primary `/fork` command.
 ///
@@ -150,8 +149,6 @@ impl CommandHandler for ForkHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use archon_tui::app::TuiEvent;
-    use tokio::sync::mpsc;
 
     /// Build a `CommandContext` with a freshly-created channel and the
     /// supplied `session_id`. Mirrors the `make_ctx` fixtures in
@@ -160,7 +157,9 @@ mod tests {
     /// Every optional field other than `session_id` stays `None`:
     /// `/fork` is a DIRECT-pattern handler and does not consume any
     /// of the typed snapshots.
-    fn make_ctx(session_id: Option<String>) -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
+    fn make_ctx(
+        session_id: Option<String>,
+    ) -> (CommandContext, archon_tui::event_channel::TuiEventReceiver) {
         // TASK-AGS-POST-6-SHARED-FIXTURES-V2: migrated to CtxBuilder.
         crate::command::test_support::CtxBuilder::new()
             .with_session_id_opt(session_id)

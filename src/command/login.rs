@@ -113,10 +113,9 @@
 //! both symbols side-by-side; no rename / remove / duplicate-code
 //! concern.
 
-use archon_tui::app::TuiEvent;
-
 use crate::Result;
 use crate::command::registry::{CommandContext, CommandHandler};
+use archon_tui::app::TuiEvent;
 
 // ---------------------------------------------------------------------------
 // Pre-existing CLI `archon login` entry point (TUI-325). Untouched by B22.
@@ -245,9 +244,6 @@ mod tests {
     use super::*;
     use std::sync::{Arc, Mutex};
 
-    use archon_tui::app::TuiEvent;
-    use tokio::sync::mpsc;
-
     use crate::command::dispatcher::Dispatcher;
     use crate::command::registry::{CommandContext, RegistryBuilder};
 
@@ -304,7 +300,7 @@ mod tests {
     /// snapshot, no effect slot.
     fn make_login_ctx(
         auth_label: Option<String>,
-    ) -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
+    ) -> (CommandContext, archon_tui::event_channel::TuiEventReceiver) {
         // TASK-AGS-POST-6-SHARED-FIXTURES-V2: migrated to CtxBuilder.
         crate::command::test_support::CtxBuilder::new()
             .with_auth_label_opt(auth_label)

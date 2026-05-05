@@ -145,7 +145,7 @@ mod tests {
     /// status_snapshot).
     fn make_release_notes_ctx() -> (
         crate::command::registry::CommandContext,
-        tokio::sync::mpsc::UnboundedReceiver<TuiEvent>,
+        archon_tui::event_channel::TuiEventReceiver,
     ) {
         make_status_ctx(None)
     }

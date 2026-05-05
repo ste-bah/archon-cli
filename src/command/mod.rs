@@ -35,6 +35,8 @@ pub(crate) mod denials;
 pub(crate) mod diff;
 pub(crate) mod dispatcher;
 pub(crate) mod docs;
+#[cfg(test)]
+pub(crate) mod docs_drift;
 pub(crate) mod doctor;
 pub(crate) mod effort;
 pub(crate) mod errors;
@@ -73,6 +75,7 @@ pub(crate) mod model;
 pub(crate) mod parser;
 pub(crate) mod permissions;
 pub(crate) mod pipeline;
+pub(crate) mod provider_gate;
 // TASK-TUI-626: /plan Plan Mode toggle via SNAPSHOT+EFFECT pattern.
 pub(crate) mod plan;
 // TASK-P0-B.3 (#174): plan-file I/O shim (re-exports from archon_core).
@@ -116,6 +119,8 @@ pub(crate) mod session;
 pub(crate) mod skills;
 pub(crate) mod slash;
 pub(crate) mod status;
+#[cfg(test)]
+pub(crate) mod surface_matrix;
 // TASK-#209 SLASH-SUMMARY: /summary one-glance session headline.
 pub(crate) mod summary;
 pub(crate) mod task;

@@ -108,7 +108,6 @@ impl CommandHandler for CompactHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use archon_tui::app::TuiEvent;
     use std::sync::Arc;
     use tokio::sync::mpsc;
 
@@ -119,7 +118,7 @@ mod tests {
     /// /compact is a THIN-WRAPPER handler — no snapshot, no effect
     /// slot, no extra context field — so every optional field stays
     /// `None`. Mirrors the `make_ctx` fixtures in export.rs / voice.rs.
-    fn make_ctx() -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
+    fn make_ctx() -> (CommandContext, archon_tui::event_channel::TuiEventReceiver) {
         // TASK-AGS-POST-6-SHARED-FIXTURES-V2: migrated to CtxBuilder.
         crate::command::test_support::CtxBuilder::new().build()
     }

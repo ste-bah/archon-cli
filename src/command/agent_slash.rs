@@ -433,7 +433,7 @@ mod tests {
         assert!(body.contains("Available agents"));
     }
 
-    fn take_text_delta(rx: &mut tokio::sync::mpsc::UnboundedReceiver<TuiEvent>) -> String {
+    fn take_text_delta(rx: &mut archon_tui::event_channel::TuiEventReceiver) -> String {
         let events = drain_tui_events(rx);
         assert_eq!(events.len(), 1, "expected one TextDelta; got {:?}", events);
         match events.into_iter().next().unwrap() {

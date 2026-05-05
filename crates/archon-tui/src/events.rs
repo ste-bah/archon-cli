@@ -72,10 +72,14 @@ pub enum AgentActivityRole {
 /// Lifecycle state for a parent agent, foreground subagent, or background task.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AgentActivityStatus {
+    Queued,
     Running,
+    Waiting,
     WaitingForTool,
+    Backgrounded,
     Complete,
     Failed,
+    Cancelled,
 }
 
 /// External activity update payload. The App also derives rows from
@@ -89,6 +93,101 @@ pub struct AgentActivityUpdate {
     pub status: AgentActivityStatus,
     pub current_tool: Option<String>,
     pub detail: Option<String>,
+    pub run_id: Option<String>,
+    pub parent_id: Option<String>,
+    pub artifact_id: Option<String>,
+}
+
+impl From<archon_observability::AgentActivityEvent> for AgentActivityUpdate {
+    fn from(event: archon_observability::AgentActivityEvent) -> Self {
+        let role = activity_role(&event);
+        let status = activity_status(&event);
+        let id = activity_id(&event);
+        let name = activity_name(&event, role);
+        let current_tool = match event.kind {
+            archon_observability::AgentActivityKind::ToolStarted
+            | archon_observability::AgentActivityKind::ToolCompleted
+            | archon_observability::AgentActivityKind::ToolFailed => Some(event.message.clone()),
+            _ => None,
+        };
+
+        Self {
+            id,
+            name,
+            role,
+            status,
+            current_tool,
+            detail: Some(event.message),
+            run_id: event.run_id,
+            parent_id: event.parent_id,
+            artifact_id: event.artifact_id,
+        }
+    }
+}
+
+fn activity_role(event: &archon_observability::AgentActivityEvent) -> AgentActivityRole {
+    match event.kind {
+        archon_observability::AgentActivityKind::ParentTurnStarted
+        | archon_observability::AgentActivityKind::ParentTurnCompleted
+        | archon_observability::AgentActivityKind::ToolStarted
+        | archon_observability::AgentActivityKind::ToolCompleted
+        | archon_observability::AgentActivityKind::ToolFailed => AgentActivityRole::Parent,
+        archon_observability::AgentActivityKind::AgentBackgrounded
+        | archon_observability::AgentActivityKind::AgentResumed => AgentActivityRole::Background,
+        _ => AgentActivityRole::Subagent,
+    }
+}
+
+fn activity_status(event: &archon_observability::AgentActivityEvent) -> AgentActivityStatus {
+    match event.kind {
+        archon_observability::AgentActivityKind::ToolStarted => {
+            return AgentActivityStatus::WaitingForTool;
+        }
+        archon_observability::AgentActivityKind::ToolCompleted => {
+            return AgentActivityStatus::Complete;
+        }
+        archon_observability::AgentActivityKind::ToolFailed => {
+            return AgentActivityStatus::Failed;
+        }
+        _ => {}
+    }
+
+    match event.status {
+        archon_observability::AgentActivityStatus::Queued => AgentActivityStatus::Queued,
+        archon_observability::AgentActivityStatus::Running => AgentActivityStatus::Running,
+        archon_observability::AgentActivityStatus::Waiting => AgentActivityStatus::Waiting,
+        archon_observability::AgentActivityStatus::Backgrounded => {
+            AgentActivityStatus::Backgrounded
+        }
+        archon_observability::AgentActivityStatus::Completed => AgentActivityStatus::Complete,
+        archon_observability::AgentActivityStatus::Failed => AgentActivityStatus::Failed,
+        archon_observability::AgentActivityStatus::Cancelled => AgentActivityStatus::Cancelled,
+    }
+}
+
+fn activity_id(event: &archon_observability::AgentActivityEvent) -> String {
+    event
+        .subagent_id
+        .clone()
+        .or_else(|| event.agent_id.clone())
+        .or_else(|| event.run_id.clone())
+        .unwrap_or_else(|| "parent".to_string())
+}
+
+fn activity_name(
+    event: &archon_observability::AgentActivityEvent,
+    role: AgentActivityRole,
+) -> String {
+    event
+        .agent_key
+        .clone()
+        .or_else(|| event.subagent_type.clone())
+        .or_else(|| event.model.clone())
+        .unwrap_or_else(|| match role {
+            AgentActivityRole::Parent => "Parent".to_string(),
+            AgentActivityRole::Subagent => "Subagent".to_string(),
+            AgentActivityRole::Background => "Background".to_string(),
+        })
 }
 
 /// Summary of a conversation message for the /rewind overlay list (TASK-TUI-620).

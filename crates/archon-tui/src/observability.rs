@@ -40,14 +40,12 @@ pub use crate::observability_tracing::{
 //
 // Drain-side counters for the production `tui_event_rx` channel.
 //
-// Bilateral ChannelMetrics instrumentation (sent + drained) for TuiEvent
-// would require wrapping `UnboundedSender<TuiEvent>` across ~100 callsites.
-// That refactor is deferred. The drain-side counter + stall detection below
-// captures the practical concern (consumer falling behind) without touching
-// the sender API. Combined with the existing AgentEvent ChannelMetrics
-// (already bilateral, exposed via /metrics), operators can compare
-// rates: if AgentEvent drained_total grows but TUI drained_total stalls,
-// TuiEvent backpressure is the culprit.
+// `TuiEventSender` now bounds the queue and records dropped events at the
+// producer side. The drain-side counter + stall detection below still captures
+// the other practical concern: the render loop can stop returning to the event
+// drain phase. Combined with the existing AgentEvent ChannelMetrics (already
+// bilateral, exposed via /metrics), operators can compare rates: if AgentEvent
+// drained_total grows but TUI drained_total stalls, rendering is the culprit.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 

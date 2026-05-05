@@ -333,6 +333,7 @@ dependencies = [
  "archon-mcp",
  "archon-meaning",
  "archon-memory",
+ "archon-observability",
  "archon-permissions",
  "archon-pipeline",
  "archon-plugin",
@@ -691,11 +692,14 @@ version = "0.1.43"
 dependencies = [
  "anyhow",
  "axum",
+ "chrono",
  "hdrhistogram",
  "once_cell",
  "parking_lot",
  "regex",
  "reqwest 0.12.28",
+ "serde",
+ "serde_json",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
@@ -703,6 +707,7 @@ dependencies = [
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]
@@ -856,6 +861,7 @@ dependencies = [
  "anyhow",
  "archon-leann",
  "archon-memory",
+ "archon-observability",
  "archon-permissions",
  "async-lsp",
  "async-trait",

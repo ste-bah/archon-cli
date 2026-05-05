@@ -611,12 +611,10 @@ pub struct CommandContext {
     /// TUI event sink for text deltas, errors, and state change
     /// notifications.
     ///
-    /// TASK-SESSION-LOOP-EXTRACT (A-2): flipped from bounded
-    /// `Sender<TuiEvent>` to `UnboundedSender<TuiEvent>`. Handlers
-    /// now call `tui_tx.send(event)` synchronously (no `.await`,
-    /// no `try_send` fallback). See `session.rs:1414` for the full
-    /// rationale.
-    pub(crate) tui_tx: tokio::sync::mpsc::UnboundedSender<TuiEvent>,
+    /// Bounded sender with a synchronous `send(event)` API. This keeps sync
+    /// slash handlers simple while preventing unbounded queue growth when the
+    /// render loop falls behind.
+    pub(crate) tui_tx: archon_tui::event_channel::TuiEventSender,
     /// TASK-AGS-807 snapshot-pattern field.
     ///
     /// Populated by `build_command_context` for `/status` (and its
@@ -1024,26 +1022,18 @@ pub struct CommandContext {
     pub(crate) agent_dispatcher: Option<Arc<std::sync::Mutex<archon_tui::AgentDispatcher>>>,
 }
 
-// TASK-AGS-POST-6-TRY-SEND: wraps `tui_tx.try_send` at every handler
-// call site so the copy-paste `let _ = ctx.tui_tx.try_send(...)` pattern
-// collapses to `ctx.emit(...)` while also distinguishing `Full` (warn —
-// benign backpressure on the 256-slot prod buffer) from `Closed`
-// (error — the TUI receiver task has died). Happy-path delivery is
-// byte-identical to the shipped `let _ = try_send(...)` behavior.
+// Wraps `tui_tx.send` at handler call sites so the copy-paste
+// `let _ = ctx.tui_tx.send(...)` pattern collapses to `ctx.emit(...)`.
+// Saturation is handled inside the bounded sender by progress-event shedding;
+// the only error surfaced here is receiver shutdown.
 impl CommandContext {
     /// Deliver a [`TuiEvent`] to the TUI channel. Logs on failure;
     /// never panics.
     ///
-    /// TASK-SESSION-LOOP-EXTRACT (A-2): semantics updated for the
-    /// unbounded channel flip. The method name stays `emit` for call-
-    /// site stability. `UnboundedSender::send` is synchronous (no
-    /// `.await`), so the method body is still safe to call from sync
-    /// `CommandHandler::execute`. The only remaining failure mode is
-    /// `SendError` (channel closed) — the former `TrySendError::Full`
-    /// (buffer saturated) cannot occur for an unbounded channel. The
-    /// "event dropped" warn is therefore gone; a closed channel still
-    /// emits the operator-visible error trace. See `session.rs:1414`
-    /// for the full rationale.
+    /// `TuiEventSender::send` is synchronous (no `.await`), so the method body
+    /// is safe to call from sync `CommandHandler::execute`. Saturation is
+    /// handled inside the bounded channel; a closed channel still emits the
+    /// operator-visible error trace.
     pub(crate) fn emit(&self, event: TuiEvent) {
         if self.tui_tx.send(event).is_err() {
             tracing::error!(
@@ -3095,7 +3085,7 @@ mod tests {
     /// is `None` — emit() only touches `tui_tx`, so the other fields
     /// are irrelevant and kept uninitialized to avoid dragging in
     /// archon-memory / archon-core fixture deps.
-    fn make_emit_test_ctx(tui_tx: tokio::sync::mpsc::UnboundedSender<TuiEvent>) -> CommandContext {
+    fn make_emit_test_ctx(tui_tx: archon_tui::event_channel::TuiEventSender) -> CommandContext {
         CommandContext {
             tui_tx,
             status_snapshot: None,
@@ -3143,7 +3133,7 @@ mod tests {
     /// subsequent `try_recv` observes it byte-equivalent.
     #[test]
     fn emit_happy_path_delivers_event() {
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<TuiEvent>();
+        let (tx, mut rx) = archon_tui::event_channel::bounded_tui_event_channel();
         let ctx = make_emit_test_ctx(tx);
 
         ctx.emit(TuiEvent::TextDelta("hello".to_string()));
@@ -3166,7 +3156,7 @@ mod tests {
     /// Must not panic; event is silently dropped (tracing::error! only).
     #[test]
     fn emit_closed_channel_errors_and_does_not_panic() {
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<TuiEvent>();
+        let (tx, rx) = archon_tui::event_channel::bounded_tui_event_channel();
         drop(rx);
         let ctx = make_emit_test_ctx(tx);
 

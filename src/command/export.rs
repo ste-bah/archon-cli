@@ -184,9 +184,7 @@ impl CommandHandler for ExportHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use archon_tui::app::TuiEvent;
     use std::sync::{Arc, Mutex};
-    use tokio::sync::mpsc;
 
     /// Build a `CommandContext` with a freshly-created channel and a
     /// freshly-allocated `Arc<std::sync::Mutex<Option<
@@ -195,7 +193,7 @@ mod tests {
     /// `None` — /export does not read any other CommandContext field.
     fn make_ctx() -> (
         CommandContext,
-        mpsc::UnboundedReceiver<TuiEvent>,
+        archon_tui::event_channel::TuiEventReceiver,
         Arc<Mutex<Option<ExportDescriptor>>>,
     ) {
         // TASK-AGS-POST-6-SHARED-FIXTURES-V2: migrated to CtxBuilder.

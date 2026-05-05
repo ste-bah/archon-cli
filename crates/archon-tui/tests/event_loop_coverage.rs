@@ -404,7 +404,7 @@ async fn test_tc_06_sigwinch_reflow_no_frame_drop() {
     let frames: Arc<Mutex<Vec<usize>>> = Arc::new(Mutex::new(Vec::new()));
     let frames_clone = Arc::clone(&frames);
 
-    let (tui_event_tx, tui_event_rx) = unbounded_channel::<archon_tui::app::TuiEvent>();
+    let (tui_event_tx, tui_event_rx) = archon_tui::event_channel::bounded_tui_event_channel();
     let (agent_event_tx, _agent_event_rx) = unbounded_channel::<TimestampedEvent>();
     let runner: Arc<dyn TurnRunner> = Arc::new(StreamRunner::new(frames_clone, 20, 10));
     let router: Arc<dyn AgentRouter> = Arc::new(NoopRouter);

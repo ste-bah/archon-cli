@@ -57,7 +57,7 @@ pub(crate) fn run_session_loop(
     agent: Agent,
     agent_def: Option<archon_core::agents::CustomAgentDefinition>,
     api_url: Option<String>,
-    input_tui_tx: tokio::sync::mpsc::UnboundedSender<TuiEvent>,
+    input_tui_tx: archon_tui::event_channel::TuiEventSender,
     mut user_input_rx: tokio::sync::mpsc::Receiver<String>,
     session_store_for_input: Arc<archon_session::storage::SessionStore>,
     session_id_for_input: String,

@@ -4,7 +4,9 @@ All slash commands work in the interactive TUI. Type `/help` to see them in-app.
 
 As of v0.1.40 the registry contains **78 primary commands** (lockstep-tested at `EXPECTED_COMMAND_COUNT = 78` in `src/command/registry.rs` and `EXPECTED_PRIMARY_COUNT = 78` in `src/command/dispatcher.rs`). Aliases come from each handler's `aliases()` method.
 
-Beyond the 78 primaries, archon-cli ships **67 built-in skills** (33 in `crates/archon-core/src/skills/builtin.rs`, 34 in `expanded.rs`). Skills behave like slash commands but are resolved through the Skill registry — primary handlers take precedence at dispatch time.
+For shell/TUI parity, see the generated [command surface matrix](../generated/command-surface-matrix.md). It is backed by `src/command/surface_matrix.rs` and has tests that fail when registered slash primaries drift.
+
+Beyond the 78 primaries, archon-cli ships **68 built-in skills** (33 in `crates/archon-core/src/skills/builtin.rs`, 35 in `expanded.rs`). Skills behave like slash commands but are resolved through the Skill registry — primary handlers take precedence at dispatch time.
 
 > **Version history.** v0.1.38 added 11 primaries (Evidence Engine: `/kb`, `/prov`, `/meaning`, `/constellation`, plus gametheory inspection subcommands and the slash mirror). v0.1.40 added 2 more (`/auth` and `/chat` for the OpenAI-Codex provider surface).
 
@@ -84,7 +86,7 @@ Beyond the 78 primaries, archon-cli ships **67 built-in skills** (33 in `crates/
 | `/reload` | — | Force configuration reload |
 | `/vim` | — | Toggle vim-style modal input |
 | `/skills` | — | Browse and invoke available skills |
-| `/providers` | — | List registered LLM providers (5 native + 31 OpenAI-compatible) |
+| `/providers` | — | List registered LLM providers; `/providers capabilities` shows Anthropic/Codex surface support; `/providers doctor` runs local diagnostics; `/providers doctor --live` runs opt-in endpoint checks |
 
 ## Infrastructure & resources
 
@@ -105,7 +107,7 @@ Beyond the 78 primaries, archon-cli ships **67 built-in skills** (33 in `crates/
 | `/chat` | — | Single-turn chat against a selected provider: `/chat --provider openai-codex "<prompt>"`. Default provider is `anthropic`. |
 | `/login` | — | Re-authenticate the active Anthropic provider (preserved for backward compatibility — equivalent to `/auth login --provider anthropic`) |
 | `/logout` | — | Sign out the active Anthropic provider (preserved for backward compatibility) |
-| `/providers` | — | List registered LLM providers (5 native + 31 OpenAI-compatible = 36 total) |
+| `/providers` | — | List registered LLM providers; `/providers capabilities` shows the generated Archon surface-support matrix; `/providers doctor` checks local auth state; `/providers doctor --live` adds opt-in endpoint reachability |
 | `/refresh-identity` | — | Clear the `anthropic-beta` header cache and re-probe (skill, not primary) |
 
 See [Codex authentication](../getting-started/codex-auth.md) for the ChatGPT-subscription user setup, and [identity-spoofing.md](../integrations/identity-spoofing.md) for the spoof-mode mechanics.
@@ -161,7 +163,7 @@ These skills compose the PRD → spec → tasks → code arc. Each emits a promp
 
 ## Built-in skills (selected)
 
-67 skills total (33 in `crates/archon-core/src/skills/builtin.rs`, 34 in `expanded.rs`). Highlights:
+68 skills total (33 in `crates/archon-core/src/skills/builtin.rs`, 35 in `expanded.rs`). Highlights:
 
 | Skill | Description |
 |---|---|
