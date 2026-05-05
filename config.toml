@@ -529,11 +529,38 @@ proposal_stale_days = 30
 # Quick reference of the most-asked-about toggles in .archon/policy.toml:
 #
 #   [policy.network]
+#   allow_cloud_vlm = false         # Gemini/Anthropic VLM refuses unless true
 #   allow_web_strategy_agents = true   # Tier 2-12 gametheory specialists may WebSearch/WebFetch
 #   allow_mcp_server_exposure = true   # MCP servers may be invoked by agents
 #
 #   [policy.workers]
+#   vlm = "deny"                    # set "allow-local" for Ollama, "allow-cloud" for Gemini/Anthropic
 #   web_fetch = "allow-local"          # WebFetch tool enabled
+#
+#   [policy.docs.vlm]
+#   enabled = false
+#   mode = "disabled"               # "disabled" | "local" | "cloud" | "hybrid"
+#   provider = "disabled"           # "disabled" | "ollama" | "gemini" | "anthropic"
+#   allow_cloud = false             # second cloud gate; both this and network.allow_cloud_vlm required
+#   require_user_confirmation_for_cloud = true
+#
+#   [policy.docs.vlm.ollama]
+#   endpoint = "http://localhost:11434"
+#   model = "gemma4:e4b"
+#   timeout_secs = 120
+#
+#   [policy.docs.vlm.gemini]
+#   api_key_env = "GOOGLE_API_KEY"
+#   model = "gemini-3-flash-preview"
+#   endpoint_base = "https://generativelanguage.googleapis.com/v1beta"
+#   rpm_limit = 15
+#
+#   [policy.docs.vlm.anthropic]
+#   model = "claude-sonnet-4-6"
+#
+#   [policy.docs.retrieval]
+#   exact_weight = 0.45
+#   semantic_weight = 0.55
 #
 #   [policy.gametheory]
 #   allow_web_tools = true             # gametheory specialists can use WebSearch/WebFetch

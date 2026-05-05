@@ -29,6 +29,9 @@ cargo build --release --bin archon
 ./target/release/archon auth login --provider openai-codex
 ./target/release/archon auth status
 
+# Optional: store a Google Gemini API key for cloud VLM image descriptions
+./target/release/archon auth login --provider google
+
 # Run interactive TUI
 ./target/release/archon
 
@@ -57,7 +60,7 @@ archon-cli is **not affiliated with Anthropic or OpenAI**. It can use an Anthrop
 
 ## Authentication
 
-Archon has two subscription-auth paths plus normal API keys:
+Archon has two subscription-auth paths plus normal API keys. Gemini VLM uses a Google API key, stored in the same credentials file when you choose the guided login:
 
 ```bash
 # Claude / Anthropic OAuth, stored in ~/.archon/.credentials.json
@@ -69,6 +72,9 @@ archon auth login --provider openai-codex
 
 # Inspect both without printing secrets
 archon auth status
+
+# Google Gemini API key for docs VLM
+archon auth login --provider google
 
 # Use Codex explicitly for one-shot chat
 archon chat --provider openai-codex "summarize this repository"
@@ -96,7 +102,7 @@ The docs are organised by user goal:
 | **Architecture** | [`docs/architecture/`](docs/architecture/) — overview, learning systems, pipelines, Evidence Engine diagrams |
 | **Evidence Engine** | [`docs/evidence-engine.md`](docs/evidence-engine.md) — documents, KB, provenance, game theory, completion integrity, governed learning |
 | **Reference** | [`docs/reference/`](docs/reference/) — slash commands, tools, skills, permissions, config schema, CLI flags, env vars |
-| **Integrations** | [`docs/integrations/`](docs/integrations/) — MCP, plugins, hooks, identity spoofing, LSP, IDE extensions |
+| **Integrations** | [`docs/integrations/`](docs/integrations/) — MCP, plugins, hooks, identity spoofing, VLM image descriptions, LSP, IDE extensions |
 | **Cookbook** | [`docs/cookbook/`](docs/cookbook/) — real-world evidence workflows, strategic engagement, memory-driven coding, god-code pipeline, custom agents |
 | **Operations** | [`docs/operations/`](docs/operations/) — sessions, TUI, cost, compaction, cron, remote control, troubleshooting, data locations |
 | **Development** | [`docs/development/`](docs/development/) — contributing, dev flow gates, adding tools/skills/agents, release process |
@@ -139,9 +145,9 @@ archon-cli/
 
 ## Status
 
-- Current version: **v0.1.45** ([release notes](docs/release-notes/v0.1.45.md))
+- Current version: **v0.1.46** ([release notes](docs/release-notes/v0.1.46.md))
 - Active development; pre-1.0 means breaking changes can land in minor versions
-- Phase 6 complete (pipelines + learning systems wired) + Evidence Engine PRD compliance pass + Codex agentic provider parity; see release notes for the v0.1.6 → v0.1.45 stabilisation arc
+- Phase 6 complete (pipelines + learning systems wired) + Evidence Engine PRD compliance pass + Codex agentic provider parity + multi-provider VLM image descriptions; see release notes for the v0.1.6 → v0.1.46 stabilisation arc
 
 ## Contributing
 

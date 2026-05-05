@@ -130,13 +130,26 @@ policy and disabled by default:
 [policy.docs.vlm]
 enabled = false
 mode = "disabled"
+provider = "disabled"
 allow_cloud = false
 require_user_confirmation_for_cloud = true
+
+[policy.docs.vlm.ollama]
+endpoint = "http://localhost:11434"
+model = "gemma4:e4b"
+timeout_secs = 120
+
+[policy.docs.vlm.gemini]
+api_key_env = "GOOGLE_API_KEY"
+model = "gemini-3-flash-preview"
+endpoint_base = "https://generativelanguage.googleapis.com/v1beta"
+rpm_limit = 15
+
+[policy.docs.vlm.anthropic]
+model = "claude-sonnet-4-6"
 ```
 
-If image embeddings require a multimodal local embedding model that is not
-available, ingest should continue with an explicit warning rather than pretending
-image embeddings were produced.
+When enabled, VLM descriptions are stored in `doc_image_descriptions`, chunked into normal `doc_chunks`, and indexed by the existing text embedding backend. If an image embedding model is unavailable, ingest still succeeds; visual search works through the description chunks.
 
 ## Full State Verification
 

@@ -17,12 +17,12 @@ use crate::chunking::{build_chunk_artifacts, chunk_with_page_anchors};
 use crate::errors::DocsError;
 use crate::hash::{sha256_hex, sha256_str};
 use crate::models::{
-    ArtifactRecord, DocumentStatus, OcrRun, OcrStatus, PageArtifact, PageOffset, ProcessingJob,
-    SourceDocument,
+    ArtifactRecord, ChunkArtifact, DocumentStatus, ImageDescription, OcrRun, OcrStatus,
+    PageArtifact, PageOffset, ProcessingJob, ProvenanceEdgeType, SourceDocument,
 };
 use crate::ocr::local::LocalOcrProvider;
 use crate::ocr::provider::{self as ocr_provider, OcrProvider, OcrRequest};
-use crate::provenance::build_doc_lineage_edges;
+use crate::provenance::{build_doc_lineage_edges, make_edge};
 use crate::schema::ensure_doc_schema;
 use crate::store::{self, hash_exists_in_sources};
 use crate::vlm::{self, VlmDescriptionOutcome};
@@ -50,6 +50,7 @@ pub struct IngestResult {
     pub sources_failed: usize,
     pub images_skipped: usize,
     pub image_ocr_completed: usize,
+    pub vlm_descriptions: usize,
     pub warnings: Vec<String>,
     pub errors: Vec<String>,
 }
@@ -338,17 +339,8 @@ async fn run_ingest_pipeline_with_bytes(
         message: e.to_string(),
     })?;
 
-    let mut full_text = extract_result.full_text;
-    let mut page_offsets = extract_result.page_offsets;
-    if is_image_media_type(media_type) {
-        apply_vlm_description(
-            policy,
-            content_bytes,
-            &mut full_text,
-            &mut page_offsets,
-            &mut outcome,
-        );
-    }
+    let full_text = extract_result.full_text;
+    let page_offsets = extract_result.page_offsets;
 
     // 3. Create page records from page_offsets
     let mut page_ids: Vec<String> = Vec::new();
@@ -408,6 +400,18 @@ async fn run_ingest_pipeline_with_bytes(
         })?;
     }
 
+    if is_image_media_type(media_type) {
+        apply_vlm_description(
+            db,
+            document_id,
+            content_bytes,
+            policy,
+            &page_ids,
+            &mut outcome,
+        )
+        .await?;
+    }
+
     // 8. Eager indexing: embed and store vectors if a provider is configured.
     if let Some(_provider) = embed::get_provider() {
         for chunk in &chunk_artifacts {
@@ -424,59 +428,169 @@ async fn run_ingest_pipeline_with_bytes(
     }
 
     if is_image_media_type(media_type) {
-        store_image_embedding_if_supported(db, &page_ids, content_bytes, &mut outcome);
+        store_image_embedding_if_supported(
+            db,
+            &page_ids,
+            content_bytes,
+            outcome.vlm_descriptions > 0,
+            &mut outcome,
+        );
     }
 
     Ok(outcome)
 }
 
-fn apply_vlm_description(
-    policy: &archon_policy::EffectivePolicy,
+async fn apply_vlm_description(
+    db: &DbInstance,
+    document_id: &str,
     content_bytes: &[u8],
-    full_text: &mut String,
-    page_offsets: &mut Vec<PageOffset>,
+    policy: &archon_policy::EffectivePolicy,
+    page_ids: &[String],
     outcome: &mut PipelineOutcome,
-) {
-    match vlm::describe_registered_image(policy, content_bytes) {
+) -> Result<(), DocsError> {
+    let policy = policy.clone();
+    let image_bytes = content_bytes.to_vec();
+    let vlm_result =
+        tokio::task::spawn_blocking(move || vlm::describe_registered_image(&policy, &image_bytes))
+            .await
+            .map_err(|e| DocsError::VlmProvider {
+                provider: "runtime".into(),
+                message: format!("VLM worker join failed: {e}"),
+                status_code: None,
+            })?;
+
+    match vlm_result {
         Err(e) => {
             outcome
                 .warnings
-                .push(format!("VLM description skipped: provider failed: {e}"));
+                .push(format!("image description failed: {e}"));
         }
         Ok(VlmDescriptionOutcome::Disabled(reason)) => {
-            tracing::debug!(reason = %reason, "VLM image description skipped by policy");
+            outcome
+                .warnings
+                .push(format!("image description skipped: {reason}"));
         }
         Ok(VlmDescriptionOutcome::NoProvider) => {
             outcome
                 .warnings
-                .push("VLM description skipped: no provider configured".into());
+                .push("image description skipped: VLM provider not configured".into());
         }
-        Ok(VlmDescriptionOutcome::Described(description)) if description.trim().is_empty() => {
+        Ok(VlmDescriptionOutcome::Described(description)) if description.text.trim().is_empty() => {
             outcome
                 .warnings
-                .push("VLM description skipped: provider returned empty description".into());
+                .push("image description skipped: provider returned empty description".into());
         }
         Ok(VlmDescriptionOutcome::Described(description)) => {
-            if !full_text.ends_with('\n') && !full_text.is_empty() {
-                full_text.push_str("\n\n");
-            }
-            full_text.push_str("[VLM description]\n");
-            full_text.push_str(description.trim());
-            page_offsets.clear();
-            page_offsets.push(PageOffset {
-                page: 1,
-                char_start: 0,
-                char_end: full_text.len(),
-            });
+            persist_vlm_description(db, document_id, page_ids, &description)?;
+            outcome.warnings.push(format!(
+                "image description ok via {}/{} ({}ms, ${:.4})",
+                description.provider,
+                description.model,
+                description.duration_ms,
+                description.cost_usd
+            ));
             outcome.vlm_descriptions += 1;
         }
     }
+    Ok(())
+}
+
+fn persist_vlm_description(
+    db: &DbInstance,
+    document_id: &str,
+    page_ids: &[String],
+    description: &vlm::VlmDescription,
+) -> Result<(), DocsError> {
+    let description_text = description.text.trim();
+    let artifact_id = format!("vlm-description-{}", uuid::Uuid::new_v4());
+    let created_at = chrono::Utc::now().to_rfc3339();
+    let artifact = ArtifactRecord {
+        artifact_id: artifact_id.clone(),
+        document_id: document_id.to_string(),
+        artifact_type: "image_description".to_string(),
+        content_hash: sha256_str(description_text),
+        created_at: created_at.clone(),
+        provenance_record_id: String::new(),
+    };
+    store::insert_artifact(db, &artifact).map_err(|e| DocsError::Storage {
+        message: e.to_string(),
+    })?;
+    store::insert_image_description(
+        db,
+        &ImageDescription {
+            artifact_id: artifact_id.clone(),
+            document_id: document_id.to_string(),
+            page_number: 1,
+            provider: description.provider.clone(),
+            model: description.model.clone(),
+            description: description_text.to_string(),
+            created_at,
+            cost_usd: description.cost_usd,
+        },
+    )
+    .map_err(|e| DocsError::Storage {
+        message: e.to_string(),
+    })?;
+
+    let page_offsets = vec![PageOffset {
+        page: 1,
+        char_start: 0,
+        char_end: description_text.len(),
+    }];
+    let page_chunks = chunk_with_page_anchors(description_text, &page_offsets);
+    let chunks: Vec<ChunkArtifact> = page_chunks
+        .iter()
+        .enumerate()
+        .map(|(i, page_chunk)| ChunkArtifact {
+            chunk_id: format!("chunk-{}-vlm-{}", document_id, i),
+            document_id: document_id.to_string(),
+            artifact_id: artifact_id.clone(),
+            chunk_index: i as u32,
+            page_start: page_chunk.page_start,
+            page_end: page_chunk.page_end,
+            content: page_chunk.content.clone(),
+            content_hash: sha256_str(&page_chunk.content),
+            embedding_status: "pending".to_string(),
+        })
+        .collect();
+    for chunk in &chunks {
+        store::insert_chunk(db, chunk).map_err(|e| DocsError::Storage {
+            message: e.to_string(),
+        })?;
+        if embed::get_provider().is_some()
+            && let Err(e) = retrieval::index_chunk(db, chunk)
+        {
+            tracing::warn!(
+                chunk_id = %chunk.chunk_id,
+                error = %e,
+                "failed to index VLM description chunk during ingest"
+            );
+        }
+        if let Some(page_id) = page_ids.first() {
+            store::insert_provenance_edge(
+                db,
+                &make_edge(&chunk.chunk_id, page_id, ProvenanceEdgeType::Describes),
+            )
+            .map_err(|e| DocsError::Storage {
+                message: e.to_string(),
+            })?;
+        }
+    }
+    store::insert_provenance_edge(
+        db,
+        &make_edge(&artifact_id, document_id, ProvenanceEdgeType::DerivedFrom),
+    )
+    .map_err(|e| DocsError::Storage {
+        message: e.to_string(),
+    })?;
+    Ok(())
 }
 
 fn store_image_embedding_if_supported(
     db: &DbInstance,
     page_ids: &[String],
     content_bytes: &[u8],
+    suppress_unsupported_warning: bool,
     outcome: &mut PipelineOutcome,
 ) {
     let Some(page_id) = page_ids.first() else {
@@ -511,6 +625,7 @@ fn store_image_embedding_if_supported(
                     .push(format!("image embedding skipped: storage failed: {e}")),
             }
         }
+        Ok(None) if suppress_unsupported_warning => {}
         Ok(None) => outcome.warnings.push(format!(
             "image embedding skipped: provider {} does not support image embeddings",
             provider.backend_name()
@@ -569,6 +684,7 @@ pub async fn ingest_directory_with_policy(
         match ingest_file_with_policy(db, path, policy).await {
             Ok(r) if r.pipeline_failed => {
                 result.sources_failed += 1;
+                result.vlm_descriptions += r.vlm_descriptions;
                 result.warnings.extend(r.warnings);
                 result.errors.push(format!(
                     "{}: pipeline failed for {}",
@@ -579,6 +695,7 @@ pub async fn ingest_directory_with_policy(
             Ok(r) if r.was_new && r.ocr_skipped => {
                 result.sources_registered += 1;
                 result.images_skipped += 1;
+                result.vlm_descriptions += r.vlm_descriptions;
                 result.warnings.extend(r.warnings);
             }
             Ok(r) if r.was_new => {
@@ -586,6 +703,7 @@ pub async fn ingest_directory_with_policy(
                 if is_image_media_type(media_type) {
                     result.image_ocr_completed += 1;
                 }
+                result.vlm_descriptions += r.vlm_descriptions;
                 result.warnings.extend(r.warnings);
             }
             Ok(_) => {
@@ -933,6 +1051,7 @@ mod tests {
         let mut policy = archon_policy::EffectivePolicy::default();
         policy.docs.vlm.enabled = true;
         policy.docs.vlm.mode = "local".into();
+        policy.docs.vlm.provider = "ollama".into();
         policy.workers.vlm = "allow-local".into();
 
         let db = test_db();
@@ -950,8 +1069,14 @@ mod tests {
             .map(|chunk| chunk.content.as_str())
             .collect::<Vec<_>>()
             .join("\n");
-        assert!(joined.contains("[VLM description]"));
         assert!(joined.contains("diagram shows a synthetic reward loop"));
+        let image_descriptions =
+            store::list_image_descriptions_for_doc(&db, &r.document_id).unwrap();
+        assert_eq!(image_descriptions.len(), 1);
+        assert_eq!(
+            image_descriptions[0].description,
+            "diagram shows a synthetic reward loop"
+        );
         reset_multimodal_test_providers();
     }
 
@@ -965,6 +1090,7 @@ mod tests {
         let mut policy = archon_policy::EffectivePolicy::default();
         policy.docs.vlm.enabled = true;
         policy.docs.vlm.mode = "local".into();
+        policy.docs.vlm.provider = "ollama".into();
         policy.workers.vlm = "allow-local".into();
 
         let db = test_db();
@@ -980,7 +1106,7 @@ mod tests {
         assert!(
             r.warnings
                 .iter()
-                .any(|w| w.contains("VLM description skipped: provider failed"))
+                .any(|w| w.contains("image description failed"))
         );
         let doc = store::get_doc_source(&db, &r.document_id).unwrap().unwrap();
         assert_eq!(doc.status, DocumentStatus::Ingested);

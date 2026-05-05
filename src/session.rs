@@ -106,6 +106,35 @@ fn active_session_model(config: &archon_core::config::ArchonConfig) -> String {
     }
 }
 
+fn configure_session_vlm_provider(working_dir: &std::path::Path) {
+    match archon_policy::load_effective_policy(working_dir) {
+        Ok(policy) => {
+            let report = archon_docs::vlm::factory::configure_registered_provider(&policy);
+            match report.status {
+                archon_docs::vlm::factory::VlmProviderInitStatus::Registered => tracing::info!(
+                    provider = %report.provider,
+                    model = %report.model,
+                    "vlm provider registered for session"
+                ),
+                archon_docs::vlm::factory::VlmProviderInitStatus::Skipped => tracing::warn!(
+                    provider = %report.provider,
+                    model = %report.model,
+                    reason = %report.message,
+                    "vlm provider unavailable for session"
+                ),
+                archon_docs::vlm::factory::VlmProviderInitStatus::Disabled => tracing::debug!(
+                    reason = %report.message,
+                    "vlm provider disabled for session"
+                ),
+            }
+        }
+        Err(e) => {
+            archon_docs::vlm::clear_provider();
+            tracing::debug!(error = %e, "could not load VLM policy for session");
+        }
+    }
+}
+
 async fn build_codex_session_provider(
     config: &archon_core::config::ArchonConfig,
 ) -> Result<Arc<dyn archon_llm::provider::LlmProvider>> {
@@ -352,6 +381,7 @@ async fn build_session_agent(
 
     let api_client = AnthropicClient::new(auth, identity.clone(), api_url);
     let working_dir = std::env::current_dir().unwrap_or_default();
+    configure_session_vlm_provider(&working_dir);
     let leann_index = init_leann_index(&working_dir);
     let mut registry = create_default_registry(working_dir.clone(), leann_index);
     registry.register(Box::new(archon_tools::bash::BashTool {

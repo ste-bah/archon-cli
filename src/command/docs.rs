@@ -16,6 +16,7 @@ use archon_docs::retrieval;
 use archon_docs::schema::ensure_doc_schema;
 use archon_docs::status;
 use archon_docs::store;
+use archon_docs::vlm::factory::{self as vlm_factory, VlmProviderInitStatus};
 
 use crate::cli_args::DocsAction;
 
@@ -63,6 +64,7 @@ async fn handle_ingest(path_str: &str) -> Result<()> {
         .ok()
         .and_then(|cwd| archon_policy::load_effective_policy(&cwd).ok())
         .unwrap_or_default();
+    let vlm_report = vlm_factory::configure_registered_provider(&policy);
     let path = PathBuf::from(path_str);
 
     if !path.exists() {
@@ -81,6 +83,13 @@ async fn handle_ingest(path_str: &str) -> Result<()> {
         if result.image_ocr_completed > 0 {
             println!("Image OCR: {} image file(s)", result.image_ocr_completed);
         }
+        if result.vlm_descriptions > 0 {
+            println!(
+                "VLM described: {} image file(s) via {}/{}",
+                result.vlm_descriptions, vlm_report.provider, vlm_report.model
+            );
+        }
+        print_vlm_init_warning_if_needed(&vlm_report);
         for warning in &result.warnings {
             println!("Warning: {warning}");
         }
@@ -97,12 +106,14 @@ async fn handle_ingest(path_str: &str) -> Result<()> {
                     "Registered: {}  (processing failed; document status is Failed)",
                     r.document_id
                 );
+                print_vlm_init_warning_if_needed(&vlm_report);
                 for warning in &r.warnings {
                     println!("Warning: {warning}");
                 }
             }
             Ok(r) if r.was_new && r.ocr_skipped => {
                 println!("Ingested: {}  (OCR skipped)", r.document_id);
+                print_vlm_init_warning_if_needed(&vlm_report);
                 for warning in &r.warnings {
                     println!("Warning: {warning}");
                 }
@@ -110,11 +121,15 @@ async fn handle_ingest(path_str: &str) -> Result<()> {
             Ok(r) if r.was_new => {
                 println!("Ingested: {}", r.document_id);
                 if r.vlm_descriptions > 0 {
-                    println!("VLM descriptions: {}", r.vlm_descriptions);
+                    println!(
+                        "VLM descriptions: {} via {}/{}",
+                        r.vlm_descriptions, vlm_report.provider, vlm_report.model
+                    );
                 }
                 if r.image_embeddings_stored > 0 {
                     println!("Image embeddings: {}", r.image_embeddings_stored);
                 }
+                print_vlm_init_warning_if_needed(&vlm_report);
                 for warning in &r.warnings {
                     println!("Warning: {warning}");
                 }
@@ -125,6 +140,12 @@ async fn handle_ingest(path_str: &str) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn print_vlm_init_warning_if_needed(report: &vlm_factory::VlmProviderInitReport) {
+    if matches!(report.status, VlmProviderInitStatus::Skipped) {
+        println!("Warning: {}", report.message);
+    }
 }
 
 async fn handle_list() -> Result<()> {
@@ -500,6 +521,30 @@ async fn handle_model_status() -> Result<()> {
                     "denied"
                 },
                 decision.reason
+            );
+            let (configured_provider, configured_model) =
+                vlm_factory::default_provider_summary(&load.policy);
+            println!(
+                "VLM config:    provider={} model={}",
+                configured_provider,
+                if configured_model.is_empty() {
+                    "n/a"
+                } else {
+                    &configured_model
+                }
+            );
+            let report = vlm_factory::diagnostic_report(&load.policy);
+            println!(
+                "VLM provider:  {}",
+                match report.status {
+                    VlmProviderInitStatus::Registered =>
+                        format!("ok — {}/{} reachable", report.provider, report.model),
+                    VlmProviderInitStatus::Disabled => format!("disabled — {}", report.message),
+                    VlmProviderInitStatus::Skipped => format!(
+                        "skipped — {}/{}: {}",
+                        report.provider, report.model, report.message
+                    ),
+                }
             );
         }
         Err(e) => println!("VLM policy:    unable to load policy — {e}"),

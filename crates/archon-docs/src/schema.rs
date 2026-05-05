@@ -15,6 +15,7 @@ pub fn ensure_doc_schema(db: &DbInstance) -> Result<()> {
     ensure_doc_pages(db)?;
     ensure_doc_chunks(db)?;
     ensure_doc_chunk_fts(db)?;
+    ensure_doc_image_descriptions(db)?;
     ensure_doc_provenance_edges(db)?;
     ensure_doc_processing_jobs(db)?;
     Ok(())
@@ -131,6 +132,22 @@ fn ensure_doc_chunk_fts(db: &DbInstance) -> Result<()> {
             extract_filter: content != "",
             tokenizer: Simple,
             filters: [Lowercase, Stemmer('english'), Stopwords('en')],
+        }"#,
+    )
+}
+
+fn ensure_doc_image_descriptions(db: &DbInstance) -> Result<()> {
+    run_create(
+        db,
+        r#":create doc_image_descriptions {
+            artifact_id: String =>
+            document_id: String,
+            page_number: Int default 0,
+            provider: String,
+            model: String,
+            description: String,
+            created_at: String,
+            cost_usd: Float default 0.0,
         }"#,
     )
 }

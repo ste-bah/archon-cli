@@ -150,17 +150,21 @@ pub fn read_credentials_locked(path: &Path) -> Result<(OAuthCredentials, SystemT
 ///
 /// Sets file permissions to 0600.
 pub fn write_credentials_atomic(path: &Path, creds: &OAuthCredentials) -> Result<(), AuthError> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
     let tmp_path = path.with_extension("json.tmp");
 
-    // Build the credential JSON in Claude Code's format
-    let json = serde_json::json!({
-        "claudeAiOauth": {
-            "accessToken": creds.access_token.expose(),
-            "refreshToken": creds.refresh_token.expose(),
-            "expiresAt": creds.expires_at.timestamp_millis(),
-            "scopes": creds.scopes,
-            "subscriptionType": creds.subscription_type,
-        }
+    // Merge-preserve sibling credentials such as Codex OAuth and Google API
+    // keys. Users can authenticate all providers without each login clobbering
+    // the others.
+    let mut json = read_existing_credentials_json(path)?;
+    json["claudeAiOauth"] = serde_json::json!({
+        "accessToken": creds.access_token.expose(),
+        "refreshToken": creds.refresh_token.expose(),
+        "expiresAt": creds.expires_at.timestamp_millis(),
+        "scopes": creds.scopes,
+        "subscriptionType": creds.subscription_type,
     });
 
     let content = serde_json::to_string_pretty(&json)
@@ -180,6 +184,15 @@ pub fn write_credentials_atomic(path: &Path, creds: &OAuthCredentials) -> Result
     fs::rename(&tmp_path, path)?;
 
     Ok(())
+}
+
+fn read_existing_credentials_json(path: &Path) -> Result<serde_json::Value, AuthError> {
+    if !path.exists() {
+        return Ok(serde_json::json!({}));
+    }
+    let content = fs::read_to_string(path)?;
+    serde_json::from_str(&content)
+        .map_err(|e| AuthError::ParseError(format!("invalid existing credentials JSON: {e}")))
 }
 
 /// Refresh credentials if expired, with file locking and mtime check.

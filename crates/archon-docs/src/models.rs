@@ -115,6 +115,18 @@ pub struct ChunkArtifact {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ImageDescription {
+    pub artifact_id: String,
+    pub document_id: String,
+    pub page_number: u32,
+    pub provider: String,
+    pub model: String,
+    pub description: String,
+    pub created_at: String,
+    pub cost_usd: f64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BoundingBox {
     pub x: f32,
     pub y: f32,

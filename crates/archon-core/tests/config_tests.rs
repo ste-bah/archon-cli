@@ -330,3 +330,19 @@ fn default_config_path_uses_config_dir() {
         path.display()
     );
 }
+
+#[test]
+fn repository_project_config_template_parses() {
+    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join(".archon")
+        .join("config.toml");
+    let raw =
+        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+    let config: ArchonConfig =
+        toml::from_str(&raw).unwrap_or_else(|e| panic!("parse {}: {e}", path.display()));
+
+    validate(&config).unwrap_or_else(|e| panic!("validate {}: {e}", path.display()));
+    assert!(config.providers.openai_codex.enabled);
+}

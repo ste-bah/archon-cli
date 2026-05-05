@@ -44,6 +44,26 @@ pub enum DocsError {
     #[error("VLM policy denied: {message}")]
     VlmPolicyDenied { message: String },
 
+    #[error("VLM provider error ({provider}): {message}")]
+    VlmProvider {
+        provider: String,
+        message: String,
+        status_code: Option<u16>,
+    },
+
+    #[error("VLM rate limited ({provider}): retry after {retry_after_secs}s — {message}")]
+    VlmRateLimit {
+        provider: String,
+        retry_after_secs: u64,
+        message: String,
+    },
+
+    #[error("VLM authentication failed ({provider}): {message}")]
+    VlmAuthentication { provider: String, message: String },
+
+    #[error("VLM timeout ({provider}): {message}")]
+    VlmTimeout { provider: String, message: String },
+
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 }

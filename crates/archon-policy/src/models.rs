@@ -110,8 +110,12 @@ impl Default for RetrievalPolicy {
 pub struct VlmPolicy {
     pub enabled: bool,
     pub mode: String,
+    pub provider: String,
     pub allow_cloud: bool,
     pub require_user_confirmation_for_cloud: bool,
+    pub ollama: OllamaVlmPolicy,
+    pub gemini: GeminiVlmPolicy,
+    pub anthropic: AnthropicVlmPolicy,
 }
 
 impl Default for VlmPolicy {
@@ -119,8 +123,61 @@ impl Default for VlmPolicy {
         Self {
             enabled: false,
             mode: "disabled".into(),
+            provider: "disabled".into(),
             allow_cloud: false,
             require_user_confirmation_for_cloud: true,
+            ollama: OllamaVlmPolicy::default(),
+            gemini: GeminiVlmPolicy::default(),
+            anthropic: AnthropicVlmPolicy::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OllamaVlmPolicy {
+    pub endpoint: String,
+    pub model: String,
+    pub timeout_secs: u64,
+}
+
+impl Default for OllamaVlmPolicy {
+    fn default() -> Self {
+        Self {
+            endpoint: "http://localhost:11434".into(),
+            model: "gemma4:e4b".into(),
+            timeout_secs: 120,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GeminiVlmPolicy {
+    pub api_key_env: String,
+    pub model: String,
+    pub endpoint_base: String,
+    pub rpm_limit: u32,
+}
+
+impl Default for GeminiVlmPolicy {
+    fn default() -> Self {
+        Self {
+            api_key_env: "GOOGLE_API_KEY".into(),
+            model: "gemini-3-flash-preview".into(),
+            endpoint_base: "https://generativelanguage.googleapis.com/v1beta".into(),
+            rpm_limit: 15,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AnthropicVlmPolicy {
+    pub model: String,
+}
+
+impl Default for AnthropicVlmPolicy {
+    fn default() -> Self {
+        Self {
+            model: "claude-sonnet-4-6".into(),
         }
     }
 }

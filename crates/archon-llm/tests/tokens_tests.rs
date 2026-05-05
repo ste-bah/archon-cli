@@ -108,6 +108,48 @@ fn write_credentials_atomic_creates_file() {
 }
 
 #[test]
+fn write_credentials_atomic_preserves_other_provider_credentials() {
+    let dir = temp_dir();
+    let cred_file = dir.join("merged-creds.json");
+    fs::write(
+        &cred_file,
+        serde_json::to_string_pretty(&serde_json::json!({
+            "openaiCodexOauth": {
+                "accessToken": "codex-access",
+                "refreshToken": "codex-refresh",
+                "expiresAt": 4102444799000i64,
+                "accountId": "acct_1234"
+            },
+            "googleApiKey": "AIza-test"
+        }))
+        .expect("serialize"),
+    )
+    .expect("write existing");
+    let creds = parse_credentials_json(
+        r#"{
+            "claudeAiOauth": {
+                "accessToken": "new-access",
+                "refreshToken": "new-refresh",
+                "expiresAt": 4102444799000,
+                "scopes": ["user:profile"],
+                "subscriptionType": "pro"
+            }
+        }"#,
+    )
+    .expect("parse");
+
+    write_credentials_atomic(&cred_file, &creds).expect("write should succeed");
+
+    let saved: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&cred_file).expect("read")).expect("json");
+    assert_eq!(saved["claudeAiOauth"]["accessToken"], "new-access");
+    assert!(saved.get("openaiCodexOauth").is_some());
+    assert_eq!(saved["googleApiKey"], "AIza-test");
+
+    cleanup(&dir);
+}
+
+#[test]
 fn write_credentials_atomic_sets_permissions() {
     let dir = temp_dir();
     let cred_file = dir.join("perms-creds.json");
