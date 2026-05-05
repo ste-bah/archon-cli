@@ -257,3 +257,15 @@ src/command/gametheory_slash.rs
 
 # --- v0.1.40 Codex OAuth provider ---
 crates/archon-llm/src/providers/codex/spoof.rs
+
+# --- v0.1.44 finalisation PRD closure (merge 1947999) ---
+# providers.rs grew from 282 -> 917 lines absorbing the doctor + live-pinger
+# implementation (TcpProviderLivePinger, render_provider_doctor_with_pinger,
+# remediation hints, anthropic/codex spoof status, redaction guards). Each
+# function under 50 LoC; split would be artificial — keep as one module.
+src/command/providers.rs
+
+# render_coverage.rs is the new TUI render-cache + bounded-channel test
+# harness from 82a33ca (event_channel + viewport-cached output). 538 lines
+# of fixture-rich tests; expected to grow as more render paths get coverage.
+crates/archon-tui/tests/render_coverage.rs
