@@ -84,7 +84,7 @@ Beyond the 78 primaries, archon-cli ships **67 built-in skills** (33 in `crates/
 | `/reload` | — | Force configuration reload |
 | `/vim` | — | Toggle vim-style modal input |
 | `/skills` | — | Browse and invoke available skills |
-| `/providers` | — | List registered LLM providers (5 native + 31 OpenAI-compatible) |
+| `/providers` | — | List registered LLM providers; `/providers capabilities` shows Anthropic/Codex surface support |
 
 ## Infrastructure & resources
 
@@ -105,7 +105,7 @@ Beyond the 78 primaries, archon-cli ships **67 built-in skills** (33 in `crates/
 | `/chat` | — | Single-turn chat against a selected provider: `/chat --provider openai-codex "<prompt>"`. Default provider is `anthropic`. |
 | `/login` | — | Re-authenticate the active Anthropic provider (preserved for backward compatibility — equivalent to `/auth login --provider anthropic`) |
 | `/logout` | — | Sign out the active Anthropic provider (preserved for backward compatibility) |
-| `/providers` | — | List registered LLM providers (5 native + 31 OpenAI-compatible = 36 total) |
+| `/providers` | — | List registered LLM providers; `/providers capabilities` shows the generated Archon surface-support matrix |
 | `/refresh-identity` | — | Clear the `anthropic-beta` header cache and re-probe (skill, not primary) |
 
 See [Codex authentication](../getting-started/codex-auth.md) for the ChatGPT-subscription user setup, and [identity-spoofing.md](../integrations/identity-spoofing.md) for the spoof-mode mechanics.

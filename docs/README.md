@@ -36,6 +36,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 - [Configuration](reference/config.md) — `config.toml` schema, precedence, every section
 - [CLI flags](reference/cli-flags.md) — every command-line argument
 - [Environment variables](reference/env-vars.md) — `ARCHON_*` overrides
+- [Provider capabilities](generated/provider-capabilities.md) — generated Anthropic/Codex surface-support matrix
 
 ## Integrations
 

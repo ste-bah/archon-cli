@@ -1,7 +1,7 @@
 //! TASK-#210 SLASH-PROVIDERS — `/providers` slash-command handler.
 //!
 //! Lists every LLM provider registered in the workspace (37 total =
-//! 5 native + 31 OpenAI-compatible) by reading the static
+//! 6 native + 31 OpenAI-compatible) by reading the static
 //! `archon_llm::providers::{list_native, list_compat}` registries.
 //! No session state is touched — both registries are
 //! `lazy_static`-style readonly statics, so the handler runs entirely
@@ -9,7 +9,7 @@
 //!
 //! GHOST-003: 4 stub native providers (azure, cohere, copilot, minimax)
 //! were removed — they returned LlmError::Unsupported with no real wire
-//! implementations. The registry now has 5 real native entries.
+//! implementations. The registry now has 6 real native entries.
 //!
 //! Output is a single `TuiEvent::TextDelta` carrying a two-section
 //! aligned table (NATIVE then OPENAI-COMPAT) — matches the
@@ -17,14 +17,24 @@
 //! than the `/mcp` overlay pattern (the provider list is static and
 //! does not warrant a custom `TuiEvent` variant + TUI overlay).
 
+use anyhow::Result;
 use archon_tui::app::TuiEvent;
 
 use archon_llm::providers::{
     CompatKind, ProviderDescriptor, ProviderFeatures, count_compat, count_native, list_compat,
-    list_native,
+    list_native, render_capability_table,
 };
 
+use crate::cli_args::ProvidersAction;
 use crate::command::registry::{CommandContext, CommandHandler};
+
+pub(crate) fn handle_providers(action: Option<ProvidersAction>) -> Result<()> {
+    match action.unwrap_or(ProvidersAction::List) {
+        ProvidersAction::List => print!("{}", render_provider_registry()),
+        ProvidersAction::Capabilities => print!("{}", render_capability_table()),
+    }
+    Ok(())
+}
 
 /// `/providers` handler — emits a 40-row aligned table of every
 /// registered LLM provider.
@@ -32,51 +42,19 @@ pub(crate) struct ProvidersHandler;
 
 impl CommandHandler for ProvidersHandler {
     fn execute(&self, ctx: &mut CommandContext, _args: &[String]) -> anyhow::Result<()> {
-        let native = list_native();
-        let compat = list_compat();
-        let total = count_native() + count_compat();
-
-        let mut out = String::with_capacity(4096);
-        out.push('\n');
-        out.push_str(&format!(
-            "LLM provider registry ({total} total: {n_native} native + {n_compat} openai-compat)\n",
-            total = total,
-            n_native = count_native(),
-            n_compat = count_compat(),
-        ));
-        out.push('\n');
-
-        // NATIVE section.
-        out.push_str(&format!("NATIVE ({})\n", count_native()));
-        out.push_str(&header_row());
-        out.push_str(&divider_row());
-        for d in &native {
-            debug_assert_eq!(d.compat_kind, CompatKind::Native);
-            out.push_str(&fmt_provider_row(d));
-        }
-        out.push('\n');
-
-        // OPENAI-COMPAT section.
-        out.push_str(&format!("OPENAI-COMPAT ({})\n", count_compat()));
-        out.push_str(&header_row());
-        out.push_str(&divider_row());
-        for d in &compat {
-            debug_assert_eq!(d.compat_kind, CompatKind::OpenAiCompat);
-            out.push_str(&fmt_provider_row(d));
-        }
-        out.push('\n');
-
-        out.push_str(
-            "Tip: configure a provider in [llm.<id>] in archon.toml; switch the active\n\
-             model with /model <name>.\n",
-        );
-
-        ctx.emit(TuiEvent::TextDelta(out));
+        let rendered = match _args.first().map(String::as_str) {
+            Some("capabilities") | Some("capability") | Some("caps") => render_capability_table(),
+            Some("list") | None => render_provider_registry(),
+            Some(other) => format!(
+                "Unknown /providers subcommand `{other}`.\nUsage: /providers [list|capabilities]\n"
+            ),
+        };
+        ctx.emit(TuiEvent::TextDelta(rendered));
         Ok(())
     }
 
     fn description(&self) -> &str {
-        "List every registered LLM provider (native + OpenAI-compatible)"
+        "List registered LLM providers and capability support"
     }
 
     fn aliases(&self) -> &'static [&'static str] {
@@ -85,6 +63,48 @@ impl CommandHandler for ProvidersHandler {
         // command, so the canonical spelling stays alone.
         &[]
     }
+}
+
+fn render_provider_registry() -> String {
+    let native = list_native();
+    let compat = list_compat();
+    let total = count_native() + count_compat();
+
+    let mut out = String::with_capacity(4096);
+    out.push('\n');
+    out.push_str(&format!(
+        "LLM provider registry ({total} total: {n_native} native + {n_compat} openai-compat)\n",
+        total = total,
+        n_native = count_native(),
+        n_compat = count_compat(),
+    ));
+    out.push('\n');
+
+    // NATIVE section.
+    out.push_str(&format!("NATIVE ({})\n", count_native()));
+    out.push_str(&header_row());
+    out.push_str(&divider_row());
+    for d in &native {
+        debug_assert_eq!(d.compat_kind, CompatKind::Native);
+        out.push_str(&fmt_provider_row(d));
+    }
+    out.push('\n');
+
+    // OPENAI-COMPAT section.
+    out.push_str(&format!("OPENAI-COMPAT ({})\n", count_compat()));
+    out.push_str(&header_row());
+    out.push_str(&divider_row());
+    for d in &compat {
+        debug_assert_eq!(d.compat_kind, CompatKind::OpenAiCompat);
+        out.push_str(&fmt_provider_row(d));
+    }
+    out.push('\n');
+
+    out.push_str(
+        "Tip: configure a provider in [llm.<id>] in archon.toml; switch the active\n\
+             model with /model <name>.\n",
+    );
+    out
 }
 
 // Column widths kept in module-private constants so the header,
@@ -190,6 +210,19 @@ mod tests {
         }
     }
 
+    fn render_args(args: &[&str]) -> String {
+        let handler = ProvidersHandler;
+        let (mut ctx, mut rx) = make_bug_ctx();
+        let args: Vec<String> = args.iter().map(|arg| arg.to_string()).collect();
+        handler.execute(&mut ctx, &args).unwrap();
+        let events = drain_tui_events(&mut rx);
+        assert_eq!(events.len(), 1);
+        match events.into_iter().next().unwrap() {
+            TuiEvent::TextDelta(s) => s,
+            other => panic!("expected TextDelta, got {:?}", other),
+        }
+    }
+
     #[test]
     fn execute_emits_total_count_line() {
         let body = render();
@@ -252,6 +285,20 @@ mod tests {
                 body
             );
         }
+    }
+
+    #[test]
+    fn execute_capabilities_lists_codex_tui_but_not_pipelines() {
+        let body = render_args(&["capabilities"]);
+        assert!(body.contains("Archon provider capability matrix"));
+        assert!(body.contains("| `openai-codex` |"));
+        assert!(body.contains("Backs one-shot chat and full TUI sessions"));
+        assert!(body.contains("pipelines/subagents are not wired yet"));
+    }
+
+    #[test]
+    fn cli_handle_capabilities_renders_without_error() {
+        handle_providers(Some(ProvidersAction::Capabilities)).expect("capabilities output");
     }
 
     #[test]

@@ -2,6 +2,7 @@
 pub mod anthropic;
 pub mod aws_auth;
 pub mod bedrock;
+pub mod capabilities;
 pub mod codex;
 pub mod gcp_auth;
 pub mod local;
@@ -39,6 +40,10 @@ pub(crate) mod stream_decode;
 
 pub use anthropic::AnthropicProvider;
 pub use bedrock::BedrockProvider;
+pub use capabilities::{
+    CapabilityStatus, ProviderCapability, ProviderCapabilityRow, capabilities_for,
+    provider_capabilities, render_capability_markdown, render_capability_table, supports,
+};
 pub use local::LocalProvider;
 pub use openai::OpenAiProvider;
 pub use vertex::VertexProvider;

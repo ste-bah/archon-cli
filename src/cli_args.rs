@@ -297,6 +297,11 @@ pub enum Commands {
     Auth(AuthArgs),
     /// Single-turn chat completion against a selected provider
     Chat(ChatArgs),
+    /// Inspect provider registry and Archon-level capability support
+    Providers {
+        #[command(subcommand)]
+        action: Option<ProvidersAction>,
+    },
     /// Manage plugins
     Plugin {
         #[command(subcommand)]
@@ -559,6 +564,14 @@ pub struct ChatArgs {
     pub max_tokens: u32,
     /// User prompt
     pub prompt: String,
+}
+
+#[derive(Subcommand, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProvidersAction {
+    /// Show provider registry entries
+    List,
+    /// Show Archon surface support by provider/auth mode
+    Capabilities,
 }
 
 #[derive(Subcommand, Debug)]

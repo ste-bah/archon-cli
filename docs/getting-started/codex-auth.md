@@ -17,6 +17,8 @@ Setup guide for users with a ChatGPT subscription who want to route some of thei
 
 In short: **Codex can back the main interactive TUI and one-shot chat surfaces.** Multi-agent pipelines and agent-callable tool surfaces still require Anthropic credentials today. You can keep both sets of credentials on the same machine and choose the provider per surface.
 
+For the generated source-of-truth matrix, run `archon providers capabilities` or `/providers capabilities`, or read [Provider capabilities](../generated/provider-capabilities.md).
+
 ## Prerequisites
 
 - An active **ChatGPT** subscription (Plus, Pro, Business, Team, or Enterprise — any tier with API access via the Codex client).
