@@ -34,6 +34,7 @@ use archon_permissions::auto::{AutoModeConfig, AutoModeEvaluator};
 use archon_tui::app::TuiEvent;
 use archon_tui::commands::CommandInfo;
 use archon_tui::observability;
+use tokio::sync::mpsc::UnboundedSender;
 
 use crate::command::registry::default_registry;
 use crate::runtime::llm::build_llm_provider;
@@ -41,12 +42,44 @@ use crate::setup::strip_cache_control_if_disabled;
 
 use archon_core::remote::protocol::AgentMessage;
 
+#[derive(Debug, Clone)]
+struct SessionActivitySink {
+    jsonl: archon_observability::JsonlActivitySink,
+    tui_tx: Option<UnboundedSender<TuiEvent>>,
+}
+
+impl archon_observability::AgentActivitySink for SessionActivitySink {
+    fn emit(&self, event: archon_observability::AgentActivityEvent) {
+        archon_observability::AgentActivitySink::emit(&self.jsonl, event.clone());
+        if let Some(tx) = &self.tui_tx {
+            let _ = tx.send(TuiEvent::AgentActivity(event.into()));
+        }
+    }
+}
+
 fn session_activity_sink(
     session_id: &str,
 ) -> Option<Arc<dyn archon_observability::AgentActivitySink>> {
+    session_activity_sink_inner(session_id, None)
+}
+
+fn session_activity_sink_with_tui(
+    session_id: &str,
+    tui_tx: UnboundedSender<TuiEvent>,
+) -> Option<Arc<dyn archon_observability::AgentActivitySink>> {
+    session_activity_sink_inner(session_id, Some(tui_tx))
+}
+
+fn session_activity_sink_inner(
+    session_id: &str,
+    tui_tx: Option<UnboundedSender<TuiEvent>>,
+) -> Option<Arc<dyn archon_observability::AgentActivitySink>> {
     let base_dir = dirs::home_dir()?.join(".archon/sessions");
     let path = archon_observability::activity_jsonl_path(base_dir, session_id);
-    Some(Arc::new(archon_observability::JsonlActivitySink::new(path)))
+    Some(Arc::new(SessionActivitySink {
+        jsonl: archon_observability::JsonlActivitySink::new(path),
+        tui_tx,
+    }))
 }
 
 /// Result of [`build_session_agent`] — a fully constructed Agent plus
@@ -1662,6 +1695,7 @@ pub(crate) async fn run_interactive_session(
     // TUI-EVENT-BACKPRESSURE-MONITORING will add runtime channel-depth
     // metrics via the existing ChannelMetrics infra (OBS-901).
     let (tui_event_tx, tui_event_rx) = tokio::sync::mpsc::unbounded_channel::<TuiEvent>();
+    agent_config.activity_sink = session_activity_sink_with_tui(session_id, tui_event_tx.clone());
 
     // TASK #218 TUI-EVENT-BACKPRESSURE-MONITORING: spawn a periodic stall
     // detector. Drain counter + last-drain timestamp updated at the
