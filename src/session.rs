@@ -1801,44 +1801,10 @@ pub(crate) async fn run_interactive_session(
             working_dir.display().to_string(),
             None, // no style override
         ));
-    let llm_adapter: Arc<dyn archon_pipeline::runner::LlmClient> = {
-        let pipe_auth = resolve_auth_with_keys(
-            env_vars.anthropic_api_key.as_deref(),
-            env_vars.archon_api_key.as_deref(),
-            env_vars.archon_oauth_token.as_deref(),
-            std::env::var("ANTHROPIC_AUTH_TOKEN").ok().as_deref(),
-        )
-        .map_err(|e| tracing::warn!("Pipeline LLM auth unavailable: {e}"))
-        .unwrap_or(archon_llm::auth::AuthProvider::ApiKey(
-            archon_llm::types::Secret::new(String::new()),
-        ));
-        let identity_mode = archon_llm::identity::resolve_identity_mode(
-            &pipe_auth,
-            false,
-            &config.identity.as_view(),
-        );
-        let account_uuid = if matches!(
-            identity_mode,
-            archon_llm::identity::IdentityMode::Spoof { .. }
-        ) {
-            crate::command::utils::fetch_account_uuid(&pipe_auth).await
-        } else {
-            String::new()
-        };
-        let identity = archon_llm::identity::IdentityProvider::new(
-            identity_mode,
-            uuid::Uuid::new_v4().to_string(),
-            "tui-pipeline-device".to_string(),
-            account_uuid,
-        );
-        let api_url = std::env::var("ANTHROPIC_BASE_URL")
-            .ok()
-            .or_else(|| config.api.base_url.clone());
-        let pipe_client = archon_llm::anthropic::AnthropicClient::new(pipe_auth, identity, api_url);
-        Arc::new(archon_pipeline::llm_adapter::AnthropicLlmAdapter::new(
-            Arc::new(pipe_client),
-        ))
-    };
+    let llm_adapter: Arc<dyn archon_pipeline::runner::LlmClient> = Arc::new(
+        archon_pipeline::llm_adapter::ProviderLlmAdapter::new(Arc::clone(&provider))
+            .with_origin("tui_pipeline"),
+    );
     // TASK-TUI-107: clone the agent_event_tx so the dispatcher constructed
     // inside the input-loop spawn can also hold a producer. The original
     // sender is moved into Agent::new below.

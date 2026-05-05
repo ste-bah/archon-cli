@@ -6,13 +6,12 @@ use std::sync::Arc;
 
 use archon_core::config::ArchonConfig;
 use archon_core::env_vars::ArchonEnvVars;
-use archon_llm::auth::resolve_auth_with_keys;
-use archon_llm::identity::{IdentityProvider, resolve_identity_mode};
 use archon_memory::{MemoryTrait, graph::MemoryGraph};
 use archon_pipeline::leann_searcher::LeannSearcher;
 
 use crate::cli_args::PipelineAction;
 use crate::command::provider_gate::ensure_active_provider_supports;
+use crate::runtime::llm::build_configured_llm_provider;
 
 /// LEANN searcher backed by a real [`archon_leann::CodeIndex`].
 ///
@@ -73,37 +72,7 @@ pub async fn handle_pipeline_command(
                     archon_llm::providers::ProviderCapability::PipelineCoding,
                     "archon pipeline code",
                 )?;
-                let pipe_auth = resolve_auth_with_keys(
-                    env_vars.anthropic_api_key.as_deref(),
-                    env_vars.archon_api_key.as_deref(),
-                    env_vars.archon_oauth_token.as_deref(),
-                    std::env::var("ANTHROPIC_AUTH_TOKEN").ok().as_deref(),
-                )
-                .map_err(|e| anyhow::anyhow!("Authentication failed: {e}"))?;
-                let identity_mode =
-                    resolve_identity_mode(&pipe_auth, false, &config.identity.as_view());
-                let account_uuid = if matches!(
-                    identity_mode,
-                    archon_llm::identity::IdentityMode::Spoof { .. }
-                ) {
-                    crate::command::utils::fetch_account_uuid(&pipe_auth).await
-                } else {
-                    String::new()
-                };
-                let identity = IdentityProvider::new(
-                    identity_mode,
-                    uuid::Uuid::new_v4().to_string(),
-                    "pipeline-device".to_string(),
-                    account_uuid,
-                );
-                let api_url = std::env::var("ANTHROPIC_BASE_URL")
-                    .ok()
-                    .or_else(|| config.api.base_url.clone());
-                let pipe_client =
-                    archon_llm::anthropic::AnthropicClient::new(pipe_auth, identity, api_url);
-                let adapter = archon_pipeline::llm_adapter::AnthropicLlmAdapter::new(
-                    std::sync::Arc::new(pipe_client),
-                );
+                let adapter = build_pipeline_adapter(config, env_vars, "pipeline_code").await?;
                 let learning = archon_pipeline::learning::integration::LearningIntegration::new(
                     None,
                     None,
@@ -141,37 +110,7 @@ pub async fn handle_pipeline_command(
                     archon_llm::providers::ProviderCapability::PipelineResearch,
                     "archon pipeline research",
                 )?;
-                let pipe_auth = resolve_auth_with_keys(
-                    env_vars.anthropic_api_key.as_deref(),
-                    env_vars.archon_api_key.as_deref(),
-                    env_vars.archon_oauth_token.as_deref(),
-                    std::env::var("ANTHROPIC_AUTH_TOKEN").ok().as_deref(),
-                )
-                .map_err(|e| anyhow::anyhow!("Authentication failed: {e}"))?;
-                let identity_mode =
-                    resolve_identity_mode(&pipe_auth, false, &config.identity.as_view());
-                let account_uuid = if matches!(
-                    identity_mode,
-                    archon_llm::identity::IdentityMode::Spoof { .. }
-                ) {
-                    crate::command::utils::fetch_account_uuid(&pipe_auth).await
-                } else {
-                    String::new()
-                };
-                let identity = IdentityProvider::new(
-                    identity_mode,
-                    uuid::Uuid::new_v4().to_string(),
-                    "pipeline-device".to_string(),
-                    account_uuid,
-                );
-                let api_url = std::env::var("ANTHROPIC_BASE_URL")
-                    .ok()
-                    .or_else(|| config.api.base_url.clone());
-                let pipe_client =
-                    archon_llm::anthropic::AnthropicClient::new(pipe_auth, identity, api_url);
-                let adapter = archon_pipeline::llm_adapter::AnthropicLlmAdapter::new(
-                    std::sync::Arc::new(pipe_client),
-                );
+                let adapter = build_pipeline_adapter(config, env_vars, "pipeline_research").await?;
                 let phd_learning =
                     archon_pipeline::learning::integration::PhDLearningIntegration::new();
                 let memory: Arc<dyn MemoryTrait> = Arc::new(
@@ -237,37 +176,8 @@ pub async fn handle_pipeline_command(
                 Ok(session) => {
                     println!("Resumed session: {}", session.session_id);
                     println!("Completed agents: {}", session.completed_agents.len());
-                    let pipe_auth = resolve_auth_with_keys(
-                        env_vars.anthropic_api_key.as_deref(),
-                        env_vars.archon_api_key.as_deref(),
-                        env_vars.archon_oauth_token.as_deref(),
-                        std::env::var("ANTHROPIC_AUTH_TOKEN").ok().as_deref(),
-                    )
-                    .map_err(|e| anyhow::anyhow!("Authentication failed: {e}"))?;
-                    let identity_mode =
-                        resolve_identity_mode(&pipe_auth, false, &config.identity.as_view());
-                    let account_uuid = if matches!(
-                        identity_mode,
-                        archon_llm::identity::IdentityMode::Spoof { .. }
-                    ) {
-                        crate::command::utils::fetch_account_uuid(&pipe_auth).await
-                    } else {
-                        String::new()
-                    };
-                    let identity = IdentityProvider::new(
-                        identity_mode,
-                        uuid::Uuid::new_v4().to_string(),
-                        "pipeline-device".to_string(),
-                        account_uuid,
-                    );
-                    let api_url = std::env::var("ANTHROPIC_BASE_URL")
-                        .ok()
-                        .or_else(|| config.api.base_url.clone());
-                    let pipe_client =
-                        archon_llm::anthropic::AnthropicClient::new(pipe_auth, identity, api_url);
-                    let adapter = archon_pipeline::llm_adapter::AnthropicLlmAdapter::new(
-                        std::sync::Arc::new(pipe_client),
-                    );
+                    let adapter =
+                        build_pipeline_adapter(config, env_vars, "pipeline_resume").await?;
                     let facade_type = &session.pipeline_type;
                     match format!("{:?}", facade_type).as_str() {
                         "Coding" => {
@@ -446,6 +356,15 @@ pub async fn handle_pipeline_command(
         }
     }
     Ok(())
+}
+
+async fn build_pipeline_adapter(
+    config: &ArchonConfig,
+    env_vars: &ArchonEnvVars,
+    origin: &str,
+) -> anyhow::Result<archon_pipeline::llm_adapter::ProviderLlmAdapter> {
+    let provider = build_configured_llm_provider(config, env_vars, origin).await?;
+    Ok(archon_pipeline::llm_adapter::ProviderLlmAdapter::new(provider).with_origin(origin))
 }
 
 async fn init_leann(cwd: &std::path::Path) -> Option<archon_pipeline::runner::LeannIntegration> {

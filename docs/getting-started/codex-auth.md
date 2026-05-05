@@ -11,11 +11,12 @@ Setup guide for users with a ChatGPT subscription who want to route some of thei
 | `/chat --provider openai-codex` | ✅ supported | Single-turn prompt, streaming or `--no-stream` response |
 | `archon chat --provider openai-codex` | ✅ supported | Same as the slash form, run from a shell |
 | `archon` (interactive TUI session) | ✅ supported when `[llm].provider = "openai-codex"` | The main conversational session uses Codex OAuth instead of Anthropic OAuth |
-| `/archon-code` and `/archon-research` | ❌ Anthropic only | Multi-agent pipelines route through Anthropic |
-| `/gametheory`, `/team`, `/run-agent` | ❌ Anthropic only | All multi-agent surfaces |
+| `/archon-code` and `/archon-research` | ✅ supported when `[llm].provider = "openai-codex"` | Provider-neutral pipeline adapter routes through the active provider |
+| `/gametheory` | ✅ supported when `[llm].provider = "openai-codex"` | Classification and specialist calls use the active provider |
+| `/team`, `/run-agent` | ❌ Anthropic only | Subagent/team parity is still gated until dedicated tests prove it |
 | `archon auth login/status/logout --provider openai-codex` | ✅ supported | Manage the credential lifecycle |
 
-In short: **Codex can back the main interactive TUI and one-shot chat surfaces.** Multi-agent pipelines and agent-callable tool surfaces still require Anthropic credentials today. You can keep both sets of credentials on the same machine and choose the provider per surface.
+In short: **Codex can back chat, the main interactive TUI, `/btw`, and provider-neutral pipelines.** Subagent/team surfaces still require Anthropic credentials until the remaining parity tests land. You can keep both sets of credentials on the same machine and choose the provider per surface.
 
 For the generated source-of-truth matrix, run `archon providers capabilities` or `/providers capabilities`, or read [Provider capabilities](../generated/provider-capabilities.md).
 

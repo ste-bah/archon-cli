@@ -24,8 +24,8 @@ pub(crate) fn ensure_active_provider_supports(
 
     Err(anyhow::anyhow!(
         "Provider `{}` does not support {} for `{surface}`. \
-         Active support is capability-specific: Codex OAuth currently supports chat, Codex-backed TUI sessions, and /btw, \
-         while agentic pipelines require Anthropic OAuth/API key/proxy. \
+         Active support is capability-specific: Codex OAuth currently supports chat, Codex-backed TUI sessions, /btw, and provider-neutral pipelines, \
+         while subagents and completion verification still require Anthropic OAuth/API key/proxy until parity tests land. \
          Run `archon providers capabilities` for the source-of-truth matrix.",
         config.llm.provider,
         capability.label()
@@ -51,36 +51,47 @@ mod tests {
     use super::*;
 
     #[test]
-    fn codex_rejects_coding_pipeline_with_actionable_error() {
+    fn codex_allows_coding_pipeline_after_provider_neutral_adapter() {
+        let mut config = ArchonConfig::default();
+        config.llm.provider = "openai-codex".into();
+
+        ensure_active_provider_supports(
+            &config,
+            ProviderCapability::PipelineCoding,
+            "archon pipeline code",
+        )
+        .expect("Codex pipeline coding support should be capability-enabled");
+    }
+
+    #[test]
+    fn codex_allows_gametheory_pipeline_after_provider_neutral_adapter() {
+        let mut config = ArchonConfig::default();
+        config.llm.provider = "openai-codex".into();
+
+        ensure_active_provider_supports(
+            &config,
+            ProviderCapability::PipelineGametheory,
+            "archon gametheory run",
+        )
+        .expect("Codex gametheory support should be capability-enabled");
+    }
+
+    #[test]
+    fn codex_rejects_unproven_subagents_with_actionable_error() {
         let mut config = ArchonConfig::default();
         config.llm.provider = "openai-codex".into();
 
         let err = ensure_active_provider_supports(
             &config,
-            ProviderCapability::PipelineCoding,
-            "archon pipeline code",
+            ProviderCapability::Subagents,
+            "archon run-agent",
         )
-        .expect_err("Codex must not claim coding-pipeline support");
+        .expect_err("Codex must not claim subagent support before parity tests land");
 
         let msg = err.to_string();
         assert!(msg.contains("openai-codex"));
-        assert!(msg.contains("does not support coding pipeline"));
+        assert!(msg.contains("does not support subagents"));
         assert!(msg.contains("archon providers capabilities"));
-    }
-
-    #[test]
-    fn codex_rejects_gametheory_pipeline() {
-        let mut config = ArchonConfig::default();
-        config.llm.provider = "openai-codex".into();
-
-        assert!(
-            ensure_active_provider_supports(
-                &config,
-                ProviderCapability::PipelineGametheory,
-                "archon gametheory run",
-            )
-            .is_err()
-        );
     }
 
     #[test]

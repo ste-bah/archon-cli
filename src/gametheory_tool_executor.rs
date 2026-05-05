@@ -131,7 +131,7 @@ impl GameTheoryExecutor for PipelineGameTheoryExecutor {
 }
 
 impl PipelineGameTheoryExecutor {
-    async fn build_llm(&self) -> Option<archon_pipeline::llm_adapter::AnthropicLlmAdapter> {
+    async fn build_llm(&self) -> Option<archon_pipeline::llm_adapter::ProviderLlmAdapter> {
         cli_gametheory::build_llm_client(&self.config, &self.env_vars).await
     }
 

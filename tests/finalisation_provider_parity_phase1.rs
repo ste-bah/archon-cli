@@ -73,6 +73,25 @@ fn phase5_btw_routes_through_active_session_provider() {
     assert!(!session.contains("btw side questions are not available in Codex-backed sessions yet"));
 }
 
+#[test]
+fn phase4_pipelines_use_provider_neutral_adapter() {
+    let pipeline = read("src/command/pipeline.rs");
+    let gametheory = read("src/command/gametheory.rs");
+    let session = read("src/session.rs");
+
+    assert!(pipeline.contains("build_configured_llm_provider(config, env_vars, origin).await"));
+    assert!(pipeline.contains("ProviderLlmAdapter::new(provider).with_origin(origin)"));
+    assert!(!pipeline.contains("AnthropicLlmAdapter::new"));
+    assert!(!pipeline.contains("AnthropicClient::new"));
+
+    assert!(gametheory.contains("ProviderLlmAdapter::new(provider).with_origin(\"gametheory\")"));
+    assert!(!gametheory.contains("AnthropicLlmAdapter"));
+    assert!(!gametheory.contains("AnthropicClient::new"));
+
+    assert!(session.contains("ProviderLlmAdapter::new(Arc::clone(&provider))"));
+    assert!(!session.contains("tui-pipeline-device"));
+}
+
 fn read(path: &str) -> String {
     fs::read_to_string(repo_root().join(path))
         .unwrap_or_else(|err| panic!("failed to read {path}: {err}"))

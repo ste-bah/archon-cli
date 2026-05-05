@@ -9,9 +9,10 @@ Phase 0 proves the current state before any capability flags are changed:
 
 - Anthropic is the fully agentic provider.
 - Codex is wired for OAuth, spoof headers, one-shot chat, streaming TUI session,
-  `/btw` side questions, provider diagnostics, and kill switch behavior.
+  `/btw` side questions, provider-neutral pipelines, provider diagnostics, and
+  kill switch behavior.
 - Codex is intentionally not yet marked as supporting tools, subagents,
-  pipelines, or agentic completion verification.
+  or agentic completion verification.
 
 The next implementation phases must remove the direct Anthropic-only
 construction sites by introducing a provider-neutral agentic contract and Codex
@@ -40,9 +41,9 @@ tool-result continuation.
 | Streaming | supported | supported | Preserve Codex SSE translation and bounded TUI delivery. |
 | Tool use | supported | not capability-enabled | Prove Codex Responses tool schema, streamed arguments, tool-result continuation, and malformed argument handling. |
 | Subagents | supported | not capability-enabled | Refactor `AgentTool` and `SubagentExecutor` through provider-neutral agentic turns. |
-| Coding pipeline | supported | not capability-enabled | Replace direct `AnthropicLlmAdapter` construction with provider-neutral pipeline adapter. |
-| Research pipeline | supported | not capability-enabled | Same as coding, including citation/provenance persistence. |
-| Gametheory pipeline | supported | not capability-enabled | Route Tier 1 and specialists through active provider. |
+| Coding pipeline | supported | supported | CLI/TUI coding pipelines use `ProviderLlmAdapter` with active provider model normalization. |
+| Research pipeline | supported | supported | CLI/TUI research pipelines use the same provider-neutral adapter. |
+| Gametheory pipeline | supported | supported | Classification, specialists, replay, and resume build the active provider through the shared runtime helper. |
 | `/btw` | supported | supported | Side questions now route through the active session provider rather than constructing a separate Anthropic client. |
 | Completion verification | supported where LLM-backed | not proven | Route LLM-backed verification through active provider and persist provider/model on incidents. |
 | Vision | supported | supported by matrix | Keep Codex vision docs honest until real image flow is proven. |
@@ -56,12 +57,10 @@ the Phase 1/2 refactor targets or approved low-level helpers.
 | Path | Count | Current purpose | Parity action |
 |---|---:|---|---|
 | `src/session_loop/slash_handlers.rs` | 1 | Refresh Anthropic identity headers. | Keep low-level Anthropic-only only if scoped to `/refresh-identity`; otherwise route through provider diagnostics. |
-| `src/session.rs` | 3 | Main session, session restore, pipeline launch. | Replace remaining agentic turn/pipeline construction with provider router. |
+| `src/session.rs` | 2 | Main session and session restore. | Replace remaining low-level construction with provider router where practical. |
 | `src/command/team.rs` | 1 | Team command LLM client. | Route through provider-neutral agentic contract. |
-| `src/runtime/llm.rs` | 1 | Runtime provider wrapper. | May remain as approved low-level factory if all callers use it. |
+| `src/runtime/llm.rs` | 2 | Runtime provider wrapper plus command-provider helper. | Approved low-level factory; command/pipeline/gametheory callers should use it instead of direct construction. |
 | `src/command/chat.rs` | 1 | One-shot Anthropic chat helper. | Route chat through the same provider router used by Codex. |
-| `src/command/pipeline.rs` | 3 | Coding/research/resume pipeline clients. | Replace with provider-neutral pipeline adapter. |
-| `src/command/gametheory.rs` | 1 | Gametheory pipeline client. | Replace with active provider pipeline adapter. |
 | `crates/archon-sdk/src/query.rs` | 1 | SDK query client. | Decide whether SDK remains Anthropic-specific or accepts provider selection. |
 
 Guard test:

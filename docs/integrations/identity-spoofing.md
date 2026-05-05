@@ -9,7 +9,7 @@ archon-cli can identify itself to the Anthropic API as either Claude Code (`spoo
 | Anthropic OAuth | `archon auth login --provider anthropic` | Claude-backed TUI sessions, pipelines, subagents |
 | Anthropic API key | `ANTHROPIC_API_KEY=sk-ant-api...` | Native Anthropic Messages API calls |
 | Anthropic-compatible proxy | Anthropic base URL + compatible key | OpenRouter, DeepSeek, LiteLLM, or similar routes |
-| Codex OAuth | `archon auth login --provider openai-codex` | `archon chat --provider openai-codex` and TUI sessions with `[llm].provider = "openai-codex"` |
+| Codex OAuth | `archon auth login --provider openai-codex` | Chat, TUI sessions, `/btw`, and provider-neutral pipelines with `[llm].provider = "openai-codex"` |
 
 Run `archon auth status` to inspect both stored OAuth credentials and the active spoof identity. The command redacts account and client IDs and never prints full tokens.
 
