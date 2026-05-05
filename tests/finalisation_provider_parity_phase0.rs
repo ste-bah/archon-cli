@@ -7,12 +7,13 @@ use archon_llm::providers::{ProviderCapability, capabilities_for};
 const PHASE0_AUDIT_DOC: &str = "docs/development/provider-parity-phase0-audit.md";
 
 #[test]
-fn phase0_codex_agentic_capabilities_remain_disabled_until_adapter_lands() {
+fn codex_agentic_capabilities_remain_disabled_except_verified_btw() {
     let codex = capabilities_for("openai-codex").expect("openai-codex capability row");
 
     assert!(codex.supports(ProviderCapability::OneShotChat));
     assert!(codex.supports(ProviderCapability::InteractiveSession));
     assert!(codex.supports(ProviderCapability::Streaming));
+    assert!(codex.supports(ProviderCapability::BtwSideQuestion));
     assert!(codex.supports(ProviderCapability::Vision));
 
     for capability in [
@@ -21,7 +22,6 @@ fn phase0_codex_agentic_capabilities_remain_disabled_until_adapter_lands() {
         ProviderCapability::PipelineCoding,
         ProviderCapability::PipelineResearch,
         ProviderCapability::PipelineGametheory,
-        ProviderCapability::BtwSideQuestion,
         ProviderCapability::CostMetadata,
     ] {
         assert!(
@@ -41,7 +41,7 @@ fn phase0_direct_anthropic_construction_baseline_is_explicit() {
         ("src/command/pipeline.rs", 3),
         ("src/command/team.rs", 1),
         ("src/runtime/llm.rs", 1),
-        ("src/session.rs", 4),
+        ("src/session.rs", 3),
         ("src/session_loop/slash_handlers.rs", 1),
     ]);
 

@@ -24,7 +24,7 @@ pub(crate) fn ensure_active_provider_supports(
 
     Err(anyhow::anyhow!(
         "Provider `{}` does not support {} for `{surface}`. \
-         Active support is capability-specific: Codex OAuth currently supports chat and Codex-backed TUI sessions, \
+         Active support is capability-specific: Codex OAuth currently supports chat, Codex-backed TUI sessions, and /btw, \
          while agentic pipelines require Anthropic OAuth/API key/proxy. \
          Run `archon providers capabilities` for the source-of-truth matrix.",
         config.llm.provider,

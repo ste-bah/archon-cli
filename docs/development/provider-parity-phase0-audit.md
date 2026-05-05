@@ -9,9 +9,9 @@ Phase 0 proves the current state before any capability flags are changed:
 
 - Anthropic is the fully agentic provider.
 - Codex is wired for OAuth, spoof headers, one-shot chat, streaming TUI session,
-  provider diagnostics, and kill switch behavior.
+  `/btw` side questions, provider diagnostics, and kill switch behavior.
 - Codex is intentionally not yet marked as supporting tools, subagents,
-  pipelines, `/btw`, or agentic completion verification.
+  pipelines, or agentic completion verification.
 
 The next implementation phases must remove the direct Anthropic-only
 construction sites by introducing a provider-neutral agentic contract and Codex
@@ -43,7 +43,7 @@ tool-result continuation.
 | Coding pipeline | supported | not capability-enabled | Replace direct `AnthropicLlmAdapter` construction with provider-neutral pipeline adapter. |
 | Research pipeline | supported | not capability-enabled | Same as coding, including citation/provenance persistence. |
 | Gametheory pipeline | supported | not capability-enabled | Route Tier 1 and specialists through active provider. |
-| `/btw` | supported | not capability-enabled | Route side question through active provider and preserve context/tool requirements. |
+| `/btw` | supported | supported | Side questions now route through the active session provider rather than constructing a separate Anthropic client. |
 | Completion verification | supported where LLM-backed | not proven | Route LLM-backed verification through active provider and persist provider/model on incidents. |
 | Vision | supported | supported by matrix | Keep Codex vision docs honest until real image flow is proven. |
 | Cost metadata | supported | not capability-enabled | Add provider-neutral usage/cost representation; mark missing exact cost honestly if Codex omits it. |
@@ -56,7 +56,7 @@ the Phase 1/2 refactor targets or approved low-level helpers.
 | Path | Count | Current purpose | Parity action |
 |---|---:|---|---|
 | `src/session_loop/slash_handlers.rs` | 1 | Refresh Anthropic identity headers. | Keep low-level Anthropic-only only if scoped to `/refresh-identity`; otherwise route through provider diagnostics. |
-| `src/session.rs` | 4 | Main session, session restore, pipeline launch, `/btw`. | Replace agentic turn/pipeline/side-question construction with provider router. |
+| `src/session.rs` | 3 | Main session, session restore, pipeline launch. | Replace remaining agentic turn/pipeline construction with provider router. |
 | `src/command/team.rs` | 1 | Team command LLM client. | Route through provider-neutral agentic contract. |
 | `src/runtime/llm.rs` | 1 | Runtime provider wrapper. | May remain as approved low-level factory if all callers use it. |
 | `src/command/chat.rs` | 1 | One-shot Anthropic chat helper. | Route chat through the same provider router used by Codex. |

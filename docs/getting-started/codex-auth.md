@@ -161,7 +161,7 @@ archon
 
 In this mode Archon skips the Anthropic auth bootstrap and builds the session agent from the stored `openaiCodexOauth` credentials. If `default_model` is still a Claude-shaped value, Archon automatically uses `gpt-5.4` for the Codex-backed session.
 
-Current limitation: `/btw` side questions are Anthropic-only. In Codex-backed sessions, use the main prompt for side questions or switch `[llm].provider` back to `"anthropic"`.
+`/btw` side questions use the same active session provider. In a Codex-backed TUI session, `/btw what did you just decide?` is sent through Codex OAuth; in an Anthropic-backed session, the same command is sent through Anthropic OAuth/API key/proxy.
 
 ## Logout
 

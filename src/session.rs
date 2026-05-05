@@ -29,6 +29,8 @@ use archon_llm::identity::{
     IdentityMode, IdentityProvider, get_or_create_device_id, resolve_and_validate_betas,
     resolve_identity_mode,
 };
+use archon_llm::provider::LlmRequest;
+use archon_llm::streaming::StreamEvent;
 use archon_memory::{MemoryAccess, MemoryGraph, MemoryTrait};
 use archon_permissions::auto::{AutoModeConfig, AutoModeEvaluator};
 use archon_tui::app::TuiEvent;
@@ -1121,7 +1123,7 @@ pub(crate) async fn run_interactive_session(
         Vec::new()
     };
 
-    let (provider_override, anthropic_client, btw_context, session_api_url, prompt_identity) =
+    let (provider_override, anthropic_client, session_api_url, prompt_identity) =
         if is_codex_session(config) {
             tracing::info!(
                 "LLM provider selected: openai-codex (skipping Anthropic auth bootstrap)"
@@ -1135,11 +1137,6 @@ pub(crate) async fn run_interactive_session(
             (
                 Some(build_codex_session_provider(config).await?),
                 None,
-                None::<(
-                    archon_llm::auth::AuthProvider,
-                    IdentityProvider,
-                    Option<String>,
-                )>,
                 None,
                 prompt_identity,
             )
@@ -1220,7 +1217,6 @@ pub(crate) async fn run_interactive_session(
                 .ok()
                 .or_else(|| config.api.base_url.clone());
 
-            let btw_context = Some((auth.clone(), identity.clone(), api_url.clone()));
             let session_api_url = api_url.clone();
             let api_client = AnthropicClient::new(auth, identity.clone(), api_url);
 
@@ -1237,13 +1233,7 @@ pub(crate) async fn run_interactive_session(
                 });
             }
 
-            (
-                None,
-                Some(api_client),
-                btw_context,
-                session_api_url,
-                identity,
-            )
+            (None, Some(api_client), session_api_url, identity)
         };
 
     // Build tool registry and get tool definitions for API
@@ -2643,76 +2633,54 @@ pub(crate) async fn run_interactive_session(
 
     // Set up /btw side question channel.
     let (btw_tx, mut btw_rx) = tokio::sync::mpsc::channel::<String>(8);
-    if let Some((btw_auth, btw_identity, api_url_for_btw)) = btw_context {
-        let btw_tui_tx = tui_event_tx.clone();
-        // Clone the same client the agent uses — same auth, identity, headers
-        let btw_client = AnthropicClient::new(btw_auth, btw_identity, api_url_for_btw);
-        let btw_model = active_model.clone();
-        let btw_max_tokens = config.api.thinking_budget;
-        // Use the pre-cloned system prompt so /btw shares the prompt cache
-        tokio::spawn(async move {
-            while let Some(question) = btw_rx.recv().await {
-                let tui_tx = btw_tui_tx.clone();
-                let client = btw_client.clone();
-                let model = btw_model.clone();
-                let sys_prompt = btw_system_prompt.clone();
-                let max_tokens = btw_max_tokens;
-                tokio::spawn(async move {
-                    let wrapped = format!(
-                        "<system-reminder>This is a side question from the user. Answer directly in a single response.\n\
-                         You have NO tools available. This is a one-off response.\n\
-                         Do NOT say \"Let me check\" or promise actions.</system-reminder>\n\n{question}"
-                    );
-                    // Use the same system prompt as the main agent for cache sharing
-                    let request = archon_llm::anthropic::MessageRequest {
-                        model,
-                        max_tokens,
-                        system: sys_prompt,
-                        messages: vec![serde_json::json!({
-                            "role": "user",
-                            "content": wrapped,
-                        })],
-                        tools: Vec::new(), // no tools for side questions
-                        thinking: None,
-                        speed: None,
-                        effort: None,
-                        request_origin: None,
-                    };
-                    let stream_result: Result<
-                        tokio::sync::mpsc::Receiver<archon_llm::streaming::StreamEvent>,
-                        _,
-                    > = client.stream_message(request).await;
-                    match stream_result {
-                        Ok(mut rx) => {
-                            let mut response = String::new();
-                            while let Some(event) = rx.recv().await {
-                                if let archon_llm::streaming::StreamEvent::TextDelta {
-                                    ref text,
-                                    ..
-                                } = event
-                                {
-                                    response.push_str(text);
-                                }
+    let btw_tui_tx = tui_event_tx.clone();
+    let btw_provider = Arc::clone(&provider);
+    let btw_model = active_model.clone();
+    let btw_max_tokens = config.api.thinking_budget;
+    // Use the same active provider as the main session so Anthropic OAuth,
+    // Anthropic-compatible proxies, and Codex OAuth all share /btw behavior.
+    tokio::spawn(async move {
+        while let Some(question) = btw_rx.recv().await {
+            let tui_tx = btw_tui_tx.clone();
+            let provider = Arc::clone(&btw_provider);
+            let model = btw_model.clone();
+            let sys_prompt = btw_system_prompt.clone();
+            let max_tokens = btw_max_tokens;
+            tokio::spawn(async move {
+                let wrapped = format!(
+                    "<system-reminder>This is a side question from the user. Answer directly in a single response.\n\
+                     You have NO tools available. This is a one-off response.\n\
+                     Do NOT say \"Let me check\" or promise actions.</system-reminder>\n\n{question}"
+                );
+                let request = LlmRequest {
+                    model,
+                    max_tokens,
+                    system: sys_prompt,
+                    messages: vec![serde_json::json!({
+                        "role": "user",
+                        "content": [{"type": "text", "text": wrapped}],
+                    })],
+                    tools: Vec::new(),
+                    request_origin: Some("btw".into()),
+                    ..LlmRequest::default()
+                };
+                match provider.stream(request).await {
+                    Ok(mut rx) => {
+                        let mut response = String::new();
+                        while let Some(event) = rx.recv().await {
+                            if let StreamEvent::TextDelta { ref text, .. } = event {
+                                response.push_str(text);
                             }
-                            let _ = tui_tx.send(TuiEvent::BtwResponse(response));
                         }
-                        Err(e) => {
-                            let _ = tui_tx.send(TuiEvent::BtwResponse(format!("Error: {e}")));
-                        }
+                        let _ = tui_tx.send(TuiEvent::BtwResponse(response));
                     }
-                });
-            }
-        });
-    } else {
-        let btw_tui_tx = tui_event_tx.clone();
-        tokio::spawn(async move {
-            while btw_rx.recv().await.is_some() {
-                let _ = btw_tui_tx.send(TuiEvent::BtwResponse(
-                    "/btw side questions are not available in Codex-backed sessions yet. Use the main prompt or switch [llm].provider to \"anthropic\".".into(),
-                ));
-            }
-        });
-    }
+                    Err(e) => {
+                        let _ = tui_tx.send(TuiEvent::BtwResponse(format!("Error: {e}")));
+                    }
+                }
+            });
+        }
+    });
 
     // Apply vim mode from config before blocking on TUI
     if config.tui.vim_mode {

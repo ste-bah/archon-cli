@@ -63,6 +63,16 @@ fn phase1_provider_capability_set_stays_precise() {
     assert!(!set.supports(ProviderCapability::PipelineGametheory));
 }
 
+#[test]
+fn phase5_btw_routes_through_active_session_provider() {
+    let session = read("src/session.rs");
+
+    assert!(session.contains("let btw_provider = Arc::clone(&provider);"));
+    assert!(session.contains("provider.stream(request).await"));
+    assert!(session.contains("request_origin: Some(\"btw\".into())"));
+    assert!(!session.contains("btw side questions are not available in Codex-backed sessions yet"));
+}
+
 fn read(path: &str) -> String {
     fs::read_to_string(repo_root().join(path))
         .unwrap_or_else(|err| panic!("failed to read {path}: {err}"))

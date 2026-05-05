@@ -630,11 +630,11 @@ mod tests {
     }
 
     #[test]
-    fn execute_capabilities_lists_codex_tui_but_not_pipelines() {
+    fn execute_capabilities_lists_codex_tui_btw_but_not_pipelines() {
         let body = render_args(&["capabilities"]);
         assert!(body.contains("Archon provider capability matrix"));
         assert!(body.contains("| `openai-codex` |"));
-        assert!(body.contains("Backs one-shot chat and full TUI sessions"));
+        assert!(body.contains("Backs one-shot chat, full TUI sessions, and /btw"));
         assert!(body.contains("pipelines/subagents are not wired yet"));
     }
 

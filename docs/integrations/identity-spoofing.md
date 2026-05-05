@@ -160,7 +160,7 @@ provider = "openai-codex"
 default_model = "gpt-5.4"
 ```
 
-When `[llm].provider = "openai-codex"`, the TUI skips Anthropic auth bootstrap entirely and constructs a Codex provider from the stored `openaiCodexOauth` credentials. `/btw` remains Anthropic-only for now; use the main prompt in Codex-backed sessions.
+When `[llm].provider = "openai-codex"`, the TUI skips Anthropic auth bootstrap entirely and constructs a Codex provider from the stored `openaiCodexOauth` credentials. `/btw` uses the same active session provider, so side questions route through Codex in Codex-backed sessions and through Anthropic in Anthropic-backed sessions.
 
 The Codex kill switch is `ARCHON_CODEX_DISABLED=1`; when set, `archon auth status` reports Codex as disabled and provider construction fails closed.
 

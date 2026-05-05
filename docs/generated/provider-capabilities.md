@@ -9,7 +9,7 @@ Archon provider capability matrix
 | `anthropic-oauth` | Claude/Anthropic OAuth | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | no | yes | Primary path for agents, subagents, pipelines and /btw. |
 | `anthropic-api-key` | ANTHROPIC_API_KEY | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | no | yes | Native Anthropic Messages API path. |
 | `anthropic-compatible-proxy` | ANTHROPIC_BASE_URL + API key | yes | yes | yes | yes | yes | yes | yes | yes | no | yes | no | yes | Depends on proxy fidelity; /btw OAuth-only behavior is not assumed. |
-| `openai-codex` | ChatGPT/Codex OAuth | yes | yes | yes | no | no | no | no | no | no | yes | no | no | Backs one-shot chat and full TUI sessions; pipelines/subagents are not wired yet. |
+| `openai-codex` | ChatGPT/Codex OAuth | yes | yes | yes | no | no | no | no | no | yes | yes | no | no | Backs one-shot chat, full TUI sessions, and /btw; pipelines/subagents are not wired yet. |
 
 ## Capability keys
 

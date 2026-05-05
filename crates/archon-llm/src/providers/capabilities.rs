@@ -143,6 +143,7 @@ const CODEX_SURFACES: &[ProviderCapability] = &[
     ProviderCapability::OneShotChat,
     ProviderCapability::InteractiveSession,
     ProviderCapability::Streaming,
+    ProviderCapability::BtwSideQuestion,
     ProviderCapability::Vision,
 ];
 
@@ -173,7 +174,7 @@ pub const PROVIDER_CAPABILITY_ROWS: &[ProviderCapabilityRow] = &[
         display_name: "OpenAI Codex OAuth",
         auth_mode: "ChatGPT/Codex OAuth",
         supported: CODEX_SURFACES,
-        notes: "Backs one-shot chat and full TUI sessions; pipelines/subagents are not wired yet.",
+        notes: "Backs one-shot chat, full TUI sessions, and /btw; pipelines/subagents are not wired yet.",
     },
 ];
 
@@ -242,7 +243,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn codex_supports_chat_and_tui_but_not_pipelines() {
+    fn codex_supports_chat_tui_and_btw_but_not_pipelines() {
         let row = capabilities_for("openai-codex").expect("codex row");
         assert!(row.supports(ProviderCapability::OneShotChat));
         assert!(row.supports(ProviderCapability::InteractiveSession));
@@ -250,7 +251,7 @@ mod tests {
         assert!(!row.supports(ProviderCapability::PipelineCoding));
         assert!(!row.supports(ProviderCapability::PipelineResearch));
         assert!(!row.supports(ProviderCapability::PipelineGametheory));
-        assert!(!row.supports(ProviderCapability::BtwSideQuestion));
+        assert!(row.supports(ProviderCapability::BtwSideQuestion));
     }
 
     #[test]
