@@ -7,29 +7,24 @@ use archon_llm::providers::{ProviderCapability, capabilities_for};
 const PHASE0_AUDIT_DOC: &str = "docs/development/provider-parity-phase0-audit.md";
 
 #[test]
-fn codex_agentic_capabilities_remain_disabled_except_verified_btw_and_pipelines() {
+fn codex_agentic_capabilities_include_verified_tools_subagents_btw_and_pipelines() {
     let codex = capabilities_for("openai-codex").expect("openai-codex capability row");
 
     assert!(codex.supports(ProviderCapability::OneShotChat));
     assert!(codex.supports(ProviderCapability::InteractiveSession));
     assert!(codex.supports(ProviderCapability::Streaming));
+    assert!(codex.supports(ProviderCapability::ToolUse));
+    assert!(codex.supports(ProviderCapability::Subagents));
     assert!(codex.supports(ProviderCapability::BtwSideQuestion));
     assert!(codex.supports(ProviderCapability::PipelineCoding));
     assert!(codex.supports(ProviderCapability::PipelineResearch));
     assert!(codex.supports(ProviderCapability::PipelineGametheory));
     assert!(codex.supports(ProviderCapability::Vision));
 
-    for capability in [
-        ProviderCapability::ToolUse,
-        ProviderCapability::Subagents,
-        ProviderCapability::CostMetadata,
-    ] {
-        assert!(
-            !codex.supports(capability),
-            "Codex must not claim {} until PRD-FINALISATION-002 adapter tests prove parity",
-            capability.label()
-        );
-    }
+    assert!(
+        !codex.supports(ProviderCapability::CostMetadata),
+        "Codex must not claim exact cost metadata until usage pricing is available"
+    );
 }
 
 #[test]
@@ -37,7 +32,6 @@ fn phase0_direct_anthropic_construction_baseline_is_explicit() {
     let expected = BTreeMap::from([
         ("crates/archon-sdk/src/query.rs", 1usize),
         ("src/command/chat.rs", 1),
-        ("src/command/team.rs", 1),
         ("src/runtime/llm.rs", 2),
         ("src/session.rs", 2),
         ("src/session_loop/slash_handlers.rs", 1),

@@ -17,16 +17,18 @@ fn generated_provider_capabilities_doc_matches_code() {
 }
 
 #[test]
-fn provider_capability_matrix_documents_codex_tui_btw_and_pipelines() {
+fn provider_capability_matrix_documents_codex_agentic_surfaces() {
     let codex = capabilities_for("openai-codex").expect("openai-codex capability row");
     assert!(codex.supports(ProviderCapability::OneShotChat));
     assert!(codex.supports(ProviderCapability::InteractiveSession));
     assert!(codex.supports(ProviderCapability::Streaming));
+    assert!(codex.supports(ProviderCapability::ToolUse));
+    assert!(codex.supports(ProviderCapability::Subagents));
     assert!(codex.supports(ProviderCapability::BtwSideQuestion));
     assert!(codex.supports(ProviderCapability::PipelineCoding));
     assert!(codex.supports(ProviderCapability::PipelineResearch));
     assert!(codex.supports(ProviderCapability::PipelineGametheory));
-    assert!(!codex.supports(ProviderCapability::Subagents));
+    assert!(!codex.supports(ProviderCapability::CostMetadata));
 }
 
 #[test]

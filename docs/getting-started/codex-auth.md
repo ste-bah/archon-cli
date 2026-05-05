@@ -13,10 +13,12 @@ Setup guide for users with a ChatGPT subscription who want to route some of thei
 | `archon` (interactive TUI session) | ✅ supported when `[llm].provider = "openai-codex"` | The main conversational session uses Codex OAuth instead of Anthropic OAuth |
 | `/archon-code` and `/archon-research` | ✅ supported when `[llm].provider = "openai-codex"` | Provider-neutral pipeline adapter routes through the active provider |
 | `/gametheory` | ✅ supported when `[llm].provider = "openai-codex"` | Classification and specialist calls use the active provider |
-| `/team`, `/run-agent` | ❌ Anthropic only | Subagent/team parity is still gated until dedicated tests prove it |
+| `/run-agent`, `Agent` tool, subagents | ✅ supported when `[llm].provider = "openai-codex"` | Provider-neutral subagent runner uses the active provider and Codex tool-result continuation |
+| `archon team run` | ✅ supported when `[llm].provider = "openai-codex"` | Team execution builds the configured provider through the shared runtime router |
+| `archon completion ...` | ✅ provider-neutral | Completion integrity currently verifies persisted evidence/trust state rather than calling a provider |
 | `archon auth login/status/logout --provider openai-codex` | ✅ supported | Manage the credential lifecycle |
 
-In short: **Codex can back chat, the main interactive TUI, `/btw`, and provider-neutral pipelines.** Subagent/team surfaces still require Anthropic credentials until the remaining parity tests land. You can keep both sets of credentials on the same machine and choose the provider per surface.
+In short: **Codex can back chat, the main interactive TUI, tool use, subagents, `/btw`, provider-neutral pipelines, and team runs.** Exact cost metadata still stays honest: if the backend does not expose pricing/usage, Archon marks cost metadata unsupported instead of inventing it. You can keep both Anthropic and Codex credentials on the same machine and choose the provider per surface.
 
 For the generated source-of-truth matrix, run `archon providers capabilities` or `/providers capabilities`, or read [Provider capabilities](../generated/provider-capabilities.md).
 

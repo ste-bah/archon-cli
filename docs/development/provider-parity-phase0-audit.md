@@ -5,18 +5,19 @@ Source PRD:
 
 ## Status
 
-Phase 0 proves the current state before any capability flags are changed:
+Phase 0 originally proved the current state before capability flags changed.
+This audit now records the post-parity state and the remaining honest limits:
 
 - Anthropic is the fully agentic provider.
 - Codex is wired for OAuth, spoof headers, one-shot chat, streaming TUI session,
-  `/btw` side questions, provider-neutral pipelines, provider diagnostics, and
-  kill switch behavior.
-- Codex is intentionally not yet marked as supporting tools, subagents,
-  or agentic completion verification.
+  tool use, subagents, `/btw` side questions, provider-neutral pipelines,
+  provider diagnostics, and kill switch behavior.
+- Completion integrity is provider-neutral today: the current verifier inspects
+  persisted evidence/trust state rather than calling a live model.
 
-The next implementation phases must remove the direct Anthropic-only
-construction sites by introducing a provider-neutral agentic contract and Codex
-tool-result continuation.
+The remaining direct Anthropic construction sites are either low-level provider
+factories, identity refresh helpers, one-shot legacy helpers, or SDK-specific
+surfaces called out below.
 
 ## Source Of Truth
 
@@ -39,13 +40,13 @@ tool-result continuation.
 | One-shot chat | supported | supported | Keep existing `LlmProvider` path working. |
 | Interactive TUI session | supported | supported | Keep Codex session routing and metadata visible. |
 | Streaming | supported | supported | Preserve Codex SSE translation and bounded TUI delivery. |
-| Tool use | supported | not capability-enabled | Prove Codex Responses tool schema, streamed arguments, tool-result continuation, and malformed argument handling. |
-| Subagents | supported | not capability-enabled | Refactor `AgentTool` and `SubagentExecutor` through provider-neutral agentic turns. |
+| Tool use | supported | supported | Codex Responses schema conversion, streamed arguments, and tool-result continuation are pinned by adapter tests. |
+| Subagents | supported | supported | `AgentTool`, `SubagentExecutor`, and `SubagentRunner` use `Arc<dyn LlmProvider>`; `codex_subagent_provider_parity` proves the Codex-named loop. |
 | Coding pipeline | supported | supported | CLI/TUI coding pipelines use `ProviderLlmAdapter` with active provider model normalization. |
 | Research pipeline | supported | supported | CLI/TUI research pipelines use the same provider-neutral adapter. |
 | Gametheory pipeline | supported | supported | Classification, specialists, replay, and resume build the active provider through the shared runtime helper. |
 | `/btw` | supported | supported | Side questions now route through the active session provider rather than constructing a separate Anthropic client. |
-| Completion verification | supported where LLM-backed | not proven | Route LLM-backed verification through active provider and persist provider/model on incidents. |
+| Completion verification | provider-neutral today | provider-neutral today | Current verifier reads source-of-truth evidence and trust state without constructing a provider client. |
 | Vision | supported | supported by matrix | Keep Codex vision docs honest until real image flow is proven. |
 | Cost metadata | supported | not capability-enabled | Add provider-neutral usage/cost representation; mark missing exact cost honestly if Codex omits it. |
 
@@ -58,7 +59,6 @@ the Phase 1/2 refactor targets or approved low-level helpers.
 |---|---:|---|---|
 | `src/session_loop/slash_handlers.rs` | 1 | Refresh Anthropic identity headers. | Keep low-level Anthropic-only only if scoped to `/refresh-identity`; otherwise route through provider diagnostics. |
 | `src/session.rs` | 2 | Main session and session restore. | Replace remaining low-level construction with provider router where practical. |
-| `src/command/team.rs` | 1 | Team command LLM client. | Route through provider-neutral agentic contract. |
 | `src/runtime/llm.rs` | 2 | Runtime provider wrapper plus command-provider helper. | Approved low-level factory; command/pipeline/gametheory callers should use it instead of direct construction. |
 | `src/command/chat.rs` | 1 | One-shot Anthropic chat helper. | Route chat through the same provider router used by Codex. |
 | `crates/archon-sdk/src/query.rs` | 1 | SDK query client. | Decide whether SDK remains Anthropic-specific or accepts provider selection. |
@@ -81,8 +81,8 @@ rewritten:
 - `ResponseInputItem::FunctionCallOutput` already exists, which is the likely
   continuation primitive for sending tool results back to Codex.
 
-The missing piece is not "can Codex ever stream tool calls"; the missing piece is
-a full Archon agentic loop that:
+The parity proof is not "can Codex ever stream tool calls"; the proof is the
+full Archon agentic loop that:
 
 1. receives Codex tool calls,
 2. executes Archon tools,
@@ -97,8 +97,9 @@ Do not make pipelines depend directly on `AnthropicClient` or `CodexProvider`.
 Introduce a provider-neutral agentic contract above `LlmProvider` and below
 session/subagent/pipeline code.
 
-The existing `LlmProvider` is a useful low-level streaming abstraction, but it is
-not yet a complete agentic contract because it does not model:
+The existing `LlmProvider` is now the practical low-level streaming contract for
+session, subagent, team and pipeline paths. The richer `agentic` module remains
+the seam for explicit turn-level tests and future cost/cancellation expansion:
 
 - tool result continuation as a first-class operation,
 - provider/model metadata on each turn,
@@ -115,9 +116,9 @@ Process X:
 Provider router resolves Codex and checks the requested capability.
 
 Expected outcome Y:
-Until parity lands, unsupported Codex agentic surfaces fail before any provider
-request is sent. After parity lands, the same command completes through Codex and
-persists provider metadata.
+Unsupported provider/surface combinations fail before any provider request is
+sent. Supported Codex agentic surfaces complete through the active provider and
+carry provider metadata into activity events where those events are emitted.
 
 Source of truth:
 

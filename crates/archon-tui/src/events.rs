@@ -85,7 +85,7 @@ pub enum AgentActivityStatus {
 /// External activity update payload. The App also derives rows from
 /// ToolStart/ToolComplete so existing sessions get useful feedback without
 /// requiring a deeper core-runner bridge.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct AgentActivityUpdate {
     pub id: String,
     pub name: String,
@@ -96,6 +96,9 @@ pub struct AgentActivityUpdate {
     pub run_id: Option<String>,
     pub parent_id: Option<String>,
     pub artifact_id: Option<String>,
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    pub cost_usd: Option<f64>,
 }
 
 impl From<archon_observability::AgentActivityEvent> for AgentActivityUpdate {
@@ -121,6 +124,9 @@ impl From<archon_observability::AgentActivityEvent> for AgentActivityUpdate {
             run_id: event.run_id,
             parent_id: event.parent_id,
             artifact_id: event.artifact_id,
+            provider: event.provider,
+            model: event.model,
+            cost_usd: event.cost_usd,
         }
     }
 }
@@ -421,6 +427,9 @@ mod tests {
                 run_id: None,
                 parent_id: None,
                 artifact_id: None,
+                provider: Some("openai-codex".into()),
+                model: Some("gpt-5.4".into()),
+                cost_usd: Some(0.01),
             })
             .variant_name(),
             "AgentActivity"

@@ -15,7 +15,7 @@ use ratatui::{
 use crate::events::{AgentActivityRole, AgentActivityStatus, AgentActivityUpdate};
 use crate::theme::Theme;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct AgentActivityRow {
     pub id: String,
     pub name: String,
@@ -26,6 +26,9 @@ pub struct AgentActivityRow {
     pub run_id: Option<String>,
     pub parent_id: Option<String>,
     pub artifact_id: Option<String>,
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    pub cost_usd: Option<f64>,
 }
 
 impl AgentActivityRow {
@@ -45,6 +48,9 @@ impl AgentActivityRow {
             run_id: None,
             parent_id: None,
             artifact_id: None,
+            provider: None,
+            model: None,
+            cost_usd: None,
         }
     }
 
@@ -59,6 +65,9 @@ impl AgentActivityRow {
             run_id: update.run_id,
             parent_id: update.parent_id,
             artifact_id: update.artifact_id,
+            provider: update.provider,
+            model: update.model,
+            cost_usd: update.cost_usd,
         }
     }
 }
@@ -73,6 +82,9 @@ pub fn apply_update(rows: &mut Vec<AgentActivityRow>, update: AgentActivityUpdat
         row.run_id = update.run_id;
         row.parent_id = update.parent_id;
         row.artifact_id = update.artifact_id;
+        row.provider = update.provider;
+        row.model = update.model;
+        row.cost_usd = update.cost_usd;
     } else {
         rows.push(AgentActivityRow::from_update(update));
     }
@@ -177,6 +189,9 @@ fn upsert_parent(
             run_id: None,
             parent_id: None,
             artifact_id: None,
+            provider: None,
+            model: None,
+            cost_usd: None,
         },
     );
 }
@@ -199,6 +214,9 @@ fn upsert_subagent(
             run_id: None,
             parent_id: Some("parent".into()),
             artifact_id: None,
+            provider: None,
+            model: None,
+            cost_usd: None,
         },
     );
 }
@@ -267,6 +285,15 @@ fn render_row<'a>(row: &AgentActivityRow, theme: &Theme, width: usize) -> Line<'
     }
     if let Some(artifact_id) = &row.artifact_id {
         detail = format!("{detail} artifact={artifact_id}");
+    }
+    if let Some(provider) = &row.provider {
+        detail = format!("{detail} provider={provider}");
+    }
+    if let Some(model) = &row.model {
+        detail = format!("{detail} model={model}");
+    }
+    if let Some(cost) = row.cost_usd {
+        detail = format!("{detail} cost=${cost:.4}");
     }
     let text = format!(
         "{badge:<8} {status:<7} {:<18} {}",

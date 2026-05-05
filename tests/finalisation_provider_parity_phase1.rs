@@ -92,6 +92,59 @@ fn phase4_pipelines_use_provider_neutral_adapter() {
     assert!(!session.contains("tui-pipeline-device"));
 }
 
+#[test]
+fn phase3_subagents_and_team_use_active_provider() {
+    let team = read("src/command/team.rs");
+    let orchestrator = read("crates/archon-core/src/orchestrator.rs");
+    let agent = read("crates/archon-core/src/agent.rs");
+    let executor = read("crates/archon-core/src/subagent_executor.rs");
+    let runner = read("crates/archon-core/src/subagent.rs");
+
+    assert!(team.contains("build_configured_llm_provider(config, env_vars, \"team\")"));
+    assert!(!team.contains("AnthropicClient::new"));
+    assert!(!team.contains("resolve_auth_with_keys"));
+
+    assert!(orchestrator.contains("provider: Arc<dyn LlmProvider>"));
+    assert!(orchestrator.contains("Agent::new("));
+    assert!(orchestrator.contains("self.provider.clone()"));
+
+    assert!(agent.contains("AgentSubagentExecutor::new("));
+    assert!(agent.contains("Arc::clone(&self.client)"));
+    assert!(executor.contains("client: Arc<dyn LlmProvider>"));
+    assert!(executor.contains("SubagentRunner::new("));
+    assert!(executor.contains("self.client.clone()"));
+    assert!(runner.contains("provider: Arc<dyn LlmProvider>"));
+    assert!(runner.contains(".provider\n                    .stream(request)"));
+    assert!(runner.contains("request_origin: Some(\"subagent\".into())"));
+}
+
+#[test]
+fn phase5_completion_integrity_is_provider_neutral_today() {
+    let completion = read("src/command/completion.rs");
+    let completion_lib = read("crates/archon-completion/src/lib.rs");
+
+    assert!(!completion.contains("AnthropicClient::new"));
+    assert!(!completion.contains("build_llm_provider"));
+    assert!(completion.contains("check_completion_with_context"));
+    assert!(completion_lib.contains("trust::recompute_trust_scores_for_run"));
+}
+
+#[test]
+fn activity_events_and_tui_rows_carry_provider_metadata() {
+    let agent = read("crates/archon-core/src/agent.rs");
+    let events = read("crates/archon-tui/src/events.rs");
+    let rail = read("crates/archon-tui/src/agent_activity.rs");
+
+    assert!(agent.contains(".with_provider_model(self.client.name().to_string()"));
+    assert!(agent.contains("struct ProviderModelActivitySink"));
+    assert!(agent.contains("activity_sink: self.provider_model_activity_sink(&active_model)"));
+    assert!(events.contains("pub provider: Option<String>"));
+    assert!(events.contains("provider: event.provider"));
+    assert!(rail.contains("provider={provider}"));
+    assert!(rail.contains("model={model}"));
+    assert!(rail.contains("cost=${cost:.4}"));
+}
+
 fn read(path: &str) -> String {
     fs::read_to_string(repo_root().join(path))
         .unwrap_or_else(|err| panic!("failed to read {path}: {err}"))

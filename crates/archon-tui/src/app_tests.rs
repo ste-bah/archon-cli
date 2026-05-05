@@ -84,6 +84,9 @@ fn app_applies_external_agent_activity_update() {
         run_id: Some("run-1".into()),
         parent_id: Some("parent".into()),
         artifact_id: Some("artifact-1".into()),
+        provider: Some("openai-codex".into()),
+        model: Some("gpt-5.4".into()),
+        cost_usd: Some(0.02),
     });
 
     let row = app.agent_activity.first().expect("activity row");
@@ -91,6 +94,8 @@ fn app_applies_external_agent_activity_update() {
     assert_eq!(row.role, AgentActivityRole::Background);
     assert_eq!(row.current_tool.as_deref(), Some("Read"));
     assert_eq!(row.artifact_id.as_deref(), Some("artifact-1"));
+    assert_eq!(row.provider.as_deref(), Some("openai-codex"));
+    assert_eq!(row.model.as_deref(), Some("gpt-5.4"));
 }
 
 #[test]
