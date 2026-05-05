@@ -68,10 +68,9 @@
 //! did NOT accept `/ctx`). `aliases()` returns `&[]`. No drift to
 //! reconcile at the user-facing surface.
 
-use archon_tui::app::TuiEvent;
-
 use crate::command::registry::{CommandContext, CommandHandler};
 use crate::slash_context::SlashCommandContext;
+use archon_tui::app::TuiEvent;
 
 /// Owned snapshot of every value the /context body reads from shared
 /// state. Built at the dispatch site (where `.await` is allowed) and
@@ -244,8 +243,6 @@ impl CommandHandler for ContextHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use archon_tui::app::TuiEvent;
-    use tokio::sync::mpsc;
 
     /// Build a `CommandContext` with a freshly-created channel and the
     /// supplied optional context snapshot. Tests exercising the
@@ -253,7 +250,7 @@ mod tests {
     /// path pass `Some(ContextSnapshot { .. })`.
     fn make_ctx(
         snapshot: Option<ContextSnapshot>,
-    ) -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
+    ) -> (CommandContext, archon_tui::event_channel::TuiEventReceiver) {
         // TASK-AGS-POST-6-SHARED-FIXTURES-V2: migrated to CtxBuilder.
         crate::command::test_support::CtxBuilder::new()
             .with_context_snapshot_opt(snapshot)

@@ -1,5 +1,6 @@
 #![allow(clippy::ptr_arg)]
 
+use archon_tui::app::TuiEvent;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -21,7 +22,6 @@ use std::sync::Arc;
 // Aliases: [todo, ps, jobs] per spec validation criterion 4.
 
 use crate::command::registry::{CommandContext, CommandHandler};
-use archon_tui::app::TuiEvent;
 
 pub(crate) struct TasksHandler;
 
@@ -191,10 +191,8 @@ pub(crate) async fn handle_run_agent_async(
 mod tests {
     use super::*;
     use crate::command::registry::{CommandContext, CommandHandler, default_registry};
-    use archon_tui::app::TuiEvent;
-    use tokio::sync::mpsc;
 
-    fn make_ctx() -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
+    fn make_ctx() -> (CommandContext, archon_tui::event_channel::TuiEventReceiver) {
         crate::command::test_support::CtxBuilder::new().build()
     }
 

@@ -109,9 +109,8 @@
 //! (NOT this subagent's responsibility). Do NOT touch slash.rs in
 //! this ticket.
 
-use archon_tui::app::TuiEvent;
-
 use crate::command::registry::{CommandContext, CommandHandler};
+use archon_tui::app::TuiEvent;
 
 /// Zero-sized handler registered as the primary `/reload` command.
 ///
@@ -219,9 +218,6 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::Arc;
 
-    use archon_tui::app::TuiEvent;
-    use tokio::sync::mpsc;
-
     use crate::command::dispatcher::Dispatcher;
     use crate::command::registry::{CommandContext, RegistryBuilder};
 
@@ -231,7 +227,7 @@ mod tests {
     /// shape — DIRECT pattern, no snapshot, no effect slot.
     fn make_reload_ctx(
         config_path: Option<PathBuf>,
-    ) -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
+    ) -> (CommandContext, archon_tui::event_channel::TuiEventReceiver) {
         // TASK-AGS-POST-6-SHARED-FIXTURES-V2: migrated to CtxBuilder.
         crate::command::test_support::CtxBuilder::new()
             .with_config_path_opt(config_path)

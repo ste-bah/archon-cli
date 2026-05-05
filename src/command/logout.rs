@@ -94,9 +94,8 @@
 //! legacy match arm in a SEPARATE parent-context run (NOT this
 //! subagent's responsibility). Do NOT touch slash.rs in this ticket.
 
-use archon_tui::app::TuiEvent;
-
 use crate::command::registry::{CommandContext, CommandHandler};
+use archon_tui::app::TuiEvent;
 
 // ---------------------------------------------------------------------------
 // TASK-AGS-POST-6-BODIES-B23-LOGOUT: slash-command handler.
@@ -188,9 +187,6 @@ mod tests {
     use super::*;
     use std::sync::{Arc, Mutex};
 
-    use archon_tui::app::TuiEvent;
-    use tokio::sync::mpsc;
-
     use crate::command::dispatcher::Dispatcher;
     use crate::command::registry::{CommandContext, RegistryBuilder};
 
@@ -244,7 +240,7 @@ mod tests {
     /// adds no new CommandContext field, so every optional field is
     /// `None` — mirroring `make_bug_ctx` (the other new-field-free
     /// handler). No `auth_label` argument needed.
-    fn make_logout_ctx() -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
+    fn make_logout_ctx() -> (CommandContext, archon_tui::event_channel::TuiEventReceiver) {
         // TASK-AGS-POST-6-SHARED-FIXTURES-V2: migrated to CtxBuilder.
         crate::command::test_support::CtxBuilder::new().build()
     }

@@ -10,9 +10,11 @@
 //! - `buffer` — `OutputBuffer` (append-only streaming buffer with scroll math).
 
 mod buffer;
+mod render_cache;
 mod thinking;
 mod tool_output;
 
 pub use buffer::OutputBuffer;
+pub use render_cache::RenderedOutputView;
 pub use thinking::ThinkingState;
 pub use tool_output::{ToolDisplayStatus, ToolOutputState};

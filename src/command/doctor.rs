@@ -125,9 +125,8 @@
 //! `handle_doctor_command` (or deletes it entirely if no other caller
 //! remains).
 
-use std::path::PathBuf;
-
 use archon_tui::app::TuiEvent;
+use std::path::PathBuf;
 
 use crate::command::registry::{CommandContext, CommandHandler};
 use crate::slash_context::SlashCommandContext;
@@ -346,7 +345,6 @@ impl CommandHandler for DoctorHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio::sync::mpsc;
 
     // ---- make_ctx -----------------------------------------------------
 
@@ -356,7 +354,7 @@ mod tests {
     /// effort.rs / add_dir.rs.
     fn make_ctx(
         snapshot: Option<DoctorSnapshot>,
-    ) -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
+    ) -> (CommandContext, archon_tui::event_channel::TuiEventReceiver) {
         // TASK-AGS-POST-6-SHARED-FIXTURES-V2: migrated to CtxBuilder.
         crate::command::test_support::CtxBuilder::new()
             .with_doctor_snapshot_opt(snapshot)
@@ -365,7 +363,7 @@ mod tests {
 
     /// Drain `rx` non-blockingly into a Vec — matches the `drain`
     /// helper in copy.rs / permissions.rs / effort.rs test modules.
-    fn drain(rx: &mut mpsc::UnboundedReceiver<TuiEvent>) -> Vec<TuiEvent> {
+    fn drain(rx: &mut archon_tui::event_channel::TuiEventReceiver) -> Vec<TuiEvent> {
         let mut out = Vec::new();
         while let Ok(ev) = rx.try_recv() {
             out.push(ev);

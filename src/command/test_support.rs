@@ -12,30 +12,24 @@
 //! ONE file (this one) — the builder's `new()` pre-populates every field,
 //! and any new `.with_*` setters live alongside the existing ones.
 
+use archon_tui::app::TuiEvent;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
-use tokio::sync::mpsc;
 
 use archon_llm::effort::EffortLevel;
-use archon_tui::app::TuiEvent;
 
 use crate::command::registry::CommandContext;
 
-/// Create an unbounded mpsc channel for TuiEvent.
+/// Create the same bounded TUI event channel shape used in production.
 ///
-/// TASK-SESSION-LOOP-EXTRACT (A-2): flipped from
-/// `mpsc::channel::<TuiEvent>(16)` to `mpsc::unbounded_channel`. Matches
-/// the production `TuiEvent` channel which was flipped to unbounded to
-/// resolve the HRTB Send-bound inference failure at
-/// `session_loop::run_session_loop` (rust-lang/rust#102211). Capacity-16
-/// semantics are preserved de-facto — tests never produce enough events
-/// to matter, and the receiver API (`try_recv`, `recv`) is the same
-/// shape. See `session.rs:1414` for full rationale.
+/// The sender exposes a synchronous `send()` method, preserving the old
+/// Send-bound fix without allowing unbounded queue growth when rendering
+/// stalls.
 pub fn mock_tui_channel() -> (
-    mpsc::UnboundedSender<TuiEvent>,
-    mpsc::UnboundedReceiver<TuiEvent>,
+    archon_tui::event_channel::TuiEventSender,
+    archon_tui::event_channel::TuiEventReceiver,
 ) {
-    mpsc::unbounded_channel::<TuiEvent>()
+    archon_tui::event_channel::bounded_tui_event_channel()
 }
 
 // ===========================================================================
@@ -45,10 +39,10 @@ pub fn mock_tui_channel() -> (
 /// Composable builder for `CommandContext` test fixtures.
 ///
 /// `CtxBuilder::new()` pre-populates every `CommandContext` field with a
-/// test-safe default (`None` for every `Option`, a fresh bounded
-/// `mpsc::channel::<TuiEvent>(16)` for `tui_tx`). `.with_*` setters replace
+/// test-safe default (`None` for every `Option`, a fresh bounded TUI event
+/// channel for `tui_tx`). `.with_*` setters replace
 /// individual fields; `.build()` consumes the builder and returns the
-/// `(CommandContext, mpsc::UnboundedReceiver<TuiEvent>)` tuple that every handler
+/// `(CommandContext, archon_tui::event_channel::TuiEventReceiver)` tuple that every handler
 /// test expects.
 ///
 /// All setters are byte-equivalent to the previous inline `CommandContext
@@ -58,8 +52,8 @@ pub fn mock_tui_channel() -> (
 /// every V1 `make_*_ctx` helper so V1 call sites can migrate without
 /// observing a different buffer size.
 pub struct CtxBuilder {
-    tui_tx: mpsc::UnboundedSender<TuiEvent>,
-    tui_rx: mpsc::UnboundedReceiver<TuiEvent>,
+    tui_tx: archon_tui::event_channel::TuiEventSender,
+    tui_rx: archon_tui::event_channel::TuiEventReceiver,
     status_snapshot: Option<crate::command::status::StatusSnapshot>,
     model_snapshot: Option<crate::command::model::ModelSnapshot>,
     cost_snapshot: Option<crate::command::cost::CostSnapshot>,
@@ -398,7 +392,7 @@ impl CtxBuilder {
     }
 
     /// Consume the builder and return `(CommandContext, Receiver)`.
-    pub fn build(self) -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
+    pub fn build(self) -> (CommandContext, archon_tui::event_channel::TuiEventReceiver) {
         (
             CommandContext {
                 tui_tx: self.tui_tx,
@@ -448,7 +442,7 @@ impl CtxBuilder {
 }
 
 /// Drain all available events from the receiver.
-pub fn drain_tui_events(rx: &mut mpsc::UnboundedReceiver<TuiEvent>) -> Vec<TuiEvent> {
+pub fn drain_tui_events(rx: &mut archon_tui::event_channel::TuiEventReceiver) -> Vec<TuiEvent> {
     let mut events = Vec::new();
     while let Ok(ev) = rx.try_recv() {
         events.push(ev);
@@ -504,7 +498,7 @@ pub fn fixture_cost_snapshot() -> crate::command::cost::CostSnapshot {
 /// V2: thin wrapper over `CtxBuilder` (deferred cleanup).
 pub fn make_status_ctx(
     snapshot: Option<crate::command::status::StatusSnapshot>,
-) -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
+) -> (CommandContext, archon_tui::event_channel::TuiEventReceiver) {
     CtxBuilder::new().with_status_snapshot_opt(snapshot).build()
 }
 
@@ -513,7 +507,7 @@ pub fn make_status_ctx(
 /// V2: thin wrapper over `CtxBuilder` (deferred cleanup).
 pub fn make_model_ctx(
     snapshot: Option<crate::command::model::ModelSnapshot>,
-) -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
+) -> (CommandContext, archon_tui::event_channel::TuiEventReceiver) {
     CtxBuilder::new().with_model_snapshot_opt(snapshot).build()
 }
 
@@ -522,7 +516,7 @@ pub fn make_model_ctx(
 /// V2: thin wrapper over `CtxBuilder` (deferred cleanup).
 pub fn make_cost_ctx(
     snapshot: Option<crate::command::cost::CostSnapshot>,
-) -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
+) -> (CommandContext, archon_tui::event_channel::TuiEventReceiver) {
     CtxBuilder::new().with_cost_snapshot_opt(snapshot).build()
 }
 
@@ -536,7 +530,9 @@ pub fn make_cost_ctx(
 /// optional fields are left at `None` — mirroring peer helpers.
 ///
 /// V2: thin wrapper over `CtxBuilder` (deferred cleanup).
-pub fn make_fast_ctx(initial: bool) -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
+pub fn make_fast_ctx(
+    initial: bool,
+) -> (CommandContext, archon_tui::event_channel::TuiEventReceiver) {
     CtxBuilder::new()
         .with_fast_mode_shared(Arc::new(AtomicBool::new(initial)))
         .build()
@@ -551,7 +547,7 @@ pub fn make_fast_ctx(initial: bool) -> (CommandContext, mpsc::UnboundedReceiver<
 /// shape: wire a mock TuiEvent channel and nothing else. No
 /// peer-fixture rollout was needed because no new struct field was
 /// added for this ticket.
-pub fn make_bug_ctx() -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
+pub fn make_bug_ctx() -> (CommandContext, archon_tui::event_channel::TuiEventReceiver) {
     CtxBuilder::new().build()
 }
 
@@ -569,7 +565,9 @@ pub fn make_bug_ctx() -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
 /// `Arc<AtomicBool>`; the helper itself never reads or stores.
 ///
 /// V2: thin wrapper over `CtxBuilder` (deferred cleanup).
-pub fn make_thinking_ctx(initial: bool) -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
+pub fn make_thinking_ctx(
+    initial: bool,
+) -> (CommandContext, archon_tui::event_channel::TuiEventReceiver) {
     CtxBuilder::new()
         .with_show_thinking(Arc::new(AtomicBool::new(initial)))
         .build()
@@ -590,7 +588,7 @@ pub fn make_thinking_ctx(initial: bool) -> (CommandContext, mpsc::UnboundedRecei
 /// (mirroring B01-FAST's `fast_mode_shared=None` handling pattern).
 pub fn make_diff_ctx(
     working_dir: Option<std::path::PathBuf>,
-) -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
+) -> (CommandContext, archon_tui::event_channel::TuiEventReceiver) {
     CtxBuilder::new().with_working_dir_opt(working_dir).build()
 }
 
@@ -613,7 +611,7 @@ pub fn make_diff_ctx(
 ///
 /// All other optional fields are left at `None`, mirroring peer
 /// helpers.
-pub fn make_help_ctx() -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
+pub fn make_help_ctx() -> (CommandContext, archon_tui::event_channel::TuiEventReceiver) {
     use archon_core::skills::SkillRegistry;
     use archon_core::skills::builtin::HelpSkill;
     let mut registry = SkillRegistry::new();
@@ -635,7 +633,7 @@ pub fn make_help_ctx() -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
 /// shape.
 pub fn make_denials_ctx(
     snapshot: Option<crate::command::denials::DenialSnapshot>,
-) -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
+) -> (CommandContext, archon_tui::event_channel::TuiEventReceiver) {
     CtxBuilder::new().with_denial_snapshot_opt(snapshot).build()
 }
 
@@ -674,7 +672,7 @@ pub fn fixture_usage_snapshot() -> crate::command::usage::UsageSnapshot {
 /// handler returns Err describing the missing-registry condition.
 pub fn make_agent_ctx(
     registry: Option<Arc<std::sync::RwLock<archon_core::agents::AgentRegistry>>>,
-) -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
+) -> (CommandContext, archon_tui::event_channel::TuiEventReceiver) {
     CtxBuilder::new().with_agent_registry_opt(registry).build()
 }
 
@@ -687,6 +685,6 @@ pub fn make_agent_ctx(
 /// when `Some(_)` the handler emits a single byte-identical TextDelta.
 pub fn make_usage_ctx(
     snapshot: Option<crate::command::usage::UsageSnapshot>,
-) -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
+) -> (CommandContext, archon_tui::event_channel::TuiEventReceiver) {
     CtxBuilder::new().with_usage_snapshot_opt(snapshot).build()
 }

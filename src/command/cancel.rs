@@ -107,9 +107,7 @@ impl CommandHandler for CancelHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use archon_tui::app::TuiEvent;
     use std::sync::Arc;
-    use tokio::sync::mpsc;
 
     use crate::command::dispatcher::Dispatcher;
     use crate::command::registry::RegistryBuilder;
@@ -118,7 +116,7 @@ mod tests {
     /// `agent_dispatcher` and `cancel_handle` default to `None` in
     /// `CtxBuilder`, so the handler emits the idle message (same as
     /// the pre-GHOST-007 Option A behaviour).
-    fn make_ctx() -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
+    fn make_ctx() -> (CommandContext, archon_tui::event_channel::TuiEventReceiver) {
         crate::command::test_support::CtxBuilder::new().build()
     }
 

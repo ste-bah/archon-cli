@@ -156,10 +156,8 @@ fn render_list(summaries: &[HookSummary]) -> String {
 mod tests {
     use super::*;
     use archon_core::hooks::{HookEvent, HookSummary};
-    use archon_tui::app::TuiEvent;
-    use tokio::sync::mpsc;
 
-    fn make_ctx() -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
+    fn make_ctx() -> (CommandContext, archon_tui::event_channel::TuiEventReceiver) {
         crate::command::test_support::CtxBuilder::new().build()
     }
 

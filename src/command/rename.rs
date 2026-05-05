@@ -94,9 +94,8 @@
 //! SEPARATE subsequent subagent run (NOT this subagent's
 //! responsibility). Do NOT touch slash.rs in this ticket.
 
-use archon_tui::app::TuiEvent;
-
 use crate::command::registry::{CommandContext, CommandHandler};
+use archon_tui::app::TuiEvent;
 
 /// Zero-sized handler registered as the primary `/rename` command.
 ///
@@ -212,9 +211,6 @@ mod tests {
     use super::*;
     use std::sync::{Arc, Mutex, OnceLock};
 
-    use archon_tui::app::TuiEvent;
-    use tokio::sync::mpsc;
-
     use crate::command::dispatcher::Dispatcher;
     use crate::command::registry::{CommandContext, RegistryBuilder};
 
@@ -276,7 +272,7 @@ mod tests {
     /// snapshot, no effect slot.
     fn make_rename_ctx(
         session_id: Option<String>,
-    ) -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
+    ) -> (CommandContext, archon_tui::event_channel::TuiEventReceiver) {
         // TASK-AGS-POST-6-SHARED-FIXTURES-V2: migrated to CtxBuilder.
         crate::command::test_support::CtxBuilder::new()
             .with_session_id_opt(session_id)

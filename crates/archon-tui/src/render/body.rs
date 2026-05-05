@@ -12,8 +12,6 @@ use ratatui::{
 };
 
 use crate::app::{App, McpManagerView};
-use crate::markdown::render_markdown_line;
-use crate::output::OutputBuffer;
 use crate::splash;
 
 use super::cursor::set_input_cursor;
@@ -36,32 +34,15 @@ pub fn draw_output_area(frame: &mut Frame, app: &App, area: Rect) {
     let output_area =
         crate::agent_activity::render_rail_if_needed(frame, &app.agent_activity, area, &app.theme);
 
-    let output_lines: Vec<Line<'_>> = {
-        let mut lines: Vec<Line<'_>> = app
-            .output
-            .all_lines()
-            .iter()
-            .map(|line| render_markdown_line(line, &app.theme))
-            .collect();
-        lines.extend(app.thinking_lines());
-        lines
-    };
-
     let visible_height = output_area.height;
     let output_width = output_area.width.saturating_sub(1); // -1 for scrollbar
-    let raw_strings: Vec<String> = output_lines
-        .iter()
-        .map(|l| {
-            l.spans
-                .iter()
-                .map(|s| s.content.as_ref())
-                .collect::<String>()
-        })
-        .collect();
-    let raw_refs: Vec<&str> = raw_strings.iter().map(|s| s.as_str()).collect();
-    let total_wrapped = OutputBuffer::count_wrapped_rows(&raw_refs, output_width);
-
-    let scroll_y = app.output.effective_scroll(total_wrapped, visible_height);
+    let rendered_view = app
+        .output
+        .rendered_view(&app.theme, output_width, visible_height);
+    let mut output_lines: Vec<Line<'_>> = rendered_view.lines;
+    output_lines.extend(app.thinking_lines());
+    let total_wrapped = rendered_view.total_wrapped;
+    let scroll_y = rendered_view.global_scroll_y;
 
     let border_style = if app.output.scroll_locked {
         Style::default().fg(t.warning)
@@ -72,7 +53,7 @@ pub fn draw_output_area(frame: &mut Frame, app: &App, area: Rect) {
     let output_widget = Paragraph::new(output_lines)
         .block(Block::default().borders(Borders::NONE).style(border_style))
         .wrap(Wrap { trim: false })
-        .scroll((scroll_y, 0));
+        .scroll((rendered_view.paragraph_scroll_y, 0));
     frame.render_widget(output_widget, output_area);
 
     if total_wrapped > visible_height {

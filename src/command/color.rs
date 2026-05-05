@@ -86,9 +86,8 @@
 //! 3. `"Unknown color '{color_arg}'. Available: red, green, yellow, \
 //!    blue, magenta, cyan, white, default"` (error).
 
-use archon_tui::app::TuiEvent;
-
 use crate::command::registry::{CommandContext, CommandHandler};
+use archon_tui::app::TuiEvent;
 
 /// Zero-sized handler registered as the primary `/color` command.
 ///
@@ -171,15 +170,13 @@ impl CommandHandler for ColorHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use archon_tui::app::TuiEvent;
-    use tokio::sync::mpsc;
 
     /// Build a `CommandContext` with a freshly-created channel.
     /// /color is a DIRECT-pattern handler — no snapshot, no effect
     /// slot, no extra context field — so every optional field stays
     /// `None`. Mirrors the make_ctx fixtures in theme.rs / voice.rs /
     /// export.rs.
-    fn make_ctx() -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
+    fn make_ctx() -> (CommandContext, archon_tui::event_channel::TuiEventReceiver) {
         // TASK-AGS-POST-6-SHARED-FIXTURES-V2: migrated to CtxBuilder.
         crate::command::test_support::CtxBuilder::new().build()
     }

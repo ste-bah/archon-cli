@@ -14,7 +14,6 @@ use archon_core::config::default_config_path;
 use archon_core::config_layers::ConfigLayer;
 use archon_core::env_vars::{self, ArchonEnvVars};
 use archon_core::logging::{default_log_dir, init_logging};
-use archon_tui::app::TuiEvent;
 
 use crate::cli_args::Cli;
 
@@ -122,7 +121,7 @@ pub fn resolve_cli_flags(
 /// Returns the voice event receiver if voice is enabled.
 pub fn setup_voice_pipeline(
     config: &archon_core::config::ArchonConfig,
-) -> Option<tokio::sync::mpsc::UnboundedReceiver<TuiEvent>> {
+) -> Option<tokio::sync::mpsc::UnboundedReceiver<archon_tui::app::TuiEvent>> {
     if !config.voice.enabled {
         tracing::info!("voice: disabled (config.voice.enabled=false)");
         return None;

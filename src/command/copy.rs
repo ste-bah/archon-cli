@@ -127,10 +127,9 @@
 //! deletes the legacy arm first, then runs the dispatcher-integration
 //! tests under the fully-migrated single-fire invariant.
 
+use archon_tui::app::TuiEvent;
 use std::io::Write;
 use std::sync::Arc;
-
-use archon_tui::app::TuiEvent;
 
 use crate::command::registry::{CommandContext, CommandHandler};
 use crate::slash_context::SlashCommandContext;
@@ -445,7 +444,6 @@ impl CommandHandler for CopyHandler {
 mod tests {
     use super::*;
     use std::sync::Mutex;
-    use tokio::sync::mpsc;
 
     // ---- Mock runner --------------------------------------------------
 
@@ -500,7 +498,7 @@ mod tests {
     /// effort.rs / add_dir.rs.
     fn make_ctx(
         snapshot: Option<CopySnapshot>,
-    ) -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
+    ) -> (CommandContext, archon_tui::event_channel::TuiEventReceiver) {
         // TASK-AGS-POST-6-SHARED-FIXTURES-V2: migrated to CtxBuilder.
         crate::command::test_support::CtxBuilder::new()
             .with_copy_snapshot_opt(snapshot)
@@ -509,7 +507,7 @@ mod tests {
 
     /// Drain `rx` non-blockingly into a Vec — matches the `drain`
     /// helper in permissions.rs / effort.rs test modules.
-    fn drain(rx: &mut mpsc::UnboundedReceiver<TuiEvent>) -> Vec<TuiEvent> {
+    fn drain(rx: &mut archon_tui::event_channel::TuiEventReceiver) -> Vec<TuiEvent> {
         let mut out = Vec::new();
         while let Ok(ev) = rx.try_recv() {
             out.push(ev);

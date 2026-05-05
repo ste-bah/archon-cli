@@ -95,10 +95,10 @@
 //! Leading AND trailing newlines are preserved (shipped used
 //! `format!("\n{stats}\n")` and `format!("\n{formatted}\n")`).
 
+use archon_tui::app::TuiEvent;
 use std::sync::Arc;
 
 use archon_memory::MemoryTrait;
-use archon_tui::app::TuiEvent;
 
 use crate::command::registry::{CommandContext, CommandHandler};
 
@@ -204,9 +204,7 @@ mod tests {
     use super::*;
     use archon_memory::garden::GardenConfig;
     use archon_memory::types::{Memory, MemoryError, MemoryType, RelType, SearchFilter};
-    use archon_tui::app::TuiEvent;
     use std::sync::Mutex;
-    use tokio::sync::mpsc;
 
     /// Inline TestMemory double used by the B13 tests.
     ///
@@ -351,7 +349,7 @@ mod tests {
     fn make_ctx(
         memory: Option<Arc<dyn MemoryTrait>>,
         garden_config: Option<GardenConfig>,
-    ) -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
+    ) -> (CommandContext, archon_tui::event_channel::TuiEventReceiver) {
         // TASK-AGS-POST-6-SHARED-FIXTURES-V2: migrated to CtxBuilder.
         crate::command::test_support::CtxBuilder::new()
             .with_memory_opt(memory)

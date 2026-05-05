@@ -33,8 +33,8 @@ use archon_memory::{MemoryAccess, MemoryGraph, MemoryTrait};
 use archon_permissions::auto::{AutoModeConfig, AutoModeEvaluator};
 use archon_tui::app::TuiEvent;
 use archon_tui::commands::CommandInfo;
+use archon_tui::event_channel::TuiEventSender;
 use archon_tui::observability;
-use tokio::sync::mpsc::UnboundedSender;
 
 use crate::command::registry::default_registry;
 use crate::runtime::llm::build_llm_provider;
@@ -45,7 +45,7 @@ use archon_core::remote::protocol::AgentMessage;
 #[derive(Debug, Clone)]
 struct SessionActivitySink {
     jsonl: archon_observability::JsonlActivitySink,
-    tui_tx: Option<UnboundedSender<TuiEvent>>,
+    tui_tx: Option<TuiEventSender>,
 }
 
 impl archon_observability::AgentActivitySink for SessionActivitySink {
@@ -65,14 +65,14 @@ fn session_activity_sink(
 
 fn session_activity_sink_with_tui(
     session_id: &str,
-    tui_tx: UnboundedSender<TuiEvent>,
+    tui_tx: TuiEventSender,
 ) -> Option<Arc<dyn archon_observability::AgentActivitySink>> {
     session_activity_sink_inner(session_id, Some(tui_tx))
 }
 
 fn session_activity_sink_inner(
     session_id: &str,
-    tui_tx: Option<UnboundedSender<TuiEvent>>,
+    tui_tx: Option<TuiEventSender>,
 ) -> Option<Arc<dyn archon_observability::AgentActivitySink>> {
     let base_dir = dirs::home_dir()?.join(".archon/sessions");
     let path = archon_observability::activity_jsonl_path(base_dir, session_id);
@@ -1679,22 +1679,10 @@ pub(crate) async fn run_interactive_session(
     // Create channels
     let (agent_event_tx, mut agent_event_rx) =
         tokio::sync::mpsc::unbounded_channel::<TimestampedEvent>();
-    // TASK-SESSION-LOOP-EXTRACT (A-2): TuiEvent channel flipped to
-    // `UnboundedSender<TuiEvent>`. This is the final Send-bound
-    // holdout that blocked `archon-cli-workspace` bin builds on CI —
-    // rustc's HRTB check could not prove `for<'a> &'a Sender<T>: Send`
-    // across await suspension for the ~45 `&Sender<TuiEvent>` borrows
-    // held across `.await` in `session_loop::run_session_loop`
-    // (rust-lang/rust#102211). `UnboundedSender::send` is synchronous,
-    // so no `&Sender` is held across any `.await` — Send is trivially
-    // satisfied. Rationale: (1) consistency with `AgentEvent` which
-    // is already `UnboundedSender` (spawn-everything philosophy,
-    // PRD-2 D10); (2) OBS-914 10k events/sec load test never showed
-    // `TuiEvent` saturation — local CLI + <1ms render = no realistic
-    // producer-faster-than-consumer scenario. Follow-up #218
-    // TUI-EVENT-BACKPRESSURE-MONITORING will add runtime channel-depth
-    // metrics via the existing ChannelMetrics infra (OBS-901).
-    let (tui_event_tx, tui_event_rx) = tokio::sync::mpsc::unbounded_channel::<TuiEvent>();
+    // The producer-facing TuiEvent channel is bounded but still exposes a
+    // synchronous send() API. This preserves the no-await Send-bound fix while
+    // preventing a slow render loop from accumulating unbounded RSS.
+    let (tui_event_tx, tui_event_rx) = archon_tui::event_channel::bounded_tui_event_channel();
     agent_config.activity_sink = session_activity_sink_with_tui(session_id, tui_event_tx.clone());
 
     // TASK #218 TUI-EVENT-BACKPRESSURE-MONITORING: spawn a periodic stall

@@ -1,7 +1,7 @@
 //! Non-blocking event loop for the TUI (TUI-106).
 //!
 //! `run_event_loop` is the entry point that TASK-TUI-107 will wire into
-//! main.rs. It consumes TuiEvents from an unbounded channel, drives
+//! main.rs. It consumes TuiEvents from a bounded priority-shedding channel, drives
 //! [`AgentDispatcher`] (spawn/cancel/switch/poll), and polls completion
 //! on a 16ms interval so finished turns drain within one frame.
 //!
@@ -63,9 +63,10 @@ use anyhow::Result;
 use archon_core::agent::TimestampedEvent;
 use crossterm::event::{self};
 use ratatui::Terminal;
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::UnboundedSender;
 
 use crate::app::{App, AppConfig, TuiEvent};
+use crate::event_channel::TuiEventReceiver;
 use crate::task_dispatch::{AgentDispatcher, AgentRouter, CancelOutcome, TurnRunner};
 
 mod input;
@@ -74,7 +75,7 @@ mod tui_events;
 /// Configuration passed to [`run_event_loop`]. Field order and types
 /// are pinned by the TUI-106 spec (with TUI-100 deviation for `runner`).
 pub struct EventLoopConfig {
-    pub tui_event_rx: UnboundedReceiver<TuiEvent>,
+    pub tui_event_rx: TuiEventReceiver,
     pub agent_event_tx: UnboundedSender<TimestampedEvent>,
     pub runner: Arc<dyn TurnRunner>,
     pub router: Arc<dyn AgentRouter>,
@@ -229,9 +230,9 @@ where
         // Check for agent events (non-blocking)
         while let Ok(tui_event) = event_rx.try_recv() {
             // TASK #218 TUI-EVENT-BACKPRESSURE-MONITORING: count drains for
-            // observability + stall detection. Sender side is uninstrumented
-            // (would require wrapping ~100 callsites); this drain counter +
-            // `warn_if_drain_stalled` give operators rate-of-progress signals.
+            // observability + stall detection. The sender side now bounds the
+            // queue and counts shed progress events; this drain counter still
+            // tells operators whether rendering is returning to event drain.
             crate::observability::record_tui_event_drain();
             tui_events::handle_tui_event(&mut app, tui_event, &input_tx).await;
         }

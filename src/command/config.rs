@@ -43,7 +43,7 @@ use archon_tui::app::TuiEvent;
 /// remain, hence the explicit Pin<Box<..>>.
 pub fn handle_config_command<'a>(
     input: &'a str,
-    tui_tx: &'a tokio::sync::mpsc::UnboundedSender<TuiEvent>,
+    tui_tx: &'a archon_tui::event_channel::TuiEventSender,
     ctx: &'a SlashCommandContext,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
     Box::pin(async move {
@@ -185,7 +185,7 @@ mod tests {
     /// no extra context field — so every optional field stays `None`.
     /// Mirrors the `make_ctx` fixtures in compact.rs / clear.rs /
     /// cancel.rs.
-    fn make_ctx() -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
+    fn make_ctx() -> (CommandContext, archon_tui::event_channel::TuiEventReceiver) {
         // TASK-AGS-POST-6-SHARED-FIXTURES-V2: migrated to CtxBuilder.
         crate::command::test_support::CtxBuilder::new().build()
     }

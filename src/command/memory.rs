@@ -98,10 +98,9 @@
 //! `"" | "list"` arm).
 
 #[allow(unused_imports)]
-use std::sync::Arc;
+use archon_tui::app::TuiEvent;
 
 use archon_memory::MemoryTrait;
-use archon_tui::app::TuiEvent;
 
 use crate::command::registry::{CommandContext, CommandHandler};
 
@@ -260,10 +259,9 @@ impl CommandHandler for MemoryHandler {
 mod tests {
     use super::*;
     use archon_memory::types::{Memory, MemoryError, MemoryType, RelType, SearchFilter};
-    use archon_tui::app::TuiEvent;
     use chrono::{TimeZone, Utc};
+    use std::sync::Arc;
     use std::sync::Mutex;
-    use tokio::sync::mpsc;
 
     /// Inline TestMemory double used by the AGS-817 tests.
     ///
@@ -422,7 +420,7 @@ mod tests {
     /// typed snapshots.
     fn make_ctx(
         memory: Option<Arc<dyn MemoryTrait>>,
-    ) -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
+    ) -> (CommandContext, archon_tui::event_channel::TuiEventReceiver) {
         // TASK-AGS-POST-6-SHARED-FIXTURES-V2: migrated to CtxBuilder.
         crate::command::test_support::CtxBuilder::new()
             .with_memory_opt(memory)

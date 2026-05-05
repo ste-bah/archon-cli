@@ -194,7 +194,7 @@ mod tests {
     use super::*;
     use crate::command::test_support::*;
 
-    fn drain_one(rx: &mut tokio::sync::mpsc::UnboundedReceiver<TuiEvent>) -> TuiEvent {
+    fn drain_one(rx: &mut archon_tui::event_channel::TuiEventReceiver) -> TuiEvent {
         let evs = drain_tui_events(rx);
         assert_eq!(evs.len(), 1, "expected exactly one event; got {:?}", evs);
         evs.into_iter().next().unwrap()

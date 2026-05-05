@@ -133,9 +133,8 @@
 //!   accessible.\n", path.display())`
 //! * invalid-dir Error — `format!("Directory not found: {path_arg}")`
 
-use std::path::PathBuf;
-
 use archon_tui::app::TuiEvent;
+use std::path::PathBuf;
 
 use crate::command::registry::{CommandContext, CommandEffect, CommandHandler};
 
@@ -229,9 +228,7 @@ impl CommandHandler for AddDirHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use archon_tui::app::TuiEvent;
     use std::path::PathBuf;
-    use tokio::sync::mpsc;
 
     /// Build a `CommandContext` with a freshly-created channel.
     ///
@@ -241,7 +238,7 @@ mod tests {
     /// field beyond `tui_tx` and `pending_effect`. Every other optional
     /// field stays `None`. Mirrors the make_ctx fixtures in color.rs /
     /// theme.rs / voice.rs / export.rs.
-    fn make_ctx() -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
+    fn make_ctx() -> (CommandContext, archon_tui::event_channel::TuiEventReceiver) {
         // TASK-AGS-POST-6-SHARED-FIXTURES-V2: migrated to CtxBuilder.
         // /add-dir is an EFFECT-SLOT handler — every optional field stays
         // at its test-safe default.
@@ -249,7 +246,7 @@ mod tests {
     }
 
     /// Drain every event currently pending in the channel.
-    fn drain(rx: &mut mpsc::UnboundedReceiver<TuiEvent>) -> Vec<TuiEvent> {
+    fn drain(rx: &mut archon_tui::event_channel::TuiEventReceiver) -> Vec<TuiEvent> {
         let mut events = Vec::new();
         while let Ok(ev) = rx.try_recv() {
             events.push(ev);

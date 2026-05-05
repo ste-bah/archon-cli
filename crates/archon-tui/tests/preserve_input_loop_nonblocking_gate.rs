@@ -216,7 +216,7 @@ async fn preserve_input_loop_nonblocking_gate() {
         switch_count: switch_count.clone(),
     });
 
-    let (tui_event_tx, tui_event_rx) = unbounded_channel::<TuiEvent>();
+    let (tui_event_tx, tui_event_rx) = archon_tui::event_channel::bounded_tui_event_channel();
     let (agent_event_tx, _agent_event_rx) = unbounded_channel::<TimestampedEvent>();
 
     let cfg = EventLoopConfig {

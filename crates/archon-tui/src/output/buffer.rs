@@ -3,17 +3,42 @@
 //! Relocated from `src/output.rs` (OutputBuffer section, L210-L374 + tests
 //! L380-L495) per REM-2h.
 
+use std::cell::RefCell;
+
+use ratatui::text::Line;
+
+use crate::markdown::render_markdown_line;
+use crate::output::render_cache::{RenderCache, RenderedOutputView, WrapCache, visible_line_range};
+use crate::theme::Theme;
+
 /// Output buffer -- append-only text buffer for streaming display.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct OutputBuffer {
     lines: Vec<String>,
     current_line: String,
+    revision: u64,
+    render_cache: RefCell<Option<RenderCache>>,
+    wrap_cache: RefCell<Option<WrapCache>>,
     /// Vertical scroll offset (lines from the top). When `scroll_locked` is
     /// false this is ignored and we auto-scroll to the bottom.
     pub scroll_offset: u16,
     /// When true the user has scrolled away from the bottom; new content does
     /// not auto-scroll.
     pub scroll_locked: bool,
+}
+
+impl Default for OutputBuffer {
+    fn default() -> Self {
+        Self {
+            lines: Vec::new(),
+            current_line: String::new(),
+            revision: 0,
+            render_cache: RefCell::new(None),
+            wrap_cache: RefCell::new(None),
+            scroll_offset: 0,
+            scroll_locked: false,
+        }
+    }
 }
 
 impl OutputBuffer {
@@ -23,6 +48,9 @@ impl OutputBuffer {
 
     /// Append text (may contain newlines).
     pub fn append(&mut self, text: &str) {
+        if text.is_empty() {
+            return;
+        }
         for ch in text.chars() {
             if ch == '\n' {
                 self.lines.push(std::mem::take(&mut self.current_line));
@@ -30,6 +58,7 @@ impl OutputBuffer {
                 self.current_line.push(ch);
             }
         }
+        self.mark_dirty();
     }
 
     /// Append a complete line.
@@ -38,6 +67,7 @@ impl OutputBuffer {
             self.lines.push(std::mem::take(&mut self.current_line));
         }
         self.lines.push(line.to_string());
+        self.mark_dirty();
     }
 
     /// Get all completed lines plus the current partial line.
@@ -60,6 +90,145 @@ impl OutputBuffer {
         self.current_line.clear();
         self.scroll_offset = 0;
         self.scroll_locked = false;
+        self.mark_dirty();
+    }
+
+    /// Render output lines with a revision/theme cache so the draw loop does
+    /// not re-run markdown parsing for the whole transcript every frame.
+    pub fn rendered_lines(&self, theme: &Theme) -> Vec<Line<'static>> {
+        self.refresh_render_cache(theme);
+        self.render_cache
+            .borrow()
+            .as_ref()
+            .map(|cache| cache.lines.clone())
+            .unwrap_or_default()
+    }
+
+    /// Plain text matching [`Self::rendered_lines`], used for wrapped-row
+    /// scroll math without re-stringifying ratatui spans every draw.
+    pub fn rendered_raw_lines(&self, theme: &Theme) -> Vec<String> {
+        self.refresh_render_cache(theme);
+        self.render_cache
+            .borrow()
+            .as_ref()
+            .map(|cache| cache.raw_lines.clone())
+            .unwrap_or_default()
+    }
+
+    /// Return only the logical lines needed for the current viewport.
+    ///
+    /// Markdown parsing and wrap-row offsets are cached by content revision,
+    /// theme, and width. Per-frame work is reduced to a binary-ish scan over
+    /// cached offsets plus cloning the visible line slice.
+    pub fn rendered_view(
+        &self,
+        theme: &Theme,
+        width: u16,
+        visible_height: u16,
+    ) -> RenderedOutputView {
+        self.refresh_wrap_cache(theme, width);
+
+        let total_wrapped = self
+            .wrap_cache
+            .borrow()
+            .as_ref()
+            .map(|cache| cache.total_wrapped)
+            .unwrap_or(0);
+        let global_scroll_y = self.effective_scroll(total_wrapped, visible_height);
+
+        let (start, end, paragraph_scroll_y) = {
+            let wrap_ref = self.wrap_cache.borrow();
+            let Some(wrap) = wrap_ref.as_ref() else {
+                return RenderedOutputView {
+                    lines: Vec::new(),
+                    total_wrapped,
+                    global_scroll_y,
+                    paragraph_scroll_y: 0,
+                };
+            };
+            visible_line_range(wrap, global_scroll_y, visible_height)
+        };
+
+        let lines = self
+            .render_cache
+            .borrow()
+            .as_ref()
+            .map(|cache| cache.lines[start..end].to_vec())
+            .unwrap_or_default();
+
+        RenderedOutputView {
+            lines,
+            total_wrapped,
+            global_scroll_y,
+            paragraph_scroll_y,
+        }
+    }
+
+    fn mark_dirty(&mut self) {
+        self.revision = self.revision.wrapping_add(1);
+        *self.render_cache.borrow_mut() = None;
+        *self.wrap_cache.borrow_mut() = None;
+    }
+
+    fn refresh_render_cache(&self, theme: &Theme) {
+        let cache_is_current = self
+            .render_cache
+            .borrow()
+            .as_ref()
+            .map(|cache| cache.revision == self.revision && cache.theme == *theme)
+            .unwrap_or(false);
+        if cache_is_current {
+            return;
+        }
+
+        let raw_lines: Vec<String> = self
+            .all_lines()
+            .into_iter()
+            .map(ToString::to_string)
+            .collect();
+        let lines = raw_lines
+            .iter()
+            .map(|line| render_markdown_line(line, theme))
+            .collect();
+        *self.render_cache.borrow_mut() = Some(RenderCache {
+            revision: self.revision,
+            theme: theme.clone(),
+            lines,
+            raw_lines,
+        });
+    }
+
+    fn refresh_wrap_cache(&self, theme: &Theme, width: u16) {
+        self.refresh_render_cache(theme);
+        let cache_is_current = self
+            .wrap_cache
+            .borrow()
+            .as_ref()
+            .map(|cache| cache.revision == self.revision && cache.width == width)
+            .unwrap_or(false);
+        if cache_is_current {
+            return;
+        }
+
+        let raw_lines = self
+            .render_cache
+            .borrow()
+            .as_ref()
+            .map(|cache| cache.raw_lines.clone())
+            .unwrap_or_default();
+        let mut offsets = Vec::with_capacity(raw_lines.len());
+        let mut total: u32 = 0;
+        for raw in &raw_lines {
+            offsets.push(total.min(u16::MAX as u32) as u16);
+            let rows = Self::count_wrapped_rows(&[raw.as_str()], width).max(1);
+            total = total.saturating_add(rows as u32);
+        }
+        *self.wrap_cache.borrow_mut() = Some(WrapCache {
+            revision: self.revision,
+            width,
+            offsets,
+            total_wrapped: total.min(u16::MAX as u32) as u16,
+        });
     }
 
     // -- scroll helpers -----------------------------------------------------
@@ -197,6 +366,37 @@ mod tests {
         buf.append_line("first");
         buf.append_line("second");
         assert_eq!(buf.all_lines(), vec!["first", "second"]);
+    }
+
+    #[test]
+    fn rendered_lines_cache_updates_only_after_content_changes() {
+        let theme = crate::theme::intj_theme();
+        let mut buf = OutputBuffer::new();
+        buf.append_line("**first**");
+
+        let first = buf.rendered_raw_lines(&theme);
+        let second = buf.rendered_raw_lines(&theme);
+        assert_eq!(first, second);
+
+        buf.append_line("second");
+        assert_eq!(buf.rendered_raw_lines(&theme), vec!["**first**", "second"]);
+    }
+
+    #[test]
+    fn rendered_view_clones_only_visible_lines() {
+        let theme = crate::theme::intj_theme();
+        let mut buf = OutputBuffer::new();
+        for idx in 0..100 {
+            buf.append_line(&format!("line {idx}"));
+        }
+        buf.scroll_locked = true;
+        buf.scroll_offset = 50;
+
+        let view = buf.rendered_view(&theme, 80, 5);
+
+        assert!(view.lines.len() <= 7);
+        assert_eq!(view.total_wrapped, 100);
+        assert!(view.global_scroll_y > 0);
     }
 
     // -- scroll tests -------------------------------------------------------

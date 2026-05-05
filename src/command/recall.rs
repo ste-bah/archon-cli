@@ -260,9 +260,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use archon_memory::types::{Memory, MemoryError, MemoryType, RelType, SearchFilter};
-    use archon_tui::app::TuiEvent;
     use chrono::{TimeZone, Utc};
-    use tokio::sync::mpsc;
 
     use crate::command::dispatcher::Dispatcher;
     use crate::command::registry::{CommandContext, RegistryBuilder};
@@ -398,7 +396,7 @@ mod tests {
     /// effect slot.
     fn make_recall_ctx(
         memory: Option<Arc<dyn MemoryTrait>>,
-    ) -> (CommandContext, mpsc::UnboundedReceiver<TuiEvent>) {
+    ) -> (CommandContext, archon_tui::event_channel::TuiEventReceiver) {
         // TASK-AGS-POST-6-SHARED-FIXTURES-V2: migrated to CtxBuilder.
         crate::command::test_support::CtxBuilder::new()
             .with_memory_opt(memory)

@@ -26,7 +26,7 @@ use crate::slash_context::SlashCommandContext;
 pub(super) async fn handle_clear_command(
     agent: &Arc<tokio::sync::Mutex<Agent>>,
     cmd_ctx: &SlashCommandContext,
-    input_tui_tx: &tokio::sync::mpsc::UnboundedSender<TuiEvent>,
+    input_tui_tx: &archon_tui::event_channel::TuiEventSender,
     persist_personality: bool,
     personality_history_limit: u32,
     session_start_confidence: f32,
@@ -101,7 +101,7 @@ pub(super) async fn handle_clear_command(
 pub(super) async fn handle_refresh_identity_command(
     agent: &Arc<tokio::sync::Mutex<Agent>>,
     api_url: &Option<String>,
-    input_tui_tx: &tokio::sync::mpsc::UnboundedSender<TuiEvent>,
+    input_tui_tx: &archon_tui::event_channel::TuiEventSender,
 ) {
     // Clear the validated beta cache
     let validated_cache = dirs::config_dir()

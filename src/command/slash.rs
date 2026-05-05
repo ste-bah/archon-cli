@@ -39,7 +39,7 @@ pub(crate) fn handle_slash_command<'a>(
     input: &'a str,
     _fast_mode: &'a mut FastModeState,
     effort_state: &'a mut EffortState,
-    tui_tx: &'a tokio::sync::mpsc::UnboundedSender<TuiEvent>,
+    tui_tx: &'a archon_tui::event_channel::TuiEventSender,
     ctx: &'a mut SlashCommandContext,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = bool> + Send + 'a>> {
     Box::pin(async move {
@@ -126,7 +126,7 @@ pub(crate) fn handle_slash_command<'a>(
 // ---------------------------------------------------------------------------
 
 pub(crate) fn handle_diff_command<'a>(
-    tui_tx: &'a tokio::sync::mpsc::UnboundedSender<TuiEvent>,
+    tui_tx: &'a archon_tui::event_channel::TuiEventSender,
     working_dir: &'a PathBuf,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
     Box::pin(async move {
