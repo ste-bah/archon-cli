@@ -20,6 +20,8 @@
 use anyhow::Result;
 use archon_tui::app::TuiEvent;
 use chrono::Utc;
+use std::net::{TcpStream, ToSocketAddrs};
+use std::time::Duration;
 
 use archon_llm::providers::{
     CompatKind, ProviderDescriptor, ProviderFeatures, count_compat, count_native, list_compat,
@@ -33,7 +35,7 @@ pub(crate) fn handle_providers(action: Option<ProvidersAction>) -> Result<()> {
     match action.unwrap_or(ProvidersAction::List) {
         ProvidersAction::List => print!("{}", render_provider_registry()),
         ProvidersAction::Capabilities => print!("{}", render_capability_table()),
-        ProvidersAction::Doctor => print!("{}", render_provider_doctor()),
+        ProvidersAction::Doctor { live } => print!("{}", render_provider_doctor(live)),
     }
     Ok(())
 }
@@ -46,10 +48,12 @@ impl CommandHandler for ProvidersHandler {
     fn execute(&self, ctx: &mut CommandContext, _args: &[String]) -> anyhow::Result<()> {
         let rendered = match _args.first().map(String::as_str) {
             Some("capabilities") | Some("capability") | Some("caps") => render_capability_table(),
-            Some("doctor") | Some("diagnose") => render_provider_doctor(),
+            Some("doctor") | Some("diagnose") => {
+                render_provider_doctor(args_contains(_args, "--live"))
+            }
             Some("list") | None => render_provider_registry(),
             Some(other) => format!(
-                "Unknown /providers subcommand `{other}`.\nUsage: /providers [list|capabilities|doctor]\n"
+                "Unknown /providers subcommand `{other}`.\nUsage: /providers [list|capabilities|doctor [--live]]\n"
             ),
         };
         ctx.emit(TuiEvent::TextDelta(rendered));
@@ -110,16 +114,42 @@ fn render_provider_registry() -> String {
     out
 }
 
-fn render_provider_doctor() -> String {
+fn render_provider_doctor(live: bool) -> String {
     let path = archon_llm::tokens::credentials_path();
     let credentials_json = std::fs::read_to_string(&path).ok();
-    render_provider_doctor_from_json(path.exists(), credentials_json.as_deref(), codex_disabled())
+    render_provider_doctor_with_pinger(
+        path.exists(),
+        credentials_json.as_deref(),
+        codex_disabled(),
+        live,
+        local_provider_env(),
+        &TcpProviderLivePinger,
+    )
 }
 
+#[cfg(test)]
 fn render_provider_doctor_from_json(
     credentials_file_exists: bool,
     credentials_json: Option<&str>,
     codex_disabled: bool,
+) -> String {
+    render_provider_doctor_with_pinger(
+        credentials_file_exists,
+        credentials_json,
+        codex_disabled,
+        false,
+        ProviderDoctorEnv::default(),
+        &DisabledLivePinger,
+    )
+}
+
+fn render_provider_doctor_with_pinger(
+    credentials_file_exists: bool,
+    credentials_json: Option<&str>,
+    codex_disabled: bool,
+    live: bool,
+    env: ProviderDoctorEnv,
+    pinger: &dyn ProviderLivePinger,
 ) -> String {
     let anthropic = credentials_json
         .and_then(|json| archon_llm::auth::parse_credentials_json(json).ok())
@@ -129,7 +159,11 @@ fn render_provider_doctor_from_json(
         .map(|creds| credential_status(creds.expires_at.timestamp_millis()));
 
     let mut out = String::new();
-    out.push_str("Provider doctor (local checks only)\n\n");
+    if live {
+        out.push_str("Provider doctor (local checks + live endpoint reachability)\n\n");
+    } else {
+        out.push_str("Provider doctor (local checks only)\n\n");
+    }
     out.push_str(&format!(
         "Credentials file: {}\n",
         if credentials_file_exists {
@@ -148,10 +182,242 @@ fn render_provider_doctor_from_json(
         codex.unwrap_or("missing")
     };
     out.push_str(&format!("Codex OAuth:     {codex_status}\n"));
+    out.push_str(&format!(
+        "ANTHROPIC_API_KEY env: {}\n",
+        env.anthropic_env_kind.as_str()
+    ));
+    out.push_str(&format!(
+        "Anthropic base URL: {}\n",
+        if env.anthropic_base_url_set {
+            "custom via ANTHROPIC_BASE_URL"
+        } else {
+            "default"
+        }
+    ));
+    out.push_str(&format!(
+        "Proxy env:       {}\n",
+        if env.proxy_env_set { "set" } else { "unset" }
+    ));
+    out.push_str(&format!(
+        "Anthropic spoof identity: {}\n",
+        anthropic_spoof_status(anthropic, env.anthropic_env_kind)
+    ));
+    out.push_str(&format!(
+        "Codex spoof identity: {}\n",
+        codex_spoof_status(codex, codex_disabled)
+    ));
     out.push('\n');
     out.push_str("Capability source of truth: `archon providers capabilities` or `/providers capabilities`\n");
-    out.push_str("Live provider pings: not run by this local doctor. Future `--live` support should remain opt-in.\n");
+    render_live_provider_pings(&mut out, live, anthropic, codex, codex_disabled, pinger);
+    render_remediation_hints(&mut out, anthropic, codex, codex_disabled, env);
     out
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ProviderDoctorEnv {
+    anthropic_env_kind: EnvAnthropicCredentialKind,
+    anthropic_base_url_set: bool,
+    proxy_env_set: bool,
+}
+
+impl Default for ProviderDoctorEnv {
+    fn default() -> Self {
+        Self {
+            anthropic_env_kind: EnvAnthropicCredentialKind::Missing,
+            anthropic_base_url_set: false,
+            proxy_env_set: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EnvAnthropicCredentialKind {
+    Missing,
+    ApiKey,
+    OAuthToken,
+    Unknown,
+}
+
+impl EnvAnthropicCredentialKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            EnvAnthropicCredentialKind::Missing => "missing",
+            EnvAnthropicCredentialKind::ApiKey => "api key shaped",
+            EnvAnthropicCredentialKind::OAuthToken => "OAuth token shaped",
+            EnvAnthropicCredentialKind::Unknown => "set but unrecognized shape",
+        }
+    }
+}
+
+fn local_provider_env() -> ProviderDoctorEnv {
+    ProviderDoctorEnv {
+        anthropic_env_kind: std::env::var("ANTHROPIC_API_KEY")
+            .ok()
+            .map(
+                |value| match archon_llm::auth::classify_anthropic_credential(&value) {
+                    archon_llm::auth::AnthropicCredentialKind::Absent => {
+                        EnvAnthropicCredentialKind::Missing
+                    }
+                    archon_llm::auth::AnthropicCredentialKind::ApiKey => {
+                        EnvAnthropicCredentialKind::ApiKey
+                    }
+                    archon_llm::auth::AnthropicCredentialKind::OAuthToken => {
+                        EnvAnthropicCredentialKind::OAuthToken
+                    }
+                    archon_llm::auth::AnthropicCredentialKind::Unknown => {
+                        EnvAnthropicCredentialKind::Unknown
+                    }
+                },
+            )
+            .unwrap_or(EnvAnthropicCredentialKind::Missing),
+        anthropic_base_url_set: std::env::var("ANTHROPIC_BASE_URL")
+            .map(|value| !value.trim().is_empty())
+            .unwrap_or(false),
+        proxy_env_set: ["HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY"]
+            .iter()
+            .any(|key| {
+                std::env::var(key)
+                    .map(|value| !value.trim().is_empty())
+                    .unwrap_or(false)
+            }),
+    }
+}
+
+fn anthropic_spoof_status(
+    anthropic_file_status: Option<&'static str>,
+    env_kind: EnvAnthropicCredentialKind,
+) -> &'static str {
+    if matches!(env_kind, EnvAnthropicCredentialKind::OAuthToken) {
+        "active for OAuth-shaped ANTHROPIC_API_KEY"
+    } else if matches!(anthropic_file_status, Some("present")) {
+        "active for Claude OAuth credential file"
+    } else {
+        "not required unless Anthropic OAuth is used"
+    }
+}
+
+fn codex_spoof_status(codex_status: Option<&'static str>, codex_disabled: bool) -> &'static str {
+    if codex_disabled {
+        "disabled by ARCHON_CODEX_DISABLED"
+    } else if matches!(codex_status, Some("present")) {
+        "loaded from bundled/config/env spoof identity at runtime"
+    } else {
+        "unavailable until Codex OAuth credentials are present"
+    }
+}
+
+fn render_remediation_hints(
+    out: &mut String,
+    anthropic: Option<&'static str>,
+    codex: Option<&'static str>,
+    codex_disabled: bool,
+    env: ProviderDoctorEnv,
+) {
+    out.push_str("Remediation:\n");
+    if anthropic.is_none() && env.anthropic_env_kind == EnvAnthropicCredentialKind::Missing {
+        out.push_str("  - Anthropic missing: run `archon auth login --provider anthropic` or set ANTHROPIC_API_KEY.\n");
+    }
+    if matches!(anthropic, Some("present but expired")) {
+        out.push_str("  - Anthropic expired: run `archon auth login --provider anthropic` to refresh credentials.\n");
+    }
+    if env.anthropic_env_kind == EnvAnthropicCredentialKind::Unknown {
+        out.push_str("  - ANTHROPIC_API_KEY shape is unknown: use sk-ant-api... for API keys or sk-ant-oat... for OAuth spoofing.\n");
+    }
+    if codex_disabled {
+        out.push_str("  - Codex disabled: unset ARCHON_CODEX_DISABLED to enable Codex surfaces.\n");
+    } else if codex.is_none() {
+        out.push_str("  - Codex missing: run `archon auth login --provider openai-codex` for Codex TUI/chat support.\n");
+    } else if matches!(codex, Some("present but expired")) {
+        out.push_str("  - Codex expired: run `archon auth login --provider openai-codex` to refresh credentials.\n");
+    }
+    out.push_str("  - Capability mismatch: run `archon providers capabilities` before using a provider on pipelines/subagents.\n");
+}
+
+fn render_live_provider_pings(
+    out: &mut String,
+    live: bool,
+    anthropic: Option<&'static str>,
+    codex: Option<&'static str>,
+    codex_disabled: bool,
+    pinger: &dyn ProviderLivePinger,
+) {
+    if !live {
+        out.push_str(
+            "Live provider pings: not requested (pass --live to enable opt-in endpoint checks).\n",
+        );
+        return;
+    }
+
+    out.push_str("Live provider pings:\n");
+    render_live_ping_row(
+        out,
+        "Anthropic",
+        "api.anthropic.com:443",
+        anthropic,
+        false,
+        pinger,
+    );
+    render_live_ping_row(
+        out,
+        "Codex",
+        "chatgpt.com:443",
+        codex,
+        codex_disabled,
+        pinger,
+    );
+}
+
+fn render_live_ping_row(
+    out: &mut String,
+    label: &str,
+    endpoint: &str,
+    credential: Option<&'static str>,
+    disabled: bool,
+    pinger: &dyn ProviderLivePinger,
+) {
+    let status = if disabled {
+        "skipped: disabled by ARCHON_CODEX_DISABLED".to_string()
+    } else {
+        match credential {
+            None => "skipped: credentials missing".to_string(),
+            Some("present but expired") => "skipped: credentials expired".to_string(),
+            Some(_) => match pinger.ping(endpoint) {
+                Ok(()) => format!("ok: endpoint reachable ({endpoint})"),
+                Err(err) => format!("failed: endpoint unreachable ({endpoint}: {err})"),
+            },
+        }
+    };
+    out.push_str(&format!("  {label:<9} {status}\n"));
+}
+
+trait ProviderLivePinger {
+    fn ping(&self, endpoint: &str) -> std::result::Result<(), String>;
+}
+
+#[cfg(test)]
+struct DisabledLivePinger;
+
+#[cfg(test)]
+impl ProviderLivePinger for DisabledLivePinger {
+    fn ping(&self, _endpoint: &str) -> std::result::Result<(), String> {
+        Ok(())
+    }
+}
+
+struct TcpProviderLivePinger;
+
+impl ProviderLivePinger for TcpProviderLivePinger {
+    fn ping(&self, endpoint: &str) -> std::result::Result<(), String> {
+        let mut addrs = endpoint
+            .to_socket_addrs()
+            .map_err(|err| format!("resolve failed: {err}"))?;
+        let addr = addrs
+            .next()
+            .ok_or_else(|| "no socket address".to_string())?;
+        TcpStream::connect_timeout(&addr, Duration::from_millis(1_500))
+            .map(|_| ())
+            .map_err(|err| err.to_string())
+    }
 }
 
 fn credential_status(expires_at_ms: i64) -> &'static str {
@@ -167,6 +433,10 @@ fn codex_disabled() -> bool {
     std::env::var("ARCHON_CODEX_DISABLED")
         .map(|v| matches!(v.to_lowercase().as_str(), "1" | "true" | "yes"))
         .unwrap_or(false)
+}
+
+fn args_contains(args: &[String], needle: &str) -> bool {
+    args.iter().any(|arg| arg == needle)
 }
 
 // Column widths kept in module-private constants so the header,
@@ -259,6 +529,16 @@ fn fmt_features(f: &ProviderFeatures) -> String {
 mod tests {
     use super::*;
     use crate::command::test_support::*;
+
+    struct FakeLivePinger {
+        outcome: std::result::Result<(), String>,
+    }
+
+    impl ProviderLivePinger for FakeLivePinger {
+        fn ping(&self, _endpoint: &str) -> std::result::Result<(), String> {
+            self.outcome.clone()
+        }
+    }
 
     fn render() -> String {
         let handler = ProvidersHandler;
@@ -375,6 +655,15 @@ mod tests {
     }
 
     #[test]
+    fn execute_doctor_live_reports_endpoint_checks() {
+        let body = render_args(&["doctor", "--live"]);
+        assert!(body.contains("Provider doctor (local checks + live endpoint reachability)"));
+        assert!(body.contains("Live provider pings:"));
+        assert!(!body.contains("accessToken"));
+        assert!(!body.contains("refreshToken"));
+    }
+
+    #[test]
     fn render_provider_doctor_from_json_redacts_credentials() {
         let future = chrono::Utc::now() + chrono::Duration::hours(1);
         let json = serde_json::json!({
@@ -397,9 +686,111 @@ mod tests {
         let body = render_provider_doctor_from_json(true, Some(&json), false);
         assert!(body.contains("Anthropic OAuth:  present"));
         assert!(body.contains("Codex OAuth:     present"));
+        assert!(body.contains("Live provider pings: not requested"));
         assert!(!body.contains("secret-anthropic-access"));
         assert!(!body.contains("secret-codex-access"));
         assert!(!body.contains("acct_secret"));
+    }
+
+    #[test]
+    fn render_provider_doctor_live_uses_pinger_without_printing_tokens() {
+        let future = chrono::Utc::now() + chrono::Duration::hours(1);
+        let json = serde_json::json!({
+            "claudeAiOauth": {
+                "accessToken": "secret-anthropic-access",
+                "refreshToken": "secret-anthropic-refresh",
+                "expiresAt": future.timestamp_millis(),
+                "scopes": ["user:inference"],
+                "subscriptionType": "pro"
+            },
+            "openaiCodexOauth": {
+                "accessToken": "secret-codex-access",
+                "refreshToken": "secret-codex-refresh",
+                "expiresAt": future.timestamp_millis(),
+                "accountId": "acct_secret"
+            }
+        })
+        .to_string();
+
+        let pinger = FakeLivePinger { outcome: Ok(()) };
+        let body = render_provider_doctor_with_pinger(
+            true,
+            Some(&json),
+            false,
+            true,
+            ProviderDoctorEnv::default(),
+            &pinger,
+        );
+        assert!(body.contains("Anthropic ok: endpoint reachable"));
+        assert!(body.contains("Codex     ok: endpoint reachable"));
+        assert!(!body.contains("secret-anthropic-access"));
+        assert!(!body.contains("secret-codex-access"));
+        assert!(!body.contains("acct_secret"));
+    }
+
+    #[test]
+    fn render_provider_doctor_live_skips_missing_or_disabled_credentials() {
+        let pinger = FakeLivePinger { outcome: Ok(()) };
+        let body = render_provider_doctor_with_pinger(
+            false,
+            None,
+            true,
+            true,
+            ProviderDoctorEnv::default(),
+            &pinger,
+        );
+        assert!(body.contains("Anthropic skipped: credentials missing"));
+        assert!(body.contains("Codex     skipped: disabled by ARCHON_CODEX_DISABLED"));
+    }
+
+    #[test]
+    fn render_provider_doctor_live_reports_ping_failure() {
+        let future = chrono::Utc::now() + chrono::Duration::hours(1);
+        let json = serde_json::json!({
+            "claudeAiOauth": {
+                "accessToken": "secret-anthropic-access",
+                "refreshToken": "secret-anthropic-refresh",
+                "expiresAt": future.timestamp_millis(),
+                "scopes": ["user:inference"],
+                "subscriptionType": "pro"
+            }
+        })
+        .to_string();
+
+        let pinger = FakeLivePinger {
+            outcome: Err("synthetic failure".to_string()),
+        };
+        let body = render_provider_doctor_with_pinger(
+            true,
+            Some(&json),
+            false,
+            true,
+            ProviderDoctorEnv::default(),
+            &pinger,
+        );
+        assert!(body.contains("Anthropic failed: endpoint unreachable"));
+        assert!(body.contains("synthetic failure"));
+        assert!(body.contains("Codex     skipped: credentials missing"));
+        assert!(!body.contains("secret-anthropic-access"));
+    }
+
+    #[test]
+    fn render_provider_doctor_reports_spoof_proxy_and_remediation() {
+        let pinger = FakeLivePinger { outcome: Ok(()) };
+        let env = ProviderDoctorEnv {
+            anthropic_env_kind: EnvAnthropicCredentialKind::OAuthToken,
+            anthropic_base_url_set: true,
+            proxy_env_set: true,
+        };
+        let body = render_provider_doctor_with_pinger(false, None, false, false, env, &pinger);
+        assert!(body.contains("ANTHROPIC_API_KEY env: OAuth token shaped"));
+        assert!(body.contains("Anthropic base URL: custom via ANTHROPIC_BASE_URL"));
+        assert!(body.contains("Proxy env:       set"));
+        assert!(
+            body.contains("Anthropic spoof identity: active for OAuth-shaped ANTHROPIC_API_KEY")
+        );
+        assert!(body.contains("Codex missing: run `archon auth login --provider openai-codex`"));
+        assert!(!body.contains("sk-ant-oat"));
     }
 
     #[test]
@@ -520,7 +911,7 @@ mod tests {
             other => panic!("expected TextDelta, got {:?}", other),
         };
         assert!(body.contains("37 total"));
-        assert!(body.contains("NATIVE (5)"));
+        assert!(body.contains("NATIVE (6)"));
         assert!(body.contains("OPENAI-COMPAT (31)"));
     }
 }

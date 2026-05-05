@@ -577,8 +577,12 @@ pub enum ProvidersAction {
     List,
     /// Show Archon surface support by provider/auth mode
     Capabilities,
-    /// Diagnose local provider/auth configuration without live network calls
-    Doctor,
+    /// Diagnose provider/auth configuration
+    Doctor {
+        /// Run opt-in live endpoint reachability checks
+        #[arg(long)]
+        live: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]

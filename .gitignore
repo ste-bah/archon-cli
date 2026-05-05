@@ -80,6 +80,8 @@ hello.txt
 !/docs/cookbook/**
 !/docs/operations/
 !/docs/operations/**
+!/docs/maintenance/
+!/docs/maintenance/**
 !/docs/development/
 !/docs/development/**
 !/docs/release-notes/

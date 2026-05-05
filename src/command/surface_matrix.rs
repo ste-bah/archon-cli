@@ -30,6 +30,14 @@ pub(crate) struct CommandSurfaceRow {
     pub(crate) notes: &'static str,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct SurfaceException {
+    pub(crate) cli: &'static str,
+    pub(crate) owner: &'static str,
+    pub(crate) review_date: &'static str,
+    pub(crate) reason: &'static str,
+}
+
 pub(crate) const COMMAND_SURFACE_ROWS: &[CommandSurfaceRow] = &[
     CommandSurfaceRow {
         cli: "archon auth ...",
@@ -201,8 +209,53 @@ pub(crate) const COMMAND_SURFACE_ROWS: &[CommandSurfaceRow] = &[
     },
 ];
 
+pub(crate) const COMMAND_SURFACE_EXCEPTIONS: &[SurfaceException] = &[
+    SurfaceException {
+        cli: "archon run-agent-async ...",
+        owner: "archon-maintainers",
+        review_date: "2026-06-30",
+        reason: "Launch is TUI-native; richer async task verbs remain under `/tasks` until the task detail screen lands.",
+    },
+    SurfaceException {
+        cli: "archon task-status/result/cancel/list/events",
+        owner: "archon-maintainers",
+        review_date: "2026-06-30",
+        reason: "`/tasks` is the approved TUI entry point; per-id shell verbs stay richer until task drill-down UX is built.",
+    },
+    SurfaceException {
+        cli: "archon plugin ...",
+        owner: "archon-maintainers",
+        review_date: "2026-06-30",
+        reason: "List/info are live; mutating plugin operations remain guided until persistent plugin state is productized.",
+    },
+    SurfaceException {
+        cli: "archon team ...",
+        owner: "archon-maintainers",
+        review_date: "2026-06-30",
+        reason: "Team execution is intentionally shell-only until a first-class team command-center workflow is designed.",
+    },
+    SurfaceException {
+        cli: "archon serve/remote/web/ide-stdio",
+        owner: "archon-maintainers",
+        review_date: "2026-06-30",
+        reason: "Host process control is intentionally shell-only and not part of the interactive command center.",
+    },
+    SurfaceException {
+        cli: "archon metrics/update",
+        owner: "archon-maintainers",
+        review_date: "2026-06-30",
+        reason: "Operational maintenance commands are approved shell-only surfaces unless a product need appears.",
+    },
+];
+
 pub(crate) fn command_surface_rows() -> &'static [CommandSurfaceRow] {
     COMMAND_SURFACE_ROWS
+}
+
+pub(crate) fn command_surface_exception(cli: &str) -> Option<&'static SurfaceException> {
+    COMMAND_SURFACE_EXCEPTIONS
+        .iter()
+        .find(|exception| exception.cli == cli)
 }
 
 pub(crate) fn render_command_surface_markdown() -> String {
@@ -213,22 +266,34 @@ pub(crate) fn render_command_surface_markdown() -> String {
         "Update the code-owned matrix and regenerate this file when command surfaces change.\n\n",
     );
     out.push_str(
-        "| CLI surface | Slash primary | TUI surface | Status | Source of truth | Notes |\n",
+        "Rows marked `PARTIAL` or `SHELL_ONLY` must carry an approved exception with an owner and review date.\n\n",
     );
-    out.push_str("|---|---|---|---|---|---|\n");
+    out.push_str(
+        "| CLI surface | Slash primary | TUI surface | Status | Source of truth | Notes | Approved exception |\n",
+    );
+    out.push_str("|---|---|---|---|---|---|---|\n");
     for row in command_surface_rows() {
         let slash = row
             .slash_primary
             .map(|primary| format!("`/{primary}`"))
             .unwrap_or_else(|| "-".to_string());
+        let exception = command_surface_exception(row.cli)
+            .map(|exception| {
+                format!(
+                    "{}; owner: {}; review: {}",
+                    exception.reason, exception.owner, exception.review_date
+                )
+            })
+            .unwrap_or_else(|| "-".to_string());
         out.push_str(&format!(
-            "| `{}` | {} | {} | {} | `{}` | {} |\n",
+            "| `{}` | {} | {} | {} | `{}` | {} | {} |\n",
             row.cli,
             slash,
             row.tui_surface,
             row.status.as_str(),
             row.source_of_truth,
-            row.notes
+            row.notes,
+            exception
         ));
     }
     out
@@ -302,6 +367,43 @@ mod tests {
                     row.cli
                 );
             }
+        }
+    }
+
+    #[test]
+    fn non_done_rows_have_approved_exceptions() {
+        for row in command_surface_rows() {
+            if row.status != SurfaceStatus::Done {
+                let exception = command_surface_exception(row.cli)
+                    .unwrap_or_else(|| panic!("{} has no approved exception", row.cli));
+                assert!(
+                    !exception.owner.is_empty(),
+                    "{} exception has no owner",
+                    row.cli
+                );
+                assert!(
+                    !exception.review_date.is_empty(),
+                    "{} exception has no review date",
+                    row.cli
+                );
+                assert!(
+                    !exception.reason.is_empty(),
+                    "{} exception has no reason",
+                    row.cli
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn exception_rows_match_real_command_rows() {
+        let rows: HashSet<_> = command_surface_rows().iter().map(|row| row.cli).collect();
+        for exception in COMMAND_SURFACE_EXCEPTIONS {
+            assert!(
+                rows.contains(exception.cli),
+                "exception references missing CLI surface {}",
+                exception.cli
+            );
         }
     }
 }

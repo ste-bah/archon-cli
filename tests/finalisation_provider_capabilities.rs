@@ -59,8 +59,19 @@ fn cli_parses_providers_doctor_subcommand() {
     let cli = Cli::parse_from(["archon", "providers", "doctor"]);
     match cli.command {
         Some(Commands::Providers {
-            action: Some(ProvidersAction::Doctor),
+            action: Some(ProvidersAction::Doctor { live: false }),
         }) => {}
         other => panic!("expected providers doctor command, got {other:?}"),
+    }
+}
+
+#[test]
+fn cli_parses_providers_doctor_live_flag() {
+    let cli = Cli::parse_from(["archon", "providers", "doctor", "--live"]);
+    match cli.command {
+        Some(Commands::Providers {
+            action: Some(ProvidersAction::Doctor { live: true }),
+        }) => {}
+        other => panic!("expected providers doctor --live command, got {other:?}"),
     }
 }

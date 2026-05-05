@@ -14,7 +14,7 @@ For which shell command families are mirrored into slash/TUI flows, see the gene
 | `archon auth login --provider anthropic\|openai-codex` | Authenticate a provider |
 | `archon auth status` | Show redacted Anthropic/Codex auth status |
 | `archon chat --provider <ID> <PROMPT>` | Single-turn chat through a selected provider |
-| `archon providers [list\|capabilities\|doctor]` | List provider registry entries, surface capability support, or local auth diagnostics |
+| `archon providers [list\|capabilities\|doctor [--live]]` | List provider registry entries, surface capability support, local auth diagnostics, or opt-in endpoint reachability checks |
 | `archon serve [--port PORT] [--token-path PATH]` | Start WebSocket server for remote agent access |
 | `archon remote ws <URL> [--token TOKEN]` | Connect to remote agent via WebSocket |
 | `archon remote ssh <TARGET>` | Connect to remote agent via SSH |
