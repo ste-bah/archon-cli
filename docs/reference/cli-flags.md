@@ -12,7 +12,7 @@ Run `archon --help` for the live, authoritative listing. Every flag below is ver
 | `archon auth login --provider anthropic\|openai-codex` | Authenticate a provider |
 | `archon auth status` | Show redacted Anthropic/Codex auth status |
 | `archon chat --provider <ID> <PROMPT>` | Single-turn chat through a selected provider |
-| `archon providers [list\|capabilities]` | List provider registry entries or Archon surface capability support |
+| `archon providers [list\|capabilities\|doctor]` | List provider registry entries, surface capability support, or local auth diagnostics |
 | `archon serve [--port PORT] [--token-path PATH]` | Start WebSocket server for remote agent access |
 | `archon remote ws <URL> [--token TOKEN]` | Connect to remote agent via WebSocket |
 | `archon remote ssh <TARGET>` | Connect to remote agent via SSH |

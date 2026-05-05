@@ -53,3 +53,14 @@ fn cli_parses_providers_capabilities_subcommand() {
         other => panic!("expected providers capabilities command, got {other:?}"),
     }
 }
+
+#[test]
+fn cli_parses_providers_doctor_subcommand() {
+    let cli = Cli::parse_from(["archon", "providers", "doctor"]);
+    match cli.command {
+        Some(Commands::Providers {
+            action: Some(ProvidersAction::Doctor),
+        }) => {}
+        other => panic!("expected providers doctor command, got {other:?}"),
+    }
+}

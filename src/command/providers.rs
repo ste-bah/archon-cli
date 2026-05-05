@@ -19,6 +19,7 @@
 
 use anyhow::Result;
 use archon_tui::app::TuiEvent;
+use chrono::Utc;
 
 use archon_llm::providers::{
     CompatKind, ProviderDescriptor, ProviderFeatures, count_compat, count_native, list_compat,
@@ -32,6 +33,7 @@ pub(crate) fn handle_providers(action: Option<ProvidersAction>) -> Result<()> {
     match action.unwrap_or(ProvidersAction::List) {
         ProvidersAction::List => print!("{}", render_provider_registry()),
         ProvidersAction::Capabilities => print!("{}", render_capability_table()),
+        ProvidersAction::Doctor => print!("{}", render_provider_doctor()),
     }
     Ok(())
 }
@@ -44,9 +46,10 @@ impl CommandHandler for ProvidersHandler {
     fn execute(&self, ctx: &mut CommandContext, _args: &[String]) -> anyhow::Result<()> {
         let rendered = match _args.first().map(String::as_str) {
             Some("capabilities") | Some("capability") | Some("caps") => render_capability_table(),
+            Some("doctor") | Some("diagnose") => render_provider_doctor(),
             Some("list") | None => render_provider_registry(),
             Some(other) => format!(
-                "Unknown /providers subcommand `{other}`.\nUsage: /providers [list|capabilities]\n"
+                "Unknown /providers subcommand `{other}`.\nUsage: /providers [list|capabilities|doctor]\n"
             ),
         };
         ctx.emit(TuiEvent::TextDelta(rendered));
@@ -105,6 +108,65 @@ fn render_provider_registry() -> String {
              model with /model <name>.\n",
     );
     out
+}
+
+fn render_provider_doctor() -> String {
+    let path = archon_llm::tokens::credentials_path();
+    let credentials_json = std::fs::read_to_string(&path).ok();
+    render_provider_doctor_from_json(path.exists(), credentials_json.as_deref(), codex_disabled())
+}
+
+fn render_provider_doctor_from_json(
+    credentials_file_exists: bool,
+    credentials_json: Option<&str>,
+    codex_disabled: bool,
+) -> String {
+    let anthropic = credentials_json
+        .and_then(|json| archon_llm::auth::parse_credentials_json(json).ok())
+        .map(|creds| credential_status(creds.expires_at.timestamp_millis()));
+    let codex = credentials_json
+        .and_then(|json| archon_llm::auth::parse_codex_credentials_json(json).ok())
+        .map(|creds| credential_status(creds.expires_at.timestamp_millis()));
+
+    let mut out = String::new();
+    out.push_str("Provider doctor (local checks only)\n\n");
+    out.push_str(&format!(
+        "Credentials file: {}\n",
+        if credentials_file_exists {
+            "present"
+        } else {
+            "missing"
+        }
+    ));
+    out.push_str(&format!(
+        "Anthropic OAuth:  {}\n",
+        anthropic.unwrap_or("missing")
+    ));
+    let codex_status = if codex_disabled {
+        "disabled by ARCHON_CODEX_DISABLED"
+    } else {
+        codex.unwrap_or("missing")
+    };
+    out.push_str(&format!("Codex OAuth:     {codex_status}\n"));
+    out.push('\n');
+    out.push_str("Capability source of truth: `archon providers capabilities` or `/providers capabilities`\n");
+    out.push_str("Live provider pings: not run by this local doctor. Future `--live` support should remain opt-in.\n");
+    out
+}
+
+fn credential_status(expires_at_ms: i64) -> &'static str {
+    let now_ms = Utc::now().timestamp_millis();
+    if expires_at_ms <= now_ms {
+        "present but expired"
+    } else {
+        "present"
+    }
+}
+
+fn codex_disabled() -> bool {
+    std::env::var("ARCHON_CODEX_DISABLED")
+        .map(|v| matches!(v.to_lowercase().as_str(), "1" | "true" | "yes"))
+        .unwrap_or(false)
 }
 
 // Column widths kept in module-private constants so the header,
@@ -299,6 +361,51 @@ mod tests {
     #[test]
     fn cli_handle_capabilities_renders_without_error() {
         handle_providers(Some(ProvidersAction::Capabilities)).expect("capabilities output");
+    }
+
+    #[test]
+    fn execute_doctor_reports_local_state_without_tokens() {
+        let body = render_args(&["doctor"]);
+        assert!(body.contains("Provider doctor (local checks only)"));
+        assert!(body.contains("Credentials file:"));
+        assert!(body.contains("Anthropic OAuth:"));
+        assert!(body.contains("Codex OAuth:"));
+        assert!(!body.contains("accessToken"));
+        assert!(!body.contains("refreshToken"));
+    }
+
+    #[test]
+    fn render_provider_doctor_from_json_redacts_credentials() {
+        let future = chrono::Utc::now() + chrono::Duration::hours(1);
+        let json = serde_json::json!({
+            "claudeAiOauth": {
+                "accessToken": "secret-anthropic-access",
+                "refreshToken": "secret-anthropic-refresh",
+                "expiresAt": future.timestamp_millis(),
+                "scopes": ["user:inference"],
+                "subscriptionType": "pro"
+            },
+            "openaiCodexOauth": {
+                "accessToken": "secret-codex-access",
+                "refreshToken": "secret-codex-refresh",
+                "expiresAt": future.timestamp_millis(),
+                "accountId": "acct_secret"
+            }
+        })
+        .to_string();
+
+        let body = render_provider_doctor_from_json(true, Some(&json), false);
+        assert!(body.contains("Anthropic OAuth:  present"));
+        assert!(body.contains("Codex OAuth:     present"));
+        assert!(!body.contains("secret-anthropic-access"));
+        assert!(!body.contains("secret-codex-access"));
+        assert!(!body.contains("acct_secret"));
+    }
+
+    #[test]
+    fn render_provider_doctor_marks_codex_kill_switch() {
+        let body = render_provider_doctor_from_json(false, None, true);
+        assert!(body.contains("Codex OAuth:     disabled by ARCHON_CODEX_DISABLED"));
     }
 
     #[test]
