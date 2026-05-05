@@ -199,3 +199,46 @@ fn capability_set_reports_supported_features() {
     assert!(set.supports(ProviderCapability::ToolUse));
     assert!(!set.supports(ProviderCapability::Subagents));
 }
+
+#[test]
+fn request_conversion_appends_tool_results_as_user_blocks() {
+    let mut turn = request();
+    turn.tool_results = vec![
+        AgenticToolResult {
+            tool_call_id: "toolu_ok".into(),
+            content: serde_json::json!("found it"),
+            is_error: false,
+        },
+        AgenticToolResult {
+            tool_call_id: "toolu_err".into(),
+            content: serde_json::json!({"message": "boom"}),
+            is_error: true,
+        },
+    ];
+
+    let llm_request = turn.into_llm_request();
+    let appended = llm_request.messages.last().expect("tool result message");
+
+    assert_eq!(appended["role"], "user");
+    assert_eq!(appended["content"][0]["type"], "tool_result");
+    assert_eq!(appended["content"][0]["tool_use_id"], "toolu_ok");
+    assert_eq!(appended["content"][0]["content"], "found it");
+    assert_eq!(appended["content"][0]["is_error"], false);
+    assert_eq!(appended["content"][1]["tool_use_id"], "toolu_err");
+    assert_eq!(appended["content"][1]["content"]["message"], "boom");
+    assert_eq!(appended["content"][1]["is_error"], true);
+}
+
+#[test]
+fn capability_set_can_be_derived_from_llm_provider() {
+    let provider = FakeProvider {
+        name: "fake".into(),
+        events: Vec::new(),
+    };
+
+    let set = ProviderCapabilitySet::from_llm_provider(&provider);
+
+    assert!(set.supports(ProviderCapability::Streaming));
+    assert!(set.supports(ProviderCapability::ToolUse));
+    assert!(!set.supports(ProviderCapability::Vision));
+}

@@ -8,7 +8,7 @@
 use async_trait::async_trait;
 use tokio::sync::mpsc;
 
-use crate::provider::{LlmError, LlmRequest};
+use crate::provider::{LlmError, LlmProvider, LlmRequest, ProviderFeature};
 use crate::providers::ProviderCapability;
 use crate::types::Usage;
 
@@ -37,7 +37,8 @@ pub struct AgenticTurnRequest {
 }
 
 impl AgenticTurnRequest {
-    pub fn into_llm_request(self) -> LlmRequest {
+    pub fn into_llm_request(mut self) -> LlmRequest {
+        append_tool_results(&mut self.messages, &self.tool_results);
         LlmRequest {
             model: self.model,
             max_tokens: self.max_tokens,
@@ -50,6 +51,26 @@ impl AgenticTurnRequest {
             extra: self.extra,
             request_origin: Some("agentic_turn".into()),
             reasoning_encrypted: self.reasoning_encrypted,
+        }
+    }
+}
+
+impl From<LlmRequest> for AgenticTurnRequest {
+    fn from(request: LlmRequest) -> Self {
+        Self {
+            model: request.model,
+            max_tokens: request.max_tokens,
+            system: request.system,
+            messages: request.messages,
+            tools: request.tools,
+            tool_results: Vec::new(),
+            effort: request.effort,
+            reasoning_encrypted: request.reasoning_encrypted,
+            session_id: None,
+            run_id: None,
+            parent_id: None,
+            budget_usd_remaining: None,
+            extra: request.extra,
         }
     }
 }
@@ -137,6 +158,20 @@ impl ProviderCapabilitySet {
     pub fn as_slice(&self) -> &[ProviderCapability] {
         &self.capabilities
     }
+
+    pub fn from_llm_provider(provider: &dyn LlmProvider) -> Self {
+        let mut capabilities = Vec::new();
+        if provider.supports_feature(ProviderFeature::Streaming) {
+            capabilities.push(ProviderCapability::Streaming);
+        }
+        if provider.supports_feature(ProviderFeature::ToolUse) {
+            capabilities.push(ProviderCapability::ToolUse);
+        }
+        if provider.supports_feature(ProviderFeature::Vision) {
+            capabilities.push(ProviderCapability::Vision);
+        }
+        Self::new(capabilities)
+    }
 }
 
 #[async_trait]
@@ -150,4 +185,25 @@ pub trait AgenticLlmProvider: Send + Sync {
     fn capabilities(&self) -> ProviderCapabilitySet;
     fn provider_id(&self) -> &str;
     fn model_id(&self) -> &str;
+}
+
+fn append_tool_results(messages: &mut Vec<serde_json::Value>, results: &[AgenticToolResult]) {
+    if results.is_empty() {
+        return;
+    }
+    let content = results
+        .iter()
+        .map(|result| {
+            serde_json::json!({
+                "type": "tool_result",
+                "tool_use_id": result.tool_call_id,
+                "content": result.content,
+                "is_error": result.is_error,
+            })
+        })
+        .collect::<Vec<_>>();
+    messages.push(serde_json::json!({
+        "role": "user",
+        "content": content,
+    }));
 }
