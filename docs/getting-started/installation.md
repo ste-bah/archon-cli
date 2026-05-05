@@ -27,29 +27,40 @@ rustc --version    # verify: 1.85.0 or newer
 
 archon-cli links against OpenSSL via `reqwest` (rustls is also enabled, but build-deps still need pkg-config + libssl headers on Linux for transitive crates).
 
+> **Quick path: one-shot installer.** `scripts/install-system-deps.sh` detects your OS and installs everything at once — build deps + `pdftotext` (poppler) for PDF ingest + `tesseract` for image OCR. Supports Ubuntu/Debian/WSL2, Fedora/RHEL/Rocky/Alma, Arch/Manjaro, and macOS (Homebrew).
+>
+> ```bash
+> sudo scripts/install-system-deps.sh         # install everything
+> scripts/install-system-deps.sh --check      # verify what's already present
+> scripts/install-system-deps.sh --dry-run    # show what would run
+> ```
+>
+> The manual per-distro lists below are kept for reference and for unsupported distros.
+
 ### Ubuntu / Debian / WSL2-Ubuntu
 
 ```bash
 sudo apt update
-sudo apt install -y build-essential pkg-config libssl-dev git
+sudo apt install -y build-essential pkg-config libssl-dev git poppler-utils tesseract-ocr
 ```
 
 ### Fedora / RHEL / Rocky
 
 ```bash
-sudo dnf install -y gcc pkg-config openssl-devel git
+sudo dnf install -y gcc pkg-config openssl-devel git poppler-utils tesseract
 ```
 
 ### Arch / Manjaro
 
 ```bash
-sudo pacman -S --needed base-devel openssl pkg-config git
+sudo pacman -S --needed base-devel openssl pkg-config git poppler tesseract
 ```
 
 ### macOS
 
 ```bash
 xcode-select --install
+brew install poppler tesseract             # PDF text extraction + image OCR
 # OpenSSL supplied by the system; no extra steps for default builds.
 # If a transitive crate complains about OpenSSL:
 brew install pkg-config openssl
