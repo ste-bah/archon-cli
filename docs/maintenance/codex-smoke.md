@@ -1,8 +1,12 @@
-# Codex Daily Smoke Runbook
+# Codex Smoke Runbook
 
-Archon runs a daily Codex smoke against a dedicated ChatGPT Plus test account.
-The smoke exercises credential restore, OAuth refresh, `archon auth status`,
-and `archon chat --provider openai-codex`.
+Archon keeps a manual Codex smoke workflow for maintainers with a dedicated
+ChatGPT Plus test account. The smoke exercises credential restore, OAuth
+refresh, `archon auth status`, and `archon chat --provider openai-codex`.
+
+This workflow is intentionally **not scheduled**. Do not add a GitHub Actions
+`schedule`/`cron` trigger: live provider checks consume paid quota and must only
+run when a maintainer explicitly starts them.
 
 ## Required GitHub Secrets
 
@@ -36,7 +40,9 @@ If the workflow opens or updates a `codex-smoke-broken` issue:
    structure changed.
 
 The workflow comments on an existing open issue instead of creating duplicates.
-When the smoke recovers, it comments and closes the issue.
+When the smoke recovers, it comments and closes the issue. Because the workflow
+is manual-only, a maintainer should close stale smoke issues only after a fresh
+manual run proves recovery.
 
 ## Local Dry Run
 
