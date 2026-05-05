@@ -1,5 +1,6 @@
 // TASK-AGS-709: ActiveProvider — ArcSwap-backed live-swappable handle.
 pub mod active;
+pub mod agentic;
 pub mod anthropic;
 pub mod auth;
 // TASK-AGS-706: LlmConfig + resolve_descriptor — feeds build_llm_provider.
