@@ -352,3 +352,78 @@ pub enum TuiEvent {
     /// Notification overlay with a duration in milliseconds (TUI-330).
     NotificationTimeout(u64),
 }
+
+impl TuiEvent {
+    pub fn variant_name(&self) -> &'static str {
+        match self {
+            Self::TextDelta(_) => "TextDelta",
+            Self::ThinkingDelta(_) => "ThinkingDelta",
+            Self::ToolStart { .. } => "ToolStart",
+            Self::ToolComplete { .. } => "ToolComplete",
+            Self::TurnComplete { .. } => "TurnComplete",
+            Self::Error(_) => "Error",
+            Self::GenerationStarted => "GenerationStarted",
+            Self::SlashCommandComplete => "SlashCommandComplete",
+            Self::ThinkingToggle(_) => "ThinkingToggle",
+            Self::ModelChanged(_) => "ModelChanged",
+            Self::BtwResponse(_) => "BtwResponse",
+            Self::PermissionPrompt { .. } => "PermissionPrompt",
+            Self::SessionRenamed(_) => "SessionRenamed",
+            Self::PermissionModeChanged(_) => "PermissionModeChanged",
+            Self::ShowSessionPicker(_) => "ShowSessionPicker",
+            Self::SetAccentColor(_) => "SetAccentColor",
+            Self::SetTheme(_) => "SetTheme",
+            Self::ShowMcpManager(_) => "ShowMcpManager",
+            Self::UpdateMcpManager(_) => "UpdateMcpManager",
+            Self::ShowMessageSelector(_) => "ShowMessageSelector",
+            Self::ShowSkillsMenu(_) => "ShowSkillsMenu",
+            Self::ShowFilePicker { .. } => "ShowFilePicker",
+            Self::ShowSearchResults { .. } => "ShowSearchResults",
+            Self::OpenView(_) => "OpenView",
+            Self::OpenViewRows { .. } => "OpenViewRows",
+            Self::AgentActivity(_) => "AgentActivity",
+            Self::SetVimMode(_) => "SetVimMode",
+            Self::VimToggle => "VimToggle",
+            Self::VoiceText(_) => "VoiceText",
+            Self::SetAgentInfo { .. } => "SetAgentInfo",
+            Self::Resize { .. } => "Resize",
+            Self::UserInput(_) => "UserInput",
+            Self::SlashCancel => "SlashCancel",
+            Self::SlashAgent(_) => "SlashAgent",
+            Self::Done => "Done",
+            Self::NotificationTimeout(_) => "NotificationTimeout",
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn variant_name_labels_events_used_in_drain_forensics() {
+        assert_eq!(
+            TuiEvent::TextDelta("hello".into()).variant_name(),
+            "TextDelta"
+        );
+        assert_eq!(
+            TuiEvent::SessionRenamed("session".into()).variant_name(),
+            "SessionRenamed"
+        );
+        assert_eq!(
+            TuiEvent::AgentActivity(AgentActivityUpdate {
+                id: "agent-1".into(),
+                name: "Agent".into(),
+                role: AgentActivityRole::Subagent,
+                status: AgentActivityStatus::Running,
+                current_tool: None,
+                detail: None,
+                run_id: None,
+                parent_id: None,
+                artifact_id: None,
+            })
+            .variant_name(),
+            "AgentActivity"
+        );
+    }
+}
