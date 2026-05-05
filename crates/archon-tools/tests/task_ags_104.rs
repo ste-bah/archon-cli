@@ -203,8 +203,12 @@ async fn missing_prompt_still_errors_without_spawning() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn invalid_max_turns_still_errors_without_spawning() {
+    // v0.1.42: MAX_TURNS_HARD_CAP raised from 100 to 100_000. Probe past
+    // the new ceiling so we still exercise the validator's reject path
+    // without accidentally spawning an actual subagent. Was 999 (which
+    // is valid under the new ceiling); now 100_001.
     let tool = AgentTool::new();
-    let input = json!({ "prompt": "x", "max_turns": 999 });
+    let input = json!({ "prompt": "x", "max_turns": 100_001 });
 
     let result = tool.execute(input, &make_ctx()).await;
     assert!(result.is_error);
