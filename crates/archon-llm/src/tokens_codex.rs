@@ -1,11 +1,25 @@
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use crate::auth::{AuthError, CodexCredentials, parse_codex_credentials_json};
+use crate::auth::{
+    AuthError, CodexCredentials, parse_codex_cli_credentials_json, parse_codex_credentials_json,
+};
 use crate::oauth_codex::CodexOAuthClient;
 
 pub fn read_codex_credentials_locked(
+    path: &Path,
+) -> Result<(CodexCredentials, SystemTime), AuthError> {
+    match read_archon_codex_credentials_locked(path) {
+        Ok(creds) => Ok(creds),
+        Err(primary_err) => match read_codex_cli_credentials_locked() {
+            Ok(creds) => Ok(creds),
+            Err(_) => Err(primary_err),
+        },
+    }
+}
+
+fn read_archon_codex_credentials_locked(
     path: &Path,
 ) -> Result<(CodexCredentials, SystemTime), AuthError> {
     let file = fs::OpenOptions::new().read(true).open(path)?;
@@ -28,6 +42,23 @@ pub fn read_codex_credentials_locked(
         .unwrap_or(SystemTime::UNIX_EPOCH);
     let creds = parse_codex_credentials_json(&content)?;
     Ok((creds, mtime))
+}
+
+fn read_codex_cli_credentials_locked() -> Result<(CodexCredentials, SystemTime), AuthError> {
+    let path = codex_cli_auth_path();
+    let content = fs::read_to_string(&path)?;
+    let mtime = fs::metadata(&path)
+        .and_then(|m| m.modified())
+        .unwrap_or(SystemTime::UNIX_EPOCH);
+    let creds = parse_codex_cli_credentials_json(&content)?;
+    Ok((creds, mtime))
+}
+
+fn codex_cli_auth_path() -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".codex")
+        .join("auth.json")
 }
 
 pub fn write_codex_credentials_atomic(

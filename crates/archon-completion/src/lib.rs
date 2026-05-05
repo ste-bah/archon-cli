@@ -292,4 +292,53 @@ mod tests {
         // With no evidence, state should NOT be Verified.
         assert_ne!(report.final_state, crate::models::CompletionState::Verified);
     }
+
+    #[tokio::test]
+    async fn codex_completion_context_persists_provider_neutral_trust_metadata() {
+        let db = test_db();
+        let run_id = "codex-completion-run";
+
+        let report = check_completion_with_context(
+            &db,
+            run_id,
+            "Task complete. All tests pass.",
+            "coding",
+            CompletionContext {
+                workspace_id: "workspace-codex".into(),
+                agent_key: Some("codex-agent".into()),
+                model: Some("gpt-5.4".into()),
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(report.run_id, run_id);
+        assert!(
+            report
+                .claims
+                .iter()
+                .all(|claim| claim.agent_key.as_deref() == Some("codex-agent"))
+        );
+        assert!(
+            report
+                .claims
+                .iter()
+                .all(|claim| claim.model.as_deref() == Some("gpt-5.4"))
+        );
+
+        let contexts = store::get_all_completion_run_contexts(&db).unwrap();
+        let context = contexts
+            .iter()
+            .find(|context| context.run_id == run_id)
+            .expect("completion_run_contexts must include the Codex run");
+        assert_eq!(context.workspace_id, "workspace-codex");
+        assert_eq!(context.agent_key.as_deref(), Some("codex-agent"));
+        assert_eq!(context.model.as_deref(), Some("gpt-5.4"));
+
+        let trust_scores =
+            store::find_trust_scores(&db, Some("codex-agent"), Some("gpt-5.4")).unwrap();
+        assert_eq!(trust_scores.len(), 1);
+        assert_eq!(trust_scores[0].workspace_id, "workspace-codex");
+        assert_eq!(trust_scores[0].task_type, "coding");
+    }
 }

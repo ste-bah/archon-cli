@@ -18,6 +18,7 @@ use archon_llm::provider::{
 use archon_llm::streaming::StreamEvent;
 use archon_llm::types::{ContentBlockType, Usage};
 use archon_tools::tool::{AgentMode, PermissionLevel, Tool, ToolContext, ToolResult};
+use tokio::sync::Barrier;
 
 const SENTINEL: &str = "CODEX_SUBAGENT_TOOL_RESULT_OK";
 
@@ -25,6 +26,16 @@ const SENTINEL: &str = "CODEX_SUBAGENT_TOOL_RESULT_OK";
 struct CodexNamedMockProvider {
     call_count: AtomicU32,
     captured_requests: Mutex<Vec<LlmRequest>>,
+    first_turn_barrier: Option<Arc<Barrier>>,
+}
+
+impl CodexNamedMockProvider {
+    fn with_first_turn_barrier(first_turn_barrier: Arc<Barrier>) -> Self {
+        Self {
+            first_turn_barrier: Some(first_turn_barrier),
+            ..Default::default()
+        }
+    }
 }
 
 #[async_trait::async_trait]
@@ -51,6 +62,12 @@ impl LlmProvider for CodexNamedMockProvider {
             .push(request);
 
         let turn = self.call_count.fetch_add(1, Ordering::SeqCst) + 1;
+        if turn == 1 {
+            if let Some(barrier) = &self.first_turn_barrier {
+                barrier.wait().await;
+            }
+        }
+
         let events = if turn == 1 {
             tool_use_turn()
         } else {
@@ -122,32 +139,7 @@ impl Tool for EchoTool {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn codex_named_subagent_executes_tool_and_continues_with_result() {
     let provider = Arc::new(CodexNamedMockProvider::default());
-    let mut registry = ToolRegistry::new();
-    registry.register(Box::new(EchoTool));
-    let registry = Arc::new(registry);
-
-    let runner = SubagentRunner::new(
-        provider.clone(),
-        "You are a Codex-backed test subagent.".into(),
-        registry.tool_definitions(),
-        registry,
-        ToolContext {
-            working_dir: std::env::temp_dir(),
-            session_id: "codex-subagent-provider-parity".into(),
-            mode: AgentMode::Normal,
-            ..Default::default()
-        },
-        "gpt-5.4".into(),
-        4,
-        60,
-        Arc::new(AgentConfig::default()),
-        Arc::new(IdentityProvider::new(
-            IdentityMode::Clean,
-            "codex-subagent-provider-parity".into(),
-            String::new(),
-            String::new(),
-        )),
-    );
+    let runner = make_runner(provider.clone(), "codex-subagent-provider-parity");
 
     let output = runner
         .run("call Echo with the sentinel")
@@ -167,6 +159,80 @@ async fn codex_named_subagent_executes_tool_and_continues_with_result() {
         extract_last_tool_result(&captured[1].messages).as_deref(),
         Some(SENTINEL)
     );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn two_codex_named_subagents_run_concurrently_without_serializing() {
+    let barrier = Arc::new(Barrier::new(2));
+    let provider_a = Arc::new(CodexNamedMockProvider::with_first_turn_barrier(
+        barrier.clone(),
+    ));
+    let provider_b = Arc::new(CodexNamedMockProvider::with_first_turn_barrier(barrier));
+    let runner_a = make_runner(provider_a.clone(), "codex-subagent-provider-parity-a");
+    let runner_b = make_runner(provider_b.clone(), "codex-subagent-provider-parity-b");
+
+    let joined = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        tokio::join!(
+            runner_a.run("call Echo with the sentinel from A"),
+            runner_b.run("call Echo with the sentinel from B")
+        )
+    })
+    .await
+    .expect("both subagents must reach the first-turn barrier concurrently");
+
+    let output_a = joined.0.expect("subagent A should complete");
+    let output_b = joined.1.expect("subagent B should complete");
+
+    assert!(output_a.contains(SENTINEL), "subagent A output: {output_a}");
+    assert!(output_b.contains(SENTINEL), "subagent B output: {output_b}");
+    assert_eq!(provider_a.call_count.load(Ordering::SeqCst), 2);
+    assert_eq!(provider_b.call_count.load(Ordering::SeqCst), 2);
+
+    for provider in [&provider_a, &provider_b] {
+        let captured = provider
+            .captured_requests
+            .lock()
+            .expect("captured request mutex poisoned");
+        assert_eq!(captured.len(), 2);
+        assert!(
+            captured
+                .iter()
+                .all(|request| request.request_origin.as_deref() == Some("subagent"))
+        );
+        assert_eq!(
+            extract_last_tool_result(&captured[1].messages).as_deref(),
+            Some(SENTINEL)
+        );
+    }
+}
+
+fn make_runner(provider: Arc<CodexNamedMockProvider>, session_id: &'static str) -> SubagentRunner {
+    let mut registry = ToolRegistry::new();
+    registry.register(Box::new(EchoTool));
+    let registry = Arc::new(registry);
+
+    SubagentRunner::new(
+        provider,
+        "You are a Codex-backed test subagent.".into(),
+        registry.tool_definitions(),
+        registry,
+        ToolContext {
+            working_dir: std::env::temp_dir(),
+            session_id: session_id.into(),
+            mode: AgentMode::Normal,
+            ..Default::default()
+        },
+        "gpt-5.4".into(),
+        4,
+        60,
+        Arc::new(AgentConfig::default()),
+        Arc::new(IdentityProvider::new(
+            IdentityMode::Clean,
+            session_id.into(),
+            String::new(),
+            String::new(),
+        )),
+    )
 }
 
 fn tool_use_turn() -> Vec<StreamEvent> {

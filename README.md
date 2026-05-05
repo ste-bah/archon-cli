@@ -6,7 +6,8 @@
 
 A strategic engineering CLI built in Rust. Self-learning agent platform with
 persistent memory, multi-agent pipelines, Evidence Engine provenance, document
-intelligence, governed learning, and identity-aware Anthropic API integration.
+intelligence, governed learning, and identity-aware Anthropic/Codex provider
+integration.
 
 > **Documentation has moved.** This README is now a landing page. The full structured docs live in [`docs/`](docs/README.md) — start there.
 
@@ -63,6 +64,7 @@ Archon has two subscription-auth paths plus normal API keys:
 archon auth login --provider anthropic
 
 # OpenAI Codex OAuth, stored beside the Anthropic token
+# (Archon also detects an existing official Codex CLI login)
 archon auth login --provider openai-codex
 
 # Inspect both without printing secrets
@@ -93,7 +95,7 @@ The docs are organised by user goal:
 | **Getting started** | [`docs/getting-started/`](docs/getting-started/) — install, first run, quick start |
 | **Architecture** | [`docs/architecture/`](docs/architecture/) — overview, learning systems, pipelines, Evidence Engine diagrams |
 | **Evidence Engine** | [`docs/evidence-engine.md`](docs/evidence-engine.md) — documents, KB, provenance, game theory, completion integrity, governed learning |
-| **Reference** | [`docs/reference/`](docs/reference/) — slash commands (65), tools (43), skills (55), permissions (7 modes), config schema, CLI flags, env vars |
+| **Reference** | [`docs/reference/`](docs/reference/) — slash commands, tools, skills, permissions, config schema, CLI flags, env vars |
 | **Integrations** | [`docs/integrations/`](docs/integrations/) — MCP, plugins, hooks, identity spoofing, LSP, IDE extensions |
 | **Cookbook** | [`docs/cookbook/`](docs/cookbook/) — real-world evidence workflows, strategic engagement, memory-driven coding, god-code pipeline, custom agents |
 | **Operations** | [`docs/operations/`](docs/operations/) — sessions, TUI, cost, compaction, cron, remote control, troubleshooting, data locations |
@@ -137,9 +139,9 @@ archon-cli/
 
 ## Status
 
-- Current version: **v0.1.44** ([release notes](docs/release-notes/v0.1.44.md))
+- Current version: **v0.1.45** ([release notes](docs/release-notes/v0.1.45.md))
 - Active development; pre-1.0 means breaking changes can land in minor versions
-- Phase 6 complete (pipelines + learning systems wired) + Evidence Engine PRD compliance pass; see release notes for the v0.1.6 → v0.1.44 stabilisation arc
+- Phase 6 complete (pipelines + learning systems wired) + Evidence Engine PRD compliance pass + Codex agentic provider parity; see release notes for the v0.1.6 → v0.1.45 stabilisation arc
 
 ## Contributing
 

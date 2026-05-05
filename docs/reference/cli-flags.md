@@ -4,6 +4,12 @@ Run `archon --help` for the live, authoritative listing. Every flag below is ver
 
 For which shell command families are mirrored into slash/TUI flows, see the generated [command surface matrix](../generated/command-surface-matrix.md).
 
+Provider selection is shared across shell and TUI agentic surfaces. Use
+`archon auth login --provider anthropic` for Anthropic OAuth/API-key/proxy
+workflows, or `archon auth login --provider openai-codex` plus
+`[llm].provider = "openai-codex"` to route the TUI, `/btw`, team runs,
+subagents, coding/research pipelines, and gametheory through Codex.
+
 ## Subcommands
 
 | Subcommand | Synopsis |
@@ -19,13 +25,13 @@ For which shell command families are mirrored into slash/TUI flows, see the gene
 | `archon remote ws <URL> [--token TOKEN]` | Connect to remote agent via WebSocket |
 | `archon remote ssh <TARGET>` | Connect to remote agent via SSH |
 | `archon web [--port PORT] [--bind-address ADDR] [--no-open]` | Start browser-based web UI |
-| `archon team run --team NAME <GOAL>` | Execute a multi-agent team on a goal |
+| `archon team run --team NAME <GOAL>` | Execute a multi-agent team on a goal using the configured provider |
 | `archon team list` | List configured teams |
 | `archon plugin list` | List discovered plugins |
 | `archon plugin info <NAME>` | Show plugin details |
 | `archon ide-stdio` | Run in IDE stdio mode (JSON-RPC over stdin/stdout) |
-| `archon pipeline code <TASK> [--dry-run]` | Run the coding pipeline on a task |
-| `archon pipeline research <TOPIC> [--dry-run]` | Run the research pipeline on a topic |
+| `archon pipeline code <TASK> [--dry-run]` | Run the coding pipeline on a task using the configured provider |
+| `archon pipeline research <TOPIC> [--dry-run]` | Run the research pipeline on a topic using the configured provider |
 | `archon pipeline status <SESSION_ID>` | Show pipeline session status |
 | `archon pipeline resume <SESSION_ID>` | Resume an interrupted pipeline session |
 | `archon pipeline list` | List all pipeline sessions |

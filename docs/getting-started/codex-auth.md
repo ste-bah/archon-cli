@@ -32,6 +32,13 @@ For the generated source-of-truth matrix, run `archon providers capabilities` or
 
 archon-cli surfaces the following warning before the first Codex login. Read it. Run `archon auth login --provider openai-codex --accept-tos` only after you have done so.
 
+If you already authenticated the official Codex CLI on the same machine, Archon
+can read `~/.codex/auth.json` as a read-only fallback. `archon auth login
+--provider openai-codex` is still the preferred Archon-native setup because it
+stores credentials in `~/.archon/.credentials.json`, but a valid Codex CLI login
+is enough for `archon auth status`, `archon providers doctor`, chat, TUI
+sessions, tools, subagents, `/btw`, and provider-neutral pipelines.
+
 ```
 WARNING: Codex authentication via archon-cli
 
@@ -85,6 +92,14 @@ If you want to skip the TOS prompt for scripted use after you've read it once:
 archon auth login --provider openai-codex --accept-tos
 ```
 
+If the official Codex CLI is already logged in, you can check whether Archon can
+see it without starting a new browser flow:
+
+```bash
+archon auth status
+archon providers doctor
+```
+
 ## Verify the login took
 
 ```
@@ -114,7 +129,7 @@ Codex (OpenAI ChatGPT subscription)
     client-id:      app_***************
     openai-beta:    responses=experimental
   Manifest:         https://archon-public.s3.amazonaws.com/codex-compat.json
-  Kill-switch:      enabled (set ARCHON_CODEX_DISABLED=1 to disable)
+  Provider:         enabled (set ARCHON_CODEX_DISABLED=1 to disable)
 ```
 
 `account_id` is partially redacted (`acct_*****d2f1`) and the OAuth client ID is also redacted (`app_***************`). archon-cli **never** prints raw tokens.
@@ -283,9 +298,9 @@ You (or your shell rc) set the kill switch. Unset it:
 unset ARCHON_CODEX_DISABLED
 ```
 
-## Daily smoke / CI
+## Manual smoke / CI
 
-The Codex daily smoke runbook lives at [docs/maintenance/codex-smoke.md](../maintenance/codex-smoke.md). It exercises credential restore, OAuth refresh, `archon auth status`, and `archon chat --provider openai-codex` against a dedicated ChatGPT Plus test account. Use it as the reference for how to validate Codex auth in your own CI.
+The Codex smoke runbook lives at [docs/maintenance/codex-smoke.md](../maintenance/codex-smoke.md). It exercises credential restore, OAuth refresh, `archon auth status`, `archon chat --provider openai-codex`, and local fake-provider tests for Codex tool/subagent parity. Live smoke is manual-only because it can spend provider quota; do not schedule it with cron.
 
 ## Where credentials live
 
@@ -310,5 +325,5 @@ For the deeper mechanics of how OAuth credentials become wire headers, see [iden
 
 - [Identity & spoofing](../integrations/identity-spoofing.md) — the spoof-mode mechanics for both providers
 - [Codex environment variables](../env-vars-codex.md) — full `ARCHON_CODEX_*` env var reference
-- [Codex daily smoke runbook](../maintenance/codex-smoke.md) — CI/operational reference
+- [Codex smoke runbook](../maintenance/codex-smoke.md) — manual CI/operational reference
 - [Slash commands reference](../reference/slash-commands.md) — `/auth`, `/chat`, `/providers`

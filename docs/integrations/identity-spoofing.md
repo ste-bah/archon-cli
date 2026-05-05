@@ -136,7 +136,7 @@ If your account has API-key billing or you use a proxy, you can switch to `clean
 
 ## Codex OAuth
 
-Codex OAuth credentials are stored in `~/.archon/.credentials.json` under a separate `openaiCodexOauth` entry. This means a machine can be logged in to both Claude and Codex at the same time:
+Codex OAuth credentials are stored in `~/.archon/.credentials.json` under a separate `openaiCodexOauth` entry. If that entry is absent, Archon can also read the official Codex CLI's `~/.codex/auth.json` as a read-only fallback. This means a machine can be logged in to both Claude and Codex at the same time:
 
 ```bash
 archon auth login --provider anthropic

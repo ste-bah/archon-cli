@@ -73,17 +73,15 @@ async fn status(config: &archon_core::config::ArchonConfig) -> Result<()> {
         return Ok(());
     }
 
-    match read_file(&path)
-        .and_then(|json| archon_llm::auth::parse_codex_credentials_json(&json).ok())
-    {
-        Some(creds) => {
+    match archon_llm::tokens_codex::read_codex_credentials_locked(&path).ok() {
+        Some((creds, _mtime)) => {
             println!(
                 "  Status:           authenticated as account {}",
                 redact_account(&creds.account_id)
             );
             println!("  Token expires:    {}", format_time(creds.expires_at));
             print_spoof_status(config).await?;
-            println!("  Kill-switch:      enabled (set ARCHON_CODEX_DISABLED=1 to disable)");
+            println!("  Provider:         enabled (set ARCHON_CODEX_DISABLED=1 to disable)");
         }
         None => {
             println!(
