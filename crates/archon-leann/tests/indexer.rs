@@ -331,6 +331,35 @@ mod indexer_tests {
         );
     }
 
+    #[tokio::test]
+    async fn index_repository_with_cancel_returns_before_processing_files() {
+        let db = test_db();
+        let config = EmbeddingConfig {
+            provider: EmbeddingProviderKind::Mock,
+            dimension: 8,
+        };
+        let indexer = Indexer::new(db.clone(), config, None).expect("indexer creation");
+        indexer.ensure_schema().unwrap();
+
+        let tmp = tempfile::tempdir().unwrap();
+        create_test_repo(tmp.path());
+
+        let index_config = IndexConfig {
+            root_path: tmp.path().to_path_buf(),
+            include_patterns: vec![],
+            exclude_patterns: vec!["node_modules".to_string(), ".git".to_string()],
+        };
+        let cancel = std::sync::atomic::AtomicBool::new(true);
+
+        let stats = indexer
+            .index_repository_blocking_with_cancel(tmp.path(), &index_config, &cancel)
+            .expect("cancelled index_repository should return partial stats");
+
+        assert_eq!(stats.total_files, 0);
+        assert_eq!(stats.total_chunks, 0);
+        assert_eq!(count_chunks(&db), 0);
+    }
+
     #[test]
     fn hnsw_index_created_with_correct_dimension() {
         let db = test_db();

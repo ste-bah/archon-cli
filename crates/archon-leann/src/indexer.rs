@@ -6,6 +6,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::{Context, Result};
 use cozo::{DataValue, DbInstance, ScriptMutability, Vector};
@@ -185,6 +186,31 @@ impl Indexer {
     /// Respects include/exclude patterns. Skips unchanged files (file hash match).
     /// Returns aggregate statistics.
     pub async fn index_repository(&self, root: &Path, config: &IndexConfig) -> Result<IndexStats> {
+        self.index_repository_blocking(root, config)
+    }
+
+    /// Synchronous repository indexing for callers that explicitly offload
+    /// LEANN work to a blocking thread.
+    pub fn index_repository_blocking(
+        &self,
+        root: &Path,
+        config: &IndexConfig,
+    ) -> Result<IndexStats> {
+        let cancel = AtomicBool::new(false);
+        self.index_repository_blocking_with_cancel(root, config, &cancel)
+    }
+
+    /// Synchronous repository indexing with cooperative cancellation checks.
+    ///
+    /// Cancellation is checked between filesystem entries, files, chunking,
+    /// embedding batches, and Cozo writes so shutdown can stop a large startup
+    /// index without waiting for the whole workspace to finish.
+    pub fn index_repository_blocking_with_cancel(
+        &self,
+        root: &Path,
+        config: &IndexConfig,
+        cancel: &AtomicBool,
+    ) -> Result<IndexStats> {
         let mut stats = IndexStats::default();
 
         let exclude = if config.exclude_patterns.is_empty() {
@@ -205,6 +231,15 @@ impl Indexer {
                 Ok(e) => e,
                 Err(_) => continue,
             };
+
+            if is_cancelled(cancel) {
+                tracing::info!(
+                    files = stats.total_files,
+                    chunks = stats.total_chunks,
+                    "LEANN repository indexing cancelled during walk"
+                );
+                return Ok(stats);
+            }
 
             if !entry.file_type().is_file() {
                 continue;
@@ -230,6 +265,15 @@ impl Indexer {
         let mut all_chunks: Vec<(CodeChunk, String)> = Vec::new(); // (chunk, file_path_str)
 
         for (path, lang_str) in &files_to_index {
+            if is_cancelled(cancel) {
+                tracing::info!(
+                    files = stats.total_files,
+                    chunks = stats.total_chunks,
+                    "LEANN repository indexing cancelled before file processing"
+                );
+                return Ok(stats);
+            }
+
             let content = match std::fs::read_to_string(path) {
                 Ok(c) => c,
                 Err(_) => continue, // skip unreadable files
@@ -253,6 +297,15 @@ impl Indexer {
             let language = str_to_chunker_language(lang_str);
             let chunks = self.chunker.chunk_file(path, &content, language);
 
+            if is_cancelled(cancel) {
+                tracing::info!(
+                    files = stats.total_files,
+                    chunks = stats.total_chunks,
+                    "LEANN repository indexing cancelled after chunking"
+                );
+                return Ok(stats);
+            }
+
             if chunks.is_empty() {
                 continue;
             }
@@ -266,8 +319,7 @@ impl Indexer {
         }
 
         // Batch embed and store
-        self.embed_and_store_chunks(&all_chunks)?;
-        stats.total_chunks = all_chunks.len();
+        stats.total_chunks = self.embed_and_store_chunks_with_cancel(&all_chunks, Some(cancel))?;
 
         Ok(stats)
     }
@@ -387,8 +439,17 @@ impl Indexer {
 
     /// Embed chunks in batches and store them in CozoDB.
     fn embed_and_store_chunks(&self, chunks: &[(CodeChunk, String)]) -> Result<()> {
+        self.embed_and_store_chunks_with_cancel(chunks, None)
+            .map(|_| ())
+    }
+
+    fn embed_and_store_chunks_with_cancel(
+        &self,
+        chunks: &[(CodeChunk, String)],
+        cancel: Option<&AtomicBool>,
+    ) -> Result<usize> {
         if chunks.is_empty() {
-            return Ok(());
+            return Ok(0);
         }
 
         let now = std::time::SystemTime::now()
@@ -397,7 +458,17 @@ impl Indexer {
             .as_secs_f64();
 
         // Process in batches
+        let mut stored = 0usize;
         for batch in chunks.chunks(EMBED_BATCH_SIZE) {
+            if cancel.map(is_cancelled).unwrap_or(false) {
+                tracing::info!(
+                    stored,
+                    remaining = chunks.len().saturating_sub(stored),
+                    "LEANN repository indexing cancelled before embedding batch"
+                );
+                return Ok(stored);
+            }
+
             let texts: Vec<String> = batch
                 .iter()
                 .map(|(chunk, _)| chunk.metadata.chunk_content.clone())
@@ -418,6 +489,15 @@ impl Indexer {
 
             // Bulk insert this batch
             for (i, (chunk, _file_path_str)) in batch.iter().enumerate() {
+                if cancel.map(is_cancelled).unwrap_or(false) {
+                    tracing::info!(
+                        stored,
+                        remaining = chunks.len().saturating_sub(stored),
+                        "LEANN repository indexing cancelled before Cozo insert"
+                    );
+                    return Ok(stored);
+                }
+
                 let chunk_id = uuid::Uuid::new_v4().to_string();
                 let emb = &embeddings[i];
                 let arr = ndarray::Array1::from_vec(emb.clone());
@@ -458,10 +538,11 @@ impl Indexer {
                     params,
                     ScriptMutability::Mutable,
                 ).map_err(cozo_err("insert chunk"))?;
+                stored += 1;
             }
         }
 
-        Ok(())
+        Ok(stored)
     }
 }
 
@@ -521,4 +602,8 @@ fn is_code_language(lang: &str) -> bool {
             | "nim"
             | "v"
     )
+}
+
+fn is_cancelled(cancel: &AtomicBool) -> bool {
+    cancel.load(Ordering::Relaxed)
 }

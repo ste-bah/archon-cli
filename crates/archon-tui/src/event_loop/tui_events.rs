@@ -8,6 +8,7 @@
 
 use crate::app::{App, McpManager, McpManagerView, SessionPicker, TuiEvent};
 use crate::vim::VimState;
+use tokio::sync::mpsc::error::TrySendError;
 
 /// Apply a single `TuiEvent` to the running `App`.
 ///
@@ -41,11 +42,7 @@ pub(super) async fn handle_tui_event(
             // Anthropic pricing: $3/MTok input, $15/MTok output
             app.status.cost +=
                 (input_tokens as f64 * 3.0 + output_tokens as f64 * 15.0) / 1_000_000.0;
-            // Drain any input queued during generation
-            let queued: Vec<String> = app.pending_input.drain(..).collect();
-            for text in queued {
-                let _ = input_tx.send(text).await;
-            }
+            flush_pending_input_after_turn(app, input_tx);
         }
         TuiEvent::Error(msg) => app.on_error(&msg),
         TuiEvent::GenerationStarted => app.on_generation_started(),
@@ -190,5 +187,105 @@ pub(super) async fn handle_tui_event(
             // event-loop side is a no-op (the timeout simply triggers a
             // re-render which then sees the expiry and clears).
         }
+    }
+}
+
+fn flush_pending_input_after_turn(app: &mut App, input_tx: &tokio::sync::mpsc::Sender<String>) {
+    let mut queued = std::mem::take(&mut app.pending_input).into_iter();
+    let mut deferred = Vec::new();
+
+    while let Some(text) = queued.next() {
+        match input_tx.try_send(text) {
+            Ok(()) => {}
+            Err(TrySendError::Full(text)) => {
+                deferred.push(text);
+                deferred.extend(queued);
+                break;
+            }
+            Err(TrySendError::Closed(_text)) => {
+                tracing::warn!("TurnComplete dropped queued input because input channel is closed");
+                return;
+            }
+        }
+    }
+
+    if deferred.is_empty() {
+        return;
+    }
+
+    let count = deferred.len();
+    let input_tx = input_tx.clone();
+    crate::observability::spawn_named("tui-pending-input-flush", async move {
+        for text in deferred {
+            if input_tx.send(text).await.is_err() {
+                tracing::warn!("TurnComplete deferred input flush stopped because channel closed");
+                return;
+            }
+        }
+    });
+    tracing::warn!(
+        count,
+        "TurnComplete deferred queued input flush because input channel was full"
+    );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[tokio::test]
+    async fn turn_complete_flushes_pending_input_without_blocking_when_channel_has_room() {
+        archon_observability::reset_task_registry_for_tests();
+        let mut app = App::new();
+        app.pending_input.push("first".to_string());
+        app.pending_input.push("second".to_string());
+        let (tx, mut rx) = tokio::sync::mpsc::channel(2);
+
+        handle_tui_event(
+            &mut app,
+            TuiEvent::TurnComplete {
+                input_tokens: 1,
+                output_tokens: 1,
+            },
+            &tx,
+        )
+        .await;
+
+        assert!(app.pending_input.is_empty());
+        assert_eq!(rx.try_recv().unwrap(), "first");
+        assert_eq!(rx.try_recv().unwrap(), "second");
+    }
+
+    #[tokio::test]
+    async fn turn_complete_does_not_block_when_input_channel_is_full() {
+        archon_observability::reset_task_registry_for_tests();
+        let mut app = App::new();
+        app.pending_input.push("queued".to_string());
+        let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+        tx.try_send("occupied".to_string()).unwrap();
+
+        tokio::time::timeout(
+            Duration::from_millis(50),
+            handle_tui_event(
+                &mut app,
+                TuiEvent::TurnComplete {
+                    input_tokens: 1,
+                    output_tokens: 1,
+                },
+                &tx,
+            ),
+        )
+        .await
+        .expect("TurnComplete handler must not await on a full input channel");
+
+        assert!(app.pending_input.is_empty());
+        assert_eq!(rx.try_recv().unwrap(), "occupied");
+        assert!(
+            archon_observability::task_snapshots()
+                .iter()
+                .any(|task| task.name == "tui-pending-input-flush")
+        );
+        archon_observability::abort_alive_tasks();
     }
 }

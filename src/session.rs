@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::cli_args::Cli;
 use crate::slash_context::SlashCommandContext;
@@ -1769,6 +1769,7 @@ pub(crate) async fn run_interactive_session(
     // Initialise LEANN code index for pipeline deep-search context.
     // Resilient: if the DB fails to open, leann stays None and pipelines
     // run without semantic search (same as CLI init_leann).
+    let leann_init_cancel = Arc::new(AtomicBool::new(false));
     let leann: Option<Arc<archon_pipeline::runner::LeannIntegration>> = {
         let db_path = working_dir.join(".archon").join("leann.db");
         if let Some(parent) = db_path.parent() {
@@ -1782,9 +1783,28 @@ pub(crate) async fn run_interactive_session(
                 // Init the index in the background — non-blocking.
                 let li_bg = Arc::clone(&li);
                 let wd = working_dir.clone();
+                let leann_cancel = Arc::clone(&leann_init_cancel);
                 observability::spawn_named("leann-background-init", async move {
-                    if let Err(e) = li_bg.init_repository(&wd).await {
-                        tracing::warn!(error = %e, "LEANN background init failed; continuing without code context");
+                    let leann_cancel_for_blocking = Arc::clone(&leann_cancel);
+                    let result =
+                        observability::spawn_blocking_named("leann-background-index", move || {
+                            li_bg.init_repository_blocking_with_cancel(
+                                &wd,
+                                leann_cancel_for_blocking.as_ref(),
+                            )
+                        })
+                        .await;
+                    match result {
+                        Ok(Ok(())) => {}
+                        Ok(Err(e)) => {
+                            tracing::warn!(error = %e, "LEANN background init failed; continuing without code context");
+                        }
+                        Err(e) if e.is_cancelled() => {
+                            tracing::info!("LEANN background init cancelled");
+                        }
+                        Err(e) => {
+                            tracing::warn!(error = %e, "LEANN background init join failed; continuing without code context");
+                        }
                     }
                 });
                 Some(li)
@@ -2711,6 +2731,7 @@ pub(crate) async fn run_interactive_session(
     if let Some(at) = auto_trainer.as_ref() {
         at.shutdown();
     }
+    leann_init_cancel.store(true, Ordering::Relaxed);
 
     // ── Phase 1: Graceful cron scheduler shutdown ───────────────
     cron_shutdown.shutdown().await;

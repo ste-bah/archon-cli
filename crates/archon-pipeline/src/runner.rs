@@ -187,6 +187,20 @@ impl LeannIntegration {
     /// Logs a warning and returns `Ok(())` if indexing fails so the pipeline
     /// can proceed without LEANN.
     pub async fn init_repository(&self, working_dir: &std::path::Path) -> Result<()> {
+        let cancel = std::sync::atomic::AtomicBool::new(false);
+        self.init_repository_blocking_with_cancel(working_dir, &cancel)
+    }
+
+    /// Blocking repository indexing entrypoint with cooperative cancellation.
+    ///
+    /// Session startup runs this through `spawn_blocking` so tree-sitter,
+    /// ONNX embedding, and Cozo writes never occupy Tokio worker threads. The
+    /// cancellation flag is checked between files and batches inside LEANN.
+    pub fn init_repository_blocking_with_cancel(
+        &self,
+        working_dir: &std::path::Path,
+        cancel: &std::sync::atomic::AtomicBool,
+    ) -> Result<()> {
         let config = archon_leann::IndexConfig {
             root_path: working_dir.to_path_buf(),
             include_patterns: vec!["**/*.rs".into(), "**/*.py".into(), "**/*.ts".into()],
@@ -196,7 +210,10 @@ impl LeannIntegration {
                 "**/.git/**".into(),
             ],
         };
-        match self.code_index.index_repository(working_dir, &config).await {
+        match self
+            .code_index
+            .index_repository_blocking_with_cancel(working_dir, &config, cancel)
+        {
             Ok(stats) => {
                 tracing::info!(
                     files = stats.total_files,
