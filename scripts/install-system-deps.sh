@@ -5,8 +5,14 @@
 # and run end-to-end:
 #
 #   Build deps         build-essential / gcc + pkg-config + openssl headers + git
-#   PDF text extraction pdftotext (poppler-utils) — required by `archon docs ingest` for native-text PDFs
-#   Image OCR          tesseract-ocr — required by `archon docs ingest` for PNG/JPEG/TIFF + scanned PDF pages
+#   PDF utilities      pdftotext + pdfimages + pdftoppm (poppler-utils) — required
+#                       by `archon docs ingest` for native-text PDFs (pdftotext),
+#                       embedded-image extraction in v0.1.47+ (pdfimages), and the
+#                       page-render fallback for scanned PDFs (pdftoppm). All three
+#                       ship together in the single poppler-utils / poppler package.
+#   Image OCR          tesseract-ocr — required by `archon docs ingest` for
+#                       PNG/JPEG/TIFF, embedded PDF images, and rendered scanned
+#                       PDF pages.
 #
 # Does NOT install Rust — use rustup directly per docs/getting-started/installation.md.
 # Does NOT install optional extras (VLM models, cloud OCR keys, etc).
@@ -128,7 +134,7 @@ case "$DISTRO_ID" in
         echo "  Supported: ubuntu/debian/wsl2, fedora/rhel/rocky/centos/almalinux, arch/manjaro, macos" >&2
         echo "  Install manually:" >&2
         echo "    Build deps:        gcc/clang, pkg-config, openssl headers, git" >&2
-        echo "    PDF text:          pdftotext (poppler-utils)" >&2
+        echo "    PDF utilities:     pdftotext + pdfimages + pdftoppm (poppler-utils)" >&2
         echo "    Image OCR:         tesseract-ocr" >&2
         exit 1
         ;;
@@ -139,7 +145,11 @@ esac
 # ---------------------------------------------------------------------------
 if [ "$CHECK_ONLY" = true ]; then
     MISSING=""
-    for bin in gcc cc pkg-config git pdftotext tesseract; do
+    # v0.1.47 unified PDF pipeline needs all three poppler binaries:
+    #   pdftotext  — text-layer extraction
+    #   pdfimages  — embedded image extraction
+    #   pdftoppm   — page-render fallback for scanned PDFs
+    for bin in gcc cc pkg-config git pdftotext pdfimages pdftoppm tesseract; do
         if ! command -v "$bin" >/dev/null 2>&1; then
             MISSING="$MISSING $bin"
         fi
@@ -155,7 +165,7 @@ if [ "$CHECK_ONLY" = true ]; then
         echo "  Run: sudo $0" >&2
         exit 2
     fi
-    echo "install-system-deps.sh: all required binaries present (gcc/cc, pkg-config, git, pdftotext, tesseract)"
+    echo "install-system-deps.sh: all required binaries present (gcc/cc, pkg-config, git, pdftotext, pdfimages, pdftoppm, tesseract)"
     exit 0
 fi
 
@@ -226,7 +236,8 @@ run $SUDO $PKG_INSTALL_CMD $ALL_PKGS || {
 if [ "$DRY_RUN" = false ]; then
     echo
     echo "install-system-deps.sh: verifying installs..."
-    for bin in pdftotext tesseract; do
+    # All four binaries the v0.1.47 unified PDF + image pipeline relies on.
+    for bin in pdftotext pdfimages pdftoppm tesseract; do
         if command -v "$bin" >/dev/null 2>&1; then
             VERSION=$("$bin" --version 2>&1 | head -n 1 || echo "(version check failed)")
             echo "  ok: $bin     $VERSION"
