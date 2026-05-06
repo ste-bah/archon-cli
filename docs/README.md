@@ -72,6 +72,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 - [Troubleshooting](operations/troubleshooting.md) — known issues, recovery procedures
 - [Data locations](operations/data-locations.md) — where logs, configs, memory, snapshots live
 - [Setup wizard](operations/setup-wizard.md) — `/setup-archon-skills` interactive configuration walkthrough
+- [TUI drain-stall warning](operations/tui-drain-stall.md) — what the render-loop stall warning means
 
 ## Development
 
@@ -84,6 +85,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 
 ## Release notes
 
+- [v0.1.49](release-notes/v0.1.49.md) — TUI drain-stall false positive fix
 - [v0.1.48](release-notes/v0.1.48.md) — OpenAI-compatible VLM and Gemini retry hardening
 - [v0.1.47](release-notes/v0.1.47.md) — Unified PDF text, OCR, and VLM image ingest
 - [v0.1.46](release-notes/v0.1.46.md) — Multi-provider VLM image descriptions

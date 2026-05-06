@@ -551,6 +551,14 @@ async fn main() -> Result<()> {
     }
 
     // Default: interactive session (with optional resume messages)
+    if !std::io::IsTerminal::is_terminal(&std::io::stdin())
+        || !std::io::IsTerminal::is_terminal(&std::io::stdout())
+    {
+        anyhow::bail!(
+            "interactive mode requires a TTY; use -p/--print, --headless, or --ide-stdio for non-interactive input"
+        );
+    }
+
     crate::session::run_interactive_session(
         &config,
         &session_id,

@@ -44,6 +44,7 @@ impl CommandHandler for CliMirrorHandler {
         let task_name = format!("cli-mirror:{label}");
 
         archon_observability::spawn_named(task_name, async move {
+            let _workload_guard = archon_tui::observability::LongRunningWorkloadGuard::new(&label);
             let output = run_archon(cli_args).await;
             let rendered = match output {
                 Ok(rendered) => format!("`{label}` completed\n\n{rendered}"),
