@@ -526,18 +526,18 @@ proposal_stale_days = 30
 # Quick reference of the most-asked-about toggles in .archon/policy.toml:
 #
 #   [policy.network]
-#   allow_cloud_vlm = false         # Gemini/Anthropic VLM refuses unless true
+#   allow_cloud_vlm = false         # Cloud VLM providers refuse unless true
 #   allow_web_strategy_agents = true   # Tier 2-12 gametheory specialists may WebSearch/WebFetch
 #   allow_mcp_server_exposure = true   # MCP servers may be invoked by agents
 #
 #   [policy.workers]
-#   vlm = "deny"                    # set "allow-local" for Ollama, "allow-cloud" for Gemini/Anthropic
+#   vlm = "deny"                    # set "allow-local" for Ollama/LM Studio, "allow-cloud" for cloud VLM
 #   web_fetch = "allow-local"          # WebFetch tool enabled
 #
 #   [policy.docs.vlm]
 #   enabled = false
 #   mode = "disabled"               # "disabled" | "local" | "cloud" | "hybrid"
-#   provider = "disabled"           # "disabled" | "ollama" | "gemini" | "anthropic"
+#   provider = "disabled"           # "disabled" | "ollama" | "gemini" | "anthropic" | "openai-compat"
 #   allow_cloud = false             # second cloud gate; both this and network.allow_cloud_vlm required
 #   require_user_confirmation_for_cloud = true
 #
@@ -550,10 +550,18 @@ proposal_stale_days = 30
 #   api_key_env = "GOOGLE_API_KEY"
 #   model = "gemini-3-flash-preview"
 #   endpoint_base = "https://generativelanguage.googleapis.com/v1beta"
-#   rpm_limit = 15
+#   rpm_limit = 12
 #
 #   [policy.docs.vlm.anthropic]
 #   model = "claude-sonnet-4-6"
+#
+#   [policy.docs.vlm.openai_compat]
+#   endpoint = "http://localhost:1234/v1"
+#   model = "google/gemma-3-12b-it"
+#   api_key_env = "OPENAI_API_KEY"
+#   timeout_secs = 120
+#   max_tokens = 1024
+#   temperature = 0.2
 #
 #   [policy.docs.pdf]
 #   extract_embedded_images = true

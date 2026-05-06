@@ -13,6 +13,7 @@ impl EffectivePolicy {
             "gemini" | "anthropic" => {
                 allow_provider_mode(vlm.mode.as_str(), "cloud", || allow_cloud_vlm(self))
             }
+            "openai-compat" => allow_openai_compat_vlm(self),
             other => PolicyDecision::deny(format!("unsupported VLM provider '{other}'")),
         }
     }
@@ -129,4 +130,33 @@ fn allow_cloud_vlm(policy: &EffectivePolicy) -> PolicyDecision {
             "cloud VLM requires policy.docs.vlm.allow_cloud and policy.network.allow_cloud_vlm",
         )
     }
+}
+
+fn allow_openai_compat_vlm(policy: &EffectivePolicy) -> PolicyDecision {
+    let vlm = &policy.docs.vlm;
+    match vlm.mode.as_str() {
+        "local" => allow_local_vlm(&policy.workers.vlm),
+        "cloud" => allow_cloud_vlm(policy),
+        "hybrid" => {
+            if endpoint_looks_local(&vlm.openai_compat.endpoint) {
+                allow_local_vlm(&policy.workers.vlm)
+            } else {
+                allow_cloud_vlm(policy)
+            }
+        }
+        "disabled" => PolicyDecision::deny("VLM descriptions are disabled by policy"),
+        other => PolicyDecision::deny(format!("unsupported VLM mode '{other}'")),
+    }
+}
+
+fn endpoint_looks_local(endpoint: &str) -> bool {
+    let endpoint = endpoint.trim().to_ascii_lowercase();
+    endpoint.starts_with("http://localhost")
+        || endpoint.starts_with("https://localhost")
+        || endpoint.starts_with("http://127.")
+        || endpoint.starts_with("https://127.")
+        || endpoint.starts_with("http://[::1]")
+        || endpoint.starts_with("https://[::1]")
+        || endpoint.starts_with("http://0.0.0.0")
+        || endpoint.starts_with("https://0.0.0.0")
 }

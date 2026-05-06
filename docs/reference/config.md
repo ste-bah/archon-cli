@@ -758,7 +758,7 @@ web_fetch = "deny"
 [policy.docs.vlm]
 enabled = false
 mode = "disabled" # disabled | local | cloud | hybrid
-provider = "disabled" # disabled | ollama | gemini | anthropic
+provider = "disabled" # disabled | ollama | gemini | anthropic | openai-compat
 allow_cloud = false
 require_user_confirmation_for_cloud = true
 
@@ -771,10 +771,18 @@ timeout_secs = 120
 api_key_env = "GOOGLE_API_KEY"
 model = "gemini-3-flash-preview"
 endpoint_base = "https://generativelanguage.googleapis.com/v1beta"
-rpm_limit = 15
+rpm_limit = 12
 
 [policy.docs.vlm.anthropic]
 model = "claude-sonnet-4-6"
+
+[policy.docs.vlm.openai_compat]
+endpoint = "http://localhost:1234/v1"
+model = "google/gemma-3-12b-it"
+api_key_env = "OPENAI_API_KEY"
+timeout_secs = 120
+max_tokens = 1024
+temperature = 0.2
 
 [policy.docs.pdf]
 extract_embedded_images = true

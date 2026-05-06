@@ -11,6 +11,10 @@ pub mod gemini;
 pub mod mime;
 #[path = "vlm/ollama.rs"]
 pub mod ollama;
+#[path = "vlm/openai_compat.rs"]
+pub mod openai_compat;
+#[path = "vlm/retry.rs"]
+pub mod retry;
 
 pub trait VlmDescriptionProvider: Send + Sync {
     fn describe_image(&self, image_bytes: &[u8]) -> Result<String, DocsError>;

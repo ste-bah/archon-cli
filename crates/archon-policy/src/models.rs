@@ -128,7 +128,7 @@ impl Default for RetrievalPolicy {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct VlmPolicy {
     pub enabled: bool,
     pub mode: String,
@@ -138,6 +138,7 @@ pub struct VlmPolicy {
     pub ollama: OllamaVlmPolicy,
     pub gemini: GeminiVlmPolicy,
     pub anthropic: AnthropicVlmPolicy,
+    pub openai_compat: OpenAiCompatVlmPolicy,
 }
 
 impl Default for VlmPolicy {
@@ -151,6 +152,7 @@ impl Default for VlmPolicy {
             ollama: OllamaVlmPolicy::default(),
             gemini: GeminiVlmPolicy::default(),
             anthropic: AnthropicVlmPolicy::default(),
+            openai_compat: OpenAiCompatVlmPolicy::default(),
         }
     }
 }
@@ -186,7 +188,7 @@ impl Default for GeminiVlmPolicy {
             api_key_env: "GOOGLE_API_KEY".into(),
             model: "gemini-3-flash-preview".into(),
             endpoint_base: "https://generativelanguage.googleapis.com/v1beta".into(),
-            rpm_limit: 15,
+            rpm_limit: 12,
         }
     }
 }
@@ -200,6 +202,29 @@ impl Default for AnthropicVlmPolicy {
     fn default() -> Self {
         Self {
             model: "claude-sonnet-4-6".into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OpenAiCompatVlmPolicy {
+    pub endpoint: String,
+    pub model: String,
+    pub api_key_env: String,
+    pub timeout_secs: u64,
+    pub max_tokens: u32,
+    pub temperature: f32,
+}
+
+impl Default for OpenAiCompatVlmPolicy {
+    fn default() -> Self {
+        Self {
+            endpoint: "http://localhost:1234/v1".into(),
+            model: "google/gemma-3-12b-it".into(),
+            api_key_env: "OPENAI_API_KEY".into(),
+            timeout_secs: 120,
+            max_tokens: 1024,
+            temperature: 0.2,
         }
     }
 }
