@@ -74,8 +74,8 @@ export class ConnectionManager {
         }
       };
 
-      ws.onmessage = (event: MessageEvent<string>) => {
-        this._handleMessage(event.data);
+      ws.onmessage = (event: MessageEvent) => {
+        this._handleMessage(String(event.data));
       };
     });
   }

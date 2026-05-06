@@ -241,6 +241,14 @@ export ARCHON_OAUTH_TOKEN="..."
 
 The OAuth flow matches the original Claude Code client (`redirect_uri = http://localhost:{port}/callback`), so existing Claude Code tokens on the same machine work transparently.
 
+## VS Code Extension
+
+The repo ships a VS Code extension under
+[`extensions/vscode/`](../../extensions/vscode/) that wraps the
+`archon ide-stdio` JSON-RPC backend as a chat panel. Build and install
+from source per [`extensions/vscode/README.md`](../../extensions/vscode/README.md).
+Marketplace publication is pending.
+
 ## Next steps
 
 - [First run](first-run.md) — what data archon writes, where logs go

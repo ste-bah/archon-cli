@@ -1,0 +1,52 @@
+name: VS Code Extension
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "extensions/vscode/**"
+      - ".github/workflows/vscode-extension.yml"
+  pull_request:
+    paths:
+      - "extensions/vscode/**"
+      - ".github/workflows/vscode-extension.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: extensions/vscode
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: extensions/vscode/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Type check
+        run: npm run typecheck
+      - name: Build
+        run: npm run build
+      - name: Verify entry point exists
+        run: |
+          test -f dist/src/extension.js || {
+            echo "::error::dist/src/extension.js missing - main field in package.json may be wrong"
+            exit 1
+          }
+      - name: Test
+        run: npm test
+      - name: Package VSIX
+        run: npm run package
+      - name: Upload VSIX artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: archon-vscode-vsix
+          path: extensions/vscode/*.vsix
+          if-no-files-found: error

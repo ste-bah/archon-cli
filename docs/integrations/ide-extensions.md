@@ -21,20 +21,19 @@ Methods include `session.send`, `session.fork`, `session.resume`, `tools.list`, 
 
 ## VS Code
 
-A VS Code extension (separate repo) wraps `archon ide-stdio`:
+The extension lives in this repo at
+[`extensions/vscode/`](../../extensions/vscode/). It wraps
+`archon ide-stdio` and surfaces the agent as a VS Code chat panel with
+permission prompts, tool-call traces, and slash-command access.
 
-```bash
-# In VS Code terminal
-archon ide-stdio
-```
+**Marketplace status:** not yet published. Install from source per
+[`extensions/vscode/README.md`](../../extensions/vscode/README.md).
 
 The extension treats archon as a chat panel backend. It surfaces:
 - Inline assistant messages with tool call traces
 - Permission prompts as VS Code modal dialogs
 - Session management via the activity bar
 - Slash commands as VS Code commands
-
-Install from the VS Code marketplace (when published) or build from source at the extension's repo.
 
 ## JetBrains
 
