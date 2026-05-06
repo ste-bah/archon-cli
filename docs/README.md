@@ -85,6 +85,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 
 ## Release notes
 
+- [v0.1.50](release-notes/v0.1.50.md) — VS Code extension install fix
 - [v0.1.49](release-notes/v0.1.49.md) — TUI drain-stall false positive fix
 - [v0.1.48](release-notes/v0.1.48.md) — OpenAI-compatible VLM and Gemini retry hardening
 - [v0.1.47](release-notes/v0.1.47.md) — Unified PDF text, OCR, and VLM image ingest

@@ -3,4 +3,7 @@ src/**
 tests/**
 tsconfig.json
 .vscode/**
-*.map
+**/*.map
+**/*.d.ts
+**/*.d.ts.map
+dist/tests/**

@@ -1,0 +1,4 @@
+
+
+# VSIX packages produced by `npm run package`
+*.vsix
