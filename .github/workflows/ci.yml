@@ -65,7 +65,15 @@ jobs:
           - os: ubuntu-latest
             timeout-override: 30
           - os: macos-latest
-            timeout-override: 30
+            # macOS runners are noticeably slower than ubuntu for this
+            # workspace: no mold linker, slower disk, and `cargo nextest
+            # run --workspace` finishes in ~28.5 of the budget on its own
+            # — leaving doc tests + sccache upload to push the job over
+            # 30 min and trigger a wall-clock cancel. Verified on the
+            # 5564ab8 CI run where all 5864 tests passed at 10:06:46Z and
+            # the operation was canceled at 10:08:10Z mid-sccache upload.
+            # Bumped to 45 to give headroom for the post-test phases.
+            timeout-override: 45
     steps:
       - uses: actions/checkout@v4
 
