@@ -58,7 +58,7 @@ endpoint = "http://localhost:1234/v1"
 model = "google/gemma-3-12b-it"
 api_key_env = "OPENAI_API_KEY"
 timeout_secs = 120
-max_tokens = 1024
+max_tokens = 8192
 temperature = 0.2
 ```
 

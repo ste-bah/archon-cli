@@ -167,7 +167,14 @@ endpoint = "http://localhost:1234/v1"
 model = "google/gemma-3-12b-it"
 api_key_env = "OPENAI_API_KEY"
 timeout_secs = 120
-max_tokens = 1024
+# Thinking models (Qwen3.6, GLM-4.5, etc.) emit reasoning into a separate
+# field but still count those tokens against this cap. With max_tokens too
+# low the model burns the entire budget on reasoning before producing
+# answer content, and archon surfaces "chat completions response did not
+# contain text". 8192 leaves comfortable headroom for both thinking and
+# non-thinking responses on common vision models. Bump higher (32k+) for
+# very verbose thinking models like Qwen3.6 q3_K_XL.
+max_tokens = 8192
 temperature = 0.2
 
 [policy.docs.pdf]
