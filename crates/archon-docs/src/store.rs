@@ -9,8 +9,8 @@ use anyhow::Result;
 use cozo::{DataValue, DbInstance, ScriptMutability, Vector};
 
 use crate::models::{
-    ChunkArtifact, DocumentStatus, OcrRun, OcrStatus, PageArtifact, ProcessingJob, ProvenanceEdge,
-    SourceDocument,
+    ChunkArtifact, DocumentStatus, ImageDescription, OcrRun, OcrStatus, PageArtifact,
+    ProcessingJob, ProvenanceEdge, SourceDocument,
 };
 
 // ---------------------------------------------------------------------------
@@ -460,6 +460,87 @@ pub fn chunk_hash_exists(db: &DbInstance, content_hash: &str) -> Result<bool> {
         )
         .map_err(|e| anyhow::anyhow!("chunk hash check failed: {e}"))?;
     Ok(!result.rows.is_empty())
+}
+
+// ---------------------------------------------------------------------------
+// ImageDescription
+// ---------------------------------------------------------------------------
+
+pub fn insert_image_description(db: &DbInstance, desc: &ImageDescription) -> Result<()> {
+    let mut params = BTreeMap::new();
+    params.insert("aid".into(), DataValue::from(desc.artifact_id.as_str()));
+    params.insert("did".into(), DataValue::from(desc.document_id.as_str()));
+    params.insert("page".into(), DataValue::from(desc.page_number as i64));
+    params.insert("provider".into(), DataValue::from(desc.provider.as_str()));
+    params.insert("model".into(), DataValue::from(desc.model.as_str()));
+    params.insert("desc".into(), DataValue::from(desc.description.as_str()));
+    params.insert("created".into(), DataValue::from(desc.created_at.as_str()));
+    params.insert("cost".into(), DataValue::from(desc.cost_usd));
+
+    db.run_script(
+        "?[artifact_id, document_id, page_number, provider, model, description, created_at, cost_usd] \
+         <- [[$aid, $did, $page, $provider, $model, $desc, $created, $cost]] \
+         :put doc_image_descriptions { artifact_id => document_id, page_number, provider, model, description, created_at, cost_usd }",
+        params,
+        ScriptMutability::Mutable,
+    )
+    .map_err(|e| anyhow::anyhow!("insert doc_image_descriptions failed: {e}"))?;
+    Ok(())
+}
+
+pub fn list_image_descriptions_for_doc(
+    db: &DbInstance,
+    document_id: &str,
+) -> Result<Vec<ImageDescription>> {
+    let mut params = BTreeMap::new();
+    params.insert("did".into(), DataValue::from(document_id));
+    let result = db
+        .run_script(
+            "?[artifact_id, document_id, page_number, provider, model, description, created_at, cost_usd] \
+             := *doc_image_descriptions{artifact_id, document_id, page_number, provider, model, description, created_at, cost_usd}, \
+             document_id = $did",
+            params,
+            ScriptMutability::Immutable,
+        )
+        .map_err(|e| anyhow::anyhow!("list doc_image_descriptions failed: {e}"))?;
+    Ok(result
+        .rows
+        .iter()
+        .map(|row| ImageDescription {
+            artifact_id: row[0].get_str().unwrap_or("").to_string(),
+            document_id: row[1].get_str().unwrap_or("").to_string(),
+            page_number: row[2].get_int().unwrap_or(0) as u32,
+            provider: row[3].get_str().unwrap_or("").to_string(),
+            model: row[4].get_str().unwrap_or("").to_string(),
+            description: row[5].get_str().unwrap_or("").to_string(),
+            created_at: row[6].get_str().unwrap_or("").to_string(),
+            cost_usd: row[7].get_float().unwrap_or(0.0),
+        })
+        .collect())
+}
+
+pub fn count_image_descriptions(db: &DbInstance) -> Result<usize> {
+    let result = db.run_script(
+        "?[count(artifact_id)] := *doc_image_descriptions{artifact_id}",
+        Default::default(),
+        ScriptMutability::Immutable,
+    );
+    match result {
+        Ok(result) => {
+            if result.rows.is_empty() {
+                return Ok(0);
+            }
+            Ok(result.rows[0][0].get_int().unwrap_or(0) as usize)
+        }
+        Err(e) => {
+            let msg = e.to_string();
+            if msg.contains(crate::errors::COZO_RELATION_NOT_FOUND) {
+                Ok(0)
+            } else {
+                Err(anyhow::anyhow!("count image descriptions failed: {msg}"))
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

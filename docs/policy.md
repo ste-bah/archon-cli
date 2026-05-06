@@ -47,8 +47,23 @@ require_approval_for_network_changes = true
 [policy.docs.vlm]
 enabled = false
 mode = "disabled" # disabled | local | cloud | hybrid
+provider = "disabled" # disabled | ollama | gemini | anthropic
 allow_cloud = false
 require_user_confirmation_for_cloud = true
+
+[policy.docs.vlm.ollama]
+endpoint = "http://localhost:11434"
+model = "gemma4:e4b"
+timeout_secs = 120
+
+[policy.docs.vlm.gemini]
+api_key_env = "GOOGLE_API_KEY"
+model = "gemini-3-flash-preview"
+endpoint_base = "https://generativelanguage.googleapis.com/v1beta"
+rpm_limit = 15
+
+[policy.docs.vlm.anthropic]
+model = "claude-sonnet-4-6"
 
 [policy.docs.retrieval]
 exact_weight = 0.45
@@ -60,8 +75,7 @@ semantic_weight = 0.55
 `archon gametheory run --enable-tier11` only enables Tier 11 specialists when
 `policy.gametheory.enable_tier11 = true`.
 
-Document VLM descriptions are denied unless `[policy.docs.vlm]` enables a local,
-cloud, or hybrid provider and the matching worker/network policy allows it.
+Document VLM descriptions are denied unless `[policy.docs.vlm]` enables a provider and the matching worker/network policy allows it. Local Ollama requires `policy.workers.vlm = "allow-local"`. Gemini and Anthropic require `policy.workers.vlm = "allow-cloud"`, `policy.docs.vlm.allow_cloud = true`, and `policy.network.allow_cloud_vlm = true`.
 
 Document search defaults to hybrid retrieval. `[policy.docs.retrieval]` controls
 the exact/semantic weighting used by `archon docs search --mode hybrid`.

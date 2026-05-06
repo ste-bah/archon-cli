@@ -8,6 +8,7 @@
 | `ARCHON_OAUTH_TOKEN` | Pre-set OAuth bearer token (skips login) |
 | `ANTHROPIC_AUTH_TOKEN` | Legacy bearer token alias |
 | `OPENAI_API_KEY` | OpenAI API key for embeddings, LLM provider, and STT |
+| `GOOGLE_API_KEY` | Google Generative Language API key for Gemini VLM image descriptions |
 | `ARCHON_MEMORY_OPENAIKEY` | Alias for `OPENAI_API_KEY` (memory embeddings only) |
 | `ARCHON_CODEX_DISABLED` | Disable Codex provider resolution when set to `1`, `true`, or `yes` |
 | `ARCHON_CODEX_BASE_URL` | Override Codex backend URL for local mocks or diagnostics |
@@ -50,6 +51,13 @@
 3. `[llm.openai] api_key` in config
 
 If none are set, archon uses local fastembed for embeddings (no network calls) and disables OpenAI-dependent features.
+
+## Resolution order for Gemini VLM key
+
+1. The env var named by `[policy.docs.vlm.gemini] api_key_env` (default: `GOOGLE_API_KEY`)
+2. `googleApiKey` in `~/.archon/.credentials.json`, written by `archon auth login --provider google`
+
+Gemini is only used when `[policy.docs.vlm] provider = "gemini"` and both cloud VLM gates allow it.
 
 ## Codex OAuth and provider parity
 

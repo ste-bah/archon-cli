@@ -79,6 +79,7 @@ mkdir -p "$ARCHON_DIR/context"
 mkdir -p "$ARCHON_DIR/specs"
 mkdir -p "$ARCHON_DIR/docs"
 mkdir -p "$ARCHON_DIR/docs/inbox"
+mkdir -p "$ARCHON_DIR/docs/images"
 mkdir -p "$ARCHON_DIR/evidence"
 mkdir -p "$TARGET/prds"
 mkdir -p "$TARGET/tasks"
@@ -143,8 +144,23 @@ require_approval_for_network_changes = true
 [policy.docs.vlm]
 enabled = false
 mode = "disabled"
+provider = "disabled"
 allow_cloud = false
 require_user_confirmation_for_cloud = true
+
+[policy.docs.vlm.ollama]
+endpoint = "http://localhost:11434"
+model = "gemma4:e4b"
+timeout_secs = 120
+
+[policy.docs.vlm.gemini]
+api_key_env = "GOOGLE_API_KEY"
+model = "gemini-3-flash-preview"
+endpoint_base = "https://generativelanguage.googleapis.com/v1beta"
+rpm_limit = 15
+
+[policy.docs.vlm.anthropic]
+model = "claude-sonnet-4-6"
 
 [policy.docs.retrieval]
 exact_weight = 0.45
@@ -171,6 +187,7 @@ echo "  .archon/adr/"
 echo "  .archon/context/"
 echo "  .archon/specs/"
 echo "  .archon/docs/inbox/"
+echo "  .archon/docs/images/"
 echo "  .archon/evidence/"
 echo "  .archon/policy.toml"
 if [ "$NO_AGENTS" = false ]; then

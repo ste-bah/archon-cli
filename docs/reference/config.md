@@ -20,6 +20,7 @@ This page explains every section. Each table tells you **what** the field does, 
 
 - [`[api]`](#api) — Anthropic API + model defaults
 - [`[llm]`](#llm) — provider routing
+- [`[providers.openai-codex]`](#providersopenai-codex) — Codex OAuth spoof manifest controls
 - [`[identity]`](#identity) — Claude Code spoofing
 - [`[personality]`](#personality) — agent personality profile
 - [`[consciousness]`](#consciousness) — inner voice and rule engine
@@ -46,6 +47,7 @@ This page explains every section. Each table tells you **what** the field does, 
 - [`[orchestrator]`](#orchestrator) — multi-agent teams
 - [`[voice]`](#voice) — speech-to-text
 - [`[web]`](#web) — browser UI
+- [Workspace policy](#workspace-policy) — VLM, retrieval, game-theory, learning gates
 - [Authentication & secrets](#authentication--secrets)
 - [Local LLMs and proxies](#local-llms-and-proxies)
 - [Recipes](#recipes)
@@ -96,6 +98,45 @@ Sub-tables `[llm.openai]`, `[llm.bedrock]`, `[llm.vertex]`, `[llm.local]` config
 
 ---
 
+## `[providers.openai-codex]`
+
+Codex provider compatibility settings for ChatGPT subscription OAuth.
+
+```toml
+[providers.openai-codex]
+enabled = true
+
+[providers.openai-codex.spoof]
+# originator  = "openclaw"
+# user_agent  = "openclaw/2026.5.1-beta.2"
+# client_id   = "app_..."
+# openai_beta = "responses=experimental"
+
+[providers.openai-codex.spoof.extra_headers]
+# "x-codex-version" = "0.34.1"
+
+[providers.openai-codex.manifest]
+# fetch_url   = "https://raw.githubusercontent.com/ste-bah/archon-cli/main/crates/archon-llm/resources/codex-compat.json"
+# ttl_seconds = 21600
+# cache_dir   = "~/.archon/cache/codex-compat"
+```
+
+| Field | Default | What / Why |
+|---|---|---|
+| `enabled` | `true` | Master switch for resolving Codex OAuth credentials and spoof metadata. `ARCHON_CODEX_DISABLED=1` disables it at runtime. |
+| `spoof.originator` | bundled manifest | Product originator header used by the Codex compatibility layer. Leave unset unless a known-good manifest update requires an override. |
+| `spoof.user_agent` | bundled manifest | User agent used for Codex requests. Archon rejects `ChatGPT-*`, `ChatGPT/`, `OpenAI-*`, and `OpenAI/` values to avoid impersonating OpenAI products. |
+| `spoof.client_id` | bundled manifest | OAuth client id. Override only for diagnostics or when the manifest is stale. |
+| `spoof.openai_beta` | bundled manifest | Optional `OpenAI-Beta` header value for the Codex responses endpoint. |
+| `spoof.extra_headers` | `{}` | Additional compatibility headers. Never put secrets here. |
+| `manifest.fetch_url` | bundled GitHub raw URL | Optional remote manifest source for refreshed spoof metadata. |
+| `manifest.ttl_seconds` | `21600` | How long fetched manifest metadata is cached. |
+| `manifest.cache_dir` | `~/.archon/cache/codex-compat` | Cache directory for fetched manifests. |
+
+Set `[llm].provider = "openai-codex"` to use Codex across chat, TUI, subagents, pipelines, and game-theory runs. Credentials are stored by `archon auth login --provider openai-codex`.
+
+---
+
 ## `[identity]`
 
 Claude Code spoofing — what HTTP headers and identity fields archon-cli sends to Anthropic.
@@ -109,7 +150,7 @@ anti_distillation = false
 
 | Field | Default | What / Why |
 |---|---|---|
-| `mode` | `"spoof"` | `"spoof"` mimics Claude Code (User-Agent, billing header, beta headers, system-prompt prelude). `"native"` identifies as archon-cli. Spoof mode lets archon-cli use Claude.ai subscriptions transparently because Anthropic's billing keys off the spoofed identity. Switch to `"native"` if you're on a non-Claude proxy that doesn't care or breaks on spoof headers. |
+| `mode` | `"spoof"` | `"spoof"` mimics Claude Code (User-Agent, billing header, beta headers, system-prompt prelude). `"clean"` identifies as archon-cli. Spoof mode lets archon-cli use Claude.ai subscriptions transparently because Anthropic's billing keys off the spoofed identity. Switch to `"clean"` if you're on a non-Claude proxy that doesn't care or breaks on spoof headers. |
 | `spoof_version` | `"2.1.89"` | Fallback version reported in the billing header when no Claude Code is detected on disk. archon-cli first tries to read the installed Claude Code version from `package.json`; this is the fallback. Bump this when Anthropic deprecates the previous spoof version (rare). |
 | `anti_distillation` | `false` | Inject an anti-distillation field. Default off because most use cases don't need it. Turn on if you're concerned about training-data leakage in your prompts. |
 
@@ -194,23 +235,30 @@ Tool gating policy. See [Permissions reference](permissions.md) for full details
 ```toml
 [permissions]
 mode = "default"
-always_allow = ["Read:*", "Glob:*", "Grep:*"]
-always_deny = ["Bash:rm -rf*", "Write:/etc/*"]
-always_ask = ["Bash:git push*"]
 allow_paths = ["/home/user/project"]
 deny_paths = ["/etc", "/.ssh"]
-sandbox = false
+
+[[permissions.always_allow]]
+tool = "Bash"
+pattern = "git status"
+
+[[permissions.always_deny]]
+tool = "Bash"
+pattern = "rm -rf"
+
+[[permissions.always_ask]]
+tool = "Bash"
+pattern = "git push"
 ```
 
 | Field | What / Why |
 |---|---|
-| `mode` | One of 7 canonical modes: `default` (prompt for risky), `acceptEdits` (auto-allow file edits), `plan` (read-only), `auto` (heuristic), `dontAsk` (allow except deny rules), `bubble` (sandbox), `bypassPermissions` (skip all). Legacy aliases: `ask` → `default`, `yolo` → `bypassPermissions`. |
-| `always_allow` | List of `Tool:pattern` strings auto-approved regardless of mode. Patterns support glob (`*`, `**`). |
-| `always_deny` | List of `Tool:pattern` strings ALWAYS denied — even in `bypassPermissions`. Use for hard guards (`rm -rf /`, secrets paths, etc.). |
-| `always_ask` | Force a prompt even in auto/dontAsk modes. Useful for one specific operation you want eyes on. |
+| `mode` | One of 6 canonical modes: `default` (prompt for risky), `acceptEdits` (auto-allow file edits), `plan` (read-only), `auto` (heuristic), `dontAsk` (allow except deny rules), `bypassPermissions` (skip most prompts). Legacy aliases: `ask` -> `default`, `yolo` -> `bypassPermissions`. |
+| `always_allow` | Array of `{ tool, pattern }` tables auto-approved regardless of mode. Patterns are prefix/glob-style matchers. |
+| `always_deny` | Array of `{ tool, pattern }` tables always denied, even in permissive modes. Use for hard guards (`rm -rf`, secrets paths, etc.). |
+| `always_ask` | Array of `{ tool, pattern }` tables that force a prompt even in auto/dontAsk modes. Useful for operations you want eyes on. |
 | `allow_paths` | Restrict file tools to these paths. Empty list = no restriction. |
 | `deny_paths` | Block file tools from these paths. Takes precedence over `allow_paths`. |
-| `sandbox` | When `true`, enforce read-only across all file tools regardless of mode. |
 
 Rule precedence: `always_deny` > `always_ask` > `always_allow` > mode default.
 
@@ -690,9 +738,58 @@ open_browser = true
 
 ---
 
+## Workspace policy
+
+Runtime gates live in `.archon/policy.toml`, not `config.toml`. The repo and `archon-init.sh` templates include every current policy field:
+
+```toml
+[policy.network]
+default = "deny"
+allow_cloud_vlm = false
+allow_web_strategy_agents = false
+allow_mcp_server_exposure = false
+
+[policy.workers]
+ocr = "allow-local"
+embedding = "allow-local"
+vlm = "deny"
+web_fetch = "deny"
+
+[policy.docs.vlm]
+enabled = false
+mode = "disabled" # disabled | local | cloud | hybrid
+provider = "disabled" # disabled | ollama | gemini | anthropic
+allow_cloud = false
+require_user_confirmation_for_cloud = true
+
+[policy.docs.vlm.ollama]
+endpoint = "http://localhost:11434"
+model = "gemma4:e4b"
+timeout_secs = 120
+
+[policy.docs.vlm.gemini]
+api_key_env = "GOOGLE_API_KEY"
+model = "gemini-3-flash-preview"
+endpoint_base = "https://generativelanguage.googleapis.com/v1beta"
+rpm_limit = 15
+
+[policy.docs.vlm.anthropic]
+model = "claude-sonnet-4-6"
+
+[policy.docs.retrieval]
+exact_weight = 0.45
+semantic_weight = 0.55
+```
+
+Local VLM requires `policy.docs.vlm.provider = "ollama"` and `policy.workers.vlm = "allow-local"`. Cloud VLM requires `policy.workers.vlm = "allow-cloud"`, `policy.docs.vlm.allow_cloud = true`, and `policy.network.allow_cloud_vlm = true`.
+
+See [Policy](../policy.md) and [VLM Image Descriptions](../integrations/vlm.md) for the full operator guide.
+
+---
+
 ## Authentication & secrets
 
-Credentials are NOT in `config.toml`. archon-cli reads them in this order:
+Credentials are NOT in `config.toml`. archon-cli reads Anthropic credentials in this order:
 
 1. `~/.config/archon/oauth.json` (from `archon login` PKCE flow)
 2. `ARCHON_OAUTH_TOKEN` / `ANTHROPIC_AUTH_TOKEN` env vars
@@ -701,6 +798,10 @@ Credentials are NOT in `config.toml`. archon-cli reads them in this order:
 If you must pin credentials in TOML, use `<workdir>/.archon/config.local.toml` (gitignored by convention). Never commit secrets to `config.toml` or `.archon/config.toml`.
 
 See [env-vars](env-vars.md) for the full credential resolution.
+
+Gemini VLM credentials are separate: set `GOOGLE_API_KEY` or run
+`archon auth login --provider google`, which stores `googleApiKey` in
+`~/.archon/.credentials.json` without overwriting Anthropic or Codex entries.
 
 ---
 
@@ -748,8 +849,14 @@ Use `--setting-sources` to debug "where does this value come from?" — restrict
 ```toml
 [permissions]
 mode = "plan"
-sandbox = true
-always_deny = ["WebFetch:*", "RemoteTrigger:*"]
+
+[[permissions.always_deny]]
+tool = "WebFetch"
+pattern = "*"
+
+[[permissions.always_deny]]
+tool = "RemoteTrigger"
+pattern = "*"
 
 [cost]
 hard_limit = 5.0
@@ -806,7 +913,6 @@ open_browser = false
 
 [permissions]
 mode = "plan"               # remote sessions are read-only by default
-sandbox = true
 ```
 
 ---

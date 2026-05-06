@@ -551,6 +551,7 @@ pub enum AuthProviderKind {
     Anthropic,
     #[value(name = "openai-codex")]
     OpenaiCodex,
+    Google,
 }
 
 #[derive(Args, Debug, Clone)]

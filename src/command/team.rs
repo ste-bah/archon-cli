@@ -32,7 +32,7 @@ pub(crate) async fn handle_team_command(
                 name: team.clone(),
                 ..Default::default()
             };
-            tokio::spawn(async move {
+            archon_observability::spawn_named("team-event-printer", async move {
                 while let Some(event) = rx.recv().await {
                     use archon_core::orchestrator::events::OrchestratorEvent;
                     match event {

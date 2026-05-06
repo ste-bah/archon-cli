@@ -69,7 +69,7 @@ impl CommandHandler for RunAgentHandler {
         let input = serde_json::Value::String(task.clone());
         let owner = "tui".to_string();
 
-        tokio::spawn(async move {
+        archon_observability::spawn_named("run-agent-submit", async move {
             match task_service
                 .submit(SubmitRequest {
                     agent_name,

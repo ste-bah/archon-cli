@@ -80,11 +80,10 @@ impl Drop for CronShutdown {
 pub fn spawn_scheduler(store_path: std::path::PathBuf) -> CronShutdown {
     let cancel = Arc::new(AtomicBool::new(false));
     let notify = Arc::new(Notify::new());
-    let handle = tokio::spawn(run_scheduler_loop_with_notify(
-        store_path,
-        Arc::clone(&cancel),
-        Arc::clone(&notify),
-    ));
+    let handle = archon_observability::spawn_named(
+        "cron-scheduler",
+        run_scheduler_loop_with_notify(store_path, Arc::clone(&cancel), Arc::clone(&notify)),
+    );
     CronShutdown {
         cancel,
         notify,

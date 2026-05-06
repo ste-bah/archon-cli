@@ -178,7 +178,7 @@ pub fn setup_voice_pipeline(
         }),
     };
     let pipeline = VoicePipeline::new(audio, stt, config.voice.vad_threshold);
-    tokio::spawn(async move {
+    archon_observability::spawn_named("voice-pipeline", async move {
         voice_loop(trig_rx, voice_evt_tx, pipeline).await;
     });
     tracing::info!(

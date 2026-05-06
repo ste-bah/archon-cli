@@ -54,7 +54,7 @@ impl CommandHandler for ArchonCodeHandler {
         let (string_tx, mut string_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
         coding.set_tui_sender(string_tx);
         let fwd_tx = tui_tx.clone();
-        tokio::spawn(async move {
+        archon_observability::spawn_named("archon-code-progress-forwarder", async move {
             while let Some(msg) = string_rx.recv().await {
                 let _ = fwd_tx.send(TuiEvent::TextDelta(msg));
             }
@@ -64,7 +64,7 @@ impl CommandHandler for ArchonCodeHandler {
             "Starting coding pipeline for task: {task}\n",
         )));
 
-        tokio::spawn(async move {
+        archon_observability::spawn_named("archon-code-pipeline", async move {
             match run_pipeline(
                 coding.as_ref(),
                 llm.as_ref(),

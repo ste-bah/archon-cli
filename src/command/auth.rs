@@ -50,6 +50,7 @@ async fn login(
             eprintln!("Codex login successful.");
             Ok(())
         }
+        AuthProviderKind::Google => login_google_api_key(),
     }
 }
 
@@ -70,24 +71,37 @@ async fn status(config: &archon_core::config::ArchonConfig) -> Result<()> {
     println!("\nCodex (OpenAI ChatGPT subscription)");
     if codex_disabled() {
         println!("  Status:           DISABLED via ARCHON_CODEX_DISABLED=1");
-        return Ok(());
+    } else {
+        match archon_llm::tokens_codex::read_codex_credentials_locked(&path).ok() {
+            Some((creds, _mtime)) => {
+                println!(
+                    "  Status:           authenticated as account {}",
+                    redact_account(&creds.account_id)
+                );
+                println!("  Token expires:    {}", format_time(creds.expires_at));
+                print_spoof_status(config).await?;
+                println!("  Provider:         enabled (set ARCHON_CODEX_DISABLED=1 to disable)");
+            }
+            None => {
+                println!(
+                    "  Status:           not authenticated. Run: archon auth login --provider openai-codex"
+                );
+            }
+        }
     }
-
-    match archon_llm::tokens_codex::read_codex_credentials_locked(&path).ok() {
-        Some((creds, _mtime)) => {
-            println!(
-                "  Status:           authenticated as account {}",
-                redact_account(&creds.account_id)
-            );
-            println!("  Token expires:    {}", format_time(creds.expires_at));
-            print_spoof_status(config).await?;
-            println!("  Provider:         enabled (set ARCHON_CODEX_DISABLED=1 to disable)");
-        }
-        None => {
-            println!(
-                "  Status:           not authenticated. Run: archon auth login --provider openai-codex"
-            );
-        }
+    println!("\nGoogle Gemini");
+    let google_env_key = std::env::var("GOOGLE_API_KEY")
+        .map(|value| !value.trim().is_empty())
+        .unwrap_or(false);
+    let google_stored_key = read_file(&path)
+        .and_then(|json| archon_docs::vlm::factory::google_api_key_from_json(&json))
+        .is_some();
+    if google_env_key {
+        println!("  Status:           API key available via GOOGLE_API_KEY");
+    } else if google_stored_key {
+        println!("  Status:           API key stored in ~/.archon/.credentials.json");
+    } else {
+        println!("  Status:           not configured. Run: archon auth login --provider google");
     }
     Ok(())
 }
@@ -136,9 +150,13 @@ fn logout_path(path: &Path, provider: Option<AuthProviderKind>) -> Result<()> {
         Some(AuthProviderKind::OpenaiCodex) => {
             remove_key(&mut root, "openaiCodexOauth");
         }
+        Some(AuthProviderKind::Google) => {
+            remove_key(&mut root, "googleApiKey");
+        }
         None => {
             remove_key(&mut root, "claudeAiOauth");
             remove_key(&mut root, "openaiCodexOauth");
+            remove_key(&mut root, "googleApiKey");
         }
     }
 
@@ -148,6 +166,29 @@ fn logout_path(path: &Path, provider: Option<AuthProviderKind>) -> Result<()> {
         write_json_atomic(path, &root)?;
     }
     println!("Credentials updated.");
+    Ok(())
+}
+
+fn login_google_api_key() -> Result<()> {
+    eprintln!("Get a free Gemini API key from https://aistudio.google.com/apikey");
+    eprint!("Paste your Google API key: ");
+    io::stderr().flush()?;
+    let mut key = String::new();
+    io::stdin().read_line(&mut key)?;
+    let key = key.trim();
+    if key.is_empty() {
+        eprintln!("Google login cancelled: empty API key.");
+        return Ok(());
+    }
+    let path = archon_llm::tokens::credentials_path();
+    let mut root = if path.exists() {
+        serde_json::from_str(&fs::read_to_string(&path)?).unwrap_or_else(|_| serde_json::json!({}))
+    } else {
+        serde_json::json!({})
+    };
+    root["googleApiKey"] = serde_json::Value::String(key.to_string());
+    write_json_atomic(&path, &root)?;
+    eprintln!("Google API key stored for Gemini VLM.");
     Ok(())
 }
 
@@ -214,8 +255,16 @@ fn remove_key(root: &mut serde_json::Value, key: &str) {
 }
 
 fn write_json_atomic(path: &Path, value: &serde_json::Value) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
     let tmp = path.with_extension("json.tmp");
     fs::write(&tmp, serde_json::to_string_pretty(value)?)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&tmp, fs::Permissions::from_mode(0o600))?;
+    }
     fs::rename(tmp, path)?;
     Ok(())
 }
@@ -301,7 +350,8 @@ mod tests {
                 "refreshToken": "codex-refresh",
                 "expiresAt": 4070908800000i64,
                 "accountId": "acct_1234567890"
-            }
+            },
+            "googleApiKey": "AIza-test"
         })
     }
 
@@ -342,6 +392,22 @@ mod tests {
         let saved: serde_json::Value = serde_json::from_str(&fs::read_to_string(&path)?)?;
         assert!(saved.get("claudeAiOauth").is_some());
         assert!(saved.get("openaiCodexOauth").is_none());
+        assert!(saved.get("googleApiKey").is_some());
+        Ok(())
+    }
+
+    #[test]
+    fn logout_path_removes_only_google_credentials() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join(".credentials.json");
+        fs::write(&path, serde_json::to_string_pretty(&credential_file())?)?;
+
+        logout_path(&path, Some(AuthProviderKind::Google))?;
+
+        let saved: serde_json::Value = serde_json::from_str(&fs::read_to_string(&path)?)?;
+        assert!(saved.get("claudeAiOauth").is_some());
+        assert!(saved.get("openaiCodexOauth").is_some());
+        assert!(saved.get("googleApiKey").is_none());
         Ok(())
     }
 

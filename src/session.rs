@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::cli_args::Cli;
 use crate::slash_context::SlashCommandContext;
@@ -106,6 +106,35 @@ fn active_session_model(config: &archon_core::config::ArchonConfig) -> String {
     }
 }
 
+fn configure_session_vlm_provider(working_dir: &std::path::Path) {
+    match archon_policy::load_effective_policy(working_dir) {
+        Ok(policy) => {
+            let report = archon_docs::vlm::factory::configure_registered_provider(&policy);
+            match report.status {
+                archon_docs::vlm::factory::VlmProviderInitStatus::Registered => tracing::info!(
+                    provider = %report.provider,
+                    model = %report.model,
+                    "vlm provider registered for session"
+                ),
+                archon_docs::vlm::factory::VlmProviderInitStatus::Skipped => tracing::warn!(
+                    provider = %report.provider,
+                    model = %report.model,
+                    reason = %report.message,
+                    "vlm provider unavailable for session"
+                ),
+                archon_docs::vlm::factory::VlmProviderInitStatus::Disabled => tracing::debug!(
+                    reason = %report.message,
+                    "vlm provider disabled for session"
+                ),
+            }
+        }
+        Err(e) => {
+            archon_docs::vlm::clear_provider();
+            tracing::debug!(error = %e, "could not load VLM policy for session");
+        }
+    }
+}
+
 async fn build_codex_session_provider(
     config: &archon_core::config::ArchonConfig,
 ) -> Result<Arc<dyn archon_llm::provider::LlmProvider>> {
@@ -185,7 +214,7 @@ fn spawn_metrics_exporter(
     // tokio one so serve_metrics can accept connections from the runtime.
     let tokio_listener = tokio::net::TcpListener::from_std(listener)
         .map_err(|e| anyhow::anyhow!("--metrics-port {port}: tokio adapt failed: {e}"))?;
-    tokio::spawn(async move {
+    observability::spawn_named("metrics-exporter", async move {
         if let Err(e) = observability::serve_metrics_on(tokio_listener, metrics).await {
             tracing::warn!(%e, port, "metrics exporter terminated");
         }
@@ -352,6 +381,7 @@ async fn build_session_agent(
 
     let api_client = AnthropicClient::new(auth, identity.clone(), api_url);
     let working_dir = std::env::current_dir().unwrap_or_default();
+    configure_session_vlm_provider(&working_dir);
     let leann_index = init_leann_index(&working_dir);
     let mut registry = create_default_registry(working_dir.clone(), leann_index);
     registry.register(Box::new(archon_tools::bash::BashTool {
@@ -1001,7 +1031,7 @@ pub(crate) async fn run_interactive_session(
     // ── CRIT-15: Auto-update check at startup ─────────────────────
     if archon_core::update::should_auto_check(&config.update) {
         let update_config = config.update.clone();
-        tokio::spawn(async move {
+        observability::spawn_named("auto-update-check", async move {
             match archon_core::update::check_update(&update_config).await {
                 Ok(msg) => tracing::info!("auto-update check: {msg}"),
                 Err(e) => tracing::debug!("auto-update check: {e}"),
@@ -1224,7 +1254,7 @@ pub(crate) async fn run_interactive_session(
                 && config.identity.spoof_betas.is_none()
             {
                 let client_for_discovery = api_client.clone();
-                tokio::spawn(async move {
+                observability::spawn_named("beta-discovery", async move {
                     let validated = resolve_and_validate_betas(&client_for_discovery, None).await;
                     tracing::info!(
                         "Background beta discovery complete: {} betas validated",
@@ -1680,7 +1710,7 @@ pub(crate) async fn run_interactive_session(
     // event_rx.try_recv() site in archon-tui::event_loop. If no drain in
     // > 10s while the session is alive, emit a warn so operators can
     // correlate with a stuck render thread or runaway producer.
-    tokio::spawn(async move {
+    observability::spawn_named("tui-drain-stall-detector", async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
         loop {
             interval.tick().await;
@@ -1690,7 +1720,7 @@ pub(crate) async fn run_interactive_session(
     // CRIT-13: Forward voice pipeline events to TUI event channel
     if let Some(mut voice_rx) = voice_event_rx {
         let voice_fwd_tx = tui_event_tx.clone();
-        tokio::spawn(async move {
+        observability::spawn_named("voice-event-forwarder", async move {
             while let Some(evt) = voice_rx.recv().await {
                 if voice_fwd_tx.send(evt).is_err() {
                     break;
@@ -1739,6 +1769,7 @@ pub(crate) async fn run_interactive_session(
     // Initialise LEANN code index for pipeline deep-search context.
     // Resilient: if the DB fails to open, leann stays None and pipelines
     // run without semantic search (same as CLI init_leann).
+    let leann_init_cancel = Arc::new(AtomicBool::new(false));
     let leann: Option<Arc<archon_pipeline::runner::LeannIntegration>> = {
         let db_path = working_dir.join(".archon").join("leann.db");
         if let Some(parent) = db_path.parent() {
@@ -1752,9 +1783,28 @@ pub(crate) async fn run_interactive_session(
                 // Init the index in the background — non-blocking.
                 let li_bg = Arc::clone(&li);
                 let wd = working_dir.clone();
-                tokio::spawn(async move {
-                    if let Err(e) = li_bg.init_repository(&wd).await {
-                        tracing::warn!(error = %e, "LEANN background init failed; continuing without code context");
+                let leann_cancel = Arc::clone(&leann_init_cancel);
+                observability::spawn_named("leann-background-init", async move {
+                    let leann_cancel_for_blocking = Arc::clone(&leann_cancel);
+                    let result =
+                        observability::spawn_blocking_named("leann-background-index", move || {
+                            li_bg.init_repository_blocking_with_cancel(
+                                &wd,
+                                leann_cancel_for_blocking.as_ref(),
+                            )
+                        })
+                        .await;
+                    match result {
+                        Ok(Ok(())) => {}
+                        Ok(Err(e)) => {
+                            tracing::warn!(error = %e, "LEANN background init failed; continuing without code context");
+                        }
+                        Err(e) if e.is_cancelled() => {
+                            tracing::info!("LEANN background init cancelled");
+                        }
+                        Err(e) => {
+                            tracing::warn!(error = %e, "LEANN background init join failed; continuing without code context");
+                        }
                     }
                 });
                 Some(li)
@@ -2181,7 +2231,7 @@ pub(crate) async fn run_interactive_session(
                 let watch_hook_registry = Arc::clone(&hook_registry_arc);
                 let watch_working_dir = working_dir.clone();
                 let watch_session_id = session_id.to_string();
-                tokio::spawn(async move {
+                observability::spawn_named("config-watcher", async move {
                     let mut reloader = reloader;
                     loop {
                         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
@@ -2240,7 +2290,7 @@ pub(crate) async fn run_interactive_session(
     // SOFT_CAP / HARD_CAP. Up to RENDER_EVENT_BUDGET events are drained
     // per tick to keep the forwarder responsive.
     use archon_cli_workspace::event_coalescer::{EventCoalescer, RENDER_EVENT_BUDGET};
-    tokio::spawn(async move {
+    observability::spawn_named("agent-event-forwarder", async move {
         let mut coalescer = EventCoalescer::with_defaults();
         loop {
             // Block for at least one event; if the channel is closed, exit.
@@ -2530,28 +2580,31 @@ pub(crate) async fn run_interactive_session(
     // `tokio::spawn` boundary. The channel handle (`McpLifecycleTx`)
     // is `Send + 'static`, so it passes through cleanly.
     let mcp_lifecycle_tx = crate::session_loop::spawn_mcp_lifecycle_task(mcp_manager.clone());
-    tokio::spawn(crate::session_loop::run_session_loop(
-        agent,
-        agent_def,
-        session_api_url,
-        input_tui_tx,
-        user_input_rx,
-        session_store_for_input,
-        session_id_for_input,
-        persist_personality,
-        personality_history_limit,
-        session_start_instant,
-        session_start_confidence,
-        slash_commands_disabled,
-        fast_mode,
-        effort_state,
-        cmd_ctx,
-        mcp_lifecycle_tx,
-        auto_capture,
-        auto_trainer.clone(),
-        agent_dispatcher_shared,
-        cancel_handle_slot,
-    ));
+    observability::spawn_named(
+        "session-loop",
+        crate::session_loop::run_session_loop(
+            agent,
+            agent_def,
+            session_api_url,
+            input_tui_tx,
+            user_input_rx,
+            session_store_for_input,
+            session_id_for_input,
+            persist_personality,
+            personality_history_limit,
+            session_start_instant,
+            session_start_confidence,
+            slash_commands_disabled,
+            fast_mode,
+            effort_state,
+            cmd_ctx,
+            mcp_lifecycle_tx,
+            auto_capture,
+            auto_trainer.clone(),
+            agent_dispatcher_shared,
+            cancel_handle_slot,
+        ),
+    );
 
     // Build splash screen config with recent activity from session store
     let activity = {
@@ -2605,14 +2658,14 @@ pub(crate) async fn run_interactive_session(
     let btw_max_tokens = config.api.thinking_budget;
     // Use the same active provider as the main session so Anthropic OAuth,
     // Anthropic-compatible proxies, and Codex OAuth all share /btw behavior.
-    tokio::spawn(async move {
+    observability::spawn_named("btw-request-loop", async move {
         while let Some(question) = btw_rx.recv().await {
             let tui_tx = btw_tui_tx.clone();
             let provider = Arc::clone(&btw_provider);
             let model = btw_model.clone();
             let sys_prompt = btw_system_prompt.clone();
             let max_tokens = btw_max_tokens;
-            tokio::spawn(async move {
+            observability::spawn_named("btw-response", async move {
                 let wrapped = format!(
                     "<system-reminder>This is a side question from the user. Answer directly in a single response.\n\
                      You have NO tools available. This is a one-off response.\n\
@@ -2678,6 +2731,7 @@ pub(crate) async fn run_interactive_session(
     if let Some(at) = auto_trainer.as_ref() {
         at.shutdown();
     }
+    leann_init_cancel.store(true, Ordering::Relaxed);
 
     // ── Phase 1: Graceful cron scheduler shutdown ───────────────
     cron_shutdown.shutdown().await;
@@ -2686,6 +2740,17 @@ pub(crate) async fn run_interactive_session(
     // ── Phase 2: Graceful MCP shutdown ──────────────────────────
     mcp_manager.shutdown_all().await;
     tracing::info!("MCP servers shut down");
+
+    // ── Phase 3: Shutdown forensics + last-ditch async task fence ─
+    //
+    // Cooperative cancellation above should normally let all detached tasks
+    // drain. If a task survives, log its human-readable spawn name before the
+    // Tokio runtime starts dropping so shutdown hangs are actionable.
+    let alive = observability::log_alive_tasks_after_cancel(std::time::Duration::from_secs(2));
+    if !alive.is_empty() {
+        observability::abort_alive_tasks();
+        let _ = observability::log_alive_tasks_after_cancel(std::time::Duration::from_millis(250));
+    }
 
     Ok(())
 }

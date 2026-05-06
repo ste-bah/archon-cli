@@ -71,7 +71,7 @@ impl Drop for TerminalGuard {
 /// ```
 #[cfg(unix)]
 pub fn install_sigwinch(tx: crate::event_channel::TuiEventSender) {
-    tokio::spawn(async move {
+    crate::observability::spawn_named("tui-sigwinch-listener", async move {
         use tokio::signal::unix::Signal;
         use tokio::signal::unix::{SignalKind, signal};
 

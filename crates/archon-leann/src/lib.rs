@@ -12,6 +12,7 @@ pub use metadata::{CodeChunk, CodeMetadata, IndexConfig, IndexStats, QueueResult
 
 use anyhow::Result;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
 
 use indexer::{EmbeddingConfig, Indexer};
 
@@ -68,6 +69,17 @@ impl CodeIndex {
     /// Index an entire repository according to the given configuration.
     pub async fn index_repository(&self, path: &Path, config: &IndexConfig) -> Result<IndexStats> {
         self.indexer.index_repository(path, config).await
+    }
+
+    /// Synchronously index a repository with cooperative cancellation checks.
+    pub fn index_repository_blocking_with_cancel(
+        &self,
+        path: &Path,
+        config: &IndexConfig,
+        cancel: &AtomicBool,
+    ) -> Result<IndexStats> {
+        self.indexer
+            .index_repository_blocking_with_cancel(path, config, cancel)
     }
 
     /// Index a single file.

@@ -148,7 +148,7 @@ impl LspClient {
             .ok_or_else(|| LspError::Protocol("process stdin not piped".into()))?
             .compat_write();
 
-        let mainloop_handle = tokio::spawn(async move {
+        let mainloop_handle = archon_observability::spawn_named("lsp-mainloop", async move {
             let _ = mainloop.run_buffered(stdout, stdin).await;
         });
 

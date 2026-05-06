@@ -23,6 +23,21 @@ auto_apply_low_risk = true
 [policy.docs.vlm]
 enabled = true
 mode = "local"
+provider = "ollama"
+
+[policy.docs.vlm.ollama]
+endpoint = "http://127.0.0.1:11434"
+model = "gemma4:e4b"
+timeout_secs = 90
+
+[policy.docs.vlm.gemini]
+api_key_env = "GOOGLE_API_KEY"
+model = "gemini-3-flash-preview"
+endpoint_base = "https://generativelanguage.googleapis.com/v1beta"
+rpm_limit = 15
+
+[policy.docs.vlm.anthropic]
+model = "claude-sonnet-4-6"
 
 [policy.docs.retrieval]
 exact_weight = 0.7
@@ -38,6 +53,16 @@ semantic_weight = 0.3
     assert_eq!(load.policy.gametheory.max_agents_per_council, 8);
     assert!(load.policy.learning.auto_apply_low_risk);
     assert_eq!(load.policy.docs.vlm.mode, "local");
+    assert_eq!(load.policy.docs.vlm.provider, "ollama");
+    assert_eq!(
+        load.policy.docs.vlm.ollama.endpoint,
+        "http://127.0.0.1:11434"
+    );
+    assert_eq!(load.policy.docs.vlm.ollama.model, "gemma4:e4b");
+    assert_eq!(load.policy.docs.vlm.ollama.timeout_secs, 90);
+    assert_eq!(load.policy.docs.vlm.gemini.model, "gemini-3-flash-preview");
+    assert_eq!(load.policy.docs.vlm.gemini.rpm_limit, 15);
+    assert_eq!(load.policy.docs.vlm.anthropic.model, "claude-sonnet-4-6");
     assert_eq!(load.policy.docs.retrieval.exact_weight, 0.7);
     assert_eq!(load.policy.docs.retrieval.semantic_weight, 0.3);
 }
@@ -105,6 +130,7 @@ fn local_vlm_requires_docs_enabled_and_worker_allow() {
             vlm: archon_policy::VlmPolicy {
                 enabled: true,
                 mode: "local".into(),
+                provider: "ollama".into(),
                 ..Default::default()
             },
             ..Default::default()
@@ -122,10 +148,38 @@ fn cloud_vlm_requires_dual_cloud_policy() {
     let mut policy = EffectivePolicy::default();
     policy.docs.vlm.enabled = true;
     policy.docs.vlm.mode = "cloud".into();
+    policy.docs.vlm.provider = "gemini".into();
     policy.docs.vlm.allow_cloud = true;
     assert!(!policy.docs_vlm_decision().allowed);
     policy.network.allow_cloud_vlm = true;
+    assert!(!policy.docs_vlm_decision().allowed);
+    policy.workers.vlm = "allow-cloud".into();
     assert!(policy.docs_vlm_decision().allowed);
+}
+
+#[test]
+fn cloud_provider_denied_when_mode_is_local() {
+    let mut policy = EffectivePolicy::default();
+    policy.docs.vlm.enabled = true;
+    policy.docs.vlm.mode = "local".into();
+    policy.docs.vlm.provider = "anthropic".into();
+    policy.docs.vlm.allow_cloud = true;
+    policy.network.allow_cloud_vlm = true;
+
+    let decision = policy.docs_vlm_decision();
+    assert!(!decision.allowed);
+    assert!(decision.reason.contains("cloud VLM provider requires"));
+}
+
+#[test]
+fn provider_disabled_overrides_enabled_mode() {
+    let mut policy = EffectivePolicy::default();
+    policy.docs.vlm.enabled = true;
+    policy.docs.vlm.mode = "local".into();
+    policy.docs.vlm.provider = "disabled".into();
+    policy.workers.vlm = "allow-local".into();
+
+    assert!(!policy.docs_vlm_decision().allowed);
 }
 
 #[test]
@@ -155,4 +209,28 @@ fn high_impact_learning_changes_remain_approval_gated() {
             .learning_auto_apply_decision("RetrievalProfile", "High")
             .allowed
     );
+}
+
+#[test]
+fn repository_policy_template_parses_all_vlm_provider_fields() {
+    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join(".archon")
+        .join("policy.toml");
+    let load = load_policy_from_sources(&[PolicySource {
+        label: "workspace",
+        path: path.clone(),
+    }])
+    .unwrap_or_else(|e| panic!("load {}: {e}", path.display()));
+
+    assert_eq!(load.policy.docs.vlm.provider, "disabled");
+    assert_eq!(load.policy.docs.vlm.ollama.model, "gemma4:e4b");
+    assert_eq!(load.policy.docs.vlm.ollama.timeout_secs, 120);
+    assert_eq!(load.policy.docs.vlm.gemini.api_key_env, "GOOGLE_API_KEY");
+    assert_eq!(load.policy.docs.vlm.gemini.model, "gemini-3-flash-preview");
+    assert_eq!(load.policy.docs.vlm.gemini.rpm_limit, 15);
+    assert_eq!(load.policy.docs.vlm.anthropic.model, "claude-sonnet-4-6");
+    assert_eq!(load.policy.docs.retrieval.exact_weight, 0.45);
+    assert_eq!(load.policy.docs.retrieval.semantic_weight, 0.55);
 }

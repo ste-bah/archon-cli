@@ -3,6 +3,22 @@ use crate::models::{EffectivePolicy, PolicyDecision};
 impl EffectivePolicy {
     pub fn docs_vlm_decision(&self) -> PolicyDecision {
         let vlm = &self.docs.vlm;
+        if !vlm.enabled || vlm.mode == "disabled" || vlm.provider == "disabled" {
+            return PolicyDecision::deny("VLM descriptions are disabled by policy");
+        }
+        match vlm.provider.as_str() {
+            "ollama" => allow_provider_mode(vlm.mode.as_str(), "local", || {
+                allow_local_vlm(&self.workers.vlm)
+            }),
+            "gemini" | "anthropic" => {
+                allow_provider_mode(vlm.mode.as_str(), "cloud", || allow_cloud_vlm(self))
+            }
+            other => PolicyDecision::deny(format!("unsupported VLM provider '{other}'")),
+        }
+    }
+
+    pub fn docs_vlm_mode_decision(&self) -> PolicyDecision {
+        let vlm = &self.docs.vlm;
         if !vlm.enabled || vlm.mode == "disabled" {
             return PolicyDecision::deny("VLM descriptions are disabled by policy");
         }
@@ -73,6 +89,24 @@ impl EffectivePolicy {
     }
 }
 
+fn allow_provider_mode(
+    configured_mode: &str,
+    provider_class: &str,
+    decision: impl FnOnce() -> PolicyDecision,
+) -> PolicyDecision {
+    match (configured_mode, provider_class) {
+        ("local", "local") | ("cloud", "cloud") | ("hybrid", _) => decision(),
+        ("disabled", _) => PolicyDecision::deny("VLM descriptions are disabled by policy"),
+        ("local", "cloud") => PolicyDecision::deny(
+            "cloud VLM provider requires policy.docs.vlm.mode = \"cloud\" or \"hybrid\"",
+        ),
+        ("cloud", "local") => PolicyDecision::deny(
+            "local VLM provider requires policy.docs.vlm.mode = \"local\" or \"hybrid\"",
+        ),
+        (other, _) => PolicyDecision::deny(format!("unsupported VLM mode '{other}'")),
+    }
+}
+
 fn allow_local_vlm(worker_policy: &str) -> PolicyDecision {
     if matches!(worker_policy, "allow-local" | "allow" | "local") {
         PolicyDecision::allow("local VLM provider is allowed by policy")
@@ -82,6 +116,12 @@ fn allow_local_vlm(worker_policy: &str) -> PolicyDecision {
 }
 
 fn allow_cloud_vlm(policy: &EffectivePolicy) -> PolicyDecision {
+    if !matches!(
+        policy.workers.vlm.as_str(),
+        "allow-cloud" | "allow" | "cloud"
+    ) {
+        return PolicyDecision::deny("cloud VLM provider is denied by policy.workers.vlm");
+    }
     if policy.docs.vlm.allow_cloud && policy.network.allow_cloud_vlm {
         PolicyDecision::allow("cloud VLM provider is allowed by policy")
     } else {

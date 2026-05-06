@@ -140,6 +140,7 @@ pub struct AutoTrainer {
     config: AutoTrainerConfig,
     state: Arc<TrainerState>,
     cancel: CancellationToken,
+    training_cancel: Arc<AtomicBool>,
     handle: std::sync::Mutex<Option<JoinHandle<()>>>,
 }
 
@@ -150,6 +151,7 @@ impl AutoTrainer {
             config,
             state: Arc::new(TrainerState::default()),
             cancel: CancellationToken::new(),
+            training_cancel: Arc::new(AtomicBool::new(false)),
             handle: std::sync::Mutex::new(None),
         }
     }
@@ -176,8 +178,9 @@ impl AutoTrainer {
         let state = Arc::clone(&self.state);
         let config = self.config.clone();
         let cancel = self.cancel.clone();
+        let training_cancel = Arc::clone(&self.training_cancel);
 
-        let handle = tokio::spawn(async move {
+        let handle = archon_observability::spawn_named("gnn-auto-trainer", async move {
             Self::run_loop(
                 config,
                 state,
@@ -186,6 +189,7 @@ impl AutoTrainer {
                 train_cfg,
                 sample_provider,
                 cancel,
+                training_cancel,
             )
             .await;
         });
@@ -241,14 +245,16 @@ impl AutoTrainer {
 
     /// Signal cancellation and try to join the background task.
     ///
-    /// Does not block — if a training run is in progress inside
-    /// `spawn_blocking`, it will complete on its own (bounded by
-    /// `max_runtime_ms`).
+    /// Does not block. If a training run is in progress inside
+    /// `spawn_blocking`, it receives a cancellation flag so it can stop at the
+    /// next trainer checkpoint instead of keeping Tokio's blocking pool alive
+    /// until the full training budget elapses.
     pub fn shutdown(&self) {
         self.cancel.cancel();
+        self.training_cancel.store(true, Ordering::Relaxed);
         if let Some(handle) = self.handle.lock().unwrap().take() {
             // Non-blocking: the handle completes when the loop exits.
-            // spawn_blocking runs to completion independently.
+            // The blocking trainer gets its own cancellation flag above.
             if !handle.is_finished() {
                 info!("AutoTrainer: shutdown signalled, background task still finishing");
             }
@@ -267,6 +273,7 @@ impl AutoTrainer {
         train_cfg: TrainingConfig,
         sample_provider: Arc<dyn Fn() -> Vec<TrajectoryWithFeedback> + Send + Sync>,
         cancel: CancellationToken,
+        training_cancel: Arc<AtomicBool>,
     ) {
         let mut tick = tokio::time::interval(Duration::from_millis(config.tick_interval_ms));
         // Skip the initial immediate tick — wait for the first interval
@@ -300,14 +307,17 @@ impl AutoTrainer {
                     let ws2 = Arc::clone(&weight_store);
                     let train_cfg2 = train_cfg.clone();
                     let provider2 = Arc::clone(&sample_provider);
+                    let training_cancel2 = Arc::clone(&training_cancel);
 
                     let samples = provider2();
 
-                    let outcome = tokio::task::spawn_blocking(move || {
-                        let cancel_flag = AtomicBool::new(false);
-                        let mut trainer = GnnTrainer::new(train_cfg2, Some(ws2));
-                        trainer.train(&enhancer2, &samples, Some(&cancel_flag))
-                    })
+                    let outcome = archon_observability::spawn_blocking_named(
+                        "gnn-auto-trainer-train",
+                        move || {
+                            let mut trainer = GnnTrainer::new(train_cfg2, Some(ws2));
+                            trainer.train(&enhancer2, &samples, Some(training_cancel2.as_ref()))
+                        },
+                    )
                     .await;
 
                     match outcome {

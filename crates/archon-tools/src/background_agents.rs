@@ -317,7 +317,7 @@ pub fn cancel_background_agent(id: &AgentId) -> Result<(), RegistryError> {
 /// though tokio::spawn detaches — dropping the handle does not cancel
 /// the task. The task runs for the lifetime of the tokio runtime.
 pub fn spawn_gc_task() -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async {
+    archon_observability::spawn_named("background-agent-gc", async {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
         // First tick fires immediately; skip it so we don't reap before
         // any agent has had time to complete.

@@ -36,7 +36,7 @@ allow_mcp_server_exposure = true
 [policy.workers]
 ocr = "allow-local"           # local OCR via pdftotext / tesseract
 embedding = "allow-local"     # fastembed (local) or OpenAI (cloud)
-vlm = "deny"                  # cloud VLM off until you set up a local model
+vlm = "deny"                  # set allow-local for Ollama or allow-cloud for Gemini/Anthropic
 web_fetch = "allow-local"     # WebFetch tool enabled
 
 
@@ -77,8 +77,23 @@ require_approval_for_network_changes = true
 [policy.docs.vlm]
 enabled = false
 mode = "disabled"  # "disabled" | "local" | "cloud" | "hybrid"
+provider = "disabled"  # "disabled" | "ollama" | "gemini" | "anthropic"
 allow_cloud = false
 require_user_confirmation_for_cloud = true
+
+[policy.docs.vlm.ollama]
+endpoint = "http://localhost:11434"
+model = "gemma4:e4b"
+timeout_secs = 120
+
+[policy.docs.vlm.gemini]
+api_key_env = "GOOGLE_API_KEY"
+model = "gemini-3-flash-preview"
+endpoint_base = "https://generativelanguage.googleapis.com/v1beta"
+rpm_limit = 15
+
+[policy.docs.vlm.anthropic]
+model = "claude-sonnet-4-6"
 
 
 # ----------------------------------------------------------------------------

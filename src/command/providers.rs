@@ -118,7 +118,7 @@ fn render_provider_doctor(live: bool) -> String {
     let path = archon_llm::tokens::credentials_path();
     let credentials_json = std::fs::read_to_string(&path).ok();
     let codex_status = codex_status_from_disk(&path);
-    render_provider_doctor_with_pinger(
+    let mut out = render_provider_doctor_with_pinger(
         path.exists(),
         credentials_json.as_deref(),
         codex_status,
@@ -126,7 +126,9 @@ fn render_provider_doctor(live: bool) -> String {
         live,
         local_provider_env(),
         &TcpProviderLivePinger,
-    )
+    );
+    append_vlm_doctor(&mut out, live);
+    out
 }
 
 #[cfg(test)]
@@ -222,6 +224,42 @@ fn codex_status_from_disk(path: &std::path::Path) -> Option<&'static str> {
     archon_llm::tokens_codex::read_codex_credentials_locked(path)
         .ok()
         .map(|(creds, _mtime)| credential_status(creds.expires_at.timestamp_millis()))
+}
+
+fn append_vlm_doctor(out: &mut String, live: bool) {
+    let policy = std::env::current_dir()
+        .ok()
+        .and_then(|cwd| archon_policy::load_effective_policy(&cwd).ok())
+        .unwrap_or_default();
+    let (provider, model) = archon_docs::vlm::factory::default_provider_summary(&policy);
+    if !live {
+        out.push_str(&format!(
+            "VLM provider:   configured provider={} model={} (pass --live for health check)\n",
+            provider,
+            if model.is_empty() {
+                "n/a"
+            } else {
+                model.as_str()
+            }
+        ));
+        return;
+    }
+    let report = archon_docs::vlm::factory::diagnostic_report(&policy);
+    let line = match report.status {
+        archon_docs::vlm::factory::VlmProviderInitStatus::Registered => {
+            format!("ok — {}/{}", report.provider, report.model)
+        }
+        archon_docs::vlm::factory::VlmProviderInitStatus::Disabled => {
+            format!("disabled — {}", report.message)
+        }
+        archon_docs::vlm::factory::VlmProviderInitStatus::Skipped => {
+            format!(
+                "skipped — {}/{}: {}",
+                report.provider, report.model, report.message
+            )
+        }
+    };
+    out.push_str(&format!("VLM provider:   {line}\n"));
 }
 
 #[derive(Debug, Clone, Copy)]

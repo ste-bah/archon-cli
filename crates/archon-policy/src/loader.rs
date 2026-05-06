@@ -126,8 +126,32 @@ struct RawRetrievalPolicy {
 struct RawVlmPolicy {
     enabled: Option<bool>,
     mode: Option<String>,
+    provider: Option<String>,
     allow_cloud: Option<bool>,
     require_user_confirmation_for_cloud: Option<bool>,
+    ollama: Option<RawOllamaVlmPolicy>,
+    gemini: Option<RawGeminiVlmPolicy>,
+    anthropic: Option<RawAnthropicVlmPolicy>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct RawOllamaVlmPolicy {
+    endpoint: Option<String>,
+    model: Option<String>,
+    timeout_secs: Option<u64>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct RawGeminiVlmPolicy {
+    api_key_env: Option<String>,
+    model: Option<String>,
+    endpoint_base: Option<String>,
+    rpm_limit: Option<u32>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct RawAnthropicVlmPolicy {
+    model: Option<String>,
 }
 
 fn apply_raw(policy: &mut EffectivePolicy, root: RawPolicyRoot) {
@@ -225,11 +249,56 @@ fn apply_vlm(policy: &mut VlmPolicy, raw: RawVlmPolicy) {
     if let Some(value) = raw.mode {
         policy.mode = value;
     }
+    if let Some(value) = raw.provider {
+        policy.provider = value;
+    }
     if let Some(value) = raw.allow_cloud {
         policy.allow_cloud = value;
     }
     if let Some(value) = raw.require_user_confirmation_for_cloud {
         policy.require_user_confirmation_for_cloud = value;
+    }
+    if let Some(value) = raw.ollama {
+        apply_ollama_vlm(&mut policy.ollama, value);
+    }
+    if let Some(value) = raw.gemini {
+        apply_gemini_vlm(&mut policy.gemini, value);
+    }
+    if let Some(value) = raw.anthropic {
+        apply_anthropic_vlm(&mut policy.anthropic, value);
+    }
+}
+
+fn apply_ollama_vlm(policy: &mut OllamaVlmPolicy, raw: RawOllamaVlmPolicy) {
+    if let Some(value) = raw.endpoint {
+        policy.endpoint = value;
+    }
+    if let Some(value) = raw.model {
+        policy.model = value;
+    }
+    if let Some(value) = raw.timeout_secs {
+        policy.timeout_secs = value;
+    }
+}
+
+fn apply_gemini_vlm(policy: &mut GeminiVlmPolicy, raw: RawGeminiVlmPolicy) {
+    if let Some(value) = raw.api_key_env {
+        policy.api_key_env = value;
+    }
+    if let Some(value) = raw.model {
+        policy.model = value;
+    }
+    if let Some(value) = raw.endpoint_base {
+        policy.endpoint_base = value;
+    }
+    if let Some(value) = raw.rpm_limit {
+        policy.rpm_limit = value;
+    }
+}
+
+fn apply_anthropic_vlm(policy: &mut AnthropicVlmPolicy, raw: RawAnthropicVlmPolicy) {
+    if let Some(value) = raw.model {
+        policy.model = value;
     }
 }
 
