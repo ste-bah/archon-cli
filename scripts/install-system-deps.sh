@@ -29,6 +29,7 @@
 #   3   package manager command failed
 #
 # Supports: Ubuntu/Debian/WSL2 (apt), Fedora/RHEL/Rocky (dnf), Arch/Manjaro (pacman),
+#           openSUSE/Tumbleweed (zypper), Alpine (apk),
 #           macOS (brew — must be pre-installed)
 
 set -eu
@@ -119,6 +120,29 @@ case "$DISTRO_ID" in
         PKG_PDF="poppler"
         PKG_OCR="tesseract"
         ;;
+    opensuse-tumbleweed|opensuse-leap|opensuse|sles|sled)
+        # OpenSUSE / SLE family. The poppler CLI utilities ship under
+        # `poppler-tools` (note: NOT `poppler-utils` like Debian/Fedora).
+        # `tesseract-ocr` is the language-pack-less core; for non-English
+        # OCR users will need `tesseract-ocr-traineddata-<lang>` separately.
+        PKG_MGR="zypper"
+        PKG_UPDATE_CMD="zypper refresh"
+        PKG_INSTALL_CMD="zypper install -y"
+        PKG_BUILD="gcc pkg-config libopenssl-devel git"
+        PKG_PDF="poppler-tools"
+        PKG_OCR="tesseract-ocr"
+        ;;
+    alpine)
+        # Alpine — common in containers. Note busybox `sh` already; the
+        # script's POSIX-only constructs are fine. `--no-cache` skips
+        # local index caching which is the standard apk convention.
+        PKG_MGR="apk"
+        PKG_UPDATE_CMD=""   # apk add --no-cache pulls fresh index per call
+        PKG_INSTALL_CMD="apk add --no-cache"
+        PKG_BUILD="build-base openssl-dev pkgconfig git"
+        PKG_PDF="poppler-utils"
+        PKG_OCR="tesseract-ocr"
+        ;;
     macos)
         PKG_MGR="brew"
         PKG_UPDATE_CMD="brew update"
@@ -131,7 +155,7 @@ case "$DISTRO_ID" in
         ;;
     *)
         echo "install-system-deps.sh: unsupported OS (uname=$UNAME_S, distro=$DISTRO_ID)" >&2
-        echo "  Supported: ubuntu/debian/wsl2, fedora/rhel/rocky/centos/almalinux, arch/manjaro, macos" >&2
+        echo "  Supported: ubuntu/debian/wsl2, fedora/rhel/rocky/centos/almalinux, arch/manjaro, opensuse/sles, alpine, macos" >&2
         echo "  Install manually:" >&2
         echo "    Build deps:        gcc/clang, pkg-config, openssl headers, git" >&2
         echo "    PDF utilities:     pdftotext + pdfimages + pdftoppm (poppler-utils)" >&2
