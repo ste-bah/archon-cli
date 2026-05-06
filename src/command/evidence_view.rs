@@ -211,12 +211,19 @@ fn open_learning_db() -> Result<DbInstance> {
 fn render_docs_status(db: &DbInstance) -> Result<String> {
     let summary = archon_docs::status::get_status_summary(db)?;
     Ok(format!(
-        "Document Status\n===============\nTotal sources: {}\nProcessed:     {}\nFailed:        {}\nTotal chunks:  {}\nTotal pages:   {}\n",
+        "Document Status\n===============\nTotal sources: {}\nProcessed:     {}\nFailed:        {}\nTotal chunks:  {}\nTotal pages:   {}\nPDF images:    {} extracted, {} filtered, {} rendered\nPDF OCR:       {} run(s), {} failed\nPDF VLM:       {} description(s), {} failed\n",
         summary.total_sources,
         summary.processed,
         summary.failed,
         summary.total_chunks,
-        summary.total_pages
+        summary.total_pages,
+        summary.pdf_embedded_images_extracted,
+        summary.pdf_embedded_images_skipped_filter,
+        summary.pdf_pages_rendered,
+        summary.pdf_image_ocr_runs,
+        summary.pdf_image_ocr_failures,
+        summary.pdf_image_vlm_descriptions,
+        summary.pdf_image_vlm_failures
     ))
 }
 

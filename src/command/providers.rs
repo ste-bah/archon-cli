@@ -242,6 +242,10 @@ fn append_vlm_doctor(out: &mut String, live: bool) {
                 model.as_str()
             }
         ));
+        out.push_str(&format!(
+            "PDF images:     pdfimages {}\n",
+            pdfimages_doctor_status()
+        ));
         return;
     }
     let report = archon_docs::vlm::factory::diagnostic_report(&policy);
@@ -260,6 +264,22 @@ fn append_vlm_doctor(out: &mut String, live: bool) {
         }
     };
     out.push_str(&format!("VLM provider:   {line}\n"));
+    out.push_str(&format!(
+        "PDF images:     pdfimages {}\n",
+        pdfimages_doctor_status()
+    ));
+}
+
+fn pdfimages_doctor_status() -> String {
+    let bin = std::env::var_os("ARCHON_PDFIMAGES_BIN").unwrap_or_else(|| "pdfimages".into());
+    let display = std::path::PathBuf::from(&bin).display().to_string();
+    match std::process::Command::new(&bin).arg("-v").output() {
+        Ok(output) if output.status.success() || !output.stderr.is_empty() => {
+            format!("ok — {display}")
+        }
+        Ok(output) => format!("unhealthy — {display} status={:?}", output.status.code()),
+        Err(e) => format!("missing — {display} ({e})"),
+    }
 }
 
 #[derive(Debug, Clone, Copy)]

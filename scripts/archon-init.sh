@@ -162,6 +162,13 @@ rpm_limit = 15
 [policy.docs.vlm.anthropic]
 model = "claude-sonnet-4-6"
 
+[policy.docs.pdf]
+extract_embedded_images = true
+min_image_dimension = 200
+min_image_bytes = 4096
+vlm_per_page_image = true
+render_text_pdf_pages = false
+
 [policy.docs.retrieval]
 exact_weight = 0.45
 semantic_weight = 0.55

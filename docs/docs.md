@@ -40,11 +40,14 @@ For a directory:
 archon docs ingest ./policy-pack
 ```
 
-Supported inputs include Markdown, text, DOCX, PDF, PNG, JPEG, and TIFF. Native
-text is chunked directly. PDFs and images run through the local OCR provider
-when needed. Image files also record page/image hashes; optional VLM
-descriptions and image embeddings are policy-gated and should either persist
-real output or emit an explicit warning.
+Supported inputs include Markdown, text, PDF, PNG, JPEG, and TIFF. Native text
+is chunked directly. PDFs now use the unified three-pass path: `pdftotext`
+extracts any text layer, `pdfimages` extracts embedded charts/figures/photos
+for OCR plus optional VLM descriptions, and `pdftoppm` renders full pages only
+for scanned/image-only fallback or when policy explicitly asks for page
+rendering. Image files and PDF-derived images record page/image hashes; optional
+VLM descriptions and image embeddings are policy-gated and should either
+persist real output or emit an explicit warning.
 
 After ingest, inspect the persisted source of truth:
 
@@ -55,6 +58,10 @@ archon docs inspect <document-id>
 archon docs chunks <document-id>
 archon docs provenance <chunk-or-answer-id>
 ```
+
+For PDFs, `status` and `inspect` also show embedded images extracted, images
+skipped by the icon/decorator filter, image OCR runs/failures, image VLM
+descriptions/failures, and rendered page fallback counts.
 
 Then index and search:
 
@@ -147,6 +154,13 @@ rpm_limit = 15
 
 [policy.docs.vlm.anthropic]
 model = "claude-sonnet-4-6"
+
+[policy.docs.pdf]
+extract_embedded_images = true
+min_image_dimension = 200
+min_image_bytes = 4096
+vlm_per_page_image = true
+render_text_pdf_pages = false
 ```
 
 When enabled, VLM descriptions are stored in `doc_image_descriptions`, chunked into normal `doc_chunks`, and indexed by the existing text embedding backend. If an image embedding model is unavailable, ingest still succeeds; visual search works through the description chunks.

@@ -37,6 +37,10 @@ if ! grep -q 'provider = "disabled"' "$TMPDIR/.archon/policy.toml"; then
     echo "FAIL: policy.toml missing VLM provider default"
     exit 1
 fi
+if ! grep -q '\[policy.docs.pdf\]' "$TMPDIR/.archon/policy.toml"; then
+    echo "FAIL: policy.toml missing PDF extraction policy"
+    exit 1
+fi
 echo "PASS"
 
 echo "=== Test 2: idempotent re-run ==="

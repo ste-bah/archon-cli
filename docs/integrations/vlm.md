@@ -103,6 +103,51 @@ archon auth status
 
 Expected success output includes the configured VLM provider/model and whether its health check is ready. `archon docs model-status` also reports embedding backend status, pending chunks, and HNSW availability.
 
+## PDF Image Extraction
+
+As of v0.1.47, PDF ingest sends images through the same VLM path as standalone
+PNG/JPEG/TIFF files. Each PDF gets three passes:
+
+| Pass | Tool | What lands in search |
+| --- | --- | --- |
+| Text layer | `pdftotext -layout` | Normal body-text chunks with page provenance |
+| Embedded images | `pdfimages -list` + `pdfimages -png` | OCR chunks plus optional VLM description chunks for charts, diagrams, figures, and photos |
+| Scanned fallback | `pdftoppm -png` | Rendered page OCR plus optional VLM descriptions when no text or embedded image survived filtering |
+
+The PDF-specific policy is:
+
+```toml
+[policy.docs.pdf]
+extract_embedded_images = true
+min_image_dimension = 200
+min_image_bytes = 4096
+vlm_per_page_image = true
+render_text_pdf_pages = false
+```
+
+`extract_embedded_images = false` reverts PDFs to text-layer/scanned fallback
+behaviour. `vlm_per_page_image = true` still respects `[policy.docs.vlm]`;
+it does not bypass cloud gates. `render_text_pdf_pages = false` avoids costly
+duplicate processing for native-text PDFs. Turn it on for bad OCR overlays
+where you want every page visually re-described.
+
+For long books, cloud VLM providers can create one VLM call per extracted chart
+or rendered page. Local Ollama keeps that private and free; Gemini/Anthropic
+require the cloud policy gates and should be used deliberately on large corpora.
+
+After ingest, verify the source of truth:
+
+```bash
+archon docs status
+archon docs inspect <document-id>
+archon docs search "visual concept from a chart" --mode hybrid --debug
+```
+
+`inspect` reports embedded images extracted/skipped, image OCR runs/failures,
+VLM descriptions/failures, and rendered fallback pages. Description rows live
+in `doc_image_descriptions`; their generated chunks live in `doc_chunks` and
+provenance links them back to the source PDF page.
+
 ## Example Workflow
 
 ```bash

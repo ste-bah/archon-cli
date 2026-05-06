@@ -6,6 +6,7 @@
 //!
 //! Implements REQ-DOCS-001, REQ-DOCS-002, REQ-DOCS-004.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
@@ -22,6 +23,7 @@ use crate::models::{
 };
 use crate::ocr::local::LocalOcrProvider;
 use crate::ocr::provider::{self as ocr_provider, OcrProvider, OcrRequest};
+use crate::pdf::{self, PdfImage};
 use crate::provenance::{build_doc_lineage_edges, make_edge};
 use crate::schema::ensure_doc_schema;
 use crate::store::{self, hash_exists_in_sources};
@@ -40,6 +42,12 @@ pub struct IngestFileResult {
     pub warnings: Vec<String>,
     pub image_embeddings_stored: usize,
     pub vlm_descriptions: usize,
+    pub pdf_embedded_images_extracted: usize,
+    pub pdf_embedded_images_skipped_filter: usize,
+    pub pdf_image_ocr_runs: usize,
+    pub pdf_image_vlm_failures: usize,
+    pub pdf_image_ocr_failures: usize,
+    pub pdf_pages_rendered: usize,
 }
 
 /// Result of a directory ingest operation.
@@ -51,6 +59,12 @@ pub struct IngestResult {
     pub images_skipped: usize,
     pub image_ocr_completed: usize,
     pub vlm_descriptions: usize,
+    pub pdf_embedded_images_extracted: usize,
+    pub pdf_embedded_images_skipped_filter: usize,
+    pub pdf_image_ocr_runs: usize,
+    pub pdf_image_vlm_failures: usize,
+    pub pdf_image_ocr_failures: usize,
+    pub pdf_pages_rendered: usize,
     pub warnings: Vec<String>,
     pub errors: Vec<String>,
 }
@@ -60,6 +74,12 @@ struct PipelineOutcome {
     warnings: Vec<String>,
     image_embeddings_stored: usize,
     vlm_descriptions: usize,
+    pdf_embedded_images_extracted: usize,
+    pdf_embedded_images_skipped_filter: usize,
+    pdf_image_ocr_runs: usize,
+    pdf_image_vlm_failures: usize,
+    pdf_image_ocr_failures: usize,
+    pdf_pages_rendered: usize,
 }
 
 /// Detect media type from file extension.
@@ -165,6 +185,12 @@ pub async fn ingest_file_with_policy(
             warnings: Vec::new(),
             image_embeddings_stored: 0,
             vlm_descriptions: 0,
+            pdf_embedded_images_extracted: 0,
+            pdf_embedded_images_skipped_filter: 0,
+            pdf_image_ocr_runs: 0,
+            pdf_image_vlm_failures: 0,
+            pdf_image_ocr_failures: 0,
+            pdf_pages_rendered: 0,
         });
     }
 
@@ -268,6 +294,12 @@ pub async fn ingest_file_with_policy(
         warnings: outcome.warnings,
         image_embeddings_stored: outcome.image_embeddings_stored,
         vlm_descriptions: outcome.vlm_descriptions,
+        pdf_embedded_images_extracted: outcome.pdf_embedded_images_extracted,
+        pdf_embedded_images_skipped_filter: outcome.pdf_embedded_images_skipped_filter,
+        pdf_image_ocr_runs: outcome.pdf_image_ocr_runs,
+        pdf_image_vlm_failures: outcome.pdf_image_vlm_failures,
+        pdf_image_ocr_failures: outcome.pdf_image_ocr_failures,
+        pdf_pages_rendered: outcome.pdf_pages_rendered,
     })
 }
 
@@ -301,6 +333,10 @@ async fn run_ingest_pipeline_with_bytes(
     store::insert_ocr_run(db, &ocr_run).map_err(|e| DocsError::Storage {
         message: e.to_string(),
     })?;
+
+    if media_type == "application/pdf" {
+        return run_pdf_ingest_pipeline(db, document_id, file_path, &ocr_run_id, policy).await;
+    }
 
     // 2. Run OCR extraction
     let request = OcrRequest {
@@ -440,6 +476,348 @@ async fn run_ingest_pipeline_with_bytes(
     Ok(outcome)
 }
 
+async fn run_pdf_ingest_pipeline(
+    db: &DbInstance,
+    document_id: &str,
+    file_path: &str,
+    ocr_run_id: &str,
+    policy: &archon_policy::EffectivePolicy,
+) -> Result<PipelineOutcome, DocsError> {
+    let mut outcome = PipelineOutcome::default();
+    let extract_result = pdf::extract_pdf_unified(Path::new(file_path), &policy.docs.pdf).await?;
+    outcome.warnings.extend(extract_result.warnings.clone());
+    outcome.pdf_embedded_images_extracted = extract_result.embedded_images.len();
+    outcome.pdf_embedded_images_skipped_filter = extract_result.embedded_images_skipped_filter;
+    outcome.pdf_pages_rendered = extract_result.rendered_pages.len();
+
+    store::update_ocr_run_completion(
+        db,
+        ocr_run_id,
+        &OcrStatus::Completed,
+        &chrono::Utc::now().to_rfc3339(),
+        extract_result.processing_duration_ms,
+    )
+    .map_err(|e| DocsError::Storage {
+        message: e.to_string(),
+    })?;
+
+    let mut page_ids_by_number = BTreeMap::<u32, String>::new();
+    let mut pages_by_number = BTreeMap::<u32, PageArtifact>::new();
+    for po in &extract_result.page_offsets {
+        let page_id = format!("page-{}-{}", document_id, po.page);
+        let page_text = extract_result
+            .full_text
+            .get(po.char_start..po.char_end)
+            .unwrap_or("");
+        let page = PageArtifact {
+            page_id: page_id.clone(),
+            document_id: document_id.to_string(),
+            page_number: po.page,
+            text_hash: if page_text.trim().is_empty() {
+                None
+            } else {
+                Some(sha256_str(page_text))
+            },
+            image_hash: None,
+            width: None,
+            height: None,
+            provenance_record_id: String::new(),
+        };
+        store::insert_page(db, &page).map_err(|e| DocsError::Storage {
+            message: e.to_string(),
+        })?;
+        page_ids_by_number.insert(po.page, page_id);
+        pages_by_number.insert(po.page, page);
+    }
+
+    let page_ids = page_ids_by_number.values().cloned().collect::<Vec<_>>();
+    if !extract_result.full_text.trim().is_empty() {
+        let ocr_artifact_id = format!("ocr-result-{}", ocr_run_id);
+        let chunks = persist_text_artifact_chunks(
+            db,
+            document_id,
+            &ocr_artifact_id,
+            "ocr_text",
+            &extract_result.full_text,
+            &extract_result.page_offsets,
+            None,
+        )?;
+        let edges = build_doc_lineage_edges(document_id, &ocr_artifact_id, &chunks, &page_ids);
+        for edge in &edges {
+            store::insert_provenance_edge(db, edge).map_err(|e| DocsError::Storage {
+                message: e.to_string(),
+            })?;
+        }
+        index_chunks_if_provider_available(db, &chunks);
+    }
+
+    let pdf_images = extract_result
+        .embedded_images
+        .iter()
+        .chain(extract_result.rendered_pages.iter())
+        .collect::<Vec<_>>();
+    let pdf_image_count = pdf_images.len();
+    if policy.docs.pdf.vlm_per_page_image
+        && policy.docs.vlm.provider != "ollama"
+        && policy.docs.vlm.provider != "disabled"
+    {
+        tracing::info!(
+            images = pdf_image_count,
+            provider = %policy.docs.vlm.provider,
+            "PDF ingest will trigger VLM calls for extracted page images"
+        );
+    }
+
+    for image in pdf_images {
+        mark_page_image_metadata(db, &mut pages_by_number, image)?;
+        let page_ids_for_image = image
+            .source_pages
+            .iter()
+            .filter_map(|page| page_ids_by_number.get(page).cloned())
+            .collect::<Vec<_>>();
+        if page_ids_for_image.is_empty() {
+            outcome.warnings.push(format!(
+                "PDF image on page {} skipped: no page artifact exists",
+                image.source_page
+            ));
+            continue;
+        }
+
+        match extract_image_ocr_text(image).await {
+            Ok(Some(text)) => {
+                outcome.pdf_image_ocr_runs += 1;
+                outcome.warnings.push(format!(
+                    "PDF image OCR ok on page {} ({} bytes)",
+                    image.source_page,
+                    text.len()
+                ));
+                persist_image_ocr_chunks(
+                    db,
+                    document_id,
+                    image.source_page,
+                    &page_ids_for_image,
+                    &text,
+                )?;
+                outcome.pdf_embedded_images_extracted = outcome
+                    .pdf_embedded_images_extracted
+                    .max(extract_result.embedded_images.len());
+            }
+            Ok(None) => {}
+            Err(e) => {
+                outcome.pdf_image_ocr_failures += 1;
+                outcome.warnings.push(format!(
+                    "PDF image OCR failed on page {}: {e}",
+                    image.source_page
+                ));
+            }
+        }
+
+        if policy.docs.pdf.vlm_per_page_image {
+            let before = outcome.vlm_descriptions;
+            let warning_count = outcome.warnings.len();
+            apply_vlm_description(
+                db,
+                document_id,
+                &image.bytes,
+                policy,
+                &page_ids_for_image,
+                &mut outcome,
+            )
+            .await?;
+            if outcome.vlm_descriptions == before
+                && outcome.warnings.len() > warning_count
+                && outcome
+                    .warnings
+                    .last()
+                    .is_some_and(|warning| warning.contains("failed"))
+            {
+                outcome.pdf_image_vlm_failures += 1;
+            }
+        }
+    }
+
+    outcome.pdf_embedded_images_skipped_filter = extract_result.embedded_images_skipped_filter;
+    let metrics = crate::models::PdfIngestMetrics {
+        document_id: document_id.to_string(),
+        embedded_images_extracted: outcome.pdf_embedded_images_extracted as u32,
+        embedded_images_skipped_filter: outcome.pdf_embedded_images_skipped_filter as u32,
+        image_ocr_runs: outcome.pdf_image_ocr_runs as u32,
+        image_ocr_failures: outcome.pdf_image_ocr_failures as u32,
+        image_vlm_descriptions: outcome.vlm_descriptions as u32,
+        image_vlm_failures: outcome.pdf_image_vlm_failures as u32,
+        pages_rendered: outcome.pdf_pages_rendered as u32,
+    };
+    store::upsert_pdf_metrics(db, &metrics).map_err(|e| DocsError::Storage {
+        message: e.to_string(),
+    })?;
+
+    Ok(outcome)
+}
+
+fn persist_text_artifact_chunks(
+    db: &DbInstance,
+    document_id: &str,
+    artifact_id: &str,
+    artifact_type: &str,
+    text: &str,
+    page_offsets: &[PageOffset],
+    chunk_id_prefix: Option<&str>,
+) -> Result<Vec<ChunkArtifact>, DocsError> {
+    let artifact = ArtifactRecord {
+        artifact_id: artifact_id.to_string(),
+        document_id: document_id.to_string(),
+        artifact_type: artifact_type.to_string(),
+        content_hash: sha256_str(text),
+        created_at: chrono::Utc::now().to_rfc3339(),
+        provenance_record_id: String::new(),
+    };
+    store::insert_artifact(db, &artifact).map_err(|e| DocsError::Storage {
+        message: e.to_string(),
+    })?;
+    let page_chunks = chunk_with_page_anchors(text, page_offsets);
+    let chunks = match chunk_id_prefix {
+        None => build_chunk_artifacts(document_id, artifact_id, &page_chunks),
+        Some(prefix) => page_chunks
+            .iter()
+            .enumerate()
+            .map(|(i, page_chunk)| ChunkArtifact {
+                chunk_id: format!("chunk-{}-{}", prefix, i),
+                document_id: document_id.to_string(),
+                artifact_id: artifact_id.to_string(),
+                chunk_index: i as u32,
+                page_start: page_chunk.page_start,
+                page_end: page_chunk.page_end,
+                content: page_chunk.content.clone(),
+                content_hash: sha256_str(&page_chunk.content),
+                embedding_status: "pending".to_string(),
+            })
+            .collect(),
+    };
+    for chunk in &chunks {
+        store::insert_chunk(db, chunk).map_err(|e| DocsError::Storage {
+            message: e.to_string(),
+        })?;
+    }
+    store::insert_provenance_edge(
+        db,
+        &make_edge(artifact_id, document_id, ProvenanceEdgeType::DerivedFrom),
+    )
+    .map_err(|e| DocsError::Storage {
+        message: e.to_string(),
+    })?;
+    Ok(chunks)
+}
+
+fn persist_image_ocr_chunks(
+    db: &DbInstance,
+    document_id: &str,
+    source_page: u32,
+    page_ids: &[String],
+    text: &str,
+) -> Result<(), DocsError> {
+    if text.trim().is_empty() {
+        return Ok(());
+    }
+    let artifact_id = format!("pdf-image-ocr-{}", uuid::Uuid::new_v4());
+    let page_offsets = vec![PageOffset {
+        page: source_page,
+        char_start: 0,
+        char_end: text.len(),
+    }];
+    let chunks = persist_text_artifact_chunks(
+        db,
+        document_id,
+        &artifact_id,
+        "pdf_image_ocr_text",
+        text,
+        &page_offsets,
+        Some(&artifact_id),
+    )?;
+    for chunk in &chunks {
+        for page_id in page_ids {
+            store::insert_provenance_edge(
+                db,
+                &make_edge(&chunk.chunk_id, page_id, ProvenanceEdgeType::ExtractedFrom),
+            )
+            .map_err(|e| DocsError::Storage {
+                message: e.to_string(),
+            })?;
+        }
+    }
+    index_chunks_if_provider_available(db, &chunks);
+    Ok(())
+}
+
+fn index_chunks_if_provider_available(db: &DbInstance, chunks: &[ChunkArtifact]) {
+    if embed::get_provider().is_some() {
+        for chunk in chunks {
+            if let Err(e) = retrieval::index_chunk(db, chunk) {
+                tracing::warn!(
+                    chunk_id = %chunk.chunk_id,
+                    error = %e,
+                    "failed to index PDF-derived chunk during ingest"
+                );
+            }
+        }
+    }
+}
+
+async fn extract_image_ocr_text(image: &PdfImage) -> Result<Option<String>, DocsError> {
+    let ext = match image.mime {
+        "image/jpeg" => "jpg",
+        _ => "png",
+    };
+    let dir = std::env::temp_dir().join(format!("archon-pdf-image-ocr-{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(&dir)?;
+    let path = dir.join(format!("image.{ext}"));
+    fs::write(&path, &image.bytes)?;
+    let local_provider = LocalOcrProvider;
+    let configured_provider = ocr_provider::get_provider();
+    let provider: &dyn OcrProvider = configured_provider.as_deref().unwrap_or(&local_provider);
+    let result = provider
+        .extract(OcrRequest {
+            file_path: path.to_string_lossy().to_string(),
+            document_id: "pdf-image".into(),
+            ocr_run_id: format!("ocr-image-{}", uuid::Uuid::new_v4()),
+            page_range: None,
+            language_hint: None,
+        })
+        .await;
+    let _ = fs::remove_dir_all(&dir);
+    result.map(|ocr| {
+        if ocr.full_text.trim().is_empty() {
+            None
+        } else {
+            Some(ocr.full_text)
+        }
+    })
+}
+
+fn mark_page_image_metadata(
+    db: &DbInstance,
+    pages_by_number: &mut BTreeMap<u32, PageArtifact>,
+    image: &PdfImage,
+) -> Result<(), DocsError> {
+    let image_hash = sha256_hex(&image.bytes);
+    for page_number in &image.source_pages {
+        if let Some(page) = pages_by_number.get_mut(page_number)
+            && page.image_hash.is_none()
+        {
+            page.image_hash = Some(image_hash.clone());
+            if image.width > 0 {
+                page.width = Some(image.width as f32);
+            }
+            if image.height > 0 {
+                page.height = Some(image.height as f32);
+            }
+            store::insert_page(db, page).map_err(|e| DocsError::Storage {
+                message: e.to_string(),
+            })?;
+        }
+    }
+    Ok(())
+}
+
 async fn apply_vlm_description(
     db: &DbInstance,
     document_id: &str,
@@ -520,7 +898,10 @@ fn persist_vlm_description(
         &ImageDescription {
             artifact_id: artifact_id.clone(),
             document_id: document_id.to_string(),
-            page_number: 1,
+            page_number: page_ids
+                .first()
+                .and_then(|id| page_number_from_id(id))
+                .unwrap_or(1),
             provider: description.provider.clone(),
             model: description.model.clone(),
             description: description_text.to_string(),
@@ -542,7 +923,7 @@ fn persist_vlm_description(
         .iter()
         .enumerate()
         .map(|(i, page_chunk)| ChunkArtifact {
-            chunk_id: format!("chunk-{}-vlm-{}", document_id, i),
+            chunk_id: format!("chunk-{}-{}", artifact_id, i),
             document_id: document_id.to_string(),
             artifact_id: artifact_id.clone(),
             chunk_index: i as u32,
@@ -566,7 +947,7 @@ fn persist_vlm_description(
                 "failed to index VLM description chunk during ingest"
             );
         }
-        if let Some(page_id) = page_ids.first() {
+        for page_id in page_ids {
             store::insert_provenance_edge(
                 db,
                 &make_edge(&chunk.chunk_id, page_id, ProvenanceEdgeType::Describes),
@@ -584,6 +965,10 @@ fn persist_vlm_description(
         message: e.to_string(),
     })?;
     Ok(())
+}
+
+fn page_number_from_id(page_id: &str) -> Option<u32> {
+    page_id.rsplit('-').next()?.parse().ok()
 }
 
 fn store_image_embedding_if_supported(
@@ -685,6 +1070,7 @@ pub async fn ingest_directory_with_policy(
             Ok(r) if r.pipeline_failed => {
                 result.sources_failed += 1;
                 result.vlm_descriptions += r.vlm_descriptions;
+                add_pdf_counts(&mut result, &r);
                 result.warnings.extend(r.warnings);
                 result.errors.push(format!(
                     "{}: pipeline failed for {}",
@@ -696,6 +1082,7 @@ pub async fn ingest_directory_with_policy(
                 result.sources_registered += 1;
                 result.images_skipped += 1;
                 result.vlm_descriptions += r.vlm_descriptions;
+                add_pdf_counts(&mut result, &r);
                 result.warnings.extend(r.warnings);
             }
             Ok(r) if r.was_new => {
@@ -704,6 +1091,7 @@ pub async fn ingest_directory_with_policy(
                     result.image_ocr_completed += 1;
                 }
                 result.vlm_descriptions += r.vlm_descriptions;
+                add_pdf_counts(&mut result, &r);
                 result.warnings.extend(r.warnings);
             }
             Ok(_) => {
@@ -719,6 +1107,15 @@ pub async fn ingest_directory_with_policy(
     Ok(result)
 }
 
+fn add_pdf_counts(result: &mut IngestResult, file: &IngestFileResult) {
+    result.pdf_embedded_images_extracted += file.pdf_embedded_images_extracted;
+    result.pdf_embedded_images_skipped_filter += file.pdf_embedded_images_skipped_filter;
+    result.pdf_image_ocr_runs += file.pdf_image_ocr_runs;
+    result.pdf_image_vlm_failures += file.pdf_image_vlm_failures;
+    result.pdf_image_ocr_failures += file.pdf_image_ocr_failures;
+    result.pdf_pages_rendered += file.pdf_pages_rendered;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -728,6 +1125,59 @@ mod tests {
         let db = DbInstance::new("sqlite", &path, "").unwrap();
         ensure_doc_schema(&db).unwrap();
         db
+    }
+
+    #[cfg(unix)]
+    fn png_bytes(width: u32, height: u32, payload_len: usize) -> Vec<u8> {
+        let mut bytes = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+        bytes.extend_from_slice(&[0, 0, 0, 13, b'I', b'H', b'D', b'R']);
+        bytes.extend_from_slice(&width.to_be_bytes());
+        bytes.extend_from_slice(&height.to_be_bytes());
+        bytes.extend_from_slice(&[8, 2, 0, 0, 0]);
+        bytes.resize(payload_len.max(64), 0x42);
+        bytes
+    }
+
+    #[cfg(unix)]
+    fn write_executable(path: &Path, body: &str) {
+        use std::os::unix::fs::PermissionsExt;
+
+        fs::write(path, body).unwrap();
+        let mut perms = fs::metadata(path).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(path, perms).unwrap();
+    }
+
+    #[cfg(unix)]
+    fn set_pdf_command_env(pdftotext: &Path, pdfimages: &Path, pdftoppm: &Path) {
+        unsafe {
+            std::env::set_var("ARCHON_PDFTOTEXT_BIN", pdftotext);
+            std::env::set_var("ARCHON_PDFIMAGES_BIN", pdfimages);
+            std::env::set_var("ARCHON_PDFTOPPM_BIN", pdftoppm);
+        }
+    }
+
+    #[cfg(unix)]
+    struct PdfCommandEnvGuard;
+
+    #[cfg(unix)]
+    impl Drop for PdfCommandEnvGuard {
+        fn drop(&mut self) {
+            unsafe {
+                std::env::remove_var("ARCHON_PDFTOTEXT_BIN");
+                std::env::remove_var("ARCHON_PDFIMAGES_BIN");
+                std::env::remove_var("ARCHON_PDFTOPPM_BIN");
+            }
+        }
+    }
+
+    fn vlm_enabled_policy() -> archon_policy::EffectivePolicy {
+        let mut policy = archon_policy::EffectivePolicy::default();
+        policy.docs.vlm.enabled = true;
+        policy.docs.vlm.mode = "local".into();
+        policy.docs.vlm.provider = "ollama".into();
+        policy.workers.vlm = "allow-local".into();
+        policy
     }
 
     #[test]
@@ -950,6 +1400,22 @@ mod tests {
         }
     }
 
+    struct FailsOnceVlmProvider {
+        calls: std::sync::atomic::AtomicUsize,
+    }
+
+    impl crate::vlm::VlmDescriptionProvider for FailsOnceVlmProvider {
+        fn describe_image(&self, _image_bytes: &[u8]) -> Result<String, DocsError> {
+            if self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
+                return Err(DocsError::OcrApi {
+                    message: "synthetic first-image VLM failure".into(),
+                    status_code: None,
+                });
+            }
+            Ok("second chart description survives".into())
+        }
+    }
+
     fn reset_multimodal_test_providers() {
         crate::ocr::provider::clear_provider();
         crate::vlm::clear_provider();
@@ -1113,6 +1579,232 @@ mod tests {
         let chunks = store::list_chunks_for_doc(&db, &r.document_id).unwrap();
         assert_eq!(chunks.len(), 1);
         assert!(chunks[0].content.contains("OCR survives VLM failure"));
+        reset_multimodal_test_providers();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_pdf_ingest_persists_embedded_image_ocr_and_vlm_description() {
+        reset_multimodal_test_providers();
+        crate::ocr::provider::set_provider(Box::new(MockOcrProvider {
+            text: "axis label OCR from PDF chart",
+        }));
+        crate::vlm::set_provider(Box::new(MockVlmProvider {
+            description: "ascending triangle with rising volume",
+        }));
+        let policy = vlm_enabled_policy();
+        let db = test_db();
+        let dir = tempfile::tempdir().unwrap();
+        let pdf = dir.path().join("chart-book.pdf");
+        fs::write(&pdf, b"%PDF mixed chart book").unwrap();
+        let pdftotext = dir.path().join("pdftotext");
+        let pdfimages = dir.path().join("pdfimages");
+        let pdftoppm = dir.path().join("pdftoppm");
+        let chart = dir.path().join("chart.bin");
+        fs::write(&chart, png_bytes(800, 600, 8192)).unwrap();
+        write_executable(
+            &pdftotext,
+            "#!/usr/bin/env bash\necho 'body text discusses waves'\n",
+        );
+        write_executable(
+            &pdfimages,
+            &format!(
+                "#!/usr/bin/env bash\n\
+                 if [ \"$1\" = \"-list\" ]; then echo '  1 0 image 800 600 rgb 3 8 image no 12 0 72 72 8K 1%'; exit 0; fi\n\
+                 cp '{}' \"${{@: -1}}-000.png\"\n",
+                chart.display()
+            ),
+        );
+        write_executable(&pdftoppm, "#!/usr/bin/env bash\nexit 99\n");
+        set_pdf_command_env(&pdftotext, &pdfimages, &pdftoppm);
+        let _guard = PdfCommandEnvGuard;
+
+        let result = ingest_file_with_policy(&db, &pdf, &policy).await.unwrap();
+        assert_eq!(result.pdf_embedded_images_extracted, 1);
+        assert_eq!(result.pdf_image_ocr_runs, 1);
+        assert_eq!(result.vlm_descriptions, 1);
+
+        let chunks = store::list_chunks_for_doc(&db, &result.document_id).unwrap();
+        let joined = chunks
+            .iter()
+            .map(|chunk| chunk.content.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(joined.contains("body text discusses waves"));
+        assert!(joined.contains("axis label OCR from PDF chart"));
+        assert!(joined.contains("ascending triangle with rising volume"));
+
+        let descriptions =
+            store::list_image_descriptions_for_doc(&db, &result.document_id).unwrap();
+        assert_eq!(descriptions.len(), 1);
+        assert_eq!(descriptions[0].page_number, 1);
+        let metrics = store::get_pdf_metrics(&db, &result.document_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(metrics.embedded_images_extracted, 1);
+        assert_eq!(metrics.image_ocr_runs, 1);
+        assert_eq!(metrics.image_vlm_descriptions, 1);
+        reset_multimodal_test_providers();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_pdf_ingest_scanned_rendered_pages_get_vlm_descriptions() {
+        reset_multimodal_test_providers();
+        crate::ocr::provider::set_provider(Box::new(MockOcrProvider {
+            text: "rendered page OCR",
+        }));
+        crate::vlm::set_provider(Box::new(MockVlmProvider {
+            description: "rendered page visual description",
+        }));
+        let policy = vlm_enabled_policy();
+        let db = test_db();
+        let dir = tempfile::tempdir().unwrap();
+        let pdf = dir.path().join("scan.pdf");
+        fs::write(&pdf, b"%PDF scan").unwrap();
+        let pdftotext = dir.path().join("pdftotext");
+        let pdfimages = dir.path().join("pdfimages");
+        let pdftoppm = dir.path().join("pdftoppm");
+        let page = dir.path().join("page.bin");
+        fs::write(&page, png_bytes(640, 480, 4096)).unwrap();
+        write_executable(&pdftotext, "#!/usr/bin/env bash\nexit 0\n");
+        write_executable(&pdfimages, "#!/usr/bin/env bash\nexit 0\n");
+        write_executable(
+            &pdftoppm,
+            &format!(
+                "#!/usr/bin/env bash\n\
+                 cp '{}' \"${{@: -1}}-1.png\"\n\
+                 cp '{}' \"${{@: -1}}-2.png\"\n\
+                 cp '{}' \"${{@: -1}}-3.png\"\n",
+                page.display(),
+                page.display(),
+                page.display()
+            ),
+        );
+        set_pdf_command_env(&pdftotext, &pdfimages, &pdftoppm);
+        let _guard = PdfCommandEnvGuard;
+
+        let result = ingest_file_with_policy(&db, &pdf, &policy).await.unwrap();
+        assert_eq!(result.pdf_pages_rendered, 3);
+        assert_eq!(result.pdf_image_ocr_runs, 3);
+        assert_eq!(result.vlm_descriptions, 3);
+        let descriptions =
+            store::list_image_descriptions_for_doc(&db, &result.document_id).unwrap();
+        assert_eq!(descriptions.len(), 3);
+        reset_multimodal_test_providers();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_pdf_single_image_vlm_failure_does_not_fail_document() {
+        reset_multimodal_test_providers();
+        crate::ocr::provider::set_provider(Box::new(MockOcrProvider {
+            text: "image OCR survives partial VLM failure",
+        }));
+        crate::vlm::set_provider(Box::new(FailsOnceVlmProvider {
+            calls: std::sync::atomic::AtomicUsize::new(0),
+        }));
+        let policy = vlm_enabled_policy();
+        let db = test_db();
+        let dir = tempfile::tempdir().unwrap();
+        let pdf = dir.path().join("two-images.pdf");
+        fs::write(&pdf, b"%PDF two charts").unwrap();
+        let pdftotext = dir.path().join("pdftotext");
+        let pdfimages = dir.path().join("pdfimages");
+        let pdftoppm = dir.path().join("pdftoppm");
+        let chart_a = dir.path().join("chart-a.bin");
+        let chart_b = dir.path().join("chart-b.bin");
+        fs::write(&chart_a, png_bytes(800, 600, 8192)).unwrap();
+        fs::write(&chart_b, png_bytes(801, 600, 8192)).unwrap();
+        write_executable(&pdftotext, "#!/usr/bin/env bash\necho 'body text'\n");
+        write_executable(
+            &pdfimages,
+            &format!(
+                "#!/usr/bin/env bash\n\
+                 if [ \"$1\" = \"-list\" ]; then\n\
+                   echo '  1 0 image 800 600 rgb 3 8 image no 12 0 72 72 8K 1%'\n\
+                   echo '  1 1 image 801 600 rgb 3 8 image no 13 0 72 72 8K 1%'\n\
+                   exit 0\n\
+                 fi\n\
+                 cp '{}' \"${{@: -1}}-000.png\"\n\
+                 cp '{}' \"${{@: -1}}-001.png\"\n",
+                chart_a.display(),
+                chart_b.display()
+            ),
+        );
+        write_executable(&pdftoppm, "#!/usr/bin/env bash\nexit 99\n");
+        set_pdf_command_env(&pdftotext, &pdfimages, &pdftoppm);
+        let _guard = PdfCommandEnvGuard;
+
+        let result = ingest_file_with_policy(&db, &pdf, &policy).await.unwrap();
+        assert!(!result.pipeline_failed);
+        assert_eq!(result.pdf_image_vlm_failures, 1);
+        assert_eq!(result.vlm_descriptions, 1);
+        let doc = store::get_doc_source(&db, &result.document_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(doc.status, DocumentStatus::Ingested);
+        reset_multimodal_test_providers();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_pdf_shared_xobject_image_has_edges_to_each_source_page() {
+        reset_multimodal_test_providers();
+        crate::ocr::provider::set_provider(Box::new(MockOcrProvider {
+            text: "shared chart OCR",
+        }));
+        crate::vlm::set_provider(Box::new(MockVlmProvider {
+            description: "shared image description",
+        }));
+        let policy = vlm_enabled_policy();
+        let db = test_db();
+        let dir = tempfile::tempdir().unwrap();
+        let pdf = dir.path().join("shared.pdf");
+        fs::write(&pdf, b"%PDF shared").unwrap();
+        let pdftotext = dir.path().join("pdftotext");
+        let pdfimages = dir.path().join("pdfimages");
+        let pdftoppm = dir.path().join("pdftoppm");
+        let chart = dir.path().join("shared.bin");
+        fs::write(&chart, png_bytes(800, 600, 8192)).unwrap();
+        write_executable(
+            &pdftotext,
+            "#!/usr/bin/env bash\nprintf 'page one\\fpage two'\n",
+        );
+        write_executable(
+            &pdfimages,
+            &format!(
+                "#!/usr/bin/env bash\n\
+                 if [ \"$1\" = \"-list\" ]; then\n\
+                   echo '  1 0 image 800 600 rgb 3 8 image no 12 0 72 72 8K 1%'\n\
+                   echo '  2 1 image 800 600 rgb 3 8 image no 12 0 72 72 8K 1%'\n\
+                   exit 0\n\
+                 fi\n\
+                 cp '{}' \"${{@: -1}}-000.png\"\n",
+                chart.display()
+            ),
+        );
+        write_executable(&pdftoppm, "#!/usr/bin/env bash\nexit 99\n");
+        set_pdf_command_env(&pdftotext, &pdfimages, &pdftoppm);
+        let _guard = PdfCommandEnvGuard;
+
+        let result = ingest_file_with_policy(&db, &pdf, &policy).await.unwrap();
+        let descriptions =
+            store::list_image_descriptions_for_doc(&db, &result.document_id).unwrap();
+        assert_eq!(descriptions.len(), 1);
+        let chunks = store::list_chunks_for_doc(&db, &result.document_id).unwrap();
+        let description_chunk = chunks
+            .iter()
+            .find(|chunk| chunk.artifact_id == descriptions[0].artifact_id)
+            .expect("description chunk persisted");
+        let edges = store::list_provenance_from(&db, &description_chunk.chunk_id).unwrap();
+        assert_eq!(
+            edges
+                .iter()
+                .filter(|edge| matches!(edge.edge_type, ProvenanceEdgeType::Describes))
+                .count(),
+            2
+        );
         reset_multimodal_test_providers();
     }
 

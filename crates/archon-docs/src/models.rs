@@ -126,6 +126,18 @@ pub struct ImageDescription {
     pub cost_usd: f64,
 }
 
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct PdfIngestMetrics {
+    pub document_id: String,
+    pub embedded_images_extracted: u32,
+    pub embedded_images_skipped_filter: u32,
+    pub image_ocr_runs: u32,
+    pub image_ocr_failures: u32,
+    pub image_vlm_descriptions: u32,
+    pub image_vlm_failures: u32,
+    pub pages_rendered: u32,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BoundingBox {
     pub x: f32,

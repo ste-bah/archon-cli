@@ -65,6 +65,13 @@ rpm_limit = 15
 [policy.docs.vlm.anthropic]
 model = "claude-sonnet-4-6"
 
+[policy.docs.pdf]
+extract_embedded_images = true
+min_image_dimension = 200
+min_image_bytes = 4096
+vlm_per_page_image = true
+render_text_pdf_pages = false
+
 [policy.docs.retrieval]
 exact_weight = 0.45
 semantic_weight = 0.55
@@ -76,6 +83,11 @@ semantic_weight = 0.55
 `policy.gametheory.enable_tier11 = true`.
 
 Document VLM descriptions are denied unless `[policy.docs.vlm]` enables a provider and the matching worker/network policy allows it. Local Ollama requires `policy.workers.vlm = "allow-local"`. Gemini and Anthropic require `policy.workers.vlm = "allow-cloud"`, `policy.docs.vlm.allow_cloud = true`, and `policy.network.allow_cloud_vlm = true`.
+
+PDF image extraction is enabled by default through `[policy.docs.pdf]`, but
+VLM calls for those extracted images still require the normal VLM gates.
+`render_text_pdf_pages = false` means full-page rendering is only used for
+scanned/image-only fallback unless explicitly enabled.
 
 Document search defaults to hybrid retrieval. `[policy.docs.retrieval]` controls
 the exact/semantic weighting used by `archon docs search --mode hybrid`.

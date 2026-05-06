@@ -16,6 +16,7 @@ pub fn ensure_doc_schema(db: &DbInstance) -> Result<()> {
     ensure_doc_chunks(db)?;
     ensure_doc_chunk_fts(db)?;
     ensure_doc_image_descriptions(db)?;
+    ensure_doc_pdf_metrics(db)?;
     ensure_doc_provenance_edges(db)?;
     ensure_doc_processing_jobs(db)?;
     Ok(())
@@ -148,6 +149,22 @@ fn ensure_doc_image_descriptions(db: &DbInstance) -> Result<()> {
             description: String,
             created_at: String,
             cost_usd: Float default 0.0,
+        }"#,
+    )
+}
+
+fn ensure_doc_pdf_metrics(db: &DbInstance) -> Result<()> {
+    run_create(
+        db,
+        r#":create doc_pdf_metrics {
+            document_id: String =>
+            embedded_images_extracted: Int default 0,
+            embedded_images_skipped_filter: Int default 0,
+            image_ocr_runs: Int default 0,
+            image_ocr_failures: Int default 0,
+            image_vlm_descriptions: Int default 0,
+            image_vlm_failures: Int default 0,
+            pages_rendered: Int default 0,
         }"#,
     )
 }

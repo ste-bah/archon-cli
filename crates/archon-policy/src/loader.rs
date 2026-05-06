@@ -113,6 +113,7 @@ struct RawLearningPolicy {
 #[derive(Debug, Default, Deserialize)]
 struct RawDocsPolicy {
     vlm: Option<RawVlmPolicy>,
+    pdf: Option<RawPdfPolicy>,
     retrieval: Option<RawRetrievalPolicy>,
 }
 
@@ -120,6 +121,15 @@ struct RawDocsPolicy {
 struct RawRetrievalPolicy {
     exact_weight: Option<f64>,
     semantic_weight: Option<f64>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct RawPdfPolicy {
+    extract_embedded_images: Option<bool>,
+    min_image_dimension: Option<u32>,
+    min_image_bytes: Option<u64>,
+    vlm_per_page_image: Option<bool>,
+    render_text_pdf_pages: Option<bool>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -171,6 +181,9 @@ fn apply_raw(policy: &mut EffectivePolicy, root: RawPolicyRoot) {
         if let Some(docs) = raw.docs {
             if let Some(vlm) = docs.vlm {
                 apply_vlm(&mut policy.docs.vlm, vlm);
+            }
+            if let Some(pdf) = docs.pdf {
+                apply_pdf(&mut policy.docs.pdf, pdf);
             }
             if let Some(retrieval) = docs.retrieval {
                 apply_retrieval(&mut policy.docs.retrieval, retrieval);
@@ -299,6 +312,24 @@ fn apply_gemini_vlm(policy: &mut GeminiVlmPolicy, raw: RawGeminiVlmPolicy) {
 fn apply_anthropic_vlm(policy: &mut AnthropicVlmPolicy, raw: RawAnthropicVlmPolicy) {
     if let Some(value) = raw.model {
         policy.model = value;
+    }
+}
+
+fn apply_pdf(policy: &mut PdfPolicy, raw: RawPdfPolicy) {
+    if let Some(value) = raw.extract_embedded_images {
+        policy.extract_embedded_images = value;
+    }
+    if let Some(value) = raw.min_image_dimension {
+        policy.min_image_dimension = value;
+    }
+    if let Some(value) = raw.min_image_bytes {
+        policy.min_image_bytes = value;
+    }
+    if let Some(value) = raw.vlm_per_page_image {
+        policy.vlm_per_page_image = value;
+    }
+    if let Some(value) = raw.render_text_pdf_pages {
+        policy.render_text_pdf_pages = value;
     }
 }
 

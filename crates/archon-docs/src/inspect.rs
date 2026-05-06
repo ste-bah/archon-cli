@@ -18,6 +18,8 @@ pub struct DocInspectOutput {
     pub chunks: Vec<crate::models::ChunkArtifact>,
     pub pages: Vec<crate::models::PageArtifact>,
     pub ocr_runs: Vec<crate::models::OcrRun>,
+    pub image_descriptions: Vec<crate::models::ImageDescription>,
+    pub pdf_metrics: Option<crate::models::PdfIngestMetrics>,
     pub provenance_edges: Vec<crate::models::ProvenanceEdge>,
 }
 
@@ -29,6 +31,8 @@ pub fn inspect_document(db: &DbInstance, document_id: &str) -> Result<DocInspect
     let chunks = store::list_chunks_for_doc(db, document_id)?;
     let pages = store::list_pages_for_doc(db, document_id)?;
     let ocr_runs = store::list_ocr_runs_for_doc(db, document_id)?;
+    let image_descriptions = store::list_image_descriptions_for_doc(db, document_id)?;
+    let pdf_metrics = store::get_pdf_metrics(db, document_id)?;
 
     // Collect all edges connected to this document's sub-artifacts:
     // edges from document_id, from any chunk_id, from any page_id,
@@ -68,6 +72,8 @@ pub fn inspect_document(db: &DbInstance, document_id: &str) -> Result<DocInspect
         chunks,
         pages,
         ocr_runs,
+        image_descriptions,
+        pdf_metrics,
         provenance_edges,
     })
 }
@@ -93,6 +99,45 @@ pub fn format_inspect_output(output: &DocInspectOutput) -> String {
                 page.page_number,
                 page.page_id,
                 page.text_hash.as_deref().unwrap_or("none")
+            ));
+        }
+    }
+
+    if let Some(metrics) = &output.pdf_metrics {
+        lines.push(String::new());
+        lines.push("=== PDF Image Extraction ===".to_string());
+        lines.push(format!(
+            "  Embedded images extracted: {}",
+            metrics.embedded_images_extracted
+        ));
+        lines.push(format!(
+            "  Embedded images skipped (filter): {}",
+            metrics.embedded_images_skipped_filter
+        ));
+        lines.push(format!(
+            "  Image OCR runs: {} ({} failed)",
+            metrics.image_ocr_runs, metrics.image_ocr_failures
+        ));
+        lines.push(format!(
+            "  Image VLM descriptions: {} ({} failed)",
+            metrics.image_vlm_descriptions, metrics.image_vlm_failures
+        ));
+        lines.push(format!(
+            "  Rendered pages (fallback): {}",
+            metrics.pages_rendered
+        ));
+    }
+
+    if !output.image_descriptions.is_empty() {
+        lines.push(String::new());
+        lines.push(format!(
+            "=== Image Descriptions ({} total) ===",
+            output.image_descriptions.len()
+        ));
+        for desc in &output.image_descriptions {
+            lines.push(format!(
+                "  {}  page={}  provider={}/{}",
+                desc.artifact_id, desc.page_number, desc.provider, desc.model
             ));
         }
     }

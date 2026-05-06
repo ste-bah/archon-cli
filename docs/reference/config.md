@@ -776,12 +776,24 @@ rpm_limit = 15
 [policy.docs.vlm.anthropic]
 model = "claude-sonnet-4-6"
 
+[policy.docs.pdf]
+extract_embedded_images = true
+min_image_dimension = 200
+min_image_bytes = 4096
+vlm_per_page_image = true
+render_text_pdf_pages = false
+
 [policy.docs.retrieval]
 exact_weight = 0.45
 semantic_weight = 0.55
 ```
 
 Local VLM requires `policy.docs.vlm.provider = "ollama"` and `policy.workers.vlm = "allow-local"`. Cloud VLM requires `policy.workers.vlm = "allow-cloud"`, `policy.docs.vlm.allow_cloud = true`, and `policy.network.allow_cloud_vlm = true`.
+
+PDF ingest uses `[policy.docs.pdf]` to decide whether to extract embedded
+images with `pdfimages`, the minimum size filter for icons/decorations, whether
+PDF-derived images should receive VLM descriptions, and whether native-text PDFs
+should also be rendered page-by-page.
 
 See [Policy](../policy.md) and [VLM Image Descriptions](../integrations/vlm.md) for the full operator guide.
 
