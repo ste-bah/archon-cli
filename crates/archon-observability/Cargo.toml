@@ -78,3 +78,9 @@ tempfile = { workspace = true }
 # a real localhost TCP listener. reqwest provides the HTTP client;
 # workspace-declared feature set already includes rustls-tls + json.
 reqwest = { workspace = true }
+# task_registry tests share a process-global Vec<TrackedTask> via OnceLock
+# (production design — shutdown forensics need one registry per process).
+# `reset_task_registry_for_tests()` would otherwise wipe a sibling test's
+# entry mid-run. Serialize the three tests in src/task_registry.rs that
+# touch the global registry. Already pinned at the workspace root.
+serial_test.workspace = true

@@ -149,8 +149,18 @@ fn registry() -> &'static Mutex<Vec<TrackedTask>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
 
+    // The three tests below all read/clear the same process-global
+    // Vec<TrackedTask> registry (OnceLock by production design — shutdown
+    // forensics need one registry per process). Without serialization the
+    // `reset_task_registry_for_tests()` call wipes a concurrently running
+    // test's entry mid-flight and the assertions race. CI runs default
+    // parallel; local runs we used --test-threads=1 which masked the
+    // race. Use a single named lock so they only serialize against each
+    // other, not against the rest of the crate's tests.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[serial(task_registry)]
     async fn spawn_named_records_task_in_registry() {
         reset_task_registry_for_tests();
         let handle = spawn_named("test-task", async {});
@@ -165,6 +175,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[serial(task_registry)]
     async fn log_alive_tasks_after_cancel_reports_clean_shutdown() {
         reset_task_registry_for_tests();
         let handle = spawn_named("short-task", async {});
@@ -175,6 +186,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[serial(task_registry)]
     async fn log_alive_tasks_after_cancel_reports_stuck_task() {
         reset_task_registry_for_tests();
         let handle = spawn_named("stuck-task", async {

@@ -150,8 +150,18 @@ fn variant_counts_cell() -> &'static Mutex<BTreeMap<&'static str, u64>> {
 #[cfg(test)]
 mod tui_drain_metric_tests {
     use super::*;
+    use serial_test::serial;
 
+    // All three tests below mutate the same process-global drain metrics
+    // (TUI_EVENT_DRAINED_TOTAL atomic + TUI_EVENT_LAST_DRAIN_VARIANT
+    // Mutex + TUI_EVENT_DRAINED_BY_VARIANT Mutex + TUI_EVENT_LAST_DRAIN_
+    // UNIX_MS). With default parallel test execution `drain_counter_
+    // increments` setting the last variant to "Done" races
+    // `drain_updates_timestamp`'s assertion that it sees "AgentActivity".
+    // Serialize them under a single named lock so they only serialize
+    // against each other, not the rest of the crate's tests.
     #[test]
+    #[serial(tui_drain_metrics)]
     fn drain_counter_increments() {
         let baseline = TUI_EVENT_DRAINED_TOTAL.load(Ordering::Relaxed);
         record_tui_event_drain("TextDelta");
@@ -167,6 +177,7 @@ mod tui_drain_metric_tests {
     }
 
     #[test]
+    #[serial(tui_drain_metrics)]
     fn drain_updates_timestamp() {
         record_tui_event_drain("AgentActivity");
         let stamped = TUI_EVENT_LAST_DRAIN_UNIX_MS.load(Ordering::Relaxed);
@@ -178,6 +189,7 @@ mod tui_drain_metric_tests {
     }
 
     #[test]
+    #[serial(tui_drain_metrics)]
     fn stall_warn_returns_false_before_first_drain() {
         // Use a thread-isolated check by reading the static directly.
         // This test only validates the early-return branch when last==0;
