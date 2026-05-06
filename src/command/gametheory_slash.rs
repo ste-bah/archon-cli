@@ -682,19 +682,34 @@ mod tests {
 
     fn with_temp_data_home<T>(f: impl FnOnce() -> T) -> T {
         let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let prev = std::env::var_os("XDG_DATA_HOME");
+        // `dirs::data_dir()` only honours `XDG_DATA_HOME` on Linux. On
+        // macOS it returns `$HOME/Library/Application Support` and on
+        // Windows it returns `{FOLDERID_RoamingAppData}` — both ignore
+        // `XDG_DATA_HOME` entirely. Without the HOME swap below, all
+        // three tests in this module share the real per-user data dir on
+        // macOS/Windows and `seed_gt_run` rows leak across tests, which
+        // breaks the `view` test's `assert_eq!(rows.len(), 1)` (CI macOS
+        // observed 3 rows from the seeds left behind by the `status` and
+        // `classify_then_status` tests).
+        let prev_xdg = std::env::var_os("XDG_DATA_HOME");
+        let prev_home = std::env::var_os("HOME");
         let root = std::env::temp_dir().join(format!("archon-gt-slash-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&root).unwrap();
-        // SAFETY: `ENV_LOCK` serialises this module's XDG_DATA_HOME mutations.
+        // SAFETY: `ENV_LOCK` serialises this module's env mutations.
         unsafe {
             std::env::set_var("XDG_DATA_HOME", &root);
+            std::env::set_var("HOME", &root);
         }
         let result = f();
         // SAFETY: same lock-protected scope as above; restore original env.
         unsafe {
-            match prev {
+            match prev_xdg {
                 Some(value) => std::env::set_var("XDG_DATA_HOME", value),
                 None => std::env::remove_var("XDG_DATA_HOME"),
+            }
+            match prev_home {
+                Some(value) => std::env::set_var("HOME", value),
+                None => std::env::remove_var("HOME"),
             }
         }
         result
