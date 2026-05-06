@@ -89,6 +89,20 @@ async fn handle_ingest(path_str: &str) -> Result<()> {
                 result.vlm_descriptions, vlm_report.provider, vlm_report.model
             );
         }
+        if result.pdf_embedded_images_extracted > 0 || result.pdf_pages_rendered > 0 {
+            println!(
+                "PDF images: {} embedded extracted, {} skipped by filter, {} rendered page(s)",
+                result.pdf_embedded_images_extracted,
+                result.pdf_embedded_images_skipped_filter,
+                result.pdf_pages_rendered
+            );
+            println!(
+                "PDF image OCR: {} run(s), {} failure(s); VLM failures: {}",
+                result.pdf_image_ocr_runs,
+                result.pdf_image_ocr_failures,
+                result.pdf_image_vlm_failures
+            );
+        }
         print_vlm_init_warning_if_needed(&vlm_report);
         for warning in &result.warnings {
             println!("Warning: {warning}");
@@ -128,6 +142,18 @@ async fn handle_ingest(path_str: &str) -> Result<()> {
                 }
                 if r.image_embeddings_stored > 0 {
                     println!("Image embeddings: {}", r.image_embeddings_stored);
+                }
+                if r.pdf_embedded_images_extracted > 0 || r.pdf_pages_rendered > 0 {
+                    println!(
+                        "PDF images: {} embedded extracted, {} skipped by filter, {} rendered page(s)",
+                        r.pdf_embedded_images_extracted,
+                        r.pdf_embedded_images_skipped_filter,
+                        r.pdf_pages_rendered
+                    );
+                    println!(
+                        "PDF image OCR: {} run(s), {} failure(s); VLM failures: {}",
+                        r.pdf_image_ocr_runs, r.pdf_image_ocr_failures, r.pdf_image_vlm_failures
+                    );
                 }
                 print_vlm_init_warning_if_needed(&vlm_report);
                 for warning in &r.warnings {
@@ -174,6 +200,23 @@ async fn handle_status() -> Result<()> {
     println!("  Failed:        {}", summary.failed);
     println!("Total chunks:    {}", summary.total_chunks);
     println!("Total pages:     {}", summary.total_pages);
+    println!(
+        "PDF images:      {} extracted",
+        summary.pdf_embedded_images_extracted
+    );
+    println!(
+        "PDF image skips: {} filtered",
+        summary.pdf_embedded_images_skipped_filter
+    );
+    println!(
+        "PDF image OCR:   {} run(s), {} failed",
+        summary.pdf_image_ocr_runs, summary.pdf_image_ocr_failures
+    );
+    println!(
+        "PDF image VLM:   {} description(s), {} failed",
+        summary.pdf_image_vlm_descriptions, summary.pdf_image_vlm_failures
+    );
+    println!("PDF rendered:    {} page(s)", summary.pdf_pages_rendered);
     Ok(())
 }
 
@@ -481,6 +524,7 @@ async fn handle_model_status() -> Result<()> {
                 ),
                 Err(e) => println!("HNSW index:    unable to check — {}", e),
             }
+            println!("pdfimages:     {}", pdfimages_status());
         }
         None => {
             println!("Backend:       not-configured");
@@ -500,6 +544,7 @@ async fn handle_model_status() -> Result<()> {
                 .join("archon")
                 .join("fastembed");
             println!("  4. Cache dir: {}", fastembed_dir.display());
+            println!("pdfimages:     {}", pdfimages_status());
             println!();
             println!("Search and answer commands will return structured errors until");
             println!("a model is configured.");
@@ -551,6 +596,21 @@ async fn handle_model_status() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn pdfimages_status() -> String {
+    let bin = std::env::var_os("ARCHON_PDFIMAGES_BIN").unwrap_or_else(|| "pdfimages".into());
+    let display = std::path::PathBuf::from(&bin).display().to_string();
+    match std::process::Command::new(&bin).arg("-v").output() {
+        Ok(output) if output.status.success() || !output.stderr.is_empty() => {
+            format!("available ({display})")
+        }
+        Ok(output) => format!(
+            "missing or unhealthy ({display}) status={:?}",
+            output.status.code()
+        ),
+        Err(e) => format!("missing ({display}) — {e}"),
+    }
 }
 
 async fn handle_index(force_all: bool) -> Result<()> {

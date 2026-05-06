@@ -18,6 +18,13 @@ pub struct DocStatusSummary {
     pub failed: usize,
     pub total_chunks: usize,
     pub total_pages: usize,
+    pub pdf_embedded_images_extracted: usize,
+    pub pdf_embedded_images_skipped_filter: usize,
+    pub pdf_image_ocr_runs: usize,
+    pub pdf_image_ocr_failures: usize,
+    pub pdf_image_vlm_descriptions: usize,
+    pub pdf_image_vlm_failures: usize,
+    pub pdf_pages_rendered: usize,
 }
 
 /// Get a summary of all document state.
@@ -41,6 +48,16 @@ pub fn get_status_summary(db: &DbInstance) -> Result<DocStatusSummary> {
         summary.total_chunks += chunks.len();
         let pages = store::list_pages_for_doc(db, &doc.document_id)?;
         summary.total_pages += pages.len();
+        if let Some(metrics) = store::get_pdf_metrics(db, &doc.document_id)? {
+            summary.pdf_embedded_images_extracted += metrics.embedded_images_extracted as usize;
+            summary.pdf_embedded_images_skipped_filter +=
+                metrics.embedded_images_skipped_filter as usize;
+            summary.pdf_image_ocr_runs += metrics.image_ocr_runs as usize;
+            summary.pdf_image_ocr_failures += metrics.image_ocr_failures as usize;
+            summary.pdf_image_vlm_descriptions += metrics.image_vlm_descriptions as usize;
+            summary.pdf_image_vlm_failures += metrics.image_vlm_failures as usize;
+            summary.pdf_pages_rendered += metrics.pages_rendered as usize;
+        }
     }
 
     Ok(summary)
@@ -58,6 +75,13 @@ impl Default for DocStatusSummary {
             failed: 0,
             total_chunks: 0,
             total_pages: 0,
+            pdf_embedded_images_extracted: 0,
+            pdf_embedded_images_skipped_filter: 0,
+            pdf_image_ocr_runs: 0,
+            pdf_image_ocr_failures: 0,
+            pdf_image_vlm_descriptions: 0,
+            pdf_image_vlm_failures: 0,
+            pdf_pages_rendered: 0,
         }
     }
 }

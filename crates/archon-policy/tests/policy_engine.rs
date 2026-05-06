@@ -39,6 +39,13 @@ rpm_limit = 15
 [policy.docs.vlm.anthropic]
 model = "claude-sonnet-4-6"
 
+[policy.docs.pdf]
+extract_embedded_images = true
+min_image_dimension = 256
+min_image_bytes = 8192
+vlm_per_page_image = true
+render_text_pdf_pages = false
+
 [policy.docs.retrieval]
 exact_weight = 0.7
 semantic_weight = 0.3
@@ -63,6 +70,11 @@ semantic_weight = 0.3
     assert_eq!(load.policy.docs.vlm.gemini.model, "gemini-3-flash-preview");
     assert_eq!(load.policy.docs.vlm.gemini.rpm_limit, 15);
     assert_eq!(load.policy.docs.vlm.anthropic.model, "claude-sonnet-4-6");
+    assert!(load.policy.docs.pdf.extract_embedded_images);
+    assert_eq!(load.policy.docs.pdf.min_image_dimension, 256);
+    assert_eq!(load.policy.docs.pdf.min_image_bytes, 8192);
+    assert!(load.policy.docs.pdf.vlm_per_page_image);
+    assert!(!load.policy.docs.pdf.render_text_pdf_pages);
     assert_eq!(load.policy.docs.retrieval.exact_weight, 0.7);
     assert_eq!(load.policy.docs.retrieval.semantic_weight, 0.3);
 }
@@ -231,6 +243,22 @@ fn repository_policy_template_parses_all_vlm_provider_fields() {
     assert_eq!(load.policy.docs.vlm.gemini.model, "gemini-3-flash-preview");
     assert_eq!(load.policy.docs.vlm.gemini.rpm_limit, 15);
     assert_eq!(load.policy.docs.vlm.anthropic.model, "claude-sonnet-4-6");
+    assert!(load.policy.docs.pdf.extract_embedded_images);
+    assert_eq!(load.policy.docs.pdf.min_image_dimension, 200);
+    assert_eq!(load.policy.docs.pdf.min_image_bytes, 4096);
+    assert!(load.policy.docs.pdf.vlm_per_page_image);
+    assert!(!load.policy.docs.pdf.render_text_pdf_pages);
     assert_eq!(load.policy.docs.retrieval.exact_weight, 0.45);
     assert_eq!(load.policy.docs.retrieval.semantic_weight, 0.55);
+}
+
+#[test]
+fn pdf_policy_defaults_to_embedded_extraction_without_page_rendering() {
+    let policy = EffectivePolicy::default();
+
+    assert!(policy.docs.pdf.extract_embedded_images);
+    assert_eq!(policy.docs.pdf.min_image_dimension, 200);
+    assert_eq!(policy.docs.pdf.min_image_bytes, 4096);
+    assert!(policy.docs.pdf.vlm_per_page_image);
+    assert!(!policy.docs.pdf.render_text_pdf_pages);
 }

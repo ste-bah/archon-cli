@@ -84,6 +84,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 
 ## Release notes
 
+- [v0.1.47](release-notes/v0.1.47.md) — Unified PDF text, OCR, and VLM image ingest
 - [v0.1.46](release-notes/v0.1.46.md) — Multi-provider VLM image descriptions
 - [v0.1.40](release-notes/v0.1.40.md) — Codex OAuth docs, Claude OAuth spoof continuity, TUI agent activity rail
 - [v0.1.39](release-notes/v0.1.39.md) — Evidence Engine PRD compliance pass

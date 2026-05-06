@@ -9,7 +9,6 @@
 use std::fs;
 use std::path::Path;
 
-use anyhow::Result;
 use cozo::DbInstance;
 use tracing::info;
 
@@ -17,17 +16,17 @@ use crate::chunking::{build_chunk_artifacts, chunk_with_page_anchors};
 use crate::errors::DocsError;
 use crate::hash::{sha256_hex, sha256_str};
 use crate::models::{
-    ArtifactRecord, ChunkArtifact, DocumentStatus, ImageDescription, OcrRun, OcrStatus,
-    PageArtifact, PageOffset, ProcessingJob, ProvenanceEdgeType, SourceDocument,
+    ArtifactRecord, DocumentStatus, OcrRun, OcrStatus, PageArtifact, ProcessingJob, SourceDocument,
 };
 use crate::ocr::local::LocalOcrProvider;
 use crate::ocr::provider::{self as ocr_provider, OcrProvider, OcrRequest};
-use crate::provenance::{build_doc_lineage_edges, make_edge};
+use crate::provenance::build_doc_lineage_edges;
 use crate::schema::ensure_doc_schema;
 use crate::store::{self, hash_exists_in_sources};
-use crate::vlm::{self, VlmDescriptionOutcome};
 
 use crate::embed;
+pub use crate::ingest_directory::{IngestResult, ingest_directory, ingest_directory_with_policy};
+use crate::ingest_multimodal::{apply_vlm_description, store_image_embedding_if_supported};
 use crate::retrieval;
 
 /// Result of a single-file ingest.
@@ -40,26 +39,25 @@ pub struct IngestFileResult {
     pub warnings: Vec<String>,
     pub image_embeddings_stored: usize,
     pub vlm_descriptions: usize,
-}
-
-/// Result of a directory ingest operation.
-#[derive(Clone, Debug, Default)]
-pub struct IngestResult {
-    pub sources_registered: usize,
-    pub sources_skipped_duplicate: usize,
-    pub sources_failed: usize,
-    pub images_skipped: usize,
-    pub image_ocr_completed: usize,
-    pub vlm_descriptions: usize,
-    pub warnings: Vec<String>,
-    pub errors: Vec<String>,
+    pub pdf_embedded_images_extracted: usize,
+    pub pdf_embedded_images_skipped_filter: usize,
+    pub pdf_image_ocr_runs: usize,
+    pub pdf_image_vlm_failures: usize,
+    pub pdf_image_ocr_failures: usize,
+    pub pdf_pages_rendered: usize,
 }
 
 #[derive(Clone, Debug, Default)]
-struct PipelineOutcome {
-    warnings: Vec<String>,
-    image_embeddings_stored: usize,
-    vlm_descriptions: usize,
+pub(crate) struct PipelineOutcome {
+    pub(crate) warnings: Vec<String>,
+    pub(crate) image_embeddings_stored: usize,
+    pub(crate) vlm_descriptions: usize,
+    pub(crate) pdf_embedded_images_extracted: usize,
+    pub(crate) pdf_embedded_images_skipped_filter: usize,
+    pub(crate) pdf_image_ocr_runs: usize,
+    pub(crate) pdf_image_vlm_failures: usize,
+    pub(crate) pdf_image_ocr_failures: usize,
+    pub(crate) pdf_pages_rendered: usize,
 }
 
 /// Detect media type from file extension.
@@ -102,7 +100,7 @@ fn is_ocr_runnable(media_type: &str) -> bool {
     )
 }
 
-fn is_image_media_type(media_type: &str) -> bool {
+pub(crate) fn is_image_media_type(media_type: &str) -> bool {
     matches!(media_type, "image/png" | "image/jpeg" | "image/tiff")
 }
 
@@ -165,6 +163,12 @@ pub async fn ingest_file_with_policy(
             warnings: Vec::new(),
             image_embeddings_stored: 0,
             vlm_descriptions: 0,
+            pdf_embedded_images_extracted: 0,
+            pdf_embedded_images_skipped_filter: 0,
+            pdf_image_ocr_runs: 0,
+            pdf_image_vlm_failures: 0,
+            pdf_image_ocr_failures: 0,
+            pdf_pages_rendered: 0,
         });
     }
 
@@ -268,6 +272,12 @@ pub async fn ingest_file_with_policy(
         warnings: outcome.warnings,
         image_embeddings_stored: outcome.image_embeddings_stored,
         vlm_descriptions: outcome.vlm_descriptions,
+        pdf_embedded_images_extracted: outcome.pdf_embedded_images_extracted,
+        pdf_embedded_images_skipped_filter: outcome.pdf_embedded_images_skipped_filter,
+        pdf_image_ocr_runs: outcome.pdf_image_ocr_runs,
+        pdf_image_vlm_failures: outcome.pdf_image_vlm_failures,
+        pdf_image_ocr_failures: outcome.pdf_image_ocr_failures,
+        pdf_pages_rendered: outcome.pdf_pages_rendered,
     })
 }
 
@@ -301,6 +311,17 @@ async fn run_ingest_pipeline_with_bytes(
     store::insert_ocr_run(db, &ocr_run).map_err(|e| DocsError::Storage {
         message: e.to_string(),
     })?;
+
+    if media_type == "application/pdf" {
+        return crate::ingest_pdf::run_pdf_ingest_pipeline(
+            db,
+            document_id,
+            file_path,
+            &ocr_run_id,
+            policy,
+        )
+        .await;
+    }
 
     // 2. Run OCR extraction
     let request = OcrRequest {
@@ -440,929 +461,18 @@ async fn run_ingest_pipeline_with_bytes(
     Ok(outcome)
 }
 
-async fn apply_vlm_description(
-    db: &DbInstance,
-    document_id: &str,
-    content_bytes: &[u8],
-    policy: &archon_policy::EffectivePolicy,
-    page_ids: &[String],
-    outcome: &mut PipelineOutcome,
-) -> Result<(), DocsError> {
-    let policy = policy.clone();
-    let image_bytes = content_bytes.to_vec();
-    let vlm_result =
-        tokio::task::spawn_blocking(move || vlm::describe_registered_image(&policy, &image_bytes))
-            .await
-            .map_err(|e| DocsError::VlmProvider {
-                provider: "runtime".into(),
-                message: format!("VLM worker join failed: {e}"),
-                status_code: None,
-            })?;
-
-    match vlm_result {
-        Err(e) => {
-            outcome
-                .warnings
-                .push(format!("image description failed: {e}"));
-        }
-        Ok(VlmDescriptionOutcome::Disabled(reason)) => {
-            outcome
-                .warnings
-                .push(format!("image description skipped: {reason}"));
-        }
-        Ok(VlmDescriptionOutcome::NoProvider) => {
-            outcome
-                .warnings
-                .push("image description skipped: VLM provider not configured".into());
-        }
-        Ok(VlmDescriptionOutcome::Described(description)) if description.text.trim().is_empty() => {
-            outcome
-                .warnings
-                .push("image description skipped: provider returned empty description".into());
-        }
-        Ok(VlmDescriptionOutcome::Described(description)) => {
-            persist_vlm_description(db, document_id, page_ids, &description)?;
-            outcome.warnings.push(format!(
-                "image description ok via {}/{} ({}ms, ${:.4})",
-                description.provider,
-                description.model,
-                description.duration_ms,
-                description.cost_usd
-            ));
-            outcome.vlm_descriptions += 1;
-        }
-    }
-    Ok(())
-}
-
-fn persist_vlm_description(
-    db: &DbInstance,
-    document_id: &str,
-    page_ids: &[String],
-    description: &vlm::VlmDescription,
-) -> Result<(), DocsError> {
-    let description_text = description.text.trim();
-    let artifact_id = format!("vlm-description-{}", uuid::Uuid::new_v4());
-    let created_at = chrono::Utc::now().to_rfc3339();
-    let artifact = ArtifactRecord {
-        artifact_id: artifact_id.clone(),
-        document_id: document_id.to_string(),
-        artifact_type: "image_description".to_string(),
-        content_hash: sha256_str(description_text),
-        created_at: created_at.clone(),
-        provenance_record_id: String::new(),
-    };
-    store::insert_artifact(db, &artifact).map_err(|e| DocsError::Storage {
-        message: e.to_string(),
-    })?;
-    store::insert_image_description(
-        db,
-        &ImageDescription {
-            artifact_id: artifact_id.clone(),
-            document_id: document_id.to_string(),
-            page_number: 1,
-            provider: description.provider.clone(),
-            model: description.model.clone(),
-            description: description_text.to_string(),
-            created_at,
-            cost_usd: description.cost_usd,
-        },
-    )
-    .map_err(|e| DocsError::Storage {
-        message: e.to_string(),
-    })?;
-
-    let page_offsets = vec![PageOffset {
-        page: 1,
-        char_start: 0,
-        char_end: description_text.len(),
-    }];
-    let page_chunks = chunk_with_page_anchors(description_text, &page_offsets);
-    let chunks: Vec<ChunkArtifact> = page_chunks
-        .iter()
-        .enumerate()
-        .map(|(i, page_chunk)| ChunkArtifact {
-            chunk_id: format!("chunk-{}-vlm-{}", document_id, i),
-            document_id: document_id.to_string(),
-            artifact_id: artifact_id.clone(),
-            chunk_index: i as u32,
-            page_start: page_chunk.page_start,
-            page_end: page_chunk.page_end,
-            content: page_chunk.content.clone(),
-            content_hash: sha256_str(&page_chunk.content),
-            embedding_status: "pending".to_string(),
-        })
-        .collect();
-    for chunk in &chunks {
-        store::insert_chunk(db, chunk).map_err(|e| DocsError::Storage {
-            message: e.to_string(),
-        })?;
-        if embed::get_provider().is_some()
-            && let Err(e) = retrieval::index_chunk(db, chunk)
-        {
-            tracing::warn!(
-                chunk_id = %chunk.chunk_id,
-                error = %e,
-                "failed to index VLM description chunk during ingest"
-            );
-        }
-        if let Some(page_id) = page_ids.first() {
-            store::insert_provenance_edge(
-                db,
-                &make_edge(&chunk.chunk_id, page_id, ProvenanceEdgeType::Describes),
-            )
-            .map_err(|e| DocsError::Storage {
-                message: e.to_string(),
-            })?;
-        }
-    }
-    store::insert_provenance_edge(
-        db,
-        &make_edge(&artifact_id, document_id, ProvenanceEdgeType::DerivedFrom),
-    )
-    .map_err(|e| DocsError::Storage {
-        message: e.to_string(),
-    })?;
-    Ok(())
-}
-
-fn store_image_embedding_if_supported(
-    db: &DbInstance,
-    page_ids: &[String],
-    content_bytes: &[u8],
-    suppress_unsupported_warning: bool,
-    outcome: &mut PipelineOutcome,
-) {
-    let Some(page_id) = page_ids.first() else {
-        outcome
-            .warnings
-            .push("image embedding skipped: no page artifact was created".into());
-        return;
-    };
-    let Some(provider) = embed::get_provider() else {
-        outcome
-            .warnings
-            .push("image embedding skipped: no embedding provider configured".into());
-        return;
-    };
-    if let Err(e) = crate::schema::ensure_vec_schema(db, provider.dimension()) {
-        outcome.warnings.push(format!(
-            "image embedding skipped: vector schema unavailable: {e}"
-        ));
-        return;
-    }
-    match provider.embed_image(content_bytes) {
-        Ok(Some(embedding)) => {
-            match store::insert_page_image_embedding(
-                db,
-                page_id,
-                &embedding,
-                provider.backend_name(),
-            ) {
-                Ok(()) => outcome.image_embeddings_stored += 1,
-                Err(e) => outcome
-                    .warnings
-                    .push(format!("image embedding skipped: storage failed: {e}")),
-            }
-        }
-        Ok(None) if suppress_unsupported_warning => {}
-        Ok(None) => outcome.warnings.push(format!(
-            "image embedding skipped: provider {} does not support image embeddings",
-            provider.backend_name()
-        )),
-        Err(e) => outcome
-            .warnings
-            .push(format!("image embedding skipped: provider failed: {e}")),
-    }
-}
-
-/// Ingest a directory: walk all files, ingest supported types, skip duplicates.
-pub async fn ingest_directory(db: &DbInstance, dir: &Path) -> Result<IngestResult> {
-    ingest_directory_with_policy(db, dir, &archon_policy::EffectivePolicy::default()).await
-}
-
-/// Ingest a directory with an explicit policy for optional multimodal steps.
-pub async fn ingest_directory_with_policy(
-    db: &DbInstance,
-    dir: &Path,
-    policy: &archon_policy::EffectivePolicy,
-) -> Result<IngestResult> {
-    ensure_doc_schema(db).map_err(|e| DocsError::Storage {
-        message: e.to_string(),
-    })?;
-
-    let mut result = IngestResult::default();
-
-    for entry in walkdir::WalkDir::new(dir).into_iter().filter_entry(|e| {
-        // Never skip the root directory; skip hidden subdirectories
-        e.depth() == 0
-            || !e
-                .file_name()
-                .to_str()
-                .map(|s| s.starts_with('.'))
-                .unwrap_or(false)
-    }) {
-        let entry = match entry {
-            Ok(e) => e,
-            Err(e) => {
-                result.errors.push(e.to_string());
-                continue;
-            }
-        };
-
-        if !entry.file_type().is_file() {
-            continue;
-        }
-
-        let path = entry.path();
-        let media_type = detect_media_type(path);
-
-        if !is_supported_media_type(media_type) {
-            continue; // skip unsupported, no error
-        }
-
-        match ingest_file_with_policy(db, path, policy).await {
-            Ok(r) if r.pipeline_failed => {
-                result.sources_failed += 1;
-                result.vlm_descriptions += r.vlm_descriptions;
-                result.warnings.extend(r.warnings);
-                result.errors.push(format!(
-                    "{}: pipeline failed for {}",
-                    path.display(),
-                    r.document_id
-                ));
-            }
-            Ok(r) if r.was_new && r.ocr_skipped => {
-                result.sources_registered += 1;
-                result.images_skipped += 1;
-                result.vlm_descriptions += r.vlm_descriptions;
-                result.warnings.extend(r.warnings);
-            }
-            Ok(r) if r.was_new => {
-                result.sources_registered += 1;
-                if is_image_media_type(media_type) {
-                    result.image_ocr_completed += 1;
-                }
-                result.vlm_descriptions += r.vlm_descriptions;
-                result.warnings.extend(r.warnings);
-            }
-            Ok(_) => {
-                result.sources_skipped_duplicate += 1;
-            }
-            Err(e) => {
-                result.sources_failed += 1;
-                result.errors.push(format!("{}: {}", path.display(), e));
-            }
-        }
-    }
-
-    Ok(result)
-}
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn test_db() -> DbInstance {
-        let path = format!("/tmp/test-ingest-{}.db", uuid::Uuid::new_v4());
-        let db = DbInstance::new("sqlite", &path, "").unwrap();
-        ensure_doc_schema(&db).unwrap();
-        db
-    }
-
-    #[test]
-    fn test_detect_media_type() {
-        assert_eq!(detect_media_type(Path::new("doc.pdf")), "application/pdf");
-        assert_eq!(detect_media_type(Path::new("readme.md")), "text/markdown");
-        assert_eq!(detect_media_type(Path::new("notes.txt")), "text/plain");
-        assert_eq!(detect_media_type(Path::new("img.png")), "image/png");
-        assert_eq!(
-            detect_media_type(Path::new("unknown.xyz")),
-            "application/octet-stream"
-        );
-    }
-
-    #[test]
-    fn test_is_supported() {
-        assert!(is_supported_media_type("text/plain"));
-        assert!(is_supported_media_type("text/markdown"));
-        assert!(is_supported_media_type("application/pdf"));
-        assert!(!is_supported_media_type("application/octet-stream"));
-        assert!(!is_supported_media_type(
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        ));
-    }
-
-    #[tokio::test]
-    async fn test_ingest_text_file() {
-        let db = test_db();
-        let dir = tempfile::tempdir().unwrap();
-        let file_path = dir.path().join("test.txt");
-        fs::write(&file_path, "Hello world").unwrap();
-
-        let r = ingest_file(&db, &file_path).await.unwrap();
-        assert!(r.was_new);
-        assert!(r.document_id.starts_with("doc-"));
-        let doc_id = r.document_id;
-
-        // Verify source in Cozo
-        let doc = store::get_doc_source(&db, &doc_id).unwrap().unwrap();
-        assert_eq!(doc.media_type, "text/plain");
-        assert_eq!(doc.status, DocumentStatus::Ingested);
-        assert!(!doc.content_hash.is_empty());
-
-        // Verify duplicate detection — returns existing doc_id, not empty
-        let dup = ingest_file(&db, &file_path).await.unwrap();
-        assert!(!dup.was_new);
-        assert_eq!(dup.document_id, doc_id);
-    }
-
-    #[tokio::test]
-    async fn test_ingest_empty_file() {
-        let db = test_db();
-        let dir = tempfile::tempdir().unwrap();
-        let file_path = dir.path().join("empty.txt");
-        fs::write(&file_path, "").unwrap();
-
-        let r = ingest_file(&db, &file_path).await.unwrap();
-        assert!(r.was_new);
-
-        let sources = store::list_doc_sources(&db).unwrap();
-        assert_eq!(sources.len(), 1);
-    }
-
-    #[tokio::test]
-    async fn test_ingest_unsupported_format() {
-        let db = test_db();
-        let dir = tempfile::tempdir().unwrap();
-        let file_path = dir.path().join("data.bin");
-        fs::write(&file_path, b"binary content").unwrap();
-
-        let result = ingest_file(&db, &file_path).await;
-        assert!(result.is_err());
-        match result.unwrap_err() {
-            DocsError::UnsupportedMediaType { .. } => {}
-            e => panic!("expected UnsupportedMediaType, got {}", e),
-        }
-    }
-
-    #[tokio::test]
-    async fn test_ingest_directory() {
-        let db = test_db();
-        let dir = tempfile::tempdir().unwrap();
-        fs::write(dir.path().join("a.txt"), "content a").unwrap();
-        fs::write(dir.path().join("b.md"), "# content b").unwrap();
-        fs::write(dir.path().join("skip.bin"), "binary").unwrap();
-
-        let result = ingest_directory(&db, dir.path()).await.unwrap();
-        assert_eq!(result.sources_registered, 2); // a.txt + b.md
-        assert_eq!(result.sources_skipped_duplicate, 0);
-        assert_eq!(result.sources_failed, 0);
-
-        let sources = store::list_doc_sources(&db).unwrap();
-        assert_eq!(sources.len(), 2);
-    }
-
-    #[tokio::test]
-    async fn test_ingest_directory_with_duplicate() {
-        let db = test_db();
-        let dir = tempfile::tempdir().unwrap();
-        fs::write(dir.path().join("first.txt"), "same content").unwrap();
-        fs::write(dir.path().join("second.txt"), "same content").unwrap();
-
-        let result = ingest_directory(&db, dir.path()).await.unwrap();
-        assert_eq!(result.sources_registered, 1);
-        assert_eq!(result.sources_skipped_duplicate, 1);
-
-        let sources = store::list_doc_sources(&db).unwrap();
-        assert_eq!(sources.len(), 1);
-    }
-
-    #[tokio::test]
-    async fn test_ingest_produces_pages_chunks_and_edges() {
-        let db = test_db();
-        let dir = tempfile::tempdir().unwrap();
-        let file_path = dir.path().join("doc.txt");
-        fs::write(
-            &file_path,
-            "First paragraph with enough content to matter.\n\n\
-             Second paragraph also has some good content here.\n\n\
-             Third paragraph is here too.",
-        )
-        .unwrap();
-
-        let r = ingest_file(&db, &file_path).await.unwrap();
-        assert!(r.was_new);
-        let doc_id = r.document_id;
-
-        // Status must be Ingested
-        let doc = store::get_doc_source(&db, &doc_id).unwrap().unwrap();
-        assert_eq!(doc.status, DocumentStatus::Ingested);
-
-        // Must have pages
-        let pages = store::list_pages_for_doc(&db, &doc_id).unwrap();
-        assert!(!pages.is_empty(), "expected at least one page");
-        assert_eq!(pages[0].page_number, 1);
-
-        // Must have OCR run
-        let ocr_runs = store::list_ocr_runs_for_doc(&db, &doc_id).unwrap();
-        assert!(!ocr_runs.is_empty(), "expected at least one OCR run");
-        assert_eq!(ocr_runs[0].status, OcrStatus::Completed);
-
-        // Chunks may be 1 for short text (<200 chars) but must exist
-        let chunks = store::list_chunks_for_doc(&db, &doc_id).unwrap();
-        assert!(!chunks.is_empty(), "expected at least one chunk");
-
-        // Must have provenance edges connected to this document
-        let edges_from_chunks = store::list_provenance_from(&db, &chunks[0].chunk_id).unwrap();
-        assert!(
-            !edges_from_chunks.is_empty(),
-            "expected chunk→page provenance edges"
-        );
-        // Verify an edge connects chunk to page
-        let has_chunk_to_page = edges_from_chunks
-            .iter()
-            .any(|e| e.to_artifact_id == pages[0].page_id);
-        assert!(has_chunk_to_page, "expected chunk→page edge");
-
-        // Verify an edge connects ocr-result artifact to document
-        let artifact_id = format!("ocr-result-{}", ocr_runs[0].ocr_run_id);
-        let edges_from_artifact = store::list_provenance_from(&db, &artifact_id).unwrap();
-        let has_artifact_to_doc = edges_from_artifact
-            .iter()
-            .any(|e| e.to_artifact_id == doc_id);
-        assert!(has_artifact_to_doc, "expected ocr-artifact→document edge");
-
-        // Verify inspect picks up all edges
-        let inspect_output = crate::inspect::inspect_document(&db, &doc_id).unwrap();
-        assert!(
-            inspect_output.provenance_edges.len() >= 2,
-            "inspect must surface ≥2 edges, got {}",
-            inspect_output.provenance_edges.len()
-        );
-    }
-
-    struct MockOcrProvider {
-        text: &'static str,
-    }
-
-    #[async_trait::async_trait]
-    impl OcrProvider for MockOcrProvider {
-        async fn extract(
-            &self,
-            _request: OcrRequest,
-        ) -> Result<crate::ocr::provider::OcrExtractResult, DocsError> {
-            Ok(crate::ocr::provider::OcrExtractResult {
-                full_text: self.text.to_string(),
-                page_count: 1,
-                page_offsets: vec![PageOffset {
-                    page: 1,
-                    char_start: 0,
-                    char_end: self.text.len(),
-                }],
-                processing_duration_ms: 7,
-            })
-        }
-
-        fn name(&self) -> &'static str {
-            "mock-ocr"
-        }
-    }
-
-    struct MockVlmProvider {
-        description: &'static str,
-    }
-
-    impl crate::vlm::VlmDescriptionProvider for MockVlmProvider {
-        fn describe_image(&self, _image_bytes: &[u8]) -> Result<String, DocsError> {
-            Ok(self.description.to_string())
-        }
-    }
-
-    struct FailingVlmProvider;
-
-    impl crate::vlm::VlmDescriptionProvider for FailingVlmProvider {
-        fn describe_image(&self, _image_bytes: &[u8]) -> Result<String, DocsError> {
-            Err(DocsError::OcrApi {
-                message: "synthetic VLM outage".into(),
-                status_code: None,
-            })
-        }
-    }
-
-    fn reset_multimodal_test_providers() {
-        crate::ocr::provider::clear_provider();
-        crate::vlm::clear_provider();
-        embed::clear_provider();
-    }
-
-    #[tokio::test]
-    async fn test_ingest_image_runs_ocr_and_persists_rows() {
-        reset_multimodal_test_providers();
-        crate::ocr::provider::set_provider(Box::new(MockOcrProvider {
-            text: "SYNTHETIC OCR TEXT from image",
-        }));
-        let db = test_db();
-        let dir = tempfile::tempdir().unwrap();
-        // Create a minimal valid PNG file (89 50 4E 47 magic bytes)
-        let file_path = dir.path().join("test.png");
-        let png_bytes = [
-            0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48,
-            0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x00, 0x00,
-            0x00, 0x90, 0x77, 0x53, 0xDE, 0x00, 0x00, 0x00, 0x0C, 0x49, 0x44, 0x41, 0x54, 0x08,
-            0xD7, 0x63, 0xF8, 0xCF, 0xC0, 0x00, 0x00, 0x00, 0x02, 0x00, 0x01, 0xE2, 0x21, 0xBC,
-            0x33, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
-        ];
-        fs::write(&file_path, png_bytes).unwrap();
-
-        let r = ingest_file(&db, &file_path).await.unwrap();
-        assert!(r.was_new);
-        assert!(!r.ocr_skipped);
-
-        // Document status should be Ingested
-        let doc = store::get_doc_source(&db, &r.document_id).unwrap().unwrap();
-        assert_eq!(doc.status, DocumentStatus::Ingested);
-
-        // Source of truth: OCR/page/chunk rows are physically present in Cozo.
-        let ocr_runs = store::list_ocr_runs_for_doc(&db, &r.document_id).unwrap();
-        assert_eq!(ocr_runs.len(), 1);
-        assert_eq!(ocr_runs[0].provider, "mock-ocr");
-        assert_eq!(ocr_runs[0].status, OcrStatus::Completed);
-
-        let pages = store::list_pages_for_doc(&db, &r.document_id).unwrap();
-        assert_eq!(pages.len(), 1, "image OCR should create a page row");
-        assert!(
-            pages[0].image_hash.is_some(),
-            "image page must retain source image hash"
-        );
-
-        let chunks = store::list_chunks_for_doc(&db, &r.document_id).unwrap();
-        assert_eq!(chunks.len(), 1, "image OCR should create a text chunk");
-        assert!(chunks[0].content.contains("SYNTHETIC OCR TEXT"));
-
-        assert!(
-            r.warnings
-                .iter()
-                .any(|w| w.contains("image embedding skipped: no embedding provider configured")),
-            "text-only/no-provider image embedding path must report an explicit warning"
-        );
-
-        // Directory ingest: image_ocr_completed counter (unique content to avoid duplicate)
-        let dir2 = tempfile::tempdir().unwrap();
-        fs::write(dir2.path().join("img2.png"), b"PNG_PLACEHOLDER_2").unwrap();
-        let dir_result = ingest_directory(&db, dir2.path()).await.unwrap();
-        assert_eq!(dir_result.images_skipped, 0);
-        assert_eq!(dir_result.image_ocr_completed, 1);
-        reset_multimodal_test_providers();
-    }
-
-    #[tokio::test]
-    async fn test_vlm_disabled_by_default_does_not_describe_image() {
-        reset_multimodal_test_providers();
-        crate::ocr::provider::set_provider(Box::new(MockOcrProvider {
-            text: "OCR only text",
-        }));
-        crate::vlm::set_provider(Box::new(MockVlmProvider {
-            description: "a policy-gated chart description",
-        }));
-        let db = test_db();
-        let dir = tempfile::tempdir().unwrap();
-        let file_path = dir.path().join("chart.png");
-        fs::write(&file_path, b"PNG_DEFAULT_VLM_DISABLED").unwrap();
-
-        let r = ingest_file(&db, &file_path).await.unwrap();
-        assert_eq!(r.vlm_descriptions, 0);
-        let chunks = store::list_chunks_for_doc(&db, &r.document_id).unwrap();
-        assert_eq!(chunks.len(), 1);
-        assert!(chunks[0].content.contains("OCR only text"));
-        assert!(!chunks[0].content.contains("policy-gated chart description"));
-        reset_multimodal_test_providers();
-    }
-
-    #[tokio::test]
-    async fn test_vlm_enabled_adds_description_to_image_chunks() {
-        reset_multimodal_test_providers();
-        crate::ocr::provider::set_provider(Box::new(MockOcrProvider {
-            text: "OCR text before VLM",
-        }));
-        crate::vlm::set_provider(Box::new(MockVlmProvider {
-            description: "diagram shows a synthetic reward loop",
-        }));
-        let mut policy = archon_policy::EffectivePolicy::default();
-        policy.docs.vlm.enabled = true;
-        policy.docs.vlm.mode = "local".into();
-        policy.docs.vlm.provider = "ollama".into();
-        policy.workers.vlm = "allow-local".into();
-
-        let db = test_db();
-        let dir = tempfile::tempdir().unwrap();
-        let file_path = dir.path().join("diagram.png");
-        fs::write(&file_path, b"PNG_VLM_ENABLED").unwrap();
-
-        let r = ingest_file_with_policy(&db, &file_path, &policy)
-            .await
-            .unwrap();
-        assert_eq!(r.vlm_descriptions, 1);
-        let chunks = store::list_chunks_for_doc(&db, &r.document_id).unwrap();
-        let joined = chunks
-            .iter()
-            .map(|chunk| chunk.content.as_str())
-            .collect::<Vec<_>>()
-            .join("\n");
-        assert!(joined.contains("diagram shows a synthetic reward loop"));
-        let image_descriptions =
-            store::list_image_descriptions_for_doc(&db, &r.document_id).unwrap();
-        assert_eq!(image_descriptions.len(), 1);
-        assert_eq!(
-            image_descriptions[0].description,
-            "diagram shows a synthetic reward loop"
-        );
-        reset_multimodal_test_providers();
-    }
-
-    #[tokio::test]
-    async fn test_vlm_provider_failure_warns_but_keeps_ocr_ingest() {
-        reset_multimodal_test_providers();
-        crate::ocr::provider::set_provider(Box::new(MockOcrProvider {
-            text: "OCR survives VLM failure",
-        }));
-        crate::vlm::set_provider(Box::new(FailingVlmProvider));
-        let mut policy = archon_policy::EffectivePolicy::default();
-        policy.docs.vlm.enabled = true;
-        policy.docs.vlm.mode = "local".into();
-        policy.docs.vlm.provider = "ollama".into();
-        policy.workers.vlm = "allow-local".into();
-
-        let db = test_db();
-        let dir = tempfile::tempdir().unwrap();
-        let file_path = dir.path().join("vlm-fail.png");
-        fs::write(&file_path, b"PNG_VLM_FAILURE").unwrap();
-
-        let r = ingest_file_with_policy(&db, &file_path, &policy)
-            .await
-            .unwrap();
-        assert!(!r.pipeline_failed);
-        assert_eq!(r.vlm_descriptions, 0);
-        assert!(
-            r.warnings
-                .iter()
-                .any(|w| w.contains("image description failed"))
-        );
-        let doc = store::get_doc_source(&db, &r.document_id).unwrap().unwrap();
-        assert_eq!(doc.status, DocumentStatus::Ingested);
-        let chunks = store::list_chunks_for_doc(&db, &r.document_id).unwrap();
-        assert_eq!(chunks.len(), 1);
-        assert!(chunks[0].content.contains("OCR survives VLM failure"));
-        reset_multimodal_test_providers();
-    }
-
-    #[tokio::test]
-    async fn test_ingest_pipeline_failure_sets_failed_status() {
-        let db = test_db();
-        let dir = tempfile::tempdir().unwrap();
-        // Garbage .pdf that pdftotext will reject
-        let file_path = dir.path().join("bad.pdf");
-        fs::write(&file_path, b"this is not a valid PDF").unwrap();
-
-        let r = ingest_file(&db, &file_path).await.unwrap();
-        assert!(r.was_new);
-        assert!(r.pipeline_failed);
-        assert!(
-            r.warnings.iter().any(|w| w.contains("OCR pipeline failed")),
-            "pipeline failure should be surfaced in result warnings"
-        );
-
-        let doc = store::get_doc_source(&db, &r.document_id).unwrap().unwrap();
-        assert_eq!(
-            doc.status,
-            DocumentStatus::Failed,
-            "pipeline failure must set Failed status"
-        );
-    }
-
-    // ── BLOCKER #1: Eager indexing tests ─────────────────────────────
-
-    use crate::embed::{self, LocalEmbeddingProvider};
-
-    struct IndexingMockProvider {
-        dim: usize,
-        // If set, embed_chunks returns this error.
-        fail_with: Option<String>,
-    }
-
-    impl LocalEmbeddingProvider for IndexingMockProvider {
-        fn embed_chunks(&self, chunks: &[String]) -> Result<Vec<Vec<f32>>, DocsError> {
-            if let Some(ref msg) = self.fail_with {
-                return Err(DocsError::Embedding {
-                    message: msg.clone(),
-                });
-            }
-            Ok(chunks
-                .iter()
-                .enumerate()
-                .map(|(i, c)| {
-                    let mut v = vec![0.0_f32; self.dim];
-                    for (j, b) in c.bytes().enumerate() {
-                        v[j % self.dim] = (b as f32) / 255.0;
-                    }
-                    v[0] = (i as f32 + 1.0) * 0.5;
-                    let norm: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt().max(1e-12);
-                    v.iter_mut().for_each(|x| *x /= norm);
-                    v
-                })
-                .collect())
-        }
-
-        fn embed_query(&self, query: &str) -> Result<Vec<f32>, DocsError> {
-            let mut results = self.embed_chunks(&[query.to_string()])?;
-            Ok(results.remove(0))
-        }
-
-        fn dimension(&self) -> usize {
-            self.dim
-        }
-
-        fn backend_name(&self) -> &'static str {
-            "mock-indexing"
-        }
-    }
-
-    struct MultimodalMockProvider {
-        dim: usize,
-    }
-
-    impl LocalEmbeddingProvider for MultimodalMockProvider {
-        fn embed_chunks(&self, chunks: &[String]) -> Result<Vec<Vec<f32>>, DocsError> {
-            Ok(chunks
-                .iter()
-                .map(|_| vec![0.5_f32, 0.5, 0.5, 0.5][..self.dim].to_vec())
-                .collect())
-        }
-
-        fn embed_query(&self, _query: &str) -> Result<Vec<f32>, DocsError> {
-            Ok(vec![0.5_f32, 0.5, 0.5, 0.5][..self.dim].to_vec())
-        }
-
-        fn embed_image(&self, _image_bytes: &[u8]) -> Result<Option<Vec<f32>>, DocsError> {
-            Ok(Some(vec![0.25_f32, 0.25, 0.25, 0.25][..self.dim].to_vec()))
-        }
-
-        fn dimension(&self) -> usize {
-            self.dim
-        }
-
-        fn backend_name(&self) -> &'static str {
-            "mock-multimodal"
-        }
-    }
-
-    #[tokio::test]
-    async fn test_ingest_indexes_chunks_when_provider_set() {
-        let db = test_db();
-        let dir = tempfile::tempdir().unwrap();
-        // Multi-chunk fixture: enough content for several chunks
-        let content = (0..50)
-            .map(|i| format!("Paragraph {} with enough text content to fill multiple chunks in the pipeline.\n", i))
-            .collect::<Vec<_>>()
-            .join("\n");
-        let file_path = dir.path().join("multi.txt");
-        fs::write(&file_path, &content).unwrap();
-
-        embed::set_provider(Box::new(IndexingMockProvider {
-            dim: 4,
-            fail_with: None,
-        }));
-
-        let r = ingest_file(&db, &file_path).await.unwrap();
-        assert!(r.was_new);
-
-        let chunks = store::list_chunks_for_doc(&db, &r.document_id).unwrap();
-        assert!(!chunks.is_empty(), "expected at least one chunk");
-        for chunk in &chunks {
-            assert_eq!(
-                chunk.embedding_status, "indexed",
-                "chunk {} should be indexed, got {}",
-                chunk.chunk_id, chunk.embedding_status
-            );
-        }
-        let count = store::count_embeddings(&db).unwrap();
-        assert_eq!(count, chunks.len(), "all chunks should have embeddings");
-    }
-
-    #[tokio::test]
-    async fn test_image_embedding_stored_when_provider_is_multimodal() {
-        reset_multimodal_test_providers();
-        crate::ocr::provider::set_provider(Box::new(MockOcrProvider {
-            text: "OCR text for multimodal embedding",
-        }));
-        embed::set_provider(Box::new(MultimodalMockProvider { dim: 4 }));
-
-        let db = test_db();
-        let dir = tempfile::tempdir().unwrap();
-        let file_path = dir.path().join("vision.png");
-        fs::write(&file_path, b"PNG_IMAGE_EMBEDDING").unwrap();
-
-        let r = ingest_file(&db, &file_path).await.unwrap();
-        assert_eq!(r.image_embeddings_stored, 1);
-        assert_eq!(store::count_page_image_embeddings(&db).unwrap(), 1);
-
-        let chunks = store::list_chunks_for_doc(&db, &r.document_id).unwrap();
-        assert!(!chunks.is_empty());
-        assert_eq!(store::count_embeddings(&db).unwrap(), chunks.len());
-        reset_multimodal_test_providers();
-    }
-
-    #[tokio::test]
-    async fn test_ingest_succeeds_without_provider() {
-        let db = test_db();
-        let dir = tempfile::tempdir().unwrap();
-        let file_path = dir.path().join("noprov.txt");
-        fs::write(
-            &file_path,
-            "Some content for a document without embedding provider.\n",
-        )
-        .unwrap();
-
-        // Ensure no provider is set
-        embed::clear_provider();
-
-        let r = ingest_file(&db, &file_path).await.unwrap();
-        assert!(r.was_new);
-
-        let chunks = store::list_chunks_for_doc(&db, &r.document_id).unwrap();
-        assert!(!chunks.is_empty());
-        for chunk in &chunks {
-            assert_eq!(chunk.embedding_status, "pending");
-        }
-        assert_eq!(store::count_embeddings(&db).unwrap(), 0);
-    }
-
-    #[tokio::test]
-    async fn test_second_ingest_indexes_new_chunks() {
-        let db = test_db();
-        embed::set_provider(Box::new(IndexingMockProvider {
-            dim: 4,
-            fail_with: None,
-        }));
-
-        // Doc A
-        let dir = tempfile::tempdir().unwrap();
-        let path_a = dir.path().join("doc_a.txt");
-        fs::write(&path_a, "Document A content with some text for chunking.\n").unwrap();
-        let r_a = ingest_file(&db, &path_a).await.unwrap();
-        assert!(r_a.was_new);
-
-        let chunks_a = store::list_chunks_for_doc(&db, &r_a.document_id).unwrap();
-        let count_after_a = store::count_embeddings(&db).unwrap();
-        assert_eq!(count_after_a, chunks_a.len());
-
-        // Doc B
-        let path_b = dir.path().join("doc_b.txt");
-        fs::write(
-            &path_b,
-            "Document B with different content for another ingest test.\n",
-        )
-        .unwrap();
-        let r_b = ingest_file(&db, &path_b).await.unwrap();
-        assert!(r_b.was_new);
-
-        let chunks_b = store::list_chunks_for_doc(&db, &r_b.document_id).unwrap();
-        let count_after_b = store::count_embeddings(&db).unwrap();
-        assert_eq!(
-            count_after_b,
-            chunks_a.len() + chunks_b.len(),
-            "both doc A and B chunks should be embedded"
-        );
-
-        for chunk in &chunks_b {
-            assert_eq!(chunk.embedding_status, "indexed");
-        }
-    }
-
-    #[tokio::test]
-    async fn test_index_failure_marks_chunk_failed() {
-        let db = test_db();
-        let dir = tempfile::tempdir().unwrap();
-        let file_path = dir.path().join("fail.txt");
-        fs::write(&file_path, "Content that will fail to embed.\n").unwrap();
-
-        embed::set_provider(Box::new(IndexingMockProvider {
-            dim: 4,
-            fail_with: Some("simulated embedding failure".into()),
-        }));
-
-        let r = ingest_file(&db, &file_path).await.unwrap();
-        assert!(r.was_new);
-
-        let chunks = store::list_chunks_for_doc(&db, &r.document_id).unwrap();
-        assert!(!chunks.is_empty());
-        for chunk in &chunks {
-            assert_eq!(
-                chunk.embedding_status, "failed",
-                "chunk {} should be marked failed after embed error, got {}",
-                chunk.chunk_id, chunk.embedding_status
-            );
-        }
-        assert_eq!(store::count_embeddings(&db).unwrap(), 0);
-    }
-}
+#[path = "ingest_embedding_tests.rs"]
+mod embedding_tests;
+#[cfg(test)]
+#[path = "ingest_multimodal_tests.rs"]
+mod multimodal_tests;
+#[cfg(test)]
+#[path = "ingest_pdf_ingest_tests.rs"]
+mod pdf_ingest_tests;
+#[cfg(test)]
+#[path = "ingest_test_support.rs"]
+mod test_support;
+#[cfg(test)]
+#[path = "ingest_tests.rs"]
+mod tests;

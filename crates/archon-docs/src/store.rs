@@ -10,7 +10,7 @@ use cozo::{DataValue, DbInstance, ScriptMutability, Vector};
 
 use crate::models::{
     ChunkArtifact, DocumentStatus, ImageDescription, OcrRun, OcrStatus, PageArtifact,
-    ProcessingJob, ProvenanceEdge, SourceDocument,
+    PdfIngestMetrics, ProcessingJob, ProvenanceEdge, SourceDocument,
 };
 
 // ---------------------------------------------------------------------------
@@ -540,6 +540,100 @@ pub fn count_image_descriptions(db: &DbInstance) -> Result<usize> {
                 Err(anyhow::anyhow!("count image descriptions failed: {msg}"))
             }
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// PdfIngestMetrics
+// ---------------------------------------------------------------------------
+
+pub fn upsert_pdf_metrics(db: &DbInstance, metrics: &PdfIngestMetrics) -> Result<()> {
+    let mut params = BTreeMap::new();
+    params.insert("did".into(), DataValue::from(metrics.document_id.as_str()));
+    params.insert(
+        "extracted".into(),
+        DataValue::from(metrics.embedded_images_extracted as i64),
+    );
+    params.insert(
+        "skipped".into(),
+        DataValue::from(metrics.embedded_images_skipped_filter as i64),
+    );
+    params.insert(
+        "ocr_runs".into(),
+        DataValue::from(metrics.image_ocr_runs as i64),
+    );
+    params.insert(
+        "ocr_failures".into(),
+        DataValue::from(metrics.image_ocr_failures as i64),
+    );
+    params.insert(
+        "vlm_descriptions".into(),
+        DataValue::from(metrics.image_vlm_descriptions as i64),
+    );
+    params.insert(
+        "vlm_failures".into(),
+        DataValue::from(metrics.image_vlm_failures as i64),
+    );
+    params.insert(
+        "rendered".into(),
+        DataValue::from(metrics.pages_rendered as i64),
+    );
+
+    db.run_script(
+        "?[document_id, embedded_images_extracted, embedded_images_skipped_filter, image_ocr_runs, image_ocr_failures, image_vlm_descriptions, image_vlm_failures, pages_rendered] \
+         <- [[$did, $extracted, $skipped, $ocr_runs, $ocr_failures, $vlm_descriptions, $vlm_failures, $rendered]] \
+         :put doc_pdf_metrics { document_id => embedded_images_extracted, embedded_images_skipped_filter, image_ocr_runs, image_ocr_failures, image_vlm_descriptions, image_vlm_failures, pages_rendered }",
+        params,
+        ScriptMutability::Mutable,
+    )
+    .map_err(|e| anyhow::anyhow!("upsert doc_pdf_metrics failed: {e}"))?;
+    Ok(())
+}
+
+pub fn get_pdf_metrics(db: &DbInstance, document_id: &str) -> Result<Option<PdfIngestMetrics>> {
+    let mut params = BTreeMap::new();
+    params.insert("did".into(), DataValue::from(document_id));
+    let result = db
+        .run_script(
+            "?[document_id, embedded_images_extracted, embedded_images_skipped_filter, image_ocr_runs, image_ocr_failures, image_vlm_descriptions, image_vlm_failures, pages_rendered] \
+             := *doc_pdf_metrics{document_id, embedded_images_extracted, embedded_images_skipped_filter, image_ocr_runs, image_ocr_failures, image_vlm_descriptions, image_vlm_failures, pages_rendered}, \
+             document_id = $did",
+            params,
+            ScriptMutability::Immutable,
+        )
+        .map_err(|e| anyhow::anyhow!("get doc_pdf_metrics failed: {e}"))?;
+    if result.rows.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(pdf_metrics_from_row(&result.rows[0])))
+}
+
+pub fn list_pdf_metrics(db: &DbInstance) -> Result<Vec<PdfIngestMetrics>> {
+    let result = db
+        .run_script(
+            "?[document_id, embedded_images_extracted, embedded_images_skipped_filter, image_ocr_runs, image_ocr_failures, image_vlm_descriptions, image_vlm_failures, pages_rendered] \
+             := *doc_pdf_metrics{document_id, embedded_images_extracted, embedded_images_skipped_filter, image_ocr_runs, image_ocr_failures, image_vlm_descriptions, image_vlm_failures, pages_rendered}",
+            Default::default(),
+            ScriptMutability::Immutable,
+        )
+        .map_err(|e| anyhow::anyhow!("list doc_pdf_metrics failed: {e}"))?;
+    Ok(result
+        .rows
+        .iter()
+        .map(|row| pdf_metrics_from_row(row))
+        .collect())
+}
+
+fn pdf_metrics_from_row(row: &[DataValue]) -> PdfIngestMetrics {
+    PdfIngestMetrics {
+        document_id: row[0].get_str().unwrap_or("").to_string(),
+        embedded_images_extracted: row[1].get_int().unwrap_or(0) as u32,
+        embedded_images_skipped_filter: row[2].get_int().unwrap_or(0) as u32,
+        image_ocr_runs: row[3].get_int().unwrap_or(0) as u32,
+        image_ocr_failures: row[4].get_int().unwrap_or(0) as u32,
+        image_vlm_descriptions: row[5].get_int().unwrap_or(0) as u32,
+        image_vlm_failures: row[6].get_int().unwrap_or(0) as u32,
+        pages_rendered: row[7].get_int().unwrap_or(0) as u32,
     }
 }
 

@@ -88,7 +88,29 @@ impl Default for LearningPolicy {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct DocsPolicy {
     pub vlm: VlmPolicy,
+    pub pdf: PdfPolicy,
     pub retrieval: RetrievalPolicy,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PdfPolicy {
+    pub extract_embedded_images: bool,
+    pub min_image_dimension: u32,
+    pub min_image_bytes: u64,
+    pub vlm_per_page_image: bool,
+    pub render_text_pdf_pages: bool,
+}
+
+impl Default for PdfPolicy {
+    fn default() -> Self {
+        Self {
+            extract_embedded_images: true,
+            min_image_dimension: 200,
+            min_image_bytes: 4096,
+            vlm_per_page_image: true,
+            render_text_pdf_pages: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
