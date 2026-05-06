@@ -1714,7 +1714,8 @@ pub(crate) async fn run_interactive_session(
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
         loop {
             interval.tick().await;
-            archon_tui::observability::warn_if_drain_stalled(10_000);
+            let threshold = archon_tui::observability::current_drain_threshold_ms();
+            archon_tui::observability::warn_if_drain_stalled(threshold);
         }
     });
     // CRIT-13: Forward voice pipeline events to TUI event channel

@@ -119,33 +119,38 @@ pub async fn run_event_loop(cfg: EventLoopConfig) -> Result<()> {
         tokio::select! {
             maybe_ev = tui_event_rx.recv() => {
                 match maybe_ev {
-                    Some(TuiEvent::UserInput(prompt)) => {
-                        let _ = dispatcher.spawn_turn(prompt, runner.clone());
-                    }
-                    Some(TuiEvent::SlashCancel) => {
-                        match dispatcher.cancel_current() {
-                            CancelOutcome::NoInflight => {
-                                tracing::info!("slash-cancel: no in-flight turn");
+                    Some(ev) => {
+                        crate::observability::record_tui_event_drain(ev.variant_name());
+                        match ev {
+                            TuiEvent::UserInput(prompt) => {
+                                let _ = dispatcher.spawn_turn(prompt, runner.clone());
                             }
-                            CancelOutcome::Aborted { elapsed_ms } => {
-                                tracing::info!(elapsed_ms, "slash-cancel: aborted");
+                            TuiEvent::SlashCancel => {
+                                match dispatcher.cancel_current() {
+                                    CancelOutcome::NoInflight => {
+                                        tracing::info!("slash-cancel: no in-flight turn");
+                                    }
+                                    CancelOutcome::Aborted { elapsed_ms } => {
+                                        tracing::info!(elapsed_ms, "slash-cancel: aborted");
+                                    }
+                                }
+                            }
+                            TuiEvent::SlashAgent(id) => {
+                                match dispatcher.switch_agent(&id) {
+                                    Ok(()) => tracing::info!(agent = %id, "slash-agent switched"),
+                                    Err(e) => tracing::warn!(error = %e, agent = %id, "slash-agent failed"),
+                                }
+                            }
+                            TuiEvent::Resize { cols, rows } => {
+                                let _ = crate::layout::handle_resize(cols, rows);
+                            }
+                            TuiEvent::Done => break,
+                            _ => {
+                                // Other TuiEvent variants (agent→TUI output events) are
+                                // consumed by the old run_tui path's render loop, not by
+                                // this dispatcher-side loop. No-op here.
                             }
                         }
-                    }
-                    Some(TuiEvent::SlashAgent(id)) => {
-                        match dispatcher.switch_agent(&id) {
-                            Ok(()) => tracing::info!(agent = %id, "slash-agent switched"),
-                            Err(e) => tracing::warn!(error = %e, agent = %id, "slash-agent failed"),
-                        }
-                    }
-                    Some(TuiEvent::Resize { cols, rows }) => {
-                        let _ = crate::layout::handle_resize(cols, rows);
-                    }
-                    Some(TuiEvent::Done) => break,
-                    Some(_) => {
-                        // Other TuiEvent variants (agent→TUI output events) are
-                        // consumed by the old run_tui path's render loop, not by
-                        // this dispatcher-side loop. No-op here.
                     }
                     None => {
                         // Channel closed. Caller dropped the sender.

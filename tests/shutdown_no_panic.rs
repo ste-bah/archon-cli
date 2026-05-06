@@ -4,12 +4,15 @@
 //! "A Tokio 1.x context was found, but it is being shutdown"
 //! during clean exit.
 
+use std::io;
 use std::path::PathBuf;
-use std::process::Stdio;
+use std::process::{Output, Stdio};
 use std::time::Duration;
 
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
+
+const CHILD_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// Locate the archon binary via the standard Cargo env var.
 fn archon_bin() -> Option<PathBuf> {
@@ -38,7 +41,43 @@ async fn run_archon_with_input(
         let _ = stdin.shutdown().await;
     });
 
-    child.wait_with_output().await
+    let mut stdout = child.stdout.take().expect("stdout pipe");
+    let mut stderr = child.stderr.take().expect("stderr pipe");
+    let stdout_task = tokio::spawn(async move {
+        let mut buf = Vec::new();
+        stdout.read_to_end(&mut buf).await.map(|_| buf)
+    });
+    let stderr_task = tokio::spawn(async move {
+        let mut buf = Vec::new();
+        stderr.read_to_end(&mut buf).await.map(|_| buf)
+    });
+
+    let status = match tokio::time::timeout(CHILD_TIMEOUT, child.wait()).await {
+        Ok(status) => status?,
+        Err(_) => {
+            let _ = child.kill().await;
+            let _ = child.wait().await;
+            let _ = stdout_task.await;
+            let _ = stderr_task.await;
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                format!("archon did not exit within {CHILD_TIMEOUT:?}"),
+            ));
+        }
+    };
+
+    let stdout = stdout_task
+        .await
+        .map_err(|e| io::Error::other(format!("stdout reader task failed: {e}")))??;
+    let stderr = stderr_task
+        .await
+        .map_err(|e| io::Error::other(format!("stderr reader task failed: {e}")))??;
+
+    Ok(Output {
+        status,
+        stdout,
+        stderr,
+    })
 }
 
 // ---------------------------------------------------------------------------

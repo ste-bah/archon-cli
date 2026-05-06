@@ -76,13 +76,16 @@ impl TuiEventSender {
                     return Ok(());
                 }
                 if drop_oldest_progress(&mut queue) {
+                    crate::observability::record_tui_event_discarded();
                     self.inner.dropped_progress.fetch_add(1, Ordering::Relaxed);
                 } else {
                     queue.pop_front();
+                    crate::observability::record_tui_event_discarded();
                     self.inner.dropped_state.fetch_add(1, Ordering::Relaxed);
                 }
             }
             queue.push_back(event);
+            crate::observability::record_tui_event_enqueued();
         }
 
         self.inner.notify.notify_one();
@@ -107,6 +110,15 @@ pub struct TuiEventReceiver {
 impl Drop for TuiEventReceiver {
     fn drop(&mut self) {
         self.inner.closed.store(true, Ordering::Release);
+        let dropped = {
+            let mut queue = self.inner.queue.lock().expect("tui event queue lock");
+            let dropped = queue.len();
+            queue.clear();
+            dropped
+        };
+        for _ in 0..dropped {
+            crate::observability::record_tui_event_discarded();
+        }
         self.inner.notify.notify_waiters();
     }
 }
@@ -127,6 +139,7 @@ impl TuiEventReceiver {
     pub fn try_recv(&mut self) -> Result<TuiEvent, tokio::sync::mpsc::error::TryRecvError> {
         let mut queue = self.inner.queue.lock().expect("tui event queue lock");
         if let Some(event) = queue.pop_front() {
+            crate::observability::record_tui_event_dequeued();
             return Ok(event);
         }
         if self.inner.sender_count.load(Ordering::Acquire) == 0 {
