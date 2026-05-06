@@ -142,6 +142,7 @@ struct RawVlmPolicy {
     ollama: Option<RawOllamaVlmPolicy>,
     gemini: Option<RawGeminiVlmPolicy>,
     anthropic: Option<RawAnthropicVlmPolicy>,
+    openai_compat: Option<RawOpenAiCompatVlmPolicy>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -162,6 +163,16 @@ struct RawGeminiVlmPolicy {
 #[derive(Debug, Default, Deserialize)]
 struct RawAnthropicVlmPolicy {
     model: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct RawOpenAiCompatVlmPolicy {
+    endpoint: Option<String>,
+    model: Option<String>,
+    api_key_env: Option<String>,
+    timeout_secs: Option<u64>,
+    max_tokens: Option<u32>,
+    temperature: Option<f32>,
 }
 
 fn apply_raw(policy: &mut EffectivePolicy, root: RawPolicyRoot) {
@@ -280,6 +291,9 @@ fn apply_vlm(policy: &mut VlmPolicy, raw: RawVlmPolicy) {
     if let Some(value) = raw.anthropic {
         apply_anthropic_vlm(&mut policy.anthropic, value);
     }
+    if let Some(value) = raw.openai_compat {
+        apply_openai_compat_vlm(&mut policy.openai_compat, value);
+    }
 }
 
 fn apply_ollama_vlm(policy: &mut OllamaVlmPolicy, raw: RawOllamaVlmPolicy) {
@@ -312,6 +326,27 @@ fn apply_gemini_vlm(policy: &mut GeminiVlmPolicy, raw: RawGeminiVlmPolicy) {
 fn apply_anthropic_vlm(policy: &mut AnthropicVlmPolicy, raw: RawAnthropicVlmPolicy) {
     if let Some(value) = raw.model {
         policy.model = value;
+    }
+}
+
+fn apply_openai_compat_vlm(policy: &mut OpenAiCompatVlmPolicy, raw: RawOpenAiCompatVlmPolicy) {
+    if let Some(value) = raw.endpoint {
+        policy.endpoint = value;
+    }
+    if let Some(value) = raw.model {
+        policy.model = value;
+    }
+    if let Some(value) = raw.api_key_env {
+        policy.api_key_env = value;
+    }
+    if let Some(value) = raw.timeout_secs {
+        policy.timeout_secs = value;
+    }
+    if let Some(value) = raw.max_tokens {
+        policy.max_tokens = value;
+    }
+    if let Some(value) = raw.temperature {
+        policy.temperature = value;
     }
 }
 

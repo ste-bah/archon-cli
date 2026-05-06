@@ -7,7 +7,8 @@ Archon can enrich ingested images with a vision-language model (VLM) description
 | Provider | Default model | Cost | Privacy | Notes |
 | --- | --- | --- | --- | --- |
 | Ollama | `gemma4:e4b` | $0 | Local | Default local path. Install Ollama and pull the configured model first. |
-| Gemini | `gemini-3-flash-preview` | Free-tier friendly | Sent to Google | Uses `GOOGLE_API_KEY` or `archon auth login --provider google`. Rate limited to 15 RPM by default. |
+| OpenAI-compatible | `google/gemma-3-12b-it` | $0 local, varies cloud | Local or cloud | LM Studio, vLLM, llama.cpp server, or `api.openai.com` using the standard OpenAI vision request shape. |
+| Gemini | `gemini-3-flash-preview` | Free-tier friendly | Sent to Google | Uses `GOOGLE_API_KEY` or `archon auth login --provider google`. Rate limited to 12 RPM by default with 5-attempt 429 retry. |
 | Anthropic | `claude-sonnet-4-6` | Paid | Sent to Anthropic | Reuses existing Anthropic API key/OAuth spoofing. No separate VLM login. |
 
 ## Enable Local VLM
@@ -37,6 +38,54 @@ archon docs search "ascending triangle pattern" --mode hybrid
 ```
 
 If Ollama is unavailable, ingest still succeeds and prints a warning; image descriptions are skipped rather than failing the document ingest.
+
+## Enable OpenAI-Compatible VLM
+
+Use this for local OpenAI-compatible servers such as LM Studio, vLLM, and
+llama.cpp server. Local servers usually do not need an API key.
+
+```toml
+[policy.workers]
+vlm = "allow-local"
+
+[policy.docs.vlm]
+enabled = true
+mode = "local"
+provider = "openai-compat"
+
+[policy.docs.vlm.openai_compat]
+endpoint = "http://localhost:1234/v1"
+model = "google/gemma-3-12b-it"
+api_key_env = "OPENAI_API_KEY"
+timeout_secs = 120
+max_tokens = 1024
+temperature = 0.2
+```
+
+For OpenAI's hosted API, switch the endpoint and cloud gates:
+
+```toml
+[policy.network]
+allow_cloud_vlm = true
+
+[policy.workers]
+vlm = "allow-cloud"
+
+[policy.docs.vlm]
+enabled = true
+mode = "cloud"
+provider = "openai-compat"
+allow_cloud = true
+
+[policy.docs.vlm.openai_compat]
+endpoint = "https://api.openai.com/v1"
+model = "gpt-4o-mini"
+api_key_env = "OPENAI_API_KEY"
+```
+
+Archon sends no `Authorization` header when the configured key env var is
+unset, which keeps LM Studio/lite local servers happy. Cloud endpoints should
+set the configured env var so Archon sends `Authorization: Bearer ...`.
 
 ## Enable Gemini
 
@@ -69,7 +118,7 @@ allow_cloud = true
 api_key_env = "GOOGLE_API_KEY"
 model = "gemini-3-flash-preview"
 endpoint_base = "https://generativelanguage.googleapis.com/v1beta"
-rpm_limit = 15
+rpm_limit = 12
 ```
 
 ## Enable Anthropic

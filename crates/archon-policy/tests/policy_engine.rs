@@ -34,10 +34,18 @@ timeout_secs = 90
 api_key_env = "GOOGLE_API_KEY"
 model = "gemini-3-flash-preview"
 endpoint_base = "https://generativelanguage.googleapis.com/v1beta"
-rpm_limit = 15
+rpm_limit = 12
 
 [policy.docs.vlm.anthropic]
 model = "claude-sonnet-4-6"
+
+[policy.docs.vlm.openai_compat]
+endpoint = "http://localhost:1234/v1"
+model = "llava:13b"
+api_key_env = "LMSTUDIO_API_KEY"
+timeout_secs = 60
+max_tokens = 768
+temperature = 0.1
 
 [policy.docs.pdf]
 extract_embedded_images = true
@@ -68,8 +76,20 @@ semantic_weight = 0.3
     assert_eq!(load.policy.docs.vlm.ollama.model, "gemma4:e4b");
     assert_eq!(load.policy.docs.vlm.ollama.timeout_secs, 90);
     assert_eq!(load.policy.docs.vlm.gemini.model, "gemini-3-flash-preview");
-    assert_eq!(load.policy.docs.vlm.gemini.rpm_limit, 15);
+    assert_eq!(load.policy.docs.vlm.gemini.rpm_limit, 12);
     assert_eq!(load.policy.docs.vlm.anthropic.model, "claude-sonnet-4-6");
+    assert_eq!(
+        load.policy.docs.vlm.openai_compat.endpoint,
+        "http://localhost:1234/v1"
+    );
+    assert_eq!(load.policy.docs.vlm.openai_compat.model, "llava:13b");
+    assert_eq!(
+        load.policy.docs.vlm.openai_compat.api_key_env,
+        "LMSTUDIO_API_KEY"
+    );
+    assert_eq!(load.policy.docs.vlm.openai_compat.timeout_secs, 60);
+    assert_eq!(load.policy.docs.vlm.openai_compat.max_tokens, 768);
+    assert!((load.policy.docs.vlm.openai_compat.temperature - 0.1).abs() < f32::EPSILON);
     assert!(load.policy.docs.pdf.extract_embedded_images);
     assert_eq!(load.policy.docs.pdf.min_image_dimension, 256);
     assert_eq!(load.policy.docs.pdf.min_image_bytes, 8192);
@@ -170,6 +190,32 @@ fn cloud_vlm_requires_dual_cloud_policy() {
 }
 
 #[test]
+fn openai_compat_local_mode_uses_local_worker_gate() {
+    let mut policy = EffectivePolicy::default();
+    policy.docs.vlm.enabled = true;
+    policy.docs.vlm.mode = "local".into();
+    policy.docs.vlm.provider = "openai-compat".into();
+    policy.workers.vlm = "allow-local".into();
+
+    assert!(policy.docs_vlm_decision().allowed);
+}
+
+#[test]
+fn openai_compat_cloud_mode_requires_cloud_gate() {
+    let mut policy = EffectivePolicy::default();
+    policy.docs.vlm.enabled = true;
+    policy.docs.vlm.mode = "cloud".into();
+    policy.docs.vlm.provider = "openai-compat".into();
+    policy.docs.vlm.openai_compat.endpoint = "https://api.openai.com/v1".into();
+    policy.docs.vlm.allow_cloud = true;
+    policy.network.allow_cloud_vlm = true;
+    assert!(!policy.docs_vlm_decision().allowed);
+
+    policy.workers.vlm = "allow-cloud".into();
+    assert!(policy.docs_vlm_decision().allowed);
+}
+
+#[test]
 fn cloud_provider_denied_when_mode_is_local() {
     let mut policy = EffectivePolicy::default();
     policy.docs.vlm.enabled = true;
@@ -241,8 +287,20 @@ fn repository_policy_template_parses_all_vlm_provider_fields() {
     assert_eq!(load.policy.docs.vlm.ollama.timeout_secs, 120);
     assert_eq!(load.policy.docs.vlm.gemini.api_key_env, "GOOGLE_API_KEY");
     assert_eq!(load.policy.docs.vlm.gemini.model, "gemini-3-flash-preview");
-    assert_eq!(load.policy.docs.vlm.gemini.rpm_limit, 15);
+    assert_eq!(load.policy.docs.vlm.gemini.rpm_limit, 12);
     assert_eq!(load.policy.docs.vlm.anthropic.model, "claude-sonnet-4-6");
+    assert_eq!(
+        load.policy.docs.vlm.openai_compat.endpoint,
+        "http://localhost:1234/v1"
+    );
+    assert_eq!(
+        load.policy.docs.vlm.openai_compat.model,
+        "google/gemma-3-12b-it"
+    );
+    assert_eq!(
+        load.policy.docs.vlm.openai_compat.api_key_env,
+        "OPENAI_API_KEY"
+    );
     assert!(load.policy.docs.pdf.extract_embedded_images);
     assert_eq!(load.policy.docs.pdf.min_image_dimension, 200);
     assert_eq!(load.policy.docs.pdf.min_image_bytes, 4096);

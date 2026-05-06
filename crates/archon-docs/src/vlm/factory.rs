@@ -4,6 +4,7 @@ use crate::errors::DocsError;
 use crate::vlm::anthropic::{AnthropicVlmProvider, DEFAULT_ANTHROPIC_VLM_MODEL};
 use crate::vlm::gemini::{DEFAULT_GEMINI_MODEL, GeminiVlmProvider};
 use crate::vlm::ollama::{DEFAULT_OLLAMA_MODEL, OllamaVlmProvider};
+use crate::vlm::openai_compat::{DEFAULT_OPENAI_COMPAT_MODEL, OpenAiCompatVlmProvider};
 use crate::vlm::{
     RegisteredVlmProvider, VlmProviderMetadata, clear_provider, set_registered_provider,
 };
@@ -72,6 +73,7 @@ pub fn configure_registered_provider(
         "ollama" => configure_ollama(policy),
         "gemini" => configure_gemini(policy),
         "anthropic" => configure_anthropic(policy),
+        "openai-compat" => configure_openai_compat(policy),
         "disabled" | "" => VlmProviderInitReport::disabled("VLM provider disabled by policy"),
         other => {
             VlmProviderInitReport::skipped(other, "", format!("unsupported VLM provider '{other}'"))
@@ -132,6 +134,24 @@ pub fn diagnostic_report(policy: &archon_policy::EffectivePolicy) -> VlmProvider
                 e.to_string(),
             ),
         },
+        "openai-compat" => {
+            let provider = match build_openai_compat_provider(policy) {
+                Ok(provider) => provider,
+                Err(e) => {
+                    return VlmProviderInitReport::skipped(
+                        "openai-compat",
+                        policy.docs.vlm.openai_compat.model.clone(),
+                        e.to_string(),
+                    );
+                }
+            };
+            match provider.health_check() {
+                Ok(()) => VlmProviderInitReport::registered("openai-compat", provider.model()),
+                Err(e) => {
+                    VlmProviderInitReport::skipped("openai-compat", provider.model(), e.to_string())
+                }
+            }
+        }
         "disabled" | "" => VlmProviderInitReport::disabled("VLM provider disabled by policy"),
         other => {
             VlmProviderInitReport::skipped(other, "", format!("unsupported VLM provider '{other}'"))
@@ -223,6 +243,36 @@ fn configure_anthropic(policy: &archon_policy::EffectivePolicy) -> VlmProviderIn
     }
 }
 
+fn configure_openai_compat(policy: &archon_policy::EffectivePolicy) -> VlmProviderInitReport {
+    let provider = match build_openai_compat_provider(policy) {
+        Ok(provider) => provider,
+        Err(e) => {
+            return VlmProviderInitReport::skipped(
+                "openai-compat",
+                policy.docs.vlm.openai_compat.model.clone(),
+                e.to_string(),
+            );
+        }
+    };
+    let provider_id = provider.provider_id();
+    let model = provider.model().to_string();
+    if let Err(e) = provider.health_check() {
+        tracing::warn!(
+            provider = provider_id,
+            model = %model,
+            endpoint = %provider.endpoint(),
+            error = %e,
+            "vlm provider health check failed; image descriptions will be skipped"
+        );
+        return VlmProviderInitReport::skipped(provider_id, model, e.to_string());
+    }
+    set_registered_provider(RegisteredVlmProvider::new(
+        VlmProviderMetadata::new(provider_id, model.clone(), 0.0),
+        Box::new(provider),
+    ));
+    VlmProviderInitReport::registered(provider_id, model)
+}
+
 fn build_anthropic_provider(
     policy: &archon_policy::EffectivePolicy,
 ) -> Result<AnthropicVlmProvider, DocsError> {
@@ -250,6 +300,15 @@ fn build_anthropic_provider(
     )
 }
 
+fn build_openai_compat_provider(
+    policy: &archon_policy::EffectivePolicy,
+) -> Result<OpenAiCompatVlmProvider, DocsError> {
+    OpenAiCompatVlmProvider::from_policy(
+        &policy.docs.vlm.openai_compat,
+        resolve_optional_env_key(&policy.docs.vlm.openai_compat.api_key_env),
+    )
+}
+
 fn configured_anthropic_model(policy: &archon_policy::EffectivePolicy) -> String {
     let model = policy.docs.vlm.anthropic.model.trim();
     if model.is_empty() {
@@ -257,6 +316,15 @@ fn configured_anthropic_model(policy: &archon_policy::EffectivePolicy) -> String
     } else {
         model.into()
     }
+}
+
+fn resolve_optional_env_key(api_key_env: &str) -> Option<String> {
+    if api_key_env.trim().is_empty() {
+        return None;
+    }
+    std::env::var(api_key_env)
+        .ok()
+        .filter(|value| !value.trim().is_empty())
 }
 
 pub fn resolve_google_api_key(api_key_env: &str) -> Option<String> {
@@ -306,6 +374,13 @@ pub fn default_provider_summary(policy: &archon_policy::EffectivePolicy) -> (Str
                 DEFAULT_ANTHROPIC_VLM_MODEL,
             ),
         ),
+        "openai-compat" => (
+            "openai-compat".into(),
+            non_empty_or_default(
+                &policy.docs.vlm.openai_compat.model,
+                DEFAULT_OPENAI_COMPAT_MODEL,
+            ),
+        ),
         other => (other.into(), String::new()),
     }
 }
@@ -342,6 +417,18 @@ mod tests {
         assert_eq!(
             default_provider_summary(&policy),
             ("ollama".into(), "llava:13b".into())
+        );
+    }
+
+    #[test]
+    fn default_provider_summary_reads_openai_compat_model() {
+        let mut policy = archon_policy::EffectivePolicy::default();
+        policy.docs.vlm.provider = "openai-compat".into();
+        policy.docs.vlm.openai_compat.model = "vision-model".into();
+
+        assert_eq!(
+            default_provider_summary(&policy),
+            ("openai-compat".into(), "vision-model".into())
         );
     }
 }
