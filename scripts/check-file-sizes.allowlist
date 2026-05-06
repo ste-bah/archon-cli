@@ -236,7 +236,10 @@ crates/archon-completion/src/verification_gates.rs
 crates/archon-core/src/dispatch.rs
 
 # --- archon-docs ---
-crates/archon-docs/src/ingest.rs
+# Note: ingest.rs was allowlisted at 1368 lines pre-v0.1.47. The
+# v0.1.47 refactor split it into ingest_pdf.rs / ingest_multimodal.rs /
+# ingest_directory.rs and brought ingest.rs down to 478 lines. The
+# allowlist entry is no longer needed.
 crates/archon-docs/src/retrieval.rs
 crates/archon-docs/src/store.rs
 
