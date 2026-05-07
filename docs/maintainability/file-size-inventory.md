@@ -48,6 +48,16 @@ Active oversized allowlist entries: 101
 
 Group 3 removed `crates/archon-core/src/agent.rs` from the active allowlist by splitting it from 1696 lines after the initial support-module carve-out to a 489-line orchestration shell plus focused `agent/*` runtime modules. Remaining Group 3 targets are `crates/archon-core/src/subagent.rs` and `crates/archon-core/src/subagent_executor.rs`.
 
+After Group 3 `subagent.rs` split:
+
+```text
+FileSizeGuard: 1328 files checked, 0 over 500, 100 allowlisted
+Raw non-comment allowlist entries: 100
+Active oversized allowlist entries: 100
+```
+
+Group 3 removed `crates/archon-core/src/subagent.rs` from the active allowlist by splitting it from 2018 lines to a 370-line manager shell plus focused `subagent/*` runner and test modules. Remaining Group 3 target is `crates/archon-core/src/subagent_executor.rs`.
+
 ## Commands
 
 Regenerate the guard summary:

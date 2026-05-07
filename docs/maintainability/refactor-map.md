@@ -40,7 +40,7 @@ Group 11 should not become a dumping ground. Split tests alongside adjacent prod
 
 ## Current Status
 
-Group 3 `agent.rs` is complete in this worktree: `crates/archon-core/src/agent.rs` is 489 lines and has been removed from `scripts/check-file-sizes.allowlist`. Continue Group 3 with `crates/archon-core/src/subagent.rs`, then `crates/archon-core/src/subagent_executor.rs`.
+Group 3 `agent.rs` and `subagent.rs` are complete in this worktree: `crates/archon-core/src/agent.rs` is 489 lines, `crates/archon-core/src/subagent.rs` is 370 lines, and both have been removed from `scripts/check-file-sizes.allowlist`. Continue Group 3 with `crates/archon-core/src/subagent_executor.rs`.
 
 ## Verification Matrix
 
@@ -84,4 +84,3 @@ Verification:
 Source-of-truth evidence:
 - <row counts / command output / registry count / fixture result>
 ```
-

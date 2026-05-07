@@ -96,9 +96,16 @@ fn phase4_pipelines_use_provider_neutral_adapter() {
 fn phase3_subagents_and_team_use_active_provider() {
     let team = read("src/command/team.rs");
     let orchestrator = read("crates/archon-core/src/orchestrator.rs");
-    let agent = read("crates/archon-core/src/agent.rs");
+    let agent = read_all(&[
+        "crates/archon-core/src/agent.rs",
+        "crates/archon-core/src/agent/lifecycle.rs",
+    ]);
     let executor = read("crates/archon-core/src/subagent_executor.rs");
-    let runner = read("crates/archon-core/src/subagent.rs");
+    let runner = read_all(&[
+        "crates/archon-core/src/subagent.rs",
+        "crates/archon-core/src/subagent/runner.rs",
+        "crates/archon-core/src/subagent/runner/runtime.rs",
+    ]);
 
     assert!(team.contains("build_configured_llm_provider(config, env_vars, \"team\")"));
     assert!(!team.contains("AnthropicClient::new"));
@@ -114,7 +121,7 @@ fn phase3_subagents_and_team_use_active_provider() {
     assert!(executor.contains("SubagentRunner::new("));
     assert!(executor.contains("self.client.clone()"));
     assert!(runner.contains("provider: Arc<dyn LlmProvider>"));
-    assert!(runner.contains(".provider\n                    .stream(request)"));
+    assert!(runner.contains(".provider\n                .stream(request)"));
     assert!(runner.contains("request_origin: Some(\"subagent\".into())"));
 }
 
@@ -131,13 +138,17 @@ fn phase5_completion_integrity_is_provider_neutral_today() {
 
 #[test]
 fn activity_events_and_tui_rows_carry_provider_metadata() {
-    let agent = read("crates/archon-core/src/agent.rs");
+    let agent = read_all(&[
+        "crates/archon-core/src/agent.rs",
+        "crates/archon-core/src/agent/events.rs",
+        "crates/archon-core/src/agent/tool_context.rs",
+    ]);
     let events = read("crates/archon-tui/src/events.rs");
     let rail = read("crates/archon-tui/src/agent_activity.rs");
 
-    assert!(agent.contains(".with_provider_model(self.client.name().to_string()"));
+    assert!(agent.contains("with_provider_model(self.provider.clone(), self.model.clone())"));
     assert!(agent.contains("struct ProviderModelActivitySink"));
-    assert!(agent.contains("activity_sink: self.provider_model_activity_sink(&active_model)"));
+    assert!(agent.contains("activity_sink: self.provider_model_activity_sink(active_model)"));
     assert!(events.contains("pub provider: Option<String>"));
     assert!(events.contains("provider: event.provider"));
     assert!(rail.contains("provider={provider}"));
@@ -148,6 +159,14 @@ fn activity_events_and_tui_rows_carry_provider_metadata() {
 fn read(path: &str) -> String {
     fs::read_to_string(repo_root().join(path))
         .unwrap_or_else(|err| panic!("failed to read {path}: {err}"))
+}
+
+fn read_all(paths: &[&str]) -> String {
+    paths
+        .iter()
+        .map(|path| read(path))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn repo_root() -> &'static Path {

@@ -30,7 +30,6 @@ crates/archon-core/src/hooks/registry.rs
 crates/archon-core/src/hooks/types.rs
 crates/archon-core/src/skills/agent_skills.rs
 crates/archon-core/src/skills/expanded.rs
-crates/archon-core/src/subagent.rs
 crates/archon-core/tests/config_layers_tests.rs
 crates/archon-core/tests/env_vars_tests.rs
 crates/archon-core/tests/hook_phase3_integration.rs
