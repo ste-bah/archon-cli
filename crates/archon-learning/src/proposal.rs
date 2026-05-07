@@ -11,10 +11,16 @@
 //!
 //! 2. **GateFailed threshold**: >=3 GateFailed events for the same gate within
 //!    7 days → PipelineGates proposal recommending gate adjustment.
+//!
+//! 3. **UserCorrected cluster**: >=3 UserCorrected events for the same
+//!    source_artifact_id (top rule id) within 7 days →
+//!    BehaviouralRuleAdjustment proposal recommending operator review.
 
 use std::collections::HashMap;
 
 use crate::models::*;
+
+const PROPOSAL_WINDOW_DAYS: i64 = 7;
 
 /// Generate proposals from a window of learning events.
 ///
@@ -25,6 +31,7 @@ pub fn generate_proposals(events: &[LearningEvent]) -> Vec<BehaviourProposal> {
 
     proposals.extend(check_source_contradictions(events));
     proposals.extend(check_gate_failures(events));
+    proposals.extend(check_user_correction_clusters(events));
 
     proposals
 }
@@ -140,6 +147,75 @@ fn check_gate_failures(events: &[LearningEvent]) -> Vec<BehaviourProposal> {
     proposals
 }
 
+/// Rule 3: >=3 UserCorrected for same rule id within 7 days.
+fn check_user_correction_clusters(events: &[LearningEvent]) -> Vec<BehaviourProposal> {
+    let cutoff = chrono::Utc::now() - chrono::Duration::days(PROPOSAL_WINDOW_DAYS);
+    let mut rule_counts: HashMap<&str, Vec<&LearningEvent>> = HashMap::new();
+
+    for event in events {
+        if event.event_type != LearningEventType::UserCorrected {
+            continue;
+        }
+        if event.source_artifact_id.is_empty() {
+            continue;
+        }
+        if !is_within_window(event, cutoff) {
+            continue;
+        }
+        rule_counts
+            .entry(event.source_artifact_id.as_str())
+            .or_default()
+            .push(event);
+    }
+
+    rule_counts
+        .into_iter()
+        .filter(|(_, rule_events)| rule_events.len() >= 3)
+        .map(|(rule_id, rule_events)| {
+            let evidence_ids: Vec<String> =
+                rule_events.iter().map(|e| e.event_id.clone()).collect();
+            let correction_count = rule_events.len();
+            BehaviourProposal {
+                proposal_id: format!(
+                    "bp-{}",
+                    uuid::Uuid::new_v4().to_string().replace('-', "")[..12].to_string()
+                ),
+                workspace_id: rule_events[0].workspace_id.clone(),
+                manifest_kind: BehaviourManifestKind::BehaviouralRuleAdjustment,
+                current_version: String::new(),
+                proposed_version: format!(
+                    "v-{}",
+                    uuid::Uuid::new_v4().to_string().replace('-', "")[..8].to_string()
+                ),
+                diff: format!(
+                    "--- BehaviouralRule: {rule_id}\n\
+                     +++ BehaviouralRule: {rule_id}\n\
+                     @@ operator review @@\n\
+                     payload_json: {payload}\n\
+                     Reason: {correction_count} user corrections in {window_days} days clustered on rule {rule_id}",
+                    payload = serde_json::json!({
+                        "rule_id": rule_id,
+                        "correction_count": correction_count,
+                        "window_days": PROPOSAL_WINDOW_DAYS,
+                    }),
+                    window_days = PROPOSAL_WINDOW_DAYS,
+                ),
+                evidence_ids,
+                risk_level: BehaviourManifestKind::BehaviouralRuleAdjustment.default_risk_level(),
+                policy_decision: PolicyDecision::PendingApproval,
+                status: ProposalStatus::Pending,
+                created_at: chrono::Utc::now().to_rfc3339(),
+            }
+        })
+        .collect()
+}
+
+fn is_within_window(event: &LearningEvent, cutoff: chrono::DateTime<chrono::Utc>) -> bool {
+    chrono::DateTime::parse_from_rfc3339(&event.created_at)
+        .map(|ts| ts.with_timezone(&chrono::Utc) >= cutoff)
+        .unwrap_or(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -148,6 +224,20 @@ mod tests {
         event_type: LearningEventType,
         source_id: &str,
         workspace_id: &str,
+    ) -> LearningEvent {
+        make_event_at(
+            event_type,
+            source_id,
+            workspace_id,
+            chrono::Utc::now().to_rfc3339(),
+        )
+    }
+
+    fn make_event_at(
+        event_type: LearningEventType,
+        source_id: &str,
+        workspace_id: &str,
+        created_at: String,
     ) -> LearningEvent {
         LearningEvent {
             event_id: format!("ev-{}", uuid::Uuid::new_v4()),
@@ -158,7 +248,7 @@ mod tests {
             signal: serde_json::json!({}),
             confidence: 0.8,
             provenance_record_id: String::new(),
-            created_at: chrono::Utc::now().to_rfc3339(),
+            created_at,
         }
     }
 
@@ -216,5 +306,89 @@ mod tests {
             proposals[0].manifest_kind,
             BehaviourManifestKind::PipelineGates
         );
+    }
+
+    #[test]
+    fn user_correction_cluster_emits_proposal_at_threshold() {
+        let events = vec![
+            make_event(LearningEventType::UserCorrected, "rule-1", "ws-1"),
+            make_event(LearningEventType::UserCorrected, "rule-1", "ws-1"),
+            make_event(LearningEventType::UserCorrected, "rule-1", "ws-1"),
+        ];
+
+        let proposals = generate_proposals(&events);
+
+        assert_eq!(proposals.len(), 1);
+        assert_eq!(
+            proposals[0].manifest_kind,
+            BehaviourManifestKind::BehaviouralRuleAdjustment
+        );
+        assert_eq!(proposals[0].evidence_ids.len(), 3);
+        assert!(proposals[0].diff.contains("\"rule_id\":\"rule-1\""));
+        assert!(proposals[0].diff.contains("\"correction_count\":3"));
+    }
+
+    #[test]
+    fn user_correction_cluster_below_threshold_emits_nothing() {
+        let events = vec![
+            make_event(LearningEventType::UserCorrected, "rule-1", "ws-1"),
+            make_event(LearningEventType::UserCorrected, "rule-1", "ws-1"),
+        ];
+
+        let proposals = generate_proposals(&events);
+
+        assert!(proposals.is_empty());
+    }
+
+    #[test]
+    fn user_correction_cluster_outside_window_does_not_fire() {
+        let old =
+            (chrono::Utc::now() - chrono::Duration::days(PROPOSAL_WINDOW_DAYS + 1)).to_rfc3339();
+        let events = vec![
+            make_event_at(
+                LearningEventType::UserCorrected,
+                "rule-1",
+                "ws-1",
+                old.clone(),
+            ),
+            make_event_at(
+                LearningEventType::UserCorrected,
+                "rule-1",
+                "ws-1",
+                old.clone(),
+            ),
+            make_event_at(LearningEventType::UserCorrected, "rule-1", "ws-1", old),
+        ];
+
+        let proposals = generate_proposals(&events);
+
+        assert!(proposals.is_empty());
+    }
+
+    #[test]
+    fn user_correction_cluster_separate_rules_do_not_merge() {
+        let events = vec![
+            make_event(LearningEventType::UserCorrected, "rule-a", "ws-1"),
+            make_event(LearningEventType::UserCorrected, "rule-a", "ws-1"),
+            make_event(LearningEventType::UserCorrected, "rule-b", "ws-1"),
+            make_event(LearningEventType::UserCorrected, "rule-b", "ws-1"),
+        ];
+
+        let proposals = generate_proposals(&events);
+
+        assert!(proposals.is_empty());
+    }
+
+    #[test]
+    fn user_correction_cluster_with_empty_rule_id_is_skipped() {
+        let events = vec![
+            make_event(LearningEventType::UserCorrected, "", "ws-1"),
+            make_event(LearningEventType::UserCorrected, "", "ws-1"),
+            make_event(LearningEventType::UserCorrected, "", "ws-1"),
+        ];
+
+        let proposals = generate_proposals(&events);
+
+        assert!(proposals.is_empty());
     }
 }

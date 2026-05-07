@@ -1045,9 +1045,13 @@ pub enum PluginAction {
 /// Subcommands for `archon behaviour`
 #[derive(Subcommand, Debug)]
 pub enum BehaviourAction {
-    /// List behaviour proposals (alias: proposals)
-    #[command(alias = "proposals")]
-    ListProposals,
+    /// List behaviour proposals (aliases: list, proposals)
+    #[command(alias = "list", alias = "proposals")]
+    ListProposals {
+        /// Show only pending proposals
+        #[arg(long)]
+        pending: bool,
+    },
     /// List learning events (optionally filtered by type)
     ListEvents {
         /// Filter by event type (e.g., FalseCompletionDetected, ManifestApplied)

@@ -1841,6 +1841,32 @@ pub(crate) async fn run_interactive_session(
         }
     };
 
+    // Governed-learning event store — shared with `archon behaviour`.
+    let governed_learning_db: Option<Arc<cozo::DbInstance>> = {
+        let session_db = archon_session::storage::default_db_path();
+        let db_path = session_db
+            .parent()
+            .map(|parent| parent.join("learning.db"))
+            .unwrap_or_else(|| working_dir.join(".archon").join("learning.db"));
+        if let Some(parent) = db_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        match cozo::DbInstance::new("sqlite", &db_path, "") {
+            Ok(db) => {
+                if let Err(e) = archon_learning::schema::ensure_learning_schema(&db) {
+                    tracing::warn!(error = %e, "governed learning schema init failed; correction events disabled");
+                    None
+                } else {
+                    Some(Arc::new(db))
+                }
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "governed learning store unavailable; correction events disabled");
+                None
+            }
+        }
+    };
+
     // Construct pipeline facades + LLM adapter once at bootstrap for
     // TUI /archon-code and /archon-research commands per Deliverable 3.
     let coding_pipeline: Arc<archon_pipeline::coding::facade::CodingFacade> =
@@ -2015,6 +2041,22 @@ pub(crate) async fn run_interactive_session(
         let at_corr = Arc::clone(at);
         let corr_cb: Arc<dyn Fn() + Send + Sync> = Arc::new(move || at_corr.record_correction());
         agent.set_record_correction_callback(corr_cb);
+    }
+
+    if let Some(ref db) = governed_learning_db {
+        let correction_learning = Arc::new(
+            archon_pipeline::learning::integration::LearningIntegration::new(
+                None,
+                None,
+                Default::default(),
+                auto_trainer.clone(),
+            )
+            .with_event_store(Arc::clone(db)),
+        );
+        let correction_cb: Arc<
+            dyn Fn(archon_core::agent::UserCorrectionEventPayload) + Send + Sync,
+        > = Arc::new(move |payload| correction_learning.record_user_correction_event(payload));
+        agent.set_record_user_correction_event_callback(correction_cb);
     }
 
     // Wire inner voice if enabled in config. The state is injected into

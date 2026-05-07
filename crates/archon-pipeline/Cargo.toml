@@ -24,6 +24,7 @@ archon-memory = { path = "../archon-memory" }
 archon-leann = { path = "../archon-leann" }
 archon-llm = { path = "../archon-llm" }
 archon-core = { path = "../archon-core" }
+archon-learning = { path = "../archon-learning" }
 archon-observability = { path = "../archon-observability" }
 cel-interpreter.workspace = true
 petgraph.workspace = true

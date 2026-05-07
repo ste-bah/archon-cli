@@ -6,6 +6,9 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use archon_core::agent::UserCorrectionEventPayload;
+use cozo::DbInstance;
+
 use super::gnn::auto_trainer::AutoTrainer;
 use super::reasoning::{ReasoningBank, ReasoningRequest, ReasoningResponse};
 use super::sona::{FeedbackInput, SonaEngine, Trajectory};
@@ -70,6 +73,8 @@ pub struct LearningIntegration {
     /// GNN auto-trainer hooks (PR 3 v0.1.26). Incremented on memory store and
     /// correction events so the background task can trigger retraining.
     auto_trainer: Option<Arc<AutoTrainer>>,
+    /// Governed-learning store used for LearningEvent emission.
+    event_store: Option<Arc<DbInstance>>,
 }
 
 impl LearningIntegration {
@@ -87,7 +92,14 @@ impl LearningIntegration {
             active_trajectories: HashMap::new(),
             session_id: uuid::Uuid::new_v4().to_string(),
             auto_trainer,
+            event_store: None,
         }
+    }
+
+    /// Attach the governed-learning event store used for LearningEvent writes.
+    pub fn with_event_store(mut self, event_store: Arc<DbInstance>) -> Self {
+        self.event_store = Some(event_store);
+        self
     }
 
     /// Called when an agent starts execution.
@@ -210,6 +222,86 @@ impl LearningIntegration {
     pub fn on_correction_recorded(&self) {
         if let Some(ref at) = self.auto_trainer {
             at.record_correction();
+        }
+    }
+
+    /// Emit a UserCorrected LearningEvent into the governed-learning store.
+    ///
+    /// Called by the agent loop after the inner voice and behavioural-rule
+    /// reinforcement paths have already run, so `top_rule_id` reflects the
+    /// rule context used for aggregation.
+    pub fn record_user_correction_event(&self, payload: UserCorrectionEventPayload) {
+        let Some(ref store) = self.event_store else {
+            return;
+        };
+
+        let rule_id = payload.top_rule_id.unwrap_or_default();
+        let signal = serde_json::json!({
+            "correction_type": payload.correction_type,
+            "user_input_excerpt": payload.user_input_excerpt,
+        });
+
+        match archon_learning::events::record_event(
+            store.as_ref(),
+            &payload.session_context,
+            archon_learning::models::LearningEventType::UserCorrected,
+            &rule_id,
+            None,
+            signal,
+            1.0,
+            "",
+        ) {
+            Ok(_) => self.persist_user_correction_proposals(store.as_ref(), &rule_id),
+            Err(e) => tracing::warn!("record_user_correction_event failed: {e}"),
+        }
+    }
+
+    fn persist_user_correction_proposals(&self, store: &DbInstance, rule_id: &str) {
+        if rule_id.is_empty() {
+            return;
+        }
+
+        let rule_marker = format!(
+            "\"rule_id\":{}",
+            serde_json::to_string(rule_id).unwrap_or_else(|_| "\"\"".into())
+        );
+
+        let existing = match archon_learning::store::list_behaviour_proposals(store, None) {
+            Ok(existing) => existing,
+            Err(e) => {
+                tracing::warn!("record_user_correction_event proposal lookup failed: {e}");
+                return;
+            }
+        };
+        if existing.iter().any(|proposal| {
+            proposal.manifest_kind
+                == archon_learning::models::BehaviourManifestKind::BehaviouralRuleAdjustment
+                && proposal.diff.contains(&rule_marker)
+        }) {
+            return;
+        }
+
+        let events = match archon_learning::store::list_all_learning_events(store) {
+            Ok(events) => events,
+            Err(e) => {
+                tracing::warn!("record_user_correction_event event scan failed: {e}");
+                return;
+            }
+        };
+
+        for proposal in archon_learning::proposal::generate_proposals(&events) {
+            if proposal.manifest_kind
+                != archon_learning::models::BehaviourManifestKind::BehaviouralRuleAdjustment
+                || !proposal.diff.contains(&rule_marker)
+            {
+                continue;
+            }
+            if let Err(e) = archon_learning::store::insert_behaviour_proposal(store, &proposal) {
+                tracing::warn!(
+                    proposal_id = %proposal.proposal_id,
+                    "record_user_correction_event proposal persist failed: {e}"
+                );
+            }
         }
     }
 
@@ -517,6 +609,59 @@ mod tests {
 
         // Should not panic
         integration.on_agent_complete("test-agent", 0.95, "completed successfully");
+    }
+
+    fn test_event_db() -> Arc<DbInstance> {
+        let path = format!(
+            "/tmp/test-user-correction-event-{}.db",
+            uuid::Uuid::new_v4()
+        );
+        let db = DbInstance::new("sqlite", &path, "").unwrap();
+        archon_learning::schema::ensure_learning_schema(&db).unwrap();
+        Arc::new(db)
+    }
+
+    #[test]
+    fn record_user_correction_event_writes_to_store() {
+        let db = test_event_db();
+        let integration =
+            LearningIntegration::new(None, None, LearningIntegrationConfig::default(), None)
+                .with_event_store(Arc::clone(&db));
+
+        integration.record_user_correction_event(UserCorrectionEventPayload {
+            correction_type: "ApproachCorrection".into(),
+            top_rule_id: Some("rule-123".into()),
+            user_input_excerpt: "use this instead".into(),
+            session_context: "turn:7".into(),
+        });
+
+        let events = archon_learning::store::list_all_learning_events(db.as_ref()).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(
+            events[0].event_type,
+            archon_learning::models::LearningEventType::UserCorrected
+        );
+        assert_eq!(events[0].source_artifact_id, "rule-123");
+        assert_eq!(events[0].workspace_id, "turn:7");
+        assert_eq!(events[0].signal["correction_type"], "ApproachCorrection");
+        assert_eq!(events[0].signal["user_input_excerpt"], "use this instead");
+
+        let proposals =
+            archon_learning::store::list_behaviour_proposals(db.as_ref(), Some("Pending")).unwrap();
+        assert!(proposals.is_empty());
+    }
+
+    #[test]
+    fn record_user_correction_event_skips_when_store_absent() {
+        let integration =
+            LearningIntegration::new(None, None, LearningIntegrationConfig::default(), None);
+
+        integration.record_user_correction_event(UserCorrectionEventPayload {
+            correction_type: "ApproachCorrection".into(),
+            top_rule_id: Some("rule-123".into()),
+            user_input_excerpt: "use this instead".into(),
+            session_context: "turn:7".into(),
+        });
     }
 
     #[test]
