@@ -152,7 +152,6 @@ src/command/parser.rs
 src/command/pipeline.rs
 src/command/permissions.rs
 src/command/recall.rs
-src/command/registry.rs
 src/command/rules.rs
 src/command/test_support.rs
 

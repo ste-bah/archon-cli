@@ -68,6 +68,16 @@ Active oversized allowlist entries: 99
 
 Group 3 removed `crates/archon-core/src/subagent_executor.rs` from the active allowlist by splitting it from 939 lines to a 286-line trait shell plus focused `subagent_executor/*` modules. Group 3 is complete.
 
+After Group 5 `src/command/registry.rs` split:
+
+```text
+FileSizeGuard: 1342 files checked, 0 over 500, 98 allowlisted
+Raw non-comment allowlist entries: 98
+Active oversized allowlist entries: 98
+```
+
+Group 5 removed `src/command/registry.rs` from the active allowlist by splitting it from 3167 lines to a 19-line compatibility shell plus focused `command/registry/*` modules. Remaining Group 5 target is `src/cli_args.rs`.
+
 ## Commands
 
 Regenerate the guard summary:
