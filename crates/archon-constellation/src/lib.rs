@@ -1,5 +1,6 @@
 //! Constellation profiles built from accepted meaning samples.
 
+pub mod bootstrap;
 pub mod centroid_builder;
 pub mod drift_detector;
 pub mod errors;
@@ -12,7 +13,10 @@ use cozo::DbInstance;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-pub use drift_detector::{DriftReport, detect_drift};
+pub use bootstrap::{BootstrapSource, MIN_BOOTSTRAP_TEXTS, bootstrap_centroid};
+pub use drift_detector::{
+    DriftReport, DriftStatus, detect_drift, detect_drift_with_bootstrap_source,
+};
 pub use errors::{ConstellationError, Result};
 pub use score::{ScoreResult, score_text};
 pub use store::{ConstellationCentroid, list_centroids};
@@ -92,10 +96,18 @@ pub fn target_positive_samples(db: &DbInstance, target: &str) -> Result<Vec<Mean
 }
 
 pub fn validate_target(target: &str) -> Result<&str> {
-    match target {
-        "project" | "research-domain" | "strategic-workflow" => Ok(target),
-        other => Err(ConstellationError::InvalidTarget(other.to_string())),
+    if is_known_target(target) {
+        Ok(target)
+    } else {
+        Err(ConstellationError::InvalidTarget(target.to_string()))
     }
+}
+
+pub(crate) fn is_known_target(target: &str) -> bool {
+    matches!(
+        target,
+        "project" | "research-domain" | "strategic-workflow" | "memory" | "docs" | "session"
+    )
 }
 
 pub fn stable_id(prefix: &str, parts: &[&str]) -> String {

@@ -48,6 +48,12 @@ pub async fn handle_constellation_command(action: ConstellationAction) -> Result
             text,
             threshold,
         } => drift(&db, &target, answer, text, threshold),
+        ConstellationAction::Bootstrap {
+            target,
+            limit,
+            session,
+            inline_file,
+        } => bootstrap(&db, &target, limit, session, inline_file),
         ConstellationAction::List => list(&db),
     }
 }
@@ -96,12 +102,67 @@ fn drift(
     let input = read_input(answer, text)?;
     let report = archon_constellation::detect_drift(db, target, &input, threshold)?;
     println!("Target: {}", report.target);
-    println!("Centroid: {}", report.centroid_id);
-    println!("Version: {}", report.version);
-    println!("Similarity: {:.4}", report.similarity);
+    println!("Status: {:?}", report.status);
+    if report.status == archon_constellation::DriftStatus::Ready {
+        println!("Centroid: {}", report.centroid_id);
+        println!("Version: {}", report.version);
+        println!("Similarity: {:.4}", report.similarity);
+    }
     println!("Threshold: {:.4}", report.threshold);
     println!("Drifted: {}", report.drifted);
     println!("Reason: {}", report.reason);
+    Ok(())
+}
+
+fn bootstrap(
+    db: &DbInstance,
+    target: &str,
+    limit: usize,
+    session: Option<String>,
+    inline_file: Option<PathBuf>,
+) -> Result<()> {
+    let inline_texts;
+    let source = if let Some(path) = inline_file {
+        inline_texts = read_inline_texts(path)?;
+        archon_constellation::BootstrapSource::Inline(&inline_texts)
+    } else {
+        match target {
+            "memory" => archon_constellation::BootstrapSource::RecentMemories { db, limit },
+            "docs" => archon_constellation::BootstrapSource::RecentDocChunks { db, limit },
+            "session" => {
+                let session_id = session
+                    .as_deref()
+                    .ok_or_else(|| anyhow::anyhow!("--target session requires --session <id>"))?;
+                archon_constellation::BootstrapSource::SessionTranscript {
+                    db,
+                    session_id,
+                    limit,
+                }
+            }
+            other => anyhow::bail!(
+                "unknown bootstrap target `{other}` (expected memory, docs, or session)"
+            ),
+        }
+    };
+
+    let centroid = archon_constellation::bootstrap_centroid(db, target, source)?;
+    println!("Constellation bootstrap complete");
+    println!("Target: {target}");
+    match centroid {
+        Some(centroid) => {
+            println!("Centroid: {}", centroid.centroid_id);
+            println!("Version: {}", centroid.version);
+            println!("Samples used: {}", centroid.sample_count);
+            println!("Source: {}", centroid.source_relation);
+        }
+        None => {
+            println!("Centroid: none");
+            println!(
+                "Reason: fewer than {} representative texts",
+                archon_constellation::MIN_BOOTSTRAP_TEXTS
+            );
+        }
+    }
     Ok(())
 }
 
@@ -131,6 +192,16 @@ fn read_input(answer: Option<PathBuf>, text: Option<String>) -> Result<String> {
         return Ok(value);
     }
     anyhow::bail!("provide --answer <file> or --text <text>")
+}
+
+fn read_inline_texts(path: PathBuf) -> Result<Vec<String>> {
+    let content = fs::read_to_string(path)?;
+    Ok(content
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(ToString::to_string)
+        .collect())
 }
 
 #[cfg(test)]

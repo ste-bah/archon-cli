@@ -24,6 +24,7 @@ use crate::learning::gnn::auto_trainer::{AutoTrainer, AutoTrainerConfig};
 use crate::learning::gnn::cache::CacheConfig;
 use crate::learning::gnn::loss::TrajectoryWithFeedback;
 use crate::learning::gnn::trainer::TrainingConfig;
+use crate::learning::gnn::triplets_loss::TripletBatch;
 use crate::learning::gnn::weights::WeightStore;
 use crate::learning::gnn::{GnnConfig, GnnEnhancer};
 
@@ -174,13 +175,36 @@ pub fn build_and_spawn_auto_trainer(
             }
         },
     );
+    let db_for_triplets = Arc::clone(&db);
+    let triplet_provider: Arc<dyn Fn() -> TripletBatch + Send + Sync> = Arc::new(move || {
+        let total = archon_meaning::list_triplets(&db_for_triplets)
+            .map(|triplets| triplets.len())
+            .unwrap_or(0);
+        match archon_meaning::list_hydrated_triplets(&db_for_triplets, 256) {
+            Ok(triplets) => {
+                if total > triplets.len() {
+                    tracing::warn!(
+                        reason = "hydrate_failed",
+                        count = total - triplets.len(),
+                        "auto_trainer.triplet_skip"
+                    );
+                }
+                TripletBatch { triplets }
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "auto_trainer.triplet_load_failed");
+                TripletBatch::default()
+            }
+        }
+    });
 
     let at = Arc::new(AutoTrainer::new(params.at_config));
-    at.spawn(
+    at.spawn_with_triplet_provider(
         enhancer,
         trainer_weights,
         params.training_config,
         sample_provider,
+        triplet_provider,
     );
     Some(at)
 }

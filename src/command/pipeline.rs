@@ -565,6 +565,7 @@ fn build_pipeline_auto_trainer(
             validation_split: train_cfg.validation_split,
             ewc_lambda: train_cfg.ewc_lambda,
             margin: train_cfg.margin,
+            triplet_loss_coefficient: train_cfg.triplet_loss_coefficient,
             max_gradient_norm: train_cfg.max_gradient_norm,
             max_triplets_per_run: train_cfg.max_triplets_per_run,
             max_runtime_ms: train_cfg.max_runtime_ms,

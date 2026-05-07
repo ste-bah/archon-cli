@@ -1,4 +1,4 @@
-//! CodingFacade — [`PipelineFacade`] implementation for the 48-agent coding
+//! CodingFacade — [`PipelineFacade`] implementation for the 50-agent coding
 //! pipeline with 11-layer prompt augmentation.
 //!
 //! Layers L1-L10 are assembled per-agent, then L11 (prompt_cap) enforces the
@@ -78,7 +78,7 @@ fn find_coding_agent(key: &str) -> Option<&'static CodingAgent> {
 // CodingFacade
 // ---------------------------------------------------------------------------
 
-/// Facade implementing the coding pipeline's 48-agent sequence with 11-layer
+/// Facade implementing the coding pipeline's 50-agent sequence with 11-layer
 /// prompt augmentation.
 pub struct CodingFacade {
     quality_calculator: CodingQualityCalculator,

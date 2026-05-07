@@ -125,7 +125,15 @@ pub(crate) const COMMAND_SURFACE_ROWS: &[CommandSurfaceRow] = &[
         tui_surface: "CLI mirror",
         status: SurfaceStatus::Done,
         source_of_truth: "src/command/registry.rs",
-        notes: "Centroid build, score, drift, and list commands are mirrored.",
+        notes: "Centroid build, bootstrap, score, drift, and list commands are mirrored.",
+    },
+    CommandSurfaceRow {
+        cli: "archon learning ...",
+        slash_primary: Some("learning"),
+        tui_surface: "Direct slash handler",
+        status: SurfaceStatus::Done,
+        source_of_truth: "src/command/evidence_view.rs",
+        notes: "Learning view plus GNN auto-trainer status diagnostics.",
     },
     CommandSurfaceRow {
         cli: "archon pipeline ...",

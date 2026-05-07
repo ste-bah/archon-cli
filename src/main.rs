@@ -225,6 +225,9 @@ async fn main() -> Result<()> {
             use crate::command::behaviour::handle_behaviour_command;
             return handle_behaviour_command(&action, &config).await;
         }
+        Some(Commands::Learning { action }) => {
+            return crate::command::learning::handle_learning_command(action, &config).await;
+        }
         Some(Commands::Pipeline { action }) => {
             use crate::command::pipeline::handle_pipeline_command;
             return handle_pipeline_command(&action, &config, &env_vars).await;

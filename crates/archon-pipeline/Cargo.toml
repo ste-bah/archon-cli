@@ -25,6 +25,7 @@ archon-leann = { path = "../archon-leann" }
 archon-llm = { path = "../archon-llm" }
 archon-core = { path = "../archon-core" }
 archon-learning = { path = "../archon-learning" }
+archon-meaning = { path = "../archon-meaning" }
 archon-observability = { path = "../archon-observability" }
 cel-interpreter.workspace = true
 petgraph.workspace = true
@@ -41,3 +42,4 @@ cozo.workspace = true
 async-trait.workspace = true
 futures-util.workspace = true
 chrono.workspace = true
+tracing-test.workspace = true

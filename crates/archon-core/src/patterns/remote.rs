@@ -398,16 +398,26 @@ mod tests {
 
     #[tokio::test]
     async fn test_remote_http_unreachable_returns_remote_unreachable() {
-        // Point at a port that is almost certainly not listening.
-        let config = make_config("http://127.0.0.1:1");
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            if let Ok((socket, _peer)) = listener.accept().await {
+                drop(socket);
+            }
+        });
+
+        let config = make_config(&format!("http://{addr}"));
         let pattern =
             RemoteAgentPattern::new(reqwest::Client::new(), config, None, Duration::from_secs(5));
 
         let err = pattern.execute(json!({}), make_ctx()).await.unwrap_err();
+        let _ = server.await;
 
         assert!(
             matches!(err, PatternError::RemoteUnreachable { .. }),
-            "connection refused should be RemoteUnreachable: {err}"
+            "dropped remote connection should be RemoteUnreachable: {err}"
         );
     }
 

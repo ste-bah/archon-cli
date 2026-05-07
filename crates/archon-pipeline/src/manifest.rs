@@ -162,7 +162,7 @@ mod tests {
 [pipeline]
 name = "coding"
 version = "1.0"
-description = "48-agent coding pipeline"
+description = "50-agent coding pipeline"
 default_model = "sonnet"
 context_window = 200000
 
@@ -206,7 +206,7 @@ critical = true
         assert_eq!(manifest.pipeline.version, "1.0");
         assert_eq!(
             manifest.pipeline.description.as_deref(),
-            Some("48-agent coding pipeline")
+            Some("50-agent coding pipeline")
         );
         assert_eq!(manifest.pipeline.default_model.as_deref(), Some("sonnet"));
         assert_eq!(manifest.pipeline.context_window, Some(200_000));

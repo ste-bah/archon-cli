@@ -1,6 +1,6 @@
 # Running the coding pipeline (`/archon-code`)
 
-End-to-end walkthrough of the 48-agent coding pipeline. The TUI primary is `/archon-code` — equivalent to the shell command `archon pipeline code <task>`. Both forms drive the same pipeline machinery; the slash form just runs through the in-session command dispatcher.
+End-to-end walkthrough of the 50-agent coding pipeline. The TUI primary is `/archon-code` — equivalent to the shell command `archon pipeline code <task>`. Both forms drive the same pipeline machinery; the slash form just runs through the in-session command dispatcher.
 
 > **TUI parity.** Every `archon X` shell command in this doc has a `/X` slash equivalent inside the interactive TUI. See [CLI and TUI Command Parity](real-world-evidence-engine.md#cli-and-tui-command-parity).
 
@@ -146,7 +146,7 @@ Cleans up partial state, preserves the ledger for forensic review.
 
 ## Cost expectations
 
-Full 48-agent pipeline on a moderate task (e.g., new feature spanning 3 crates):
+Full 50-agent pipeline on a moderate task (e.g., new feature spanning 3 crates):
 - ~150-300k input tokens (heavy due to L0-L3 layered context)
 - ~20-50k output tokens
 - Sonnet 4.6: $5-15
@@ -159,10 +159,10 @@ archon pipeline code "..." --max-budget-usd 20
 
 ## Customizing
 
-The pipeline reads its agent definitions from `crates/archon-pipeline/src/agents/coding/*.md` plus TOML manifests. Override per-project:
+The pipeline's canonical agent list is `crates/archon-pipeline/src/coding/agents.rs::AGENTS`; each entry points at a prompt file under `.archon/agents/coding-pipeline/`. Override a prompt per project with the same path:
 
 ```
-<workdir>/.archon/agents/coding/code-quality-improver.md
+<workdir>/.archon/agents/coding-pipeline/code-quality-improver.md
 ```
 
 A project-local agent definition takes precedence over the built-in.

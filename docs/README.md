@@ -14,7 +14,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 
 - [Overview](architecture/overview.md) — workspace crates, request lifecycle, data flow
 - [Learning systems](architecture/learning-systems.md) — SONA, ReasoningBank (12 modes), GNN, CausalMemory, Provenance, DESC, Reflexion, AutoCapture
-- [Pipelines](architecture/pipelines.md) — `/archon-code` (48 agents), `/archon-research` (46 agents), agent loop, subagent spawning, multi-agent teams
+- [Pipelines](architecture/pipelines.md) — `/archon-code` (50 agents), `/archon-research` (46 agents), agent loop, subagent spawning, multi-agent teams
 - [Evidence Engine](evidence-engine.md) — documents, knowledge, provenance, game theory, completion integrity, governed learning, meaning, constellations
 
 ## Evidence Engine
@@ -29,7 +29,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 
 ## Reference
 
-- [Slash commands](reference/slash-commands.md) — 65 primary commands grouped by purpose
+- [Slash commands](reference/slash-commands.md) — 78 primary commands grouped by purpose
 - [Tools](reference/tools.md) — 43 built-in tools available to agents
 - [Skills](reference/skills.md) — 68 built-in skills (composable command sequences)
 - [Permissions](reference/permissions.md) — 7 permission modes, rule lists, sandboxing
@@ -54,7 +54,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 - [Strategic engagement research](cookbook/strategic-engagement.md) — 22-document intelligence package workflow
 - [Real-world Evidence Engine examples](cookbook/real-world-evidence-engine.md) — research, education, business, trading, coding, and strategic analysis workflows
 - [Memory-driven coding](cookbook/memory-driven-coding.md) — using SONA + ReasoningBank to inform decisions
-- [Coding pipeline (`/archon-code`)](cookbook/god-code-pipeline.md) — 48-agent coding workflow end-to-end inside the TUI
+- [Coding pipeline (`/archon-code`)](cookbook/god-code-pipeline.md) — 50-agent coding workflow end-to-end inside the TUI
 - [Research pipeline (`/archon-research`)](cookbook/archon-research-pipeline.md) — 46-agent PhD research workflow end-to-end inside the TUI
 - [Game-theory pipeline (`/gametheory`)](cookbook/gametheory-pipeline.md) — Tier 1 classify → route → specialists → report end-to-end inside the TUI
 - [Trading and asset analysis with `/gametheory`](cookbook/trading-with-gametheory.md) — applying the game-theory pipeline to pre-trade assessment, post-event decomposition, counterparty analysis, strategy-viability tests, and macro reaction-function modelling
@@ -85,6 +85,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 
 ## Release notes
 
+- [v0.1.52](release-notes/v0.1.52.md) — Learning systems completion
 - [v0.1.51](release-notes/v0.1.51.md) — Corrections feed behavioural-rule proposals
 - [v0.1.50](release-notes/v0.1.50.md) — VS Code extension install fix
 - [v0.1.49](release-notes/v0.1.49.md) — TUI drain-stall false positive fix

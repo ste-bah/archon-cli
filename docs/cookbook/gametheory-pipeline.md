@@ -425,7 +425,7 @@ These tools call the same persisted machinery as the slash and CLI surfaces — 
 ## See also
 
 - [Game theory reference](../gametheory.md) — full CLI surface, slash table, source-of-truth relations
-- [Coding pipeline (`/archon-code`)](god-code-pipeline.md) — sibling 48-agent pipeline for code
+- [Coding pipeline (`/archon-code`)](god-code-pipeline.md) — sibling 50-agent pipeline for code
 - [Research pipeline (`/archon-research`)](archon-research-pipeline.md) — sibling 46-agent pipeline for research prose
 - [Real-world Evidence Engine](real-world-evidence-engine.md) — composing docs + KB + gametheory + provenance
 - [Trading and asset analysis with `/gametheory`](trading-with-gametheory.md) — applying the pipeline to pre-trade assessment, post-event decomposition, counterparty analysis, strategy-viability tests, macro reaction functions

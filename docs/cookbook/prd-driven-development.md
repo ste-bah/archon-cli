@@ -13,7 +13,7 @@ The full PRD-to-code pipeline: from a feature description to a running implement
 | 1. Generate PRD | `/to-prd "feature description"` | `prds/<slug>/PRD.md` |
 | 2. Spec from PRD | `/prd-to-spec prds/<slug>/PRD.md` | `tasks/INDEX.md` + per-phase task files |
 | 3. Refine tasks | `/spec-to-tasks` | Atomic, dev-flow-ready task files |
-| 4. Implement | `/archon-code` | 48-agent pipeline execution |
+| 4. Implement | `/archon-code` | 50-agent pipeline execution |
 
 ## Fast path
 
@@ -53,7 +53,7 @@ Refines the task tree for dev-flow readiness:
 
 ### 4. `/archon-code`
 
-Runs the 48-agent implementation pipeline against the refined task tree. Each task gets:
+Runs the 50-agent implementation pipeline against the refined task tree. Each task gets:
 - Test-first implementation
 - Sherlock adversarial review (Gate 3 + 6)
 - Live smoke test (Gate 5)
@@ -176,7 +176,7 @@ Runs steps 1–3 back-to-back. Stops before `/archon-code` so you can still insp
 > /archon-code
 ```
 
-Picks up the refined `tasks/` tree. Each task triggers a 48-agent run with:
+Picks up the refined `tasks/` tree. Each task triggers a 50-agent run with:
 - 6 dev-flow gates per task (tests-written-first → implementation → sherlock review → tests-passing → live smoke → final sherlock)
 - Phase reviewers (Phases 1-6) gate progression
 - Sherlock adversarial review at Gate 3 and Gate 6 — Sherlock independently re-reads the diff, treats it as guilty until proven innocent

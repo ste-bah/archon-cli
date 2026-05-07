@@ -489,6 +489,8 @@ archon meaning build --from learning-events
 archon meaning build --from gametheory-runs
 archon meaning triplets
 
+archon learning gnn status
+archon constellation bootstrap --target memory
 archon constellation build --target strategic-workflow
 archon constellation score --target strategic-workflow --text "new strategic workflow description"
 archon constellation drift --target strategic-workflow --text "changed workflow description"
@@ -503,6 +505,8 @@ TUI equivalent:
 /meaning build --from learning-events
 /meaning build --from gametheory-runs
 /meaning triplets
+/learning gnn status
+/constellation bootstrap --target memory
 /constellation build --target strategic-workflow
 /constellation score --target strategic-workflow --text "new strategic workflow description"
 /constellation drift --target strategic-workflow --text "changed workflow description"

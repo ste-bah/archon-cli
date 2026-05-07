@@ -72,6 +72,20 @@ impl CommandHandler for DocsViewHandler {
 impl CommandHandler for LearningViewHandler {
     fn execute(&self, ctx: &mut CommandContext, args: &[String]) -> Result<()> {
         if matches!(
+            args.iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>()
+                .as_slice(),
+            ["gnn", "status"]
+        ) {
+            let config = archon_core::config::load_config().unwrap_or_default();
+            let live = ctx.auto_trainer.as_ref().map(|at| at.status());
+            return emit(
+                ctx,
+                crate::command::learning::gnn::render_gnn_status(&config, live.as_ref()),
+            );
+        }
+        if matches!(
             args.first().map(String::as_str),
             None | Some("open" | "view")
         ) {
@@ -86,7 +100,7 @@ impl CommandHandler for LearningViewHandler {
             return Ok(());
         }
         ctx.emit(TuiEvent::TextDelta(
-            "Usage: /learning [open|view]\nOpens the governed-learning TUI browser.".into(),
+            "Usage: /learning [open|view] | /learning gnn status\nOpens the governed-learning TUI browser or reports GNN auto-trainer status.".into(),
         ));
         Ok(())
     }

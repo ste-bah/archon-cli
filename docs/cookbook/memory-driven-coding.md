@@ -93,9 +93,10 @@ The GNN trains itself in the background while you work:
 
 | Trigger | Threshold |
 |---|---|
-| Memory threshold | 50 new memories since last run |
+| First run | 30 memories or 3 corrections before any prior run |
+| Memory threshold | 20 new memories since last run |
 | Time elapsed | 6 hours since last run |
-| Corrections | 5 user corrections since last run |
+| Corrections | 3 user corrections since last run |
 
 Throttled at 1 hour minimum between runs, 5 minutes max per run. Status:
 
@@ -104,6 +105,11 @@ Throttled at 1 hour minimum between runs, 5 minutes max per run. Status:
 ```
 
 Output includes the GNN section: weight version, last run, next eligible time, total runs, total rollbacks.
+
+For a focused auto-trainer diagnostic view:
+```
+/learning gnn status
+```
 
 ## Manual retrain
 

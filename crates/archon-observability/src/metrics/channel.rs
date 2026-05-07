@@ -6,12 +6,26 @@
 //! `metrics/mod.rs` — downstream callers keep writing
 //! `archon_observability::metrics::ChannelMetrics`, etc.
 
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use hdrhistogram::Histogram;
 use parking_lot::Mutex;
 
 use super::ChannelMetricSink;
+
+fn monotonic_unix_ms() -> u64 {
+    static CLOCK_ANCHOR: OnceLock<(u64, Instant)> = OnceLock::new();
+    let (start_unix_ms, start_instant) = CLOCK_ANCHOR.get_or_init(|| {
+        let unix_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        (unix_ms, Instant::now())
+    });
+    start_unix_ms.saturating_add(start_instant.elapsed().as_millis() as u64)
+}
 
 /// Channel instrumentation metrics.
 ///
@@ -120,10 +134,7 @@ impl ChannelMetrics {
         if backlog <= threshold {
             return false;
         }
-        let now_ms = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis() as u64)
-            .unwrap_or(0);
+        let now_ms = monotonic_unix_ms();
         let last = self.last_warn_unix_ms.load(Ordering::Relaxed);
         if now_ms.saturating_sub(last) < 1000 {
             return false;

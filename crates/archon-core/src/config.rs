@@ -687,6 +687,7 @@ pub struct GnnTrainingConfig {
     pub validation_split: f32,
     pub ewc_lambda: f32,
     pub margin: f32,
+    pub triplet_loss_coefficient: f32,
     pub max_gradient_norm: f32,
     pub max_triplets_per_run: usize,
     pub max_runtime_ms: u64,
@@ -702,6 +703,7 @@ impl Default for GnnTrainingConfig {
             validation_split: 0.2,
             ewc_lambda: 0.1,
             margin: 0.5,
+            triplet_loss_coefficient: 0.1,
             max_gradient_norm: 1.0,
             max_triplets_per_run: 256,
             max_runtime_ms: 300_000,
@@ -736,12 +738,12 @@ pub struct GnnAutoTrainerConfig {
 impl Default for GnnAutoTrainerConfig {
     fn default() -> Self {
         Self {
-            enabled: false,
+            enabled: true,
             min_throttle_ms: 3_600_000,
-            trigger_new_memories: 50,
+            trigger_new_memories: 20,
             trigger_elapsed_ms: 21_600_000,
-            trigger_corrections: 5,
-            first_run_threshold: 100,
+            trigger_corrections: 3,
+            first_run_threshold: 30,
             max_runtime_ms: 300_000,
             tick_interval_ms: 60_000,
         }

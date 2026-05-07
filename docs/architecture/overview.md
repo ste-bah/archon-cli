@@ -19,7 +19,7 @@ graph TB
         subgraph mid["Data & API Layer"]
             SESSION["archon-session<br/>(CozoDB)"]
             MEMORY["archon-memory<br/>(CozoDB graph + embeddings)"]
-            LLM["archon-llm<br/>(Claude API proxy)"]
+            LLM["archon-llm<br/>(provider clients + identity)"]
         end
         subgraph bottom["Integration Layer"]
             MCP["archon-mcp<br/>(stdio / ws / http-stream)"]
@@ -92,7 +92,7 @@ graph TB
 | `archon-consciousness` | Inner voice, rule engine, personality persistence |
 | `archon-session` | Per-session checkpoint store (CozoDB) |
 | `archon-memory` | Memory graph with embeddings (CozoDB) |
-| `archon-llm` | Claude API client + identity spoofing |
+| `archon-llm` | Anthropic, Codex, native/provider-compatible clients + identity spoofing |
 | `archon-tools` | Built-in tools, including Evidence Engine and game-theory tools |
 | `archon-permissions` | 7 permission modes + rule lists + sandboxing |
 | `archon-mcp` | Model Context Protocol transport |
@@ -149,7 +149,7 @@ When you send a message in the TUI:
    - Relevant memories from memory graph (semantic search)
    - Active rules from consciousness layer
    - System prompt (with identity spoofing layer if enabled)
-4. **LLM client** sends the request to Anthropic API (or proxy).
+4. **LLM client** sends the request to the active provider: Anthropic, Codex, a native provider, or a compatible proxy.
 5. Response streams back; tool calls are dispatched to the tools registry.
 6. Each tool call passes through **permissions** before execution.
 7. Tool results feed back into the agent loop until the model returns a final assistant message.

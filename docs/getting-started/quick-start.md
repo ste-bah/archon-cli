@@ -5,7 +5,7 @@
 ## Prerequisites
 
 - Rust 1.85+ (edition 2024)
-- Either an Anthropic API key OR an active Claude.ai subscription
+- Either an Anthropic API key, an active Claude.ai subscription, or Codex OAuth with `[llm].provider = "openai-codex"`
 
 If you don't have Rust:
 ```bash
@@ -44,8 +44,11 @@ Pick one:
 # Option A: API key
 export ANTHROPIC_API_KEY="sk-ant-..."
 
-# Option B: OAuth (Claude subscriber)
-./target/release/archon login
+# Option B: Anthropic OAuth (Claude subscriber)
+./target/release/archon auth login --provider anthropic
+
+# Option C: Codex OAuth (ChatGPT/Codex subscriber)
+./target/release/archon auth login --provider openai-codex
 ```
 
 ## First run
@@ -69,5 +72,5 @@ If you see structured JSON output with content from your `Cargo.toml`, the insta
 
 - [Installation](installation.md) — full build details for every OS, OS-specific dependencies, common build problems
 - [First run](first-run.md) — what data archon writes to disk, where logs go, common gotchas
-- [Slash commands reference](../reference/slash-commands.md) — the 65 primary commands
+- [Slash commands reference](../reference/slash-commands.md) — the 78 primary commands
 - [Cookbook](../cookbook/) — task-oriented walkthroughs

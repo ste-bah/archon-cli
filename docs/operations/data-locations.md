@@ -6,9 +6,9 @@ Where archon-cli writes everything.
 
 | Linux/macOS | Windows | Purpose |
 |---|---|---|
+| `~/.archon/.credentials.json` | `%USERPROFILE%\.archon\.credentials.json` | Provider credentials (Anthropic, Codex, Gemini) |
 | `~/.config/archon/` | `%APPDATA%\archon\` | Configuration |
 | `~/.config/archon/config.toml` | `%APPDATA%\archon\config.toml` | User config |
-| `~/.config/archon/oauth.json` | `%APPDATA%\archon\oauth.json` | OAuth tokens |
 | `~/.config/archon/.mcp.json` | `%APPDATA%\archon\.mcp.json` | Global MCP server config |
 | `~/.local/share/archon/` | `%APPDATA%\archon\share\` | State and data |
 | `~/.local/share/archon/sessions.db` | `...\sessions.db` | Session metadata + journal (CozoDB) |
@@ -78,6 +78,7 @@ To reset everything (lose all sessions, memory, checkpoints):
 ```bash
 rm -rf ~/.local/share/archon
 rm -rf ~/.config/archon
+rm -rf ~/.archon
 ```
 
 To reset just sessions but keep memory:
@@ -88,15 +89,16 @@ rm ~/.local/share/archon/sessions.db
 ## Migrating between machines
 
 Copy these to migrate full state:
-- `~/.config/archon/` (configs + OAuth)
+- `~/.archon/` (provider credentials)
+- `~/.config/archon/` (configs)
 - `~/.local/share/archon/` (state + memory + sessions)
 
 Both are POSIX-compatible (with file locks released). Tar and copy:
 ```bash
-tar czf archon-state.tar.gz ~/.config/archon ~/.local/share/archon
+tar czf archon-state.tar.gz ~/.archon ~/.config/archon ~/.local/share/archon
 ```
 
-OAuth tokens are tied to the device that originated them but may continue functioning on other machines. If they don't, run `archon login` on the target.
+OAuth tokens are tied to the device that originated them but may continue functioning on other machines. If they don't, run `archon auth login --provider anthropic` or `archon auth login --provider openai-codex` on the target.
 
 ## See also
 
