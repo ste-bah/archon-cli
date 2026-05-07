@@ -44,14 +44,20 @@ use archon_test_support::memory::MockMemoryTrait;
 /// TASK-AGS-105: the three legacy `save_agent_memory` call sites in agent.rs
 /// (foreground subagent result, background-result arrival, and
 /// handle_subagent_result) were intentionally collapsed into a single call
-/// in `AgentSubagentExecutor::on_inner_complete` inside
-/// `archon-core/src/subagent_executor.rs`. The invariant is now "at least
-/// one call site in subagent_executor.rs, zero in agent.rs" — the old
+/// in `AgentSubagentExecutor::on_inner_complete` inside the
+/// `archon-core/src/subagent_executor/*` module family. The invariant is now "at least
+/// one call site in the executor modules, zero in agent.rs" — the old
 /// indirection MUST NOT be reintroduced.
 #[test]
 fn test_save_agent_memory_invoked_at_all_three_call_sites() {
     let agent_source = include_str!("../src/agent.rs");
-    let exec_source = include_str!("../src/subagent_executor.rs");
+    let exec_source = [
+        include_str!("../src/subagent_executor.rs"),
+        include_str!("../src/subagent_executor/completion.rs"),
+        include_str!("../src/subagent_executor/run.rs"),
+        include_str!("../src/subagent_executor/classification.rs"),
+    ]
+    .join("\n");
 
     // Count non-comment occurrences of `save_agent_memory(` in
     // subagent_executor.rs. Must be >= 1 (collapsed call site).
@@ -69,7 +75,7 @@ fn test_save_agent_memory_invoked_at_all_three_call_sites() {
     assert!(
         exec_count >= 1,
         "REQ-FOR-PRESERVE-D8 (a) violated: expected ≥1 save_agent_memory( call site in \
-         subagent_executor.rs, found {exec_count}. The collapsed call site in \
+         subagent_executor modules, found {exec_count}. The collapsed call site in \
          on_inner_complete is the post-TASK-AGS-105 persistence path."
     );
 
