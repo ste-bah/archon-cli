@@ -88,7 +88,6 @@ crates/archon-session/src/storage.rs
 
 # --- archon-tools ---
 crates/archon-tools/src/agent_tool.rs
-crates/archon-tools/src/config_tool.rs
 crates/archon-tools/src/send_message.rs
 
 # --- archon-tui ---
