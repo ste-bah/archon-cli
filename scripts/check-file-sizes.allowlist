@@ -55,7 +55,6 @@ crates/archon-llm/src/providers/vertex.rs
 # --- archon-memory ---
 crates/archon-memory/src/access.rs
 crates/archon-memory/src/garden.rs
-crates/archon-memory/src/graph.rs
 crates/archon-memory/tests/garden_tests.rs
 crates/archon-memory/tests/memory_server_tests.rs
 
