@@ -137,12 +137,6 @@ src/cli_args.rs
 crates/archon-llm/src/providers/openai_compat.rs
 crates/archon-llm/src/providers/registry.rs
 
-# --- archon-observability ---
-# Grew past 500 in #201 TASK-201-SEC-REDACTION-GCP (added GCP/PEM/credentials
-# patterns). Allowlisted here as #204 HYGIENE-MCP-FILE-SIZES hygiene sweep;
-# split into submodules as a follow-up ticket.
-crates/archon-observability/src/redaction.rs
-
 # --- archon-tui ---
 crates/archon-tui/tests/task_dispatch.rs
 
