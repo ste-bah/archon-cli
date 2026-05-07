@@ -100,14 +100,29 @@ run_checks() {
     fi
 
     # --- Check 5: save_agent_memory signature ---
-    local MEM_FILE="$BASE_DIR/crates/archon-core/src/agents/memory.rs"
+    # Post-refactor (commit b2fb45c "Split agent memory modules"): the
+    # parent agents/memory.rs is now a module file that re-exports from
+    # agents/memory/store.rs. The fn signature lives in the store submodule.
+    # We guard both: parent must re-export the symbol, store submodule must
+    # contain the canonical signature.
+    local MEM_PARENT="$BASE_DIR/crates/archon-core/src/agents/memory.rs"
+    local MEM_FILE="$BASE_DIR/crates/archon-core/src/agents/memory/store.rs"
+    if [[ ! -f "$MEM_PARENT" ]]; then
+        echo "MISSING: $MEM_PARENT"
+        diag
+        FAILED=1
+    elif ! grep -q "save_agent_memory" "$MEM_PARENT"; then
+        echo "MISSING: agents/memory.rs must re-export save_agent_memory (post-refactor: pub use store::save_agent_memory)"
+        diag
+        FAILED=1
+    fi
     if [[ ! -f "$MEM_FILE" ]]; then
         echo "MISSING: $MEM_FILE"
         diag
         FAILED=1
     else
         if ! grep -q "pub fn save_agent_memory" "$MEM_FILE"; then
-            echo "MISSING: pub fn save_agent_memory in memory.rs"
+            echo "MISSING: pub fn save_agent_memory in memory/store.rs"
             diag
             FAILED=1
         fi

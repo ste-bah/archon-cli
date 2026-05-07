@@ -75,17 +75,22 @@ fn duplicate_error_message_matches_spec() {
 // ERR-ARCH-02: Structural - send_event uses WARN on closed channel
 // ---------------------------------------------------------------------------
 
-/// Verify that agent.rs's send_event uses tracing::warn! (not trace!) for
+/// Verify that the send_event path uses tracing::warn! (not trace!) for
 /// closed channel errors matching the ERR-ARCH-02 spec message.
+///
+/// Post-refactor (commit b2fb45c+): agent.rs was split into a module
+/// directory; send_event now lives in agent/events.rs. The invariant
+/// (warn! + spec message co-located with send_event within a 15-line
+/// window) is unchanged; only the file path moved.
 #[test]
 fn send_event_uses_warn_for_closed_channel() {
-    let src =
-        std::fs::read_to_string("crates/archon-core/src/agent.rs").expect("cannot read agent.rs");
+    let src = std::fs::read_to_string("crates/archon-core/src/agent/events.rs")
+        .expect("cannot read agent/events.rs");
 
     // Must contain the spec message
     assert!(
         src.contains("Agent event channel closed"),
-        "agent.rs must contain ERR-ARCH-02 message 'Agent event channel closed'"
+        "agent/events.rs must contain ERR-ARCH-02 message 'Agent event channel closed'"
     );
 
     // Must use tracing::warn!, not tracing::trace!
@@ -93,7 +98,7 @@ fn send_event_uses_warn_for_closed_channel() {
     let send_event_line = lines
         .iter()
         .position(|l| l.contains("fn send_event"))
-        .expect("cannot find send_event method");
+        .expect("cannot find send_event method in agent/events.rs");
 
     // Within 15 lines of send_event, should have warn! not trace!
     let window_end = (send_event_line + 15).min(lines.len());
@@ -108,14 +113,17 @@ fn send_event_uses_warn_for_closed_channel() {
 }
 
 /// Verify AgentEvent has an event_name() or similar accessor for the WARN message.
+///
+/// Post-refactor: the impl AgentEvent block lives in agent/types.rs.
 #[test]
 fn agent_event_has_name_accessor() {
-    let src =
-        std::fs::read_to_string("crates/archon-core/src/agent.rs").expect("cannot read agent.rs");
+    let src = std::fs::read_to_string("crates/archon-core/src/agent/types.rs")
+        .expect("cannot read agent/types.rs");
 
     assert!(
         src.contains("fn event_name") || src.contains("fn id("),
-        "AgentEvent must have an event_name() or id() accessor for ERR-ARCH-02 logging"
+        "AgentEvent must have an event_name() or id() accessor for ERR-ARCH-02 logging \
+         (post-refactor location: crates/archon-core/src/agent/types.rs)"
     );
 }
 
