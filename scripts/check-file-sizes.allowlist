@@ -116,7 +116,6 @@ crates/archon-pipeline/tests/executor_retry.rs
 crates/archon-pipeline/tests/executor_rollback.rs
 
 # --- root bin (carryover) ---
-src/cli_args.rs
 
 # ============================================================================
 # Added during TASK-AGS-OBS-908 (2026-04-22): post-baseline debt discovered

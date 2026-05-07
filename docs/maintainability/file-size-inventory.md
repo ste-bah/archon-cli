@@ -78,6 +78,16 @@ Active oversized allowlist entries: 98
 
 Group 5 removed `src/command/registry.rs` from the active allowlist by splitting it from 3167 lines to a 19-line compatibility shell plus focused `command/registry/*` modules. Remaining Group 5 target is `src/cli_args.rs`.
 
+After Group 5 `src/cli_args.rs` split:
+
+```text
+FileSizeGuard: 1348 files checked, 0 over 500, 97 allowlisted
+Raw non-comment allowlist entries: 97
+Active oversized allowlist entries: 97
+```
+
+Group 5 removed `src/cli_args.rs` from the active allowlist by splitting it from 1335 lines to a 24-line compatibility shell plus focused `cli_args/*` modules. Group 5 is complete.
+
 ## Commands
 
 Regenerate the guard summary:

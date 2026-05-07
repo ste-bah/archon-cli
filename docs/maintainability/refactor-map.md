@@ -42,7 +42,7 @@ Group 11 should not become a dumping ground. Split tests alongside adjacent prod
 
 Group 3 is complete in this worktree: `crates/archon-core/src/agent.rs` is 489 lines, `crates/archon-core/src/subagent.rs` is 370 lines, and `crates/archon-core/src/subagent_executor.rs` is 286 lines. All three have been removed from `scripts/check-file-sizes.allowlist`.
 
-Group 5 is in progress: `src/command/registry.rs` is now a 19-line compatibility shell backed by focused `src/command/registry/*` modules, and has been removed from `scripts/check-file-sizes.allowlist`. Continue with the remaining Group 5 target, `src/cli_args.rs`.
+Group 5 is complete: `src/command/registry.rs` is now a 19-line compatibility shell backed by focused `src/command/registry/*` modules, and `src/cli_args.rs` is now a 24-line compatibility shell backed by focused `src/cli_args/*` modules. Both files have been removed from `scripts/check-file-sizes.allowlist`. Continue with Group 6 session startup and loop targets.
 
 ## Verification Matrix
 
