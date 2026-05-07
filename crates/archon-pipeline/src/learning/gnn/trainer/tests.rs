@@ -1,7 +1,8 @@
 use super::*;
+use crate::learning::gnn::cache::CacheConfig;
 use crate::learning::gnn::loss::TrajectoryWithFeedback;
 use crate::learning::gnn::triplets_loss::TripletBatch;
-use crate::learning::gnn::{CacheConfig, GnnConfig, GnnEnhancer};
+use crate::learning::gnn::{GnnConfig, GnnEnhancer};
 
 fn make_sample(id: &str, embedding: Vec<f32>, quality: f32) -> TrajectoryWithFeedback {
     TrajectoryWithFeedback {
