@@ -21,7 +21,6 @@ crates/archon-consciousness/src/assembler.rs
 crates/archon-consciousness/src/rules.rs
 
 # --- archon-core ---
-crates/archon-core/src/agent.rs
 crates/archon-core/src/agents/definition.rs
 crates/archon-core/src/agents/loader.rs
 crates/archon-core/src/agents/memory.rs

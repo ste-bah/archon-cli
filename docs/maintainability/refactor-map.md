@@ -11,7 +11,7 @@ This map assigns each oversized subsystem to a reviewable refactor group. The or
 - Preserve public imports with `pub use` compatibility shells where callers depend on existing paths.
 - Keep new Rust modules at or below 500 lines.
 - Remove allowlist entries in the same change that brings a file below 500 lines.
-- Run one package-filtered Cargo command at a time with `CARGO_BUILD_JOBS=2` and `-j1`.
+- Run one package-filtered Cargo command at a time with WSL-safe limits: `CARGO_BUILD_JOBS=1`, `-j1`, and `--test-threads=1` where applicable.
 - Do not change CLI, TUI, provider, persistence, or pipeline behaviour as a side effect of a split.
 
 ## Group Order
@@ -38,18 +38,22 @@ Group 5 and Group 10 both touch `src/command/providers.rs`. Treat that file as p
 
 Group 11 should not become a dumping ground. Split tests alongside adjacent production groups where possible; use Group 11 only for command/test debt with no higher-risk subsystem owner.
 
+## Current Status
+
+Group 3 `agent.rs` is complete in this worktree: `crates/archon-core/src/agent.rs` is 489 lines and has been removed from `scripts/check-file-sizes.allowlist`. Continue Group 3 with `crates/archon-core/src/subagent.rs`, then `crates/archon-core/src/subagent_executor.rs`.
+
 ## Verification Matrix
 
 | Touched area | Required checks |
 |---|---|
 | File-size docs or allowlist only | `bash scripts/check-file-sizes.sh`, raw allowlist count, `git diff --check` |
-| Gametheory facade/registry/routing | `CARGO_BUILD_JOBS=2 cargo test -p archon-pipeline -j1 gametheory:: -- --test-threads=1` |
-| Core agent/subagent/config/hooks | `CARGO_BUILD_JOBS=2 cargo test -p archon-core -j1 -- --test-threads=1` |
-| Command registry or CLI args | `CARGO_BUILD_JOBS=2 cargo test -p archon-cli-workspace -j1 command -- --test-threads=1` plus help/surface checks |
-| Session/TUI loop | `CARGO_BUILD_JOBS=2 cargo test -p archon-tui -j1 -- --test-threads=1` and shutdown smoke tests |
-| Docs retrieval/store/VLM | `CARGO_BUILD_JOBS=2 cargo test -p archon-docs -j1 -- --test-threads=1` |
-| Learning/GNN/meaning | `CARGO_BUILD_JOBS=2 cargo test -p archon-pipeline -j1 learning::gnn -- --test-threads=1`, `cargo test -p archon-meaning -j1 -- --test-threads=1` |
-| Provider/LLM/tool surface | `CARGO_BUILD_JOBS=2 cargo test -p archon-llm -j1 -- --test-threads=1`, provider doctor smoke |
+| Gametheory facade/registry/routing | `CARGO_BUILD_JOBS=1 cargo test -p archon-pipeline -j1 gametheory:: -- --test-threads=1` |
+| Core agent/subagent/config/hooks | `CARGO_BUILD_JOBS=1 cargo test -p archon-core -j1 -- --test-threads=1` |
+| Command registry or CLI args | `CARGO_BUILD_JOBS=1 cargo test -p archon-cli-workspace -j1 command -- --test-threads=1` plus help/surface checks |
+| Session/TUI loop | `CARGO_BUILD_JOBS=1 cargo test -p archon-tui -j1 -- --test-threads=1` and shutdown smoke tests |
+| Docs retrieval/store/VLM | `CARGO_BUILD_JOBS=1 cargo test -p archon-docs -j1 -- --test-threads=1` |
+| Learning/GNN/meaning | `CARGO_BUILD_JOBS=1 cargo test -p archon-pipeline -j1 learning::gnn -- --test-threads=1`, `cargo test -p archon-meaning -j1 -- --test-threads=1` |
+| Provider/LLM/tool surface | `CARGO_BUILD_JOBS=1 cargo test -p archon-llm -j1 -- --test-threads=1`, provider doctor smoke |
 
 ## Commit Evidence Template
 

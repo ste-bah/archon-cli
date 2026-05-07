@@ -38,6 +38,16 @@ Active oversized allowlist entries: 121
 
 Group 1 removed `crates/archon-pipeline/src/gametheory/facade.rs` from the active allowlist by splitting it from 4171 lines to a 458-line facade shell plus focused submodules and test modules.
 
+After Group 3 `agent.rs` split:
+
+```text
+FileSizeGuard: 1319 files checked, 0 over 500, 101 allowlisted
+Raw non-comment allowlist entries: 101
+Active oversized allowlist entries: 101
+```
+
+Group 3 removed `crates/archon-core/src/agent.rs` from the active allowlist by splitting it from 1696 lines after the initial support-module carve-out to a 489-line orchestration shell plus focused `agent/*` runtime modules. Remaining Group 3 targets are `crates/archon-core/src/subagent.rs` and `crates/archon-core/src/subagent_executor.rs`.
+
 ## Commands
 
 Regenerate the guard summary:
