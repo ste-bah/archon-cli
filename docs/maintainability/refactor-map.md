@@ -23,6 +23,7 @@ This map assigns each oversized subsystem to a reviewable refactor group. The or
 | 2 | Gametheory registry and routing | `registry.rs`, `routing.rs`, `schema.rs` | 84-agent coverage, routing YAML, DAG cycle/orphan checks |
 | 9 | Memory, learning and GNN | `learning/gnn/trainer.rs`, `auto_trainer.rs`, `integration.rs` | GNN weights, Adam state, training runs, correction events |
 | 3 | Core agent and subagent runtime | `agent.rs`, `subagent.rs`, `subagent_executor.rs` | Agent launch, cancellation, event streaming |
+| 4 | Core agents, hooks, config, and patterns | `agents/loader.rs`, `agents/memory.rs`, `hooks/registry.rs`, `config.rs` | Agent discovery/load, memory prompts, hook summaries, config reload |
 | 5 | Command surface and CLI registry | `src/command/registry.rs`, `src/cli_args.rs` | 78 primary commands, aliases, help output, slash mirror |
 | 6 | Session startup and loop | `src/session.rs`, `src/session_loop/mod.rs`, `src/main.rs` | TUI/headless startup, shutdown, provider and auto-trainer wiring |
 | 7 | Document retrieval and store | `archon-docs/src/retrieval.rs`, `store.rs` | Cozo doc rows, search order, VLM/image ingest |
@@ -42,7 +43,11 @@ Group 11 should not become a dumping ground. Split tests alongside adjacent prod
 
 Group 3 is complete in this worktree: `crates/archon-core/src/agent.rs` is 489 lines, `crates/archon-core/src/subagent.rs` is 370 lines, and `crates/archon-core/src/subagent_executor.rs` is 286 lines. All three have been removed from `scripts/check-file-sizes.allowlist`.
 
-Group 5 is complete: `src/command/registry.rs` is now a 19-line compatibility shell backed by focused `src/command/registry/*` modules, and `src/cli_args.rs` is now a 24-line compatibility shell backed by focused `src/cli_args/*` modules. Both files have been removed from `scripts/check-file-sizes.allowlist`. Continue with Group 6 session startup and loop targets.
+Group 5 is complete: `src/command/registry.rs` is now a 19-line compatibility shell backed by focused `src/command/registry/*` modules, and `src/cli_args.rs` is now a 24-line compatibility shell backed by focused `src/cli_args/*` modules. Both files have been removed from `scripts/check-file-sizes.allowlist`.
+
+Group 4 was missing from the earlier map and is now restored ahead of Group 6. Group 4 is now in progress: `crates/archon-core/src/agents/loader.rs` has been split from 2020 lines to a 29-line compatibility shell backed by focused `agents/loader/*` modules and removed from `scripts/check-file-sizes.allowlist`.
+
+Continue with the remaining Group 4 core agents, hooks, config, and patterns targets before session startup and loop work. The next high-value production target is `crates/archon-core/src/agents/memory.rs`, followed by `crates/archon-core/src/config.rs` and `crates/archon-core/src/hooks/registry.rs`.
 
 ## Verification Matrix
 
@@ -51,6 +56,7 @@ Group 5 is complete: `src/command/registry.rs` is now a 19-line compatibility sh
 | File-size docs or allowlist only | `bash scripts/check-file-sizes.sh`, raw allowlist count, `git diff --check` |
 | Gametheory facade/registry/routing | `CARGO_BUILD_JOBS=1 cargo test -p archon-pipeline -j1 gametheory:: -- --test-threads=1` |
 | Core agent/subagent/config/hooks | `CARGO_BUILD_JOBS=1 cargo test -p archon-core -j1 -- --test-threads=1` |
+| Core agents/hooks/config Group 4 slices | `CARGO_BUILD_JOBS=1 cargo test -p archon-core -j1 agents:: -- --test-threads=1`, `CARGO_BUILD_JOBS=1 cargo test -p archon-core -j1 hooks:: -- --test-threads=1`, or focused adjacent package checks |
 | Command registry or CLI args | `CARGO_BUILD_JOBS=1 cargo test -p archon-cli-workspace -j1 command -- --test-threads=1` plus help/surface checks |
 | Session/TUI loop | `CARGO_BUILD_JOBS=1 cargo test -p archon-tui -j1 -- --test-threads=1` and shutdown smoke tests |
 | Docs retrieval/store/VLM | `CARGO_BUILD_JOBS=1 cargo test -p archon-docs -j1 -- --test-threads=1` |

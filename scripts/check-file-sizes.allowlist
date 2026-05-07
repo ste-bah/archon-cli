@@ -22,7 +22,6 @@ crates/archon-consciousness/src/rules.rs
 
 # --- archon-core ---
 crates/archon-core/src/agents/definition.rs
-crates/archon-core/src/agents/loader.rs
 crates/archon-core/src/agents/memory.rs
 crates/archon-core/src/agents/registry.rs
 crates/archon-core/src/config.rs

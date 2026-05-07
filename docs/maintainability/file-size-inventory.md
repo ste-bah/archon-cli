@@ -88,6 +88,16 @@ Active oversized allowlist entries: 97
 
 Group 5 removed `src/cli_args.rs` from the active allowlist by splitting it from 1335 lines to a 24-line compatibility shell plus focused `cli_args/*` modules. Group 5 is complete.
 
+After Group 4 `agents/loader.rs` split:
+
+```text
+FileSizeGuard: 1361 files checked, 0 over 500, 96 allowlisted
+Raw non-comment allowlist entries: 96
+Active oversized allowlist entries: 96
+```
+
+Group 4 removed `crates/archon-core/src/agents/loader.rs` from the active allowlist by splitting it from 2020 lines to a 29-line compatibility shell plus focused `agents/loader/*` implementation and test modules. Remaining Group 4 targets include `crates/archon-core/src/agents/memory.rs`, `crates/archon-core/tests/hooks_tests.rs`, `crates/archon-core/src/config.rs`, and `crates/archon-core/src/hooks/registry.rs`.
+
 ## Commands
 
 Regenerate the guard summary:
@@ -248,34 +258,22 @@ Removed stale or inactive entries:
 
 | Lines | Path | Group |
 |---:|---|---|
-| 4171 | `crates/archon-pipeline/src/gametheory/facade.rs` | Group 1 |
-| 3404 | `crates/archon-core/src/agent.rs` | Group 3 |
-| 3167 | `src/command/registry.rs` | Group 5 |
 | 2800 | `src/session.rs` | Group 6 |
-| 2134 | `crates/archon-pipeline/src/gametheory/registry.rs` | Group 2 |
-| 2020 | `crates/archon-core/src/agents/loader.rs` | Group 4 |
-| 2018 | `crates/archon-core/src/subagent.rs` | Group 3 |
 | 1365 | `crates/archon-docs/src/retrieval.rs` | Group 7 |
 | 1355 | `crates/archon-pipeline/src/coding/agents.rs` | Group 8 |
 | 1339 | `crates/archon-docs/src/store.rs` | Group 7 |
-| 1335 | `src/cli_args.rs` | Group 5 |
-| 1211 | `crates/archon-memory/src/graph.rs` | Group 9 |
 | 1207 | `crates/archon-core/src/agents/memory.rs` | Group 4 |
 | 1184 | `crates/archon-core/tests/hooks_tests.rs` | Group 4 |
 | 1183 | `crates/archon-pipeline/src/research/quality.rs` | Group 8 |
-| 1177 | `crates/archon-pipeline/src/gametheory/routing.rs` | Group 2 |
 | 1161 | `crates/archon-core/src/config.rs` | Group 4 |
 | 1155 | `crates/archon-pipeline/src/compression.rs` | Group 8 |
 | 1124 | `crates/archon-core/src/hooks/registry.rs` | Group 4 |
-| 1123 | `crates/archon-pipeline/src/learning/gnn/trainer.rs` | Group 9 |
 | 1061 | `crates/archon-pipeline/src/executor.rs` | Group 8 |
 | 1046 | `crates/archon-tools/src/agent_tool.rs` | Group 10 |
 | 1010 | `src/command/providers.rs` | Group 10 |
 | 997 | `crates/archon-session/src/storage.rs` | Group 6 |
 | 965 | `crates/archon-completion/src/store.rs` | Group 11 |
-| 962 | `crates/archon-pipeline/src/learning/gnn/mod.rs` | Group 9 |
 | 940 | `crates/archon-core/src/skills/agent_skills.rs` | Group 4 |
-| 939 | `crates/archon-core/src/subagent_executor.rs` | Group 3 |
 | 935 | `crates/archon-llm/src/identity.rs` | Group 10 |
 | 926 | `src/command/copy.rs` | Group 11 |
 | 926 | `crates/archon-tools/src/send_message.rs` | Group 10 |
@@ -286,7 +284,6 @@ Removed stale or inactive entries:
 | 874 | `crates/archon-pipeline/src/kb/query.rs` | Group 8 |
 | 844 | `src/command/permissions.rs` | Group 11 |
 | 830 | `crates/archon-tui/tests/task_dispatch.rs` | Group 11 |
-| 822 | `crates/archon-pipeline/src/learning/gnn/weights.rs` | Group 9 |
 | 817 | `src/session_loop/mod.rs` | Group 6 |
 | 814 | `crates/archon-pipeline/src/coding/quality.rs` | Group 8 |
 | 802 | `crates/archon-core/src/skills/expanded.rs` | Group 4 |
@@ -294,11 +291,9 @@ Removed stale or inactive entries:
 | 783 | `crates/archon-session/src/checkpoint.rs` | Group 6 |
 | 773 | `src/command/context.rs` | Group 11 |
 | 760 | `crates/archon-core/src/agents/registry.rs` | Group 4 |
-| 756 | `crates/archon-pipeline/src/learning/gnn/auto_trainer.rs` | Group 9 |
 | 754 | `src/command/effort.rs` | Group 11 |
 | 752 | `src/command/garden.rs` | Group 11 |
 | 749 | `crates/archon-core/src/dispatch.rs` | Group 4 |
-| 743 | `crates/archon-pipeline/src/learning/integration.rs` | Group 9 |
 | 739 | `crates/archon-pipeline/src/runner.rs` | Group 8 |
 | 736 | `crates/archon-pipeline/tests/executor_rollback.rs` | Group 11 |
 | 735 | `crates/archon-memory/tests/memory_server_tests.rs` | Group 9 |
@@ -308,7 +303,6 @@ Removed stale or inactive entries:
 | 717 | `src/command/gametheory_slash.rs` | Group 11 |
 | 702 | `crates/archon-core/tests/hook_phase3_integration.rs` | Group 4 |
 | 701 | `crates/archon-core/tests/config_layers_tests.rs` | Group 4 |
-| 698 | `crates/archon-pipeline/src/learning/causal.rs` | Group 9 |
 | 690 | `src/command/test_support.rs` | Group 11 |
 | 681 | `crates/archon-pipeline/src/coding/gates.rs` | Group 8 |
 | 674 | `src/command/docs.rs` | Group 11 |
@@ -320,25 +314,18 @@ Removed stale or inactive entries:
 | 638 | `crates/archon-pipeline/src/research/style.rs` | Group 8 |
 | 632 | `crates/archon-memory/tests/garden_tests.rs` | Group 9 |
 | 629 | `crates/archon-llm/src/anthropic.rs` | Group 10 |
-| 628 | `crates/archon-pipeline/src/learning/sona.rs` | Group 9 |
-| 628 | `crates/archon-memory/src/garden.rs` | Group 9 |
 | 618 | `src/command/recall.rs` | Group 11 |
-| 617 | `crates/archon-pipeline/src/learning/gnn/loss.rs` | Group 9 |
 | 614 | `crates/archon-pipeline/src/kb/compile.rs` | Group 8 |
-| 610 | `crates/archon-memory/src/access.rs` | Group 9 |
 | 609 | `crates/archon-leann/src/indexer.rs` | Group 11 |
 | 607 | `src/command/plugin_slash.rs` | Group 11 |
 | 607 | `crates/archon-pipeline/tests/learning_schema.rs` | Group 11 |
 | 603 | `crates/archon-core/src/agents/definition.rs` | Group 4 |
-| 601 | `crates/archon-observability/src/redaction.rs` | Group 11 |
 | 600 | `src/command/doctor.rs` | Group 11 |
-| 596 | `crates/archon-plugin/src/host.rs` | Group 11 |
 | 593 | `crates/archon-pipeline/tests/runner.rs` | Group 11 |
 | 591 | `crates/archon-pipeline/tests/final_stage.rs` | Group 11 |
 | 587 | `src/command/help.rs` | Group 11 |
 | 587 | `crates/archon-llm/src/providers/registry.rs` | Group 10 |
 | 585 | `src/command/pipeline.rs` | Group 11 |
-| 584 | `crates/archon-pipeline/src/learning/desc.rs` | Group 9 |
 | 584 | `crates/archon-llm/src/providers/bedrock.rs` | Group 10 |
 | 576 | `crates/archon-consciousness/src/assembler.rs` | Group 11 |
 | 575 | `crates/archon-pipeline/tests/layered_context.rs` | Group 11 |
@@ -351,14 +338,12 @@ Removed stale or inactive entries:
 | 549 | `crates/archon-core/src/patterns/circuit_breaker.rs` | Group 4 |
 | 548 | `crates/archon-completion/src/verification_gates.rs` | Group 11 |
 | 547 | `crates/archon-core/src/hooks/types.rs` | Group 4 |
-| 541 | `crates/archon-pipeline/src/learning/gnn/backprop.rs` | Group 9 |
 | 538 | `crates/archon-tui/tests/render_coverage.rs` | Group 11 |
 | 537 | `crates/archon-llm/src/providers/vertex.rs` | Group 10 |
 | 535 | `src/command/login.rs` | Group 11 |
 | 535 | `crates/archon-completion/src/evidence_resolver.rs` | Group 11 |
 | 532 | `crates/archon-llm/src/providers/codex/spoof.rs` | Group 10 |
 | 532 | `crates/archon-learning/src/apply.rs` | Group 9 |
-| 531 | `crates/archon-pipeline/src/gametheory/schema.rs` | Group 2 |
 | 528 | `crates/archon-llm/src/providers/openai_compat.rs` | Group 10 |
 | 527 | `crates/archon-pipeline/tests/executor_retry.rs` | Group 11 |
 | 520 | `src/command/logout.rs` | Group 11 |
@@ -367,7 +352,6 @@ Removed stale or inactive entries:
 | 519 | `crates/archon-pipeline/src/manifest.rs` | Group 8 |
 | 518 | `crates/archon-pipeline/src/coding/wiring.rs` | Group 8 |
 | 509 | `crates/archon-core/tests/task_executor.rs` | Group 4 |
-| 508 | `crates/archon-tools/src/config_tool.rs` | Group 10 |
 | 507 | `crates/archon-leann/tests/chunker.rs` | Group 11 |
 | 503 | `crates/archon-plugin/tests/test_plugin_loader.rs` | Group 11 |
 
@@ -375,14 +359,14 @@ Removed stale or inactive entries:
 
 | Group | Count |
 |---|---:|
-| Group 1 | 1 |
-| Group 2 | 3 |
-| Group 3 | 3 |
-| Group 4 | 20 |
-| Group 5 | 2 |
+| Group 1 | 0 |
+| Group 2 | 0 |
+| Group 3 | 0 |
+| Group 4 | 19 |
+| Group 5 | 0 |
 | Group 6 | 5 |
 | Group 7 | 2 |
 | Group 8 | 17 |
-| Group 9 | 17 |
-| Group 10 | 11 |
-| Group 11 | 41 |
+| Group 9 | 4 |
+| Group 10 | 10 |
+| Group 11 | 39 |
