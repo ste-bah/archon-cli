@@ -313,6 +313,7 @@ early_stopping_patience = 3
 validation_split = 0.2
 ewc_lambda = 0.1
 margin = 0.5
+triplet_loss_coefficient = 0.1
 max_gradient_norm = 1.0
 max_triplets_per_run = 256
 max_runtime_ms = 300000        # 5 minutes max per training run
@@ -324,10 +325,10 @@ max_runtime_ms = 300000        # 5 minutes max per training run
 [learning.gnn.auto_trainer]
 enabled = true
 min_throttle_ms = 3600000      # 1 hour minimum between runs
-trigger_new_memories = 50      # fire when N new memories accrued
+trigger_new_memories = 20      # fire when N new memories accrued
 trigger_elapsed_ms = 21600000  # 6 hours
-trigger_corrections = 5        # fire when N user corrections logged
-first_run_threshold = 100      # kickoff at startup if memory_count > this
+trigger_corrections = 3        # fire when N user corrections logged
+first_run_threshold = 30       # kickoff at startup if memory_count >= this
 max_runtime_ms = 300000        # 5 minutes max per run
 tick_interval_ms = 60000       # background poll interval (1 minute)
 

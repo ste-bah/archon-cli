@@ -14,6 +14,7 @@ use super::ewc::EwcRegularizer;
 use super::loss::{self, ContrastiveLossConfig, TrajectoryWithFeedback};
 use super::math::ActivationType;
 use super::optimizer::{AdamConfig, AdamOptimizer};
+use super::triplets_loss::{self, TripletBatch, TripletLossConfig};
 use super::weights::WeightStore;
 use super::{GnnEnhancer, LayerWeights};
 
@@ -31,6 +32,7 @@ pub struct TrainingConfig {
     pub validation_split: f32,
     pub ewc_lambda: f32,
     pub margin: f32,
+    pub triplet_loss_coefficient: f32,
     pub max_gradient_norm: f32,
     pub shuffle: bool,
     pub min_improvement: f32,
@@ -48,6 +50,7 @@ impl Default for TrainingConfig {
             validation_split: 0.2,
             ewc_lambda: 0.1,
             margin: 0.5,
+            triplet_loss_coefficient: 0.1,
             max_gradient_norm: 1.0,
             shuffle: true,
             min_improvement: 0.001,
@@ -70,6 +73,9 @@ pub struct EpochMetrics {
     pub epoch: usize,
     pub train_loss: f32,
     pub val_loss: Option<f32>,
+    pub loss_quality: f32,
+    pub loss_ewc: f32,
+    pub loss_triplet: f32,
     /// (layer_id, l2_norm_of_weights, has_nan_or_inf)
     pub layer_norms: Vec<(String, f32, bool)>,
 }
@@ -114,6 +120,9 @@ struct BatchResult {
 struct EpochResult {
     train_loss: f32,
     val_loss: Option<f32>,
+    loss_quality: f32,
+    loss_ewc: f32,
+    loss_triplet: f32,
 }
 
 // ---------------------------------------------------------------------------
@@ -129,6 +138,7 @@ pub struct GnnTrainer {
     optimizer: AdamOptimizer,
     ewc: EwcRegularizer,
     loss_config: ContrastiveLossConfig,
+    triplet_loss_config: TripletLossConfig,
     weight_store: Option<Arc<WeightStore>>,
 }
 
@@ -150,12 +160,14 @@ impl GnnTrainer {
             margin: config.margin,
             ..ContrastiveLossConfig::default()
         };
+        let triplet_loss_config = TripletLossConfig::default();
 
         Self {
             config,
             optimizer,
             ewc,
             loss_config,
+            triplet_loss_config,
             weight_store,
         }
     }
@@ -169,6 +181,20 @@ impl GnnTrainer {
         samples: &[TrajectoryWithFeedback],
         cancel: Option<&std::sync::atomic::AtomicBool>,
     ) -> TrainingOutcome {
+        self.train_with_triplets(enhancer, samples, &TripletBatch::default(), cancel)
+    }
+
+    /// Run the full training loop with optional hydrated meaning triplets.
+    ///
+    /// The empty-triplet path is identical to [`Self::train`]. Hydrated
+    /// triplets add a conservative auxiliary metric-learning term.
+    pub fn train_with_triplets(
+        &mut self,
+        enhancer: &GnnEnhancer,
+        samples: &[TrajectoryWithFeedback],
+        triplet_batch: &TripletBatch,
+        cancel: Option<&std::sync::atomic::AtomicBool>,
+    ) -> TrainingOutcome {
         let start_time = Instant::now();
         let mut samples_processed = 0usize;
         let mut batches_processed = 0usize;
@@ -178,8 +204,12 @@ impl GnnTrainer {
 
         // Build triplets (indices into samples)
         let triplets = loss::build_triplets(samples, &self.loss_config);
-        if triplets.len() < 2 {
-            warn!("Not enough triplets for training (got {})", triplets.len());
+        if triplets.len() < 2 && triplet_batch.triplets.is_empty() {
+            warn!(
+                "Not enough triplets for training (trajectory={}, meaning={})",
+                triplets.len(),
+                triplet_batch.triplets.len()
+            );
             return TrainingOutcome {
                 epochs_completed: 0,
                 batches_processed: 0,
@@ -206,9 +236,13 @@ impl GnnTrainer {
         };
 
         // Train/validation split
-        let split_idx = ((1.0 - self.config.validation_split) * triplets.len() as f32) as usize;
-        let split_idx = split_idx.max(1).min(triplets.len().saturating_sub(1));
-        let (train_triplets, val_triplets) = triplets.split_at(split_idx);
+        let (train_triplets, val_triplets) = if triplets.is_empty() {
+            (&[][..], &[][..])
+        } else {
+            let split_idx = ((1.0 - self.config.validation_split) * triplets.len() as f32) as usize;
+            let split_idx = split_idx.max(1).min(triplets.len().saturating_sub(1));
+            triplets.split_at(split_idx)
+        };
 
         // Initialize optimizer with current layer shapes
         let (l1, l2, l3) = enhancer.get_weights();
@@ -223,7 +257,10 @@ impl GnnTrainer {
         // Compute initial loss — bust cache so embeddings are fresh
         enhancer.clear_cache();
         let all_embeddings = Self::forward_all(enhancer, samples);
-        let initial_loss = self.compute_triplet_loss(train_triplets, &all_embeddings);
+        let initial_quality_loss = self.compute_triplet_loss(train_triplets, &all_embeddings);
+        let initial_triplet_loss = self.compute_meaning_triplet_loss(enhancer, triplet_batch);
+        let initial_loss =
+            initial_quality_loss + self.config.triplet_loss_coefficient * initial_triplet_loss;
         let mut best_loss = f32::MAX;
 
         // Record pre-training weight version
@@ -267,6 +304,7 @@ impl GnnTrainer {
                 train_triplets,
                 &embeddings,
                 val_triplets,
+                triplet_batch,
                 &mut batches_processed,
                 &mut samples_processed,
                 cancel,
@@ -280,8 +318,18 @@ impl GnnTrainer {
                 epoch,
                 train_loss: epoch_result.train_loss,
                 val_loss: epoch_result.val_loss,
+                loss_quality: epoch_result.loss_quality,
+                loss_ewc: epoch_result.loss_ewc,
+                loss_triplet: epoch_result.loss_triplet,
                 layer_norms,
             });
+            info!(
+                epoch,
+                loss_quality = epoch_result.loss_quality,
+                loss_ewc = epoch_result.loss_ewc,
+                loss_triplet = epoch_result.loss_triplet,
+                "trainer.epoch"
+            );
 
             epochs_completed += 1;
 
@@ -358,7 +406,10 @@ impl GnnTrainer {
 
         enhancer.clear_cache();
         let final_embeddings = Self::forward_all(enhancer, samples);
-        let final_loss = self.compute_triplet_loss(train_triplets, &final_embeddings);
+        let final_quality_loss = self.compute_triplet_loss(train_triplets, &final_embeddings);
+        let final_triplet_loss = self.compute_meaning_triplet_loss(enhancer, triplet_batch);
+        let final_loss =
+            final_quality_loss + self.config.triplet_loss_coefficient * final_triplet_loss;
 
         // Post-training: persist or rollback.
         // Check weight sanity first — NaN/Inf weights always trigger rollback.
@@ -442,12 +493,14 @@ impl GnnTrainer {
         train: &[loss::Triplet],
         embeddings: &[Vec<f32>],
         val: &[loss::Triplet],
+        triplet_batch: &TripletBatch,
         batches_processed: &mut usize,
         samples_processed: &mut usize,
         cancel: Option<&std::sync::atomic::AtomicBool>,
     ) -> EpochResult {
-        let mut total_loss = 0.0_f32;
-        let mut batch_count = 0usize;
+        let mut total_quality_loss = 0.0_f32;
+        let mut quality_batch_count = 0usize;
+        let mut triplet_loss = 0.0_f32;
 
         for batch in train.chunks(self.config.batch_size) {
             if cancel.map(|c| c.load(std::sync::atomic::Ordering::Relaxed)) == Some(true) {
@@ -455,8 +508,8 @@ impl GnnTrainer {
             }
 
             let result = self.train_batch(enhancer, samples, batch, embeddings);
-            total_loss += result.loss;
-            batch_count += 1;
+            total_quality_loss += result.loss;
+            quality_batch_count += 1;
 
             // Apply gradients
             self.apply_gradients(enhancer, &result.grads);
@@ -465,11 +518,25 @@ impl GnnTrainer {
             *samples_processed += batch.len();
         }
 
-        let train_loss = if batch_count > 0 {
-            total_loss / batch_count as f32
+        if !triplet_batch.triplets.is_empty()
+            && cancel.map(|c| c.load(std::sync::atomic::Ordering::Relaxed)) != Some(true)
+        {
+            let result = self.train_meaning_triplet_batch(enhancer, triplet_batch);
+            triplet_loss = result.loss;
+            let scaled = scale_grads(&result.grads, self.config.triplet_loss_coefficient);
+            self.apply_gradients(enhancer, &scaled);
+            *batches_processed += 1;
+            *samples_processed += triplet_batch.triplets.len();
+        }
+
+        let loss_quality = if quality_batch_count > 0 {
+            total_quality_loss / quality_batch_count as f32
         } else {
             0.0
         };
+        let loss_ewc = self.current_ewc_loss(enhancer);
+        let train_loss =
+            loss_quality + loss_ewc + self.config.triplet_loss_coefficient * triplet_loss;
 
         let val_loss = if !val.is_empty() {
             Some(self.compute_triplet_loss(val, embeddings))
@@ -480,6 +547,9 @@ impl GnnTrainer {
         EpochResult {
             train_loss,
             val_loss,
+            loss_quality,
+            loss_ewc,
+            loss_triplet: triplet_loss,
         }
     }
 
@@ -659,6 +729,100 @@ impl GnnTrainer {
         total / triplets.len() as f32
     }
 
+    fn train_meaning_triplet_batch(
+        &self,
+        enhancer: &GnnEnhancer,
+        batch: &TripletBatch,
+    ) -> BatchResult {
+        if batch.triplets.is_empty() {
+            return BatchResult {
+                loss: 0.0,
+                grads: zero_grads(enhancer),
+            };
+        }
+
+        let (l1, l2, l3) = enhancer.get_weights();
+        let mut total_loss = 0.0_f32;
+        let mut accumulated_grads: Option<Vec<(Vec<Vec<f32>>, Vec<f32>)>> = None;
+
+        for triplet in &batch.triplets {
+            let anchor = enhancer.enhance(&triplet.anchor, None, None, true);
+            let positive = enhancer.enhance(&triplet.positive, None, None, true);
+            let negative = enhancer.enhance(&triplet.negative, None, None, true);
+
+            let loss_result = triplets_loss::triplet_loss_gradient(
+                &anchor.enhanced,
+                &positive.enhanced,
+                &negative.enhanced,
+                &self.triplet_loss_config,
+            );
+            total_loss += loss_result.loss;
+            if loss_result.loss <= 0.0 {
+                continue;
+            }
+
+            accumulate_embedding_grads(
+                &mut accumulated_grads,
+                &anchor.activation_cache,
+                [&l1, &l2, &l3],
+                &pad_gradient(loss_result.grad_anchor, anchor.enhanced.len()),
+            );
+            accumulate_embedding_grads(
+                &mut accumulated_grads,
+                &positive.activation_cache,
+                [&l1, &l2, &l3],
+                &pad_gradient(loss_result.grad_positive, positive.enhanced.len()),
+            );
+            accumulate_embedding_grads(
+                &mut accumulated_grads,
+                &negative.activation_cache,
+                [&l1, &l2, &l3],
+                &pad_gradient(loss_result.grad_negative, negative.enhanced.len()),
+            );
+        }
+
+        let batch_size = batch.triplets.len() as f32;
+        let grads = accumulated_grads
+            .map(|acc| average_grads(acc, batch_size))
+            .unwrap_or_else(|| zero_grads(enhancer));
+
+        BatchResult {
+            loss: total_loss / batch_size,
+            grads,
+        }
+    }
+
+    fn compute_meaning_triplet_loss(&self, enhancer: &GnnEnhancer, batch: &TripletBatch) -> f32 {
+        if batch.triplets.is_empty() {
+            return 0.0;
+        }
+        let total = batch
+            .triplets
+            .iter()
+            .map(|triplet| {
+                let anchor = enhancer.enhance(&triplet.anchor, None, None, false);
+                let positive = enhancer.enhance(&triplet.positive, None, None, false);
+                let negative = enhancer.enhance(&triplet.negative, None, None, false);
+                triplets_loss::triplet_loss(
+                    &anchor.enhanced,
+                    &positive.enhanced,
+                    &negative.enhanced,
+                    &self.triplet_loss_config,
+                )
+            })
+            .sum::<f32>();
+        total / batch.triplets.len() as f32
+    }
+
+    fn current_ewc_loss(&self, enhancer: &GnnEnhancer) -> f32 {
+        let (l1, l2, l3) = enhancer.get_weights();
+        let mut weights = HashMap::new();
+        weights.insert("gnn_embed".to_string(), l1.w);
+        weights.insert("gnn_hidden".to_string(), l2.w);
+        weights.insert("gnn_output".to_string(), l3.w);
+        self.ewc.penalty(&weights)
+    }
+
     // -----------------------------------------------------------------------
     // Accessors
     // -----------------------------------------------------------------------
@@ -710,6 +874,88 @@ fn compute_layer_norms(enhancer: &GnnEnhancer) -> Vec<(String, f32, bool)> {
             (name.to_string(), (sum_sq.sqrt()) as f32, has_nan)
         })
         .collect()
+}
+
+fn accumulate_embedding_grads(
+    accumulated: &mut Option<Vec<(Vec<Vec<f32>>, Vec<f32>)>>,
+    caches: &[super::LayerActivationCache],
+    weights: [&LayerWeights; 3],
+    grad: &[f32],
+) {
+    if caches.len() != 3 {
+        return;
+    }
+    let grads = backprop::full_backward(
+        caches,
+        weights,
+        grad,
+        [
+            ActivationType::LeakyRelu,
+            ActivationType::LeakyRelu,
+            ActivationType::Tanh,
+        ],
+    );
+    let layer_grads: Vec<(Vec<Vec<f32>>, Vec<f32>)> =
+        grads.into_iter().map(|grad| (grad.dw, grad.db)).collect();
+    match accumulated {
+        Some(acc) => add_grads_in_place(acc, &layer_grads),
+        None => *accumulated = Some(layer_grads),
+    }
+}
+
+fn add_grads_in_place(
+    acc: &mut [(Vec<Vec<f32>>, Vec<f32>)],
+    layer_grads: &[(Vec<Vec<f32>>, Vec<f32>)],
+) {
+    for (i, (dw, db)) in layer_grads.iter().enumerate() {
+        for (row_a, row_g) in acc[i].0.iter_mut().zip(dw.iter()) {
+            for (a, g) in row_a.iter_mut().zip(row_g.iter()) {
+                *a += *g;
+            }
+        }
+        for (a, g) in acc[i].1.iter_mut().zip(db.iter()) {
+            *a += *g;
+        }
+    }
+}
+
+fn average_grads(
+    grads: Vec<(Vec<Vec<f32>>, Vec<f32>)>,
+    divisor: f32,
+) -> Vec<(Vec<Vec<f32>>, Vec<f32>)> {
+    if divisor <= 0.0 {
+        return grads;
+    }
+    grads
+        .into_iter()
+        .map(|(dw, db)| {
+            let dw = dw
+                .into_iter()
+                .map(|row| row.into_iter().map(|value| value / divisor).collect())
+                .collect();
+            let db = db.into_iter().map(|value| value / divisor).collect();
+            (dw, db)
+        })
+        .collect()
+}
+
+fn scale_grads(grads: &[(Vec<Vec<f32>>, Vec<f32>)], scale: f32) -> Vec<(Vec<Vec<f32>>, Vec<f32>)> {
+    grads
+        .iter()
+        .map(|(dw, db)| {
+            let dw = dw
+                .iter()
+                .map(|row| row.iter().map(|value| value * scale).collect())
+                .collect();
+            let db = db.iter().map(|value| value * scale).collect();
+            (dw, db)
+        })
+        .collect()
+}
+
+fn pad_gradient(mut grad: Vec<f32>, dim: usize) -> Vec<f32> {
+    grad.resize(dim, 0.0);
+    grad
 }
 
 fn zero_grads(enhancer: &GnnEnhancer) -> Vec<(Vec<Vec<f32>>, Vec<f32>)> {
@@ -786,6 +1032,38 @@ mod tests {
         let outcome = trainer.train(&enhancer, &samples, None);
         assert!(outcome.epochs_completed >= 1);
         assert!(outcome.batches_processed > 0);
+    }
+
+    #[test]
+    fn trainer_handles_empty_triplet_batch() {
+        let mut trainer = GnnTrainer::new(
+            TrainingConfig {
+                max_epochs: 1,
+                batch_size: 4,
+                max_triplets_per_run: 16,
+                max_runtime_ms: 30_000,
+                ..TrainingConfig::default()
+            },
+            None,
+        );
+        let enhancer = test_enhancer();
+        let samples: Vec<TrajectoryWithFeedback> = (0..10)
+            .map(|i| {
+                let q = if i % 2 == 0 { 0.9 } else { 0.1 };
+                make_sample(&format!("t{}", i), vec![i as f32 * 0.1; 4], q)
+            })
+            .collect();
+
+        let outcome =
+            trainer.train_with_triplets(&enhancer, &samples, &TripletBatch::default(), None);
+
+        assert!(outcome.epochs_completed >= 1);
+        assert!(
+            outcome
+                .epoch_metrics
+                .iter()
+                .all(|epoch| epoch.loss_triplet == 0.0)
+        );
     }
 
     #[test]

@@ -132,7 +132,7 @@ graph TD
 
 Training infrastructure:
 - **Optimizer:** Adam with bias correction, persisted state via CozoDB `gnn_adam_state` relation
-- **Loss:** triplet contrastive loss with HardestNegative selection
+- **Loss:** trajectory quality + EWC + hydrated meaning-triplet margin loss; per-epoch logs split `loss_quality`, `loss_ewc`, and `loss_triplet`
 - **Regularization:** EWC (Elastic Weight Consolidation) with Fisher information matrix
 - **Early stopping:** `epochs_since_improvement >= patience` triggers stop, restores best-epoch weights
 - **NaN guard:** training run rolls back to prior weight version if any layer goes NaN/Inf, or if final loss > initial loss × 1.1
@@ -140,12 +140,12 @@ Training infrastructure:
 Auto-retraining (`AutoTrainer`):
 - Background tokio task with `spawn_blocking` for the sync trainer call
 - 60s tick interval checks 3 trigger conditions (any fires):
-  - 50 new memories since last run
+  - 20 new memories since last run
   - 6h elapsed since last run
-  - 5 user corrections since last run
+  - 3 user corrections since last run
 - 1h minimum throttle between runs
-- 5min max runtime per run, 256 triplets max per batch
-- First-run kickoff at startup if existing memory_count > 100
+- 5min max runtime per run, 256 hydrated meaning triplets max per batch
+- First-run kickoff if existing memory_count >= 30, or if 3 corrections arrive before the first run
 - Versioned weight snapshots in `gnn_weights` relation
 
 ### CausalMemory — directed hypergraph
@@ -238,7 +238,9 @@ archon behaviour approve <proposal-id>
 archon behaviour history <manifest-kind>
 archon meaning build --from learning-events
 archon meaning triplets
+archon learning gnn status
 archon constellation build --target strategic-workflow
+archon constellation bootstrap --target memory
 archon constellation drift --target strategic-workflow --text "new workflow description"
 ```
 
@@ -267,6 +269,7 @@ early_stopping_patience = 3
 validation_split = 0.2
 ewc_lambda = 0.1
 margin = 0.5
+triplet_loss_coefficient = 0.1
 max_gradient_norm = 1.0
 max_triplets_per_run = 256
 max_runtime_ms = 300000
@@ -274,12 +277,12 @@ max_runtime_ms = 300000
 [learning.gnn.auto_trainer]
 enabled = true
 min_throttle_ms = 3600000     # 1 hour
-trigger_new_memories = 50
+trigger_new_memories = 20
 trigger_elapsed_ms = 21600000 # 6 hours
-trigger_corrections = 5
-first_run_threshold = 100
+trigger_corrections = 3
+first_run_threshold = 30
 max_runtime_ms = 300000       # 5 minutes
-max_triplets_per_run = 256
+tick_interval_ms = 60000      # 1 minute
 
 [reasoning_bank]
 default_max_results = 5

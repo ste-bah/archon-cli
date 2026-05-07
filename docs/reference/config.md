@@ -444,6 +444,7 @@ early_stopping_patience = 3
 validation_split = 0.2
 ewc_lambda = 0.1
 margin = 0.5
+triplet_loss_coefficient = 0.1
 max_gradient_norm = 1.0
 max_triplets_per_run = 256
 max_runtime_ms = 300000
@@ -458,6 +459,7 @@ max_runtime_ms = 300000
 | `validation_split` | `0.2` | Fraction of triplets held out for validation. `0.0` disables validation (training-loss-only stopping). |
 | `ewc_lambda` | `0.1` | Elastic Weight Consolidation regularization strength. Penalizes drift from prior task knowledge. Higher = more conservative updates. |
 | `margin` | `0.5` | Triplet contrastive loss margin. The gap between positive and negative similarities the model must achieve. Larger = more separation, harder to satisfy. |
+| `triplet_loss_coefficient` | `0.1` | Auxiliary weight for hydrated `archon meaning` triplets. Conservative by default so trajectory-quality training remains primary. |
 | `max_gradient_norm` | `1.0` | Global L2 gradient clip threshold. Prevents gradient explosion. Lower if loss diverges; raise only if you see vanishing gradients. |
 | `max_triplets_per_run` | `256` | Cap on triplets sampled per training run. Limits training duration; raise for more thorough updates if your machine can handle it. |
 | `max_runtime_ms` | `300000` (5 min) | Wall-clock cap per training run. Training stops at this point regardless of progress. |
@@ -470,24 +472,24 @@ Background auto-retraining.
 
 ```toml
 [learning.gnn.auto_trainer]
-enabled = false
+enabled = true
 min_throttle_ms = 3600000     # 1 hour
-trigger_new_memories = 50
+trigger_new_memories = 20
 trigger_elapsed_ms = 21600000 # 6 hours
-trigger_corrections = 5
-first_run_threshold = 100
+trigger_corrections = 3
+first_run_threshold = 30
 max_runtime_ms = 300000       # 5 minutes
 tick_interval_ms = 60000
 ```
 
 | Field | Default | What / Why |
 |---|---|---|
-| `enabled` | `false` | OFF by default. Set `true` to let the GNN retrain itself in the background as memories accrue. Off means the GNN trains only on explicit `/learning-status retrain` commands. |
+| `enabled` | `true` | ON by default. The 1h throttle and 5min runtime cap keep background training bounded; set `false` to opt out. |
 | `min_throttle_ms` | `3600000` (1h) | Minimum gap between training runs. Prevents thrashing on rapid memory churn. Lower for very active sessions. |
-| `trigger_new_memories` | `50` | Fire training when N new memories have accrued since the last run. |
+| `trigger_new_memories` | `20` | Fire training when N new memories have accrued since the last run. |
 | `trigger_elapsed_ms` | `21600000` (6h) | Fire training when this much wall time has elapsed regardless of memory activity. |
-| `trigger_corrections` | `5` | Fire training when N user corrections have been recorded. Corrections are the strongest training signal. |
-| `first_run_threshold` | `100` | At session startup, if the existing memory count exceeds this, kick off an immediate training run. Lets you bootstrap a fresh archon-cli installation against a populated memory graph. |
+| `trigger_corrections` | `3` | Fire training when N user corrections have been recorded. Corrections are the strongest training signal. |
+| `first_run_threshold` | `30` | At session startup, if the existing memory count is at least this value, kick off an immediate training run. Lets early workspaces train in the first 2-3 normal sessions. |
 | `max_runtime_ms` | `300000` (5 min) | Wall-clock cap per run. Same semantics as in `[learning.gnn.training]`. |
 | `tick_interval_ms` | `60000` (1 min) | Background poll interval. The auto-trainer checks trigger conditions this often. Lower = more responsive triggers, higher CPU; higher = lazier, lower CPU. |
 
@@ -811,9 +813,10 @@ See [Policy](../policy.md) and [VLM Image Descriptions](../integrations/vlm.md) 
 
 Credentials are NOT in `config.toml`. archon-cli reads Anthropic credentials in this order:
 
-1. `~/.config/archon/oauth.json` (from `archon login` PKCE flow)
-2. `ARCHON_OAUTH_TOKEN` / `ANTHROPIC_AUTH_TOKEN` env vars
-3. `ANTHROPIC_API_KEY` / `ARCHON_API_KEY` env vars
+1. `~/.archon/.credentials.json` (from `archon auth login --provider anthropic`)
+2. `~/.claude/.credentials.json` (deprecated fallback when the Archon file is absent)
+3. `ARCHON_OAUTH_TOKEN` / `ANTHROPIC_AUTH_TOKEN` env vars
+4. `ANTHROPIC_API_KEY` / `ARCHON_API_KEY` env vars
 
 If you must pin credentials in TOML, use `<workdir>/.archon/config.local.toml` (gitignored by convention). Never commit secrets to `config.toml` or `.archon/config.toml`.
 

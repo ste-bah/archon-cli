@@ -15,8 +15,8 @@ subagents, coding/research pipelines, and gametheory through Codex.
 | Subcommand | Synopsis |
 |---|---|
 | `archon` | Start interactive TUI (default) |
-| `archon login` | Authenticate via OAuth PKCE flow |
-| `archon logout` | Sign out (clears OAuth tokens) |
+| `archon login` | Legacy shortcut for Anthropic OAuth PKCE login |
+| `archon logout` | Legacy shortcut for Anthropic logout |
 | `archon auth login --provider anthropic\|openai-codex` | Authenticate a provider |
 | `archon auth status` | Show redacted Anthropic/Codex auth status |
 | `archon chat --provider <ID> <PROMPT>` | Single-turn chat through a selected provider |

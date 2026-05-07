@@ -1,12 +1,12 @@
-//! 48-agent coding pipeline definitions.
+//! 50-agent coding pipeline definitions.
 //!
 //! Ports the TypeScript coding pipeline agent configuration to Rust,
 //! mapping the original 7 TS phases into 6 Rust phases per PRD REQ-CODE-007:
 //!
 //! - Phase 1 Understanding (8): core analysis + exploration agents
 //! - Phase 2 Design (10): architecture + feasibility + reviewers
-//! - Phase 3 WiringPlan (2): integration-architect + phase-3-reviewer
-//! - Phase 4 Implementation (10): code generators + implementers
+//! - Phase 3 WiringPlan (3): integration-architect + phase-3-reviewer
+//! - Phase 4 Implementation (11): code generators + implementers
 //! - Phase 5 Testing (9): test agents + phase-4/5-reviewers
 //! - Phase 6 Refinement (9): optimization + coordination + sign-off
 
@@ -155,10 +155,10 @@ impl<'de> Deserialize<'de> for CodingAgent {
 }
 
 // ---------------------------------------------------------------------------
-// 48 agent definitions
+// 50 agent definitions
 // ---------------------------------------------------------------------------
 
-/// All 48 coding-pipeline agents in execution order.
+/// All 50 coding-pipeline agents in execution order.
 pub static AGENTS: &[CodingAgent] = &[
     // =========================================================================
     // PHASE 1: UNDERSTANDING  (TS understanding agents)

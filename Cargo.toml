@@ -8,7 +8,7 @@ publish = false
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.1.51"
+version = "0.1.52"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT"
@@ -179,6 +179,7 @@ tempfile.workspace = true
 async-trait.workspace = true
 regex.workspace = true
 wiremock.workspace = true
+tracing-test.workspace = true
 
 [features]
 test-support = []

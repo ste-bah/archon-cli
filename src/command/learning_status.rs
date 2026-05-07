@@ -182,6 +182,7 @@ impl LearningStatusHandler {
             validation_split: train_cfg_val.validation_split,
             ewc_lambda: train_cfg_val.ewc_lambda,
             margin: train_cfg_val.margin,
+            triplet_loss_coefficient: train_cfg_val.triplet_loss_coefficient,
             max_gradient_norm: train_cfg_val.max_gradient_norm,
             max_triplets_per_run: train_cfg_val.max_triplets_per_run,
             max_runtime_ms: train_cfg_val.max_runtime_ms,

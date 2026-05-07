@@ -64,6 +64,10 @@ The proposal engine currently emits these manifest kinds:
 | `PromptProfile` | Prompt-profile evidence suggests a reviewed prompt change |
 | `PolicyOverride` | Policy evidence suggests an explicit operator-reviewed override |
 
+`archon meaning` triplets are also consumed by the GNN auto-trainer as an
+auxiliary loss term. The governed proposal flow remains review-gated; triplet
+training shapes embeddings but does not auto-apply behavioural proposals.
+
 ## Full State Verification
 
 ```bash

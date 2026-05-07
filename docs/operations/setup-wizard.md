@@ -10,7 +10,7 @@ Type `/setup-archon-skills` in the TUI. The agent becomes a guided configurator 
 
 ### 1. Authentication
 
-OAuth (Claude.ai subscription) or API key. If OAuth, the wizard tells you to run `archon login`. If API key, it tells you to set `ANTHROPIC_API_KEY`.
+OAuth (Claude.ai subscription) or API key. If OAuth, the wizard tells you to run `archon auth login --provider anthropic`. If API key, it tells you to set `ANTHROPIC_API_KEY`.
 
 ### 2. Personality
 

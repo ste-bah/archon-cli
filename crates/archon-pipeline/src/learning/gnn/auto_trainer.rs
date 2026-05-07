@@ -10,11 +10,12 @@ use std::time::{Duration, Instant};
 
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
-use tracing::{info, warn};
+use tracing::{info, trace, warn};
 
 use super::GnnEnhancer;
 use super::loss::TrajectoryWithFeedback;
 use super::trainer::{GnnTrainer, TrainingConfig, TrainingOutcome};
+use super::triplets_loss::TripletBatch;
 use super::weights::WeightStore;
 
 // ---------------------------------------------------------------------------
@@ -47,14 +48,19 @@ pub struct AutoTrainerConfig {
 impl Default for AutoTrainerConfig {
     fn default() -> Self {
         Self {
-            enabled: false,
+            // Enabled by default. The 1h throttle and 5min runtime cap below
+            // remain the compute safety rails; operators can still opt out
+            // explicitly with learning.gnn.auto_trainer.enabled=false.
+            enabled: true,
             min_throttle_ms: 3_600_000, // 1 hour
-            trigger_new_memories: 50,
+            max_runtime_ms: 300_000,    // 5 minutes
+            // Tuned for the first 2-3 normal sessions instead of a dozen+.
+            // Correction threshold matches governed-learning proposal clusters.
+            first_run_threshold: 30,
+            trigger_new_memories: 20,
+            trigger_corrections: 3,
             trigger_elapsed_ms: 21_600_000, // 6 hours
-            trigger_corrections: 5,
-            first_run_threshold: 100,
-            max_runtime_ms: 300_000,  // 5 minutes
-            tick_interval_ms: 60_000, // 1 minute
+            tick_interval_ms: 60_000,       // 1 minute
         }
     }
 }
@@ -106,6 +112,11 @@ impl Default for TrainerState {
 #[derive(Debug, Clone)]
 pub struct AutoTrainerStatus {
     pub enabled: bool,
+    pub first_run_threshold: u64,
+    pub trigger_new_memories: u64,
+    pub trigger_corrections: u64,
+    pub trigger_elapsed_ms: u64,
+    pub min_throttle_ms: u64,
     pub training_count: u64,
     pub total_memories: u64,
     pub total_corrections: u64,
@@ -170,6 +181,24 @@ impl AutoTrainer {
         train_cfg: TrainingConfig,
         sample_provider: Arc<dyn Fn() -> Vec<TrajectoryWithFeedback> + Send + Sync>,
     ) {
+        self.spawn_with_triplet_provider(
+            enhancer,
+            weight_store,
+            train_cfg,
+            sample_provider,
+            Arc::new(TripletBatch::default),
+        );
+    }
+
+    /// Launch the background training loop with hydrated meaning triplets.
+    pub fn spawn_with_triplet_provider(
+        &self,
+        enhancer: Arc<GnnEnhancer>,
+        weight_store: Arc<WeightStore>,
+        train_cfg: TrainingConfig,
+        sample_provider: Arc<dyn Fn() -> Vec<TrajectoryWithFeedback> + Send + Sync>,
+        triplet_provider: Arc<dyn Fn() -> TripletBatch + Send + Sync>,
+    ) {
         if !self.config.enabled {
             info!("AutoTrainer: disabled, background task not started");
             return;
@@ -188,6 +217,7 @@ impl AutoTrainer {
                 weight_store,
                 train_cfg,
                 sample_provider,
+                triplet_provider,
                 cancel,
                 training_cancel,
             )
@@ -232,6 +262,11 @@ impl AutoTrainer {
 
         AutoTrainerStatus {
             enabled: self.config.enabled,
+            first_run_threshold: self.config.first_run_threshold,
+            trigger_new_memories: self.config.trigger_new_memories,
+            trigger_corrections: self.config.trigger_corrections,
+            trigger_elapsed_ms: self.config.trigger_elapsed_ms,
+            min_throttle_ms: self.config.min_throttle_ms,
             training_count: self.state.training_count.load(Ordering::Relaxed),
             total_memories: total,
             total_corrections: corr,
@@ -241,6 +276,11 @@ impl AutoTrainer {
             training_in_progress: self.state.training_in_progress.load(Ordering::Relaxed),
             last_outcome: self.state.last_outcome.read().unwrap().clone(),
         }
+    }
+
+    /// Expose immutable runtime configuration for status surfaces.
+    pub fn config(&self) -> &AutoTrainerConfig {
+        &self.config
     }
 
     /// Signal cancellation and try to join the background task.
@@ -272,6 +312,7 @@ impl AutoTrainer {
         weight_store: Arc<WeightStore>,
         train_cfg: TrainingConfig,
         sample_provider: Arc<dyn Fn() -> Vec<TrajectoryWithFeedback> + Send + Sync>,
+        triplet_provider: Arc<dyn Fn() -> TripletBatch + Send + Sync>,
         cancel: CancellationToken,
         training_cancel: Arc<AtomicBool>,
     ) {
@@ -307,15 +348,26 @@ impl AutoTrainer {
                     let ws2 = Arc::clone(&weight_store);
                     let train_cfg2 = train_cfg.clone();
                     let provider2 = Arc::clone(&sample_provider);
+                    let triplet_provider2 = Arc::clone(&triplet_provider);
                     let training_cancel2 = Arc::clone(&training_cancel);
 
                     let samples = provider2();
+                    let triplet_batch = triplet_provider2();
+                    info!(
+                        count = triplet_batch.triplets.len(),
+                        "auto_trainer.triplet_load"
+                    );
 
                     let outcome = archon_observability::spawn_blocking_named(
                         "gnn-auto-trainer-train",
                         move || {
                             let mut trainer = GnnTrainer::new(train_cfg2, Some(ws2));
-                            trainer.train(&enhancer2, &samples, Some(training_cancel2.as_ref()))
+                            trainer.train_with_triplets(
+                                &enhancer2,
+                                &samples,
+                                &triplet_batch,
+                                Some(training_cancel2.as_ref()),
+                            )
                         },
                     )
                     .await;
@@ -365,7 +417,13 @@ impl AutoTrainer {
             corr_total.saturating_sub(state.corrections_at_last_train.load(Ordering::Relaxed));
         let training_count = state.training_count.load(Ordering::Relaxed);
 
+        if !config.enabled {
+            trace!(reason = "disabled", "autotrainer.skip");
+            return false;
+        }
+
         if state.training_in_progress.load(Ordering::Relaxed) {
+            trace!(reason = "training_in_progress", "autotrainer.skip");
             return false;
         }
 
@@ -373,29 +431,102 @@ impl AutoTrainer {
         if let Some(last) = *state.last_train_time.read().unwrap()
             && (last.elapsed().as_millis() as u64) < config.min_throttle_ms
         {
+            trace!(
+                reason = "throttled",
+                elapsed_ms = last.elapsed().as_millis() as u64,
+                throttle_ms = config.min_throttle_ms,
+                "autotrainer.skip"
+            );
             return false;
         }
 
         // First run
-        if training_count == 0 && total >= config.first_run_threshold {
+        if training_count == 0 {
+            if config.trigger_corrections > 0 && corr_since >= config.trigger_corrections {
+                info!(
+                    trigger = "corrections",
+                    corrections_since = corr_since,
+                    trigger_corrections = config.trigger_corrections,
+                    "autotrainer.train"
+                );
+                return true;
+            }
+
+            if total < config.first_run_threshold {
+                trace!(
+                    reason = "below_first_run_threshold",
+                    total_memories = total,
+                    first_run_threshold = config.first_run_threshold,
+                    corrections_since = corr_since,
+                    trigger_corrections = config.trigger_corrections,
+                    "autotrainer.skip"
+                );
+                return false;
+            }
+            info!(
+                trigger = "first_run",
+                total_memories = total,
+                first_run_threshold = config.first_run_threshold,
+                "autotrainer.train"
+            );
             return true;
         }
 
         // Memory accumulation
         if memories_since >= config.trigger_new_memories {
+            info!(
+                trigger = "new_memories",
+                memories_since,
+                trigger_new_memories = config.trigger_new_memories,
+                "autotrainer.train"
+            );
             return true;
         }
+        trace!(
+            reason = "below_new_memory_threshold",
+            memories_since,
+            trigger_new_memories = config.trigger_new_memories,
+            "autotrainer.skip"
+        );
 
         // Correction spike
         if corr_since >= config.trigger_corrections {
+            info!(
+                trigger = "corrections",
+                corrections_since = corr_since,
+                trigger_corrections = config.trigger_corrections,
+                "autotrainer.train"
+            );
             return true;
         }
+        trace!(
+            reason = "below_correction_threshold",
+            corrections_since = corr_since,
+            trigger_corrections = config.trigger_corrections,
+            "autotrainer.skip"
+        );
 
         // Time-based
         if let Some(last) = *state.last_train_time.read().unwrap()
             && (last.elapsed().as_millis() as u64) >= config.trigger_elapsed_ms
         {
+            info!(
+                trigger = "elapsed",
+                elapsed_ms = last.elapsed().as_millis() as u64,
+                trigger_elapsed_ms = config.trigger_elapsed_ms,
+                "autotrainer.train"
+            );
             return true;
+        }
+        if let Some(last) = *state.last_train_time.read().unwrap() {
+            trace!(
+                reason = "below_elapsed_threshold",
+                elapsed_ms = last.elapsed().as_millis() as u64,
+                trigger_elapsed_ms = config.trigger_elapsed_ms,
+                "autotrainer.skip"
+            );
+        } else {
+            trace!(reason = "elapsed_gate_unavailable", "autotrainer.skip");
         }
 
         false
@@ -409,6 +540,44 @@ impl AutoTrainer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_config_is_enabled() {
+        assert!(AutoTrainerConfig::default().enabled);
+    }
+
+    #[test]
+    fn default_config_thresholds_are_tuned() {
+        let config = AutoTrainerConfig::default();
+        assert_eq!(config.first_run_threshold, 30);
+        assert_eq!(config.trigger_new_memories, 20);
+        assert_eq!(config.trigger_corrections, 3);
+        assert_eq!(config.min_throttle_ms, 3_600_000);
+        assert_eq!(config.max_runtime_ms, 300_000);
+    }
+
+    #[test]
+    fn should_train_skips_below_new_first_run_threshold() {
+        let config = AutoTrainerConfig::default();
+        let state = TrainerState::default();
+        state.total_memories.store(29, Ordering::Relaxed);
+        assert!(!AutoTrainer::check_triggers(&config, &state));
+
+        state.total_memories.store(30, Ordering::Relaxed);
+        assert!(AutoTrainer::check_triggers(&config, &state));
+    }
+
+    #[tracing_test::traced_test]
+    #[test]
+    fn should_train_logs_skip_reason_at_trace() {
+        let config = AutoTrainerConfig::default();
+        let state = TrainerState::default();
+        state.total_memories.store(29, Ordering::Relaxed);
+
+        assert!(!AutoTrainer::check_triggers(&config, &state));
+        assert!(logs_contain("autotrainer.skip"));
+        assert!(logs_contain("below_first_run_threshold"));
+    }
 
     #[test]
     fn first_run_fires_when_threshold_met() {
@@ -479,6 +648,20 @@ mod tests {
         state.training_count.store(1, Ordering::Relaxed);
         *state.last_train_time.write().unwrap() =
             Some(Instant::now() - Duration::from_millis(config.min_throttle_ms + 1000));
+
+        assert!(AutoTrainer::check_triggers(&config, &state));
+    }
+
+    #[test]
+    fn correction_trigger_can_start_first_run() {
+        let config = AutoTrainerConfig {
+            first_run_threshold: 100,
+            trigger_corrections: 5,
+            ..Default::default()
+        };
+        let state = TrainerState::default();
+        state.total_memories.store(2, Ordering::Relaxed);
+        state.total_corrections.store(5, Ordering::Relaxed);
 
         assert!(AutoTrainer::check_triggers(&config, &state));
     }

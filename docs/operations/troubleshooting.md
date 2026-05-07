@@ -7,8 +7,9 @@ Known issues and recovery procedures, organized by symptom.
 ### `(no auth)` shown in TUI
 
 No credentials found in the resolution order. Either:
-- Run `archon login` (OAuth)
+- Run `archon auth login --provider anthropic` (OAuth)
 - `export ANTHROPIC_API_KEY="sk-ant-..."`
+- Or configure Codex with `archon auth login --provider openai-codex` and `[llm].provider = "openai-codex"`
 
 See [env-vars resolution order](../reference/env-vars.md#resolution-order-for-credentials).
 
@@ -50,9 +51,9 @@ Fall back to API key if OAuth keeps timing out:
 export ANTHROPIC_API_KEY="sk-ant-..."
 ```
 
-### Pre-existing `oauth.json` ignored
+### Pre-existing credential file ignored
 
-If multiple Claude Code clients write to the same path, file locking prevents corruption but may cause stale-token reads. Run `archon login` to re-authenticate.
+Archon reads `~/.archon/.credentials.json` first and only falls back to `~/.claude/.credentials.json` when the Archon file is absent. If credentials look stale, run `archon auth login --provider anthropic` to refresh them.
 
 ## Permissions
 

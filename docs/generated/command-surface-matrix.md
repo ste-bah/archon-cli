@@ -16,7 +16,8 @@ Rows marked `PARTIAL` or `SHELL_ONLY` must carry an approved exception with an o
 | `archon completion ...` | `/completion` | CLI mirror | DONE | `src/command/registry.rs` | Completion integrity inspection and trust surfaces are mirrored. | - |
 | `archon behaviour ...` | `/behaviour` | CLI mirror | DONE | `src/command/registry.rs` | Governed-learning events, proposals, approvals, rollback, and status are mirrored. | - |
 | `archon meaning ...` | `/meaning` | CLI mirror | DONE | `src/command/registry.rs` | Meaning samples, contrastive pairs, triplets, and export are mirrored. | - |
-| `archon constellation ...` | `/constellation` | CLI mirror | DONE | `src/command/registry.rs` | Centroid build, score, drift, and list commands are mirrored. | - |
+| `archon constellation ...` | `/constellation` | CLI mirror | DONE | `src/command/registry.rs` | Centroid build, bootstrap, score, drift, and list commands are mirrored. | - |
+| `archon learning ...` | `/learning` | Direct slash handler | DONE | `src/command/evidence_view.rs` | Learning view plus GNN auto-trainer status diagnostics. | - |
 | `archon pipeline ...` | `/pipeline` | CLI mirror | DONE | `src/command/registry.rs` | Pipeline run/status/resume/list/abort/cancel are mirrored. | - |
 | `archon pipeline code <task>` | `/archon-code` | Pipeline primary | DONE | `src/command/archon_code.rs` | The coding pipeline has a first-class TUI slash primary. | - |
 | `archon pipeline research <topic>` | `/archon-research` | Pipeline primary | DONE | `src/command/archon_research.rs` | The research pipeline has a first-class TUI slash primary. | - |

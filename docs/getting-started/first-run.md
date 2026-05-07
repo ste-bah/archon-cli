@@ -5,11 +5,12 @@ What to expect when you launch `archon` for the first time.
 ## What happens on first launch
 
 1. archon-cli generates a config file at `~/.config/archon/config.toml` with commented defaults.
-2. It looks for credentials in this order:
-   - OAuth token at `~/.config/archon/oauth.json` (from a prior `archon login`)
+2. It looks for active-provider credentials. For Anthropic, the order is:
+   - `~/.archon/.credentials.json` (from `archon auth login --provider anthropic`)
+   - deprecated fallback `~/.claude/.credentials.json`, if the Archon file is absent
    - `ARCHON_OAUTH_TOKEN` / `ANTHROPIC_AUTH_TOKEN` env vars
    - `ANTHROPIC_API_KEY` / `ARCHON_API_KEY` env vars
-3. If no credentials are found, archon prompts you to run `archon login` or set an API key.
+3. If no credentials are found, archon prompts you to run `archon auth login --provider anthropic` or set an API key. Codex-backed sessions use `archon auth login --provider openai-codex` plus `[llm].provider = "openai-codex"`.
 4. The TUI opens with built-in defaults (INTJ personality, `dracula` theme, default permission mode).
 
 ## Where data lives
@@ -17,7 +18,7 @@ What to expect when you launch `archon` for the first time.
 | Path | Purpose |
 |---|---|
 | `~/.config/archon/config.toml` | User config (model, identity, personality, permissions) |
-| `~/.config/archon/oauth.json` | OAuth tokens (when using `archon login`) |
+| `~/.archon/.credentials.json` | Provider credentials from `archon auth login` (Anthropic OAuth/API key, Codex OAuth, Gemini API key) |
 | `~/.local/share/archon/` (Linux/macOS) | Per-user state: sessions, memory graph, logs |
 | `%APPDATA%\archon\` (Windows) | Per-user state on Windows |
 | `~/.local/share/archon/sessions/` | Session checkpoints + transcripts |
@@ -35,7 +36,7 @@ Project-local config layers on top of user config — see [Configuration](../ref
 In the TUI:
 
 ```
-/help                  # list all 65 primary slash commands
+/help                  # list all 78 primary slash commands
 /setup-archon-skills   # interactive 8-prompt config wizard
 /status                # session info: model, effort, tokens used
 /cost                  # estimated session cost
@@ -48,7 +49,7 @@ In the TUI:
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| TUI shows `(no auth)` and refuses to send messages | No credentials found | Run `archon login` or `export ANTHROPIC_API_KEY=...` |
+| TUI shows `(no auth)` and refuses to send messages | No credentials found for the active provider | Run `archon auth login --provider anthropic`, set `ANTHROPIC_API_KEY=...`, or configure Codex auth + `[llm].provider = "openai-codex"` |
 | `429 Too Many Requests` on every send | Rate limit on your account / shared IP | Wait, or check `/status` for retry timing |
 | `/run-agent foo` returns `Blocked. The Agent tool requires elevated permissions` | Permission mode does not allow `Agent` tool | Switch mode: type `/permissions auto` or pass `--permission-mode auto` at launch |
 | Pipeline agent dispatch panics with `blocking_lock`-style error | Pre-v0.1.13 bug — should not occur on current builds | Upgrade to latest release |

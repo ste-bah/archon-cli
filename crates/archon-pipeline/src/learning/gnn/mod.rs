@@ -21,6 +21,7 @@ pub mod loss;
 pub mod math;
 pub mod optimizer;
 pub mod trainer;
+pub mod triplets_loss;
 pub mod weights;
 
 use crate::learning::gnn::cache::{CacheConfig, CacheStats, GnnCacheManager};

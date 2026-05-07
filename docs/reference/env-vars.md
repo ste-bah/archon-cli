@@ -38,11 +38,12 @@
 
 ## Resolution order for credentials
 
-1. `~/.config/archon/oauth.json` (from `archon login`)
-2. `ARCHON_OAUTH_TOKEN` env
-3. `ANTHROPIC_AUTH_TOKEN` env (legacy)
-4. `ANTHROPIC_API_KEY` env
-5. `ARCHON_API_KEY` env (alias)
+1. `~/.archon/.credentials.json` (from `archon auth login --provider anthropic`)
+2. `~/.claude/.credentials.json` (deprecated fallback when the Archon file is absent)
+3. `ARCHON_OAUTH_TOKEN` env
+4. `ANTHROPIC_AUTH_TOKEN` env (legacy)
+5. `ANTHROPIC_API_KEY` env
+6. `ARCHON_API_KEY` env (alias)
 
 ## Resolution order for OpenAI key
 

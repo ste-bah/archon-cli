@@ -215,15 +215,15 @@ cargo nextest run --workspace -j1 -- --test-threads=2
 
 ## Authentication
 
-Three methods, tried in this order:
+Anthropic credentials are resolved in this order:
 
 ### OAuth (recommended for Claude subscribers)
 
 ```bash
-archon login
+archon auth login --provider anthropic
 ```
 
-PKCE OAuth flow in your browser, exchanges authorization code for tokens, stored at `~/.config/archon/oauth.json`. Tokens refresh automatically with file locking to prevent race conditions across concurrent sessions. Re-run `archon login` to re-authenticate; `archon logout` (or `/logout` in the TUI) signs out.
+PKCE OAuth flow in your browser, exchanges authorization code for tokens, stored at `~/.archon/.credentials.json`. Tokens refresh automatically with file locking to prevent race conditions across concurrent sessions. Re-run `archon auth login --provider anthropic` to re-authenticate; `archon auth logout --provider anthropic` (or `/auth logout --provider anthropic` in the TUI) signs out. The legacy `archon login` / `archon logout` commands still route to the Anthropic provider.
 
 ### API key
 
@@ -240,6 +240,14 @@ export ARCHON_OAUTH_TOKEN="..."
 ```
 
 The OAuth flow matches the original Claude Code client (`redirect_uri = http://localhost:{port}/callback`), so existing Claude Code tokens on the same machine work transparently.
+
+### Codex OAuth
+
+```bash
+archon auth login --provider openai-codex
+```
+
+Codex credentials are stored in the same `~/.archon/.credentials.json` file under `openaiCodexOauth`. Set `[llm].provider = "openai-codex"` to use Codex for the TUI, tools, subagents, `/btw`, team runs, coding/research pipelines, and game-theory runs.
 
 ## VS Code Extension
 

@@ -2,13 +2,13 @@
 
 All slash commands work in the interactive TUI. Type `/help` to see them in-app.
 
-As of v0.1.45 the registry contains **78 primary commands** (lockstep-tested at `EXPECTED_COMMAND_COUNT = 78` in `src/command/registry.rs` and `EXPECTED_PRIMARY_COUNT = 78` in `src/command/dispatcher.rs`). Aliases come from each handler's `aliases()` method.
+As of v0.1.52 the registry contains **78 primary commands** (lockstep-tested at `EXPECTED_COMMAND_COUNT = 78` in `src/command/registry.rs` and `EXPECTED_PRIMARY_COUNT = 78` in `src/command/dispatcher.rs`). Aliases come from each handler's `aliases()` method.
 
 For shell/TUI parity, see the generated [command surface matrix](../generated/command-surface-matrix.md). It is backed by `src/command/surface_matrix.rs` and has tests that fail when registered slash primaries drift.
 
 Beyond the 78 primaries, archon-cli ships **68 built-in skills** (33 in `crates/archon-core/src/skills/builtin.rs`, 35 in `expanded.rs`). Skills behave like slash commands but are resolved through the Skill registry — primary handlers take precedence at dispatch time.
 
-> **Version history.** v0.1.38 added 11 primaries (Evidence Engine: `/kb`, `/prov`, `/meaning`, `/constellation`, plus gametheory inspection subcommands and the slash mirror). v0.1.40 added 2 more (`/auth` and `/chat` for the OpenAI-Codex provider surface). v0.1.45 keeps the same command count but upgrades Codex from chat/TUI-only to provider-neutral agentic surfaces where `[llm].provider = "openai-codex"`.
+> **Version history.** v0.1.38 added 11 primaries (Evidence Engine: `/kb`, `/prov`, `/meaning`, `/constellation`, plus gametheory inspection subcommands and the slash mirror). v0.1.40 added 2 more (`/auth` and `/chat` for the OpenAI-Codex provider surface). v0.1.45 keeps the same command count but upgrades Codex from chat/TUI-only to provider-neutral agentic surfaces where `[llm].provider = "openai-codex"`. v0.1.52 adds `/learning gnn status` to expose GNN auto-trainer diagnostics from the learning command family.
 
 ## Core & meta
 
@@ -68,7 +68,7 @@ Beyond the 78 primaries, archon-cli ships **68 built-in skills** (33 in `crates/
 |---|---|---|
 | `/agent` | — | Umbrella: `/agent list`, `/agent info <name>`, `/agent run <name>` |
 | `/run-agent` | — | Invoke a custom agent by name with a task description (async via TaskService, using the active provider) |
-| `/archon-code` | — | Run the 48-agent coding pipeline on a task using the active provider |
+| `/archon-code` | — | Run the 50-agent coding pipeline on a task using the active provider |
 | `/archon-research` | — | Run the 46-agent PhD research pipeline on a topic using the active provider |
 | `/managed-agents` | — | Show managed-agent (remote-registry) status |
 | `/refresh` | — | Re-scan the agent registry from disk |
@@ -121,13 +121,13 @@ Each command goes through the same persisted Cozo state as its `archon X` shell 
 | `/docs` | — | Document intelligence: `open`, `list`, `status`, `show`, `inspect`, `chunks`, `provenance`, `model-status`, `ingest`, `index`, `search`, `answer` |
 | `/kb` | — | Knowledge base: `ingest`, `list`, `search`, `process` (claims, entities, relations, contradictions), `claims`, `entities`, `relations`, `contradictions`, `stats` |
 | `/prov` | — | Provenance: `trace <artifact-id>`, `export <artifact-id>` (W3C PROV JSON-LD), `verify <artifact-id>` |
-| `/meaning` | — | Meaning compiler: `build --from learning-events|gametheory-runs`, `samples`, `contrastive`, `triplets`, `export --kind samples|triplets` |
-| `/constellation` | — | Centroid profiles: `build --target project|research-domain|strategic-workflow`, `score`, `drift`, `list` |
+| `/meaning` | — | Meaning compiler and GNN triplet source: `build --from learning-events|gametheory-runs`, `samples`, `contrastive`, `triplets`, `export --kind samples|triplets` |
+| `/learning` | — | Learning diagnostics: `open`, `view`, `gnn status` |
+| `/constellation` | — | Centroid profiles: `build --target project|research-domain|strategic-workflow`, `bootstrap --target memory|docs|session`, `score`, `drift`, `list` |
 | `/completion` | — | Completion integrity: `inspect <run-id>`, `claims`, `evidence`, `incidents`, `verify`, `trust` |
 | `/behaviour` | — | Governed learning: `list-events`, `list-proposals`, `show`, `apply`, `approve`, `deny`, `rollback`, `history`, `generate-proposals`, `status` |
 | `/gametheory` | — | Game-theory umbrella: `run`, `classify-only`, `status`, `inspect`, `inspect-fingerprint`, `inspect-routing`, `list-runs`, `show`, `replay`, `list-agents`, `specimens` |
 | `/learning-status` | — | Status pane for the 8 learning subsystems (separate from `/behaviour status`) |
-| `/learning` | — | Open the governed-learning TUI browser |
 
 ## Analysis & insights
 

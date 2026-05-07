@@ -1,4 +1,4 @@
-//! Tests for the 48-agent coding pipeline definitions.
+//! Tests for the 50-agent coding pipeline definitions.
 
 use archon_pipeline::coding::agents::*;
 use std::collections::HashSet;

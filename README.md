@@ -120,7 +120,7 @@ archon-cli/
 │   ├── archon-consciousness/  # rules, personality, persistence
 │   ├── archon-session/        # session checkpoints (CozoDB)
 │   ├── archon-memory/         # memory graph + embeddings (CozoDB)
-│   ├── archon-llm/            # Anthropic API client + spoofing
+│   ├── archon-llm/            # provider clients + identity/spoofing
 │   ├── archon-tools/          # 43 built-in tools
 │   ├── archon-permissions/    # 7 permission modes
 │   ├── archon-mcp/            # MCP transport
@@ -145,9 +145,9 @@ archon-cli/
 
 ## Status
 
-- Current version: **v0.1.49** ([release notes](docs/release-notes/v0.1.49.md))
+- Current version: **v0.1.52** ([release notes](docs/release-notes/v0.1.52.md))
 - Active development; pre-1.0 means breaking changes can land in minor versions
-- Phase 6 complete (pipelines + learning systems wired) + Evidence Engine PRD compliance pass + Codex agentic provider parity + multi-provider VLM image descriptions + unified PDF image extraction + OpenAI-compatible VLM support + TUI drain-stall false-positive fix; see release notes for the v0.1.6 → v0.1.49 stabilisation arc
+- Phase 6 complete (pipelines + learning systems wired) + Evidence Engine PRD compliance pass + Codex agentic provider parity + multi-provider VLM image descriptions + unified PDF image extraction + OpenAI-compatible VLM support + TUI drain-stall false-positive fix + learning-systems completion; see release notes for the v0.1.6 → v0.1.52 stabilisation arc
 
 ## Contributing
 

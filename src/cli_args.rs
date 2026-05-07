@@ -373,6 +373,11 @@ pub enum Commands {
         #[command(subcommand)]
         action: BehaviourAction,
     },
+    /// Inspect learning subsystem diagnostics
+    Learning {
+        #[command(subcommand)]
+        action: LearningAction,
+    },
     /// Check status of an async task
     TaskStatus {
         /// Task ID (UUID)
@@ -980,6 +985,21 @@ pub enum MeaningAction {
 }
 
 #[derive(Subcommand, Debug, Clone)]
+pub enum LearningAction {
+    /// Inspect GNN auto-trainer diagnostics
+    Gnn {
+        #[command(subcommand)]
+        action: LearningGnnAction,
+    },
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum LearningGnnAction {
+    /// Show auto-trainer gates, thresholds, and last-run state
+    Status,
+}
+
+#[derive(Subcommand, Debug, Clone)]
 pub enum MemoryAction {
     /// Re-embed every memory in the graph using the currently-configured
     /// embedding model. Use after swapping models or recovering from a
@@ -1026,6 +1046,21 @@ pub enum ConstellationAction {
         /// Minimum accepted similarity before drift is reported
         #[arg(long, default_value_t = 0.45)]
         threshold: f64,
+    },
+    /// Bootstrap a centroid profile from recent memories, docs, a session, or an inline file
+    Bootstrap {
+        /// Target profile to bootstrap: memory, docs, or session
+        #[arg(long)]
+        target: String,
+        /// Maximum source texts to read
+        #[arg(long, default_value_t = 50)]
+        limit: usize,
+        /// Session id for --target session
+        #[arg(long)]
+        session: Option<String>,
+        /// File containing representative texts, one per non-empty line
+        #[arg(long)]
+        inline_file: Option<PathBuf>,
     },
     /// List persisted constellation centroids
     List,

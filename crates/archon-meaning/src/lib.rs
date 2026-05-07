@@ -4,6 +4,7 @@ pub mod contrastive;
 pub mod errors;
 pub mod eval_dataset_builder;
 pub mod export;
+pub mod resolver;
 pub mod samples;
 pub mod triplets;
 
@@ -13,11 +14,12 @@ use cozo::{DataValue, DbInstance, ScriptMutability};
 use sha2::{Digest, Sha256};
 
 pub use errors::{MeaningError, Result};
+pub use resolver::{HydratedTriplet, list_hydrated_triplets, resolve_triplet_embeddings};
 pub use samples::{MeaningLabel, MeaningSample};
+pub use triplets::TripletRecord;
 
 use contrastive::ContrastivePair;
 use eval_dataset_builder::EvalDataset;
-use triplets::TripletRecord;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BuildReport {

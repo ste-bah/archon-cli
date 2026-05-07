@@ -101,7 +101,7 @@ archon task-status <task-id>
 
 Pipeline agents (50 coding + 46 research) use the dual format:
 
-`crates/archon-pipeline/src/agents/coding/code-quality-improver.md`:
+`.archon/agents/coding-pipeline/code-quality-improver.md`:
 
 ```markdown
 ---
