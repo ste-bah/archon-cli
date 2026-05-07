@@ -53,7 +53,6 @@ crates/archon-llm/src/providers/vertex.rs
 # #204 HYGIENE-MCP-FILE-SIZES — all resulting files < 500 lines.)
 
 # --- archon-memory ---
-crates/archon-memory/src/garden.rs
 crates/archon-memory/tests/garden_tests.rs
 crates/archon-memory/tests/memory_server_tests.rs
 
