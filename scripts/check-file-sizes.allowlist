@@ -69,7 +69,6 @@ crates/archon-pipeline/src/coding/wiring.rs
 crates/archon-pipeline/src/compression.rs
 crates/archon-pipeline/src/kb/compile.rs
 crates/archon-pipeline/src/kb/query.rs
-crates/archon-pipeline/src/learning/desc.rs
 crates/archon-pipeline/src/learning/integration.rs
 crates/archon-pipeline/src/learning/sona.rs
 crates/archon-pipeline/src/manifest.rs
