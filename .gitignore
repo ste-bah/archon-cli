@@ -82,6 +82,8 @@ hello.txt
 !/docs/operations/**
 !/docs/maintenance/
 !/docs/maintenance/**
+!/docs/maintainability/
+!/docs/maintainability/**
 !/docs/development/
 !/docs/development/**
 !/docs/release-notes/

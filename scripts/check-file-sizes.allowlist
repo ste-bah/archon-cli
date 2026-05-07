@@ -124,7 +124,6 @@ crates/archon-tools/src/send_message.rs
 crates/archon-core/src/agents/catalog.rs
 crates/archon-core/src/patterns/circuit_breaker.rs
 crates/archon-core/src/patterns/composite.rs
-crates/archon-core/src/patterns/plugin.rs
 crates/archon-core/src/subagent_executor.rs
 crates/archon-core/tests/task_cancel.rs
 
@@ -158,20 +157,7 @@ crates/archon-llm/src/providers/registry.rs
 crates/archon-observability/src/redaction.rs
 
 # --- archon-tui ---
-crates/archon-tui/src/screens/session_browser.rs
 crates/archon-tui/tests/task_dispatch.rs
-
-# Grew 491→510 in TASK-#207 SLASH-FILES (added ShowFilePicker variant +
-# file_picker field + Default init). Root cause is the dual-TuiEvent-
-# enum structure: events.rs holds the canonical layer-0 definition AND
-# app.rs holds a parallel duplicate that consumers import via
-# `archon_tui::app::TuiEvent`. Adding any new variant requires editing
-# both. The structural fix is to delete the app.rs duplicate and
-# `pub use crate::events::TuiEvent;` instead — that's a cross-cutting
-# refactor (touches every consumer's import path) and out of scope for
-# #207's wrapper-scope ticket. Allowlisted here; consolidation
-# follow-up tracked.
-crates/archon-tui/src/app.rs
 
 # --- root src/command ---
 src/command/add_dir.rs
@@ -191,7 +177,6 @@ src/command/pipeline.rs
 src/command/permissions.rs
 src/command/recall.rs
 src/command/registry.rs
-src/command/rename.rs
 src/command/rules.rs
 src/command/test_support.rs
 
@@ -248,7 +233,6 @@ crates/archon-learning/src/apply.rs
 crates/archon-learning/src/store.rs
 
 # --- archon-pipeline gametheory ---
-crates/archon-pipeline/src/gametheory/facade.rs
 crates/archon-pipeline/src/gametheory/registry.rs
 crates/archon-pipeline/src/gametheory/routing.rs
 crates/archon-pipeline/src/gametheory/schema.rs
