@@ -78,7 +78,6 @@ crates/archon-pipeline/tests/learning_schema.rs
 crates/archon-pipeline/tests/runner.rs
 
 # --- archon-plugin ---
-crates/archon-plugin/src/host.rs
 crates/archon-plugin/tests/test_plugin_loader.rs
 crates/archon-plugin/tests/test_wasm_host.rs
 
