@@ -18,7 +18,7 @@ pub async fn handle_behaviour_command(
     archon_learning::schema::ensure_learning_schema(&db)?;
 
     match action {
-        BehaviourAction::ListProposals => cmd_list_proposals(&db),
+        BehaviourAction::ListProposals { pending } => cmd_list_proposals(&db, *pending),
         BehaviourAction::ListEvents { event_type } => cmd_list_events(&db, event_type.as_deref()),
         BehaviourAction::Show { id } => cmd_show(&db, id),
         BehaviourAction::Apply { proposal_id } => cmd_apply(&db, proposal_id),
@@ -51,12 +51,17 @@ fn open_learning_db(path: &std::path::Path) -> Result<DbInstance> {
 
 // ── Subcommand handlers ──────────────────────────────────────────────────────
 
-fn cmd_list_proposals(db: &DbInstance) -> Result<()> {
-    let proposals = archon_learning::store::list_behaviour_proposals(db, None)
+fn cmd_list_proposals(db: &DbInstance, pending: bool) -> Result<()> {
+    let status = pending.then_some("Pending");
+    let proposals = archon_learning::store::list_behaviour_proposals(db, status)
         .map_err(|e| anyhow::anyhow!("{e}"))?;
 
     if proposals.is_empty() {
-        println!("No behaviour proposals found.");
+        if pending {
+            println!("No pending behaviour proposals found.");
+        } else {
+            println!("No behaviour proposals found.");
+        }
         return Ok(());
     }
 
@@ -324,6 +329,7 @@ fn cmd_status(db: &DbInstance) -> Result<()> {
         "AgentRoutingProfile",
         "ConstellationThresholds",
         "PipelineGates",
+        "BehaviouralRuleAdjustment",
         "PromptProfile",
     ] {
         if let Ok(Some(v)) = archon_learning::store::get_latest_manifest_version(db, kind) {

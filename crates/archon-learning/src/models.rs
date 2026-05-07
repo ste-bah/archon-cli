@@ -147,6 +147,7 @@ pub enum BehaviourManifestKind {
     AgentRoutingProfile,
     ConstellationThresholds,
     PipelineGates,
+    BehaviouralRuleAdjustment,
     PromptProfile,
     PolicyOverride,
 }
@@ -159,6 +160,7 @@ impl BehaviourManifestKind {
             Self::AgentRoutingProfile => "AgentRoutingProfile",
             Self::ConstellationThresholds => "ConstellationThresholds",
             Self::PipelineGates => "PipelineGates",
+            Self::BehaviouralRuleAdjustment => "BehaviouralRuleAdjustment",
             Self::PromptProfile => "PromptProfile",
             Self::PolicyOverride => "PolicyOverride",
         }
@@ -171,6 +173,7 @@ impl BehaviourManifestKind {
             "AgentRoutingProfile" => Some(Self::AgentRoutingProfile),
             "ConstellationThresholds" => Some(Self::ConstellationThresholds),
             "PipelineGates" => Some(Self::PipelineGates),
+            "BehaviouralRuleAdjustment" => Some(Self::BehaviouralRuleAdjustment),
             "PromptProfile" => Some(Self::PromptProfile),
             "PolicyOverride" => Some(Self::PolicyOverride),
             _ => None,
@@ -186,7 +189,9 @@ impl BehaviourManifestKind {
             | Self::SourceQualityProfile
             | Self::AgentRoutingProfile
             | Self::ConstellationThresholds => RiskLevel::Low,
-            Self::PipelineGates | Self::PromptProfile => RiskLevel::High,
+            Self::PipelineGates | Self::BehaviouralRuleAdjustment | Self::PromptProfile => {
+                RiskLevel::High
+            }
             Self::PolicyOverride => RiskLevel::Critical,
         }
     }

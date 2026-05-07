@@ -412,6 +412,11 @@ pub struct Agent {
     /// GNN auto-trainer hook: invoked after a successful correction record.
     /// Same injection rationale as `record_memory_callback`.
     record_correction_callback: Option<Arc<dyn Fn() + Send + Sync>>,
+    /// Governed-learning hook: invoked after correction handling and rule
+    /// reinforcement so embedders can persist a UserCorrected LearningEvent.
+    /// archon-core cannot depend on archon-learning, so this is closure-wired.
+    record_user_correction_event_callback:
+        Option<Arc<dyn Fn(UserCorrectionEventPayload) + Send + Sync>>,
     /// Personality-mirror hook: invoked with the post-mutation `&InnerVoice`
     /// after every write site (per-tool-call, per-turn-complete, user
     /// correction). Wired by the binary at startup so a sync-Mutex mirror
@@ -420,6 +425,18 @@ pub struct Agent {
     /// async Mutex). Reference: `src/panic_save.rs` and TASK #245.
     #[allow(clippy::type_complexity)]
     inner_voice_change_callback: Option<Arc<dyn Fn(&InnerVoice) + Send + Sync>>,
+}
+
+/// Payload emitted by the agent loop when a user correction is detected.
+///
+/// Kept in archon-core as plain data so the binary/pipeline layer can map it
+/// into archon-learning without introducing a crate cycle.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UserCorrectionEventPayload {
+    pub correction_type: String,
+    pub top_rule_id: Option<String>,
+    pub user_input_excerpt: String,
+    pub session_context: String,
 }
 
 impl Agent {
@@ -476,6 +493,7 @@ impl Agent {
             // methods get called from agent's memory + correction code paths.
             record_memory_callback: None,
             record_correction_callback: None,
+            record_user_correction_event_callback: None,
             // TASK #245: wired by the binary at startup; default None makes
             // tests and non-interactive paths no-op.
             inner_voice_change_callback: None,
@@ -676,6 +694,17 @@ impl Agent {
     /// Called from `detect_and_record_correction` after a successful record.
     pub fn set_record_correction_callback(&mut self, cb: Arc<dyn Fn() + Send + Sync>) {
         self.record_correction_callback = Some(cb);
+    }
+
+    /// Wire governed-learning UserCorrected event emission.
+    ///
+    /// Called from the binary/pipeline layer so archon-core does not import
+    /// archon-learning directly.
+    pub fn set_record_user_correction_event_callback(
+        &mut self,
+        cb: Arc<dyn Fn(UserCorrectionEventPayload) + Send + Sync>,
+    ) {
+        self.record_user_correction_event_callback = Some(cb);
     }
 
     /// Wire the personality-mirror update hook (TASK #245).
@@ -2813,11 +2842,26 @@ impl Agent {
         // When the user corrects us, reinforce the top matching rule so it
         // gains more prominence in future prompts.
         let engine = RulesEngine::new(graph.as_ref());
-        if let Ok(rules) = engine.get_rules_sorted()
-            && let Some(top) = rules.first()
-            && let Err(e) = engine.reinforce_rule(&top.id)
-        {
-            tracing::debug!("reinforce_rule failed: {e}");
+        let mut top_rule_id = None;
+        match engine.get_rules_sorted() {
+            Ok(rules) => {
+                if let Some(top) = rules.first() {
+                    top_rule_id = Some(top.id.clone());
+                    if let Err(e) = engine.reinforce_rule(&top.id) {
+                        tracing::debug!("reinforce_rule failed: {e}");
+                    }
+                }
+            }
+            Err(e) => tracing::debug!("get_rules_sorted failed during correction handling: {e}"),
+        }
+
+        if let Some(ref cb) = self.record_user_correction_event_callback {
+            cb(UserCorrectionEventPayload {
+                correction_type: format!("{correction_type:?}"),
+                top_rule_id,
+                user_input_excerpt: user_correction_excerpt(user_input),
+                session_context: context,
+            });
         }
     }
 
@@ -3045,6 +3089,12 @@ fn parse_plan_from_text(text: &str) -> archon_session::plan::PlanDocument {
     doc
 }
 
+fn user_correction_excerpt(user_input: &str) -> String {
+    // TODO(v0.1.52): use the shared secret-redaction regex once it is exposed
+    // as a public helper outside archon-observability's tracing internals.
+    user_input.chars().take(200).collect()
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -3052,6 +3102,104 @@ fn parse_plan_from_text(text: &str) -> archon_session::plan::PlanDocument {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use archon_consciousness::rules::RuleSource;
+    use archon_llm::provider::{LlmError, LlmResponse, ModelInfo, ProviderFeature};
+    use archon_memory::MemoryGraph;
+
+    struct MockLlmProvider;
+
+    #[async_trait::async_trait]
+    impl LlmProvider for MockLlmProvider {
+        fn name(&self) -> &str {
+            "mock"
+        }
+
+        fn models(&self) -> Vec<ModelInfo> {
+            vec![]
+        }
+
+        fn supports_feature(&self, _: ProviderFeature) -> bool {
+            false
+        }
+
+        async fn stream(
+            &self,
+            _request: LlmRequest,
+        ) -> Result<tokio::sync::mpsc::Receiver<StreamEvent>, LlmError> {
+            let (tx, rx) = tokio::sync::mpsc::channel(1);
+            drop(tx);
+            Ok(rx)
+        }
+
+        async fn complete(&self, _request: LlmRequest) -> Result<LlmResponse, LlmError> {
+            unimplemented!()
+        }
+    }
+
+    fn test_agent() -> Agent {
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        Agent::new(
+            Arc::new(MockLlmProvider),
+            ToolRegistry::new(),
+            AgentConfig::default(),
+            tx,
+            Arc::new(std::sync::RwLock::new(AgentRegistry::load(
+                &std::env::temp_dir(),
+            ))),
+        )
+    }
+
+    #[test]
+    fn correction_detection_fires_event_callback_with_top_rule_id() {
+        let mut agent = test_agent();
+        let graph = MemoryGraph::in_memory().expect("in-memory graph");
+        let seeded_rule_id = {
+            let engine = RulesEngine::new(&graph);
+            let rule = engine
+                .add_rule("prefer concise corrections", RuleSource::UserDefined)
+                .expect("seed rule");
+            for _ in 0..10 {
+                let _ = engine.reinforce_rule(&rule.id);
+            }
+            rule.id
+        };
+        let graph: Arc<dyn MemoryTrait> = Arc::new(graph);
+
+        let correction_count = Arc::new(AtomicUsize::new(0));
+        let correction_count_cb = Arc::clone(&correction_count);
+        agent.set_record_correction_callback(Arc::new(move || {
+            correction_count_cb.fetch_add(1, Ordering::SeqCst);
+        }));
+
+        let iv = Arc::new(Mutex::new(InnerVoice::new()));
+        agent.set_inner_voice(Arc::clone(&iv));
+
+        let captured = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let captured_cb = Arc::clone(&captured);
+        agent.set_record_user_correction_event_callback(Arc::new(move |payload| {
+            captured_cb.lock().unwrap().push(payload);
+        }));
+
+        agent
+            .detect_and_record_correction(&format!("use this instead {}", "x".repeat(220)), &graph);
+
+        assert_eq!(correction_count.load(Ordering::SeqCst), 1);
+        let iv = iv.try_lock().expect("inner voice lock");
+        assert_eq!(iv.corrections_received, 1);
+        assert!((iv.confidence - 0.6).abs() < f32::EPSILON);
+
+        let captured = captured.lock().unwrap();
+        assert_eq!(captured.len(), 1);
+        assert_eq!(captured[0].correction_type, "ApproachCorrection");
+        assert_eq!(
+            captured[0].top_rule_id.as_deref(),
+            Some(seeded_rule_id.as_str())
+        );
+        assert!(!captured[0].user_input_excerpt.is_empty());
+        assert!(captured[0].user_input_excerpt.chars().count() <= 200);
+    }
 
     /// Verify that thinking blocks include the `signature` field when built
     /// as assistant message content. This is required by the Anthropic API

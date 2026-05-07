@@ -54,12 +54,25 @@ flowchart TB
     GNN2 --> MEMORY
     MEANING --> CONST["Constellation centroids"]
     CONST --> NEXT
+
+    CORR["agent.handle_correction"] --> REC["LearningIntegration.record_user_correction_event"]
+    REC --> EVENTS
+    EVENTS --> UC["BehaviouralRuleAdjustment<br/>after 3 corrections / 7 days"]
+    UC --> PROPOSALS
 ```
 
 Practically, this means Archon can remember useful prior work, retrieve it
 semantically, detect contradictions, learn from false completions or accepted
 outputs, and suggest behaviour changes without silently rewriting itself.
 Risky changes go through governed learning and policy gates.
+
+User corrections have a separate governed-learning edge. When
+`agent.handle_correction` detects a correction, the existing memory graph,
+inner-voice, GNN counter, and behavioural-rule reinforcement paths still run.
+After rule reinforcement, the agent emits a `UserCorrected` event through
+`LearningIntegration.record_user_correction_event`. The proposal engine scans
+those events and emits a `BehaviouralRuleAdjustment` proposal when three or
+more corrections cluster on the same rule id within seven days.
 
 ## System details
 
@@ -176,8 +189,8 @@ When an agent task fails, Reflexion captures the failure, generates a self-criti
 LearningIntegration::new(
     Some(sona),
     Some(reasoning_bank),
-    Some(auto_trainer),
     config,
+    Some(auto_trainer),
 )
 ```
 
@@ -185,6 +198,7 @@ All deps are `Option<T>` for graceful degradation. Hooks fire on:
 - `on_agent_start` — query ReasoningBank for context, create SONA trajectory
 - `on_agent_complete` — finalize trajectory, capture facts via AutoCapture, signal AutoTrainer
 - `on_correction_recorded` — increment correction counter, may trigger retrain
+- `record_user_correction_event` — persist `UserCorrected` events for governed proposals
 - `score_quality` — assigns quality score to trajectory for triplet sampling
 
 ## /learning-status
@@ -219,6 +233,7 @@ archon completion trust --agent verifier --model sonnet
 archon behaviour status
 archon behaviour list-events
 archon behaviour generate-proposals
+archon behaviour list --pending
 archon behaviour approve <proposal-id>
 archon behaviour history <manifest-kind>
 archon meaning build --from learning-events
