@@ -107,7 +107,6 @@ crates/archon-tools/src/send_message.rs
 crates/archon-core/src/agents/catalog.rs
 crates/archon-core/src/patterns/circuit_breaker.rs
 crates/archon-core/src/patterns/composite.rs
-crates/archon-core/src/subagent_executor.rs
 crates/archon-core/tests/task_cancel.rs
 
 # --- archon-pipeline (carryover) ---

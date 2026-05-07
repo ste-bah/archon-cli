@@ -100,7 +100,10 @@ fn phase3_subagents_and_team_use_active_provider() {
         "crates/archon-core/src/agent.rs",
         "crates/archon-core/src/agent/lifecycle.rs",
     ]);
-    let executor = read("crates/archon-core/src/subagent_executor.rs");
+    let executor = read_all(&[
+        "crates/archon-core/src/subagent_executor.rs",
+        "crates/archon-core/src/subagent_executor/run.rs",
+    ]);
     let runner = read_all(&[
         "crates/archon-core/src/subagent.rs",
         "crates/archon-core/src/subagent/runner.rs",

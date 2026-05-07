@@ -40,7 +40,7 @@ Group 11 should not become a dumping ground. Split tests alongside adjacent prod
 
 ## Current Status
 
-Group 3 `agent.rs` and `subagent.rs` are complete in this worktree: `crates/archon-core/src/agent.rs` is 489 lines, `crates/archon-core/src/subagent.rs` is 370 lines, and both have been removed from `scripts/check-file-sizes.allowlist`. Continue Group 3 with `crates/archon-core/src/subagent_executor.rs`.
+Group 3 is complete in this worktree: `crates/archon-core/src/agent.rs` is 489 lines, `crates/archon-core/src/subagent.rs` is 370 lines, and `crates/archon-core/src/subagent_executor.rs` is 286 lines. All three have been removed from `scripts/check-file-sizes.allowlist`. Continue with Group 5 command-surface targets.
 
 ## Verification Matrix
 
