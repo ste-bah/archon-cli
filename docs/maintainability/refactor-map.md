@@ -45,9 +45,9 @@ Group 3 is complete in this worktree: `crates/archon-core/src/agent.rs` is 489 l
 
 Group 5 is complete: `src/command/registry.rs` is now a 19-line compatibility shell backed by focused `src/command/registry/*` modules, and `src/cli_args.rs` is now a 24-line compatibility shell backed by focused `src/cli_args/*` modules. Both files have been removed from `scripts/check-file-sizes.allowlist`.
 
-Group 4 was missing from the earlier map and is now restored ahead of Group 6. Group 4 is now in progress: `crates/archon-core/src/agents/loader.rs` has been split from 2020 lines to a 29-line compatibility shell backed by focused `agents/loader/*` modules and removed from `scripts/check-file-sizes.allowlist`.
+Group 4 was missing from the earlier map and is now restored ahead of Group 6. Group 4 is now in progress: `crates/archon-core/src/agents/loader.rs` has been split from 2020 lines to a 29-line compatibility shell, and `crates/archon-core/src/agents/memory.rs` has been split from 1207 lines to a 22-line compatibility shell. Both are backed by focused submodules and removed from `scripts/check-file-sizes.allowlist`.
 
-Continue with the remaining Group 4 core agents, hooks, config, and patterns targets before session startup and loop work. The next high-value production target is `crates/archon-core/src/agents/memory.rs`, followed by `crates/archon-core/src/config.rs` and `crates/archon-core/src/hooks/registry.rs`.
+Continue with the remaining Group 4 core agents, hooks, config, and patterns targets before session startup and loop work. The next high-value production targets are `crates/archon-core/src/config.rs` and `crates/archon-core/src/hooks/registry.rs`, followed by the adjacent oversized agent/skills modules and Group 4 tests.
 
 ## Verification Matrix
 

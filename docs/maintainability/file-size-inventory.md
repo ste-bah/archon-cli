@@ -98,6 +98,16 @@ Active oversized allowlist entries: 96
 
 Group 4 removed `crates/archon-core/src/agents/loader.rs` from the active allowlist by splitting it from 2020 lines to a 29-line compatibility shell plus focused `agents/loader/*` implementation and test modules. Remaining Group 4 targets include `crates/archon-core/src/agents/memory.rs`, `crates/archon-core/tests/hooks_tests.rs`, `crates/archon-core/src/config.rs`, and `crates/archon-core/src/hooks/registry.rs`.
 
+After Group 4 `agents/memory.rs` split:
+
+```text
+FileSizeGuard: 1371 files checked, 0 over 500, 95 allowlisted
+Raw non-comment allowlist entries: 95
+Active oversized allowlist entries: 95
+```
+
+Group 4 removed `crates/archon-core/src/agents/memory.rs` from the active allowlist by splitting it from 1207 lines to a 22-line compatibility shell plus focused `agents/memory/*` implementation and test modules. Remaining Group 4 production targets include `crates/archon-core/src/config.rs`, `crates/archon-core/src/hooks/registry.rs`, `crates/archon-core/src/skills/agent_skills.rs`, and `crates/archon-core/src/agents/catalog.rs`.
+
 ## Commands
 
 Regenerate the guard summary:
@@ -262,7 +272,6 @@ Removed stale or inactive entries:
 | 1365 | `crates/archon-docs/src/retrieval.rs` | Group 7 |
 | 1355 | `crates/archon-pipeline/src/coding/agents.rs` | Group 8 |
 | 1339 | `crates/archon-docs/src/store.rs` | Group 7 |
-| 1207 | `crates/archon-core/src/agents/memory.rs` | Group 4 |
 | 1184 | `crates/archon-core/tests/hooks_tests.rs` | Group 4 |
 | 1183 | `crates/archon-pipeline/src/research/quality.rs` | Group 8 |
 | 1161 | `crates/archon-core/src/config.rs` | Group 4 |
@@ -362,7 +371,7 @@ Removed stale or inactive entries:
 | Group 1 | 0 |
 | Group 2 | 0 |
 | Group 3 | 0 |
-| Group 4 | 19 |
+| Group 4 | 18 |
 | Group 5 | 0 |
 | Group 6 | 5 |
 | Group 7 | 2 |
