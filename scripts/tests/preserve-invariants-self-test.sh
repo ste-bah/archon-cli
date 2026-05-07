@@ -93,10 +93,15 @@ assert_fails "agt025-race-missing"
 git -C "$WORK/ws" checkout -- crates/archon-tools/src/agent_tool.rs 2>/dev/null || true
 
 # --- Case F: save_agent_memory signature drift (memory_scope removed) ---
+# Post-refactor (commit b2fb45c "Split agent memory modules"): the
+# canonical save_agent_memory signature lives in agents/memory/store.rs;
+# agents/memory.rs is now a parent module that re-exports it. Inject
+# drift into the store submodule where the actual signature lives so
+# the check-preserve-invariants.sh Check 5 detects it.
 echo "--- Case F: save_agent_memory signature drift ---"
-sed -i 's/memory_scope: Option<&AgentMemoryScope>/\/\/ memory_scope removed/' "$WORK/ws/crates/archon-core/src/agents/memory.rs"
+sed -i 's/memory_scope: Option<&AgentMemoryScope>/\/\/ memory_scope removed/' "$WORK/ws/crates/archon-core/src/agents/memory/store.rs"
 assert_fails "save-agent-memory-signature-drift"
-git -C "$WORK/ws" checkout -- crates/archon-core/src/agents/memory.rs 2>/dev/null || true
+git -C "$WORK/ws" checkout -- crates/archon-core/src/agents/memory/store.rs 2>/dev/null || true
 
 echo ""
 echo "========================================"
