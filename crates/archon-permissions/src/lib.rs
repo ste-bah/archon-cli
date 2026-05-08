@@ -5,6 +5,9 @@ pub mod denial_log;
 pub mod mode;
 pub mod rules;
 
+#[cfg(test)]
+mod permission_contract_tests;
+
 pub use checker::{
     accept_edits_whitelist, default_safe_tools, is_accept_edits_safe_tool, is_default_safe_tool,
 };

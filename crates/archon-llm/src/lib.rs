@@ -24,6 +24,9 @@ pub mod tokens;
 pub mod tokens_codex;
 pub mod types;
 
+#[cfg(test)]
+mod identity_spoof_contract_tests;
+
 // TASK-AGS-706: re-export LlmConfig at crate root for call sites that
 // don't want to reach into `config::`.
 pub use config::LlmConfig;
