@@ -232,9 +232,18 @@ fn flush_pending_input_after_turn(app: &mut App, input_tx: &tokio::sync::mpsc::S
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
     use std::time::Duration;
 
+    // Both tests below clear and read the process-global task registry
+    // (archon_observability::reset_task_registry_for_tests + task_snapshots).
+    // task_registry.rs documents this race: parallel tests wipe each other's
+    // entries mid-flight. Marking them #[serial(task_registry)] matches the
+    // pattern the registry's own tests use (task_registry.rs:163,178,189).
+    // Surfaced by CI run 25541207525 on commit bee8d8b under cargo llvm-cov,
+    // where instrumentation widens the race window enough to flip pass→fail.
     #[tokio::test]
+    #[serial(task_registry)]
     async fn turn_complete_flushes_pending_input_without_blocking_when_channel_has_room() {
         archon_observability::reset_task_registry_for_tests();
         let mut app = App::new();
@@ -258,6 +267,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial(task_registry)]
     async fn turn_complete_does_not_block_when_input_channel_is_full() {
         archon_observability::reset_task_registry_for_tests();
         let mut app = App::new();

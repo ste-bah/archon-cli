@@ -75,12 +75,19 @@ fn phase5_btw_routes_through_active_session_provider() {
 
 #[test]
 fn phase4_pipelines_use_provider_neutral_adapter() {
+    // Post-refactor (commit b8dc02a "Implement audited pipeline runtime"):
+    // pipeline.rs was split; the provider-neutral adapter helpers now live in
+    // src/command/pipeline_support.rs. The negative asserts still apply to
+    // pipeline.rs (Anthropic-specific adapters must not reappear there).
     let pipeline = read("src/command/pipeline.rs");
+    let pipeline_support = read("src/command/pipeline_support.rs");
     let gametheory = read("src/command/gametheory.rs");
     let session = read("src/session.rs");
 
-    assert!(pipeline.contains("build_configured_llm_provider(config, env_vars, origin).await"));
-    assert!(pipeline.contains("ProviderLlmAdapter::new(provider).with_origin(origin)"));
+    assert!(
+        pipeline_support.contains("build_configured_llm_provider(config, env_vars, origin).await")
+    );
+    assert!(pipeline_support.contains("ProviderLlmAdapter::new(provider).with_origin(origin)"));
     assert!(!pipeline.contains("AnthropicLlmAdapter::new"));
     assert!(!pipeline.contains("AnthropicClient::new"));
 
