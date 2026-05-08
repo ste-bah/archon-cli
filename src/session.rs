@@ -12,6 +12,9 @@ use archon_consciousness::defaults::load_configured_defaults;
 use archon_consciousness::rules::RulesEngine;
 use archon_core::agent::{Agent, AgentConfig, AgentEvent, TimestampedEvent};
 use archon_core::agents::AgentRegistry;
+use archon_core::agents::permissions_overlay::{
+    PermissionOverlayReason, resolve_permission_overlay,
+};
 use archon_core::config::default_config_path;
 use archon_core::config_layers::ConfigLayer;
 use archon_core::cost_alerts::{CostAlertAction, CostAlertState};
@@ -608,24 +611,40 @@ async fn build_session_agent(
             }
         }
         if let Some(ref pm) = def.permission_mode {
-            let mode_str = pm.as_str();
             let parent_mode = agent_config.permission_mode.lock().await.clone();
-            let parent_is_privileged = matches!(
-                parent_mode.as_str(),
-                "bypassPermissions" | "acceptEdits" | "auto"
+            let decision = resolve_permission_overlay(
+                &parent_mode,
+                Some(pm),
+                cli.dangerously_skip_permissions,
             );
-            if parent_is_privileged {
-                tracing::debug!(
-                    agent = %def.agent_type, parent_mode = %parent_mode, agent_mode = %mode_str,
-                    "agent permission_mode skipped — parent has privileged mode"
-                );
-            } else if mode_str == "bypassPermissions" && !cli.dangerously_skip_permissions {
-                tracing::warn!(
-                    agent = %def.agent_type, raw_mode = %pm,
-                    "agent requests bypassPermissions but --dangerously-skip-permissions not passed; ignoring"
-                );
-            } else {
-                *agent_config.permission_mode.lock().await = mode_str.to_string();
+            match decision.reason {
+                PermissionOverlayReason::Applied => {
+                    *agent_config.permission_mode.lock().await =
+                        decision.effective_mode.as_str().to_string();
+                }
+                PermissionOverlayReason::ParentModeLocked => {
+                    tracing::debug!(
+                        agent = %def.agent_type,
+                        parent_mode = %decision.parent_mode,
+                        requested_mode = %decision.requested_mode.expect("requested mode exists"),
+                        "agent permission_mode skipped because parent mode has priority"
+                    );
+                }
+                PermissionOverlayReason::BlockedDangerousBypass => {
+                    tracing::warn!(
+                        agent = %def.agent_type, raw_mode = %pm,
+                        "agent requests bypassPermissions but --dangerously-skip-permissions not passed; ignoring"
+                    );
+                }
+                PermissionOverlayReason::BlockedExpansion => {
+                    tracing::warn!(
+                        agent = %def.agent_type,
+                        parent_mode = %decision.parent_mode,
+                        requested_mode = %decision.requested_mode.expect("requested mode exists"),
+                        "agent permission_mode would widen parent mode; keeping parent mode"
+                    );
+                }
+                PermissionOverlayReason::NoRequest => {}
             }
         }
         if def.max_turns.is_some() {
@@ -1678,25 +1697,40 @@ pub(crate) async fn run_interactive_session(
             }
         }
         if let Some(ref pm) = def.permission_mode {
-            let mode_str = pm.as_str();
-            // AC-103: Agent permission_mode must NOT override parent BypassPermissions/AcceptEdits/Auto
             let parent_mode = agent_config.permission_mode.lock().await.clone();
-            let parent_is_privileged = matches!(
-                parent_mode.as_str(),
-                "bypassPermissions" | "acceptEdits" | "auto"
+            let decision = resolve_permission_overlay(
+                &parent_mode,
+                Some(pm),
+                cli.dangerously_skip_permissions,
             );
-            if parent_is_privileged {
-                tracing::debug!(
-                    agent = %def.agent_type, parent_mode = %parent_mode, agent_mode = %mode_str,
-                    "agent permission_mode skipped — parent has privileged mode"
-                );
-            } else if mode_str == "bypassPermissions" && !cli.dangerously_skip_permissions {
-                tracing::warn!(
-                    agent = %def.agent_type, raw_mode = %pm,
-                    "agent requests bypassPermissions but --dangerously-skip-permissions not passed; ignoring"
-                );
-            } else {
-                *agent_config.permission_mode.lock().await = mode_str.to_string();
+            match decision.reason {
+                PermissionOverlayReason::Applied => {
+                    *agent_config.permission_mode.lock().await =
+                        decision.effective_mode.as_str().to_string();
+                }
+                PermissionOverlayReason::ParentModeLocked => {
+                    tracing::debug!(
+                        agent = %def.agent_type,
+                        parent_mode = %decision.parent_mode,
+                        requested_mode = %decision.requested_mode.expect("requested mode exists"),
+                        "agent permission_mode skipped because parent mode has priority"
+                    );
+                }
+                PermissionOverlayReason::BlockedDangerousBypass => {
+                    tracing::warn!(
+                        agent = %def.agent_type, raw_mode = %pm,
+                        "agent requests bypassPermissions but --dangerously-skip-permissions not passed; ignoring"
+                    );
+                }
+                PermissionOverlayReason::BlockedExpansion => {
+                    tracing::warn!(
+                        agent = %def.agent_type,
+                        parent_mode = %decision.parent_mode,
+                        requested_mode = %decision.requested_mode.expect("requested mode exists"),
+                        "agent permission_mode would widen parent mode; keeping parent mode"
+                    );
+                }
+                PermissionOverlayReason::NoRequest => {}
             }
         }
         if def.max_turns.is_some() {

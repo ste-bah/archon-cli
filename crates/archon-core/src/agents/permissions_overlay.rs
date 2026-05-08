@@ -9,6 +9,7 @@ use crate::agents::definition::PermissionMode as DefinitionPermissionMode;
 pub enum PermissionOverlayReason {
     NoRequest,
     Applied,
+    ParentModeLocked,
     BlockedExpansion,
     BlockedDangerousBypass,
 }
@@ -43,6 +44,15 @@ pub fn resolve_permission_overlay(
             reason: PermissionOverlayReason::NoRequest,
         };
     };
+
+    if parent_mode_locks_overlay(parent_mode) && requested != parent_mode {
+        return PermissionOverlayDecision {
+            parent_mode,
+            requested_mode,
+            effective_mode: parent_mode,
+            reason: PermissionOverlayReason::ParentModeLocked,
+        };
+    }
 
     if requested == PermissionMode::BypassPermissions
         && parent_mode != PermissionMode::BypassPermissions
@@ -102,6 +112,13 @@ fn definition_mode_to_permission_mode(mode: &DefinitionPermissionMode) -> Permis
 
 fn is_permission_expansion(parent: PermissionMode, requested: PermissionMode) -> bool {
     permission_rank(requested) > permission_rank(parent)
+}
+
+fn parent_mode_locks_overlay(mode: PermissionMode) -> bool {
+    matches!(
+        mode,
+        PermissionMode::BypassPermissions | PermissionMode::AcceptEdits | PermissionMode::Auto
+    )
 }
 
 fn permission_rank(mode: PermissionMode) -> u8 {
@@ -177,6 +194,24 @@ mod tests {
 
         assert_eq!(resolved.effective_mode, PermissionMode::BypassPermissions);
         assert_eq!(resolved.reason, PermissionOverlayReason::Applied);
+        assert_eq!(resolved.agent_mode(), AgentMode::Normal);
+    }
+
+    #[test]
+    fn parent_bypass_mode_wins_over_agent_default() {
+        let resolved = decision("bypassPermissions", DefinitionPermissionMode::Default, true);
+
+        assert_eq!(resolved.effective_mode, PermissionMode::BypassPermissions);
+        assert_eq!(resolved.reason, PermissionOverlayReason::ParentModeLocked);
+        assert_eq!(resolved.agent_mode(), AgentMode::Normal);
+    }
+
+    #[test]
+    fn parent_auto_mode_wins_over_agent_plan() {
+        let resolved = decision("auto", DefinitionPermissionMode::Plan, false);
+
+        assert_eq!(resolved.effective_mode, PermissionMode::Auto);
+        assert_eq!(resolved.reason, PermissionOverlayReason::ParentModeLocked);
         assert_eq!(resolved.agent_mode(), AgentMode::Normal);
     }
 }
