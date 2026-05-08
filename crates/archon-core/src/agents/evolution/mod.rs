@@ -1,8 +1,10 @@
+pub mod engine;
 pub mod ledger;
 pub mod permissions;
 pub mod proposal;
 pub mod version;
 
+pub use engine::{AgentEvolutionRuntime, AgentEvolutionRuntimeConfig};
 pub use ledger::{AgentCompletionStatus, AgentPerformanceEvent, agent_performance_event_id};
 pub use permissions::ToolAccessProfileDiff;
 pub use proposal::{
