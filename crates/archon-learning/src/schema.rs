@@ -20,6 +20,7 @@ pub fn ensure_learning_schema(db: &DbInstance) -> Result<()> {
     ensure_behaviour_approvals(db)?;
     ensure_provider_runtime_events(db)?;
     ensure_agent_performance_ledger(db)?;
+    ensure_agent_evolution_proposals(db)?;
     Ok(())
 }
 
@@ -174,6 +175,29 @@ fn ensure_agent_performance_ledger(db: &DbInstance) -> Result<()> {
             test_failed: Bool default false,
             provider_incident_id: String default "",
             evidence_ids_json: String default "[]",
+            created_at: String,
+        }"#,
+    )
+}
+
+fn ensure_agent_evolution_proposals(db: &DbInstance) -> Result<()> {
+    run_create(
+        db,
+        r#":create agent_evolution_proposals {
+            proposal_id: String =>
+            agent_type: String,
+            current_version: String,
+            proposed_version: String,
+            kind: String,
+            diff: String,
+            evidence_ids_json: String default "[]",
+            risk_level: String,
+            policy_decision: String,
+            status: String,
+            expected_impact: String default "",
+            rollback_target_version: String default "",
+            affects_provider_identity: Bool default false,
+            affects_permissions: Bool default false,
             created_at: String,
         }"#,
     )
