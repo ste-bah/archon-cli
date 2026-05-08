@@ -17,6 +17,7 @@ pub mod provider;
 pub mod providers;
 // TASK-AGS-708: RetryProvider<P> decorator with exponential backoff.
 pub mod retry;
+pub mod runtime;
 pub mod secrets;
 pub mod streaming;
 pub mod thinking;
