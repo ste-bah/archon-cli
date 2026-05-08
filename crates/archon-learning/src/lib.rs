@@ -1,5 +1,6 @@
 pub mod agent_evolution_ledger;
 pub mod agent_evolution_proposals;
+pub mod agent_profile_versions;
 pub mod apply;
 pub mod errors;
 pub mod events;

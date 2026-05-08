@@ -21,6 +21,7 @@ pub fn ensure_learning_schema(db: &DbInstance) -> Result<()> {
     ensure_provider_runtime_events(db)?;
     ensure_agent_performance_ledger(db)?;
     ensure_agent_evolution_proposals(db)?;
+    ensure_agent_profile_versions(db)?;
     Ok(())
 }
 
@@ -198,6 +199,28 @@ fn ensure_agent_evolution_proposals(db: &DbInstance) -> Result<()> {
             rollback_target_version: String default "",
             affects_provider_identity: Bool default false,
             affects_permissions: Bool default false,
+            created_at: String,
+        }"#,
+    )
+}
+
+fn ensure_agent_profile_versions(db: &DbInstance) -> Result<()> {
+    run_create(
+        db,
+        r#":create agent_profile_versions {
+            version_id: String =>
+            agent_type: String,
+            version_number: Int default 1,
+            parent_version_id: String default "",
+            source: String,
+            created_by_proposal_id: String default "",
+            profile_json: String default "{}",
+            prompt_hash: String default "",
+            tools_hash: String default "",
+            model_hash: String default "",
+            memory_hash: String default "",
+            is_active: Bool default false,
+            is_rollback_target: Bool default false,
             created_at: String,
         }"#,
     )
