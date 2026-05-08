@@ -65,6 +65,10 @@ use archon_llm::providers::{
 };
 use archon_llm::{ActiveProvider, LlmConfig as FlatLlmConfig};
 
+use crate::runtime::provider_observer::{
+    observe_llm_provider, record_provider_fallback, runtime_mode_for_provider_name,
+};
+
 /// Build the configured provider for command surfaces that can choose
 /// Anthropic, Codex, or an OpenAI-compatible provider.
 pub(crate) async fn build_configured_llm_provider(
@@ -73,7 +77,8 @@ pub(crate) async fn build_configured_llm_provider(
     origin: &str,
 ) -> Result<Arc<dyn LlmProvider>> {
     if config.llm.provider == "openai-codex" {
-        return build_codex_provider(config).await;
+        let provider = build_codex_provider(config).await?;
+        return Ok(observe_llm_provider(provider, "auto"));
     }
 
     let auth = resolve_auth_with_keys(
@@ -102,7 +107,16 @@ pub(crate) async fn build_configured_llm_provider(
         .ok()
         .or_else(|| config.api.base_url.clone());
     let client = AnthropicClient::new(auth, identity, api_url);
-    Ok(build_llm_provider(&config.llm, client))
+    let provider = build_llm_provider(&config.llm, client);
+    let selected_provider = provider.name().to_string();
+    let runtime_mode = runtime_mode_for_provider_name(&selected_provider);
+    record_provider_fallback(
+        &config.llm.provider,
+        &selected_provider,
+        runtime_mode,
+        "provider_construction_fallback",
+    );
+    Ok(observe_llm_provider(provider, runtime_mode))
 }
 
 async fn build_codex_provider(config: &ArchonConfig) -> Result<Arc<dyn LlmProvider>> {

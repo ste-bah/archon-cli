@@ -13,6 +13,7 @@ use archon_llm::providers::codex::client::CodexProvider;
 use archon_llm::providers::codex::spoof::resolve;
 
 use crate::cli_args::ChatArgs;
+use crate::runtime::provider_observer::{observe_llm_provider, runtime_mode_for_provider_name};
 
 pub async fn handle_chat(args: ChatArgs, config: &archon_core::config::ArchonConfig) -> Result<()> {
     let provider = build_provider(&args, config).await?;
@@ -48,9 +49,12 @@ async fn build_provider(
     config: &archon_core::config::ArchonConfig,
 ) -> Result<Arc<dyn LlmProvider>> {
     match args.provider.as_str() {
-        "anthropic" => Ok(Arc::new(AnthropicProvider::new(
-            build_anthropic_client(config).await?,
-        ))),
+        "anthropic" => Ok(observe_llm_provider(
+            Arc::new(AnthropicProvider::new(
+                build_anthropic_client(config).await?,
+            )),
+            "direct",
+        )),
         "openai-codex" => {
             let codex_cfg =
                 crate::command::auth::codex_config_from_core(&config.providers.openai_codex);
@@ -71,7 +75,7 @@ async fn build_provider(
                 ),
             }
             .context("failed to construct Codex provider")?;
-            Ok(Arc::new(provider))
+            Ok(observe_llm_provider(Arc::new(provider), "auto"))
         }
         other => {
             let flat = archon_llm::LlmConfig {
@@ -81,8 +85,10 @@ async fn build_provider(
                 api_key_env: None,
                 retry: None,
             };
-            build_llm_provider(&flat, Arc::new(reqwest::Client::new()))
-                .map_err(|e| anyhow::anyhow!("unknown or unavailable provider `{other}`: {e}"))
+            let provider = build_llm_provider(&flat, Arc::new(reqwest::Client::new()))
+                .map_err(|e| anyhow::anyhow!("unknown or unavailable provider `{other}`: {e}"))?;
+            let runtime_mode = runtime_mode_for_provider_name(provider.name());
+            Ok(observe_llm_provider(provider, runtime_mode))
         }
     }
 }

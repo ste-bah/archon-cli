@@ -43,6 +43,9 @@ use archon_tui::observability;
 
 use crate::command::registry::default_registry;
 use crate::runtime::llm::build_llm_provider;
+use crate::runtime::provider_observer::{
+    observe_llm_provider, record_provider_fallback, runtime_mode_for_provider_name,
+};
 use crate::setup::strip_cache_control_if_disabled;
 
 use archon_core::remote::protocol::AgentMessage;
@@ -162,7 +165,7 @@ async fn build_codex_session_provider(
         ),
     }
     .context("failed to construct Codex provider for TUI session")?;
-    Ok(Arc::new(provider))
+    Ok(observe_llm_provider(Arc::new(provider), "auto"))
 }
 
 /// Spawn the Prometheus `/metrics` exporter when `--metrics-port PORT` is
@@ -663,6 +666,15 @@ async fn build_session_agent(
     let (agent_event_tx, agent_event_rx) =
         tokio::sync::mpsc::unbounded_channel::<TimestampedEvent>();
     let provider = build_llm_provider(&config.llm, api_client);
+    let selected_provider = provider.name().to_string();
+    let runtime_mode = runtime_mode_for_provider_name(&selected_provider);
+    record_provider_fallback(
+        &config.llm.provider,
+        &selected_provider,
+        runtime_mode,
+        "provider_construction_fallback",
+    );
+    let provider = observe_llm_provider(provider, runtime_mode);
     tracing::info!("LLM provider: {}", provider.name());
 
     let agent_registry = Arc::new(std::sync::RwLock::new(AgentRegistry::load(&working_dir)));
@@ -1795,7 +1807,18 @@ pub(crate) async fn run_interactive_session(
     let provider = match provider_override {
         Some(provider) => provider,
         None => match anthropic_client {
-            Some(client) => build_llm_provider(&config.llm, client),
+            Some(client) => {
+                let provider = build_llm_provider(&config.llm, client);
+                let selected_provider = provider.name().to_string();
+                let runtime_mode = runtime_mode_for_provider_name(&selected_provider);
+                record_provider_fallback(
+                    &config.llm.provider,
+                    &selected_provider,
+                    runtime_mode,
+                    "provider_construction_fallback",
+                );
+                observe_llm_provider(provider, runtime_mode)
+            }
             None => {
                 return Err(anyhow::anyhow!(
                     "missing Anthropic client for session provider"

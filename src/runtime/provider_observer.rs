@@ -1,0 +1,468 @@
+//! Observe real LLM provider traffic and persist redacted runtime events.
+
+use std::sync::Arc;
+
+use anyhow::Result;
+use archon_llm::identity::IdentityMode;
+use archon_llm::provider::{
+    LlmError, LlmProvider, LlmRequest, LlmResponse, ModelInfo, ProviderFeature,
+};
+use archon_llm::runtime::{
+    ProviderIdentityStatus, ProviderRuntimeEvent, ProviderRuntimeEventType, ProviderRuntimeSeverity,
+};
+use archon_llm::streaming::StreamEvent;
+use async_trait::async_trait;
+use cozo::DbInstance;
+use tokio::sync::mpsc::Receiver;
+
+use super::provider_event_record::provider_event_record;
+
+#[derive(Clone)]
+pub(crate) struct ProviderRuntimeEventRecorder {
+    db: Option<Arc<DbInstance>>,
+}
+
+impl ProviderRuntimeEventRecorder {
+    pub(crate) fn default_learning_store() -> Self {
+        match open_learning_db() {
+            Ok(db) => Self {
+                db: Some(Arc::new(db)),
+            },
+            Err(error) => {
+                tracing::warn!(%error, "provider runtime event store unavailable");
+                Self { db: None }
+            }
+        }
+    }
+
+    #[cfg(test)]
+    fn with_db(db: DbInstance) -> Self {
+        Self {
+            db: Some(Arc::new(db)),
+        }
+    }
+
+    fn record(&self, event: ProviderRuntimeEvent) {
+        let Some(db) = &self.db else {
+            return;
+        };
+        let record = provider_event_record(event);
+        if let Err(error) =
+            archon_learning::runtime_events::insert_provider_runtime_event(db, &record)
+        {
+            tracing::warn!(
+                %error,
+                provider = %record.provider_id,
+                event_type = %record.event_type,
+                "provider runtime event persistence failed"
+            );
+        }
+    }
+}
+
+pub(crate) fn observe_llm_provider(
+    provider: Arc<dyn LlmProvider>,
+    runtime_mode: impl Into<String>,
+) -> Arc<dyn LlmProvider> {
+    Arc::new(ObservedLlmProvider::new(
+        provider,
+        runtime_mode,
+        ProviderRuntimeEventRecorder::default_learning_store(),
+    ))
+}
+
+pub(crate) fn runtime_mode_for_provider_name(provider_name: &str) -> &'static str {
+    match provider_name {
+        "openai-codex" => "auto",
+        "local" => "local",
+        _ => "direct",
+    }
+}
+
+pub(crate) fn record_provider_fallback(
+    requested_provider: &str,
+    selected_provider: &str,
+    runtime_mode: &str,
+    reason_code: &str,
+) {
+    if requested_provider == selected_provider {
+        return;
+    }
+    let event = base_event(
+        selected_provider,
+        runtime_mode,
+        ProviderRuntimeEventType::FallbackSelected,
+        ProviderRuntimeSeverity::Warn,
+    )
+    .with_reason(reason_code)
+    .with_fallback(requested_provider, selected_provider)
+    .with_redacted_json(serde_json::json!({
+        "requested_provider": requested_provider,
+        "selected_provider": selected_provider,
+        "source": "provider_construction"
+    }));
+    ProviderRuntimeEventRecorder::default_learning_store().record(event);
+}
+
+pub(crate) struct ObservedLlmProvider {
+    inner: Arc<dyn LlmProvider>,
+    runtime_mode: String,
+    recorder: ProviderRuntimeEventRecorder,
+}
+
+impl ObservedLlmProvider {
+    fn new(
+        inner: Arc<dyn LlmProvider>,
+        runtime_mode: impl Into<String>,
+        recorder: ProviderRuntimeEventRecorder,
+    ) -> Self {
+        Self {
+            inner,
+            runtime_mode: runtime_mode.into(),
+            recorder,
+        }
+    }
+
+    fn event(
+        &self,
+        request_id: &str,
+        request: &ObservedRequest,
+        event_type: ProviderRuntimeEventType,
+        severity: ProviderRuntimeSeverity,
+    ) -> ProviderRuntimeEvent {
+        base_event(self.inner.name(), &self.runtime_mode, event_type, severity)
+            .with_request_id(request_id)
+            .with_model(request.model.clone())
+            .with_redacted_json(serde_json::json!({
+                "request_origin": request.origin.as_deref(),
+                "identity_status": identity_status_label(identity_status_for_provider(self.inner.as_ref())),
+            }))
+    }
+
+    fn record_start(&self, request_id: &str, request: &ObservedRequest, operation: &str) {
+        self.recorder.record(
+            self.event(
+                request_id,
+                request,
+                ProviderRuntimeEventType::RequestStarted,
+                ProviderRuntimeSeverity::Debug,
+            )
+            .with_reason(operation),
+        );
+    }
+
+    fn record_success(
+        &self,
+        request_id: &str,
+        request: &ObservedRequest,
+        metadata: serde_json::Value,
+    ) {
+        self.recorder.record(
+            self.event(
+                request_id,
+                request,
+                ProviderRuntimeEventType::RequestSucceeded,
+                ProviderRuntimeSeverity::Info,
+            )
+            .with_reason("ok")
+            .with_redacted_json(metadata),
+        );
+    }
+
+    fn record_failure(&self, request_id: &str, request: &ObservedRequest, error: &LlmError) {
+        let error_kind = error_kind(error);
+        self.recorder.record(
+            self.event(
+                request_id,
+                request,
+                ProviderRuntimeEventType::RequestFailed,
+                error_severity(error),
+            )
+            .with_reason(error_kind)
+            .with_message(error_message(error))
+            .with_redacted_json(error_metadata(error)),
+        );
+
+        if let Some(event_type) = limit_event_type(error) {
+            self.recorder.record(
+                self.event(
+                    request_id,
+                    request,
+                    event_type,
+                    ProviderRuntimeSeverity::Warn,
+                )
+                .with_reason(error_kind)
+                .with_message(error_message(error))
+                .with_redacted_json(error_metadata(error)),
+            );
+        }
+    }
+}
+
+#[async_trait]
+impl LlmProvider for ObservedLlmProvider {
+    fn name(&self) -> &str {
+        self.inner.name()
+    }
+
+    fn models(&self) -> Vec<ModelInfo> {
+        self.inner.models()
+    }
+
+    async fn stream(&self, request: LlmRequest) -> Result<Receiver<StreamEvent>, LlmError> {
+        let observed = ObservedRequest::from_request(&request);
+        let request_id = uuid::Uuid::new_v4().to_string();
+        self.record_start(&request_id, &observed, "stream");
+
+        match self.inner.stream(request).await {
+            Ok(mut inner_rx) => {
+                let (tx, rx) = tokio::sync::mpsc::channel(64);
+                let recorder = self.recorder.clone();
+                let provider_id = self.inner.name().to_string();
+                let runtime_mode = self.runtime_mode.clone();
+                tokio::spawn(async move {
+                    let mut completed = false;
+                    while let Some(event) = inner_rx.recv().await {
+                        match &event {
+                            StreamEvent::Error {
+                                error_type,
+                                message: _,
+                            } => {
+                                recorder.record(
+                                    base_event(
+                                        &provider_id,
+                                        &runtime_mode,
+                                        ProviderRuntimeEventType::RequestFailed,
+                                        ProviderRuntimeSeverity::Warn,
+                                    )
+                                    .with_request_id(request_id.clone())
+                                    .with_model(observed.model.clone())
+                                    .with_reason(error_type.clone())
+                                    .with_message("provider stream emitted an error event")
+                                    .with_redacted_json(
+                                        serde_json::json!({
+                                            "request_origin": observed.origin.as_deref(),
+                                            "stream_error_type": error_type,
+                                        }),
+                                    ),
+                                );
+                            }
+                            StreamEvent::MessageStop => {
+                                completed = true;
+                                recorder.record(
+                                    base_event(
+                                        &provider_id,
+                                        &runtime_mode,
+                                        ProviderRuntimeEventType::RequestSucceeded,
+                                        ProviderRuntimeSeverity::Info,
+                                    )
+                                    .with_request_id(request_id.clone())
+                                    .with_model(observed.model.clone())
+                                    .with_reason("stream_completed")
+                                    .with_redacted_json(
+                                        serde_json::json!({
+                                            "request_origin": observed.origin.as_deref(),
+                                        }),
+                                    ),
+                                );
+                            }
+                            _ => {}
+                        }
+                        if tx.send(event).await.is_err() {
+                            break;
+                        }
+                    }
+                    if !completed {
+                        recorder.record(
+                            base_event(
+                                &provider_id,
+                                &runtime_mode,
+                                ProviderRuntimeEventType::RequestFailed,
+                                ProviderRuntimeSeverity::Warn,
+                            )
+                            .with_request_id(request_id)
+                            .with_model(observed.model.clone())
+                            .with_reason("stream_closed_without_message_stop")
+                            .with_message("provider stream ended before message_stop")
+                            .with_redacted_json(serde_json::json!({
+                                "request_origin": observed.origin.as_deref(),
+                            })),
+                        );
+                    }
+                });
+                Ok(rx)
+            }
+            Err(error) => {
+                self.record_failure(&request_id, &observed, &error);
+                Err(error)
+            }
+        }
+    }
+
+    async fn complete(&self, request: LlmRequest) -> Result<LlmResponse, LlmError> {
+        let observed = ObservedRequest::from_request(&request);
+        let request_id = uuid::Uuid::new_v4().to_string();
+        self.record_start(&request_id, &observed, "complete");
+
+        match self.inner.complete(request).await {
+            Ok(response) => {
+                self.record_success(
+                    &request_id,
+                    &observed,
+                    serde_json::json!({
+                        "request_origin": observed.origin.as_deref(),
+                        "stop_reason": response.stop_reason.clone(),
+                        "usage": {
+                            "input_count": response.usage.input_tokens,
+                            "output_count": response.usage.output_tokens,
+                            "cache_creation_input_count": response.usage.cache_creation_input_tokens,
+                            "cache_read_input_count": response.usage.cache_read_input_tokens,
+                        }
+                    }),
+                );
+                Ok(response)
+            }
+            Err(error) => {
+                self.record_failure(&request_id, &observed, &error);
+                Err(error)
+            }
+        }
+    }
+
+    fn supports_feature(&self, feature: ProviderFeature) -> bool {
+        self.inner.supports_feature(feature)
+    }
+
+    fn as_anthropic(&self) -> Option<&archon_llm::anthropic::AnthropicClient> {
+        self.inner.as_anthropic()
+    }
+}
+
+#[derive(Clone)]
+struct ObservedRequest {
+    model: String,
+    origin: Option<String>,
+}
+
+impl ObservedRequest {
+    fn from_request(request: &LlmRequest) -> Self {
+        Self {
+            model: request.model.clone(),
+            origin: request.request_origin.clone(),
+        }
+    }
+}
+
+fn open_learning_db() -> Result<DbInstance> {
+    let base = archon_session::storage::default_db_path();
+    let parent = base
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("cannot determine data directory"))?;
+    let path = parent.join("learning.db");
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let path_str = path.to_string_lossy().to_string();
+    let db = DbInstance::new("sqlite", &path_str, "")
+        .map_err(|e| anyhow::anyhow!("open learning db: {e}"))?;
+    archon_learning::schema::ensure_learning_schema(&db)?;
+    Ok(db)
+}
+
+fn base_event(
+    provider_id: &str,
+    runtime_mode: &str,
+    event_type: ProviderRuntimeEventType,
+    severity: ProviderRuntimeSeverity,
+) -> ProviderRuntimeEvent {
+    ProviderRuntimeEvent::new(provider_id, runtime_mode, event_type, severity)
+}
+
+fn identity_status_for_provider(provider: &dyn LlmProvider) -> ProviderIdentityStatus {
+    match provider
+        .as_anthropic()
+        .map(|client| &client.identity().mode)
+    {
+        Some(IdentityMode::Spoof { .. }) => ProviderIdentityStatus::Spoof,
+        Some(IdentityMode::Clean) => ProviderIdentityStatus::Clean,
+        Some(IdentityMode::Custom { .. }) => ProviderIdentityStatus::Custom,
+        None => ProviderIdentityStatus::NotApplicable,
+    }
+}
+
+fn identity_status_label(identity_status: ProviderIdentityStatus) -> &'static str {
+    match identity_status {
+        ProviderIdentityStatus::Clean => "clean",
+        ProviderIdentityStatus::Spoof => "spoof",
+        ProviderIdentityStatus::Custom => "custom",
+        ProviderIdentityStatus::AppServer => "app_server",
+        ProviderIdentityStatus::NotApplicable => "n/a",
+    }
+}
+
+fn error_kind(error: &LlmError) -> &'static str {
+    match error {
+        LlmError::Http(_) => "http_error",
+        LlmError::Auth(_) => "auth_error",
+        LlmError::RateLimited { .. } => "rate_limited",
+        LlmError::Overloaded => "overloaded",
+        LlmError::Server { .. } => "server_error",
+        LlmError::Serialize(_) => "serialization_error",
+        LlmError::Unsupported(_) => "unsupported_feature",
+        LlmError::ProviderNotFound { .. } => "provider_not_found",
+        LlmError::QuotaExceeded(_) => "quota_exceeded",
+        LlmError::Aborted => "aborted",
+    }
+}
+
+fn error_message(error: &LlmError) -> &'static str {
+    match error {
+        LlmError::RateLimited { .. } => "provider reported a rate limit",
+        LlmError::QuotaExceeded(_) => "provider reported a usage or quota limit",
+        LlmError::Auth(_) => "provider authentication failed",
+        LlmError::Server { .. } => "provider returned a server error",
+        LlmError::ProviderNotFound { .. } => "provider was not found",
+        LlmError::Unsupported(_) => "provider does not support the requested feature",
+        LlmError::Aborted => "provider request was aborted",
+        LlmError::Http(_) => "provider HTTP request failed",
+        LlmError::Overloaded => "provider reported overload",
+        LlmError::Serialize(_) => "provider request or response serialization failed",
+    }
+}
+
+fn error_severity(error: &LlmError) -> ProviderRuntimeSeverity {
+    match error {
+        LlmError::RateLimited { .. } | LlmError::QuotaExceeded(_) | LlmError::Overloaded => {
+            ProviderRuntimeSeverity::Warn
+        }
+        _ => ProviderRuntimeSeverity::Error,
+    }
+}
+
+fn limit_event_type(error: &LlmError) -> Option<ProviderRuntimeEventType> {
+    match error {
+        LlmError::RateLimited { .. } => Some(ProviderRuntimeEventType::RateLimitObserved),
+        LlmError::QuotaExceeded(_) => Some(ProviderRuntimeEventType::UsageLimitObserved),
+        _ => None,
+    }
+}
+
+fn error_metadata(error: &LlmError) -> serde_json::Value {
+    match error {
+        LlmError::RateLimited { retry_after_secs } => serde_json::json!({
+            "error_kind": error_kind(error),
+            "retry_after_secs": retry_after_secs,
+        }),
+        LlmError::Server { status, .. } => serde_json::json!({
+            "error_kind": error_kind(error),
+            "status": status,
+        }),
+        _ => serde_json::json!({
+            "error_kind": error_kind(error),
+        }),
+    }
+}
+
+#[cfg(test)]
+#[path = "provider_observer_tests.rs"]
+mod tests;
