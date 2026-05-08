@@ -2367,6 +2367,8 @@ pub(crate) async fn run_interactive_session(
     let session_stats_for_fwd = Arc::clone(&session_stats_shared);
     let session_id_fwd = session_id.to_string();
     let session_store_for_fwd = Arc::clone(&session_store_fwd);
+    let permission_mode_for_fwd = Arc::clone(&permission_mode_shared);
+    let permission_events_db_for_fwd = governed_learning_db.clone();
     let last_assistant_response_shared: Arc<tokio::sync::Mutex<String>> =
         Arc::new(tokio::sync::Mutex::new(String::new()));
     let last_response_for_fwd = Arc::clone(&last_assistant_response_shared);
@@ -2468,9 +2470,36 @@ pub(crate) async fn run_interactive_session(
                     AgentEvent::Error(msg) => TuiEvent::Error(msg),
                     AgentEvent::SessionComplete => TuiEvent::Done,
                     AgentEvent::PermissionRequired { tool, description } => {
+                        let mode = permission_mode_for_fwd.lock().await.clone();
+                        crate::runtime::permission_events::record_permission_event(
+                            permission_events_db_for_fwd.as_ref(),
+                            &session_id_fwd,
+                            &mode,
+                            &tool,
+                            "requested",
+                        );
                         TuiEvent::PermissionPrompt { tool, description }
                     }
-                    AgentEvent::PermissionGranted { .. } | AgentEvent::PermissionDenied { .. } => {
+                    AgentEvent::PermissionGranted { tool } => {
+                        let mode = permission_mode_for_fwd.lock().await.clone();
+                        crate::runtime::permission_events::record_permission_event(
+                            permission_events_db_for_fwd.as_ref(),
+                            &session_id_fwd,
+                            &mode,
+                            &tool,
+                            "granted",
+                        );
+                        continue;
+                    }
+                    AgentEvent::PermissionDenied { tool } => {
+                        let mode = permission_mode_for_fwd.lock().await.clone();
+                        crate::runtime::permission_events::record_permission_event(
+                            permission_events_db_for_fwd.as_ref(),
+                            &session_id_fwd,
+                            &mode,
+                            &tool,
+                            "denied",
+                        );
                         continue;
                     }
                     _ => continue,
