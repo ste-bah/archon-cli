@@ -98,6 +98,9 @@ struct BuiltAgent {
     event_rx: tokio::sync::mpsc::UnboundedReceiver<TimestampedEvent>,
     agent_def: Option<archon_core::agents::definition::CustomAgentDefinition>,
     metrics: std::sync::Arc<archon_tui::observability::ChannelMetrics>,
+    selected_provider: String,
+    selected_model: String,
+    permission_mode: Arc<tokio::sync::Mutex<String>>,
 }
 
 fn is_codex_session(config: &archon_core::config::ArchonConfig) -> bool {
@@ -126,6 +129,98 @@ fn session_sandbox_backend(
             sandbox_flag,
         ))
     }
+}
+
+fn open_governed_learning_db(working_dir: &std::path::Path) -> Option<Arc<cozo::DbInstance>> {
+    let session_db = archon_session::storage::default_db_path();
+    let db_path = session_db
+        .parent()
+        .map(|parent| parent.join("learning.db"))
+        .unwrap_or_else(|| working_dir.join(".archon").join("learning.db"));
+    if let Some(parent) = db_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    match cozo::DbInstance::new("sqlite", &db_path, "") {
+        Ok(db) => {
+            if let Err(e) = archon_learning::schema::ensure_learning_schema(&db) {
+                tracing::warn!(
+                    error = %e,
+                    "governed learning schema init failed; runtime evidence disabled"
+                );
+                None
+            } else {
+                Some(Arc::new(db))
+            }
+        }
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                "governed learning store unavailable; runtime evidence disabled"
+            );
+            None
+        }
+    }
+}
+
+fn agent_ledger_context(
+    session_id: &str,
+    agent_def: Option<&archon_core::agents::definition::CustomAgentDefinition>,
+    model: impl Into<String>,
+    provider: impl Into<String>,
+) -> crate::runtime::agent_ledger_events::AgentLedgerContext {
+    crate::runtime::agent_ledger_events::AgentLedgerContext::new(
+        agent_def
+            .map(|def| def.agent_type.clone())
+            .unwrap_or_else(|| "main".into()),
+        session_id.to_string(),
+        model,
+        provider,
+    )
+    .with_version(agent_def.map(|def| def.meta.version.clone()))
+}
+
+async fn record_agent_ledger_event(
+    db: Option<&Arc<cozo::DbInstance>>,
+    context: &crate::runtime::agent_ledger_events::AgentLedgerContext,
+    permission_mode: &Arc<tokio::sync::Mutex<String>>,
+    event: &AgentEvent,
+) {
+    let mode = permission_mode.lock().await.clone();
+    match event {
+        AgentEvent::TurnComplete {
+            input_tokens,
+            output_tokens,
+        } => crate::runtime::agent_ledger_events::record_agent_turn_completed(
+            db,
+            context,
+            &mode,
+            *input_tokens,
+            *output_tokens,
+        ),
+        AgentEvent::Error(_) => {
+            crate::runtime::agent_ledger_events::record_agent_runtime_error(db, context, &mode)
+        }
+        _ => {}
+    }
+}
+
+fn spawn_print_ledger_forwarder(
+    mut event_rx: tokio::sync::mpsc::UnboundedReceiver<TimestampedEvent>,
+    db: Option<Arc<cozo::DbInstance>>,
+    context: crate::runtime::agent_ledger_events::AgentLedgerContext,
+    permission_mode: Arc<tokio::sync::Mutex<String>>,
+) -> tokio::sync::mpsc::UnboundedReceiver<TimestampedEvent> {
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    observability::spawn_named("print-agent-ledger-forwarder", async move {
+        while let Some(timestamped) = event_rx.recv().await {
+            record_agent_ledger_event(db.as_ref(), &context, &permission_mode, &timestamped.inner)
+                .await;
+            if tx.send(timestamped).is_err() {
+                break;
+            }
+        }
+    });
+    rx
 }
 
 fn configure_session_vlm_provider(working_dir: &std::path::Path) {
@@ -679,6 +774,8 @@ async fn build_session_agent(
 
     let (agent_event_tx, agent_event_rx) =
         tokio::sync::mpsc::unbounded_channel::<TimestampedEvent>();
+    let selected_model = agent_config.model.clone();
+    let permission_mode_for_built = Arc::clone(&agent_config.permission_mode);
     let provider = build_llm_provider(&config.llm, api_client);
     let selected_provider = provider.name().to_string();
     let runtime_mode = runtime_mode_for_provider_name(&selected_provider);
@@ -758,6 +855,9 @@ async fn build_session_agent(
         event_rx: agent_event_rx,
         agent_def,
         metrics,
+        selected_provider,
+        selected_model,
+        permission_mode: permission_mode_for_built,
     })
 }
 
@@ -774,6 +874,9 @@ pub(crate) async fn run_print_mode_session(
         mut agent,
         event_rx,
         agent_def,
+        selected_provider,
+        selected_model,
+        permission_mode,
         ..
     } = match build_session_agent(config, session_id, cli, env_vars, resolved_flags, true).await {
         Ok(b) => b,
@@ -787,6 +890,21 @@ pub(crate) async fn run_print_mode_session(
     {
         print_config.query = format!("{prefix}\n\n{}", print_config.query);
     }
+
+    let working_dir = std::env::current_dir().unwrap_or_default();
+    let governed_learning_db = open_governed_learning_db(&working_dir);
+    let ledger_context = agent_ledger_context(
+        session_id,
+        agent_def.as_ref(),
+        selected_model,
+        selected_provider,
+    );
+    let event_rx = spawn_print_ledger_forwarder(
+        event_rx,
+        governed_learning_db,
+        ledger_context,
+        permission_mode,
+    );
 
     run_print_mode(print_config, config, &mut agent, event_rx).await
 }
@@ -808,6 +926,10 @@ pub(crate) async fn run_headless_session(
     let BuiltAgent {
         mut agent,
         event_rx,
+        agent_def,
+        selected_provider,
+        selected_model,
+        permission_mode,
         ..
     } = match build_session_agent(config, session_id, cli, env_vars, resolved_flags, false).await {
         Ok(b) => b,
@@ -819,6 +941,14 @@ pub(crate) async fn run_headless_session(
     let mut stdout = tokio::io::stdout();
     let mut line = String::new();
     let mut event_rx = event_rx;
+    let working_dir = std::env::current_dir().unwrap_or_default();
+    let governed_learning_db = open_governed_learning_db(&working_dir);
+    let ledger_context = agent_ledger_context(
+        session_id,
+        agent_def.as_ref(),
+        selected_model,
+        selected_provider,
+    );
 
     tracing::info!(%session_id, "headless: agent loop started");
 
@@ -857,6 +987,11 @@ pub(crate) async fn run_headless_session(
 
                 if let Err(e) = agent.process_message(&content).await {
                     tracing::error!(%e, "headless: agent error");
+                    crate::runtime::agent_ledger_events::record_agent_runtime_error(
+                        governed_learning_db.as_ref(),
+                        &ledger_context,
+                        &permission_mode.lock().await.clone(),
+                    );
                     // Drain stale events from the failed processing before
                     // sending the error response to avoid leaking fragments
                     // into the next message's response.
@@ -889,6 +1024,13 @@ pub(crate) async fn run_headless_session(
                 loop {
                     match event_rx.try_recv() {
                         Ok(ts) => {
+                            record_agent_ledger_event(
+                                governed_learning_db.as_ref(),
+                                &ledger_context,
+                                &permission_mode,
+                                &ts.inner,
+                            )
+                            .await;
                             if let AgentEvent::TextDelta(text) = ts.inner {
                                 response_text.push_str(&text);
                             }
@@ -1938,30 +2080,7 @@ pub(crate) async fn run_interactive_session(
     };
 
     // Governed-learning event store — shared with `archon behaviour`.
-    let governed_learning_db: Option<Arc<cozo::DbInstance>> = {
-        let session_db = archon_session::storage::default_db_path();
-        let db_path = session_db
-            .parent()
-            .map(|parent| parent.join("learning.db"))
-            .unwrap_or_else(|| working_dir.join(".archon").join("learning.db"));
-        if let Some(parent) = db_path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        match cozo::DbInstance::new("sqlite", &db_path, "") {
-            Ok(db) => {
-                if let Err(e) = archon_learning::schema::ensure_learning_schema(&db) {
-                    tracing::warn!(error = %e, "governed learning schema init failed; correction events disabled");
-                    None
-                } else {
-                    Some(Arc::new(db))
-                }
-            }
-            Err(e) => {
-                tracing::warn!(error = %e, "governed learning store unavailable; correction events disabled");
-                None
-            }
-        }
-    };
+    let governed_learning_db = open_governed_learning_db(&working_dir);
 
     // Construct pipeline facades + LLM adapter once at bootstrap for
     // TUI /archon-code and /archon-research commands per Deliverable 3.
