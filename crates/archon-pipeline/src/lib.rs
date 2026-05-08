@@ -2,6 +2,7 @@
 
 pub mod agent_loader;
 pub mod artefacts;
+pub mod audit;
 pub mod capture;
 pub mod coding;
 pub mod compression;

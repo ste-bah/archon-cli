@@ -96,7 +96,7 @@ graph TB
 | `archon-tools` | Built-in tools, including Evidence Engine and game-theory tools |
 | `archon-permissions` | 7 permission modes + rule lists + sandboxing |
 | `archon-mcp` | Model Context Protocol transport |
-| `archon-pipeline` | 50-agent coding pipeline, 46-agent research pipeline, game-theory pipeline, learning systems |
+| `archon-pipeline` | 50-agent coding pipeline, 46-agent research pipeline, audited bundles, game-theory pipeline, learning systems |
 | `archon-leann` | LEANN semantic code search |
 | `archon-docs` | Document ingest, OCR, VLM policy, embeddings, exact/semantic/hybrid retrieval |
 | `archon-knowledge` | Claims, entities, relations, source quality, contradiction scanning |
@@ -234,6 +234,6 @@ Evidence Engine learning surfaces:
 ## See also
 
 - [Learning systems](learning-systems.md) — full deep dive on the 8 subsystems
-- [Pipelines](pipelines.md) — 50-agent coding + 46-agent research orchestration
+- [Pipelines](pipelines.md) — 50-agent coding + 46-agent research orchestration with audited run bundles
 - [Evidence Engine](../evidence-engine.md) — durable evidence, provenance, and governed learning
 - [Crate-level diagrams](https://github.com/ste-bah/archon-cli) — code layout in the repo itself

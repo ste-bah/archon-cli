@@ -90,10 +90,14 @@ Pre-v0.1.13 bug. Upgrade to current release.
 Session state requires git working tree consistency. If files were modified mid-pipeline, the recovery layer rejects continuation. Check:
 ```bash
 archon pipeline status <session-id>
+archon pipeline verify <session-id> --write-report
 git status
 ```
 
-Either revert the conflicting changes or abort the session and restart.
+If verification fails, inspect
+`<workdir>/.archon/pipelines/<session-id>/verification/report.json` and either
+restore the missing/corrupt artifact, export with `--include-unverified` for
+incident review, or abort the session and restart.
 
 ## MCP
 

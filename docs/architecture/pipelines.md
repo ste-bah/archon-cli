@@ -2,8 +2,10 @@
 
 archon-cli ships three production pipeline families: a 50-agent coding pipeline,
 a 46-agent research pipeline, and the Evidence Engine game-theory pipeline.
-They are stateful, resumable, and integrate with memory, provenance, and
-governed learning.
+They are stateful, resumable, and integrate with memory, provenance,
+completion integrity, and governed learning. The built-in coding/research
+pipelines write audited run bundles that can be verified, inspected, exported,
+and resumed safely.
 
 ```mermaid
 flowchart TB
@@ -12,8 +14,8 @@ flowchart TB
     CHOOSE --> RESEARCH["Research pipeline<br/>46 agents / 7 phases"]
     CHOOSE --> GT["Game-theory pipeline<br/>84 specialists / 12 tiers"]
 
-    CODE --> ART["Structured artifacts<br/>spec, exploration, architecture, implementation, quality, signoff"]
-    RESEARCH --> PAPERS["Research artifacts<br/>questions, literature map, synthesis, methodology, manuscript"]
+    CODE --> ART["Audited run bundle<br/>prompts, attempts, outputs, state, audit log"]
+    RESEARCH --> PAPERS["Audited run bundle<br/>prompts, attempts, outputs, state, audit log"]
     GT --> STRAT["Strategic artifacts<br/>fingerprint, routing, specialist outputs, sections, report"]
 
     ART --> PROV["Provenance and completion integrity"]
@@ -62,7 +64,7 @@ Every coding pipeline agent receives 4 layers of context:
 | Layer | Source | Purpose |
 |---|---|---|
 | L0 | Task description | Original user request |
-| L1 | Phase artefacts | Outputs from prior phases (specifications, designs, code) |
+| L1 | Prior agent outputs | Outputs from completed agents in the audited session |
 | L2 | LEANN semantic search | Code from the working repo relevant to the current step |
 | L3 | ReasoningBank patterns | Successful patterns from prior similar tasks |
 
@@ -79,21 +81,42 @@ L3 is what makes the pipeline self-improving — past successes inform present d
 
 Each gate has explicit pass/fail criteria. Failed gates block progression and can trigger a Reflexion retry.
 
-### Structured artefacts (6)
+### Audited run bundle
 
-Pipeline state lives as structured artefacts in `<workdir>/.archon/pipelines/<session-id>/`:
-- `specification.json` — requirements, scope, feasibility
-- `exploration.json` — codebase map, identified patterns
-- `architecture.json` — system design, component graph
-- `implementation/` — generated code, types, tests
-- `quality.json` — review findings, test results
-- `signoff.json` — final approval
+Built-in coding/research pipeline state lives in
+`<workdir>/.archon/pipelines/<session-id>/`:
 
-Resumable: any artefact persists across crashes; `archon pipeline resume <id>` continues from the last completed phase.
+| Path | Purpose |
+|---|---|
+| `manifest.json` | Session id, pipeline type, Archon version, worktree, initial git head, task, created time |
+| `state.json` | Checksum-protected status, current agent, completed count, token/cost totals, completion-integrity summary |
+| `audit.log` | Append-only JSONL event stream for run creation/resume, prompts, LLM attempts, quality scores, retries, completion, abort/failure |
+| `prompts/` | Serialized prompt/system/tool records with content hashes |
+| `agents/` | Per-agent audit records linking prompts, accepted output, attempts, quality, tokens, cost, and tool-use log |
+| `outputs/` | Accepted agent outputs plus `outputs/attempts/` for retry/failure attempt text |
+| `verification/` | Optional verifier reports written by `archon pipeline verify --write-report` |
+| `exports/` | Operator-chosen trace export destination when writing into the bundle |
 
-### Append-only ledgers
+Resume is verifier-gated: `archon pipeline resume <id>` verifies the bundle,
+hydrates completed agents from the audited records, and continues from the next
+agent instead of trusting ad hoc local state.
 
-Every agent invocation appends to `ledger.ndjson` for the session — agent name, timestamps, tokens, cost, success/failure. Used for forensic analysis and Sherlock reviews.
+### Inspection and export
+
+```bash
+archon pipeline status <session-id>
+archon pipeline verify <session-id> --write-report
+archon pipeline inspect <session-id>
+archon pipeline export-traces <session-id> --out traces.jsonl
+```
+
+`export-traces` emits JSONL rows for every recorded attempt, including retries
+that were rejected by the quality gate. By default it refuses bundles that fail
+verification; `--include-unverified` is available for incident response.
+
+When a built-in pipeline completes through the CLI path, Archon runs completion
+integrity against the final output and stores the report summary/id in
+`state.json` with a `completion_checked` audit event.
 
 ## Research pipeline (46 agents)
 
@@ -158,9 +181,12 @@ archon pipeline research "literature review on graph attention networks"
 # Game theory
 archon gametheory "Assess this marketplace incentive design" --kb policy-pack
 
-# Status
+# Status and verification
 archon pipeline status <session-id>
 archon pipeline list
+archon pipeline verify <session-id> --write-report
+archon pipeline inspect <session-id>
+archon pipeline export-traces <session-id> --out traces.jsonl
 
 # Resume / abort
 archon pipeline resume <session-id>
@@ -175,10 +201,13 @@ Pipeline sessions persist all state to `<workdir>/.archon/pipelines/<session-id>
 
 ```bash
 archon pipeline list                      # find your session
-archon pipeline resume <session-id>       # picks up from the last completed gate
+archon pipeline resume <session-id>       # verifies bundle, then continues at the next agent
 ```
 
-Session recovery requires the same git working tree state (file modifications mid-pipeline can interfere). The recovery layer re-validates each artefact's signature before continuing.
+Session recovery requires the same git working tree state (file modifications
+mid-pipeline can interfere). The recovery layer verifies the audited bundle
+before continuing, including state checksums, audit JSONL, prompt records, agent
+records, accepted outputs, and attempt-output hashes.
 
 ## Agent loop (single agent, not pipeline)
 

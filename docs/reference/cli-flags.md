@@ -36,8 +36,14 @@ subagents, coding/research pipelines, and gametheory through Codex.
 | `archon pipeline resume <SESSION_ID>` | Resume an interrupted pipeline session |
 | `archon pipeline list` | List all pipeline sessions |
 | `archon pipeline abort <SESSION_ID>` | Abort a running pipeline session |
+| `archon pipeline verify <SESSION_ID> [--write-report]` | Verify an audited built-in pipeline bundle and optionally write `verification/report.json` |
+| `archon pipeline inspect <SESSION_ID>` | Inspect an audited built-in pipeline bundle manifest, state, and agent records |
+| `archon pipeline export-traces <SESSION_ID> [--format jsonl] [--out PATH] [--include-unverified]` | Export per-attempt audited pipeline traces as JSONL |
 | `archon pipeline run <FILE> [--format FMT] [--detach]` | Run declarative pipeline from spec file |
 | `archon pipeline cancel <ID>` | Cancel a running declarative pipeline |
+| `archon self retrospective <SESSION_ID>` | Extract evidence-backed lessons from a session activity log |
+| `archon self trust status` | Show domain-scoped self-calibration trust scores |
+| `archon self plans inspect <SESSION_ID>` | Compare a stored session plan with recorded step outcomes |
 | `archon run-agent-async <NAME> [--input FILE] [--version REQ] [--detach]` | Submit an async agent task |
 | `archon task-status <TASK_ID> [--watch]` | Check status of an async task |
 | `archon task-result <TASK_ID> [--stream]` | Get result of a completed async task |

@@ -323,6 +323,9 @@ async fn main() -> Result<()> {
         Some(Commands::Memory { ref action }) => {
             return crate::command::memory_cli::handle_memory_command(action.clone()).await;
         }
+        Some(Commands::SelfCmd { ref action }) => {
+            return crate::command::self_calibration::handle_self_command(action.clone()).await;
+        }
         Some(Commands::Gametheory {
             ref situation,
             classify_only,

@@ -213,6 +213,34 @@ pub enum PipelineAction {
         /// Session ID to abort
         session_id: String,
     },
+    /// Verify an audited built-in pipeline bundle
+    Verify {
+        /// Session ID to verify
+        session_id: String,
+        /// Also write verification/report.json into the bundle
+        #[arg(long)]
+        write_report: bool,
+    },
+    /// Inspect an audited built-in pipeline bundle
+    Inspect {
+        /// Session ID to inspect
+        session_id: String,
+    },
+    /// Export verified built-in pipeline traces
+    #[command(name = "export-traces")]
+    ExportTraces {
+        /// Session ID to export
+        session_id: String,
+        /// Export format; currently only jsonl is supported
+        #[arg(long, default_value = "jsonl")]
+        format: String,
+        /// Output file path. Omit to print to stdout.
+        #[arg(long)]
+        out: Option<std::path::PathBuf>,
+        /// Export even if the bundle verifier reports errors
+        #[arg(long)]
+        include_unverified: bool,
+    },
     /// Run a declarative pipeline from a spec file
     #[command(name = "run")]
     Run {

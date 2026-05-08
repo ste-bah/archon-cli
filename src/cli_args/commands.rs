@@ -3,7 +3,7 @@ use clap::Subcommand;
 use super::{
     AuthArgs, BehaviourAction, ChatArgs, CompletionAction, ConstellationAction, DocsAction,
     GametheoryAction, KbAction, LearningAction, MeaningAction, MemoryAction, PipelineAction,
-    PluginAction, ProvAction, ProvidersAction, RemoteAction, TeamAction,
+    PluginAction, ProvAction, ProvidersAction, RemoteAction, SelfAction, TeamAction,
 };
 
 #[derive(Subcommand, Debug)]
@@ -208,6 +208,12 @@ pub enum Commands {
     Memory {
         #[command(subcommand)]
         action: MemoryAction,
+    },
+    /// Inspect Archon's self-calibration records
+    #[command(name = "self")]
+    SelfCmd {
+        #[command(subcommand)]
+        action: SelfAction,
     },
     /// Game-theory strategic analysis
     Gametheory {

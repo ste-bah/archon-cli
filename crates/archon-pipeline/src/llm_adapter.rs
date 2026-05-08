@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use async_trait::async_trait;
+use sha2::{Digest, Sha256};
 
 use archon_llm::anthropic::{AnthropicClient, MessageRequest};
 use archon_llm::provider::{LlmProvider, LlmRequest};
@@ -194,8 +195,22 @@ async fn collect_stream(mut rx: Receiver<StreamEvent>) -> Result<LlmResponse> {
             | StreamEvent::SignatureDelta { .. }
             | StreamEvent::ReasoningEncrypted { .. }
             | StreamEvent::MessageStop
-            | StreamEvent::Ping
-            | StreamEvent::Error { .. } => {}
+            | StreamEvent::Ping => {}
+            StreamEvent::Error {
+                error_type,
+                message,
+            } => {
+                let partial_hash = if text_parts.is_empty() {
+                    "none".to_string()
+                } else {
+                    let partial = text_parts.join("");
+                    let digest = Sha256::digest(partial.as_bytes());
+                    hex::encode(digest)
+                };
+                anyhow::bail!(
+                    "LLM stream error ({error_type}): {message}; partial_output_hash={partial_hash}"
+                );
+            }
         }
     }
 

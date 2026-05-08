@@ -8,7 +8,7 @@ publish = false
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.1.52"
+version = "1.0.0"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT"
@@ -155,7 +155,10 @@ openssl.workspace = true
 chrono.workspace = true
 clap.workspace = true
 dirs.workspace = true
+serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
+hex.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 walkdir.workspace = true

@@ -47,6 +47,8 @@ pub enum AgentActivityKind {
     PipelineSpecialistStarted,
     /// A pipeline specialist completed.
     PipelineSpecialistCompleted,
+    /// Relevant memories were proactively surfaced for the current task.
+    MemorySurfaced,
     /// An artifact was created and can be inspected.
     ArtifactCreated,
     /// An agent failed.

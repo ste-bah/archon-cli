@@ -1,14 +1,14 @@
 //! `/archon-code` slash-command handler.
 //!
-//! Spawns the 48-agent coding pipeline via `tokio::spawn` wrapping
-//! `archon_pipeline::runner::run_pipeline()`. Per-agent progress events
+//! Spawns the 50-agent coding pipeline via `tokio::spawn` wrapping
+//! `archon_pipeline::runner::run_pipeline_audited()`. Per-agent progress events
 //! are streamed to the TUI via the facade's `tui_sender`.
 
 use std::sync::Arc;
 
 use crate::command::registry::{CommandContext, CommandHandler};
 use archon_pipeline::coding::facade::CodingFacade;
-use archon_pipeline::runner::{LlmClient, run_pipeline};
+use archon_pipeline::runner::{LlmClient, run_pipeline_audited};
 use archon_tui::app::TuiEvent;
 
 /// Handler for `/archon-code <task description>`.
@@ -18,7 +18,7 @@ impl CommandHandler for ArchonCodeHandler {
     fn execute(&self, ctx: &mut CommandContext, args: &[String]) -> anyhow::Result<()> {
         if args.is_empty() {
             ctx.emit(TuiEvent::TextDelta(
-                "\n/archon-code — run the 48-agent coding pipeline.\n\n\
+                "\n/archon-code — run the 50-agent coding pipeline.\n\n\
                  Usage: /archon-code <task description>\n\n\
                  Example: /archon-code implement a REST API for user management\n"
                     .to_string(),
@@ -49,6 +49,7 @@ impl CommandHandler for ArchonCodeHandler {
 
         let tui_tx = ctx.tui_tx.clone();
         let leann = ctx.leann.clone();
+        let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
 
         // Facade emits per-agent progress as Strings; forward to TUI as TextDelta.
         let (string_tx, mut string_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
@@ -65,10 +66,11 @@ impl CommandHandler for ArchonCodeHandler {
         )));
 
         archon_observability::spawn_named("archon-code-pipeline", async move {
-            match run_pipeline(
+            match run_pipeline_audited(
                 coding.as_ref(),
                 llm.as_ref(),
                 &task,
+                &cwd,
                 leann.as_deref(),
                 None,
                 None,
@@ -98,7 +100,7 @@ impl CommandHandler for ArchonCodeHandler {
     }
 
     fn description(&self) -> &str {
-        "Run the 48-agent coding pipeline on a task"
+        "Run the 50-agent coding pipeline on a task"
     }
 }
 
@@ -131,8 +133,8 @@ mod tests {
     fn archon_code_handler_description_matches() {
         let desc = ArchonCodeHandler.description();
         assert!(
-            desc.contains("48-agent"),
-            "description must mention 48-agent, got: {desc}"
+            desc.contains("50-agent"),
+            "description must mention 50-agent, got: {desc}"
         );
     }
 

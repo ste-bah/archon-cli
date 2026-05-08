@@ -7,6 +7,8 @@ Where archon-cli writes everything.
 | Linux/macOS | Windows | Purpose |
 |---|---|---|
 | `~/.archon/.credentials.json` | `%USERPROFILE%\.archon\.credentials.json` | Provider credentials (Anthropic, Codex, Gemini) |
+| `~/.archon/sessions/<id>/activity/events.jsonl` | `%USERPROFILE%\.archon\sessions\<id>\activity\events.jsonl` | Agent/tool activity stream used by retrospectives |
+| `~/.archon/self-calibration/` | `%USERPROFILE%\.archon\self-calibration\` | Retrospectives, self-trust records, plan-vs-outcome summaries |
 | `~/.config/archon/` | `%APPDATA%\archon\` | Configuration |
 | `~/.config/archon/config.toml` | `%APPDATA%\archon\config.toml` | User config |
 | `~/.config/archon/.mcp.json` | `%APPDATA%\archon\.mcp.json` | Global MCP server config |
@@ -42,7 +44,7 @@ archon-cli specific overrides:
 | `teams.toml` | Multi-agent team definitions |
 | `skills/<name>.toml` | User-authored skills |
 | `plugins/` | Project-local plugins |
-| `pipelines/<session-id>/` | Pipeline session state (specifications, artefacts, ledger) |
+| `pipelines/<session-id>/` | Audited built-in pipeline bundle: manifest, checksum state, audit log, prompts, agent records, outputs, verification reports, exports |
 | `settings.json` | Hooks definitions (alternative to TOML) |
 | `lsp.toml` | LSP server overrides |
 

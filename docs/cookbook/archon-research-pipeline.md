@@ -33,7 +33,7 @@ Starting research pipeline for topic: impact of transformer architectures on ret
 …
 ```
 
-The handler (`src/command/archon_research.rs:14`) spawns the pipeline async via `tokio::spawn`. Per-agent progress streams to the TUI through canonical activity events and conversation output. The conversation stays interactive — you can keep using other slash commands while the run is in flight.
+The handler spawns the audited pipeline async via `tokio::spawn`. Per-agent progress streams to the TUI through canonical activity events and conversation output, while prompts, attempts, accepted outputs, quality scores, and state are persisted under `<workdir>/.archon/pipelines/<session-id>/`. The conversation stays interactive — you can keep using other slash commands while the run is in flight.
 
 Equivalent CLI invocation (same persisted state, same outputs):
 
@@ -47,9 +47,11 @@ If `--dry-run` is needed (the CLI form supports it; the slash form does not):
 archon pipeline research "..." --dry-run
 ```
 
-## What happens — 8 phases, 46 agents
+## What happens — 7 agent phases, 46 agents, final assembly
 
-The pipeline runs phases sequentially with phase-reviewer gates between each. Each phase publishes its artefact to `<workdir>/.archon/research/<session-id>/` for inspection.
+The pipeline runs phases sequentially with phase-reviewer gates between each.
+Each agent output is persisted to the audited bundle at
+`<workdir>/.archon/pipelines/<session-id>/` for verification and inspection.
 
 ### Phase 1: Scoping (5 agents)
 
@@ -93,11 +95,15 @@ Output: `phase6-draft.md` (full draft) + `executive-brief.md` (1-page summary).
 
 Output: `phase7-citations.md` + final `references.bib`.
 
-### Phase 8: Review and finalize (5 agents)
+### Final assembly
 
-`phase-1-reviewer` through `phase-5-reviewer` re-validate each upstream phase's artefact against the criteria from `step-back-analyzer`. `file-length-manager` splits files at 1500 lines with cross-references. `confidence-quantifier` re-runs on the assembled draft.
+The final-stage orchestrator assembles accepted agent outputs into the final
+research paper, preserving citation and confidence context from the audited
+agent records.
 
-Output: `phase8-final.md`. Pipeline marks the session as complete.
+Output: final research answer. Pipeline marks the session complete, runs
+completion integrity on the final answer in the CLI path, and stores the
+summary in bundle state.
 
 ## Live progress in the TUI
 
@@ -129,7 +135,9 @@ SESSION ID                                 KIND       PHASE       STATUS    STAR
 01HYCDC4XKM91Y…                            coding     phase-6     complete  2026-05-04 19:34
 
 > /pipeline status 01HYCDF3RR…
-Status:    InProgress (phase 3 of 8)
+> /pipeline verify 01HYCDF3RR… --write-report
+> /pipeline inspect 01HYCDF3RR…
+Status:    InProgress (phase 3 of 7)
 Phase:     theoretical-synthesis
 Last agent: thematic-synthesizer (completed 4s ago)
 Cost:      $3.92 / $20.00 budget
@@ -144,31 +152,35 @@ Resumeable: yes
 > /pipeline list
 > /pipeline resume 01HYCDF3RR…
 [recovery] verifying git working tree...
-[recovery] last completed gate: phase-2 evidence-synthesizer
+[recovery] verifying audited bundle...
+[recovery] last completed agent: evidence-synthesizer
 [recovery] resuming at phase-3 thematic-synthesizer
 ```
 
-Resume is git-aware — refuses to continue if files under the pipeline's purview have changed since the last gate. Commit or stash first if that fires.
+Resume is git-aware and verifier-gated. It refuses to continue if files under
+the pipeline's purview changed unexpectedly or if persisted prompt/output
+records fail hash verification.
 
 ## Inspecting after completion
 
 ```
 > /pipeline status 01HYCDF3RR…
 Status:    Complete
-Phase:     phase-8 finalize
+Phase:     final assembly
 Total cost: $14.27
 Agents run: 46 / 46
-Files created: .archon/research/01HYCDF3RR…/{phase1-scope,phase2-literature,phase3-synthesis,phase4-critique,phase6-draft,phase7-citations,phase8-final}.md (7 chapters)
+Bundle: .archon/pipelines/01HYCDF3RR…
 Total sources cited: 47
 Final draft: 11428 words
 Duration: 18m 42s
 ```
 
-Read the chapters from inside the TUI:
+Inspect and export the audited trace from inside the TUI:
 
 ```
-> /docs open .archon/research/01HYCDF3RR…/phase8-final.md
-> /docs open .archon/research/01HYCDF3RR…/executive-brief.md
+> /pipeline verify 01HYCDF3RR… --write-report
+> /pipeline inspect 01HYCDF3RR…
+> /pipeline export-traces 01HYCDF3RR… --out research-traces.jsonl
 ```
 
 Verify the citations actually match real sources (don't trust the model's word):

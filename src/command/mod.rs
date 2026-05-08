@@ -76,6 +76,9 @@ pub(crate) mod model;
 pub(crate) mod parser;
 pub(crate) mod permissions;
 pub(crate) mod pipeline;
+pub(crate) mod pipeline_bundle;
+pub(crate) mod pipeline_declarative;
+pub(crate) mod pipeline_support;
 pub(crate) mod provider_gate;
 // TASK-TUI-626: /plan Plan Mode toggle via SNAPSHOT+EFFECT pattern.
 pub(crate) mod plan;
@@ -99,7 +102,7 @@ pub(crate) mod remote;
 pub(crate) mod rename;
 pub(crate) mod resume;
 // TASK-HOTFIX-V0.1.7: /run-agent primary command (#248).
-/// `/archon-code` — 48-agent coding pipeline TUI primary.
+/// `/archon-code` — 50-agent coding pipeline TUI primary.
 pub(crate) mod archon_code;
 /// `/archon-research` — 46-agent research pipeline TUI primary.
 pub(crate) mod archon_research;
@@ -108,6 +111,7 @@ pub(crate) mod run_agent;
 pub(crate) mod review;
 // TASK-#208 SLASH-SEARCH: /search recursive basename substring search.
 pub(crate) mod search;
+pub(crate) mod self_calibration;
 // TASK-TUI-620: /rewind message-selector overlay launcher.
 pub(crate) mod rewind;
 pub(crate) mod rules;

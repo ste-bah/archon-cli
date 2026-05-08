@@ -74,3 +74,19 @@ archon completion trust --agent verifier-agent --model claude-sonnet
 The success criterion is not the `verify` return code alone. The independent
 read must show persisted claims/evidence/incidents and a trust row with the
 expected workspace, agent, model, and task type.
+
+## Pipeline completion summaries
+
+Built-in coding/research pipelines call completion integrity automatically when
+they finish through the CLI path. The final-output check stores a human-readable
+summary and completion report id in
+`<workdir>/.archon/pipelines/<session-id>/state.json`, then appends a
+`completion_checked` event to `audit.log`.
+
+Use the pipeline verifier and completion inspector together:
+
+```bash
+archon pipeline verify <session-id> --write-report
+archon pipeline inspect <session-id>
+archon completion inspect <session-id>
+```
