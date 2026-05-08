@@ -577,6 +577,11 @@ async fn build_session_agent(
         effort_level: effort_level_shared,
         model_override: model_override_shared,
         permission_mode: permission_mode_shared,
+        permission_rules: archon_permissions::rules::RuleSet {
+            always_allow: config.permissions.always_allow.clone(),
+            always_deny: config.permissions.always_deny.clone(),
+            always_ask: config.permissions.always_ask.clone(),
+        },
         extra_dirs: Arc::new(tokio::sync::Mutex::new(Vec::new())),
         max_tool_concurrency: config.tools.max_concurrency as usize,
         max_turns: None,
@@ -1640,6 +1645,11 @@ pub(crate) async fn run_interactive_session(
         effort_level: Arc::clone(&effort_level_shared),
         model_override: Arc::clone(&model_override_shared),
         permission_mode: Arc::clone(&permission_mode_shared),
+        permission_rules: archon_permissions::rules::RuleSet {
+            always_allow: config.permissions.always_allow.clone(),
+            always_deny: config.permissions.always_deny.clone(),
+            always_ask: config.permissions.always_ask.clone(),
+        },
         extra_dirs: Arc::new(tokio::sync::Mutex::new(Vec::new())),
         max_tool_concurrency: config.tools.max_concurrency as usize,
         max_turns: None,

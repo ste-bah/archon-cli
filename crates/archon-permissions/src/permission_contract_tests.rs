@@ -52,6 +52,24 @@ fn allow_rules_do_not_override_plan_mode_deny_rules() {
 }
 
 #[test]
+fn bypass_permissions_only_overrides_non_deny_rule_decisions() {
+    let rules = RuleSet {
+        always_allow: vec![],
+        always_deny: vec![],
+        always_ask: vec![ToolRule {
+            tool: "Bash".to_string(),
+            pattern: "*".to_string(),
+        }],
+    };
+    let checker = PermissionChecker::new(PermissionMode::BypassPermissions, rules);
+
+    assert_eq!(
+        checker.check_rule_decision("Bash", "cargo test"),
+        Some(PermissionDecision::Allow)
+    );
+}
+
+#[test]
 fn codex_or_anthropic_identity_is_not_part_of_permission_decisions() {
     let checker = PermissionChecker::new(PermissionMode::Default, RuleSet::empty());
 

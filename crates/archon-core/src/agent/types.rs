@@ -127,6 +127,8 @@ pub struct AgentConfig {
     pub model_override: Arc<Mutex<String>>,
     /// Shared permission mode (toggled by /permissions slash command: "auto", "ask", "yolo").
     pub permission_mode: Arc<Mutex<String>>,
+    /// Fine-grained permission rules applied before mode-level preflight.
+    pub permission_rules: archon_permissions::rules::RuleSet,
     /// Additional working directories added at runtime via `/add-dir`.
     pub extra_dirs: Arc<Mutex<Vec<std::path::PathBuf>>>,
     /// Maximum concurrent tool calls (1 = sequential, from config.tools.max_concurrency).
@@ -185,6 +187,7 @@ impl Default for AgentConfig {
             effort_level: Arc::new(Mutex::new(EffortLevel::Medium)),
             model_override: Arc::new(Mutex::new(String::new())),
             permission_mode: Arc::new(Mutex::new("auto".to_string())),
+            permission_rules: archon_permissions::rules::RuleSet::empty(),
             extra_dirs: Arc::new(Mutex::new(Vec::new())),
             max_tool_concurrency: archon_tools::concurrency::DEFAULT_MAX_CONCURRENCY,
             max_turns: None,

@@ -34,6 +34,7 @@ mod events;
 mod lifecycle;
 mod memory_integration;
 mod message_delivery;
+mod permission_gate;
 mod support;
 #[cfg(test)]
 mod tests;
