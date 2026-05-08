@@ -149,7 +149,7 @@ pub(crate) const COMMAND_SURFACE_ROWS: &[CommandSurfaceRow] = &[
         tui_surface: "Pipeline primary",
         status: SurfaceStatus::Done,
         source_of_truth: "src/command/archon_code.rs",
-        notes: "The coding pipeline has a first-class TUI slash primary.",
+        notes: "The coding pipeline has a first-class TUI slash primary; continuation uses /pipeline resume <session-id>.",
     },
     CommandSurfaceRow {
         cli: "archon pipeline research <topic>",
@@ -157,7 +157,7 @@ pub(crate) const COMMAND_SURFACE_ROWS: &[CommandSurfaceRow] = &[
         tui_surface: "Pipeline primary",
         status: SurfaceStatus::Done,
         source_of_truth: "src/command/archon_research.rs",
-        notes: "The research pipeline has a first-class TUI slash primary.",
+        notes: "The research pipeline has a first-class TUI slash primary; continuation uses /pipeline resume <session-id>.",
     },
     CommandSurfaceRow {
         cli: "archon agent-list/search/info",

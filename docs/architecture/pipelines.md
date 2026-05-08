@@ -193,7 +193,9 @@ archon pipeline resume <session-id>
 archon pipeline abort <session-id>
 ```
 
-In the TUI, `/archon-code` and `/archon-research` are the equivalent slash commands.
+In the TUI, `/archon-code` and `/archon-research` start coding and research
+runs. Continuation is shared: `/pipeline resume <session-id>` resumes either
+pipeline type after verifying the audited bundle.
 
 ## Session recovery
 

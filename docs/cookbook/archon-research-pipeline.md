@@ -35,6 +35,11 @@ Starting research pipeline for topic: impact of transformer architectures on ret
 
 The handler spawns the audited pipeline async via `tokio::spawn`. Per-agent progress streams to the TUI through canonical activity events and conversation output, while prompts, attempts, accepted outputs, quality scores, and state are persisted under `<workdir>/.archon/pipelines/<session-id>/`. The conversation stays interactive — you can keep using other slash commands while the run is in flight.
 
+Continuation is handled by the shared pipeline control surface, not by a second
+`/archon-research` invocation. If the run is interrupted, use
+`/pipeline resume <session-id>` or `archon pipeline resume <session-id>`; the
+persisted bundle records whether the run is coding or research.
+
 Equivalent CLI invocation (same persisted state, same outputs):
 
 ```bash
