@@ -1,6 +1,13 @@
-use std::process::Command;
+use std::future::Future;
+use std::path::Path;
+use std::pin::Pin;
+use std::process::{Command, Stdio};
+use std::time::Duration;
 
+use archon_permissions::sandbox::{SandboxBackend, SandboxCommandRequest, SandboxCommandResult};
 use serde::{Deserialize, Serialize};
+use tokio::io::AsyncReadExt;
+use tokio::process::Command as TokioCommand;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -115,7 +122,8 @@ pub fn probe_docker(binary: &str) -> DockerProbe {
 
 pub fn docker_doctor_report(config: &DockerConfig, probe: DockerProbe) -> DockerDoctorReport {
     let mut findings = Vec::new();
-    findings.push("execution backend is detect-only in this release slice".into());
+    findings
+        .push("doctor is detect-only; Bash execution routes through Docker when selected".into());
     findings.push("provider credentials, SSH agents, Git credentials, and host home mounts are not passed by default".into());
 
     let status = if config.privileged || config.mount_docker_socket || config.mount_home {
@@ -173,15 +181,239 @@ pub fn render_docker_doctor_report(report: &DockerDoctorReport) -> String {
         out.push_str(finding);
         out.push('\n');
     }
-    out.push_str(
-        "Execution: disabled until the Docker sandbox backend is explicitly implemented\n",
-    );
+    out.push_str("Execution: Bash routes through Docker when sandbox.backend=docker\n");
     out
+}
+
+#[derive(Debug, Clone)]
+pub struct DockerSandboxBackend {
+    config: DockerConfig,
+    workspace_access: String,
+}
+
+impl DockerSandboxBackend {
+    pub fn new(config: DockerConfig, workspace_access: impl Into<String>) -> Self {
+        Self {
+            config,
+            workspace_access: workspace_access.into(),
+        }
+    }
+
+    fn safe_to_execute(&self) -> Result<(), String> {
+        self.config.validate()?;
+        if !self.config.enabled {
+            return Err("docker sandbox backend is disabled".into());
+        }
+        if self.config.privileged {
+            return Err("docker sandbox refuses privileged containers".into());
+        }
+        if self.config.mount_docker_socket {
+            return Err("docker sandbox refuses host Docker socket mounts".into());
+        }
+        if self.config.mount_home {
+            return Err("docker sandbox refuses broad host home mounts".into());
+        }
+        Ok(())
+    }
+}
+
+impl SandboxBackend for DockerSandboxBackend {
+    fn check(&self, tool: &str, _input: &serde_json::Value) -> Result<(), String> {
+        self.safe_to_execute()?;
+        match tool {
+            "Read" | "Glob" | "Grep" | "ToolSearch" | "TodoWrite" | "Sleep" => Ok(()),
+            "Bash" | "Shell" => Ok(()),
+            "Write" | "Edit" | "NotebookEdit" => Err(format!(
+                "docker sandbox: {tool} host-side file mutation is not supported yet"
+            )),
+            "WebFetch" | "WebSearch" => Err(format!(
+                "docker sandbox: {tool} host-side network access is not supported"
+            )),
+            "TaskCreate" | "TaskUpdate" | "Agent" => Err(format!(
+                "docker sandbox: {tool} agent spawning is not supported"
+            )),
+            other => Err(format!("docker sandbox: unsupported tool {other}")),
+        }
+    }
+
+    fn execute_bash<'a>(
+        &'a self,
+        request: SandboxCommandRequest,
+    ) -> Pin<Box<dyn Future<Output = Option<SandboxCommandResult>> + Send + 'a>> {
+        Box::pin(async move { Some(self.execute_bash_inner(request).await) })
+    }
+}
+
+impl DockerSandboxBackend {
+    async fn execute_bash_inner(&self, request: SandboxCommandRequest) -> SandboxCommandResult {
+        if let Err(error) = self.safe_to_execute() {
+            return SandboxCommandResult {
+                content: format!("Error: {error}"),
+                is_error: true,
+            };
+        }
+        let args = docker_run_args(&self.config, &self.workspace_access, &request);
+        let mut cmd = TokioCommand::new(&self.config.binary);
+        cmd.args(args)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .stdin(Stdio::null());
+        #[cfg(unix)]
+        cmd.process_group(0);
+
+        let mut child = match cmd.spawn() {
+            Ok(child) => child,
+            Err(error) => {
+                return SandboxCommandResult {
+                    content: format!("Error: Failed to spawn docker: {error}"),
+                    is_error: true,
+                };
+            }
+        };
+
+        let result = tokio::time::timeout(Duration::from_millis(request.timeout_ms), async {
+            let mut stdout_buf = Vec::new();
+            let mut stderr_buf = Vec::new();
+            if let Some(mut stdout) = child.stdout.take() {
+                let _ = stdout.read_to_end(&mut stdout_buf).await;
+            }
+            if let Some(mut stderr) = child.stderr.take() {
+                let _ = stderr.read_to_end(&mut stderr_buf).await;
+            }
+            let status = child.wait().await;
+            (stdout_buf, stderr_buf, status)
+        })
+        .await;
+
+        match result {
+            Ok((stdout_buf, stderr_buf, status)) => {
+                docker_output_result(stdout_buf, stderr_buf, status, request.max_output_bytes)
+            }
+            Err(_) => {
+                let _ = child.kill().await;
+                SandboxCommandResult {
+                    content: format!(
+                        "Error: Docker command timed out after {}ms",
+                        request.timeout_ms
+                    ),
+                    is_error: true,
+                }
+            }
+        }
+    }
+}
+
+fn docker_run_args(
+    config: &DockerConfig,
+    workspace_access: &str,
+    request: &SandboxCommandRequest,
+) -> Vec<String> {
+    let mut args = vec!["run".into(), "--rm".into(), "--pull".into(), "never".into()];
+    args.extend(["--security-opt".into(), "no-new-privileges".into()]);
+    args.extend(["--cap-drop".into(), "ALL".into()]);
+    args.extend(["--pids-limit".into(), "256".into()]);
+    args.extend(["--tmpfs".into(), "/tmp:rw,nosuid,size=256m".into()]);
+    args.extend([
+        "--network".into(),
+        docker_network_mode(&config.network).into(),
+    ]);
+    if let Some(memory) = &config.memory_limit {
+        args.extend(["--memory".into(), memory.clone()]);
+    }
+    if let Some(cpus) = &config.cpu_limit {
+        args.extend(["--cpus".into(), cpus.clone()]);
+    }
+    args.extend(workspace_mount_args(&request.working_dir, workspace_access));
+    args.extend(allowed_env_args(&request.env, &config.env_allowlist));
+    args.extend([
+        config.image.clone(),
+        "/bin/bash".into(),
+        "-lc".into(),
+        request.command.clone(),
+    ]);
+    args
+}
+
+fn workspace_mount_args(working_dir: &Path, workspace_access: &str) -> Vec<String> {
+    let mode = if workspace_access == "rw" {
+        ""
+    } else {
+        ",readonly"
+    };
+    vec![
+        "--mount".into(),
+        format!(
+            "type=bind,src={},dst=/workspace{mode}",
+            working_dir.display()
+        ),
+        "--workdir".into(),
+        "/workspace".into(),
+    ]
+}
+
+fn allowed_env_args(env: &[(String, String)], allowlist: &[String]) -> Vec<String> {
+    let mut args = Vec::new();
+    for name in allowlist {
+        if sensitive_env_name(name) {
+            continue;
+        }
+        if let Some((_, value)) = env.iter().find(|(key, _)| key == name) {
+            args.extend(["--env".into(), format!("{name}={value}")]);
+        }
+    }
+    args
+}
+
+fn sensitive_env_name(name: &str) -> bool {
+    let upper = name.to_ascii_uppercase();
+    ["TOKEN", "SECRET", "KEY", "PASSWORD", "CREDENTIAL"]
+        .iter()
+        .any(|needle| upper.contains(needle))
+}
+
+fn docker_network_mode(network: &str) -> &'static str {
+    match network {
+        "enabled" => "bridge",
+        "limited" | "disabled" => "none",
+        _ => "none",
+    }
+}
+
+fn docker_output_result(
+    stdout_buf: Vec<u8>,
+    stderr_buf: Vec<u8>,
+    status: std::io::Result<std::process::ExitStatus>,
+    max_output_bytes: usize,
+) -> SandboxCommandResult {
+    let exit_code = status.as_ref().ok().and_then(|s| s.code()).unwrap_or(-1);
+    let combined = [stdout_buf, stderr_buf].concat();
+    let truncated = combined.len() > max_output_bytes;
+    let bytes = if truncated {
+        &combined[..max_output_bytes]
+    } else {
+        &combined
+    };
+    let mut output = String::from_utf8_lossy(bytes).to_string();
+    if truncated {
+        output.push_str(&format!("\n\nOutput truncated at {max_output_bytes} bytes"));
+    }
+    if exit_code == 0 {
+        SandboxCommandResult {
+            content: output,
+            is_error: false,
+        }
+    } else {
+        SandboxCommandResult {
+            content: format!("Exit code {exit_code}\n{output}"),
+            is_error: true,
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     #[test]
     fn docker_defaults_are_safe() {
@@ -210,5 +442,57 @@ mod tests {
 
         assert_eq!(report.status, DockerDoctorStatus::UnsafeConfig);
         assert!(render_docker_doctor_report(&report).contains("unsafe-config"));
+    }
+
+    #[test]
+    fn docker_run_args_default_to_no_network_and_readonly_workspace() {
+        let cfg = DockerConfig {
+            enabled: true,
+            env_allowlist: vec!["RUST_LOG".into(), "ANTHROPIC_API_KEY".into()],
+            ..DockerConfig::default()
+        };
+        let request = SandboxCommandRequest {
+            command: "cargo test -p archon-core".into(),
+            working_dir: PathBuf::from("/repo"),
+            timeout_ms: 1_000,
+            max_output_bytes: 1024,
+            env: vec![
+                ("RUST_LOG".into(), "debug".into()),
+                ("ANTHROPIC_API_KEY".into(), "secret".into()),
+            ],
+        };
+
+        let args = docker_run_args(&cfg, "ro", &request);
+
+        assert!(
+            args.windows(2)
+                .any(|pair| pair[0] == "--network" && pair[1] == "none")
+        );
+        assert!(
+            args.iter()
+                .any(|arg| arg.contains("dst=/workspace,readonly"))
+        );
+        assert!(
+            args.windows(2)
+                .any(|pair| pair[0] == "--env" && pair[1] == "RUST_LOG=debug")
+        );
+        assert!(!args.iter().any(|arg| arg.contains("ANTHROPIC_API_KEY")));
+        assert!(args.iter().any(|arg| arg == "never"));
+    }
+
+    #[test]
+    fn docker_backend_fails_closed_for_unsafe_config() {
+        let backend = DockerSandboxBackend::new(
+            DockerConfig {
+                enabled: true,
+                privileged: true,
+                ..DockerConfig::default()
+            },
+            "rw",
+        );
+
+        let error = backend.check("Bash", &serde_json::json!({})).unwrap_err();
+
+        assert!(error.contains("privileged"));
     }
 }

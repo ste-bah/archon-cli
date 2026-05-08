@@ -141,7 +141,7 @@ mod tests {
 
         assert!(body.contains("Backend: docker"));
         assert!(body.contains("ready-detect-only"));
-        assert!(body.contains("Execution: disabled"));
+        assert!(body.contains("Execution: Bash routes through Docker"));
         assert!(body.contains("provider credentials"));
     }
 

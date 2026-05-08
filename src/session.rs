@@ -112,6 +112,22 @@ fn active_session_model(config: &archon_core::config::ArchonConfig) -> String {
     }
 }
 
+fn session_sandbox_backend(
+    config: &archon_core::config::ArchonConfig,
+    sandbox_flag: Arc<AtomicBool>,
+) -> Arc<dyn archon_permissions::SandboxBackend> {
+    if config.sandbox.backend == "docker" {
+        Arc::new(archon_core::sandbox::DockerSandboxBackend::new(
+            config.sandbox.docker.clone(),
+            config.sandbox.workspace_access.clone(),
+        ))
+    } else {
+        Arc::new(archon_tui::sandbox::SharedSandboxFlag::with_flag(
+            sandbox_flag,
+        ))
+    }
+}
+
 fn configure_session_vlm_provider(working_dir: &std::path::Path) {
     match archon_policy::load_effective_policy(working_dir) {
         Ok(policy) => {
@@ -601,9 +617,7 @@ async fn build_session_agent(
         max_turns: None,
         cancel_token: None,
         // GHOST-006: SandboxBackend wraps the shared flag for dispatch gating.
-        sandbox: Some(std::sync::Arc::new(
-            archon_tui::sandbox::SharedSandboxFlag::with_flag(sandbox_flag.clone()),
-        )),
+        sandbox: Some(session_sandbox_backend(config, sandbox_flag.clone())),
         activity_sink: session_activity_sink(session_id),
     };
 
@@ -1702,9 +1716,7 @@ pub(crate) async fn run_interactive_session(
         max_turns: None,
         cancel_token: None,
         // GHOST-006: SandboxBackend wraps the shared flag for dispatch gating.
-        sandbox: Some(std::sync::Arc::new(
-            archon_tui::sandbox::SharedSandboxFlag::with_flag(sandbox_flag.clone()),
-        )),
+        sandbox: Some(session_sandbox_backend(config, sandbox_flag.clone())),
         activity_sink: session_activity_sink(session_id),
     };
 

@@ -6,8 +6,8 @@ mod policy;
 mod ssh;
 
 pub use docker::{
-    DockerConfig, DockerDoctorReport, DockerDoctorStatus, DockerProbe, docker_doctor_report,
-    probe_docker, render_docker_doctor_report,
+    DockerConfig, DockerDoctorReport, DockerDoctorStatus, DockerProbe, DockerSandboxBackend,
+    docker_doctor_report, probe_docker, render_docker_doctor_report,
 };
 pub use openshell::{
     OpenShellConfig, OpenShellDoctorReport, OpenShellDoctorStatus, OpenShellProbe,
