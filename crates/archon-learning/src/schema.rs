@@ -22,6 +22,7 @@ pub fn ensure_learning_schema(db: &DbInstance) -> Result<()> {
     ensure_agent_performance_ledger(db)?;
     ensure_agent_evolution_proposals(db)?;
     ensure_agent_profile_versions(db)?;
+    ensure_agent_shadow_evaluations(db)?;
     Ok(())
 }
 
@@ -221,6 +222,27 @@ fn ensure_agent_profile_versions(db: &DbInstance) -> Result<()> {
             memory_hash: String default "",
             is_active: Bool default false,
             is_rollback_target: Bool default false,
+            created_at: String,
+        }"#,
+    )
+}
+
+fn ensure_agent_shadow_evaluations(db: &DbInstance) -> Result<()> {
+    run_create(
+        db,
+        r#":create agent_shadow_evaluations {
+            evaluation_id: String =>
+            proposal_id: String,
+            agent_type: String,
+            candidate_version_id: String default "",
+            baseline_version_id: String default "",
+            task_set_id: String default "",
+            baseline_score: Float default 0.0,
+            candidate_score: Float default 0.0,
+            regression_count: Int default 0,
+            improvement_count: Int default 0,
+            verdict: String,
+            evidence_json: String default "{}",
             created_at: String,
         }"#,
     )
