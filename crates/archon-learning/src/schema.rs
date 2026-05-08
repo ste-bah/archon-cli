@@ -26,6 +26,7 @@ pub fn ensure_learning_schema(db: &DbInstance) -> Result<()> {
     ensure_memory_promotion_candidates(db)?;
     ensure_permission_runtime_events(db)?;
     ensure_provider_auth_profiles(db)?;
+    ensure_provider_rate_limit_windows(db)?;
     Ok(())
 }
 
@@ -311,6 +312,25 @@ fn ensure_provider_auth_profiles(db: &DbInstance) -> Result<()> {
             cooldown_until: String default "",
             disabled_reason: String default "",
             metadata_redacted_json: String default "{}",
+        }"#,
+    )
+}
+
+fn ensure_provider_rate_limit_windows(db: &DbInstance) -> Result<()> {
+    run_create(
+        db,
+        r#":create provider_rate_limit_windows {
+            window_id: String =>
+            provider_id: String,
+            profile_id: String default "",
+            model_id: String default "",
+            limit_id: String default "",
+            limit_name: String default "",
+            window_kind: String,
+            used_percent: Float default -1.0,
+            resets_at: String default "",
+            raw_redacted_json: String default "{}",
+            observed_at: String,
         }"#,
     )
 }
