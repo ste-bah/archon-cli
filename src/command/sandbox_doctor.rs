@@ -8,9 +8,15 @@ pub(crate) type DockerDoctorOverride = (
     archon_core::sandbox::DockerProbe,
 );
 
+pub(crate) type SshDoctorOverride = (
+    archon_core::sandbox::SshConfig,
+    archon_core::sandbox::SshProbe,
+);
+
 #[derive(Default)]
 pub(crate) struct SandboxDoctorOverrides<'a> {
     pub(crate) docker: Option<&'a DockerDoctorOverride>,
+    pub(crate) ssh: Option<&'a SshDoctorOverride>,
     pub(crate) openshell: Option<&'a OpenShellDoctorOverride>,
 }
 
@@ -21,6 +27,7 @@ pub(crate) fn render_sandbox_doctor(
     let backend = parse_backend_arg(args).unwrap_or("logical");
     match backend {
         "docker" => render_docker_doctor(overrides.docker),
+        "ssh" => render_ssh_doctor(overrides.ssh),
         "openshell" => render_openshell_doctor(overrides.openshell),
         "logical" => {
             "Sandbox doctor\nBackend: logical\nStatus: available\nIsolation: policy gate only, not OS/container isolation\nExecution: host tool execution remains governed by permission preflight\n".into()
@@ -48,6 +55,25 @@ fn render_docker_doctor(docker_override: Option<&DockerDoctorOverride>) -> Strin
     let probe = archon_core::sandbox::probe_docker(&config.binary);
     let report = archon_core::sandbox::docker_doctor_report(&config, probe);
     archon_core::sandbox::render_docker_doctor_report(&report)
+}
+
+fn render_ssh_doctor(ssh_override: Option<&SshDoctorOverride>) -> String {
+    if let Some((config, probe)) = ssh_override {
+        let report = archon_core::sandbox::ssh_doctor_report(config, probe.clone());
+        return archon_core::sandbox::render_ssh_doctor_report(&report);
+    }
+
+    let config = match load_sandbox_config_without_writing() {
+        Ok(config) => config.ssh,
+        Err(error) => {
+            return format!(
+                "Sandbox doctor\nBackend: ssh\nStatus: config-error\n- {error}\nExecution: disabled\n"
+            );
+        }
+    };
+    let probe = archon_core::sandbox::probe_ssh(&config.binary);
+    let report = archon_core::sandbox::ssh_doctor_report(&config, probe);
+    archon_core::sandbox::render_ssh_doctor_report(&report)
 }
 
 fn render_openshell_doctor(openshell_override: Option<&OpenShellDoctorOverride>) -> String {
@@ -117,6 +143,32 @@ mod tests {
         assert!(body.contains("ready-detect-only"));
         assert!(body.contains("Execution: disabled"));
         assert!(body.contains("provider credentials"));
+    }
+
+    #[test]
+    fn sandbox_doctor_ssh_reports_detect_only_status() {
+        let override_report = (
+            archon_core::sandbox::SshConfig {
+                enabled: true,
+                host: Some("sandbox.example".into()),
+                user: Some("archon".into()),
+                ..archon_core::sandbox::SshConfig::default()
+            },
+            archon_core::sandbox::SshProbe::found("OpenSSH_9.6"),
+        );
+
+        let body = render_sandbox_doctor(
+            &[String::from("--backend"), String::from("ssh")],
+            SandboxDoctorOverrides {
+                ssh: Some(&override_report),
+                ..SandboxDoctorOverrides::default()
+            },
+        );
+
+        assert!(body.contains("Backend: ssh"));
+        assert!(body.contains("ready-detect-only"));
+        assert!(body.contains("TOFU mismatch blocking"));
+        assert!(body.contains("Execution: disabled"));
     }
 
     #[test]
