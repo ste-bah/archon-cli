@@ -133,7 +133,10 @@ archon self plans inspect <session-id>
 
 The retrospective command reads `~/.archon/sessions/<id>/activity/events.jsonl`,
 writes artifacts under `~/.archon/self-calibration/`, and attempts to promote
-high-signal lessons into memory and governed LearningEvents.
+high-signal lessons into memory and governed LearningEvents. The first extractor
+is deliberately conservative: it looks for source-tree mistakes, tool or agent
+failure patterns, and verification habits rather than treating every log line as
+a lesson.
 
 ## See also
 

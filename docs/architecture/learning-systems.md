@@ -69,9 +69,12 @@ Risky changes go through governed learning and policy gates.
 v1.0.0 adds a self-calibration read path over the data Archon was already
 writing. `archon self retrospective <session-id>` reads the session activity
 JSONL, extracts a small set of evidence-backed lessons, writes a retrospective
-artifact, and attempts to store matching memories plus LearningEvents. Proactive
-memory injection now emits `MemorySurfaced` activity events, so later
-retrospectives can tell when prior context was actually shown to the agent.
+artifact, and attempts to store matching memories plus LearningEvents. The
+extractor is intentionally shell-first and conservative: it currently captures
+source-tree mistakes, tool or agent failure patterns, and verification habits.
+Existing proactive memory injection now emits `MemorySurfaced` activity events,
+so later retrospectives can tell when prior context was actually shown to the
+agent.
 `archon self trust status` reports domain-scoped first-answer reliability using
 the same Laplace-smoothed shape as completion trust, and `archon self plans
 inspect <session-id>` compares stored plans with recorded step outcomes.
