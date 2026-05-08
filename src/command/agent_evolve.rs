@@ -36,6 +36,11 @@ fn handle_evolve_action(db: &DbInstance, action: &AgentEvolveAction) -> Result<(
         AgentEvolveAction::Reject { proposal_id } => {
             cmd_update_proposal_status(db, proposal_id, "rejected")
         }
+        AgentEvolveAction::Rollback {
+            agent,
+            version_id,
+            activate,
+        } => cmd_rollback_profile(db, agent, version_id, *activate),
     }
 }
 
@@ -184,6 +189,23 @@ fn cmd_apply_proposal(db: &DbInstance, proposal_id: &str, activate: bool) -> Res
         "Applied proposal {} into profile version {} (active={}).",
         proposal_id,
         applied.version_id,
+        yes_no(applied.active)
+    );
+    Ok(())
+}
+
+fn cmd_rollback_profile(
+    db: &DbInstance,
+    agent_type: &str,
+    version_id: &str,
+    activate: bool,
+) -> Result<()> {
+    let applied =
+        crate::command::agent_evolve_apply::rollback_profile(db, agent_type, version_id, activate)?;
+    println!(
+        "Created rollback profile version {} for agent {} (active={}).",
+        applied.version_id,
+        agent_type,
         yes_no(applied.active)
     );
     Ok(())

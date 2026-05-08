@@ -281,6 +281,40 @@ mod agent_evolve_parse_tests {
     }
 
     #[test]
+    fn agent_evolve_rollback_parses_agent_and_activation() {
+        let cli = Cli::try_parse_from([
+            "archon",
+            "agent",
+            "evolve",
+            "rollback",
+            "--agent",
+            "reviewer",
+            "agent-profile-1",
+            "--activate",
+        ])
+        .expect("agent evolve rollback must parse");
+
+        match cli.command {
+            Some(Commands::Agent {
+                action:
+                    AgentAction::Evolve {
+                        action:
+                            AgentEvolveAction::Rollback {
+                                agent,
+                                version_id,
+                                activate,
+                            },
+                    },
+            }) => {
+                assert_eq!(agent, "reviewer");
+                assert_eq!(version_id, "agent-profile-1");
+                assert!(activate);
+            }
+            other => panic!("expected agent evolve rollback, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn agent_evolve_permissions_parses_proposal_id() {
         let cli = Cli::try_parse_from([
             "archon",

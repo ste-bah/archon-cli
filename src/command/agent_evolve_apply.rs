@@ -27,12 +27,56 @@ pub(crate) fn apply_proposal(
     let core_version = build_profile_version(&proposal, parent.as_ref(), version_number, activate);
     let record = profile_record_from_core(&core_version);
 
+    mark_previous_active_for_rollback(db, parent.as_ref(), activate)?;
     archon_learning::agent_profile_versions::insert_agent_profile_version(db, &record)?;
     archon_learning::agent_evolution_proposals::update_agent_evolution_proposal_status(
         db,
         proposal_id,
         "applied",
     )?;
+
+    Ok(AppliedAgentProfile {
+        version_id: record.version_id,
+        active: record.is_active,
+    })
+}
+
+pub(crate) fn rollback_profile(
+    db: &DbInstance,
+    agent_type: &str,
+    target_version_id: &str,
+    activate: bool,
+) -> Result<AppliedAgentProfile> {
+    let target =
+        archon_learning::agent_profile_versions::get_agent_profile_version(db, target_version_id)?
+            .ok_or_else(|| anyhow::anyhow!("profile version not found: {target_version_id}"))?;
+    if target.agent_type != agent_type {
+        anyhow::bail!(
+            "profile version {} belongs to agent {}, not {}",
+            target_version_id,
+            target.agent_type,
+            agent_type
+        );
+    }
+
+    let parent =
+        archon_learning::agent_profile_versions::get_active_agent_profile_version(db, agent_type)?;
+    let mut version = archon_core::agents::evolution::AgentProfileVersion::new(
+        agent_type.to_string(),
+        next_version_number(db, agent_type)?,
+        archon_core::agents::evolution::AgentProfileVersionSource::Rollback,
+        target.profile_json.clone(),
+    );
+    if let Some(parent) = &parent {
+        version = version.with_parent(parent.version_id.clone());
+    }
+    if activate {
+        version = version.mark_active();
+    }
+    let record = profile_record_from_core(&version);
+
+    mark_previous_active_for_rollback(db, parent.as_ref(), activate)?;
+    archon_learning::agent_profile_versions::insert_agent_profile_version(db, &record)?;
 
     Ok(AppliedAgentProfile {
         version_id: record.version_id,
@@ -110,7 +154,7 @@ fn profile_record_from_core(
         version.version_id.clone(),
         version.agent_type.clone(),
         version.version_number,
-        "governed_proposal",
+        profile_source_str(version.source),
         version.created_at.to_rfc3339(),
     )
     .with_profile_json(version.profile_json.clone())
@@ -133,6 +177,40 @@ fn profile_record_from_core(
         record = record.mark_rollback_target();
     }
     record
+}
+
+fn mark_previous_active_for_rollback(
+    db: &DbInstance,
+    previous_active: Option<&archon_learning::agent_profile_versions::AgentProfileVersionRecord>,
+    activate: bool,
+) -> Result<()> {
+    if !activate {
+        return Ok(());
+    }
+    if let Some(previous_active) = previous_active {
+        let mut updated = previous_active.clone();
+        updated.is_active = false;
+        updated.is_rollback_target = true;
+        archon_learning::agent_profile_versions::insert_agent_profile_version(db, &updated)?;
+    }
+    Ok(())
+}
+
+fn profile_source_str(
+    source: archon_core::agents::evolution::AgentProfileVersionSource,
+) -> &'static str {
+    match source {
+        archon_core::agents::evolution::AgentProfileVersionSource::FileDefinition => {
+            "file_definition"
+        }
+        archon_core::agents::evolution::AgentProfileVersionSource::GovernedProposal => {
+            "governed_proposal"
+        }
+        archon_core::agents::evolution::AgentProfileVersionSource::ManualOperator => {
+            "manual_operator"
+        }
+        archon_core::agents::evolution::AgentProfileVersionSource::Rollback => "rollback",
+    }
 }
 
 #[cfg(test)]
@@ -206,5 +284,41 @@ mod tests {
             Some("agent-evo-prop-1")
         );
         assert_eq!(proposal.status, "applied");
+    }
+
+    #[test]
+    fn rollback_creates_profile_version_from_target() {
+        let db = test_db();
+        let target = archon_learning::agent_profile_versions::AgentProfileVersionRecord::new(
+            "agent-profile-1",
+            "reviewer",
+            1,
+            "file_definition",
+            "2026-05-08T12:00:00Z",
+        )
+        .with_profile_json(serde_json::json!({"model": "claude-sonnet-4-6"}))
+        .mark_active();
+        archon_learning::agent_profile_versions::insert_agent_profile_version(&db, &target)
+            .unwrap();
+
+        let applied = rollback_profile(&db, "reviewer", "agent-profile-1", true).unwrap();
+        let rollback = archon_learning::agent_profile_versions::get_agent_profile_version(
+            &db,
+            &applied.version_id,
+        )
+        .unwrap()
+        .unwrap();
+        let old_active = archon_learning::agent_profile_versions::get_agent_profile_version(
+            &db,
+            "agent-profile-1",
+        )
+        .unwrap()
+        .unwrap();
+
+        assert!(rollback.is_active);
+        assert_eq!(rollback.source, "rollback");
+        assert_eq!(rollback.profile_json["model"], "claude-sonnet-4-6");
+        assert!(!old_active.is_active);
+        assert!(old_active.is_rollback_target);
     }
 }

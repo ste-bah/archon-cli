@@ -240,6 +240,17 @@ pub enum AgentEvolveAction {
         /// Agent evolution proposal ID
         proposal_id: String,
     },
+    /// Create a rollback profile version from an existing profile version
+    Rollback {
+        /// Agent type that owns the profile version
+        #[arg(long)]
+        agent: String,
+        /// Existing profile version ID to restore from
+        version_id: String,
+        /// Mark the rollback profile version active in Cozo
+        #[arg(long)]
+        activate: bool,
+    },
 }
 
 #[derive(Subcommand, Debug, Clone)]
