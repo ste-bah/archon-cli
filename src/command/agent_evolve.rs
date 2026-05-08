@@ -38,6 +38,16 @@ fn handle_evolve_action(db: &DbInstance, action: &AgentEvolveAction) -> Result<(
         AgentEvolveAction::Reject { proposal_id } => {
             cmd_update_proposal_status(db, proposal_id, "rejected")
         }
+        AgentEvolveAction::Shadow {
+            proposal_id,
+            task_set,
+            json,
+        } => crate::command::agent_evolve_shadow::cmd_run_shadow_evaluation(
+            db,
+            proposal_id,
+            task_set.as_deref(),
+            *json,
+        ),
         AgentEvolveAction::Rollback {
             agent,
             version_id,

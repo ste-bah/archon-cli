@@ -249,6 +249,17 @@ pub enum AgentEvolveAction {
         /// Agent evolution proposal ID
         proposal_id: String,
     },
+    /// Record a Cozo-backed shadow evaluation for one proposal
+    Shadow {
+        /// Agent evolution proposal ID
+        proposal_id: String,
+        /// Optional archived task set or evaluation suite identifier
+        #[arg(long)]
+        task_set: Option<String>,
+        /// Output the persisted shadow evaluation as JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Create a rollback profile version from an existing profile version
     Rollback {
         /// Agent type that owns the profile version
