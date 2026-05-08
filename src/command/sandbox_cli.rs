@@ -8,13 +8,35 @@ pub(crate) fn handle_sandbox_command(
 ) -> Result<()> {
     let action = action.unwrap_or(SandboxAction::Status { verbose: false });
     let output = match action {
-        SandboxAction::Status { verbose } => render_status(&config.sandbox, verbose)?,
-        SandboxAction::Explain { backend } => render_explain(&config.sandbox, backend)?,
+        SandboxAction::Status { verbose } => {
+            let output = render_status(&config.sandbox, verbose)?;
+            persist_sandbox_command_event(&config.sandbox, None, "status", "cli_status");
+            output
+        }
+        SandboxAction::Explain { backend } => {
+            let output = render_explain(&config.sandbox, backend.clone())?;
+            persist_sandbox_command_event(
+                &config.sandbox,
+                backend.as_deref(),
+                "explain",
+                "cli_explain",
+            );
+            output
+        }
         SandboxAction::Doctor { backend } => crate::command::sandbox_doctor::render_sandbox_doctor(
             &doctor_args(backend),
             crate::command::sandbox_doctor::SandboxDoctorOverrides::default(),
         ),
-        SandboxAction::Test { backend } => render_test(&config.sandbox, backend)?,
+        SandboxAction::Test { backend } => {
+            let output = render_test(&config.sandbox, backend.clone())?;
+            persist_sandbox_command_event(
+                &config.sandbox,
+                backend.as_deref(),
+                "test_config_valid",
+                "cli_test",
+            );
+            output
+        }
     };
     print!("{output}");
     Ok(())
@@ -75,6 +97,22 @@ fn doctor_args(backend: Option<String>) -> Vec<String> {
     match backend {
         Some(backend) => vec!["--backend".into(), backend],
         None => Vec::new(),
+    }
+}
+
+fn persist_sandbox_command_event(
+    config: &archon_core::sandbox::SandboxConfig,
+    backend_override: Option<&str>,
+    decision: &str,
+    reason_code: &str,
+) {
+    if let Err(error) = crate::runtime::sandbox_events::record_sandbox_cli_event(
+        config,
+        backend_override,
+        decision,
+        reason_code,
+    ) {
+        tracing::warn!(%error, decision, "sandbox audit event persistence failed");
     }
 }
 

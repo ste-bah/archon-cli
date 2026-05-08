@@ -6,3 +6,4 @@
 pub(crate) mod agent_profile_overlay;
 pub(crate) mod llm;
 pub(crate) mod permission_events;
+pub(crate) mod sandbox_events;
