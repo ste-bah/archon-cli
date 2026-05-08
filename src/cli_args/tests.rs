@@ -251,6 +251,36 @@ mod agent_evolve_parse_tests {
     }
 
     #[test]
+    fn agent_evolve_apply_parses_activation_flag() {
+        let cli = Cli::try_parse_from([
+            "archon",
+            "agent",
+            "evolve",
+            "apply",
+            "agent-evo-prop-1",
+            "--activate",
+        ])
+        .expect("agent evolve apply must parse");
+
+        match cli.command {
+            Some(Commands::Agent {
+                action:
+                    AgentAction::Evolve {
+                        action:
+                            AgentEvolveAction::Apply {
+                                proposal_id,
+                                activate,
+                            },
+                    },
+            }) => {
+                assert_eq!(proposal_id, "agent-evo-prop-1");
+                assert!(activate);
+            }
+            other => panic!("expected agent evolve apply, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn agent_evolve_permissions_parses_proposal_id() {
         let cli = Cli::try_parse_from([
             "archon",

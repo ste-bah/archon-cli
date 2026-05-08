@@ -21,6 +21,10 @@ pub(crate) async fn handle_agent_command(
 
 fn handle_evolve_action(db: &DbInstance, action: &AgentEvolveAction) -> Result<()> {
     match action {
+        AgentEvolveAction::Apply {
+            proposal_id,
+            activate,
+        } => cmd_apply_proposal(db, proposal_id, *activate),
         AgentEvolveAction::Approve { proposal_id } => {
             cmd_update_proposal_status(db, proposal_id, "approved")
         }
@@ -171,6 +175,17 @@ fn cmd_show_permission_diff(db: &DbInstance, proposal_id: &str) -> Result<()> {
     if !proposal.evidence_ids.is_empty() {
         println!("\nEvidence: {}", proposal.evidence_ids.join(", "));
     }
+    Ok(())
+}
+
+fn cmd_apply_proposal(db: &DbInstance, proposal_id: &str, activate: bool) -> Result<()> {
+    let applied = crate::command::agent_evolve_apply::apply_proposal(db, proposal_id, activate)?;
+    println!(
+        "Applied proposal {} into profile version {} (active={}).",
+        proposal_id,
+        applied.version_id,
+        yes_no(applied.active)
+    );
     Ok(())
 }
 

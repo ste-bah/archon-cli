@@ -202,6 +202,14 @@ pub enum AgentAction {
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum AgentEvolveAction {
+    /// Apply an approved proposal into a governed profile version
+    Apply {
+        /// Agent evolution proposal ID
+        proposal_id: String,
+        /// Mark the created profile version active in Cozo
+        #[arg(long)]
+        activate: bool,
+    },
     /// Mark an agent evolution proposal as approved for later apply
     Approve {
         /// Agent evolution proposal ID
