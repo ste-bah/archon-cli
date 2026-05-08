@@ -18,5 +18,8 @@ pub mod provider_runtime_statuses;
 pub mod rollback;
 pub mod runtime_events;
 pub mod runtime_models;
+pub mod sandbox_profiles;
+pub mod sandbox_runtime_events;
+pub mod sandbox_sessions;
 pub mod schema;
 pub mod store;
