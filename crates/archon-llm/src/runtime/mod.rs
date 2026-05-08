@@ -1,10 +1,15 @@
 pub mod events;
+pub mod fallback;
 pub mod profile;
 pub mod rate_limits;
 
 pub use events::{
     ProviderRuntimeEvent, ProviderRuntimeEventType, ProviderRuntimeSeverity,
     provider_runtime_event_id,
+};
+pub use fallback::{
+    ProviderFallbackDecision, ProviderFallbackPolicy, ProviderFallbackRequest,
+    ProviderFallbackVerdict,
 };
 pub use profile::{
     AuthProfileSelection, AuthProfileSkipReason, AuthProfileSource, ProviderAuthProfile,
