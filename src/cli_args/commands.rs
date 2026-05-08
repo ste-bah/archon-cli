@@ -1,9 +1,10 @@
 use clap::Subcommand;
 
 use super::{
-    AuthArgs, BehaviourAction, ChatArgs, CompletionAction, ConstellationAction, DocsAction,
-    GametheoryAction, KbAction, LearningAction, MeaningAction, MemoryAction, PipelineAction,
-    PluginAction, ProvAction, ProvidersAction, RemoteAction, SandboxAction, SelfAction, TeamAction,
+    AgentAction, AuthArgs, BehaviourAction, ChatArgs, CompletionAction, ConstellationAction,
+    DocsAction, GametheoryAction, KbAction, LearningAction, MeaningAction, MemoryAction,
+    PipelineAction, PluginAction, ProvAction, ProvidersAction, RemoteAction, SandboxAction,
+    SelfAction, TeamAction,
 };
 
 #[derive(Subcommand, Debug)]
@@ -94,6 +95,11 @@ pub enum Commands {
     Behaviour {
         #[command(subcommand)]
         action: BehaviourAction,
+    },
+    /// Inspect agent definitions and governed agent evolution
+    Agent {
+        #[command(subcommand)]
+        action: AgentAction,
     },
     /// Inspect learning subsystem diagnostics
     Learning {

@@ -1,4 +1,4 @@
-use super::{Cli, Commands, GametheoryAction};
+use super::{AgentAction, AgentEvolveAction, Cli, Commands, GametheoryAction};
 
 #[cfg(test)]
 mod metrics_port_parse_tests {
@@ -171,6 +171,57 @@ mod gametheory_prd_parse_tests {
                 assert_eq!(kb.as_deref(), Some("policy-pack"));
             }
             other => panic!("expected gametheory run action, got {other:?}"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod agent_evolve_parse_tests {
+    use super::{AgentAction, AgentEvolveAction, Cli, Commands};
+    use clap::Parser;
+
+    #[test]
+    fn agent_evolve_list_parses_filters() {
+        let cli = Cli::try_parse_from([
+            "archon", "agent", "evolve", "list", "--status", "pending", "--agent", "reviewer",
+        ])
+        .expect("agent evolve list must parse");
+
+        match cli.command {
+            Some(Commands::Agent {
+                action:
+                    AgentAction::Evolve {
+                        action: AgentEvolveAction::List { status, agent },
+                    },
+            }) => {
+                assert_eq!(status.as_deref(), Some("pending"));
+                assert_eq!(agent.as_deref(), Some("reviewer"));
+            }
+            other => panic!("expected agent evolve list, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn agent_evolve_permissions_parses_proposal_id() {
+        let cli = Cli::try_parse_from([
+            "archon",
+            "agent",
+            "evolve",
+            "permissions",
+            "agent-evo-prop-1",
+        ])
+        .expect("agent evolve permissions must parse");
+
+        match cli.command {
+            Some(Commands::Agent {
+                action:
+                    AgentAction::Evolve {
+                        action: AgentEvolveAction::Permissions { proposal_id },
+                    },
+            }) => {
+                assert_eq!(proposal_id, "agent-evo-prop-1");
+            }
+            other => panic!("expected agent evolve permissions, got {other:?}"),
         }
     }
 }

@@ -192,6 +192,33 @@ pub enum LearningGnnAction {
 }
 
 #[derive(Subcommand, Debug, Clone)]
+pub enum AgentAction {
+    /// Inspect governed agent profile evolution
+    Evolve {
+        #[command(subcommand)]
+        action: AgentEvolveAction,
+    },
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum AgentEvolveAction {
+    /// List Cozo-backed agent evolution proposals
+    List {
+        /// Filter by proposal status, e.g. pending, rejected, approved
+        #[arg(long)]
+        status: Option<String>,
+        /// Filter by agent type
+        #[arg(long)]
+        agent: Option<String>,
+    },
+    /// Show permission-impact details for one proposal
+    Permissions {
+        /// Agent evolution proposal ID
+        proposal_id: String,
+    },
+}
+
+#[derive(Subcommand, Debug, Clone)]
 pub enum MemoryAction {
     /// Re-embed every memory in the graph using the currently-configured
     /// embedding model. Use after swapping models or recovering from a

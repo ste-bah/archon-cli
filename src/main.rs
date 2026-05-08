@@ -228,6 +228,10 @@ async fn main() -> Result<()> {
             use crate::command::behaviour::handle_behaviour_command;
             return handle_behaviour_command(&action, &config).await;
         }
+        Some(Commands::Agent { action }) => {
+            use crate::command::agent_evolve::handle_agent_command;
+            return handle_agent_command(&action, &config).await;
+        }
         Some(Commands::Learning { action }) => {
             return crate::command::learning::handle_learning_command(action, &config).await;
         }
