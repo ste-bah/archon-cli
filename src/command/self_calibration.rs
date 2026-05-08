@@ -4,12 +4,18 @@ use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
+use archon_core::config::ArchonConfig;
+use archon_core::env_vars::ArchonEnvVars;
 use chrono::Utc;
 use cozo::DbInstance;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::cli_args::{SelfAction, SelfPlansAction, SelfTrustAction};
+use crate::cli_args::{RetrospectiveAnalyzerArg, SelfAction, SelfPlansAction, SelfTrustAction};
+
+mod extract;
+
+use extract::{AnalyzerMode, RetrospectiveCandidate, extract_candidates};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct TolerantActivityRead {
@@ -23,18 +29,14 @@ struct SkippedLine {
     error: String,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
-struct RetrospectiveCandidate {
-    category: String,
-    domain: String,
-    content: String,
-    confidence: f32,
-    evidence_event_ids: Vec<String>,
-}
-#[derive(Clone, Debug, Serialize, Deserialize)]
 struct RetrospectiveReport {
     session_id: String,
     source_activity_log: String,
     source_activity_hash: String,
+    #[serde(default)]
+    analyzer: String,
+    #[serde(default)]
+    extractor_notes: Vec<String>,
     extracted_at: String,
     accepted: Vec<AcceptedLearning>,
     skipped: Vec<SkippedLearning>,
@@ -68,9 +70,16 @@ struct SelfTrustRecord {
     confidence_notes: Vec<String>,
 }
 
-pub async fn handle_self_command(action: SelfAction) -> Result<()> {
+pub async fn handle_self_command(
+    action: SelfAction,
+    config: &ArchonConfig,
+    env_vars: &ArchonEnvVars,
+) -> Result<()> {
     match action {
-        SelfAction::Retrospective { session_id } => retrospective(&session_id),
+        SelfAction::Retrospective {
+            session_id,
+            analyzer,
+        } => retrospective(&session_id, AnalyzerMode::from(analyzer), config, env_vars).await,
         SelfAction::Trust {
             action: SelfTrustAction::Status,
         } => trust_status(),
@@ -80,11 +89,31 @@ pub async fn handle_self_command(action: SelfAction) -> Result<()> {
     }
 }
 
-fn retrospective(session_id: &str) -> Result<()> {
+fn analyzer_arg_to_mode(arg: RetrospectiveAnalyzerArg) -> AnalyzerMode {
+    match arg {
+        RetrospectiveAnalyzerArg::Heuristic => AnalyzerMode::Heuristic,
+        RetrospectiveAnalyzerArg::Llm => AnalyzerMode::Llm,
+        RetrospectiveAnalyzerArg::Hybrid => AnalyzerMode::Hybrid,
+    }
+}
+
+impl From<RetrospectiveAnalyzerArg> for AnalyzerMode {
+    fn from(arg: RetrospectiveAnalyzerArg) -> Self {
+        analyzer_arg_to_mode(arg)
+    }
+}
+
+async fn retrospective(
+    session_id: &str,
+    analyzer: AnalyzerMode,
+    config: &ArchonConfig,
+    env_vars: &ArchonEnvVars,
+) -> Result<()> {
     let activity_path = activity_path(session_id)?;
     let read = read_activity_tolerant(&activity_path)
         .with_context(|| format!("read {}", activity_path.display()))?;
-    let candidates = extract_candidates(&read.events);
+    let extraction = extract_candidates(&read.events, analyzer, config, env_vars).await;
+    let candidates = extraction.candidates;
     let base = calibration_root()?;
     let report_path = base
         .join("retrospectives")
@@ -174,6 +203,8 @@ fn retrospective(session_id: &str) -> Result<()> {
         session_id: session_id.to_string(),
         source_activity_log: activity_path.display().to_string(),
         source_activity_hash: read.source_hash,
+        analyzer: extraction.analyzer.to_string(),
+        extractor_notes: extraction.notes,
         extracted_at: Utc::now().to_rfc3339(),
         accepted,
         skipped,
@@ -181,9 +212,13 @@ fn retrospective(session_id: &str) -> Result<()> {
     };
     write_json(&report_path, &report)?;
     println!("Retrospective: {}", report.session_id);
+    println!("Analyzer: {}", report.analyzer);
     println!("Accepted learnings: {}", report.accepted.len());
     println!("Skipped candidates: {}", report.skipped.len());
     println!("Skipped malformed lines: {}", report.skipped_lines.len());
+    for note in &report.extractor_notes {
+        println!("Analyzer note: {note}");
+    }
     println!("Report: {}", report_path.display());
     Ok(())
 }
@@ -274,64 +309,6 @@ fn inspect_plans(session_id: &str) -> Result<()> {
     println!("Planning accuracy: {:.2}", planning_accuracy);
     println!("Report: {}", report_path.display());
     Ok(())
-}
-
-fn extract_candidates(
-    events: &[archon_observability::AgentActivityEvent],
-) -> Vec<RetrospectiveCandidate> {
-    let mut out = Vec::new();
-    for event in events {
-        let message = event.message.to_lowercase();
-        let (category, domain, content, confidence) = if message.contains("there is no")
-            || message.contains("no such file")
-            || message.contains("not found")
-            || message.contains("wrong source")
-            || message.contains("wrong repo")
-        {
-            (
-                "source_tree_mistake",
-                "rust-codebase-analysis",
-                "Verify the actual source tree before making architecture or path claims.",
-                0.90,
-            )
-        } else if matches!(
-            event.kind,
-            archon_observability::AgentActivityKind::ToolFailed
-                | archon_observability::AgentActivityKind::AgentFailed
-        ) {
-            (
-                "bug_pattern",
-                "provider-debugging",
-                "Treat failed tools and failed agents as learning evidence, not disposable noise.",
-                0.75,
-            )
-        } else if message.contains("test failed") || message.contains("verify failed") {
-            (
-                "verification_habit",
-                "rust-codebase-analysis",
-                "When verification fails, report the concrete failing command and evidence.",
-                0.80,
-            )
-        } else {
-            continue;
-        };
-        out.push(RetrospectiveCandidate {
-            category: category.into(),
-            domain: domain.into(),
-            content: content.into(),
-            confidence,
-            evidence_event_ids: vec![event.event_id.clone()],
-        });
-    }
-    dedupe_candidates(out)
-}
-
-fn dedupe_candidates(candidates: Vec<RetrospectiveCandidate>) -> Vec<RetrospectiveCandidate> {
-    let mut seen = BTreeSet::new();
-    candidates
-        .into_iter()
-        .filter(|candidate| seen.insert(candidate.content.clone()))
-        .collect()
 }
 
 fn read_activity_tolerant(path: &Path) -> Result<TolerantActivityRead> {

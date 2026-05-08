@@ -85,6 +85,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 
 ## Release notes
 
+- [v1.0.1](release-notes/v1.0.1.md) — Provider-neutral hybrid retrospective analysis
 - [v1.0.0](release-notes/v1.0.0.md) — Audited pipeline runtime and self-calibration
 - [v0.1.52](release-notes/v0.1.52.md) — Learning systems completion
 - [v0.1.51](release-notes/v0.1.51.md) — Corrections feed behavioural-rule proposals

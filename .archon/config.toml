@@ -40,7 +40,9 @@ max_retries = 3
 # for swapping to another provider — uncomment only the one you want to use
 # AND change `provider` accordingly.
 [llm]
-# Active provider: "anthropic" | "openai" | "bedrock" | "vertex" | "local"
+# Active provider: "anthropic" | "openai-codex" | "openai" | "bedrock" | "vertex" | "local"
+# Hybrid/LLM retrospectives (`archon self retrospective --analyzer hybrid|llm`)
+# use this active provider too; there is no separate retrospective provider key.
 provider = "anthropic"
 
 # --- OpenAI (uncomment to activate) ---
@@ -110,7 +112,7 @@ anti_distillation = false
 # workload = "coding"   # optional free-form tag
 
 # [identity.custom]   # Only used when identity.mode = "custom"
-# user_agent = "archon-cli/0.1.4"
+# user_agent = "archon-cli/1.0.1"
 # x_app = "archon"
 # [identity.custom.extra_headers]
 # "X-Custom-Header" = "value"
@@ -312,6 +314,7 @@ early_stopping_patience = 3
 validation_split = 0.2
 ewc_lambda = 0.1
 margin = 0.5
+triplet_loss_coefficient = 0.1
 max_gradient_norm = 1.0
 max_triplets_per_run = 256
 max_runtime_ms = 300000        # 5 minutes max per training run
@@ -560,7 +563,7 @@ proposal_stale_days = 30
 #   model = "google/gemma-3-12b-it"
 #   api_key_env = "OPENAI_API_KEY"
 #   timeout_secs = 120
-#   max_tokens = 1024
+#   max_tokens = 8192
 #   temperature = 0.2
 #
 #   [policy.docs.pdf]

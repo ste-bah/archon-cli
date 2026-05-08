@@ -286,7 +286,7 @@ impl Default for ApiConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct LlmConfig {
-    /// The active provider name (e.g. `"anthropic"`, `"openai"`, `"bedrock"`, `"vertex"`, `"local"`).
+    /// The active provider name (e.g. `"anthropic"`, `"openai-codex"`, `"openai"`, `"bedrock"`, `"vertex"`, `"local"`).
     pub provider: String,
     /// OpenAI provider settings.
     pub openai: LlmOpenAiConfig,

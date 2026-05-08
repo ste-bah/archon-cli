@@ -301,6 +301,7 @@ fn repository_policy_template_parses_all_vlm_provider_fields() {
         load.policy.docs.vlm.openai_compat.api_key_env,
         "OPENAI_API_KEY"
     );
+    assert_eq!(load.policy.docs.vlm.openai_compat.max_tokens, 8192);
     assert!(load.policy.docs.pdf.extract_embedded_images);
     assert_eq!(load.policy.docs.pdf.min_image_dimension, 200);
     assert_eq!(load.policy.docs.pdf.min_image_bytes, 4096);
