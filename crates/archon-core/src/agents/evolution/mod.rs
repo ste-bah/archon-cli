@@ -1,5 +1,6 @@
 pub mod engine;
 pub mod ledger;
+pub mod memory;
 pub mod permissions;
 pub mod proposal;
 pub mod shadow;
@@ -7,6 +8,10 @@ pub mod version;
 
 pub use engine::{AgentEvolutionRuntime, AgentEvolutionRuntimeConfig};
 pub use ledger::{AgentCompletionStatus, AgentPerformanceEvent, agent_performance_event_id};
+pub use memory::{
+    MemoryPromotionCandidate, MemoryPromotionSignalSource, MemoryPromotionTarget,
+    memory_promotion_candidate_id,
+};
 pub use permissions::ToolAccessProfileDiff;
 pub use proposal::{
     AgentEvolutionPolicyDecision, AgentEvolutionProposal, AgentEvolutionProposalKind,
