@@ -48,6 +48,12 @@ pub(crate) fn handle_providers(action: Option<ProvidersAction>) -> Result<()> {
             crate::command::providers_store_cli::render_provider_limits(provider.as_deref())?
         ),
         ProvidersAction::Profiles { action } => match action {
+            crate::cli_args::ProviderProfilesAction::Import => {
+                print!(
+                    "{}",
+                    crate::command::providers_profile_import::import_provider_profiles()?
+                )
+            }
             crate::cli_args::ProviderProfilesAction::List { provider } => print!(
                 "{}",
                 crate::command::providers_store_cli::render_provider_profiles(provider.as_deref())?

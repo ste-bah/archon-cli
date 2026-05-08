@@ -33,6 +33,8 @@ pub enum ProvidersAction {
 
 #[derive(Subcommand, Debug, Clone, PartialEq, Eq)]
 pub enum ProviderProfilesAction {
+    /// Import current local/env credentials into the Cozo auth profile store
+    Import,
     /// List persisted auth profiles
     List {
         /// Restrict output to one provider id
