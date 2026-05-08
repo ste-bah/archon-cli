@@ -42,7 +42,7 @@ Tier 11 (`--enable-tier11`) brings in civilizational/Jiang-frameworks specialist
 
 ## Five concrete trading workflows
 
-Each workflow shows the actual `/gametheory` command, the rough cost, and the kind of output you should expect. All assume you've authenticated with Anthropic (gametheory is gated to Anthropic on agentic surfaces — Codex is blocked per the v0.1.44 capability matrix).
+Each workflow shows the actual `/gametheory` command, the rough cost, and the kind of output you should expect. Authenticate with Anthropic, or use Codex OAuth with `[llm].provider = "openai-codex"`. The cost figures are Anthropic-calibrated; Codex-backed runs can execute the same pipeline, but exact usage pricing may be unavailable when the backend omits cost metadata.
 
 ### 1. Pre-trade position assessment
 
@@ -161,7 +161,7 @@ If you want to use this pipeline as a routine part of your trading process:
 - **No live market data.** The model has a training cutoff. Real-time prices, intraday news, and post-cutoff filings must come in via `--kb` or the analysis is operating on stale priors.
 - **No price prediction.** The pipeline tells you how to think about a situation, not where the price will go. Use the multi-lens decomposition to find blind spots in your own thesis, not to outsource judgement.
 - **LLM cost ≠ trading edge.** Spending $7 on a gametheory run to size a $500 position is dumb. Match the spend to the position size and the time horizon.
-- **Anthropic-only on agentic surfaces.** Per the v0.1.44 capability matrix, gametheory blocks Codex. If you've configured `[llm].provider = "openai-codex"` for general TUI use, you'll need to switch back for gametheory runs.
+- **Provider parity.** v0.1.45 and later support `/gametheory` through Codex when `[llm].provider = "openai-codex"` is configured. The old v0.1.44 Codex block was a historical limitation, not the current runtime gate.
 - **Provenance is your friend.** Always read the citations. If a specialist makes a numerical claim and the citation chunk doesn't actually support it, the claim is hallucinated. `--kb` + `archon completion verify <run-id>` is the way to catch this.
 - **Replay is cheaper than re-running** — favour `replay --rerun-specialist` over starting fresh.
 
