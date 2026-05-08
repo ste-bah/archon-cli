@@ -411,7 +411,15 @@ async fn build_session_agent(
         match agent_registry_early.resolve(agent_name) {
             Some(def) => {
                 tracing::info!(agent = agent_name, "resolved custom agent");
-                Some(def.clone())
+                let mut def = def.clone();
+                if let Err(error) =
+                    crate::runtime::agent_profile_overlay::apply_active_profile_overlay_if_enabled(
+                        config, &mut def,
+                    )
+                {
+                    tracing::warn!(agent = agent_name, %error, "agent profile overlay skipped");
+                }
+                Some(def)
             }
             None => {
                 let available = agent_registry_early.available_agent_names().join(", ");
@@ -1387,7 +1395,15 @@ pub(crate) async fn run_interactive_session(
             match agent_registry_tmp.resolve(agent_name) {
                 Some(def) => {
                     tracing::info!(agent = agent_name, "resolved custom agent definition");
-                    Some(def.clone())
+                    let mut def = def.clone();
+                    if let Err(error) =
+                    crate::runtime::agent_profile_overlay::apply_active_profile_overlay_if_enabled(
+                        config, &mut def,
+                    )
+                {
+                    tracing::warn!(agent = agent_name, %error, "agent profile overlay skipped");
+                }
+                    Some(def)
                 }
                 None => {
                     let available = agent_registry_tmp.available_agent_names().join(", ");
