@@ -69,9 +69,14 @@ Risky changes go through governed learning and policy gates.
 v1.0.0 adds a self-calibration read path over the data Archon was already
 writing. `archon self retrospective <session-id>` reads the session activity
 JSONL, extracts a small set of evidence-backed lessons, writes a retrospective
-artifact, and attempts to store matching memories plus LearningEvents. Proactive
-memory injection now emits `MemorySurfaced` activity events, so later
-retrospectives can tell when prior context was actually shown to the agent.
+artifact, and attempts to store matching memories plus LearningEvents. v1.0.1
+adds the default `--analyzer hybrid` mode: it keeps the conservative local
+extractor for source-tree mistakes, tool or agent failures, and verification
+habits, then adds a provider-neutral LLM pass through the active configured
+`LlmProvider`. That keeps Anthropic OAuth, Codex OAuth, and compatible providers
+on the same validated path. Existing proactive memory injection emits
+`MemorySurfaced` activity events, so later retrospectives can tell when prior
+context was actually shown to the agent.
 `archon self trust status` reports domain-scoped first-answer reliability using
 the same Laplace-smoothed shape as completion trust, and `archon self plans
 inspect <session-id>` compares stored plans with recorded step outcomes.

@@ -172,7 +172,7 @@ pub enum Commands {
     AgentInfo {
         /// Agent name
         name: String,
-        /// Pin to a specific version (e.g. "=1.0.0", "^2")
+        /// Pin to a specific version (e.g. "=1.0.1", "^2")
         #[arg(long, value_name = "REQ")]
         version: Option<String>,
         /// Output as JSON

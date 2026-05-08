@@ -197,7 +197,7 @@ pub(crate) const COMMAND_SURFACE_ROWS: &[CommandSurfaceRow] = &[
         tui_surface: "Calibration shell",
         status: SurfaceStatus::ShellOnly,
         source_of_truth: "src/cli_args.rs + src/command/self_calibration.rs",
-        notes: "Retrospective, self-trust, and plan-vs-outcome inspection are shell-first calibration tools.",
+        notes: "Hybrid retrospective analysis, self-trust, and plan-vs-outcome inspection are shell-first calibration tools.",
     },
     CommandSurfaceRow {
         cli: "archon team ...",

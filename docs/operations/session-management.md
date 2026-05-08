@@ -123,17 +123,24 @@ Sessions interrupted during tool calls reach a "tool error / retry" state; the a
 ## Activity retrospectives
 
 Archon also writes per-session activity JSONL for agent/tool events. v1.0.0 can
-read those logs back:
+read those logs back, and v1.0.1 adds provider-neutral analyzer modes:
 
 ```bash
 archon self retrospective <session-id>
+archon self retrospective <session-id> --analyzer heuristic
+archon self retrospective <session-id> --analyzer llm
 archon self trust status
 archon self plans inspect <session-id>
 ```
 
 The retrospective command reads `~/.archon/sessions/<id>/activity/events.jsonl`,
 writes artifacts under `~/.archon/self-calibration/`, and attempts to promote
-high-signal lessons into memory and governed LearningEvents.
+high-signal lessons into memory and governed LearningEvents. The default hybrid
+extractor combines deterministic local rules with an LLM-assisted pass that uses
+the active configured provider. If the provider is unavailable, Archon records
+the analyzer note and falls back to deterministic candidates. LLM candidates are
+validated against real event ids and filtered for confidence, duplicates, and
+secret-shaped content before they can update memory or self-trust.
 
 ## See also
 

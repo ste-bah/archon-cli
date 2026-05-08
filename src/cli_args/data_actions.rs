@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use clap::Subcommand;
+use clap::{Subcommand, ValueEnum};
 
 #[derive(Subcommand, Debug)]
 pub enum RemoteAction {
@@ -210,6 +210,9 @@ pub enum SelfAction {
     Retrospective {
         /// Session ID under ~/.archon/sessions/<session-id>/activity/events.jsonl
         session_id: String,
+        /// Candidate extractor to use
+        #[arg(long, value_enum, default_value = "hybrid")]
+        analyzer: RetrospectiveAnalyzerArg,
     },
     /// Inspect self-calibration trust records
     Trust {
@@ -221,6 +224,16 @@ pub enum SelfAction {
         #[command(subcommand)]
         action: SelfPlansAction,
     },
+}
+
+#[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RetrospectiveAnalyzerArg {
+    /// Run deterministic local rules only
+    Heuristic,
+    /// Run the configured LLM analyzer only, with local fallback if unavailable
+    Llm,
+    /// Run deterministic rules plus the configured LLM analyzer
+    Hybrid,
 }
 
 #[derive(Subcommand, Debug, Clone)]

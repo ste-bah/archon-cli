@@ -13,8 +13,8 @@ pub use auth::{AuthArgs, AuthProviderKind, AuthSubcommand, ChatArgs};
 pub use commands::Commands;
 pub use data_actions::{
     BehaviourAction, ConstellationAction, DocsAction, KbAction, LearningAction, LearningGnnAction,
-    MeaningAction, MemoryAction, PluginAction, ProvAction, RemoteAction, SelfAction,
-    SelfPlansAction, SelfTrustAction,
+    MeaningAction, MemoryAction, PluginAction, ProvAction, RemoteAction, RetrospectiveAnalyzerArg,
+    SelfAction, SelfPlansAction, SelfTrustAction,
 };
 pub use root::Cli;
 pub use strategy_actions::{

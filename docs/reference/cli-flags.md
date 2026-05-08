@@ -41,7 +41,7 @@ subagents, coding/research pipelines, and gametheory through Codex.
 | `archon pipeline export-traces <SESSION_ID> [--format jsonl] [--out PATH] [--include-unverified]` | Export per-attempt audited pipeline traces as JSONL |
 | `archon pipeline run <FILE> [--format FMT] [--detach]` | Run declarative pipeline from spec file |
 | `archon pipeline cancel <ID>` | Cancel a running declarative pipeline |
-| `archon self retrospective <SESSION_ID>` | Extract evidence-backed lessons from a session activity log |
+| `archon self retrospective <SESSION_ID> [--analyzer hybrid\|heuristic\|llm]` | Extract evidence-backed lessons from a session activity log |
 | `archon self trust status` | Show domain-scoped self-calibration trust scores |
 | `archon self plans inspect <SESSION_ID>` | Compare a stored session plan with recorded step outcomes |
 | `archon run-agent-async <NAME> [--input FILE] [--version REQ] [--detach]` | Submit an async agent task |

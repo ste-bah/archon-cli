@@ -84,6 +84,7 @@ Provider routing and per-provider settings.
 ```toml
 [llm]
 provider = "anthropic"
+# provider = "openai-codex" - Codex OAuth provider
 # [llm.openai]   - alternative LLM provider for chat
 # [llm.bedrock]  - AWS Bedrock
 # [llm.vertex]   - GCP Vertex
@@ -92,9 +93,15 @@ provider = "anthropic"
 
 | Field | Default | What / Why |
 |---|---|---|
-| `provider` | `"anthropic"` | Active LLM provider. Use `"openai"` to route chat through OpenAI models instead of Claude. Anthropic is the default because archon-cli uses Claude features (extended thinking, prompt caching) heavily. Set this only if you must use a non-Anthropic LLM. |
+| `provider` | `"anthropic"` | Active LLM provider. Use `"openai-codex"` for ChatGPT subscription OAuth, `"openai"` for API-key OpenAI routing, or the other listed providers for Bedrock, Vertex, and local servers. Anthropic is the default because archon-cli uses Claude features heavily. |
 
 Sub-tables `[llm.openai]`, `[llm.bedrock]`, `[llm.vertex]`, `[llm.local]` configure each provider. Most users only need `[llm.openai]` if using OpenAI as primary or for embeddings — see [env-vars](env-vars.md#resolution-order-for-openai-key).
+
+`archon self retrospective <session-id> --analyzer hybrid|llm` uses the same
+active provider through the shared `LlmProvider` path. There is deliberately no
+separate `[self_calibration]` provider block: switch retrospectives between
+Anthropic, Codex OAuth, OpenAI-compatible, or local providers by changing
+`[llm].provider` and the matching provider credentials.
 
 ---
 
@@ -825,6 +832,11 @@ See [env-vars](env-vars.md) for the full credential resolution.
 Gemini VLM credentials are separate: set `GOOGLE_API_KEY` or run
 `archon auth login --provider google`, which stores `googleApiKey` in
 `~/.archon/.credentials.json` without overwriting Anthropic or Codex entries.
+
+Codex OAuth credentials are also kept out of TOML. Run
+`archon auth login --provider openai-codex`, then set
+`[llm].provider = "openai-codex"` when you want chat, pipelines, or hybrid
+retrospectives to use the Codex provider.
 
 ---
 

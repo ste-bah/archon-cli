@@ -145,9 +145,9 @@ archon-cli/
 
 ## Status
 
-- Current version: **v1.0.0** ([release notes](docs/release-notes/v1.0.0.md))
+- Current version: **v1.0.1** ([release notes](docs/release-notes/v1.0.1.md))
 - Final completion release for the current Archon feature set; future feature changes are major-version updates
-- v1.0.0 adds audited built-in pipeline bundles, fail-closed LLM stream errors, completion-integrity summaries on pipeline finish, retrospective self-calibration, proactive memory-surfacing telemetry, self-trust scoring, and plan-vs-outcome inspection; see release notes for the v0.1.6 → v1.0.0 stabilisation arc
+- v1.0.1 adds provider-neutral hybrid retrospective analysis on top of the v1.0.0 audited pipeline runtime and self-calibration baseline
 
 ## Contributing
 
