@@ -37,6 +37,12 @@ fn empty_toml_produces_valid_defaults() {
     // MemoryConfig defaults
     assert!(config.memory.enabled);
     assert!(config.memory.db_path.is_none());
+    assert!(
+        !config
+            .learning
+            .agent_evolution
+            .active_profile_overlay_enabled
+    );
 
     // CostConfig defaults
     assert!((config.cost.warn_threshold - 5.0).abs() < f64::EPSILON);

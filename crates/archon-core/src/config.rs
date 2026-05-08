@@ -615,6 +615,15 @@ pub struct LearningConfig {
     pub shadow_vector: ToggleConfig,
     pub reasoning_bank: ToggleConfig,
     pub reflexion: ReflexionConfig,
+    pub agent_evolution: AgentEvolutionConfig,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AgentEvolutionConfig {
+    /// Governed Cozo profile versions exist by default, but runtime overlay is
+    /// opt-in until enough shadow/e2e coverage proves the path for operators.
+    pub active_profile_overlay_enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

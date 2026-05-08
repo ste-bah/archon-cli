@@ -1,6 +1,7 @@
 pub mod engine;
 pub mod ledger;
 pub mod memory;
+pub mod overlay;
 pub mod permissions;
 pub mod proposal;
 pub mod shadow;
@@ -12,6 +13,7 @@ pub use memory::{
     MemoryPromotionCandidate, MemoryPromotionSignalSource, MemoryPromotionTarget,
     memory_promotion_candidate_id,
 };
+pub use overlay::{AgentProfileOverlayReport, apply_agent_profile_overlay};
 pub use permissions::ToolAccessProfileDiff;
 pub use proposal::{
     AgentEvolutionPolicyDecision, AgentEvolutionProposal, AgentEvolutionProposalKind,
