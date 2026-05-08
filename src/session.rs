@@ -1766,6 +1766,7 @@ pub(crate) async fn run_interactive_session(
         }
     }
 
+    let agent_model_for_ledger = agent_config.model.clone();
     let extra_dirs_shared = Arc::clone(&agent_config.extra_dirs);
 
     // Create channels
@@ -2408,6 +2409,18 @@ pub(crate) async fn run_interactive_session(
     let session_store_for_fwd = Arc::clone(&session_store_fwd);
     let permission_mode_for_fwd = Arc::clone(&permission_mode_shared);
     let permission_events_db_for_fwd = governed_learning_db.clone();
+    let agent_ledger_db_for_fwd = governed_learning_db.clone();
+    let agent_ledger_context_for_fwd =
+        crate::runtime::agent_ledger_events::AgentLedgerContext::new(
+            agent_def
+                .as_ref()
+                .map(|def| def.agent_type.clone())
+                .unwrap_or_else(|| "main".into()),
+            session_id.to_string(),
+            agent_model_for_ledger,
+            provider.name().to_string(),
+        )
+        .with_version(agent_def.as_ref().map(|def| def.meta.version.clone()));
     let last_assistant_response_shared: Arc<tokio::sync::Mutex<String>> =
         Arc::new(tokio::sync::Mutex::new(String::new()));
     let last_response_for_fwd = Arc::clone(&last_assistant_response_shared);
@@ -2501,12 +2514,29 @@ pub(crate) async fn run_interactive_session(
                             );
                         }
 
+                        let mode = permission_mode_for_fwd.lock().await.clone();
+                        crate::runtime::agent_ledger_events::record_agent_turn_completed(
+                            agent_ledger_db_for_fwd.as_ref(),
+                            &agent_ledger_context_for_fwd,
+                            &mode,
+                            input_tokens,
+                            output_tokens,
+                        );
+
                         TuiEvent::TurnComplete {
                             input_tokens,
                             output_tokens,
                         }
                     }
-                    AgentEvent::Error(msg) => TuiEvent::Error(msg),
+                    AgentEvent::Error(msg) => {
+                        let mode = permission_mode_for_fwd.lock().await.clone();
+                        crate::runtime::agent_ledger_events::record_agent_runtime_error(
+                            agent_ledger_db_for_fwd.as_ref(),
+                            &agent_ledger_context_for_fwd,
+                            &mode,
+                        );
+                        TuiEvent::Error(msg)
+                    }
                     AgentEvent::SessionComplete => TuiEvent::Done,
                     AgentEvent::PermissionRequired { tool, description } => {
                         let mode = permission_mode_for_fwd.lock().await.clone();
