@@ -2,6 +2,7 @@ pub mod engine;
 pub mod ledger;
 pub mod permissions;
 pub mod proposal;
+pub mod shadow;
 pub mod version;
 
 pub use engine::{AgentEvolutionRuntime, AgentEvolutionRuntimeConfig};
@@ -11,4 +12,5 @@ pub use proposal::{
     AgentEvolutionPolicyDecision, AgentEvolutionProposal, AgentEvolutionProposalKind,
     AgentEvolutionRiskLevel, AgentEvolutionStatus, agent_evolution_proposal_id,
 };
+pub use shadow::{AgentShadowEvaluation, ShadowEvaluationVerdict, agent_shadow_evaluation_id};
 pub use version::{AgentProfileVersion, AgentProfileVersionSource, agent_profile_version_id};
