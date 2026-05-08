@@ -14,7 +14,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 
 - [Overview](architecture/overview.md) — workspace crates, request lifecycle, data flow
 - [Learning systems](architecture/learning-systems.md) — SONA, ReasoningBank (12 modes), GNN, CausalMemory, Provenance, DESC, Reflexion, AutoCapture
-- [Pipelines](architecture/pipelines.md) — `/archon-code` (50 agents), `/archon-research` (46 agents), agent loop, subagent spawning, multi-agent teams
+- [Pipelines](architecture/pipelines.md) — `/archon-code` (50 agents), `/archon-research` (46 agents), audited bundles, resume verification, agent loop, subagent spawning
 - [Evidence Engine](evidence-engine.md) — documents, knowledge, provenance, game theory, completion integrity, governed learning, meaning, constellations
 
 ## Evidence Engine
@@ -85,6 +85,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 
 ## Release notes
 
+- [v1.0.0](release-notes/v1.0.0.md) — Audited pipeline runtime and self-calibration
 - [v0.1.52](release-notes/v0.1.52.md) — Learning systems completion
 - [v0.1.51](release-notes/v0.1.51.md) — Corrections feed behavioural-rule proposals
 - [v0.1.50](release-notes/v0.1.50.md) — VS Code extension install fix

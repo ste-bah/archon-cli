@@ -107,6 +107,8 @@ The `checkpoint_diff` module computes line-level diffs between versions for insp
 | `~/.local/share/archon/checkpoints.db` | File snapshots (CozoDB) |
 | `~/.local/share/archon/sessions/<id>/` | Per-session transcript + artefacts |
 | `~/.local/share/archon/logs/<id>.log` | Per-session log file |
+| `~/.archon/sessions/<id>/activity/events.jsonl` | Session activity JSONL used by retrospectives |
+| `~/.archon/self-calibration/` | Retrospectives, self-trust records, and plan-vs-outcome summaries |
 
 ## Recovery from crash
 
@@ -117,6 +119,21 @@ archon -c                          # auto-resume picks up where you left off
 ```
 
 Sessions interrupted during tool calls reach a "tool error / retry" state; the agent receives a tool failure result and can decide to retry or proceed.
+
+## Activity retrospectives
+
+Archon also writes per-session activity JSONL for agent/tool events. v1.0.0 can
+read those logs back:
+
+```bash
+archon self retrospective <session-id>
+archon self trust status
+archon self plans inspect <session-id>
+```
+
+The retrospective command reads `~/.archon/sessions/<id>/activity/events.jsonl`,
+writes artifacts under `~/.archon/self-calibration/`, and attempts to promote
+high-signal lessons into memory and governed LearningEvents.
 
 ## See also
 

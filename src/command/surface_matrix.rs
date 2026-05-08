@@ -141,7 +141,7 @@ pub(crate) const COMMAND_SURFACE_ROWS: &[CommandSurfaceRow] = &[
         tui_surface: "CLI mirror",
         status: SurfaceStatus::Done,
         source_of_truth: "src/command/registry.rs",
-        notes: "Pipeline run/status/resume/list/abort/cancel are mirrored.",
+        notes: "Pipeline run/status/resume/list/abort/cancel plus audited verify/inspect/export are mirrored.",
     },
     CommandSurfaceRow {
         cli: "archon pipeline code <task>",
@@ -192,6 +192,14 @@ pub(crate) const COMMAND_SURFACE_ROWS: &[CommandSurfaceRow] = &[
         notes: "List/info are live; enable/disable/install/reload emit guidance until persistent plugin state exists.",
     },
     CommandSurfaceRow {
+        cli: "archon self ...",
+        slash_primary: None,
+        tui_surface: "Calibration shell",
+        status: SurfaceStatus::ShellOnly,
+        source_of_truth: "src/cli_args.rs + src/command/self_calibration.rs",
+        notes: "Retrospective, self-trust, and plan-vs-outcome inspection are shell-first calibration tools.",
+    },
+    CommandSurfaceRow {
         cli: "archon team ...",
         slash_primary: None,
         tui_surface: "Not yet mirrored",
@@ -235,6 +243,12 @@ pub(crate) const COMMAND_SURFACE_EXCEPTIONS: &[SurfaceException] = &[
         owner: "archon-maintainers",
         review_date: "2026-06-30",
         reason: "List/info are live; mutating plugin operations remain guided until persistent plugin state is productized.",
+    },
+    SurfaceException {
+        cli: "archon self ...",
+        owner: "archon-maintainers",
+        review_date: "2026-09-30",
+        reason: "Self-calibration is intentionally shell-first until retrospective review has a dedicated TUI inspector.",
     },
     SurfaceException {
         cli: "archon team ...",

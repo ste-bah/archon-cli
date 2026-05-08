@@ -1,14 +1,14 @@
 //! `/archon-research` slash-command handler.
 //!
 //! Spawns the 46-agent PhD research pipeline via `tokio::spawn` wrapping
-//! `archon_pipeline::runner::run_pipeline()`. Per-agent progress events
+//! `archon_pipeline::runner::run_pipeline_audited()`. Per-agent progress events
 //! are streamed to the TUI via the facade's `tui_sender`.
 
 use std::sync::Arc;
 
 use crate::command::registry::{CommandContext, CommandHandler};
 use archon_pipeline::research::facade::ResearchFacade;
-use archon_pipeline::runner::{LlmClient, run_pipeline};
+use archon_pipeline::runner::{LlmClient, run_pipeline_audited};
 use archon_tui::app::TuiEvent;
 
 /// Handler for `/archon-research <topic>`.
@@ -49,6 +49,7 @@ impl CommandHandler for ArchonResearchHandler {
 
         let tui_tx = ctx.tui_tx.clone();
         let leann = ctx.leann.clone();
+        let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
 
         // Facade emits per-agent progress as Strings; forward to TUI as TextDelta.
         let (string_tx, mut string_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
@@ -65,10 +66,11 @@ impl CommandHandler for ArchonResearchHandler {
         )));
 
         archon_observability::spawn_named("archon-research-pipeline", async move {
-            match run_pipeline(
+            match run_pipeline_audited(
                 research.as_ref(),
                 llm.as_ref(),
                 &topic,
+                &cwd,
                 leann.as_deref(),
                 None,
                 None,

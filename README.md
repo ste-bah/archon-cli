@@ -145,9 +145,9 @@ archon-cli/
 
 ## Status
 
-- Current version: **v0.1.52** ([release notes](docs/release-notes/v0.1.52.md))
-- Active development; pre-1.0 means breaking changes can land in minor versions
-- Phase 6 complete (pipelines + learning systems wired) + Evidence Engine PRD compliance pass + Codex agentic provider parity + multi-provider VLM image descriptions + unified PDF image extraction + OpenAI-compatible VLM support + TUI drain-stall false-positive fix + learning-systems completion; see release notes for the v0.1.6 → v0.1.52 stabilisation arc
+- Current version: **v1.0.0** ([release notes](docs/release-notes/v1.0.0.md))
+- Final completion release for the current Archon feature set; future feature changes are major-version updates
+- v1.0.0 adds audited built-in pipeline bundles, fail-closed LLM stream errors, completion-integrity summaries on pipeline finish, retrospective self-calibration, proactive memory-surfacing telemetry, self-trust scoring, and plan-vs-outcome inspection; see release notes for the v0.1.6 → v1.0.0 stabilisation arc
 
 ## Contributing
 

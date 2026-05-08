@@ -37,6 +37,9 @@ archon pipeline code \
 After it finishes, inspect the claims instead of trusting the final paragraph:
 
 ```bash
+archon pipeline verify <session-id> --write-report
+archon pipeline inspect <session-id>
+archon pipeline export-traces <session-id> --out traces.jsonl
 archon completion verify <run-id> --agent code-quality-improver --model sonnet
 archon completion incidents
 archon completion trust --agent code-quality-improver
@@ -63,7 +66,7 @@ Starting coding pipeline for task: implement OAuth2 token refresh with file lock
 …
 ```
 
-The handler (`src/command/archon_code.rs:14`) spawns the pipeline async via `tokio::spawn`. Per-agent progress streams through canonical activity events and conversation output. The conversation stays interactive — keep using other slash commands while the run is in flight.
+The handler spawns the audited pipeline async via `tokio::spawn`. Per-agent progress streams through canonical activity events and conversation output, while prompts, attempts, accepted outputs, quality scores, and state are persisted under `<workdir>/.archon/pipelines/<session-id>/`. The conversation stays interactive — keep using other slash commands while the run is in flight.
 
 Equivalent CLI invocation (same persisted state, same outputs):
 
@@ -84,37 +87,37 @@ The pipeline runs 6 phases sequentially. Each phase has reviewers that gate prog
 
 `contract-agent` parses the input contract → `requirement-extractor` pulls out functional/non-functional requirements → `requirement-prioritizer` MoSCoW-orders them → `scope-definer` sets boundaries → `context-gatherer` reads existing code → `feasibility-analyzer` validates technical feasibility → `pattern-explorer` identifies relevant patterns → `technology-scout` evaluates external solutions.
 
-Output: `specification.json` with structured requirements, scope, feasibility verdict.
+Output: agent output persisted in the audited bundle with prompt hashes, token/cost metadata, and quality scoring.
 
 ### Phase 2: Exploration (5 agents)
 
 `context-gatherer` reads existing code → `codebase-analyzer` maps architecture → `pattern-explorer` identifies relevant patterns → `technology-scout` evaluates external solutions → `ambiguity-clarifier` resolves unknowns.
 
-Output: `exploration.json` with codebase map, patterns to follow, unknowns flagged.
+Output: exploration output persisted in the audited bundle with prompt and attempt records.
 
 ### Phase 3: Architecture (7 agents)
 
 `system-designer` does high-level → `component-designer` does internal → `interface-designer` defines APIs → `data-architect` designs storage → `security-architect` flags threats → `integration-architect` plans external connections → `performance-architect` plans for load.
 
-Output: `architecture.json` with full design.
+Output: architecture output persisted in the audited bundle.
 
 ### Phase 4: Implementation (12 agents)
 
 Splits the work: `code-generator`, `unit-implementer`, `service-implementer`, `api-implementer`, `frontend-implementer`, `data-layer-implementer`, `type-implementer`, `error-handler-implementer`, `logger-implementer`, `config-implementer`, `integration-tester`, `dependency-manager`.
 
-Each writes its slice in parallel where possible. Output: actual code in `<workdir>` plus `implementation/` artefacts (types, tests, error specs).
+Each writes its slice in parallel where possible. Output: actual code in `<workdir>` plus audited agent outputs and retry attempts in the bundle.
 
 ### Phase 5: Quality (7 agents)
 
 `code-quality-improver`, `sherlock-holmes` (forensic review), `security-tester`, `regression-tester`, `coverage-analyzer`, `code-simplifier`, `final-refactorer`. The Sherlock Holmes agent independently re-reads the code; reviews from other agents are not trusted.
 
-Output: `quality.json` with findings, test results, refactor suggestions.
+Output: quality findings, test evidence, retry decisions, and accepted outputs in the audited bundle.
 
 ### Phase 6: Sign-off (8 agents)
 
 `sign-off-approver` plus phase-1 through phase-6 reviewers. Each phase is checked once more. Final approval gates the pipeline closing.
 
-Output: `signoff.json`. Pipeline marks the session as complete.
+Output: final sign-off output. Pipeline marks the session complete, runs completion integrity on the final answer in the CLI path, and stores the summary in bundle state.
 
 ## Monitoring progress
 
@@ -122,6 +125,8 @@ Output: `signoff.json`. Pipeline marks the session as complete.
 # In another terminal
 archon pipeline status <session-id>
 archon pipeline list
+archon pipeline verify <session-id>
+archon pipeline inspect <session-id>
 ```
 
 The TUI shows live progress with phase indicators.
@@ -131,10 +136,11 @@ The TUI shows live progress with phase indicators.
 If archon-cli crashes or you `Ctrl-C`:
 ```bash
 archon pipeline list                      # find your session
-archon pipeline resume <session-id>       # continues from last completed gate
+archon pipeline verify <session-id>       # optional preflight
+archon pipeline resume <session-id>       # verifies bundle, then continues
 ```
 
-Resume requires git working tree consistency — if files changed mid-pipeline, the recovery layer rejects continuation.
+Resume requires git working tree consistency. It also verifies the audited bundle before continuing so corrupted state, missing outputs, or mismatched hashes fail closed.
 
 ## Aborting
 
@@ -142,7 +148,7 @@ Resume requires git working tree consistency — if files changed mid-pipeline, 
 archon pipeline abort <session-id>
 ```
 
-Cleans up partial state, preserves the ledger for forensic review.
+Marks the bundle aborted and preserves manifest, state, audit log, prompts, outputs, and attempt records for forensic review.
 
 ## Cost expectations
 
@@ -187,7 +193,7 @@ $ archon pipeline code "Add archon docs summarize <doc-id>: read persisted chunk
 Task: Add archon docs summarize <doc-id>: read persisted chunks, produce cited
       summaries, write provenance edges, add tests, update docs
 
-Agent Sequence (48 agents):
+Agent Sequence (50 agents):
   Phase 1: task-analyzer, requirement-extractor, requirement-prioritizer
   Phase 2: pattern-explorer, technology-scout, feasibility-analyzer, codebase-analyzer
   Phase 3: system-designer, component-designer, interface-designer, ...
@@ -260,17 +266,17 @@ $ archon
 [recovery] resuming at phase-3 system-designer
 ```
 
-The recovery layer refuses to resume if files under the pipeline's purview have changed since the last gate — protects against silently overwriting user edits. Commit or stash first if that fires.
+The recovery layer verifies the audited bundle and refuses to resume if the persisted records no longer match their hashes. Commit or stash unrelated work before resuming if git-state checks fire.
 
 ### Abort cleanly
 
 ```
 > /pipeline abort 01HYCD3WSXKJ8R…
 [abort] killing in-flight subagents...
-[abort] partial state cleaned, ledger preserved at .archon/pipelines/01HYCD3WSXKJ8R…/ledger.jsonl
+[abort] bundle marked aborted at .archon/pipelines/01HYCD3WSXKJ8R…
 ```
 
-Forensic-review-friendly: the ledger stays so you can reconstruct what each agent did.
+Forensic-review-friendly: the bundle stays so you can reconstruct prompts, outputs, retries, quality scores, and the final completion check.
 
 ### Inspecting after completion
 
@@ -286,6 +292,8 @@ Files modified: crates/archon-docs/src/summarize.rs (new), tests/docs_summarize_
 Then verify the claims from inside the TUI rather than trust the final paragraph:
 
 ```
+> /pipeline verify 01HYCD0GMQ1YZP… --write-report
+> /pipeline inspect 01HYCD0GMQ1YZP…
 > /completion verify 01HYCD0GMQ1YZP… --agent code-quality-improver --model sonnet
 > /completion incidents
 > /completion trust --agent code-quality-improver

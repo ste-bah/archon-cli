@@ -5,7 +5,7 @@
 //! pipeline types (coding, research, learning, knowledge-base).
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -13,6 +13,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
+use crate::audit::runtime::PipelineAuditRun;
 use crate::learning::integration::LearningIntegration;
 use crate::learning::reflexion::{FailedTrajectory, ReflexionInjector};
 
@@ -367,7 +368,79 @@ pub async fn run_pipeline(
     mut learning: Option<&mut LearningIntegration>,
 ) -> Result<PipelineResult> {
     let mut session = facade.init_session(task).await?;
+    run_pipeline_inner(
+        facade,
+        llm,
+        &mut session,
+        leann,
+        &mut reflexion,
+        &mut learning,
+        None,
+    )
+    .await
+}
 
+/// Execute a built-in pipeline with a durable audited bundle.
+pub async fn run_pipeline_audited(
+    facade: &dyn PipelineFacade,
+    llm: &dyn LlmClient,
+    task: &str,
+    worktree: &Path,
+    leann: Option<&LeannIntegration>,
+    mut reflexion: Option<&mut ReflexionInjector>,
+    mut learning: Option<&mut LearningIntegration>,
+) -> Result<PipelineResult> {
+    let mut session = facade.init_session(task).await?;
+    let pipeline_type = session.pipeline_type.clone();
+    let audit = PipelineAuditRun::start(worktree, &session.id, pipeline_type, &session.task)?;
+    run_pipeline_inner(
+        facade,
+        llm,
+        &mut session,
+        leann,
+        &mut reflexion,
+        &mut learning,
+        Some(audit),
+    )
+    .await
+}
+
+/// Resume a verified audited bundle without repeating completed agents.
+pub async fn resume_pipeline_audited(
+    facade: &dyn PipelineFacade,
+    llm: &dyn LlmClient,
+    session_id: &str,
+    worktree: &Path,
+    leann: Option<&LeannIntegration>,
+    mut reflexion: Option<&mut ReflexionInjector>,
+    mut learning: Option<&mut LearningIntegration>,
+) -> Result<PipelineResult> {
+    let audit = PipelineAuditRun::resume(worktree, session_id)?;
+    let mut session = facade.init_session(&audit.state().task).await?;
+    session.id = audit.state().session_id.clone();
+    session.pipeline_type = audit.state().pipeline_type.clone();
+    session.agent_results = audit.hydrate_results()?;
+    run_pipeline_inner(
+        facade,
+        llm,
+        &mut session,
+        leann,
+        &mut reflexion,
+        &mut learning,
+        Some(audit),
+    )
+    .await
+}
+
+async fn run_pipeline_inner(
+    facade: &dyn PipelineFacade,
+    llm: &dyn LlmClient,
+    session: &mut PipelineSession,
+    leann: Option<&LeannIntegration>,
+    reflexion: &mut Option<&mut ReflexionInjector>,
+    learning: &mut Option<&mut LearningIntegration>,
+    mut audit: Option<PipelineAuditRun>,
+) -> Result<PipelineResult> {
     tracing::info!(
         session_id = %session.id,
         pipeline_type = ?session.pipeline_type,
@@ -377,8 +450,16 @@ pub async fn run_pipeline(
     );
 
     loop {
-        match facade.next_agent(&session).await? {
+        let next = match facade.next_agent(session).await {
+            Ok(next) => next,
+            Err(error) => {
+                fail_audit(&mut audit, &error.to_string())?;
+                return Err(error);
+            }
+        };
+        match next {
             NextAgent::Continue(agent) => {
+                let ordinal = session.agent_results.len();
                 tracing::info!(
                     agent_key = %agent.key,
                     agent_name = %agent.display_name,
@@ -386,6 +467,9 @@ pub async fn run_pipeline(
                     model = %agent.model,
                     "Executing agent"
                 );
+                if let Some(audit) = audit.as_mut() {
+                    audit.record_agent_planned(ordinal, &agent)?;
+                }
 
                 // Inject LEANN code context before prompt build.
                 if let Some(li) = leann {
@@ -393,7 +477,7 @@ pub async fn run_pipeline(
                 }
 
                 // v0.1.23: Query learning integration for SONA + ReasoningBank context.
-                let learning_ctx = if let Some(ref mut li) = learning {
+                let learning_ctx = if let Some(li) = learning.as_deref_mut() {
                     li.on_agent_start(
                         &agent.key,
                         &agent.phase.to_string(),
@@ -407,12 +491,19 @@ pub async fn run_pipeline(
                 // v0.1.23: Retry loop with reflexion injection (max 3 attempts).
                 const MAX_ATTEMPTS: usize = 3;
                 let mut attempt = 0usize;
-                let (result, quality) = loop {
+                let mut attempts = Vec::new();
+                let (result, quality, accepted_prompt) = loop {
                     attempt += 1;
 
                     // Build a fresh prompt — context isolation.
                     let (messages, mut system, tools) =
-                        facade.build_prompt(&session, &agent).await?;
+                        match facade.build_prompt(session, &agent).await {
+                            Ok(prompt) => prompt,
+                            Err(error) => {
+                                fail_audit(&mut audit, &error.to_string())?;
+                                return Err(error);
+                            }
+                        };
 
                     // Inject learning context on first attempt.
                     if attempt == 1 {
@@ -430,7 +521,7 @@ pub async fn run_pipeline(
 
                     // Inject reflexion context on retry.
                     if attempt > 1
-                        && let Some(ref ri) = reflexion
+                        && let Some(ri) = reflexion.as_deref()
                         && let Some(ctx) = ri.inject_reflexion(&agent.key)
                     {
                         system.push(serde_json::json!({
@@ -443,11 +534,35 @@ pub async fn run_pipeline(
                         );
                     }
 
+                    let prompt_hashes = if let Some(audit) = audit.as_ref() {
+                        Some(audit.record_prompt(ordinal, &agent, &messages, &system, &tools)?)
+                    } else {
+                        None
+                    };
+                    if let Some(audit) = audit.as_ref() {
+                        audit.record_attempt_started(ordinal, &agent, attempt)?;
+                    }
+
                     // Execute against the LLM.
                     let agent_start = Instant::now();
-                    let llm_response = llm
+                    let llm_response = match llm
                         .send_message(messages, system, tools, &agent.model)
-                        .await?;
+                        .await
+                    {
+                        Ok(response) => response,
+                        Err(error) => {
+                            if let Some(audit) = audit.as_ref() {
+                                audit.record_attempt_failed(
+                                    ordinal,
+                                    &agent,
+                                    attempt,
+                                    &error.to_string(),
+                                )?;
+                            }
+                            fail_audit(&mut audit, &error.to_string())?;
+                            return Err(error);
+                        }
+                    };
                     let duration = agent_start.elapsed();
 
                     // Build the agent result.
@@ -462,10 +577,34 @@ pub async fn run_pipeline(
                     };
 
                     // Score quality.
-                    let quality = facade.score_quality(&session, &agent, &result).await?;
+                    let quality = match facade.score_quality(session, &agent, &result).await {
+                        Ok(quality) => quality,
+                        Err(error) => {
+                            fail_audit(&mut audit, &error.to_string())?;
+                            return Err(error);
+                        }
+                    };
                     result.quality = Some(quality.clone());
 
                     let meets_threshold = quality.overall >= agent.quality_threshold;
+                    let accepted = meets_threshold || attempt >= MAX_ATTEMPTS;
+                    let failure_reason = (!meets_threshold).then(|| {
+                        format!(
+                            "Quality {:.2} below threshold {:.2}",
+                            quality.overall, agent.quality_threshold
+                        )
+                    });
+                    if let Some(audit) = audit.as_ref() {
+                        let attempt_record = audit.record_attempt_completed(
+                            ordinal,
+                            &agent,
+                            attempt,
+                            &result,
+                            accepted,
+                            failure_reason.clone(),
+                        )?;
+                        attempts.push(attempt_record);
+                    }
 
                     tracing::info!(
                         agent_key = %agent.key,
@@ -479,12 +618,12 @@ pub async fn run_pipeline(
                         "Agent completed"
                     );
 
-                    if meets_threshold || attempt >= MAX_ATTEMPTS {
-                        break (result, quality);
+                    if accepted {
+                        break (result, quality, prompt_hashes);
                     }
 
                     // Record failure for reflexion on next attempt.
-                    if let Some(ref mut ri) = reflexion {
+                    if let Some(ri) = reflexion.as_deref_mut() {
                         ri.record_failure(FailedTrajectory {
                             agent_name: agent.key.clone(),
                             attempt,
@@ -505,15 +644,29 @@ pub async fn run_pipeline(
                             "Recorded failure for reflexion"
                         );
                     }
+                    if let Some(audit) = audit.as_ref() {
+                        audit.record_agent_retry(
+                            ordinal,
+                            &agent,
+                            attempt,
+                            failure_reason
+                                .as_deref()
+                                .unwrap_or("quality threshold not met"),
+                        )?;
+                    }
                 };
 
                 // Post-processing.
-                facade
-                    .process_completion(&mut session, &agent, &result, &quality)
-                    .await?;
+                if let Err(error) = facade
+                    .process_completion(session, &agent, &result, &quality)
+                    .await
+                {
+                    fail_audit(&mut audit, &error.to_string())?;
+                    return Err(error);
+                }
 
                 // v0.1.23: Feed quality back into learning integration (SONA trajectory).
-                if let Some(ref mut li) = learning {
+                if let Some(li) = learning.as_deref_mut() {
                     li.on_agent_complete(&agent.key, quality.overall, &result.output);
                 }
 
@@ -541,6 +694,11 @@ pub async fn run_pipeline(
                 }
 
                 // Store in session.
+                if let Some(audit) = audit.as_mut() {
+                    if let Some(prompt) = accepted_prompt {
+                        audit.record_agent_completed(ordinal, &agent, &result, attempts, prompt)?;
+                    }
+                }
                 session.agent_results.push((agent, result));
             }
             NextAgent::Skip(reason) => {
@@ -557,7 +715,35 @@ pub async fn run_pipeline(
         }
     }
 
-    facade.finalize(session).await
+    let session_id = session.id.clone();
+    let pipeline_type = session.pipeline_type.clone();
+    let placeholder = PipelineSession {
+        id: session_id,
+        pipeline_type,
+        task: String::new(),
+        started_at: Instant::now(),
+        agent_results: Vec::new(),
+        leann_context: String::new(),
+    };
+    let owned_session = std::mem::replace(session, placeholder);
+    let result = match facade.finalize(owned_session).await {
+        Ok(result) => result,
+        Err(error) => {
+            fail_audit(&mut audit, &error.to_string())?;
+            return Err(error);
+        }
+    };
+    if let Some(audit) = audit.as_mut() {
+        audit.complete(&result.final_output)?;
+    }
+    Ok(result)
+}
+
+fn fail_audit(audit: &mut Option<PipelineAuditRun>, error: &str) -> Result<()> {
+    if let Some(audit) = audit.as_mut() {
+        audit.fail(error)?;
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------

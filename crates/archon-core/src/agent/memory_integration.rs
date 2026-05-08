@@ -52,6 +52,15 @@ impl Agent {
 
         match self.memory_injector.inject(graph.as_ref(), &context, 500) {
             Ok(memories_text) if !memories_text.is_empty() => {
+                let surfaced = memories_text
+                    .lines()
+                    .filter(|line| line.trim_start().starts_with("- "))
+                    .count();
+                self.emit_activity(
+                    AgentActivityKind::MemorySurfaced,
+                    AgentActivityStatus::Completed,
+                    format!("surfaced {surfaced} task-relevant memories from early user context"),
+                );
                 system.push(serde_json::json!({
                     "type": "text",
                     "text": memories_text,
@@ -98,6 +107,11 @@ impl Agent {
             }));
         }
         if let Some(briefing) = self.memory_briefing.take() {
+            self.emit_activity(
+                AgentActivityKind::MemorySurfaced,
+                AgentActivityStatus::Completed,
+                "injected first-turn memory garden briefing",
+            );
             system.push(serde_json::json!({
                 "type": "text",
                 "text": briefing,

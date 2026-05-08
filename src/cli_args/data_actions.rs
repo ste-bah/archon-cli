@@ -205,6 +205,40 @@ pub enum MemoryAction {
 }
 
 #[derive(Subcommand, Debug, Clone)]
+pub enum SelfAction {
+    /// Extract evidence-backed lessons from a persisted session activity log
+    Retrospective {
+        /// Session ID under ~/.archon/sessions/<session-id>/activity/events.jsonl
+        session_id: String,
+    },
+    /// Inspect self-calibration trust records
+    Trust {
+        #[command(subcommand)]
+        action: SelfTrustAction,
+    },
+    /// Inspect stored plan artifacts and plan-vs-outcome summaries
+    Plans {
+        #[command(subcommand)]
+        action: SelfPlansAction,
+    },
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum SelfTrustAction {
+    /// Show domain-scoped self-trust summaries
+    Status,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum SelfPlansAction {
+    /// Compare the latest plan for a session with recorded step outcomes
+    Inspect {
+        /// Session ID
+        session_id: String,
+    },
+}
+
+#[derive(Subcommand, Debug, Clone)]
 pub enum ConstellationAction {
     /// Build a versioned centroid profile from positive meaning samples
     Build {

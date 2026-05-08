@@ -188,11 +188,15 @@ See [god-code-pipeline.md](god-code-pipeline.md) for the full agent breakdown an
 ```
 > /pipeline status                # current run id + phase + last completed agent
 > /pipeline list                  # all sessions, resumeable + completed
+> /pipeline verify <session-id>   # checks bundle hashes before trust/resume
+> /pipeline inspect <session-id>  # shows manifest, state, and agent records
 > /pipeline resume <session-id>   # continues from last completed gate
-> /pipeline abort <session-id>    # cleans up partial state, keeps ledger
+> /pipeline abort <session-id>    # marks the audited bundle aborted and keeps artifacts
 ```
 
-If `/archon-code` crashes (rare) or you Ctrl-C deliberately, the resume path is git-aware: it refuses to continue if files have changed under it.
+If `/archon-code` crashes (rare) or you Ctrl-C deliberately, the resume path is
+git-aware and verifier-gated: it refuses to continue if files have changed
+under it or if bundle artifacts no longer match their hashes.
 
 ## Task atomicity criteria
 

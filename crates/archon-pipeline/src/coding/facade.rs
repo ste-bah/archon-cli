@@ -547,7 +547,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // 4. next_agent returns Done after all 48 agents
+    // 4. next_agent returns Done after all pipeline agents
     // -----------------------------------------------------------------------
 
     #[tokio::test]
@@ -555,7 +555,7 @@ mod tests {
         let facade = make_facade();
         let mut session = facade.init_session("task").await.unwrap();
 
-        // Fill session with 48 fake results
+        // Fill session with one fake result per configured agent
         for agent in AGENTS.iter() {
             let info = agent_to_info(agent);
             let result = make_result("output");

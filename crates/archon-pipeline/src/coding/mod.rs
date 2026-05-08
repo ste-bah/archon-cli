@@ -1,4 +1,4 @@
-//! Coding pipeline (48 agents).
+//! Coding pipeline (50 agents).
 
 pub mod agents;
 pub mod algorithm;
