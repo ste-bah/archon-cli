@@ -12,6 +12,7 @@ pub(crate) mod add_dir;
 pub(crate) mod agent;
 pub(crate) mod agent_evolve;
 pub(crate) mod agent_evolve_apply;
+pub(crate) mod agent_evolve_generate;
 // TASK-#211 SLASH-AGENT: /agent slash-command umbrella (list/info/run).
 pub(crate) mod agent_slash;
 pub(crate) mod auth;
