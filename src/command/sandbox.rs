@@ -43,7 +43,10 @@ impl CommandHandler for SandboxHandler {
             }
             "" | "status" => render_sandbox_status(flag.load(Ordering::SeqCst), verbose),
             "explain" => render_sandbox_explain(flag.load(Ordering::SeqCst)),
-            "doctor" => sandbox_doctor::render_sandbox_doctor(&args[1..], None),
+            "doctor" => sandbox_doctor::render_sandbox_doctor(
+                &args[1..],
+                sandbox_doctor::SandboxDoctorOverrides::default(),
+            ),
             other => {
                 return Err(anyhow::anyhow!(
                     "unknown /sandbox argument '{}': expected on, off, status, explain, or doctor",

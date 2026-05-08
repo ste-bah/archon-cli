@@ -202,6 +202,22 @@ always_ask = []
 # separate isolation backends and are not activated by this flag alone.
 backend = "disabled"
 
+[sandbox.docker]
+# Detect-only in this release slice. Execution remains disabled until the
+# Docker backend is explicitly implemented and audited.
+enabled = false
+binary = "docker"
+image = "ubuntu:24.04"
+# "disabled" | "limited" | "enabled"
+network = "disabled"
+memory_limit = "2g"
+cpu_limit = "2"
+writable_paths = []
+env_allowlist = []
+privileged = false
+mount_docker_socket = false
+mount_home = false
+
 [sandbox.openshell]
 # Detect-only in this release slice. Execution remains disabled until the
 # OpenShell backend is explicitly implemented and audited.
