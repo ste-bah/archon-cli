@@ -252,6 +252,16 @@ fn input_generating_without_tool_shows_placeholder() {
     assert!(rendered.contains("..."), "buffer:\n{rendered}");
 }
 
+#[test]
+fn long_input_expands_and_scrolls_to_tail() {
+    let mut app = App::new();
+    app.show_splash = false;
+    app.input
+        .set_text(&format!("{} TAIL_MARKER", "long pasted prompt ".repeat(80)));
+    let rendered = render_once(&mut app);
+    assert!(rendered.contains("TAIL_MARKER"), "buffer:\n{rendered}");
+}
+
 // ───────────────────────────────────────────────────────────────────────
 // Session badge + suggestions popup
 // ───────────────────────────────────────────────────────────────────────

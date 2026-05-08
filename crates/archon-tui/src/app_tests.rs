@@ -281,6 +281,19 @@ fn slash_command_complete_resets_is_generating() {
 }
 
 #[test]
+fn input_accepts_paste_only_without_modal_overlays() {
+    let mut app = App::new();
+    assert!(app.input_accepts_paste());
+
+    app.btw_overlay = Some("side question".into());
+    assert!(!app.input_accepts_paste());
+
+    app.btw_overlay = None;
+    app.permission_prompt = Some("Bash".into());
+    assert!(!app.input_accepts_paste());
+}
+
+#[test]
 fn full_agent_turn_lifecycle() {
     // Simulates: user submits -> GenerationStarted -> TextDelta -> TurnComplete
     let mut app = App::new();

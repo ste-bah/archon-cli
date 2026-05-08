@@ -75,11 +75,13 @@ pub async fn run(config: AppConfig) -> Result<(), io::Error> {
     // Setup terminal - TerminalGuard handles raw mode, alternate screen, and cursor hide.
     // Its Drop will restore the terminal on function exit.
     let _guard = TerminalGuard::enter()?;
-    // Mouse capture enabled for scroll support. Most terminals let you hold Shift
-    // while dragging to select text even with mouse capture active (works in
-    // Windows Terminal, WezTerm, Kitty, iTerm2, GNOME Terminal, etc.).
-    // Use /copy or Ctrl+Y to copy the last assistant response to clipboard.
-    io::stdout().execute(EnableMouseCapture)?;
+    // Keep normal terminal text selection available by default. Operators who
+    // prefer mouse-wheel events inside the TUI can opt into capture with
+    // ARCHON_TUI_MOUSE_CAPTURE=1.
+    let mouse_capture = crate::terminal::mouse_capture_enabled();
+    if mouse_capture {
+        io::stdout().execute(EnableMouseCapture)?;
+    }
     let backend = CrosstermBackend::new(io::stdout());
     let mut terminal = Terminal::new(backend)?;
 
@@ -90,9 +92,11 @@ pub async fn run(config: AppConfig) -> Result<(), io::Error> {
 
     let result = crate::event_loop::run_inner(config, &mut terminal).await;
 
-    // Restore terminal - DisableMouseCapture only; TerminalGuard's Drop handles
-    // cursor show, leave alternate screen, and disable raw mode.
-    io::stdout().execute(DisableMouseCapture)?;
+    // Restore terminal - TerminalGuard's Drop handles cursor show, leave
+    // alternate screen, bracketed paste, and raw mode.
+    if mouse_capture {
+        io::stdout().execute(DisableMouseCapture)?;
+    }
 
     result
 }
@@ -216,6 +220,19 @@ impl App {
 
     pub fn set_last_esc(&mut self, instant: Option<std::time::Instant>) {
         self.last_esc = instant;
+    }
+
+    pub fn input_accepts_paste(&self) -> bool {
+        self.permission_prompt.is_none()
+            && self.btw_overlay.is_none()
+            && self.session_picker.is_none()
+            && self.mcp_manager.is_none()
+            && self.message_selector.is_none()
+            && self.skills_menu.is_none()
+            && self.file_picker.is_none()
+            && self.search_results.is_none()
+            && self.evidence_view.is_none()
+            && self.vim_state.is_none()
     }
 
     pub fn on_text_delta(&mut self, text: &str) {

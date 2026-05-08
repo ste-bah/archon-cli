@@ -436,6 +436,14 @@ mod tests {
     }
 
     #[test]
+    fn inject_text_accepts_multiline_paste() {
+        let mut input = InputHandler::new();
+        input.inject_text("first\nsecond");
+        assert_eq!(input.text(), "first\nsecond");
+        assert_eq!(input.cursor(), "first\nsecond".len());
+    }
+
+    #[test]
     fn history_navigation() {
         let mut input = InputHandler::new();
         input.insert('a');

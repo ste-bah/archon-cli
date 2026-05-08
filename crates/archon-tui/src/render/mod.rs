@@ -38,7 +38,8 @@ use ratatui::Frame;
 /// ```
 pub fn draw(frame: &mut Frame, app: &mut App) {
     let size = frame.area();
-    let l = compute_layout(size);
+    let input_height = layout::input_height_for_display(size, &body::input_display_text(app));
+    let l = layout::compute_layout_with_input_height(size, input_height);
 
     // Body: output area
     body::draw_output_area(frame, app, l.output);

@@ -17,6 +17,17 @@ pub struct TerminalGuard {
     _priv: (),
 }
 
+pub fn mouse_capture_enabled() -> bool {
+    std::env::var("ARCHON_TUI_MOUSE_CAPTURE")
+        .map(|value| {
+            matches!(
+                value.as_str(),
+                "1" | "true" | "TRUE" | "on" | "ON" | "yes" | "YES"
+            )
+        })
+        .unwrap_or(false)
+}
+
 impl TerminalGuard {
     /// Enter raw mode and alternate screen, hiding the cursor.
     ///
@@ -26,10 +37,12 @@ impl TerminalGuard {
     pub fn enter() -> IoResult<Self> {
         use crossterm::ExecutableCommand;
         use crossterm::cursor::Hide;
+        use crossterm::event::EnableBracketedPaste;
         use crossterm::terminal::{EnterAlternateScreen, enable_raw_mode};
 
         enable_raw_mode()?;
         stdout().execute(EnterAlternateScreen)?;
+        stdout().execute(EnableBracketedPaste)?;
         stdout().execute(Hide)?;
 
         Ok(Self { _priv: () })
@@ -40,11 +53,13 @@ impl Drop for TerminalGuard {
     fn drop(&mut self) {
         use crossterm::ExecutableCommand;
         use crossterm::cursor::Show;
+        use crossterm::event::DisableBracketedPaste;
         use crossterm::terminal::{LeaveAlternateScreen, disable_raw_mode};
 
         // We use std::mem::forget on the result because there's nothing we can
         // do if cleanup fails, and swallowing the error avoids a panic at shutdown.
         let _ = stdout().execute(Show);
+        let _ = stdout().execute(DisableBracketedPaste);
         let _ = stdout().execute(LeaveAlternateScreen);
         let _ = disable_raw_mode();
     }

@@ -485,6 +485,11 @@ pub(super) async fn handle_key_event(
         Event::Resize(cols, rows) => {
             crate::layout::handle_resize(cols, rows);
         }
-        _ => {} // FocusGained/FocusLost/Paste
+        Event::Paste(text) => {
+            if app.input_accepts_paste() {
+                app.input.inject_text(&text);
+            }
+        }
+        _ => {} // FocusGained/FocusLost
     }
 }
