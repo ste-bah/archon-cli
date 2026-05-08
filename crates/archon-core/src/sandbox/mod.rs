@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 mod docker;
 mod openshell;
+mod policy;
 mod ssh;
 
 pub use docker::{
@@ -12,6 +13,7 @@ pub use openshell::{
     OpenShellConfig, OpenShellDoctorReport, OpenShellDoctorStatus, OpenShellProbe,
     openshell_doctor_report, probe_openshell, render_openshell_doctor_report,
 };
+pub use policy::{SandboxBackendKind, SandboxPolicy};
 pub use ssh::{
     SshConfig, SshDoctorReport, SshDoctorStatus, SshProbe, probe_ssh, render_ssh_doctor_report,
     ssh_doctor_report,
@@ -21,6 +23,9 @@ pub use ssh::{
 #[serde(default)]
 pub struct SandboxConfig {
     pub backend: String,
+    pub mode: String,
+    pub scope: String,
+    pub workspace_access: String,
     pub docker: DockerConfig,
     pub ssh: SshConfig,
     pub openshell: OpenShellConfig,
@@ -30,6 +35,9 @@ impl Default for SandboxConfig {
     fn default() -> Self {
         Self {
             backend: "disabled".into(),
+            mode: "risky".into(),
+            scope: "session".into(),
+            workspace_access: "ro".into(),
             docker: DockerConfig::default(),
             ssh: SshConfig::default(),
             openshell: OpenShellConfig::default(),
@@ -39,17 +47,23 @@ impl Default for SandboxConfig {
 
 impl SandboxConfig {
     pub fn validate(&self) -> Result<(), String> {
-        match self.backend.as_str() {
-            "disabled" | "logical" | "docker" | "ssh" | "openshell" => {}
-            other => {
-                return Err(format!(
-                    "sandbox.backend must be disabled, logical, docker, ssh, or openshell, got \"{other}\""
-                ));
-            }
-        }
+        self.policy()?.validate()?;
         self.docker.validate()?;
         self.ssh.validate()?;
         self.openshell.validate()
+    }
+
+    pub fn backend_kind(&self) -> Result<SandboxBackendKind, String> {
+        self.backend.parse()
+    }
+
+    pub fn policy(&self) -> Result<SandboxPolicy, String> {
+        Ok(SandboxPolicy {
+            backend: self.backend_kind()?,
+            mode: self.mode.clone(),
+            scope: self.scope.clone(),
+            workspace_access: self.workspace_access.clone(),
+        })
     }
 }
 
@@ -70,6 +84,9 @@ mod tests {
         let cfg: SandboxConfig = toml::from_str(
             r#"
             backend = "openshell"
+            mode = "all"
+            scope = "session"
+            workspace_access = "rw"
 
             [openshell]
             enabled = true
@@ -83,6 +100,9 @@ mod tests {
         .unwrap();
 
         assert_eq!(cfg.backend, "openshell");
+        assert_eq!(cfg.backend_kind().unwrap(), SandboxBackendKind::OpenShell);
+        assert_eq!(cfg.policy().unwrap().mode, "all");
+        assert_eq!(cfg.policy().unwrap().workspace_access, "rw");
         assert!(cfg.openshell.enabled);
         assert_eq!(cfg.openshell.workspace_mode, "remote");
         assert_eq!(cfg.openshell.gateway.as_deref(), Some("team-gateway"));
@@ -96,6 +116,7 @@ mod tests {
         let cfg: SandboxConfig = toml::from_str(
             r#"
             backend = "ssh"
+            mode = "all"
 
             [ssh]
             enabled = true
@@ -108,6 +129,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(cfg.backend, "ssh");
+        assert_eq!(cfg.backend_kind().unwrap(), SandboxBackendKind::Ssh);
         assert!(cfg.ssh.enabled);
         assert_eq!(cfg.ssh.host.as_deref(), Some("sandbox.example"));
         assert_eq!(cfg.ssh.user.as_deref(), Some("archon"));
@@ -115,5 +137,17 @@ mod tests {
         assert_eq!(cfg.ssh.workspace_mode, "remote");
         assert!(cfg.ssh.host_key_checking);
         assert!(!cfg.ssh.host_shell_fallback);
+    }
+
+    #[test]
+    fn sandbox_config_rejects_unknown_backend() {
+        let cfg = SandboxConfig {
+            backend: "host".into(),
+            ..SandboxConfig::default()
+        };
+
+        let error = cfg.validate().unwrap_err();
+
+        assert!(error.contains("sandbox.backend"));
     }
 }
