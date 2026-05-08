@@ -27,6 +27,7 @@ pub fn ensure_learning_schema(db: &DbInstance) -> Result<()> {
     ensure_permission_runtime_events(db)?;
     ensure_provider_auth_profiles(db)?;
     ensure_provider_rate_limit_windows(db)?;
+    ensure_provider_runtime_status_snapshots(db)?;
     Ok(())
 }
 
@@ -330,6 +331,27 @@ fn ensure_provider_rate_limit_windows(db: &DbInstance) -> Result<()> {
             used_percent: Float default -1.0,
             resets_at: String default "",
             raw_redacted_json: String default "{}",
+            observed_at: String,
+        }"#,
+    )
+}
+
+fn ensure_provider_runtime_status_snapshots(db: &DbInstance) -> Result<()> {
+    run_create(
+        db,
+        r#":create provider_runtime_status_snapshots {
+            status_id: String =>
+            provider_id: String,
+            display_name: String default "",
+            profile_id: String default "",
+            model_id: String default "",
+            runtime_mode: String,
+            identity_status: String,
+            health: String,
+            last_success_at: String default "",
+            last_failure_at: String default "",
+            rate_limit_ids_json: String default "[]",
+            metadata_redacted_json: String default "{}",
             observed_at: String,
         }"#,
     )

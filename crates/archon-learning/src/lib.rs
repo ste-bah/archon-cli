@@ -14,6 +14,7 @@ pub mod policy;
 pub mod proposal;
 pub mod provider_auth_profiles;
 pub mod provider_rate_limits;
+pub mod provider_runtime_statuses;
 pub mod rollback;
 pub mod runtime_events;
 pub mod runtime_models;
