@@ -16,6 +16,7 @@ use cozo::DbInstance;
 use tokio::sync::mpsc::Receiver;
 
 use super::provider_event_record::provider_event_record;
+use super::provider_limit_windows;
 
 #[derive(Clone)]
 pub(crate) struct ProviderRuntimeEventRecorder {
@@ -57,6 +58,10 @@ impl ProviderRuntimeEventRecorder {
                 "provider runtime event persistence failed"
             );
         }
+    }
+
+    fn record_limit_window(&self, provider_id: &str, model_id: Option<&str>, error: &LlmError) {
+        provider_limit_windows::record_limit_window(self.db.as_ref(), provider_id, model_id, error);
     }
 }
 
@@ -195,6 +200,8 @@ impl ObservedLlmProvider {
                 .with_message(error_message(error))
                 .with_redacted_json(error_metadata(error)),
             );
+            self.recorder
+                .record_limit_window(self.inner.name(), Some(&request.model), error);
         }
     }
 }
