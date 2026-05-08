@@ -9,6 +9,7 @@ pub mod manifest;
 pub mod memory_promotion_candidates;
 pub mod models;
 pub mod outcome_signal;
+pub mod permission_runtime_events;
 pub mod policy;
 pub mod proposal;
 pub mod rollback;

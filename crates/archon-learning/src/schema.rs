@@ -24,6 +24,7 @@ pub fn ensure_learning_schema(db: &DbInstance) -> Result<()> {
     ensure_agent_profile_versions(db)?;
     ensure_agent_shadow_evaluations(db)?;
     ensure_memory_promotion_candidates(db)?;
+    ensure_permission_runtime_events(db)?;
     Ok(())
 }
 
@@ -265,6 +266,26 @@ fn ensure_memory_promotion_candidates(db: &DbInstance) -> Result<()> {
             evidence_quality: Float default 0.0,
             evidence_ids_json: String default "[]",
             proposal_required: Bool default true,
+            created_at: String,
+        }"#,
+    )
+}
+
+fn ensure_permission_runtime_events(db: &DbInstance) -> Result<()> {
+    run_create(
+        db,
+        r#":create permission_runtime_events {
+            event_id: String =>
+            session_id: String default "",
+            run_id: String default "",
+            agent_type: String default "",
+            tool_name: String,
+            permission_mode: String,
+            decision: String,
+            reason_code: String default "",
+            rule_name: String default "",
+            sandbox_backend: String default "",
+            raw_redacted_json: String default "{}",
             created_at: String,
         }"#,
     )
