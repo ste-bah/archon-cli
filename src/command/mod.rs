@@ -117,6 +117,7 @@ pub(crate) mod rewind;
 pub(crate) mod rules;
 // TASK-TUI-628: /sandbox handler — Bubble-mode flag flipper.
 pub(crate) mod sandbox;
+pub(crate) mod sandbox_cli;
 pub(crate) mod sandbox_doctor;
 pub(crate) mod sessions;
 // TASK-TUI-625: /session remote-URL + QR code handler.

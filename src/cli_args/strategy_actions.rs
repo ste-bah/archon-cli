@@ -14,6 +14,34 @@ pub enum ProvidersAction {
     },
 }
 
+#[derive(Subcommand, Debug, Clone, PartialEq, Eq)]
+pub enum SandboxAction {
+    /// Show configured sandbox backend and policy
+    Status {
+        /// Include compatibility and isolation details
+        #[arg(long)]
+        verbose: bool,
+    },
+    /// Explain how tools are routed through permission and sandbox gates
+    Explain {
+        /// Explain a specific backend instead of the configured backend
+        #[arg(long)]
+        backend: Option<String>,
+    },
+    /// Diagnose a sandbox backend without executing untrusted commands
+    Doctor {
+        /// Backend to diagnose: logical, docker, ssh, or openshell
+        #[arg(long)]
+        backend: Option<String>,
+    },
+    /// Validate sandbox config and report whether live execution is available
+    Test {
+        /// Backend to validate: logical, docker, ssh, or openshell
+        #[arg(long)]
+        backend: Option<String>,
+    },
+}
+
 #[derive(Subcommand, Debug)]
 pub enum GametheoryAction {
     /// Run full pipeline: classify → route → specialists → report

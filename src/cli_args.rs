@@ -18,7 +18,7 @@ pub use data_actions::{
 };
 pub use root::Cli;
 pub use strategy_actions::{
-    CompletionAction, GametheoryAction, PipelineAction, ProvidersAction, TeamAction,
+    CompletionAction, GametheoryAction, PipelineAction, ProvidersAction, SandboxAction, TeamAction,
 };
 
 #[cfg(test)]

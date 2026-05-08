@@ -194,6 +194,9 @@ async fn main() -> Result<()> {
         Some(Commands::Providers { action }) => {
             return crate::command::providers::handle_providers(action);
         }
+        Some(Commands::Sandbox { action }) => {
+            return crate::command::sandbox_cli::handle_sandbox_command(action, &config);
+        }
         Some(Commands::Plugin { action }) => {
             return crate::command::plugin::handle_plugin_command(action);
         }
