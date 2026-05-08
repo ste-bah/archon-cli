@@ -43,6 +43,24 @@ pub(crate) fn handle_providers(action: Option<ProvidersAction>) -> Result<()> {
                 )
             )
         }
+        ProvidersAction::Limits { provider } => print!(
+            "{}",
+            crate::command::providers_store_cli::render_provider_limits(provider.as_deref())?
+        ),
+        ProvidersAction::Profiles { action } => match action {
+            crate::cli_args::ProviderProfilesAction::List { provider } => print!(
+                "{}",
+                crate::command::providers_store_cli::render_provider_profiles(provider.as_deref())?
+            ),
+            crate::cli_args::ProviderProfilesAction::Inspect { profile_id } => print!(
+                "{}",
+                crate::command::providers_store_cli::render_provider_profile_inspect(&profile_id)?
+            ),
+            crate::cli_args::ProviderProfilesAction::CooldownClear { profile_id } => print!(
+                "{}",
+                crate::command::providers_store_cli::clear_provider_profile_cooldown(&profile_id)?
+            ),
+        },
         ProvidersAction::Doctor { live } => print!("{}", render_provider_doctor(live)),
     }
     Ok(())

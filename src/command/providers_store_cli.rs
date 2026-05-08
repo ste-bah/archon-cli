@@ -1,0 +1,255 @@
+//! Cozo-backed provider profile and rate-limit CLI surfaces.
+
+use anyhow::Result;
+use archon_learning::provider_auth_profiles::{
+    ProviderAuthProfileRecord, get_provider_auth_profile, insert_provider_auth_profile,
+    list_provider_auth_profiles,
+};
+use archon_learning::provider_rate_limits::{
+    ProviderRateLimitWindowRecord, list_provider_rate_limit_windows,
+};
+use archon_llm::providers::{list_compat, list_native};
+use cozo::DbInstance;
+
+pub(crate) fn render_provider_limits(provider_filter: Option<&str>) -> Result<String> {
+    let db = open_learning_db()?;
+    Ok(render_provider_limits_from_db(&db, provider_filter)?)
+}
+
+pub(crate) fn render_provider_profiles(provider_filter: Option<&str>) -> Result<String> {
+    let db = open_learning_db()?;
+    Ok(render_provider_profiles_from_db(&db, provider_filter)?)
+}
+
+pub(crate) fn render_provider_profile_inspect(profile_id: &str) -> Result<String> {
+    let db = open_learning_db()?;
+    let profile = get_provider_auth_profile(&db, profile_id)?
+        .ok_or_else(|| anyhow::anyhow!("provider auth profile not found: {profile_id}"))?;
+    Ok(render_profile_detail(&profile))
+}
+
+pub(crate) fn clear_provider_profile_cooldown(profile_id: &str) -> Result<String> {
+    let db = open_learning_db()?;
+    let mut profile = get_provider_auth_profile(&db, profile_id)?
+        .ok_or_else(|| anyhow::anyhow!("provider auth profile not found: {profile_id}"))?;
+    profile.cooldown_until = None;
+    profile.disabled_reason = None;
+    profile.updated_at = chrono::Utc::now().to_rfc3339();
+    insert_provider_auth_profile(&db, &profile)?;
+    Ok(format!(
+        "Cleared cooldown for provider profile {} ({})\n",
+        profile.profile_id, profile.provider_id
+    ))
+}
+
+fn render_provider_limits_from_db(
+    db: &DbInstance,
+    provider_filter: Option<&str>,
+) -> Result<String> {
+    let mut windows = Vec::new();
+    for provider_id in provider_ids(provider_filter) {
+        windows.extend(list_provider_rate_limit_windows(db, &provider_id)?);
+    }
+    windows.sort_by(|a, b| {
+        b.is_exhausted()
+            .cmp(&a.is_exhausted())
+            .then_with(|| b.observed_at.cmp(&a.observed_at))
+    });
+
+    let mut out = String::from("Provider rate limits (Cozo)\n\n");
+    if windows.is_empty() {
+        out.push_str("No provider rate-limit windows found.\n");
+        return Ok(out);
+    }
+    out.push_str("provider             kind        used     resets_at             observed_at\n");
+    out.push_str("----------------------------------------------------------------------------\n");
+    for window in windows {
+        out.push_str(&format!(
+            "{:<20} {:<11} {:<8} {:<20} {}\n",
+            window.provider_id,
+            window.window_kind,
+            percent_label(window.used_percent),
+            window.resets_at.as_deref().unwrap_or("-"),
+            window.observed_at,
+        ));
+    }
+    Ok(out)
+}
+
+fn render_provider_profiles_from_db(
+    db: &DbInstance,
+    provider_filter: Option<&str>,
+) -> Result<String> {
+    let mut profiles = Vec::new();
+    for provider_id in provider_ids(provider_filter) {
+        profiles.extend(list_provider_auth_profiles(db, &provider_id)?);
+    }
+    profiles.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+
+    let mut out = String::from("Provider auth profiles (Cozo)\n\n");
+    if profiles.is_empty() {
+        out.push_str("No provider auth profiles found.\n");
+        return Ok(out);
+    }
+    out.push_str("profile_id           provider             auth_kind   source       state\n");
+    out.push_str("------------------------------------------------------------------------\n");
+    for profile in profiles {
+        out.push_str(&format!(
+            "{:<20} {:<20} {:<11} {:<12} {}\n",
+            profile.profile_id,
+            profile.provider_id,
+            profile.auth_kind,
+            profile.source,
+            profile_state(&profile),
+        ));
+    }
+    Ok(out)
+}
+
+fn render_profile_detail(profile: &ProviderAuthProfileRecord) -> String {
+    format!(
+        "Provider auth profile\n\
+         Profile:      {}\n\
+         Provider:     {}\n\
+         Auth kind:    {}\n\
+         Display:      {}\n\
+         Source:       {}\n\
+         Fingerprint:  {}\n\
+         Last used:    {}\n\
+         Last good:    {}\n\
+         Last failed:  {}\n\
+         Failures:     {}\n\
+         Cooldown:     {}\n\
+         Disabled:     {}\n\
+         Updated:      {}\n",
+        profile.profile_id,
+        profile.provider_id,
+        profile.auth_kind,
+        profile.display_name.as_deref().unwrap_or("-"),
+        profile.source,
+        profile.identity_fingerprint.as_deref().unwrap_or("-"),
+        profile.last_used_at.as_deref().unwrap_or("-"),
+        profile.last_good_at.as_deref().unwrap_or("-"),
+        profile.last_failed_at.as_deref().unwrap_or("-"),
+        profile.failure_count,
+        profile.cooldown_until.as_deref().unwrap_or("-"),
+        profile.disabled_reason.as_deref().unwrap_or("-"),
+        profile.updated_at,
+    )
+}
+
+fn provider_ids(provider_filter: Option<&str>) -> Vec<String> {
+    if let Some(provider_id) = provider_filter {
+        return vec![provider_id.to_string()];
+    }
+    let mut ids: Vec<String> = list_native()
+        .into_iter()
+        .chain(list_compat())
+        .map(|descriptor| descriptor.id.clone())
+        .collect();
+    ids.sort();
+    ids.dedup();
+    ids
+}
+
+fn profile_state(profile: &ProviderAuthProfileRecord) -> &'static str {
+    if profile.cooldown_until.is_some() {
+        "cooldown"
+    } else if profile.disabled_reason.is_some() {
+        "disabled"
+    } else if profile.failure_count > 0 {
+        "degraded"
+    } else {
+        "ok"
+    }
+}
+
+fn percent_label(value: Option<f64>) -> String {
+    value
+        .map(|value| format!("{value:.0}%"))
+        .unwrap_or_else(|| "-".into())
+}
+
+fn open_learning_db() -> Result<DbInstance> {
+    let base = archon_session::storage::default_db_path();
+    let parent = base
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("cannot determine data directory"))?;
+    let path = parent.join("learning.db");
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let path_str = path.to_string_lossy().to_string();
+    let db = DbInstance::new("sqlite", &path_str, "")
+        .map_err(|e| anyhow::anyhow!("open learning db: {e}"))?;
+    archon_learning::schema::ensure_learning_schema(&db)?;
+    Ok(db)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_db() -> DbInstance {
+        let path = format!("/tmp/test-provider-store-cli-{}.db", uuid::Uuid::new_v4());
+        let db = DbInstance::new("sqlite", &path, "").unwrap();
+        archon_learning::schema::ensure_learning_schema(&db).unwrap();
+        db
+    }
+
+    #[test]
+    fn renders_profiles_from_cozo() {
+        let db = test_db();
+        insert_provider_auth_profile(
+            &db,
+            &ProviderAuthProfileRecord::new(
+                "prof-1",
+                "anthropic",
+                "oauth",
+                "archon_store",
+                "2026-05-08T12:00:00Z",
+            )
+            .with_cooldown("2026-05-08T13:00:00Z", "rate_limited"),
+        )
+        .unwrap();
+
+        let body = render_provider_profiles_from_db(&db, Some("anthropic")).unwrap();
+
+        assert!(body.contains("prof-1"));
+        assert!(body.contains("anthropic"));
+        assert!(body.contains("cooldown"));
+    }
+
+    #[test]
+    fn renders_exhausted_limits_first() {
+        let db = test_db();
+        archon_learning::provider_rate_limits::insert_provider_rate_limit_window(
+            &db,
+            &ProviderRateLimitWindowRecord::new(
+                "limit-1",
+                "openai-codex",
+                "tokens",
+                "2026-05-08T12:00:00Z",
+            )
+            .with_used_percent(50.0),
+        )
+        .unwrap();
+        archon_learning::provider_rate_limits::insert_provider_rate_limit_window(
+            &db,
+            &ProviderRateLimitWindowRecord::new(
+                "limit-2",
+                "openai-codex",
+                "usage",
+                "2026-05-08T11:00:00Z",
+            )
+            .with_used_percent(100.0),
+        )
+        .unwrap();
+
+        let body = render_provider_limits_from_db(&db, Some("openai-codex")).unwrap();
+
+        let usage = body.find("usage").unwrap();
+        let tokens = body.find("tokens").unwrap();
+        assert!(usage < tokens);
+    }
+}

@@ -95,6 +95,7 @@ pub(crate) mod prov;
 pub(crate) mod providers;
 pub(crate) mod providers_slash;
 pub(crate) mod providers_status;
+pub(crate) mod providers_store_cli;
 // TASK-#217 SLASH-RELOAD-PLUGINS: /reload-plugins disk re-scan.
 pub(crate) mod recall;
 pub(crate) mod registry;

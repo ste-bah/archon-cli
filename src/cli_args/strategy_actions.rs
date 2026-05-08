@@ -12,11 +12,42 @@ pub enum ProvidersAction {
         #[arg(long)]
         provider: Option<String>,
     },
+    /// Show persisted provider rate-limit windows
+    Limits {
+        /// Restrict output to one provider id
+        #[arg(long)]
+        provider: Option<String>,
+    },
+    /// Inspect persisted provider auth profiles
+    Profiles {
+        #[command(subcommand)]
+        action: ProviderProfilesAction,
+    },
     /// Diagnose provider/auth configuration
     Doctor {
         /// Run opt-in live endpoint reachability checks
         #[arg(long)]
         live: bool,
+    },
+}
+
+#[derive(Subcommand, Debug, Clone, PartialEq, Eq)]
+pub enum ProviderProfilesAction {
+    /// List persisted auth profiles
+    List {
+        /// Restrict output to one provider id
+        #[arg(long)]
+        provider: Option<String>,
+    },
+    /// Inspect one persisted auth profile
+    Inspect {
+        /// Profile id to inspect
+        profile_id: String,
+    },
+    /// Clear a profile cooldown marker
+    CooldownClear {
+        /// Profile id to update
+        profile_id: String,
     },
 }
 
