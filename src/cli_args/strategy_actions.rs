@@ -1,11 +1,17 @@
 use clap::Subcommand;
 
-#[derive(Subcommand, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Subcommand, Debug, Clone, PartialEq, Eq)]
 pub enum ProvidersAction {
     /// Show provider registry entries
     List,
     /// Show Archon surface support by provider/auth mode
     Capabilities,
+    /// Show provider-neutral runtime status from local configuration
+    Status {
+        /// Restrict output to one provider id
+        #[arg(long)]
+        provider: Option<String>,
+    },
     /// Diagnose provider/auth configuration
     Doctor {
         /// Run opt-in live endpoint reachability checks

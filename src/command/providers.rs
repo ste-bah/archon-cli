@@ -18,7 +18,6 @@
 //! does not warrant a custom `TuiEvent` variant + TUI overlay).
 
 use anyhow::Result;
-use archon_tui::app::TuiEvent;
 use chrono::Utc;
 use std::net::{TcpStream, ToSocketAddrs};
 use std::time::Duration;
@@ -29,50 +28,25 @@ use archon_llm::providers::{
 };
 
 use crate::cli_args::ProvidersAction;
-use crate::command::registry::{CommandContext, CommandHandler};
+
+pub(crate) use crate::command::providers_slash::ProvidersHandler;
 
 pub(crate) fn handle_providers(action: Option<ProvidersAction>) -> Result<()> {
     match action.unwrap_or(ProvidersAction::List) {
         ProvidersAction::List => print!("{}", render_provider_registry()),
         ProvidersAction::Capabilities => print!("{}", render_capability_table()),
+        ProvidersAction::Status { provider } => {
+            print!(
+                "{}",
+                crate::command::providers_status::render_provider_status(provider.as_deref())
+            )
+        }
         ProvidersAction::Doctor { live } => print!("{}", render_provider_doctor(live)),
     }
     Ok(())
 }
 
-/// `/providers` handler — emits a 40-row aligned table of every
-/// registered LLM provider.
-pub(crate) struct ProvidersHandler;
-
-impl CommandHandler for ProvidersHandler {
-    fn execute(&self, ctx: &mut CommandContext, _args: &[String]) -> anyhow::Result<()> {
-        let rendered = match _args.first().map(String::as_str) {
-            Some("capabilities") | Some("capability") | Some("caps") => render_capability_table(),
-            Some("doctor") | Some("diagnose") => {
-                render_provider_doctor(args_contains(_args, "--live"))
-            }
-            Some("list") | None => render_provider_registry(),
-            Some(other) => format!(
-                "Unknown /providers subcommand `{other}`.\nUsage: /providers [list|capabilities|doctor [--live]]\n"
-            ),
-        };
-        ctx.emit(TuiEvent::TextDelta(rendered));
-        Ok(())
-    }
-
-    fn description(&self) -> &str {
-        "List registered LLM providers and capability support"
-    }
-
-    fn aliases(&self) -> &'static [&'static str] {
-        // No aliases — `list-providers` and `provider` were considered
-        // but `/provider` could be confused with a future singular-form
-        // command, so the canonical spelling stays alone.
-        &[]
-    }
-}
-
-fn render_provider_registry() -> String {
+pub(crate) fn render_provider_registry() -> String {
     let native = list_native();
     let compat = list_compat();
     let total = count_native() + count_compat();
@@ -114,7 +88,7 @@ fn render_provider_registry() -> String {
     out
 }
 
-fn render_provider_doctor(live: bool) -> String {
+pub(crate) fn render_provider_doctor(live: bool) -> String {
     let path = archon_llm::tokens::credentials_path();
     let credentials_json = std::fs::read_to_string(&path).ok();
     let codex_status = codex_status_from_disk(&path);
@@ -504,10 +478,6 @@ fn codex_disabled() -> bool {
         .unwrap_or(false)
 }
 
-fn args_contains(args: &[String], needle: &str) -> bool {
-    args.iter().any(|arg| arg == needle)
-}
-
 // Column widths kept in module-private constants so the header,
 // divider, and data rows stay in lockstep — change one, change all.
 const COL_ID: usize = 15;
@@ -597,7 +567,9 @@ fn fmt_features(f: &ProviderFeatures) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::command::registry::CommandHandler;
     use crate::command::test_support::*;
+    use archon_tui::app::TuiEvent;
 
     struct FakeLivePinger {
         outcome: std::result::Result<(), String>,
