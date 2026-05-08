@@ -45,6 +45,7 @@ lcov.info
 
 # Dev-flow gate artifacts (local task tracking state)
 .gates/
+project-tasks/
 
 # Scratch / test files
 hello.txt
