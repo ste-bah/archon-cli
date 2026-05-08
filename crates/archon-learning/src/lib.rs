@@ -6,6 +6,7 @@ pub mod apply;
 pub mod errors;
 pub mod events;
 pub mod manifest;
+pub mod memory_promotion_candidates;
 pub mod models;
 pub mod outcome_signal;
 pub mod policy;

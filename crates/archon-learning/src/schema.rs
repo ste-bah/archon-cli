@@ -23,6 +23,7 @@ pub fn ensure_learning_schema(db: &DbInstance) -> Result<()> {
     ensure_agent_evolution_proposals(db)?;
     ensure_agent_profile_versions(db)?;
     ensure_agent_shadow_evaluations(db)?;
+    ensure_memory_promotion_candidates(db)?;
     Ok(())
 }
 
@@ -243,6 +244,27 @@ fn ensure_agent_shadow_evaluations(db: &DbInstance) -> Result<()> {
             improvement_count: Int default 0,
             verdict: String,
             evidence_json: String default "{}",
+            created_at: String,
+        }"#,
+    )
+}
+
+fn ensure_memory_promotion_candidates(db: &DbInstance) -> Result<()> {
+    run_create(
+        db,
+        r#":create memory_promotion_candidates {
+            candidate_id: String =>
+            agent_type: String,
+            signal_source: String,
+            target: String,
+            claim: String,
+            confidence: Float default 0.0,
+            frequency_score: Float default 0.0,
+            recency_score: Float default 0.0,
+            diversity_score: Float default 0.0,
+            evidence_quality: Float default 0.0,
+            evidence_ids_json: String default "[]",
+            proposal_required: Bool default true,
             created_at: String,
         }"#,
     )
