@@ -18,6 +18,7 @@ pub fn ensure_learning_schema(db: &DbInstance) -> Result<()> {
     ensure_behaviour_manifest_versions(db)?;
     ensure_behaviour_policy_decisions(db)?;
     ensure_behaviour_approvals(db)?;
+    ensure_provider_runtime_events(db)?;
     Ok(())
 }
 
@@ -116,6 +117,31 @@ fn ensure_behaviour_approvals(db: &DbInstance) -> Result<()> {
             approver: String,
             approved: Bool,
             comment: String default "",
+            created_at: String,
+        }"#,
+    )
+}
+
+fn ensure_provider_runtime_events(db: &DbInstance) -> Result<()> {
+    run_create(
+        db,
+        r#":create provider_runtime_events {
+            event_id: String =>
+            provider_id: String,
+            profile_id: String default "",
+            model_id: String default "",
+            runtime_mode: String,
+            event_type: String,
+            severity: String,
+            reason_code: String default "",
+            message: String default "",
+            retry_count: Int default 0,
+            fallback_from: String default "",
+            fallback_to: String default "",
+            request_id: String default "",
+            run_id: String default "",
+            pipeline_id: String default "",
+            raw_redacted_json: String default "{}",
             created_at: String,
         }"#,
     )

@@ -7,5 +7,7 @@ pub mod outcome_signal;
 pub mod policy;
 pub mod proposal;
 pub mod rollback;
+pub mod runtime_events;
+pub mod runtime_models;
 pub mod schema;
 pub mod store;
