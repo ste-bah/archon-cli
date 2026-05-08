@@ -12,6 +12,7 @@ pub mod outcome_signal;
 pub mod permission_runtime_events;
 pub mod policy;
 pub mod proposal;
+pub mod provider_auth_profiles;
 pub mod rollback;
 pub mod runtime_events;
 pub mod runtime_models;

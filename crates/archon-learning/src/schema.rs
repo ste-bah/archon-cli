@@ -25,6 +25,7 @@ pub fn ensure_learning_schema(db: &DbInstance) -> Result<()> {
     ensure_agent_shadow_evaluations(db)?;
     ensure_memory_promotion_candidates(db)?;
     ensure_permission_runtime_events(db)?;
+    ensure_provider_auth_profiles(db)?;
     Ok(())
 }
 
@@ -287,6 +288,29 @@ fn ensure_permission_runtime_events(db: &DbInstance) -> Result<()> {
             sandbox_backend: String default "",
             raw_redacted_json: String default "{}",
             created_at: String,
+        }"#,
+    )
+}
+
+fn ensure_provider_auth_profiles(db: &DbInstance) -> Result<()> {
+    run_create(
+        db,
+        r#":create provider_auth_profiles {
+            profile_id: String =>
+            provider_id: String,
+            auth_kind: String,
+            display_name: String default "",
+            source: String,
+            identity_fingerprint: String default "",
+            created_at: String,
+            updated_at: String,
+            last_used_at: String default "",
+            last_good_at: String default "",
+            last_failed_at: String default "",
+            failure_count: Int default 0,
+            cooldown_until: String default "",
+            disabled_reason: String default "",
+            metadata_redacted_json: String default "{}",
         }"#,
     )
 }
