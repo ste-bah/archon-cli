@@ -38,7 +38,9 @@ pub(crate) fn handle_providers(action: Option<ProvidersAction>) -> Result<()> {
         ProvidersAction::Status { provider } => {
             print!(
                 "{}",
-                crate::command::providers_status::render_provider_status(provider.as_deref())
+                crate::command::providers_status::render_and_persist_provider_status(
+                    provider.as_deref()
+                )
             )
         }
         ProvidersAction::Doctor { live } => print!("{}", render_provider_doctor(live)),

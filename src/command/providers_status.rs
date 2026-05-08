@@ -1,26 +1,51 @@
 use std::collections::HashSet;
 
+use anyhow::Result;
+use archon_learning::provider_runtime_statuses::{
+    ProviderRuntimeStatusSnapshotRecord, insert_provider_runtime_status_snapshot,
+};
 use archon_llm::providers::{AuthFlavor, ProviderDescriptor, list_compat, list_native};
 use archon_llm::runtime::{ProviderHealthStatus, ProviderIdentityStatus, ProviderRuntimeStatus};
+use cozo::DbInstance;
 
 pub(crate) fn render_provider_status(provider_filter: Option<&str>) -> String {
-    render_provider_status_with_env(provider_filter, &ProviderStatusEnv::detect())
+    render_provider_statuses(&local_provider_statuses(
+        provider_filter,
+        &ProviderStatusEnv::detect(),
+    ))
+}
+
+pub(crate) fn render_and_persist_provider_status(provider_filter: Option<&str>) -> String {
+    let statuses = local_provider_statuses(provider_filter, &ProviderStatusEnv::detect());
+    if let Err(error) = persist_provider_status_snapshots(&statuses) {
+        tracing::warn!(%error, "provider status snapshot persistence failed");
+    }
+    render_provider_statuses(&statuses)
 }
 
 fn render_provider_status_with_env(
     provider_filter: Option<&str>,
     env: &ProviderStatusEnv,
 ) -> String {
+    render_provider_statuses(&local_provider_statuses(provider_filter, env))
+}
+
+fn local_provider_statuses(
+    provider_filter: Option<&str>,
+    env: &ProviderStatusEnv,
+) -> Vec<ProviderRuntimeStatus> {
     let mut descriptors = list_native();
     descriptors.extend(list_compat());
     descriptors.sort_by(|a, b| a.id.cmp(&b.id));
 
-    let statuses: Vec<ProviderRuntimeStatus> = descriptors
+    descriptors
         .into_iter()
         .filter(|descriptor| provider_filter.map_or(true, |filter| descriptor.id == filter))
         .map(|descriptor| status_from_descriptor(descriptor, env))
-        .collect();
+        .collect()
+}
 
+fn render_provider_statuses(statuses: &[ProviderRuntimeStatus]) -> String {
     let mut out = String::new();
     out.push_str("Provider runtime status (local configuration)\n\n");
     if statuses.is_empty() {
@@ -43,6 +68,67 @@ fn render_provider_status_with_env(
         "\nThis status is local and redacted; use `archon providers doctor --live` for opt-in endpoint checks.\n",
     );
     out
+}
+
+fn persist_provider_status_snapshots(statuses: &[ProviderRuntimeStatus]) -> Result<()> {
+    if statuses.is_empty() {
+        return Ok(());
+    }
+    let db_path = learning_db_path()?;
+    let db = open_learning_db(&db_path)?;
+    archon_learning::schema::ensure_learning_schema(&db)?;
+    for status in statuses {
+        let record = status_snapshot_record(status);
+        insert_provider_runtime_status_snapshot(&db, &record)?;
+    }
+    Ok(())
+}
+
+fn learning_db_path() -> Result<std::path::PathBuf> {
+    let base = archon_session::storage::default_db_path();
+    let parent = base
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("cannot determine data directory"))?;
+    Ok(parent.join("learning.db"))
+}
+
+fn open_learning_db(path: &std::path::Path) -> Result<DbInstance> {
+    let path_str = path.to_string_lossy().to_string();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    DbInstance::new("sqlite", &path_str, "").map_err(|e| anyhow::anyhow!("open learning db: {e}"))
+}
+
+fn status_snapshot_record(status: &ProviderRuntimeStatus) -> ProviderRuntimeStatusSnapshotRecord {
+    let mut record = ProviderRuntimeStatusSnapshotRecord::new(
+        format!("provider-status-{}", uuid::Uuid::new_v4()),
+        status.provider_id.clone(),
+        status.runtime_mode.clone(),
+        identity_label(status.identity_status),
+        health_label(status.health),
+        chrono::Utc::now().to_rfc3339(),
+    )
+    .with_redacted_metadata(status.metadata_redacted_json.clone());
+    if let Some(display_name) = &status.display_name {
+        record = record.with_display_name(display_name.clone());
+    }
+    if let Some(profile_id) = &status.profile_id {
+        record = record.with_profile(profile_id.clone());
+    }
+    if let Some(model_id) = &status.model_id {
+        record = record.with_model(model_id.clone());
+    }
+    if let Some(last_success_at) = status.last_success_at {
+        record = record.with_last_success(last_success_at.to_rfc3339());
+    }
+    if let Some(last_failure_at) = status.last_failure_at {
+        record = record.with_last_failure(last_failure_at.to_rfc3339());
+    }
+    for limit in &status.rate_limits {
+        record = record.with_rate_limit_id(limit.id.clone());
+    }
+    record
 }
 
 fn status_from_descriptor(
@@ -206,5 +292,26 @@ mod tests {
         let body = render_provider_status_with_env(Some("missing-provider"), &env_with(&[]));
 
         assert!(body.contains("No provider matched"));
+    }
+
+    #[test]
+    fn status_snapshot_record_uses_redacted_status_metadata() {
+        let status = ProviderRuntimeStatus::new("anthropic", "direct")
+            .with_display_name("Anthropic")
+            .with_model("claude-sonnet-4-6")
+            .with_identity_status(ProviderIdentityStatus::Spoof)
+            .with_health(ProviderHealthStatus::Healthy)
+            .with_redacted_json(serde_json::json!({
+                "authorization": "Bearer secret",
+                "safe": "kept"
+            }));
+
+        let record = status_snapshot_record(&status);
+
+        assert_eq!(record.provider_id, "anthropic");
+        assert_eq!(record.identity_status, "spoof");
+        assert_eq!(record.health, "healthy");
+        assert_eq!(record.metadata_redacted_json["authorization"], "[redacted]");
+        assert_eq!(record.metadata_redacted_json["safe"], "kept");
     }
 }
