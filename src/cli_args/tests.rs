@@ -202,6 +202,26 @@ mod agent_evolve_parse_tests {
     }
 
     #[test]
+    fn agent_evolve_generate_parses_agent_filter() {
+        let cli = Cli::try_parse_from([
+            "archon", "agent", "evolve", "generate", "--agent", "reviewer",
+        ])
+        .expect("agent evolve generate must parse");
+
+        match cli.command {
+            Some(Commands::Agent {
+                action:
+                    AgentAction::Evolve {
+                        action: AgentEvolveAction::Generate { agent },
+                    },
+            }) => {
+                assert_eq!(agent, "reviewer");
+            }
+            other => panic!("expected agent evolve generate, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn agent_evolve_permissions_parses_proposal_id() {
         let cli = Cli::try_parse_from([
             "archon",

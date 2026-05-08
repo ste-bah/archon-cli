@@ -202,6 +202,12 @@ pub enum AgentAction {
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum AgentEvolveAction {
+    /// Generate governed proposals from persisted agent performance ledger rows
+    Generate {
+        /// Agent type to scan in the Cozo-backed performance ledger
+        #[arg(long)]
+        agent: String,
+    },
     /// List Cozo-backed agent evolution proposals
     List {
         /// Filter by proposal status, e.g. pending, rejected, approved
