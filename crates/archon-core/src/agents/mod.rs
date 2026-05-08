@@ -5,6 +5,7 @@ pub mod discovery;
 pub mod loader;
 pub mod memory;
 pub mod metadata;
+pub mod permissions_overlay;
 pub mod registry;
 pub mod schema;
 pub mod transcript;
