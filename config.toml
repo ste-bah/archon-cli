@@ -194,6 +194,33 @@ always_ask = []
 
 
 # ----------------------------------------------------------------------------
+# [sandbox] — Execution isolation backend selection
+# ----------------------------------------------------------------------------
+[sandbox]
+# Available backends: "disabled" | "logical" | "docker" | "ssh" | "openshell"
+# Current /sandbox toggle uses the logical policy gate. Docker/SSH/OpenShell are
+# separate isolation backends and are not activated by this flag alone.
+backend = "disabled"
+
+[sandbox.openshell]
+# Detect-only in this release slice. Execution remains disabled until the
+# OpenShell backend is explicitly implemented and audited.
+enabled = false
+binary = "openshell"
+# "mirror" keeps the local workspace canonical; "remote" requires gateway.
+workspace_mode = "mirror"
+# gateway = "team-gateway"
+# policy = "locked-down"
+providers = []
+gpu = false
+# Provider injection stays disabled so Anthropic Claude Code spoofing and other
+# provider routing remain host-side in Archon's LLM runtime.
+provider_injection = false
+# Never fall back to direct host shell when OpenShell activation fails.
+host_shell_fallback = false
+
+
+# ----------------------------------------------------------------------------
 # [context] — Conversation compaction + caching
 # ----------------------------------------------------------------------------
 [context]

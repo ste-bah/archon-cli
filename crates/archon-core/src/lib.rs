@@ -41,6 +41,7 @@ pub mod plan_file;
 pub mod print_mode;
 pub mod reasoning;
 pub mod remote;
+pub mod sandbox;
 pub mod schema_validation;
 pub mod skills;
 pub mod subagent;

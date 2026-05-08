@@ -13,11 +13,30 @@ use archon_tui::app::TuiEvent;
 use crate::command::registry::{CommandContext, CommandHandler};
 
 /// `/sandbox` handler — flips sandbox-enabled shared flag via CommandContext.
-pub(crate) struct SandboxHandler;
+pub(crate) struct SandboxHandler {
+    #[cfg(test)]
+    openshell_doctor_override: Option<(
+        archon_core::sandbox::OpenShellConfig,
+        archon_core::sandbox::OpenShellProbe,
+    )>,
+}
 
 impl SandboxHandler {
     pub(crate) fn new() -> Self {
-        Self
+        Self {
+            #[cfg(test)]
+            openshell_doctor_override: None,
+        }
+    }
+
+    #[cfg(test)]
+    fn with_openshell_doctor(
+        config: archon_core::sandbox::OpenShellConfig,
+        probe: archon_core::sandbox::OpenShellProbe,
+    ) -> Self {
+        Self {
+            openshell_doctor_override: Some((config, probe)),
+        }
     }
 }
 
@@ -42,9 +61,10 @@ impl CommandHandler for SandboxHandler {
             }
             "" | "status" => render_sandbox_status(flag.load(Ordering::SeqCst), verbose),
             "explain" => render_sandbox_explain(flag.load(Ordering::SeqCst)),
+            "doctor" => self.render_sandbox_doctor(&args[1..]),
             other => {
                 return Err(anyhow::anyhow!(
-                    "unknown /sandbox argument '{}': expected on, off, status, or explain",
+                    "unknown /sandbox argument '{}': expected on, off, status, explain, or doctor",
                     other
                 ));
             }
@@ -61,6 +81,68 @@ impl CommandHandler for SandboxHandler {
     fn aliases(&self) -> &'static [&'static str] {
         &["sandbox-toggle"]
     }
+}
+
+impl SandboxHandler {
+    fn render_sandbox_doctor(&self, args: &[String]) -> String {
+        let backend = parse_backend_arg(args).unwrap_or("logical");
+        match backend {
+            "openshell" => self.render_openshell_doctor(),
+            "logical" => {
+                "Sandbox doctor\nBackend: logical\nStatus: available\nIsolation: policy gate only, not OS/container isolation\nExecution: host tool execution remains governed by permission preflight\n".into()
+            }
+            other => format!(
+                "Sandbox doctor\nBackend: {other}\nStatus: not implemented in this build\n"
+            ),
+        }
+    }
+
+    fn render_openshell_doctor(&self) -> String {
+        #[cfg(test)]
+        if let Some((config, probe)) = &self.openshell_doctor_override {
+            let report = archon_core::sandbox::openshell_doctor_report(config, probe.clone());
+            return archon_core::sandbox::render_openshell_doctor_report(&report);
+        }
+
+        let config = match load_openshell_config_without_writing() {
+            Ok(config) => config,
+            Err(error) => {
+                return format!(
+                    "Sandbox doctor\nBackend: openshell\nStatus: config-error\n- {error}\nExecution: disabled\n"
+                );
+            }
+        };
+        let probe = archon_core::sandbox::probe_openshell(&config.binary);
+        let report = archon_core::sandbox::openshell_doctor_report(&config, probe);
+        archon_core::sandbox::render_openshell_doctor_report(&report)
+    }
+}
+
+fn parse_backend_arg(args: &[String]) -> Option<&str> {
+    let mut iter = args.iter().map(String::as_str);
+    while let Some(arg) = iter.next() {
+        match arg {
+            "--backend" => return iter.next(),
+            value if !value.starts_with('-') => return Some(value),
+            _ => {}
+        }
+    }
+    None
+}
+
+fn load_openshell_config_without_writing() -> Result<archon_core::sandbox::OpenShellConfig, String>
+{
+    let path = archon_core::config::default_config_path();
+    if !path.exists() {
+        return Ok(archon_core::sandbox::OpenShellConfig::default());
+    }
+    archon_core::config::load_config_if_exists(path)
+        .map(|config| {
+            config
+                .map(|config| config.sandbox.openshell)
+                .unwrap_or_default()
+        })
+        .map_err(|error| error.to_string())
 }
 
 fn render_sandbox_status(enabled: bool, verbose: bool) -> String {
@@ -222,6 +304,61 @@ mod tests {
                 assert!(s.contains("State: OFF"));
                 assert!(s.contains("does not bypass permission modes"));
                 assert!(s.contains("Docker, SSH, and OpenShell"));
+            }
+            other => panic!("expected TextDelta, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn sandbox_doctor_openshell_reports_detect_only_status() {
+        let flag = Arc::new(AtomicBool::new(false));
+        let handler = SandboxHandler::with_openshell_doctor(
+            archon_core::sandbox::OpenShellConfig {
+                enabled: true,
+                ..archon_core::sandbox::OpenShellConfig::default()
+            },
+            archon_core::sandbox::OpenShellProbe::found("openshell 1.2.3"),
+        );
+        let (mut ctx, mut rx) = make_bug_ctx();
+        ctx.sandbox_flag = Some(flag);
+        handler
+            .execute(
+                &mut ctx,
+                &[
+                    String::from("doctor"),
+                    String::from("--backend"),
+                    String::from("openshell"),
+                ],
+            )
+            .unwrap();
+
+        let events = drain_tui_events(&mut rx);
+        match &events[0] {
+            TuiEvent::TextDelta(s) => {
+                assert!(s.contains("Backend: openshell"));
+                assert!(s.contains("ready-detect-only"));
+                assert!(s.contains("Execution: disabled"));
+                assert!(s.contains("Anthropic spoofing remains host-side"));
+            }
+            other => panic!("expected TextDelta, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn sandbox_doctor_logical_reports_policy_gate_only() {
+        let flag = Arc::new(AtomicBool::new(false));
+        let handler = SandboxHandler::new();
+        let (mut ctx, mut rx) = make_bug_ctx();
+        ctx.sandbox_flag = Some(flag);
+        handler
+            .execute(&mut ctx, &[String::from("doctor")])
+            .unwrap();
+
+        let events = drain_tui_events(&mut rx);
+        match &events[0] {
+            TuiEvent::TextDelta(s) => {
+                assert!(s.contains("Backend: logical"));
+                assert!(s.contains("policy gate only"));
             }
             other => panic!("expected TextDelta, got {:?}", other),
         }

@@ -66,6 +66,9 @@ pub struct ArchonConfig {
     /// Web UI configuration.
     #[serde(default)]
     pub web: WebConfig,
+    /// Sandbox backend configuration.
+    #[serde(default)]
+    pub sandbox: crate::sandbox::SandboxConfig,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -941,6 +944,11 @@ pub fn validate(config: &ArchonConfig) -> Result<(), ConfigError> {
         )));
     }
 
+    config
+        .sandbox
+        .validate()
+        .map_err(ConfigError::ValidationError)?;
+
     // context.compact_threshold
     if !(0.0..=1.0).contains(&config.context.compact_threshold) {
         return Err(ConfigError::ValidationError(format!(
@@ -1008,6 +1016,18 @@ pub fn load_config_from(path: PathBuf) -> Result<ArchonConfig, ConfigError> {
     let config: ArchonConfig = toml::from_str(&content)?;
     validate(&config)?;
     Ok(config)
+}
+
+/// Load configuration from an existing path without creating a default file.
+pub fn load_config_if_exists(path: PathBuf) -> Result<Option<ArchonConfig>, ConfigError> {
+    if !path.exists() {
+        return Ok(None);
+    }
+
+    let content = fs::read_to_string(&path)?;
+    let config: ArchonConfig = toml::from_str(&content)?;
+    validate(&config)?;
+    Ok(Some(config))
 }
 
 /// GHOST-008: persist `voice.enabled` to the HOME config file.
