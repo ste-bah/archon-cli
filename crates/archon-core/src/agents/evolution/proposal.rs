@@ -169,6 +169,12 @@ impl AgentEvolutionProposal {
         self.escalate_risk(AgentEvolutionRiskLevel::High)
     }
 
+    pub fn with_risk_level(mut self, risk_level: AgentEvolutionRiskLevel) -> Self {
+        self.risk_level = risk_level;
+        self.policy_decision = AgentEvolutionPolicyDecision::initial_for_risk(risk_level);
+        self
+    }
+
     pub fn requires_approval(&self) -> bool {
         self.risk_level.requires_approval()
             || self.policy_decision == AgentEvolutionPolicyDecision::PendingApproval
@@ -246,6 +252,25 @@ mod tests {
         assert_eq!(
             proposal.policy_decision,
             AgentEvolutionPolicyDecision::PendingApproval
+        );
+    }
+
+    #[test]
+    fn explicit_risk_level_recomputes_policy_decision() {
+        let proposal = AgentEvolutionProposal::new(
+            "verifier",
+            "agentv-4",
+            "agentv-5",
+            AgentEvolutionProposalKind::ToolAccessProfile,
+            "- disallow risky tool",
+            "Reduce blast radius",
+        )
+        .with_risk_level(AgentEvolutionRiskLevel::Medium);
+
+        assert_eq!(proposal.risk_level, AgentEvolutionRiskLevel::Medium);
+        assert_eq!(
+            proposal.policy_decision,
+            AgentEvolutionPolicyDecision::EligibleForAutoApply
         );
     }
 
