@@ -19,6 +19,7 @@ pub fn ensure_learning_schema(db: &DbInstance) -> Result<()> {
     ensure_behaviour_policy_decisions(db)?;
     ensure_behaviour_approvals(db)?;
     ensure_provider_runtime_events(db)?;
+    ensure_agent_performance_ledger(db)?;
     Ok(())
 }
 
@@ -142,6 +143,37 @@ fn ensure_provider_runtime_events(db: &DbInstance) -> Result<()> {
             run_id: String default "",
             pipeline_id: String default "",
             raw_redacted_json: String default "{}",
+            created_at: String,
+        }"#,
+    )
+}
+
+fn ensure_agent_performance_ledger(db: &DbInstance) -> Result<()> {
+    run_create(
+        db,
+        r#":create agent_performance_ledger {
+            event_id: String =>
+            agent_type: String,
+            agent_version: String default "",
+            run_id: String default "",
+            pipeline_id: String default "",
+            phase: String default "",
+            task_hash: String default "",
+            model_id: String default "",
+            provider_id: String default "",
+            profile_id: String default "",
+            permission_mode: String default "",
+            completion_status: String,
+            applied_rate: Float default -1.0,
+            completion_rate: Float default -1.0,
+            quality_score: Float default -1.0,
+            l_score: Float default -1.0,
+            user_accepted: String default "",
+            user_corrected: String default "",
+            gate_failed: String default "",
+            test_failed: Bool default false,
+            provider_incident_id: String default "",
+            evidence_ids_json: String default "[]",
             created_at: String,
         }"#,
     )

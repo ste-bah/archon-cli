@@ -1,3 +1,4 @@
+pub mod agent_evolution_ledger;
 pub mod apply;
 pub mod errors;
 pub mod events;
