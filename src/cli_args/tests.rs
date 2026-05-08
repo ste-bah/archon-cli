@@ -281,6 +281,27 @@ mod agent_evolve_parse_tests {
     }
 
     #[test]
+    fn agent_evolve_active_parses_json_flag() {
+        let cli = Cli::try_parse_from([
+            "archon", "agent", "evolve", "active", "--agent", "reviewer", "--json",
+        ])
+        .expect("agent evolve active must parse");
+
+        match cli.command {
+            Some(Commands::Agent {
+                action:
+                    AgentAction::Evolve {
+                        action: AgentEvolveAction::Active { agent, json },
+                    },
+            }) => {
+                assert_eq!(agent, "reviewer");
+                assert!(json);
+            }
+            other => panic!("expected agent evolve active, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn agent_evolve_rollback_parses_agent_and_activation() {
         let cli = Cli::try_parse_from([
             "archon",

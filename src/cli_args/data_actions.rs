@@ -202,6 +202,15 @@ pub enum AgentAction {
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum AgentEvolveAction {
+    /// Show the active governed profile version for an agent
+    Active {
+        /// Agent type to inspect
+        #[arg(long)]
+        agent: String,
+        /// Output the full Cozo record as JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Apply an approved proposal into a governed profile version
     Apply {
         /// Agent evolution proposal ID

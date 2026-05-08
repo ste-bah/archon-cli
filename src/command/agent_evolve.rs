@@ -21,6 +21,7 @@ pub(crate) async fn handle_agent_command(
 
 fn handle_evolve_action(db: &DbInstance, action: &AgentEvolveAction) -> Result<()> {
     match action {
+        AgentEvolveAction::Active { agent, json } => cmd_show_active_profile(db, agent, *json),
         AgentEvolveAction::Apply {
             proposal_id,
             activate,
@@ -87,6 +88,41 @@ fn cmd_generate_agent_evolution(db: &DbInstance, agent_type: &str) -> Result<()>
             risk_level_str(proposal.risk_level),
             proposal.expected_impact
         );
+    }
+    Ok(())
+}
+
+fn cmd_show_active_profile(db: &DbInstance, agent_type: &str, json: bool) -> Result<()> {
+    let active =
+        archon_learning::agent_profile_versions::get_active_agent_profile_version(db, agent_type)?;
+    let Some(active) = active else {
+        println!("No active governed profile version found for agent: {agent_type}");
+        return Ok(());
+    };
+    if json {
+        println!("{}", serde_json::to_string_pretty(&active)?);
+    } else {
+        println!("Agent:       {}", active.agent_type);
+        println!("Version:     {}", active.version_id);
+        println!("Version no:  {}", active.version_number);
+        println!("Source:      {}", active.source);
+        println!(
+            "Proposal:    {}",
+            active.created_by_proposal_id.as_deref().unwrap_or("-")
+        );
+        println!(
+            "Parent:      {}",
+            active.parent_version_id.as_deref().unwrap_or("-")
+        );
+        println!(
+            "Rollback:    {}",
+            if active.is_rollback_target {
+                "yes"
+            } else {
+                "no"
+            }
+        );
+        println!("Created:     {}", active.created_at);
     }
     Ok(())
 }
