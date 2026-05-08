@@ -4,15 +4,19 @@ use archon_permissions::mode::{PermissionDecision, PermissionMode};
 use super::*;
 
 impl Agent {
-    pub(super) fn permission_rule_decision(
+    pub(super) fn permission_checker_decision(
         &self,
         raw_mode: &str,
         tool_name: &str,
         tool_args: &str,
-    ) -> Option<PermissionDecision> {
+        description: &str,
+    ) -> PermissionDecision {
         let mode = raw_mode.parse::<PermissionMode>().unwrap_or_default();
-        PermissionChecker::new(mode, self.config.permission_rules.clone())
-            .check_rule_decision(tool_name, tool_args)
+        PermissionChecker::new(mode, self.config.permission_rules.clone()).check(
+            tool_name,
+            description,
+            tool_args,
+        )
     }
 
     pub(super) async fn request_tool_permission(
@@ -173,6 +177,34 @@ mod tests {
             pattern: "*".to_string(),
         });
         let mut agent = agent_with_rules("bypassPermissions", rules);
+        let pending = [PendingToolCall {
+            id: "tool-1".to_string(),
+            name: "Bash".to_string(),
+            input_json: r#"{"command":"cargo test"}"#.to_string(),
+        }];
+
+        let allowed = agent.preflight_tools(&pending, AgentMode::Normal).await;
+
+        assert!(allowed.is_empty());
+        let tool_result = &agent.state.messages[0]["content"][0];
+        assert_eq!(tool_result["tool_use_id"], "tool-1");
+        assert_eq!(tool_result["is_error"], true);
+        assert!(
+            tool_result["content"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("Blocked by deny rule")
+        );
+    }
+
+    #[tokio::test]
+    async fn preflight_deny_rule_blocks_dont_ask_mode() {
+        let mut rules = RuleSet::empty();
+        rules.always_deny.push(ToolRule {
+            tool: "Bash".to_string(),
+            pattern: "*".to_string(),
+        });
+        let mut agent = agent_with_rules("dontAsk", rules);
         let pending = [PendingToolCall {
             id: "tool-1".to_string(),
             name: "Bash".to_string(),

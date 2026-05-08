@@ -12,8 +12,22 @@ const PLAN_MODE_WHITELIST: &[&str] = &[
     "Agent",
 ];
 
-/// Tools auto-allowed in AcceptEdits mode (file operations + search).
-const ACCEPT_EDITS_WHITELIST: &[&str] = &["Read", "Write", "Edit", "Glob", "Grep"];
+/// Tools auto-allowed in AcceptEdits mode (file operations + safe session tools).
+const ACCEPT_EDITS_WHITELIST: &[&str] = &[
+    "Read",
+    "Write",
+    "Edit",
+    "Glob",
+    "Grep",
+    "ToolSearch",
+    "AskUserQuestion",
+    "TodoWrite",
+    "Sleep",
+    "Config",
+    "EnterPlanMode",
+    "ExitPlanMode",
+    "NotebookEdit",
+];
 
 /// Tools that are safe (read-only or coordination) and auto-allowed in Default mode.
 ///
@@ -249,6 +263,20 @@ mod tests {
             checker.check("Edit", "edit file", ""),
             PermissionDecision::NeedsPermission(_)
         ));
+    }
+
+    #[test]
+    fn accept_edits_preserves_session_tool_allowlist() {
+        let checker = PermissionChecker::new(PermissionMode::AcceptEdits, RuleSet::empty());
+
+        assert_eq!(
+            checker.check("Config", "read config", ""),
+            PermissionDecision::Allow
+        );
+        assert_eq!(
+            checker.check("NotebookEdit", "edit notebook", ""),
+            PermissionDecision::Allow
+        );
     }
 
     #[test]
