@@ -222,6 +222,35 @@ mod agent_evolve_parse_tests {
     }
 
     #[test]
+    fn agent_evolve_review_state_commands_parse() {
+        let approve =
+            Cli::try_parse_from(["archon", "agent", "evolve", "approve", "agent-evo-prop-1"])
+                .expect("agent evolve approve must parse");
+        let reject =
+            Cli::try_parse_from(["archon", "agent", "evolve", "reject", "agent-evo-prop-1"])
+                .expect("agent evolve reject must parse");
+
+        match approve.command {
+            Some(Commands::Agent {
+                action:
+                    AgentAction::Evolve {
+                        action: AgentEvolveAction::Approve { proposal_id },
+                    },
+            }) => assert_eq!(proposal_id, "agent-evo-prop-1"),
+            other => panic!("expected agent evolve approve, got {other:?}"),
+        }
+        match reject.command {
+            Some(Commands::Agent {
+                action:
+                    AgentAction::Evolve {
+                        action: AgentEvolveAction::Reject { proposal_id },
+                    },
+            }) => assert_eq!(proposal_id, "agent-evo-prop-1"),
+            other => panic!("expected agent evolve reject, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn agent_evolve_permissions_parses_proposal_id() {
         let cli = Cli::try_parse_from([
             "archon",

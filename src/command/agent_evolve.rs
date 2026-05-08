@@ -21,11 +21,17 @@ pub(crate) async fn handle_agent_command(
 
 fn handle_evolve_action(db: &DbInstance, action: &AgentEvolveAction) -> Result<()> {
     match action {
+        AgentEvolveAction::Approve { proposal_id } => {
+            cmd_update_proposal_status(db, proposal_id, "approved")
+        }
         AgentEvolveAction::Generate { agent } => cmd_generate_agent_evolution(db, agent),
         AgentEvolveAction::List { status, agent } => {
             cmd_list_agent_evolution(db, status.as_deref(), agent.as_deref())
         }
         AgentEvolveAction::Permissions { proposal_id } => cmd_show_permission_diff(db, proposal_id),
+        AgentEvolveAction::Reject { proposal_id } => {
+            cmd_update_proposal_status(db, proposal_id, "rejected")
+        }
     }
 }
 
@@ -165,6 +171,24 @@ fn cmd_show_permission_diff(db: &DbInstance, proposal_id: &str) -> Result<()> {
     if !proposal.evidence_ids.is_empty() {
         println!("\nEvidence: {}", proposal.evidence_ids.join(", "));
     }
+    Ok(())
+}
+
+fn cmd_update_proposal_status(db: &DbInstance, proposal_id: &str, status: &str) -> Result<()> {
+    let proposal =
+        archon_learning::agent_evolution_proposals::update_agent_evolution_proposal_status(
+            db,
+            proposal_id,
+            status,
+        )?;
+    println!(
+        "Proposal {} marked {}. Agent={} kind={} risk={}",
+        proposal.proposal_id,
+        proposal.status,
+        proposal.agent_type,
+        proposal.kind,
+        proposal.risk_level
+    );
     Ok(())
 }
 

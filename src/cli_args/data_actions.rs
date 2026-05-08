@@ -202,6 +202,11 @@ pub enum AgentAction {
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum AgentEvolveAction {
+    /// Mark an agent evolution proposal as approved for later apply
+    Approve {
+        /// Agent evolution proposal ID
+        proposal_id: String,
+    },
     /// Generate governed proposals from persisted agent performance ledger rows
     Generate {
         /// Agent type to scan in the Cozo-backed performance ledger
@@ -219,6 +224,11 @@ pub enum AgentEvolveAction {
     },
     /// Show permission-impact details for one proposal
     Permissions {
+        /// Agent evolution proposal ID
+        proposal_id: String,
+    },
+    /// Reject an agent evolution proposal
+    Reject {
         /// Agent evolution proposal ID
         proposal_id: String,
     },

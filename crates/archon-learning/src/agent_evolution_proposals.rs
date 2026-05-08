@@ -194,6 +194,18 @@ pub fn list_agent_evolution_proposals(
     Ok(proposals)
 }
 
+pub fn update_agent_evolution_proposal_status(
+    db: &DbInstance,
+    proposal_id: &str,
+    status: &str,
+) -> Result<AgentEvolutionProposalRecord> {
+    let mut proposal = get_agent_evolution_proposal(db, proposal_id)?
+        .ok_or_else(|| anyhow::anyhow!("agent evolution proposal not found: {proposal_id}"))?;
+    proposal.status = status.to_string();
+    insert_agent_evolution_proposal(db, &proposal)?;
+    Ok(proposal)
+}
+
 fn proposal_put_script() -> &'static str {
     "?[proposal_id, agent_type, current_version, proposed_version, kind, \
      diff, evidence_ids_json, risk_level, policy_decision, status, \
@@ -346,5 +358,32 @@ mod tests {
         assert_eq!(all[0].proposal_id, "agent-evo-prop-2");
         assert_eq!(rejected.len(), 1);
         assert!(rejected[0].affects_permissions);
+    }
+
+    #[test]
+    fn agent_evolution_proposal_status_updates() {
+        let db = test_db();
+        insert_agent_evolution_proposal(
+            &db,
+            &AgentEvolutionProposalRecord::new(
+                "agent-evo-prop-1",
+                "planner",
+                "agentv-1",
+                "agentv-2",
+                "model_profile",
+                "2026-05-08T12:00:00Z",
+            ),
+        )
+        .unwrap();
+
+        let updated =
+            update_agent_evolution_proposal_status(&db, "agent-evo-prop-1", "approved").unwrap();
+        let restored = get_agent_evolution_proposal(&db, "agent-evo-prop-1")
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(updated.status, "approved");
+        assert_eq!(restored.status, "approved");
+        assert_eq!(restored.kind, "model_profile");
     }
 }
