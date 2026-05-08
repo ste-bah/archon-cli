@@ -2,6 +2,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use super::redaction::redact_provider_metadata;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProviderRuntimeEventType {
@@ -129,7 +131,7 @@ impl ProviderRuntimeEvent {
     }
 
     pub fn with_redacted_json(mut self, value: Value) -> Self {
-        self.raw_redacted_json = value;
+        self.raw_redacted_json = redact_provider_metadata(value);
         self
     }
 }
@@ -179,5 +181,27 @@ mod tests {
         assert_eq!(event.fallback_to.as_deref(), Some("direct"));
         assert_eq!(event.retry_count, Some(1));
         assert!(event.event_id.starts_with("provider-event-"));
+    }
+
+    #[test]
+    fn event_metadata_redacts_sensitive_values() {
+        let event = ProviderRuntimeEvent::new(
+            "anthropic",
+            "direct",
+            ProviderRuntimeEventType::RequestStarted,
+            ProviderRuntimeSeverity::Debug,
+        )
+        .with_redacted_json(json!({
+            "authorization": "Bearer secret",
+            "safe": "visible",
+            "nested": {"refresh_token": "secret"}
+        }));
+
+        assert_eq!(event.raw_redacted_json["authorization"], "[redacted]");
+        assert_eq!(event.raw_redacted_json["safe"], "visible");
+        assert_eq!(
+            event.raw_redacted_json["nested"]["refresh_token"],
+            "[redacted]"
+        );
     }
 }

@@ -2,6 +2,7 @@ pub mod events;
 pub mod fallback;
 pub mod profile;
 pub mod rate_limits;
+pub mod redaction;
 pub mod status;
 pub mod supervisor;
 
@@ -18,5 +19,6 @@ pub use profile::{
     ordered_profiles_for_selection,
 };
 pub use rate_limits::{ProviderRateLimitWindow, RateLimitWindowKind, rate_limit_window_id};
+pub use redaction::redact_provider_metadata;
 pub use status::{ProviderHealthStatus, ProviderIdentityStatus, ProviderRuntimeStatus};
 pub use supervisor::{ProviderRuntimeSupervisor, ProviderRuntimeSupervisorError};

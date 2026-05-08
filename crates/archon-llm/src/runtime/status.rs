@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::rate_limits::ProviderRateLimitWindow;
+use super::redaction::redact_provider_metadata;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -97,7 +98,7 @@ impl ProviderRuntimeStatus {
     }
 
     pub fn with_redacted_json(mut self, value: Value) -> Self {
-        self.metadata_redacted_json = value;
+        self.metadata_redacted_json = redact_provider_metadata(value);
         self
     }
 
@@ -168,5 +169,16 @@ mod tests {
 
         assert_eq!(value["identity_status"], "spoof");
         assert_eq!(value["metadata_redacted_json"]["spoof_reason"], "oauth");
+    }
+
+    #[test]
+    fn status_metadata_redacts_sensitive_values() {
+        let status = ProviderRuntimeStatus::new("openai", "direct").with_redacted_json(json!({
+            "api_key": "secret",
+            "region": "us-east-1"
+        }));
+
+        assert_eq!(status.metadata_redacted_json["api_key"], "[redacted]");
+        assert_eq!(status.metadata_redacted_json["region"], "us-east-1");
     }
 }
