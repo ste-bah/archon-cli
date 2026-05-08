@@ -3,6 +3,7 @@ pub mod fallback;
 pub mod profile;
 pub mod rate_limits;
 pub mod status;
+pub mod supervisor;
 
 pub use events::{
     ProviderRuntimeEvent, ProviderRuntimeEventType, ProviderRuntimeSeverity,
@@ -18,3 +19,4 @@ pub use profile::{
 };
 pub use rate_limits::{ProviderRateLimitWindow, RateLimitWindowKind, rate_limit_window_id};
 pub use status::{ProviderHealthStatus, ProviderIdentityStatus, ProviderRuntimeStatus};
+pub use supervisor::{ProviderRuntimeSupervisor, ProviderRuntimeSupervisorError};
