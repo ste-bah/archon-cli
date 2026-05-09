@@ -29,4 +29,6 @@ pub use strategy_actions::{
 #[cfg(test)]
 mod permissions_parse_tests;
 #[cfg(test)]
+mod sandbox_parse_tests;
+#[cfg(test)]
 mod tests;

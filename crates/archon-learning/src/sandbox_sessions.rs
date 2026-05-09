@@ -181,6 +181,19 @@ pub fn list_sandbox_sessions_by_status(
     Ok(sessions)
 }
 
+pub fn list_sandbox_sessions(db: &DbInstance) -> Result<Vec<SandboxSessionRecord>> {
+    let result = db
+        .run_script(
+            session_query("all"),
+            Default::default(),
+            ScriptMutability::Immutable,
+        )
+        .map_err(|e| anyhow::anyhow!("list sandbox_sessions failed: {e}"))?;
+    let mut sessions: Vec<_> = result.rows.iter().map(|row| row_to_session(row)).collect();
+    sessions.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+    Ok(sessions)
+}
+
 fn session_put_script() -> &'static str {
     "?[sandbox_session_id, backend_kind, sandbox_profile_id, run_id, \
      agent_type, backend_instance_id, workspace_mode, canonical_workspace, \
@@ -205,6 +218,16 @@ fn session_query(predicate: &'static str) -> &'static str {
              agent_type, backend_instance_id, workspace_mode, canonical_workspace, \
              transport_kind, transport_endpoint_redacted, provider_injection_enabled, \
              status, created_at, updated_at}, sandbox_session_id = $sid"
+        }
+        "all" => {
+            "?[sandbox_session_id, backend_kind, sandbox_profile_id, run_id, \
+             agent_type, backend_instance_id, workspace_mode, canonical_workspace, \
+             transport_kind, transport_endpoint_redacted, provider_injection_enabled, \
+             status, created_at, updated_at] := *sandbox_sessions{ \
+             sandbox_session_id, backend_kind, sandbox_profile_id, run_id, \
+             agent_type, backend_instance_id, workspace_mode, canonical_workspace, \
+             transport_kind, transport_endpoint_redacted, provider_injection_enabled, \
+             status, created_at, updated_at}"
         }
         _ => {
             "?[sandbox_session_id, backend_kind, sandbox_profile_id, run_id, \
@@ -275,6 +298,7 @@ mod tests {
             .unwrap()
             .unwrap();
         let listed = list_sandbox_sessions_by_status(&db, "active").unwrap();
+        let all = list_sandbox_sessions(&db).unwrap();
 
         assert_eq!(restored.backend_kind, "openshell");
         assert_eq!(restored.workspace_mode.as_deref(), Some("mirror"));
@@ -284,5 +308,6 @@ mod tests {
         );
         assert!(!restored.provider_injection_enabled);
         assert_eq!(listed.len(), 1);
+        assert_eq!(all.len(), 1);
     }
 }

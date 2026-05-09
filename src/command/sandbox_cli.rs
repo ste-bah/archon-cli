@@ -46,6 +46,16 @@ pub(crate) fn handle_sandbox_command(
             );
             output
         }
+        SandboxAction::Sessions {
+            status,
+            agent,
+            limit,
+            json,
+        } => {
+            let output = render_sessions(status.as_deref(), agent.as_deref(), limit, json)?;
+            persist_sandbox_command_event(&config.sandbox, None, "sessions", "cli_sessions");
+            output
+        }
     };
     print!("{output}");
     Ok(())
@@ -196,6 +206,10 @@ fn list_or_none(values: &[String]) -> String {
     }
 }
 
+fn yes_no(value: bool) -> &'static str {
+    if value { "yes" } else { "no" }
+}
+
 fn render_test(
     config: &archon_core::sandbox::SandboxConfig,
     backend: Option<String>,
@@ -216,6 +230,75 @@ fn doctor_args(backend: Option<String>) -> Vec<String> {
         Some(backend) => vec!["--backend".into(), backend],
         None => Vec::new(),
     }
+}
+
+fn render_sessions(
+    status: Option<&str>,
+    agent_filter: Option<&str>,
+    limit: usize,
+    json: bool,
+) -> Result<String> {
+    let db_path = learning_db_path()?;
+    let db = open_learning_db(&db_path)?;
+    archon_learning::schema::ensure_learning_schema(&db)?;
+    let mut sessions = if let Some(status) = status.filter(|value| !value.trim().is_empty()) {
+        archon_learning::sandbox_sessions::list_sandbox_sessions_by_status(&db, status)?
+    } else {
+        archon_learning::sandbox_sessions::list_sandbox_sessions(&db)?
+    };
+    if let Some(agent) = agent_filter.filter(|value| !value.trim().is_empty()) {
+        sessions.retain(|session| session.agent_type.as_deref() == Some(agent));
+    }
+    sessions.truncate(limit);
+
+    if json {
+        return Ok(format!("{}\n", serde_json::to_string_pretty(&sessions)?));
+    }
+    if sessions.is_empty() {
+        return Ok("No sandbox sessions found.\n".into());
+    }
+    Ok(render_sessions_table(&sessions))
+}
+
+fn render_sessions_table(
+    sessions: &[archon_learning::sandbox_sessions::SandboxSessionRecord],
+) -> String {
+    let mut output = String::from(
+        "Sandbox sessions (Cozo)\n\nsession_id                           backend    status      agent              workspace  transport  provider_injection\n",
+    );
+    for session in sessions {
+        output.push_str(&format!(
+            "{:<36} {:<10} {:<11} {:<18} {:<10} {:<10} {}\n",
+            session.sandbox_session_id,
+            session.backend_kind,
+            session.status,
+            session.agent_type.as_deref().unwrap_or("-"),
+            session.workspace_mode.as_deref().unwrap_or("-"),
+            session.transport_kind.as_deref().unwrap_or("-"),
+            yes_no(session.provider_injection_enabled)
+        ));
+    }
+    output.push_str(
+        "\nProvider credentials and generated memory stores are redacted by sandbox audit policy.\n",
+    );
+    output
+}
+
+fn learning_db_path() -> Result<std::path::PathBuf> {
+    let base = archon_session::storage::default_db_path();
+    let parent = base
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("cannot determine data directory"))?;
+    Ok(parent.join("learning.db"))
+}
+
+fn open_learning_db(path: &std::path::Path) -> Result<cozo::DbInstance> {
+    let path_str = path.to_string_lossy().to_string();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    cozo::DbInstance::new("sqlite", &path_str, "")
+        .map_err(|e| anyhow::anyhow!("open learning db: {e}"))
 }
 
 fn persist_sandbox_command_event(
@@ -337,5 +420,26 @@ mod tests {
 
         assert!(body.contains("Backend: openshell"));
         assert!(body.contains("no untrusted command was run"));
+    }
+
+    #[test]
+    fn sandbox_sessions_render_redacted_audit_rows() {
+        let session = archon_learning::sandbox_sessions::SandboxSessionRecord::new(
+            "sandbox-session-1",
+            "openshell",
+            "sandbox-profile-1",
+            "configured",
+            "2026-05-08T12:00:00Z",
+        )
+        .with_run_context(Some("run-1".into()), Some("reviewer".into()))
+        .with_workspace(Some("mirror".into()), Some("local".into()))
+        .with_transport(Some("openshell".into()), Some("gateway/[redacted]".into()));
+
+        let body = render_sessions_table(&[session]);
+
+        assert!(body.contains("sandbox-session-1"));
+        assert!(body.contains("openshell"));
+        assert!(body.contains("provider_injection"));
+        assert!(body.contains("memory stores are redacted"));
     }
 }

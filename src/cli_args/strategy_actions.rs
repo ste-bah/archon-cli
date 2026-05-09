@@ -99,6 +99,21 @@ pub enum SandboxAction {
         #[arg(long)]
         backend: Option<String>,
     },
+    /// List audited sandbox sessions from the Cozo learning store
+    Sessions {
+        /// Filter by sandbox session status, e.g. configured
+        #[arg(long)]
+        status: Option<String>,
+        /// Filter by agent type
+        #[arg(long)]
+        agent: Option<String>,
+        /// Maximum rows to show
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+        /// Output session rows as JSON
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
