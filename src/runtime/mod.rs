@@ -9,6 +9,7 @@ pub(crate) mod codex_app_server;
 pub(crate) mod codex_provider;
 pub(crate) mod codex_strategy;
 pub(crate) mod llm;
+pub(crate) mod llm_non_anthropic;
 pub(crate) mod permission_events;
 pub(crate) mod provider_auth_selection;
 pub(crate) mod provider_event_record;

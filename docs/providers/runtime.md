@@ -24,6 +24,12 @@ markers, and reports explicit reasons such as `cooldown`, `disabled`, or
 `auth-kind-mismatch`. Runtime request events include the selected profile id
 when one is known.
 
+OpenAI, Bedrock, Vertex, local, and OpenAI-compatible providers can be
+constructed by the shared runtime router without first requiring Anthropic
+credentials. If their own construction fails, Archon may still attempt the
+legacy Anthropic fallback where that compatibility path is available, and the
+fallback is recorded as a provider runtime event.
+
 ## Status And Limits
 
 ```bash

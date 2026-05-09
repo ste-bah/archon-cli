@@ -65,6 +65,7 @@ use archon_llm::providers::{
 };
 use archon_llm::{ActiveProvider, LlmConfig as FlatLlmConfig};
 
+use crate::runtime::llm_non_anthropic::build_llm_provider_without_anthropic_fallback;
 use crate::runtime::provider_observer::{
     observe_llm_provider_with_profile, record_provider_fallback, runtime_mode_for_provider_name,
 };
@@ -87,6 +88,31 @@ pub(crate) async fn build_configured_llm_provider(
             runtime_mode,
             profile_id,
         ));
+    }
+
+    if config.llm.provider != "anthropic" {
+        match build_llm_provider_without_anthropic_fallback(&config.llm) {
+            Ok(provider) => {
+                let selected_provider = provider.name().to_string();
+                let runtime_mode = runtime_mode_for_provider_name(&selected_provider);
+                let profile_id =
+                    crate::runtime::provider_auth_selection::selected_provider_auth_profile_id(
+                        &selected_provider,
+                    );
+                return Ok(observe_llm_provider_with_profile(
+                    provider,
+                    runtime_mode,
+                    profile_id,
+                ));
+            }
+            Err(provider_error) => {
+                tracing::warn!(
+                    provider = %config.llm.provider,
+                    error = %provider_error,
+                    "provider construction failed before Anthropic fallback"
+                );
+            }
+        }
     }
 
     let auth = resolve_auth_with_keys(
@@ -341,6 +367,47 @@ mod tests {
         // LocalProvider::name() returns "local" (verified in
         // crates/archon-llm/src/providers/local.rs ~line 227).
         assert_eq!(provider.name(), "local");
+    }
+
+    #[test]
+    fn local_provider_constructs_without_anthropic_fallback_client() {
+        let cfg = LlmConfig {
+            provider: "local".to_string(),
+            ..Default::default()
+        };
+
+        let provider = build_llm_provider_without_anthropic_fallback(&cfg).unwrap();
+
+        assert_eq!(provider.name(), "local");
+    }
+
+    #[test]
+    fn openai_missing_key_errors_without_anthropic_fallback_client() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let prev = std::env::var("OPENAI_API_KEY").ok();
+        unsafe {
+            std::env::remove_var("OPENAI_API_KEY");
+        }
+        let mut cfg = LlmConfig {
+            provider: "openai".to_string(),
+            ..Default::default()
+        };
+        cfg.openai.api_key = None;
+
+        let error = match build_llm_provider_without_anthropic_fallback(&cfg) {
+            Ok(provider) => panic!(
+                "expected missing-key error, built provider {}",
+                provider.name()
+            ),
+            Err(error) => error.to_string(),
+        };
+
+        assert!(error.contains("OpenAI selected but no API key found"));
+        if let Some(v) = prev {
+            unsafe {
+                std::env::set_var("OPENAI_API_KEY", v);
+            }
+        }
     }
 
     #[test]
