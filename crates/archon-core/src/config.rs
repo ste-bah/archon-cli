@@ -82,6 +82,9 @@ pub struct ProvidersConfig {
 #[serde(default)]
 pub struct CodexProviderConfig {
     pub enabled: bool,
+    pub runtime: String,
+    pub direct_fallback: bool,
+    pub app_server_discovery_timeout_ms: u64,
     pub spoof: CodexSpoofPartialConfig,
     pub manifest: CodexManifestConfig,
 }
@@ -90,6 +93,9 @@ impl Default for CodexProviderConfig {
     fn default() -> Self {
         Self {
             enabled: true,
+            runtime: "direct".into(),
+            direct_fallback: false,
+            app_server_discovery_timeout_ms: 2_500,
             spoof: CodexSpoofPartialConfig::default(),
             manifest: CodexManifestConfig::default(),
         }

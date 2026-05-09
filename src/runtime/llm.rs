@@ -52,7 +52,7 @@
 
 use std::sync::Arc;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use archon_core::config::{ArchonConfig, LlmConfig};
 use archon_core::env_vars::ArchonEnvVars;
 use archon_llm::anthropic::AnthropicClient;
@@ -77,8 +77,9 @@ pub(crate) async fn build_configured_llm_provider(
     origin: &str,
 ) -> Result<Arc<dyn LlmProvider>> {
     if config.llm.provider == "openai-codex" {
-        let provider = build_codex_provider(config).await?;
-        return Ok(observe_llm_provider(provider, "auto"));
+        let (provider, runtime_mode) =
+            crate::runtime::codex_provider::build_codex_provider(config, origin).await?;
+        return Ok(observe_llm_provider(provider, runtime_mode));
     }
 
     let auth = resolve_auth_with_keys(
@@ -117,31 +118,6 @@ pub(crate) async fn build_configured_llm_provider(
         "provider_construction_fallback",
     );
     Ok(observe_llm_provider(provider, runtime_mode))
-}
-
-async fn build_codex_provider(config: &ArchonConfig) -> Result<Arc<dyn LlmProvider>> {
-    let codex_cfg = crate::command::auth::codex_config_from_core(&config.providers.openai_codex);
-    let http = reqwest::Client::new();
-    let resolution = archon_llm::providers::codex::spoof::resolve(&codex_cfg, &http)
-        .await
-        .context("failed to resolve Codex spoof identity")?;
-    let provider = match std::env::var("ARCHON_CODEX_BASE_URL").ok() {
-        Some(base_url) if !base_url.trim().is_empty() => {
-            archon_llm::providers::codex::client::CodexProvider::new_with_base_url(
-                archon_llm::tokens::credentials_path(),
-                resolution.config,
-                http,
-                base_url,
-            )
-        }
-        _ => archon_llm::providers::codex::client::CodexProvider::new(
-            archon_llm::tokens::credentials_path(),
-            resolution.config,
-            http,
-        ),
-    }
-    .context("failed to construct Codex provider")?;
-    Ok(Arc::new(provider))
 }
 
 /// Build the active LLM provider from the `[llm]` config section.

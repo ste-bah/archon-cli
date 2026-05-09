@@ -9,8 +9,6 @@ use archon_llm::agentic::{
 use archon_llm::provider::{LlmProvider, LlmRequest};
 use archon_llm::providers::anthropic::AnthropicProvider;
 use archon_llm::providers::build_llm_provider;
-use archon_llm::providers::codex::client::CodexProvider;
-use archon_llm::providers::codex::spoof::resolve;
 
 use crate::cli_args::ChatArgs;
 use crate::runtime::provider_observer::{observe_llm_provider, runtime_mode_for_provider_name};
@@ -56,26 +54,9 @@ async fn build_provider(
             "direct",
         )),
         "openai-codex" => {
-            let codex_cfg =
-                crate::command::auth::codex_config_from_core(&config.providers.openai_codex);
-            let resolution = resolve(&codex_cfg, &reqwest::Client::new())
-                .await
-                .context("failed to resolve Codex spoof identity")?;
-            let provider = match std::env::var("ARCHON_CODEX_BASE_URL").ok() {
-                Some(base_url) if !base_url.trim().is_empty() => CodexProvider::new_with_base_url(
-                    archon_llm::tokens::credentials_path(),
-                    resolution.config,
-                    reqwest::Client::new(),
-                    base_url,
-                ),
-                _ => CodexProvider::new(
-                    archon_llm::tokens::credentials_path(),
-                    resolution.config,
-                    reqwest::Client::new(),
-                ),
-            }
-            .context("failed to construct Codex provider")?;
-            Ok(observe_llm_provider(Arc::new(provider), "auto"))
+            let (provider, runtime_mode) =
+                crate::runtime::codex_provider::build_codex_provider(config, "cli_chat").await?;
+            Ok(observe_llm_provider(provider, runtime_mode))
         }
         other => {
             let flat = archon_llm::LlmConfig {

@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::cli_args::Cli;
 use crate::slash_context::SlashCommandContext;
-use anyhow::{Context, Result};
+use anyhow::Result;
 use archon_consciousness::assembler::{AssemblyInput, BudgetConfig, SystemPromptAssembler};
 use archon_consciousness::defaults::load_configured_defaults;
 use archon_consciousness::rules::RulesEngine;
@@ -260,28 +260,9 @@ fn configure_session_vlm_provider(working_dir: &std::path::Path) {
 async fn build_codex_session_provider(
     config: &archon_core::config::ArchonConfig,
 ) -> Result<Arc<dyn archon_llm::provider::LlmProvider>> {
-    let codex_cfg = crate::command::auth::codex_config_from_core(&config.providers.openai_codex);
-    let http = reqwest::Client::new();
-    let resolution = archon_llm::providers::codex::spoof::resolve(&codex_cfg, &http)
-        .await
-        .context("failed to resolve Codex spoof identity for TUI session")?;
-    let provider = match std::env::var("ARCHON_CODEX_BASE_URL").ok() {
-        Some(base_url) if !base_url.trim().is_empty() => {
-            archon_llm::providers::codex::client::CodexProvider::new_with_base_url(
-                archon_llm::tokens::credentials_path(),
-                resolution.config,
-                http,
-                base_url,
-            )
-        }
-        _ => archon_llm::providers::codex::client::CodexProvider::new(
-            archon_llm::tokens::credentials_path(),
-            resolution.config,
-            http,
-        ),
-    }
-    .context("failed to construct Codex provider for TUI session")?;
-    Ok(observe_llm_provider(Arc::new(provider), "auto"))
+    let (provider, runtime_mode) =
+        crate::runtime::codex_provider::build_codex_provider(config, "tui_session").await?;
+    Ok(observe_llm_provider(provider, runtime_mode))
 }
 
 /// Spawn the Prometheus `/metrics` exporter when `--metrics-port PORT` is
@@ -471,37 +452,46 @@ async fn build_session_agent(
     resolved_flags: &archon_core::cli_flags::ResolvedFlags,
     inject_output_style: bool,
 ) -> Result<BuiltAgent, i32> {
-    let auth = match resolve_auth_with_keys(
-        env_vars.anthropic_api_key.as_deref(),
-        env_vars.archon_api_key.as_deref(),
-        env_vars.archon_oauth_token.as_deref(),
-        std::env::var("ANTHROPIC_AUTH_TOKEN").ok().as_deref(),
-    ) {
-        Ok(a) => a,
-        Err(e) => {
-            eprintln!("Authentication failed: {e}");
-            eprintln!("Run `archon login` or set ANTHROPIC_API_KEY.");
-            return Err(archon_core::print_mode::EXIT_ERROR);
-        }
-    };
-
     let device_id = get_or_create_device_id();
-    let identity_mode =
-        resolve_identity_mode(&auth, cli.identity_spoof, &config.identity.as_view());
-
-    let account_uuid = fetch_account_uuid(&auth).await;
-    let identity = IdentityProvider::new(
-        identity_mode,
-        session_id.to_string(),
-        device_id,
-        account_uuid,
-    );
-
-    let api_url = std::env::var("ANTHROPIC_BASE_URL")
-        .ok()
-        .or_else(|| config.api.base_url.clone());
-
-    let api_client = AnthropicClient::new(auth, identity.clone(), api_url);
+    let (identity, api_client) = if is_codex_session(config) {
+        let identity = IdentityProvider::new(
+            IdentityMode::Clean,
+            session_id.to_string(),
+            device_id,
+            String::new(),
+        );
+        (identity, None)
+    } else {
+        let auth = match resolve_auth_with_keys(
+            env_vars.anthropic_api_key.as_deref(),
+            env_vars.archon_api_key.as_deref(),
+            env_vars.archon_oauth_token.as_deref(),
+            std::env::var("ANTHROPIC_AUTH_TOKEN").ok().as_deref(),
+        ) {
+            Ok(a) => a,
+            Err(e) => {
+                eprintln!("Authentication failed: {e}");
+                eprintln!("Run `archon login` or set ANTHROPIC_API_KEY.");
+                return Err(archon_core::print_mode::EXIT_ERROR);
+            }
+        };
+        let identity_mode =
+            resolve_identity_mode(&auth, cli.identity_spoof, &config.identity.as_view());
+        let account_uuid = fetch_account_uuid(&auth).await;
+        let identity = IdentityProvider::new(
+            identity_mode,
+            session_id.to_string(),
+            device_id,
+            account_uuid,
+        );
+        let api_url = std::env::var("ANTHROPIC_BASE_URL")
+            .ok()
+            .or_else(|| config.api.base_url.clone());
+        (
+            identity.clone(),
+            Some(AnthropicClient::new(auth, identity, api_url)),
+        )
+    };
     let working_dir = std::env::current_dir().unwrap_or_default();
     configure_session_vlm_provider(&working_dir);
     let leann_index = init_leann_index(&working_dir);
@@ -696,7 +686,7 @@ async fn build_session_agent(
     let permission_mode_shared = Arc::new(tokio::sync::Mutex::new(initial_perm_mode));
 
     let mut agent_config = AgentConfig {
-        model: config.api.default_model.clone(),
+        model: active_session_model(config),
         max_tokens: config.api.thinking_budget,
         thinking_budget: config.api.thinking_budget,
         system_prompt,
@@ -781,16 +771,32 @@ async fn build_session_agent(
         tokio::sync::mpsc::unbounded_channel::<TimestampedEvent>();
     let selected_model = agent_config.model.clone();
     let permission_mode_for_built = Arc::clone(&agent_config.permission_mode);
-    let provider = build_llm_provider(&config.llm, api_client);
+    let provider = if is_codex_session(config) {
+        let (provider, runtime_mode) =
+            match crate::runtime::codex_provider::build_codex_provider(config, "session_agent")
+                .await
+            {
+                Ok(provider) => provider,
+                Err(error) => {
+                    eprintln!("Codex provider failed: {error}");
+                    return Err(archon_core::print_mode::EXIT_ERROR);
+                }
+            };
+        observe_llm_provider(provider, runtime_mode)
+    } else {
+        let api_client = api_client.expect("anthropic client is present for non-Codex sessions");
+        let provider = build_llm_provider(&config.llm, api_client);
+        let selected_provider = provider.name().to_string();
+        let runtime_mode = runtime_mode_for_provider_name(&selected_provider);
+        record_provider_fallback(
+            &config.llm.provider,
+            &selected_provider,
+            runtime_mode,
+            "provider_construction_fallback",
+        );
+        observe_llm_provider(provider, runtime_mode)
+    };
     let selected_provider = provider.name().to_string();
-    let runtime_mode = runtime_mode_for_provider_name(&selected_provider);
-    record_provider_fallback(
-        &config.llm.provider,
-        &selected_provider,
-        runtime_mode,
-        "provider_construction_fallback",
-    );
-    let provider = observe_llm_provider(provider, runtime_mode);
     tracing::info!("LLM provider: {}", provider.name());
 
     let agent_registry = Arc::new(std::sync::RwLock::new(AgentRegistry::load(&working_dir)));

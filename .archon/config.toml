@@ -82,6 +82,12 @@ provider = "anthropic"
 # own products.
 [providers.openai-codex]
 enabled = true
+# Runtime strategy: "direct" preserves the current direct backend. "auto"
+# attempts app-server first and can use direct only when direct_fallback=true.
+# "app_server" fails visibly until the app-server adapter is available.
+runtime = "direct"
+direct_fallback = false
+app_server_discovery_timeout_ms = 2500
 
 [providers.openai-codex.spoof]
 # originator  = "openclaw"

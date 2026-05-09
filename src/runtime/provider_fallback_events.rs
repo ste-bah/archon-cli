@@ -1,0 +1,82 @@
+//! Persist explicit provider fallback decisions.
+
+use anyhow::Result;
+use archon_llm::runtime::{
+    ProviderRuntimeEvent, ProviderRuntimeEventType, ProviderRuntimeSeverity,
+};
+use cozo::DbInstance;
+
+pub(crate) fn record_provider_fallback_selected(
+    provider_id: &str,
+    from_runtime_mode: &str,
+    to_runtime_mode: &str,
+    reason_code: &str,
+    metadata: serde_json::Value,
+) {
+    record_provider_fallback_decision(
+        provider_id,
+        from_runtime_mode,
+        to_runtime_mode,
+        ProviderRuntimeEventType::FallbackSelected,
+        ProviderRuntimeSeverity::Warn,
+        reason_code,
+        metadata,
+    );
+}
+
+pub(crate) fn record_provider_fallback_denied(
+    provider_id: &str,
+    from_runtime_mode: &str,
+    to_runtime_mode: &str,
+    reason_code: &str,
+    metadata: serde_json::Value,
+) {
+    record_provider_fallback_decision(
+        provider_id,
+        from_runtime_mode,
+        to_runtime_mode,
+        ProviderRuntimeEventType::FallbackDenied,
+        ProviderRuntimeSeverity::Error,
+        reason_code,
+        metadata,
+    );
+}
+
+fn record_provider_fallback_decision(
+    provider_id: &str,
+    from_runtime_mode: &str,
+    to_runtime_mode: &str,
+    event_type: ProviderRuntimeEventType,
+    severity: ProviderRuntimeSeverity,
+    reason_code: &str,
+    metadata: serde_json::Value,
+) {
+    let Ok(db) = open_learning_db() else {
+        return;
+    };
+    let event = ProviderRuntimeEvent::new(provider_id, to_runtime_mode, event_type, severity)
+        .with_reason(reason_code)
+        .with_fallback(from_runtime_mode, to_runtime_mode)
+        .with_redacted_json(metadata);
+    let record = crate::runtime::provider_event_record::provider_event_record(event);
+    if let Err(error) = archon_learning::runtime_events::insert_provider_runtime_event(&db, &record)
+    {
+        tracing::warn!(%error, provider_id, "provider fallback event persistence failed");
+    }
+}
+
+fn open_learning_db() -> Result<DbInstance> {
+    let base = archon_session::storage::default_db_path();
+    let parent = base
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("cannot determine data directory"))?;
+    let path = parent.join("learning.db");
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let path_str = path.to_string_lossy().to_string();
+    let db = DbInstance::new("sqlite", &path_str, "")
+        .map_err(|e| anyhow::anyhow!("open learning db: {e}"))?;
+    archon_learning::schema::ensure_learning_schema(&db)?;
+    Ok(db)
+}
