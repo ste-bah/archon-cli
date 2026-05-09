@@ -18,4 +18,5 @@ pub(crate) mod provider_incident_ledger;
 pub(crate) mod provider_limit_windows;
 pub(crate) mod provider_observer;
 pub(crate) mod provider_profile_updates;
+pub(crate) mod sandbox_audit;
 pub(crate) mod sandbox_events;

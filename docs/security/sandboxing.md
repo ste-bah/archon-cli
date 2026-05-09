@@ -30,6 +30,12 @@ Docker host-mount settings and OpenShell provider-injection/host-shell-fallback
 flags. `archon sandbox doctor --backend <name>` is also recorded as a redacted
 Cozo sandbox runtime event.
 
+Interactive sessions wrap the selected sandbox backend with a Cozo audit layer.
+Tool checks and backend Bash execution decisions are recorded as
+`sandbox_runtime_events`, and each session creates a `sandbox_sessions` row with
+redacted transport details. Commands, environment values, and workspace paths
+are not stored in the audit payload.
+
 ## OpenShell Policy
 
 OpenShell defaults are deliberately conservative:

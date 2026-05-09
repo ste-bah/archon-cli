@@ -119,8 +119,11 @@ fn active_session_model(config: &archon_core::config::ArchonConfig) -> String {
 fn session_sandbox_backend(
     config: &archon_core::config::ArchonConfig,
     sandbox_flag: Arc<AtomicBool>,
+    session_id: &str,
+    agent_type: &str,
 ) -> Arc<dyn archon_permissions::SandboxBackend> {
-    match config.sandbox.backend.as_str() {
+    let backend: Arc<dyn archon_permissions::SandboxBackend> = match config.sandbox.backend.as_str()
+    {
         "docker" => Arc::new(archon_core::sandbox::DockerSandboxBackend::new(
             config.sandbox.docker.clone(),
             config.sandbox.workspace_access.clone(),
@@ -134,7 +137,13 @@ fn session_sandbox_backend(
         _ => Arc::new(archon_tui::sandbox::SharedSandboxFlag::with_flag(
             sandbox_flag,
         )),
-    }
+    };
+    crate::runtime::sandbox_audit::audit_sandbox_backend(
+        backend,
+        &config.sandbox,
+        session_id,
+        agent_type,
+    )
 }
 
 fn open_governed_learning_db(working_dir: &std::path::Path) -> Option<Arc<cozo::DbInstance>> {
@@ -727,7 +736,15 @@ async fn build_session_agent(
         max_turns: None,
         cancel_token: None,
         // GHOST-006: SandboxBackend wraps the shared flag for dispatch gating.
-        sandbox: Some(session_sandbox_backend(config, sandbox_flag.clone())),
+        sandbox: Some(session_sandbox_backend(
+            config,
+            sandbox_flag.clone(),
+            session_id,
+            agent_def
+                .as_ref()
+                .map(|def| def.agent_type.as_str())
+                .unwrap_or("main"),
+        )),
         activity_sink: session_activity_sink(session_id),
     };
 
@@ -1916,7 +1933,15 @@ pub(crate) async fn run_interactive_session(
         max_turns: None,
         cancel_token: None,
         // GHOST-006: SandboxBackend wraps the shared flag for dispatch gating.
-        sandbox: Some(session_sandbox_backend(config, sandbox_flag.clone())),
+        sandbox: Some(session_sandbox_backend(
+            config,
+            sandbox_flag.clone(),
+            session_id,
+            agent_def
+                .as_ref()
+                .map(|def| def.agent_type.as_str())
+                .unwrap_or("main"),
+        )),
         activity_sink: session_activity_sink(session_id),
     };
 
