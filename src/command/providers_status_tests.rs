@@ -118,7 +118,7 @@ fn codex_status_persists_app_server_discovery_metadata() {
     );
     assert_eq!(
         status.metadata_redacted_json["codex_strategy"]["status_note"],
-        "app-server:configured selected"
+        "app-server:configured selected tool-fallback-enabled"
     );
 }
 

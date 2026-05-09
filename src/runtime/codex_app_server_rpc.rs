@@ -286,7 +286,7 @@ async fn reply_unsupported_request(id: u64, writer: &Arc<Mutex<RpcWriter>>) {
         "id": id,
         "error": {
             "code": -32601,
-            "message": "Archon Codex app-server adapter does not expose provider-side tools",
+            "message": "Archon Codex app-server mode does not expose provider-side tools",
         }
     });
     let Ok(line) = serde_json::to_string(&frame) else {

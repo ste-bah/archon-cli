@@ -15,17 +15,26 @@ pub(crate) async fn build_codex_provider(
         surface,
     )?;
     if decision.selected_runtime_mode == "app_server" {
-        let provider = crate::runtime::codex_app_server_provider::CodexAppServerProvider::new(
+        let app_server = crate::runtime::codex_app_server_provider::CodexAppServerProvider::new(
             config.providers.openai_codex.clone(),
         )
         .with_context(|| format!("failed to construct Codex app-server provider for {surface}"))?;
-        return Ok((Arc::new(provider), decision.selected_runtime_mode));
+        let provider: Arc<dyn LlmProvider> = Arc::new(app_server);
+        if should_enable_tool_direct_fallback(&config.providers.openai_codex) {
+            let provider = crate::runtime::codex_auto_provider::CodexAutoProvider::new(
+                provider,
+                config.clone(),
+                surface,
+            );
+            return Ok((Arc::new(provider), decision.selected_runtime_mode));
+        }
+        return Ok((provider, decision.selected_runtime_mode));
     }
     let provider = build_direct_codex_provider(config, surface).await?;
     Ok((provider, decision.selected_runtime_mode))
 }
 
-async fn build_direct_codex_provider(
+pub(super) async fn build_direct_codex_provider(
     config: &ArchonConfig,
     surface: &str,
 ) -> Result<Arc<dyn LlmProvider>> {
@@ -51,4 +60,8 @@ async fn build_direct_codex_provider(
     }
     .with_context(|| format!("failed to construct direct Codex provider for {surface}"))?;
     Ok(Arc::new(provider))
+}
+
+fn should_enable_tool_direct_fallback(config: &archon_core::config::CodexProviderConfig) -> bool {
+    config.runtime.trim().eq_ignore_ascii_case("auto") && config.direct_fallback
 }

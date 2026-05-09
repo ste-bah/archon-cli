@@ -58,16 +58,18 @@ app_server_discovery_timeout_ms = 2500
 app_server_model_catalog = ["gpt-5.5", "gpt-5.4"]
 ```
 
-`direct` preserves Archon's existing Codex backend path. `app_server` fails
-visibly until a real adapter is implemented. `auto` may fall back from
+`direct` preserves Archon's existing Codex backend path. `app_server` talks to a
+configured Codex app-server JSON-RPC transport. `auto` may fall back from
 app-server to direct only when `direct_fallback=true`; that fallback emits a
-provider runtime event. `ARCHON_CODEX_APP_SERVER_URL` overrides
-`app_server_url` for local diagnostics.
+provider runtime event. Tool-bearing `auto` requests also use direct fallback
+when allowed, keeping Archon's governed tool loop in charge. Forced
+`app_server` mode rejects Archon tool schemas instead of bypassing permissions.
+`ARCHON_CODEX_APP_SERVER_URL` overrides `app_server_url` for local diagnostics.
 
 `archon providers status --provider openai-codex` reports whether an app-server
 endpoint is configured, whether direct fallback is selected, and whether the
-adapter is still pending. Invalid app-server URLs fail closed and are reported
-as `app-server:invalid-url` with the endpoint redacted before persistence to the
+adapter is implemented. Invalid app-server URLs fail closed and are reported as
+`app-server:invalid-url` with the endpoint redacted before persistence to the
 Cozo learning store.
 
 Anthropic Claude Code spoofing remains a protected compatibility contract and

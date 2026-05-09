@@ -53,7 +53,7 @@ impl LlmProvider for CodexAppServerProvider {
     async fn stream(&self, request: LlmRequest) -> Result<mpsc::Receiver<StreamEvent>, LlmError> {
         if !request.tools.is_empty() {
             return Err(LlmError::Unsupported(
-                "Codex app-server provider-side tool bridge is not enabled; use runtime=direct for Archon-managed tool use".into(),
+                "Codex app-server mode cannot execute Archon-managed tool calls directly; use runtime=auto with direct_fallback=true or runtime=direct for governed tool use".into(),
             ));
         }
         let config = self.config.clone();
@@ -404,7 +404,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn provider_refuses_tools_until_archon_bridge_exists() {
+    async fn provider_rejects_tools_without_direct_fallback() {
         let provider = configured_provider();
         let request = LlmRequest {
             tools: vec![serde_json::json!({
@@ -417,7 +417,7 @@ mod tests {
 
         let error = provider.stream(request).await.unwrap_err().to_string();
 
-        assert!(error.contains("provider-side tool bridge is not enabled"));
+        assert!(error.contains("cannot execute Archon-managed tool calls directly"));
     }
 
     #[tokio::test]
