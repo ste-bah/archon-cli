@@ -31,8 +31,10 @@ error instead of falling back to the host shell.
 
 `archon sandbox status --verbose` shows backend-specific safety knobs, including
 Docker host-mount settings and OpenShell provider-injection/host-shell-fallback
-flags. `archon sandbox doctor --backend <name>` is also recorded as a redacted
-Cozo sandbox runtime event.
+flags. `archon sandbox explain --backend <name>` expands that into the
+permission flow, mount/workspace policy, network policy, and credential-redaction
+posture before any command is run. `archon sandbox doctor --backend <name>` is
+also recorded as a redacted Cozo sandbox runtime event.
 
 Interactive sessions wrap the selected sandbox backend with a Cozo audit layer.
 Tool checks and backend Bash execution decisions are recorded as
