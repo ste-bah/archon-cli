@@ -146,6 +146,7 @@ export class ChatPanel {
   private _buildHtml(): string {
     const htmlPath = path.join(
       this._extensionUri.fsPath,
+      "dist",
       "src",
       "chat",
       "webview.html"
