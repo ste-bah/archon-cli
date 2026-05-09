@@ -5,9 +5,7 @@ use archon_learning::provider_auth_profiles::{
     ProviderAuthProfileRecord, get_provider_auth_profile, insert_provider_auth_profile,
     list_provider_auth_profiles,
 };
-use archon_learning::provider_rate_limits::{
-    ProviderRateLimitWindowRecord, list_provider_rate_limit_windows,
-};
+use archon_learning::provider_rate_limits::list_provider_rate_limit_windows;
 use archon_llm::providers::{list_compat, list_native};
 use archon_llm::runtime::{AuthProfileSelection, AuthProfileSkipReason, AuthProfileSource};
 use cozo::DbInstance;
@@ -294,6 +292,7 @@ fn open_learning_db() -> Result<DbInstance> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use archon_learning::provider_rate_limits::ProviderRateLimitWindowRecord;
 
     fn test_db() -> DbInstance {
         let path = format!("/tmp/test-provider-store-cli-{}.db", uuid::Uuid::new_v4());

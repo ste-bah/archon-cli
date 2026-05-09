@@ -44,6 +44,7 @@ pub(crate) fn render_and_persist_provider_status(
     render_provider_statuses(&statuses)
 }
 
+#[cfg(test)]
 fn render_provider_status_with_env(
     provider_filter: Option<&str>,
     env: &ProviderStatusEnv,
@@ -55,6 +56,7 @@ fn render_provider_status_with_env(
     )
 }
 
+#[cfg(test)]
 fn render_provider_status_with_env_and_config(
     provider_filter: Option<&str>,
     env: &ProviderStatusEnv,

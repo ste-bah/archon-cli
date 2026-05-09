@@ -19,6 +19,7 @@ pub(crate) struct ProviderAuthSelectionReport {
 }
 
 impl ProviderAuthSelectionReport {
+    #[cfg(test)]
     pub(crate) fn skipped(&self) -> impl Iterator<Item = &AuthProfileSelection> {
         let selected_id = self
             .selected
