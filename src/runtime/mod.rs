@@ -12,6 +12,7 @@ pub(crate) mod permission_events;
 pub(crate) mod provider_auth_selection;
 pub(crate) mod provider_event_record;
 pub(crate) mod provider_fallback_events;
+pub(crate) mod provider_incident_ledger;
 pub(crate) mod provider_limit_windows;
 pub(crate) mod provider_observer;
 pub(crate) mod provider_profile_updates;

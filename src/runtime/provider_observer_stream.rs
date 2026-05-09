@@ -74,22 +74,34 @@ fn record_stream_error(
     request_id: &str,
     error_type: &str,
 ) {
-    recorder.record(
-        base_event(
-            provider_id,
-            runtime_mode,
-            ProviderRuntimeEventType::RequestFailed,
-            ProviderRuntimeSeverity::Warn,
-        )
-        .with_request_id(request_id.to_string())
-        .with_model(observed.model.clone())
-        .with_reason(error_type.to_string())
-        .with_message("provider stream emitted an error event")
-        .with_redacted_json(serde_json::json!({
-            "request_origin": observed.origin.as_deref(),
-            "stream_error_type": error_type,
-        })),
-    );
+    let event = base_event(
+        provider_id,
+        runtime_mode,
+        ProviderRuntimeEventType::RequestFailed,
+        ProviderRuntimeSeverity::Warn,
+    )
+    .with_request_id(request_id.to_string())
+    .with_model(observed.model.clone())
+    .with_reason(error_type.to_string())
+    .with_message("provider stream emitted an error event")
+    .with_redacted_json(serde_json::json!({
+        "request_origin": observed.origin.as_deref(),
+        "stream_error_type": error_type,
+    }));
+    if let Some(event_id) = recorder.record(event) {
+        crate::runtime::provider_incident_ledger::record_provider_incident(
+            crate::runtime::provider_incident_ledger::ProviderIncidentLedgerInput {
+                db: recorder.db.as_ref(),
+                agent_type: observed.agent_type.as_deref(),
+                agent_version: observed.agent_version.as_deref(),
+                run_id: observed.run_id.as_deref(),
+                model_id: &observed.model,
+                provider_id,
+                provider_event_id: &event_id,
+                reason_code: error_type,
+            },
+        );
+    }
     crate::runtime::provider_profile_updates::mark_failure_reason(
         recorder.db.as_ref(),
         provider_id,
@@ -141,21 +153,33 @@ fn record_stream_closed_without_stop(
     observed: &ObservedRequest,
     request_id: &str,
 ) {
-    recorder.record(
-        base_event(
-            provider_id,
-            runtime_mode,
-            ProviderRuntimeEventType::RequestFailed,
-            ProviderRuntimeSeverity::Warn,
-        )
-        .with_request_id(request_id.to_string())
-        .with_model(observed.model.clone())
-        .with_reason("stream_closed_without_message_stop")
-        .with_message("provider stream ended before message_stop")
-        .with_redacted_json(serde_json::json!({
-            "request_origin": observed.origin.as_deref(),
-        })),
-    );
+    let event = base_event(
+        provider_id,
+        runtime_mode,
+        ProviderRuntimeEventType::RequestFailed,
+        ProviderRuntimeSeverity::Warn,
+    )
+    .with_request_id(request_id.to_string())
+    .with_model(observed.model.clone())
+    .with_reason("stream_closed_without_message_stop")
+    .with_message("provider stream ended before message_stop")
+    .with_redacted_json(serde_json::json!({
+        "request_origin": observed.origin.as_deref(),
+    }));
+    if let Some(event_id) = recorder.record(event) {
+        crate::runtime::provider_incident_ledger::record_provider_incident(
+            crate::runtime::provider_incident_ledger::ProviderIncidentLedgerInput {
+                db: recorder.db.as_ref(),
+                agent_type: observed.agent_type.as_deref(),
+                agent_version: observed.agent_version.as_deref(),
+                run_id: observed.run_id.as_deref(),
+                model_id: &observed.model,
+                provider_id,
+                provider_event_id: &event_id,
+                reason_code: "stream_closed_without_message_stop",
+            },
+        );
+    }
     crate::runtime::provider_profile_updates::mark_failure_reason(
         recorder.db.as_ref(),
         provider_id,

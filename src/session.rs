@@ -699,6 +699,11 @@ async fn build_session_agent(
         tools: tool_defs,
         working_dir: working_dir.clone(),
         session_id: session_id.to_string(),
+        agent_type: agent_def
+            .as_ref()
+            .map(|def| def.agent_type.clone())
+            .unwrap_or_else(|| "main".into()),
+        agent_version: agent_def.as_ref().map(|def| def.meta.version.clone()),
         fast_mode: fast_mode_shared,
         effort_level: effort_level_shared,
         model_override: model_override_shared,
@@ -1867,6 +1872,11 @@ pub(crate) async fn run_interactive_session(
         tools: tool_defs,
         working_dir: working_dir.clone(),
         session_id: session_id.to_string(),
+        agent_type: agent_def
+            .as_ref()
+            .map(|def| def.agent_type.clone())
+            .unwrap_or_else(|| "main".into()),
+        agent_version: agent_def.as_ref().map(|def| def.meta.version.clone()),
         fast_mode: Arc::clone(&fast_mode_shared),
         effort_level: Arc::clone(&effort_level_shared),
         model_override: Arc::clone(&model_override_shared),

@@ -120,6 +120,9 @@ pub struct AgentConfig {
     pub tools: Vec<serde_json::Value>,
     pub working_dir: std::path::PathBuf,
     pub session_id: String,
+    /// Agent identity used only for host-side runtime evidence.
+    pub agent_type: String,
+    pub agent_version: Option<String>,
     /// Shared atomic flag for fast mode (toggled by /fast slash command).
     pub fast_mode: Arc<AtomicBool>,
     /// Shared effort level (toggled by /effort slash command).
@@ -172,6 +175,16 @@ impl AgentConfig {
         };
         (self.max_tokens, thinking, speed)
     }
+
+    pub fn runtime_context_extra(&self) -> serde_json::Value {
+        serde_json::json!({
+            "archon_runtime": {
+                "run_id": self.session_id,
+                "agent_type": self.agent_type,
+                "agent_version": self.agent_version,
+            }
+        })
+    }
 }
 
 impl Default for AgentConfig {
@@ -184,6 +197,8 @@ impl Default for AgentConfig {
             tools: Vec::new(),
             working_dir: std::env::current_dir().unwrap_or_default(),
             session_id: uuid::Uuid::new_v4().to_string(),
+            agent_type: "main".to_string(),
+            agent_version: None,
             fast_mode: Arc::new(AtomicBool::new(false)),
             effort_level: Arc::new(Mutex::new(EffortLevel::Medium)),
             model_override: Arc::new(Mutex::new(String::new())),
@@ -258,5 +273,26 @@ impl ConversationState {
             }
         }
         ""
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn runtime_context_extra_carries_agent_identity() {
+        let config = AgentConfig {
+            session_id: "session-1".to_string(),
+            agent_type: "reviewer".to_string(),
+            agent_version: Some("1.0.0".to_string()),
+            ..AgentConfig::default()
+        };
+
+        let extra = config.runtime_context_extra();
+
+        assert_eq!(extra["archon_runtime"]["run_id"], "session-1");
+        assert_eq!(extra["archon_runtime"]["agent_type"], "reviewer");
+        assert_eq!(extra["archon_runtime"]["agent_version"], "1.0.0");
     }
 }

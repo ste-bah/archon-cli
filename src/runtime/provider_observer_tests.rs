@@ -156,6 +156,45 @@ async fn failures_emit_request_and_limit_events() {
     );
 }
 
+#[tokio::test]
+async fn provider_failures_feed_agent_ledger_when_context_present() {
+    let db = test_db();
+    let observed = ObservedLlmProvider::new(
+        Arc::new(FailingProvider),
+        "direct",
+        None,
+        ProviderRuntimeEventRecorder::with_db(db.clone()),
+    );
+
+    let error = observed
+        .complete(LlmRequest {
+            model: "model-a".into(),
+            extra: serde_json::json!({
+                "archon_runtime": {
+                    "run_id": "session-1",
+                    "agent_type": "reviewer",
+                    "agent_version": "1.0.0"
+                }
+            }),
+            ..LlmRequest::default()
+        })
+        .await
+        .unwrap_err();
+
+    assert!(matches!(error, LlmError::QuotaExceeded(_)));
+    let rows = archon_learning::agent_evolution_ledger::list_agent_performance_ledger_by_agent(
+        &db, "reviewer",
+    )
+    .unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].completion_status, "failed");
+    assert_eq!(rows[0].agent_version.as_deref(), Some("1.0.0"));
+    assert_eq!(rows[0].run_id.as_deref(), Some("session-1"));
+    assert!(rows[0].provider_incident_id.as_deref().is_some());
+    assert_eq!(rows[0].model_id.as_deref(), Some("model-a"));
+    assert_eq!(rows[0].provider_id.as_deref(), Some("test-provider"));
+}
+
 #[test]
 fn converts_provider_event_to_learning_record() {
     let record = provider_event_record(

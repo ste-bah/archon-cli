@@ -47,9 +47,10 @@ impl ProviderRuntimeEventRecorder {
         }
     }
 
-    fn record(&self, event: ProviderRuntimeEvent) {
+    fn record(&self, event: ProviderRuntimeEvent) -> Option<String> {
+        let event_id = event.event_id.clone();
         let Some(db) = &self.db else {
-            return;
+            return None;
         };
         let record = provider_event_record(event);
         if let Err(error) =
@@ -61,7 +62,9 @@ impl ProviderRuntimeEventRecorder {
                 event_type = %record.event_type,
                 "provider runtime event persistence failed"
             );
+            return None;
         }
+        Some(event_id)
     }
 
     fn record_limit_window(&self, provider_id: &str, model_id: Option<&str>, error: &LlmError) {
@@ -207,8 +210,8 @@ impl ObservedLlmProvider {
 
     fn record_failure(&self, request_id: &str, request: &ObservedRequest, error: &LlmError) {
         let error_kind = error_kind(error);
-        self.recorder.record(
-            self.event(
+        let event = self
+            .event(
                 request_id,
                 request,
                 ProviderRuntimeEventType::RequestFailed,
@@ -216,8 +219,10 @@ impl ObservedLlmProvider {
             )
             .with_reason(error_kind)
             .with_message(error_message(error))
-            .with_redacted_json(error_metadata(error)),
-        );
+            .with_redacted_json(error_metadata(error));
+        if let Some(event_id) = self.recorder.record(event) {
+            self.record_agent_provider_incident(&event_id, request, error_kind);
+        }
 
         if let Some(event_type) = limit_event_type(error) {
             self.recorder.record(
@@ -242,6 +247,26 @@ impl ObservedLlmProvider {
             Some(&request.model),
             Some(request_id),
             error,
+        );
+    }
+
+    fn record_agent_provider_incident(
+        &self,
+        provider_event_id: &str,
+        request: &ObservedRequest,
+        reason_code: &str,
+    ) {
+        super::provider_incident_ledger::record_provider_incident(
+            super::provider_incident_ledger::ProviderIncidentLedgerInput {
+                db: self.recorder.db.as_ref(),
+                agent_type: request.agent_type.as_deref(),
+                agent_version: request.agent_version.as_deref(),
+                run_id: request.run_id.as_deref(),
+                model_id: &request.model,
+                provider_id: self.inner.name(),
+                provider_event_id,
+                reason_code,
+            },
         );
     }
 }
@@ -321,15 +346,31 @@ impl LlmProvider for ObservedLlmProvider {
 pub(super) struct ObservedRequest {
     model: String,
     origin: Option<String>,
+    run_id: Option<String>,
+    agent_type: Option<String>,
+    agent_version: Option<String>,
 }
 
 impl ObservedRequest {
     fn from_request(request: &LlmRequest) -> Self {
+        let runtime = request.extra.get("archon_runtime");
         Self {
             model: request.model.clone(),
             origin: request.request_origin.clone(),
+            run_id: runtime_field(runtime, "run_id"),
+            agent_type: runtime_field(runtime, "agent_type"),
+            agent_version: runtime_field(runtime, "agent_version"),
         }
     }
+}
+
+fn runtime_field(runtime: Option<&serde_json::Value>, field: &str) -> Option<String> {
+    runtime?
+        .get(field)?
+        .as_str()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
 }
 
 fn open_learning_db() -> Result<DbInstance> {

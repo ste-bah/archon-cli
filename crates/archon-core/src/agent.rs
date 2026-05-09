@@ -256,7 +256,7 @@ impl Agent {
                 thinking,
                 speed,
                 effort,
-                extra: serde_json::Value::Null,
+                extra: self.config.runtime_context_extra(),
                 request_origin: Some("main_session".into()),
                 reasoning_encrypted: None,
             };
