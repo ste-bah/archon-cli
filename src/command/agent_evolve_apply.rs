@@ -34,6 +34,18 @@ pub(crate) fn apply_proposal(
         proposal_id,
         "applied",
     )?;
+    record_profile_learning_event(
+        db,
+        &proposal.agent_type,
+        archon_learning::models::LearningEventType::ManifestApplied,
+        &proposal.proposal_id,
+        &record.version_id,
+        serde_json::json!({
+            "source": "agent_evolution_apply",
+            "kind": proposal.kind,
+            "activate": activate,
+        }),
+    )?;
 
     Ok(AppliedAgentProfile {
         version_id: record.version_id,
@@ -77,6 +89,18 @@ pub(crate) fn rollback_profile(
 
     mark_previous_active_for_rollback(db, parent.as_ref(), activate)?;
     archon_learning::agent_profile_versions::insert_agent_profile_version(db, &record)?;
+    record_profile_learning_event(
+        db,
+        agent_type,
+        archon_learning::models::LearningEventType::ManifestRolledBack,
+        target_version_id,
+        &record.version_id,
+        serde_json::json!({
+            "source": "agent_evolution_rollback",
+            "target_version_id": target_version_id,
+            "activate": activate,
+        }),
+    )?;
 
     Ok(AppliedAgentProfile {
         version_id: record.version_id,
@@ -238,6 +262,28 @@ fn profile_source_str(
     }
 }
 
+fn record_profile_learning_event(
+    db: &DbInstance,
+    agent_type: &str,
+    event_type: archon_learning::models::LearningEventType,
+    source_artifact_id: &str,
+    outcome_artifact_id: &str,
+    signal: serde_json::Value,
+) -> Result<()> {
+    let event = archon_learning::models::LearningEvent {
+        event_id: format!("learning-{}", uuid::Uuid::new_v4()),
+        workspace_id: format!("agent:{agent_type}"),
+        event_type,
+        source_artifact_id: source_artifact_id.to_string(),
+        outcome_artifact_id: Some(outcome_artifact_id.to_string()),
+        signal,
+        confidence: 1.0,
+        provenance_record_id: "agent_profile_versions".to_string(),
+        created_at: chrono::Utc::now().to_rfc3339(),
+    };
+    archon_learning::store::insert_learning_event(db, &event)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -309,6 +355,14 @@ mod tests {
             Some("agent-evo-prop-1")
         );
         assert_eq!(proposal.status, "applied");
+        let events =
+            archon_learning::store::list_learning_events_by_type(&db, "ManifestApplied").unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].source_artifact_id, "agent-evo-prop-1");
+        assert_eq!(
+            events[0].outcome_artifact_id.as_deref(),
+            Some(applied.version_id.as_str())
+        );
     }
 
     #[test]
@@ -407,5 +461,14 @@ mod tests {
         assert_eq!(rollback.profile_json["model"], "claude-sonnet-4-6");
         assert!(!old_active.is_active);
         assert!(old_active.is_rollback_target);
+        let events =
+            archon_learning::store::list_learning_events_by_type(&db, "ManifestRolledBack")
+                .unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].source_artifact_id, "agent-profile-1");
+        assert_eq!(
+            events[0].outcome_artifact_id.as_deref(),
+            Some(applied.version_id.as_str())
+        );
     }
 }
