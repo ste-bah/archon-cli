@@ -28,11 +28,22 @@ impl Agent {
                 let input = pre.input.clone();
                 let ctx_clone = ctx_arc.clone();
                 let sem_clone = sem.clone();
+                let sandbox_prechecked = pre.sandbox_prechecked;
 
                 join_set.spawn(async move {
                     let _permit = sem_clone.acquire().await.expect("semaphore closed");
                     // GHOST-006: sandbox pre-check (main-agent direct path).
-                    let result = if let Some(ref backend) = ctx_clone.sandbox {
+                    let result = if sandbox_prechecked {
+                        crate::dispatch::emit_tool_activity(
+                            &ctx_clone,
+                            tool.name(),
+                            AgentActivityKind::ToolStarted,
+                            AgentActivityStatus::Running,
+                        );
+                        let result = tool.execute(input, &ctx_clone).await;
+                        emit_tool_result_activity(&ctx_clone, tool.name(), &result);
+                        result
+                    } else if let Some(ref backend) = ctx_clone.sandbox {
                         match backend.check(tool.name(), &input) {
                             Err(reason) => {
                                 crate::dispatch::emit_tool_activity(
@@ -99,7 +110,17 @@ impl Agent {
             let mut results = Vec::with_capacity(allowed.len());
             for pre in allowed {
                 // GHOST-006: sandbox pre-check (main-agent sequential path).
-                let result = if let Some(ref backend) = ctx.sandbox {
+                let result = if pre.sandbox_prechecked {
+                    crate::dispatch::emit_tool_activity(
+                        &ctx,
+                        pre.tool_arc.name(),
+                        AgentActivityKind::ToolStarted,
+                        AgentActivityStatus::Running,
+                    );
+                    let result = pre.tool_arc.execute(pre.input.clone(), &ctx).await;
+                    emit_tool_result_activity(&ctx, pre.tool_arc.name(), &result);
+                    result
+                } else if let Some(ref backend) = ctx.sandbox {
                     match backend.check(pre.tool_arc.name(), &pre.input) {
                         Err(reason) => {
                             crate::dispatch::emit_tool_activity(

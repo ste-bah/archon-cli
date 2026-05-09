@@ -91,22 +91,6 @@ impl Agent {
                 continue;
             }
 
-            // --- Checkpoint before Write/Edit ---
-            if matches!(tool.name.as_str(), "Write" | "Edit")
-                && let Some(ref store) = self.checkpoint_store
-                && let Some(file_path) = input.get("file_path").and_then(|v| v.as_str())
-            {
-                let store = store.lock().await;
-                if let Err(e) = store.snapshot(
-                    &self.config.session_id,
-                    file_path,
-                    self.turn_number as i64,
-                    &tool.name,
-                ) {
-                    tracing::warn!("checkpoint snapshot failed for {file_path}: {e}");
-                }
-            }
-
             // --- Pre-tool-use hook (REQ-HOOK-001/003/004) ---
             if let Some(ref registry) = self.hook_registry {
                 let hook_input = serde_json::json!({
@@ -230,6 +214,45 @@ impl Agent {
                 }
             };
 
+            // --- Sandbox check against final hook-mutated input ---
+            let sandbox_result = self
+                .config
+                .sandbox
+                .as_ref()
+                .map(|backend| backend.check(&tool.name, &input));
+            let sandbox_prechecked = match sandbox_result {
+                Some(Ok(())) => true,
+                Some(Err(reason)) => {
+                    let result =
+                        ToolResult::error(format!("Sandbox denied tool '{}': {reason}", tool.name));
+                    self.send_event(AgentEvent::ToolCallComplete {
+                        name: tool.name.clone(),
+                        id: tool.id.clone(),
+                        result: result.clone(),
+                    })
+                    .await;
+                    self.state.add_tool_result(&tool.id, &result.content, true);
+                    continue;
+                }
+                None => false,
+            };
+
+            // --- Checkpoint before Write/Edit ---
+            if matches!(tool.name.as_str(), "Write" | "Edit")
+                && let Some(ref store) = self.checkpoint_store
+                && let Some(file_path) = input.get("file_path").and_then(|v| v.as_str())
+            {
+                let store = store.lock().await;
+                if let Err(e) = store.snapshot(
+                    &self.config.session_id,
+                    file_path,
+                    self.turn_number as i64,
+                    &tool.name,
+                ) {
+                    tracing::warn!("checkpoint snapshot failed for {file_path}: {e}");
+                }
+            }
+
             // --- Capture file_path for post-processing ---
             let file_path = if matches!(tool.name.as_str(), "Write" | "Edit" | "NotebookEdit") {
                 input
@@ -246,6 +269,7 @@ impl Agent {
                 input,
                 tool_arc,
                 file_path,
+                sandbox_prechecked,
             });
         }
 

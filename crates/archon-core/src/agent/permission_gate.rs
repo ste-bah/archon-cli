@@ -125,6 +125,21 @@ mod tests {
 
     struct MockLlmProvider;
 
+    #[derive(Debug)]
+    struct DenyBlockedWriteSandbox;
+
+    impl archon_permissions::SandboxBackend for DenyBlockedWriteSandbox {
+        fn check(&self, tool: &str, input: &serde_json::Value) -> Result<(), String> {
+            if tool == "Write"
+                && input.get("file_path").and_then(|v| v.as_str()) == Some("/blocked")
+            {
+                Err("sandbox blocked mutated write path".to_string())
+            } else {
+                Ok(())
+            }
+        }
+    }
+
     #[async_trait::async_trait]
     impl LlmProvider for MockLlmProvider {
         fn name(&self) -> &str {
@@ -179,6 +194,27 @@ mod tests {
             ))),
         );
         (agent, rx)
+    }
+
+    fn agent_with_registry_and_sandbox(
+        registry: ToolRegistry,
+        sandbox: Arc<dyn archon_permissions::SandboxBackend>,
+    ) -> Agent {
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let config = AgentConfig {
+            permission_mode: Arc::new(Mutex::new("bypassPermissions".to_string())),
+            sandbox: Some(sandbox),
+            ..AgentConfig::default()
+        };
+        Agent::new(
+            Arc::new(MockLlmProvider),
+            registry,
+            config,
+            tx,
+            Arc::new(std::sync::RwLock::new(AgentRegistry::load(
+                &std::env::temp_dir(),
+            ))),
+        )
     }
 
     #[tokio::test]
@@ -289,5 +325,49 @@ mod tests {
             AgentEvent::ToolCallComplete { name, result, .. }
                 if name == "Bash" && result.is_error
         )));
+    }
+
+    #[tokio::test]
+    async fn preflight_sandbox_check_uses_hook_mutated_input() {
+        let mut registry = ToolRegistry::new();
+        registry.register(Box::new(archon_tools::file_write::WriteTool));
+        let mut agent =
+            agent_with_registry_and_sandbox(registry, Arc::new(DenyBlockedWriteSandbox));
+        let hooks = Arc::new(crate::hooks::HookRegistry::new());
+        let callback: crate::hooks::HookCallback = Arc::new(|_| crate::hooks::HookResult {
+            updated_input: Some(serde_json::json!({
+                "file_path": "/blocked",
+                "content": "must not be dispatched"
+            })),
+            ..Default::default()
+        });
+        hooks.register_callback(
+            crate::hooks::HookEvent::PreToolUse,
+            crate::hooks::HookCallbackEntry {
+                name: "rewrite-write-path".to_string(),
+                callback,
+                authority: crate::hooks::SourceAuthority::Policy,
+                timeout_secs: 1,
+            },
+        );
+        agent.set_hook_registry(hooks);
+        let pending = [PendingToolCall {
+            id: "tool-1".to_string(),
+            name: "Write".to_string(),
+            input_json: r#"{"file_path":"/allowed","content":"before hook"}"#.to_string(),
+        }];
+
+        let allowed = agent.preflight_tools(&pending, AgentMode::Normal).await;
+
+        assert!(allowed.is_empty());
+        let tool_result = &agent.state.messages[0]["content"][0];
+        assert_eq!(tool_result["tool_use_id"], "tool-1");
+        assert_eq!(tool_result["is_error"], true);
+        assert!(
+            tool_result["content"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("sandbox blocked mutated write path")
+        );
     }
 }
