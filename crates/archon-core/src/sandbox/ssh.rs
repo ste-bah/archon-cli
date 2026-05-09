@@ -1,7 +1,15 @@
-use std::process::Command;
+use std::future::Future;
+use std::pin::Pin;
+use std::process::{Command, Stdio};
+use std::time::Duration;
 
 use archon_permissions::sandbox::{SandboxBackend, SandboxCommandRequest, SandboxCommandResult};
 use serde::{Deserialize, Serialize};
+use tokio::process::Command as TokioCommand;
+
+mod exec;
+
+use exec::{ssh_command_args, ssh_output_result};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -13,6 +21,7 @@ pub struct SshConfig {
     pub port: u16,
     pub key_file: Option<String>,
     pub workspace_mode: String,
+    pub remote_workdir: Option<String>,
     pub host_key_checking: bool,
     pub host_shell_fallback: bool,
 }
@@ -27,6 +36,7 @@ impl Default for SshConfig {
             port: 22,
             key_file: None,
             workspace_mode: "remote".into(),
+            remote_workdir: None,
             host_key_checking: true,
             host_shell_fallback: false,
         }
@@ -81,6 +91,7 @@ pub enum SshDoctorStatus {
     ReadyDetectOnly,
     MissingBinary,
     MissingTarget,
+    MissingWorkspace,
     UnsafeConfig,
 }
 
@@ -113,7 +124,7 @@ pub fn probe_ssh(binary: &str) -> SshProbe {
 
 pub fn ssh_doctor_report(config: &SshConfig, probe: SshProbe) -> SshDoctorReport {
     let mut findings = Vec::new();
-    findings.push("execution backend is detect-only in this release slice".into());
+    findings.push("doctor is detect-only; Bash execution routes through SSH when selected".into());
     findings.push(
         "SSH sandboxing is remote execution; local Docker remains the local isolation backend"
             .into(),
@@ -140,6 +151,16 @@ pub fn ssh_doctor_report(config: &SshConfig, probe: SshProbe) -> SshDoctorReport
     } else if config.host.as_deref().unwrap_or("").trim().is_empty() {
         findings.push("enabled SSH sandbox requires sandbox.ssh.host".into());
         SshDoctorStatus::MissingTarget
+    } else if config.workspace_mode == "remote"
+        && config
+            .remote_workdir
+            .as_deref()
+            .unwrap_or("")
+            .trim()
+            .is_empty()
+    {
+        findings.push("remote workspace mode requires sandbox.ssh.remote_workdir".into());
+        SshDoctorStatus::MissingWorkspace
     } else {
         findings.push(format!(
             "target: {}@{}:{}",
@@ -165,6 +186,7 @@ pub fn render_ssh_doctor_report(report: &SshDoctorReport) -> String {
         SshDoctorStatus::ReadyDetectOnly => "ready-detect-only",
         SshDoctorStatus::MissingBinary => "missing-binary",
         SshDoctorStatus::MissingTarget => "missing-target",
+        SshDoctorStatus::MissingWorkspace => "missing-workspace",
         SshDoctorStatus::UnsafeConfig => "unsafe-config",
     };
     let version = report.version.as_deref().unwrap_or("unknown");
@@ -177,7 +199,7 @@ pub fn render_ssh_doctor_report(report: &SshDoctorReport) -> String {
         out.push_str(finding);
         out.push('\n');
     }
-    out.push_str("Execution: disabled until the SSH sandbox backend is explicitly implemented\n");
+    out.push_str("Execution: Bash routes through SSH when sandbox.backend=ssh\n");
     out
 }
 
@@ -204,6 +226,17 @@ impl SshSandboxBackend {
         }
         if self.config.host.as_deref().unwrap_or("").trim().is_empty() {
             return Err("ssh sandbox requires sandbox.ssh.host".into());
+        }
+        if self.config.workspace_mode == "remote"
+            && self
+                .config
+                .remote_workdir
+                .as_deref()
+                .unwrap_or("")
+                .trim()
+                .is_empty()
+        {
+            return Err("ssh sandbox remote mode requires sandbox.ssh.remote_workdir".into());
         }
         let probe = probe_ssh(&self.config.binary);
         if !probe.found {
@@ -236,16 +269,71 @@ impl SandboxBackend for SshSandboxBackend {
 
     fn execute_bash<'a>(
         &'a self,
-        _request: SandboxCommandRequest,
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Option<SandboxCommandResult>> + Send + 'a>,
-    > {
-        Box::pin(async {
-            Some(SandboxCommandResult {
-                content: "SSH sandbox execution is fail-closed in this release slice; no host shell fallback was used.\n".into(),
+        request: SandboxCommandRequest,
+    ) -> Pin<Box<dyn Future<Output = Option<SandboxCommandResult>> + Send + 'a>> {
+        Box::pin(async move { Some(self.execute_bash_inner(request).await) })
+    }
+}
+
+impl SshSandboxBackend {
+    async fn execute_bash_inner(&self, request: SandboxCommandRequest) -> SandboxCommandResult {
+        if let Err(error) = self.safe_to_route() {
+            return SandboxCommandResult {
+                content: format!(
+                    "SSH sandbox refused execution: {error}; no host shell fallback was used.\n"
+                ),
                 is_error: true,
-            })
-        })
+            };
+        }
+        let args = match ssh_command_args(&self.config, &request) {
+            Ok(args) => args,
+            Err(error) => {
+                return SandboxCommandResult {
+                    content: format!(
+                        "SSH sandbox refused execution: {error}; no host shell fallback was used.\n"
+                    ),
+                    is_error: true,
+                };
+            }
+        };
+        let mut cmd = TokioCommand::new(&self.config.binary);
+        cmd.args(args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
+        #[cfg(unix)]
+        cmd.process_group(0);
+
+        let child = match cmd.spawn() {
+            Ok(child) => child,
+            Err(error) => {
+                return SandboxCommandResult {
+                    content: format!("Error: Failed to spawn ssh: {error}"),
+                    is_error: true,
+                };
+            }
+        };
+
+        match tokio::time::timeout(
+            Duration::from_millis(request.timeout_ms),
+            child.wait_with_output(),
+        )
+        .await
+        {
+            Ok(Ok(output)) => ssh_output_result(output, request.max_output_bytes),
+            Ok(Err(error)) => SandboxCommandResult {
+                content: format!("Error: SSH command failed: {error}"),
+                is_error: true,
+            },
+            Err(_) => SandboxCommandResult {
+                content: format!(
+                    "Error: SSH command timed out after {}ms",
+                    request.timeout_ms
+                ),
+                is_error: true,
+            },
+        }
     }
 }
 
@@ -260,8 +348,23 @@ mod tests {
         assert!(!cfg.enabled);
         assert_eq!(cfg.binary, "ssh");
         assert_eq!(cfg.port, 22);
+        assert_eq!(cfg.remote_workdir, None);
         assert!(cfg.host_key_checking);
         assert!(!cfg.host_shell_fallback);
+    }
+
+    #[test]
+    fn doctor_requires_remote_workdir_for_remote_mode() {
+        let cfg = SshConfig {
+            enabled: true,
+            host: Some("sandbox.example".into()),
+            ..SshConfig::default()
+        };
+
+        let report = ssh_doctor_report(&cfg, SshProbe::found("OpenSSH_9.6"));
+
+        assert_eq!(report.status, SshDoctorStatus::MissingWorkspace);
+        assert!(render_ssh_doctor_report(&report).contains("missing-workspace"));
     }
 
     #[test]

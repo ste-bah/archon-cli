@@ -152,6 +152,7 @@ mod tests {
                 enabled: true,
                 host: Some("sandbox.example".into()),
                 user: Some("archon".into()),
+                remote_workdir: Some("/srv/workspace".into()),
                 ..archon_core::sandbox::SshConfig::default()
             },
             archon_core::sandbox::SshProbe::found("OpenSSH_9.6"),
@@ -168,7 +169,7 @@ mod tests {
         assert!(body.contains("Backend: ssh"));
         assert!(body.contains("ready-detect-only"));
         assert!(body.contains("TOFU mismatch blocking"));
-        assert!(body.contains("Execution: disabled"));
+        assert!(body.contains("Execution: Bash routes through SSH"));
     }
 
     #[test]

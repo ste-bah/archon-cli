@@ -76,7 +76,7 @@ fn render_status(config: &archon_core::sandbox::SandboxConfig, verbose: bool) ->
             "Compatibility: /sandbox toggles the logical TUI gate only; normal permission rules still apply\n",
         );
         output.push_str(
-            "Execution: docker can route Bash when selected; ssh and openshell fail closed until execution is implemented\n",
+            "Execution: docker and ssh can route Bash when selected; openshell fails closed until execution is implemented\n",
         );
         append_backend_verbose_status(&mut output, config);
     }
@@ -98,9 +98,14 @@ fn append_backend_verbose_status(
             config.docker.mount_docker_socket
         )),
         "ssh" => output.push_str(&format!(
-            "SSH: enabled={} workspace_mode={} host_configured={} host_key_checking={} host_shell_fallback={}\n",
+            "SSH: enabled={} workspace_mode={} remote_workdir_configured={} host_configured={} host_key_checking={} host_shell_fallback={}\n",
             config.ssh.enabled,
             config.ssh.workspace_mode,
+            config
+                .ssh
+                .remote_workdir
+                .as_deref()
+                .is_some_and(|workdir| !workdir.trim().is_empty()),
             config.ssh.host.as_deref().is_some_and(|host| !host.trim().is_empty()),
             config.ssh.host_key_checking,
             config.ssh.host_shell_fallback
@@ -131,7 +136,7 @@ fn render_explain(
     }
     policy.validate().map_err(anyhow::Error::msg)?;
     let mut output = format!(
-        "Sandbox explain\nBackend: {}\nIsolation: {}\nDecision flow: UnifiedToolPreflight -> PermissionChecker -> SandboxPolicyResolver -> SandboxBackend -> ToolDispatch\nPermissions: sandbox policy cannot bypass always_deny rules, permission modes, or dangerous-bypass guards\nExecution: docker can route Bash when selected; ssh and openshell fail closed instead of falling back to host shell\n",
+        "Sandbox explain\nBackend: {}\nIsolation: {}\nDecision flow: UnifiedToolPreflight -> PermissionChecker -> SandboxPolicyResolver -> SandboxBackend -> ToolDispatch\nPermissions: sandbox policy cannot bypass always_deny rules, permission modes, or dangerous-bypass guards\nExecution: docker and ssh can route Bash when selected; openshell fails closed instead of falling back to host shell\n",
         policy.backend,
         policy.describes_isolation()
     );
@@ -159,11 +164,16 @@ fn append_explain_details(
         archon_core::sandbox::SandboxBackendKind::Ssh => {
             config.ssh.validate().map_err(anyhow::Error::msg)?;
             output.push_str(&format!(
-                "Transport policy: ssh remote execution; host_configured={} host_key_checking={} host_shell_fallback={}\nWorkspace policy: mode={} remote workspace remains explicit\nRedaction policy: provider tokens, generated memory stores, SSH agents, Git credentials, and host home mounts are not forwarded by default\n",
+                "Transport policy: ssh remote execution; host_configured={} host_key_checking={} host_shell_fallback={}\nWorkspace policy: mode={} remote_workdir_configured={} remote workspace remains explicit\nRedaction policy: provider tokens, generated memory stores, SSH agents, Git credentials, and host home mounts are not forwarded by default\n",
                 config.ssh.host.as_deref().is_some_and(|host| !host.trim().is_empty()),
                 config.ssh.host_key_checking,
                 config.ssh.host_shell_fallback,
-                config.ssh.workspace_mode
+                config.ssh.workspace_mode,
+                config
+                    .ssh
+                    .remote_workdir
+                    .as_deref()
+                    .is_some_and(|workdir| !workdir.trim().is_empty())
             ));
         }
         archon_core::sandbox::SandboxBackendKind::OpenShell => {

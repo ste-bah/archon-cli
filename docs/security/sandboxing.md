@@ -25,9 +25,15 @@ workspace read-only and expose only explicit relative `docker.writable_paths`.
 `workspace_access = "scratch"` adds an ephemeral `/scratch` mount without
 loosening the workspace.
 
-`ssh` and `openshell` are detect-only/fail-closed in this slice. If selected
-for Bash execution before a real transport is implemented, they return an
-error instead of falling back to the host shell.
+`ssh` can route Bash through a configured remote target when selected. Remote
+mode requires an explicit `ssh.remote_workdir`; mirror mode assumes the active
+workspace path exists on the remote target. SSH does not forward provider
+credentials, SSH agents, Git credentials, or arbitrary environment values, and
+it refuses disabled host-key checking or host-shell fallback.
+
+`openshell` is detect-only/fail-closed in this slice. If selected for Bash
+execution before a real transport is implemented, it returns an error instead
+of falling back to the host shell.
 
 `archon sandbox status --verbose` shows backend-specific safety knobs, including
 Docker host-mount settings and OpenShell provider-injection/host-shell-fallback
