@@ -4,6 +4,8 @@ use crate::cli_args::SandboxAction;
 
 #[path = "sandbox_explain_tools.rs"]
 mod sandbox_explain_tools;
+#[path = "sandbox_test.rs"]
+mod sandbox_test;
 
 pub(crate) fn handle_sandbox_command(
     action: Option<SandboxAction>,
@@ -49,7 +51,7 @@ pub(crate) fn handle_sandbox_command(
             output
         }
         SandboxAction::Test { backend } => {
-            let output = render_test(&config.sandbox, backend.clone())?;
+            let output = sandbox_test::render_test(&config.sandbox, backend.clone())?;
             persist_sandbox_command_event(
                 &config.sandbox,
                 backend.as_deref(),
@@ -233,21 +235,6 @@ fn list_or_none(values: &[String]) -> String {
 
 fn yes_no(value: bool) -> &'static str {
     if value { "yes" } else { "no" }
-}
-
-fn render_test(
-    config: &archon_core::sandbox::SandboxConfig,
-    backend: Option<String>,
-) -> Result<String> {
-    let mut policy = config.policy().map_err(anyhow::Error::msg)?;
-    if let Some(backend) = backend {
-        policy.backend = backend.parse().map_err(anyhow::Error::msg)?;
-    }
-    policy.validate().map_err(anyhow::Error::msg)?;
-    Ok(format!(
-        "Sandbox test\nBackend: {}\nConfig: valid\nExecution: detect-only; no untrusted command was run\n",
-        policy.backend
-    ))
 }
 
 fn doctor_args(backend: Option<String>) -> Vec<String> {
@@ -459,10 +446,10 @@ mod tests {
     fn sandbox_test_is_detect_only() {
         let config = archon_core::sandbox::SandboxConfig::default();
 
-        let body = render_test(&config, Some("openshell".into())).unwrap();
+        let body = sandbox_test::render_test(&config, Some("openshell".into())).unwrap();
 
         assert!(body.contains("Backend: openshell"));
-        assert!(body.contains("no untrusted command was run"));
+        assert!(body.contains("No untrusted command was run"));
     }
 
     #[test]
