@@ -1,7 +1,16 @@
+use std::future::Future;
+use std::pin::Pin;
 use std::process::Command;
+use std::process::Stdio;
+use std::time::Duration;
 
 use archon_permissions::sandbox::{SandboxBackend, SandboxCommandRequest, SandboxCommandResult};
 use serde::{Deserialize, Serialize};
+use tokio::process::Command as TokioCommand;
+
+mod exec;
+
+use exec::{openshell_create_args, openshell_output_result};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -37,6 +46,19 @@ impl OpenShellConfig {
     pub fn validate(&self) -> Result<(), String> {
         if self.binary.trim().is_empty() {
             return Err("sandbox.openshell.binary must not be empty".into());
+        }
+        if self.binary.contains('\0') {
+            return Err("sandbox.openshell.binary must not contain NUL".into());
+        }
+        if let Some(gateway) = self.gateway.as_deref() {
+            if gateway.contains('\0') {
+                return Err("sandbox.openshell.gateway must not contain NUL".into());
+            }
+        }
+        if let Some(policy) = self.policy.as_deref() {
+            if policy.contains('\0') {
+                return Err("sandbox.openshell.policy must not contain NUL".into());
+            }
         }
         match self.workspace_mode.as_str() {
             "mirror" | "remote" => Ok(()),
@@ -113,10 +135,17 @@ pub fn openshell_doctor_report(
     probe: OpenShellProbe,
 ) -> OpenShellDoctorReport {
     let mut findings = Vec::new();
-    findings.push("execution backend is detect-only in this release slice".into());
+    findings.push(
+        "doctor is detect-only; Bash execution routes through OpenShell when selected".into(),
+    );
     findings.push(
         "provider injection is disabled by default; Anthropic spoofing remains host-side".into(),
     );
+    if !config.providers.is_empty() && !config.provider_injection {
+        findings.push(
+            "configured OpenShell providers are ignored while provider_injection=false".into(),
+        );
+    }
 
     let status = if config.provider_injection || config.host_shell_fallback {
         findings.push("unsafe config: provider injection or host shell fallback is enabled".into());
@@ -171,9 +200,7 @@ pub fn render_openshell_doctor_report(report: &OpenShellDoctorReport) -> String 
         out.push_str(finding);
         out.push('\n');
     }
-    out.push_str(
-        "Execution: disabled until the OpenShell execution backend is explicitly implemented\n",
-    );
+    out.push_str("Execution: Bash routes through OpenShell when sandbox.backend=openshell\n");
     out
 }
 
@@ -240,24 +267,92 @@ impl SandboxBackend for OpenShellSandboxBackend {
 
     fn execute_bash<'a>(
         &'a self,
-        _request: SandboxCommandRequest,
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Option<SandboxCommandResult>> + Send + 'a>,
-    > {
-        Box::pin(async {
-            if let Err(error) = self.safe_to_route() {
-                return Some(SandboxCommandResult {
+        request: SandboxCommandRequest,
+    ) -> Pin<Box<dyn Future<Output = Option<SandboxCommandResult>> + Send + 'a>> {
+        Box::pin(async move { Some(self.execute_bash_inner(request).await) })
+    }
+}
+
+impl OpenShellSandboxBackend {
+    async fn execute_bash_inner(&self, request: SandboxCommandRequest) -> SandboxCommandResult {
+        if let Err(error) = self.safe_to_route() {
+            return SandboxCommandResult {
+                content: format!(
+                    "OpenShell sandbox refused execution: {error}; no host shell fallback was used.\n"
+                ),
+                is_error: true,
+            };
+        }
+        let args = match openshell_create_args(&self.config, &request) {
+            Ok(args) => args,
+            Err(error) => {
+                return SandboxCommandResult {
                     content: format!(
                         "OpenShell sandbox refused execution: {error}; no host shell fallback was used.\n"
                     ),
                     is_error: true,
-                });
+                };
             }
-            Some(SandboxCommandResult {
-                content: "OpenShell sandbox transport is not implemented in this release slice; no host shell fallback was used.\n".into(),
+        };
+        let mut cmd = TokioCommand::new(&self.config.binary);
+        cmd.args(args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
+        apply_openshell_env_policy(&mut cmd, &self.config);
+        #[cfg(unix)]
+        cmd.process_group(0);
+
+        let child = match cmd.spawn() {
+            Ok(child) => child,
+            Err(error) => {
+                return SandboxCommandResult {
+                    content: format!("Error: Failed to spawn openshell: {error}"),
+                    is_error: true,
+                };
+            }
+        };
+
+        match tokio::time::timeout(
+            Duration::from_millis(request.timeout_ms),
+            child.wait_with_output(),
+        )
+        .await
+        {
+            Ok(Ok(output)) => openshell_output_result(output, request.max_output_bytes),
+            Ok(Err(error)) => SandboxCommandResult {
+                content: format!("Error: OpenShell command failed: {error}"),
                 is_error: true,
-            })
-        })
+            },
+            Err(_) => SandboxCommandResult {
+                content: format!(
+                    "Error: OpenShell command timed out after {}ms",
+                    request.timeout_ms
+                ),
+                is_error: true,
+            },
+        }
+    }
+}
+
+fn apply_openshell_env_policy(cmd: &mut TokioCommand, config: &OpenShellConfig) {
+    for name in [
+        "ANTHROPIC_API_KEY",
+        "CLAUDE_API_KEY",
+        "OPENAI_API_KEY",
+        "GITHUB_TOKEN",
+        "GH_TOKEN",
+        "GITLAB_TOKEN",
+        "NVIDIA_API_KEY",
+        "COPILOT_GITHUB_TOKEN",
+    ] {
+        cmd.env_remove(name);
+    }
+    if let Some(gateway) = config.gateway.as_deref().map(str::trim) {
+        if !gateway.is_empty() {
+            cmd.env("OPENSHELL_GATEWAY", gateway);
+        }
     }
 }
 
@@ -302,6 +397,23 @@ mod tests {
 
         assert_eq!(report.status, OpenShellDoctorStatus::UnsafeConfig);
         assert!(render_openshell_doctor_report(&report).contains("unsafe-config"));
+    }
+
+    #[test]
+    fn doctor_reports_routed_execution_without_provider_injection() {
+        let cfg = OpenShellConfig {
+            enabled: true,
+            providers: vec!["my-claude".into()],
+            ..OpenShellConfig::default()
+        };
+
+        let report = openshell_doctor_report(&cfg, OpenShellProbe::found("openshell 1.2.3"));
+        let body = render_openshell_doctor_report(&report);
+
+        assert_eq!(report.status, OpenShellDoctorStatus::ReadyDetectOnly);
+        assert!(body.contains("Bash routes through OpenShell"));
+        assert!(body.contains("providers are ignored"));
+        assert!(body.contains("Anthropic spoofing remains host-side"));
     }
 
     #[test]

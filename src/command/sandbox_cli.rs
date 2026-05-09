@@ -76,7 +76,7 @@ fn render_status(config: &archon_core::sandbox::SandboxConfig, verbose: bool) ->
             "Compatibility: /sandbox toggles the logical TUI gate only; normal permission rules still apply\n",
         );
         output.push_str(
-            "Execution: docker and ssh can route Bash when selected; openshell fails closed until execution is implemented\n",
+            "Execution: docker, ssh, and openshell can route Bash when selected; no backend may fall back to host shell\n",
         );
         append_backend_verbose_status(&mut output, config);
     }
@@ -136,7 +136,7 @@ fn render_explain(
     }
     policy.validate().map_err(anyhow::Error::msg)?;
     let mut output = format!(
-        "Sandbox explain\nBackend: {}\nIsolation: {}\nDecision flow: UnifiedToolPreflight -> PermissionChecker -> SandboxPolicyResolver -> SandboxBackend -> ToolDispatch\nPermissions: sandbox policy cannot bypass always_deny rules, permission modes, or dangerous-bypass guards\nExecution: docker and ssh can route Bash when selected; openshell fails closed instead of falling back to host shell\n",
+        "Sandbox explain\nBackend: {}\nIsolation: {}\nDecision flow: UnifiedToolPreflight -> PermissionChecker -> SandboxPolicyResolver -> SandboxBackend -> ToolDispatch\nPermissions: sandbox policy cannot bypass always_deny rules, permission modes, or dangerous-bypass guards\nExecution: docker, ssh, and openshell can route Bash when selected; direct host shell fallback stays forbidden\n",
         policy.backend,
         policy.describes_isolation()
     );

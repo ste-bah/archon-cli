@@ -31,9 +31,13 @@ workspace path exists on the remote target. SSH does not forward provider
 credentials, SSH agents, Git credentials, or arbitrary environment values, and
 it refuses disabled host-key checking or host-shell fallback.
 
-`openshell` is detect-only/fail-closed in this slice. If selected for Bash
-execution before a real transport is implemented, it returns an error instead
-of falling back to the host shell.
+`openshell` can route Bash through `openshell sandbox create --no-keep --` when
+selected. Archon does not pass `--provider`, does not forward request
+environment values, strips common provider credential variables from the
+OpenShell CLI process, and sets `OPENSHELL_GATEWAY` only when an explicit
+gateway is configured. `workspace_mode = "remote"` runs from `/sandbox`;
+`workspace_mode = "mirror"` assumes the active workspace path is visible inside
+the sandbox runtime.
 
 `archon sandbox status --verbose` shows backend-specific safety knobs, including
 Docker host-mount settings and OpenShell provider-injection/host-shell-fallback
@@ -60,9 +64,9 @@ host_shell_fallback = false
 workspace_mode = "mirror"
 ```
 
-Future OpenShell execution must use the OpenShell transport or configured
-gateway. It must not inject provider credentials into the sandbox, and it must
-not silently execute directly on the host.
+OpenShell execution must use the OpenShell transport or configured gateway. It
+must not inject provider credentials into the sandbox, and it must not silently
+execute directly on the host.
 
 See also:
 

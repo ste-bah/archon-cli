@@ -173,7 +173,7 @@ mod tests {
     }
 
     #[test]
-    fn sandbox_doctor_openshell_reports_detect_only_status() {
+    fn sandbox_doctor_openshell_reports_routed_status() {
         let override_report = (
             archon_core::sandbox::OpenShellConfig {
                 enabled: true,
@@ -192,7 +192,7 @@ mod tests {
 
         assert!(body.contains("Backend: openshell"));
         assert!(body.contains("ready-detect-only"));
-        assert!(body.contains("Execution: disabled"));
+        assert!(body.contains("Execution: Bash routes through OpenShell"));
         assert!(body.contains("Anthropic spoofing remains host-side"));
     }
 
