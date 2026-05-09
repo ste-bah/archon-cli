@@ -3,6 +3,13 @@
 The Docker backend provides local process isolation for Bash when
 `sandbox.backend = "docker"` and `sandbox.docker.enabled = true`.
 
+Install host Docker dependencies with:
+
+```bash
+sudo scripts/install-system-deps.sh --with-docker
+archon sandbox doctor --backend docker
+```
+
 ## Default Posture
 
 Docker runs with:

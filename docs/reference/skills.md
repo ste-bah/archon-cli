@@ -13,7 +13,7 @@ Skills are slash commands resolved through the Skill registry rather than the pr
 
 When you type `/foo`, archon first checks the primary registry. If no primary matches, it falls back to the skill registry.
 
-## Built-in skills (67 total)
+## Built-in skills (68 total)
 
 21 in `builtin.rs`, 35 in `expanded.rs`, 12 embedded prompt-template skills. Highlights:
 
@@ -129,7 +129,7 @@ name = "release"
 description = "Cut a release"
 trigger = "/release"
 parameters = [
-    { name = "version", description = "Semver version (e.g. 0.1.28)", required = true },
+    { name = "version", description = "Semver version (e.g. 1.1.0-beta.2)", required = true },
     { name = "notes", description = "Release notes" },
 ]
 template = '''
@@ -142,7 +142,7 @@ Cut release version {version}:
 '''
 ```
 
-Invoke with: `/release 0.1.28 "GNN hygiene cleanup"`.
+Invoke with: `/release 1.1.0-beta.2 "Provider runtime polish"`.
 
 ## Plugin-supplied skills
 

@@ -295,6 +295,11 @@ Bash execution isolation. The default is host execution with permission
 preflight only. Set a real backend plus its matching `enabled = true` section to
 route Bash through Docker, SSH, or OpenShell.
 
+Host runtime dependencies stay outside `config.toml`. Install optional Docker
+and OpenShell tooling with `scripts/install-system-deps.sh --with-docker`,
+`--with-openshell`, or `--with-sandbox`, then use
+`archon sandbox doctor --backend <name>` before enabling a backend.
+
 ```toml
 [sandbox]
 backend = "disabled"       # "disabled" | "logical" | "docker" | "ssh" | "openshell"

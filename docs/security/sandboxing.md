@@ -13,6 +13,10 @@ archon sandbox doctor --backend openshell
 archon sandbox test --backend docker
 ```
 
+Host Docker/OpenShell dependencies are optional. Install them with
+`scripts/install-system-deps.sh --with-docker`, `--with-openshell`, or
+`--with-sandbox`; then enable the matching backend in `[sandbox]`.
+
 ## Backends
 
 `logical` keeps the existing permission gate behavior.

@@ -15,6 +15,15 @@ provider_injection = false
 host_shell_fallback = false
 ```
 
+## Host Requirements
+
+OpenShell follows NVIDIA's current support matrix: Debian/Ubuntu Linux on
+x86_64/aarch64, macOS Apple Silicon, and Windows WSL2 as experimental. Docker
+Desktop or Docker Engine must be installed and running before OpenShell commands
+are used. See the NVIDIA OpenShell
+[Quickstart](https://docs.nvidia.com/openshell/get-started/quickstart) and
+[Support Matrix](https://docs.nvidia.com/openshell/reference/support-matrix).
+
 `mirror` mode treats the local Archon workspace as canonical and assumes that
 path is visible inside the OpenShell sandbox runtime. `remote` mode must
 configure a gateway and runs commands from `/sandbox`.
@@ -24,7 +33,8 @@ configure a gateway and runs commands from `/sandbox`.
 Provider injection stays disabled by default. Anthropic Claude Code spoofing,
 Codex OAuth, and provider auth all remain host-side Archon provider runtime
 behavior. OpenShell must not receive provider credentials or generated memory
-stores unless a separate audited profile explicitly allows it in a future slice.
+stores unless a separate audited profile explicitly allows that in a later
+security-reviewed change.
 Archon does not pass OpenShell `--provider` flags and strips common provider
 credential environment variables from the OpenShell CLI process before launch.
 

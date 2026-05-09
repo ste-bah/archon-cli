@@ -70,7 +70,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 - [Sandboxing](security/sandboxing.md) — backend model, safety posture, and routing decisions
 - [Tool preflight](security/tool-preflight.md) — pre-execution permission and sandbox checks
 - [Docker sandbox](security/docker-sandbox.md) — Docker backend policy, mounts, and diagnostics
-- [SSH sandbox](security/ssh-sandbox.md) — SSH backend policy and detect-only checks
+- [SSH sandbox](security/ssh-sandbox.md) — SSH backend policy, routing, and diagnostics
 - [OpenShell sandbox](security/openshell-sandbox.md) — OpenShell backend policy and spoof-safety notes
 
 ## Cookbook

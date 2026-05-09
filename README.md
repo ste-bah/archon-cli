@@ -19,6 +19,8 @@ integration.
 # Build (Rust 1.85+, edition 2024)
 git clone https://github.com/ste-bah/archon-cli
 cd archon-cli
+sudo scripts/install-system-deps.sh --check || sudo scripts/install-system-deps.sh
+# Optional sandbox deps: sudo scripts/install-system-deps.sh --with-sandbox
 cargo build --release --bin archon
 
 # Authenticate with Claude/Anthropic OAuth or API-key billing

@@ -4,7 +4,8 @@ archon-cli ships from `main` with `--no-ff` merge commits per PR. Versions are b
 
 ## Versioning
 
-Semver. Pre-1.0 means breaking changes can land in minor versions; archon-cli is currently 0.1.x.
+Semver. archon-cli now ships 1.x releases and beta pre-releases from the
+workspace version in `Cargo.toml`.
 
 ## Per-PR steps
 
@@ -21,14 +22,14 @@ Pass [CI gates](dev-flow-gates.md):
 Workspace root `Cargo.toml`:
 ```toml
 [workspace.package]
-version = "0.1.29"
+version = "1.1.0-beta.2"
 ```
 
 All workspace crates inherit via `version.workspace = true`.
 
 ### 3. Update docs
 
-- `docs/release-notes/v0.1.29.md` — release notes for this version
+- `docs/release-notes/v1.1.0-beta.2.md` — release notes for this version
 - `docs/README.md` — link to the new release notes
 - Any user-facing doc that drifts from the change (slash commands, tools, config keys)
 
@@ -74,7 +75,7 @@ Per [dev flow](dev-flow-gates.md), the audit pattern:
 
 ```bash
 git checkout main
-git merge --no-ff <branch> -m "Merge PR (#NN): v0.1.29 brief subject"
+git merge --no-ff <branch> -m "Merge PR (#NN): v1.1.0-beta.2 brief subject"
 git push origin main
 ```
 
@@ -83,8 +84,8 @@ Sequential `--no-ff` merges (NOT fast-forward) — preserves revert points if a 
 ### 8. Tag the release
 
 ```bash
-git tag v0.1.29
-git push origin v0.1.29
+git tag v1.1.0-beta.2
+git push origin v1.1.0-beta.2
 ```
 
 ### 9. Build the release binary
@@ -92,7 +93,7 @@ git push origin v0.1.29
 ```bash
 cargo build --release --bin archon -j1
 ./target/release/archon --version
-# Expected: archon 0.1.29 (<short-sha>)
+# Expected: archon 1.1.0-beta.2 (<short-sha>)
 ```
 
 If you hit `petgraph::graphmap::NeighborsDirected::next` ICE:
@@ -132,7 +133,7 @@ Pre-existing failures (4 known: checkpoint, login, resume) are documented and do
 For urgent bug fixes:
 - Branch from `main`
 - Pass all 6 gates (no skipping for "small" fixes)
-- Bump patch version (0.1.28 → 0.1.28.1 if needed, or 0.1.29 if it's the next normal version)
+- Bump patch or beta version (for example, `1.1.0-beta.1` → `1.1.0-beta.2`, or the next stable patch once the beta graduates)
 - `--no-ff` merge
 
 ## Rollback
@@ -145,7 +146,7 @@ git revert -m 1 <merge-sha>
 git push origin main
 
 # Bump version (revert is a forward change)
-# Update Cargo.toml to 0.1.30 or similar
+# Update Cargo.toml to the next patch or beta version
 ```
 
 The `--no-ff` merge structure makes revert clean — `git revert -m 1` undoes the entire feature without disturbing other PRs.

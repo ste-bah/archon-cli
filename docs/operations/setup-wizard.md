@@ -45,6 +45,11 @@ Bootstraps `.archon/`, `prds/`, `tasks/` directories. Two paths:
 
 The wizard auto-detects which path applies by checking for `scripts/archon-init.sh` locally.
 
+System packages are handled separately by `scripts/install-system-deps.sh`.
+Run it before or after the wizard for build/PDF/OCR dependencies, and add
+`--with-docker`, `--with-openshell`, or `--with-sandbox` when the project will
+use those sandbox backends.
+
 ## Config file
 
 All choices are written to `~/.config/archon/config.toml`. The wizard reads existing values before prompting so you know what you're changing.

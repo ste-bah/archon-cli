@@ -1,6 +1,6 @@
 # Installation
 
-archon-cli is a 21-crate Cargo workspace. There are no precompiled binaries — clone, install Rust, build with `cargo build --release`. End-to-end build time is ~3-4 minutes on a modern laptop, longer on WSL2.
+archon-cli is a 26-crate Cargo workspace. There are no precompiled binaries — clone, install Rust, build with `cargo build --release`. End-to-end build time is ~3-4 minutes on a modern laptop, longer on WSL2.
 
 > **After install: TUI parity.** All examples in the rest of the docs show shell commands like `archon docs ingest ./path`. Inside the TUI those become `/docs ingest ./path` (drop the `archon` and prefix with `/`). Both forms work; both go through the same crates and write to the same persisted state. See [CLI and TUI Command Parity](../cookbook/real-world-evidence-engine.md#cli-and-tui-command-parity).
 
@@ -27,14 +27,20 @@ rustc --version    # verify: 1.85.0 or newer
 
 archon-cli links against OpenSSL via `reqwest` (rustls is also enabled, but build-deps still need pkg-config + libssl headers on Linux for transitive crates).
 
-> **Quick path: one-shot installer.** `scripts/install-system-deps.sh` detects your OS and installs everything at once — build deps + `pdftotext` (poppler) for PDF ingest + `tesseract` for image OCR. Supports Ubuntu/Debian/WSL2, Fedora/RHEL/Rocky/Alma, Arch/Manjaro, and macOS (Homebrew).
+> **Quick path: one-shot installer.** `scripts/install-system-deps.sh` detects your OS and installs the required build/doc-ingest packages at once: build deps + `pdftotext`/`pdfimages`/`pdftoppm` (poppler) for PDF ingest + `tesseract` for image OCR. Supports Ubuntu/Debian/WSL2, Fedora/RHEL/Rocky/Alma, Arch/Manjaro, openSUSE/SLE, Alpine, and macOS (Homebrew).
 >
 > ```bash
-> sudo scripts/install-system-deps.sh         # install everything
-> scripts/install-system-deps.sh --check      # verify what's already present
-> scripts/install-system-deps.sh --dry-run    # show what would run
+> sudo scripts/install-system-deps.sh                  # required build/PDF/OCR deps
+> sudo scripts/install-system-deps.sh --with-docker    # add Docker sandbox deps
+> sudo scripts/install-system-deps.sh --with-openshell # add Docker + OpenShell deps
+> sudo scripts/install-system-deps.sh --with-sandbox   # add both sandbox extras
+> scripts/install-system-deps.sh --check               # verify required deps
+> scripts/install-system-deps.sh --check --with-sandbox
+> scripts/install-system-deps.sh --dry-run --with-sandbox
 > ```
 >
+> Sandbox backends remain opt-in after installation. Enable them in
+> `[sandbox]` only after reviewing [Sandboxing](../security/sandboxing.md).
 > The manual per-distro lists below are kept for reference and for unsupported distros.
 
 ### Ubuntu / Debian / WSL2-Ubuntu
@@ -74,6 +80,8 @@ winget install Rustlang.Rustup
 winget install Microsoft.VisualStudio.2022.BuildTools
 # Select "Desktop development with C++" during install
 winget install Git.Git
+# Optional Docker sandbox backend:
+winget install Docker.DockerDesktop
 ```
 
 ### Windows (WSL2 — recommended)
@@ -82,6 +90,37 @@ winget install Git.Git
 wsl --install -d Ubuntu
 # Then follow Ubuntu/Debian setup above inside WSL
 ```
+
+## Optional sandbox dependencies
+
+Archon can route approved Bash commands through Docker, SSH, or OpenShell when
+configured. These are not required for normal chat, docs, memory, providers, or
+pipeline use.
+
+```bash
+# Linux/macOS from this repo clone:
+sudo scripts/install-system-deps.sh --with-docker
+sudo scripts/install-system-deps.sh --with-openshell
+
+# Check without changing the machine:
+scripts/install-system-deps.sh --check --with-sandbox
+archon sandbox doctor --backend docker
+archon sandbox doctor --backend openshell
+```
+
+Docker installs use the host package manager where possible (`docker.io`,
+`moby-engine`/`docker-cli`, `docker`, or Docker Desktop on macOS). On Linux you
+may still need to add your user to the `docker` group and start/enable the
+daemon according to your distro policy.
+
+OpenShell installs with the official `uv tool install -U openshell` path when
+`uv` is available, otherwise the official NVIDIA OpenShell install script is
+used. OpenShell's local gateway path expects Docker to be available, so
+`--with-openshell` also installs/checks Docker. The installer only enables
+OpenShell on hosts covered by NVIDIA's current support matrix: Debian/Ubuntu
+Linux on x86_64/aarch64, WSL2 Debian/Ubuntu on x86_64, and macOS Apple Silicon.
+Use Docker or SSH sandboxing on other hosts unless you install and validate
+OpenShell manually.
 
 ## Clone and build
 
@@ -101,7 +140,7 @@ cargo build --bin archon
 
 ## WSL2 caveat — parallelism limit
 
-If you are building inside WSL2, do NOT let cargo run rustc in parallel against the full 21-crate workspace. WSL2's memory pressure on multi-process compilation has caused OOM kills.
+If you are building inside WSL2, do NOT let cargo run rustc in parallel against the full 26-crate workspace. WSL2's memory pressure on multi-process compilation has caused OOM kills.
 
 ```bash
 cargo build --release --bin archon -j1
@@ -170,7 +209,7 @@ $env:PATH += ";$PWD\target\release"
 
 ```bash
 archon --version
-# Expected: archon 0.1.28 (<short-sha>)
+# Expected: archon 1.1.0-beta.1 (<short-sha>)
 
 archon --help                   # full subcommand listing
 archon --list-themes            # 23 themes available

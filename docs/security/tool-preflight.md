@@ -19,8 +19,9 @@ surfaces that expose it.
 ## Sandbox Rules
 
 Sandbox policy cannot grant tools. It can only allow the already-permitted tool
-to continue, deny it, or route Bash through a backend such as Docker or SSH.
-OpenShell currently fails closed.
+to continue, deny it, or route Bash through a backend such as Docker, SSH, or
+OpenShell. OpenShell routes when selected and configured safely; otherwise it
+fails closed without host-shell fallback.
 
 ## Provider Independence
 
