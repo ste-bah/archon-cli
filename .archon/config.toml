@@ -95,6 +95,7 @@ app_server_transport = "websocket"
 # app_server_command = "codex"
 # app_server_args = ["app-server"]
 app_server_discovery_timeout_ms = 2500
+app_server_model_catalog = ["gpt-5.5", "gpt-5.4"]
 
 [providers.openai-codex.spoof]
 # originator  = "openclaw"
@@ -206,6 +207,67 @@ always_ask = []
 
 
 # ----------------------------------------------------------------------------
+# [sandbox] — Execution isolation backend selection
+# ----------------------------------------------------------------------------
+[sandbox]
+# Available backends: "disabled" | "logical" | "docker" | "ssh" | "openshell"
+# Current /sandbox toggle uses the logical policy gate. Docker/SSH/OpenShell are
+# separate isolation backends and require their matching enabled=true section.
+backend = "disabled"
+# Which commands route through the backend: "risky" | "all" | "shell"
+mode = "risky"
+# Backend lifecycle: "session" | "turn" | "tool"
+scope = "session"
+# Workspace mount policy: "ro" | "rw" | "scratch"
+workspace_access = "ro"
+
+[sandbox.docker]
+# Real Bash execution backend when sandbox.backend = "docker" and enabled=true.
+enabled = false
+binary = "docker"
+image = "ubuntu:24.04"
+# "disabled" | "limited" | "enabled"
+network = "disabled"
+memory_limit = "2g"
+cpu_limit = "2"
+writable_paths = []
+env_allowlist = []
+privileged = false
+mount_docker_socket = false
+mount_home = false
+
+[sandbox.ssh]
+# Real Bash execution backend when sandbox.backend = "ssh" and enabled=true.
+enabled = false
+binary = "ssh"
+# host = "sandbox.example"
+# user = "archon"
+port = 22
+# key_file = "~/.ssh/id_ed25519"
+# "remote" runs from remote_workdir; "mirror" assumes the same path exists remotely.
+workspace_mode = "remote"
+# remote_workdir = "/srv/archon/workspace"
+host_key_checking = true
+host_shell_fallback = false
+
+[sandbox.openshell]
+# Real Bash execution backend when sandbox.backend = "openshell" and enabled=true.
+enabled = false
+binary = "openshell"
+# "mirror" keeps the local workspace canonical; "remote" requires gateway.
+workspace_mode = "mirror"
+# gateway = "team-gateway"
+# policy = "locked-down"
+providers = []
+gpu = false
+# Provider injection stays disabled so Anthropic Claude Code spoofing and other
+# provider routing remain host-side in Archon's LLM runtime.
+provider_injection = false
+# Never fall back to direct host shell when OpenShell activation fails.
+host_shell_fallback = false
+
+
+# ----------------------------------------------------------------------------
 # [context] — Conversation compaction + caching
 # ----------------------------------------------------------------------------
 [context]
@@ -302,6 +364,12 @@ enabled = true
 [learning.reflexion]
 enabled = true
 max_per_agent = 3
+
+# --- Governed agent profile evolution ---
+[learning.agent_evolution]
+# Profile versions and proposals are always stored in CozoDB. Runtime use of the
+# active profile overlay stays opt-in until an operator enables it explicitly.
+active_profile_overlay_enabled = false
 
 # --- GNN Enhancer (round-trip 1536 → 1024 → 1280 → 1536 graph attention) ---
 [learning.gnn]

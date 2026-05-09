@@ -351,4 +351,34 @@ fn repository_project_config_template_parses() {
 
     validate(&config).unwrap_or_else(|e| panic!("validate {}: {e}", path.display()));
     assert!(config.providers.openai_codex.enabled);
+    assert_eq!(
+        config.providers.openai_codex.app_server_model_catalog,
+        vec!["gpt-5.5".to_string(), "gpt-5.4".to_string()]
+    );
+    assert_eq!(config.sandbox.backend, "disabled");
+    assert_eq!(config.sandbox.ssh.binary, "ssh");
+    assert!(!config.sandbox.openshell.provider_injection);
+    assert!(
+        !config
+            .learning
+            .agent_evolution
+            .active_profile_overlay_enabled
+    );
+}
+
+#[test]
+fn repository_root_config_template_parses() {
+    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("config.toml");
+    let raw =
+        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+    let config: ArchonConfig =
+        toml::from_str(&raw).unwrap_or_else(|e| panic!("parse {}: {e}", path.display()));
+
+    validate(&config).unwrap_or_else(|e| panic!("validate {}: {e}", path.display()));
+    assert_eq!(config.sandbox.policy().unwrap().workspace_access, "ro");
+    assert_eq!(config.sandbox.ssh.workspace_mode, "remote");
+    assert!(!config.sandbox.openshell.host_shell_fallback);
 }
