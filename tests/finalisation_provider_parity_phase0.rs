@@ -32,7 +32,7 @@ fn phase0_direct_anthropic_construction_baseline_is_explicit() {
     let expected = BTreeMap::from([
         ("crates/archon-sdk/src/query.rs", 1usize),
         ("src/command/chat.rs", 1),
-        ("src/runtime/llm.rs", 2),
+        ("src/runtime/llm.rs", 1),
         ("src/session.rs", 2),
         ("src/session_loop/slash_handlers.rs", 1),
     ]);
