@@ -153,13 +153,23 @@ mod tests {
     }
 
     fn agent_with_rules(mode: &str, rules: RuleSet) -> Agent {
-        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        agent_with_rules_and_events(mode, rules).0
+    }
+
+    fn agent_with_rules_and_events(
+        mode: &str,
+        rules: RuleSet,
+    ) -> (
+        Agent,
+        tokio::sync::mpsc::UnboundedReceiver<TimestampedEvent>,
+    ) {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let config = AgentConfig {
             permission_mode: Arc::new(Mutex::new(mode.to_string())),
             permission_rules: rules,
             ..AgentConfig::default()
         };
-        Agent::new(
+        let agent = Agent::new(
             Arc::new(MockLlmProvider),
             ToolRegistry::new(),
             config,
@@ -167,7 +177,8 @@ mod tests {
             Arc::new(std::sync::RwLock::new(AgentRegistry::load(
                 &std::env::temp_dir(),
             ))),
-        )
+        );
+        (agent, rx)
     }
 
     #[tokio::test]
@@ -224,5 +235,59 @@ mod tests {
                 .unwrap_or_default()
                 .contains("Blocked by deny rule")
         );
+    }
+
+    #[tokio::test]
+    async fn pretool_hook_deny_records_denial_event_and_log() {
+        let (mut agent, mut rx) =
+            agent_with_rules_and_events("bypassPermissions", RuleSet::empty());
+        let registry = Arc::new(crate::hooks::HookRegistry::new());
+        let callback: crate::hooks::HookCallback = Arc::new(|_| crate::hooks::HookResult {
+            permission_behavior: Some(crate::hooks::PermissionBehavior::Deny),
+            permission_decision_reason: Some("hook policy denied".to_string()),
+            source_authority: Some(crate::hooks::SourceAuthority::Policy),
+            ..Default::default()
+        });
+        registry.register_callback(
+            crate::hooks::HookEvent::PreToolUse,
+            crate::hooks::HookCallbackEntry {
+                name: "deny-bash".to_string(),
+                callback,
+                authority: crate::hooks::SourceAuthority::Policy,
+                timeout_secs: 1,
+            },
+        );
+        agent.set_hook_registry(registry);
+        let pending = [PendingToolCall {
+            id: "tool-1".to_string(),
+            name: "Bash".to_string(),
+            input_json: r#"{"command":"cargo test"}"#.to_string(),
+        }];
+
+        let allowed = agent.preflight_tools(&pending, AgentMode::Normal).await;
+
+        assert!(allowed.is_empty());
+        let recent = {
+            let log = agent.denial_log.lock().await;
+            log.recent(1).to_vec()
+        };
+        assert_eq!(recent.len(), 1);
+        assert_eq!(recent[0].tool_name, "Bash");
+        assert_eq!(recent[0].reason, "hook policy denied");
+
+        let mut events = Vec::new();
+        while let Ok(event) = rx.try_recv() {
+            events.push(event.inner);
+        }
+        assert!(events.iter().any(|event| matches!(
+            event,
+            AgentEvent::PermissionDenied { tool, reason }
+                if tool == "Bash" && reason.as_deref() == Some("hook policy denied")
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            AgentEvent::ToolCallComplete { name, result, .. }
+                if name == "Bash" && result.is_error
+        )));
     }
 }

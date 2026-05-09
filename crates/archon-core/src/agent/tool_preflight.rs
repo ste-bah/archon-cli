@@ -148,6 +148,12 @@ impl Agent {
                                 .permission_decision_reason
                                 .as_deref()
                                 .unwrap_or("hook denied permission");
+                            self.fire_permission_denied_hook(tool, &perm_mode, reason)
+                                .await;
+                            {
+                                let mut log = self.denial_log.lock().await;
+                                log.record(&tool.name, reason);
+                            }
                             let result = ToolResult::error(format!("Permission denied: {reason}"));
                             self.send_event(AgentEvent::ToolCallComplete {
                                 name: tool.name.clone(),
