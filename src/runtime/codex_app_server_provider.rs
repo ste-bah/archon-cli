@@ -1,5 +1,6 @@
 //! Codex app-server provider adapter.
 
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use anyhow::Result;
@@ -17,6 +18,7 @@ use crate::runtime::codex_app_server_rpc::{CodexAppServerRpcClient, CodexNotific
 
 pub(crate) struct CodexAppServerProvider {
     config: CodexProviderConfig,
+    model_cache: crate::runtime::codex_app_server_models::ModelCache,
 }
 
 impl CodexAppServerProvider {
@@ -28,7 +30,13 @@ impl CodexAppServerProvider {
                 discovery.reason_code()
             );
         }
-        Ok(Self { config })
+        let model_cache = Arc::new(RwLock::new(
+            crate::runtime::codex_app_server_models::fallback_models(&config),
+        ));
+        Ok(Self {
+            config,
+            model_cache,
+        })
     }
 }
 
@@ -39,15 +47,10 @@ impl LlmProvider for CodexAppServerProvider {
     }
 
     fn models(&self) -> Vec<ModelInfo> {
-        self.config
-            .app_server_model_catalog
-            .iter()
-            .map(|id| ModelInfo {
-                id: id.clone(),
-                display_name: id.clone(),
-                context_window: 200_000,
-            })
-            .collect()
+        self.model_cache
+            .read()
+            .map(|guard| guard.clone())
+            .unwrap_or_default()
     }
 
     async fn stream(&self, request: LlmRequest) -> Result<mpsc::Receiver<StreamEvent>, LlmError> {
@@ -57,10 +60,13 @@ impl LlmProvider for CodexAppServerProvider {
             ));
         }
         let config = self.config.clone();
+        let model_cache = Arc::clone(&self.model_cache);
         let timeout_ms = config.app_server_discovery_timeout_ms.max(100);
         let (tx, rx) = mpsc::channel(256);
         tokio::spawn(async move {
-            if let Err(error) = run_app_server_turn(config, request, tx.clone(), timeout_ms).await {
+            if let Err(error) =
+                run_app_server_turn(config, request, tx.clone(), timeout_ms, model_cache).await
+            {
                 let _ = tx
                     .send(StreamEvent::Error {
                         error_type: "codex_app_server_error".into(),
@@ -123,9 +129,12 @@ async fn run_app_server_turn(
     request: LlmRequest,
     tx: mpsc::Sender<StreamEvent>,
     timeout_ms: u64,
+    model_cache: crate::runtime::codex_app_server_models::ModelCache,
 ) -> Result<(), LlmError> {
     let (client, mut notifications) = CodexAppServerRpcClient::connect(&config).await?;
     client.initialize(timeout_ms).await?;
+    crate::runtime::codex_app_server_models::refresh_model_cache(&client, timeout_ms, &model_cache)
+        .await;
     let cwd = std::env::current_dir()
         .map_err(|e| LlmError::Http(e.to_string()))?
         .display()
