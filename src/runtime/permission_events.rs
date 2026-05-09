@@ -29,7 +29,9 @@ pub(crate) fn record_permission_event(
     );
     if let Err(error) = insert_permission_runtime_event(db, &event) {
         tracing::warn!(%error, tool = %tool_name, decision, "permission event persistence failed");
+        return;
     }
+    record_denied_permission_ledger_signal(db, &event);
 }
 
 pub(crate) fn record_permission_mode_event(
@@ -98,6 +100,44 @@ fn build_permission_event(
         event.reason_code = Some("permission_denied".to_string());
     }
     event
+}
+
+fn record_denied_permission_ledger_signal(db: &DbInstance, event: &PermissionRuntimeEventRecord) {
+    if event.decision != "denied" {
+        return;
+    }
+    let Some(agent_type) = event
+        .agent_type
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+    else {
+        return;
+    };
+    let reason = event.reason_code.as_deref().unwrap_or("permission_denied");
+    let mut record = archon_learning::agent_evolution_ledger::AgentPerformanceLedgerRecord::new(
+        format!("ledger-{}", uuid::Uuid::new_v4()),
+        agent_type,
+        "failed",
+        chrono::Utc::now().to_rfc3339(),
+    )
+    .add_evidence(format!("permission_event:{}", event.event_id))
+    .add_evidence(format!("permission_reason:{reason}"));
+    record.permission_mode = Some(event.permission_mode.clone());
+    record.gate_failed = Some(format!("permission:{}:denied", event.tool_name));
+    record.completion_rate = Some(0.0);
+    if let Some(run_id) = event.run_id.as_deref().or(event.session_id.as_deref()) {
+        record = record.with_run_id(run_id);
+    }
+    if let Err(error) =
+        archon_learning::agent_evolution_ledger::insert_agent_performance_ledger_record(db, &record)
+    {
+        tracing::warn!(
+            %error,
+            agent = %agent_type,
+            tool = %event.tool_name,
+            "permission denial ledger signal failed"
+        );
+    }
 }
 
 fn sanitized_permission_reason(reason: &str) -> String {
@@ -200,5 +240,58 @@ mod tests {
         assert_eq!(rows[0].run_id.as_deref(), Some("session-1"));
         assert_eq!(rows[0].raw_redacted_json["previous_mode"], "default");
         assert_eq!(rows[0].raw_redacted_json["payload"], "redacted");
+    }
+
+    #[test]
+    fn denied_permission_event_feeds_agent_ledger_without_granting_tool() {
+        let path = format!(
+            "/tmp/test-runtime-permission-ledger-{}.db",
+            uuid::Uuid::new_v4()
+        );
+        let db = Arc::new(DbInstance::new("sqlite", &path, "").unwrap());
+        archon_learning::schema::ensure_learning_schema(&db).unwrap();
+
+        record_permission_event(
+            Some(&db),
+            "session-1",
+            Some("reviewer"),
+            "ask",
+            "Bash",
+            "denied",
+            Some("Blocked by deny rule: tool=Bash"),
+        );
+
+        let permission_rows =
+            archon_learning::permission_runtime_events::list_permission_runtime_events_by_session(
+                &db,
+                "session-1",
+            )
+            .unwrap();
+        assert_eq!(permission_rows.len(), 1);
+        assert_eq!(permission_rows[0].decision, "denied");
+
+        let ledger_rows =
+            archon_learning::agent_evolution_ledger::list_agent_performance_ledger_by_agent(
+                &db, "reviewer",
+            )
+            .unwrap();
+        assert_eq!(ledger_rows.len(), 1);
+        assert_eq!(ledger_rows[0].completion_status, "failed");
+        assert_eq!(
+            ledger_rows[0].gate_failed.as_deref(),
+            Some("permission:Bash:denied")
+        );
+        assert_eq!(ledger_rows[0].permission_mode.as_deref(), Some("ask"));
+        assert!(
+            ledger_rows[0]
+                .evidence_ids
+                .iter()
+                .any(|id| id.starts_with("permission_event:permission-"))
+        );
+        assert!(
+            ledger_rows[0]
+                .evidence_ids
+                .contains(&"permission_reason:deny_rule".to_string())
+        );
     }
 }
