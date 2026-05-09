@@ -17,7 +17,7 @@ pub(crate) fn apply_proposal(
     let proposal =
         archon_learning::agent_evolution_proposals::get_agent_evolution_proposal(db, proposal_id)?
             .ok_or_else(|| anyhow::anyhow!("agent evolution proposal not found: {proposal_id}"))?;
-    ensure_can_apply(&proposal)?;
+    crate::command::agent_evolve_apply_policy::ensure_can_apply(db, &proposal, activate)?;
 
     let parent = archon_learning::agent_profile_versions::get_active_agent_profile_version(
         db,
@@ -106,27 +106,6 @@ pub(crate) fn rollback_profile(
         version_id: record.version_id,
         active: record.is_active,
     })
-}
-
-fn ensure_can_apply(
-    proposal: &archon_learning::agent_evolution_proposals::AgentEvolutionProposalRecord,
-) -> Result<()> {
-    match proposal.status.as_str() {
-        "rejected" => anyhow::bail!("proposal {} is rejected", proposal.proposal_id),
-        "applied" => anyhow::bail!("proposal {} is already applied", proposal.proposal_id),
-        _ => {}
-    }
-
-    let requires_approval = matches!(proposal.risk_level.as_str(), "high" | "critical")
-        || proposal.affects_permissions
-        || proposal.affects_provider_identity;
-    if requires_approval && proposal.status != "approved" {
-        anyhow::bail!(
-            "proposal {} requires approval before apply",
-            proposal.proposal_id
-        );
-    }
-    Ok(())
 }
 
 fn next_version_number(db: &DbInstance, agent_type: &str) -> Result<i64> {
@@ -311,6 +290,22 @@ mod tests {
         .with_status(status)
     }
 
+    fn insert_promoting_shadow(db: &DbInstance) {
+        archon_learning::agent_shadow_evaluations::insert_agent_shadow_evaluation(
+            db,
+            &archon_learning::agent_shadow_evaluations::AgentShadowEvaluationRecord::new(
+                "shadow-eval-1",
+                "agent-evo-prop-1",
+                "reviewer",
+                "promote",
+                "2026-05-08T12:30:00Z",
+            )
+            .with_counts(0, 2)
+            .with_scores(0.65, 0.82),
+        )
+        .unwrap();
+    }
+
     #[test]
     fn high_risk_proposal_requires_approval_before_apply() {
         let db = test_db();
@@ -373,6 +368,7 @@ mod tests {
             &proposal("approved"),
         )
         .unwrap();
+        insert_promoting_shadow(&db);
 
         let applied = apply_proposal(&db, "agent-evo-prop-1", true).unwrap();
         let version = archon_learning::agent_profile_versions::get_agent_profile_version(

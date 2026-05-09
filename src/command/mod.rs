@@ -12,6 +12,7 @@ pub(crate) mod add_dir;
 pub(crate) mod agent;
 pub(crate) mod agent_evolve;
 pub(crate) mod agent_evolve_apply;
+pub(crate) mod agent_evolve_apply_policy;
 pub(crate) mod agent_evolve_digest;
 pub(crate) mod agent_evolve_generate;
 pub(crate) mod agent_evolve_generate_support;
