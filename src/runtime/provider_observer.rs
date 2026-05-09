@@ -18,6 +18,9 @@ use tokio::sync::mpsc::Receiver;
 use super::provider_event_record::provider_event_record;
 use super::provider_limit_windows;
 
+#[path = "provider_observer_stream.rs"]
+mod stream;
+
 #[derive(Clone)]
 pub(crate) struct ProviderRuntimeEventRecorder {
     db: Option<Arc<DbInstance>>,
@@ -182,6 +185,14 @@ impl ObservedLlmProvider {
             .with_reason("ok")
             .with_redacted_json(metadata),
         );
+        super::provider_profile_updates::mark_success(
+            self.recorder.db.as_ref(),
+            self.inner.name(),
+            &self.runtime_mode,
+            self.profile_id.as_deref(),
+            Some(&request.model),
+            Some(request_id),
+        );
     }
 
     fn record_failure(&self, request_id: &str, request: &ObservedRequest, error: &LlmError) {
@@ -213,6 +224,15 @@ impl ObservedLlmProvider {
             self.recorder
                 .record_limit_window(self.inner.name(), Some(&request.model), error);
         }
+        super::provider_profile_updates::mark_failure(
+            self.recorder.db.as_ref(),
+            self.inner.name(),
+            &self.runtime_mode,
+            self.profile_id.as_deref(),
+            Some(&request.model),
+            Some(request_id),
+            error,
+        );
     }
 }
 
@@ -232,83 +252,15 @@ impl LlmProvider for ObservedLlmProvider {
         self.record_start(&request_id, &observed, "stream");
 
         match self.inner.stream(request).await {
-            Ok(mut inner_rx) => {
-                let (tx, rx) = tokio::sync::mpsc::channel(64);
-                let recorder = self.recorder.clone();
-                let provider_id = self.inner.name().to_string();
-                let runtime_mode = self.runtime_mode.clone();
-                tokio::spawn(async move {
-                    let mut completed = false;
-                    while let Some(event) = inner_rx.recv().await {
-                        match &event {
-                            StreamEvent::Error {
-                                error_type,
-                                message: _,
-                            } => {
-                                recorder.record(
-                                    base_event(
-                                        &provider_id,
-                                        &runtime_mode,
-                                        ProviderRuntimeEventType::RequestFailed,
-                                        ProviderRuntimeSeverity::Warn,
-                                    )
-                                    .with_request_id(request_id.clone())
-                                    .with_model(observed.model.clone())
-                                    .with_reason(error_type.clone())
-                                    .with_message("provider stream emitted an error event")
-                                    .with_redacted_json(
-                                        serde_json::json!({
-                                            "request_origin": observed.origin.as_deref(),
-                                            "stream_error_type": error_type,
-                                        }),
-                                    ),
-                                );
-                            }
-                            StreamEvent::MessageStop => {
-                                completed = true;
-                                recorder.record(
-                                    base_event(
-                                        &provider_id,
-                                        &runtime_mode,
-                                        ProviderRuntimeEventType::RequestSucceeded,
-                                        ProviderRuntimeSeverity::Info,
-                                    )
-                                    .with_request_id(request_id.clone())
-                                    .with_model(observed.model.clone())
-                                    .with_reason("stream_completed")
-                                    .with_redacted_json(
-                                        serde_json::json!({
-                                            "request_origin": observed.origin.as_deref(),
-                                        }),
-                                    ),
-                                );
-                            }
-                            _ => {}
-                        }
-                        if tx.send(event).await.is_err() {
-                            break;
-                        }
-                    }
-                    if !completed {
-                        recorder.record(
-                            base_event(
-                                &provider_id,
-                                &runtime_mode,
-                                ProviderRuntimeEventType::RequestFailed,
-                                ProviderRuntimeSeverity::Warn,
-                            )
-                            .with_request_id(request_id)
-                            .with_model(observed.model.clone())
-                            .with_reason("stream_closed_without_message_stop")
-                            .with_message("provider stream ended before message_stop")
-                            .with_redacted_json(serde_json::json!({
-                                "request_origin": observed.origin.as_deref(),
-                            })),
-                        );
-                    }
-                });
-                Ok(rx)
-            }
+            Ok(inner_rx) => Ok(stream::forward_stream(
+                inner_rx,
+                self.recorder.clone(),
+                self.inner.name().to_string(),
+                self.runtime_mode.clone(),
+                self.profile_id.clone(),
+                observed,
+                request_id,
+            )),
             Err(error) => {
                 self.record_failure(&request_id, &observed, &error);
                 Err(error)
@@ -356,7 +308,7 @@ impl LlmProvider for ObservedLlmProvider {
 }
 
 #[derive(Clone)]
-struct ObservedRequest {
+pub(super) struct ObservedRequest {
     model: String,
     origin: Option<String>,
 }

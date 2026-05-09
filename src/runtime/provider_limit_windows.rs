@@ -85,7 +85,10 @@ fn build_limit_window(
     Some(window)
 }
 
-fn reset_after_secs(observed_at: DateTime<Utc>, retry_after_secs: u64) -> Option<DateTime<Utc>> {
+pub(crate) fn reset_after_secs(
+    observed_at: DateTime<Utc>,
+    retry_after_secs: u64,
+) -> Option<DateTime<Utc>> {
     if retry_after_secs == 0 {
         None
     } else {
@@ -93,7 +96,10 @@ fn reset_after_secs(observed_at: DateTime<Utc>, retry_after_secs: u64) -> Option
     }
 }
 
-fn reset_hint_from_text(message: &str, observed_at: DateTime<Utc>) -> Option<DateTime<Utc>> {
+pub(crate) fn reset_hint_from_text(
+    message: &str,
+    observed_at: DateTime<Utc>,
+) -> Option<DateTime<Utc>> {
     rfc3339_hint(message).or_else(|| relative_duration_hint(message, observed_at))
 }
 

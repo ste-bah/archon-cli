@@ -14,4 +14,5 @@ pub(crate) mod provider_event_record;
 pub(crate) mod provider_fallback_events;
 pub(crate) mod provider_limit_windows;
 pub(crate) mod provider_observer;
+pub(crate) mod provider_profile_updates;
 pub(crate) mod sandbox_events;
