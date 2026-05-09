@@ -55,6 +55,7 @@ pub enum AgentEvent {
     },
     PermissionDenied {
         tool: String,
+        reason: Option<String>,
     },
     TurnComplete {
         input_tokens: u64,

@@ -2705,6 +2705,7 @@ pub(crate) async fn run_interactive_session(
                             &mode,
                             &tool,
                             "requested",
+                            None,
                         );
                         TuiEvent::PermissionPrompt { tool, description }
                     }
@@ -2717,10 +2718,11 @@ pub(crate) async fn run_interactive_session(
                             &mode,
                             &tool,
                             "granted",
+                            None,
                         );
                         continue;
                     }
-                    AgentEvent::PermissionDenied { tool } => {
+                    AgentEvent::PermissionDenied { tool, reason } => {
                         let mode = permission_mode_for_fwd.lock().await.clone();
                         crate::runtime::permission_events::record_permission_event(
                             permission_events_db_for_fwd.as_ref(),
@@ -2729,6 +2731,7 @@ pub(crate) async fn run_interactive_session(
                             &mode,
                             &tool,
                             "denied",
+                            reason.as_deref(),
                         );
                         continue;
                     }

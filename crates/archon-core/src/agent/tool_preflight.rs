@@ -304,6 +304,7 @@ impl Agent {
                 .await;
                 self.send_event(AgentEvent::PermissionDenied {
                     tool: tool.name.clone(),
+                    reason: Some("dangerous_operation".to_string()),
                 })
                 .await;
                 false

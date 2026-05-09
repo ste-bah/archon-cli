@@ -14,12 +14,19 @@ pub(crate) fn record_permission_event(
     permission_mode: &str,
     tool_name: &str,
     decision: &str,
+    reason: Option<&str>,
 ) {
     let Some(db) = db else {
         return;
     };
-    let event =
-        build_permission_event(session_id, agent_type, permission_mode, tool_name, decision);
+    let event = build_permission_event(
+        session_id,
+        agent_type,
+        permission_mode,
+        tool_name,
+        decision,
+        reason,
+    );
     if let Err(error) = insert_permission_runtime_event(db, &event) {
         tracing::warn!(%error, tool = %tool_name, decision, "permission event persistence failed");
     }
@@ -66,8 +73,10 @@ fn build_permission_event(
     permission_mode: &str,
     tool_name: &str,
     decision: &str,
+    reason: Option<&str>,
 ) -> PermissionRuntimeEventRecord {
-    PermissionRuntimeEventRecord::new(
+    let reason_code = reason.map(sanitized_permission_reason);
+    let mut event = PermissionRuntimeEventRecord::new(
         format!("permission-{}", uuid::Uuid::new_v4()),
         tool_name,
         permission_mode,
@@ -79,10 +88,39 @@ fn build_permission_event(
         Some(session_id.to_string()),
         agent_type.map(ToOwned::to_owned),
     )
+    .with_policy_context(reason_code.clone(), None, None)
     .with_raw_redacted_json(serde_json::json!({
         "source": "agent_event_forwarder",
+        "reason_code": reason_code,
         "payload": "redacted"
-    }))
+    }));
+    if decision == "denied" && event.reason_code.is_none() {
+        event.reason_code = Some("permission_denied".to_string());
+    }
+    event
+}
+
+fn sanitized_permission_reason(reason: &str) -> String {
+    let lower = reason.to_ascii_lowercase();
+    if lower.contains("blocked by deny rule") {
+        "deny_rule".to_string()
+    } else if lower.contains("plan mode") {
+        "plan_mode".to_string()
+    } else if lower.contains("user_denied_or_timeout") {
+        "user_denied_or_timeout".to_string()
+    } else if lower.contains("dangerous_operation") {
+        "dangerous_operation".to_string()
+    } else if lower.contains("risky_operation") {
+        "risky_operation".to_string()
+    } else if lower.contains("bubble sandbox") {
+        "bubble_sandbox".to_string()
+    } else if lower.contains("requires confirmation") {
+        "rule_requires_confirmation".to_string()
+    } else if lower.contains("wants to") {
+        "needs_permission".to_string()
+    } else {
+        "permission_denied".to_string()
+    }
 }
 
 #[cfg(test)]
@@ -91,7 +129,14 @@ mod tests {
 
     #[test]
     fn built_permission_event_has_redacted_payload_only() {
-        let event = build_permission_event("session-1", Some("reviewer"), "ask", "Bash", "denied");
+        let event = build_permission_event(
+            "session-1",
+            Some("reviewer"),
+            "ask",
+            "Bash",
+            "denied",
+            Some("Blocked by deny rule: tool=Bash, pattern=*"),
+        );
 
         assert_eq!(event.session_id.as_deref(), Some("session-1"));
         assert_eq!(event.run_id.as_deref(), Some("session-1"));
@@ -99,9 +144,28 @@ mod tests {
         assert_eq!(event.tool_name, "Bash");
         assert_eq!(event.permission_mode, "ask");
         assert_eq!(event.decision, "denied");
+        assert_eq!(event.reason_code.as_deref(), Some("deny_rule"));
+        assert_eq!(event.raw_redacted_json["reason_code"], "deny_rule");
         assert_eq!(event.raw_redacted_json["payload"], "redacted");
+        assert!(event.raw_redacted_json.get("reason").is_none());
         assert!(event.raw_redacted_json.get("command").is_none());
         assert!(event.raw_redacted_json.get("file_path").is_none());
+    }
+
+    #[test]
+    fn permission_reason_sanitizer_does_not_store_raw_details() {
+        assert_eq!(
+            sanitized_permission_reason("Tool 'Bash' wants to: use Bash"),
+            "needs_permission"
+        );
+        assert_eq!(
+            sanitized_permission_reason("Plan mode: tool 'Write' is not allowed"),
+            "plan_mode"
+        );
+        assert_eq!(
+            sanitized_permission_reason("/tmp/secret-project command details"),
+            "permission_denied"
+        );
     }
 
     #[test]
