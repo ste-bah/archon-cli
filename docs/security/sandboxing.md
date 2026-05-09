@@ -34,7 +34,9 @@ Interactive sessions wrap the selected sandbox backend with a Cozo audit layer.
 Tool checks and backend Bash execution decisions are recorded as
 `sandbox_runtime_events`, and each session creates a `sandbox_sessions` row with
 redacted transport details. Commands, environment values, and workspace paths
-are not stored in the audit payload.
+are not stored in the audit payload. Denied or failed sandbox decisions also
+write an agent performance ledger signal so governed evolution can see repeated
+sandbox failures without learning around the isolation boundary.
 
 ## OpenShell Policy
 

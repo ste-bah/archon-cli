@@ -97,8 +97,9 @@ impl AuditedSandboxBackend {
             return;
         };
         let backend_kind = self.backend_kind();
+        let event_id = format!("sandbox-event-{}", uuid::Uuid::new_v4());
         let event = archon_learning::sandbox_runtime_events::SandboxRuntimeEventRecord::new(
-            format!("sandbox-event-{}", uuid::Uuid::new_v4()),
+            event_id.clone(),
             backend_kind.clone(),
             decision,
             chrono::Utc::now().to_rfc3339(),
@@ -118,6 +119,44 @@ impl AuditedSandboxBackend {
             archon_learning::sandbox_runtime_events::insert_sandbox_runtime_event(db, &event)
         {
             tracing::warn!(%error, backend = %backend_kind, "sandbox runtime audit failed");
+        }
+        self.record_agent_ledger_signal(db, &event_id, decision, reason_code, &backend_kind);
+    }
+
+    fn record_agent_ledger_signal(
+        &self,
+        db: &DbInstance,
+        sandbox_event_id: &str,
+        decision: &str,
+        reason_code: &str,
+        backend_kind: &str,
+    ) {
+        if !matches!(decision, "denied" | "failed") {
+            return;
+        }
+        let mut record =
+            archon_learning::agent_evolution_ledger::AgentPerformanceLedgerRecord::new(
+                format!("ledger-{}", uuid::Uuid::new_v4()),
+                self.agent_type.clone(),
+                "failed",
+                chrono::Utc::now().to_rfc3339(),
+            )
+            .with_run_id(self.run_id.clone())
+            .add_evidence(format!("sandbox_event:{sandbox_event_id}"))
+            .add_evidence(format!("sandbox_reason:{reason_code}"));
+        record.gate_failed = Some(format!("sandbox:{backend_kind}:{decision}"));
+        record.completion_rate = Some(0.0);
+        if let Err(error) =
+            archon_learning::agent_evolution_ledger::insert_agent_performance_ledger_record(
+                db, &record,
+            )
+        {
+            tracing::warn!(
+                %error,
+                backend = %backend_kind,
+                agent = %self.agent_type,
+                "sandbox agent ledger signal failed"
+            );
         }
     }
 
@@ -370,5 +409,47 @@ mod tests {
         assert_eq!(events[0].agent_type.as_deref(), Some("coder"));
         assert!(events[0].redacted_context_json.get("command").is_none());
         assert!(events[0].redacted_context_json.get("env").is_none());
+    }
+
+    #[test]
+    fn wrapper_feeds_denied_sandbox_events_into_agent_ledger() {
+        let db = test_db();
+        let config = archon_core::sandbox::SandboxConfig {
+            backend: "openshell".to_string(),
+            ..archon_core::sandbox::SandboxConfig::default()
+        };
+        let wrapper = AuditedSandboxBackend::new(
+            Arc::new(FakeSandboxBackend { bash_result: None }),
+            config,
+            "run-2".to_string(),
+            "reviewer".to_string(),
+            Some(db.clone()),
+        );
+
+        let error = wrapper
+            .check("DenyMe", &serde_json::json!({"command": "secret"}))
+            .unwrap_err();
+        let rows = archon_learning::agent_evolution_ledger::list_agent_performance_ledger_by_agent(
+            &db, "reviewer",
+        )
+        .unwrap();
+
+        assert_eq!(error, "blocked");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(
+            rows[0].gate_failed.as_deref(),
+            Some("sandbox:openshell:denied")
+        );
+        assert!(
+            rows[0]
+                .evidence_ids
+                .iter()
+                .any(|evidence| evidence.starts_with("sandbox_event:sandbox-event-"))
+        );
+        assert!(
+            rows[0]
+                .evidence_ids
+                .contains(&"sandbox_reason:sandbox_check_denied".to_string())
+        );
     }
 }
