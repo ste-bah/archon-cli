@@ -1,6 +1,6 @@
 //! Generate governed agent evolution proposals from the Cozo ledger.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use anyhow::Result;
 use chrono::{DateTime, Utc};
@@ -35,11 +35,17 @@ pub(crate) fn cmd_generate_agent_evolution(db: &DbInstance, agent_type: &str) ->
         return Ok(());
     }
 
-    for proposal in &proposals {
-        archon_learning::agent_evolution_proposals::insert_agent_evolution_proposal(
-            db,
-            &proposal_to_record(proposal),
-        )?;
+    let mut existing_fingerprints = existing_proposal_fingerprints(db, agent_type)?;
+    let mut inserted_proposals = Vec::new();
+    let mut skipped_duplicates = 0usize;
+    for proposal in proposals {
+        let record = proposal_to_record(&proposal);
+        if !existing_fingerprints.insert(proposal_fingerprint(&record)) {
+            skipped_duplicates += 1;
+            continue;
+        }
+        archon_learning::agent_evolution_proposals::insert_agent_evolution_proposal(db, &record)?;
+        inserted_proposals.push(proposal);
     }
     for candidate in &memory_candidates {
         archon_learning::memory_promotion_candidates::insert_memory_promotion_candidate(
@@ -47,13 +53,21 @@ pub(crate) fn cmd_generate_agent_evolution(db: &DbInstance, agent_type: &str) ->
         )?;
     }
 
+    if inserted_proposals.is_empty() && memory_candidates.is_empty() {
+        println!(
+            "No new agent evolution proposals or memory candidates generated for {agent_type}. Skipped {skipped_duplicates} duplicate proposal(s)."
+        );
+        return Ok(());
+    }
+
     println!(
-        "Generated {} agent evolution proposal(s) and {} memory candidate(s) for {agent_type} from {} ledger row(s).",
-        proposals.len(),
+        "Generated {} new agent evolution proposal(s) and {} memory candidate(s) for {agent_type} from {} ledger row(s). Skipped {} duplicate proposal(s).",
+        inserted_proposals.len(),
         memory_candidates.len(),
-        ledger.len()
+        ledger.len(),
+        skipped_duplicates
     );
-    for proposal in proposals {
+    for proposal in inserted_proposals {
         println!(
             "{:<24} {:<20} {:<10} {}",
             proposal.proposal_id,
@@ -69,6 +83,16 @@ pub(crate) fn cmd_generate_agent_evolution(db: &DbInstance, agent_type: &str) ->
         );
     }
     Ok(())
+}
+
+fn existing_proposal_fingerprints(db: &DbInstance, agent_type: &str) -> Result<HashSet<String>> {
+    let proposals =
+        archon_learning::agent_evolution_proposals::list_agent_evolution_proposals(db, None)?;
+    Ok(proposals
+        .iter()
+        .filter(|proposal| proposal.agent_type == agent_type)
+        .map(proposal_fingerprint)
+        .collect())
 }
 
 fn permission_denial_proposals(
@@ -178,6 +202,25 @@ fn proposal_to_record(
         record = record.with_permission_impact();
     }
     record
+}
+
+fn proposal_fingerprint(
+    proposal: &archon_learning::agent_evolution_proposals::AgentEvolutionProposalRecord,
+) -> String {
+    let mut evidence = proposal.evidence_ids.clone();
+    evidence.sort();
+    let mut digest = Sha256::new();
+    digest.update(proposal.agent_type.as_bytes());
+    digest.update(b"\0");
+    digest.update(proposal.kind.as_bytes());
+    digest.update(b"\0");
+    digest.update(proposal.diff.as_bytes());
+    digest.update(b"\0");
+    for evidence_id in evidence {
+        digest.update(evidence_id.as_bytes());
+        digest.update(b"\0");
+    }
+    format!("proposal-fingerprint-{}", hex::encode(digest.finalize()))
 }
 
 fn memory_candidates_from_events(
@@ -373,6 +416,34 @@ mod tests {
             stable_memory_candidate_id("planner", &evidence),
             stable_memory_candidate_id("planner", &evidence)
         );
+    }
+
+    #[test]
+    fn proposal_fingerprint_is_stable_for_evidence_order() {
+        let left = archon_learning::agent_evolution_proposals::AgentEvolutionProposalRecord::new(
+            "proposal-1",
+            "reviewer",
+            "agentv-1",
+            "agentv-2",
+            "tool_access_profile",
+            "2026-05-08T12:00:00Z",
+        )
+        .with_diff("+ review Bash")
+        .with_evidence("permission-2")
+        .with_evidence("permission-1");
+        let right = archon_learning::agent_evolution_proposals::AgentEvolutionProposalRecord::new(
+            "proposal-2",
+            "reviewer",
+            "agentv-1",
+            "agentv-2",
+            "tool_access_profile",
+            "2026-05-08T12:00:00Z",
+        )
+        .with_diff("+ review Bash")
+        .with_evidence("permission-1")
+        .with_evidence("permission-2");
+
+        assert_eq!(proposal_fingerprint(&left), proposal_fingerprint(&right));
     }
 
     #[test]
