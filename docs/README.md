@@ -49,6 +49,30 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 - [LSP integration](integrations/lsp.md) — language server discovery and operations
 - [IDE extensions](integrations/ide-extensions.md) — VS Code, JetBrains protocol
 
+## Providers
+
+- [Provider runtime](providers/runtime.md) — runtime events, status snapshots, fallback evidence, rate-limit windows
+- [Codex provider](providers/codex.md) — direct runtime, app-server JSON-RPC, WebSocket and stdio transports
+- [Anthropic Claude Code](providers/anthropic-claude-code.md) — Claude OAuth/API-key routing and spoof compatibility
+- [Provider auth profiles](providers/auth-profiles.md) — durable Cozo-backed auth profile import, ordering, health, cooldowns
+- [Cloud and local providers](providers/cloud-and-local.md) — Anthropic, Bedrock, Vertex, Gemini, local, and compatible routes
+- [OpenAI-compatible providers](providers/openai-compatible.md) — compatible API-key endpoints and provider-neutral observation
+
+## Agents and learning
+
+- [Governed agent evolution](agents/evolution.md) — proposal, shadow, apply, reject, rollback, history, status
+- [Memory system promotion](agents/memory-system-promotion.md) — promoting candidates into Archon's memory system without markdown files
+- [Agent permission governance](agents/permission-governance.md) — profile permission diffs and tool-access review
+- [Governed agent evolution storage](learning/governed-agent-evolution.md) — Cozo-backed ledgers, proposals, profile versions, shadow evaluations
+
+## Security and sandboxing
+
+- [Sandboxing](security/sandboxing.md) — backend model, safety posture, and routing decisions
+- [Tool preflight](security/tool-preflight.md) — pre-execution permission and sandbox checks
+- [Docker sandbox](security/docker-sandbox.md) — Docker backend policy, mounts, and diagnostics
+- [SSH sandbox](security/ssh-sandbox.md) — SSH backend policy and detect-only checks
+- [OpenShell sandbox](security/openshell-sandbox.md) — OpenShell backend policy and spoof-safety notes
+
 ## Cookbook
 
 - [Strategic engagement research](cookbook/strategic-engagement.md) — 22-document intelligence package workflow
@@ -85,6 +109,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 
 ## Release notes
 
+- [v1.1.0-beta.1](release-notes/v1.1.0-beta.1.md) — Provider runtime governance and governed agent evolution
 - [v1.0.1](release-notes/v1.0.1.md) — Provider-neutral hybrid retrospective analysis
 - [v1.0.0](release-notes/v1.0.0.md) — Audited pipeline runtime and self-calibration
 - [v0.1.52](release-notes/v0.1.52.md) — Learning systems completion
