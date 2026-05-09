@@ -41,6 +41,12 @@ Rollback creates a new profile version from an older version:
 archon agent evolve rollback --agent reviewer agent-profile-123 --activate
 ```
 
+When active profile overlays are enabled, runtime agent metadata is hydrated
+from the Cozo performance ledger. `invocation_count`, `quality.applied_rate`,
+and `quality.completion_rate` reflect observed ledger rows in memory for the
+loaded agent; Archon does not rewrite `meta.json` or create memory files for
+this.
+
 ## Memory Promotion
 
 Memory candidates are promoted explicitly into the Archon memory graph:
