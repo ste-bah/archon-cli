@@ -23,10 +23,19 @@ pub(crate) fn handle_sandbox_command(
             );
             output
         }
-        SandboxAction::Doctor { backend } => crate::command::sandbox_doctor::render_sandbox_doctor(
-            &doctor_args(backend),
-            crate::command::sandbox_doctor::SandboxDoctorOverrides::default(),
-        ),
+        SandboxAction::Doctor { backend } => {
+            let output = crate::command::sandbox_doctor::render_sandbox_doctor(
+                &doctor_args(backend.clone()),
+                crate::command::sandbox_doctor::SandboxDoctorOverrides::default(),
+            );
+            persist_sandbox_command_event(
+                &config.sandbox,
+                backend.as_deref(),
+                "doctor",
+                "cli_doctor",
+            );
+            output
+        }
         SandboxAction::Test { backend } => {
             let output = render_test(&config.sandbox, backend.clone())?;
             persist_sandbox_command_event(
@@ -59,8 +68,47 @@ fn render_status(config: &archon_core::sandbox::SandboxConfig, verbose: bool) ->
         output.push_str(
             "Execution: docker can route Bash when selected; ssh and openshell fail closed until execution is implemented\n",
         );
+        append_backend_verbose_status(&mut output, config);
     }
     Ok(output)
+}
+
+fn append_backend_verbose_status(
+    output: &mut String,
+    config: &archon_core::sandbox::SandboxConfig,
+) {
+    match config.backend.as_str() {
+        "docker" => output.push_str(&format!(
+            "Docker: enabled={} image={} network={} privileged={} mount_home={} mount_docker_socket={}\n",
+            config.docker.enabled,
+            config.docker.image,
+            config.docker.network,
+            config.docker.privileged,
+            config.docker.mount_home,
+            config.docker.mount_docker_socket
+        )),
+        "ssh" => output.push_str(&format!(
+            "SSH: enabled={} workspace_mode={} host_configured={} host_key_checking={} host_shell_fallback={}\n",
+            config.ssh.enabled,
+            config.ssh.workspace_mode,
+            config.ssh.host.as_deref().is_some_and(|host| !host.trim().is_empty()),
+            config.ssh.host_key_checking,
+            config.ssh.host_shell_fallback
+        )),
+        "openshell" => output.push_str(&format!(
+            "OpenShell: enabled={} workspace_mode={} gateway_configured={} provider_injection={} host_shell_fallback={}\nProvider routing: host-side; sandbox provider injection must stay disabled for Claude Code spoofing\n",
+            config.openshell.enabled,
+            config.openshell.workspace_mode,
+            config
+                .openshell
+                .gateway
+                .as_deref()
+                .is_some_and(|gateway| !gateway.trim().is_empty()),
+            config.openshell.provider_injection,
+            config.openshell.host_shell_fallback
+        )),
+        _ => {}
+    }
 }
 
 fn render_explain(
@@ -135,6 +183,28 @@ mod tests {
         assert!(body.contains("Mode: all"));
         assert!(body.contains("Workspace access: rw"));
         assert!(body.contains("normal permission rules still apply"));
+        assert!(body.contains("Docker: enabled="));
+        assert!(body.contains("mount_docker_socket=false"));
+    }
+
+    #[test]
+    fn sandbox_status_verbose_shows_openshell_safety_knobs() {
+        let config = archon_core::sandbox::SandboxConfig {
+            backend: "openshell".into(),
+            openshell: archon_core::sandbox::OpenShellConfig {
+                enabled: true,
+                workspace_mode: "mirror".into(),
+                ..archon_core::sandbox::OpenShellConfig::default()
+            },
+            ..archon_core::sandbox::SandboxConfig::default()
+        };
+
+        let body = render_status(&config, true).unwrap();
+
+        assert!(body.contains("OpenShell: enabled=true"));
+        assert!(body.contains("provider_injection=false"));
+        assert!(body.contains("Provider routing: host-side"));
+        assert!(body.contains("Claude Code spoofing"));
     }
 
     #[test]

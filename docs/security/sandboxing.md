@@ -25,6 +25,11 @@ uses the configured resource and network policy.
 for Bash execution before a real transport is implemented, they return an
 error instead of falling back to the host shell.
 
+`archon sandbox status --verbose` shows backend-specific safety knobs, including
+Docker host-mount settings and OpenShell provider-injection/host-shell-fallback
+flags. `archon sandbox doctor --backend <name>` is also recorded as a redacted
+Cozo sandbox runtime event.
+
 ## OpenShell Policy
 
 OpenShell defaults are deliberately conservative:
