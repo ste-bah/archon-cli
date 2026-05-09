@@ -3,7 +3,7 @@
 use anyhow::Result;
 use archon_learning::provider_auth_profiles::{
     ProviderAuthProfileRecord, get_provider_auth_profile, insert_provider_auth_profile,
-    list_provider_auth_profiles,
+    list_all_provider_auth_profiles, list_provider_auth_profiles,
 };
 use archon_learning::provider_rate_limits::list_provider_rate_limit_windows;
 use archon_llm::providers::{list_compat, list_native};
@@ -95,10 +95,11 @@ fn render_provider_profiles_from_db(
     db: &DbInstance,
     provider_filter: Option<&str>,
 ) -> Result<String> {
-    let mut profiles = Vec::new();
-    for provider_id in provider_ids(provider_filter) {
-        profiles.extend(list_provider_auth_profiles(db, &provider_id)?);
-    }
+    let mut profiles = if let Some(provider_id) = provider_filter {
+        list_provider_auth_profiles(db, provider_id)?
+    } else {
+        list_all_provider_auth_profiles(db)?
+    };
     profiles.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
 
     let mut out = String::from("Provider auth profiles (Cozo)\n\n");
@@ -322,6 +323,27 @@ mod tests {
         assert!(body.contains("prof-1"));
         assert!(body.contains("anthropic"));
         assert!(body.contains("cooldown"));
+    }
+
+    #[test]
+    fn renders_custom_provider_profiles_without_filter() {
+        let db = test_db();
+        insert_provider_auth_profile(
+            &db,
+            &ProviderAuthProfileRecord::new(
+                "prof-custom",
+                "custom-openai-compatible",
+                "api_key",
+                "config",
+                "2026-05-08T12:00:00Z",
+            ),
+        )
+        .unwrap();
+
+        let body = render_provider_profiles_from_db(&db, None).unwrap();
+
+        assert!(body.contains("prof-custom"));
+        assert!(body.contains("custom-openai-compatible"));
     }
 
     #[test]

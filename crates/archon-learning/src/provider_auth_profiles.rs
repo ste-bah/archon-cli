@@ -196,6 +196,23 @@ pub fn list_provider_auth_profiles(
     Ok(profiles)
 }
 
+pub fn list_all_provider_auth_profiles(db: &DbInstance) -> Result<Vec<ProviderAuthProfileRecord>> {
+    let result = db
+        .run_script(
+            auth_profile_query("all"),
+            Default::default(),
+            ScriptMutability::Immutable,
+        )
+        .map_err(|e| anyhow::anyhow!("list provider_auth_profiles failed: {e}"))?;
+    let mut profiles: Vec<_> = result
+        .rows
+        .iter()
+        .map(|row| row_to_auth_profile(row))
+        .collect();
+    profiles.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+    Ok(profiles)
+}
+
 fn auth_profile_put_script() -> &'static str {
     "?[profile_id, provider_id, auth_kind, display_name, source, \
      identity_fingerprint, created_at, updated_at, last_used_at, \
@@ -221,6 +238,17 @@ fn auth_profile_query(predicate: &'static str) -> &'static str {
              updated_at, last_used_at, last_good_at, last_failed_at, \
              failure_count, cooldown_until, disabled_reason, \
              metadata_redacted_json}, profile_id = $pid"
+        }
+        "all" => {
+            "?[profile_id, provider_id, auth_kind, display_name, source, \
+             identity_fingerprint, created_at, updated_at, last_used_at, \
+             last_good_at, last_failed_at, failure_count, cooldown_until, \
+             disabled_reason, metadata_redacted_json] := \
+             *provider_auth_profiles{profile_id, provider_id, auth_kind, \
+             display_name, source, identity_fingerprint, created_at, \
+             updated_at, last_used_at, last_good_at, last_failed_at, \
+             failure_count, cooldown_until, disabled_reason, \
+             metadata_redacted_json}"
         }
         _ => {
             "?[profile_id, provider_id, auth_kind, display_name, source, \
@@ -348,5 +376,26 @@ mod tests {
             profiles[0].cooldown_until.as_deref(),
             Some("2026-05-08T12:30:00Z")
         );
+    }
+
+    #[test]
+    fn provider_auth_profiles_list_all_includes_custom_providers() {
+        let db = test_db();
+        insert_provider_auth_profile(
+            &db,
+            &ProviderAuthProfileRecord::new(
+                "auth-profile-custom",
+                "custom-openai-compatible",
+                "api_key",
+                "config",
+                "2026-05-08T12:00:00Z",
+            ),
+        )
+        .unwrap();
+
+        let profiles = list_all_provider_auth_profiles(&db).unwrap();
+
+        assert_eq!(profiles.len(), 1);
+        assert_eq!(profiles[0].provider_id, "custom-openai-compatible");
     }
 }
