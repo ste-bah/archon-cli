@@ -143,11 +143,12 @@ impl ToolAccessProfileDiff {
 fn permission_mode_rank(mode: &PermissionMode) -> u8 {
     match mode {
         PermissionMode::Plan => 0,
-        PermissionMode::Default | PermissionMode::Bubble => 1,
-        PermissionMode::AcceptEdits => 2,
-        PermissionMode::Auto => 3,
-        PermissionMode::DontAsk => 4,
-        PermissionMode::BypassPermissions => 5,
+        PermissionMode::Default => 1,
+        PermissionMode::Auto => 2,
+        PermissionMode::AcceptEdits => 3,
+        PermissionMode::Bubble => 4,
+        PermissionMode::DontAsk => 5,
+        PermissionMode::BypassPermissions => 6,
     }
 }
 
@@ -220,6 +221,18 @@ mod tests {
         let diff = ToolAccessProfileDiff {
             permission_mode_from: Some(PermissionMode::Plan),
             permission_mode_to: Some(PermissionMode::Default),
+            ..Default::default()
+        };
+
+        assert!(diff.expands_permissions());
+        assert_eq!(diff.risk_level(), AgentEvolutionRiskLevel::High);
+    }
+
+    #[test]
+    fn default_to_bubble_is_permission_expansion() {
+        let diff = ToolAccessProfileDiff {
+            permission_mode_from: Some(PermissionMode::Default),
+            permission_mode_to: Some(PermissionMode::Bubble),
             ..Default::default()
         };
 

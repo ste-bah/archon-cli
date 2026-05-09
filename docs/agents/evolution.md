@@ -79,4 +79,6 @@ durable truth without their underlying evidence IDs.
 Permission changes remain governed proposals. Parent session mode, sandbox
 policy, subagent deny lists, and dangerous-bypass guards stay authoritative.
 Evolved profiles may narrow behavior automatically, but risky permission or
-provider identity changes require explicit approval.
+provider identity changes require explicit approval. Requests to move toward
+`bubble`, `dontAsk`, or `bypassPermissions` are treated as permission expansion;
+`bypassPermissions` remains critical risk.
