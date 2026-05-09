@@ -10,7 +10,8 @@ quota.
 - Credentials: `~/.archon/.credentials.json` and read-only Codex CLI fallback
   `~/.codex/auth.json`
 - Provider capability matrix: `archon providers capabilities`
-- Local/live diagnostics: `archon providers doctor` and `archon providers doctor --live`
+- Local/live diagnostics: `archon providers status --live`,
+  `archon providers doctor`, and `archon providers doctor --live`
 - Auth status: `archon auth status`
 - Live smoke transcript: `.archon/evidence/provider-smoke/<date>/`
 - Agentic parity proof: focused cargo tests named in this runbook plus any
@@ -44,11 +45,14 @@ validation; it must not send, print, or log token values.
 
 ```bash
 archon providers doctor --live
+archon providers status --live --provider openai-codex
 ```
 
 Expected result:
 
 - Present, non-expired provider credentials trigger an endpoint reachability row.
+- `providers status --live` reports redacted `host:port` reachability and skips
+  remote providers with missing credentials.
 - Missing, disabled, or expired providers are skipped with an actionable reason.
 - Remediation text tells the operator which login/env/config step to take next.
 
@@ -103,7 +107,8 @@ or provenance command.
 
 1. Run `archon providers doctor` first to separate local credential/config
    failures from endpoint drift.
-2. Run `archon providers doctor --live` only when local state is sane.
+2. Run `archon providers doctor --live` or targeted
+   `archon providers status --live --provider <id>` only when local state is sane.
 3. If Codex spoof posture drifted, compare the current request headers and update
    `crates/archon-llm/resources/codex-compat.json`.
 4. If Anthropic OAuth spoofing fails with authentication or identity rejection,

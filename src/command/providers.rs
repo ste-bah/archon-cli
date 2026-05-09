@@ -19,8 +19,6 @@
 
 use anyhow::Result;
 use chrono::Utc;
-use std::net::{TcpStream, ToSocketAddrs};
-use std::time::Duration;
 
 use archon_llm::providers::{
     CompatKind, ProviderDescriptor, ProviderFeatures, count_compat, count_native, list_compat,
@@ -28,6 +26,9 @@ use archon_llm::providers::{
 };
 
 use crate::cli_args::ProvidersAction;
+#[cfg(test)]
+use crate::command::providers_live::DisabledLivePinger;
+use crate::command::providers_live::{ProviderLivePinger, TcpProviderLivePinger};
 
 pub(crate) use crate::command::providers_slash::ProvidersHandler;
 
@@ -38,12 +39,17 @@ pub(crate) fn handle_providers(
     match action.unwrap_or(ProvidersAction::List) {
         ProvidersAction::List => print!("{}", render_provider_registry()),
         ProvidersAction::Capabilities => print!("{}", render_capability_table()),
-        ProvidersAction::Status { provider, json } => print!(
+        ProvidersAction::Status {
+            provider,
+            json,
+            live,
+        } => print!(
             "{}",
             crate::command::providers_status::render_and_persist_provider_status(
                 provider.as_deref(),
                 config,
                 json,
+                live,
             )?
         ),
         ProvidersAction::Report { provider, json } => print!(
@@ -480,36 +486,6 @@ fn render_live_ping_row(
         }
     };
     out.push_str(&format!("  {label:<9} {status}\n"));
-}
-
-trait ProviderLivePinger {
-    fn ping(&self, endpoint: &str) -> std::result::Result<(), String>;
-}
-
-#[cfg(test)]
-struct DisabledLivePinger;
-
-#[cfg(test)]
-impl ProviderLivePinger for DisabledLivePinger {
-    fn ping(&self, _endpoint: &str) -> std::result::Result<(), String> {
-        Ok(())
-    }
-}
-
-struct TcpProviderLivePinger;
-
-impl ProviderLivePinger for TcpProviderLivePinger {
-    fn ping(&self, endpoint: &str) -> std::result::Result<(), String> {
-        let mut addrs = endpoint
-            .to_socket_addrs()
-            .map_err(|err| format!("resolve failed: {err}"))?;
-        let addr = addrs
-            .next()
-            .ok_or_else(|| "no socket address".to_string())?;
-        TcpStream::connect_timeout(&addr, Duration::from_millis(1_500))
-            .map(|_| ())
-            .map_err(|err| err.to_string())
-    }
 }
 
 fn credential_status(expires_at_ms: i64) -> &'static str {

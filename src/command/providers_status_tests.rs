@@ -1,4 +1,5 @@
 use super::*;
+use crate::command::providers_live::ProviderLivePinger;
 use archon_learning::provider_auth_profiles::{
     ProviderAuthProfileRecord, insert_provider_auth_profile,
 };
@@ -300,10 +301,11 @@ fn status_json_renders_redacted_snapshot() {
             "safe": "kept"
         }));
 
-    let body = render_provider_statuses_json(&[status]).unwrap();
+    let body = render_provider_statuses_json(&[status], None).unwrap();
     let parsed: serde_json::Value = serde_json::from_str(&body).unwrap();
 
     assert_eq!(parsed["provider_count"], 1);
+    assert!(parsed.get("live_checks").is_none());
     assert_eq!(parsed["providers"][0]["provider_id"], "anthropic");
     assert_eq!(parsed["providers"][0]["health"], "healthy");
     assert_eq!(parsed["providers"][0]["identity_status"], "spoof");
@@ -315,4 +317,77 @@ fn status_json_renders_redacted_snapshot() {
         parsed["providers"][0]["metadata_redacted_json"]["safe"],
         "kept"
     );
+}
+
+#[test]
+fn status_live_checks_ping_configured_local_provider() {
+    struct FakePinger;
+    impl ProviderLivePinger for FakePinger {
+        fn ping(&self, endpoint: &str) -> std::result::Result<(), String> {
+            assert_eq!(endpoint, "localhost:11434");
+            Ok(())
+        }
+    }
+
+    let statuses = vec![
+        ProviderRuntimeStatus::new("ollama", "local").with_health(ProviderHealthStatus::Unknown),
+    ];
+    let checks = collect_provider_live_checks(
+        &statuses,
+        &archon_core::config::ArchonConfig::default(),
+        &FakePinger,
+    );
+
+    assert_eq!(checks.len(), 1);
+    assert_eq!(checks[0].provider_id, "ollama");
+    assert_eq!(checks[0].status, "ok");
+    assert_eq!(checks[0].endpoint.as_deref(), Some("localhost:11434"));
+}
+
+#[test]
+fn status_live_checks_skip_remote_missing_credentials() {
+    struct PanicPinger;
+    impl ProviderLivePinger for PanicPinger {
+        fn ping(&self, _endpoint: &str) -> std::result::Result<(), String> {
+            panic!("missing credential remote providers should not be pinged")
+        }
+    }
+
+    let statuses = vec![
+        ProviderRuntimeStatus::new("openai", "direct")
+            .with_health(ProviderHealthStatus::MissingCredentials),
+    ];
+    let checks = collect_provider_live_checks(
+        &statuses,
+        &archon_core::config::ArchonConfig::default(),
+        &PanicPinger,
+    );
+
+    assert_eq!(checks.len(), 1);
+    assert_eq!(checks[0].status, "skipped");
+    assert_eq!(checks[0].detail, "credentials missing");
+}
+
+#[test]
+fn status_live_checks_use_codex_app_server_endpoint() {
+    struct FakePinger;
+    impl ProviderLivePinger for FakePinger {
+        fn ping(&self, endpoint: &str) -> std::result::Result<(), String> {
+            assert_eq!(endpoint, "127.0.0.1:4141");
+            Ok(())
+        }
+    }
+
+    let mut config = archon_core::config::ArchonConfig::default();
+    config.providers.openai_codex.runtime = "auto".into();
+    config.providers.openai_codex.app_server_url = Some("ws://127.0.0.1:4141/codex".into());
+    let statuses = vec![
+        ProviderRuntimeStatus::new("openai-codex", "auto")
+            .with_health(ProviderHealthStatus::MissingCredentials),
+    ];
+
+    let checks = collect_provider_live_checks(&statuses, &config, &FakePinger);
+
+    assert_eq!(checks[0].status, "ok");
+    assert_eq!(checks[0].endpoint.as_deref(), Some("127.0.0.1:4141"));
 }

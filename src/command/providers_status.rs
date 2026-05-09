@@ -9,41 +9,45 @@ use chrono::{DateTime, Utc};
 use cozo::DbInstance;
 use serde::Serialize;
 
+#[path = "providers_status_live.rs"]
+mod providers_status_live;
 #[path = "providers_status_support.rs"]
 mod providers_status_support;
+use providers_status_live::{ProviderLiveCheck, append_live_checks, collect_provider_live_checks};
 use providers_status_support::{
     ProviderStatusEnv, health_label, identity_label, merge_redacted_metadata, profile_metadata,
     status_from_descriptor, status_note, status_snapshot_record,
 };
 
-pub(crate) fn render_provider_status(provider_filter: Option<&str>) -> String {
-    render_provider_status_with_config(
-        provider_filter,
-        &archon_core::config::ArchonConfig::default(),
-    )
-}
+use crate::command::providers_live::TcpProviderLivePinger;
 
-pub(crate) fn render_provider_status_with_config(
+pub(crate) fn render_provider_status_with_config_and_live(
     provider_filter: Option<&str>,
     config: &archon_core::config::ArchonConfig,
+    live: bool,
 ) -> String {
-    render_provider_statuses(&local_provider_statuses(
-        provider_filter,
-        &ProviderStatusEnv::detect(),
-        config,
-    ))
+    let statuses = local_provider_statuses(provider_filter, &ProviderStatusEnv::detect(), config);
+    let live_checks =
+        live.then(|| collect_provider_live_checks(&statuses, config, &TcpProviderLivePinger));
+    render_provider_statuses_with_live(&statuses, live_checks.as_deref())
 }
 
 pub(crate) fn render_and_persist_provider_status(
     provider_filter: Option<&str>,
     config: &archon_core::config::ArchonConfig,
     json: bool,
+    live: bool,
 ) -> Result<String> {
     let statuses = collect_and_persist_provider_statuses(provider_filter, config);
+    let live_checks =
+        live.then(|| collect_provider_live_checks(&statuses, config, &TcpProviderLivePinger));
     if json {
-        render_provider_statuses_json(&statuses)
+        render_provider_statuses_json(&statuses, live_checks.as_deref())
     } else {
-        Ok(render_provider_statuses(&statuses))
+        Ok(render_provider_statuses_with_live(
+            &statuses,
+            live_checks.as_deref(),
+        ))
     }
 }
 
@@ -100,6 +104,13 @@ fn local_provider_statuses(
 }
 
 fn render_provider_statuses(statuses: &[ProviderRuntimeStatus]) -> String {
+    render_provider_statuses_with_live(statuses, None)
+}
+
+fn render_provider_statuses_with_live(
+    statuses: &[ProviderRuntimeStatus],
+    live_checks: Option<&[ProviderLiveCheck]>,
+) -> String {
     let mut out = String::new();
     out.push_str("Provider runtime status (local configuration)\n\n");
     if statuses.is_empty() {
@@ -124,16 +135,23 @@ fn render_provider_statuses(statuses: &[ProviderRuntimeStatus]) -> String {
             status_note(status),
         ));
     }
-    out.push_str(
-        "\nThis status is local and redacted; use `archon providers doctor --live` for opt-in endpoint checks.\n",
-    );
+    match live_checks {
+        Some(checks) => append_live_checks(&mut out, checks),
+        None => out.push_str(
+            "\nThis status is local and redacted; use `archon providers status --live` for opt-in endpoint checks.\n",
+        ),
+    }
     out
 }
 
-fn render_provider_statuses_json(statuses: &[ProviderRuntimeStatus]) -> Result<String> {
+fn render_provider_statuses_json(
+    statuses: &[ProviderRuntimeStatus],
+    live_checks: Option<&[ProviderLiveCheck]>,
+) -> Result<String> {
     let report = ProviderStatusJson {
         generated_at: Utc::now().to_rfc3339(),
         provider_count: statuses.len(),
+        live_checks,
         providers: statuses,
     };
     Ok(format!("{}\n", serde_json::to_string_pretty(&report)?))
@@ -143,6 +161,8 @@ fn render_provider_statuses_json(statuses: &[ProviderRuntimeStatus]) -> Result<S
 struct ProviderStatusJson<'a> {
     generated_at: String,
     provider_count: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    live_checks: Option<&'a [ProviderLiveCheck]>,
     providers: &'a [ProviderRuntimeStatus],
 }
 

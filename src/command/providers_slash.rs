@@ -16,11 +16,15 @@ impl CommandHandler for ProvidersHandler {
             }
             Some("status") => {
                 let provider = arg_value(args, "--provider");
-                crate::command::providers_status::render_provider_status(provider)
+                crate::command::providers_status::render_provider_status_with_config_and_live(
+                    provider,
+                    &archon_core::config::ArchonConfig::default(),
+                    args_contains(args, "--live"),
+                )
             }
             Some("list") | None => crate::command::providers::render_provider_registry(),
             Some(other) => format!(
-                "Unknown /providers subcommand `{other}`.\nUsage: /providers [list|status [--provider <id>]|capabilities|doctor [--live]]\n"
+                "Unknown /providers subcommand `{other}`.\nUsage: /providers [list|status [--provider <id>] [--live]|capabilities|doctor [--live]]\n"
             ),
         };
         ctx.emit(TuiEvent::TextDelta(rendered));

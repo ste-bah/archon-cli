@@ -38,11 +38,39 @@ fn providers_status_parses_provider_and_json() {
 
     match cli.command {
         Some(Commands::Providers {
-            action: Some(ProvidersAction::Status { provider, json }),
+            action:
+                Some(ProvidersAction::Status {
+                    provider,
+                    json,
+                    live,
+                }),
         }) => {
             assert_eq!(provider.as_deref(), Some("openai-codex"));
             assert!(json);
+            assert!(!live);
         }
         other => panic!("expected providers status, got {other:?}"),
+    }
+}
+
+#[test]
+fn providers_status_parses_live() {
+    let cli = Cli::try_parse_from(["archon", "providers", "status", "--live"])
+        .expect("providers status --live must parse");
+
+    match cli.command {
+        Some(Commands::Providers {
+            action:
+                Some(ProvidersAction::Status {
+                    provider,
+                    json,
+                    live,
+                }),
+        }) => {
+            assert!(provider.is_none());
+            assert!(!json);
+            assert!(live);
+        }
+        other => panic!("expected providers status --live, got {other:?}"),
     }
 }

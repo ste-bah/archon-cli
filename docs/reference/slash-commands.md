@@ -87,7 +87,7 @@ Beyond the 78 primaries, archon-cli ships **68 built-in skills** (33 in `crates/
 | `/reload` | — | Force configuration reload |
 | `/vim` | — | Toggle vim-style modal input |
 | `/skills` | — | Browse and invoke available skills |
-| `/providers` | — | List registered LLM providers; `/providers capabilities` shows Anthropic/Codex surface support; `/providers doctor` runs local diagnostics; `/providers doctor --live` runs opt-in endpoint checks |
+| `/providers` | — | List registered LLM providers; `/providers status --live` shows redacted endpoint reachability; `/providers capabilities` shows Anthropic/Codex surface support; `/providers doctor --live` runs opt-in endpoint checks |
 
 ## Infrastructure & resources
 
@@ -108,7 +108,7 @@ Beyond the 78 primaries, archon-cli ships **68 built-in skills** (33 in `crates/
 | `/chat` | — | Single-turn chat against a selected provider: `/chat --provider openai-codex "<prompt>"`. Default provider is `anthropic`; full-session provider comes from `[llm].provider`. |
 | `/login` | — | Re-authenticate the active Anthropic provider (preserved for backward compatibility — equivalent to `/auth login --provider anthropic`) |
 | `/logout` | — | Sign out the active Anthropic provider (preserved for backward compatibility) |
-| `/providers` | — | List registered LLM providers; `/providers capabilities` shows the generated Archon surface-support matrix; `/providers doctor` checks local auth state; `/providers doctor --live` adds opt-in endpoint reachability |
+| `/providers` | — | List registered LLM providers; `/providers status --live` shows redacted endpoint reachability; `/providers capabilities` shows the generated Archon surface-support matrix; `/providers doctor --live` adds opt-in endpoint reachability |
 | `/refresh-identity` | — | Clear the `anthropic-beta` header cache and re-probe (skill, not primary) |
 
 See [Codex authentication](../getting-started/codex-auth.md) for the ChatGPT-subscription user setup, and [identity-spoofing.md](../integrations/identity-spoofing.md) for the spoof-mode mechanics. With `[llm].provider = "openai-codex"`, `/run-agent`, `/btw`, `/archon-code`, `/archon-research`, `/gametheory`, and team-driven agentic surfaces route through Codex rather than silently constructing Anthropic clients.

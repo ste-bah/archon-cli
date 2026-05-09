@@ -14,6 +14,9 @@ pub enum ProvidersAction {
         /// Output the status snapshot as JSON
         #[arg(long)]
         json: bool,
+        /// Run opt-in live endpoint reachability checks
+        #[arg(long)]
+        live: bool,
     },
     /// Summarize provider health from status and persisted runtime events
     Report {

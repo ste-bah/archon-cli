@@ -20,7 +20,7 @@ subagents, coding/research pipelines, and gametheory through Codex.
 | `archon auth login --provider anthropic\|openai-codex` | Authenticate a provider |
 | `archon auth status` | Show redacted Anthropic/Codex auth status |
 | `archon chat --provider <ID> <PROMPT>` | Single-turn chat through a selected provider |
-| `archon providers [list\|capabilities\|doctor [--live]]` | List provider registry entries, surface capability support, local auth diagnostics, or opt-in endpoint reachability checks |
+| `archon providers [list\|capabilities\|status [--live]\|doctor [--live]]` | List provider registry entries, surface capability support, show redacted runtime status, local auth diagnostics, or opt-in endpoint reachability checks |
 | `archon serve [--port PORT] [--token-path PATH]` | Start WebSocket server for remote agent access |
 | `archon remote ws <URL> [--token TOKEN]` | Connect to remote agent via WebSocket |
 | `archon remote ssh <TARGET>` | Connect to remote agent via SSH |
