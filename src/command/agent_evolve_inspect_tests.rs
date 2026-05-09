@@ -127,6 +127,18 @@ fn inspect_resolves_provider_and_sandbox_event_references() {
         ),
     )
     .unwrap();
+    archon_learning::permission_runtime_events::insert_permission_runtime_event(
+        &db,
+        &archon_learning::permission_runtime_events::PermissionRuntimeEventRecord::new(
+            "permission-1",
+            "Bash",
+            "ask",
+            "denied",
+            "2026-05-08T12:01:30Z",
+        )
+        .with_policy_context(Some("deny_rule".to_string()), None, None),
+    )
+    .unwrap();
     archon_learning::agent_evolution_proposals::insert_agent_evolution_proposal(
         &db,
         &archon_learning::agent_evolution_proposals::AgentEvolutionProposalRecord::new(
@@ -138,13 +150,14 @@ fn inspect_resolves_provider_and_sandbox_event_references() {
             "2026-05-08T12:02:00Z",
         )
         .with_evidence("provider_event:provider-event-1")
-        .with_evidence("sandbox_event:sandbox-event-1"),
+        .with_evidence("sandbox_event:sandbox-event-1")
+        .with_evidence("permission_event:permission-1"),
     )
     .unwrap();
 
     let inspection = AgentEvolutionInspection::load(&db, "prop-2").unwrap();
 
-    assert_eq!(inspection.evidence.len(), 2);
+    assert_eq!(inspection.evidence.len(), 3);
     assert_eq!(inspection.evidence[0].source, "provider_runtime_events");
     assert!(
         inspection.evidence[0]
@@ -159,4 +172,6 @@ fn inspect_resolves_provider_and_sandbox_event_references() {
     assert_eq!(inspection.evidence[1].source, "sandbox_runtime_events");
     assert!(inspection.evidence[1].summary.contains("decision=denied"));
     assert!(inspection.evidence[1].summary.contains("backend=docker"));
+    assert_eq!(inspection.evidence[2].source, "permission_runtime_events");
+    assert!(inspection.evidence[2].summary.contains("reason=deny_rule"));
 }

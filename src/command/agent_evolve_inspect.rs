@@ -184,9 +184,7 @@ fn summarize_evidence(db: &DbInstance, evidence_id: &str) -> Result<EvidenceInsp
             created_at: Some(record.created_at),
         });
     }
-    if let Some(record) =
-        archon_learning::permission_runtime_events::get_permission_runtime_event(db, evidence_id)?
-    {
+    if let Some(record) = permission_evidence(db, evidence_id)? {
         return Ok(EvidenceInspection {
             evidence_id: evidence_id.to_string(),
             source: "permission_runtime_events".to_string(),
@@ -216,6 +214,19 @@ fn summarize_evidence(db: &DbInstance, evidence_id: &str) -> Result<EvidenceInsp
         summary: "evidence row not found in local learning store".to_string(),
         created_at: None,
     })
+}
+
+fn permission_evidence(
+    db: &DbInstance,
+    evidence_id: &str,
+) -> Result<Option<archon_learning::permission_runtime_events::PermissionRuntimeEventRecord>> {
+    let permission_event_id = evidence_id
+        .strip_prefix("permission_event:")
+        .unwrap_or(evidence_id);
+    archon_learning::permission_runtime_events::get_permission_runtime_event(
+        db,
+        permission_event_id,
+    )
 }
 
 fn provider_evidence(
