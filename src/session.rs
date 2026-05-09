@@ -2701,6 +2701,7 @@ pub(crate) async fn run_interactive_session(
                         crate::runtime::permission_events::record_permission_event(
                             permission_events_db_for_fwd.as_ref(),
                             &session_id_fwd,
+                            Some(&agent_ledger_context_for_fwd.agent_type),
                             &mode,
                             &tool,
                             "requested",
@@ -2712,6 +2713,7 @@ pub(crate) async fn run_interactive_session(
                         crate::runtime::permission_events::record_permission_event(
                             permission_events_db_for_fwd.as_ref(),
                             &session_id_fwd,
+                            Some(&agent_ledger_context_for_fwd.agent_type),
                             &mode,
                             &tool,
                             "granted",
@@ -2723,6 +2725,7 @@ pub(crate) async fn run_interactive_session(
                         crate::runtime::permission_events::record_permission_event(
                             permission_events_db_for_fwd.as_ref(),
                             &session_id_fwd,
+                            Some(&agent_ledger_context_for_fwd.agent_type),
                             &mode,
                             &tool,
                             "denied",

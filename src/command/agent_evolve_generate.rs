@@ -1,15 +1,20 @@
 //! Generate governed agent evolution proposals from the Cozo ledger.
 
+use std::collections::HashMap;
+
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use cozo::DbInstance;
 use sha2::{Digest, Sha256};
 
+const MIN_PERMISSION_DENIALS: usize = 3;
+
 pub(crate) fn cmd_generate_agent_evolution(db: &DbInstance, agent_type: &str) -> Result<()> {
     let ledger = archon_learning::agent_evolution_ledger::list_agent_performance_ledger_by_agent(
         db, agent_type,
     )?;
-    if ledger.is_empty() {
+    let permission_proposals = permission_denial_proposals(db, agent_type)?;
+    if ledger.is_empty() && permission_proposals.is_empty() {
         println!("No performance ledger rows found for agent: {agent_type}");
         return Ok(());
     }
@@ -18,7 +23,8 @@ pub(crate) fn cmd_generate_agent_evolution(db: &DbInstance, agent_type: &str) ->
     let runtime = archon_core::agents::evolution::AgentEvolutionRuntime::new(
         archon_core::agents::evolution::AgentEvolutionRuntimeConfig::default(),
     );
-    let proposals = runtime.propose(&events);
+    let mut proposals = runtime.propose(&events);
+    proposals.extend(permission_proposals);
     let memory_candidates = memory_candidates_from_events(agent_type, &events);
 
     if proposals.is_empty() && memory_candidates.is_empty() {
@@ -63,6 +69,54 @@ pub(crate) fn cmd_generate_agent_evolution(db: &DbInstance, agent_type: &str) ->
         );
     }
     Ok(())
+}
+
+fn permission_denial_proposals(
+    db: &DbInstance,
+    agent_type: &str,
+) -> Result<Vec<archon_core::agents::evolution::AgentEvolutionProposal>> {
+    let events =
+        archon_learning::permission_runtime_events::list_permission_runtime_events_by_decision(
+            db, "denied",
+        )?;
+    Ok(permission_denial_proposals_from_events(agent_type, &events))
+}
+
+fn permission_denial_proposals_from_events(
+    agent_type: &str,
+    events: &[archon_learning::permission_runtime_events::PermissionRuntimeEventRecord],
+) -> Vec<archon_core::agents::evolution::AgentEvolutionProposal> {
+    let mut by_tool: HashMap<
+        String,
+        Vec<&archon_learning::permission_runtime_events::PermissionRuntimeEventRecord>,
+    > = HashMap::new();
+    for event in events {
+        if event.agent_type.as_deref() == Some(agent_type) {
+            by_tool
+                .entry(event.tool_name.clone())
+                .or_default()
+                .push(event);
+        }
+    }
+
+    by_tool
+        .into_iter()
+        .filter(|(_, events)| events.len() >= MIN_PERMISSION_DENIALS)
+        .map(|(tool, events)| {
+            events.iter().fold(
+                archon_core::agents::evolution::AgentEvolutionProposal::new(
+                    agent_type,
+                    "unversioned",
+                    "unversioned+evo",
+                    archon_core::agents::evolution::AgentEvolutionProposalKind::ToolAccessProfile,
+                    format!("+ review repeated denied tool `{tool}`; do not grant automatically"),
+                    "Repeated permission denials should be reviewed as a tool-access proposal",
+                )
+                .with_permission_impact(false),
+                |proposal, event| proposal.add_evidence(&event.event_id),
+            )
+        })
+        .collect()
 }
 
 fn ledger_record_to_event(
@@ -319,5 +373,32 @@ mod tests {
             stable_memory_candidate_id("planner", &evidence),
             stable_memory_candidate_id("planner", &evidence)
         );
+    }
+
+    #[test]
+    fn repeated_permission_denials_create_tool_access_proposal() {
+        let events: Vec<_> = (0..3)
+            .map(|index| {
+                archon_learning::permission_runtime_events::PermissionRuntimeEventRecord::new(
+                    format!("permission-{index}"),
+                    "Bash",
+                    "default",
+                    "denied",
+                    "2026-05-08T12:00:00Z",
+                )
+                .with_run_context(None, Some("reviewer".into()))
+            })
+            .collect();
+
+        let proposals = permission_denial_proposals_from_events("reviewer", &events);
+
+        assert_eq!(proposals.len(), 1);
+        assert_eq!(
+            proposals[0].kind,
+            archon_core::agents::evolution::AgentEvolutionProposalKind::ToolAccessProfile
+        );
+        assert!(proposals[0].affects_permissions);
+        assert!(proposals[0].diff.contains("Bash"));
+        assert_eq!(proposals[0].evidence_ids.len(), 3);
     }
 }

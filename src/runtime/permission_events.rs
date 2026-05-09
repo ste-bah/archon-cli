@@ -10,6 +10,7 @@ use cozo::DbInstance;
 pub(crate) fn record_permission_event(
     db: Option<&Arc<DbInstance>>,
     session_id: &str,
+    agent_type: Option<&str>,
     permission_mode: &str,
     tool_name: &str,
     decision: &str,
@@ -17,7 +18,8 @@ pub(crate) fn record_permission_event(
     let Some(db) = db else {
         return;
     };
-    let event = build_permission_event(session_id, permission_mode, tool_name, decision);
+    let event =
+        build_permission_event(session_id, agent_type, permission_mode, tool_name, decision);
     if let Err(error) = insert_permission_runtime_event(db, &event) {
         tracing::warn!(%error, tool = %tool_name, decision, "permission event persistence failed");
     }
@@ -25,6 +27,7 @@ pub(crate) fn record_permission_event(
 
 fn build_permission_event(
     session_id: &str,
+    agent_type: Option<&str>,
     permission_mode: &str,
     tool_name: &str,
     decision: &str,
@@ -37,6 +40,10 @@ fn build_permission_event(
         chrono::Utc::now().to_rfc3339(),
     )
     .with_session(session_id)
+    .with_run_context(
+        Some(session_id.to_string()),
+        agent_type.map(ToOwned::to_owned),
+    )
     .with_raw_redacted_json(serde_json::json!({
         "source": "agent_event_forwarder",
         "payload": "redacted"
@@ -49,9 +56,11 @@ mod tests {
 
     #[test]
     fn built_permission_event_has_redacted_payload_only() {
-        let event = build_permission_event("session-1", "ask", "Bash", "denied");
+        let event = build_permission_event("session-1", Some("reviewer"), "ask", "Bash", "denied");
 
         assert_eq!(event.session_id.as_deref(), Some("session-1"));
+        assert_eq!(event.run_id.as_deref(), Some("session-1"));
+        assert_eq!(event.agent_type.as_deref(), Some("reviewer"));
         assert_eq!(event.tool_name, "Bash");
         assert_eq!(event.permission_mode, "ask");
         assert_eq!(event.decision, "denied");
