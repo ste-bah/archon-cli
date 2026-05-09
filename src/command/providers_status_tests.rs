@@ -76,6 +76,7 @@ fn codex_status_uses_configured_runtime_not_oauth_presence() {
 fn codex_status_shows_app_server_when_configured() {
     let mut config = archon_core::config::ArchonConfig::default();
     config.providers.openai_codex.runtime = "app-server".into();
+    config.providers.openai_codex.app_server_url = Some("http://127.0.0.1:11434/codex".into());
 
     let body = render_provider_status_with_env_and_config(
         Some("openai-codex"),
@@ -85,6 +86,55 @@ fn codex_status_shows_app_server_when_configured() {
 
     assert!(body.contains("app_server"));
     assert!(body.contains("app-server"));
+    assert!(body.contains("unavailable"));
+    assert!(body.contains("adapter-pending"));
+}
+
+#[test]
+fn codex_status_persists_app_server_discovery_metadata() {
+    let mut config = archon_core::config::ArchonConfig::default();
+    config.providers.openai_codex.runtime = "auto".into();
+    config.providers.openai_codex.direct_fallback = true;
+    config.providers.openai_codex.app_server_url = Some("http://127.0.0.1:11434/codex".into());
+    let status = status_from_descriptor(
+        archon_llm::providers::list_native()
+            .iter()
+            .find(|descriptor| descriptor.id == "openai-codex")
+            .unwrap(),
+        &ProviderStatusEnv {
+            codex_oauth: true,
+            ..ProviderStatusEnv::default()
+        },
+        &config,
+    );
+
+    assert_eq!(
+        status.metadata_redacted_json["app_server_discovery"]["status"],
+        "configured"
+    );
+    assert_eq!(
+        status.metadata_redacted_json["app_server_discovery"]["endpoint_redacted"],
+        "http://127.0.0.1:11434/[redacted]"
+    );
+    assert_eq!(
+        status.metadata_redacted_json["codex_strategy"]["status_note"],
+        "app-server:configured direct-fallback"
+    );
+}
+
+#[test]
+fn status_enrichment_preserves_existing_metadata() {
+    let existing = serde_json::json!({
+        "app_server_discovery": {"status": "configured"},
+    });
+    let incoming = serde_json::json!({
+        "selected_profile_id": "codex-oauth",
+    });
+
+    let merged = merge_redacted_metadata(existing, incoming);
+
+    assert_eq!(merged["app_server_discovery"]["status"], "configured");
+    assert_eq!(merged["selected_profile_id"], "codex-oauth");
 }
 
 #[test]

@@ -186,7 +186,10 @@ fn enrich_provider_statuses_from_db(
         } else {
             status.health = ProviderHealthStatus::Degraded;
         }
-        status.metadata_redacted_json = redact_provider_metadata(profile_metadata(&report));
+        status.metadata_redacted_json = merge_redacted_metadata(
+            status.metadata_redacted_json.clone(),
+            profile_metadata(&report),
+        );
 
         let rate_limits = crate::command::providers_status_limits::recent_rate_limits_from_db(
             db,
@@ -227,6 +230,20 @@ fn profile_selection_metadata(selection: &AuthProfileSelection) -> serde_json::V
         "auth_kind": selection.profile.auth_kind.clone(),
         "reason": skip_reason_label(selection.reason),
     })
+}
+
+fn merge_redacted_metadata(
+    existing: serde_json::Value,
+    incoming: serde_json::Value,
+) -> serde_json::Value {
+    let mut merged = match existing {
+        serde_json::Value::Object(map) => map,
+        _ => serde_json::Map::new(),
+    };
+    if let serde_json::Value::Object(map) = incoming {
+        merged.extend(map);
+    }
+    redact_provider_metadata(serde_json::Value::Object(merged))
 }
 
 fn status_snapshot_record(status: &ProviderRuntimeStatus) -> ProviderRuntimeStatusSnapshotRecord {
@@ -276,6 +293,12 @@ fn status_from_descriptor(
         ProviderHealthStatus::MissingCredentials
     };
     status = status.with_health(health);
+    if descriptor.id == "openai-codex" {
+        status = status.with_redacted_json(codex_status_metadata(&config.providers.openai_codex));
+        if normalize_codex_runtime(&config.providers.openai_codex.runtime) == "app_server" {
+            status = status.with_health(ProviderHealthStatus::Unavailable);
+        }
+    }
     status
 }
 
@@ -284,18 +307,54 @@ fn runtime_mode(
     config: &archon_core::config::ArchonConfig,
 ) -> String {
     if descriptor.id == "openai-codex" {
-        config
-            .providers
-            .openai_codex
-            .runtime
-            .trim()
-            .to_ascii_lowercase()
-            .replace('-', "_")
+        normalize_codex_runtime(&config.providers.openai_codex.runtime)
     } else if matches!(descriptor.auth_flavor, AuthFlavor::None) {
         "local".into()
     } else {
         "direct".into()
     }
+}
+
+fn codex_status_metadata(config: &archon_core::config::CodexProviderConfig) -> serde_json::Value {
+    let discovery = crate::runtime::codex_app_server::discover_codex_app_server(config);
+    let mut metadata = discovery.metadata(config);
+    if let Some(object) = metadata.as_object_mut() {
+        object.insert(
+            "codex_strategy".to_string(),
+            serde_json::json!({
+                "runtime": normalize_codex_runtime(&config.runtime),
+                "direct_fallback": config.direct_fallback,
+                "adapter_state": "unimplemented",
+                "status_note": codex_strategy_status_note(config, discovery.is_configured()),
+            }),
+        );
+    }
+    metadata
+}
+
+fn codex_strategy_status_note(
+    config: &archon_core::config::CodexProviderConfig,
+    app_server_configured: bool,
+) -> &'static str {
+    match (
+        normalize_codex_runtime(&config.runtime).as_str(),
+        config.direct_fallback,
+        app_server_configured,
+    ) {
+        ("direct", _, true) => "app-server:configured direct-selected",
+        ("direct", _, false) => "direct",
+        ("auto", true, true) => "app-server:configured direct-fallback",
+        ("auto", true, false) => "app-server:not-configured direct-fallback",
+        ("auto", false, true) => "app-server:adapter-pending fallback-disabled",
+        ("auto", false, false) => "app-server:not-configured fallback-disabled",
+        ("app_server", _, true) => "app-server:adapter-pending",
+        ("app_server", _, false) => "app-server:not-configured",
+        _ => "invalid-codex-runtime",
+    }
+}
+
+fn normalize_codex_runtime(value: &str) -> String {
+    value.trim().to_ascii_lowercase().replace('-', "_")
 }
 
 fn identity_status(
@@ -354,6 +413,12 @@ fn status_note(status: &ProviderRuntimeStatus) -> String {
         format!("limited:{exhausted}")
     } else if !status.rate_limits.is_empty() {
         format!("recent-limits:{}", status.rate_limits.len())
+    } else if let Some(note) = status
+        .metadata_redacted_json
+        .pointer("/codex_strategy/status_note")
+        .and_then(|value| value.as_str())
+    {
+        note.to_string()
     } else {
         "-".to_string()
     }

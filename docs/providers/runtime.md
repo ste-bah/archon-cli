@@ -45,13 +45,21 @@ Codex is configured under `[providers.openai-codex]`:
 ```toml
 runtime = "direct" # direct | auto | app_server
 direct_fallback = false
+app_server_url = "http://127.0.0.1:11434/codex"
 app_server_discovery_timeout_ms = 2500
+app_server_model_catalog = ["gpt-5.5", "gpt-5.4"]
 ```
 
 `direct` preserves Archon's existing Codex backend path. `app_server` fails
 visibly until a real adapter is implemented. `auto` may fall back from
 app-server to direct only when `direct_fallback=true`; that fallback emits a
-provider runtime event.
+provider runtime event. `ARCHON_CODEX_APP_SERVER_URL` overrides
+`app_server_url` for local diagnostics.
+
+`archon providers status openai-codex` reports whether an app-server endpoint is
+configured, whether direct fallback is selected, and whether the adapter is
+still pending. App-server metadata is redacted before it is persisted to the
+Cozo learning store.
 
 Anthropic Claude Code spoofing remains a protected compatibility contract and
 is not controlled by Codex strategy settings.

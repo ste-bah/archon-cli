@@ -114,7 +114,9 @@ Codex provider compatibility settings for ChatGPT subscription OAuth.
 enabled = true
 runtime = "direct"
 direct_fallback = false
+app_server_url = ""
 app_server_discovery_timeout_ms = 2500
+app_server_model_catalog = ["gpt-5.5", "gpt-5.4"]
 
 [providers.openai-codex.spoof]
 # originator  = "openclaw"
@@ -136,7 +138,9 @@ app_server_discovery_timeout_ms = 2500
 | `enabled` | `true` | Master switch for resolving Codex OAuth credentials and spoof metadata. `ARCHON_CODEX_DISABLED=1` disables it at runtime. |
 | `runtime` | `"direct"` | Codex runtime strategy. `"direct"` preserves Archon's current direct backend. `"auto"` can fall back from app-server to direct only when `direct_fallback=true`. `"app_server"` fails visibly until the adapter is available. |
 | `direct_fallback` | `false` | Explicit policy switch for auto-mode app-server to direct fallback. Keeping this false prevents silent strategy changes. |
+| `app_server_url` | unset | Optional Codex app-server endpoint. `ARCHON_CODEX_APP_SERVER_URL` overrides this value for local diagnostics. The endpoint path is redacted in status and persisted snapshots. |
 | `app_server_discovery_timeout_ms` | `2500` | Future app-server discovery budget, persisted now so fallback decisions can report the configured policy. |
+| `app_server_model_catalog` | `["gpt-5.5", "gpt-5.4"]` | Fallback Codex app-server model catalog shown in status metadata until live model discovery is implemented. |
 | `spoof.originator` | bundled manifest | Product originator header used by the Codex compatibility layer. Leave unset unless a known-good manifest update requires an override. |
 | `spoof.user_agent` | bundled manifest | User agent used for Codex requests. Archon rejects `ChatGPT-*`, `ChatGPT/`, `OpenAI-*`, and `OpenAI/` values to avoid impersonating OpenAI products. |
 | `spoof.client_id` | bundled manifest | OAuth client id. Override only for diagnostics or when the manifest is stale. |
