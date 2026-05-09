@@ -2,6 +2,9 @@ use anyhow::Result;
 
 use crate::cli_args::SandboxAction;
 
+#[path = "sandbox_explain_tools.rs"]
+mod sandbox_explain_tools;
+
 pub(crate) fn handle_sandbox_command(
     action: Option<SandboxAction>,
     config: &archon_core::config::ArchonConfig,
@@ -13,8 +16,17 @@ pub(crate) fn handle_sandbox_command(
             persist_sandbox_command_event(&config.sandbox, None, "status", "cli_status");
             output
         }
-        SandboxAction::Explain { backend } => {
-            let output = render_explain(&config.sandbox, backend.clone())?;
+        SandboxAction::Explain {
+            backend,
+            tool,
+            command,
+        } => {
+            let output = render_explain(
+                &config.sandbox,
+                backend.clone(),
+                tool.as_deref(),
+                command.as_deref(),
+            )?;
             persist_sandbox_command_event(
                 &config.sandbox,
                 backend.as_deref(),
@@ -129,6 +141,8 @@ fn append_backend_verbose_status(
 fn render_explain(
     config: &archon_core::sandbox::SandboxConfig,
     backend: Option<String>,
+    tool: Option<&str>,
+    command: Option<&str>,
 ) -> Result<String> {
     let mut policy = config.policy().map_err(anyhow::Error::msg)?;
     if let Some(backend) = backend {
@@ -141,6 +155,7 @@ fn render_explain(
         policy.describes_isolation()
     );
     append_explain_details(&mut output, config, &policy)?;
+    sandbox_explain_tools::append_tool_explain(&mut output, &policy, tool, command);
     Ok(output)
 }
 
@@ -374,7 +389,7 @@ mod tests {
     fn sandbox_explain_rejects_unknown_backend_override() {
         let config = archon_core::sandbox::SandboxConfig::default();
 
-        let error = render_explain(&config, Some("host".into())).unwrap_err();
+        let error = render_explain(&config, Some("host".into()), None, None).unwrap_err();
 
         assert!(error.to_string().contains("sandbox.backend"));
     }
@@ -392,7 +407,7 @@ mod tests {
             ..archon_core::sandbox::SandboxConfig::default()
         };
 
-        let body = render_explain(&config, None).unwrap();
+        let body = render_explain(&config, None, None, None).unwrap();
 
         assert!(body.contains("workspace mounted read-only with ephemeral /scratch"));
         assert!(body.contains("Writable paths: target"));
@@ -413,13 +428,31 @@ mod tests {
             ..archon_core::sandbox::SandboxConfig::default()
         };
 
-        let body = render_explain(&config, None).unwrap();
+        let body = render_explain(&config, None, None, None).unwrap();
 
         assert!(body.contains("openshell mediated execution"));
         assert!(body.contains("provider_injection=false"));
         assert!(body.contains("Claude Code spoofing stays in Archon's provider runtime"));
         assert!(body.contains("host_shell_fallback=false"));
         assert!(body.contains("generated memory databases"));
+    }
+
+    #[test]
+    fn sandbox_explain_can_show_tool_routing_without_execution() {
+        let config = archon_core::sandbox::SandboxConfig {
+            backend: "openshell".into(),
+            openshell: archon_core::sandbox::OpenShellConfig {
+                enabled: true,
+                ..archon_core::sandbox::OpenShellConfig::default()
+            },
+            ..archon_core::sandbox::SandboxConfig::default()
+        };
+
+        let body = render_explain(&config, None, Some("Bash"), Some("cargo test")).unwrap();
+
+        assert!(body.contains("Tool: Bash"));
+        assert!(body.contains("Decision: route_to_sandbox"));
+        assert!(body.contains("Command preview: cargo test"));
     }
 
     #[test]

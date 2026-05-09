@@ -89,6 +89,12 @@ pub enum SandboxAction {
         /// Explain a specific backend instead of the configured backend
         #[arg(long)]
         backend: Option<String>,
+        /// Explain routing for a specific tool, e.g. Bash
+        #[arg(long)]
+        tool: Option<String>,
+        /// Optional command preview for shell routing explanations
+        #[arg(long)]
+        command: Option<String>,
     },
     /// Diagnose a sandbox backend without executing untrusted commands
     Doctor {
