@@ -23,7 +23,8 @@ adapter is not implemented. `auto` may use direct only when
 runtime event in Cozo.
 
 `ARCHON_CODEX_APP_SERVER_URL` overrides `app_server_url` for diagnostics. The
-endpoint is redacted before persistence.
+endpoint must be `http` or `https`; invalid values fail closed and are redacted
+before persistence.
 
 ## OAuth
 

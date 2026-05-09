@@ -123,6 +123,37 @@ fn codex_status_persists_app_server_discovery_metadata() {
 }
 
 #[test]
+fn codex_status_surfaces_invalid_app_server_endpoint() {
+    let mut config = archon_core::config::ArchonConfig::default();
+    config.providers.openai_codex.runtime = "app_server".into();
+    config.providers.openai_codex.app_server_url = Some("file:///tmp/codex.sock".into());
+    let status = status_from_descriptor(
+        archon_llm::providers::list_native()
+            .iter()
+            .find(|descriptor| descriptor.id == "openai-codex")
+            .unwrap(),
+        &ProviderStatusEnv {
+            codex_oauth: true,
+            ..ProviderStatusEnv::default()
+        },
+        &config,
+    );
+
+    assert_eq!(
+        status.metadata_redacted_json["app_server_discovery"]["status"],
+        "invalid"
+    );
+    assert_eq!(
+        status.metadata_redacted_json["app_server_discovery"]["reason"],
+        "unsupported_scheme"
+    );
+    assert_eq!(
+        status.metadata_redacted_json["codex_strategy"]["status_note"],
+        "app-server:invalid-url"
+    );
+}
+
+#[test]
 fn status_enrichment_preserves_existing_metadata() {
     let existing = serde_json::json!({
         "app_server_discovery": {"status": "configured"},

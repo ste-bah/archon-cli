@@ -66,8 +66,9 @@ provider runtime event. `ARCHON_CODEX_APP_SERVER_URL` overrides
 
 `archon providers status --provider openai-codex` reports whether an app-server
 endpoint is configured, whether direct fallback is selected, and whether the
-adapter is still pending. App-server metadata is redacted before it is persisted
-to the Cozo learning store.
+adapter is still pending. Invalid app-server URLs fail closed and are reported
+as `app-server:invalid-url` with the endpoint redacted before persistence to the
+Cozo learning store.
 
 Anthropic Claude Code spoofing remains a protected compatibility contract and
 is not controlled by Codex strategy settings.

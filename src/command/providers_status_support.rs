@@ -126,7 +126,7 @@ fn codex_status_metadata(config: &archon_core::config::CodexProviderConfig) -> s
                 "runtime": normalize_codex_runtime(&config.runtime),
                 "direct_fallback": config.direct_fallback,
                 "adapter_state": "unimplemented",
-                "status_note": codex_strategy_status_note(config, discovery.is_configured()),
+                "status_note": codex_strategy_status_note(config, discovery.status_label()),
             }),
         );
     }
@@ -135,21 +135,22 @@ fn codex_status_metadata(config: &archon_core::config::CodexProviderConfig) -> s
 
 fn codex_strategy_status_note(
     config: &archon_core::config::CodexProviderConfig,
-    app_server_configured: bool,
+    app_server_status: &str,
 ) -> &'static str {
     match (
         normalize_codex_runtime(&config.runtime).as_str(),
         config.direct_fallback,
-        app_server_configured,
+        app_server_status,
     ) {
-        ("direct", _, true) => "app-server:configured direct-selected",
-        ("direct", _, false) => "direct",
-        ("auto", true, true) => "app-server:configured direct-fallback",
-        ("auto", true, false) => "app-server:not-configured direct-fallback",
-        ("auto", false, true) => "app-server:adapter-pending fallback-disabled",
-        ("auto", false, false) => "app-server:not-configured fallback-disabled",
-        ("app_server", _, true) => "app-server:adapter-pending",
-        ("app_server", _, false) => "app-server:not-configured",
+        (_, _, "invalid") => "app-server:invalid-url",
+        ("direct", _, "configured") => "app-server:configured direct-selected",
+        ("direct", _, _) => "direct",
+        ("auto", true, "configured") => "app-server:configured direct-fallback",
+        ("auto", true, _) => "app-server:not-configured direct-fallback",
+        ("auto", false, "configured") => "app-server:adapter-pending fallback-disabled",
+        ("auto", false, _) => "app-server:not-configured fallback-disabled",
+        ("app_server", _, "configured") => "app-server:adapter-pending",
+        ("app_server", _, _) => "app-server:not-configured",
         _ => "invalid-codex-runtime",
     }
 }

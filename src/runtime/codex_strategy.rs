@@ -71,7 +71,7 @@ fn auto_with_direct_fallback(
 
 fn discovery_reason(config: &CodexProviderConfig, fallback_reason: &'static str) -> &'static str {
     let discovery = crate::runtime::codex_app_server::discover_codex_app_server(config);
-    if discovery.is_configured() {
+    if discovery.is_present() {
         discovery.reason_code()
     } else {
         fallback_reason
@@ -100,6 +100,9 @@ fn strategy_error(surface: &str, reason_code: &str) -> String {
     match reason_code {
         "codex_app_server_adapter_unimplemented" => format!(
             "Codex app-server endpoint is configured for `{surface}`, but the app-server transport adapter is not implemented in this release slice; set providers.openai-codex.runtime = \"direct\" or use runtime = \"auto\" with direct_fallback = true"
+        ),
+        "codex_app_server_invalid_url" => format!(
+            "Codex app-server endpoint is invalid for `{surface}`; fix providers.openai-codex.app_server_url or ARCHON_CODEX_APP_SERVER_URL before using app_server mode"
         ),
         "codex_auto_direct_fallback_disabled" => format!(
             "Codex app-server runtime is unavailable for `{surface}` and direct fallback is disabled; set providers.openai-codex.runtime = \"direct\" or enable direct_fallback for auto mode"
@@ -219,5 +222,20 @@ mod tests {
             .to_string();
 
         assert!(error.contains("adapter is not implemented"));
+    }
+
+    #[test]
+    fn app_server_mode_reports_invalid_endpoint_before_adapter_pending() {
+        let config = CodexProviderConfig {
+            runtime: "app_server".into(),
+            app_server_url: Some("file:///tmp/codex.sock".into()),
+            ..CodexProviderConfig::default()
+        };
+
+        let error = resolve_codex_runtime_strategy_with_events(&config, "test", false)
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("endpoint is invalid"));
     }
 }
