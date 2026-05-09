@@ -195,6 +195,51 @@ fn status_enrichment_adds_selected_profile() {
 }
 
 #[test]
+fn status_enrichment_adds_last_runtime_events_without_profile() {
+    let db = test_db();
+    archon_learning::runtime_events::insert_provider_runtime_event(
+        &db,
+        &archon_learning::runtime_models::ProviderRuntimeEventRecord::new(
+            "provider-event-ok",
+            "openai",
+            "direct",
+            "request_succeeded",
+            "info",
+            "2026-05-08T12:00:00Z",
+        ),
+    )
+    .unwrap();
+    archon_learning::runtime_events::insert_provider_runtime_event(
+        &db,
+        &archon_learning::runtime_models::ProviderRuntimeEventRecord::new(
+            "provider-event-fail",
+            "openai",
+            "direct",
+            "request_failed",
+            "error",
+            "2026-05-08T12:01:00Z",
+        )
+        .with_reason("auth_error"),
+    )
+    .unwrap();
+    let mut statuses = vec![
+        ProviderRuntimeStatus::new("openai", "direct").with_health(ProviderHealthStatus::Unknown),
+    ];
+
+    enrich_provider_statuses_from_db(&mut statuses, &db).unwrap();
+    let body = render_provider_statuses(&statuses);
+
+    assert_eq!(statuses[0].health, ProviderHealthStatus::Degraded);
+    assert!(statuses[0].last_success_at.is_some());
+    assert!(statuses[0].last_failure_at.is_some());
+    assert_eq!(
+        statuses[0].metadata_redacted_json["last_failure_event"],
+        "provider-event-fail"
+    );
+    assert!(body.contains("last-failure:auth_error"));
+}
+
+#[test]
 fn status_render_shows_recent_limit_notes() {
     let status = ProviderRuntimeStatus::new("openai-codex", "auto")
         .with_model("gpt-5.3-codex")

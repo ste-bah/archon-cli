@@ -216,6 +216,12 @@ pub(super) fn status_note(status: &ProviderRuntimeStatus) -> String {
         format!("recent-limits:{}", status.rate_limits.len())
     } else if let Some(note) = status
         .metadata_redacted_json
+        .pointer("/runtime_event_status_note")
+        .and_then(|value| value.as_str())
+    {
+        note.to_string()
+    } else if let Some(note) = status
+        .metadata_redacted_json
         .pointer("/codex_strategy/status_note")
         .and_then(|value| value.as_str())
     {
