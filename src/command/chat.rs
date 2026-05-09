@@ -11,7 +11,9 @@ use archon_llm::providers::anthropic::AnthropicProvider;
 use archon_llm::providers::build_llm_provider;
 
 use crate::cli_args::ChatArgs;
-use crate::runtime::provider_observer::{observe_llm_provider, runtime_mode_for_provider_name};
+use crate::runtime::provider_observer::{
+    observe_llm_provider_with_profile, runtime_mode_for_provider_name,
+};
 
 pub async fn handle_chat(args: ChatArgs, config: &archon_core::config::ArchonConfig) -> Result<()> {
     let provider = build_provider(&args, config).await?;
@@ -47,16 +49,30 @@ async fn build_provider(
     config: &archon_core::config::ArchonConfig,
 ) -> Result<Arc<dyn LlmProvider>> {
     match args.provider.as_str() {
-        "anthropic" => Ok(observe_llm_provider(
-            Arc::new(AnthropicProvider::new(
+        "anthropic" => {
+            let provider: Arc<dyn LlmProvider> = Arc::new(AnthropicProvider::new(
                 build_anthropic_client(config).await?,
-            )),
-            "direct",
-        )),
+            ));
+            let profile_id =
+                crate::runtime::provider_auth_selection::selected_provider_auth_profile_id(
+                    provider.name(),
+                );
+            Ok(observe_llm_provider_with_profile(
+                provider, "direct", profile_id,
+            ))
+        }
         "openai-codex" => {
             let (provider, runtime_mode) =
                 crate::runtime::codex_provider::build_codex_provider(config, "cli_chat").await?;
-            Ok(observe_llm_provider(provider, runtime_mode))
+            let profile_id =
+                crate::runtime::provider_auth_selection::selected_provider_auth_profile_id(
+                    provider.name(),
+                );
+            Ok(observe_llm_provider_with_profile(
+                provider,
+                runtime_mode,
+                profile_id,
+            ))
         }
         other => {
             let flat = archon_llm::LlmConfig {
@@ -69,7 +85,15 @@ async fn build_provider(
             let provider = build_llm_provider(&flat, Arc::new(reqwest::Client::new()))
                 .map_err(|e| anyhow::anyhow!("unknown or unavailable provider `{other}`: {e}"))?;
             let runtime_mode = runtime_mode_for_provider_name(provider.name());
-            Ok(observe_llm_provider(provider, runtime_mode))
+            let profile_id =
+                crate::runtime::provider_auth_selection::selected_provider_auth_profile_id(
+                    provider.name(),
+                );
+            Ok(observe_llm_provider_with_profile(
+                provider,
+                runtime_mode,
+                profile_id,
+            ))
         }
     }
 }

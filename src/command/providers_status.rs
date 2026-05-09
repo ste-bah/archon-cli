@@ -122,7 +122,8 @@ fn enrich_provider_statuses_from_db(
     db: &DbInstance,
 ) -> Result<()> {
     for status in statuses {
-        let allowed = default_auth_kinds(&status.provider_id);
+        let allowed =
+            crate::runtime::provider_auth_selection::default_auth_kinds(&status.provider_id);
         let report = crate::runtime::provider_auth_selection::select_provider_auth_profile_from_db(
             db,
             &status.provider_id,
@@ -143,13 +144,6 @@ fn enrich_provider_statuses_from_db(
         status.metadata_redacted_json = redact_provider_metadata(profile_metadata(&report));
     }
     Ok(())
-}
-
-fn default_auth_kinds(provider_id: &str) -> Vec<&'static str> {
-    match provider_id {
-        "anthropic" | "openai-codex" => vec!["oauth", "api_key"],
-        _ => vec!["api_key"],
-    }
 }
 
 fn profile_metadata(

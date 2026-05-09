@@ -44,7 +44,7 @@ use archon_tui::observability;
 use crate::command::registry::default_registry;
 use crate::runtime::llm::build_llm_provider;
 use crate::runtime::provider_observer::{
-    observe_llm_provider, record_provider_fallback, runtime_mode_for_provider_name,
+    observe_llm_provider_with_profile, record_provider_fallback, runtime_mode_for_provider_name,
 };
 use crate::setup::strip_cache_control_if_disabled;
 
@@ -262,7 +262,13 @@ async fn build_codex_session_provider(
 ) -> Result<Arc<dyn archon_llm::provider::LlmProvider>> {
     let (provider, runtime_mode) =
         crate::runtime::codex_provider::build_codex_provider(config, "tui_session").await?;
-    Ok(observe_llm_provider(provider, runtime_mode))
+    let profile_id =
+        crate::runtime::provider_auth_selection::selected_provider_auth_profile_id(provider.name());
+    Ok(observe_llm_provider_with_profile(
+        provider,
+        runtime_mode,
+        profile_id,
+    ))
 }
 
 /// Spawn the Prometheus `/metrics` exporter when `--metrics-port PORT` is
@@ -782,7 +788,10 @@ async fn build_session_agent(
                     return Err(archon_core::print_mode::EXIT_ERROR);
                 }
             };
-        observe_llm_provider(provider, runtime_mode)
+        let profile_id = crate::runtime::provider_auth_selection::selected_provider_auth_profile_id(
+            provider.name(),
+        );
+        observe_llm_provider_with_profile(provider, runtime_mode, profile_id)
     } else {
         let api_client = api_client.expect("anthropic client is present for non-Codex sessions");
         let provider = build_llm_provider(&config.llm, api_client);
@@ -794,7 +803,10 @@ async fn build_session_agent(
             runtime_mode,
             "provider_construction_fallback",
         );
-        observe_llm_provider(provider, runtime_mode)
+        let profile_id = crate::runtime::provider_auth_selection::selected_provider_auth_profile_id(
+            &selected_provider,
+        );
+        observe_llm_provider_with_profile(provider, runtime_mode, profile_id)
     };
     let selected_provider = provider.name().to_string();
     tracing::info!("LLM provider: {}", provider.name());
@@ -1983,7 +1995,11 @@ pub(crate) async fn run_interactive_session(
                     runtime_mode,
                     "provider_construction_fallback",
                 );
-                observe_llm_provider(provider, runtime_mode)
+                let profile_id =
+                    crate::runtime::provider_auth_selection::selected_provider_auth_profile_id(
+                        &selected_provider,
+                    );
+                observe_llm_provider_with_profile(provider, runtime_mode, profile_id)
             }
             None => {
                 return Err(anyhow::anyhow!(

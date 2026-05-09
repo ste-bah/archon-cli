@@ -65,13 +65,15 @@ impl ProviderRuntimeEventRecorder {
     }
 }
 
-pub(crate) fn observe_llm_provider(
+pub(crate) fn observe_llm_provider_with_profile(
     provider: Arc<dyn LlmProvider>,
     runtime_mode: impl Into<String>,
+    profile_id: Option<String>,
 ) -> Arc<dyn LlmProvider> {
     Arc::new(ObservedLlmProvider::new(
         provider,
         runtime_mode,
+        profile_id,
         ProviderRuntimeEventRecorder::default_learning_store(),
     ))
 }
@@ -112,6 +114,7 @@ pub(crate) fn record_provider_fallback(
 pub(crate) struct ObservedLlmProvider {
     inner: Arc<dyn LlmProvider>,
     runtime_mode: String,
+    profile_id: Option<String>,
     recorder: ProviderRuntimeEventRecorder,
 }
 
@@ -119,11 +122,13 @@ impl ObservedLlmProvider {
     fn new(
         inner: Arc<dyn LlmProvider>,
         runtime_mode: impl Into<String>,
+        profile_id: Option<String>,
         recorder: ProviderRuntimeEventRecorder,
     ) -> Self {
         Self {
             inner,
             runtime_mode: runtime_mode.into(),
+            profile_id,
             recorder,
         }
     }
@@ -135,13 +140,18 @@ impl ObservedLlmProvider {
         event_type: ProviderRuntimeEventType,
         severity: ProviderRuntimeSeverity,
     ) -> ProviderRuntimeEvent {
-        base_event(self.inner.name(), &self.runtime_mode, event_type, severity)
+        let event = base_event(self.inner.name(), &self.runtime_mode, event_type, severity)
             .with_request_id(request_id)
             .with_model(request.model.clone())
             .with_redacted_json(serde_json::json!({
                 "request_origin": request.origin.as_deref(),
                 "identity_status": identity_status_label(identity_status_for_provider(self.inner.as_ref())),
-            }))
+            }));
+        if let Some(profile_id) = &self.profile_id {
+            event.with_profile(profile_id.clone())
+        } else {
+            event
+        }
     }
 
     fn record_start(&self, request_id: &str, request: &ObservedRequest, operation: &str) {

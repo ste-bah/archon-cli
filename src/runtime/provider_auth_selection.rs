@@ -46,6 +46,29 @@ pub(crate) fn select_provider_auth_profile_from_db(
     ))
 }
 
+pub(crate) fn selected_provider_auth_profile_id(provider_id: &str) -> Option<String> {
+    let base = archon_session::storage::default_db_path();
+    let path = base.parent()?.join("learning.db");
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).ok()?;
+    }
+    let path_str = path.to_string_lossy().to_string();
+    let db = DbInstance::new("sqlite", &path_str, "").ok()?;
+    archon_learning::schema::ensure_learning_schema(&db).ok()?;
+    let allowed = default_auth_kinds(provider_id);
+    select_provider_auth_profile_from_db(&db, provider_id, &allowed, None)
+        .ok()?
+        .selected
+        .map(|selection| selection.profile.profile_id)
+}
+
+pub(crate) fn default_auth_kinds(provider_id: &str) -> Vec<&'static str> {
+    match provider_id {
+        "anthropic" | "openai-codex" => vec!["oauth", "api_key"],
+        _ => vec!["api_key"],
+    }
+}
+
 fn select_provider_auth_profile_from_records(
     provider_id: &str,
     records: &[ProviderAuthProfileRecord],

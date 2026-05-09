@@ -66,7 +66,7 @@ use archon_llm::providers::{
 use archon_llm::{ActiveProvider, LlmConfig as FlatLlmConfig};
 
 use crate::runtime::provider_observer::{
-    observe_llm_provider, record_provider_fallback, runtime_mode_for_provider_name,
+    observe_llm_provider_with_profile, record_provider_fallback, runtime_mode_for_provider_name,
 };
 
 /// Build the configured provider for command surfaces that can choose
@@ -79,7 +79,14 @@ pub(crate) async fn build_configured_llm_provider(
     if config.llm.provider == "openai-codex" {
         let (provider, runtime_mode) =
             crate::runtime::codex_provider::build_codex_provider(config, origin).await?;
-        return Ok(observe_llm_provider(provider, runtime_mode));
+        let profile_id = crate::runtime::provider_auth_selection::selected_provider_auth_profile_id(
+            provider.name(),
+        );
+        return Ok(observe_llm_provider_with_profile(
+            provider,
+            runtime_mode,
+            profile_id,
+        ));
     }
 
     let auth = resolve_auth_with_keys(
@@ -117,7 +124,14 @@ pub(crate) async fn build_configured_llm_provider(
         runtime_mode,
         "provider_construction_fallback",
     );
-    Ok(observe_llm_provider(provider, runtime_mode))
+    let profile_id = crate::runtime::provider_auth_selection::selected_provider_auth_profile_id(
+        &selected_provider,
+    );
+    Ok(observe_llm_provider_with_profile(
+        provider,
+        runtime_mode,
+        profile_id,
+    ))
 }
 
 /// Build the active LLM provider from the `[llm]` config section.

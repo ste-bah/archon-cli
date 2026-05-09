@@ -79,6 +79,7 @@ async fn complete_records_start_and_success_events() {
     let observed = ObservedLlmProvider::new(
         Arc::new(CompleteProvider),
         "direct",
+        None,
         ProviderRuntimeEventRecorder::with_db(db.clone()),
     );
 
@@ -109,6 +110,7 @@ async fn failures_emit_request_and_limit_events() {
     let observed = ObservedLlmProvider::new(
         Arc::new(FailingProvider),
         "direct",
+        None,
         ProviderRuntimeEventRecorder::with_db(db.clone()),
     );
 
@@ -151,4 +153,31 @@ fn converts_provider_event_to_learning_record() {
     assert_eq!(record.severity, "debug");
     assert_eq!(record.model_id.as_deref(), Some("claude-sonnet-4-6"));
     assert_eq!(record.raw_redacted_json["authorization"], "[redacted]");
+}
+
+#[tokio::test]
+async fn observed_events_include_profile_id_when_known() {
+    let db = test_db();
+    let observed = ObservedLlmProvider::new(
+        Arc::new(CompleteProvider),
+        "direct",
+        Some("anthropic-oauth".into()),
+        ProviderRuntimeEventRecorder::with_db(db.clone()),
+    );
+
+    observed
+        .complete(LlmRequest {
+            model: "model-a".into(),
+            ..LlmRequest::default()
+        })
+        .await
+        .unwrap();
+
+    let events = archon_learning::runtime_events::list_provider_runtime_events(
+        &db,
+        Some("complete-provider"),
+    )
+    .unwrap();
+    assert_eq!(events[0].profile_id.as_deref(), Some("anthropic-oauth"));
+    assert_eq!(events[1].profile_id.as_deref(), Some("anthropic-oauth"));
 }
