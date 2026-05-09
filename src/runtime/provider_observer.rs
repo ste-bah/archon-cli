@@ -3,12 +3,11 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use archon_llm::identity::IdentityMode;
 use archon_llm::provider::{
     LlmError, LlmProvider, LlmRequest, LlmResponse, ModelInfo, ProviderFeature,
 };
 use archon_llm::runtime::{
-    ProviderIdentityStatus, ProviderRuntimeEvent, ProviderRuntimeEventType, ProviderRuntimeSeverity,
+    ProviderRuntimeEvent, ProviderRuntimeEventType, ProviderRuntimeSeverity,
 };
 use archon_llm::streaming::StreamEvent;
 use async_trait::async_trait;
@@ -18,6 +17,8 @@ use tokio::sync::mpsc::Receiver;
 use super::provider_event_record::provider_event_record;
 use super::provider_limit_windows;
 
+#[path = "provider_identity_events.rs"]
+mod identity_events;
 #[path = "provider_observer_stream.rs"]
 mod stream;
 
@@ -128,12 +129,19 @@ impl ObservedLlmProvider {
         profile_id: Option<String>,
         recorder: ProviderRuntimeEventRecorder,
     ) -> Self {
-        Self {
+        let observed = Self {
             inner,
             runtime_mode: runtime_mode.into(),
             profile_id,
             recorder,
-        }
+        };
+        identity_events::record_provider_identity_decision(
+            &observed.recorder,
+            observed.inner.as_ref(),
+            &observed.runtime_mode,
+            observed.profile_id.as_deref(),
+        );
+        observed
     }
 
     fn event(
@@ -148,7 +156,9 @@ impl ObservedLlmProvider {
             .with_model(request.model.clone())
             .with_redacted_json(serde_json::json!({
                 "request_origin": request.origin.as_deref(),
-                "identity_status": identity_status_label(identity_status_for_provider(self.inner.as_ref())),
+                "identity_status": identity_events::identity_status_label(
+                    identity_events::identity_status_for_provider(self.inner.as_ref())
+                ),
             }));
         if let Some(profile_id) = &self.profile_id {
             event.with_profile(profile_id.clone())
@@ -345,28 +355,6 @@ fn base_event(
     severity: ProviderRuntimeSeverity,
 ) -> ProviderRuntimeEvent {
     ProviderRuntimeEvent::new(provider_id, runtime_mode, event_type, severity)
-}
-
-fn identity_status_for_provider(provider: &dyn LlmProvider) -> ProviderIdentityStatus {
-    match provider
-        .as_anthropic()
-        .map(|client| &client.identity().mode)
-    {
-        Some(IdentityMode::Spoof { .. }) => ProviderIdentityStatus::Spoof,
-        Some(IdentityMode::Clean) => ProviderIdentityStatus::Clean,
-        Some(IdentityMode::Custom { .. }) => ProviderIdentityStatus::Custom,
-        None => ProviderIdentityStatus::NotApplicable,
-    }
-}
-
-fn identity_status_label(identity_status: ProviderIdentityStatus) -> &'static str {
-    match identity_status {
-        ProviderIdentityStatus::Clean => "clean",
-        ProviderIdentityStatus::Spoof => "spoof",
-        ProviderIdentityStatus::Custom => "custom",
-        ProviderIdentityStatus::AppServer => "app_server",
-        ProviderIdentityStatus::NotApplicable => "n/a",
-    }
 }
 
 fn error_kind(error: &LlmError) -> &'static str {

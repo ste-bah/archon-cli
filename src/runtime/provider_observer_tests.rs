@@ -1,4 +1,9 @@
 use super::*;
+use archon_llm::anthropic::AnthropicClient;
+use archon_llm::auth::AuthProvider;
+use archon_llm::identity::{IdentityMode, IdentityProvider};
+use archon_llm::providers::AnthropicProvider;
+use archon_llm::types::Secret;
 use archon_llm::types::Usage;
 
 struct FailingProvider;
@@ -71,6 +76,21 @@ fn test_db() -> DbInstance {
     let db = DbInstance::new("sqlite", &path, "").unwrap();
     archon_learning::schema::ensure_learning_schema(&db).unwrap();
     db
+}
+
+fn anthropic_provider(identity_mode: IdentityMode) -> Arc<dyn LlmProvider> {
+    let identity = IdentityProvider::new(
+        identity_mode,
+        "session-test".to_string(),
+        "device-test".to_string(),
+        "account-test".to_string(),
+    );
+    let client = AnthropicClient::new(
+        AuthProvider::ApiKey(Secret::new("sk-ant-api03-test".to_string())),
+        identity,
+        None,
+    );
+    Arc::new(AnthropicProvider::new(client))
 }
 
 #[tokio::test]
@@ -180,4 +200,50 @@ async fn observed_events_include_profile_id_when_known() {
     .unwrap();
     assert_eq!(events[0].profile_id.as_deref(), Some("anthropic-oauth"));
     assert_eq!(events[1].profile_id.as_deref(), Some("anthropic-oauth"));
+}
+
+#[test]
+fn anthropic_spoof_identity_event_is_recorded_on_wrap() {
+    let db = test_db();
+    let _observed = ObservedLlmProvider::new(
+        anthropic_provider(IdentityMode::Spoof {
+            version: "2.1.89".to_string(),
+            entrypoint: "cli".to_string(),
+            betas: vec!["claude-code-20250219".to_string()],
+            workload: None,
+            anti_distillation: false,
+        }),
+        "direct",
+        Some("anthropic-oauth".into()),
+        ProviderRuntimeEventRecorder::with_db(db.clone()),
+    );
+
+    let events =
+        archon_learning::runtime_events::list_provider_runtime_events(&db, Some("anthropic"))
+            .unwrap();
+
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].event_type, "spoof_identity_selected");
+    assert_eq!(events[0].profile_id.as_deref(), Some("anthropic-oauth"));
+    assert_eq!(events[0].raw_redacted_json["identity_status"], "spoof");
+}
+
+#[test]
+fn anthropic_clean_identity_records_rejected_spoof_event() {
+    let db = test_db();
+    let _observed = ObservedLlmProvider::new(
+        anthropic_provider(IdentityMode::Clean),
+        "direct",
+        None,
+        ProviderRuntimeEventRecorder::with_db(db.clone()),
+    );
+
+    let events =
+        archon_learning::runtime_events::list_provider_runtime_events(&db, Some("anthropic"))
+            .unwrap();
+
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].event_type, "spoof_identity_rejected");
+    assert_eq!(events[0].reason_code.as_deref(), Some("clean_identity"));
+    assert_eq!(events[0].raw_redacted_json["identity_status"], "clean");
 }
