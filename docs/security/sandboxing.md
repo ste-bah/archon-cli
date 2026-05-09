@@ -63,3 +63,10 @@ workspace_mode = "mirror"
 Future OpenShell execution must use the OpenShell transport or configured
 gateway. It must not inject provider credentials into the sandbox, and it must
 not silently execute directly on the host.
+
+See also:
+
+- [Docker sandbox](docker-sandbox.md)
+- [SSH sandbox](ssh-sandbox.md)
+- [OpenShell sandbox](openshell-sandbox.md)
+- [Tool preflight](tool-preflight.md)

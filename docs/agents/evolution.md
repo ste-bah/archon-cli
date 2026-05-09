@@ -82,3 +82,14 @@ Evolved profiles may narrow behavior automatically, but risky permission or
 provider identity changes require explicit approval. Requests to move toward
 `bubble`, `dontAsk`, or `bypassPermissions` are treated as permission expansion;
 `bypassPermissions` remains critical risk.
+
+Activating a high-risk, permission-impacting, or provider-identity-impacting
+profile version also requires the latest Cozo `agent_shadow_evaluations` row for
+that proposal to have verdict `promote` and zero regressions. Applying without
+`--activate` can still stage a reviewed version for later inspection.
+
+See also:
+
+- [Permission governance](permission-governance.md)
+- [Memory system promotion](memory-system-promotion.md)
+- [Governed learning](../learning/governed-agent-evolution.md)

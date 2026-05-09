@@ -69,3 +69,11 @@ Cozo learning store.
 
 Anthropic Claude Code spoofing remains a protected compatibility contract and
 is not controlled by Codex strategy settings.
+
+See also:
+
+- [Codex provider](codex.md)
+- [Anthropic Claude Code](anthropic-claude-code.md)
+- [Auth profiles](auth-profiles.md)
+- [OpenAI-compatible providers](openai-compatible.md)
+- [Cloud and local providers](cloud-and-local.md)
