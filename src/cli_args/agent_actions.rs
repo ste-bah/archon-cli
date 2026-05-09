@@ -39,6 +39,15 @@ pub enum AgentEvolveAction {
         #[arg(long)]
         agent: String,
     },
+    /// Show governed profile version history for an agent
+    History {
+        /// Agent type to inspect
+        #[arg(long)]
+        agent: String,
+        /// Output history as JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Inspect one Cozo-backed agent evolution proposal
     Inspect {
         /// Agent evolution proposal ID
@@ -89,6 +98,15 @@ pub enum AgentEvolveAction {
         #[arg(long)]
         agent: String,
         /// Output the report as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show concise governed evolution status for an agent
+    Status {
+        /// Agent type to inspect
+        #[arg(long)]
+        agent: String,
+        /// Output status as JSON
         #[arg(long)]
         json: bool,
     },

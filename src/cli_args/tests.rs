@@ -277,6 +277,43 @@ mod agent_evolve_parse_tests {
     }
 
     #[test]
+    fn agent_evolve_history_and_status_parse() {
+        let history = Cli::try_parse_from([
+            "archon", "agent", "evolve", "history", "--agent", "reviewer", "--json",
+        ])
+        .expect("agent evolve history must parse");
+        let status = Cli::try_parse_from([
+            "archon", "agent", "evolve", "status", "--agent", "reviewer", "--json",
+        ])
+        .expect("agent evolve status must parse");
+
+        match history.command {
+            Some(Commands::Agent {
+                action:
+                    AgentAction::Evolve {
+                        action: AgentEvolveAction::History { agent, json },
+                    },
+            }) => {
+                assert_eq!(agent, "reviewer");
+                assert!(json);
+            }
+            other => panic!("expected agent evolve history, got {other:?}"),
+        }
+        match status.command {
+            Some(Commands::Agent {
+                action:
+                    AgentAction::Evolve {
+                        action: AgentEvolveAction::Status { agent, json },
+                    },
+            }) => {
+                assert_eq!(agent, "reviewer");
+                assert!(json);
+            }
+            other => panic!("expected agent evolve status, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn agent_evolve_review_state_commands_parse() {
         let approve =
             Cli::try_parse_from(["archon", "agent", "evolve", "approve", "agent-evo-prop-1"])

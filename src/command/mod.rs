@@ -13,6 +13,7 @@ pub(crate) mod agent;
 pub(crate) mod agent_evolve;
 pub(crate) mod agent_evolve_apply;
 pub(crate) mod agent_evolve_generate;
+pub(crate) mod agent_evolve_history;
 pub(crate) mod agent_evolve_inspect;
 pub(crate) mod agent_evolve_report;
 pub(crate) mod agent_evolve_shadow;

@@ -31,6 +31,9 @@ fn handle_evolve_action(db: &DbInstance, action: &AgentEvolveAction) -> Result<(
         AgentEvolveAction::Generate { agent } => {
             crate::command::agent_evolve_generate::cmd_generate_agent_evolution(db, agent)
         }
+        AgentEvolveAction::History { agent, json } => {
+            crate::command::agent_evolve_history::cmd_show_agent_history(db, agent, *json)
+        }
         AgentEvolveAction::Inspect { proposal_id, json } => {
             crate::command::agent_evolve_inspect::cmd_inspect_agent_evolution(
                 db,
@@ -53,6 +56,9 @@ fn handle_evolve_action(db: &DbInstance, action: &AgentEvolveAction) -> Result<(
         }
         AgentEvolveAction::Report { agent, json } => {
             crate::command::agent_evolve_report::cmd_report_agent_evolution(db, agent, *json)
+        }
+        AgentEvolveAction::Status { agent, json } => {
+            crate::command::agent_evolve_history::cmd_show_agent_status(db, agent, *json)
         }
         AgentEvolveAction::Shadow {
             proposal_id,
