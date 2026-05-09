@@ -1,5 +1,6 @@
 use std::process::Command;
 
+use archon_permissions::sandbox::{SandboxBackend, SandboxCommandRequest, SandboxCommandResult};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -180,6 +181,74 @@ pub fn render_ssh_doctor_report(report: &SshDoctorReport) -> String {
     out
 }
 
+#[derive(Debug, Clone)]
+pub struct SshSandboxBackend {
+    config: SshConfig,
+}
+
+impl SshSandboxBackend {
+    pub fn new(config: SshConfig) -> Self {
+        Self { config }
+    }
+
+    fn safe_to_route(&self) -> Result<(), String> {
+        self.config.validate()?;
+        if !self.config.host_key_checking {
+            return Err("ssh sandbox refuses disabled host-key checking".into());
+        }
+        if self.config.host_shell_fallback {
+            return Err("ssh sandbox refuses host shell fallback".into());
+        }
+        if !self.config.enabled {
+            return Err("ssh sandbox backend is disabled".into());
+        }
+        if self.config.host.as_deref().unwrap_or("").trim().is_empty() {
+            return Err("ssh sandbox requires sandbox.ssh.host".into());
+        }
+        let probe = probe_ssh(&self.config.binary);
+        if !probe.found {
+            return Err(probe
+                .error
+                .unwrap_or_else(|| "ssh binary was not found".into()));
+        }
+        Ok(())
+    }
+}
+
+impl SandboxBackend for SshSandboxBackend {
+    fn check(&self, tool: &str, _input: &serde_json::Value) -> Result<(), String> {
+        self.safe_to_route()?;
+        match tool {
+            "Read" | "Glob" | "Grep" | "ToolSearch" | "TodoWrite" | "Sleep" => Ok(()),
+            "Bash" | "Shell" => Ok(()),
+            "Write" | "Edit" | "NotebookEdit" => Err(format!(
+                "ssh sandbox: {tool} host-side file mutation is not supported"
+            )),
+            "WebFetch" | "WebSearch" => Err(format!(
+                "ssh sandbox: {tool} host-side network access is not supported"
+            )),
+            "TaskCreate" | "TaskUpdate" | "Agent" => Err(format!(
+                "ssh sandbox: {tool} agent spawning is not supported"
+            )),
+            other => Err(format!("ssh sandbox: unsupported tool {other}")),
+        }
+    }
+
+    fn execute_bash<'a>(
+        &'a self,
+        _request: SandboxCommandRequest,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Option<SandboxCommandResult>> + Send + 'a>,
+    > {
+        Box::pin(async {
+            Some(SandboxCommandResult {
+                content: "SSH sandbox execution is fail-closed in this release slice; no host shell fallback was used.\n".into(),
+                is_error: true,
+            })
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -221,5 +290,39 @@ mod tests {
 
         assert_eq!(report.status, SshDoctorStatus::UnsafeConfig);
         assert!(render_ssh_doctor_report(&report).contains("unsafe-config"));
+    }
+
+    #[test]
+    fn backend_requires_host_without_falling_back() {
+        let backend = SshSandboxBackend::new(SshConfig {
+            enabled: true,
+            ..SshConfig::default()
+        });
+
+        let error = backend.check("Bash", &serde_json::json!({})).unwrap_err();
+
+        assert!(error.contains("sandbox.ssh.host"));
+    }
+
+    #[tokio::test]
+    async fn backend_execute_bash_returns_error_without_host_fallback() {
+        let backend = SshSandboxBackend::new(SshConfig {
+            enabled: true,
+            host: Some("example.invalid".into()),
+            ..SshConfig::default()
+        });
+        let result = backend
+            .execute_bash(SandboxCommandRequest {
+                command: "echo no-host".into(),
+                working_dir: std::path::PathBuf::from("."),
+                timeout_ms: 1000,
+                max_output_bytes: 1024,
+                env: Vec::new(),
+            })
+            .await
+            .unwrap();
+
+        assert!(result.is_error);
+        assert!(result.content.contains("no host shell fallback"));
     }
 }

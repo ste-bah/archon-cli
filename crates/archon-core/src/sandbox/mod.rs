@@ -11,12 +11,13 @@ pub use docker::{
 };
 pub use openshell::{
     OpenShellConfig, OpenShellDoctorReport, OpenShellDoctorStatus, OpenShellProbe,
-    openshell_doctor_report, probe_openshell, render_openshell_doctor_report,
+    OpenShellSandboxBackend, openshell_doctor_report, probe_openshell,
+    render_openshell_doctor_report,
 };
 pub use policy::{SandboxBackendKind, SandboxPolicy};
 pub use ssh::{
-    SshConfig, SshDoctorReport, SshDoctorStatus, SshProbe, probe_ssh, render_ssh_doctor_report,
-    ssh_doctor_report,
+    SshConfig, SshDoctorReport, SshDoctorStatus, SshProbe, SshSandboxBackend, probe_ssh,
+    render_ssh_doctor_report, ssh_doctor_report,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

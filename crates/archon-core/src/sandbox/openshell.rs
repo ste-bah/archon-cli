@@ -1,5 +1,6 @@
 use std::process::Command;
 
+use archon_permissions::sandbox::{SandboxBackend, SandboxCommandRequest, SandboxCommandResult};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -176,6 +177,82 @@ pub fn render_openshell_doctor_report(report: &OpenShellDoctorReport) -> String 
     out
 }
 
+#[derive(Debug, Clone)]
+pub struct OpenShellSandboxBackend {
+    config: OpenShellConfig,
+}
+
+impl OpenShellSandboxBackend {
+    pub fn new(config: OpenShellConfig) -> Self {
+        Self { config }
+    }
+
+    fn safe_to_route(&self) -> Result<(), String> {
+        self.config.validate()?;
+        if self.config.provider_injection {
+            return Err("openshell sandbox refuses provider injection by default".into());
+        }
+        if self.config.host_shell_fallback {
+            return Err("openshell sandbox refuses host shell fallback".into());
+        }
+        if !self.config.enabled {
+            return Err("openshell sandbox backend is disabled".into());
+        }
+        let probe = probe_openshell(&self.config.binary);
+        if !probe.found {
+            return Err(probe
+                .error
+                .unwrap_or_else(|| "openshell binary was not found".into()));
+        }
+        if self.config.workspace_mode == "remote"
+            && self
+                .config
+                .gateway
+                .as_deref()
+                .unwrap_or("")
+                .trim()
+                .is_empty()
+        {
+            return Err("openshell remote mode requires an explicit gateway".into());
+        }
+        Ok(())
+    }
+}
+
+impl SandboxBackend for OpenShellSandboxBackend {
+    fn check(&self, tool: &str, _input: &serde_json::Value) -> Result<(), String> {
+        self.safe_to_route()?;
+        match tool {
+            "Read" | "Glob" | "Grep" | "ToolSearch" | "TodoWrite" | "Sleep" => Ok(()),
+            "Bash" | "Shell" => Ok(()),
+            "Write" | "Edit" | "NotebookEdit" => Err(format!(
+                "openshell sandbox: {tool} host-side file mutation is not supported"
+            )),
+            "WebFetch" | "WebSearch" => Err(format!(
+                "openshell sandbox: {tool} host-side network access is not supported"
+            )),
+            "TaskCreate" | "TaskUpdate" | "Agent" => Err(format!(
+                "openshell sandbox: {tool} agent spawning is not supported"
+            )),
+            other => Err(format!("openshell sandbox: unsupported tool {other}")),
+        }
+    }
+
+    fn execute_bash<'a>(
+        &'a self,
+        _request: SandboxCommandRequest,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Option<SandboxCommandResult>> + Send + 'a>,
+    > {
+        Box::pin(async {
+            Some(SandboxCommandResult {
+                content: "OpenShell sandbox execution is fail-closed in this release slice; no host shell fallback was used.\n".into(),
+                is_error: true,
+            })
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -217,5 +294,39 @@ mod tests {
 
         assert_eq!(report.status, OpenShellDoctorStatus::UnsafeConfig);
         assert!(render_openshell_doctor_report(&report).contains("unsafe-config"));
+    }
+
+    #[test]
+    fn backend_fails_closed_when_openshell_missing() {
+        let backend = OpenShellSandboxBackend::new(OpenShellConfig {
+            enabled: true,
+            binary: "__definitely_missing_openshell__".into(),
+            ..OpenShellConfig::default()
+        });
+
+        let error = backend.check("Bash", &serde_json::json!({})).unwrap_err();
+
+        assert!(error.contains("__definitely_missing_openshell__"));
+    }
+
+    #[tokio::test]
+    async fn backend_execute_bash_returns_error_without_host_fallback() {
+        let backend = OpenShellSandboxBackend::new(OpenShellConfig {
+            enabled: true,
+            ..OpenShellConfig::default()
+        });
+        let result = backend
+            .execute_bash(SandboxCommandRequest {
+                command: "echo no-host".into(),
+                working_dir: std::path::PathBuf::from("."),
+                timeout_ms: 1000,
+                max_output_bytes: 1024,
+                env: Vec::new(),
+            })
+            .await
+            .unwrap();
+
+        assert!(result.is_error);
+        assert!(result.content.contains("no host shell fallback"));
     }
 }

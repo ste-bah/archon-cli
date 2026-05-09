@@ -119,15 +119,20 @@ fn session_sandbox_backend(
     config: &archon_core::config::ArchonConfig,
     sandbox_flag: Arc<AtomicBool>,
 ) -> Arc<dyn archon_permissions::SandboxBackend> {
-    if config.sandbox.backend == "docker" {
-        Arc::new(archon_core::sandbox::DockerSandboxBackend::new(
+    match config.sandbox.backend.as_str() {
+        "docker" => Arc::new(archon_core::sandbox::DockerSandboxBackend::new(
             config.sandbox.docker.clone(),
             config.sandbox.workspace_access.clone(),
-        ))
-    } else {
-        Arc::new(archon_tui::sandbox::SharedSandboxFlag::with_flag(
+        )),
+        "ssh" => Arc::new(archon_core::sandbox::SshSandboxBackend::new(
+            config.sandbox.ssh.clone(),
+        )),
+        "openshell" => Arc::new(archon_core::sandbox::OpenShellSandboxBackend::new(
+            config.sandbox.openshell.clone(),
+        )),
+        _ => Arc::new(archon_tui::sandbox::SharedSandboxFlag::with_flag(
             sandbox_flag,
-        ))
+        )),
     }
 }
 
