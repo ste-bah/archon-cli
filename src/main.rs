@@ -192,7 +192,7 @@ async fn main() -> Result<()> {
             return crate::command::chat::handle_chat(args, &config).await;
         }
         Some(Commands::Providers { action }) => {
-            return crate::command::providers::handle_providers(action);
+            return crate::command::providers::handle_providers(action, &config);
         }
         Some(Commands::Sandbox { action }) => {
             return crate::command::sandbox_cli::handle_sandbox_command(action, &config);

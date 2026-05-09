@@ -31,7 +31,10 @@ use crate::cli_args::ProvidersAction;
 
 pub(crate) use crate::command::providers_slash::ProvidersHandler;
 
-pub(crate) fn handle_providers(action: Option<ProvidersAction>) -> Result<()> {
+pub(crate) fn handle_providers(
+    action: Option<ProvidersAction>,
+    config: &archon_core::config::ArchonConfig,
+) -> Result<()> {
     match action.unwrap_or(ProvidersAction::List) {
         ProvidersAction::List => print!("{}", render_provider_registry()),
         ProvidersAction::Capabilities => print!("{}", render_capability_table()),
@@ -39,7 +42,8 @@ pub(crate) fn handle_providers(action: Option<ProvidersAction>) -> Result<()> {
             print!(
                 "{}",
                 crate::command::providers_status::render_and_persist_provider_status(
-                    provider.as_deref()
+                    provider.as_deref(),
+                    config,
                 )
             )
         }
@@ -719,7 +723,11 @@ mod tests {
 
     #[test]
     fn cli_handle_capabilities_renders_without_error() {
-        handle_providers(Some(ProvidersAction::Capabilities)).expect("capabilities output");
+        handle_providers(
+            Some(ProvidersAction::Capabilities),
+            &archon_core::config::ArchonConfig::default(),
+        )
+        .expect("capabilities output");
     }
 
     #[test]

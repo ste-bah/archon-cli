@@ -12,14 +12,29 @@ use archon_llm::runtime::{
 use cozo::DbInstance;
 
 pub(crate) fn render_provider_status(provider_filter: Option<&str>) -> String {
+    render_provider_status_with_config(
+        provider_filter,
+        &archon_core::config::ArchonConfig::default(),
+    )
+}
+
+pub(crate) fn render_provider_status_with_config(
+    provider_filter: Option<&str>,
+    config: &archon_core::config::ArchonConfig,
+) -> String {
     render_provider_statuses(&local_provider_statuses(
         provider_filter,
         &ProviderStatusEnv::detect(),
+        config,
     ))
 }
 
-pub(crate) fn render_and_persist_provider_status(provider_filter: Option<&str>) -> String {
-    let mut statuses = local_provider_statuses(provider_filter, &ProviderStatusEnv::detect());
+pub(crate) fn render_and_persist_provider_status(
+    provider_filter: Option<&str>,
+    config: &archon_core::config::ArchonConfig,
+) -> String {
+    let mut statuses =
+        local_provider_statuses(provider_filter, &ProviderStatusEnv::detect(), config);
     if let Err(error) = enrich_provider_statuses_from_store(&mut statuses) {
         tracing::warn!(%error, "provider status profile enrichment failed");
     }
@@ -33,12 +48,25 @@ fn render_provider_status_with_env(
     provider_filter: Option<&str>,
     env: &ProviderStatusEnv,
 ) -> String {
-    render_provider_statuses(&local_provider_statuses(provider_filter, env))
+    render_provider_status_with_env_and_config(
+        provider_filter,
+        env,
+        &archon_core::config::ArchonConfig::default(),
+    )
+}
+
+fn render_provider_status_with_env_and_config(
+    provider_filter: Option<&str>,
+    env: &ProviderStatusEnv,
+    config: &archon_core::config::ArchonConfig,
+) -> String {
+    render_provider_statuses(&local_provider_statuses(provider_filter, env, config))
 }
 
 fn local_provider_statuses(
     provider_filter: Option<&str>,
     env: &ProviderStatusEnv,
+    config: &archon_core::config::ArchonConfig,
 ) -> Vec<ProviderRuntimeStatus> {
     let mut descriptors = list_native();
     descriptors.extend(list_compat());
@@ -47,7 +75,7 @@ fn local_provider_statuses(
     descriptors
         .into_iter()
         .filter(|descriptor| provider_filter.map_or(true, |filter| descriptor.id == filter))
-        .map(|descriptor| status_from_descriptor(descriptor, env))
+        .map(|descriptor| status_from_descriptor(descriptor, env, config))
         .collect()
 }
 
@@ -223,11 +251,13 @@ fn status_snapshot_record(status: &ProviderRuntimeStatus) -> ProviderRuntimeStat
 fn status_from_descriptor(
     descriptor: &ProviderDescriptor,
     env: &ProviderStatusEnv,
+    config: &archon_core::config::ArchonConfig,
 ) -> ProviderRuntimeStatus {
-    let mut status = ProviderRuntimeStatus::new(descriptor.id.clone(), runtime_mode(descriptor))
-        .with_display_name(descriptor.display_name.clone())
-        .with_model(descriptor.default_model.clone())
-        .with_identity_status(identity_status(descriptor, env));
+    let mut status =
+        ProviderRuntimeStatus::new(descriptor.id.clone(), runtime_mode(descriptor, config))
+            .with_display_name(descriptor.display_name.clone())
+            .with_model(descriptor.default_model.clone())
+            .with_identity_status(identity_status(descriptor, env, config));
     let health = if credentials_present(descriptor, env) {
         ProviderHealthStatus::Unknown
     } else {
@@ -237,26 +267,38 @@ fn status_from_descriptor(
     status
 }
 
-fn runtime_mode(descriptor: &ProviderDescriptor) -> &'static str {
+fn runtime_mode(
+    descriptor: &ProviderDescriptor,
+    config: &archon_core::config::ArchonConfig,
+) -> String {
     if descriptor.id == "openai-codex" {
-        "auto"
+        config
+            .providers
+            .openai_codex
+            .runtime
+            .trim()
+            .to_ascii_lowercase()
+            .replace('-', "_")
     } else if matches!(descriptor.auth_flavor, AuthFlavor::None) {
-        "local"
+        "local".into()
     } else {
-        "direct"
+        "direct".into()
     }
 }
 
 fn identity_status(
     descriptor: &ProviderDescriptor,
     env: &ProviderStatusEnv,
+    config: &archon_core::config::ArchonConfig,
 ) -> ProviderIdentityStatus {
     match descriptor.id.as_str() {
         "anthropic" if env.anthropic_oauth || env.anthropic_bearer_env => {
             ProviderIdentityStatus::Spoof
         }
         "anthropic" => ProviderIdentityStatus::Clean,
-        "openai-codex" if env.codex_oauth => ProviderIdentityStatus::AppServer,
+        "openai-codex" if runtime_mode(descriptor, config) == "app_server" => {
+            ProviderIdentityStatus::AppServer
+        }
         "openai-codex" => ProviderIdentityStatus::Custom,
         _ if matches!(descriptor.auth_flavor, AuthFlavor::None) => {
             ProviderIdentityStatus::NotApplicable
@@ -354,136 +396,5 @@ impl ProviderStatusEnv {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use archon_learning::provider_auth_profiles::{
-        ProviderAuthProfileRecord, insert_provider_auth_profile,
-    };
-
-    fn env_with(vars: &[&str]) -> ProviderStatusEnv {
-        ProviderStatusEnv {
-            env_vars: vars.iter().map(|name| name.to_string()).collect(),
-            ..ProviderStatusEnv::default()
-        }
-    }
-
-    fn test_db() -> DbInstance {
-        let path = format!("/tmp/test-provider-status-{}.db", uuid::Uuid::new_v4());
-        let db = DbInstance::new("sqlite", &path, "").unwrap();
-        archon_learning::schema::ensure_learning_schema(&db).unwrap();
-        db
-    }
-
-    #[test]
-    fn status_lists_local_provider_without_credentials() {
-        let body = render_provider_status_with_env(Some("ollama"), &ProviderStatusEnv::default());
-
-        assert!(body.contains("ollama"));
-        assert!(body.contains("unknown-local"));
-        assert!(body.contains("local"));
-        assert!(body.contains("n/a"));
-    }
-
-    #[test]
-    fn status_marks_missing_credentials_for_remote_provider() {
-        let body = render_provider_status_with_env(Some("openai"), &ProviderStatusEnv::default());
-
-        assert!(body.contains("openai"));
-        assert!(body.contains("missing-credentials"));
-    }
-
-    #[test]
-    fn status_marks_configured_env_provider_as_unknown_local() {
-        let body = render_provider_status_with_env(Some("openai"), &env_with(&["OPENAI_API_KEY"]));
-
-        assert!(body.contains("openai"));
-        assert!(body.contains("unknown-local"));
-    }
-
-    #[test]
-    fn status_shows_anthropic_spoof_for_oauth_profile() {
-        let env = ProviderStatusEnv {
-            anthropic_oauth: true,
-            ..ProviderStatusEnv::default()
-        };
-        let body = render_provider_status_with_env(Some("anthropic"), &env);
-
-        assert!(body.contains("anthropic"));
-        assert!(body.contains("spoof"));
-    }
-
-    #[test]
-    fn status_reports_empty_filter_result() {
-        let body = render_provider_status_with_env(Some("missing-provider"), &env_with(&[]));
-
-        assert!(body.contains("No provider matched"));
-    }
-
-    #[test]
-    fn status_snapshot_record_uses_redacted_status_metadata() {
-        let status = ProviderRuntimeStatus::new("anthropic", "direct")
-            .with_display_name("Anthropic")
-            .with_model("claude-sonnet-4-6")
-            .with_identity_status(ProviderIdentityStatus::Spoof)
-            .with_health(ProviderHealthStatus::Healthy)
-            .with_redacted_json(serde_json::json!({
-                "authorization": "Bearer secret",
-                "safe": "kept"
-            }));
-
-        let record = status_snapshot_record(&status);
-
-        assert_eq!(record.provider_id, "anthropic");
-        assert_eq!(record.identity_status, "spoof");
-        assert_eq!(record.health, "healthy");
-        assert_eq!(record.metadata_redacted_json["authorization"], "[redacted]");
-        assert_eq!(record.metadata_redacted_json["safe"], "kept");
-    }
-
-    #[test]
-    fn status_enrichment_adds_selected_profile() {
-        let db = test_db();
-        insert_provider_auth_profile(
-            &db,
-            &ProviderAuthProfileRecord::new(
-                "anthropic-oauth",
-                "anthropic",
-                "oauth",
-                "archon_store",
-                "2026-05-08T12:00:00Z",
-            ),
-        )
-        .unwrap();
-        let mut statuses = vec![
-            ProviderRuntimeStatus::new("anthropic", "direct")
-                .with_health(ProviderHealthStatus::MissingCredentials),
-        ];
-
-        enrich_provider_statuses_from_db(&mut statuses, &db).unwrap();
-
-        assert_eq!(statuses[0].profile_id.as_deref(), Some("anthropic-oauth"));
-        assert_eq!(statuses[0].health, ProviderHealthStatus::Unknown);
-        assert_eq!(
-            statuses[0].metadata_redacted_json["selected_profile_id"],
-            "anthropic-oauth"
-        );
-    }
-
-    #[test]
-    fn status_render_shows_recent_limit_notes() {
-        let status = ProviderRuntimeStatus::new("openai-codex", "auto")
-            .with_model("gpt-5.3-codex")
-            .with_health(ProviderHealthStatus::Degraded)
-            .with_rate_limits(vec![
-                archon_llm::runtime::ProviderRateLimitWindow::new(
-                    "openai-codex",
-                    archon_llm::runtime::RateLimitWindowKind::Usage,
-                )
-                .with_used_percent(100.0),
-            ]);
-
-        let body = render_provider_statuses(&[status]);
-
-        assert!(body.contains("limited:1"));
-    }
-}
+#[path = "providers_status_tests.rs"]
+mod tests;
