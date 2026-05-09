@@ -194,6 +194,22 @@ fn summarize_evidence(db: &DbInstance, evidence_id: &str) -> Result<EvidenceInsp
             created_at: Some(record.created_at),
         });
     }
+    if let Some(record) = provider_evidence(db, evidence_id)? {
+        return Ok(EvidenceInspection {
+            evidence_id: evidence_id.to_string(),
+            source: "provider_runtime_events".to_string(),
+            summary: provider_summary(&record),
+            created_at: Some(record.created_at),
+        });
+    }
+    if let Some(record) = sandbox_evidence(db, evidence_id)? {
+        return Ok(EvidenceInspection {
+            evidence_id: evidence_id.to_string(),
+            source: "sandbox_runtime_events".to_string(),
+            summary: sandbox_summary(&record),
+            created_at: Some(record.created_at),
+        });
+    }
     Ok(EvidenceInspection {
         evidence_id: evidence_id.to_string(),
         source: "unknown".to_string(),
@@ -202,16 +218,38 @@ fn summarize_evidence(db: &DbInstance, evidence_id: &str) -> Result<EvidenceInsp
     })
 }
 
+fn provider_evidence(
+    db: &DbInstance,
+    evidence_id: &str,
+) -> Result<Option<archon_learning::runtime_models::ProviderRuntimeEventRecord>> {
+    let provider_event_id = evidence_id
+        .strip_prefix("provider_event:")
+        .unwrap_or(evidence_id);
+    archon_learning::runtime_events::get_provider_runtime_event(db, provider_event_id)
+}
+
+fn sandbox_evidence(
+    db: &DbInstance,
+    evidence_id: &str,
+) -> Result<Option<archon_learning::sandbox_runtime_events::SandboxRuntimeEventRecord>> {
+    let sandbox_event_id = evidence_id
+        .strip_prefix("sandbox_event:")
+        .unwrap_or(evidence_id);
+    archon_learning::sandbox_runtime_events::get_sandbox_runtime_event(db, sandbox_event_id)
+}
+
 fn ledger_summary(
     record: &archon_learning::agent_evolution_ledger::AgentPerformanceLedgerRecord,
 ) -> String {
     let provider = record.provider_id.as_deref().unwrap_or("-");
     let incident = record.provider_incident_id.as_deref().unwrap_or("-");
+    let gate = record.gate_failed.as_deref().unwrap_or("-");
     format!(
-        "status={} provider={} incident={} corrected={} test_failed={}",
+        "status={} provider={} incident={} gate={} corrected={} test_failed={}",
         record.completion_status,
         provider,
         incident,
+        gate,
         yes_no(record.user_corrected == Some(true)),
         yes_no(record.test_failed)
     )
@@ -225,6 +263,43 @@ fn permission_summary(
     format!(
         "decision={} tool={} mode={} reason={} sandbox={}",
         record.decision, record.tool_name, record.permission_mode, reason, sandbox
+    )
+}
+
+fn provider_summary(
+    record: &archon_learning::runtime_models::ProviderRuntimeEventRecord,
+) -> String {
+    let reason = record.reason_code.as_deref().unwrap_or("-");
+    let model = record.model_id.as_deref().unwrap_or("-");
+    let profile = record.profile_id.as_deref().unwrap_or("-");
+    let fallback = match (&record.fallback_from, &record.fallback_to) {
+        (Some(from), Some(to)) => format!("{from}->{to}"),
+        _ => "-".to_string(),
+    };
+    format!(
+        "event={} provider={} mode={} severity={} reason={} model={} profile={} fallback={}",
+        record.event_type,
+        record.provider_id,
+        record.runtime_mode,
+        record.severity,
+        reason,
+        model,
+        profile,
+        fallback
+    )
+}
+
+fn sandbox_summary(
+    record: &archon_learning::sandbox_runtime_events::SandboxRuntimeEventRecord,
+) -> String {
+    let tool = record.tool_name.as_deref().unwrap_or("-");
+    let reason = record.reason_code.as_deref().unwrap_or("-");
+    let workspace = record.workspace_mode.as_deref().unwrap_or("-");
+    let network = record.network_mode.as_deref().unwrap_or("-");
+    let mount = record.workspace_mount_mode.as_deref().unwrap_or("-");
+    format!(
+        "decision={} backend={} tool={} reason={} workspace={} network={} mount={}",
+        record.decision, record.backend_kind, tool, reason, workspace, network, mount
     )
 }
 
