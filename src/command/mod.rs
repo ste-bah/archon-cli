@@ -17,6 +17,7 @@ pub(crate) mod agent_evolve_generate;
 pub(crate) mod agent_evolve_generate_support;
 pub(crate) mod agent_evolve_history;
 pub(crate) mod agent_evolve_inspect;
+pub(crate) mod agent_evolve_permissions;
 pub(crate) mod agent_evolve_report;
 pub(crate) mod agent_evolve_shadow;
 // TASK-#211 SLASH-AGENT: /agent slash-command umbrella (list/info/run).

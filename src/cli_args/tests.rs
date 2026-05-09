@@ -439,6 +439,7 @@ mod agent_evolve_parse_tests {
             "evolve",
             "permissions",
             "agent-evo-prop-1",
+            "--json",
         ])
         .expect("agent evolve permissions must parse");
 
@@ -446,10 +447,11 @@ mod agent_evolve_parse_tests {
             Some(Commands::Agent {
                 action:
                     AgentAction::Evolve {
-                        action: AgentEvolveAction::Permissions { proposal_id },
+                        action: AgentEvolveAction::Permissions { proposal_id, json },
                     },
             }) => {
                 assert_eq!(proposal_id, "agent-evo-prop-1");
+                assert!(json);
             }
             other => panic!("expected agent evolve permissions, got {other:?}"),
         }

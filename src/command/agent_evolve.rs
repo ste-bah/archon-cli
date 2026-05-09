@@ -57,7 +57,13 @@ fn handle_evolve_action(db: &DbInstance, action: &AgentEvolveAction) -> Result<(
             min_score,
             dry_run,
         } => cmd_promote_memory_candidate(db, candidate_id, *min_score, *dry_run),
-        AgentEvolveAction::Permissions { proposal_id } => cmd_show_permission_diff(db, proposal_id),
+        AgentEvolveAction::Permissions { proposal_id, json } => {
+            crate::command::agent_evolve_permissions::cmd_show_permission_diff(
+                db,
+                proposal_id,
+                *json,
+            )
+        }
         AgentEvolveAction::Reject { proposal_id } => {
             cmd_update_proposal_status(db, proposal_id, "rejected")
         }
@@ -288,46 +294,6 @@ fn cmd_list_agent_evolution(
     Ok(())
 }
 
-fn cmd_show_permission_diff(db: &DbInstance, proposal_id: &str) -> Result<()> {
-    let proposal =
-        archon_learning::agent_evolution_proposals::get_agent_evolution_proposal(db, proposal_id)?
-            .ok_or_else(|| anyhow::anyhow!("agent evolution proposal not found: {proposal_id}"))?;
-
-    println!("Proposal:    {}", proposal.proposal_id);
-    println!("Agent:       {}", proposal.agent_type);
-    println!("Kind:        {}", proposal.kind);
-    println!("Status:      {}", proposal.status);
-    println!("Risk:        {}", proposal.risk_level);
-    println!("Decision:    {}", proposal.policy_decision);
-    println!(
-        "Impacts:     provider={} permissions={}",
-        yes_no(proposal.affects_provider_identity),
-        yes_no(proposal.affects_permissions)
-    );
-    println!("Rollback:    {}", proposal.rollback_target_version);
-
-    if !proposal.affects_permissions && !looks_permission_related(&proposal.kind) {
-        println!("\nThis proposal is not marked as permission-impacting.");
-    }
-
-    println!("\nPermission guardrails:");
-    println!("- parent session mode, sandbox state, and CLI bypass guards remain authoritative");
-    println!("- subagent deny lists remain authoritative");
-    println!("- evolved profiles can only narrow or propose reviewed changes");
-
-    println!("\nDiff:");
-    if proposal.diff.trim().is_empty() {
-        println!("(no diff recorded)");
-    } else {
-        println!("{}", proposal.diff);
-    }
-
-    if !proposal.evidence_ids.is_empty() {
-        println!("\nEvidence: {}", proposal.evidence_ids.join(", "));
-    }
-    Ok(())
-}
-
 fn cmd_apply_proposal(db: &DbInstance, proposal_id: &str, activate: bool) -> Result<()> {
     let applied = crate::command::agent_evolve_apply::apply_proposal(db, proposal_id, activate)?;
     println!(
@@ -374,14 +340,6 @@ fn cmd_update_proposal_status(db: &DbInstance, proposal_id: &str, status: &str) 
     Ok(())
 }
 
-fn looks_permission_related(kind: &str) -> bool {
-    let kind = kind.to_ascii_lowercase();
-    kind.contains("permission")
-        || kind.contains("tool_access")
-        || kind.contains("toolaccess")
-        || kind.contains("sandbox")
-}
-
 fn yes_no(value: bool) -> &'static str {
     if value { "yes" } else { "no" }
 }
@@ -399,14 +357,6 @@ fn promotion_score(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn permission_kind_detection_covers_tool_access_and_sandbox() {
-        assert!(looks_permission_related("ToolAccessProfile"));
-        assert!(looks_permission_related("sandbox_backend_profile"));
-        assert!(looks_permission_related("permission_overlay"));
-        assert!(!looks_permission_related("prompt_profile"));
-    }
 
     #[test]
     fn promotion_score_matches_core_weighting() {

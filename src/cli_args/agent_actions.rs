@@ -98,6 +98,9 @@ pub enum AgentEvolveAction {
     Permissions {
         /// Agent evolution proposal ID
         proposal_id: String,
+        /// Output the full permission review as JSON
+        #[arg(long)]
+        json: bool,
     },
     /// Reject an agent evolution proposal
     Reject {
