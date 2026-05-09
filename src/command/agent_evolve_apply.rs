@@ -130,6 +130,7 @@ fn build_profile_version(
         "expected_impact": proposal.expected_impact,
         "evidence_ids": proposal.evidence_ids,
         "activate_requested": activate,
+        "overrides": profile_overrides_for_proposal(proposal),
     });
     let mut version = archon_core::agents::evolution::AgentProfileVersion::new(
         proposal.agent_type.clone(),
@@ -145,6 +146,30 @@ fn build_profile_version(
         version = version.mark_active();
     }
     version
+}
+
+fn profile_overrides_for_proposal(
+    proposal: &archon_learning::agent_evolution_proposals::AgentEvolutionProposalRecord,
+) -> serde_json::Value {
+    let note = proposal.diff.trim();
+    match proposal.kind.as_str() {
+        "prompt_profile" => serde_json::json!({
+            "system_prompt_append": format!(
+                "Governed evolution note: review the linked correction evidence before finalizing. {note}"
+            )
+        }),
+        "quality_gate_profile" => serde_json::json!({
+            "tool_guidance_append": format!(
+                "Governed evolution note: check and remediate the repeated quality gate pattern before final output. {note}"
+            )
+        }),
+        "tool_access_profile" => serde_json::json!({
+            "tool_guidance_append": format!(
+                "Governed permission note: use explicit approval or safer alternatives for repeated tool denials. Do not grant tools automatically. {note}"
+            )
+        }),
+        _ => serde_json::json!({}),
+    }
 }
 
 fn profile_record_from_core(
@@ -284,6 +309,68 @@ mod tests {
             Some("agent-evo-prop-1")
         );
         assert_eq!(proposal.status, "applied");
+    }
+
+    #[test]
+    fn prompt_profile_apply_payload_contains_safe_overlay() {
+        let db = test_db();
+        archon_learning::agent_evolution_proposals::insert_agent_evolution_proposal(
+            &db,
+            &proposal("approved"),
+        )
+        .unwrap();
+
+        let applied = apply_proposal(&db, "agent-evo-prop-1", true).unwrap();
+        let version = archon_learning::agent_profile_versions::get_agent_profile_version(
+            &db,
+            &applied.version_id,
+        )
+        .unwrap()
+        .unwrap();
+
+        assert!(version.is_active);
+        assert!(
+            version.profile_json["overrides"]["system_prompt_append"]
+                .as_str()
+                .unwrap()
+                .contains("Governed evolution note")
+        );
+        assert!(version.profile_json["overrides"].get("provider").is_none());
+        assert!(
+            version.profile_json["overrides"]
+                .get("identity_spoof")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn tool_access_apply_payload_never_grants_permissions() {
+        let proposal =
+            archon_learning::agent_evolution_proposals::AgentEvolutionProposalRecord::new(
+                "agent-evo-perm-1",
+                "reviewer",
+                "agentv-1",
+                "agentv-2",
+                "tool_access_profile",
+                "2026-05-08T12:00:00Z",
+            )
+            .with_diff("+ review repeated denied tool `Bash`; do not grant automatically")
+            .with_permission_impact()
+            .with_risk("high", "pending_approval")
+            .with_status("approved");
+
+        let version = build_profile_version(&proposal, None, 1, true);
+        let overrides = &version.profile_json["overrides"];
+
+        assert!(
+            overrides["tool_guidance_append"]
+                .as_str()
+                .unwrap()
+                .contains("Do not grant tools automatically")
+        );
+        assert!(overrides.get("permission_mode").is_none());
+        assert!(overrides.get("allowed_tools").is_none());
+        assert!(overrides.get("sandbox_backend").is_none());
     }
 
     #[test]
