@@ -12,7 +12,7 @@
 | `ARCHON_MEMORY_OPENAIKEY` | Alias for `OPENAI_API_KEY` (memory embeddings only) |
 | `ARCHON_CODEX_DISABLED` | Disable Codex provider resolution when set to `1`, `true`, or `yes` |
 | `ARCHON_CODEX_BASE_URL` | Override Codex backend URL for local mocks or diagnostics |
-| `ARCHON_CODEX_APP_SERVER_URL` | Override configured Codex app-server endpoint for local diagnostics |
+| `ARCHON_CODEX_APP_SERVER_URL` | Override configured Codex app-server WebSocket endpoint for local diagnostics |
 | `ARCHON_CODEX_ORIGINATOR` | Override Codex spoof `originator` field |
 | `ARCHON_CODEX_USER_AGENT` | Override Codex spoof user agent, subject to anti-impersonation validation |
 | `ARCHON_CODEX_CLIENT_ID` | Override Codex OAuth client id (`app_...`) |

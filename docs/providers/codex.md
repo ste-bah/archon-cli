@@ -11,7 +11,10 @@ contracts.
 [providers.openai-codex]
 runtime = "direct" # direct | auto | app_server
 direct_fallback = false
-app_server_url = "http://127.0.0.1:11434/codex"
+app_server_transport = "websocket" # websocket | stdio
+app_server_url = "ws://127.0.0.1:11434/codex"
+app_server_command = "codex"
+app_server_args = ["app-server"]
 app_server_discovery_timeout_ms = 2500
 app_server_model_catalog = ["gpt-5.5", "gpt-5.4"]
 ```
@@ -22,9 +25,12 @@ adapter is not implemented. `auto` may use direct only when
 `direct_fallback = true`; the fallback is persisted as a redacted provider
 runtime event in Cozo.
 
-`ARCHON_CODEX_APP_SERVER_URL` overrides `app_server_url` for diagnostics. The
-endpoint must be `http` or `https`; invalid values fail closed and are redacted
-before persistence.
+Codex app-server is a JSON-RPC transport. `app_server_transport = "websocket"`
+uses `app_server_url`; `app_server_transport = "stdio"` spawns
+`app_server_command` with `app_server_args` and talks over stdin/stdout.
+`ARCHON_CODEX_APP_SERVER_URL` overrides `app_server_url` for diagnostics. URL
+schemes `ws`, `wss`, `http`, and `https` are accepted for compatibility;
+invalid targets fail closed and are redacted before persistence.
 
 ## OAuth
 

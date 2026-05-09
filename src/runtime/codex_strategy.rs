@@ -104,6 +104,9 @@ fn strategy_error(surface: &str, reason_code: &str) -> String {
         "codex_app_server_invalid_url" => format!(
             "Codex app-server endpoint is invalid for `{surface}`; fix providers.openai-codex.app_server_url or ARCHON_CODEX_APP_SERVER_URL before using app_server mode"
         ),
+        "codex_app_server_invalid_target" => format!(
+            "Codex app-server transport target is invalid for `{surface}`; fix providers.openai-codex app_server_transport, app_server_url, app_server_command, or app_server_args before using app_server mode"
+        ),
         "codex_auto_direct_fallback_disabled" => format!(
             "Codex app-server runtime is unavailable for `{surface}` and direct fallback is disabled; set providers.openai-codex.runtime = \"direct\" or enable direct_fallback for auto mode"
         ),
@@ -237,5 +240,20 @@ mod tests {
             .to_string();
 
         assert!(error.contains("endpoint is invalid"));
+    }
+
+    #[test]
+    fn app_server_mode_reports_invalid_transport_before_adapter_pending() {
+        let config = CodexProviderConfig {
+            runtime: "app_server".into(),
+            app_server_transport: "pipe".into(),
+            ..CodexProviderConfig::default()
+        };
+
+        let error = resolve_codex_runtime_strategy_with_events(&config, "test", false)
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("transport target is invalid"));
     }
 }

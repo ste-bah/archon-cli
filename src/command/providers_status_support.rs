@@ -126,7 +126,11 @@ fn codex_status_metadata(config: &archon_core::config::CodexProviderConfig) -> s
                 "runtime": normalize_codex_runtime(&config.runtime),
                 "direct_fallback": config.direct_fallback,
                 "adapter_state": "unimplemented",
-                "status_note": codex_strategy_status_note(config, discovery.status_label()),
+                "status_note": codex_strategy_status_note(
+                    config,
+                    discovery.status_label(),
+                    discovery.reason_code()
+                ),
             }),
         );
     }
@@ -136,7 +140,11 @@ fn codex_status_metadata(config: &archon_core::config::CodexProviderConfig) -> s
 fn codex_strategy_status_note(
     config: &archon_core::config::CodexProviderConfig,
     app_server_status: &str,
+    reason_code: &str,
 ) -> &'static str {
+    if reason_code == "codex_app_server_invalid_target" {
+        return "app-server:invalid-target";
+    }
     match (
         normalize_codex_runtime(&config.runtime).as_str(),
         config.direct_fallback,
