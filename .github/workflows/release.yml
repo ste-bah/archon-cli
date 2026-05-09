@@ -178,7 +178,7 @@ jobs:
           tag_name: ${{ needs.check.outputs.tag }}
           name: Archon ${{ needs.check.outputs.tag }}
           draft: true
-          prerelease: false
+          prerelease: ${{ contains(needs.check.outputs.version, '-') }}
           generate_release_notes: true
           files: |
             dist/*.tar.gz
