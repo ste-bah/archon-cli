@@ -69,9 +69,6 @@ pub fn apply_agent_profile_overlay(
             "tool_guidance_append" => apply_string(profile, &key, &mut report, |value| {
                 append_block(&mut agent.tool_guidance, &value);
             }),
-            "allowed_tools" => apply_string_vec(profile, &key, &mut report, |value| {
-                agent.allowed_tools = Some(value);
-            }),
             "disallowed_tools" => apply_string_vec(profile, &key, &mut report, |value| {
                 agent.disallowed_tools = Some(value);
             }),
@@ -105,23 +102,6 @@ pub fn apply_agent_profile_overlay(
             }),
             "isolation" => apply_string(profile, &key, &mut report, |value| {
                 agent.isolation = Some(value);
-            }),
-            "mcp_servers" => apply_string_vec(profile, &key, &mut report, |value| {
-                agent.mcp_servers = Some(value);
-            }),
-            "required_mcp_servers" => apply_string_vec(profile, &key, &mut report, |value| {
-                agent.required_mcp_servers = Some(value);
-            }),
-            "hooks" => {
-                if let Some(value) = profile.get(&key).filter(|value| value.is_object()) {
-                    agent.hooks = Some(value.clone());
-                    report.applied(&key);
-                } else {
-                    report.ignored(&key);
-                }
-            }
-            "skills" => apply_string_vec(profile, &key, &mut report, |value| {
-                agent.skills = Some(value);
             }),
             "omit_claude_md" => apply_bool(profile, &key, &mut report, |value| {
                 agent.omit_claude_md = value;
@@ -276,7 +256,8 @@ fn string_vec(value: &Value) -> Option<Vec<String>> {
 fn is_blocked_field(key: &str) -> bool {
     matches!(
         key,
-        "allow_host_shell_fallback"
+        "allowed_tools"
+            | "allow_host_shell_fallback"
             | "allow_provider_injection"
             | "anthropic"
             | "anthropic_spoof"
@@ -288,15 +269,19 @@ fn is_blocked_field(key: &str) -> bool {
             | "identity_spoof"
             | "memory_file_path"
             | "memory_files"
+            | "mcp_servers"
             | "openai_codex"
             | "openshell"
             | "provider"
             | "provider_id"
             | "provider_injection"
+            | "required_mcp_servers"
             | "sandbox_backend"
             | "sandbox_profile"
+            | "skills"
             | "spoof"
             | "ssh"
+            | "hooks"
     )
 }
 
@@ -328,7 +313,7 @@ mod tests {
             &serde_json::json!({
                 "overrides": {
                     "system_prompt_append": "Require citations.",
-                    "allowed_tools": ["Read", "Grep"],
+                    "disallowed_tools": ["Bash"],
                     "model": "claude-sonnet-4-6",
                     "permission_mode": "plan",
                     "max_turns": 6
@@ -337,10 +322,7 @@ mod tests {
         );
 
         assert!(agent.system_prompt.contains("Require citations."));
-        assert_eq!(
-            agent.allowed_tools,
-            Some(vec!["Read".into(), "Grep".into()])
-        );
+        assert_eq!(agent.disallowed_tools, Some(vec!["Bash".into()]));
         assert_eq!(agent.model.as_deref(), Some("claude-sonnet-4-6"));
         assert_eq!(agent.permission_mode, Some(PermissionMode::Plan));
         assert_eq!(agent.max_turns, Some(6));
@@ -385,6 +367,36 @@ mod tests {
                 .contains(&"sandbox_backend".to_string())
         );
         assert!(report.ignored_fields.contains(&"memory_files".to_string()));
+    }
+
+    #[test]
+    fn overlay_ignores_tool_mcp_skill_and_hook_grants() {
+        let mut agent = agent();
+        let report = apply_agent_profile_overlay(
+            &mut agent,
+            "agent-profile-5",
+            &serde_json::json!({
+                "overrides": {
+                    "allowed_tools": ["Bash"],
+                    "mcp_servers": ["filesystem"],
+                    "required_mcp_servers": ["filesystem"],
+                    "skills": ["deploy"],
+                    "hooks": {"PermissionRequest": [{"matcher": "Bash"}]},
+                    "tool_guidance_append": "Use safer alternatives first."
+                }
+            }),
+        );
+
+        assert!(agent.allowed_tools.is_none());
+        assert!(agent.mcp_servers.is_none());
+        assert!(agent.required_mcp_servers.is_none());
+        assert!(agent.skills.is_none());
+        assert!(agent.hooks.is_none());
+        assert_eq!(report.applied_fields, vec!["tool_guidance_append"]);
+        assert!(report.ignored_fields.contains(&"allowed_tools".to_string()));
+        assert!(report.ignored_fields.contains(&"mcp_servers".to_string()));
+        assert!(report.ignored_fields.contains(&"skills".to_string()));
+        assert!(report.ignored_fields.contains(&"hooks".to_string()));
     }
 
     #[test]
