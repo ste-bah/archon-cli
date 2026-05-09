@@ -1,4 +1,4 @@
-use super::{AgentAction, AgentEvolveAction, Cli, Commands, GametheoryAction};
+use super::{AgentAction, AgentEvolveAction, Cli, Commands, GametheoryAction, ProvidersAction};
 
 #[cfg(test)]
 mod metrics_port_parse_tests {
@@ -91,6 +91,35 @@ mod remote_url_parse_tests {
     fn remote_url_absent_when_not_supplied() {
         let cli = Cli::try_parse_from(["archon"]).expect("archon with no flags must parse");
         assert!(cli.remote_url.is_none());
+    }
+}
+
+#[cfg(test)]
+mod provider_parse_tests {
+    use super::{Cli, Commands, ProvidersAction};
+    use clap::Parser;
+
+    #[test]
+    fn providers_report_parses_provider_and_json() {
+        let cli = Cli::try_parse_from([
+            "archon",
+            "providers",
+            "report",
+            "--provider",
+            "anthropic",
+            "--json",
+        ])
+        .expect("providers report must parse");
+
+        match cli.command {
+            Some(Commands::Providers {
+                action: Some(ProvidersAction::Report { provider, json }),
+            }) => {
+                assert_eq!(provider.as_deref(), Some("anthropic"));
+                assert!(json);
+            }
+            other => panic!("expected providers report, got {other:?}"),
+        }
     }
 }
 

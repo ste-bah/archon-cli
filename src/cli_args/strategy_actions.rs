@@ -12,6 +12,15 @@ pub enum ProvidersAction {
         #[arg(long)]
         provider: Option<String>,
     },
+    /// Summarize provider health from status and persisted runtime events
+    Report {
+        /// Restrict output to one provider id
+        #[arg(long)]
+        provider: Option<String>,
+        /// Output the report as JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Show persisted provider rate-limit windows
     Limits {
         /// Restrict output to one provider id

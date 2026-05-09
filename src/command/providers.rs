@@ -47,6 +47,14 @@ pub(crate) fn handle_providers(
                 )
             )
         }
+        ProvidersAction::Report { provider, json } => print!(
+            "{}",
+            crate::command::providers_health_report::render_provider_health_report(
+                provider.as_deref(),
+                config,
+                json,
+            )?
+        ),
         ProvidersAction::Limits { provider } => print!(
             "{}",
             crate::command::providers_store_cli::render_provider_limits(provider.as_deref())?

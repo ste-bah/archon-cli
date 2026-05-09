@@ -96,6 +96,7 @@ pub(crate) mod plugin_slash;
 // TASK-#210 SLASH-PROVIDERS: /providers list registered LLM providers.
 pub(crate) mod prov;
 pub(crate) mod providers;
+pub(crate) mod providers_health_report;
 pub(crate) mod providers_profile_import;
 pub(crate) mod providers_slash;
 pub(crate) mod providers_status;

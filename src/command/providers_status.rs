@@ -33,6 +33,16 @@ pub(crate) fn render_and_persist_provider_status(
     provider_filter: Option<&str>,
     config: &archon_core::config::ArchonConfig,
 ) -> String {
+    render_provider_statuses(&collect_and_persist_provider_statuses(
+        provider_filter,
+        config,
+    ))
+}
+
+pub(crate) fn collect_and_persist_provider_statuses(
+    provider_filter: Option<&str>,
+    config: &archon_core::config::ArchonConfig,
+) -> Vec<ProviderRuntimeStatus> {
     let mut statuses =
         local_provider_statuses(provider_filter, &ProviderStatusEnv::detect(), config);
     if let Err(error) = enrich_provider_statuses_from_store(&mut statuses) {
@@ -41,7 +51,7 @@ pub(crate) fn render_and_persist_provider_status(
     if let Err(error) = persist_provider_status_snapshots(&statuses) {
         tracing::warn!(%error, "provider status snapshot persistence failed");
     }
-    render_provider_statuses(&statuses)
+    statuses
 }
 
 #[cfg(test)]
