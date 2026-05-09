@@ -58,17 +58,22 @@ fn render_provider_statuses(statuses: &[ProviderRuntimeStatus]) -> String {
         out.push_str("No provider matched the requested filter.\n");
         return out;
     }
-    out.push_str("provider             health               mode        identity    profile              model\n");
-    out.push_str("-----------------------------------------------------------------------------------------------\n");
+    out.push_str(
+        "provider             health               mode        identity    profile              model               notes\n",
+    );
+    out.push_str(
+        "----------------------------------------------------------------------------------------------------------------\n",
+    );
     for status in statuses {
         out.push_str(&format!(
-            "{:<20} {:<20} {:<11} {:<11} {:<20} {}\n",
+            "{:<20} {:<20} {:<11} {:<11} {:<20} {:<19} {}\n",
             status.provider_id,
             health_label(status.health),
             status.runtime_mode,
             identity_label(status.identity_status),
             status.profile_id.as_deref().unwrap_or("-"),
             status.model_id.as_deref().unwrap_or("n/a"),
+            status_note(status),
         ));
     }
     out.push_str(
@@ -142,6 +147,20 @@ fn enrich_provider_statuses_from_db(
             status.health = ProviderHealthStatus::Degraded;
         }
         status.metadata_redacted_json = redact_provider_metadata(profile_metadata(&report));
+
+        let rate_limits = crate::command::providers_status_limits::recent_rate_limits_from_db(
+            db,
+            &status.provider_id,
+            chrono::Utc::now(),
+        )?;
+        if !rate_limits.is_empty() {
+            if rate_limits.iter().any(|limit| limit.is_exhausted())
+                && status.health != ProviderHealthStatus::MissingCredentials
+            {
+                status.health = ProviderHealthStatus::Degraded;
+            }
+            status.rate_limits = rate_limits;
+        }
     }
     Ok(())
 }
@@ -272,6 +291,17 @@ fn identity_label(identity: ProviderIdentityStatus) -> &'static str {
         ProviderIdentityStatus::Custom => "custom",
         ProviderIdentityStatus::AppServer => "app-server",
         ProviderIdentityStatus::NotApplicable => "n/a",
+    }
+}
+
+fn status_note(status: &ProviderRuntimeStatus) -> String {
+    let exhausted = status.exhausted_limits().len();
+    if exhausted > 0 {
+        format!("limited:{exhausted}")
+    } else if !status.rate_limits.is_empty() {
+        format!("recent-limits:{}", status.rate_limits.len())
+    } else {
+        "-".to_string()
     }
 }
 
@@ -437,5 +467,23 @@ mod tests {
             statuses[0].metadata_redacted_json["selected_profile_id"],
             "anthropic-oauth"
         );
+    }
+
+    #[test]
+    fn status_render_shows_recent_limit_notes() {
+        let status = ProviderRuntimeStatus::new("openai-codex", "auto")
+            .with_model("gpt-5.3-codex")
+            .with_health(ProviderHealthStatus::Degraded)
+            .with_rate_limits(vec![
+                archon_llm::runtime::ProviderRateLimitWindow::new(
+                    "openai-codex",
+                    archon_llm::runtime::RateLimitWindowKind::Usage,
+                )
+                .with_used_percent(100.0),
+            ]);
+
+        let body = render_provider_statuses(&[status]);
+
+        assert!(body.contains("limited:1"));
     }
 }
