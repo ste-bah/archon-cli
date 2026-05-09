@@ -51,6 +51,17 @@ pub enum ProviderProfilesAction {
         /// Profile id to update
         profile_id: String,
     },
+    /// Show ordered profile selection and skip reasons
+    Select {
+        /// Provider id to select for
+        provider: String,
+        /// Restrict to one or more auth kinds
+        #[arg(long = "auth-kind")]
+        auth_kinds: Vec<String>,
+        /// Prefer this profile id when it is healthy
+        #[arg(long)]
+        preferred: Option<String>,
+    },
 }
 
 #[derive(Subcommand, Debug, Clone, PartialEq, Eq)]

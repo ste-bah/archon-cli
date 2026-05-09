@@ -9,6 +9,7 @@ pub(crate) mod codex_provider;
 pub(crate) mod codex_strategy;
 pub(crate) mod llm;
 pub(crate) mod permission_events;
+pub(crate) mod provider_auth_selection;
 pub(crate) mod provider_event_record;
 pub(crate) mod provider_fallback_events;
 pub(crate) mod provider_limit_windows;

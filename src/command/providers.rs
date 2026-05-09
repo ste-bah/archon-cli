@@ -66,6 +66,18 @@ pub(crate) fn handle_providers(action: Option<ProvidersAction>) -> Result<()> {
                 "{}",
                 crate::command::providers_store_cli::clear_provider_profile_cooldown(&profile_id)?
             ),
+            crate::cli_args::ProviderProfilesAction::Select {
+                provider,
+                auth_kinds,
+                preferred,
+            } => print!(
+                "{}",
+                crate::command::providers_store_cli::render_provider_profile_selection(
+                    &provider,
+                    &auth_kinds,
+                    preferred.as_deref(),
+                )?
+            ),
         },
         ProvidersAction::Doctor { live } => print!("{}", render_provider_doctor(live)),
     }

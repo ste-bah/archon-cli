@@ -9,6 +9,7 @@ use archon_learning::provider_rate_limits::{
     ProviderRateLimitWindowRecord, list_provider_rate_limit_windows,
 };
 use archon_llm::providers::{list_compat, list_native};
+use archon_llm::runtime::{AuthProfileSelection, AuthProfileSkipReason, AuthProfileSource};
 use cozo::DbInstance;
 
 pub(crate) fn render_provider_limits(provider_filter: Option<&str>) -> Result<String> {
@@ -40,6 +41,22 @@ pub(crate) fn clear_provider_profile_cooldown(profile_id: &str) -> Result<String
         "Cleared cooldown for provider profile {} ({})\n",
         profile.profile_id, profile.provider_id
     ))
+}
+
+pub(crate) fn render_provider_profile_selection(
+    provider_id: &str,
+    auth_kinds: &[String],
+    preferred_profile_id: Option<&str>,
+) -> Result<String> {
+    let db = open_learning_db()?;
+    let allowed: Vec<&str> = auth_kinds.iter().map(String::as_str).collect();
+    let report = crate::runtime::provider_auth_selection::select_provider_auth_profile_from_db(
+        &db,
+        provider_id,
+        &allowed,
+        preferred_profile_id,
+    )?;
+    Ok(render_profile_selection_report(&report, &allowed))
 }
 
 fn render_provider_limits_from_db(
@@ -138,6 +155,48 @@ fn render_profile_detail(profile: &ProviderAuthProfileRecord) -> String {
     )
 }
 
+fn render_profile_selection_report(
+    report: &crate::runtime::provider_auth_selection::ProviderAuthSelectionReport,
+    allowed_auth_kinds: &[&str],
+) -> String {
+    let mut out = String::from("Provider auth profile selection (Cozo)\n\n");
+    out.push_str(&format!("Provider: {}\n", report.provider_id));
+    out.push_str(&format!(
+        "Allowed auth: {}\n",
+        if allowed_auth_kinds.is_empty() {
+            "any".into()
+        } else {
+            allowed_auth_kinds.join(", ")
+        }
+    ));
+    match &report.selected {
+        Some(selection) => out.push_str(&format!(
+            "Selected: {} ({}/{})\n\n",
+            selection.profile.profile_id,
+            selection.profile.auth_kind,
+            auth_profile_source_label(selection.profile.source)
+        )),
+        None => out.push_str("Selected: none\n\n"),
+    }
+    if report.ordered.is_empty() {
+        out.push_str("No provider auth profiles found.\n");
+        return out;
+    }
+
+    out.push_str("profile_id                         auth       state       reason\n");
+    out.push_str("-----------------------------------------------------------------\n");
+    for selection in &report.ordered {
+        out.push_str(&format!(
+            "{:<34} {:<10} {:<11} {}\n",
+            selection.profile.profile_id,
+            selection.profile.auth_kind,
+            selection_state(selection, report),
+            skip_reason_label(selection.reason),
+        ));
+    }
+    out
+}
+
 fn provider_ids(provider_filter: Option<&str>) -> Vec<String> {
     if let Some(provider_id) = provider_filter {
         return vec![provider_id.to_string()];
@@ -161,6 +220,52 @@ fn profile_state(profile: &ProviderAuthProfileRecord) -> &'static str {
         "degraded"
     } else {
         "ok"
+    }
+}
+
+fn selection_state(
+    selection: &AuthProfileSelection,
+    report: &crate::runtime::provider_auth_selection::ProviderAuthSelectionReport,
+) -> &'static str {
+    if report
+        .selected
+        .as_ref()
+        .map(|selected| selected.profile.profile_id.as_str())
+        == Some(selection.profile.profile_id.as_str())
+    {
+        "selected"
+    } else if selection.reason == AuthProfileSkipReason::Ok {
+        "standby"
+    } else {
+        "skipped"
+    }
+}
+
+fn skip_reason_label(reason: AuthProfileSkipReason) -> &'static str {
+    match reason {
+        AuthProfileSkipReason::Ok => "ok",
+        AuthProfileSkipReason::ProfileMissing => "profile-missing",
+        AuthProfileSkipReason::ProviderMismatch => "provider-mismatch",
+        AuthProfileSkipReason::AuthKindMismatch => "auth-kind-mismatch",
+        AuthProfileSkipReason::Expired => "expired",
+        AuthProfileSkipReason::RefreshFailed => "refresh-failed",
+        AuthProfileSkipReason::RateLimited => "rate-limited",
+        AuthProfileSkipReason::UsageLimited => "usage-limited",
+        AuthProfileSkipReason::Cooldown => "cooldown",
+        AuthProfileSkipReason::Disabled => "disabled",
+    }
+}
+
+fn auth_profile_source_label(source: AuthProfileSource) -> &'static str {
+    match source {
+        AuthProfileSource::ArchonStore => "archon-store",
+        AuthProfileSource::Config => "config",
+        AuthProfileSource::Env => "env",
+        AuthProfileSource::ExternalCodex => "external-codex",
+        AuthProfileSource::AwsChain => "aws-chain",
+        AuthProfileSource::GcpCredentials => "gcp-credentials",
+        AuthProfileSource::LocalRuntime => "local-runtime",
+        AuthProfileSource::Unknown => "unknown",
     }
 }
 
@@ -218,6 +323,46 @@ mod tests {
         assert!(body.contains("prof-1"));
         assert!(body.contains("anthropic"));
         assert!(body.contains("cooldown"));
+    }
+
+    #[test]
+    fn renders_profile_selection_skip_reasons() {
+        let db = test_db();
+        insert_provider_auth_profile(
+            &db,
+            &ProviderAuthProfileRecord::new(
+                "anthropic-oauth",
+                "anthropic",
+                "oauth",
+                "archon_store",
+                "2026-05-08T12:00:00Z",
+            ),
+        )
+        .unwrap();
+        insert_provider_auth_profile(
+            &db,
+            &ProviderAuthProfileRecord::new(
+                "anthropic-api",
+                "anthropic",
+                "api_key",
+                "env",
+                "2026-05-08T12:01:00Z",
+            ),
+        )
+        .unwrap();
+        let report = crate::runtime::provider_auth_selection::select_provider_auth_profile_from_db(
+            &db,
+            "anthropic",
+            &["oauth"],
+            None,
+        )
+        .unwrap();
+
+        let body = render_profile_selection_report(&report, &["oauth"]);
+
+        assert!(body.contains("Selected: anthropic-oauth"));
+        assert!(body.contains("anthropic-api"));
+        assert!(body.contains("auth-kind-mismatch"));
     }
 
     #[test]
