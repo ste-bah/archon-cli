@@ -70,9 +70,11 @@ struct ProviderHealthItem {
     exhausted_rate_limits: usize,
     event_count: usize,
     failure_count: usize,
+    fallback_count: usize,
     by_event_type: BTreeMap<String, usize>,
     by_severity: BTreeMap<String, usize>,
     last_failure: Option<ProviderEventItem>,
+    last_fallback: Option<ProviderEventItem>,
     recent_events: Vec<ProviderEventItem>,
 }
 
@@ -103,11 +105,19 @@ impl ProviderHealthItem {
                 .iter()
                 .filter(|event| is_failure_event(event))
                 .count(),
+            fallback_count: provider_events
+                .iter()
+                .filter(|event| is_fallback_event(event))
+                .count(),
             by_event_type,
             by_severity,
             last_failure: provider_events
                 .iter()
                 .find(|event| is_failure_event(event))
+                .map(|event| ProviderEventItem::from(*event)),
+            last_fallback: provider_events
+                .iter()
+                .find(|event| is_fallback_event(event))
                 .map(|event| ProviderEventItem::from(*event)),
             recent_events: provider_events
                 .iter()
@@ -124,6 +134,8 @@ struct ProviderEventItem {
     event_type: String,
     severity: String,
     reason_code: Option<String>,
+    fallback_from: Option<String>,
+    fallback_to: Option<String>,
     created_at: String,
 }
 
@@ -134,6 +146,8 @@ impl From<&ProviderRuntimeEventRecord> for ProviderEventItem {
             event_type: event.event_type.clone(),
             severity: event.severity.clone(),
             reason_code: event.reason_code.clone(),
+            fallback_from: event.fallback_from.clone(),
+            fallback_to: event.fallback_to.clone(),
             created_at: event.created_at.clone(),
         }
     }
@@ -147,14 +161,14 @@ fn render_report(report: &ProviderHealthReport) -> String {
         return out;
     }
     out.push_str(
-        "provider             health               mode        identity    limits  events  failures  notes\n",
+        "provider             health               mode        identity    limits  events  failures  fallback  notes\n",
     );
     out.push_str(
-        "------------------------------------------------------------------------------------------------\n",
+        "----------------------------------------------------------------------------------------------------------\n",
     );
     for provider in &report.providers {
         out.push_str(&format!(
-            "{:<20} {:<20} {:<11} {:<11} {:<7} {:<7} {:<9} {}\n",
+            "{:<20} {:<20} {:<11} {:<11} {:<7} {:<7} {:<9} {:<9} {}\n",
             provider.provider_id,
             provider.health,
             provider.runtime_mode,
@@ -162,6 +176,7 @@ fn render_report(report: &ProviderHealthReport) -> String {
             provider.rate_limit_count,
             provider.event_count,
             provider.failure_count,
+            provider.fallback_count,
             provider_note(provider),
         ));
     }
@@ -172,6 +187,12 @@ fn render_report(report: &ProviderHealthReport) -> String {
 fn provider_note(provider: &ProviderHealthItem) -> String {
     if provider.exhausted_rate_limits > 0 {
         format!("exhausted-limits:{}", provider.exhausted_rate_limits)
+    } else if let Some(fallback) = &provider.last_fallback {
+        format!(
+            "fallback:{}:{}",
+            fallback.event_type,
+            fallback.reason_code.as_deref().unwrap_or("-")
+        )
     } else if let Some(failure) = &provider.last_failure {
         format!(
             "last-failure:{}:{}",
@@ -189,6 +210,13 @@ fn is_failure_event(event: &ProviderRuntimeEventRecord) -> bool {
     matches!(severity.as_str(), "warn" | "warning" | "error" | "critical")
         || event_type.contains("failed")
         || event_type.contains("limit")
+}
+
+fn is_fallback_event(event: &ProviderRuntimeEventRecord) -> bool {
+    event
+        .event_type
+        .to_ascii_lowercase()
+        .starts_with("fallback_")
 }
 
 fn count(counts: &mut BTreeMap<String, usize>, key: &str) {
