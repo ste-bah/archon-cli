@@ -84,6 +84,7 @@ pub(crate) mod memory_cli;
 pub(crate) mod model;
 pub(crate) mod parser;
 pub(crate) mod permissions;
+pub(crate) mod permissions_cli;
 pub(crate) mod pipeline;
 pub(crate) mod pipeline_bundle;
 pub(crate) mod pipeline_declarative;

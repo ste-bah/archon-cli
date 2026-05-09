@@ -3,8 +3,8 @@ use clap::Subcommand;
 use super::{
     AgentAction, AuthArgs, BehaviourAction, ChatArgs, CompletionAction, ConstellationAction,
     DocsAction, GametheoryAction, KbAction, LearningAction, MeaningAction, MemoryAction,
-    PipelineAction, PluginAction, ProvAction, ProvidersAction, RemoteAction, SandboxAction,
-    SelfAction, TeamAction,
+    PermissionsAction, PipelineAction, PluginAction, ProvAction, ProvidersAction, RemoteAction,
+    SandboxAction, SelfAction, TeamAction,
 };
 
 #[derive(Subcommand, Debug)]
@@ -24,6 +24,11 @@ pub enum Commands {
     Sandbox {
         #[command(subcommand)]
         action: Option<SandboxAction>,
+    },
+    /// Audit durable permission decisions and denials
+    Permissions {
+        #[command(subcommand)]
+        action: PermissionsAction,
     },
     /// Manage plugins
     Plugin {

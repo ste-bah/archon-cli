@@ -158,6 +158,21 @@ pub fn list_permission_runtime_events_by_session(
     ))
 }
 
+pub fn list_permission_runtime_events(
+    db: &DbInstance,
+) -> Result<Vec<PermissionRuntimeEventRecord>> {
+    let result = db
+        .run_script(
+            permission_event_query("all"),
+            BTreeMap::new(),
+            ScriptMutability::Immutable,
+        )
+        .map_err(|e| anyhow::anyhow!("list permission_runtime_events failed: {e}"))?;
+    Ok(sorted(
+        result.rows.iter().map(|row| row_to_permission_event(row)),
+    ))
+}
+
 pub fn list_permission_runtime_events_by_decision(
     db: &DbInstance,
     decision: &str,
@@ -188,6 +203,14 @@ fn permission_event_put_script() -> &'static str {
 
 fn permission_event_query(predicate: &'static str) -> &'static str {
     match predicate {
+        "all" => {
+            "?[event_id, session_id, run_id, agent_type, tool_name, \
+             permission_mode, decision, reason_code, rule_name, \
+             sandbox_backend, raw_redacted_json, created_at] := \
+             *permission_runtime_events{event_id, session_id, run_id, \
+             agent_type, tool_name, permission_mode, decision, reason_code, \
+             rule_name, sandbox_backend, raw_redacted_json, created_at}"
+        }
         "event_id = $eid" => {
             "?[event_id, session_id, run_id, agent_type, tool_name, \
              permission_mode, decision, reason_code, rule_name, \
@@ -334,5 +357,38 @@ mod tests {
         assert_eq!(by_session[0].event_id, "permission-event-2");
         assert_eq!(denied.len(), 1);
         assert_eq!(denied[0].tool_name, "Write");
+    }
+
+    #[test]
+    fn permission_runtime_events_list_all_sorted() {
+        let db = test_db();
+        insert_permission_runtime_event(
+            &db,
+            &PermissionRuntimeEventRecord::new(
+                "permission-event-1",
+                "Write",
+                "ask",
+                "denied",
+                "2026-05-08T12:00:00Z",
+            ),
+        )
+        .unwrap();
+        insert_permission_runtime_event(
+            &db,
+            &PermissionRuntimeEventRecord::new(
+                "permission-event-2",
+                "Bash",
+                "ask",
+                "granted",
+                "2026-05-08T12:01:00Z",
+            ),
+        )
+        .unwrap();
+
+        let rows = list_permission_runtime_events(&db).unwrap();
+
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].event_id, "permission-event-2");
+        assert_eq!(rows[1].event_id, "permission-event-1");
     }
 }

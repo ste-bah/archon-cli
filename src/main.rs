@@ -197,6 +197,9 @@ async fn main() -> Result<()> {
         Some(Commands::Sandbox { action }) => {
             return crate::command::sandbox_cli::handle_sandbox_command(action, &config);
         }
+        Some(Commands::Permissions { action }) => {
+            return crate::command::permissions_cli::handle_permissions_command(&action);
+        }
         Some(Commands::Plugin { action }) => {
             return crate::command::plugin::handle_plugin_command(action);
         }
