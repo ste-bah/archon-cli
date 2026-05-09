@@ -11,6 +11,10 @@ fn archon_config_defaults_codex_provider_enabled() {
         cfg.providers.openai_codex.app_server_discovery_timeout_ms,
         2_500
     );
+    assert_eq!(
+        cfg.providers.openai_codex.app_server_model_catalog,
+        vec!["gpt-5.5".to_string(), "gpt-5.4".to_string()]
+    );
     assert_eq!(cfg.providers.openai_codex.manifest.ttl_seconds, 21_600);
 }
 
@@ -22,7 +26,9 @@ fn archon_config_parses_openai_codex_provider_section() {
         enabled = true
         runtime = "auto"
         direct_fallback = true
+        app_server_url = "http://127.0.0.1:11434/codex"
         app_server_discovery_timeout_ms = 750
+        app_server_model_catalog = ["gpt-5.5", "gpt-5.4-mini"]
 
         [providers.openai-codex.spoof]
         originator = "cfgorigin"
@@ -46,6 +52,14 @@ fn archon_config_parses_openai_codex_provider_section() {
     assert_eq!(
         cfg.providers.openai_codex.app_server_discovery_timeout_ms,
         750
+    );
+    assert_eq!(
+        cfg.providers.openai_codex.app_server_url.as_deref(),
+        Some("http://127.0.0.1:11434/codex")
+    );
+    assert_eq!(
+        cfg.providers.openai_codex.app_server_model_catalog,
+        vec!["gpt-5.5".to_string(), "gpt-5.4-mini".to_string()]
     );
     assert_eq!(
         cfg.providers.openai_codex.spoof.originator.as_deref(),

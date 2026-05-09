@@ -5,6 +5,7 @@
 
 pub(crate) mod agent_ledger_events;
 pub(crate) mod agent_profile_overlay;
+pub(crate) mod codex_app_server;
 pub(crate) mod codex_provider;
 pub(crate) mod codex_strategy;
 pub(crate) mod llm;

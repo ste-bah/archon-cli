@@ -10,6 +10,7 @@ use crate::runtime::provider_fallback_events::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct CodexRuntimeDecision {
     pub(crate) selected_runtime_mode: &'static str,
+    pub(crate) app_server_discovered: bool,
 }
 
 pub(crate) fn resolve_codex_runtime_strategy(
@@ -27,33 +28,53 @@ fn resolve_codex_runtime_strategy_with_events(
     match normalize_runtime(&config.runtime).as_str() {
         "direct" => Ok(CodexRuntimeDecision {
             selected_runtime_mode: "direct",
+            app_server_discovered: false,
         }),
-        "auto" if config.direct_fallback => {
-            if emit_events {
-                record_provider_fallback_selected(
-                    "openai-codex",
-                    "app_server",
-                    "direct",
-                    "codex_app_server_unavailable",
-                    strategy_metadata(config, surface, true),
-                );
-            }
-            Ok(CodexRuntimeDecision {
-                selected_runtime_mode: "direct",
-            })
-        }
+        "auto" if config.direct_fallback => auto_with_direct_fallback(config, surface, emit_events),
         "auto" => deny_direct_fallback(
             config,
             surface,
-            "codex_auto_direct_fallback_disabled",
+            discovery_reason(config, "codex_auto_direct_fallback_disabled"),
             emit_events,
         ),
         "app_server" => {
-            deny_direct_fallback(config, surface, "codex_app_server_unavailable", emit_events)
+            let discovery = crate::runtime::codex_app_server::discover_codex_app_server(config);
+            let reason_code = discovery.reason_code();
+            deny_direct_fallback(config, surface, reason_code, emit_events)
         }
         other => Err(anyhow::anyhow!(
             "providers.openai-codex.runtime must be direct, app_server, or auto, got `{other}`"
         )),
+    }
+}
+
+fn auto_with_direct_fallback(
+    config: &CodexProviderConfig,
+    surface: &str,
+    emit_events: bool,
+) -> Result<CodexRuntimeDecision> {
+    let discovery = crate::runtime::codex_app_server::discover_codex_app_server(config);
+    if emit_events {
+        record_provider_fallback_selected(
+            "openai-codex",
+            "app_server",
+            "direct",
+            discovery.reason_code(),
+            strategy_metadata(config, surface, true),
+        );
+    }
+    Ok(CodexRuntimeDecision {
+        selected_runtime_mode: "direct",
+        app_server_discovered: discovery.is_configured(),
+    })
+}
+
+fn discovery_reason(config: &CodexProviderConfig, fallback_reason: &'static str) -> &'static str {
+    let discovery = crate::runtime::codex_app_server::discover_codex_app_server(config);
+    if discovery.is_configured() {
+        discovery.reason_code()
+    } else {
+        fallback_reason
     }
 }
 
@@ -72,9 +93,21 @@ fn deny_direct_fallback(
             strategy_metadata(config, surface, false),
         );
     }
-    Err(anyhow::anyhow!(
-        "Codex app-server runtime is unavailable for `{surface}` and direct fallback is disabled; set providers.openai-codex.runtime = \"direct\" or enable direct_fallback for auto mode"
-    ))
+    Err(anyhow::anyhow!("{}", strategy_error(surface, reason_code)))
+}
+
+fn strategy_error(surface: &str, reason_code: &str) -> String {
+    match reason_code {
+        "codex_app_server_adapter_unimplemented" => format!(
+            "Codex app-server endpoint is configured for `{surface}`, but the app-server transport adapter is not implemented in this release slice; set providers.openai-codex.runtime = \"direct\" or use runtime = \"auto\" with direct_fallback = true"
+        ),
+        "codex_auto_direct_fallback_disabled" => format!(
+            "Codex app-server runtime is unavailable for `{surface}` and direct fallback is disabled; set providers.openai-codex.runtime = \"direct\" or enable direct_fallback for auto mode"
+        ),
+        _ => format!(
+            "Codex app-server runtime is unavailable for `{surface}` and direct fallback is disabled; set providers.openai-codex.runtime = \"direct\" or enable direct_fallback for auto mode"
+        ),
+    }
 }
 
 fn normalize_runtime(value: &str) -> String {
@@ -86,13 +119,20 @@ fn strategy_metadata(
     surface: &str,
     direct_fallback_used: bool,
 ) -> serde_json::Value {
-    serde_json::json!({
+    let discovery = crate::runtime::codex_app_server::discover_codex_app_server(config);
+    let mut metadata = serde_json::json!({
         "surface": surface,
         "configured_runtime": config.runtime,
         "direct_fallback": config.direct_fallback,
         "direct_fallback_used": direct_fallback_used,
         "app_server_discovery_timeout_ms": config.app_server_discovery_timeout_ms,
-    })
+    });
+    if let Some(object) = metadata.as_object_mut() {
+        if let Some(discovery_metadata) = discovery.metadata(config).as_object() {
+            object.extend(discovery_metadata.clone());
+        }
+    }
+    metadata
 }
 
 #[cfg(test)]
@@ -106,6 +146,7 @@ mod tests {
         let decision = resolve_codex_runtime_strategy_with_events(&config, "test", false).unwrap();
 
         assert_eq!(decision.selected_runtime_mode, "direct");
+        assert!(!decision.app_server_discovered);
     }
 
     #[test]
@@ -145,5 +186,38 @@ mod tests {
         let decision = resolve_codex_runtime_strategy_with_events(&config, "test", false).unwrap();
 
         assert_eq!(decision.selected_runtime_mode, "direct");
+        assert!(!decision.app_server_discovered);
+    }
+
+    #[test]
+    fn auto_records_app_server_discovery_when_falling_back() {
+        let config = CodexProviderConfig {
+            runtime: "auto".into(),
+            direct_fallback: true,
+            app_server_url: Some("http://127.0.0.1:11434/codex".into()),
+            ..CodexProviderConfig::default()
+        };
+
+        let decision = resolve_codex_runtime_strategy_with_events(&config, "test", false).unwrap();
+        let metadata = strategy_metadata(&config, "test", true);
+
+        assert_eq!(decision.selected_runtime_mode, "direct");
+        assert!(decision.app_server_discovered);
+        assert_eq!(metadata["app_server_discovery"]["status"], "configured");
+    }
+
+    #[test]
+    fn app_server_mode_reports_unimplemented_adapter_when_endpoint_configured() {
+        let config = CodexProviderConfig {
+            runtime: "app_server".into(),
+            app_server_url: Some("http://127.0.0.1:11434/codex".into()),
+            ..CodexProviderConfig::default()
+        };
+
+        let error = resolve_codex_runtime_strategy_with_events(&config, "test", false)
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("adapter is not implemented"));
     }
 }

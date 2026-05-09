@@ -84,7 +84,9 @@ pub struct CodexProviderConfig {
     pub enabled: bool,
     pub runtime: String,
     pub direct_fallback: bool,
+    pub app_server_url: Option<String>,
     pub app_server_discovery_timeout_ms: u64,
+    pub app_server_model_catalog: Vec<String>,
     pub spoof: CodexSpoofPartialConfig,
     pub manifest: CodexManifestConfig,
 }
@@ -95,7 +97,9 @@ impl Default for CodexProviderConfig {
             enabled: true,
             runtime: "direct".into(),
             direct_fallback: false,
+            app_server_url: None,
             app_server_discovery_timeout_ms: 2_500,
+            app_server_model_catalog: vec!["gpt-5.5".into(), "gpt-5.4".into()],
             spoof: CodexSpoofPartialConfig::default(),
             manifest: CodexManifestConfig::default(),
         }
