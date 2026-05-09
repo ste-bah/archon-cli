@@ -42,7 +42,7 @@ use archon_tui::event_channel::TuiEventSender;
 use archon_tui::observability;
 
 use crate::command::registry::default_registry;
-use crate::runtime::llm::build_llm_provider;
+use crate::runtime::llm::build_llm_provider_selection;
 use crate::runtime::llm_non_anthropic::build_llm_provider_without_anthropic_fallback;
 use crate::runtime::provider_observer::{
     observe_llm_provider_with_profile, record_provider_fallback, runtime_mode_for_provider_name,
@@ -825,7 +825,20 @@ async fn build_session_agent(
         observe_llm_provider_with_profile(provider, runtime_mode, profile_id)
     } else {
         let provider = match api_client {
-            Some(api_client) => build_llm_provider(&config.llm, api_client),
+            Some(api_client) => {
+                let selection = build_llm_provider_selection(&config.llm, api_client);
+                let selected_provider = selection.provider.name().to_string();
+                let runtime_mode = runtime_mode_for_provider_name(&selected_provider);
+                record_provider_fallback(
+                    &config.llm.provider,
+                    &selected_provider,
+                    runtime_mode,
+                    selection
+                        .fallback_reason
+                        .unwrap_or("provider_construction_fallback"),
+                );
+                selection.provider
+            }
             None => match build_llm_provider_without_anthropic_fallback(&config.llm) {
                 Ok(provider) => provider,
                 Err(error) => {
@@ -836,12 +849,6 @@ async fn build_session_agent(
         };
         let selected_provider = provider.name().to_string();
         let runtime_mode = runtime_mode_for_provider_name(&selected_provider);
-        record_provider_fallback(
-            &config.llm.provider,
-            &selected_provider,
-            runtime_mode,
-            "provider_construction_fallback",
-        );
         let profile_id = crate::runtime::provider_auth_selection::selected_provider_auth_profile_id(
             &selected_provider,
         );
@@ -2046,20 +2053,22 @@ pub(crate) async fn run_interactive_session(
         Some(provider) => provider,
         None => match anthropic_client {
             Some(client) => {
-                let provider = build_llm_provider(&config.llm, client);
-                let selected_provider = provider.name().to_string();
+                let selection = build_llm_provider_selection(&config.llm, client);
+                let selected_provider = selection.provider.name().to_string();
                 let runtime_mode = runtime_mode_for_provider_name(&selected_provider);
                 record_provider_fallback(
                     &config.llm.provider,
                     &selected_provider,
                     runtime_mode,
-                    "provider_construction_fallback",
+                    selection
+                        .fallback_reason
+                        .unwrap_or("provider_construction_fallback"),
                 );
                 let profile_id =
                     crate::runtime::provider_auth_selection::selected_provider_auth_profile_id(
                         &selected_provider,
                     );
-                observe_llm_provider_with_profile(provider, runtime_mode, profile_id)
+                observe_llm_provider_with_profile(selection.provider, runtime_mode, profile_id)
             }
             None => {
                 let provider = build_llm_provider_without_anthropic_fallback(&config.llm).map_err(

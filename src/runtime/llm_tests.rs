@@ -57,6 +57,32 @@ fn openai_with_empty_key_falls_back_to_anthropic() {
 }
 
 #[test]
+fn openai_fallback_selection_reports_missing_key_reason() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let prev = std::env::var("OPENAI_API_KEY").ok();
+    unsafe {
+        std::env::remove_var("OPENAI_API_KEY");
+    }
+
+    let mut cfg = LlmConfig {
+        provider: "openai".into(),
+        ..Default::default()
+    };
+    cfg.openai.api_key = None;
+
+    let selection = build_llm_provider_selection(&cfg, make_test_client());
+
+    assert_eq!(selection.provider.name(), "anthropic");
+    assert_eq!(selection.fallback_reason, Some("openai_missing_api_key"));
+
+    if let Some(v) = prev {
+        unsafe {
+            std::env::set_var("OPENAI_API_KEY", v);
+        }
+    }
+}
+
+#[test]
 fn bedrock_with_missing_region_falls_back_to_anthropic() {
     let mut cfg = LlmConfig {
         provider: "bedrock".into(),
@@ -166,4 +192,21 @@ fn test_unknown_flat_provider_falls_back_to_anthropic() {
     };
     let provider = build_llm_provider(&cfg, make_test_client());
     assert_eq!(provider.name(), "anthropic");
+}
+
+#[test]
+fn unknown_flat_provider_selection_reports_reason() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let cfg = LlmConfig {
+        provider: "definitely-not-a-real-provider-zzz".to_string(),
+        ..Default::default()
+    };
+
+    let selection = build_llm_provider_selection(&cfg, make_test_client());
+
+    assert_eq!(selection.provider.name(), "anthropic");
+    assert_eq!(
+        selection.fallback_reason,
+        Some("openai_compatible_unknown_provider")
+    );
 }

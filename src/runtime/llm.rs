@@ -70,6 +70,11 @@ use crate::runtime::provider_observer::{
     observe_llm_provider_with_profile, record_provider_fallback, runtime_mode_for_provider_name,
 };
 
+pub(crate) struct LlmProviderSelection {
+    pub(crate) provider: Arc<dyn LlmProvider>,
+    pub(crate) fallback_reason: Option<&'static str>,
+}
+
 /// Build the configured provider for command surfaces that can choose
 /// Anthropic, Codex, or an OpenAI-compatible provider.
 pub(crate) async fn build_configured_llm_provider(
@@ -141,20 +146,22 @@ pub(crate) async fn build_configured_llm_provider(
         .ok()
         .or_else(|| config.api.base_url.clone());
     let client = AnthropicClient::new(auth, identity, api_url);
-    let provider = build_llm_provider(&config.llm, client);
-    let selected_provider = provider.name().to_string();
+    let selection = build_llm_provider_selection(&config.llm, client);
+    let selected_provider = selection.provider.name().to_string();
     let runtime_mode = runtime_mode_for_provider_name(&selected_provider);
     record_provider_fallback(
         &config.llm.provider,
         &selected_provider,
         runtime_mode,
-        "provider_construction_fallback",
+        selection
+            .fallback_reason
+            .unwrap_or("provider_construction_fallback"),
     );
     let profile_id = crate::runtime::provider_auth_selection::selected_provider_auth_profile_id(
         &selected_provider,
     );
     Ok(observe_llm_provider_with_profile(
-        provider,
+        selection.provider,
         runtime_mode,
         profile_id,
     ))
@@ -178,21 +185,34 @@ pub(crate) fn build_llm_provider(
     llm_cfg: &LlmConfig,
     api_client: AnthropicClient,
 ) -> Arc<dyn LlmProvider> {
+    build_llm_provider_selection(llm_cfg, api_client).provider
+}
+
+pub(crate) fn build_llm_provider_selection(
+    llm_cfg: &LlmConfig,
+    api_client: AnthropicClient,
+) -> LlmProviderSelection {
     match llm_cfg.provider.as_str() {
-        "anthropic" => Arc::new(AnthropicProvider::new(api_client)),
+        "anthropic" => selected(AnthropicProvider::new(api_client), None),
 
         "openai" => {
             let inline_key = llm_cfg.openai.api_key.clone().unwrap_or_default();
             let resolved = OpenAiProvider::resolve_api_key(&inline_key);
             if resolved.is_empty() {
                 tracing::warn!("OpenAI selected but no API key found; falling back to Anthropic");
-                return Arc::new(AnthropicProvider::new(api_client));
+                return selected(
+                    AnthropicProvider::new(api_client),
+                    Some("openai_missing_api_key"),
+                );
             }
-            Arc::new(OpenAiProvider::new(
-                resolved,
-                llm_cfg.openai.base_url.clone(),
-                llm_cfg.openai.model.clone(),
-            ))
+            selected(
+                OpenAiProvider::new(
+                    resolved,
+                    llm_cfg.openai.base_url.clone(),
+                    llm_cfg.openai.model.clone(),
+                ),
+                None,
+            )
         }
 
         "bedrock" => {
@@ -202,37 +222,49 @@ pub(crate) fn build_llm_provider(
                 tracing::warn!(
                     "Bedrock selected but region/model_id missing; falling back to Anthropic"
                 );
-                return Arc::new(AnthropicProvider::new(api_client));
+                return selected(
+                    AnthropicProvider::new(api_client),
+                    Some("bedrock_missing_region_or_model"),
+                );
             }
-            Arc::new(BedrockProvider::new(region, model_id))
+            selected(BedrockProvider::new(region, model_id), None)
         }
 
         "vertex" => {
             let project_id = llm_cfg.vertex.project_id.as_deref().unwrap_or("");
             if project_id.is_empty() {
                 tracing::warn!("Vertex selected but project_id missing; falling back to Anthropic");
-                return Arc::new(AnthropicProvider::new(api_client));
+                return selected(
+                    AnthropicProvider::new(api_client),
+                    Some("vertex_missing_project_id"),
+                );
             }
             let publisher = if llm_cfg.vertex.model.contains("claude") {
                 "anthropic"
             } else {
                 "google"
             };
-            Arc::new(VertexProvider::new(
-                project_id.to_string(),
-                llm_cfg.vertex.region.clone(),
-                llm_cfg.vertex.model.clone(),
-                publisher.to_string(),
-                llm_cfg.vertex.credentials_file.clone(),
-            ))
+            selected(
+                VertexProvider::new(
+                    project_id.to_string(),
+                    llm_cfg.vertex.region.clone(),
+                    llm_cfg.vertex.model.clone(),
+                    publisher.to_string(),
+                    llm_cfg.vertex.credentials_file.clone(),
+                ),
+                None,
+            )
         }
 
-        "local" => Arc::new(LocalProvider::new(
-            llm_cfg.local.base_url.clone(),
-            llm_cfg.local.model.clone(),
-            llm_cfg.local.timeout_secs,
-            llm_cfg.local.pull_if_missing,
-        )),
+        "local" => selected(
+            LocalProvider::new(
+                llm_cfg.local.base_url.clone(),
+                llm_cfg.local.model.clone(),
+                llm_cfg.local.timeout_secs,
+                llm_cfg.local.pull_if_missing,
+            ),
+            None,
+        ),
 
         other => {
             // Flat-config descriptor path: groq, deepseek, mistral, xai,
@@ -250,14 +282,17 @@ pub(crate) fn build_llm_provider(
             };
             let http = Arc::new(reqwest::Client::new());
             match ActiveProvider::new(&flat, http) {
-                Ok(active) => Arc::new(active),
+                Ok(active) => selected(active, None),
                 Err(ProviderError::MissingCredential { var }) => {
                     tracing::warn!(
                         provider = %other,
                         env_var = %var,
                         "provider credentials missing; falling back to Anthropic"
                     );
-                    Arc::new(AnthropicProvider::new(api_client))
+                    selected(
+                        AnthropicProvider::new(api_client),
+                        Some(flat_provider_missing_credential_reason(&var)),
+                    )
                 }
                 Err(e) => {
                     tracing::warn!(
@@ -265,10 +300,31 @@ pub(crate) fn build_llm_provider(
                         error = %e,
                         "provider construction failed; falling back to Anthropic"
                     );
-                    Arc::new(AnthropicProvider::new(api_client))
+                    selected(
+                        AnthropicProvider::new(api_client),
+                        Some("openai_compatible_construction_failed"),
+                    )
                 }
             }
         }
+    }
+}
+
+fn selected(
+    provider: impl LlmProvider + 'static,
+    fallback_reason: Option<&'static str>,
+) -> LlmProviderSelection {
+    LlmProviderSelection {
+        provider: Arc::new(provider),
+        fallback_reason,
+    }
+}
+
+fn flat_provider_missing_credential_reason(var: &str) -> &'static str {
+    if var.starts_with("unknown provider:") {
+        "openai_compatible_unknown_provider"
+    } else {
+        "openai_compatible_missing_credential"
     }
 }
 
