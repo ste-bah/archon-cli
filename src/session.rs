@@ -43,6 +43,7 @@ use archon_tui::observability;
 
 use crate::command::registry::default_registry;
 use crate::runtime::llm::build_llm_provider;
+use crate::runtime::llm_non_anthropic::build_llm_provider_without_anthropic_fallback;
 use crate::runtime::provider_observer::{
     observe_llm_provider_with_profile, record_provider_fallback, runtime_mode_for_provider_name,
 };
@@ -467,6 +468,14 @@ async fn build_session_agent(
             String::new(),
         );
         (identity, None)
+    } else if config.llm.provider != "anthropic" {
+        let identity = IdentityProvider::new(
+            IdentityMode::Clean,
+            session_id.to_string(),
+            device_id,
+            String::new(),
+        );
+        (identity, None)
     } else {
         let auth = match resolve_auth_with_keys(
             env_vars.anthropic_api_key.as_deref(),
@@ -798,8 +807,16 @@ async fn build_session_agent(
         );
         observe_llm_provider_with_profile(provider, runtime_mode, profile_id)
     } else {
-        let api_client = api_client.expect("anthropic client is present for non-Codex sessions");
-        let provider = build_llm_provider(&config.llm, api_client);
+        let provider = match api_client {
+            Some(api_client) => build_llm_provider(&config.llm, api_client),
+            None => match build_llm_provider_without_anthropic_fallback(&config.llm) {
+                Ok(provider) => provider,
+                Err(error) => {
+                    eprintln!("Provider {} failed: {error}", config.llm.provider);
+                    return Err(archon_core::print_mode::EXIT_ERROR);
+                }
+            },
+        };
         let selected_provider = provider.name().to_string();
         let runtime_mode = runtime_mode_for_provider_name(&selected_provider);
         record_provider_fallback(
@@ -1398,6 +1415,14 @@ pub(crate) async fn run_interactive_session(
                 None,
                 prompt_identity,
             )
+        } else if config.llm.provider != "anthropic" {
+            let prompt_identity = IdentityProvider::new(
+                IdentityMode::Clean,
+                session_id.to_string(),
+                get_or_create_device_id(),
+                String::new(),
+            );
+            (None, None, None, prompt_identity)
         } else {
             // ── Resolve Anthropic authentication ─────────────────────
             let auth = match resolve_auth_with_keys(
@@ -2012,9 +2037,16 @@ pub(crate) async fn run_interactive_session(
                 observe_llm_provider_with_profile(provider, runtime_mode, profile_id)
             }
             None => {
-                return Err(anyhow::anyhow!(
-                    "missing Anthropic client for session provider"
-                ));
+                let provider = build_llm_provider_without_anthropic_fallback(&config.llm).map_err(
+                    |error| anyhow::anyhow!("provider {} failed: {error}", config.llm.provider),
+                )?;
+                let selected_provider = provider.name().to_string();
+                let runtime_mode = runtime_mode_for_provider_name(&selected_provider);
+                let profile_id =
+                    crate::runtime::provider_auth_selection::selected_provider_auth_profile_id(
+                        &selected_provider,
+                    );
+                observe_llm_provider_with_profile(provider, runtime_mode, profile_id)
             }
         },
     };
