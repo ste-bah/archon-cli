@@ -12,12 +12,24 @@ use serde::Serialize;
 
 use crate::cli_args::PermissionsAction;
 
+#[path = "permissions_cli_diff.rs"]
+mod permissions_cli_diff;
+
 pub(crate) fn handle_permissions_command(action: &PermissionsAction) -> Result<()> {
     match action {
         PermissionsAction::Audit { json } => print!("{}", render_permissions_audit(*json)?),
         PermissionsAction::Denials { agent, limit, json } => print!(
             "{}",
             render_permission_denials(agent.as_deref(), *limit, *json)?
+        ),
+        PermissionsAction::Diff {
+            agent,
+            from_version_id,
+            to_version_id,
+            json,
+        } => print!(
+            "{}",
+            render_permission_profile_diff(agent, from_version_id, to_version_id, *json)?
         ),
     }
     Ok(())
@@ -35,6 +47,22 @@ fn render_permission_denials(
 ) -> Result<String> {
     let db = open_learning_db()?;
     render_permission_denials_from_db(&db, agent_filter, limit, json)
+}
+
+fn render_permission_profile_diff(
+    agent_type: &str,
+    from_version_id: &str,
+    to_version_id: &str,
+    json: bool,
+) -> Result<String> {
+    let db = open_learning_db()?;
+    permissions_cli_diff::render_permission_profile_diff_from_db(
+        &db,
+        agent_type,
+        from_version_id,
+        to_version_id,
+        json,
+    )
 }
 
 fn render_permissions_audit_from_db(db: &DbInstance, json: bool) -> Result<String> {
@@ -274,5 +302,63 @@ mod tests {
 
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].agent_type.as_deref(), Some("reviewer"));
+    }
+
+    #[test]
+    fn permission_diff_reports_access_expansion() {
+        let db = test_db();
+        insert_profile(
+            &db,
+            "profile-from",
+            serde_json::json!({
+                "overrides": {
+                    "allowed_tools": ["Read"],
+                    "permission_mode": "plan",
+                    "sandbox_backend": "docker"
+                }
+            }),
+        );
+        insert_profile(
+            &db,
+            "profile-to",
+            serde_json::json!({
+                "overrides": {
+                    "allowed_tools": ["Read", "Bash"],
+                    "skills": ["shell-helper"],
+                    "permission_mode": "default",
+                    "sandbox_backend": "logical"
+                }
+            }),
+        );
+
+        let body = permissions_cli_diff::render_permission_profile_diff_from_db(
+            &db,
+            "reviewer",
+            "profile-from",
+            "profile-to",
+            false,
+        )
+        .unwrap();
+
+        assert!(body.contains("Risk:  High"));
+        assert!(body.contains("Expands permissions: yes"));
+        assert!(body.contains("Added tools: Bash"));
+        assert!(body.contains("Permission mode: plan -> default"));
+        assert!(body.contains("Guardrail"));
+    }
+
+    fn insert_profile(db: &DbInstance, version_id: &str, profile_json: serde_json::Value) {
+        archon_learning::agent_profile_versions::insert_agent_profile_version(
+            db,
+            &archon_learning::agent_profile_versions::AgentProfileVersionRecord::new(
+                version_id,
+                "reviewer",
+                1,
+                "governed_proposal",
+                "2026-05-08T12:00:00Z",
+            )
+            .with_profile_json(profile_json),
+        )
+        .unwrap();
     }
 }

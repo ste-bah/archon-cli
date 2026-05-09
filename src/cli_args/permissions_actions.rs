@@ -20,4 +20,19 @@ pub enum PermissionsAction {
         #[arg(long)]
         json: bool,
     },
+    /// Compare permission-relevant fields between two governed profile versions
+    Diff {
+        /// Agent type that owns both profile versions
+        #[arg(long)]
+        agent: String,
+        /// Baseline profile version ID
+        #[arg(long = "from")]
+        from_version_id: String,
+        /// Candidate profile version ID
+        #[arg(long = "to")]
+        to_version_id: String,
+        /// Output the diff as JSON
+        #[arg(long)]
+        json: bool,
+    },
 }
