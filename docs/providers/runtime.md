@@ -28,12 +28,15 @@ when one is known.
 
 ```bash
 archon providers status
+archon providers report
 archon providers limits --provider openai-codex
 ```
 
 `providers status` enriches local provider status with the selected Cozo auth
 profile and persists redacted snapshots. `providers limits` shows observed
-rate/usage windows captured from real provider failures.
+rate/usage windows captured from real provider failures. `providers report`
+combines current status, persisted runtime events, recent limits, and failure
+counts into a redacted provider-health report; use `--json` for automation.
 
 ## Codex Strategy
 
