@@ -245,8 +245,16 @@ impl SandboxBackend for OpenShellSandboxBackend {
         Box<dyn std::future::Future<Output = Option<SandboxCommandResult>> + Send + 'a>,
     > {
         Box::pin(async {
+            if let Err(error) = self.safe_to_route() {
+                return Some(SandboxCommandResult {
+                    content: format!(
+                        "OpenShell sandbox refused execution: {error}; no host shell fallback was used.\n"
+                    ),
+                    is_error: true,
+                });
+            }
             Some(SandboxCommandResult {
-                content: "OpenShell sandbox execution is fail-closed in this release slice; no host shell fallback was used.\n".into(),
+                content: "OpenShell sandbox transport is not implemented in this release slice; no host shell fallback was used.\n".into(),
                 is_error: true,
             })
         })
@@ -310,9 +318,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn backend_execute_bash_returns_error_without_host_fallback() {
+    async fn backend_execute_bash_runs_fail_closed_preflight() {
         let backend = OpenShellSandboxBackend::new(OpenShellConfig {
             enabled: true,
+            binary: "__definitely_missing_openshell__".into(),
             ..OpenShellConfig::default()
         });
         let result = backend
@@ -327,6 +336,8 @@ mod tests {
             .unwrap();
 
         assert!(result.is_error);
+        assert!(result.content.contains("refused execution"));
+        assert!(result.content.contains("__definitely_missing_openshell__"));
         assert!(result.content.contains("no host shell fallback"));
     }
 }
