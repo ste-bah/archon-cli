@@ -26,6 +26,7 @@ pub(crate) mod provider_observer;
 pub(crate) mod provider_profile_updates;
 pub(crate) mod sandbox_audit;
 pub(crate) mod sandbox_events;
+pub(crate) mod sandbox_mode;
 
 #[cfg(test)]
 mod provider_sandbox_compat_tests;

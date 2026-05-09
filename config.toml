@@ -215,7 +215,11 @@ always_ask = []
 # Current /sandbox toggle uses the logical policy gate. Docker/SSH/OpenShell are
 # separate isolation backends and require their matching enabled=true section.
 backend = "disabled"
-# Which commands route through the backend: "risky" | "all" | "shell"
+# Backend routing mode:
+#   "risky" / "shell" route Bash/Shell through the backend but leave normal
+#   host-side tools such as Write/Edit/WebFetch under permission preflight.
+#   "all" requires every tool to be backend-compatible, so unsupported
+#   host-side mutation/network/agent-spawn tools are blocked.
 mode = "risky"
 # Backend lifecycle: "session" | "turn" | "tool"
 scope = "session"

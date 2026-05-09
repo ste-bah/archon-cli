@@ -7,7 +7,7 @@ pub(super) fn append_tool_explain(
     let Some(tool) = tool.map(str::trim).filter(|tool| !tool.is_empty()) else {
         return;
     };
-    let decision = tool_decision(policy.backend, tool);
+    let decision = tool_decision(policy, tool);
     output.push_str(&format!(
         "Tool explain\nTool: {tool}\nDecision: {}\nReason: {}\n",
         decision.0, decision.1
@@ -18,10 +18,10 @@ pub(super) fn append_tool_explain(
 }
 
 fn tool_decision(
-    backend: archon_core::sandbox::SandboxBackendKind,
+    policy: &archon_core::sandbox::SandboxPolicy,
     tool: &str,
 ) -> (&'static str, &'static str) {
-    match (backend, tool) {
+    match (policy.backend, tool) {
         (archon_core::sandbox::SandboxBackendKind::Docker, "Bash" | "Shell") => (
             "route_to_sandbox",
             "Docker can execute approved shell commands with configured mounts, network, and resource limits",
@@ -42,17 +42,25 @@ fn tool_decision(
             "permission_preflight_only",
             "sandbox backend is disabled; normal permission preflight still applies",
         ),
+        (_, "PowerShell") if policy.backend.is_real_isolation() && policy.mode != "all" => (
+            "blocked_shell_not_supported",
+            "sandbox mode routes shell execution through Bash-compatible backends; PowerShell cannot be sandbox-routed yet",
+        ),
+        (_, _) if policy.backend.is_real_isolation() && policy.mode != "all" => (
+            "permission_preflight_host_tool",
+            "sandbox.mode routes shell execution through the backend while non-shell tools continue through normal permission preflight",
+        ),
         (_, "Write" | "Edit" | "NotebookEdit") => (
             "host_mutation_blocked_by_backend",
-            "real sandbox backends do not allow host-side file mutation tools",
+            "sandbox.mode=all requires backend-compatible tools and does not allow host-side file mutation tools",
         ),
         (_, "WebFetch" | "WebSearch") => (
             "host_network_blocked_by_backend",
-            "real sandbox backends do not allow host-side network tools",
+            "sandbox.mode=all requires backend-compatible tools and does not allow host-side network tools",
         ),
         (_, "TaskCreate" | "TaskUpdate" | "Agent") => (
             "agent_spawn_blocked_by_backend",
-            "real sandbox backends do not allow host-side agent spawning",
+            "sandbox.mode=all requires backend-compatible tools and does not allow host-side agent spawning",
         ),
         _ => (
             "permission_preflight_required",

@@ -51,6 +51,11 @@ openshell sandbox create --no-keep -- /bin/bash -lc '<command>'
 Configured policies are passed with `--policy`. Configured providers are ignored
 while `provider_injection = false`.
 
+With the default `sandbox.mode = "risky"`, OpenShell applies to Bash/Shell
+execution only. Normal host-side coding tools such as `Write` and `Edit` still
+go through Archon's permission preflight. Set `sandbox.mode = "all"` only when
+you want unsupported host-side tools to be blocked.
+
 ```bash
 archon sandbox doctor --backend openshell
 archon sandbox explain --backend openshell

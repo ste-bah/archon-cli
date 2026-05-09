@@ -303,7 +303,7 @@ and OpenShell tooling with `scripts/install-system-deps.sh --with-docker`,
 ```toml
 [sandbox]
 backend = "disabled"       # "disabled" | "logical" | "docker" | "ssh" | "openshell"
-mode = "risky"             # "risky" | "all" | "shell"
+mode = "risky"             # "risky" | "shell" route shell only; "all" is strict
 scope = "session"          # "session" | "turn" | "tool"
 workspace_access = "ro"    # "ro" | "rw" | "scratch"
 
@@ -347,7 +347,7 @@ host_shell_fallback = false
 | Field | Default | What / Why |
 |---|---|---|
 | `backend` | `"disabled"` | Selects the sandbox route for Bash. `logical` is a policy gate only; `docker`, `ssh`, and `openshell` are real isolation backends when their section is enabled. |
-| `mode` | `"risky"` | Chooses which Bash commands route through the backend: risky commands only, every command, or shell commands. |
+| `mode` | `"risky"` | Chooses how broadly a real backend applies. `risky` and `shell` route Bash/Shell through Docker/SSH/OpenShell while normal host-side tools such as `Write`, `Edit`, and `WebFetch` continue through permission preflight. `all` is strict and blocks unsupported host-side mutation, network, and agent-spawn tools. |
 | `scope` | `"session"` | Backend lifecycle hint for session-, turn-, or tool-scoped isolation. |
 | `workspace_access` | `"ro"` | Workspace mount policy. `rw` allows writes; `scratch` keeps the workspace read-only and provides ephemeral scratch space where supported. |
 | `sandbox.docker.*` | see template | Docker binary/image, resource limits, network mode, writable paths, and mount hardening. Docker socket, home mount, and privileged mode default to off. |

@@ -26,6 +26,11 @@ The workspace is read-only by default. `workspace_access = "rw"` mounts it
 read-write. `workspace_access = "scratch"` keeps the workspace read-only and
 adds ephemeral `/scratch`.
 
+The default `sandbox.mode = "risky"` routes Bash through Docker while leaving
+normal host-side coding tools under permission preflight. Use
+`sandbox.mode = "all"` only for strict sessions where unsupported host-side
+tools should be blocked.
+
 ## Writable Paths
 
 Use relative `docker.writable_paths` when a mostly read-only workspace needs a

@@ -141,6 +141,8 @@ fn session_sandbox_backend(
             sandbox_flag,
         )),
     };
+    let backend =
+        crate::runtime::sandbox_mode::apply_configured_sandbox_mode(backend, &config.sandbox);
     crate::runtime::sandbox_audit::audit_sandbox_backend(
         backend,
         &config.sandbox,

@@ -17,6 +17,13 @@ Host Docker/OpenShell dependencies are optional. Install them with
 `scripts/install-system-deps.sh --with-docker`, `--with-openshell`, or
 `--with-sandbox`; then enable the matching backend in `[sandbox]`.
 
+By default, `sandbox.mode = "risky"` routes shell execution through the selected
+real backend but does not break normal host-side coding tools. `Write`, `Edit`,
+`WebFetch`, and similar tools still pass through Archon's permission preflight.
+Set `sandbox.mode = "all"` only when you want strict backend compatibility and
+are willing to block unsupported host-side mutation, network, and agent-spawn
+tools.
+
 ## Backends
 
 `logical` keeps the existing permission gate behavior.
