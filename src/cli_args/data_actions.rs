@@ -266,6 +266,15 @@ pub enum AgentEvolveAction {
         /// Agent evolution proposal ID
         proposal_id: String,
     },
+    /// Summarize governed evolution state for an agent
+    Report {
+        /// Agent type to inspect
+        #[arg(long)]
+        agent: String,
+        /// Output the report as JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Record a Cozo-backed shadow evaluation for one proposal
     Shadow {
         /// Agent evolution proposal ID

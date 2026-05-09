@@ -44,6 +44,9 @@ fn handle_evolve_action(db: &DbInstance, action: &AgentEvolveAction) -> Result<(
         AgentEvolveAction::Reject { proposal_id } => {
             cmd_update_proposal_status(db, proposal_id, "rejected")
         }
+        AgentEvolveAction::Report { agent, json } => {
+            crate::command::agent_evolve_report::cmd_report_agent_evolution(db, agent, *json)
+        }
         AgentEvolveAction::Shadow {
             proposal_id,
             task_set,

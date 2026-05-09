@@ -358,4 +358,25 @@ mod agent_evolve_parse_tests {
             other => panic!("expected agent evolve permissions, got {other:?}"),
         }
     }
+
+    #[test]
+    fn agent_evolve_report_parses_agent_and_json() {
+        let cli = Cli::try_parse_from([
+            "archon", "agent", "evolve", "report", "--agent", "reviewer", "--json",
+        ])
+        .expect("agent evolve report must parse");
+
+        match cli.command {
+            Some(Commands::Agent {
+                action:
+                    AgentAction::Evolve {
+                        action: AgentEvolveAction::Report { agent, json },
+                    },
+            }) => {
+                assert_eq!(agent, "reviewer");
+                assert!(json);
+            }
+            other => panic!("expected agent evolve report, got {other:?}"),
+        }
+    }
 }
