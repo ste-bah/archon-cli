@@ -261,8 +261,10 @@ async function sendPromptToChatPanel(
   updateStatusBar("connecting");
 
   try {
-    // Use a placeholder session ID; real initialization happens in connectFromConfig.
-    await connectionManager.sendPrompt("default-session", text);
+    // Real session ID was captured during the initialize handshake in
+    // connectFromConfig; sendPrompt prefers it over the legacy argument.
+    const sessionId = connectionManager.getSessionId() ?? "default-session";
+    await connectionManager.sendPrompt(sessionId, text);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     panel.showError(msg);

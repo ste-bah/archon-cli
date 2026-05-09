@@ -132,7 +132,17 @@ test("config_key_connection_mode: CONFIG_KEY_CONNECTION_MODE constant is defined
   assert.strictEqual(CONFIG_KEY_CONNECTION_MODE, "archon.connectionMode");
 });
 
-// ── Test 10: archon_command_ids ───────────────────────────────────────────────
+// ── Test 10: connection_manager_initial_state ────────────────────────────────
+
+test("connection_manager_initial_state: getState='idle', getSessionId=null before connect", () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { ConnectionManager } = require("../src/connection/manager") as typeof import("../src/connection/manager");
+  const mgr = new ConnectionManager();
+  assert.strictEqual(mgr.getState(), "idle");
+  assert.strictEqual(mgr.getSessionId(), null);
+});
+
+// ── Test 11: archon_command_ids ───────────────────────────────────────────────
 
 test("archon_command_ids: COMMANDS object has at least 4 command ID strings", () => {
   const commandValues = Object.values(COMMANDS);
