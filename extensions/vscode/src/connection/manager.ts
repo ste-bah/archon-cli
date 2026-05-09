@@ -97,7 +97,7 @@ export class ConnectionManager {
     const { spawn } = require("child_process") as typeof import("child_process");
 
     return new Promise<void>((resolve, reject) => {
-      const child = spawn(binaryPath, ["--ide-mode"], {
+      const child = spawn(binaryPath, ["ide-stdio"], {
         stdio: ["pipe", "pipe", "inherit"],
       });
 
