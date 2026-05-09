@@ -85,7 +85,7 @@ provider = "anthropic"
 enabled = true
 # Runtime strategy: "direct" preserves the current direct backend. "auto"
 # attempts app-server first and can use direct only when direct_fallback=true.
-# "app_server" fails visibly until the app-server adapter is available.
+# "app_server" requires a configured JSON-RPC app-server transport.
 runtime = "direct"
 direct_fallback = false
 # App-server transport for runtime="app_server" or runtime="auto":

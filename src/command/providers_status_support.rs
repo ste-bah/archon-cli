@@ -96,9 +96,6 @@ pub(super) fn status_from_descriptor(
     status = status.with_health(health);
     if descriptor.id == "openai-codex" {
         status = status.with_redacted_json(codex_status_metadata(&config.providers.openai_codex));
-        if normalize_codex_runtime(&config.providers.openai_codex.runtime) == "app_server" {
-            status = status.with_health(ProviderHealthStatus::Unavailable);
-        }
     }
     status
 }
@@ -125,7 +122,7 @@ fn codex_status_metadata(config: &archon_core::config::CodexProviderConfig) -> s
             serde_json::json!({
                 "runtime": normalize_codex_runtime(&config.runtime),
                 "direct_fallback": config.direct_fallback,
-                "adapter_state": "unimplemented",
+                "adapter_state": "implemented",
                 "status_note": codex_strategy_status_note(
                     config,
                     discovery.status_label(),
@@ -153,11 +150,10 @@ fn codex_strategy_status_note(
         (_, _, "invalid") => "app-server:invalid-url",
         ("direct", _, "configured") => "app-server:configured direct-selected",
         ("direct", _, _) => "direct",
-        ("auto", true, "configured") => "app-server:configured direct-fallback",
+        ("auto", _, "configured") => "app-server:configured selected",
         ("auto", true, _) => "app-server:not-configured direct-fallback",
-        ("auto", false, "configured") => "app-server:adapter-pending fallback-disabled",
         ("auto", false, _) => "app-server:not-configured fallback-disabled",
-        ("app_server", _, "configured") => "app-server:adapter-pending",
+        ("app_server", _, "configured") => "app-server:configured selected",
         ("app_server", _, _) => "app-server:not-configured",
         _ => "invalid-codex-runtime",
     }

@@ -31,7 +31,7 @@ impl CodexAppServerDiscovery {
 
     pub(crate) fn reason_code(&self) -> &'static str {
         match self {
-            Self::Configured(_) => "codex_app_server_adapter_unimplemented",
+            Self::Configured(_) => "codex_app_server_configured",
             Self::Invalid(target) => match target.reason {
                 "parse_error" | "unsupported_scheme" | "missing_host" => {
                     "codex_app_server_invalid_url"

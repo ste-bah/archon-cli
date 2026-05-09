@@ -20,10 +20,10 @@ app_server_model_catalog = ["gpt-5.5", "gpt-5.4"]
 ```
 
 `direct` is the compatibility path and talks through Archon's native Codex
-provider. `app_server` currently fails closed because the app-server transport
-adapter is not implemented. `auto` may use direct only when
-`direct_fallback = true`; the fallback is persisted as a redacted provider
-runtime event in Cozo.
+provider. `app_server` talks JSON-RPC over the configured app-server
+transport. `auto` selects app-server when the transport target is configured;
+otherwise it may use direct only when `direct_fallback = true`. Fallbacks are
+persisted as redacted provider runtime events in Cozo.
 
 Codex app-server is a JSON-RPC transport. `app_server_transport = "websocket"`
 uses `app_server_url`; `app_server_transport = "stdio"` spawns
@@ -58,6 +58,7 @@ archon providers report --provider openai-codex --json
 
 ## Safety Notes
 
-Codex app-server fallback is policy controlled and auditable. It must not
-silently bypass the provider runtime event store, permission preflight, sandbox
-backend, or Anthropic spoofing invariants.
+Codex app-server fallback is policy controlled and auditable. The app-server
+provider adapter refuses Archon tool schemas until a governed dynamic-tool
+bridge exists, so provider-side tools cannot silently bypass Archon's
+permission preflight, sandbox backend, or Anthropic spoofing invariants.

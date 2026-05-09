@@ -14,6 +14,13 @@ pub(crate) async fn build_codex_provider(
         &config.providers.openai_codex,
         surface,
     )?;
+    if decision.selected_runtime_mode == "app_server" {
+        let provider = crate::runtime::codex_app_server_provider::CodexAppServerProvider::new(
+            config.providers.openai_codex.clone(),
+        )
+        .with_context(|| format!("failed to construct Codex app-server provider for {surface}"))?;
+        return Ok((Arc::new(provider), decision.selected_runtime_mode));
+    }
     let provider = build_direct_codex_provider(config, surface).await?;
     Ok((provider, decision.selected_runtime_mode))
 }

@@ -86,8 +86,8 @@ fn codex_status_shows_app_server_when_configured() {
 
     assert!(body.contains("app_server"));
     assert!(body.contains("app-server"));
-    assert!(body.contains("unavailable"));
-    assert!(body.contains("adapter-pending"));
+    assert!(body.contains("missing-credentials"));
+    assert!(body.contains("configured selected"));
 }
 
 #[test]
@@ -118,7 +118,7 @@ fn codex_status_persists_app_server_discovery_metadata() {
     );
     assert_eq!(
         status.metadata_redacted_json["codex_strategy"]["status_note"],
-        "app-server:configured direct-fallback"
+        "app-server:configured selected"
     );
 }
 
