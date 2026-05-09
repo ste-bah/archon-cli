@@ -28,6 +28,13 @@ fn handle_evolve_action(db: &DbInstance, action: &AgentEvolveAction) -> Result<(
         AgentEvolveAction::Approve { proposal_id } => {
             cmd_update_proposal_status(db, proposal_id, "approved")
         }
+        AgentEvolveAction::Digest {
+            agent,
+            persist,
+            json,
+        } => crate::command::agent_evolve_digest::cmd_generate_agent_digest(
+            db, agent, *persist, *json,
+        ),
         AgentEvolveAction::Generate { agent } => {
             crate::command::agent_evolve_generate::cmd_generate_agent_evolution(db, agent)
         }

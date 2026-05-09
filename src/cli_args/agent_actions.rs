@@ -33,6 +33,18 @@ pub enum AgentEvolveAction {
         /// Agent evolution proposal ID
         proposal_id: String,
     },
+    /// Compile an Archon-native knowledge digest for an agent
+    Digest {
+        /// Agent type to inspect
+        #[arg(long)]
+        agent: String,
+        /// Persist generated claims into Cozo learning events
+        #[arg(long)]
+        persist: bool,
+        /// Output the digest as JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Generate governed proposals from persisted agent performance ledger rows
     Generate {
         /// Agent type to scan in the Cozo-backed performance ledger
