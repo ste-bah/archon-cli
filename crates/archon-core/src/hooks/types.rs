@@ -4,7 +4,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
-// HookEvent — 27 variants, PascalCase serialization (serde default)
+// HookEvent — PascalCase serialization with PRD snake_case aliases.
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -36,6 +36,30 @@ pub enum HookEvent {
     InstructionsLoaded,
     CwdChanged,
     FileChanged,
+    #[serde(alias = "before_provider_resolve")]
+    BeforeProviderResolve,
+    #[serde(alias = "after_provider_resolve")]
+    AfterProviderResolve,
+    #[serde(alias = "before_prompt_build")]
+    BeforePromptBuild,
+    #[serde(alias = "after_prompt_build")]
+    AfterPromptBuild,
+    #[serde(alias = "before_agent_run")]
+    BeforeAgentRun,
+    #[serde(alias = "after_agent_run")]
+    AfterAgentRun,
+    #[serde(alias = "before_tool_call")]
+    BeforeToolCall,
+    #[serde(alias = "after_tool_call")]
+    AfterToolCall,
+    #[serde(alias = "before_learning_event")]
+    BeforeLearningEvent,
+    #[serde(alias = "after_learning_event")]
+    AfterLearningEvent,
+    #[serde(alias = "before_agent_profile_apply")]
+    BeforeAgentProfileApply,
+    #[serde(alias = "after_agent_profile_apply")]
+    AfterAgentProfileApply,
 }
 
 /// Backward-compat alias — `HookType` and `HookEvent` are the same type.

@@ -122,7 +122,7 @@ impl Agent {
     }
 
     /// Detect correction patterns in user input and record via CorrectionTracker.
-    pub(super) fn detect_and_record_correction(
+    pub(super) async fn detect_and_record_correction(
         &self,
         user_input: &str,
         graph: &Arc<dyn MemoryTrait>,
@@ -206,12 +206,17 @@ impl Agent {
         }
 
         if let Some(ref cb) = self.record_user_correction_event_callback {
-            cb(UserCorrectionEventPayload {
+            let payload = UserCorrectionEventPayload {
                 correction_type: format!("{correction_type:?}"),
                 top_rule_id,
                 user_input_excerpt: user_correction_excerpt(user_input),
                 session_context: context,
-            });
+            };
+            self.fire_before_learning_event_hook("UserCorrected", &payload)
+                .await;
+            cb(payload.clone());
+            self.fire_after_learning_event_hook("UserCorrected", &payload)
+                .await;
         }
     }
 

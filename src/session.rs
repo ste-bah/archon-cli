@@ -566,6 +566,12 @@ async fn build_session_agent(
     } else {
         None
     };
+    let hook_registry_arc = crate::runtime::hooks::load_runtime_hook_registry(&working_dir);
+    crate::runtime::hooks::register_agent_session_hooks(
+        &hook_registry_arc,
+        session_id,
+        agent_def.as_ref(),
+    );
 
     if let Some(ref def) = agent_def {
         if let Some(ref allowed) = def.allowed_tools {
@@ -811,6 +817,26 @@ async fn build_session_agent(
         tokio::sync::mpsc::unbounded_channel::<TimestampedEvent>();
     let selected_model = agent_config.model.clone();
     let permission_mode_for_built = Arc::clone(&agent_config.permission_mode);
+    let requested_provider_for_hooks = if is_codex_session(config) {
+        "openai-codex"
+    } else {
+        config.llm.provider.as_str()
+    };
+    crate::runtime::hooks::fire_provider_resolve_hook(
+        &hook_registry_arc,
+        &working_dir,
+        session_id,
+        crate::runtime::hooks::ProviderResolveHookPayload {
+            hook_event: "BeforeProviderResolve",
+            stage: "before_provider_resolve",
+            surface: "session_agent",
+            requested_provider: requested_provider_for_hooks,
+            selected_provider: None,
+            runtime_mode: None,
+            profile_id: None,
+        },
+    )
+    .await;
     let provider = if is_codex_session(config) {
         let (provider, runtime_mode) =
             match crate::runtime::codex_provider::build_codex_provider(config, "session_agent")
@@ -860,6 +886,26 @@ async fn build_session_agent(
         observe_llm_provider_with_profile(provider, runtime_mode, profile_id)
     };
     let selected_provider = provider.name().to_string();
+    let runtime_mode_for_hooks = runtime_mode_for_provider_name(&selected_provider);
+    let profile_id_for_hooks =
+        crate::runtime::provider_auth_selection::selected_provider_auth_profile_id(
+            &selected_provider,
+        );
+    crate::runtime::hooks::fire_provider_resolve_hook(
+        &hook_registry_arc,
+        &working_dir,
+        session_id,
+        crate::runtime::hooks::ProviderResolveHookPayload {
+            hook_event: "AfterProviderResolve",
+            stage: "after_provider_resolve",
+            surface: "session_agent",
+            requested_provider: requested_provider_for_hooks,
+            selected_provider: Some(&selected_provider),
+            runtime_mode: Some(runtime_mode_for_hooks),
+            profile_id: profile_id_for_hooks.as_deref(),
+        },
+    )
+    .await;
     tracing::info!("LLM provider: {}", provider.name());
 
     let agent_registry = Arc::new(std::sync::RwLock::new(AgentRegistry::load(&working_dir)));
@@ -887,28 +933,7 @@ async fn build_session_agent(
         return Err(archon_core::print_mode::EXIT_ERROR);
     }
 
-    {
-        let home_dir = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
-        let hook_registry = archon_core::hooks::HookRegistry::load_all(&working_dir, &home_dir);
-        let arc = std::sync::Arc::new(hook_registry);
-        agent.set_hook_registry(Arc::clone(&arc));
-
-        if let Some(ref def) = agent_def
-            && let Some(ref hooks_json) = def.hooks
-        {
-            match archon_core::agents::loader::parse_agent_hooks(hooks_json) {
-                Ok(hook_pairs) => {
-                    for (event, config) in hook_pairs {
-                        arc.register_session_hook(session_id, event, config);
-                    }
-                    tracing::info!(agent = %def.agent_type, "registered agent session-scoped hooks");
-                }
-                Err(e) => {
-                    tracing::warn!(agent = %def.agent_type, error = %e, "failed to parse agent hooks")
-                }
-            }
-        }
-    }
+    agent.set_hook_registry(Arc::clone(&hook_registry_arc));
 
     let auto_eval = AutoModeEvaluator::new(AutoModeConfig {
         project_dir: Some(working_dir),
@@ -1388,6 +1413,7 @@ pub(crate) async fn run_interactive_session(
 
     // ── Phase 2: Load MCP server configs (CLI-101) ──────────────
     let working_dir = std::env::current_dir().unwrap_or_default();
+    let hook_registry_arc = crate::runtime::hooks::load_runtime_hook_registry(&working_dir);
     let mcp_configs = if resolved_flags.bare_mode {
         tracing::info!("bare mode: skipping MCP auto-discovery");
         Vec::new()
@@ -1432,18 +1458,49 @@ pub(crate) async fn run_interactive_session(
             tracing::info!(
                 "LLM provider selected: openai-codex (skipping Anthropic auth bootstrap)"
             );
+            crate::runtime::hooks::fire_provider_resolve_hook(
+                &hook_registry_arc,
+                &working_dir,
+                session_id,
+                crate::runtime::hooks::ProviderResolveHookPayload {
+                    hook_event: "BeforeProviderResolve",
+                    stage: "before_provider_resolve",
+                    surface: "tui_session",
+                    requested_provider: "openai-codex",
+                    selected_provider: None,
+                    runtime_mode: None,
+                    profile_id: None,
+                },
+            )
+            .await;
             let prompt_identity = IdentityProvider::new(
                 IdentityMode::Clean,
                 session_id.to_string(),
                 get_or_create_device_id(),
                 String::new(),
             );
-            (
-                Some(build_codex_session_provider(config).await?),
-                None,
-                None,
-                prompt_identity,
+            let codex_provider = build_codex_session_provider(config).await?;
+            let selected_provider = codex_provider.name().to_string();
+            let profile_id =
+                crate::runtime::provider_auth_selection::selected_provider_auth_profile_id(
+                    &selected_provider,
+                );
+            crate::runtime::hooks::fire_provider_resolve_hook(
+                &hook_registry_arc,
+                &working_dir,
+                session_id,
+                crate::runtime::hooks::ProviderResolveHookPayload {
+                    hook_event: "AfterProviderResolve",
+                    stage: "after_provider_resolve",
+                    surface: "tui_session",
+                    requested_provider: "openai-codex",
+                    selected_provider: Some(&selected_provider),
+                    runtime_mode: Some(runtime_mode_for_provider_name(&selected_provider)),
+                    profile_id: profile_id.as_deref(),
+                },
             )
+            .await;
+            (Some(codex_provider), None, None, prompt_identity)
         } else if config.llm.provider != "anthropic" {
             let prompt_identity = IdentityProvider::new(
                 IdentityMode::Clean,
@@ -1664,6 +1721,11 @@ pub(crate) async fn run_interactive_session(
             None
         };
     drop(agent_registry_tmp);
+    crate::runtime::hooks::register_agent_session_hooks(
+        &hook_registry_arc,
+        session_id,
+        agent_def.as_ref(),
+    );
 
     // Apply agent tool filtering to registry
     if let Some(ref def) = agent_def {
@@ -2054,6 +2116,24 @@ pub(crate) async fn run_interactive_session(
     let (user_input_tx, user_input_rx) = tokio::sync::mpsc::channel::<String>(16);
 
     // Create agent
+    let provider_was_prebuilt = provider_override.is_some();
+    if !provider_was_prebuilt {
+        crate::runtime::hooks::fire_provider_resolve_hook(
+            &hook_registry_arc,
+            &working_dir,
+            session_id,
+            crate::runtime::hooks::ProviderResolveHookPayload {
+                hook_event: "BeforeProviderResolve",
+                stage: "before_provider_resolve",
+                surface: "interactive_session",
+                requested_provider: &config.llm.provider,
+                selected_provider: None,
+                runtime_mode: None,
+                profile_id: None,
+            },
+        )
+        .await;
+    }
     let provider = match provider_override {
         Some(provider) => provider,
         None => match anthropic_client {
@@ -2097,6 +2177,27 @@ pub(crate) async fn run_interactive_session(
             }
         },
     };
+    if !provider_was_prebuilt {
+        let selected_provider = provider.name().to_string();
+        let profile_id = crate::runtime::provider_auth_selection::selected_provider_auth_profile_id(
+            &selected_provider,
+        );
+        crate::runtime::hooks::fire_provider_resolve_hook(
+            &hook_registry_arc,
+            &working_dir,
+            session_id,
+            crate::runtime::hooks::ProviderResolveHookPayload {
+                hook_event: "AfterProviderResolve",
+                stage: "after_provider_resolve",
+                surface: "interactive_session",
+                requested_provider: &config.llm.provider,
+                selected_provider: Some(&selected_provider),
+                runtime_mode: Some(runtime_mode_for_provider_name(&selected_provider)),
+                profile_id: profile_id.as_deref(),
+            },
+        )
+        .await;
+    }
     tracing::info!("LLM provider: {}", provider.name());
 
     // Load custom agent registry (built-in + project + user agents)
@@ -2490,31 +2591,10 @@ pub(crate) async fn run_interactive_session(
         }
     }
 
-    // Wire hook system — load hooks from all sources (settings.json + TOML)
-    let hook_registry_arc = {
-        let home_dir = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
-        let hook_registry = archon_core::hooks::HookRegistry::load_all(&working_dir, &home_dir);
-        let arc = std::sync::Arc::new(hook_registry);
-        agent.set_hook_registry(Arc::clone(&arc));
-        arc
-    };
+    agent.set_hook_registry(Arc::clone(&hook_registry_arc));
 
-    // Wire Phase G agent definition fields (hooks, critical_system_reminder)
+    // Wire Phase G agent definition fields (critical_system_reminder)
     if let Some(ref def) = agent_def {
-        // Register agent-specific hooks as session-scoped hooks
-        if let Some(ref hooks_json) = def.hooks {
-            match archon_core::agents::loader::parse_agent_hooks(hooks_json) {
-                Ok(hook_pairs) => {
-                    for (event, config) in hook_pairs {
-                        hook_registry_arc.register_session_hook(session_id, event, config);
-                    }
-                    tracing::info!(agent = %def.agent_type, "registered agent session-scoped hooks");
-                }
-                Err(e) => {
-                    tracing::warn!(agent = %def.agent_type, error = %e, "failed to parse agent hooks")
-                }
-            }
-        }
         // Set critical system reminder for per-turn injection
         if let Some(ref reminder) = def.critical_system_reminder {
             agent.set_critical_system_reminder(reminder.clone());

@@ -262,6 +262,8 @@ impl Agent {
             } else {
                 None
             };
+            self.fire_before_tool_call_hook(&tool.name, &tool.id, &input)
+                .await;
 
             allowed.push(PreflightResult {
                 tool_name: tool.name.clone(),

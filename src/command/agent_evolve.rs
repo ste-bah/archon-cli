@@ -14,17 +14,17 @@ pub(crate) async fn handle_agent_command(
     archon_learning::schema::ensure_learning_schema(&db)?;
 
     match action {
-        AgentAction::Evolve { action } => handle_evolve_action(&db, action),
+        AgentAction::Evolve { action } => handle_evolve_action(&db, action).await,
     }
 }
 
-fn handle_evolve_action(db: &DbInstance, action: &AgentEvolveAction) -> Result<()> {
+async fn handle_evolve_action(db: &DbInstance, action: &AgentEvolveAction) -> Result<()> {
     match action {
         AgentEvolveAction::Active { agent, json } => cmd_show_active_profile(db, agent, *json),
         AgentEvolveAction::Apply {
             proposal_id,
             activate,
-        } => cmd_apply_proposal(db, proposal_id, *activate),
+        } => cmd_apply_proposal(db, proposal_id, *activate).await,
         AgentEvolveAction::Approve { proposal_id } => {
             cmd_update_proposal_status(db, proposal_id, "approved")
         }
@@ -87,7 +87,7 @@ fn handle_evolve_action(db: &DbInstance, action: &AgentEvolveAction) -> Result<(
             agent,
             version_id,
             activate,
-        } => cmd_rollback_profile(db, agent, version_id, *activate),
+        } => cmd_rollback_profile(db, agent, version_id, *activate).await,
     }
 }
 
@@ -294,8 +294,28 @@ fn cmd_list_agent_evolution(
     Ok(())
 }
 
-fn cmd_apply_proposal(db: &DbInstance, proposal_id: &str, activate: bool) -> Result<()> {
+async fn cmd_apply_proposal(db: &DbInstance, proposal_id: &str, activate: bool) -> Result<()> {
+    fire_agent_profile_apply_hook(
+        archon_core::hooks::HookEvent::BeforeAgentProfileApply,
+        "BeforeAgentProfileApply",
+        "before_agent_profile_apply",
+        "apply",
+        proposal_id,
+        activate,
+        None,
+    )
+    .await;
     let applied = crate::command::agent_evolve_apply::apply_proposal(db, proposal_id, activate)?;
+    fire_agent_profile_apply_hook(
+        archon_core::hooks::HookEvent::AfterAgentProfileApply,
+        "AfterAgentProfileApply",
+        "after_agent_profile_apply",
+        "apply",
+        proposal_id,
+        activate,
+        Some(applied.version_id.as_str()),
+    )
+    .await;
     println!(
         "Applied proposal {} into profile version {} (active={}).",
         proposal_id,
@@ -305,14 +325,34 @@ fn cmd_apply_proposal(db: &DbInstance, proposal_id: &str, activate: bool) -> Res
     Ok(())
 }
 
-fn cmd_rollback_profile(
+async fn cmd_rollback_profile(
     db: &DbInstance,
     agent_type: &str,
     version_id: &str,
     activate: bool,
 ) -> Result<()> {
+    fire_agent_profile_apply_hook(
+        archon_core::hooks::HookEvent::BeforeAgentProfileApply,
+        "BeforeAgentProfileApply",
+        "before_agent_profile_apply",
+        "rollback",
+        version_id,
+        activate,
+        None,
+    )
+    .await;
     let applied =
         crate::command::agent_evolve_apply::rollback_profile(db, agent_type, version_id, activate)?;
+    fire_agent_profile_apply_hook(
+        archon_core::hooks::HookEvent::AfterAgentProfileApply,
+        "AfterAgentProfileApply",
+        "after_agent_profile_apply",
+        "rollback",
+        version_id,
+        activate,
+        Some(applied.version_id.as_str()),
+    )
+    .await;
     println!(
         "Created rollback profile version {} for agent {} (active={}).",
         applied.version_id,
@@ -320,6 +360,34 @@ fn cmd_rollback_profile(
         yes_no(applied.active)
     );
     Ok(())
+}
+
+async fn fire_agent_profile_apply_hook(
+    event: archon_core::hooks::HookEvent,
+    hook_event: &str,
+    stage: &str,
+    action: &str,
+    source_id: &str,
+    activate: bool,
+    version_id: Option<&str>,
+) {
+    let working_dir = std::env::current_dir().unwrap_or_default();
+    let registry = crate::runtime::hooks::load_runtime_hook_registry(&working_dir);
+    crate::runtime::hooks::fire_runtime_hook(
+        &registry,
+        event,
+        &working_dir,
+        "agent-evolve",
+        serde_json::json!({
+            "hook_event": hook_event,
+            "stage": stage,
+            "profile_action": action,
+            "source_id": source_id,
+            "activate": activate,
+            "version_id": version_id,
+        }),
+    )
+    .await;
 }
 
 fn cmd_update_proposal_status(db: &DbInstance, proposal_id: &str, status: &str) -> Result<()> {
