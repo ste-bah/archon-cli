@@ -345,6 +345,25 @@ mod tests {
     }
 
     #[test]
+    fn discovery_accepts_http_and_websocket_schemes() {
+        for endpoint in [
+            "http://127.0.0.1:11434/codex",
+            "https://codex.example.invalid/app-server",
+            "ws://127.0.0.1:11434/codex",
+            "wss://codex.example.invalid/app-server",
+        ] {
+            let config = CodexProviderConfig {
+                app_server_url: Some(endpoint.into()),
+                ..CodexProviderConfig::default()
+            };
+
+            let discovered = discover_codex_app_server_with_env(&config, None);
+
+            assert!(discovered.is_configured(), "{endpoint} should be accepted");
+        }
+    }
+
+    #[test]
     fn discovery_supports_stdio_transport() {
         let config = CodexProviderConfig {
             app_server_transport: "stdio".into(),

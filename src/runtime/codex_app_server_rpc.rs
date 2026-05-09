@@ -330,3 +330,32 @@ fn websocket_url(url: &str) -> String {
 fn normalize_transport(value: &str) -> String {
     value.trim().to_ascii_lowercase().replace('-', "_")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn websocket_url_preserves_ws_and_wss() {
+        assert_eq!(
+            websocket_url("ws://127.0.0.1:11434/codex"),
+            "ws://127.0.0.1:11434/codex"
+        );
+        assert_eq!(
+            websocket_url("wss://codex.example.invalid/app-server"),
+            "wss://codex.example.invalid/app-server"
+        );
+    }
+
+    #[test]
+    fn websocket_url_converts_http_compatibility_schemes() {
+        assert_eq!(
+            websocket_url("http://127.0.0.1:11434/codex"),
+            "ws://127.0.0.1:11434/codex"
+        );
+        assert_eq!(
+            websocket_url("https://codex.example.invalid/app-server"),
+            "wss://codex.example.invalid/app-server"
+        );
+    }
+}
