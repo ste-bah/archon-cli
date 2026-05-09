@@ -245,6 +245,17 @@ pub enum AgentEvolveAction {
         #[arg(long)]
         agent: String,
     },
+    /// Promote one memory candidate into the Archon memory graph
+    MemoryPromote {
+        /// Memory promotion candidate ID
+        candidate_id: String,
+        /// Minimum weighted score required for promotion
+        #[arg(long, default_value_t = 0.85)]
+        min_score: f64,
+        /// Show what would be written without storing memory
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Show permission-impact details for one proposal
     Permissions {
         /// Agent evolution proposal ID

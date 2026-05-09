@@ -35,6 +35,11 @@ fn handle_evolve_action(db: &DbInstance, action: &AgentEvolveAction) -> Result<(
             cmd_list_agent_evolution(db, status.as_deref(), agent.as_deref())
         }
         AgentEvolveAction::MemoryCandidates { agent } => cmd_list_memory_candidates(db, agent),
+        AgentEvolveAction::MemoryPromote {
+            candidate_id,
+            min_score,
+            dry_run,
+        } => cmd_promote_memory_candidate(db, candidate_id, *min_score, *dry_run),
         AgentEvolveAction::Permissions { proposal_id } => cmd_show_permission_diff(db, proposal_id),
         AgentEvolveAction::Reject { proposal_id } => {
             cmd_update_proposal_status(db, proposal_id, "rejected")
@@ -84,6 +89,93 @@ fn cmd_list_memory_candidates(db: &DbInstance, agent_type: &str) -> Result<()> {
     }
     println!("\n{} candidate(s)", candidates.len());
     Ok(())
+}
+
+fn cmd_promote_memory_candidate(
+    db: &DbInstance,
+    candidate_id: &str,
+    min_score: f64,
+    dry_run: bool,
+) -> Result<()> {
+    let candidate = archon_learning::memory_promotion_candidates::get_memory_promotion_candidate(
+        db,
+        candidate_id,
+    )?
+    .ok_or_else(|| anyhow::anyhow!("memory promotion candidate not found: {candidate_id}"))?;
+    let score = promotion_score(&candidate);
+    if score < min_score {
+        anyhow::bail!(
+            "candidate {} score {:.3} is below required threshold {:.3}",
+            candidate.candidate_id,
+            score,
+            min_score
+        );
+    }
+
+    if dry_run {
+        println!("Memory promotion dry run");
+        println!("Candidate: {}", candidate.candidate_id);
+        println!("Agent:     {}", candidate.agent_type);
+        println!("Score:     {:.3}", score);
+        println!("Claim:     {}", candidate.claim);
+        println!("Target:    Archon memory graph (Cozo)");
+        return Ok(());
+    }
+
+    let graph = archon_memory::MemoryGraph::open_default()
+        .map_err(|error| anyhow::anyhow!("open memory graph: {error}"))?;
+    let project_path = std::env::current_dir()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+    let memory_id =
+        promote_memory_candidate_to_graph(&graph, &candidate, min_score, &project_path)?;
+    println!(
+        "Promoted memory candidate {} into Archon memory graph as {}.",
+        candidate.candidate_id, memory_id
+    );
+    Ok(())
+}
+
+fn promote_memory_candidate_to_graph(
+    memory: &dyn archon_memory::MemoryTrait,
+    candidate: &archon_learning::memory_promotion_candidates::MemoryPromotionCandidateRecord,
+    min_score: f64,
+    project_path: &str,
+) -> Result<String> {
+    let score = promotion_score(candidate);
+    if score < min_score {
+        anyhow::bail!(
+            "candidate {} score {:.3} is below required threshold {:.3}",
+            candidate.candidate_id,
+            score,
+            min_score
+        );
+    }
+    let mut tags = vec![
+        "agent-evolution".to_string(),
+        "memory-promotion".to_string(),
+        format!("agent:{}", candidate.agent_type),
+        format!("candidate:{}", candidate.candidate_id),
+    ];
+    tags.extend(
+        candidate
+            .evidence_ids
+            .iter()
+            .map(|evidence_id| format!("evidence:{evidence_id}")),
+    );
+    let title = format!("Agent {} correction", candidate.agent_type);
+    memory
+        .store_memory(
+            &candidate.claim,
+            &title,
+            archon_memory::types::MemoryType::Correction,
+            score,
+            &tags,
+            "agent_evolution_memory_promotion",
+            project_path,
+        )
+        .map_err(|error| anyhow::anyhow!("store promoted memory: {error}"))
 }
 
 fn cmd_show_active_profile(db: &DbInstance, agent_type: &str, json: bool) -> Result<()> {
@@ -307,5 +399,33 @@ mod tests {
             .with_scores(1.0, 0.5, 0.5, 0.0, 1.0);
 
         assert!((promotion_score(&candidate) - 0.725).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn memory_candidate_promotes_to_memory_graph() {
+        let graph = archon_memory::MemoryGraph::in_memory().unwrap();
+        let candidate =
+            archon_learning::memory_promotion_candidates::MemoryPromotionCandidateRecord::new(
+                "mem-1",
+                "planner",
+                "user_correction",
+                "memory_graph_fact",
+                "Always cite source evidence before changing plans.",
+                "2026-05-08T12:00:00Z",
+            )
+            .with_scores(1.0, 1.0, 1.0, 1.0, 1.0)
+            .with_evidence("ledger-1");
+
+        let memory_id = promote_memory_candidate_to_graph(&graph, &candidate, 0.85, "/repo")
+            .expect("candidate should promote");
+        let memory = graph.get_memory(&memory_id).unwrap();
+
+        assert_eq!(memory.content, candidate.claim);
+        assert!(memory.tags.contains(&"agent:planner".to_string()));
+        assert!(memory.tags.contains(&"evidence:ledger-1".to_string()));
+        assert_eq!(
+            memory.memory_type,
+            archon_memory::types::MemoryType::Correction
+        );
     }
 }
