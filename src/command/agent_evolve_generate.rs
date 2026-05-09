@@ -52,25 +52,23 @@ pub(crate) fn cmd_generate_agent_evolution(db: &DbInstance, agent_type: &str) ->
         archon_learning::agent_evolution_proposals::insert_agent_evolution_proposal(db, &record)?;
         inserted_proposals.push(proposal);
     }
-    for candidate in &memory_candidates {
-        archon_learning::memory_promotion_candidates::insert_memory_promotion_candidate(
-            db, candidate,
-        )?;
-    }
+    let (inserted_memory_candidates, skipped_duplicate_memory_candidates) =
+        insert_new_memory_candidates(db, agent_type, memory_candidates)?;
 
-    if inserted_proposals.is_empty() && memory_candidates.is_empty() {
+    if inserted_proposals.is_empty() && inserted_memory_candidates.is_empty() {
         println!(
-            "No new agent evolution proposals or memory candidates generated for {agent_type}. Skipped {skipped_duplicates} duplicate proposal(s)."
+            "No new agent evolution proposals or memory candidates generated for {agent_type}. Skipped {skipped_duplicates} duplicate proposal(s) and {skipped_duplicate_memory_candidates} duplicate memory candidate(s)."
         );
         return Ok(());
     }
 
     println!(
-        "Generated {} new agent evolution proposal(s) and {} memory candidate(s) for {agent_type} from {} ledger row(s). Skipped {} duplicate proposal(s).",
+        "Generated {} new agent evolution proposal(s) and {} new memory candidate(s) for {agent_type} from {} ledger row(s). Skipped {} duplicate proposal(s) and {} duplicate memory candidate(s).",
         inserted_proposals.len(),
-        memory_candidates.len(),
+        inserted_memory_candidates.len(),
         ledger.len(),
-        skipped_duplicates
+        skipped_duplicates,
+        skipped_duplicate_memory_candidates
     );
     for proposal in inserted_proposals {
         println!(
@@ -81,7 +79,7 @@ pub(crate) fn cmd_generate_agent_evolution(db: &DbInstance, agent_type: &str) ->
             proposal.expected_impact
         );
     }
-    for candidate in memory_candidates {
+    for candidate in inserted_memory_candidates {
         println!(
             "{:<24} {:<20} {:<10} {}",
             candidate.candidate_id, candidate.target, "memory", candidate.claim
@@ -97,6 +95,43 @@ fn existing_proposal_fingerprints(db: &DbInstance, agent_type: &str) -> Result<H
         .iter()
         .filter(|proposal| proposal.agent_type == agent_type)
         .map(proposal_fingerprint)
+        .collect())
+}
+
+fn insert_new_memory_candidates(
+    db: &DbInstance,
+    agent_type: &str,
+    memory_candidates: Vec<
+        archon_learning::memory_promotion_candidates::MemoryPromotionCandidateRecord,
+    >,
+) -> Result<(
+    Vec<archon_learning::memory_promotion_candidates::MemoryPromotionCandidateRecord>,
+    usize,
+)> {
+    let mut existing_ids = existing_memory_candidate_ids(db, agent_type)?;
+    let mut inserted_candidates = Vec::new();
+    let mut skipped_duplicates = 0usize;
+    for candidate in memory_candidates {
+        if !existing_ids.insert(candidate.candidate_id.clone()) {
+            skipped_duplicates += 1;
+            continue;
+        }
+        archon_learning::memory_promotion_candidates::insert_memory_promotion_candidate(
+            db, &candidate,
+        )?;
+        inserted_candidates.push(candidate);
+    }
+    Ok((inserted_candidates, skipped_duplicates))
+}
+
+fn existing_memory_candidate_ids(db: &DbInstance, agent_type: &str) -> Result<HashSet<String>> {
+    let candidates =
+        archon_learning::memory_promotion_candidates::list_memory_promotion_candidates_by_agent(
+            db, agent_type,
+        )?;
+    Ok(candidates
+        .into_iter()
+        .map(|candidate| candidate.candidate_id)
         .collect())
 }
 
@@ -196,6 +231,16 @@ fn stable_memory_candidate_id(agent_type: &str, evidence_ids: &[String]) -> Stri
 mod tests {
     use super::*;
 
+    fn test_db() -> DbInstance {
+        let path = format!(
+            "/tmp/test-agent-evolve-generate-{}.db",
+            uuid::Uuid::new_v4()
+        );
+        let db = DbInstance::new("sqlite", &path, "").unwrap();
+        archon_learning::schema::ensure_learning_schema(&db).unwrap();
+        db
+    }
+
     #[test]
     fn repeated_corrections_create_governed_memory_candidate() {
         let events = vec![
@@ -224,6 +269,37 @@ mod tests {
             stable_memory_candidate_id("planner", &evidence),
             stable_memory_candidate_id("planner", &evidence)
         );
+    }
+
+    #[test]
+    fn duplicate_memory_candidates_are_skipped_by_candidate_id() {
+        let db = test_db();
+        let candidate =
+            archon_learning::memory_promotion_candidates::MemoryPromotionCandidateRecord::new(
+                "memory-candidate-1",
+                "planner",
+                "user_correction",
+                "governed_learning_event",
+                "Review repeated corrections before durable memory promotion.",
+                "2026-05-08T12:00:00Z",
+            )
+            .with_evidence("ledger-1");
+        archon_learning::memory_promotion_candidates::insert_memory_promotion_candidate(
+            &db, &candidate,
+        )
+        .unwrap();
+
+        let (inserted, skipped) =
+            insert_new_memory_candidates(&db, "planner", vec![candidate]).unwrap();
+
+        assert!(inserted.is_empty());
+        assert_eq!(skipped, 1);
+        let persisted =
+            archon_learning::memory_promotion_candidates::list_memory_promotion_candidates_by_agent(
+                &db, "planner",
+            )
+            .unwrap();
+        assert_eq!(persisted.len(), 1);
     }
 
     #[test]
