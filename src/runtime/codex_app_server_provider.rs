@@ -156,7 +156,8 @@ async fn run_app_server_turn(
     .await
     .ok();
 
-    let mut projector = AppServerStreamProjector::new(thread_id, turn_id, tx);
+    let mut projector =
+        AppServerStreamProjector::new(thread_id, turn_id, request.model.clone(), tx);
     projector.project_turn_snapshot(turn.get("turn")).await;
     let idle = Duration::from_millis(timeout_ms.max(100));
     while !projector.completed {
@@ -177,6 +178,7 @@ async fn run_app_server_turn(
 struct AppServerStreamProjector {
     thread_id: String,
     turn_id: String,
+    model_id: String,
     tx: mpsc::Sender<StreamEvent>,
     text_started: bool,
     emitted_text: bool,
@@ -184,10 +186,16 @@ struct AppServerStreamProjector {
 }
 
 impl AppServerStreamProjector {
-    fn new(thread_id: String, turn_id: String, tx: mpsc::Sender<StreamEvent>) -> Self {
+    fn new(
+        thread_id: String,
+        turn_id: String,
+        model_id: String,
+        tx: mpsc::Sender<StreamEvent>,
+    ) -> Self {
         Self {
             thread_id,
             turn_id,
+            model_id,
             tx,
             text_started: false,
             emitted_text: false,
@@ -196,6 +204,13 @@ impl AppServerStreamProjector {
     }
 
     async fn handle_notification(&mut self, notification: CodexNotification) {
+        if notification.method == "account/rateLimits/updated" {
+            super::codex_app_server_limits::record_rate_limits(
+                &notification.params,
+                Some(&self.model_id),
+            );
+            return;
+        }
         if !self.is_current_turn(&notification.params) {
             return;
         }
@@ -423,7 +438,8 @@ mod tests {
     #[tokio::test]
     async fn projector_emits_completed_turn_text() {
         let (tx, mut rx) = mpsc::channel(16);
-        let mut projector = AppServerStreamProjector::new("thread-1".into(), "turn-1".into(), tx);
+        let mut projector =
+            AppServerStreamProjector::new("thread-1".into(), "turn-1".into(), "gpt-5.4".into(), tx);
         projector
             .handle_notification(CodexNotification {
                 method: "turn/completed".into(),
