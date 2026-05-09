@@ -96,27 +96,33 @@ pub(crate) async fn build_configured_llm_provider(
     }
 
     if config.llm.provider != "anthropic" {
-        match build_llm_provider_without_anthropic_fallback(&config.llm) {
-            Ok(provider) => {
-                let selected_provider = provider.name().to_string();
-                let runtime_mode = runtime_mode_for_provider_name(&selected_provider);
-                let profile_id =
-                    crate::runtime::provider_auth_selection::selected_provider_auth_profile_id(
-                        &selected_provider,
+        let fallback_denial_reason =
+            match build_llm_provider_without_anthropic_fallback(&config.llm) {
+                Ok(provider) => {
+                    let selected_provider = provider.name().to_string();
+                    let runtime_mode = runtime_mode_for_provider_name(&selected_provider);
+                    let profile_id =
+                        crate::runtime::provider_auth_selection::selected_provider_auth_profile_id(
+                            &selected_provider,
+                        );
+                    return Ok(observe_llm_provider_with_profile(
+                        provider,
+                        runtime_mode,
+                        profile_id,
+                    ));
+                }
+                Err(provider_error) => {
+                    tracing::warn!(
+                        provider = %config.llm.provider,
+                        error = %provider_error,
+                        "provider construction failed before Anthropic fallback"
                     );
-                return Ok(observe_llm_provider_with_profile(
-                    provider,
-                    runtime_mode,
-                    profile_id,
-                ));
-            }
-            Err(provider_error) => {
-                tracing::warn!(
-                    provider = %config.llm.provider,
-                    error = %provider_error,
-                    "provider construction failed before Anthropic fallback"
-                );
-            }
+                    provider_construction_error_reason(&provider_error)
+                }
+            };
+
+        if !anthropic_fallback_auth_available(env_vars) {
+            record_anthropic_fallback_denied(&config.llm.provider, origin, fallback_denial_reason);
         }
     }
 
@@ -165,6 +171,59 @@ pub(crate) async fn build_configured_llm_provider(
         runtime_mode,
         profile_id,
     ))
+}
+
+pub(crate) fn record_anthropic_fallback_denied(
+    requested_provider: &str,
+    surface: &str,
+    provider_error_reason: &'static str,
+) {
+    if requested_provider == "anthropic" {
+        return;
+    }
+    crate::runtime::provider_fallback_events::record_provider_construction_fallback_denied(
+        requested_provider,
+        "anthropic",
+        "anthropic_fallback_auth_unavailable",
+        serde_json::json!({
+            "requested_provider": requested_provider,
+            "target_provider": "anthropic",
+            "source": "provider_construction",
+            "surface": surface,
+            "provider_error_reason": provider_error_reason,
+        }),
+    );
+}
+
+pub(crate) fn provider_construction_error_reason(error: &anyhow::Error) -> &'static str {
+    let message = error.to_string();
+    if message.contains("OpenAI selected but no API key found") {
+        "openai_missing_api_key"
+    } else if message.contains("Bedrock selected but region/model_id missing") {
+        "bedrock_missing_region_or_model"
+    } else if message.contains("Vertex selected but project_id missing") {
+        "vertex_missing_project_id"
+    } else if message.contains("unknown provider:") {
+        "openai_compatible_unknown_provider"
+    } else if message.contains("missing credential: env var") {
+        "openai_compatible_missing_credential"
+    } else {
+        "provider_construction_failed"
+    }
+}
+
+fn anthropic_fallback_auth_available(env_vars: &ArchonEnvVars) -> bool {
+    env_vars.anthropic_api_key.as_deref().is_some_and(has_text)
+        || env_vars.archon_api_key.as_deref().is_some_and(has_text)
+        || env_vars.archon_oauth_token.as_deref().is_some_and(has_text)
+        || std::env::var("ANTHROPIC_AUTH_TOKEN")
+            .ok()
+            .as_deref()
+            .is_some_and(has_text)
+}
+
+fn has_text(value: &str) -> bool {
+    !value.trim().is_empty()
 }
 
 /// Build the active LLM provider from the `[llm]` config section.

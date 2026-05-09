@@ -42,7 +42,10 @@ use archon_tui::event_channel::TuiEventSender;
 use archon_tui::observability;
 
 use crate::command::registry::default_registry;
-use crate::runtime::llm::build_llm_provider_selection;
+use crate::runtime::llm::{
+    build_llm_provider_selection, provider_construction_error_reason,
+    record_anthropic_fallback_denied,
+};
 use crate::runtime::llm_non_anthropic::build_llm_provider_without_anthropic_fallback;
 use crate::runtime::provider_observer::{
     observe_llm_provider_with_profile, record_provider_fallback, runtime_mode_for_provider_name,
@@ -842,6 +845,8 @@ async fn build_session_agent(
             None => match build_llm_provider_without_anthropic_fallback(&config.llm) {
                 Ok(provider) => provider,
                 Err(error) => {
+                    let reason = provider_construction_error_reason(&error);
+                    record_anthropic_fallback_denied(&config.llm.provider, "session_agent", reason);
                     eprintln!("Provider {} failed: {error}", config.llm.provider);
                     return Err(archon_core::print_mode::EXIT_ERROR);
                 }
@@ -2072,7 +2077,15 @@ pub(crate) async fn run_interactive_session(
             }
             None => {
                 let provider = build_llm_provider_without_anthropic_fallback(&config.llm).map_err(
-                    |error| anyhow::anyhow!("provider {} failed: {error}", config.llm.provider),
+                    |error| {
+                        let reason = provider_construction_error_reason(&error);
+                        record_anthropic_fallback_denied(
+                            &config.llm.provider,
+                            "interactive_session",
+                            reason,
+                        );
+                        anyhow::anyhow!("provider {} failed: {error}", config.llm.provider)
+                    },
                 )?;
                 let selected_provider = provider.name().to_string();
                 let runtime_mode = runtime_mode_for_provider_name(&selected_provider);

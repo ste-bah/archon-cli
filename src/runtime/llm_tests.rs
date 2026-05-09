@@ -157,6 +157,26 @@ fn openai_missing_key_errors_without_anthropic_fallback_client() {
 }
 
 #[test]
+fn provider_construction_error_reason_classifies_missing_credentials() {
+    let error = anyhow::anyhow!("missing credential: env var GROQ_API_KEY not set");
+
+    assert_eq!(
+        provider_construction_error_reason(&error),
+        "openai_compatible_missing_credential"
+    );
+}
+
+#[test]
+fn provider_construction_error_reason_classifies_unknown_provider() {
+    let error = anyhow::anyhow!("missing credential: env var unknown provider: nope not set");
+
+    assert_eq!(
+        provider_construction_error_reason(&error),
+        "openai_compatible_unknown_provider"
+    );
+}
+
+#[test]
 fn test_groq_without_env_falls_back_to_anthropic() {
     let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let prev = std::env::var("GROQ_API_KEY").ok();

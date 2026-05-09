@@ -42,6 +42,31 @@ pub(crate) fn record_provider_fallback_denied(
     );
 }
 
+pub(crate) fn record_provider_construction_fallback_denied(
+    requested_provider: &str,
+    target_provider: &str,
+    reason_code: &str,
+    metadata: serde_json::Value,
+) {
+    let Ok(db) = open_learning_db() else {
+        return;
+    };
+    let event = ProviderRuntimeEvent::new(
+        target_provider,
+        "direct",
+        ProviderRuntimeEventType::FallbackDenied,
+        ProviderRuntimeSeverity::Error,
+    )
+    .with_reason(reason_code)
+    .with_fallback(requested_provider, target_provider)
+    .with_redacted_json(metadata);
+    let record = crate::runtime::provider_event_record::provider_event_record(event);
+    if let Err(error) = archon_learning::runtime_events::insert_provider_runtime_event(&db, &record)
+    {
+        tracing::warn!(%error, target_provider, "provider fallback denial persistence failed");
+    }
+}
+
 fn record_provider_fallback_decision(
     provider_id: &str,
     from_runtime_mode: &str,
@@ -79,4 +104,31 @@ fn open_learning_db() -> Result<DbInstance> {
         .map_err(|e| anyhow::anyhow!("open learning db: {e}"))?;
     archon_learning::schema::ensure_learning_schema(&db)?;
     Ok(db)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn construction_fallback_denial_event_uses_provider_fallback_fields() {
+        let event = ProviderRuntimeEvent::new(
+            "anthropic",
+            "direct",
+            ProviderRuntimeEventType::FallbackDenied,
+            ProviderRuntimeSeverity::Error,
+        )
+        .with_reason("anthropic_fallback_auth_unavailable")
+        .with_fallback("openai", "anthropic");
+        let record = crate::runtime::provider_event_record::provider_event_record(event);
+
+        assert_eq!(record.provider_id, "anthropic");
+        assert_eq!(record.event_type, "fallback_denied");
+        assert_eq!(record.fallback_from.as_deref(), Some("openai"));
+        assert_eq!(record.fallback_to.as_deref(), Some("anthropic"));
+        assert_eq!(
+            record.reason_code.as_deref(),
+            Some("anthropic_fallback_auth_unavailable")
+        );
+    }
 }
