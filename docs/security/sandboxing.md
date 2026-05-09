@@ -19,7 +19,11 @@ archon sandbox test --backend docker
 
 `docker` can route Bash through a container when selected. It avoids mounting
 host credentials, the Docker socket, or privileged host paths by default, and
-uses the configured resource and network policy.
+uses the configured resource and network policy. The workspace is mounted
+read-only unless `workspace_access = "rw"` is configured; teams can keep the
+workspace read-only and expose only explicit relative `docker.writable_paths`.
+`workspace_access = "scratch"` adds an ephemeral `/scratch` mount without
+loosening the workspace.
 
 `ssh` and `openshell` are detect-only/fail-closed in this slice. If selected
 for Bash execution before a real transport is implemented, they return an

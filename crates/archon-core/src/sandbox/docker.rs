@@ -1,5 +1,5 @@
 use std::future::Future;
-use std::path::Path;
+use std::path::{Component, Path};
 use std::pin::Pin;
 use std::process::{Command, Stdio};
 use std::time::Duration;
@@ -56,7 +56,11 @@ impl DockerConfig {
             other => Err(format!(
                 "sandbox.docker.network must be disabled, limited, or enabled, got \"{other}\""
             )),
+        }?;
+        for path in &self.writable_paths {
+            normal_writable_path(path)?;
         }
+        Ok(())
     }
 }
 
@@ -126,7 +130,10 @@ pub fn docker_doctor_report(config: &DockerConfig, probe: DockerProbe) -> Docker
         .push("doctor is detect-only; Bash execution routes through Docker when selected".into());
     findings.push("provider credentials, SSH agents, Git credentials, and host home mounts are not passed by default".into());
 
-    let status = if config.privileged || config.mount_docker_socket || config.mount_home {
+    let status = if let Err(error) = config.validate() {
+        findings.push(format!("invalid config: {error}"));
+        DockerDoctorStatus::UnsafeConfig
+    } else if config.privileged || config.mount_docker_socket || config.mount_home {
         findings.push(
             "unsafe config: privileged mode, Docker socket mount, or home mount is enabled".into(),
         );
@@ -201,6 +208,7 @@ impl DockerSandboxBackend {
 
     fn safe_to_execute(&self) -> Result<(), String> {
         self.config.validate()?;
+        validate_workspace_access(&self.workspace_access)?;
         if !self.config.enabled {
             return Err("docker sandbox backend is disabled".into());
         }
@@ -323,7 +331,11 @@ fn docker_run_args(
     if let Some(cpus) = &config.cpu_limit {
         args.extend(["--cpus".into(), cpus.clone()]);
     }
-    args.extend(workspace_mount_args(&request.working_dir, workspace_access));
+    args.extend(workspace_mount_args(
+        &request.working_dir,
+        workspace_access,
+        &config.writable_paths,
+    ));
     args.extend(allowed_env_args(&request.env, &config.env_allowlist));
     args.extend([
         config.image.clone(),
@@ -334,23 +346,95 @@ fn docker_run_args(
     args
 }
 
-fn workspace_mount_args(working_dir: &Path, workspace_access: &str) -> Vec<String> {
-    let mode = if workspace_access == "rw" {
-        ""
-    } else {
-        ",readonly"
-    };
-    vec![
+fn workspace_mount_args(
+    working_dir: &Path,
+    workspace_access: &str,
+    writable_paths: &[String],
+) -> Vec<String> {
+    let readonly = workspace_access != "rw";
+    let mut args = vec![
         "--mount".into(),
         format!(
-            "type=bind,src={},dst=/workspace{mode}",
-            working_dir.display()
+            "type=bind,src={},dst=/workspace{}",
+            working_dir.display(),
+            if readonly { ",readonly" } else { "" }
         ),
         "--workdir".into(),
         "/workspace".into(),
-    ]
+    ];
+    if workspace_access == "scratch" {
+        args.extend(["--tmpfs".into(), "/scratch:rw,nosuid,size=512m".into()]);
+        args.extend(["--env".into(), "ARCHON_SANDBOX_SCRATCH=/scratch".into()]);
+    }
+    if readonly {
+        args.extend(writable_path_mount_args(working_dir, writable_paths));
+    }
+    args
 }
 
+fn writable_path_mount_args(working_dir: &Path, writable_paths: &[String]) -> Vec<String> {
+    let mut args = Vec::new();
+    for path in writable_paths {
+        let Ok(relative) = normal_writable_path(path) else {
+            continue;
+        };
+        let source = working_dir.join(&relative);
+        args.extend([
+            "--mount".into(),
+            format!(
+                "type=bind,src={},dst=/workspace/{}",
+                source.display(),
+                relative
+            ),
+        ]);
+    }
+    args
+}
+
+fn validate_workspace_access(workspace_access: &str) -> Result<(), String> {
+    match workspace_access {
+        "ro" | "rw" | "scratch" => Ok(()),
+        other => Err(format!(
+            "sandbox.workspace_access must be ro, rw, or scratch, got \"{other}\""
+        )),
+    }
+}
+
+fn normal_writable_path(path: &str) -> Result<String, String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Err("sandbox.docker.writable_paths entries must not be empty".into());
+    }
+    if trimmed.contains(',') || trimmed.contains('\0') {
+        return Err(format!(
+            "sandbox.docker.writable_paths entry \"{trimmed}\" contains an unsupported character"
+        ));
+    }
+    let path = Path::new(trimmed);
+    if path.is_absolute() {
+        return Err(format!(
+            "sandbox.docker.writable_paths entry \"{trimmed}\" must be relative to the workspace"
+        ));
+    }
+    let mut parts = Vec::new();
+    for component in path.components() {
+        match component {
+            Component::Normal(part) => parts.push(part.to_string_lossy().to_string()),
+            Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                return Err(format!(
+                    "sandbox.docker.writable_paths entry \"{trimmed}\" must not escape the workspace"
+                ));
+            }
+        }
+    }
+    if parts.is_empty() {
+        return Err(format!(
+            "sandbox.docker.writable_paths entry \"{trimmed}\" must name a subpath"
+        ));
+    }
+    Ok(parts.join("/"))
+}
 fn allowed_env_args(env: &[(String, String)], allowlist: &[String]) -> Vec<String> {
     let mut args = Vec::new();
     for name in allowlist {
