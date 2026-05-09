@@ -230,6 +230,14 @@ pub enum AgentEvolveAction {
         #[arg(long)]
         agent: String,
     },
+    /// Inspect one Cozo-backed agent evolution proposal
+    Inspect {
+        /// Agent evolution proposal ID
+        proposal_id: String,
+        /// Output the full inspection as JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// List Cozo-backed agent evolution proposals
     List {
         /// Filter by proposal status, e.g. pending, rejected, approved

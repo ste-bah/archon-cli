@@ -222,6 +222,32 @@ mod agent_evolve_parse_tests {
     }
 
     #[test]
+    fn agent_evolve_inspect_parses_proposal_and_json() {
+        let cli = Cli::try_parse_from([
+            "archon",
+            "agent",
+            "evolve",
+            "inspect",
+            "agent-evo-prop-1",
+            "--json",
+        ])
+        .expect("agent evolve inspect must parse");
+
+        match cli.command {
+            Some(Commands::Agent {
+                action:
+                    AgentAction::Evolve {
+                        action: AgentEvolveAction::Inspect { proposal_id, json },
+                    },
+            }) => {
+                assert_eq!(proposal_id, "agent-evo-prop-1");
+                assert!(json);
+            }
+            other => panic!("expected agent evolve inspect, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn agent_evolve_review_state_commands_parse() {
         let approve =
             Cli::try_parse_from(["archon", "agent", "evolve", "approve", "agent-evo-prop-1"])

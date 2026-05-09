@@ -31,6 +31,13 @@ fn handle_evolve_action(db: &DbInstance, action: &AgentEvolveAction) -> Result<(
         AgentEvolveAction::Generate { agent } => {
             crate::command::agent_evolve_generate::cmd_generate_agent_evolution(db, agent)
         }
+        AgentEvolveAction::Inspect { proposal_id, json } => {
+            crate::command::agent_evolve_inspect::cmd_inspect_agent_evolution(
+                db,
+                proposal_id,
+                *json,
+            )
+        }
         AgentEvolveAction::List { status, agent } => {
             cmd_list_agent_evolution(db, status.as_deref(), agent.as_deref())
         }
