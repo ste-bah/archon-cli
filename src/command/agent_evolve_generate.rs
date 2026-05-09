@@ -3,6 +3,7 @@
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use cozo::DbInstance;
+use sha2::{Digest, Sha256};
 
 pub(crate) fn cmd_generate_agent_evolution(db: &DbInstance, agent_type: &str) -> Result<()> {
     let ledger = archon_learning::agent_evolution_ledger::list_agent_performance_ledger_by_agent(
@@ -18,10 +19,11 @@ pub(crate) fn cmd_generate_agent_evolution(db: &DbInstance, agent_type: &str) ->
         archon_core::agents::evolution::AgentEvolutionRuntimeConfig::default(),
     );
     let proposals = runtime.propose(&events);
+    let memory_candidates = memory_candidates_from_events(agent_type, &events);
 
-    if proposals.is_empty() {
+    if proposals.is_empty() && memory_candidates.is_empty() {
         println!(
-            "No agent evolution proposals generated for {agent_type}. Scanned {} ledger row(s).",
+            "No agent evolution proposals or memory candidates generated for {agent_type}. Scanned {} ledger row(s).",
             ledger.len()
         );
         return Ok(());
@@ -33,10 +35,16 @@ pub(crate) fn cmd_generate_agent_evolution(db: &DbInstance, agent_type: &str) ->
             &proposal_to_record(proposal),
         )?;
     }
+    for candidate in &memory_candidates {
+        archon_learning::memory_promotion_candidates::insert_memory_promotion_candidate(
+            db, candidate,
+        )?;
+    }
 
     println!(
-        "Generated {} agent evolution proposal(s) for {agent_type} from {} ledger row(s).",
+        "Generated {} agent evolution proposal(s) and {} memory candidate(s) for {agent_type} from {} ledger row(s).",
         proposals.len(),
+        memory_candidates.len(),
         ledger.len()
     );
     for proposal in proposals {
@@ -46,6 +54,12 @@ pub(crate) fn cmd_generate_agent_evolution(db: &DbInstance, agent_type: &str) ->
             proposal_kind_str(proposal.kind),
             risk_level_str(proposal.risk_level),
             proposal.expected_impact
+        );
+    }
+    for candidate in memory_candidates {
+        println!(
+            "{:<24} {:<20} {:<10} {}",
+            candidate.candidate_id, candidate.target, "memory", candidate.claim
         );
     }
     Ok(())
@@ -110,6 +124,50 @@ fn proposal_to_record(
         record = record.with_permission_impact();
     }
     record
+}
+
+fn memory_candidates_from_events(
+    agent_type: &str,
+    events: &[archon_core::agents::evolution::AgentPerformanceEvent],
+) -> Vec<archon_learning::memory_promotion_candidates::MemoryPromotionCandidateRecord> {
+    let correction_events: Vec<_> = events
+        .iter()
+        .filter(|event| event.user_corrected == Some(true))
+        .collect();
+    if correction_events.len() < 3 {
+        return Vec::new();
+    }
+
+    let evidence_ids: Vec<String> = correction_events
+        .iter()
+        .map(|event| event.event_id.clone())
+        .collect();
+    let mut candidate =
+        archon_learning::memory_promotion_candidates::MemoryPromotionCandidateRecord::new(
+            stable_memory_candidate_id(agent_type, &evidence_ids),
+            agent_type.to_string(),
+            "user_correction",
+            "governed_learning_event",
+            format!(
+                "Repeated user corrections observed for agent `{agent_type}`; review before durable memory promotion."
+            ),
+            Utc::now().to_rfc3339(),
+        )
+        .with_scores(0.8, 0.8, 0.7, 0.6, 0.75);
+    for evidence_id in evidence_ids {
+        candidate = candidate.with_evidence(evidence_id);
+    }
+    vec![candidate]
+}
+
+fn stable_memory_candidate_id(agent_type: &str, evidence_ids: &[String]) -> String {
+    let mut digest = Sha256::new();
+    digest.update(agent_type.as_bytes());
+    for evidence_id in evidence_ids {
+        digest.update(b"\0");
+        digest.update(evidence_id.as_bytes());
+    }
+    format!("memory-promotion-{}", hex::encode(digest.finalize()))
 }
 
 fn completion_status(value: &str) -> archon_core::agents::evolution::AgentCompletionStatus {
@@ -231,5 +289,35 @@ mod tests {
         );
         assert_eq!(event.agent_version.as_deref(), Some("agentv-1"));
         assert_eq!(event.quality_score, Some(0.9));
+    }
+
+    #[test]
+    fn repeated_corrections_create_governed_memory_candidate() {
+        let events = vec![
+            archon_core::agents::evolution::AgentPerformanceEvent::new("planner")
+                .with_user_feedback(Some(false), Some(true)),
+            archon_core::agents::evolution::AgentPerformanceEvent::new("planner")
+                .with_user_feedback(Some(false), Some(true)),
+            archon_core::agents::evolution::AgentPerformanceEvent::new("planner")
+                .with_user_feedback(Some(false), Some(true)),
+        ];
+
+        let candidates = memory_candidates_from_events("planner", &events);
+
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].signal_source, "user_correction");
+        assert_eq!(candidates[0].target, "governed_learning_event");
+        assert!(candidates[0].proposal_required);
+        assert_eq!(candidates[0].evidence_ids.len(), 3);
+    }
+
+    #[test]
+    fn memory_candidate_ids_are_stable_for_same_evidence() {
+        let evidence = vec!["ledger-1".to_string(), "ledger-2".to_string()];
+
+        assert_eq!(
+            stable_memory_candidate_id("planner", &evidence),
+            stable_memory_candidate_id("planner", &evidence)
+        );
     }
 }

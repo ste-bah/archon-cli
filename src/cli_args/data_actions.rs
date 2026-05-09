@@ -239,6 +239,12 @@ pub enum AgentEvolveAction {
         #[arg(long)]
         agent: Option<String>,
     },
+    /// List Cozo-backed memory promotion candidates for an agent
+    MemoryCandidates {
+        /// Agent type to inspect
+        #[arg(long)]
+        agent: String,
+    },
     /// Show permission-impact details for one proposal
     Permissions {
         /// Agent evolution proposal ID

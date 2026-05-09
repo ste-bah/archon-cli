@@ -34,6 +34,7 @@ fn handle_evolve_action(db: &DbInstance, action: &AgentEvolveAction) -> Result<(
         AgentEvolveAction::List { status, agent } => {
             cmd_list_agent_evolution(db, status.as_deref(), agent.as_deref())
         }
+        AgentEvolveAction::MemoryCandidates { agent } => cmd_list_memory_candidates(db, agent),
         AgentEvolveAction::Permissions { proposal_id } => cmd_show_permission_diff(db, proposal_id),
         AgentEvolveAction::Reject { proposal_id } => {
             cmd_update_proposal_status(db, proposal_id, "rejected")
@@ -54,6 +55,35 @@ fn handle_evolve_action(db: &DbInstance, action: &AgentEvolveAction) -> Result<(
             activate,
         } => cmd_rollback_profile(db, agent, version_id, *activate),
     }
+}
+
+fn cmd_list_memory_candidates(db: &DbInstance, agent_type: &str) -> Result<()> {
+    let candidates =
+        archon_learning::memory_promotion_candidates::list_memory_promotion_candidates_by_agent(
+            db, agent_type,
+        )?;
+    if candidates.is_empty() {
+        println!("No memory promotion candidates found for agent: {agent_type}");
+        return Ok(());
+    }
+
+    println!(
+        "{:<28} {:<18} {:<24} {:<8} claim",
+        "candidate_id", "source", "target", "score"
+    );
+    for candidate in &candidates {
+        let score = promotion_score(candidate);
+        println!(
+            "{:<28} {:<18} {:<24} {:<8.3} {}",
+            candidate.candidate_id,
+            candidate.signal_source,
+            candidate.target,
+            score,
+            candidate.claim
+        );
+    }
+    println!("\n{} candidate(s)", candidates.len());
+    Ok(())
 }
 
 fn cmd_show_active_profile(db: &DbInstance, agent_type: &str, json: bool) -> Result<()> {
@@ -241,6 +271,16 @@ fn yes_no(value: bool) -> &'static str {
     if value { "yes" } else { "no" }
 }
 
+fn promotion_score(
+    candidate: &archon_learning::memory_promotion_candidates::MemoryPromotionCandidateRecord,
+) -> f64 {
+    (candidate.confidence * 0.35)
+        + (candidate.frequency_score * 0.20)
+        + (candidate.recency_score * 0.15)
+        + (candidate.diversity_score * 0.10)
+        + (candidate.evidence_quality * 0.20)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -251,5 +291,21 @@ mod tests {
         assert!(looks_permission_related("sandbox_backend_profile"));
         assert!(looks_permission_related("permission_overlay"));
         assert!(!looks_permission_related("prompt_profile"));
+    }
+
+    #[test]
+    fn promotion_score_matches_core_weighting() {
+        let candidate =
+            archon_learning::memory_promotion_candidates::MemoryPromotionCandidateRecord::new(
+                "mem-1",
+                "planner",
+                "user_correction",
+                "governed_learning_event",
+                "Remember to review repeated corrections.",
+                "2026-05-08T12:00:00Z",
+            )
+            .with_scores(1.0, 0.5, 0.5, 0.0, 1.0);
+
+        assert!((promotion_score(&candidate) - 0.725).abs() < f64::EPSILON);
     }
 }
