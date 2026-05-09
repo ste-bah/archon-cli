@@ -119,11 +119,81 @@ fn render_explain(
     if let Some(backend) = backend {
         policy.backend = backend.parse().map_err(anyhow::Error::msg)?;
     }
-    Ok(format!(
+    policy.validate().map_err(anyhow::Error::msg)?;
+    let mut output = format!(
         "Sandbox explain\nBackend: {}\nIsolation: {}\nDecision flow: UnifiedToolPreflight -> PermissionChecker -> SandboxPolicyResolver -> SandboxBackend -> ToolDispatch\nPermissions: sandbox policy cannot bypass always_deny rules, permission modes, or dangerous-bypass guards\nExecution: docker can route Bash when selected; ssh and openshell fail closed instead of falling back to host shell\n",
         policy.backend,
         policy.describes_isolation()
-    ))
+    );
+    append_explain_details(&mut output, config, &policy)?;
+    Ok(output)
+}
+
+fn append_explain_details(
+    output: &mut String,
+    config: &archon_core::sandbox::SandboxConfig,
+    policy: &archon_core::sandbox::SandboxPolicy,
+) -> Result<()> {
+    match policy.backend {
+        archon_core::sandbox::SandboxBackendKind::Docker => {
+            config.docker.validate().map_err(anyhow::Error::msg)?;
+            output.push_str(&format!(
+                "Mount policy: {}\nWritable paths: {}\nNetwork policy: {}\nResource limits: memory={} cpu={}\nRedaction policy: only env_allowlist entries are forwarded; provider tokens, SSH agents, Git credentials, Docker socket, and broad home mounts are excluded by default\n",
+                workspace_access_summary(&policy.workspace_access),
+                list_or_none(&config.docker.writable_paths),
+                config.docker.network,
+                config.docker.memory_limit.as_deref().unwrap_or("unset"),
+                config.docker.cpu_limit.as_deref().unwrap_or("unset")
+            ));
+        }
+        archon_core::sandbox::SandboxBackendKind::Ssh => {
+            config.ssh.validate().map_err(anyhow::Error::msg)?;
+            output.push_str(&format!(
+                "Transport policy: ssh remote execution; host_configured={} host_key_checking={} host_shell_fallback={}\nWorkspace policy: mode={} remote workspace remains explicit\nRedaction policy: provider tokens, generated memory stores, SSH agents, Git credentials, and host home mounts are not forwarded by default\n",
+                config.ssh.host.as_deref().is_some_and(|host| !host.trim().is_empty()),
+                config.ssh.host_key_checking,
+                config.ssh.host_shell_fallback,
+                config.ssh.workspace_mode
+            ));
+        }
+        archon_core::sandbox::SandboxBackendKind::OpenShell => {
+            config.openshell.validate().map_err(anyhow::Error::msg)?;
+            output.push_str(&format!(
+                "Transport policy: openshell mediated execution; workspace_mode={} gateway_configured={}\nProvider routing: host-side; provider_injection={} so Anthropic Claude Code spoofing stays in Archon's provider runtime\nFallback policy: host_shell_fallback={} and direct host shell fallback is not allowed\nRedaction policy: provider credentials, token stores, generated memory databases, SSH agents, Git credentials, and arbitrary home mounts are not synced by default\n",
+                config.openshell.workspace_mode,
+                config
+                    .openshell
+                    .gateway
+                    .as_deref()
+                    .is_some_and(|gateway| !gateway.trim().is_empty()),
+                config.openshell.provider_injection,
+                config.openshell.host_shell_fallback
+            ));
+        }
+        archon_core::sandbox::SandboxBackendKind::Logical => output.push_str(
+            "Isolation policy: logical permission gate only; no process, network, or filesystem isolation is claimed\n",
+        ),
+        archon_core::sandbox::SandboxBackendKind::Disabled => output.push_str(
+            "Isolation policy: sandbox backend disabled; normal permission checks still apply\n",
+        ),
+    }
+    Ok(())
+}
+
+fn workspace_access_summary(workspace_access: &str) -> &'static str {
+    match workspace_access {
+        "rw" => "workspace mounted read-write",
+        "scratch" => "workspace mounted read-only with ephemeral /scratch",
+        _ => "workspace mounted read-only",
+    }
+}
+
+fn list_or_none(values: &[String]) -> String {
+    if values.is_empty() {
+        "none".into()
+    } else {
+        values.join(", ")
+    }
 }
 
 fn render_test(
@@ -214,6 +284,49 @@ mod tests {
         let error = render_explain(&config, Some("host".into())).unwrap_err();
 
         assert!(error.to_string().contains("sandbox.backend"));
+    }
+
+    #[test]
+    fn sandbox_explain_docker_shows_mount_network_and_redaction_policy() {
+        let config = archon_core::sandbox::SandboxConfig {
+            backend: "docker".into(),
+            workspace_access: "scratch".into(),
+            docker: archon_core::sandbox::DockerConfig {
+                writable_paths: vec!["target".into()],
+                network: "disabled".into(),
+                ..archon_core::sandbox::DockerConfig::default()
+            },
+            ..archon_core::sandbox::SandboxConfig::default()
+        };
+
+        let body = render_explain(&config, None).unwrap();
+
+        assert!(body.contains("workspace mounted read-only with ephemeral /scratch"));
+        assert!(body.contains("Writable paths: target"));
+        assert!(body.contains("Network policy: disabled"));
+        assert!(body.contains("provider tokens"));
+        assert!(body.contains("Docker socket"));
+    }
+
+    #[test]
+    fn sandbox_explain_openshell_keeps_provider_routing_host_side() {
+        let config = archon_core::sandbox::SandboxConfig {
+            backend: "openshell".into(),
+            openshell: archon_core::sandbox::OpenShellConfig {
+                enabled: true,
+                workspace_mode: "mirror".into(),
+                ..archon_core::sandbox::OpenShellConfig::default()
+            },
+            ..archon_core::sandbox::SandboxConfig::default()
+        };
+
+        let body = render_explain(&config, None).unwrap();
+
+        assert!(body.contains("openshell mediated execution"));
+        assert!(body.contains("provider_injection=false"));
+        assert!(body.contains("Claude Code spoofing stays in Archon's provider runtime"));
+        assert!(body.contains("host_shell_fallback=false"));
+        assert!(body.contains("generated memory databases"));
     }
 
     #[test]
