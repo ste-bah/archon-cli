@@ -55,3 +55,6 @@ while `provider_injection = false`.
 archon sandbox doctor --backend openshell
 archon sandbox explain --backend openshell
 ```
+
+For scenario-driven setup examples, see
+[Sandbox real-world use cases](../cookbook/sandbox-real-world-use-cases.md).

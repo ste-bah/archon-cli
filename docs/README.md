@@ -68,6 +68,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 ## Security and sandboxing
 
 - [Sandboxing](security/sandboxing.md) — backend model, safety posture, and routing decisions
+- [Sandbox cookbook](cookbook/sandbox-real-world-use-cases.md) — plain-English real-world Docker, OpenShell, SSH, and mode examples
 - [Tool preflight](security/tool-preflight.md) — pre-execution permission and sandbox checks
 - [Docker sandbox](security/docker-sandbox.md) — Docker backend policy, mounts, and diagnostics
 - [SSH sandbox](security/ssh-sandbox.md) — SSH backend policy, routing, and diagnostics
@@ -84,6 +85,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 - [Trading and asset analysis with `/gametheory`](cookbook/trading-with-gametheory.md) — applying the game-theory pipeline to pre-trade assessment, post-event decomposition, counterparty analysis, strategy-viability tests, and macro reaction-function modelling
 - [Custom agent workflows](cookbook/custom-agent-workflows.md) — `/create-agent`, `/run-agent`, `/evolve-agent`
 - [PRD-driven development](cookbook/prd-driven-development.md) — `/to-prd` → `/prd-to-spec` → `/spec-to-tasks` → `/archon-code`
+- [Sandbox real-world use cases](cookbook/sandbox-real-world-use-cases.md) — when to use Docker, OpenShell, SSH, `risky`, `all`, `scratch`, and writable paths
 
 ## Operations
 

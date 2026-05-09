@@ -74,6 +74,7 @@ execute directly on the host.
 
 See also:
 
+- [Sandbox real-world use cases](../cookbook/sandbox-real-world-use-cases.md)
 - [Docker sandbox](docker-sandbox.md)
 - [SSH sandbox](ssh-sandbox.md)
 - [OpenShell sandbox](openshell-sandbox.md)

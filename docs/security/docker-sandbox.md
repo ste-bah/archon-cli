@@ -42,3 +42,6 @@ archon sandbox doctor --backend docker
 
 Doctor is detect-only. Actual Bash routing happens through the runtime sandbox
 backend during tool execution.
+
+For scenario-driven setup examples, see
+[Sandbox real-world use cases](../cookbook/sandbox-real-world-use-cases.md).
