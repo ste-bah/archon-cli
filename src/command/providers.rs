@@ -38,15 +38,14 @@ pub(crate) fn handle_providers(
     match action.unwrap_or(ProvidersAction::List) {
         ProvidersAction::List => print!("{}", render_provider_registry()),
         ProvidersAction::Capabilities => print!("{}", render_capability_table()),
-        ProvidersAction::Status { provider } => {
-            print!(
-                "{}",
-                crate::command::providers_status::render_and_persist_provider_status(
-                    provider.as_deref(),
-                    config,
-                )
-            )
-        }
+        ProvidersAction::Status { provider, json } => print!(
+            "{}",
+            crate::command::providers_status::render_and_persist_provider_status(
+                provider.as_deref(),
+                config,
+                json,
+            )?
+        ),
         ProvidersAction::Report { provider, json } => print!(
             "{}",
             crate::command::providers_health_report::render_provider_health_report(

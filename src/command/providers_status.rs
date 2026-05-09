@@ -7,6 +7,7 @@ use archon_llm::runtime::ProviderIdentityStatus;
 use archon_llm::runtime::{ProviderHealthStatus, ProviderRuntimeStatus};
 use chrono::{DateTime, Utc};
 use cozo::DbInstance;
+use serde::Serialize;
 
 #[path = "providers_status_support.rs"]
 mod providers_status_support;
@@ -36,11 +37,14 @@ pub(crate) fn render_provider_status_with_config(
 pub(crate) fn render_and_persist_provider_status(
     provider_filter: Option<&str>,
     config: &archon_core::config::ArchonConfig,
-) -> String {
-    render_provider_statuses(&collect_and_persist_provider_statuses(
-        provider_filter,
-        config,
-    ))
+    json: bool,
+) -> Result<String> {
+    let statuses = collect_and_persist_provider_statuses(provider_filter, config);
+    if json {
+        render_provider_statuses_json(&statuses)
+    } else {
+        Ok(render_provider_statuses(&statuses))
+    }
 }
 
 pub(crate) fn collect_and_persist_provider_statuses(
@@ -124,6 +128,22 @@ fn render_provider_statuses(statuses: &[ProviderRuntimeStatus]) -> String {
         "\nThis status is local and redacted; use `archon providers doctor --live` for opt-in endpoint checks.\n",
     );
     out
+}
+
+fn render_provider_statuses_json(statuses: &[ProviderRuntimeStatus]) -> Result<String> {
+    let report = ProviderStatusJson {
+        generated_at: Utc::now().to_rfc3339(),
+        provider_count: statuses.len(),
+        providers: statuses,
+    };
+    Ok(format!("{}\n", serde_json::to_string_pretty(&report)?))
+}
+
+#[derive(Debug, Serialize)]
+struct ProviderStatusJson<'a> {
+    generated_at: String,
+    provider_count: usize,
+    providers: &'a [ProviderRuntimeStatus],
 }
 
 fn persist_provider_status_snapshots(statuses: &[ProviderRuntimeStatus]) -> Result<()> {

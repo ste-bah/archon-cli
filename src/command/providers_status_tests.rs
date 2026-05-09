@@ -256,3 +256,32 @@ fn status_render_shows_recent_limit_notes() {
 
     assert!(body.contains("limited:1"));
 }
+
+#[test]
+fn status_json_renders_redacted_snapshot() {
+    let status = ProviderRuntimeStatus::new("anthropic", "direct")
+        .with_display_name("Anthropic")
+        .with_model("claude-sonnet-4-6")
+        .with_identity_status(ProviderIdentityStatus::Spoof)
+        .with_health(ProviderHealthStatus::Healthy)
+        .with_redacted_json(serde_json::json!({
+            "authorization": "Bearer secret",
+            "safe": "kept"
+        }));
+
+    let body = render_provider_statuses_json(&[status]).unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(&body).unwrap();
+
+    assert_eq!(parsed["provider_count"], 1);
+    assert_eq!(parsed["providers"][0]["provider_id"], "anthropic");
+    assert_eq!(parsed["providers"][0]["health"], "healthy");
+    assert_eq!(parsed["providers"][0]["identity_status"], "spoof");
+    assert_eq!(
+        parsed["providers"][0]["metadata_redacted_json"]["authorization"],
+        "[redacted]"
+    );
+    assert_eq!(
+        parsed["providers"][0]["metadata_redacted_json"]["safe"],
+        "kept"
+    );
+}

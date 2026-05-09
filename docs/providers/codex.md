@@ -33,6 +33,7 @@ Run:
 archon auth login --provider openai-codex
 archon auth status
 archon providers status --provider openai-codex
+archon providers status --provider openai-codex --json
 ```
 
 Archon stores Codex OAuth separately from Anthropic credentials. If Archon's
@@ -45,7 +46,7 @@ Recent Codex rate or usage-limit windows are captured in Cozo and shown with:
 
 ```bash
 archon providers limits --provider openai-codex
-archon providers report --provider openai-codex
+archon providers report --provider openai-codex --json
 ```
 
 ## Safety Notes

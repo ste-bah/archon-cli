@@ -14,6 +14,7 @@ Useful checks:
 
 ```bash
 archon providers status
+archon providers status --json
 archon providers report
 archon providers profiles list --provider openai-compatible
 ```

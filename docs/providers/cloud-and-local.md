@@ -8,6 +8,7 @@ default; temporary probe caches may remain outside Cozo.
 
 ```bash
 archon providers status
+archon providers status --json
 archon providers report --json
 ```
 

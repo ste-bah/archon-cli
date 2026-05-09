@@ -11,6 +11,9 @@ pub enum ProvidersAction {
         /// Restrict output to one provider id
         #[arg(long)]
         provider: Option<String>,
+        /// Output the status snapshot as JSON
+        #[arg(long)]
+        json: bool,
     },
     /// Summarize provider health from status and persisted runtime events
     Report {

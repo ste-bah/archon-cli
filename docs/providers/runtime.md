@@ -34,15 +34,17 @@ available, and the fallback is recorded as a provider runtime event.
 
 ```bash
 archon providers status
+archon providers status --json
 archon providers report
 archon providers limits --provider openai-codex
 ```
 
 `providers status` enriches local provider status with the selected Cozo auth
-profile and persists redacted snapshots. `providers limits` shows observed
-rate/usage windows captured from real provider failures. `providers report`
-combines current status, persisted runtime events, recent limits, and failure
-counts into a redacted provider-health report; use `--json` for automation.
+profile and persists redacted snapshots; use `--json` for automation-friendly
+status output. `providers limits` shows observed rate/usage windows captured
+from real provider failures. `providers report` combines current status,
+persisted runtime events, recent limits, and failure counts into a redacted
+provider-health report; use `--json` for automation.
 
 ## Codex Strategy
 
@@ -62,10 +64,10 @@ app-server to direct only when `direct_fallback=true`; that fallback emits a
 provider runtime event. `ARCHON_CODEX_APP_SERVER_URL` overrides
 `app_server_url` for local diagnostics.
 
-`archon providers status openai-codex` reports whether an app-server endpoint is
-configured, whether direct fallback is selected, and whether the adapter is
-still pending. App-server metadata is redacted before it is persisted to the
-Cozo learning store.
+`archon providers status --provider openai-codex` reports whether an app-server
+endpoint is configured, whether direct fallback is selected, and whether the
+adapter is still pending. App-server metadata is redacted before it is persisted
+to the Cozo learning store.
 
 Anthropic Claude Code spoofing remains a protected compatibility contract and
 is not controlled by Codex strategy settings.
