@@ -171,6 +171,8 @@ struct LedgerSummary {
     total: usize,
     by_status: BTreeMap<String, usize>,
     provider_incidents: usize,
+    gate_failures: usize,
+    by_gate: BTreeMap<String, usize>,
     test_failures: usize,
     user_corrections: usize,
     average_quality: Option<f64>,
@@ -183,8 +185,12 @@ impl LedgerSummary {
         records: &[archon_learning::agent_evolution_ledger::AgentPerformanceLedgerRecord],
     ) -> Self {
         let mut by_status = BTreeMap::new();
+        let mut by_gate = BTreeMap::new();
         for record in records {
             count(&mut by_status, &record.completion_status);
+            if let Some(gate) = &record.gate_failed {
+                count(&mut by_gate, gate);
+            }
         }
         Self {
             total: records.len(),
@@ -193,6 +199,11 @@ impl LedgerSummary {
                 .iter()
                 .filter(|record| record.provider_incident_id.is_some())
                 .count(),
+            gate_failures: records
+                .iter()
+                .filter(|record| record.gate_failed.is_some())
+                .count(),
+            by_gate,
             test_failures: records.iter().filter(|record| record.test_failed).count(),
             user_corrections: records
                 .iter()
@@ -215,6 +226,7 @@ struct LedgerItem {
     completion_status: String,
     provider_id: Option<String>,
     provider_incident_id: Option<String>,
+    gate_failed: Option<String>,
     created_at: String,
 }
 
@@ -227,6 +239,7 @@ impl From<&archon_learning::agent_evolution_ledger::AgentPerformanceLedgerRecord
             completion_status: record.completion_status.clone(),
             provider_id: record.provider_id.clone(),
             provider_incident_id: record.provider_incident_id.clone(),
+            gate_failed: record.gate_failed.clone(),
             created_at: record.created_at.clone(),
         }
     }
@@ -357,13 +370,17 @@ fn print_report(report: &AgentEvolutionReport) {
         report.proposals.provider_identity_impacts, report.proposals.permission_impacts
     );
     println!(
-        "Ledger: {} | status [{}] | provider_incidents={} test_failures={} corrections={}",
+        "Ledger: {} | status [{}] | provider_incidents={} gate_failures={} test_failures={} corrections={}",
         report.ledger.total,
         format_counts(&report.ledger.by_status),
         report.ledger.provider_incidents,
+        report.ledger.gate_failures,
         report.ledger.test_failures,
         report.ledger.user_corrections
     );
+    if !report.ledger.by_gate.is_empty() {
+        println!("Gate failures: [{}]", format_counts(&report.ledger.by_gate));
+    }
     println!(
         "Scores: quality={} l_score={}",
         format_optional_score(report.ledger.average_quality),

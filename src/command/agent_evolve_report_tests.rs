@@ -46,6 +46,7 @@ fn report_summarizes_agent_evolution_state() {
         )
         .with_model_provider("claude-sonnet-4-6", "anthropic")
         .with_provider_incident("provider-event-1")
+        .with_gate_failed("sandbox:docker:failed")
         .with_scores(Some(0.8), Some(0.6))
         .with_user_feedback(None, Some(true)),
     )
@@ -83,6 +84,12 @@ fn report_summarizes_agent_evolution_state() {
     assert_eq!(report.proposals.by_risk.get("high"), Some(&1));
     assert_eq!(report.proposals.permission_impacts, 1);
     assert_eq!(report.ledger.provider_incidents, 1);
+    assert_eq!(report.ledger.gate_failures, 1);
+    assert_eq!(report.ledger.by_gate.get("sandbox:docker:failed"), Some(&1));
+    assert_eq!(
+        report.ledger.recent[0].gate_failed.as_deref(),
+        Some("sandbox:docker:failed")
+    );
     assert_eq!(report.ledger.average_quality, Some(0.8));
     assert_eq!(report.shadow.regressions, 1);
     assert_eq!(report.memory.top_candidates[0].score, 1.0);
