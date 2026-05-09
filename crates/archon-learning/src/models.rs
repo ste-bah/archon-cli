@@ -30,6 +30,7 @@ pub enum LearningEventType {
     ManifestApplied,
     ManifestDenied,
     ManifestRolledBack,
+    AgentKnowledgeClaim,
 }
 
 impl LearningEventType {
@@ -56,6 +57,7 @@ impl LearningEventType {
             Self::ManifestApplied => "ManifestApplied",
             Self::ManifestDenied => "ManifestDenied",
             Self::ManifestRolledBack => "ManifestRolledBack",
+            Self::AgentKnowledgeClaim => "AgentKnowledgeClaim",
         }
     }
 
@@ -82,6 +84,7 @@ impl LearningEventType {
             "ManifestApplied" => Some(Self::ManifestApplied),
             "ManifestDenied" => Some(Self::ManifestDenied),
             "ManifestRolledBack" => Some(Self::ManifestRolledBack),
+            "AgentKnowledgeClaim" => Some(Self::AgentKnowledgeClaim),
             _ => None,
         }
     }
