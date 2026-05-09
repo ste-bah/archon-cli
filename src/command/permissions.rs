@@ -300,6 +300,14 @@ impl CommandHandler for PermissionsHandler {
                 })?;
 
                 if resolved == "bypassPermissions" && !snap.allow_bypass_permissions {
+                    crate::runtime::permission_events::record_permission_mode_event(
+                        ctx.cozo_db.as_ref(),
+                        ctx.session_id.as_deref(),
+                        Some(&snap.current_mode),
+                        &resolved,
+                        "mode_change_denied",
+                        "dangerous_bypass_guard",
+                    );
                     // Bypass-blocked branch — byte-identical error
                     // string from shipped slash.rs:315.
                     ctx.emit(TuiEvent::Error(
