@@ -12,13 +12,13 @@ impl PipelineParser {
     /// Parse a pipeline spec from a string in the given format.
     pub fn parse_str(src: &str, fmt: PipelineFormat) -> Result<PipelineSpec, PipelineError> {
         let spec = match fmt {
-            PipelineFormat::Yaml => {
-                serde_yml::from_str::<PipelineSpec>(src).map_err(|e| PipelineError::ParseError {
+            PipelineFormat::Yaml => serde_yaml_ng::from_str::<PipelineSpec>(src).map_err(|e| {
+                PipelineError::ParseError {
                     path: "<string>".to_string(),
                     line: e.location().map(|l| l.line()),
                     msg: e.to_string(),
-                })?
-            }
+                }
+            })?,
             PipelineFormat::Json => serde_json::from_str::<PipelineSpec>(src).map_err(|e| {
                 PipelineError::ParseError {
                     path: "<string>".to_string(),
@@ -36,7 +36,7 @@ impl PipelineParser {
         let src = std::fs::read_to_string(path).map_err(PipelineError::Io)?;
         let fmt = Self::detect_format(path, &src);
         let spec = match fmt {
-            PipelineFormat::Yaml => serde_yml::from_str::<PipelineSpec>(&src).map_err(|e| {
+            PipelineFormat::Yaml => serde_yaml_ng::from_str::<PipelineSpec>(&src).map_err(|e| {
                 PipelineError::ParseError {
                     path: path.display().to_string(),
                     line: e.location().map(|l| l.line()),

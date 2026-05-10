@@ -60,7 +60,7 @@ fn parse_flat_file_agent(
     };
 
     let parsed: serde_json::Value =
-        serde_yml::from_str(&frontmatter).map_err(|e| format!("YAML parse error: {e}"))?;
+        serde_yaml_ng::from_str(&frontmatter).map_err(|e| format!("YAML parse error: {e}"))?;
 
     let filename_stem = path
         .file_stem()
