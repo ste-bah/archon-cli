@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use std::net::IpAddr;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -55,6 +56,7 @@ impl GeminiVlmProvider {
                 message: "Google API key missing".into(),
             });
         }
+        let endpoint_base = normalize_endpoint_base(endpoint_base.into())?;
         let http = reqwest::blocking::Client::builder()
             .timeout(Duration::from_secs(120))
             .build()
@@ -66,7 +68,7 @@ impl GeminiVlmProvider {
         Ok(Self {
             api_key,
             model: model.into(),
-            endpoint_base: endpoint_base.into(),
+            endpoint_base,
             http,
             rate_limiter: GeminiRateLimiter::new(rpm_limit),
             retry_base_delay,
@@ -98,11 +100,7 @@ impl GeminiVlmProvider {
     }
 
     pub fn health_check(&self) -> Result<(), DocsError> {
-        let url = format!(
-            "{}/models?key={}",
-            self.endpoint_base.trim_end_matches('/'),
-            self.api_key
-        );
+        let url = self.endpoint_url("models")?;
         let response = self.http.get(url).send().map_err(map_send_error)?;
         let status = response.status();
         if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
@@ -145,12 +143,7 @@ impl GeminiVlmProvider {
     fn generate_once(&self, image_bytes: &[u8]) -> Result<String, DocsError> {
         self.rate_limiter.acquire()?;
         let mime = detect_mime(image_bytes)?;
-        let url = format!(
-            "{}/models/{}:generateContent?key={}",
-            self.endpoint_base.trim_end_matches('/'),
-            self.model,
-            self.api_key
-        );
+        let url = self.endpoint_url(&format!("models/{}:generateContent", self.model))?;
         let body = json!({
             "contents": [{
                 "parts": [
@@ -201,6 +194,17 @@ impl GeminiVlmProvider {
                 message: "generateContent response did not contain text".into(),
                 status_code: None,
             })
+    }
+
+    fn endpoint_url(&self, path: &str) -> Result<reqwest::Url, DocsError> {
+        let mut url = reqwest::Url::parse(&format!(
+            "{}/{}",
+            self.endpoint_base,
+            path.trim_start_matches('/')
+        ))
+        .map_err(|e| gemini_provider_error(format!("invalid Gemini endpoint URL: {e}")))?;
+        url.query_pairs_mut().append_pair("key", &self.api_key);
+        Ok(url)
     }
 }
 
@@ -270,6 +274,40 @@ fn map_send_error(error: reqwest::Error) -> DocsError {
             message: error.to_string(),
             status_code: None,
         }
+    }
+}
+
+fn normalize_endpoint_base(endpoint_base: String) -> Result<String, DocsError> {
+    let endpoint_base = endpoint_base.trim().trim_end_matches('/').to_string();
+    let url = reqwest::Url::parse(&endpoint_base)
+        .map_err(|e| gemini_provider_error(format!("invalid Gemini endpoint_base: {e}")))?;
+    if endpoint_allows_sensitive_data(&url) {
+        Ok(endpoint_base)
+    } else {
+        Err(gemini_provider_error(
+            "Gemini endpoint_base must use HTTPS unless it targets loopback/local test host",
+        ))
+    }
+}
+
+fn endpoint_allows_sensitive_data(url: &reqwest::Url) -> bool {
+    url.scheme() == "https"
+        || (url.scheme() == "http" && url.host_str().map(is_loopback_host).unwrap_or(false))
+}
+
+fn is_loopback_host(host: &str) -> bool {
+    host.eq_ignore_ascii_case("localhost")
+        || host
+            .parse::<IpAddr>()
+            .map(|addr| addr.is_loopback())
+            .unwrap_or(false)
+}
+
+fn gemini_provider_error(message: impl Into<String>) -> DocsError {
+    DocsError::VlmProvider {
+        provider: "gemini".into(),
+        message: message.into(),
+        status_code: None,
     }
 }
 

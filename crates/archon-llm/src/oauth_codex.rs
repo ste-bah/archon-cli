@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::net::IpAddr;
 use std::sync::mpsc;
 use std::time::Duration;
 
@@ -90,6 +91,7 @@ impl CodexOAuthClient {
         code: &str,
         code_verifier: &str,
     ) -> Result<CodexCredentials, AuthError> {
+        let token_url = sensitive_endpoint_url(&self.token_url, "Codex OAuth token")?;
         let params = [
             ("grant_type", "authorization_code"),
             ("code", code),
@@ -99,7 +101,7 @@ impl CodexOAuthClient {
         ];
         let response = self
             .http
-            .post(&self.token_url)
+            .post(token_url)
             .form(&params)
             .send()
             .await
@@ -108,6 +110,7 @@ impl CodexOAuthClient {
     }
 
     pub async fn refresh(&self, refresh_token: &str) -> Result<CodexCredentials, AuthError> {
+        let token_url = sensitive_endpoint_url(&self.token_url, "Codex OAuth token")?;
         let params = [
             ("grant_type", "refresh_token"),
             ("refresh_token", refresh_token),
@@ -115,13 +118,38 @@ impl CodexOAuthClient {
         ];
         let response = self
             .http
-            .post(&self.token_url)
+            .post(token_url)
             .form(&params)
             .send()
             .await
             .map_err(|e| AuthError::ParseError(format!("token refresh HTTP error: {e}")))?;
         parse_token_response(response, TokenFailureKind::Refresh).await
     }
+}
+
+fn sensitive_endpoint_url(raw: &str, label: &str) -> Result<reqwest::Url, AuthError> {
+    let url = reqwest::Url::parse(raw)
+        .map_err(|e| AuthError::ParseError(format!("{label} endpoint URL is invalid: {e}")))?;
+    if endpoint_allows_sensitive_data(&url) {
+        Ok(url)
+    } else {
+        Err(AuthError::ParseError(format!(
+            "{label} endpoint must use HTTPS unless it targets loopback/local test host"
+        )))
+    }
+}
+
+fn endpoint_allows_sensitive_data(url: &reqwest::Url) -> bool {
+    url.scheme() == "https"
+        || (url.scheme() == "http" && url.host_str().map(is_loopback_host).unwrap_or(false))
+}
+
+fn is_loopback_host(host: &str) -> bool {
+    host.eq_ignore_ascii_case("localhost")
+        || host
+            .parse::<IpAddr>()
+            .map(|addr| addr.is_loopback())
+            .unwrap_or(false)
 }
 
 enum TokenFailureKind {

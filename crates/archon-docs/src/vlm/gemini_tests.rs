@@ -37,6 +37,30 @@ fn provider_refuses_when_api_key_missing() {
 }
 
 #[test]
+fn provider_rejects_non_loopback_http_endpoint() {
+    let err = GeminiVlmProvider::new(
+        "test-key",
+        DEFAULT_GEMINI_MODEL,
+        "http://api.example.test",
+        15,
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("must use HTTPS"));
+}
+
+#[test]
+fn provider_allows_loopback_http_endpoint() {
+    let provider = GeminiVlmProvider::new(
+        "test-key",
+        DEFAULT_GEMINI_MODEL,
+        "http://127.0.0.1:9876",
+        15,
+    )
+    .unwrap();
+    assert_eq!(provider.endpoint_base(), "http://127.0.0.1:9876");
+}
+
+#[test]
 fn default_rpm_limit_is_12() {
     assert_eq!(archon_policy::GeminiVlmPolicy::default().rpm_limit, 12);
 }

@@ -64,3 +64,18 @@ async fn exchange_code_maps_http_error() {
         .expect_err("exchange should fail");
     assert!(err.to_string().contains("token exchange failed"));
 }
+
+#[tokio::test]
+async fn exchange_code_rejects_non_loopback_http_token_endpoint() {
+    let client = CodexOAuthClient::new_with_urls(
+        reqwest::Client::new(),
+        "https://auth.example.test/oauth/authorize".into(),
+        "http://auth.example.test/oauth/token".into(),
+    );
+
+    let err = client
+        .exchange_code("auth-code", "verifier")
+        .await
+        .expect_err("exchange should fail before HTTP");
+    assert!(err.to_string().contains("must use HTTPS"));
+}
