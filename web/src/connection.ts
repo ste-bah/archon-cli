@@ -24,10 +24,44 @@ interface JRpcNotification {
   params?: unknown;
 }
 
+type PendingRequest =
+  | { type: "initialize"; resolve: () => void }
+  | { type: "prompt"; resolve: () => void; reject: (error: Error) => void };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isJRpcError(value: unknown): value is JRpcResponse["error"] {
+  return (
+    isRecord(value) &&
+    typeof value.code === "number" &&
+    typeof value.message === "string"
+  );
+}
+
+function isJRpcResponse(value: unknown): value is JRpcResponse {
+  return (
+    isRecord(value) &&
+    value.jsonrpc === "2.0" &&
+    Number.isSafeInteger(value.id) &&
+    (value.error === undefined || isJRpcError(value.error))
+  );
+}
+
+function isJRpcNotification(value: unknown): value is JRpcNotification {
+  return (
+    isRecord(value) &&
+    value.jsonrpc === "2.0" &&
+    typeof value.method === "string" &&
+    !("id" in value)
+  );
+}
+
 export class ArchonConnection {
   private ws: WebSocket | null = null;
   private nextId = 1;
-  private pendingCallbacks = new Map<number, (res: JRpcResponse) => void>();
+  private pendingRequests = new Map<number, PendingRequest>();
   private onTextDeltaHandler: TextDeltaHandler | null = null;
   private onTurnCompleteHandler: TurnCompleteHandler | null = null;
   private onStateChange: ((state: ConnectionState) => void) | null = null;
@@ -94,10 +128,7 @@ export class ArchonConnection {
         method: "archon/prompt",
         params: { sessionId: this.sessionId, text },
       };
-      this.pendingCallbacks.set(id, (res) => {
-        if (res.error) reject(new Error(res.error.message));
-        else resolve();
-      });
+      this.pendingRequests.set(id, { type: "prompt", resolve, reject });
       this.send(req);
     });
   }
@@ -111,42 +142,82 @@ export class ArchonConnection {
       params: { clientVersion: "0.1.0" },
     };
     return new Promise((resolve) => {
-      this.pendingCallbacks.set(id, (res) => {
-        if (res.result && typeof res.result === "object") {
-          const r = res.result as Record<string, unknown>;
-          this.sessionId = (r.sessionId as string) ?? null;
-        }
-        resolve();
-      });
+      this.pendingRequests.set(id, { type: "initialize", resolve });
       this.send(req);
     });
   }
 
   private handleMessage(data: string): void {
-    let msg: JRpcResponse | JRpcNotification;
+    let msg: unknown;
     try {
-      msg = JSON.parse(data) as JRpcResponse | JRpcNotification;
+      msg = JSON.parse(data) as unknown;
     } catch {
       return;
     }
 
-    if ("id" in msg && msg.id !== undefined) {
-      // Response to a request
-      const cb = this.pendingCallbacks.get((msg as JRpcResponse).id);
-      if (cb) {
-        this.pendingCallbacks.delete((msg as JRpcResponse).id);
-        cb(msg as JRpcResponse);
-      }
+    if (isJRpcResponse(msg)) {
+      this.handleResponse(msg);
       return;
     }
 
-    // Notification
-    const notif = msg as JRpcNotification;
-    if (notif.method === "archon/textDelta") {
-      const p = notif.params as Record<string, unknown>;
-      this.onTextDeltaHandler?.(p.text as string);
-    } else if (notif.method === "archon/turnComplete") {
-      this.onTurnCompleteHandler?.();
+    if (isJRpcNotification(msg)) {
+      this.handleNotification(msg);
+    }
+  }
+
+  private handleResponse(response: JRpcResponse): void {
+    const pending = this.pendingRequests.get(response.id);
+    if (!pending) {
+      return;
+    }
+    this.pendingRequests.delete(response.id);
+
+    switch (pending.type) {
+      case "initialize":
+        this.handleInitializeResponse(response, pending);
+        break;
+      case "prompt":
+        this.handlePromptResponse(response, pending);
+        break;
+    }
+  }
+
+  private handleInitializeResponse(
+    response: JRpcResponse,
+    pending: Extract<PendingRequest, { type: "initialize" }>,
+  ): void {
+    if (isRecord(response.result)) {
+      this.sessionId =
+        typeof response.result.sessionId === "string"
+          ? response.result.sessionId
+          : null;
+    }
+    pending.resolve();
+  }
+
+  private handlePromptResponse(
+    response: JRpcResponse,
+    pending: Extract<PendingRequest, { type: "prompt" }>,
+  ): void {
+    if (response.error) {
+      pending.reject(new Error(response.error.message));
+    } else {
+      pending.resolve();
+    }
+  }
+
+  private handleNotification(notif: JRpcNotification): void {
+    switch (notif.method) {
+      case "archon/textDelta": {
+        const p = isRecord(notif.params) ? notif.params : null;
+        if (typeof p?.text === "string") {
+          this.onTextDeltaHandler?.(p.text);
+        }
+        break;
+      }
+      case "archon/turnComplete":
+        this.onTurnCompleteHandler?.();
+        break;
     }
   }
 
