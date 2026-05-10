@@ -61,7 +61,7 @@ tree-sitter-go = "0.25"
 petgraph = "0.8"
 inventory = "0.3"
 libloading = "0.8"
-git2 = "0.19"
+git2 = "0.20"
 openssl = { version = "0.10", features = ["vendored"] }
 cron = "0.12"
 rand = "0.9"
