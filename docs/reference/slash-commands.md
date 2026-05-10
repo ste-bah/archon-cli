@@ -2,13 +2,13 @@
 
 All slash commands work in the interactive TUI. Type `/help` to see them in-app.
 
-As of v1.1.0-beta.1 the registry contains **78 primary commands** (lockstep-tested at `EXPECTED_COMMAND_COUNT = 78` in `src/command/registry.rs` and `EXPECTED_PRIMARY_COUNT = 78` in `src/command/dispatcher.rs`). Aliases come from each handler's `aliases()` method.
+As of v1.1.0-beta.2 the registry contains **78 primary commands** (lockstep-tested at `EXPECTED_COMMAND_COUNT = 78` in `src/command/registry.rs` and `EXPECTED_PRIMARY_COUNT = 78` in `src/command/dispatcher.rs`). Aliases come from each handler's `aliases()` method.
 
 For shell/TUI parity, see the generated [command surface matrix](../generated/command-surface-matrix.md). It is backed by `src/command/surface_matrix.rs` and has tests that fail when registered slash primaries drift.
 
 Beyond the 78 primaries, archon-cli ships **68 built-in skills** (33 in `crates/archon-core/src/skills/builtin.rs`, 35 in `expanded.rs`). Skills behave like slash commands but are resolved through the Skill registry — primary handlers take precedence at dispatch time.
 
-> **Version history.** v0.1.38 added 11 primaries (Evidence Engine: `/kb`, `/prov`, `/meaning`, `/constellation`, plus gametheory inspection subcommands and the slash mirror). v0.1.40 added 2 more (`/auth` and `/chat` for the OpenAI-Codex provider surface). v0.1.45 keeps the same command count but upgrades Codex from chat/TUI-only to provider-neutral agentic surfaces where `[llm].provider = "openai-codex"`. v0.1.52 adds `/learning gnn status` to expose GNN auto-trainer diagnostics from the learning command family. v1.0.0 keeps the slash count at 78; `/archon-code`, `/archon-research`, and `/pipeline` now use the audited pipeline runtime. v1.0.1 keeps the slash count at 78 and adds shell-only hybrid retrospective analyzer modes. v1.1.0-beta.1 keeps the same slash primary count while adding provider runtime, sandbox, permissions, and governed agent-evolution shell surfaces.
+> **Version history.** v0.1.38 added 11 primaries (Evidence Engine: `/kb`, `/prov`, `/meaning`, `/constellation`, plus gametheory inspection subcommands and the slash mirror). v0.1.40 added 2 more (`/auth` and `/chat` for the OpenAI-Codex provider surface). v0.1.45 keeps the same command count but upgrades Codex from chat/TUI-only to provider-neutral agentic surfaces where `[llm].provider = "openai-codex"`. v0.1.52 adds `/learning gnn status` to expose GNN auto-trainer diagnostics from the learning command family. v1.0.0 keeps the slash count at 78; `/archon-code`, `/archon-research`, and `/pipeline` now use the audited pipeline runtime. v1.0.1 keeps the slash count at 78 and adds shell-only hybrid retrospective analyzer modes. v1.1.0-beta.2 keeps the same slash primary count while adding provider runtime, sandbox, permissions, and governed agent-evolution shell surfaces (supersedes the unpublished v1.1.0-beta.1 draft with OpenShell setup/gateway/upload-mode fixes).
 
 ## Core & meta
 

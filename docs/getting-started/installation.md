@@ -229,7 +229,7 @@ $env:PATH += ";$PWD\target\release"
 
 ```bash
 archon --version
-# Expected: archon 1.1.0-beta.1 (<short-sha>)
+# Expected: archon 1.1.0-beta.2 (<short-sha>)
 
 archon --help                   # full subcommand listing
 archon --list-themes            # 23 themes available
