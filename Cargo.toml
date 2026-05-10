@@ -80,7 +80,7 @@ wasmtime = "36"
 wat = "1"
 aws-sigv4 = { version = "1", features = ["sign-http"] }
 aws-credential-types = "1"
-jsonwebtoken = "9"
+jsonwebtoken = { version = "10.3", features = ["aws_lc_rs"] }
 hmac = "0.12"
 semver = { version = "1", features = ["serde"] }
 russh = "0.60"
