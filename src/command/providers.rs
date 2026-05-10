@@ -18,10 +18,7 @@
 //! does not warrant a custom `TuiEvent` variant + TUI overlay).
 
 use anyhow::Result;
-use archon_tui::app::TuiEvent;
 use chrono::Utc;
-use std::net::{TcpStream, ToSocketAddrs};
-use std::time::Duration;
 
 use archon_llm::providers::{
     CompatKind, ProviderDescriptor, ProviderFeatures, count_compat, count_native, list_compat,
@@ -29,50 +26,82 @@ use archon_llm::providers::{
 };
 
 use crate::cli_args::ProvidersAction;
-use crate::command::registry::{CommandContext, CommandHandler};
+#[cfg(test)]
+use crate::command::providers_live::DisabledLivePinger;
+use crate::command::providers_live::{ProviderLivePinger, TcpProviderLivePinger};
 
-pub(crate) fn handle_providers(action: Option<ProvidersAction>) -> Result<()> {
+pub(crate) use crate::command::providers_slash::ProvidersHandler;
+
+pub(crate) fn handle_providers(
+    action: Option<ProvidersAction>,
+    config: &archon_core::config::ArchonConfig,
+) -> Result<()> {
     match action.unwrap_or(ProvidersAction::List) {
         ProvidersAction::List => print!("{}", render_provider_registry()),
         ProvidersAction::Capabilities => print!("{}", render_capability_table()),
+        ProvidersAction::Status {
+            provider,
+            json,
+            live,
+        } => print!(
+            "{}",
+            crate::command::providers_status::render_and_persist_provider_status(
+                provider.as_deref(),
+                config,
+                json,
+                live,
+            )?
+        ),
+        ProvidersAction::Report { provider, json } => print!(
+            "{}",
+            crate::command::providers_health_report::render_provider_health_report(
+                provider.as_deref(),
+                config,
+                json,
+            )?
+        ),
+        ProvidersAction::Limits { provider } => print!(
+            "{}",
+            crate::command::providers_store_cli::render_provider_limits(provider.as_deref())?
+        ),
+        ProvidersAction::Profiles { action } => match action {
+            crate::cli_args::ProviderProfilesAction::Import => {
+                print!(
+                    "{}",
+                    crate::command::providers_profile_import::import_provider_profiles()?
+                )
+            }
+            crate::cli_args::ProviderProfilesAction::List { provider } => print!(
+                "{}",
+                crate::command::providers_store_cli::render_provider_profiles(provider.as_deref())?
+            ),
+            crate::cli_args::ProviderProfilesAction::Inspect { profile_id } => print!(
+                "{}",
+                crate::command::providers_store_cli::render_provider_profile_inspect(&profile_id)?
+            ),
+            crate::cli_args::ProviderProfilesAction::CooldownClear { profile_id } => print!(
+                "{}",
+                crate::command::providers_store_cli::clear_provider_profile_cooldown(&profile_id)?
+            ),
+            crate::cli_args::ProviderProfilesAction::Select {
+                provider,
+                auth_kinds,
+                preferred,
+            } => print!(
+                "{}",
+                crate::command::providers_store_cli::render_provider_profile_selection(
+                    &provider,
+                    &auth_kinds,
+                    preferred.as_deref(),
+                )?
+            ),
+        },
         ProvidersAction::Doctor { live } => print!("{}", render_provider_doctor(live)),
     }
     Ok(())
 }
 
-/// `/providers` handler — emits a 40-row aligned table of every
-/// registered LLM provider.
-pub(crate) struct ProvidersHandler;
-
-impl CommandHandler for ProvidersHandler {
-    fn execute(&self, ctx: &mut CommandContext, _args: &[String]) -> anyhow::Result<()> {
-        let rendered = match _args.first().map(String::as_str) {
-            Some("capabilities") | Some("capability") | Some("caps") => render_capability_table(),
-            Some("doctor") | Some("diagnose") => {
-                render_provider_doctor(args_contains(_args, "--live"))
-            }
-            Some("list") | None => render_provider_registry(),
-            Some(other) => format!(
-                "Unknown /providers subcommand `{other}`.\nUsage: /providers [list|capabilities|doctor [--live]]\n"
-            ),
-        };
-        ctx.emit(TuiEvent::TextDelta(rendered));
-        Ok(())
-    }
-
-    fn description(&self) -> &str {
-        "List registered LLM providers and capability support"
-    }
-
-    fn aliases(&self) -> &'static [&'static str] {
-        // No aliases — `list-providers` and `provider` were considered
-        // but `/provider` could be confused with a future singular-form
-        // command, so the canonical spelling stays alone.
-        &[]
-    }
-}
-
-fn render_provider_registry() -> String {
+pub(crate) fn render_provider_registry() -> String {
     let native = list_native();
     let compat = list_compat();
     let total = count_native() + count_compat();
@@ -114,7 +143,7 @@ fn render_provider_registry() -> String {
     out
 }
 
-fn render_provider_doctor(live: bool) -> String {
+pub(crate) fn render_provider_doctor(live: bool) -> String {
     let path = archon_llm::tokens::credentials_path();
     let credentials_json = std::fs::read_to_string(&path).ok();
     let codex_status = codex_status_from_disk(&path);
@@ -459,36 +488,6 @@ fn render_live_ping_row(
     out.push_str(&format!("  {label:<9} {status}\n"));
 }
 
-trait ProviderLivePinger {
-    fn ping(&self, endpoint: &str) -> std::result::Result<(), String>;
-}
-
-#[cfg(test)]
-struct DisabledLivePinger;
-
-#[cfg(test)]
-impl ProviderLivePinger for DisabledLivePinger {
-    fn ping(&self, _endpoint: &str) -> std::result::Result<(), String> {
-        Ok(())
-    }
-}
-
-struct TcpProviderLivePinger;
-
-impl ProviderLivePinger for TcpProviderLivePinger {
-    fn ping(&self, endpoint: &str) -> std::result::Result<(), String> {
-        let mut addrs = endpoint
-            .to_socket_addrs()
-            .map_err(|err| format!("resolve failed: {err}"))?;
-        let addr = addrs
-            .next()
-            .ok_or_else(|| "no socket address".to_string())?;
-        TcpStream::connect_timeout(&addr, Duration::from_millis(1_500))
-            .map(|_| ())
-            .map_err(|err| err.to_string())
-    }
-}
-
 fn credential_status(expires_at_ms: i64) -> &'static str {
     let now_ms = Utc::now().timestamp_millis();
     if expires_at_ms <= now_ms {
@@ -502,10 +501,6 @@ fn codex_disabled() -> bool {
     std::env::var("ARCHON_CODEX_DISABLED")
         .map(|v| matches!(v.to_lowercase().as_str(), "1" | "true" | "yes"))
         .unwrap_or(false)
-}
-
-fn args_contains(args: &[String], needle: &str) -> bool {
-    args.iter().any(|arg| arg == needle)
 }
 
 // Column widths kept in module-private constants so the header,
@@ -597,7 +592,9 @@ fn fmt_features(f: &ProviderFeatures) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::command::registry::CommandHandler;
     use crate::command::test_support::*;
+    use archon_tui::app::TuiEvent;
 
     struct FakeLivePinger {
         outcome: std::result::Result<(), String>,
@@ -709,7 +706,11 @@ mod tests {
 
     #[test]
     fn cli_handle_capabilities_renders_without_error() {
-        handle_providers(Some(ProvidersAction::Capabilities)).expect("capabilities output");
+        handle_providers(
+            Some(ProvidersAction::Capabilities),
+            &archon_core::config::ArchonConfig::default(),
+        )
+        .expect("capabilities output");
     }
 
     #[test]

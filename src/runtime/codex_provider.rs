@@ -1,0 +1,67 @@
+//! Codex provider construction behind the runtime strategy gate.
+
+use std::sync::Arc;
+
+use anyhow::{Context, Result};
+use archon_core::config::ArchonConfig;
+use archon_llm::provider::LlmProvider;
+
+pub(crate) async fn build_codex_provider(
+    config: &ArchonConfig,
+    surface: &str,
+) -> Result<(Arc<dyn LlmProvider>, &'static str)> {
+    let decision = crate::runtime::codex_strategy::resolve_codex_runtime_strategy(
+        &config.providers.openai_codex,
+        surface,
+    )?;
+    if decision.selected_runtime_mode == "app_server" {
+        let app_server = crate::runtime::codex_app_server_provider::CodexAppServerProvider::new(
+            config.providers.openai_codex.clone(),
+        )
+        .with_context(|| format!("failed to construct Codex app-server provider for {surface}"))?;
+        let provider: Arc<dyn LlmProvider> = Arc::new(app_server);
+        if should_enable_tool_direct_fallback(&config.providers.openai_codex) {
+            let provider = crate::runtime::codex_auto_provider::CodexAutoProvider::new(
+                provider,
+                config.clone(),
+                surface,
+            );
+            return Ok((Arc::new(provider), decision.selected_runtime_mode));
+        }
+        return Ok((provider, decision.selected_runtime_mode));
+    }
+    let provider = build_direct_codex_provider(config, surface).await?;
+    Ok((provider, decision.selected_runtime_mode))
+}
+
+pub(super) async fn build_direct_codex_provider(
+    config: &ArchonConfig,
+    surface: &str,
+) -> Result<Arc<dyn LlmProvider>> {
+    let codex_cfg = crate::command::auth::codex_config_from_core(&config.providers.openai_codex);
+    let http = reqwest::Client::new();
+    let resolution = archon_llm::providers::codex::spoof::resolve(&codex_cfg, &http)
+        .await
+        .with_context(|| format!("failed to resolve Codex spoof identity for {surface}"))?;
+    let provider = match std::env::var("ARCHON_CODEX_BASE_URL").ok() {
+        Some(base_url) if !base_url.trim().is_empty() => {
+            archon_llm::providers::codex::client::CodexProvider::new_with_base_url(
+                archon_llm::tokens::credentials_path(),
+                resolution.config,
+                http,
+                base_url,
+            )
+        }
+        _ => archon_llm::providers::codex::client::CodexProvider::new(
+            archon_llm::tokens::credentials_path(),
+            resolution.config,
+            http,
+        ),
+    }
+    .with_context(|| format!("failed to construct direct Codex provider for {surface}"))?;
+    Ok(Arc::new(provider))
+}
+
+fn should_enable_tool_direct_fallback(config: &archon_core::config::CodexProviderConfig) -> bool {
+    config.runtime.trim().eq_ignore_ascii_case("auto") && config.direct_fallback
+}

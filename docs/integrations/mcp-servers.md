@@ -7,8 +7,9 @@ Model Context Protocol (MCP) extends archon-cli with external tools and resource
 | Transport | Use case |
 |---|---|
 | `stdio` | Local processes (default) |
-| `websocket` (`ws://`, `wss://`) | Remote / network MCP servers |
-| `http_streamable` | HTTP streaming (beta) |
+| `http` | Streamable HTTP MCP servers |
+| `websocket` / `ws` (`ws://`, `wss://`) | WebSocket JSON-RPC MCP servers |
+| `sse` | Classic MCP Server-Sent Events transport |
 
 ## Config schema
 
@@ -31,6 +32,14 @@ Model Context Protocol (MCP) extends archon-cli with external tools and resource
       "transport": "websocket",
       "url": "wss://mcp.example.com/memory",
       "headers": { "Authorization": "Bearer ${MCP_TOKEN}" }
+    },
+    "remote-http": {
+      "transport": "http",
+      "url": "https://mcp.example.com/mcp"
+    },
+    "legacy-sse": {
+      "transport": "sse",
+      "url": "https://mcp.example.com/sse"
     }
   }
 }

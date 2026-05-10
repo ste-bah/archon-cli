@@ -322,6 +322,9 @@ impl Agent {
                 .await;
             }
 
+            self.fire_after_tool_call_hook(&pre.tool_name, &pre.tool_id, &result)
+                .await;
+
             self.send_event(AgentEvent::ToolCallComplete {
                 name: pre.tool_name.clone(),
                 id: pre.tool_id.clone(),

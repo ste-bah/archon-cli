@@ -10,6 +10,17 @@
 
 pub(crate) mod add_dir;
 pub(crate) mod agent;
+pub(crate) mod agent_evolve;
+pub(crate) mod agent_evolve_apply;
+pub(crate) mod agent_evolve_apply_policy;
+pub(crate) mod agent_evolve_digest;
+pub(crate) mod agent_evolve_generate;
+pub(crate) mod agent_evolve_generate_support;
+pub(crate) mod agent_evolve_history;
+pub(crate) mod agent_evolve_inspect;
+pub(crate) mod agent_evolve_permissions;
+pub(crate) mod agent_evolve_report;
+pub(crate) mod agent_evolve_shadow;
 // TASK-#211 SLASH-AGENT: /agent slash-command umbrella (list/info/run).
 pub(crate) mod agent_slash;
 pub(crate) mod auth;
@@ -75,6 +86,7 @@ pub(crate) mod memory_cli;
 pub(crate) mod model;
 pub(crate) mod parser;
 pub(crate) mod permissions;
+pub(crate) mod permissions_cli;
 pub(crate) mod pipeline;
 pub(crate) mod pipeline_bundle;
 pub(crate) mod pipeline_declarative;
@@ -90,6 +102,13 @@ pub(crate) mod plugin_slash;
 // TASK-#210 SLASH-PROVIDERS: /providers list registered LLM providers.
 pub(crate) mod prov;
 pub(crate) mod providers;
+pub(crate) mod providers_health_report;
+pub(crate) mod providers_live;
+pub(crate) mod providers_profile_import;
+pub(crate) mod providers_slash;
+pub(crate) mod providers_status;
+pub(crate) mod providers_status_limits;
+pub(crate) mod providers_store_cli;
 // TASK-#217 SLASH-RELOAD-PLUGINS: /reload-plugins disk re-scan.
 pub(crate) mod recall;
 pub(crate) mod registry;
@@ -117,6 +136,8 @@ pub(crate) mod rewind;
 pub(crate) mod rules;
 // TASK-TUI-628: /sandbox handler — Bubble-mode flag flipper.
 pub(crate) mod sandbox;
+pub(crate) mod sandbox_cli;
+pub(crate) mod sandbox_doctor;
 pub(crate) mod sessions;
 // TASK-TUI-625: /session remote-URL + QR code handler.
 pub(crate) mod session;

@@ -60,3 +60,18 @@ async fn refresh_maps_http_error() {
         .expect_err("refresh should fail");
     assert!(err.to_string().contains("token refresh failed"));
 }
+
+#[tokio::test]
+async fn refresh_rejects_non_loopback_http_token_endpoint() {
+    let client = CodexOAuthClient::new_with_urls(
+        reqwest::Client::new(),
+        "https://auth.example.test/oauth/authorize".into(),
+        "http://auth.example.test/oauth/token".into(),
+    );
+
+    let err = client
+        .refresh("old-refresh")
+        .await
+        .expect_err("refresh should fail before HTTP");
+    assert!(err.to_string().contains("must use HTTPS"));
+}

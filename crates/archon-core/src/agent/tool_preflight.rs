@@ -2,6 +2,7 @@ use std::path::Path;
 
 use archon_permissions::auto::AutoDecision;
 use archon_permissions::is_default_safe_tool;
+use archon_permissions::mode::{PermissionDecision, PermissionMode};
 use archon_tools::plan_mode::is_tool_allowed_in_mode;
 
 use super::tool_types::PreflightResult;
@@ -24,219 +25,44 @@ impl Agent {
                 let mode = self.config.permission_mode.lock().await;
                 mode.clone()
             };
-            let tool_allowed = match perm_mode.as_str() {
-                "bypassPermissions" | "yolo" | "dontAsk" => {
-                    tracing::debug!(tool = %tool.name, "bypass-mode: allowed");
+            let mut denial_reason = format!("mode={perm_mode}");
+            let description = format!("use {}", tool.name);
+            let checker_decision = self.permission_checker_decision(
+                &perm_mode,
+                &tool.name,
+                &tool.input_json,
+                &description,
+            );
+            let parsed_mode = perm_mode.parse::<PermissionMode>().unwrap_or_default();
+            let tool_allowed = match checker_decision {
+                PermissionDecision::Allow => {
+                    tracing::debug!(tool = %tool.name, mode = %perm_mode, "permission checker allowed");
                     true
                 }
-                "acceptEdits" => match tool.name.as_str() {
-                    "Read" | "Glob" | "Grep" | "ToolSearch" | "AskUserQuestion" | "TodoWrite"
-                    | "Sleep" | "Write" | "Edit" | "Config" | "EnterPlanMode" | "ExitPlanMode"
-                    | "NotebookEdit" => true,
-                    _ => {
-                        let perm_agg = self
-                            .fire_hook(
-                                crate::hooks::HookEvent::PermissionRequest,
-                                serde_json::json!({
-                                    "hook_event": "PermissionRequest",
-                                    "tool_name": tool.name,
-                                    "mode": "acceptEdits",
-                                }),
-                            )
-                            .await;
-                        // Apply updated_permissions from hooks (REQ-HOOK-016)
-                        if !perm_agg.updated_permissions.is_empty() {
-                            let authority = crate::hooks::SourceAuthority::Project;
-                            let errors = crate::hooks::apply_permission_updates(
-                                &perm_agg.updated_permissions,
-                                &authority,
-                                self.permission_store.as_ref(),
-                            );
-                            for err in &errors {
-                                tracing::error!("permission update failed: {}", err);
-                            }
-                        }
-                        self.send_event(AgentEvent::PermissionRequired {
-                            tool: tool.name.clone(),
-                            description: format!("Permission required for {}", tool.name),
-                        })
-                        .await;
-                        self.fire_hook(
-                            crate::hooks::HookEvent::PermissionDenied,
-                            serde_json::json!({
-                                "hook_event": "PermissionDenied",
-                                "tool_name": tool.name,
-                                "mode": "acceptEdits",
-                            }),
-                        )
-                        .await;
-                        self.send_event(AgentEvent::PermissionDenied {
-                            tool: tool.name.clone(),
-                        })
-                        .await;
-                        false
-                    }
-                },
-                "default" | "ask" => {
-                    if is_default_safe_tool(&tool.name) {
-                        tracing::debug!(tool = %tool.name, "default-mode: safe, allowed");
-                        true
+                PermissionDecision::NeedsPermission(reason) => {
+                    denial_reason = reason.clone();
+                    if parsed_mode == PermissionMode::Auto {
+                        self.auto_mode_tool_allowed(tool, &input).await
                     } else {
-                        let perm_agg = self
-                            .fire_hook(
-                                crate::hooks::HookEvent::PermissionRequest,
-                                serde_json::json!({
-                                    "hook_event": "PermissionRequest",
-                                    "tool_name": tool.name,
-                                    "mode": "ask",
-                                }),
-                            )
-                            .await;
-                        // Apply updated_permissions from hooks (REQ-HOOK-016)
-                        if !perm_agg.updated_permissions.is_empty() {
-                            let authority = crate::hooks::SourceAuthority::Project;
-                            let errors = crate::hooks::apply_permission_updates(
-                                &perm_agg.updated_permissions,
-                                &authority,
-                                self.permission_store.as_ref(),
-                            );
-                            for err in &errors {
-                                tracing::error!("permission update failed: {}", err);
-                            }
-                        }
-                        self.send_event(AgentEvent::PermissionRequired {
-                            tool: tool.name.clone(),
-                            description: format!("{} wants to use {}", tool.name, tool.name),
-                        })
-                        .await;
-
-                        if let Some(ref rx) = self.permission_response_rx {
-                            let mut rx = rx.lock().await;
-                            match tokio::time::timeout(
-                                std::time::Duration::from_secs(120),
-                                rx.recv(),
-                            )
-                            .await
-                            {
-                                Ok(Some(true)) => {
-                                    self.send_event(AgentEvent::PermissionGranted {
-                                        tool: tool.name.clone(),
-                                    })
-                                    .await;
-                                    tracing::info!(tool = %tool.name, "default-mode: user approved");
-                                    true
-                                }
-                                _ => {
-                                    self.fire_hook(
-                                        crate::hooks::HookEvent::PermissionDenied,
-                                        serde_json::json!({
-                                            "hook_event": "PermissionDenied",
-                                            "tool_name": tool.name,
-                                            "mode": "ask",
-                                            "reason": "user_denied_or_timeout",
-                                        }),
-                                    )
-                                    .await;
-                                    self.send_event(AgentEvent::PermissionDenied {
-                                        tool: tool.name.clone(),
-                                    })
-                                    .await;
-                                    tracing::info!(tool = %tool.name, "default-mode: user denied or timeout");
-                                    false
-                                }
-                            }
-                        } else {
-                            tracing::info!(tool = %tool.name, "default-mode: no permission channel, auto-approved");
-                            true
-                        }
+                        self.request_tool_permission(tool, &perm_mode, reason).await
                     }
                 }
-                _ => {
-                    // "auto" mode -- use AutoModeEvaluator
-                    if let Some(ref evaluator) = self.auto_evaluator {
-                        let decision = match tool.name.as_str() {
-                            "Bash" | "PowerShell" => {
-                                let cmd =
-                                    input.get("command").and_then(|v| v.as_str()).unwrap_or("");
-                                evaluator.evaluate_command(cmd)
-                            }
-                            "Write" | "Edit" => {
-                                let path = input
-                                    .get("file_path")
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or("");
-                                evaluator.evaluate_file_write(Path::new(path))
-                            }
-                            "TodoWrite" | "Sleep" => AutoDecision::Allow,
-                            _ if is_default_safe_tool(&tool.name) => AutoDecision::Allow,
-                            "Config" => {
-                                let action =
-                                    input.get("action").and_then(|v| v.as_str()).unwrap_or("");
-                                if action.eq_ignore_ascii_case("get") {
-                                    AutoDecision::Allow
-                                } else {
-                                    AutoDecision::Prompt
-                                }
-                            }
-                            _ => AutoDecision::Prompt,
-                        };
-                        match decision {
-                            AutoDecision::Allow => {
-                                tracing::debug!(tool = %tool.name, "auto-mode: allowed");
-                                true
-                            }
-                            AutoDecision::Prompt => {
-                                tracing::warn!(tool = %tool.name, "auto-mode: risky, denied");
-                                self.fire_hook(
-                                    crate::hooks::HookEvent::PermissionDenied,
-                                    serde_json::json!({
-                                        "hook_event": "PermissionDenied",
-                                        "tool_name": tool.name,
-                                        "mode": "auto",
-                                        "reason": "risky_operation",
-                                    }),
-                                )
-                                .await;
-                                self.send_event(AgentEvent::PermissionDenied {
-                                    tool: tool.name.clone(),
-                                })
-                                .await;
-                                false
-                            }
-                            AutoDecision::PromptWithWarning(msg) => {
-                                tracing::warn!(tool = %tool.name, warning = %msg, "auto-mode: dangerous, denied");
-                                self.fire_hook(
-                                    crate::hooks::HookEvent::PermissionDenied,
-                                    serde_json::json!({
-                                        "hook_event": "PermissionDenied",
-                                        "tool_name": tool.name,
-                                        "mode": "auto",
-                                        "reason": "dangerous_operation",
-                                        "warning": msg,
-                                    }),
-                                )
-                                .await;
-                                self.send_event(AgentEvent::PermissionDenied {
-                                    tool: tool.name.clone(),
-                                })
-                                .await;
-                                false
-                            }
-                        }
-                    } else {
-                        true // no evaluator = allow
-                    }
+                PermissionDecision::Deny(reason) => {
+                    denial_reason = reason.clone();
+                    self.fire_permission_denied_hook(tool, &perm_mode, &reason)
+                        .await;
+                    false
                 }
             };
 
             if !tool_allowed {
                 {
                     let mut log = self.denial_log.lock().await;
-                    log.record(&tool.name, &format!("mode={perm_mode}"));
+                    log.record(&tool.name, &denial_reason);
                 }
                 let denied_result = ToolResult::error(format!(
-                    "Permission denied for tool '{}'. Current mode: {}. Use /permissions yolo to allow all operations.",
-                    tool.name, perm_mode
+                    "Permission denied for tool '{}'. Current mode: {}. Reason: {}",
+                    tool.name, perm_mode, denial_reason
                 ));
                 self.send_event(AgentEvent::ToolCallComplete {
                     name: tool.name.clone(),
@@ -263,22 +89,6 @@ impl Agent {
                 .await;
                 self.state.add_tool_result(&tool.id, &result.content, true);
                 continue;
-            }
-
-            // --- Checkpoint before Write/Edit ---
-            if matches!(tool.name.as_str(), "Write" | "Edit")
-                && let Some(ref store) = self.checkpoint_store
-                && let Some(file_path) = input.get("file_path").and_then(|v| v.as_str())
-            {
-                let store = store.lock().await;
-                if let Err(e) = store.snapshot(
-                    &self.config.session_id,
-                    file_path,
-                    self.turn_number as i64,
-                    &tool.name,
-                ) {
-                    tracing::warn!("checkpoint snapshot failed for {file_path}: {e}");
-                }
             }
 
             // --- Pre-tool-use hook (REQ-HOOK-001/003/004) ---
@@ -322,6 +132,12 @@ impl Agent {
                                 .permission_decision_reason
                                 .as_deref()
                                 .unwrap_or("hook denied permission");
+                            self.fire_permission_denied_hook(tool, &perm_mode, reason)
+                                .await;
+                            {
+                                let mut log = self.denial_log.lock().await;
+                                log.record(&tool.name, reason);
+                            }
                             let result = ToolResult::error(format!("Permission denied: {reason}"));
                             self.send_event(AgentEvent::ToolCallComplete {
                                 name: tool.name.clone(),
@@ -398,6 +214,45 @@ impl Agent {
                 }
             };
 
+            // --- Sandbox check against final hook-mutated input ---
+            let sandbox_result = self
+                .config
+                .sandbox
+                .as_ref()
+                .map(|backend| backend.check(&tool.name, &input));
+            let sandbox_prechecked = match sandbox_result {
+                Some(Ok(())) => true,
+                Some(Err(reason)) => {
+                    let result =
+                        ToolResult::error(format!("Sandbox denied tool '{}': {reason}", tool.name));
+                    self.send_event(AgentEvent::ToolCallComplete {
+                        name: tool.name.clone(),
+                        id: tool.id.clone(),
+                        result: result.clone(),
+                    })
+                    .await;
+                    self.state.add_tool_result(&tool.id, &result.content, true);
+                    continue;
+                }
+                None => false,
+            };
+
+            // --- Checkpoint before Write/Edit ---
+            if matches!(tool.name.as_str(), "Write" | "Edit")
+                && let Some(ref store) = self.checkpoint_store
+                && let Some(file_path) = input.get("file_path").and_then(|v| v.as_str())
+            {
+                let store = store.lock().await;
+                if let Err(e) = store.snapshot(
+                    &self.config.session_id,
+                    file_path,
+                    self.turn_number as i64,
+                    &tool.name,
+                ) {
+                    tracing::warn!("checkpoint snapshot failed for {file_path}: {e}");
+                }
+            }
+
             // --- Capture file_path for post-processing ---
             let file_path = if matches!(tool.name.as_str(), "Write" | "Edit" | "NotebookEdit") {
                 input
@@ -407,6 +262,8 @@ impl Agent {
             } else {
                 None
             };
+            self.fire_before_tool_call_hook(&tool.name, &tool.id, &input)
+                .await;
 
             allowed.push(PreflightResult {
                 tool_name: tool.name.clone(),
@@ -414,9 +271,76 @@ impl Agent {
                 input,
                 tool_arc,
                 file_path,
+                sandbox_prechecked,
             });
         }
 
         allowed
+    }
+
+    async fn auto_mode_tool_allowed(
+        &self,
+        tool: &PendingToolCall,
+        input: &serde_json::Value,
+    ) -> bool {
+        let Some(ref evaluator) = self.auto_evaluator else {
+            return true;
+        };
+        let decision = match tool.name.as_str() {
+            "Bash" | "PowerShell" => {
+                let cmd = input.get("command").and_then(|v| v.as_str()).unwrap_or("");
+                evaluator.evaluate_command(cmd)
+            }
+            "Write" | "Edit" => {
+                let path = input
+                    .get("file_path")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                evaluator.evaluate_file_write(Path::new(path))
+            }
+            "TodoWrite" | "Sleep" => AutoDecision::Allow,
+            _ if is_default_safe_tool(&tool.name) => AutoDecision::Allow,
+            "Config" => {
+                let action = input.get("action").and_then(|v| v.as_str()).unwrap_or("");
+                if action.eq_ignore_ascii_case("get") {
+                    AutoDecision::Allow
+                } else {
+                    AutoDecision::Prompt
+                }
+            }
+            _ => AutoDecision::Prompt,
+        };
+        match decision {
+            AutoDecision::Allow => {
+                tracing::debug!(tool = %tool.name, "auto-mode: allowed");
+                true
+            }
+            AutoDecision::Prompt => {
+                tracing::warn!(tool = %tool.name, "auto-mode: risky, denied");
+                self.fire_permission_denied_hook(tool, "auto", "risky_operation")
+                    .await;
+                false
+            }
+            AutoDecision::PromptWithWarning(msg) => {
+                tracing::warn!(tool = %tool.name, warning = %msg, "auto-mode: dangerous, denied");
+                self.fire_hook(
+                    crate::hooks::HookEvent::PermissionDenied,
+                    serde_json::json!({
+                        "hook_event": "PermissionDenied",
+                        "tool_name": tool.name,
+                        "mode": "auto",
+                        "reason": "dangerous_operation",
+                        "warning": msg,
+                    }),
+                )
+                .await;
+                self.send_event(AgentEvent::PermissionDenied {
+                    tool: tool.name.clone(),
+                    reason: Some("dangerous_operation".to_string()),
+                })
+                .await;
+                false
+            }
+        }
     }
 }

@@ -12,8 +12,22 @@ const PLAN_MODE_WHITELIST: &[&str] = &[
     "Agent",
 ];
 
-/// Tools auto-allowed in AcceptEdits mode (file operations + search).
-const ACCEPT_EDITS_WHITELIST: &[&str] = &["Read", "Write", "Edit", "Glob", "Grep"];
+/// Tools auto-allowed in AcceptEdits mode (file operations + safe session tools).
+const ACCEPT_EDITS_WHITELIST: &[&str] = &[
+    "Read",
+    "Write",
+    "Edit",
+    "Glob",
+    "Grep",
+    "ToolSearch",
+    "AskUserQuestion",
+    "TodoWrite",
+    "Sleep",
+    "Config",
+    "EnterPlanMode",
+    "ExitPlanMode",
+    "NotebookEdit",
+];
 
 /// Tools that are safe (read-only or coordination) and auto-allowed in Default mode.
 ///
@@ -76,6 +90,25 @@ impl PermissionChecker {
         self.mode
     }
 
+    /// Evaluate fine-grained rules without falling through to mode defaults.
+    ///
+    /// Deny rules remain absolute. `BypassPermissions` still turns non-deny
+    /// rule decisions into allow, matching [`Self::check`].
+    pub fn check_rule_decision(
+        &self,
+        tool_name: &str,
+        tool_args: &str,
+    ) -> Option<PermissionDecision> {
+        let decision = self.rules.evaluate(tool_name, tool_args)?;
+        if matches!(decision, PermissionDecision::Deny(_)) {
+            return Some(decision);
+        }
+        if self.mode == PermissionMode::BypassPermissions {
+            return Some(PermissionDecision::Allow);
+        }
+        Some(decision)
+    }
+
     /// Check if a tool execution should proceed.
     ///
     /// Evaluation order:
@@ -85,15 +118,7 @@ impl PermissionChecker {
     pub fn check(&self, tool_name: &str, description: &str, tool_args: &str) -> PermissionDecision {
         // Step 1: Evaluate fine-grained rules (unless BypassPermissions which
         // skips everything — but deny rules still apply even there).
-        if let Some(decision) = self.rules.evaluate(tool_name, tool_args) {
-            // Deny rules are absolute — they block in every mode including BypassPermissions.
-            if matches!(decision, PermissionDecision::Deny(_)) {
-                return decision;
-            }
-            // For non-deny rule decisions, BypassPermissions overrides to Allow.
-            if self.mode == PermissionMode::BypassPermissions {
-                return PermissionDecision::Allow;
-            }
+        if let Some(decision) = self.check_rule_decision(tool_name, tool_args) {
             return decision;
         }
 
@@ -238,6 +263,20 @@ mod tests {
             checker.check("Edit", "edit file", ""),
             PermissionDecision::NeedsPermission(_)
         ));
+    }
+
+    #[test]
+    fn accept_edits_preserves_session_tool_allowlist() {
+        let checker = PermissionChecker::new(PermissionMode::AcceptEdits, RuleSet::empty());
+
+        assert_eq!(
+            checker.check("Config", "read config", ""),
+            PermissionDecision::Allow
+        );
+        assert_eq!(
+            checker.check("NotebookEdit", "edit notebook", ""),
+            PermissionDecision::Allow
+        );
     }
 
     #[test]

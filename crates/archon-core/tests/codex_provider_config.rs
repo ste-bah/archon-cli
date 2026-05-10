@@ -5,6 +5,22 @@ fn archon_config_defaults_codex_provider_enabled() {
     let cfg = ArchonConfig::default();
 
     assert!(cfg.providers.openai_codex.enabled);
+    assert_eq!(cfg.providers.openai_codex.runtime, "direct");
+    assert!(!cfg.providers.openai_codex.direct_fallback);
+    assert_eq!(cfg.providers.openai_codex.app_server_transport, "websocket");
+    assert_eq!(cfg.providers.openai_codex.app_server_command, "codex");
+    assert_eq!(
+        cfg.providers.openai_codex.app_server_args,
+        vec!["app-server".to_string()]
+    );
+    assert_eq!(
+        cfg.providers.openai_codex.app_server_discovery_timeout_ms,
+        2_500
+    );
+    assert_eq!(
+        cfg.providers.openai_codex.app_server_model_catalog,
+        vec!["gpt-5.5".to_string(), "gpt-5.4".to_string()]
+    );
     assert_eq!(cfg.providers.openai_codex.manifest.ttl_seconds, 21_600);
 }
 
@@ -14,6 +30,14 @@ fn archon_config_parses_openai_codex_provider_section() {
         r#"
         [providers.openai-codex]
         enabled = true
+        runtime = "auto"
+        direct_fallback = true
+        app_server_transport = "stdio"
+        app_server_url = "http://127.0.0.1:11434/codex"
+        app_server_command = "/usr/local/bin/codex"
+        app_server_args = ["app-server", "--json-rpc"]
+        app_server_discovery_timeout_ms = 750
+        app_server_model_catalog = ["gpt-5.5", "gpt-5.4-mini"]
 
         [providers.openai-codex.spoof]
         originator = "cfgorigin"
@@ -32,6 +56,29 @@ fn archon_config_parses_openai_codex_provider_section() {
     )
     .expect("config parses");
 
+    assert_eq!(cfg.providers.openai_codex.runtime, "auto");
+    assert!(cfg.providers.openai_codex.direct_fallback);
+    assert_eq!(
+        cfg.providers.openai_codex.app_server_discovery_timeout_ms,
+        750
+    );
+    assert_eq!(
+        cfg.providers.openai_codex.app_server_url.as_deref(),
+        Some("http://127.0.0.1:11434/codex")
+    );
+    assert_eq!(cfg.providers.openai_codex.app_server_transport, "stdio");
+    assert_eq!(
+        cfg.providers.openai_codex.app_server_command,
+        "/usr/local/bin/codex"
+    );
+    assert_eq!(
+        cfg.providers.openai_codex.app_server_args,
+        vec!["app-server".to_string(), "--json-rpc".to_string()]
+    );
+    assert_eq!(
+        cfg.providers.openai_codex.app_server_model_catalog,
+        vec!["gpt-5.5".to_string(), "gpt-5.4-mini".to_string()]
+    );
     assert_eq!(
         cfg.providers.openai_codex.spoof.originator.as_deref(),
         Some("cfgorigin")

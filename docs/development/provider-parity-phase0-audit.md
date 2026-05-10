@@ -59,7 +59,7 @@ the Phase 1/2 refactor targets or approved low-level helpers.
 |---|---:|---|---|
 | `src/session_loop/slash_handlers.rs` | 1 | Refresh Anthropic identity headers. | Keep low-level Anthropic-only only if scoped to `/refresh-identity`; otherwise route through provider diagnostics. |
 | `src/session.rs` | 2 | Main session and session restore. | Replace remaining low-level construction with provider router where practical. |
-| `src/runtime/llm.rs` | 2 | Runtime provider wrapper plus command-provider helper. | Approved low-level factory; command/pipeline/gametheory callers should use it instead of direct construction. |
+| `src/runtime/llm.rs` | 1 | Runtime provider wrapper (one site wrapped in ObservedLlmProvider by PRD-006). | Approved low-level factory; command/pipeline/gametheory callers should use it instead of direct construction. |
 | `src/command/chat.rs` | 1 | One-shot Anthropic chat helper. | Route chat through the same provider router used by Codex. |
 | `crates/archon-sdk/src/query.rs` | 1 | SDK query client. | Decide whether SDK remains Anthropic-specific or accepts provider selection. |
 

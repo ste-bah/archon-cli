@@ -1,16 +1,130 @@
 use clap::Subcommand;
 
-#[derive(Subcommand, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Subcommand, Debug, Clone, PartialEq, Eq)]
 pub enum ProvidersAction {
     /// Show provider registry entries
     List,
     /// Show Archon surface support by provider/auth mode
     Capabilities,
+    /// Show provider-neutral runtime status from local configuration
+    Status {
+        /// Restrict output to one provider id
+        #[arg(long)]
+        provider: Option<String>,
+        /// Output the status snapshot as JSON
+        #[arg(long)]
+        json: bool,
+        /// Run opt-in live endpoint reachability checks
+        #[arg(long)]
+        live: bool,
+    },
+    /// Summarize provider health from status and persisted runtime events
+    Report {
+        /// Restrict output to one provider id
+        #[arg(long)]
+        provider: Option<String>,
+        /// Output the report as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show persisted provider rate-limit windows
+    Limits {
+        /// Restrict output to one provider id
+        #[arg(long)]
+        provider: Option<String>,
+    },
+    /// Inspect persisted provider auth profiles
+    Profiles {
+        #[command(subcommand)]
+        action: ProviderProfilesAction,
+    },
     /// Diagnose provider/auth configuration
     Doctor {
         /// Run opt-in live endpoint reachability checks
         #[arg(long)]
         live: bool,
+    },
+}
+
+#[derive(Subcommand, Debug, Clone, PartialEq, Eq)]
+pub enum ProviderProfilesAction {
+    /// Import current local/env credentials into the Cozo auth profile store
+    Import,
+    /// List persisted auth profiles
+    List {
+        /// Restrict output to one provider id
+        #[arg(long)]
+        provider: Option<String>,
+    },
+    /// Inspect one persisted auth profile
+    Inspect {
+        /// Profile id to inspect
+        profile_id: String,
+    },
+    /// Clear a profile cooldown marker
+    CooldownClear {
+        /// Profile id to update
+        profile_id: String,
+    },
+    /// Show ordered profile selection and skip reasons
+    Select {
+        /// Provider id to select for
+        provider: String,
+        /// Restrict to one or more auth kinds
+        #[arg(long = "auth-kind")]
+        auth_kinds: Vec<String>,
+        /// Prefer this profile id when it is healthy
+        #[arg(long)]
+        preferred: Option<String>,
+    },
+}
+
+#[derive(Subcommand, Debug, Clone, PartialEq, Eq)]
+pub enum SandboxAction {
+    /// Show configured sandbox backend and policy
+    Status {
+        /// Include compatibility and isolation details
+        #[arg(long)]
+        verbose: bool,
+    },
+    /// Explain how tools are routed through permission and sandbox gates
+    Explain {
+        /// Explain a specific backend instead of the configured backend
+        #[arg(long)]
+        backend: Option<String>,
+        /// Explain routing for a specific tool, e.g. Bash
+        #[arg(long)]
+        tool: Option<String>,
+        /// Optional command preview for shell routing explanations
+        #[arg(long)]
+        command: Option<String>,
+    },
+    /// Diagnose a sandbox backend without executing untrusted commands
+    Doctor {
+        /// Backend to diagnose: logical, docker, ssh, or openshell
+        #[arg(long)]
+        backend: Option<String>,
+    },
+    /// Validate sandbox config and report whether live execution is available
+    Test {
+        /// Backend to validate: logical, docker, ssh, or openshell
+        #[arg(long)]
+        backend: Option<String>,
+    },
+    /// List audited sandbox sessions from the Cozo learning store
+    Sessions {
+        /// Filter by sandbox session status, e.g. configured
+        #[arg(long)]
+        status: Option<String>,
+        /// Filter by agent type
+        #[arg(long)]
+        agent: Option<String>,
+        /// Maximum rows to show
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+        /// Output session rows as JSON
+        #[arg(long)]
+        json: bool,
     },
 }
 

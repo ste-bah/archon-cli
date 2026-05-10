@@ -6,12 +6,15 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::cli_args::Cli;
 use crate::slash_context::SlashCommandContext;
-use anyhow::{Context, Result};
+use anyhow::Result;
 use archon_consciousness::assembler::{AssemblyInput, BudgetConfig, SystemPromptAssembler};
 use archon_consciousness::defaults::load_configured_defaults;
 use archon_consciousness::rules::RulesEngine;
 use archon_core::agent::{Agent, AgentConfig, AgentEvent, TimestampedEvent};
 use archon_core::agents::AgentRegistry;
+use archon_core::agents::permissions_overlay::{
+    PermissionOverlayReason, resolve_permission_overlay,
+};
 use archon_core::config::default_config_path;
 use archon_core::config_layers::ConfigLayer;
 use archon_core::cost_alerts::{CostAlertAction, CostAlertState};
@@ -39,7 +42,14 @@ use archon_tui::event_channel::TuiEventSender;
 use archon_tui::observability;
 
 use crate::command::registry::default_registry;
-use crate::runtime::llm::build_llm_provider;
+use crate::runtime::llm::{
+    build_llm_provider_selection, provider_construction_error_reason,
+    record_anthropic_fallback_denied,
+};
+use crate::runtime::llm_non_anthropic::build_llm_provider_without_anthropic_fallback;
+use crate::runtime::provider_observer::{
+    observe_llm_provider_with_profile, record_provider_fallback, runtime_mode_for_provider_name,
+};
 use crate::setup::strip_cache_control_if_disabled;
 
 use archon_core::remote::protocol::AgentMessage;
@@ -92,6 +102,9 @@ struct BuiltAgent {
     event_rx: tokio::sync::mpsc::UnboundedReceiver<TimestampedEvent>,
     agent_def: Option<archon_core::agents::definition::CustomAgentDefinition>,
     metrics: std::sync::Arc<archon_tui::observability::ChannelMetrics>,
+    selected_provider: String,
+    selected_model: String,
+    permission_mode: Arc<tokio::sync::Mutex<String>>,
 }
 
 fn is_codex_session(config: &archon_core::config::ArchonConfig) -> bool {
@@ -104,6 +117,130 @@ fn active_session_model(config: &archon_core::config::ArchonConfig) -> String {
     } else {
         config.api.default_model.clone()
     }
+}
+
+fn session_sandbox_backend(
+    config: &archon_core::config::ArchonConfig,
+    sandbox_flag: Arc<AtomicBool>,
+    session_id: &str,
+    agent_type: &str,
+) -> Arc<dyn archon_permissions::SandboxBackend> {
+    let backend: Arc<dyn archon_permissions::SandboxBackend> = match config.sandbox.backend.as_str()
+    {
+        "docker" => Arc::new(archon_core::sandbox::DockerSandboxBackend::new(
+            config.sandbox.docker.clone(),
+            config.sandbox.workspace_access.clone(),
+        )),
+        "ssh" => Arc::new(archon_core::sandbox::SshSandboxBackend::new(
+            config.sandbox.ssh.clone(),
+        )),
+        "openshell" => Arc::new(archon_core::sandbox::OpenShellSandboxBackend::new(
+            config.sandbox.openshell.clone(),
+        )),
+        _ => Arc::new(archon_tui::sandbox::SharedSandboxFlag::with_flag(
+            sandbox_flag,
+        )),
+    };
+    let backend =
+        crate::runtime::sandbox_mode::apply_configured_sandbox_mode(backend, &config.sandbox);
+    crate::runtime::sandbox_audit::audit_sandbox_backend(
+        backend,
+        &config.sandbox,
+        session_id,
+        agent_type,
+    )
+}
+
+fn open_governed_learning_db(working_dir: &std::path::Path) -> Option<Arc<cozo::DbInstance>> {
+    let session_db = archon_session::storage::default_db_path();
+    let db_path = session_db
+        .parent()
+        .map(|parent| parent.join("learning.db"))
+        .unwrap_or_else(|| working_dir.join(".archon").join("learning.db"));
+    if let Some(parent) = db_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    match cozo::DbInstance::new("sqlite", &db_path, "") {
+        Ok(db) => {
+            if let Err(e) = archon_learning::schema::ensure_learning_schema(&db) {
+                tracing::warn!(
+                    error = %e,
+                    "governed learning schema init failed; runtime evidence disabled"
+                );
+                None
+            } else {
+                Some(Arc::new(db))
+            }
+        }
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                "governed learning store unavailable; runtime evidence disabled"
+            );
+            None
+        }
+    }
+}
+
+fn agent_ledger_context(
+    session_id: &str,
+    agent_def: Option<&archon_core::agents::definition::CustomAgentDefinition>,
+    model: impl Into<String>,
+    provider: impl Into<String>,
+) -> crate::runtime::agent_ledger_events::AgentLedgerContext {
+    crate::runtime::agent_ledger_events::AgentLedgerContext::new(
+        agent_def
+            .map(|def| def.agent_type.clone())
+            .unwrap_or_else(|| "main".into()),
+        session_id.to_string(),
+        model,
+        provider,
+    )
+    .with_version(agent_def.map(|def| def.meta.version.clone()))
+}
+
+async fn record_agent_ledger_event(
+    db: Option<&Arc<cozo::DbInstance>>,
+    context: &crate::runtime::agent_ledger_events::AgentLedgerContext,
+    permission_mode: &Arc<tokio::sync::Mutex<String>>,
+    event: &AgentEvent,
+) {
+    let mode = permission_mode.lock().await.clone();
+    match event {
+        AgentEvent::TurnComplete {
+            input_tokens,
+            output_tokens,
+        } => crate::runtime::agent_ledger_events::record_agent_turn_completed(
+            db,
+            context,
+            &mode,
+            *input_tokens,
+            *output_tokens,
+        ),
+        AgentEvent::Error(_) => {
+            crate::runtime::agent_ledger_events::record_agent_runtime_error(db, context, &mode)
+        }
+        _ => {}
+    }
+}
+
+fn spawn_print_ledger_forwarder(
+    mut event_rx: tokio::sync::mpsc::UnboundedReceiver<TimestampedEvent>,
+    db: Option<Arc<cozo::DbInstance>>,
+    context: crate::runtime::agent_ledger_events::AgentLedgerContext,
+    permission_mode: Arc<tokio::sync::Mutex<String>>,
+) -> tokio::sync::mpsc::UnboundedReceiver<TimestampedEvent> {
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    observability::spawn_named("print-agent-ledger-forwarder", async move {
+        while let Some(timestamped) = event_rx.recv().await {
+            record_agent_ledger_event(db.as_ref(), &context, &permission_mode, &timestamped.inner)
+                .await;
+            if tx.send(timestamped).is_err() {
+                break;
+            }
+        }
+    });
+    rx
 }
 
 fn configure_session_vlm_provider(working_dir: &std::path::Path) {
@@ -138,28 +275,15 @@ fn configure_session_vlm_provider(working_dir: &std::path::Path) {
 async fn build_codex_session_provider(
     config: &archon_core::config::ArchonConfig,
 ) -> Result<Arc<dyn archon_llm::provider::LlmProvider>> {
-    let codex_cfg = crate::command::auth::codex_config_from_core(&config.providers.openai_codex);
-    let http = reqwest::Client::new();
-    let resolution = archon_llm::providers::codex::spoof::resolve(&codex_cfg, &http)
-        .await
-        .context("failed to resolve Codex spoof identity for TUI session")?;
-    let provider = match std::env::var("ARCHON_CODEX_BASE_URL").ok() {
-        Some(base_url) if !base_url.trim().is_empty() => {
-            archon_llm::providers::codex::client::CodexProvider::new_with_base_url(
-                archon_llm::tokens::credentials_path(),
-                resolution.config,
-                http,
-                base_url,
-            )
-        }
-        _ => archon_llm::providers::codex::client::CodexProvider::new(
-            archon_llm::tokens::credentials_path(),
-            resolution.config,
-            http,
-        ),
-    }
-    .context("failed to construct Codex provider for TUI session")?;
-    Ok(Arc::new(provider))
+    let (provider, runtime_mode) =
+        crate::runtime::codex_provider::build_codex_provider(config, "tui_session").await?;
+    let profile_id =
+        crate::runtime::provider_auth_selection::selected_provider_auth_profile_id(provider.name());
+    Ok(observe_llm_provider_with_profile(
+        provider,
+        runtime_mode,
+        profile_id,
+    ))
 }
 
 /// Spawn the Prometheus `/metrics` exporter when `--metrics-port PORT` is
@@ -349,37 +473,54 @@ async fn build_session_agent(
     resolved_flags: &archon_core::cli_flags::ResolvedFlags,
     inject_output_style: bool,
 ) -> Result<BuiltAgent, i32> {
-    let auth = match resolve_auth_with_keys(
-        env_vars.anthropic_api_key.as_deref(),
-        env_vars.archon_api_key.as_deref(),
-        env_vars.archon_oauth_token.as_deref(),
-        std::env::var("ANTHROPIC_AUTH_TOKEN").ok().as_deref(),
-    ) {
-        Ok(a) => a,
-        Err(e) => {
-            eprintln!("Authentication failed: {e}");
-            eprintln!("Run `archon login` or set ANTHROPIC_API_KEY.");
-            return Err(archon_core::print_mode::EXIT_ERROR);
-        }
-    };
-
     let device_id = get_or_create_device_id();
-    let identity_mode =
-        resolve_identity_mode(&auth, cli.identity_spoof, &config.identity.as_view());
-
-    let account_uuid = fetch_account_uuid(&auth).await;
-    let identity = IdentityProvider::new(
-        identity_mode,
-        session_id.to_string(),
-        device_id,
-        account_uuid,
-    );
-
-    let api_url = std::env::var("ANTHROPIC_BASE_URL")
-        .ok()
-        .or_else(|| config.api.base_url.clone());
-
-    let api_client = AnthropicClient::new(auth, identity.clone(), api_url);
+    let (identity, api_client) = if is_codex_session(config) {
+        let identity = IdentityProvider::new(
+            IdentityMode::Clean,
+            session_id.to_string(),
+            device_id,
+            String::new(),
+        );
+        (identity, None)
+    } else if config.llm.provider != "anthropic" {
+        let identity = IdentityProvider::new(
+            IdentityMode::Clean,
+            session_id.to_string(),
+            device_id,
+            String::new(),
+        );
+        (identity, None)
+    } else {
+        let auth = match resolve_auth_with_keys(
+            env_vars.anthropic_api_key.as_deref(),
+            env_vars.archon_api_key.as_deref(),
+            env_vars.archon_oauth_token.as_deref(),
+            std::env::var("ANTHROPIC_AUTH_TOKEN").ok().as_deref(),
+        ) {
+            Ok(a) => a,
+            Err(e) => {
+                eprintln!("Authentication failed: {e}");
+                eprintln!("Run `archon login` or set ANTHROPIC_API_KEY.");
+                return Err(archon_core::print_mode::EXIT_ERROR);
+            }
+        };
+        let identity_mode =
+            resolve_identity_mode(&auth, cli.identity_spoof, &config.identity.as_view());
+        let account_uuid = fetch_account_uuid(&auth).await;
+        let identity = IdentityProvider::new(
+            identity_mode,
+            session_id.to_string(),
+            device_id,
+            account_uuid,
+        );
+        let api_url = std::env::var("ANTHROPIC_BASE_URL")
+            .ok()
+            .or_else(|| config.api.base_url.clone());
+        (
+            identity.clone(),
+            Some(AnthropicClient::new(auth, identity, api_url)),
+        )
+    };
     let working_dir = std::env::current_dir().unwrap_or_default();
     configure_session_vlm_provider(&working_dir);
     let leann_index = init_leann_index(&working_dir);
@@ -408,7 +549,15 @@ async fn build_session_agent(
         match agent_registry_early.resolve(agent_name) {
             Some(def) => {
                 tracing::info!(agent = agent_name, "resolved custom agent");
-                Some(def.clone())
+                let mut def = def.clone();
+                if let Err(error) =
+                    crate::runtime::agent_profile_overlay::apply_active_profile_overlay_if_enabled(
+                        config, &mut def,
+                    )
+                {
+                    tracing::warn!(agent = agent_name, %error, "agent profile overlay skipped");
+                }
+                Some(def)
             }
             None => {
                 let available = agent_registry_early.available_agent_names().join(", ");
@@ -419,6 +568,12 @@ async fn build_session_agent(
     } else {
         None
     };
+    let hook_registry_arc = crate::runtime::hooks::load_runtime_hook_registry(&working_dir);
+    crate::runtime::hooks::register_agent_session_hooks(
+        &hook_registry_arc,
+        session_id,
+        agent_def.as_ref(),
+    );
 
     if let Some(ref def) = agent_def {
         if let Some(ref allowed) = def.allowed_tools {
@@ -566,24 +721,40 @@ async fn build_session_agent(
     let permission_mode_shared = Arc::new(tokio::sync::Mutex::new(initial_perm_mode));
 
     let mut agent_config = AgentConfig {
-        model: config.api.default_model.clone(),
+        model: active_session_model(config),
         max_tokens: config.api.thinking_budget,
         thinking_budget: config.api.thinking_budget,
         system_prompt,
         tools: tool_defs,
         working_dir: working_dir.clone(),
         session_id: session_id.to_string(),
+        agent_type: agent_def
+            .as_ref()
+            .map(|def| def.agent_type.clone())
+            .unwrap_or_else(|| "main".into()),
+        agent_version: agent_def.as_ref().map(|def| def.meta.version.clone()),
         fast_mode: fast_mode_shared,
         effort_level: effort_level_shared,
         model_override: model_override_shared,
         permission_mode: permission_mode_shared,
+        permission_rules: archon_permissions::rules::RuleSet {
+            always_allow: config.permissions.always_allow.clone(),
+            always_deny: config.permissions.always_deny.clone(),
+            always_ask: config.permissions.always_ask.clone(),
+        },
         extra_dirs: Arc::new(tokio::sync::Mutex::new(Vec::new())),
         max_tool_concurrency: config.tools.max_concurrency as usize,
         max_turns: None,
         cancel_token: None,
         // GHOST-006: SandboxBackend wraps the shared flag for dispatch gating.
-        sandbox: Some(std::sync::Arc::new(
-            archon_tui::sandbox::SharedSandboxFlag::with_flag(sandbox_flag.clone()),
+        sandbox: Some(session_sandbox_backend(
+            config,
+            sandbox_flag.clone(),
+            session_id,
+            agent_def
+                .as_ref()
+                .map(|def| def.agent_type.as_str())
+                .unwrap_or("main"),
         )),
         activity_sink: session_activity_sink(session_id),
     };
@@ -603,24 +774,40 @@ async fn build_session_agent(
             }
         }
         if let Some(ref pm) = def.permission_mode {
-            let mode_str = pm.as_str();
             let parent_mode = agent_config.permission_mode.lock().await.clone();
-            let parent_is_privileged = matches!(
-                parent_mode.as_str(),
-                "bypassPermissions" | "acceptEdits" | "auto"
+            let decision = resolve_permission_overlay(
+                &parent_mode,
+                Some(pm),
+                cli.dangerously_skip_permissions,
             );
-            if parent_is_privileged {
-                tracing::debug!(
-                    agent = %def.agent_type, parent_mode = %parent_mode, agent_mode = %mode_str,
-                    "agent permission_mode skipped — parent has privileged mode"
-                );
-            } else if mode_str == "bypassPermissions" && !cli.dangerously_skip_permissions {
-                tracing::warn!(
-                    agent = %def.agent_type, raw_mode = %pm,
-                    "agent requests bypassPermissions but --dangerously-skip-permissions not passed; ignoring"
-                );
-            } else {
-                *agent_config.permission_mode.lock().await = mode_str.to_string();
+            match decision.reason {
+                PermissionOverlayReason::Applied => {
+                    *agent_config.permission_mode.lock().await =
+                        decision.effective_mode.as_str().to_string();
+                }
+                PermissionOverlayReason::ParentModeLocked => {
+                    tracing::debug!(
+                        agent = %def.agent_type,
+                        parent_mode = %decision.parent_mode,
+                        requested_mode = %decision.requested_mode.expect("requested mode exists"),
+                        "agent permission_mode skipped because parent mode has priority"
+                    );
+                }
+                PermissionOverlayReason::BlockedDangerousBypass => {
+                    tracing::warn!(
+                        agent = %def.agent_type, raw_mode = %pm,
+                        "agent requests bypassPermissions but --dangerously-skip-permissions not passed; ignoring"
+                    );
+                }
+                PermissionOverlayReason::BlockedExpansion => {
+                    tracing::warn!(
+                        agent = %def.agent_type,
+                        parent_mode = %decision.parent_mode,
+                        requested_mode = %decision.requested_mode.expect("requested mode exists"),
+                        "agent permission_mode would widen parent mode; keeping parent mode"
+                    );
+                }
+                PermissionOverlayReason::NoRequest => {}
             }
         }
         if def.max_turns.is_some() {
@@ -630,7 +817,97 @@ async fn build_session_agent(
 
     let (agent_event_tx, agent_event_rx) =
         tokio::sync::mpsc::unbounded_channel::<TimestampedEvent>();
-    let provider = build_llm_provider(&config.llm, api_client);
+    let selected_model = agent_config.model.clone();
+    let permission_mode_for_built = Arc::clone(&agent_config.permission_mode);
+    let requested_provider_for_hooks = if is_codex_session(config) {
+        "openai-codex"
+    } else {
+        config.llm.provider.as_str()
+    };
+    crate::runtime::hooks::fire_provider_resolve_hook(
+        &hook_registry_arc,
+        &working_dir,
+        session_id,
+        crate::runtime::hooks::ProviderResolveHookPayload {
+            hook_event: "BeforeProviderResolve",
+            stage: "before_provider_resolve",
+            surface: "session_agent",
+            requested_provider: requested_provider_for_hooks,
+            selected_provider: None,
+            runtime_mode: None,
+            profile_id: None,
+        },
+    )
+    .await;
+    let provider = if is_codex_session(config) {
+        let (provider, runtime_mode) =
+            match crate::runtime::codex_provider::build_codex_provider(config, "session_agent")
+                .await
+            {
+                Ok(provider) => provider,
+                Err(error) => {
+                    eprintln!("Codex provider failed: {error}");
+                    return Err(archon_core::print_mode::EXIT_ERROR);
+                }
+            };
+        let profile_id = crate::runtime::provider_auth_selection::selected_provider_auth_profile_id(
+            provider.name(),
+        );
+        observe_llm_provider_with_profile(provider, runtime_mode, profile_id)
+    } else {
+        let provider = match api_client {
+            Some(api_client) => {
+                let selection = build_llm_provider_selection(&config.llm, api_client);
+                let selected_provider = selection.provider.name().to_string();
+                let runtime_mode = runtime_mode_for_provider_name(&selected_provider);
+                record_provider_fallback(
+                    &config.llm.provider,
+                    &selected_provider,
+                    runtime_mode,
+                    selection
+                        .fallback_reason
+                        .unwrap_or("provider_construction_fallback"),
+                );
+                selection.provider
+            }
+            None => match build_llm_provider_without_anthropic_fallback(&config.llm) {
+                Ok(provider) => provider,
+                Err(error) => {
+                    let reason = provider_construction_error_reason(&error);
+                    record_anthropic_fallback_denied(&config.llm.provider, "session_agent", reason);
+                    eprintln!("Provider {} failed: {error}", config.llm.provider);
+                    return Err(archon_core::print_mode::EXIT_ERROR);
+                }
+            },
+        };
+        let selected_provider = provider.name().to_string();
+        let runtime_mode = runtime_mode_for_provider_name(&selected_provider);
+        let profile_id = crate::runtime::provider_auth_selection::selected_provider_auth_profile_id(
+            &selected_provider,
+        );
+        observe_llm_provider_with_profile(provider, runtime_mode, profile_id)
+    };
+    let selected_provider = provider.name().to_string();
+    let runtime_mode_for_hooks = runtime_mode_for_provider_name(&selected_provider);
+    let profile_id_for_hooks =
+        crate::runtime::provider_auth_selection::selected_provider_auth_profile_id(
+            &selected_provider,
+        );
+    crate::runtime::hooks::fire_provider_resolve_hook(
+        &hook_registry_arc,
+        &working_dir,
+        session_id,
+        crate::runtime::hooks::ProviderResolveHookPayload {
+            hook_event: "AfterProviderResolve",
+            stage: "after_provider_resolve",
+            surface: "session_agent",
+            requested_provider: requested_provider_for_hooks,
+            selected_provider: Some(&selected_provider),
+            runtime_mode: Some(runtime_mode_for_hooks),
+            profile_id: profile_id_for_hooks.as_deref(),
+        },
+    )
+    .await;
     tracing::info!("LLM provider: {}", provider.name());
 
     let agent_registry = Arc::new(std::sync::RwLock::new(AgentRegistry::load(&working_dir)));
@@ -658,28 +935,7 @@ async fn build_session_agent(
         return Err(archon_core::print_mode::EXIT_ERROR);
     }
 
-    {
-        let home_dir = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
-        let hook_registry = archon_core::hooks::HookRegistry::load_all(&working_dir, &home_dir);
-        let arc = std::sync::Arc::new(hook_registry);
-        agent.set_hook_registry(Arc::clone(&arc));
-
-        if let Some(ref def) = agent_def
-            && let Some(ref hooks_json) = def.hooks
-        {
-            match archon_core::agents::loader::parse_agent_hooks(hooks_json) {
-                Ok(hook_pairs) => {
-                    for (event, config) in hook_pairs {
-                        arc.register_session_hook(session_id, event, config);
-                    }
-                    tracing::info!(agent = %def.agent_type, "registered agent session-scoped hooks");
-                }
-                Err(e) => {
-                    tracing::warn!(agent = %def.agent_type, error = %e, "failed to parse agent hooks")
-                }
-            }
-        }
-    }
+    agent.set_hook_registry(Arc::clone(&hook_registry_arc));
 
     let auto_eval = AutoModeEvaluator::new(AutoModeConfig {
         project_dir: Some(working_dir),
@@ -700,6 +956,9 @@ async fn build_session_agent(
         event_rx: agent_event_rx,
         agent_def,
         metrics,
+        selected_provider,
+        selected_model,
+        permission_mode: permission_mode_for_built,
     })
 }
 
@@ -716,6 +975,9 @@ pub(crate) async fn run_print_mode_session(
         mut agent,
         event_rx,
         agent_def,
+        selected_provider,
+        selected_model,
+        permission_mode,
         ..
     } = match build_session_agent(config, session_id, cli, env_vars, resolved_flags, true).await {
         Ok(b) => b,
@@ -729,6 +991,21 @@ pub(crate) async fn run_print_mode_session(
     {
         print_config.query = format!("{prefix}\n\n{}", print_config.query);
     }
+
+    let working_dir = std::env::current_dir().unwrap_or_default();
+    let governed_learning_db = open_governed_learning_db(&working_dir);
+    let ledger_context = agent_ledger_context(
+        session_id,
+        agent_def.as_ref(),
+        selected_model,
+        selected_provider,
+    );
+    let event_rx = spawn_print_ledger_forwarder(
+        event_rx,
+        governed_learning_db,
+        ledger_context,
+        permission_mode,
+    );
 
     run_print_mode(print_config, config, &mut agent, event_rx).await
 }
@@ -750,6 +1027,10 @@ pub(crate) async fn run_headless_session(
     let BuiltAgent {
         mut agent,
         event_rx,
+        agent_def,
+        selected_provider,
+        selected_model,
+        permission_mode,
         ..
     } = match build_session_agent(config, session_id, cli, env_vars, resolved_flags, false).await {
         Ok(b) => b,
@@ -761,6 +1042,14 @@ pub(crate) async fn run_headless_session(
     let mut stdout = tokio::io::stdout();
     let mut line = String::new();
     let mut event_rx = event_rx;
+    let working_dir = std::env::current_dir().unwrap_or_default();
+    let governed_learning_db = open_governed_learning_db(&working_dir);
+    let ledger_context = agent_ledger_context(
+        session_id,
+        agent_def.as_ref(),
+        selected_model,
+        selected_provider,
+    );
 
     tracing::info!(%session_id, "headless: agent loop started");
 
@@ -799,6 +1088,11 @@ pub(crate) async fn run_headless_session(
 
                 if let Err(e) = agent.process_message(&content).await {
                     tracing::error!(%e, "headless: agent error");
+                    crate::runtime::agent_ledger_events::record_agent_runtime_error(
+                        governed_learning_db.as_ref(),
+                        &ledger_context,
+                        &permission_mode.lock().await.clone(),
+                    );
                     // Drain stale events from the failed processing before
                     // sending the error response to avoid leaking fragments
                     // into the next message's response.
@@ -831,6 +1125,13 @@ pub(crate) async fn run_headless_session(
                 loop {
                     match event_rx.try_recv() {
                         Ok(ts) => {
+                            record_agent_ledger_event(
+                                governed_learning_db.as_ref(),
+                                &ledger_context,
+                                &permission_mode,
+                                &ts.inner,
+                            )
+                            .await;
                             if let AgentEvent::TextDelta(text) = ts.inner {
                                 response_text.push_str(&text);
                             }
@@ -1114,6 +1415,7 @@ pub(crate) async fn run_interactive_session(
 
     // ── Phase 2: Load MCP server configs (CLI-101) ──────────────
     let working_dir = std::env::current_dir().unwrap_or_default();
+    let hook_registry_arc = crate::runtime::hooks::load_runtime_hook_registry(&working_dir);
     let mcp_configs = if resolved_flags.bare_mode {
         tracing::info!("bare mode: skipping MCP auto-discovery");
         Vec::new()
@@ -1158,18 +1460,57 @@ pub(crate) async fn run_interactive_session(
             tracing::info!(
                 "LLM provider selected: openai-codex (skipping Anthropic auth bootstrap)"
             );
+            crate::runtime::hooks::fire_provider_resolve_hook(
+                &hook_registry_arc,
+                &working_dir,
+                session_id,
+                crate::runtime::hooks::ProviderResolveHookPayload {
+                    hook_event: "BeforeProviderResolve",
+                    stage: "before_provider_resolve",
+                    surface: "tui_session",
+                    requested_provider: "openai-codex",
+                    selected_provider: None,
+                    runtime_mode: None,
+                    profile_id: None,
+                },
+            )
+            .await;
             let prompt_identity = IdentityProvider::new(
                 IdentityMode::Clean,
                 session_id.to_string(),
                 get_or_create_device_id(),
                 String::new(),
             );
-            (
-                Some(build_codex_session_provider(config).await?),
-                None,
-                None,
-                prompt_identity,
+            let codex_provider = build_codex_session_provider(config).await?;
+            let selected_provider = codex_provider.name().to_string();
+            let profile_id =
+                crate::runtime::provider_auth_selection::selected_provider_auth_profile_id(
+                    &selected_provider,
+                );
+            crate::runtime::hooks::fire_provider_resolve_hook(
+                &hook_registry_arc,
+                &working_dir,
+                session_id,
+                crate::runtime::hooks::ProviderResolveHookPayload {
+                    hook_event: "AfterProviderResolve",
+                    stage: "after_provider_resolve",
+                    surface: "tui_session",
+                    requested_provider: "openai-codex",
+                    selected_provider: Some(&selected_provider),
+                    runtime_mode: Some(runtime_mode_for_provider_name(&selected_provider)),
+                    profile_id: profile_id.as_deref(),
+                },
             )
+            .await;
+            (Some(codex_provider), None, None, prompt_identity)
+        } else if config.llm.provider != "anthropic" {
+            let prompt_identity = IdentityProvider::new(
+                IdentityMode::Clean,
+                session_id.to_string(),
+                get_or_create_device_id(),
+                String::new(),
+            );
+            (None, None, None, prompt_identity)
         } else {
             // ── Resolve Anthropic authentication ─────────────────────
             let auth = match resolve_auth_with_keys(
@@ -1363,7 +1704,15 @@ pub(crate) async fn run_interactive_session(
             match agent_registry_tmp.resolve(agent_name) {
                 Some(def) => {
                     tracing::info!(agent = agent_name, "resolved custom agent definition");
-                    Some(def.clone())
+                    let mut def = def.clone();
+                    if let Err(error) =
+                    crate::runtime::agent_profile_overlay::apply_active_profile_overlay_if_enabled(
+                        config, &mut def,
+                    )
+                {
+                    tracing::warn!(agent = agent_name, %error, "agent profile overlay skipped");
+                }
+                    Some(def)
                 }
                 None => {
                     let available = agent_registry_tmp.available_agent_names().join(", ");
@@ -1374,6 +1723,11 @@ pub(crate) async fn run_interactive_session(
             None
         };
     drop(agent_registry_tmp);
+    crate::runtime::hooks::register_agent_session_hooks(
+        &hook_registry_arc,
+        session_id,
+        agent_def.as_ref(),
+    );
 
     // Apply agent tool filtering to registry
     if let Some(ref def) = agent_def {
@@ -1636,17 +1990,33 @@ pub(crate) async fn run_interactive_session(
         tools: tool_defs,
         working_dir: working_dir.clone(),
         session_id: session_id.to_string(),
+        agent_type: agent_def
+            .as_ref()
+            .map(|def| def.agent_type.clone())
+            .unwrap_or_else(|| "main".into()),
+        agent_version: agent_def.as_ref().map(|def| def.meta.version.clone()),
         fast_mode: Arc::clone(&fast_mode_shared),
         effort_level: Arc::clone(&effort_level_shared),
         model_override: Arc::clone(&model_override_shared),
         permission_mode: Arc::clone(&permission_mode_shared),
+        permission_rules: archon_permissions::rules::RuleSet {
+            always_allow: config.permissions.always_allow.clone(),
+            always_deny: config.permissions.always_deny.clone(),
+            always_ask: config.permissions.always_ask.clone(),
+        },
         extra_dirs: Arc::new(tokio::sync::Mutex::new(Vec::new())),
         max_tool_concurrency: config.tools.max_concurrency as usize,
         max_turns: None,
         cancel_token: None,
         // GHOST-006: SandboxBackend wraps the shared flag for dispatch gating.
-        sandbox: Some(std::sync::Arc::new(
-            archon_tui::sandbox::SharedSandboxFlag::with_flag(sandbox_flag.clone()),
+        sandbox: Some(session_sandbox_backend(
+            config,
+            sandbox_flag.clone(),
+            session_id,
+            agent_def
+                .as_ref()
+                .map(|def| def.agent_type.as_str())
+                .unwrap_or("main"),
         )),
         activity_sink: session_activity_sink(session_id),
     };
@@ -1668,25 +2038,40 @@ pub(crate) async fn run_interactive_session(
             }
         }
         if let Some(ref pm) = def.permission_mode {
-            let mode_str = pm.as_str();
-            // AC-103: Agent permission_mode must NOT override parent BypassPermissions/AcceptEdits/Auto
             let parent_mode = agent_config.permission_mode.lock().await.clone();
-            let parent_is_privileged = matches!(
-                parent_mode.as_str(),
-                "bypassPermissions" | "acceptEdits" | "auto"
+            let decision = resolve_permission_overlay(
+                &parent_mode,
+                Some(pm),
+                cli.dangerously_skip_permissions,
             );
-            if parent_is_privileged {
-                tracing::debug!(
-                    agent = %def.agent_type, parent_mode = %parent_mode, agent_mode = %mode_str,
-                    "agent permission_mode skipped — parent has privileged mode"
-                );
-            } else if mode_str == "bypassPermissions" && !cli.dangerously_skip_permissions {
-                tracing::warn!(
-                    agent = %def.agent_type, raw_mode = %pm,
-                    "agent requests bypassPermissions but --dangerously-skip-permissions not passed; ignoring"
-                );
-            } else {
-                *agent_config.permission_mode.lock().await = mode_str.to_string();
+            match decision.reason {
+                PermissionOverlayReason::Applied => {
+                    *agent_config.permission_mode.lock().await =
+                        decision.effective_mode.as_str().to_string();
+                }
+                PermissionOverlayReason::ParentModeLocked => {
+                    tracing::debug!(
+                        agent = %def.agent_type,
+                        parent_mode = %decision.parent_mode,
+                        requested_mode = %decision.requested_mode.expect("requested mode exists"),
+                        "agent permission_mode skipped because parent mode has priority"
+                    );
+                }
+                PermissionOverlayReason::BlockedDangerousBypass => {
+                    tracing::warn!(
+                        agent = %def.agent_type, raw_mode = %pm,
+                        "agent requests bypassPermissions but --dangerously-skip-permissions not passed; ignoring"
+                    );
+                }
+                PermissionOverlayReason::BlockedExpansion => {
+                    tracing::warn!(
+                        agent = %def.agent_type,
+                        parent_mode = %decision.parent_mode,
+                        requested_mode = %decision.requested_mode.expect("requested mode exists"),
+                        "agent permission_mode would widen parent mode; keeping parent mode"
+                    );
+                }
+                PermissionOverlayReason::NoRequest => {}
             }
         }
         if def.max_turns.is_some() {
@@ -1694,6 +2079,7 @@ pub(crate) async fn run_interactive_session(
         }
     }
 
+    let agent_model_for_ledger = agent_config.model.clone();
     let extra_dirs_shared = Arc::clone(&agent_config.extra_dirs);
 
     // Create channels
@@ -1732,17 +2118,88 @@ pub(crate) async fn run_interactive_session(
     let (user_input_tx, user_input_rx) = tokio::sync::mpsc::channel::<String>(16);
 
     // Create agent
+    let provider_was_prebuilt = provider_override.is_some();
+    if !provider_was_prebuilt {
+        crate::runtime::hooks::fire_provider_resolve_hook(
+            &hook_registry_arc,
+            &working_dir,
+            session_id,
+            crate::runtime::hooks::ProviderResolveHookPayload {
+                hook_event: "BeforeProviderResolve",
+                stage: "before_provider_resolve",
+                surface: "interactive_session",
+                requested_provider: &config.llm.provider,
+                selected_provider: None,
+                runtime_mode: None,
+                profile_id: None,
+            },
+        )
+        .await;
+    }
     let provider = match provider_override {
         Some(provider) => provider,
         None => match anthropic_client {
-            Some(client) => build_llm_provider(&config.llm, client),
+            Some(client) => {
+                let selection = build_llm_provider_selection(&config.llm, client);
+                let selected_provider = selection.provider.name().to_string();
+                let runtime_mode = runtime_mode_for_provider_name(&selected_provider);
+                record_provider_fallback(
+                    &config.llm.provider,
+                    &selected_provider,
+                    runtime_mode,
+                    selection
+                        .fallback_reason
+                        .unwrap_or("provider_construction_fallback"),
+                );
+                let profile_id =
+                    crate::runtime::provider_auth_selection::selected_provider_auth_profile_id(
+                        &selected_provider,
+                    );
+                observe_llm_provider_with_profile(selection.provider, runtime_mode, profile_id)
+            }
             None => {
-                return Err(anyhow::anyhow!(
-                    "missing Anthropic client for session provider"
-                ));
+                let provider = build_llm_provider_without_anthropic_fallback(&config.llm).map_err(
+                    |error| {
+                        let reason = provider_construction_error_reason(&error);
+                        record_anthropic_fallback_denied(
+                            &config.llm.provider,
+                            "interactive_session",
+                            reason,
+                        );
+                        anyhow::anyhow!("provider {} failed: {error}", config.llm.provider)
+                    },
+                )?;
+                let selected_provider = provider.name().to_string();
+                let runtime_mode = runtime_mode_for_provider_name(&selected_provider);
+                let profile_id =
+                    crate::runtime::provider_auth_selection::selected_provider_auth_profile_id(
+                        &selected_provider,
+                    );
+                observe_llm_provider_with_profile(provider, runtime_mode, profile_id)
             }
         },
     };
+    if !provider_was_prebuilt {
+        let selected_provider = provider.name().to_string();
+        let profile_id = crate::runtime::provider_auth_selection::selected_provider_auth_profile_id(
+            &selected_provider,
+        );
+        crate::runtime::hooks::fire_provider_resolve_hook(
+            &hook_registry_arc,
+            &working_dir,
+            session_id,
+            crate::runtime::hooks::ProviderResolveHookPayload {
+                hook_event: "AfterProviderResolve",
+                stage: "after_provider_resolve",
+                surface: "interactive_session",
+                requested_provider: &config.llm.provider,
+                selected_provider: Some(&selected_provider),
+                runtime_mode: Some(runtime_mode_for_provider_name(&selected_provider)),
+                profile_id: profile_id.as_deref(),
+            },
+        )
+        .await;
+    }
     tracing::info!("LLM provider: {}", provider.name());
 
     // Load custom agent registry (built-in + project + user agents)
@@ -1842,30 +2299,7 @@ pub(crate) async fn run_interactive_session(
     };
 
     // Governed-learning event store — shared with `archon behaviour`.
-    let governed_learning_db: Option<Arc<cozo::DbInstance>> = {
-        let session_db = archon_session::storage::default_db_path();
-        let db_path = session_db
-            .parent()
-            .map(|parent| parent.join("learning.db"))
-            .unwrap_or_else(|| working_dir.join(".archon").join("learning.db"));
-        if let Some(parent) = db_path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        match cozo::DbInstance::new("sqlite", &db_path, "") {
-            Ok(db) => {
-                if let Err(e) = archon_learning::schema::ensure_learning_schema(&db) {
-                    tracing::warn!(error = %e, "governed learning schema init failed; correction events disabled");
-                    None
-                } else {
-                    Some(Arc::new(db))
-                }
-            }
-            Err(e) => {
-                tracing::warn!(error = %e, "governed learning store unavailable; correction events disabled");
-                None
-            }
-        }
-    };
+    let governed_learning_db = open_governed_learning_db(&working_dir);
 
     // Construct pipeline facades + LLM adapter once at bootstrap for
     // TUI /archon-code and /archon-research commands per Deliverable 3.
@@ -2159,31 +2593,10 @@ pub(crate) async fn run_interactive_session(
         }
     }
 
-    // Wire hook system — load hooks from all sources (settings.json + TOML)
-    let hook_registry_arc = {
-        let home_dir = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
-        let hook_registry = archon_core::hooks::HookRegistry::load_all(&working_dir, &home_dir);
-        let arc = std::sync::Arc::new(hook_registry);
-        agent.set_hook_registry(Arc::clone(&arc));
-        arc
-    };
+    agent.set_hook_registry(Arc::clone(&hook_registry_arc));
 
-    // Wire Phase G agent definition fields (hooks, critical_system_reminder)
+    // Wire Phase G agent definition fields (critical_system_reminder)
     if let Some(ref def) = agent_def {
-        // Register agent-specific hooks as session-scoped hooks
-        if let Some(ref hooks_json) = def.hooks {
-            match archon_core::agents::loader::parse_agent_hooks(hooks_json) {
-                Ok(hook_pairs) => {
-                    for (event, config) in hook_pairs {
-                        hook_registry_arc.register_session_hook(session_id, event, config);
-                    }
-                    tracing::info!(agent = %def.agent_type, "registered agent session-scoped hooks");
-                }
-                Err(e) => {
-                    tracing::warn!(agent = %def.agent_type, error = %e, "failed to parse agent hooks")
-                }
-            }
-        }
         // Set critical system reminder for per-turn injection
         if let Some(ref reminder) = def.critical_system_reminder {
             agent.set_critical_system_reminder(reminder.clone());
@@ -2323,6 +2736,20 @@ pub(crate) async fn run_interactive_session(
     let session_stats_for_fwd = Arc::clone(&session_stats_shared);
     let session_id_fwd = session_id.to_string();
     let session_store_for_fwd = Arc::clone(&session_store_fwd);
+    let permission_mode_for_fwd = Arc::clone(&permission_mode_shared);
+    let permission_events_db_for_fwd = governed_learning_db.clone();
+    let agent_ledger_db_for_fwd = governed_learning_db.clone();
+    let agent_ledger_context_for_fwd =
+        crate::runtime::agent_ledger_events::AgentLedgerContext::new(
+            agent_def
+                .as_ref()
+                .map(|def| def.agent_type.clone())
+                .unwrap_or_else(|| "main".into()),
+            session_id.to_string(),
+            agent_model_for_ledger,
+            provider.name().to_string(),
+        )
+        .with_version(agent_def.as_ref().map(|def| def.meta.version.clone()));
     let last_assistant_response_shared: Arc<tokio::sync::Mutex<String>> =
         Arc::new(tokio::sync::Mutex::new(String::new()));
     let last_response_for_fwd = Arc::clone(&last_assistant_response_shared);
@@ -2416,17 +2843,67 @@ pub(crate) async fn run_interactive_session(
                             );
                         }
 
+                        let mode = permission_mode_for_fwd.lock().await.clone();
+                        crate::runtime::agent_ledger_events::record_agent_turn_completed(
+                            agent_ledger_db_for_fwd.as_ref(),
+                            &agent_ledger_context_for_fwd,
+                            &mode,
+                            input_tokens,
+                            output_tokens,
+                        );
+
                         TuiEvent::TurnComplete {
                             input_tokens,
                             output_tokens,
                         }
                     }
-                    AgentEvent::Error(msg) => TuiEvent::Error(msg),
+                    AgentEvent::Error(msg) => {
+                        let mode = permission_mode_for_fwd.lock().await.clone();
+                        crate::runtime::agent_ledger_events::record_agent_runtime_error(
+                            agent_ledger_db_for_fwd.as_ref(),
+                            &agent_ledger_context_for_fwd,
+                            &mode,
+                        );
+                        TuiEvent::Error(msg)
+                    }
                     AgentEvent::SessionComplete => TuiEvent::Done,
                     AgentEvent::PermissionRequired { tool, description } => {
+                        let mode = permission_mode_for_fwd.lock().await.clone();
+                        crate::runtime::permission_events::record_permission_event(
+                            permission_events_db_for_fwd.as_ref(),
+                            &session_id_fwd,
+                            Some(&agent_ledger_context_for_fwd.agent_type),
+                            &mode,
+                            &tool,
+                            "requested",
+                            None,
+                        );
                         TuiEvent::PermissionPrompt { tool, description }
                     }
-                    AgentEvent::PermissionGranted { .. } | AgentEvent::PermissionDenied { .. } => {
+                    AgentEvent::PermissionGranted { tool } => {
+                        let mode = permission_mode_for_fwd.lock().await.clone();
+                        crate::runtime::permission_events::record_permission_event(
+                            permission_events_db_for_fwd.as_ref(),
+                            &session_id_fwd,
+                            Some(&agent_ledger_context_for_fwd.agent_type),
+                            &mode,
+                            &tool,
+                            "granted",
+                            None,
+                        );
+                        continue;
+                    }
+                    AgentEvent::PermissionDenied { tool, reason } => {
+                        let mode = permission_mode_for_fwd.lock().await.clone();
+                        crate::runtime::permission_events::record_permission_event(
+                            permission_events_db_for_fwd.as_ref(),
+                            &session_id_fwd,
+                            Some(&agent_ledger_context_for_fwd.agent_type),
+                            &mode,
+                            &tool,
+                            "denied",
+                            reason.as_deref(),
+                        );
                         continue;
                     }
                     _ => continue,

@@ -192,7 +192,13 @@ async fn main() -> Result<()> {
             return crate::command::chat::handle_chat(args, &config).await;
         }
         Some(Commands::Providers { action }) => {
-            return crate::command::providers::handle_providers(action);
+            return crate::command::providers::handle_providers(action, &config);
+        }
+        Some(Commands::Sandbox { action }) => {
+            return crate::command::sandbox_cli::handle_sandbox_command(action, &config);
+        }
+        Some(Commands::Permissions { action }) => {
+            return crate::command::permissions_cli::handle_permissions_command(&action);
         }
         Some(Commands::Plugin { action }) => {
             return crate::command::plugin::handle_plugin_command(action);
@@ -224,6 +230,10 @@ async fn main() -> Result<()> {
         Some(Commands::Behaviour { action }) => {
             use crate::command::behaviour::handle_behaviour_command;
             return handle_behaviour_command(&action, &config).await;
+        }
+        Some(Commands::Agent { action }) => {
+            use crate::command::agent_evolve::handle_agent_command;
+            return handle_agent_command(&action, &config).await;
         }
         Some(Commands::Learning { action }) => {
             return crate::command::learning::handle_learning_command(action, &config).await;

@@ -34,6 +34,8 @@ mod events;
 mod lifecycle;
 mod memory_integration;
 mod message_delivery;
+mod permission_gate;
+mod runtime_hooks;
 mod support;
 #[cfg(test)]
 mod tests;
@@ -56,20 +58,12 @@ pub fn is_safe_in_default_mode(name: &str) -> bool {
     is_default_safe_tool(name)
 }
 
-// ---------------------------------------------------------------------------
-// Pending tool call accumulated from streaming events
-// ---------------------------------------------------------------------------
-
 #[derive(Debug)]
 pub(super) struct PendingToolCall {
     pub(super) id: String,
     pub(super) name: String,
     pub(super) input_json: String,
 }
-
-// ---------------------------------------------------------------------------
-// Agent — the main orchestration engine
-// ---------------------------------------------------------------------------
 
 pub struct Agent {
     client: Arc<dyn LlmProvider>,
@@ -170,6 +164,7 @@ impl Agent {
     /// Returns when the LLM produces a final text response (no more tool calls).
     pub async fn process_message(&mut self, user_input: &str) -> Result<(), AgentLoopError> {
         self.turn_number += 1;
+        self.fire_before_agent_run_hook(user_input).await;
         self.emit_activity(
             AgentActivityKind::ParentTurnStarted,
             AgentActivityStatus::Running,
@@ -210,6 +205,7 @@ impl Agent {
 
         let mut agentic_iterations: u32 = 0;
         loop {
+            self.fire_before_prompt_build_hook(agentic_iterations).await;
             // GAP 7: Inject recalled memories into system prompt
             let mut system_with_memories = self.inject_memories();
             // Append inner voice block (consciousness state) if enabled
@@ -255,10 +251,12 @@ impl Agent {
                 thinking,
                 speed,
                 effort,
-                extra: serde_json::Value::Null,
+                extra: self.config.runtime_context_extra(),
                 request_origin: Some("main_session".into()),
                 reasoning_encrypted: None,
             };
+            self.fire_after_prompt_build_hook(&request, agentic_iterations)
+                .await;
 
             self.send_event(AgentEvent::ApiCallStarted {
                 model: active_model.clone(),
@@ -274,6 +272,8 @@ impl Agent {
                         AgentActivityStatus::Failed,
                         format!("turn {} failed: {e}", self.turn_number),
                     );
+                    self.fire_after_agent_run_hook("failed", Some(e.to_string()))
+                        .await;
                     return Err(AgentLoopError::ApiError(format!("{e}")));
                 }
             };
@@ -380,6 +380,11 @@ impl Agent {
                             AgentActivityStatus::Failed,
                             format!("turn {} failed: {error_type}: {message}", self.turn_number),
                         );
+                        self.fire_after_agent_run_hook(
+                            "failed",
+                            Some(format!("{error_type}: {message}")),
+                        )
+                        .await;
                         return Err(AgentLoopError::ApiError(format!("{error_type}: {message}")));
                     }
                 }
@@ -485,6 +490,7 @@ impl Agent {
             AgentActivityStatus::Completed,
             format!("turn {} completed", self.turn_number),
         );
+        self.fire_after_agent_run_hook("completed", None).await;
         Ok(())
     }
 }

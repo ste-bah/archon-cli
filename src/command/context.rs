@@ -463,7 +463,20 @@ pub(crate) fn apply_effect<'a>(
             // no /permissions tracing, so this is new but invariant-
             // preserving.
             CommandEffect::SetPermissionMode(resolved) => {
-                *slash_ctx.permission_mode.lock().await = resolved.clone();
+                let previous_mode = {
+                    let mut mode = slash_ctx.permission_mode.lock().await;
+                    let previous = mode.clone();
+                    *mode = resolved.clone();
+                    previous
+                };
+                crate::runtime::permission_events::record_permission_mode_event(
+                    slash_ctx.cozo_db.as_ref(),
+                    Some(&slash_ctx.session_id),
+                    Some(&previous_mode),
+                    &resolved,
+                    "mode_changed",
+                    "slash_permissions",
+                );
                 let _ = tui_tx.send(TuiEvent::PermissionModeChanged(resolved.clone()));
                 tracing::info!(mode = %resolved, "set permission mode via /permissions");
             } // Future variants (AGS-819 /theme, etc.): add a match arm here

@@ -12,6 +12,7 @@ read-only fallback.
 | --- | --- | --- | --- | --- |
 | `ARCHON_CODEX_DISABLED` | bool | `false` | CDX-006 | `1`, `true`, or `yes` disables Codex provider resolution. |
 | `ARCHON_CODEX_BASE_URL` | URL | `https://chatgpt.com/backend-api` | CDX-009 | Test/smoke override for the Codex backend. Use only with local mocks or diagnostics. |
+| `ARCHON_CODEX_APP_SERVER_URL` | URL | config value | PRD-006 | Overrides `[providers.openai-codex].app_server_url` for local app-server diagnostics. Use `ws`/`wss` for WebSocket app-server endpoints; `http`/`https` are accepted for compatibility. Invalid targets fail closed. |
 | `ARCHON_CODEX_ORIGINATOR` | string | bundled manifest | CDX-006 | Overrides the `originator` spoof field. Must not impersonate OpenAI products. |
 | `ARCHON_CODEX_USER_AGENT` | string | bundled manifest | CDX-006 | Overrides the Codex user agent. Values matching `ChatGPT-*`, `ChatGPT/`, `OpenAI-*`, or `OpenAI/` are rejected. |
 | `ARCHON_CODEX_CLIENT_ID` | string | bundled manifest | CDX-006 | Overrides the OAuth client id. Must match `app_...`. |

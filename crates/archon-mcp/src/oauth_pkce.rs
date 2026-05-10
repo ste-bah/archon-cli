@@ -16,6 +16,7 @@
 //! on a mock IdP and feeding the resulting code into
 //! [`OAuthClient::exchange_code`].
 
+use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -24,7 +25,7 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use rand::Rng;
 use sha2::{Digest, Sha256};
 use tokio::sync::RwLock;
-use url::form_urlencoded;
+use url::{Url, form_urlencoded};
 
 use crate::types::McpError;
 
@@ -35,6 +36,31 @@ fn form_body(pairs: &[(&str, &str)]) -> String {
         s.append_pair(k, v);
     }
     s.finish()
+}
+
+fn sensitive_endpoint_url(raw: &str, label: &str) -> Result<Url, McpError> {
+    let url = Url::parse(raw)
+        .map_err(|e| McpError::Transport(format!("oauth: {label} URL is invalid: {e}")))?;
+    if endpoint_allows_sensitive_data(&url) {
+        Ok(url)
+    } else {
+        Err(McpError::Transport(format!(
+            "oauth: {label} must use HTTPS unless it targets loopback/local test host"
+        )))
+    }
+}
+
+fn endpoint_allows_sensitive_data(url: &Url) -> bool {
+    url.scheme() == "https"
+        || (url.scheme() == "http" && url.host_str().map(is_loopback_host).unwrap_or(false))
+}
+
+fn is_loopback_host(host: &str) -> bool {
+    host.eq_ignore_ascii_case("localhost")
+        || host
+            .parse::<IpAddr>()
+            .map(|addr| addr.is_loopback())
+            .unwrap_or(false)
 }
 
 /// RFC 7636 §4.1 — unreserved URL-safe alphabet for code_verifier.
@@ -117,6 +143,7 @@ impl OAuthClient {
         code: &str,
         code_verifier: &str,
     ) -> Result<Self, McpError> {
+        let token_url = sensitive_endpoint_url(&config.token_url, "token endpoint")?;
         let http = reqwest::Client::builder()
             .connect_timeout(HTTP_TIMEOUT)
             .timeout(HTTP_TIMEOUT)
@@ -131,7 +158,7 @@ impl OAuthClient {
             ("redirect_uri", config.redirect_uri.as_str()),
         ]);
         let resp = http
-            .post(&config.token_url)
+            .post(token_url)
             .header(
                 http::header::CONTENT_TYPE,
                 "application/x-www-form-urlencoded",
@@ -185,6 +212,7 @@ impl OAuthClient {
             .clone()
             .ok_or_else(|| McpError::Transport("oauth: no refresh_token available".into()))?;
 
+        let token_url = sensitive_endpoint_url(&self.config.token_url, "token endpoint")?;
         let body = form_body(&[
             ("grant_type", "refresh_token"),
             ("refresh_token", refresh_token.as_str()),
@@ -192,7 +220,7 @@ impl OAuthClient {
         ]);
         let resp = self
             .http
-            .post(&self.config.token_url)
+            .post(token_url)
             .header(
                 http::header::CONTENT_TYPE,
                 "application/x-www-form-urlencoded",
@@ -252,5 +280,21 @@ mod tests {
                 "bad char {c:?}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn exchange_code_rejects_non_loopback_http_token_endpoint() {
+        let config = OAuthConfig {
+            authorize_url: "https://idp.example.test/authorize".into(),
+            token_url: "http://idp.example.test/token".into(),
+            client_id: "client".into(),
+            redirect_uri: "http://localhost/callback".into(),
+        };
+
+        let err = match OAuthClient::exchange_code(config, "code", "verifier").await {
+            Ok(_) => panic!("exchange should fail before HTTP"),
+            Err(err) => err,
+        };
+        assert!(err.to_string().contains("must use HTTPS"));
     }
 }

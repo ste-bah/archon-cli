@@ -48,8 +48,8 @@ fn test_agent() -> Agent {
     )
 }
 
-#[test]
-fn correction_detection_fires_event_callback_with_top_rule_id() {
+#[tokio::test]
+async fn correction_detection_fires_event_callback_with_top_rule_id() {
     let mut agent = test_agent();
     let graph = MemoryGraph::in_memory().expect("in-memory graph");
     let seeded_rule_id = {
@@ -79,7 +79,9 @@ fn correction_detection_fires_event_callback_with_top_rule_id() {
         captured_cb.lock().unwrap().push(payload);
     }));
 
-    agent.detect_and_record_correction(&format!("use this instead {}", "x".repeat(220)), &graph);
+    agent
+        .detect_and_record_correction(&format!("use this instead {}", "x".repeat(220)), &graph)
+        .await;
 
     assert_eq!(correction_count.load(Ordering::SeqCst), 1);
     let iv = iv.try_lock().expect("inner voice lock");
@@ -95,6 +97,42 @@ fn correction_detection_fires_event_callback_with_top_rule_id() {
     );
     assert!(!captured[0].user_input_excerpt.is_empty());
     assert!(captured[0].user_input_excerpt.chars().count() <= 200);
+}
+
+#[tokio::test]
+async fn process_message_fires_runtime_lifecycle_hooks() {
+    let mut agent = test_agent();
+    let registry = Arc::new(crate::hooks::HookRegistry::new());
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    for event in [
+        crate::hooks::HookEvent::BeforeAgentRun,
+        crate::hooks::HookEvent::BeforePromptBuild,
+        crate::hooks::HookEvent::AfterPromptBuild,
+        crate::hooks::HookEvent::AfterAgentRun,
+    ] {
+        let seen_for_hook = Arc::clone(&seen);
+        registry.register_callback(
+            event.clone(),
+            crate::hooks::HookCallbackEntry {
+                name: format!("{event:?}"),
+                callback: Arc::new(move |ctx| {
+                    seen_for_hook.lock().unwrap().push(ctx.hook_event.clone());
+                    crate::hooks::HookResult::allow()
+                }),
+                authority: crate::hooks::SourceAuthority::Project,
+                timeout_secs: 1,
+            },
+        );
+    }
+    agent.set_hook_registry(registry);
+
+    agent.process_message("hello").await.unwrap();
+
+    let seen = seen.lock().unwrap();
+    assert!(seen.contains(&crate::hooks::HookEvent::BeforeAgentRun));
+    assert!(seen.contains(&crate::hooks::HookEvent::BeforePromptBuild));
+    assert!(seen.contains(&crate::hooks::HookEvent::AfterPromptBuild));
+    assert!(seen.contains(&crate::hooks::HookEvent::AfterAgentRun));
 }
 
 /// Verify that thinking blocks include the `signature` field when built

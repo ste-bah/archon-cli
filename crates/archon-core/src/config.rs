@@ -66,6 +66,9 @@ pub struct ArchonConfig {
     /// Web UI configuration.
     #[serde(default)]
     pub web: WebConfig,
+    /// Sandbox backend configuration.
+    #[serde(default)]
+    pub sandbox: crate::sandbox::SandboxConfig,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -79,6 +82,14 @@ pub struct ProvidersConfig {
 #[serde(default)]
 pub struct CodexProviderConfig {
     pub enabled: bool,
+    pub runtime: String,
+    pub direct_fallback: bool,
+    pub app_server_transport: String,
+    pub app_server_url: Option<String>,
+    pub app_server_command: String,
+    pub app_server_args: Vec<String>,
+    pub app_server_discovery_timeout_ms: u64,
+    pub app_server_model_catalog: Vec<String>,
     pub spoof: CodexSpoofPartialConfig,
     pub manifest: CodexManifestConfig,
 }
@@ -87,6 +98,14 @@ impl Default for CodexProviderConfig {
     fn default() -> Self {
         Self {
             enabled: true,
+            runtime: "direct".into(),
+            direct_fallback: false,
+            app_server_transport: "websocket".into(),
+            app_server_url: None,
+            app_server_command: "codex".into(),
+            app_server_args: vec!["app-server".into()],
+            app_server_discovery_timeout_ms: 2_500,
+            app_server_model_catalog: vec!["gpt-5.5".into(), "gpt-5.4".into()],
             spoof: CodexSpoofPartialConfig::default(),
             manifest: CodexManifestConfig::default(),
         }
@@ -612,6 +631,15 @@ pub struct LearningConfig {
     pub shadow_vector: ToggleConfig,
     pub reasoning_bank: ToggleConfig,
     pub reflexion: ReflexionConfig,
+    pub agent_evolution: AgentEvolutionConfig,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AgentEvolutionConfig {
+    /// Governed Cozo profile versions exist by default, but runtime overlay is
+    /// opt-in until enough shadow/e2e coverage proves the path for operators.
+    pub active_profile_overlay_enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -941,6 +969,11 @@ pub fn validate(config: &ArchonConfig) -> Result<(), ConfigError> {
         )));
     }
 
+    config
+        .sandbox
+        .validate()
+        .map_err(ConfigError::ValidationError)?;
+
     // context.compact_threshold
     if !(0.0..=1.0).contains(&config.context.compact_threshold) {
         return Err(ConfigError::ValidationError(format!(
@@ -1008,6 +1041,18 @@ pub fn load_config_from(path: PathBuf) -> Result<ArchonConfig, ConfigError> {
     let config: ArchonConfig = toml::from_str(&content)?;
     validate(&config)?;
     Ok(config)
+}
+
+/// Load configuration from an existing path without creating a default file.
+pub fn load_config_if_exists(path: PathBuf) -> Result<Option<ArchonConfig>, ConfigError> {
+    if !path.exists() {
+        return Ok(None);
+    }
+
+    let content = fs::read_to_string(&path)?;
+    let config: ArchonConfig = toml::from_str(&content)?;
+    validate(&config)?;
+    Ok(Some(config))
 }
 
 /// GHOST-008: persist `voice.enabled` to the HOME config file.

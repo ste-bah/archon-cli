@@ -93,6 +93,23 @@ impl Tool for BashTool {
         // Build sanitized environment
         let env_vars = sanitized_env();
 
+        if let Some(sandbox) = &ctx.sandbox
+            && let Some(result) = sandbox
+                .execute_bash(archon_permissions::sandbox::SandboxCommandRequest {
+                    command: command.to_string(),
+                    working_dir: ctx.working_dir.clone(),
+                    timeout_ms,
+                    max_output_bytes: self.max_output_bytes,
+                    env: env_vars.clone(),
+                })
+                .await
+        {
+            return ToolResult {
+                content: result.content,
+                is_error: result.is_error,
+            };
+        }
+
         let mut cmd = Command::new("/bin/bash");
         cmd.arg("-c")
             .arg(command)

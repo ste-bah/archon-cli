@@ -1,9 +1,10 @@
 use clap::Subcommand;
 
 use super::{
-    AuthArgs, BehaviourAction, ChatArgs, CompletionAction, ConstellationAction, DocsAction,
-    GametheoryAction, KbAction, LearningAction, MeaningAction, MemoryAction, PipelineAction,
-    PluginAction, ProvAction, ProvidersAction, RemoteAction, SelfAction, TeamAction,
+    AgentAction, AuthArgs, BehaviourAction, ChatArgs, CompletionAction, ConstellationAction,
+    DocsAction, GametheoryAction, KbAction, LearningAction, MeaningAction, MemoryAction,
+    PermissionsAction, PipelineAction, PluginAction, ProvAction, ProvidersAction, RemoteAction,
+    SandboxAction, SelfAction, TeamAction,
 };
 
 #[derive(Subcommand, Debug)]
@@ -18,6 +19,16 @@ pub enum Commands {
     Providers {
         #[command(subcommand)]
         action: Option<ProvidersAction>,
+    },
+    /// Inspect sandbox policy and backend readiness
+    Sandbox {
+        #[command(subcommand)]
+        action: Option<SandboxAction>,
+    },
+    /// Audit durable permission decisions and denials
+    Permissions {
+        #[command(subcommand)]
+        action: PermissionsAction,
     },
     /// Manage plugins
     Plugin {
@@ -89,6 +100,11 @@ pub enum Commands {
     Behaviour {
         #[command(subcommand)]
         action: BehaviourAction,
+    },
+    /// Inspect agent definitions and governed agent evolution
+    Agent {
+        #[command(subcommand)]
+        action: AgentAction,
     },
     /// Inspect learning subsystem diagnostics
     Learning {

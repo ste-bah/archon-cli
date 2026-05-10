@@ -6,4 +6,5 @@ pub(super) struct PreflightResult {
     pub(super) input: serde_json::Value,
     pub(super) tool_arc: Arc<dyn archon_tools::tool::Tool>,
     pub(super) file_path: Option<String>,
+    pub(super) sandbox_prechecked: bool,
 }

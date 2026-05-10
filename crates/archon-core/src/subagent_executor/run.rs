@@ -378,22 +378,16 @@ impl AgentSubagentExecutor {
             .or_else(|| request.cwd.as_ref().map(std::path::PathBuf::from))
             .unwrap_or_else(|| self.working_dir.clone());
 
-        // Subagent mode resolution (Q15: .lock().await).
         let subagent_mode = {
-            let parent_pm = self.parent_permission_mode.lock().await.clone();
-            let def_pm_str = resolved_def
+            let parent_mode = self.parent_permission_mode.lock().await.clone();
+            let requested_mode = resolved_def
                 .as_ref()
-                .and_then(|d| d.permission_mode.as_ref())
-                .map(|pm| pm.as_str().to_string());
-            let resolved_pm = match parent_pm.as_str() {
-                "bypassPermissions" | "acceptEdits" | "auto" => parent_pm,
-                _ => def_pm_str.unwrap_or(parent_pm),
-            };
-            if resolved_pm == "plan" {
-                archon_tools::tool::AgentMode::Plan
-            } else {
-                archon_tools::tool::AgentMode::Normal
-            }
+                .and_then(|definition| definition.permission_mode.as_ref());
+            crate::agents::permissions_overlay::resolve_subagent_agent_mode(
+                &parent_mode,
+                requested_mode,
+                parent_mode == "bypassPermissions",
+            )
         };
 
         // Build the subagent's own ToolContext. in_fork inherits from

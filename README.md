@@ -19,6 +19,8 @@ integration.
 # Build (Rust 1.85+, edition 2024)
 git clone https://github.com/ste-bah/archon-cli
 cd archon-cli
+sudo scripts/install-system-deps.sh --check || sudo scripts/install-system-deps.sh
+# Optional sandbox deps: sudo scripts/install-system-deps.sh --with-sandbox
 cargo build --release --bin archon
 
 # Authenticate with Claude/Anthropic OAuth or API-key billing
@@ -101,6 +103,9 @@ The docs are organised by user goal:
 | **Getting started** | [`docs/getting-started/`](docs/getting-started/) — install, first run, quick start |
 | **Architecture** | [`docs/architecture/`](docs/architecture/) — overview, learning systems, pipelines, Evidence Engine diagrams |
 | **Evidence Engine** | [`docs/evidence-engine.md`](docs/evidence-engine.md) — documents, KB, provenance, game theory, completion integrity, governed learning |
+| **Providers** | [`docs/providers/`](docs/providers/) — provider runtime, Codex app-server, Claude Code spoofing, auth profiles, cloud/local providers |
+| **Agents & learning** | [`docs/agents/`](docs/agents/) and [`docs/learning/`](docs/learning/) — governed agent evolution, memory promotion, permission governance |
+| **Security** | [`docs/security/`](docs/security/) — tool preflight, sandboxing, Docker, SSH, OpenShell |
 | **Reference** | [`docs/reference/`](docs/reference/) — slash commands, tools, skills, permissions, config schema, CLI flags, env vars |
 | **Integrations** | [`docs/integrations/`](docs/integrations/) — MCP, plugins, hooks, identity spoofing, VLM image descriptions, LSP, IDE extensions |
 | **Cookbook** | [`docs/cookbook/`](docs/cookbook/) — real-world evidence workflows, strategic engagement, memory-driven coding, god-code pipeline, custom agents |
@@ -145,9 +150,9 @@ archon-cli/
 
 ## Status
 
-- Current version: **v1.0.1** ([release notes](docs/release-notes/v1.0.1.md))
-- Final completion release for the current Archon feature set; future feature changes are major-version updates
-- v1.0.1 adds provider-neutral hybrid retrospective analysis on top of the v1.0.0 audited pipeline runtime and self-calibration baseline
+- Current version: **v1.1.0-beta.3** ([release notes](docs/release-notes/v1.1.0-beta.3.md))
+- Beta release for provider runtime governance, Cozo-backed agent evolution, permission preflight, and sandbox routing
+- v1.1.0-beta.3 adds Codex app-server support, Claude Code spoof compatibility coverage, durable provider telemetry, governed profile evolution, Docker/SSH/OpenShell sandbox documentation, the macOS external-volume OpenShell upload-mode default, and security hardening for OAuth/Gemini auth endpoints plus JSON-RPC response validation (supersedes the unpublished v1.1.0-beta.1 and v1.1.0-beta.2 drafts)
 
 ## Contributing
 

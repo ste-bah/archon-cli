@@ -26,12 +26,14 @@ This page explains every section. Each table tells you **what** the field does, 
 - [`[consciousness]`](#consciousness) — inner voice and rule engine
 - [`[tools]`](#tools) — tool execution defaults
 - [`[permissions]`](#permissions) — tool gating
+- [`[sandbox]`](#sandbox) — Bash isolation backends
 - [`[context]`](#context) — compaction and prompt cache
 - [`[memory]`](#memory) — memory graph backbone
 - [`[memory.garden]`](#memorygarden) — background consolidation
 - [`[memory.auto_capture]`](#memoryauto_capture) — regex memory detection
 - [`[memory.auto_extraction]`](#memoryauto_extraction) — LLM fact extraction
 - [`[learning.*]`](#learning) — 8 learning subsystems
+- [`[learning.agent_evolution]`](#learningagent_evolution) — governed profile overlay activation
 - [`[learning.gnn]`](#learninggnn) — GNN model
 - [`[learning.gnn.training]`](#learninggnntraining) — GNN training hyperparams
 - [`[learning.gnn.auto_trainer]`](#learninggnnauto_trainer) — background retraining
@@ -112,6 +114,14 @@ Codex provider compatibility settings for ChatGPT subscription OAuth.
 ```toml
 [providers.openai-codex]
 enabled = true
+runtime = "direct"
+direct_fallback = false
+app_server_transport = "websocket"
+app_server_url = ""
+app_server_command = "codex"
+app_server_args = ["app-server"]
+app_server_discovery_timeout_ms = 2500
+app_server_model_catalog = ["gpt-5.5", "gpt-5.4"]
 
 [providers.openai-codex.spoof]
 # originator  = "openclaw"
@@ -131,6 +141,14 @@ enabled = true
 | Field | Default | What / Why |
 |---|---|---|
 | `enabled` | `true` | Master switch for resolving Codex OAuth credentials and spoof metadata. `ARCHON_CODEX_DISABLED=1` disables it at runtime. |
+| `runtime` | `"direct"` | Codex runtime strategy. `"direct"` preserves Archon's current direct backend. `"auto"` selects app-server when configured and can fall back to direct only when `direct_fallback=true`. `"app_server"` requires a configured JSON-RPC app-server transport. |
+| `direct_fallback` | `false` | Explicit policy switch for auto-mode app-server to direct fallback. Keeping this false prevents silent strategy changes. |
+| `app_server_transport` | `"websocket"` | Codex app-server transport target. `"websocket"` uses `app_server_url`; `"stdio"` uses `app_server_command` and `app_server_args`. Both are JSON-RPC transports. |
+| `app_server_url` | unset | Optional Codex app-server WebSocket endpoint. `ARCHON_CODEX_APP_SERVER_URL` overrides this value for local diagnostics. `ws`, `wss`, `http`, and `https` are accepted for compatibility; endpoint paths and query strings are redacted in status and persisted snapshots. |
+| `app_server_command` | `"codex"` | Command used when `app_server_transport = "stdio"`. Status redacts this to the executable basename. |
+| `app_server_args` | `["app-server"]` | Arguments used when spawning stdio app-server transport. Arguments are counted but not persisted verbatim in status snapshots. |
+| `app_server_discovery_timeout_ms` | `2500` | App-server JSON-RPC request and idle timeout budget for discovery/startup/status decisions. |
+| `app_server_model_catalog` | `["gpt-5.5", "gpt-5.4"]` | Fallback Codex app-server model catalog used when live model discovery is unavailable. |
 | `spoof.originator` | bundled manifest | Product originator header used by the Codex compatibility layer. Leave unset unless a known-good manifest update requires an override. |
 | `spoof.user_agent` | bundled manifest | User agent used for Codex requests. Archon rejects `ChatGPT-*`, `ChatGPT/`, `OpenAI-*`, and `OpenAI/` values to avoid impersonating OpenAI products. |
 | `spoof.client_id` | bundled manifest | OAuth client id. Override only for diagnostics or when the manifest is stale. |
@@ -271,6 +289,76 @@ Rule precedence: `always_deny` > `always_ask` > `always_allow` > mode default.
 
 ---
 
+## `[sandbox]`
+
+Bash execution isolation. The default is host execution with permission
+preflight only. Set a real backend plus its matching `enabled = true` section to
+route Bash through Docker, SSH, or OpenShell.
+
+Host runtime dependencies stay outside `config.toml`. Install optional Docker
+and OpenShell tooling with `scripts/install-system-deps.sh --with-docker`,
+`--with-openshell`, or `--with-sandbox`, then use
+`archon sandbox doctor --backend <name>` before enabling a backend.
+
+```toml
+[sandbox]
+backend = "disabled"       # "disabled" | "logical" | "docker" | "ssh" | "openshell"
+mode = "risky"             # "risky" | "shell" route shell only; "all" is strict
+scope = "session"          # "session" | "turn" | "tool"
+workspace_access = "ro"    # "ro" | "rw" | "scratch"
+
+[sandbox.docker]
+enabled = false
+binary = "docker"
+image = "ubuntu:24.04"
+network = "disabled"       # "disabled" | "limited" | "enabled"
+memory_limit = "2g"
+cpu_limit = "2"
+writable_paths = []
+env_allowlist = []
+privileged = false
+mount_docker_socket = false
+mount_home = false
+
+[sandbox.ssh]
+enabled = false
+binary = "ssh"
+# host = "sandbox.example"
+# user = "archon"
+port = 22
+# key_file = "~/.ssh/id_ed25519"
+workspace_mode = "remote"  # "remote" | "mirror"
+# remote_workdir = "/srv/archon/workspace"
+host_key_checking = true
+host_shell_fallback = false
+
+[sandbox.openshell]
+enabled = false
+binary = "openshell"
+workspace_mode = "upload"  # "upload" | "remote" | "mirror"
+gateway = "openshell"
+# remote_workdir = "/sandbox"
+# policy = "locked-down"
+providers = []
+gpu = false
+provider_injection = false
+host_shell_fallback = false
+```
+
+| Field | Default | What / Why |
+|---|---|---|
+| `backend` | `"disabled"` | Selects the sandbox route for Bash. `logical` is a policy gate only; `docker`, `ssh`, and `openshell` are real isolation backends when their section is enabled. |
+| `mode` | `"risky"` | Chooses how broadly a real backend applies. `risky` and `shell` route Bash/Shell through Docker/SSH/OpenShell while normal host-side tools such as `Write`, `Edit`, and `WebFetch` continue through permission preflight. `all` is strict and blocks unsupported host-side mutation, network, and agent-spawn tools. |
+| `scope` | `"session"` | Backend lifecycle hint for session-, turn-, or tool-scoped isolation. |
+| `workspace_access` | `"ro"` | Workspace mount policy. `rw` allows writes; `scratch` keeps the workspace read-only and provides ephemeral scratch space where supported. |
+| `sandbox.docker.*` | see template | Docker binary/image, resource limits, network mode, writable paths, and mount hardening. Docker socket, home mount, and privileged mode default to off. |
+| `sandbox.ssh.*` | see template | Remote SSH execution target. Remote mode requires `remote_workdir`; mirror mode assumes the same workspace path exists remotely. Host shell fallback is off. |
+| `sandbox.openshell.*` | see template | OpenShell execution target. Provider injection and host shell fallback stay off by default so Claude Code spoofing and provider credentials remain host-side. |
+
+See [Sandboxing](../security/sandboxing.md), [Docker sandbox](../security/docker-sandbox.md), [SSH sandbox](../security/ssh-sandbox.md), [OpenShell sandbox](../security/openshell-sandbox.md), and [Tool preflight](../security/tool-preflight.md).
+
+---
+
 ## `[context]`
 
 Context-window management.
@@ -402,6 +490,26 @@ Each subsystem only takes resources (memory, embedding compute, occasional LLM c
 - You want to A/B test the agent's behavior with one subsystem off
 
 See [Learning systems architecture](../architecture/learning-systems.md) for what each subsystem does.
+
+---
+
+## `[learning.agent_evolution]`
+
+Runtime activation for governed agent profile overlays. Profile versions,
+proposals, shadow evaluations, reports, digest claims, and memory-promotion
+candidates are stored in CozoDB regardless of this flag. This switch only
+controls whether the active profile overlay is applied at runtime.
+
+```toml
+[learning.agent_evolution]
+active_profile_overlay_enabled = false
+```
+
+| Field | Default | What / Why |
+|---|---|---|
+| `active_profile_overlay_enabled` | `false` | Keeps generated agent-profile overlays opt-in. Leave off while reviewing proposals and shadow results; enable only when you want approved active profiles to influence runtime agent behavior. |
+
+See [Governed agent evolution](../agents/evolution.md) and [Governed agent evolution storage](../learning/governed-agent-evolution.md).
 
 ---
 

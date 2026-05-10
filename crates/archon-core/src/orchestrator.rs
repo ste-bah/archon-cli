@@ -97,6 +97,7 @@ impl SubtaskExecutor for RealSubtaskExecutor {
             })],
             tools: tool_defs,
             working_dir: self.working_dir.clone(),
+            agent_type: subtask.agent_type.clone(),
             permission_mode: Arc::new(Mutex::new("bypassPermissions".to_string())),
             ..AgentConfig::default()
         };

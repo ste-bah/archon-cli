@@ -74,7 +74,10 @@ fn priority_classifies_state_transitions_as_state() {
         Priority::State
     );
     assert_eq!(
-        priority(&AgentEvent::PermissionDenied { tool: "t".into() }),
+        priority(&AgentEvent::PermissionDenied {
+            tool: "t".into(),
+            reason: None,
+        }),
         Priority::State
     );
     assert_eq!(

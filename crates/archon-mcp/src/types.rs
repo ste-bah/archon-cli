@@ -21,13 +21,13 @@ pub struct ServerConfig {
     /// When true the server is skipped during startup.
     #[serde(default)]
     pub disabled: bool,
-    /// Transport type: "stdio" (default) or "http".
+    /// Transport type: "stdio" (default), "http", "ws"/"websocket", or "sse".
     #[serde(default = "default_transport")]
     pub transport: String,
-    /// HTTP endpoint URL (required when transport is "http").
+    /// Endpoint URL required by network transports.
     #[serde(default)]
     pub url: Option<String>,
-    /// Custom HTTP headers (e.g. Authorization) for HTTP transport.
+    /// Custom headers (e.g. Authorization) for network transports.
     #[serde(default)]
     pub headers: Option<HashMap<String, String>>,
 }
