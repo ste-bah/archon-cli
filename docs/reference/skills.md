@@ -129,7 +129,7 @@ name = "release"
 description = "Cut a release"
 trigger = "/release"
 parameters = [
-    { name = "version", description = "Semver version (e.g. 1.1.0-beta.2)", required = true },
+    { name = "version", description = "Semver version (e.g. 1.1.0-beta.3)", required = true },
     { name = "notes", description = "Release notes" },
 ]
 template = '''
@@ -142,7 +142,7 @@ Cut release version {version}:
 '''
 ```
 
-Invoke with: `/release 1.1.0-beta.2 "Provider runtime polish"`.
+Invoke with: `/release 1.1.0-beta.3 "Provider runtime polish"`.
 
 ## Plugin-supplied skills
 

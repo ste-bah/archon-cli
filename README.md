@@ -150,9 +150,9 @@ archon-cli/
 
 ## Status
 
-- Current version: **v1.1.0-beta.2** ([release notes](docs/release-notes/v1.1.0-beta.2.md))
+- Current version: **v1.1.0-beta.3** ([release notes](docs/release-notes/v1.1.0-beta.3.md))
 - Beta release for provider runtime governance, Cozo-backed agent evolution, permission preflight, and sandbox routing
-- v1.1.0-beta.2 adds Codex app-server support, Claude Code spoof compatibility coverage, durable provider telemetry, governed profile evolution, Docker/SSH/OpenShell sandbox documentation, and the macOS external-volume OpenShell upload-mode default (supersedes the unpublished v1.1.0-beta.1 draft)
+- v1.1.0-beta.3 adds Codex app-server support, Claude Code spoof compatibility coverage, durable provider telemetry, governed profile evolution, Docker/SSH/OpenShell sandbox documentation, the macOS external-volume OpenShell upload-mode default, and security hardening for OAuth/Gemini auth endpoints plus JSON-RPC response validation (supersedes the unpublished v1.1.0-beta.1 and v1.1.0-beta.2 drafts)
 
 ## Contributing
 

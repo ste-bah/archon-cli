@@ -111,7 +111,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 
 ## Release notes
 
-- [v1.1.0-beta.2](release-notes/v1.1.0-beta.2.md) — Provider runtime governance and governed agent evolution (supersedes unpublished v1.1.0-beta.1)
+- [v1.1.0-beta.3](release-notes/v1.1.0-beta.3.md) — Provider runtime governance and governed agent evolution (supersedes unpublished v1.1.0-beta.1 and v1.1.0-beta.2)
 - [v1.0.1](release-notes/v1.0.1.md) — Provider-neutral hybrid retrospective analysis
 - [v1.0.0](release-notes/v1.0.0.md) — Audited pipeline runtime and self-calibration
 - [v0.1.52](release-notes/v0.1.52.md) — Learning systems completion
