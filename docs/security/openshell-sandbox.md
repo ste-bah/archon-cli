@@ -10,7 +10,8 @@ host shell fallback disabled by default.
 [sandbox.openshell]
 enabled = false
 binary = "openshell"
-workspace_mode = "mirror"
+workspace_mode = "upload"
+gateway = "openshell"
 provider_injection = false
 host_shell_fallback = false
 ```
@@ -26,9 +27,12 @@ are used. See the NVIDIA OpenShell
 Use `scripts/install-system-deps.sh --with-openshell --setup-openshell-gateway`
 to install OpenShell and start/verify the local gateway as your normal user.
 
-`mirror` mode treats the local Archon workspace as canonical and assumes that
-path is visible inside the OpenShell sandbox runtime. `remote` mode must
-configure a gateway and runs commands from `/sandbox`.
+`upload` mode stages the current working directory into `/sandbox/<basename>`
+before running Bash. This is the safe default for macOS external volumes such as
+`/Volumes/Externalwork/...`, because those host paths do not exist inside the
+OpenShell sandbox. `remote` mode runs from `remote_workdir` or `/sandbox`.
+`mirror` mode is only for environments where the same absolute path exists
+inside the OpenShell runtime.
 
 ## Provider Routing
 
@@ -47,7 +51,7 @@ configured with host shell fallback, Bash execution returns an error stating tha
 no host shell fallback was used. When enabled and safe, Bash routes through:
 
 ```bash
-openshell sandbox create --no-keep -- /bin/bash -lc '<command>'
+openshell sandbox create --no-keep --upload '<workdir>:/sandbox' -- /bin/bash -lc '<command>'
 ```
 
 Configured policies are passed with `--policy`. Configured providers are ignored

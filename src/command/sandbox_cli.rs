@@ -125,7 +125,7 @@ fn append_backend_verbose_status(
             config.ssh.host_shell_fallback
         )),
         "openshell" => output.push_str(&format!(
-            "OpenShell: enabled={} workspace_mode={} gateway_configured={} provider_injection={} host_shell_fallback={}\nProvider routing: host-side; sandbox provider injection must stay disabled for Claude Code spoofing\n",
+            "OpenShell: enabled={} workspace_mode={} gateway_configured={} remote_workdir_configured={} provider_injection={} host_shell_fallback={}\nProvider routing: host-side; sandbox provider injection must stay disabled for Claude Code spoofing\n",
             config.openshell.enabled,
             config.openshell.workspace_mode,
             config
@@ -133,6 +133,11 @@ fn append_backend_verbose_status(
                 .gateway
                 .as_deref()
                 .is_some_and(|gateway| !gateway.trim().is_empty()),
+            config
+                .openshell
+                .remote_workdir
+                .as_deref()
+                .is_some_and(|workdir| !workdir.trim().is_empty()),
             config.openshell.provider_injection,
             config.openshell.host_shell_fallback
         )),
@@ -196,13 +201,18 @@ fn append_explain_details(
         archon_core::sandbox::SandboxBackendKind::OpenShell => {
             config.openshell.validate().map_err(anyhow::Error::msg)?;
             output.push_str(&format!(
-                "Transport policy: openshell mediated execution; workspace_mode={} gateway_configured={}\nProvider routing: host-side; provider_injection={} so Anthropic Claude Code spoofing stays in Archon's provider runtime\nFallback policy: host_shell_fallback={} and direct host shell fallback is not allowed\nRedaction policy: provider credentials, token stores, generated memory databases, SSH agents, Git credentials, and arbitrary home mounts are not synced by default\n",
+                "Transport policy: openshell mediated execution; workspace_mode={} gateway_configured={}\nWorkspace policy: upload stages the active workdir into /sandbox/<basename>; remote_workdir_configured={}; mirror requires matching absolute paths\nProvider routing: host-side; provider_injection={} so Anthropic Claude Code spoofing stays in Archon's provider runtime\nFallback policy: host_shell_fallback={} and direct host shell fallback is not allowed\nRedaction policy: provider credentials, token stores, generated memory databases, SSH agents, Git credentials, and arbitrary home mounts are not synced by default\n",
                 config.openshell.workspace_mode,
                 config
                     .openshell
                     .gateway
                     .as_deref()
                     .is_some_and(|gateway| !gateway.trim().is_empty()),
+                config
+                    .openshell
+                    .remote_workdir
+                    .as_deref()
+                    .is_some_and(|workdir| !workdir.trim().is_empty()),
                 config.openshell.provider_injection,
                 config.openshell.host_shell_fallback
             ));

@@ -93,6 +93,7 @@ mod tests {
             enabled = true
             workspace_mode = "remote"
             gateway = "team-gateway"
+            remote_workdir = "/workspace/team"
             policy = "locked-down"
             providers = ["ssh"]
             gpu = true
@@ -107,6 +108,10 @@ mod tests {
         assert!(cfg.openshell.enabled);
         assert_eq!(cfg.openshell.workspace_mode, "remote");
         assert_eq!(cfg.openshell.gateway.as_deref(), Some("team-gateway"));
+        assert_eq!(
+            cfg.openshell.remote_workdir.as_deref(),
+            Some("/workspace/team")
+        );
         assert!(cfg.openshell.gpu);
         assert!(!cfg.openshell.provider_injection);
         assert!(!cfg.openshell.host_shell_fallback);

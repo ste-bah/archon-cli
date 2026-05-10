@@ -259,9 +259,12 @@ host_shell_fallback = false
 # Real Bash execution backend when sandbox.backend = "openshell" and enabled=true.
 enabled = false
 binary = "openshell"
-# "mirror" keeps the local workspace canonical; "remote" requires gateway.
-workspace_mode = "mirror"
-# gateway = "team-gateway"
+# "upload" stages the current workdir into /sandbox/<basename> before Bash.
+# "remote" runs from remote_workdir or /sandbox; "mirror" requires the same
+# absolute path to exist inside the OpenShell runtime.
+workspace_mode = "upload"
+gateway = "openshell"
+# remote_workdir = "/sandbox"
 # policy = "locked-down"
 providers = []
 gpu = false

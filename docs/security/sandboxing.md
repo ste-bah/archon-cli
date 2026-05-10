@@ -46,9 +46,11 @@ it refuses disabled host-key checking or host-shell fallback.
 selected. Archon does not pass `--provider`, does not forward request
 environment values, strips common provider credential variables from the
 OpenShell CLI process, and sets `OPENSHELL_GATEWAY` only when an explicit
-gateway is configured. `workspace_mode = "remote"` runs from `/sandbox`;
-`workspace_mode = "mirror"` assumes the active workspace path is visible inside
-the sandbox runtime.
+gateway is configured. `workspace_mode = "upload"` stages the active workdir
+into `/sandbox/<basename>` before Bash, which avoids macOS external-volume paths
+such as `/Volumes/...` leaking into the sandbox. `remote` runs from
+`remote_workdir` or `/sandbox`; `mirror` assumes the active workspace path is
+visible inside the sandbox runtime.
 
 `archon sandbox status --verbose` shows backend-specific safety knobs, including
 Docker host-mount settings and OpenShell provider-injection/host-shell-fallback
@@ -72,7 +74,8 @@ OpenShell defaults are deliberately conservative:
 ```toml
 provider_injection = false
 host_shell_fallback = false
-workspace_mode = "mirror"
+workspace_mode = "upload"
+gateway = "openshell"
 ```
 
 OpenShell execution must use the OpenShell transport or configured gateway. It

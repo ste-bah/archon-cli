@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use archon_permissions::sandbox::{SandboxCommandRequest, SandboxCommandResult};
 
 use super::OpenShellConfig;
@@ -12,6 +14,9 @@ pub(super) fn openshell_create_args(
         args.push("--gpu".into());
     }
     args.push("--no-keep".into());
+    if config.workspace_mode == "upload" {
+        args.extend(["--upload".into(), openshell_upload_spec(request)?]);
+    }
     if let Some(policy) = config.policy.as_deref().map(str::trim) {
         if policy.contains('\0') {
             return Err("sandbox.openshell.policy must not contain NUL".into());
@@ -55,15 +60,52 @@ fn openshell_workdir(
     config: &OpenShellConfig,
     request: &SandboxCommandRequest,
 ) -> Result<String, String> {
-    let workdir = if config.workspace_mode == "remote" {
-        "/sandbox".into()
-    } else {
-        request.working_dir.to_string_lossy().to_string()
+    let workdir = match config.workspace_mode.as_str() {
+        "remote" => remote_workdir(config),
+        "upload" => uploaded_workdir(&request.working_dir)?,
+        _ => mirror_workdir(&request.working_dir)?,
     };
     if workdir.trim().is_empty() || workdir.contains('\0') {
         return Err("openshell sandbox workdir must not be empty or contain NUL".into());
     }
     Ok(workdir)
+}
+
+fn remote_workdir(config: &OpenShellConfig) -> String {
+    config
+        .remote_workdir
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("/sandbox")
+        .to_string()
+}
+
+fn mirror_workdir(path: &Path) -> Result<String, String> {
+    let workdir = path.to_string_lossy().to_string();
+    if workdir.starts_with("/Volumes/") {
+        return Err(
+            "openshell mirror mode cannot use a macOS external volume path; set sandbox.openshell.workspace_mode=\"upload\" or \"remote\"".into(),
+        );
+    }
+    Ok(workdir)
+}
+
+fn openshell_upload_spec(request: &SandboxCommandRequest) -> Result<String, String> {
+    let local = request.working_dir.to_string_lossy();
+    if local.contains(':') {
+        return Err("openshell upload mode cannot upload workdirs containing ':'".into());
+    }
+    Ok(format!("{local}:/sandbox"))
+}
+
+fn uploaded_workdir(path: &Path) -> Result<String, String> {
+    let basename = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .ok_or_else(|| "openshell upload mode requires a workdir with a basename".to_string())?;
+    Ok(format!("/sandbox/{basename}"))
 }
 
 fn shell_quote(value: &str) -> String {
@@ -131,8 +173,10 @@ mod tests {
         assert!(args.contains(&"--no-keep".to_string()));
         assert!(args.contains(&"--policy".to_string()));
         assert!(args.contains(&"./policy.yaml".to_string()));
+        assert!(args.contains(&"--upload".to_string()));
+        assert!(args.contains(&"/workspace/local:/sandbox".to_string()));
         assert!(args.contains(&"/bin/bash".to_string()));
-        assert!(args.last().unwrap().contains("cd -- '/workspace/local'"));
+        assert!(args.last().unwrap().contains("cd -- '/sandbox/local'"));
         assert!(!args.iter().any(|arg| arg == "--provider"));
         assert!(!args.iter().any(|arg| arg.contains("ANTHROPIC_API_KEY")));
         assert!(!args.iter().any(|arg| arg.contains("my-claude")));
@@ -163,6 +207,57 @@ mod tests {
         let args = openshell_create_args(&cfg, &request()).unwrap();
 
         assert!(args.last().unwrap().contains("cd -- '/sandbox'"));
+    }
+
+    #[test]
+    fn remote_mode_uses_configured_remote_workdir() {
+        let cfg = OpenShellConfig {
+            enabled: true,
+            workspace_mode: "remote".into(),
+            remote_workdir: Some("/workspace/project-1".into()),
+            ..OpenShellConfig::default()
+        };
+
+        let args = openshell_create_args(&cfg, &request()).unwrap();
+
+        assert!(
+            args.last()
+                .unwrap()
+                .contains("cd -- '/workspace/project-1'")
+        );
+        assert!(!args.contains(&"--upload".to_string()));
+    }
+
+    #[test]
+    fn mirror_mode_uses_request_workdir_when_explicit() {
+        let cfg = OpenShellConfig {
+            enabled: true,
+            workspace_mode: "mirror".into(),
+            ..OpenShellConfig::default()
+        };
+
+        let args = openshell_create_args(&cfg, &request()).unwrap();
+
+        assert!(args.last().unwrap().contains("cd -- '/workspace/local'"));
+        assert!(!args.contains(&"--upload".to_string()));
+    }
+
+    #[test]
+    fn mirror_mode_rejects_macos_external_volume_paths() {
+        let cfg = OpenShellConfig {
+            enabled: true,
+            workspace_mode: "mirror".into(),
+            ..OpenShellConfig::default()
+        };
+        let req = SandboxCommandRequest {
+            working_dir: PathBuf::from("/Volumes/Externalwork/archon-cli/project-1"),
+            ..request()
+        };
+
+        let err = openshell_create_args(&cfg, &req).unwrap_err();
+
+        assert!(err.contains("macOS external volume"));
+        assert!(err.contains("workspace_mode=\"upload\""));
     }
 
     #[test]

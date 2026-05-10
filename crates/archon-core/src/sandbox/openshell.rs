@@ -19,6 +19,7 @@ pub struct OpenShellConfig {
     pub binary: String,
     pub workspace_mode: String,
     pub gateway: Option<String>,
+    pub remote_workdir: Option<String>,
     pub policy: Option<String>,
     pub providers: Vec<String>,
     pub gpu: bool,
@@ -31,8 +32,9 @@ impl Default for OpenShellConfig {
         Self {
             enabled: false,
             binary: "openshell".into(),
-            workspace_mode: "mirror".into(),
-            gateway: None,
+            workspace_mode: "upload".into(),
+            gateway: Some("openshell".into()),
+            remote_workdir: None,
             policy: None,
             providers: Vec::new(),
             gpu: false,
@@ -55,15 +57,20 @@ impl OpenShellConfig {
                 return Err("sandbox.openshell.gateway must not contain NUL".into());
             }
         }
+        if let Some(workdir) = self.remote_workdir.as_deref() {
+            if workdir.contains('\0') {
+                return Err("sandbox.openshell.remote_workdir must not contain NUL".into());
+            }
+        }
         if let Some(policy) = self.policy.as_deref() {
             if policy.contains('\0') {
                 return Err("sandbox.openshell.policy must not contain NUL".into());
             }
         }
         match self.workspace_mode.as_str() {
-            "mirror" | "remote" => Ok(()),
+            "mirror" | "remote" | "upload" => Ok(()),
             other => Err(format!(
-                "sandbox.openshell.workspace_mode must be mirror or remote, got \"{other}\""
+                "sandbox.openshell.workspace_mode must be mirror, remote, or upload, got \"{other}\""
             )),
         }
     }
@@ -161,10 +168,10 @@ pub fn openshell_doctor_report(
                 .unwrap_or_else(|| "OpenShell binary was not found".into()),
         );
         OpenShellDoctorStatus::MissingBinary
-    } else if config.workspace_mode == "remote"
+    } else if matches!(config.workspace_mode.as_str(), "remote" | "upload")
         && config.gateway.as_deref().unwrap_or("").is_empty()
     {
-        findings.push("remote workspace mode requires an explicit gateway".into());
+        findings.push("remote/upload workspace mode requires an explicit gateway".into());
         OpenShellDoctorStatus::MissingGateway
     } else {
         findings.push(format!(
@@ -231,7 +238,7 @@ impl OpenShellSandboxBackend {
                 .error
                 .unwrap_or_else(|| "openshell binary was not found".into()));
         }
-        if self.config.workspace_mode == "remote"
+        if matches!(self.config.workspace_mode.as_str(), "remote" | "upload")
             && self
                 .config
                 .gateway
@@ -240,7 +247,7 @@ impl OpenShellSandboxBackend {
                 .trim()
                 .is_empty()
         {
-            return Err("openshell remote mode requires an explicit gateway".into());
+            return Err("openshell remote/upload mode requires an explicit gateway".into());
         }
         Ok(())
     }
@@ -366,7 +373,8 @@ mod tests {
 
         assert!(!cfg.enabled);
         assert_eq!(cfg.binary, "openshell");
-        assert_eq!(cfg.workspace_mode, "mirror");
+        assert_eq!(cfg.workspace_mode, "upload");
+        assert_eq!(cfg.gateway.as_deref(), Some("openshell"));
         assert!(!cfg.provider_injection);
         assert!(!cfg.host_shell_fallback);
     }

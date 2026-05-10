@@ -246,7 +246,8 @@ mode = "risky"
 [sandbox.openshell]
 enabled = true
 binary = "openshell"
-workspace_mode = "mirror"
+workspace_mode = "upload"
+gateway = "openshell"
 provider_injection = false
 host_shell_fallback = false
 ```
@@ -254,21 +255,30 @@ host_shell_fallback = false
 What happens:
 
 - Bash routes through `openshell sandbox create --no-keep --`.
+- The current workdir is uploaded to `/sandbox/<basename>` before the command.
 - Claude Code spoofing, Codex OAuth, provider auth, and memory stay host-side.
 - Archon strips common provider credentials from the OpenShell process.
 - OpenShell provider entries are ignored while `provider_injection = false`.
 
-`workspace_mode = "mirror"` assumes the active host path is visible inside the
-OpenShell runtime. Use `remote` only when you have a configured gateway:
+`workspace_mode = "upload"` is the default because macOS volume paths such as
+`/Volumes/Externalwork/...` do not exist inside OpenShell. Bash-side file
+changes stay inside the ephemeral sandbox; use Archon's normal `Edit`/`Write`
+tools for host-side edits. Use `remote` only when you have a configured gateway
+and a known remote working directory:
 
 ```toml
 [sandbox.openshell]
 enabled = true
 workspace_mode = "remote"
-gateway = "team-gateway"
+gateway = "openshell"
+remote_workdir = "/sandbox"
 provider_injection = false
 host_shell_fallback = false
 ```
+
+Use `mirror` only when the same absolute path exists inside the OpenShell
+runtime. Archon refuses obvious macOS external-volume mirror paths before
+running OpenShell so the agent does not fail later on `cd /Volumes/...`.
 
 OpenShell workspace mutability is governed by the OpenShell environment and any
 configured OpenShell policy. Archon still controls whether non-shell host tools

@@ -335,8 +335,9 @@ host_shell_fallback = false
 [sandbox.openshell]
 enabled = false
 binary = "openshell"
-workspace_mode = "mirror"  # "mirror" | "remote"
-# gateway = "team-gateway"
+workspace_mode = "upload"  # "upload" | "remote" | "mirror"
+gateway = "openshell"
+# remote_workdir = "/sandbox"
 # policy = "locked-down"
 providers = []
 gpu = false
