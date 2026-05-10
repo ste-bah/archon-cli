@@ -23,6 +23,8 @@ Desktop or Docker Engine must be installed and running before OpenShell commands
 are used. See the NVIDIA OpenShell
 [Quickstart](https://docs.nvidia.com/openshell/get-started/quickstart) and
 [Support Matrix](https://docs.nvidia.com/openshell/reference/support-matrix).
+Use `scripts/install-system-deps.sh --with-openshell --setup-openshell-gateway`
+to install OpenShell and start/verify the local gateway as your normal user.
 
 `mirror` mode treats the local Archon workspace as canonical and assumes that
 path is visible inside the OpenShell sandbox runtime. `remote` mode must

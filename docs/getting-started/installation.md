@@ -34,6 +34,7 @@ archon-cli links against OpenSSL via `reqwest` (rustls is also enabled, but buil
 > sudo scripts/install-system-deps.sh --with-docker    # add Docker sandbox deps
 > sudo scripts/install-system-deps.sh --with-openshell # add Docker + OpenShell deps
 > sudo scripts/install-system-deps.sh --with-sandbox   # add both sandbox extras
+> scripts/install-system-deps.sh --with-openshell --setup-openshell-gateway
 > scripts/install-system-deps.sh --check               # verify required deps
 > scripts/install-system-deps.sh --check --with-sandbox
 > scripts/install-system-deps.sh --dry-run --with-sandbox
@@ -121,6 +122,16 @@ OpenShell on hosts covered by NVIDIA's current support matrix: Debian/Ubuntu
 Linux on x86_64/aarch64, WSL2 Debian/Ubuntu on x86_64, and macOS Apple Silicon.
 Use Docker or SSH sandboxing on other hosts unless you install and validate
 OpenShell manually.
+
+OpenShell gateway setup is per-user state. Run this as your normal user, not
+with `sudo`, after Docker Desktop or Docker Engine is running:
+
+```bash
+scripts/install-system-deps.sh --with-openshell --setup-openshell-gateway
+```
+
+The setup step runs `openshell gateway start` when no active gateway exists and
+then verifies with `openshell status`.
 
 ## Clone and build
 

@@ -56,6 +56,17 @@ sudo scripts/install-system-deps.sh --with-openshell
 sudo scripts/install-system-deps.sh --with-sandbox
 ```
 
+For OpenShell, also set up the local gateway as your normal user after Docker is
+running:
+
+```bash
+scripts/install-system-deps.sh --with-openshell --setup-openshell-gateway
+```
+
+That command starts the gateway only if `openshell status` reports no active
+gateway. Do not run the gateway setup under `sudo`; OpenShell stores active
+gateway metadata in the current user's profile.
+
 Run diagnostics before enabling anything:
 
 ```bash
@@ -84,6 +95,8 @@ linters, or package-manager commands, build a project image first and point
 For OpenShell, Docker Desktop or Docker Engine must be running first. OpenShell
 support follows NVIDIA's current support matrix. See
 [OpenShell sandbox](../security/openshell-sandbox.md) for host requirements.
+If `openshell sandbox create` reports `No active gateway`, rerun the installer
+with `--setup-openshell-gateway` or run `openshell gateway start` directly.
 
 ## Use Case 1: Normal Coding, Safer Shell
 

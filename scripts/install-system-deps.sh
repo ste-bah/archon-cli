@@ -1,25 +1,12 @@
 #!/bin/sh
 # install-system-deps.sh — POSIX-compatible system-package installer for archon-cli.
 #
-# Detects the host OS and installs everything archon-cli needs to build
-# and run end-to-end:
+# Detects the host OS and installs build deps, poppler PDF utilities
+# (`pdftotext`, `pdfimages`, `pdftoppm`), Tesseract OCR, and optional
+# Docker/OpenShell sandbox runtime dependencies.
 #
-#   Build deps         build-essential / gcc + pkg-config + openssl headers + git
-#   PDF utilities      pdftotext + pdfimages + pdftoppm (poppler-utils) — required
-#                       by `archon docs ingest` for native-text PDFs (pdftotext),
-#                       embedded-image extraction in v0.1.47+ (pdfimages), and the
-#                       page-render fallback for scanned PDFs (pdftoppm). All three
-#                       ship together in the single poppler-utils / poppler package.
-#   Image OCR          tesseract-ocr — required by `archon docs ingest` for
-#                       PNG/JPEG/TIFF, embedded PDF images, and rendered scanned
-#                       PDF pages.
-#   Sandbox extras     opt-in Docker/OpenShell runtime dependencies for
-#                       `[sandbox]` backends (`--with-docker`, `--with-openshell`,
-#                       or `--with-sandbox`).
-#
-# Does NOT install Rust — use rustup directly per docs/getting-started/installation.md.
-# Does NOT install VLM models, cloud OCR keys, provider credentials, or enable
-# sandbox backends in config.toml.
+# Does NOT install Rust, VLM models, cloud OCR keys, provider credentials, or
+# enable sandbox backends in config.toml. OpenShell gateway setup is opt-in.
 #
 # Usage:
 #   sudo scripts/install-system-deps.sh         # install everything
@@ -28,6 +15,7 @@
 #   sudo scripts/install-system-deps.sh --with-docker
 #   sudo scripts/install-system-deps.sh --with-openshell
 #   sudo scripts/install-system-deps.sh --with-sandbox   # Docker + OpenShell
+#   scripts/install-system-deps.sh --with-openshell --setup-openshell-gateway
 #
 # OpenShell extras are installed only on hosts covered by NVIDIA's current
 # support matrix: Debian/Ubuntu Linux x86_64/aarch64, WSL2 Debian/Ubuntu x86_64,
@@ -52,13 +40,18 @@ DRY_RUN=false
 CHECK_ONLY=false
 WITH_DOCKER=false
 WITH_OPENSHELL=false
+SETUP_OPENSHELL_GATEWAY=false
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        --dry-run)        DRY_RUN=true ;;
-        --check)          CHECK_ONLY=true ;;
-        --with-docker)    WITH_DOCKER=true ;;
-        --with-openshell) WITH_OPENSHELL=true ;;
+        --dry-run)                  DRY_RUN=true ;;
+        --check)                    CHECK_ONLY=true ;;
+        --with-docker)              WITH_DOCKER=true ;;
+        --with-openshell)           WITH_OPENSHELL=true ;;
+        --setup-openshell-gateway|--start-openshell-gateway)
+            WITH_OPENSHELL=true
+            SETUP_OPENSHELL_GATEWAY=true
+            ;;
         --with-sandbox)
             WITH_DOCKER=true
             WITH_OPENSHELL=true
@@ -251,6 +244,9 @@ if [ "$CHECK_ONLY" = true ]; then
     if [ "$WITH_OPENSHELL" = true ] && ! command -v openshell >/dev/null 2>&1; then
         MISSING="$MISSING openshell"
     fi
+    if [ "$SETUP_OPENSHELL_GATEWAY" = true ] && ! openshell status >/dev/null 2>&1; then
+        MISSING="$MISSING openshell-gateway"
+    fi
     # gcc OR cc satisfies the C compiler requirement
     if ! command -v gcc >/dev/null 2>&1 && ! command -v cc >/dev/null 2>&1; then
         :  # already in MISSING
@@ -259,8 +255,10 @@ if [ "$CHECK_ONLY" = true ]; then
     fi
     if [ -n "$MISSING" ]; then
         echo "install-system-deps.sh: missing:$MISSING" >&2
-        if [ "$WITH_OPENSHELL" = true ]; then
-            echo "  Run: sudo $0 --with-openshell" >&2
+        if [ "$SETUP_OPENSHELL_GATEWAY" = true ]; then
+            echo "  Run: $0 --with-openshell --setup-openshell-gateway" >&2
+        elif [ "$WITH_OPENSHELL" = true ]; then
+            echo "  Run: $0 --with-openshell" >&2
         elif [ "$WITH_DOCKER" = true ]; then
             echo "  Run: sudo $0 --with-docker" >&2
         else
@@ -274,6 +272,9 @@ if [ "$CHECK_ONLY" = true ]; then
     fi
     if [ "$WITH_OPENSHELL" = true ]; then
         PRESENT="$PRESENT, openshell"
+    fi
+    if [ "$SETUP_OPENSHELL_GATEWAY" = true ]; then
+        PRESENT="$PRESENT, openshell-gateway"
     fi
     echo "install-system-deps.sh: all requested binaries present ($PRESENT)"
     exit 0
@@ -326,6 +327,9 @@ run() {
 
 echo "install-system-deps.sh: detected $OS_FAMILY/$DISTRO_ID, package manager: $PKG_MGR"
 echo "install-system-deps.sh: sandbox extras: docker=$WITH_DOCKER openshell=$WITH_OPENSHELL"
+if [ "$SETUP_OPENSHELL_GATEWAY" = true ]; then
+    echo "install-system-deps.sh: OpenShell gateway setup requested"
+fi
 if [ "$PKG_MGR" = "brew" ]; then
     if ! command -v brew >/dev/null 2>&1; then
         echo "install-system-deps.sh: Homebrew not found. Install from https://brew.sh first, then re-run." >&2
@@ -390,6 +394,48 @@ install_openshell() {
     exit 3
 }
 
+setup_openshell_gateway() {
+    [ "$SETUP_OPENSHELL_GATEWAY" = true ] || return 0
+    if [ "$DRY_RUN" = true ]; then
+        echo "[dry-run] docker info"
+        echo "[dry-run] openshell status || openshell gateway start"
+        echo "[dry-run] openshell status"
+        return 0
+    fi
+    if [ "$(id -u 2>/dev/null || echo 1)" -eq 0 ]; then
+        echo "install-system-deps.sh: refusing to set up OpenShell gateway as root" >&2
+        echo "  Re-run as your normal user: $0 --with-openshell --setup-openshell-gateway" >&2
+        exit 1
+    fi
+    for bin in docker openshell; do
+        command -v "$bin" >/dev/null 2>&1 || {
+            echo "install-system-deps.sh: $bin is required before OpenShell gateway setup" >&2
+            exit 3
+        }
+    done
+    if ! docker info >/dev/null 2>&1; then
+        echo "install-system-deps.sh: Docker is installed but the daemon is not reachable" >&2
+        echo "  Start Docker Desktop or Docker Engine, then re-run:" >&2
+        echo "    $0 --with-openshell --setup-openshell-gateway" >&2
+        exit 3
+    fi
+    if openshell status >/dev/null 2>&1; then
+        echo "install-system-deps.sh: OpenShell gateway already active"
+        openshell status || true
+        return 0
+    fi
+    echo "+ openshell gateway start"
+    openshell gateway start || {
+        echo "install-system-deps.sh: OpenShell gateway start failed" >&2
+        exit 3
+    }
+    echo "+ openshell status"
+    openshell status || {
+        echo "install-system-deps.sh: OpenShell gateway status check failed" >&2
+        exit 3
+    }
+}
+
 if [ -n "$PKG_UPDATE_CMD" ]; then
     # shellcheck disable=SC2086
     run $SUDO $PKG_UPDATE_CMD || {
@@ -409,6 +455,7 @@ fi
 
 install_macos_docker
 install_openshell
+setup_openshell_gateway
 
 # ---------------------------------------------------------------------------
 # Post-install verification
@@ -440,6 +487,13 @@ if [ "$DRY_RUN" = false ]; then
         echo "  4. Enable Docker sandboxing by setting [sandbox].backend=\"docker\" and [sandbox.docker].enabled=true"
     fi
     if [ "$WITH_OPENSHELL" = true ]; then
-        echo "  5. Enable OpenShell sandboxing by setting [sandbox].backend=\"openshell\" and [sandbox.openshell].enabled=true"
+        if [ "$SETUP_OPENSHELL_GATEWAY" = true ]; then
+            echo "  5. Enable OpenShell sandboxing by setting [sandbox].backend=\"openshell\" and [sandbox.openshell].enabled=true"
+            echo "  6. Test mirror mode from your project: openshell sandbox create --no-keep -- /bin/bash -lc \"cd -- '\\$PWD' && pwd && ls\""
+        else
+            echo "  5. Start/check the OpenShell gateway: openshell gateway start && openshell status"
+            echo "     Or rerun: $0 --with-openshell --setup-openshell-gateway"
+            echo "  6. Enable OpenShell sandboxing by setting [sandbox].backend=\"openshell\" and [sandbox.openshell].enabled=true"
+        fi
     fi
 fi
