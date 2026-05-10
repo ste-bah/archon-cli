@@ -114,9 +114,13 @@ Docker installs use the host package manager where possible (`docker.io`,
 may still need to add your user to the `docker` group and start/enable the
 daemon according to your distro policy.
 
-OpenShell installs with the official `uv tool install -U openshell` path when
-`uv` is available, otherwise the official NVIDIA OpenShell install script is
-used. OpenShell's local gateway path expects Docker to be available, so
+OpenShell installs with NVIDIA's official install script:
+
+```bash
+curl -LsSf https://raw.githubusercontent.com/NVIDIA/OpenShell/main/install.sh | sh
+```
+
+OpenShell's local gateway path expects Docker to be available, so
 `--with-openshell` also installs/checks Docker. The installer only enables
 OpenShell on hosts covered by NVIDIA's current support matrix: Debian/Ubuntu
 Linux on x86_64/aarch64, WSL2 Debian/Ubuntu on x86_64, and macOS Apple Silicon.
@@ -130,8 +134,13 @@ with `sudo`, after Docker Desktop or Docker Engine is running:
 scripts/install-system-deps.sh --with-openshell --setup-openshell-gateway
 ```
 
-The setup step runs `openshell gateway start` when no active gateway exists and
-then verifies with `openshell status`.
+The setup step verifies Docker and OpenShell, refreshes OpenShell through the
+official installer when gateway setup is requested, reuses an already-active
+gateway, and starts/registers the local gateway service when needed. On macOS
+that is the Homebrew service for `nvidia/openshell/openshell`; on Linux it is
+the user `openshell-gateway` systemd service registered at
+`https://127.0.0.1:17670`. Older CLI builds that still expose
+`openshell gateway start` are handled as a fallback.
 
 ## Clone and build
 

@@ -63,9 +63,10 @@ running:
 scripts/install-system-deps.sh --with-openshell --setup-openshell-gateway
 ```
 
-That command starts the gateway only if `openshell status` reports no active
-gateway. Do not run the gateway setup under `sudo`; OpenShell stores active
-gateway metadata in the current user's profile.
+That command refreshes OpenShell through NVIDIA's official install script and
+starts the gateway only if `openshell status` reports no active gateway. Do not
+run the gateway setup under `sudo`; OpenShell stores active gateway metadata in
+the current user's profile.
 
 Run diagnostics before enabling anything:
 
@@ -96,7 +97,11 @@ For OpenShell, Docker Desktop or Docker Engine must be running first. OpenShell
 support follows NVIDIA's current support matrix. See
 [OpenShell sandbox](../security/openshell-sandbox.md) for host requirements.
 If `openshell sandbox create` reports `No active gateway`, rerun the installer
-with `--setup-openshell-gateway` or run `openshell gateway start` directly.
+with `--setup-openshell-gateway`. On macOS the installer uses the Homebrew
+service for `nvidia/openshell/openshell`; on Linux it enables and restarts the
+user `openshell-gateway` systemd service, then registers
+`https://127.0.0.1:17670` as the local gateway. Older CLI builds with
+`openshell gateway start` are supported as a fallback.
 
 ## Use Case 1: Normal Coding, Safer Shell
 

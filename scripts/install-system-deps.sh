@@ -17,9 +17,8 @@
 #   sudo scripts/install-system-deps.sh --with-sandbox   # Docker + OpenShell
 #   scripts/install-system-deps.sh --with-openshell --setup-openshell-gateway
 #
-# OpenShell extras are installed only on hosts covered by NVIDIA's current
-# support matrix: Debian/Ubuntu Linux x86_64/aarch64, WSL2 Debian/Ubuntu x86_64,
-# and macOS Apple Silicon.
+# OpenShell extras follow NVIDIA's current support matrix: Debian/Ubuntu Linux
+# x86_64/aarch64, WSL2 Debian/Ubuntu x86_64, and macOS Apple Silicon.
 #
 # Exit codes:
 #   0   success (or all deps already present in --check mode)
@@ -27,15 +26,12 @@
 #   2   missing dependency (in --check mode)
 #   3   package manager command failed
 #
-# Supports: Ubuntu/Debian/WSL2 (apt), Fedora/RHEL/Rocky (dnf), Arch/Manjaro (pacman),
-#           openSUSE/Tumbleweed (zypper), Alpine (apk),
-#           macOS (brew — must be pre-installed)
+# Supports apt, dnf, pacman, zypper, apk, and macOS brew (pre-installed).
 
 set -eu
 
-# ---------------------------------------------------------------------------
-# Args
-# ---------------------------------------------------------------------------
+SCRIPT_DIR=$(CDPATH= cd "$(dirname "$0")" && pwd)
+
 DRY_RUN=false
 CHECK_ONLY=false
 WITH_DOCKER=false
@@ -72,9 +68,6 @@ while [ $# -gt 0 ]; do
     shift
 done
 
-# ---------------------------------------------------------------------------
-# OS detection
-# ---------------------------------------------------------------------------
 UNAME_S="$(uname -s 2>/dev/null || echo unknown)"
 
 OS_FAMILY="unknown"
@@ -98,9 +91,6 @@ case "$UNAME_S" in
         ;;
 esac
 
-# ---------------------------------------------------------------------------
-# Per-OS package lists
-# ---------------------------------------------------------------------------
 # Each variable below is a SPACE-SEPARATED list of package names appropriate
 # for the selected package manager. The runner concatenates all three groups
 # and runs them in a single pass for efficiency.
@@ -358,83 +348,7 @@ install_macos_docker() {
     }
 }
 
-install_openshell() {
-    if [ "$WITH_OPENSHELL" != true ]; then
-        return 0
-    fi
-    if command -v openshell >/dev/null 2>&1; then
-        echo "install-system-deps.sh: openshell already present"
-        return 0
-    fi
-    if [ "$DRY_RUN" = true ]; then
-        if command -v uv >/dev/null 2>&1; then
-            echo "[dry-run] uv tool install -U openshell"
-        else
-            echo "[dry-run] curl -LsSf https://raw.githubusercontent.com/NVIDIA/OpenShell/main/install.sh | sh"
-        fi
-        return 0
-    fi
-    if command -v uv >/dev/null 2>&1; then
-        echo "+ uv tool install -U openshell"
-        uv tool install -U openshell || {
-            echo "install-system-deps.sh: OpenShell install via uv failed" >&2
-            exit 3
-        }
-        return 0
-    fi
-    if command -v curl >/dev/null 2>&1; then
-        echo "+ curl -LsSf https://raw.githubusercontent.com/NVIDIA/OpenShell/main/install.sh | sh"
-        curl -LsSf https://raw.githubusercontent.com/NVIDIA/OpenShell/main/install.sh | sh || {
-            echo "install-system-deps.sh: OpenShell install script failed" >&2
-            exit 3
-        }
-        return 0
-    fi
-    echo "install-system-deps.sh: cannot install OpenShell because neither uv nor curl is available" >&2
-    exit 3
-}
-
-setup_openshell_gateway() {
-    [ "$SETUP_OPENSHELL_GATEWAY" = true ] || return 0
-    if [ "$DRY_RUN" = true ]; then
-        echo "[dry-run] docker info"
-        echo "[dry-run] openshell status || openshell gateway start"
-        echo "[dry-run] openshell status"
-        return 0
-    fi
-    if [ "$(id -u 2>/dev/null || echo 1)" -eq 0 ]; then
-        echo "install-system-deps.sh: refusing to set up OpenShell gateway as root" >&2
-        echo "  Re-run as your normal user: $0 --with-openshell --setup-openshell-gateway" >&2
-        exit 1
-    fi
-    for bin in docker openshell; do
-        command -v "$bin" >/dev/null 2>&1 || {
-            echo "install-system-deps.sh: $bin is required before OpenShell gateway setup" >&2
-            exit 3
-        }
-    done
-    if ! docker info >/dev/null 2>&1; then
-        echo "install-system-deps.sh: Docker is installed but the daemon is not reachable" >&2
-        echo "  Start Docker Desktop or Docker Engine, then re-run:" >&2
-        echo "    $0 --with-openshell --setup-openshell-gateway" >&2
-        exit 3
-    fi
-    if openshell status >/dev/null 2>&1; then
-        echo "install-system-deps.sh: OpenShell gateway already active"
-        openshell status || true
-        return 0
-    fi
-    echo "+ openshell gateway start"
-    openshell gateway start || {
-        echo "install-system-deps.sh: OpenShell gateway start failed" >&2
-        exit 3
-    }
-    echo "+ openshell status"
-    openshell status || {
-        echo "install-system-deps.sh: OpenShell gateway status check failed" >&2
-        exit 3
-    }
-}
+. "$SCRIPT_DIR/lib/openshell-setup.sh"
 
 if [ -n "$PKG_UPDATE_CMD" ]; then
     # shellcheck disable=SC2086
@@ -491,8 +405,7 @@ if [ "$DRY_RUN" = false ]; then
             echo "  5. Enable OpenShell sandboxing by setting [sandbox].backend=\"openshell\" and [sandbox.openshell].enabled=true"
             echo "  6. Test mirror mode from your project: openshell sandbox create --no-keep -- /bin/bash -lc \"cd -- '\\$PWD' && pwd && ls\""
         else
-            echo "  5. Start/check the OpenShell gateway: openshell gateway start && openshell status"
-            echo "     Or rerun: $0 --with-openshell --setup-openshell-gateway"
+            echo "  5. Start/check the OpenShell gateway: $0 --with-openshell --setup-openshell-gateway"
             echo "  6. Enable OpenShell sandboxing by setting [sandbox].backend=\"openshell\" and [sandbox.openshell].enabled=true"
         fi
     fi
