@@ -65,7 +65,7 @@ moka.workspace = true
 strsim.workspace = true
 globset.workspace = true
 rayon.workspace = true
-serde_yml.workspace = true
+serde_yaml_ng.workspace = true
 
 [dev-dependencies]
 archon-permissions = { path = "../archon-permissions" }

@@ -144,7 +144,7 @@ impl LocalDiscoverySource {
                 serde_json::from_str(&content).map_err(|e| format!("JSON parse error: {e}"))?
             }
             "yaml" | "yml" => {
-                serde_yml::from_str(&content).map_err(|e| format!("YAML parse error: {e}"))?
+                serde_yaml_ng::from_str(&content).map_err(|e| format!("YAML parse error: {e}"))?
             }
             "toml" => {
                 let toml_val: toml::Value =
@@ -155,7 +155,7 @@ impl LocalDiscoverySource {
             "md" => {
                 let frontmatter = extract_yaml_frontmatter(&content)
                     .ok_or_else(|| "no YAML frontmatter".to_string())?;
-                serde_yml::from_str(&frontmatter)
+                serde_yaml_ng::from_str(&frontmatter)
                     .map_err(|e| format!("YAML frontmatter parse error: {e}"))?
             }
             _ => return Err(format!("unsupported extension: {ext}")),

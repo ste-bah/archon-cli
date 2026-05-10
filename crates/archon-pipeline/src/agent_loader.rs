@@ -16,13 +16,13 @@ use std::path::Path;
 ///
 /// If no valid frontmatter delimiters are found, returns an empty YAML mapping
 /// and the original content as the body.
-pub fn parse_frontmatter(content: &str) -> Result<(serde_yml::Value, String)> {
+pub fn parse_frontmatter(content: &str) -> Result<(serde_yaml_ng::Value, String)> {
     // Normalize CRLF → LF so frontmatter delimiters work on Windows.
     let content = &content.replace("\r\n", "\n");
 
     let empty_result = || {
         (
-            serde_yml::Value::Mapping(Default::default()),
+            serde_yaml_ng::Value::Mapping(Default::default()),
             content.to_string(),
         )
     };
@@ -54,8 +54,8 @@ pub fn parse_frontmatter(content: &str) -> Result<(serde_yml::Value, String)> {
     };
 
     let yaml_text = &rest[..yaml_end];
-    let yaml_value: serde_yml::Value =
-        serde_yml::from_str(yaml_text).context("failed to parse YAML frontmatter")?;
+    let yaml_value: serde_yaml_ng::Value =
+        serde_yaml_ng::from_str(yaml_text).context("failed to parse YAML frontmatter")?;
 
     // Body starts after the `\n---\n` (or `\n---` at EOF).
     let second_delim_end = after_first + yaml_end + 4; // skip \n---
@@ -141,11 +141,11 @@ fn deserialize_quality_gates<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<Stri
 
         fn visit_map<M: de::MapAccess<'de>>(self, mut map: M) -> Result<Vec<String>, M::Error> {
             let mut v = Vec::new();
-            while let Some((key, val)) = map.next_entry::<String, serde_yml::Value>()? {
+            while let Some((key, val)) = map.next_entry::<String, serde_yaml_ng::Value>()? {
                 let val_str = match &val {
-                    serde_yml::Value::Bool(b) => b.to_string(),
-                    serde_yml::Value::Number(n) => n.to_string(),
-                    serde_yml::Value::String(s) => s.clone(),
+                    serde_yaml_ng::Value::Bool(b) => b.to_string(),
+                    serde_yaml_ng::Value::Number(n) => n.to_string(),
+                    serde_yaml_ng::Value::String(s) => s.clone(),
                     _ => format!("{:?}", val),
                 };
                 v.push(format!("{}: {}", key, val_str));
@@ -291,7 +291,7 @@ pub fn load_coding_agents(dir: &Path) -> Result<Vec<CodingAgentDef>> {
         let (yaml, body) = parse_frontmatter(&content)
             .with_context(|| format!("failed to parse frontmatter in {}", path.display()))?;
 
-        let mut def: CodingAgentDef = serde_yml::from_value(yaml)
+        let mut def: CodingAgentDef = serde_yaml_ng::from_value(yaml)
             .with_context(|| format!("failed to deserialize agent from {}", path.display()))?;
 
         def.key = path
@@ -329,7 +329,7 @@ pub fn load_research_agents(dir: &Path) -> Result<Vec<ResearchAgentDef>> {
         let (yaml, body) = parse_frontmatter(&content)
             .with_context(|| format!("failed to parse frontmatter in {}", path.display()))?;
 
-        let mut def: ResearchAgentDef = serde_yml::from_value(yaml)
+        let mut def: ResearchAgentDef = serde_yaml_ng::from_value(yaml)
             .with_context(|| format!("failed to deserialize agent from {}", path.display()))?;
 
         def.key = path
@@ -655,8 +655,8 @@ name: "Gate String Agent"
 description: "Quality gates as single string"
 qualityGates: "compilation-only"
 "#;
-        let yaml: serde_yml::Value = serde_yml::from_str(yaml_str).expect("parse yaml");
-        let def: CodingAgentDef = serde_yml::from_value(yaml).expect("deserialize agent");
+        let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(yaml_str).expect("parse yaml");
+        let def: CodingAgentDef = serde_yaml_ng::from_value(yaml).expect("deserialize agent");
         assert_eq!(
             def.quality_gates,
             vec!["compilation-only"],
@@ -675,7 +675,7 @@ qualityGates:
   minScore: 0.85
   maxRetries: 3
 "#;
-        let def: CodingAgentDef = serde_yml::from_str(yaml_str).expect("deserialize agent");
+        let def: CodingAgentDef = serde_yaml_ng::from_str(yaml_str).expect("deserialize agent");
         let gates = &def.quality_gates;
         assert_eq!(gates.len(), 2, "map should produce 2 'key: value' entries");
         assert!(

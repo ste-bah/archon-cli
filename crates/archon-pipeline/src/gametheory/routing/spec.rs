@@ -8,7 +8,7 @@ pub fn load_spec(path: &Path) -> Result<GameTheorySpec, GameTheoryError> {
     let contents = std::fs::read_to_string(path).map_err(|e| GameTheoryError::Io {
         message: format!("cannot read spec at {}: {e}", path.display()),
     })?;
-    serde_yml::from_str(&contents).map_err(|e| GameTheoryError::Validation {
+    serde_yaml_ng::from_str(&contents).map_err(|e| GameTheoryError::Validation {
         message: format!("invalid gametheory spec YAML: {e}"),
     })
 }
