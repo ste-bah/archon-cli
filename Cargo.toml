@@ -8,7 +8,7 @@ publish = false
 members = ["crates/*"]
 
 [workspace.package]
-version = "1.1.0-beta.3"
+version = "1.2.0-beta"
 edition = "2024"
 rust-version = "1.86"
 license = "MIT"
@@ -150,6 +150,7 @@ archon-tools = { path = "crates/archon-tools" }
 archon-tui = { path = "crates/archon-tui" }
 archon-learning = { path = "crates/archon-learning" }
 archon-observability = { path = "crates/archon-observability" }
+archon-world-model = { path = "crates/archon-world-model" }
 reqwest.workspace = true
 openssl.workspace = true
 chrono.workspace = true

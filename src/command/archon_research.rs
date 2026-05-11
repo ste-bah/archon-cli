@@ -64,6 +64,40 @@ impl CommandHandler for ArchonResearchHandler {
         let _ = tui_tx.send(TuiEvent::TextDelta(format!(
             "Starting research pipeline for topic: {topic}\n",
         )));
+        let world_context = archon_core::config::load_config().ok().map(|config| {
+            let record = crate::command::world_model::record_runtime_advisory(
+                &config,
+                archon_world_model::integration::WorldAdvisorSurface::Pipeline,
+                "archon-research",
+                "tui_archon_research_start",
+                &topic,
+            );
+            tracing::debug!(
+                continue_foreground_flow = record.continue_foreground_flow,
+                "world_model.tui_archon_research_advisory"
+            );
+            (config, record)
+        });
+        if let Some((config, _)) = world_context.as_ref() {
+            let _ = crate::command::world_model::record_runtime_counterfactual_advice(
+                config,
+                archon_world_model::integration::WorldAdvisorSurface::Pipeline,
+                &topic,
+                &[
+                    ("pipeline-research", "run the full research pipeline now"),
+                    ("verify-first", "run source verification before research"),
+                    ("resume-existing", "resume a previous research pipeline"),
+                    (
+                        "surface-memory",
+                        "surface relevant memories before research",
+                    ),
+                    (
+                        "provider-fallback",
+                        "switch provider before pipeline execution",
+                    ),
+                ],
+            );
+        }
 
         archon_observability::spawn_named("archon-research-pipeline", async move {
             match run_pipeline_audited(
@@ -89,6 +123,15 @@ impl CommandHandler for ArchonResearchHandler {
                         result.total_cost_usd,
                         result.duration.as_secs_f64(),
                     )));
+                    if let Some((config, record)) = world_context.as_ref() {
+                        crate::command::world_model::record_runtime_outcome(
+                            config,
+                            record,
+                            &result.final_output,
+                            Some(&result.session_id),
+                        );
+                        crate::command::world_model::schedule_dynamic_trainer_tick(config.clone());
+                    }
                 }
                 Err(e) => {
                     let _ = tui_tx.send(TuiEvent::Error(format!("Research pipeline failed: {e}")));

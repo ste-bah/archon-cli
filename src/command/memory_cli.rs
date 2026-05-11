@@ -30,6 +30,17 @@ async fn handle_reindex(all: bool) -> Result<()> {
 
     // Resolve config (so we use the configured embedding provider).
     let config = archon_core::config::load_config().context("failed to load archon config")?;
+    let record = crate::command::world_model::record_runtime_advisory(
+        &config,
+        archon_world_model::integration::WorldAdvisorSurface::MemorySurfacing,
+        "memory-cli",
+        "memory_reindex",
+        "reindex memory embeddings",
+    );
+    tracing::debug!(
+        continue_foreground_flow = record.continue_foreground_flow,
+        "world_model.memory_advisory"
+    );
 
     let data_dir = std::env::var("ARCHON_DATA_DIR")
         .ok()

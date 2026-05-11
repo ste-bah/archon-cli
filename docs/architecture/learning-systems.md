@@ -81,6 +81,18 @@ context was actually shown to the agent.
 the same Laplace-smoothed shape as completion trust, and `archon self plans
 inspect <session-id>` compares stored plans with recorded step outcomes.
 
+v1.2.0-beta adds the local world model as a separate, consumer-friendly learning
+layer. It reads redacted session, pipeline, memory, retrospective, provider,
+plan, transcript, and agent-output traces into `~/.archon/world-model`, learns a
+compact latent transition model, and predicts likely next state plus auxiliary
+risk labels. The world model is advisory and fail-open: cold start, store
+failure, training, or backend failure records a typed unavailable event and the
+foreground task continues. Shell and TUI coding/research pipelines, memory
+reindex, governed agent evolution, and observed provider-runtime starts append
+runtime advisory records through the same fail-open contract. Pipeline
+completion links outcomes and audited bundles back to persisted predictions
+when an active advisory model exists.
+
 User corrections have a separate governed-learning edge. When
 `agent.handle_correction` detects a correction, the existing memory graph,
 inner-voice, GNN counter, and behavioural-rule reinforcement paths still run.

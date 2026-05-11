@@ -1,0 +1,35 @@
+[package]
+name = "archon-world-model"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[features]
+default = []
+candle = ["dep:candle-core"]
+cuda = ["candle", "candle-core/cuda"]
+mlx-metal = ["dep:mlx-rs"]
+
+[dependencies]
+anyhow.workspace = true
+archon-llm = { path = "../archon-llm" }
+archon-memory = { path = "../archon-memory" }
+candle-core = { version = "0.10.2", optional = true }
+chrono.workspace = true
+cozo.workspace = true
+hex.workspace = true
+regex.workspace = true
+safetensors = "0.7.0"
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+
+[target.'cfg(all(target_os = "macos", target_arch = "aarch64"))'.dependencies]
+mlx-rs = { version = "=0.25.3", optional = true }
+
+[dev-dependencies]
+async-trait.workspace = true
+tempfile.workspace = true
+tokio.workspace = true

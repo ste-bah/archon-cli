@@ -180,6 +180,17 @@ impl ObservedLlmProvider {
             )
             .with_reason(operation),
         );
+        crate::command::world_model::record_provider_runtime_advisory(
+            request.run_id.as_deref().unwrap_or(self.inner.name()),
+            request_id,
+            &format!(
+                "{} provider={} model={} origin={}",
+                operation,
+                self.inner.name(),
+                request.model,
+                request.origin.as_deref().unwrap_or("unknown")
+            ),
+        );
     }
 
     fn record_success(

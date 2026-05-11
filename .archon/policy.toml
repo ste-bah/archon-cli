@@ -69,6 +69,18 @@ require_approval_for_network_changes = true
 
 
 # ----------------------------------------------------------------------------
+# [policy.world_model] — Local world-model gates
+# ----------------------------------------------------------------------------
+# The world model is advisory by default. Cloud embeddings and LLM-assisted
+# labeling are explicit opt-ins; behavior-changing use stays disabled unless
+# an operator turns it on after reviewing evaluation reports.
+[policy.world_model]
+allow_third_party_embeddings = false
+allow_llm_labeler = false
+allow_behavior_changes = false
+
+
+# ----------------------------------------------------------------------------
 # [policy.docs.vlm] — Document VLM (image description) gates
 # ----------------------------------------------------------------------------
 # Off by default. Flip enabled + mode to "local" once you have a local VLM,

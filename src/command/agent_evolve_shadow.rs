@@ -81,6 +81,9 @@ fn build_shadow_evaluation(
         "candidate_rows": candidate_rows.len(),
         "baseline_rows": baseline_rows.len(),
         "reason": shadow_reason(&candidate_rows),
+        "world_model": crate::command::agent_evolve_world_model::world_model_shadow_evidence(
+            &proposal.agent_type
+        ),
     }));
 
     if let Some(task_set) = task_set {

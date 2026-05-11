@@ -21,6 +21,7 @@ pub(crate) mod agent_evolve_inspect;
 pub(crate) mod agent_evolve_permissions;
 pub(crate) mod agent_evolve_report;
 pub(crate) mod agent_evolve_shadow;
+pub(crate) mod agent_evolve_world_model;
 // TASK-#211 SLASH-AGENT: /agent slash-command umbrella (list/info/run).
 pub(crate) mod agent_slash;
 pub(crate) mod auth;
@@ -168,6 +169,7 @@ pub(crate) mod utils;
 pub(crate) mod vim;
 pub(crate) mod voice;
 pub(crate) mod web;
+pub(crate) mod world_model;
 
 // TASK-AGS-800 (Stage 6, Q1=A): spec-name discoverability shim.
 //

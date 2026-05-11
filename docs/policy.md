@@ -44,6 +44,11 @@ require_approval_for_prompt_changes = true
 require_approval_for_blocking_gates = true
 require_approval_for_network_changes = true
 
+[policy.world_model]
+allow_third_party_embeddings = false
+allow_llm_labeler = false
+allow_behavior_changes = false
+
 [policy.docs.vlm]
 enabled = false
 mode = "disabled" # disabled | local | cloud | hybrid
@@ -104,6 +109,15 @@ Governed-learning auto-apply is denied by default. Low-risk updates can only
 auto-apply when `policy.learning.auto_apply_low_risk = true`; prompt, blocking
 gate, policy, and network changes remain approval-gated.
 
+The local world model is advisory by default. Third-party embeddings require
+both `[learning.world_model.embeddings].allow_third_party = true` and
+`policy.world_model.allow_third_party_embeddings = true`; cloud embedding calls
+also require `policy.workers.embedding = "allow-cloud"` and
+`policy.network.default = "allow"`. LLM-assisted semantic labeling requires
+`policy.world_model.allow_llm_labeler = true`. Any world-model path that can
+change runtime behaviour requires `policy.world_model.allow_behavior_changes =
+true`; current runtime integrations remain advisory and fail open.
+
 ## Full State Verification
 
 Policy verification is feature-specific:
@@ -114,6 +128,7 @@ Policy verification is feature-specific:
 | VLM | `archon docs ingest <image-or-pdf>` | OCR/VLM rows show local/denied/provider state |
 | Hybrid retrieval | `archon docs search <query> --mode hybrid --debug` | debug output shows exact and semantic score components |
 | Governed learning | `archon behaviour apply <proposal-id>` | proposal decision and manifest history reflect policy outcome |
+| World model | `archon world predict-next ...` | unavailable advisors fail open; behavior-changing use remains disabled unless policy allows it |
 
 Keep policy files in source control for project-level gates when possible:
 

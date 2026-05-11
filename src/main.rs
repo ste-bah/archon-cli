@@ -238,6 +238,10 @@ async fn main() -> Result<()> {
         Some(Commands::Learning { action }) => {
             return crate::command::learning::handle_learning_command(action, &config).await;
         }
+        Some(Commands::World { action }) => {
+            return crate::command::world_model::handle_world_command(&action, &config, &env_vars)
+                .await;
+        }
         Some(Commands::Pipeline { action }) => {
             use crate::command::pipeline::handle_pipeline_command;
             return handle_pipeline_command(&action, &config, &env_vars).await;
