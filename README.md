@@ -154,7 +154,7 @@ archon-cli/
 
 - Current version: **v1.2.0-beta** ([release notes](docs/release-notes/v1.2.0-beta.md))
 - Beta release for local world-model advisory learning, provider runtime governance, Cozo-backed agent evolution, permission preflight, and sandbox routing
-- v1.2.0-beta adds the local world-model corpus/advisor/training scaffolds on top of the v1.1.0-beta.3 provider runtime and governed agent-evolution baseline.
+- v1.2.0-beta adds the local world-model corpus, fail-open advisor, dynamic training, counterfactual scoring, runtime outcome feedback, agent-evolution signals, and accelerator backend probes on top of the v1.1.0-beta.3 provider runtime and governed agent-evolution baseline.
 
 ## Contributing
 
