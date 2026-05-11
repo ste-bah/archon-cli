@@ -70,7 +70,12 @@ pub struct ModelRegistry {
 
 impl ModelRegistry {
     pub fn open(root: impl AsRef<Path>) -> Result<Self> {
-        let paths = ModelRegistryPaths::under(root);
+        // Canonicalize root for the same reason as WorldModelStore::open:
+        // macOS tempdir paths involve a /private symlink that produces
+        // inconsistent path identity across reopens.
+        std::fs::create_dir_all(root.as_ref())?;
+        let root = std::fs::canonicalize(root.as_ref())?;
+        let paths = ModelRegistryPaths::under(&root);
         std::fs::create_dir_all(&paths.candidates_dir)?;
         std::fs::create_dir_all(&paths.active_dir)?;
         std::fs::create_dir_all(&paths.ledgers_dir)?;

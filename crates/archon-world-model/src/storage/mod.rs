@@ -32,7 +32,13 @@ pub struct WorldModelStore {
 
 impl WorldModelStore {
     pub fn open(root: impl AsRef<Path>) -> Result<Self> {
-        let root = root.as_ref().to_path_buf();
+        // Ensure root exists before canonicalizing; required on macOS where
+        // tempfile::tempdir() returns /var/folders/... that resolves to
+        // /private/var/folders/.... Without canonicalization, repeated
+        // open(root) calls would key the sqlite-backed Cozo instance under
+        // two different effective paths and silently see empty state.
+        std::fs::create_dir_all(root.as_ref())?;
+        let root = std::fs::canonicalize(root.as_ref())?;
         std::fs::create_dir_all(root.join("ledgers"))?;
 
         let db_path = root.join("world-model.db");

@@ -200,6 +200,14 @@ pub(crate) const COMMAND_SURFACE_ROWS: &[CommandSurfaceRow] = &[
         notes: "Hybrid retrospective analysis, self-trust, and plan-vs-outcome inspection are shell-first calibration tools.",
     },
     CommandSurfaceRow {
+        cli: "archon world ...",
+        slash_primary: None,
+        tui_surface: "World-model shell",
+        status: SurfaceStatus::ShellOnly,
+        source_of_truth: "src/cli_args.rs + src/command/world_model.rs + crates/archon-world-model",
+        notes: "Local world-model status, ingest/backfill, dynamic trainer tick, candidate train/eval/promote, fail-open prediction, outcome/surprise recording, action scoring, explain, and rollback are shell-first while the advisor remains advisory-only.",
+    },
+    CommandSurfaceRow {
         cli: "archon team ...",
         slash_primary: None,
         tui_surface: "Not yet mirrored",
@@ -249,6 +257,12 @@ pub(crate) const COMMAND_SURFACE_EXCEPTIONS: &[SurfaceException] = &[
         owner: "archon-maintainers",
         review_date: "2026-09-30",
         reason: "Self-calibration is intentionally shell-first until retrospective review has a dedicated TUI inspector.",
+    },
+    SurfaceException {
+        cli: "archon world ...",
+        owner: "archon-maintainers",
+        review_date: "2026-09-30",
+        reason: "World-model controls are intentionally shell-first until a dedicated TUI inspector and approval workflow lands.",
     },
     SurfaceException {
         cli: "archon team ...",
