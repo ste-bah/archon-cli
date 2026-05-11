@@ -7,11 +7,22 @@ use crate::cli_args::{AgentAction, AgentEvolveAction};
 
 pub(crate) async fn handle_agent_command(
     action: &AgentAction,
-    _config: &archon_core::config::ArchonConfig,
+    config: &archon_core::config::ArchonConfig,
 ) -> Result<()> {
     let db_path = learning_db_path()?;
     let db = open_learning_db(&db_path)?;
     archon_learning::schema::ensure_learning_schema(&db)?;
+    let world_record = crate::command::world_model::record_runtime_advisory(
+        config,
+        archon_world_model::integration::WorldAdvisorSurface::AgentEvolution,
+        "agent-evolution",
+        "agent_evolution_command",
+        &format!("{action:?}"),
+    );
+    tracing::debug!(
+        continue_foreground_flow = world_record.continue_foreground_flow,
+        "world_model.agent_evolution_advisory"
+    );
 
     match action {
         AgentAction::Evolve { action } => handle_evolve_action(&db, action).await,
@@ -405,6 +416,16 @@ fn cmd_update_proposal_status(db: &DbInstance, proposal_id: &str, status: &str) 
         proposal.kind,
         proposal.risk_level
     );
+    let world = crate::command::agent_evolve_world_model::world_model_summary(&proposal.agent_type);
+    if world.signal_count > 0 {
+        println!(
+            "World-model evidence: signals={} evidence={} shadow_required={} approval_required={}",
+            world.signal_count,
+            world.evidence_count,
+            world.requires_shadow_evaluation,
+            world.requires_approval
+        );
+    }
     Ok(())
 }
 

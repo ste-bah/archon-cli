@@ -37,6 +37,7 @@ This page explains every section. Each table tells you **what** the field does, 
 - [`[learning.gnn]`](#learninggnn) — GNN model
 - [`[learning.gnn.training]`](#learninggnntraining) — GNN training hyperparams
 - [`[learning.gnn.auto_trainer]`](#learninggnnauto_trainer) — background retraining
+- [`[learning.world_model]`](#learningworld_model) — local trace world model
 - [`[learning.reflexion]`](#learningreflexion) — N-attempt retry
 - [`[cost]`](#cost) — spending guardrails
 - [`[logging]`](#logging) — log rotation
@@ -612,6 +613,109 @@ Triggers are OR-combined — ANY one firing is enough. The throttle gates ALL of
 
 ---
 
+## `[learning.world_model]`
+
+Local ME-JEPA-inspired trace model for advisory next-state prediction.
+
+```toml
+[learning.world_model]
+enabled = true
+model_kind = "latent_transition"
+auto_promote_advisory = true
+require_approval_for_behavior_change = true
+state_dim = 384
+max_checkpoint_mb = 64
+max_prediction_latency_ms = 100
+max_counterfactual_actions = 5
+store_raw_text = false
+include_conversation_turns = true
+include_agent_outputs = true
+
+[learning.world_model.embeddings]
+source = "local"
+provider = "fastembed"
+model = "bge-base-en-v1.5"
+dimensions = 768
+projection_dim = 384
+cache_enabled = true
+cache_max_mb = 1024
+redact_before_embedding = true
+allow_third_party = false
+external_base_url = ""
+external_api_key_env = ""
+
+[learning.world_model.labeler]
+analyzer = "hybrid"
+llm_enabled = true
+max_events_per_prompt = 120
+max_prompt_chars = 32000
+
+[learning.world_model.training]
+backend = "auto"
+allow_cpu_fallback = true
+prefer_accelerator = true
+precision = "fp32"
+max_accelerator_memory_mb = 4096
+batch_size = 32
+max_epochs = 10
+validation_split = 0.2
+promotion_min_delta = 0.02
+max_runtime_ms = 300000
+
+[learning.world_model.eval]
+bootstrap_iterations = 1000
+confidence_level = 0.95
+parity_precision = "fp32"
+parity_min_cosine = 0.95
+next_state_baseline_min_delta = 0.10
+counterfactual_baseline_min_delta = 0.10
+surprise_ks_min_p = 0.05
+counterfactual_ndcg_min = 0.60
+
+[learning.world_model.cold_start]
+min_rows = 1000
+min_sessions = 50
+min_observed_days = 7
+
+[learning.world_model.auto_trainer]
+enabled = true
+min_throttle_ms = 3600000
+idle_required_ms = 300000
+battery_suspend_below_percent = 30
+trigger_new_rows = 100
+trigger_surprises = 5
+trigger_corrections = 3
+trigger_elapsed_ms = 21600000
+first_run_threshold = 300
+max_runtime_ms = 300000
+tick_interval_ms = 60000
+
+[learning.world_model.retention]
+jsonl_rotate_mb = 500
+raw_retention_days = 90
+retain_cozo_summaries = true
+retain_checkpoint_count = 5
+```
+
+| Field | Default | What / Why |
+|---|---|---|
+| `enabled` | `true` | Enables local world-model corpus and advisory surfaces. |
+| `state_dim` | `384` | Latent state size. Small enough for consumer machines. |
+| `max_prediction_latency_ms` | `100` | Advisor budget. Exceeding this must fail open. |
+| `embeddings.source` | `"local"` | Local-first embeddings. Third-party embeddings require config and policy. |
+| `embeddings.cache_enabled` | `true` | Caches redacted embeddings under `~/.archon/world-model/embeddings/cache`. |
+| `embeddings.cache_max_mb` | `1024` | Prunes oldest cache rows after the cache exceeds this size. |
+| `embeddings.redact_before_embedding` | `true` | Redacts common email, token, API-key, and long secret shapes before local or external embedding calls. |
+| `labeler.analyzer` | `"hybrid"` | `"heuristic"`, `"llm"`, or `"hybrid"`. LLM mode is provider-neutral and requires policy. |
+| `training.backend` | `"auto"` | Selects an accelerator only after its tensor self-test probe passes, otherwise CPU if fallback is allowed. |
+| `auto_trainer.idle_required_ms` | `300000` | Suspends training while foreground work is active. |
+| `retention.jsonl_rotate_mb` | `500` | Rotates raw JSONL ledgers. |
+| `retention.raw_retention_days` | `90` | Deletes old raw ledgers, while Cozo summaries remain. |
+
+See [Local world model](../architecture/world-model.md), [world-model backends](world-model-backends.md), and [world-model embeddings](world-model-embeddings.md).
+
+---
+
 ## `[learning.reflexion]`
 
 N-attempt retry loop with self-critique on failed agent dispatch.
@@ -872,6 +976,23 @@ embedding = "allow-local"
 vlm = "deny"
 web_fetch = "deny"
 
+[policy.gametheory]
+max_agents_per_council = 12
+max_cost_usd = 20.0
+enable_tier11 = false
+allow_web_tools = false
+
+[policy.learning]
+auto_apply_low_risk = false
+require_approval_for_prompt_changes = true
+require_approval_for_blocking_gates = true
+require_approval_for_network_changes = true
+
+[policy.world_model]
+allow_third_party_embeddings = false
+allow_llm_labeler = false
+allow_behavior_changes = false
+
 [policy.docs.vlm]
 enabled = false
 mode = "disabled" # disabled | local | cloud | hybrid
@@ -914,6 +1035,13 @@ semantic_weight = 0.55
 ```
 
 Local VLM requires `policy.docs.vlm.provider = "ollama"` and `policy.workers.vlm = "allow-local"`. Cloud VLM requires `policy.workers.vlm = "allow-cloud"`, `policy.docs.vlm.allow_cloud = true`, and `policy.network.allow_cloud_vlm = true`.
+
+World-model cloud embeddings require both config and policy:
+`learning.world_model.embeddings.allow_third_party = true`,
+`policy.world_model.allow_third_party_embeddings = true`,
+`policy.workers.embedding = "allow-cloud"`, and
+`policy.network.default = "allow"`. LLM-assisted world-model labeling requires
+`policy.world_model.allow_llm_labeler = true`.
 
 PDF ingest uses `[policy.docs.pdf]` to decide whether to extract embedded
 images with `pdfimages`, the minimum size filter for icons/decorations, whether

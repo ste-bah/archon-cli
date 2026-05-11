@@ -75,6 +75,7 @@ struct RawPolicy {
     workers: Option<RawWorkersPolicy>,
     gametheory: Option<RawGameTheoryPolicy>,
     learning: Option<RawLearningPolicy>,
+    world_model: Option<RawWorldModelPolicy>,
     docs: Option<RawDocsPolicy>,
 }
 
@@ -108,6 +109,13 @@ struct RawLearningPolicy {
     require_approval_for_prompt_changes: Option<bool>,
     require_approval_for_blocking_gates: Option<bool>,
     require_approval_for_network_changes: Option<bool>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct RawWorldModelPolicy {
+    allow_third_party_embeddings: Option<bool>,
+    allow_llm_labeler: Option<bool>,
+    allow_behavior_changes: Option<bool>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -189,6 +197,9 @@ fn apply_raw(policy: &mut EffectivePolicy, root: RawPolicyRoot) {
         if let Some(learning) = raw.learning {
             apply_learning(&mut policy.learning, learning);
         }
+        if let Some(world_model) = raw.world_model {
+            apply_world_model(&mut policy.world_model, world_model);
+        }
         if let Some(docs) = raw.docs {
             if let Some(vlm) = docs.vlm {
                 apply_vlm(&mut policy.docs.vlm, vlm);
@@ -263,6 +274,18 @@ fn apply_learning(policy: &mut LearningPolicy, raw: RawLearningPolicy) {
     }
     if let Some(value) = raw.require_approval_for_network_changes {
         policy.require_approval_for_network_changes = value;
+    }
+}
+
+fn apply_world_model(policy: &mut WorldModelPolicy, raw: RawWorldModelPolicy) {
+    if let Some(value) = raw.allow_third_party_embeddings {
+        policy.allow_third_party_embeddings = value;
+    }
+    if let Some(value) = raw.allow_llm_labeler {
+        policy.allow_llm_labeler = value;
+    }
+    if let Some(value) = raw.allow_behavior_changes {
+        policy.allow_behavior_changes = value;
     }
 }
 

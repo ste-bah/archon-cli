@@ -9,6 +9,7 @@ Where archon-cli writes everything.
 | `~/.archon/.credentials.json` | `%USERPROFILE%\.archon\.credentials.json` | Provider credentials (Anthropic, Codex, Gemini) |
 | `~/.archon/sessions/<id>/activity/events.jsonl` | `%USERPROFILE%\.archon\sessions\<id>\activity\events.jsonl` | Agent/tool activity stream used by retrospectives |
 | `~/.archon/self-calibration/` | `%USERPROFILE%\.archon\self-calibration\` | Retrospectives, self-trust records, plan-vs-outcome summaries |
+| `~/.archon/world-model/` | `%USERPROFILE%\.archon\world-model\` | Local world-model corpus, ledgers, checkpoints, embeddings, and active pointer |
 | `~/.config/archon/` | `%APPDATA%\archon\` | Configuration |
 | `~/.config/archon/config.toml` | `%APPDATA%\archon\config.toml` | User config |
 | `~/.config/archon/.mcp.json` | `%APPDATA%\archon\.mcp.json` | Global MCP server config |
@@ -45,6 +46,7 @@ archon-cli specific overrides:
 | `skills/<name>.toml` | User-authored skills |
 | `plugins/` | Project-local plugins |
 | `pipelines/<session-id>/` | Audited built-in pipeline bundle: manifest, checksum state, audit log, prompts, agent records, outputs, verification reports, exports |
+| `plugin-artifacts/`, `artifacts/`, `runs/` | Optional plugin and run artifacts discoverable by world-model backfill |
 | `settings.json` | Hooks definitions (alternative to TOML) |
 | `lsp.toml` | LSP server overrides |
 

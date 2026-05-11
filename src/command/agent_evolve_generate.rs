@@ -19,7 +19,9 @@ pub(crate) fn cmd_generate_agent_evolution(db: &DbInstance, agent_type: &str) ->
         db, agent_type,
     )?;
     let permission_proposals = permission_denial_proposals(db, agent_type)?;
-    if ledger.is_empty() && permission_proposals.is_empty() {
+    let world_model_proposals =
+        crate::command::agent_evolve_world_model::world_model_proposals(agent_type);
+    if ledger.is_empty() && permission_proposals.is_empty() && world_model_proposals.is_empty() {
         println!("No performance ledger rows found for agent: {agent_type}");
         return Ok(());
     }
@@ -30,6 +32,7 @@ pub(crate) fn cmd_generate_agent_evolution(db: &DbInstance, agent_type: &str) ->
     );
     let mut proposals = runtime.propose(&events);
     proposals.extend(permission_proposals);
+    proposals.extend(world_model_proposals);
     let memory_candidates = memory_candidates_from_events(agent_type, &events);
 
     if proposals.is_empty() && memory_candidates.is_empty() {

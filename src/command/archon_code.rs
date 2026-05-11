@@ -64,6 +64,37 @@ impl CommandHandler for ArchonCodeHandler {
         let _ = tui_tx.send(TuiEvent::TextDelta(format!(
             "Starting coding pipeline for task: {task}\n",
         )));
+        let world_context = archon_core::config::load_config().ok().map(|config| {
+            let record = crate::command::world_model::record_runtime_advisory(
+                &config,
+                archon_world_model::integration::WorldAdvisorSurface::Pipeline,
+                "archon-code",
+                "tui_archon_code_start",
+                &task,
+            );
+            tracing::debug!(
+                continue_foreground_flow = record.continue_foreground_flow,
+                "world_model.tui_archon_code_advisory"
+            );
+            (config, record)
+        });
+        if let Some((config, _)) = world_context.as_ref() {
+            let _ = crate::command::world_model::record_runtime_counterfactual_advice(
+                config,
+                archon_world_model::integration::WorldAdvisorSurface::Pipeline,
+                &task,
+                &[
+                    ("pipeline-code", "run the full coding pipeline now"),
+                    ("verify-first", "run verification before coding"),
+                    ("resume-existing", "resume a previous coding pipeline"),
+                    ("surface-memory", "surface relevant memories before coding"),
+                    (
+                        "provider-fallback",
+                        "switch provider before pipeline execution",
+                    ),
+                ],
+            );
+        }
 
         archon_observability::spawn_named("archon-code-pipeline", async move {
             match run_pipeline_audited(
@@ -89,6 +120,15 @@ impl CommandHandler for ArchonCodeHandler {
                         result.total_cost_usd,
                         result.duration.as_secs_f64(),
                     )));
+                    if let Some((config, record)) = world_context.as_ref() {
+                        crate::command::world_model::record_runtime_outcome(
+                            config,
+                            record,
+                            &result.final_output,
+                            Some(&result.session_id),
+                        );
+                        crate::command::world_model::schedule_dynamic_trainer_tick(config.clone());
+                    }
                 }
                 Err(e) => {
                     let _ = tui_tx.send(TuiEvent::Error(format!("Coding pipeline failed: {e}")));

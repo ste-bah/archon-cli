@@ -88,6 +88,41 @@ impl EffectivePolicy {
             PolicyDecision::deny("MCP server exposure is disabled by policy")
         }
     }
+
+    pub fn world_model_third_party_embeddings_decision(&self) -> PolicyDecision {
+        if !self.world_model.allow_third_party_embeddings {
+            return PolicyDecision::deny(
+                "third-party world-model embeddings are disabled by policy.world_model",
+            );
+        }
+        if matches!(
+            self.workers.embedding.as_str(),
+            "allow-cloud" | "allow" | "cloud"
+        ) && self.network.default == "allow"
+        {
+            PolicyDecision::allow("third-party world-model embeddings are enabled by policy")
+        } else {
+            PolicyDecision::deny(
+                "third-party world-model embeddings require policy.workers.embedding = \"allow-cloud\" and policy.network.default = \"allow\"",
+            )
+        }
+    }
+
+    pub fn world_model_llm_labeler_decision(&self) -> PolicyDecision {
+        if self.world_model.allow_llm_labeler {
+            PolicyDecision::allow("world-model LLM labeling is enabled by policy")
+        } else {
+            PolicyDecision::deny("world-model LLM labeling is disabled by policy")
+        }
+    }
+
+    pub fn world_model_behavior_change_decision(&self) -> PolicyDecision {
+        if self.world_model.allow_behavior_changes {
+            PolicyDecision::allow("world-model behavior-changing use is enabled by policy")
+        } else {
+            PolicyDecision::deny("world-model behavior-changing use is disabled by policy")
+        }
+    }
 }
 
 fn allow_provider_mode(

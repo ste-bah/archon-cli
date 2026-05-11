@@ -6,6 +6,7 @@ pub struct EffectivePolicy {
     pub workers: WorkersPolicy,
     pub gametheory: GameTheoryPolicy,
     pub learning: LearningPolicy,
+    pub world_model: WorldModelPolicy,
     pub docs: DocsPolicy,
 }
 
@@ -81,6 +82,23 @@ impl Default for LearningPolicy {
             require_approval_for_prompt_changes: true,
             require_approval_for_blocking_gates: true,
             require_approval_for_network_changes: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorldModelPolicy {
+    pub allow_third_party_embeddings: bool,
+    pub allow_llm_labeler: bool,
+    pub allow_behavior_changes: bool,
+}
+
+impl Default for WorldModelPolicy {
+    fn default() -> Self {
+        Self {
+            allow_third_party_embeddings: false,
+            allow_llm_labeler: false,
+            allow_behavior_changes: false,
         }
     }
 }

@@ -422,6 +422,85 @@ first_run_threshold = 30       # kickoff at startup if memory_count >= this
 max_runtime_ms = 300000        # 5 minutes max per run
 tick_interval_ms = 60000       # background poll interval (1 minute)
 
+# --- Local World Model (latent next-state trace learning) ---
+[learning.world_model]
+enabled = true
+model_kind = "latent_transition"
+auto_promote_advisory = true
+require_approval_for_behavior_change = true
+state_dim = 384
+max_checkpoint_mb = 64
+max_prediction_latency_ms = 100
+max_counterfactual_actions = 5
+store_raw_text = false
+include_conversation_turns = true
+include_agent_outputs = true
+
+[learning.world_model.embeddings]
+source = "local"                   # "local" | "third_party" | "auto"
+provider = "fastembed"
+model = "bge-base-en-v1.5"
+dimensions = 768
+projection_dim = 384
+cache_enabled = true
+cache_max_mb = 1024
+redact_before_embedding = true
+allow_third_party = false
+external_base_url = ""
+external_api_key_env = ""
+
+[learning.world_model.labeler]
+analyzer = "hybrid"                # "heuristic" | "llm" | "hybrid"
+llm_enabled = true
+max_events_per_prompt = 120
+max_prompt_chars = 32000
+
+[learning.world_model.training]
+backend = "auto"                   # "auto" | "cpu" | "metal" | "cuda"
+allow_cpu_fallback = true
+prefer_accelerator = true
+precision = "fp32"
+max_accelerator_memory_mb = 4096
+batch_size = 32
+max_epochs = 10
+validation_split = 0.2
+promotion_min_delta = 0.02
+max_runtime_ms = 300000
+
+[learning.world_model.eval]
+bootstrap_iterations = 1000
+confidence_level = 0.95
+parity_precision = "fp32"
+parity_min_cosine = 0.95
+next_state_baseline_min_delta = 0.10
+counterfactual_baseline_min_delta = 0.10
+surprise_ks_min_p = 0.05
+counterfactual_ndcg_min = 0.60
+
+[learning.world_model.cold_start]
+min_rows = 1000
+min_sessions = 50
+min_observed_days = 7
+
+[learning.world_model.auto_trainer]
+enabled = true
+min_throttle_ms = 3600000
+idle_required_ms = 300000
+battery_suspend_below_percent = 30
+trigger_new_rows = 100
+trigger_surprises = 5
+trigger_corrections = 3
+trigger_elapsed_ms = 21600000
+first_run_threshold = 300
+max_runtime_ms = 300000
+tick_interval_ms = 60000
+
+[learning.world_model.retention]
+jsonl_rotate_mb = 500
+raw_retention_days = 90
+retain_cozo_summaries = true
+retain_checkpoint_count = 5
+
 
 # ----------------------------------------------------------------------------
 # [cost] — Spending guardrails (USD)
@@ -671,3 +750,8 @@ proposal_stale_days = 30
 #   [policy.gametheory]
 #   allow_web_tools = true             # gametheory specialists can use WebSearch/WebFetch
 #   enable_tier11 = false              # opt-in flag for Civilizational agents
+#
+#   [policy.world_model]
+#   allow_third_party_embeddings = false  # cloud embeddings require this plus workers.embedding/network gates
+#   allow_llm_labeler = false             # LLM-assisted semantic labeling opt-in
+#   allow_behavior_changes = false        # world model remains advisory unless explicitly enabled

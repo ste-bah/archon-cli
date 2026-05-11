@@ -44,6 +44,18 @@ subagents, coding/research pipelines, and gametheory through Codex.
 | `archon self retrospective <SESSION_ID> [--analyzer hybrid\|heuristic\|llm]` | Extract evidence-backed lessons from a session activity log |
 | `archon self trust status` | Show domain-scoped self-calibration trust scores |
 | `archon self plans inspect <SESSION_ID>` | Compare a stored session plan with recorded step outcomes |
+| `archon world status` | Show local world-model corpus, cold-start, and backend status |
+| `archon world ingest <SESSION_ID>` | Ingest one session's activity, plan, memory, retrospective, transcript, provider, pipeline, and agent-output artifacts into the corpus |
+| `archon world ingest --backfill` | Backfill available session, pipeline, memory, retrospective, provider, plugin-artifact, and agent-output traces into the corpus |
+| `archon world predict-next --session-id <ID> --action-ref <REF> --summary <TEXT>` | Request a fail-open next-state advisory |
+| `archon world score-actions --task <TEXT> --actions <PATH>` | Rank candidate actions with similarity-based counterfactual scoring |
+| `archon world explain <PREDICTION_ID>` | Inspect a persisted prediction and any recorded outcome/surprise |
+| `archon world record-outcome <PREDICTION_ID> --actual-summary <TEXT>` | Attach a redacted actual next-state summary and compute latent surprise |
+| `archon world train [--candidate] [--max-runtime-ms MS]` | Train a local candidate manifest from the stored world-model corpus |
+| `archon world trainer-tick [--last-activity-age-ms MS] [--last-training-age-ms MS] [--battery-percent N] [--unplugged]` | Run one idle-aware dynamic trainer tick |
+| `archon world eval [CANDIDATE_ID]` | Evaluate a candidate manifest against mandatory promotion gates |
+| `archon world promote <MODEL_ID>` | Promote only a candidate with a passing eval report |
+| `archon world rollback <MODEL_ID>` | Restore a prior advisory model pointer |
 | `archon run-agent-async <NAME> [--input FILE] [--version REQ] [--detach]` | Submit an async agent task |
 | `archon task-status <TASK_ID> [--watch]` | Check status of an async task |
 | `archon task-result <TASK_ID> [--stream]` | Get result of a completed async task |

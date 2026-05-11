@@ -4,7 +4,7 @@ use super::{
     AgentAction, AuthArgs, BehaviourAction, ChatArgs, CompletionAction, ConstellationAction,
     DocsAction, GametheoryAction, KbAction, LearningAction, MeaningAction, MemoryAction,
     PermissionsAction, PipelineAction, PluginAction, ProvAction, ProvidersAction, RemoteAction,
-    SandboxAction, SelfAction, TeamAction,
+    SandboxAction, SelfAction, TeamAction, WorldAction,
 };
 
 #[derive(Subcommand, Debug)]
@@ -110,6 +110,11 @@ pub enum Commands {
     Learning {
         #[command(subcommand)]
         action: LearningAction,
+    },
+    /// Manage local world-model learning
+    World {
+        #[command(subcommand)]
+        action: WorldAction,
     },
     /// Check status of an async task
     TaskStatus {

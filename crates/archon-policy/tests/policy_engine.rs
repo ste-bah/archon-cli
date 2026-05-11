@@ -20,6 +20,11 @@ enable_tier11 = true
 [policy.learning]
 auto_apply_low_risk = true
 
+[policy.world_model]
+allow_third_party_embeddings = true
+allow_llm_labeler = true
+allow_behavior_changes = true
+
 [policy.docs.vlm]
 enabled = true
 mode = "local"
@@ -67,6 +72,9 @@ semantic_weight = 0.3
     assert!(load.policy.gametheory.enable_tier11);
     assert_eq!(load.policy.gametheory.max_agents_per_council, 8);
     assert!(load.policy.learning.auto_apply_low_risk);
+    assert!(load.policy.world_model.allow_third_party_embeddings);
+    assert!(load.policy.world_model.allow_llm_labeler);
+    assert!(load.policy.world_model.allow_behavior_changes);
     assert_eq!(load.policy.docs.vlm.mode, "local");
     assert_eq!(load.policy.docs.vlm.provider, "ollama");
     assert_eq!(
@@ -110,6 +118,14 @@ fn missing_policy_defaults_to_deny() {
     assert!(load.loaded_sources.is_empty());
     assert!(!load.policy.gametheory_tier11_decision().allowed);
     assert!(!load.policy.docs_vlm_decision().allowed);
+    assert!(
+        !load
+            .policy
+            .world_model_third_party_embeddings_decision()
+            .allowed
+    );
+    assert!(!load.policy.world_model_llm_labeler_decision().allowed);
+    assert!(!load.policy.world_model_behavior_change_decision().allowed);
     assert!(
         !load
             .policy
@@ -267,6 +283,19 @@ fn high_impact_learning_changes_remain_approval_gated() {
             .learning_auto_apply_decision("RetrievalProfile", "High")
             .allowed
     );
+}
+
+#[test]
+fn world_model_cloud_embeddings_require_policy_worker_and_network() {
+    let mut policy = EffectivePolicy::default();
+    policy.world_model.allow_third_party_embeddings = true;
+    assert!(!policy.world_model_third_party_embeddings_decision().allowed);
+
+    policy.workers.embedding = "allow-cloud".into();
+    assert!(!policy.world_model_third_party_embeddings_decision().allowed);
+
+    policy.network.default = "allow".into();
+    assert!(policy.world_model_third_party_embeddings_decision().allowed);
 }
 
 #[test]

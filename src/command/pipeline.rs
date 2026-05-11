@@ -114,6 +114,32 @@ async fn handle_code(
         archon_llm::providers::ProviderCapability::PipelineCoding,
         "archon pipeline code",
     )?;
+    let world_record = crate::command::world_model::record_runtime_advisory(
+        config,
+        archon_world_model::integration::WorldAdvisorSurface::Pipeline,
+        "pipeline-code",
+        "pipeline_code_start",
+        task,
+    );
+    tracing::debug!(
+        continue_foreground_flow = world_record.continue_foreground_flow,
+        "world_model.pipeline_advisory"
+    );
+    let _ = crate::command::world_model::record_runtime_counterfactual_advice(
+        config,
+        archon_world_model::integration::WorldAdvisorSurface::Pipeline,
+        task,
+        &[
+            ("pipeline-code", "run the full coding pipeline now"),
+            ("verify-first", "run verification before coding"),
+            ("resume-existing", "resume a previous coding pipeline"),
+            ("surface-memory", "surface relevant memories before coding"),
+            (
+                "provider-fallback",
+                "switch provider before pipeline execution",
+            ),
+        ],
+    );
     let adapter = build_pipeline_adapter(config, env_vars, "pipeline_code").await?;
     let learning = archon_pipeline::learning::integration::LearningIntegration::new(
         None,
@@ -136,6 +162,13 @@ async fn handle_code(
     )
     .await?;
     print_pipeline_result(&result, cwd).await;
+    crate::command::world_model::record_runtime_outcome(
+        config,
+        &world_record,
+        &result.final_output,
+        Some(&result.session_id),
+    );
+    crate::command::world_model::schedule_dynamic_trainer_tick(config.clone());
     Ok(())
 }
 
@@ -162,6 +195,35 @@ async fn handle_research(
         archon_llm::providers::ProviderCapability::PipelineResearch,
         "archon pipeline research",
     )?;
+    let world_record = crate::command::world_model::record_runtime_advisory(
+        config,
+        archon_world_model::integration::WorldAdvisorSurface::Pipeline,
+        "pipeline-research",
+        "pipeline_research_start",
+        topic,
+    );
+    tracing::debug!(
+        continue_foreground_flow = world_record.continue_foreground_flow,
+        "world_model.pipeline_advisory"
+    );
+    let _ = crate::command::world_model::record_runtime_counterfactual_advice(
+        config,
+        archon_world_model::integration::WorldAdvisorSurface::Pipeline,
+        topic,
+        &[
+            ("pipeline-research", "run the full research pipeline now"),
+            ("verify-first", "run source verification before research"),
+            ("resume-existing", "resume a previous research pipeline"),
+            (
+                "surface-memory",
+                "surface relevant memories before research",
+            ),
+            (
+                "provider-fallback",
+                "switch provider before pipeline execution",
+            ),
+        ],
+    );
     let adapter = build_pipeline_adapter(config, env_vars, "pipeline_research").await?;
     let phd_learning = archon_pipeline::learning::integration::PhDLearningIntegration::new();
     let memory: Arc<dyn MemoryTrait> =
@@ -181,5 +243,12 @@ async fn handle_research(
     )
     .await?;
     print_pipeline_result(&result, cwd).await;
+    crate::command::world_model::record_runtime_outcome(
+        config,
+        &world_record,
+        &result.final_output,
+        Some(&result.session_id),
+    );
+    crate::command::world_model::schedule_dynamic_trainer_tick(config.clone());
     Ok(())
 }

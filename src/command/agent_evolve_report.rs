@@ -31,6 +31,7 @@ struct AgentEvolutionReport {
     ledger: LedgerSummary,
     shadow: ShadowSummary,
     memory: MemorySummary,
+    world_model: crate::command::agent_evolve_world_model::WorldModelAgentEvolutionSummary,
 }
 
 impl AgentEvolutionReport {
@@ -69,6 +70,7 @@ impl AgentEvolutionReport {
             ledger: LedgerSummary::from_records(&ledger),
             shadow: ShadowSummary::from_records(&shadow),
             memory: MemorySummary::from_records(&memory),
+            world_model: crate::command::agent_evolve_world_model::world_model_summary(agent_type),
         })
     }
 }
@@ -396,6 +398,13 @@ fn print_report(report: &AgentEvolutionReport) {
     println!(
         "Memory candidates: {} | proposal_required={}",
         report.memory.total, report.memory.proposal_required
+    );
+    println!(
+        "World model: signals={} evidence={} shadow_required={} approval_required={}",
+        report.world_model.signal_count,
+        report.world_model.evidence_count,
+        report.world_model.requires_shadow_evaluation,
+        report.world_model.requires_approval
     );
     print_recent_proposals(&report.proposals.recent);
 }

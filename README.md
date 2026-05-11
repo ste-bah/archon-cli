@@ -54,7 +54,7 @@ Full installation guide: [`docs/getting-started/installation.md`](docs/getting-s
 | Documents | ad hoc file reads | OCR, image ingest, chunks, embeddings, hybrid retrieval, citations |
 | Pipelines | Single-agent loop | 50-agent coding + 46-agent research + 84-specialist game theory |
 | Reasoning | Direct LLM call | 12 reasoning modes (deductive, inductive, abductive, analogical, adversarial, counterfactual, temporal, constraint, decomposition, first-principles, causal, contextual) |
-| Learning | None | 8 subsystems: SONA, ReasoningBank, GNN, CausalMemory, Provenance, DESC, Reflexion, AutoCapture |
+| Learning | None | 8 subsystems plus local world-model advisory learning from Archon traces |
 | Verification | model self-report | completion evidence, false-completion incidents, trust scores, provenance traces |
 | Identity | Native | Claude Code spoof, Anthropic OAuth/API keys, or Codex OAuth |
 
@@ -105,6 +105,7 @@ The docs are organised by user goal:
 | **Evidence Engine** | [`docs/evidence-engine.md`](docs/evidence-engine.md) — documents, KB, provenance, game theory, completion integrity, governed learning |
 | **Providers** | [`docs/providers/`](docs/providers/) — provider runtime, Codex app-server, Claude Code spoofing, auth profiles, cloud/local providers |
 | **Agents & learning** | [`docs/agents/`](docs/agents/) and [`docs/learning/`](docs/learning/) — governed agent evolution, memory promotion, permission governance |
+| **World model** | [`docs/architecture/world-model.md`](docs/architecture/world-model.md) — local trace corpus, advisory predictions, training backends, retention |
 | **Security** | [`docs/security/`](docs/security/) — tool preflight, sandboxing, Docker, SSH, OpenShell |
 | **Reference** | [`docs/reference/`](docs/reference/) — slash commands, tools, skills, permissions, config schema, CLI flags, env vars |
 | **Integrations** | [`docs/integrations/`](docs/integrations/) — MCP, plugins, hooks, identity spoofing, VLM image descriptions, LSP, IDE extensions |
@@ -137,6 +138,7 @@ archon-cli/
 │   ├── archon-learning/       # governed learning events/manifests
 │   ├── archon-meaning/        # labels, contrastive pairs, triplets
 │   ├── archon-constellation/  # centroids, scoring, drift
+│   ├── archon-world-model/    # local trace world model, advisor, counterfactual scoring
 │   ├── archon-policy/         # policy gates
 │   ├── archon-leann/          # semantic code search
 │   ├── archon-plugin/         # dynamic plugin loading
@@ -150,9 +152,9 @@ archon-cli/
 
 ## Status
 
-- Current version: **v1.1.0-beta.3** ([release notes](docs/release-notes/v1.1.0-beta.3.md))
-- Beta release for provider runtime governance, Cozo-backed agent evolution, permission preflight, and sandbox routing
-- v1.1.0-beta.3 adds Codex app-server support, Claude Code spoof compatibility coverage, durable provider telemetry, governed profile evolution, Docker/SSH/OpenShell sandbox documentation, the macOS external-volume OpenShell upload-mode default, and security hardening for OAuth/Gemini auth endpoints plus JSON-RPC response validation (supersedes the unpublished v1.1.0-beta.1 and v1.1.0-beta.2 drafts)
+- Current version: **v1.2.0-beta** ([release notes](docs/release-notes/v1.2.0-beta.md))
+- Beta release for local world-model advisory learning, provider runtime governance, Cozo-backed agent evolution, permission preflight, and sandbox routing
+- v1.2.0-beta adds the local world-model corpus/advisor/training scaffolds on top of the v1.1.0-beta.3 provider runtime and governed agent-evolution baseline.
 
 ## Contributing
 

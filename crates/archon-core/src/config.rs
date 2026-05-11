@@ -627,6 +627,7 @@ pub struct LearningConfig {
     pub provenance: ToggleConfig,
     pub desc: ToggleConfig,
     pub gnn: GnnModelConfig,
+    pub world_model: WorldModelConfig,
     pub causal_memory: ToggleConfig,
     pub shadow_vector: ToggleConfig,
     pub reasoning_bank: ToggleConfig,
@@ -774,6 +775,244 @@ impl Default for GnnAutoTrainerConfig {
             first_run_threshold: 30,
             max_runtime_ms: 300_000,
             tick_interval_ms: 60_000,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Local world model configuration — [learning.world_model]
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WorldModelConfig {
+    pub enabled: bool,
+    pub model_kind: String,
+    pub auto_promote_advisory: bool,
+    pub require_approval_for_behavior_change: bool,
+    pub state_dim: usize,
+    pub max_checkpoint_mb: u64,
+    pub max_prediction_latency_ms: u64,
+    pub max_counterfactual_actions: usize,
+    pub store_raw_text: bool,
+    pub include_conversation_turns: bool,
+    pub include_agent_outputs: bool,
+    pub embeddings: WorldModelEmbeddingsConfig,
+    pub labeler: WorldModelLabelerConfig,
+    pub training: WorldModelTrainingConfig,
+    pub eval: WorldModelEvalConfig,
+    pub cold_start: WorldModelColdStartConfig,
+    pub auto_trainer: WorldModelAutoTrainerConfig,
+    pub retention: WorldModelRetentionConfig,
+}
+
+impl Default for WorldModelConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            model_kind: "latent_transition".into(),
+            auto_promote_advisory: true,
+            require_approval_for_behavior_change: true,
+            state_dim: 384,
+            max_checkpoint_mb: 64,
+            max_prediction_latency_ms: 100,
+            max_counterfactual_actions: 5,
+            store_raw_text: false,
+            include_conversation_turns: true,
+            include_agent_outputs: true,
+            embeddings: WorldModelEmbeddingsConfig::default(),
+            labeler: WorldModelLabelerConfig::default(),
+            training: WorldModelTrainingConfig::default(),
+            eval: WorldModelEvalConfig::default(),
+            cold_start: WorldModelColdStartConfig::default(),
+            auto_trainer: WorldModelAutoTrainerConfig::default(),
+            retention: WorldModelRetentionConfig::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WorldModelEmbeddingsConfig {
+    pub source: String,
+    pub provider: String,
+    pub model: String,
+    pub dimensions: usize,
+    pub projection_dim: usize,
+    pub cache_enabled: bool,
+    pub cache_max_mb: u64,
+    pub redact_before_embedding: bool,
+    pub allow_third_party: bool,
+    pub external_base_url: String,
+    pub external_api_key_env: String,
+}
+
+impl Default for WorldModelEmbeddingsConfig {
+    fn default() -> Self {
+        Self {
+            source: "local".into(),
+            provider: "fastembed".into(),
+            model: "bge-base-en-v1.5".into(),
+            dimensions: 768,
+            projection_dim: 384,
+            cache_enabled: true,
+            cache_max_mb: 1_024,
+            redact_before_embedding: true,
+            allow_third_party: false,
+            external_base_url: String::new(),
+            external_api_key_env: String::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WorldModelLabelerConfig {
+    pub analyzer: String,
+    pub llm_enabled: bool,
+    pub max_events_per_prompt: usize,
+    pub max_prompt_chars: usize,
+}
+
+impl Default for WorldModelLabelerConfig {
+    fn default() -> Self {
+        Self {
+            analyzer: "hybrid".into(),
+            llm_enabled: true,
+            max_events_per_prompt: 120,
+            max_prompt_chars: 32_000,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WorldModelTrainingConfig {
+    pub backend: String,
+    pub allow_cpu_fallback: bool,
+    pub prefer_accelerator: bool,
+    pub precision: String,
+    pub max_accelerator_memory_mb: u64,
+    pub batch_size: usize,
+    pub max_epochs: usize,
+    pub validation_split: f32,
+    pub promotion_min_delta: f32,
+    pub max_runtime_ms: u64,
+}
+
+impl Default for WorldModelTrainingConfig {
+    fn default() -> Self {
+        Self {
+            backend: "auto".into(),
+            allow_cpu_fallback: true,
+            prefer_accelerator: true,
+            precision: "fp32".into(),
+            max_accelerator_memory_mb: 4_096,
+            batch_size: 32,
+            max_epochs: 10,
+            validation_split: 0.2,
+            promotion_min_delta: 0.02,
+            max_runtime_ms: 300_000,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WorldModelEvalConfig {
+    pub bootstrap_iterations: usize,
+    pub confidence_level: f32,
+    pub parity_precision: String,
+    pub parity_min_cosine: f32,
+    pub next_state_baseline_min_delta: f32,
+    pub counterfactual_baseline_min_delta: f32,
+    pub surprise_ks_min_p: f32,
+    pub counterfactual_ndcg_min: f32,
+}
+
+impl Default for WorldModelEvalConfig {
+    fn default() -> Self {
+        Self {
+            bootstrap_iterations: 1_000,
+            confidence_level: 0.95,
+            parity_precision: "fp32".into(),
+            parity_min_cosine: 0.95,
+            next_state_baseline_min_delta: 0.10,
+            counterfactual_baseline_min_delta: 0.10,
+            surprise_ks_min_p: 0.05,
+            counterfactual_ndcg_min: 0.60,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WorldModelColdStartConfig {
+    pub min_rows: u64,
+    pub min_sessions: u64,
+    pub min_observed_days: u64,
+}
+
+impl Default for WorldModelColdStartConfig {
+    fn default() -> Self {
+        Self {
+            min_rows: 1_000,
+            min_sessions: 50,
+            min_observed_days: 7,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WorldModelAutoTrainerConfig {
+    pub enabled: bool,
+    pub min_throttle_ms: u64,
+    pub idle_required_ms: u64,
+    pub battery_suspend_below_percent: u8,
+    pub trigger_new_rows: u64,
+    pub trigger_surprises: u64,
+    pub trigger_corrections: u64,
+    pub trigger_elapsed_ms: u64,
+    pub first_run_threshold: u64,
+    pub max_runtime_ms: u64,
+    pub tick_interval_ms: u64,
+}
+
+impl Default for WorldModelAutoTrainerConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            min_throttle_ms: 3_600_000,
+            idle_required_ms: 300_000,
+            battery_suspend_below_percent: 30,
+            trigger_new_rows: 100,
+            trigger_surprises: 5,
+            trigger_corrections: 3,
+            trigger_elapsed_ms: 21_600_000,
+            first_run_threshold: 300,
+            max_runtime_ms: 300_000,
+            tick_interval_ms: 60_000,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WorldModelRetentionConfig {
+    pub jsonl_rotate_mb: u64,
+    pub raw_retention_days: u64,
+    pub retain_cozo_summaries: bool,
+    pub retain_checkpoint_count: usize,
+}
+
+impl Default for WorldModelRetentionConfig {
+    fn default() -> Self {
+        Self {
+            jsonl_rotate_mb: 500,
+            raw_retention_days: 90,
+            retain_cozo_summaries: true,
+            retain_checkpoint_count: 5,
         }
     }
 }
