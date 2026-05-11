@@ -215,6 +215,13 @@ mod tests {
 
     #[test]
     fn accelerator_training_can_fallback_to_cpu() {
+        let Some(backend) = [BackendKind::Cuda, BackendKind::Metal]
+            .into_iter()
+            .find(|backend| !crate::backend::probe_backend(*backend).available)
+        else {
+            return;
+        };
+
         let examples = [LatentTransitionExample {
             state: vec![0.0, 0.0],
             action: vec![0.0, 0.0],
@@ -223,8 +230,7 @@ mod tests {
         }];
 
         let (model, _) =
-            train_candidate_with_backend_or_cpu_fallback(2, &examples, BackendKind::Metal, true)
-                .unwrap();
+            train_candidate_with_backend_or_cpu_fallback(2, &examples, backend, true).unwrap();
 
         assert_eq!(model.metadata.backend, BackendKind::Cpu);
     }

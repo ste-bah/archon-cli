@@ -39,12 +39,14 @@ pub fn mlx_metal_probe() -> BackendProbeReport {
     use mlx_rs::{Array, Device};
 
     Device::set_default(&Device::gpu());
-    match Array::from_slice(&[0.0f32], &[1])
-        .add(&Array::from_f32(1.0))
-        .and_then(|result| {
-            result.eval()?;
-            result.try_as_slice::<f32>().map(|_| ())
-        }) {
+    let self_test: Result<()> = (|| {
+        let result = Array::from_slice(&[0.0f32], &[1]).add(&Array::from_f32(1.0))?;
+        result.eval()?;
+        result.try_as_slice::<f32>()?;
+        Ok(())
+    })();
+
+    match self_test {
         Ok(()) => BackendProbeReport::available(BackendKind::Metal, "mlx-rs"),
         Err(error) => BackendProbeReport::unavailable(
             BackendKind::Metal,
