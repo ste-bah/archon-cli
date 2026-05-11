@@ -20,8 +20,8 @@ pub fn p95_ms(samples: &[Duration]) -> u64 {
         return 0;
     }
 
-    let mut hist: Histogram<u64> = Histogram::new_with_bounds(1, 3_600_000_000, 3)
-        .expect("hdrhistogram bounds are valid");
+    let mut hist: Histogram<u64> =
+        Histogram::new_with_bounds(1, 3_600_000_000, 3).expect("hdrhistogram bounds are valid");
 
     for d in samples {
         let micros = d.as_micros().min(u64::MAX as u128) as u64;
@@ -54,10 +54,7 @@ mod tests {
         let samples = vec![Duration::from_millis(50); 100];
         // hdrhistogram clusters into buckets at 3 sig figs; expect within 1ms.
         let got = p95_ms(&samples);
-        assert!(
-            (49..=51).contains(&got),
-            "expected ~50ms p95, got {got}ms"
-        );
+        assert!((49..=51).contains(&got), "expected ~50ms p95, got {got}ms");
     }
 
     #[test]

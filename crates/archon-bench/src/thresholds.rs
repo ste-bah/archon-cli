@@ -57,12 +57,7 @@ pub fn get_p95_ms(bench_name: &str) -> u64 {
     cache()
         .get(bench_name)
         .map(|t| t.p95_ms)
-        .unwrap_or_else(|| {
-            panic!(
-                "{}",
-                ThresholdError::Missing(bench_name.to_string())
-            )
-        })
+        .unwrap_or_else(|| panic!("{}", ThresholdError::Missing(bench_name.to_string())))
 }
 
 /// Fallible variant for unit-testing the loader without panicking.

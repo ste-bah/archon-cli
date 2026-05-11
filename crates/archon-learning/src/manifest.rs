@@ -106,10 +106,7 @@ mod apply_diff_tests {
         let current = json!({"k": 1});
         let new = json!({"k": 2});
         let err = apply_diff(&current, "", new).unwrap_err();
-        assert!(
-            err.to_string().contains("inconsistent"),
-            "got error: {err}"
-        );
+        assert!(err.to_string().contains("inconsistent"), "got error: {err}");
     }
 
     #[test]
@@ -127,10 +124,7 @@ mod apply_diff_tests {
         let new = json!({"version": 3}); // says 3 but diff sets 2
         let diff = r#"[{"op": "replace", "path": "/version", "value": 2}]"#;
         let err = apply_diff(&current, diff, new).unwrap_err();
-        assert!(
-            err.to_string().contains("inconsistent"),
-            "got error: {err}"
-        );
+        assert!(err.to_string().contains("inconsistent"), "got error: {err}");
     }
 
     #[test]
