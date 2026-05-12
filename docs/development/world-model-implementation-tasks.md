@@ -10,7 +10,7 @@ Starting point:
 - Source branch: `origin/main`
 - Starting commit: `4fb5884 feat: Provider Runtime Hardening & Governed Agent Evolution (PRD-006) - v1.1.0-beta.3 (#27)`
 - Main merge: `406b31c chore(deps): close 19 Dependabot alerts (wasmtime/jsonwebtoken/serde_yml/openssl/git2) (#31)`
-- Version target: `1.2.0-beta`
+- Version target: `1.2.0`
 
 Build hygiene:
 
@@ -40,7 +40,7 @@ Status legend:
 - [x] Create branch `codex/local-world-model`.
 - [x] Record starting commit.
 - [x] Pull in main-branch Dependabot fix commit `406b31c`.
-- [x] Bump workspace version to `1.2.0-beta`.
+- [x] Bump workspace version to `1.2.0`.
 - [x] Add handover note with starting commit and implementation scope.
 
 ## M1: Corpus And Latent Model Core

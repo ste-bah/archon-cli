@@ -9,7 +9,7 @@ Starting point:
 
 - Source branch: `origin/main`
 - Starting commit: `075faf4 feat: implement 3 deferred bench bodies + apply_diff consistency check [skip ci]`
-- Version target: `1.2.0-beta`
+- Version target: `1.2.0`
 
 Build hygiene:
 
@@ -40,7 +40,7 @@ Status legend:
 - [x] Create worktree from `origin/main`.
 - [x] Create branch `codex/reasoning-quality-events`.
 - [x] Record starting commit.
-- [x] Confirm workspace version is `1.2.0-beta`.
+- [x] Confirm workspace version is `1.2.0`.
 - [x] Keep this task list updated after each implementation slice.
 
 ## M1: Core Crate, Store, Extractor, Fixture Gates

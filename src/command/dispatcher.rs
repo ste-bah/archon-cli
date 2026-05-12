@@ -629,7 +629,7 @@ mod tests {
     /// meaning, constellation primaries + gametheory inspection
     /// subcommands and slash mirrors) → 78 (v0.1.40 Codex auth: /auth
     /// + /chat primaries for the OpenAI-Codex provider surface) → 80
-    /// (v1.2.0-beta reasoning quality: /reasoning + /briefing).
+    /// (v1.2.0 reasoning quality: /reasoning + /briefing).
     const EXPECTED_PRIMARY_COUNT: usize = 80;
 
     /// Drain every currently-queued event from `rx` using `try_recv`

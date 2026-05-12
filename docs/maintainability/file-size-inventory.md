@@ -1,11 +1,11 @@
 # File Size Inventory
 
-Generated: 2026-05-07
+Generated: 2026-05-12
 
 Source:
 
 - Repo: `project-work/archon-cli`
-- Worktree: `/home/unixdude/Archon-projects/archon-cli-worktrees/maintainability-refactor-prd-update`
+- Worktree: `/home/unixdude/Archon-projects/archon-cli-worktrees/reasoning-quality-events`
 - Baseline commit: `9f624af`
 - PRD: `PRD-ARCHON-FINALISATION-003`
 
@@ -108,6 +108,25 @@ Active oversized allowlist entries: 95
 
 Group 4 removed `crates/archon-core/src/agents/memory.rs` from the active allowlist by splitting it from 1207 lines to a 22-line compatibility shell plus focused `agents/memory/*` implementation and test modules. Remaining Group 4 production targets include `crates/archon-core/src/config.rs`, `crates/archon-core/src/hooks/registry.rs`, `crates/archon-core/src/skills/agent_skills.rs`, and `crates/archon-core/src/agents/catalog.rs`.
 
+After Group 6 `src/session.rs` split:
+
+```text
+FileSizeGuard: 1581 files checked, 0 over 500, 94 allowlisted
+Raw non-comment allowlist entries: 96
+Active oversized allowlist entries: 94
+```
+
+Group 6 removed `src/session.rs` from the oversized set by splitting it from 1995 lines to a 439-line orchestration shell plus focused `src/session/*` modules:
+
+- `interactive_bootstrap.rs` — 415 lines
+- `interactive_setup.rs` — 217 lines
+- `interactive_agent.rs` — 461 lines
+- `interactive_finish.rs` — 237 lines
+- `interactive_ui.rs` — 251 lines
+- plus supporting focused helpers already carved out: `build_agent.rs` (462), `build_prompt.rs` (220), `event_forwarder.rs` (235), `config_watcher.rs` (59), `slash_context_builder.rs` (111), `btw.rs` (68), and `splash.rs` (48)
+
+The file-size guard is green again. `crates/archon-core/src/agent.rs` drifted back up to 525 lines during later runtime work, so it has been re-added to `scripts/check-file-sizes.allowlist` as temporary carryover debt until a follow-up Group 3 trim brings it back under the threshold.
+
 ## Commands
 
 Regenerate the guard summary:
@@ -160,6 +179,33 @@ Removed stale or inactive entries:
 | Missing | `crates/archon-tui/src/screens/session_browser.rs` | File no longer exists |
 
 ## Top 100 Rust Files
+
+Latest snapshot after the Group 6 session split:
+
+| Lines | Path |
+|---:|---|
+| 1617 | `crates/archon-core/src/config.rs` |
+| 1365 | `crates/archon-docs/src/retrieval.rs` |
+| 1355 | `crates/archon-pipeline/src/coding/agents.rs` |
+| 1339 | `crates/archon-docs/src/store.rs` |
+| 1184 | `crates/archon-core/tests/hooks_tests.rs` |
+| 1183 | `crates/archon-pipeline/src/research/quality.rs` |
+| 1155 | `crates/archon-pipeline/src/compression.rs` |
+| 1124 | `crates/archon-core/src/hooks/registry.rs` |
+| 1061 | `crates/archon-pipeline/src/executor.rs` |
+| 1046 | `crates/archon-tools/src/agent_tool.rs` |
+| 1011 | `src/command/providers.rs` |
+| 997 | `crates/archon-session/src/storage.rs` |
+| 965 | `crates/archon-completion/src/store.rs` |
+| 940 | `crates/archon-core/src/skills/agent_skills.rs` |
+| 935 | `crates/archon-llm/src/identity.rs` |
+| 926 | `src/command/copy.rs` |
+| 926 | `crates/archon-tools/src/send_message.rs` |
+| 925 | `crates/archon-pipeline/src/runner.rs` |
+| 917 | `crates/archon-pipeline/src/coding/facade.rs` |
+| 909 | `crates/archon-core/src/agents/catalog.rs` |
+
+Historical baseline before the later refactor groups:
 
 | Lines | Path |
 |---:|---|

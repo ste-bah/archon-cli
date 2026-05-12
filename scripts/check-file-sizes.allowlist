@@ -21,6 +21,10 @@ crates/archon-consciousness/src/assembler.rs
 crates/archon-consciousness/src/rules.rs
 
 # --- archon-core ---
+# `agent.rs` drifted back above 500 lines after later runtime wiring landed on
+# top of the split shell. Re-allowlisted on 2026-05-12 so FileSizeGuard stays
+# forward-looking while Group 3 follow-up trims it back under the limit.
+crates/archon-core/src/agent.rs
 crates/archon-core/src/agents/definition.rs
 crates/archon-core/src/agents/registry.rs
 crates/archon-core/src/config.rs

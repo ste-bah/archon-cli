@@ -118,7 +118,7 @@ When a built-in pipeline completes through the CLI path, Archon runs completion
 integrity against the final output and stores the report summary/id in
 `state.json` with a `completion_checked` audit event.
 
-v1.2.0-beta also records non-blocking world-model advisory evidence around
+v1.2.0 also records non-blocking world-model advisory evidence around
 coding and research runs. Before launch, the pipeline asks for advisory
 next-state and counterfactual/shadow-plan signals. After completion, it records
 the observed outcome, computes surprise when a persisted prediction exists, and
