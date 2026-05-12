@@ -813,3 +813,10 @@ proposal_stale_days = 30
 #   allow_third_party_embeddings = false  # cloud embeddings require this plus workers.embedding/network gates
 #   allow_llm_labeler = false             # LLM-assisted semantic labeling opt-in
 #   allow_behavior_changes = false        # world model remains advisory unless explicitly enabled
+#
+#   [policy.web]
+#   allow_mutating_actions = false        # browser workbench remains inspect-only unless explicitly enabled
+#   allow_file_uploads = false            # attachment/upload intents require this plus allow_mutating_actions
+#   allow_pipeline_controls = false       # pause/resume/cancel buttons require this plus allow_mutating_actions
+#   allow_model_training_actions = false  # model training/promotion requires this plus world_model behavior gate
+#   allow_corpus_open_paths = false       # filesystem-open actions require this plus allow_mutating_actions

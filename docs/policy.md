@@ -51,6 +51,13 @@ allow_third_party_embeddings = false
 allow_llm_labeler = false
 allow_behavior_changes = false
 
+[policy.web]
+allow_mutating_actions = false
+allow_file_uploads = false
+allow_pipeline_controls = false
+allow_model_training_actions = false
+allow_corpus_open_paths = false
+
 [policy.reasoning_quality]
 allow_llm_critic = false
 allow_critic_cloud_data_flow = false
@@ -133,6 +140,13 @@ also require `policy.workers.embedding = "allow-cloud"` and
 `policy.world_model.allow_llm_labeler = true`. Any world-model path that can
 change runtime behaviour requires `policy.world_model.allow_behavior_changes =
 true`; current runtime integrations remain advisory and fail open.
+
+The browser workbench is inspect-only by default. Browser-originated actions
+require `policy.web.allow_mutating_actions = true` plus the matching
+action-family gate (`allow_file_uploads`, `allow_pipeline_controls`,
+`allow_model_training_actions`, or `allow_corpus_open_paths`). World-model
+training and checkpoint-promotion actions also require
+`policy.world_model.allow_behavior_changes = true`.
 
 Reasoning-quality extraction is local and deterministic by default. Optional
 LLM critique requires both `learning.reasoning_quality.critic.allow_llm = true`

@@ -19,7 +19,7 @@ pub mod world;
 
 use std::net::SocketAddr;
 
-use api::WebApiState;
+use api::{EffectivePolicySummary, WebApiState};
 use axum::http::HeaderValue;
 use axum::{
     Router,
@@ -30,6 +30,8 @@ use axum::{
 };
 use live::WebLiveManager;
 use tower_http::cors::{AllowOrigin, Any, CorsLayer};
+
+pub use api::{WebPolicySummary, WebSubsystemPolicySummary};
 
 // ---------------------------------------------------------------------------
 // WebConfig
@@ -92,6 +94,7 @@ pub(crate) struct AppState {
 pub struct WebServer {
     config: WebConfig,
     token: Option<String>,
+    policy: EffectivePolicySummary,
 }
 
 impl WebServer {
@@ -100,7 +103,19 @@ impl WebServer {
     /// `token` is the bearer token required when binding to a non-loopback
     /// address. Pass `None` for localhost-only deployments.
     pub fn new(config: WebConfig, token: Option<String>) -> Self {
-        Self { config, token }
+        Self::with_policy(config, token, EffectivePolicySummary::default_safe())
+    }
+
+    pub fn with_policy(
+        config: WebConfig,
+        token: Option<String>,
+        policy: EffectivePolicySummary,
+    ) -> Self {
+        Self {
+            config,
+            token,
+            policy,
+        }
     }
 
     /// Bind and serve. Blocks until the server is shut down.
@@ -122,7 +137,11 @@ impl WebServer {
 
         let state = AppState {
             token: self.token.clone(),
-            api: WebApiState::from_server_config(&self.config, self.token.is_some()),
+            api: WebApiState::from_server_config(
+                &self.config,
+                self.token.is_some(),
+                self.policy.clone(),
+            ),
             live,
         };
 

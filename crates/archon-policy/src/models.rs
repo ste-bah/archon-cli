@@ -7,6 +7,7 @@ pub struct EffectivePolicy {
     pub gametheory: GameTheoryPolicy,
     pub learning: LearningPolicy,
     pub world_model: WorldModelPolicy,
+    pub web: WebPolicy,
     pub reasoning_quality: ReasoningQualityPolicy,
     pub docs: DocsPolicy,
 }
@@ -100,6 +101,27 @@ impl Default for WorldModelPolicy {
             allow_third_party_embeddings: false,
             allow_llm_labeler: false,
             allow_behavior_changes: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WebPolicy {
+    pub allow_mutating_actions: bool,
+    pub allow_file_uploads: bool,
+    pub allow_pipeline_controls: bool,
+    pub allow_model_training_actions: bool,
+    pub allow_corpus_open_paths: bool,
+}
+
+impl Default for WebPolicy {
+    fn default() -> Self {
+        Self {
+            allow_mutating_actions: false,
+            allow_file_uploads: false,
+            allow_pipeline_controls: false,
+            allow_model_training_actions: false,
+            allow_corpus_open_paths: false,
         }
     }
 }

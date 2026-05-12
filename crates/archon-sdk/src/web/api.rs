@@ -88,6 +88,7 @@ pub struct FrontendStackSummary {
 #[ts(rename_all = "camelCase")]
 pub struct EffectivePolicySummary {
     pub web: WebPolicySummary,
+    pub subsystem: WebSubsystemPolicySummary,
     pub action_gate: String,
     pub requires_confirmation: Vec<String>,
 }
@@ -101,6 +102,17 @@ pub struct WebPolicySummary {
     pub allow_pipeline_controls: bool,
     pub allow_model_training_actions: bool,
     pub allow_corpus_open_paths: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct WebSubsystemPolicySummary {
+    pub allow_behavior_proposal_actions: bool,
+    pub allow_model_behavior_changes: bool,
+    pub allow_pipeline_controls: bool,
+    pub allow_corpus_open_paths: bool,
+    pub allow_file_uploads: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
@@ -121,7 +133,11 @@ pub struct WebApiState {
 }
 
 impl WebApiState {
-    pub fn from_server_config(config: &WebConfig, auth_required: bool) -> Self {
+    pub fn from_server_config(
+        config: &WebConfig,
+        auth_required: bool,
+        policy: EffectivePolicySummary,
+    ) -> Self {
         let dev_mode = std::env::var("ARCHON_WEB_DEV").ok().as_deref() == Some("1");
         let status = ApiStatus {
             status: "ok".to_string(),
@@ -133,13 +149,8 @@ impl WebApiState {
                 dev_mode,
                 asset_mode: if dev_mode { "vite-dev" } else { "embedded" }.to_string(),
             },
-            features: WebFeatureSummary::foundation(),
-            stores: vec![
-                WebStoreStatus::not_wired("memory"),
-                WebStoreStatus::not_wired("world-model"),
-                WebStoreStatus::not_wired("corpus"),
-                WebStoreStatus::not_wired("pipelines"),
-            ],
+            features: WebFeatureSummary::foundation(&policy),
+            stores: WebStoreStatus::known_stores(),
         };
 
         let config_summary = EffectiveConfigSummary {
@@ -156,17 +167,6 @@ impl WebApiState {
                 generated_types: true,
                 asset_delivery: "embedded web/dist assets".to_string(),
             },
-        };
-
-        let policy = EffectivePolicySummary {
-            web: WebPolicySummary::default_safe(),
-            action_gate: "web policy AND subsystem policy must both allow".to_string(),
-            requires_confirmation: vec![
-                "pipeline control".to_string(),
-                "model promotion".to_string(),
-                "training action".to_string(),
-                "corpus filesystem open".to_string(),
-            ],
         };
 
         Self {
@@ -190,10 +190,12 @@ impl WebApiState {
 }
 
 impl WebFeatureSummary {
-    fn foundation() -> Self {
+    fn foundation(policy: &EffectivePolicySummary) -> Self {
         Self {
             chat: true,
-            uploads: false,
+            uploads: policy.web.allow_mutating_actions
+                && policy.web.allow_file_uploads
+                && policy.subsystem.allow_file_uploads,
             memory_learning: true,
             world_model: true,
             reasoning_quality: true,
@@ -205,23 +207,67 @@ impl WebFeatureSummary {
 }
 
 impl WebStoreStatus {
-    fn not_wired(name: &str) -> Self {
+    fn known_stores() -> Vec<Self> {
+        let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let home = dirs::home_dir()
+            .unwrap_or_else(|| std::path::PathBuf::from("."))
+            .join(".archon");
+        vec![
+            Self::from_path("memory", home.join("memory")),
+            Self::from_path("world-model", home.join("world-model")),
+            Self::from_path("corpus", cwd.join(".archon/docs")),
+            Self::from_path("pipelines", home.join("pipelines")),
+        ]
+    }
+
+    fn from_path(name: &str, path: std::path::PathBuf) -> Self {
+        let exists = path.exists();
         Self {
             name: name.to_string(),
-            status: "pending".to_string(),
-            detail: "foundation API is live; deep store adapters land in M4-M7".to_string(),
+            status: if exists { "ready" } else { "missing" }.to_string(),
+            detail: path.to_string_lossy().to_string(),
         }
     }
 }
 
 impl WebPolicySummary {
-    fn default_safe() -> Self {
+    pub fn default_safe() -> Self {
         Self {
             allow_mutating_actions: false,
             allow_file_uploads: false,
             allow_pipeline_controls: false,
             allow_model_training_actions: false,
             allow_corpus_open_paths: false,
+        }
+    }
+}
+
+impl WebSubsystemPolicySummary {
+    pub fn default_safe() -> Self {
+        Self {
+            allow_behavior_proposal_actions: false,
+            allow_model_behavior_changes: false,
+            allow_pipeline_controls: false,
+            allow_corpus_open_paths: false,
+            allow_file_uploads: false,
+        }
+    }
+}
+
+impl EffectivePolicySummary {
+    pub fn default_safe() -> Self {
+        Self {
+            web: WebPolicySummary::default_safe(),
+            subsystem: WebSubsystemPolicySummary::default_safe(),
+            action_gate: "global web mutation gate AND action-family gate AND subsystem gate"
+                .to_string(),
+            requires_confirmation: vec![
+                "pipeline control".to_string(),
+                "model promotion".to_string(),
+                "training action".to_string(),
+                "corpus filesystem open".to_string(),
+                "behaviour proposal approval".to_string(),
+            ],
         }
     }
 }
@@ -257,6 +303,7 @@ pub fn generated_typescript() -> String {
         exported(FrontendStackSummary::decl(&cfg)),
         exported(EffectivePolicySummary::decl(&cfg)),
         exported(WebPolicySummary::decl(&cfg)),
+        exported(WebSubsystemPolicySummary::decl(&cfg)),
         exported(WebActionDecision::decl(&cfg)),
     ]
     .into_iter()
@@ -302,7 +349,8 @@ mod tests {
             bind_address: "0.0.0.0".to_string(),
             open_browser: false,
         };
-        let state = WebApiState::from_server_config(&cfg, true);
+        let state =
+            WebApiState::from_server_config(&cfg, true, EffectivePolicySummary::default_safe());
         assert_eq!(state.status().web.port, 9001);
         assert!(state.config().web.non_loopback_bind);
         assert!(state.status().web.auth_required);

@@ -12,9 +12,11 @@ export type WebConfigSummary = { port: number, bindAddress: string, openBrowser:
 
 export type FrontendStackSummary = { framework: string, bundler: string, generatedTypes: boolean, assetDelivery: string, };
 
-export type EffectivePolicySummary = { web: WebPolicySummary, actionGate: string, requiresConfirmation: Array<string>, };
+export type EffectivePolicySummary = { web: WebPolicySummary, subsystem: WebSubsystemPolicySummary, actionGate: string, requiresConfirmation: Array<string>, };
 
 export type WebPolicySummary = { allowMutatingActions: boolean, allowFileUploads: boolean, allowPipelineControls: boolean, allowModelTrainingActions: boolean, allowCorpusOpenPaths: boolean, };
+
+export type WebSubsystemPolicySummary = { allowBehaviorProposalActions: boolean, allowModelBehaviorChanges: boolean, allowPipelineControls: boolean, allowCorpusOpenPaths: boolean, allowFileUploads: boolean, };
 
 export type WebActionDecision = { allowed: boolean, requiresConfirmation: boolean, policyReason: string, dryRunAvailable: boolean, };
 

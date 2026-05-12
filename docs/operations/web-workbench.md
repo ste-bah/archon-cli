@@ -221,7 +221,11 @@ and reviewable in the normal config files.
 
 ### Evidence Graph
 
-The evidence graph shows how major local data families relate:
+The evidence graph shows how major local data families relate. Source nodes
+and aggregate counts are derived from the local filesystem and scanned corpus
+text; the graph does not invent chunk/claim counts from fixed multipliers.
+Claim and evidence counts are deterministic text-marker counts until a richer
+indexed evidence graph is available.
 
 | Node family | Meaning |
 |---|---|
@@ -257,6 +261,21 @@ Policy is composed as an AND gate:
 
 Dry-run previews are safe to use for inspection. They still write audit rows so
 operators can review what was attempted.
+
+The default `[policy.web]` posture is inspect-only:
+
+```toml
+[policy.web]
+allow_mutating_actions = false
+allow_file_uploads = false
+allow_pipeline_controls = false
+allow_model_training_actions = false
+allow_corpus_open_paths = false
+```
+
+Set the global gate and the specific action-family gate to enable a browser
+operation family. Model-training and checkpoint-promotion actions also require
+`policy.world_model.allow_behavior_changes = true`.
 
 ## Security posture
 

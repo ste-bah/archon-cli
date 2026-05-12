@@ -1085,6 +1085,13 @@ allow_third_party_embeddings = false
 allow_llm_labeler = false
 allow_behavior_changes = false
 
+[policy.web]
+allow_mutating_actions = false
+allow_file_uploads = false
+allow_pipeline_controls = false
+allow_model_training_actions = false
+allow_corpus_open_paths = false
+
 [policy.docs.vlm]
 enabled = false
 mode = "disabled" # disabled | local | cloud | hybrid
@@ -1134,6 +1141,13 @@ World-model cloud embeddings require both config and policy:
 `policy.workers.embedding = "allow-cloud"`, and
 `policy.network.default = "allow"`. LLM-assisted world-model labeling requires
 `policy.world_model.allow_llm_labeler = true`.
+
+Browser workbench actions require `[policy.web]` gates. The global
+`policy.web.allow_mutating_actions` gate must be true, and the matching
+action-family gate must also be true. World-model training or promotion
+actions additionally require `policy.world_model.allow_behavior_changes =
+true`; otherwise the web action evaluator denies the request even if the web
+action-family gate is enabled.
 
 Reasoning-quality LLM critique requires both config and policy:
 `learning.reasoning_quality.critic.allow_llm = true`,

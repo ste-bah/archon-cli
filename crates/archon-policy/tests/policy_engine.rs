@@ -25,6 +25,13 @@ allow_third_party_embeddings = true
 allow_llm_labeler = true
 allow_behavior_changes = true
 
+[policy.web]
+allow_mutating_actions = true
+allow_file_uploads = true
+allow_pipeline_controls = true
+allow_model_training_actions = true
+allow_corpus_open_paths = true
+
 [policy.docs.vlm]
 enabled = true
 mode = "local"
@@ -75,6 +82,11 @@ semantic_weight = 0.3
     assert!(load.policy.world_model.allow_third_party_embeddings);
     assert!(load.policy.world_model.allow_llm_labeler);
     assert!(load.policy.world_model.allow_behavior_changes);
+    assert!(load.policy.web.allow_mutating_actions);
+    assert!(load.policy.web.allow_file_uploads);
+    assert!(load.policy.web.allow_pipeline_controls);
+    assert!(load.policy.web.allow_model_training_actions);
+    assert!(load.policy.web.allow_corpus_open_paths);
     assert_eq!(load.policy.docs.vlm.mode, "local");
     assert_eq!(load.policy.docs.vlm.provider, "ollama");
     assert_eq!(
@@ -126,6 +138,7 @@ fn missing_policy_defaults_to_deny() {
     );
     assert!(!load.policy.world_model_llm_labeler_decision().allowed);
     assert!(!load.policy.world_model_behavior_change_decision().allowed);
+    assert!(!load.policy.web.allow_mutating_actions);
     assert!(
         !load
             .policy
@@ -364,6 +377,11 @@ fn repository_policy_template_parses_all_vlm_provider_fields() {
     assert!(!load.policy.docs.pdf.render_text_pdf_pages);
     assert_eq!(load.policy.docs.retrieval.exact_weight, 0.45);
     assert_eq!(load.policy.docs.retrieval.semantic_weight, 0.55);
+    assert!(!load.policy.web.allow_mutating_actions);
+    assert!(!load.policy.web.allow_file_uploads);
+    assert!(!load.policy.web.allow_pipeline_controls);
+    assert!(!load.policy.web.allow_model_training_actions);
+    assert!(!load.policy.web.allow_corpus_open_paths);
 }
 
 #[test]

@@ -51,6 +51,13 @@ export async function mockApi(page: Page) {
         allowModelTrainingActions: false,
         allowCorpusOpenPaths: false,
       },
+      subsystem: {
+        allowBehaviorProposalActions: true,
+        allowModelBehaviorChanges: false,
+        allowPipelineControls: false,
+        allowCorpusOpenPaths: false,
+        allowFileUploads: true,
+      },
       actionGate: "web policy AND subsystem policy",
       requiresConfirmation: ["pipeline controls", "training actions"],
     },

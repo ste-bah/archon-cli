@@ -81,6 +81,20 @@ allow_behavior_changes = false
 
 
 # ----------------------------------------------------------------------------
+# [policy.web] — Browser workbench action gates
+# ----------------------------------------------------------------------------
+# The web workbench is inspection-first. Mutating browser actions require the
+# global gate plus the action-family gate below, and model-changing actions also
+# require the matching subsystem policy (for example world_model.allow_behavior_changes).
+[policy.web]
+allow_mutating_actions = false
+allow_file_uploads = false
+allow_pipeline_controls = false
+allow_model_training_actions = false
+allow_corpus_open_paths = false
+
+
+# ----------------------------------------------------------------------------
 # [policy.reasoning_quality] — Visible claim/evidence learning gates
 # ----------------------------------------------------------------------------
 # Deterministic reasoning-quality extraction is local and enabled by config.
