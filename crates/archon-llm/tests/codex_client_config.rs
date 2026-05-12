@@ -62,19 +62,19 @@ fn effort_clamp_matches_codex_rules() {
     assert_eq!(clamp_reasoning_effort("gpt-5.4/foo", "minimal"), "minimal");
     assert_eq!(clamp_reasoning_effort("gpt-5.1", "xhigh"), "high");
     assert_eq!(
-        clamp_reasoning_effort("gpt-5.1-codex-mini", "low"),
+        clamp_reasoning_effort("gpt-5.3-codex-mini", "low"),
         "medium"
     );
     assert_eq!(
-        clamp_reasoning_effort("gpt-5.1-codex-mini", "xhigh"),
+        clamp_reasoning_effort("gpt-5.3-codex-mini", "xhigh"),
         "high"
     );
 }
 
 #[test]
 fn reasoning_config_is_omitted_without_effort() {
-    assert!(build_reasoning_config("gpt-5.1-codex", None).is_none());
-    let cfg = build_reasoning_config("gpt-5.1-codex-mini", Some("low")).expect("config");
+    assert!(build_reasoning_config("gpt-5.3-codex", None).is_none());
+    let cfg = build_reasoning_config("gpt-5.3-codex-mini", Some("low")).expect("config");
     assert_eq!(cfg.effort.as_deref(), Some("medium"));
     assert_eq!(cfg.summary.as_deref(), Some("auto"));
 }

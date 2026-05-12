@@ -52,10 +52,10 @@ fn agent_builder_default_thinking_disabled() {
 fn agent_builder_set_model() {
     let query = AgentBuilder::new()
         .api_key("sk-test")
-        .model("claude-opus-4-6")
+        .model("claude-opus-4-7")
         .build()
         .unwrap();
-    assert_eq!(query.options().model, "claude-opus-4-6");
+    assert_eq!(query.options().model, "claude-opus-4-7");
 }
 
 #[test]

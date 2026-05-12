@@ -79,7 +79,11 @@ fn known_shortcuts_are_complete() {
 
 #[test]
 fn known_model_ids_are_complete() {
-    assert_eq!(KNOWN_MODEL_IDS.len(), 3);
+    // Opus 4.6 is retained alongside 4.7 for backward-compat with TUI
+    // sessions, memory references, and snapshot fixtures that pinned the
+    // previous Opus generation. See validation.rs:KNOWN_MODEL_IDS comment.
+    assert_eq!(KNOWN_MODEL_IDS.len(), 4);
+    assert!(KNOWN_MODEL_IDS.contains(&"claude-opus-4-7"));
     assert!(KNOWN_MODEL_IDS.contains(&"claude-opus-4-6"));
     assert!(KNOWN_MODEL_IDS.contains(&"claude-sonnet-4-6"));
     assert!(KNOWN_MODEL_IDS.contains(&"claude-haiku-4-5-20251001"));
@@ -118,7 +122,7 @@ fn legacy_permission_aliases_are_complete() {
 
 #[test]
 fn model_shortcut_opus() {
-    assert_eq!(validate_model_name("opus"), Ok("claude-opus-4-6".into()));
+    assert_eq!(validate_model_name("opus"), Ok("claude-opus-4-7".into()));
 }
 
 #[test]
@@ -140,8 +144,8 @@ fn model_shortcut_haiku() {
 #[test]
 fn model_full_id_opus() {
     assert_eq!(
-        validate_model_name("claude-opus-4-6"),
-        Ok("claude-opus-4-6".into())
+        validate_model_name("claude-opus-4-7"),
+        Ok("claude-opus-4-7".into())
     );
 }
 
@@ -155,7 +159,7 @@ fn model_full_id_sonnet() {
 
 #[test]
 fn model_shortcut_case_insensitive() {
-    assert_eq!(validate_model_name("OPUS"), Ok("claude-opus-4-6".into()));
+    assert_eq!(validate_model_name("OPUS"), Ok("claude-opus-4-7".into()));
     assert_eq!(
         validate_model_name("Sonnet"),
         Ok("claude-sonnet-4-6".into())

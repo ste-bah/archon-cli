@@ -28,10 +28,10 @@ fn write_creds(path: &std::path::Path) {
 async fn provider_streams_codex_sse_as_archon_events() {
     let server = MockServer::start().await;
     let sse = [
-        r#"data: {"type":"response.created","response":{"id":"resp_1","status":"in_progress","model":"gpt-5.1-codex"}}"#,
+        r#"data: {"type":"response.created","response":{"id":"resp_1","status":"in_progress","model":"gpt-5.3-codex"}}"#,
         r#"data: {"type":"response.output_item.added","output_index":0,"item":{"type":"message","id":"msg_1","status":"in_progress","role":"assistant","content":[]}}"#,
         r#"data: {"type":"response.output_text.delta","item_id":"msg_1","output_index":0,"content_index":0,"delta":"hello"}"#,
-        r#"data: {"type":"response.completed","response":{"id":"resp_1","status":"completed","model":"gpt-5.1-codex","usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}}}"#,
+        r#"data: {"type":"response.completed","response":{"id":"resp_1","status":"completed","model":"gpt-5.3-codex","usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}}}"#,
         "data: [DONE]",
     ]
     .join("\n\n");
@@ -57,7 +57,7 @@ async fn provider_streams_codex_sse_as_archon_events() {
     .expect("provider");
 
     let request = LlmRequest {
-        model: "gpt-5.1-codex".into(),
+        model: "gpt-5.3-codex".into(),
         messages: vec![serde_json::json!({
             "role": "user",
             "content": [{"type": "text", "text": "say hello"}]

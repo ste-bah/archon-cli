@@ -3,19 +3,45 @@
 //! All validators return `Ok(canonical_value)` on success or `Err(user_facing_message)`
 //! with a helpful suggestion when the input is close to a valid option.
 
-/// Known shortcut names mapped to full model identifiers.
+/// Known shortcut names mapped to full Anthropic model identifiers.
+///
+/// These are compile-time fallbacks used when `[models.anthropic]` config is
+/// unavailable. The canonical source of truth is `ArchonConfig::models`;
+/// production code should call `resolve_anthropic_model(alias, &cfg)` instead
+/// of reading this constant directly.
 pub const KNOWN_SHORTCUTS: &[(&str, &str)] = &[
-    ("opus", "claude-opus-4-6"),
+    ("opus", "claude-opus-4-7"),
     ("sonnet", "claude-sonnet-4-6"),
     ("haiku", "claude-haiku-4-5-20251001"),
 ];
 
-/// Full model identifiers accepted without shortcut expansion.
+/// Full Anthropic model identifiers accepted without shortcut expansion.
+///
+/// Used by `validate_model_name` to accept literal IDs as well as shortcuts.
+/// Keep `claude-opus-4-6` listed so existing TUI sessions, snapshots, and
+/// memory references that pinned the previous Opus generation still validate
+/// rather than erroring on input.
 pub const KNOWN_MODEL_IDS: &[&str] = &[
+    "claude-opus-4-7",
     "claude-opus-4-6",
     "claude-sonnet-4-6",
     "claude-haiku-4-5-20251001",
 ];
+
+/// Known shortcut names mapped to full OpenAI Codex model identifiers.
+///
+/// Compile-time fallbacks for the `openai-codex` provider. The canonical
+/// source of truth is `ArchonConfig::models.openai_codex`; production code
+/// should call `resolve_codex_model(alias, &cfg)` instead.
+pub const CODEX_KNOWN_SHORTCUTS: &[(&str, &str)] = &[
+    ("default", "gpt-5.5"),
+    ("codex", "gpt-5.3-codex"),
+    ("mini", "gpt-5.4-mini"),
+];
+
+// Resolver functions for these aliases live in `archon_core::config` next to
+// the `ModelsConfig` struct (cannot live here because `archon-tools` is below
+// `archon-core` in the workspace dependency order).
 
 /// Valid effort level values (case-insensitive).
 pub const VALID_EFFORT_LEVELS: &[&str] = &["high", "medium", "low"];

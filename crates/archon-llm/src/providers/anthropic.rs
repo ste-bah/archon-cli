@@ -36,18 +36,55 @@ impl From<ApiError> for LlmError {
 // AnthropicProvider
 // ---------------------------------------------------------------------------
 
+/// Anthropic tier alias map — provider-owned model identifiers indexed by
+/// agent class.
+///
+/// Defaults match `archon_core::config::AnthropicModelsConfig::default()`.
+/// The binary should populate this from the operator's `[models.anthropic]`
+/// config and pass it to `AnthropicProvider::with_alias_map(..)` so config
+/// overrides flow through to provider resolution.
+#[derive(Debug, Clone)]
+pub struct AnthropicAliasMap {
+    pub opus: String,
+    pub sonnet: String,
+    pub haiku: String,
+}
+
+impl Default for AnthropicAliasMap {
+    fn default() -> Self {
+        Self {
+            opus: "claude-opus-4-7".into(),
+            sonnet: "claude-sonnet-4-6".into(),
+            haiku: "claude-haiku-4-5-20251001".into(),
+        }
+    }
+}
+
 /// An `LlmProvider` backed by `AnthropicClient`.
 ///
 /// The inner client remains accessible via `client()` for code paths that
 /// need Anthropic-specific accessors (auth headers, identity headers).
 pub struct AnthropicProvider {
     client: AnthropicClient,
+    aliases: AnthropicAliasMap,
 }
 
 impl AnthropicProvider {
-    /// Wrap an existing `AnthropicClient`.
+    /// Wrap an existing `AnthropicClient` using compile-time-default aliases.
+    ///
+    /// Use `with_alias_map(..)` to supply an operator-overridden alias map
+    /// from `ArchonConfig::models.anthropic`.
     pub fn new(client: AnthropicClient) -> Self {
-        Self { client }
+        Self {
+            client,
+            aliases: AnthropicAliasMap::default(),
+        }
+    }
+
+    /// Builder: attach an alias map sourced from operator config.
+    pub fn with_alias_map(mut self, aliases: AnthropicAliasMap) -> Self {
+        self.aliases = aliases;
+        self
     }
 
     /// Access the underlying `AnthropicClient` directly.
@@ -68,8 +105,8 @@ impl LlmProvider for AnthropicProvider {
     fn models(&self) -> Vec<ModelInfo> {
         vec![
             ModelInfo {
-                id: "claude-opus-4-6".into(),
-                display_name: "Claude Opus 4.6".into(),
+                id: "claude-opus-4-7".into(),
+                display_name: "Claude Opus 4.7".into(),
                 context_window: 200_000,
             },
             ModelInfo {
@@ -83,6 +120,15 @@ impl LlmProvider for AnthropicProvider {
                 context_window: 200_000,
             },
         ]
+    }
+
+    fn resolve_alias(&self, alias: &str) -> Option<String> {
+        match alias.trim().to_lowercase().as_str() {
+            "opus" => Some(self.aliases.opus.clone()),
+            "sonnet" => Some(self.aliases.sonnet.clone()),
+            "haiku" => Some(self.aliases.haiku.clone()),
+            _ => None,
+        }
     }
 
     async fn stream(&self, request: LlmRequest) -> Result<Receiver<StreamEvent>, LlmError> {

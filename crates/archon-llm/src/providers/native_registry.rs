@@ -129,7 +129,7 @@ pub static NATIVE_REGISTRY: Lazy<HashMap<&'static str, ProviderDescriptor>> = La
             auth_flavor: AuthFlavor::Custom("aws-sigv4".into()),
             env_key_var: "AWS_ACCESS_KEY_ID".into(),
             compat_kind: CompatKind::Native,
-            default_model: "anthropic.claude-sonnet-4-20250514-v1:0".into(),
+            default_model: "anthropic.claude-sonnet-4-6-v1:0".into(),
             supports: ProviderFeatures {
                 streaming: true,
                 tool_calling: true,

@@ -58,7 +58,8 @@ pub(super) async fn build_direct_codex_provider(
             http,
         ),
     }
-    .with_context(|| format!("failed to construct direct Codex provider for {surface}"))?;
+    .with_context(|| format!("failed to construct direct Codex provider for {surface}"))?
+    .with_alias_map(config.models.openai_codex.to_alias_map());
     Ok(Arc::new(provider))
 }
 

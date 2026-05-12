@@ -91,9 +91,6 @@ impl SubagentRunner {
                 }));
             }
 
-            // Context snipping: prevent unbounded message growth
-            Self::snip_context_if_needed(&mut messages);
-
             // Effort layering: per-agent-definition override wins if Some;
             // otherwise read the parent's live /effort setting (v0.1.18).
             let effort = if self.effort.is_some() {

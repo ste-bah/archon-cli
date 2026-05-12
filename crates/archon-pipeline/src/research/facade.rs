@@ -61,6 +61,10 @@ pub struct ResearchFacade {
     /// Uses internal mutability so the sender can be attached after
     /// construction (it's not known at bootstrap time).
     tui_sender: Mutex<Option<UnboundedSender<String>>>,
+    /// Anthropic model alias map. Defaults to compile-time defaults; callers
+    /// that have an active `ArchonConfig` should pass `config.models.anthropic`
+    /// via `with_models(..)` so operator overrides apply.
+    models: archon_core::config::AnthropicModelsConfig,
 }
 
 impl ResearchFacade {
@@ -80,6 +84,7 @@ impl ResearchFacade {
             style_prompt,
             learning: None,
             tui_sender: Mutex::new(None),
+            models: archon_core::config::AnthropicModelsConfig::default(),
         }
     }
 
@@ -100,12 +105,19 @@ impl ResearchFacade {
             style_prompt,
             learning: Some(Mutex::new(learning)),
             tui_sender: Mutex::new(None),
+            models: archon_core::config::AnthropicModelsConfig::default(),
         }
     }
 
     /// Attach a TUI sender at construction time (builder pattern).
     pub fn with_tui_sender(mut self, tx: UnboundedSender<String>) -> Self {
         self.tui_sender = Mutex::new(Some(tx));
+        self
+    }
+
+    /// Attach an operator-configured Anthropic model alias map (builder pattern).
+    pub fn with_models(mut self, models: archon_core::config::AnthropicModelsConfig) -> Self {
+        self.models = models;
         self
     }
 
@@ -172,7 +184,13 @@ impl ResearchFacade {
     }
 
     /// Convert a [`ResearchAgent`] to an [`AgentInfo`].
-    fn to_agent_info(agent: &ResearchAgent) -> AgentInfo {
+    ///
+    /// Emits the tier alias verbatim; resolution to a concrete model id
+    /// happens at the provider boundary via `LlmProvider::resolve_alias(..)`.
+    fn to_agent_info(
+        agent: &ResearchAgent,
+        _models: &archon_core::config::AnthropicModelsConfig,
+    ) -> AgentInfo {
         let tool_access = if agent.phase >= 6 {
             ToolAccessLevel::Full
         } else {
@@ -182,7 +200,7 @@ impl ResearchFacade {
         AgentInfo {
             key: agent.key.to_string(),
             display_name: agent.display_name.to_string(),
-            model: "claude-sonnet-4-20250514".to_string(),
+            model: "sonnet".to_string(),
             phase: agent.phase as u32,
             critical: super::quality::PhDQualityCalculator::create_quality_context(
                 agent.key,
@@ -215,7 +233,7 @@ impl PipelineFacade for ResearchFacade {
             return Ok(NextAgent::Done);
         }
         let agent = &RESEARCH_AGENTS[idx];
-        Ok(NextAgent::Continue(Self::to_agent_info(agent)))
+        Ok(NextAgent::Continue(Self::to_agent_info(agent, &self.models)))
     }
 
     async fn build_prompt(
@@ -465,7 +483,7 @@ mod tests {
         }
 
         for i in 0..RESEARCH_AGENTS.len() {
-            let agent_info = ResearchFacade::to_agent_info(&RESEARCH_AGENTS[i]);
+            let agent_info = ResearchFacade::to_agent_info(&RESEARCH_AGENTS[i], &archon_core::config::AnthropicModelsConfig::default());
             let result = make_agent_result("output");
             session.agent_results.push((agent_info, result));
         }
@@ -481,7 +499,7 @@ mod tests {
     async fn score_quality_returns_valid() {
         let facade = make_facade();
         let session = facade.init_session("test").await.unwrap();
-        let agent_info = ResearchFacade::to_agent_info(&RESEARCH_AGENTS[0]);
+        let agent_info = ResearchFacade::to_agent_info(&RESEARCH_AGENTS[0], &archon_core::config::AnthropicModelsConfig::default());
         let result = make_agent_result(
             "## Analysis\n\nThis is a detailed analysis with methodology and framework.\n\
              The theoretical framework suggests important findings.\n\
@@ -506,7 +524,7 @@ mod tests {
     async fn process_completion_stores_memory() {
         let facade = make_facade();
         let mut session = facade.init_session("test").await.unwrap();
-        let agent_info = ResearchFacade::to_agent_info(&RESEARCH_AGENTS[0]);
+        let agent_info = ResearchFacade::to_agent_info(&RESEARCH_AGENTS[0], &archon_core::config::AnthropicModelsConfig::default());
         let result = make_agent_result("step-back analysis output");
         let quality = QualityScore {
             overall: 0.75,
@@ -528,7 +546,7 @@ mod tests {
         let facade = make_facade();
         let mut session = facade.init_session("AI research").await.unwrap();
 
-        let agent_a = ResearchFacade::to_agent_info(&RESEARCH_AGENTS[0]);
+        let agent_a = ResearchFacade::to_agent_info(&RESEARCH_AGENTS[0], &archon_core::config::AnthropicModelsConfig::default());
         let result_a = make_agent_result("Foundation analysis: AI impacts healthcare deeply.");
         let quality = QualityScore {
             overall: 0.80,
@@ -551,7 +569,7 @@ mod tests {
     async fn build_prompt_returns_triple() {
         let facade = make_facade();
         let session = facade.init_session("test query").await.unwrap();
-        let agent_info = ResearchFacade::to_agent_info(&RESEARCH_AGENTS[0]);
+        let agent_info = ResearchFacade::to_agent_info(&RESEARCH_AGENTS[0], &archon_core::config::AnthropicModelsConfig::default());
 
         let (messages, system, tools) = facade.build_prompt(&session, &agent_info).await.unwrap();
 
@@ -572,7 +590,7 @@ mod tests {
         let facade = make_facade();
         let mut session = facade.init_session("test").await.unwrap();
 
-        let agent_info = ResearchFacade::to_agent_info(&RESEARCH_AGENTS[0]);
+        let agent_info = ResearchFacade::to_agent_info(&RESEARCH_AGENTS[0], &archon_core::config::AnthropicModelsConfig::default());
         let result = make_agent_result("final output text");
         session.agent_results.push((agent_info, result));
 
@@ -594,7 +612,7 @@ mod tests {
         );
         let session = facade.init_session("test").await.unwrap();
 
-        let agent_info = ResearchFacade::to_agent_info(&RESEARCH_AGENTS[29]);
+        let agent_info = ResearchFacade::to_agent_info(&RESEARCH_AGENTS[29], &archon_core::config::AnthropicModelsConfig::default());
         assert_eq!(agent_info.key, "introduction-writer");
 
         let (messages, _, _) = facade.build_prompt(&session, &agent_info).await.unwrap();
@@ -624,7 +642,7 @@ mod tests {
     #[test]
     fn to_agent_info_conversion() {
         let agent = &RESEARCH_AGENTS[0];
-        let info = ResearchFacade::to_agent_info(agent);
+        let info = ResearchFacade::to_agent_info(agent, &archon_core::config::AnthropicModelsConfig::default());
 
         assert_eq!(info.key, "step-back-analyzer");
         assert_eq!(info.display_name, "Step-Back Analyzer");
@@ -632,7 +650,7 @@ mod tests {
         assert_eq!(info.tool_access_level, ToolAccessLevel::ReadOnly);
 
         let writer = &RESEARCH_AGENTS[29];
-        let writer_info = ResearchFacade::to_agent_info(writer);
+        let writer_info = ResearchFacade::to_agent_info(writer, &archon_core::config::AnthropicModelsConfig::default());
         assert_eq!(writer_info.tool_access_level, ToolAccessLevel::Full);
     }
 
@@ -653,7 +671,7 @@ mod tests {
 
         // Store first via process_completion
         let mut session = facade.init_session("test").await.unwrap();
-        let agent_info = ResearchFacade::to_agent_info(&RESEARCH_AGENTS[0]);
+        let agent_info = ResearchFacade::to_agent_info(&RESEARCH_AGENTS[0], &archon_core::config::AnthropicModelsConfig::default());
         let result = make_agent_result("stored content");
         let quality = QualityScore {
             overall: 0.75,
@@ -678,7 +696,7 @@ mod tests {
 
         // Store via facade A
         let mut session = facade_a.init_session("test").await.unwrap();
-        let agent_info = ResearchFacade::to_agent_info(&RESEARCH_AGENTS[0]);
+        let agent_info = ResearchFacade::to_agent_info(&RESEARCH_AGENTS[0], &archon_core::config::AnthropicModelsConfig::default());
         let result = make_agent_result("persistent output");
         let quality = QualityScore {
             overall: 0.75,
@@ -699,7 +717,7 @@ mod tests {
     async fn store_memory_uses_phd_pipeline_tags() {
         let facade = make_facade();
         let mut session = facade.init_session("test").await.unwrap();
-        let agent_info = ResearchFacade::to_agent_info(&RESEARCH_AGENTS[0]);
+        let agent_info = ResearchFacade::to_agent_info(&RESEARCH_AGENTS[0], &archon_core::config::AnthropicModelsConfig::default());
         let result = make_agent_result("tagged output");
         let quality = QualityScore {
             overall: 0.75,

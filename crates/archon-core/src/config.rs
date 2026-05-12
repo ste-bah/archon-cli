@@ -32,6 +32,10 @@ pub struct ArchonConfig {
     pub llm: LlmConfig,
     #[serde(default)]
     pub providers: ProvidersConfig,
+    /// Provider-namespaced model aliases. Bumping a default model only
+    /// requires editing one entry here; agent code uses aliases.
+    #[serde(default)]
+    pub models: ModelsConfig,
     pub identity: IdentityConfig,
     pub tools: ToolsConfig,
     pub permissions: PermissionsConfig,
@@ -76,6 +80,145 @@ pub struct ArchonConfig {
 pub struct ProvidersConfig {
     #[serde(rename = "openai-codex")]
     pub openai_codex: CodexProviderConfig,
+}
+
+// ---------------------------------------------------------------------------
+// Models config — provider-namespaced model alias map.
+// ---------------------------------------------------------------------------
+//
+// archon agent code refers to models by alias (e.g. `"sonnet"`, `"opus"`,
+// `"haiku"` for Anthropic; `"default"`, `"codex"`, `"mini"` for Codex).
+// At runtime the alias is resolved against this config; literal model
+// identifiers pass through unchanged.
+//
+// Bumping a default Anthropic or Codex model requires editing exactly one
+// entry here. Operators can override per-installation by setting these in
+// `~/.config/archon/config.toml` or the project-local layer.
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ModelsConfig {
+    pub anthropic: AnthropicModelsConfig,
+    #[serde(rename = "openai-codex")]
+    pub openai_codex: OpenAiCodexModelsConfig,
+}
+
+impl Default for ModelsConfig {
+    fn default() -> Self {
+        Self {
+            anthropic: AnthropicModelsConfig::default(),
+            openai_codex: OpenAiCodexModelsConfig::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AnthropicModelsConfig {
+    pub opus: String,
+    pub sonnet: String,
+    pub haiku: String,
+}
+
+impl Default for AnthropicModelsConfig {
+    fn default() -> Self {
+        Self {
+            opus: "claude-opus-4-7".into(),
+            sonnet: "claude-sonnet-4-6".into(),
+            haiku: "claude-haiku-4-5-20251001".into(),
+        }
+    }
+}
+
+impl AnthropicModelsConfig {
+    /// Convert to the runtime alias map owned by `archon_llm::providers::AnthropicProvider`.
+    ///
+    /// This is the binary's job: read `config.models.anthropic`, call
+    /// `to_alias_map()`, pass via `AnthropicProvider::with_alias_map(..)` so
+    /// operator overrides reach the provider at construction.
+    pub fn to_alias_map(&self) -> archon_llm::providers::anthropic::AnthropicAliasMap {
+        archon_llm::providers::anthropic::AnthropicAliasMap {
+            opus: self.opus.clone(),
+            sonnet: self.sonnet.clone(),
+            haiku: self.haiku.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct OpenAiCodexModelsConfig {
+    pub default: String,
+    pub codex: String,
+    pub mini: String,
+}
+
+impl Default for OpenAiCodexModelsConfig {
+    fn default() -> Self {
+        // Per OpenAI's Codex models reference (https://developers.openai.com/codex/models):
+        // - default: gpt-5.5 is the newest/frontier model; gpt-5.4 is the
+        //   documented fallback. Operators can override to gpt-5.4 here if
+        //   they cannot reach 5.5 yet.
+        // - codex: gpt-5.3-codex is the current codex-specific model for
+        //   complex software engineering.
+        // - mini: gpt-5.4-mini is the efficient/subagent variant.
+        Self {
+            default: "gpt-5.5".into(),
+            codex: "gpt-5.3-codex".into(),
+            mini: "gpt-5.4-mini".into(),
+        }
+    }
+}
+
+impl OpenAiCodexModelsConfig {
+    /// Convert to the runtime alias map owned by `archon_llm::providers::CodexProvider`.
+    ///
+    /// Tier mapping for cross-provider neutrality:
+    /// - `opus` tier (smartest) → `default` (frontier flagship)
+    /// - `sonnet` tier (smart) → `default` (frontier flagship — same model
+    ///   for now; can be split if Codex adds a smartest tier above gpt-5.5)
+    /// - `haiku` tier (fast) → `mini`
+    pub fn to_alias_map(&self) -> archon_llm::providers::codex::CodexAliasMap {
+        archon_llm::providers::codex::CodexAliasMap {
+            opus: self.default.clone(),
+            sonnet: self.default.clone(),
+            haiku: self.mini.clone(),
+            codex: self.codex.clone(),
+        }
+    }
+}
+
+/// Resolve an Anthropic alias (or pass-through ID) using the provided
+/// `[models.anthropic]` config slice.
+///
+/// Aliases recognised: `opus`, `sonnet`, `haiku` (case-insensitive). Anything
+/// else is returned as-is so literal model IDs (e.g. `claude-sonnet-4-6`,
+/// `claude-opus-4-7`) work without the resolver rejecting them.
+pub fn resolve_anthropic_model(alias_or_id: &str, cfg: &AnthropicModelsConfig) -> String {
+    match alias_or_id.trim().to_lowercase().as_str() {
+        "opus" => cfg.opus.clone(),
+        "sonnet" => cfg.sonnet.clone(),
+        "haiku" => cfg.haiku.clone(),
+        _ => alias_or_id.to_string(),
+    }
+}
+
+/// Resolve a Codex alias (or pass-through ID) using the provided
+/// `[models.openai-codex]` config slice.
+///
+/// Aliases recognised: `default`, `codex`, `mini` (case-insensitive). Anything
+/// else is returned as-is. Empty input is treated as `default`.
+pub fn resolve_codex_model(alias_or_id: &str, cfg: &OpenAiCodexModelsConfig) -> String {
+    let lowered = alias_or_id.trim().to_lowercase();
+    if lowered.is_empty() {
+        return cfg.default.clone();
+    }
+    match lowered.as_str() {
+        "default" => cfg.default.clone(),
+        "codex" => cfg.codex.clone(),
+        "mini" => cfg.mini.clone(),
+        _ => alias_or_id.to_string(),
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -357,7 +500,7 @@ impl Default for LlmOpenAiConfig {
 pub struct LlmBedrockConfig {
     /// AWS region (e.g. `"us-east-1"`).
     pub region: String,
-    /// Bedrock model ID (e.g. `"anthropic.claude-sonnet-4-20250514-v1:0"`).
+    /// Bedrock model ID (e.g. `"anthropic.claude-sonnet-4-6-v1:0"`).
     pub model_id: String,
 }
 
@@ -365,7 +508,7 @@ impl Default for LlmBedrockConfig {
     fn default() -> Self {
         Self {
             region: "us-east-1".to_string(),
-            model_id: "anthropic.claude-sonnet-4-20250514-v1:0".to_string(),
+            model_id: "anthropic.claude-sonnet-4-6-v1:0".to_string(),
         }
     }
 }
@@ -378,7 +521,7 @@ pub struct LlmVertexConfig {
     pub project_id: Option<String>,
     /// GCP region (e.g. `"us-central1"`).
     pub region: String,
-    /// Model name (e.g. `"claude-sonnet-4-20250514@20250514"`).
+    /// Model name (e.g. `"claude-sonnet-4-6@20250514"`).
     pub model: String,
     /// Path to service account credentials JSON file.
     pub credentials_file: Option<String>,
@@ -389,7 +532,7 @@ impl Default for LlmVertexConfig {
         Self {
             project_id: None,
             region: "us-central1".to_string(),
-            model: "claude-sonnet-4-20250514@20250514".to_string(),
+            model: "claude-sonnet-4-6@20250514".to_string(),
             credentials_file: None,
         }
     }

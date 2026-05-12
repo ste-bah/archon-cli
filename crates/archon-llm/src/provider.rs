@@ -243,6 +243,25 @@ pub trait LlmProvider: Send + Sync {
         DataFlowClassification::UserOperated
     }
 
+    /// Resolve a tier alias (`"sonnet"`, `"opus"`, `"haiku"`) into this
+    /// provider's concrete model identifier.
+    ///
+    /// Pipelines and subagents emit aliases by tier (capability class) — each
+    /// provider implementation knows how to map them to its own namespace:
+    /// - Anthropic: `sonnet` → `claude-sonnet-4-6`, `opus` → `claude-opus-4-7`,
+    ///   `haiku` → `claude-haiku-4-5-20251001`
+    /// - Codex: `sonnet` → `gpt-5.5`, `opus` → `gpt-5.4`, `haiku` →
+    ///   `gpt-5.4-mini`
+    /// - Local / OpenAI-compat: return `None` to let callers pass the alias
+    ///   through to the local model (which usually ignores model strings)
+    ///
+    /// Returning `None` means the caller should pass the alias through to the
+    /// underlying API unchanged. Returning `Some(id)` substitutes the alias
+    /// with the provider-specific model id.
+    fn resolve_alias(&self, _alias: &str) -> Option<String> {
+        None
+    }
+
     /// Downcast to the underlying `AnthropicClient` if this provider wraps one.
     ///
     /// Returns `None` for all non-Anthropic providers. Used by code paths that

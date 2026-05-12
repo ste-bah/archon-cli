@@ -13,7 +13,7 @@ fn check_object_safe(_: Box<dyn LlmProvider>) {}
 fn bedrock_provider_is_object_safe() {
     let provider = BedrockProvider::new(
         "us-east-1".to_string(),
-        "anthropic.claude-sonnet-4-20250514-v1:0".to_string(),
+        "anthropic.claude-sonnet-4-6-v1:0".to_string(),
     );
     check_object_safe(Box::new(provider));
 }
@@ -135,7 +135,7 @@ fn bedrock_message_stop_parsed() {
 fn bedrock_claude_supports_thinking() {
     let provider = BedrockProvider::new(
         "us-east-1".to_string(),
-        "anthropic.claude-sonnet-4-20250514-v1:0".to_string(),
+        "anthropic.claude-sonnet-4-6-v1:0".to_string(),
     );
     assert!(provider.supports_feature(ProviderFeature::Thinking));
     assert!(provider.supports_feature(ProviderFeature::PromptCaching));

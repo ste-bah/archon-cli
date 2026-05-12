@@ -23,6 +23,7 @@ use crate::runner::{
     AgentInfo, AgentResult, NextAgent, PipelineFacade, PipelineResult, PipelineSession,
     PipelineType, QualityScore, ToolAccessLevel,
 };
+use archon_core::config::AnthropicModelsConfig;
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -54,7 +55,17 @@ fn display_name_from_key(key: &str) -> String {
 }
 
 /// Convert a [`CodingAgent`] to an [`AgentInfo`] for the runner.
-fn agent_to_info(agent: &CodingAgent) -> AgentInfo {
+///
+/// `agent.model` is emitted verbatim as a tier alias (e.g. `"sonnet"`,
+/// `"opus"`). Resolution to a provider-specific concrete model id happens
+/// downstream at the LLM provider boundary via
+/// `LlmProvider::resolve_alias(..)`. That is what keeps pipelines
+/// provider-neutral: the same alias resolves to `claude-sonnet-4-6` on
+/// Anthropic and `gpt-5.5` on Codex.
+///
+/// `_models` is retained for API stability (existing call sites pass an
+/// `AnthropicModelsConfig`) but is unused — resolution moved to the provider.
+fn agent_to_info(agent: &CodingAgent, _models: &AnthropicModelsConfig) -> AgentInfo {
     AgentInfo {
         key: agent.key.to_string(),
         display_name: display_name_from_key(agent.key),
@@ -88,6 +99,10 @@ pub struct CodingFacade {
     /// Uses internal mutability so the sender can be attached after
     /// construction (it's not known at bootstrap time).
     tui_sender: Mutex<Option<UnboundedSender<String>>>,
+    /// Anthropic model alias map. Defaults to compile-time defaults; callers
+    /// that have an active `ArchonConfig` should pass `config.models.anthropic`
+    /// via `with_models(..)` so operator overrides apply.
+    models: AnthropicModelsConfig,
 }
 
 impl CodingFacade {
@@ -98,6 +113,7 @@ impl CodingFacade {
             rlm_store: Mutex::new(RlmStore::new()),
             learning: None,
             tui_sender: Mutex::new(None),
+            models: AnthropicModelsConfig::default(),
         }
     }
 
@@ -111,12 +127,23 @@ impl CodingFacade {
             rlm_store: Mutex::new(RlmStore::new()),
             learning: Some(Mutex::new(learning)),
             tui_sender: Mutex::new(None),
+            models: AnthropicModelsConfig::default(),
         }
     }
 
     /// Attach a TUI sender at construction time (builder pattern).
     pub fn with_tui_sender(mut self, tx: UnboundedSender<String>) -> Self {
         self.tui_sender = Mutex::new(Some(tx));
+        self
+    }
+
+    /// Attach an operator-configured Anthropic model alias map (builder pattern).
+    ///
+    /// When this is not called, the facade uses `AnthropicModelsConfig::default()`
+    /// which is the compile-time fallback. Pass `config.models.anthropic.clone()`
+    /// from the active `ArchonConfig` to honour operator overrides.
+    pub fn with_models(mut self, models: AnthropicModelsConfig) -> Self {
+        self.models = models;
         self
     }
 
@@ -334,7 +361,7 @@ impl PipelineFacade for CodingFacade {
             return Ok(NextAgent::Done);
         }
         let coding_agent = &AGENTS[idx];
-        Ok(NextAgent::Continue(agent_to_info(coding_agent)))
+        Ok(NextAgent::Continue(agent_to_info(coding_agent, &self.models)))
     }
 
     /// Build the (messages, system, tools) triple with 11-layer prompt
@@ -557,7 +584,7 @@ mod tests {
 
         // Fill session with one fake result per configured agent
         for agent in AGENTS.iter() {
-            let info = agent_to_info(agent);
+            let info = agent_to_info(agent, &AnthropicModelsConfig::default());
             let result = make_result("output");
             session.agent_results.push((info, result));
         }
@@ -583,7 +610,7 @@ mod tests {
             .iter()
             .find(|a| a.phase == Phase::Implementation)
             .expect("should have a phase 4 agent");
-        let info = agent_to_info(phase4_agent);
+        let info = agent_to_info(phase4_agent, &AnthropicModelsConfig::default());
 
         let (messages, system, tools) = facade.build_prompt(&session, &info).await.unwrap();
 
@@ -626,7 +653,7 @@ mod tests {
     async fn inactive_learning_layers_produce_no_errors() {
         let facade = make_facade();
         let session = facade.init_session("any task").await.unwrap();
-        let info = agent_to_info(&AGENTS[0]);
+        let info = agent_to_info(&AGENTS[0], &AnthropicModelsConfig::default());
 
         // This should succeed without errors even though layers 5-9 are inactive
         let result = facade.build_prompt(&session, &info).await;
@@ -671,7 +698,7 @@ mod tests {
         // Inject LEANN context into session
         session.leann_context = "function parse_input at src/parser.rs:42".to_string();
 
-        let info = agent_to_info(&AGENTS[0]);
+        let info = agent_to_info(&AGENTS[0], &AnthropicModelsConfig::default());
         let (messages, _, _) = facade.build_prompt(&session, &info).await.unwrap();
         let content = messages[0]["content"].as_str().unwrap();
 
@@ -689,7 +716,7 @@ mod tests {
     async fn score_quality_returns_valid_score() {
         let facade = make_facade();
         let session = facade.init_session("task").await.unwrap();
-        let info = agent_to_info(&AGENTS[0]);
+        let info = agent_to_info(&AGENTS[0], &AnthropicModelsConfig::default());
 
         let result = make_result(
             r#"
@@ -737,7 +764,7 @@ mod tests {
     async fn process_completion_writes_to_rlm() {
         let facade = make_facade();
         let mut session = facade.init_session("task").await.unwrap();
-        let info = agent_to_info(&AGENTS[0]); // contract-agent
+        let info = agent_to_info(&AGENTS[0], &AnthropicModelsConfig::default()); // contract-agent
         let result = make_result("analysis output");
         let quality = QualityScore {
             overall: 0.9,
@@ -770,7 +797,7 @@ mod tests {
     async fn build_prompt_is_deterministic() {
         let facade = make_facade();
         let session = facade.init_session("deterministic task").await.unwrap();
-        let info = agent_to_info(&AGENTS[0]);
+        let info = agent_to_info(&AGENTS[0], &AnthropicModelsConfig::default());
 
         let (msgs1, sys1, tools1) = facade.build_prompt(&session, &info).await.unwrap();
         let (msgs2, sys2, tools2) = facade.build_prompt(&session, &info).await.unwrap();
@@ -790,7 +817,7 @@ mod tests {
         let session = facade.init_session("task").await.unwrap();
 
         // Phase 1 agent (Understanding) -> threshold 0.75
-        let info_p1 = agent_to_info(&AGENTS[0]);
+        let info_p1 = agent_to_info(&AGENTS[0], &AnthropicModelsConfig::default());
         let result = make_result("some output");
 
         let score = facade
@@ -806,7 +833,7 @@ mod tests {
             .iter()
             .find(|a| a.phase == Phase::Implementation)
             .unwrap();
-        let info_p4 = agent_to_info(phase4_agent);
+        let info_p4 = agent_to_info(phase4_agent, &AnthropicModelsConfig::default());
         let score_p4 = facade
             .score_quality(&session, &info_p4, &result)
             .await
@@ -841,12 +868,12 @@ mod tests {
         let session_id = session.id.clone();
 
         // Add two fake results
-        let info1 = agent_to_info(&AGENTS[0]);
+        let info1 = agent_to_info(&AGENTS[0], &AnthropicModelsConfig::default());
         let mut result1 = make_result("first output");
         result1.cost_usd = 0.05;
         session.agent_results.push((info1, result1));
 
-        let info2 = agent_to_info(&AGENTS[1]);
+        let info2 = agent_to_info(&AGENTS[1], &AnthropicModelsConfig::default());
         let mut result2 = make_result("final output");
         result2.cost_usd = 0.03;
         session.agent_results.push((info2, result2));
@@ -870,7 +897,7 @@ mod tests {
         let mut session = facade.init_session("flow test").await.unwrap();
 
         // Simulate contract-agent completion which writes to RLM
-        let info = agent_to_info(&AGENTS[0]);
+        let info = agent_to_info(&AGENTS[0], &AnthropicModelsConfig::default());
         let result = make_result("task analysis: build REST API with auth");
         let quality = QualityScore {
             overall: 0.9,
@@ -882,7 +909,7 @@ mod tests {
             .unwrap();
 
         // Now build prompt for requirement-extractor (reads coding/understanding/task-analysis)
-        let req_agent = agent_to_info(&AGENTS[1]);
+        let req_agent = agent_to_info(&AGENTS[1], &AnthropicModelsConfig::default());
         let (messages, _, _) = facade.build_prompt(&session, &req_agent).await.unwrap();
         let content = messages[0]["content"].as_str().unwrap();
 

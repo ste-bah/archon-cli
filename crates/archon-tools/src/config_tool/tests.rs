@@ -67,7 +67,7 @@ async fn set_then_get_returns_overlay_value() {
 
     let set_res = tool
         .execute(
-            json!({"action": "set", "key": "api.default_model", "value": "claude-opus-4-6"}),
+            json!({"action": "set", "key": "api.default_model", "value": "claude-opus-4-7"}),
             &ctx,
         )
         .await;
@@ -77,7 +77,7 @@ async fn set_then_get_returns_overlay_value() {
         .execute(json!({"action": "get", "key": "api.default_model"}), &ctx)
         .await;
     assert!(!get_res.is_error);
-    assert!(get_res.content.contains("claude-opus-4-6"));
+    assert!(get_res.content.contains("claude-opus-4-7"));
     assert!(get_res.content.contains("overlay"));
 }
 

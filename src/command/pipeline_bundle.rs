@@ -64,7 +64,8 @@ pub(crate) async fn handle_resume(
                     Default::default(),
                     auto_trainer,
                 );
-                let facade = archon_pipeline::coding::facade::CodingFacade::with_learning(learning);
+                let facade = archon_pipeline::coding::facade::CodingFacade::with_learning(learning)
+                    .with_models(config.models.anthropic.clone());
                 let leann = init_leann(cwd).await;
                 println!("Resuming audited coding pipeline...");
                 let result = archon_pipeline::runner::resume_pipeline_audited(
@@ -98,7 +99,8 @@ pub(crate) async fn handle_resume(
                     cwd.display().to_string(),
                     None,
                     phd_learning,
-                );
+                )
+                .with_models(config.models.anthropic.clone());
                 println!("Resuming audited research pipeline...");
                 let result = archon_pipeline::runner::resume_pipeline_audited(
                     &facade, &adapter, session_id, cwd, None, None, None,

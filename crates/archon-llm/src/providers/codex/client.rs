@@ -42,6 +42,37 @@ const RESERVED_HEADERS: &[&str] = &[
     "openai-beta",
 ];
 
+/// Codex tier alias map — provider-owned model identifiers indexed by tier
+/// keyword.
+///
+/// Defaults match `archon_core::config::OpenAiCodexModelsConfig::default()`.
+/// The binary should populate from operator config and pass via
+/// `CodexProvider::with_alias_map(..)`.
+///
+/// Tier mapping (per OpenAI's Codex models reference):
+/// - `opus`   → `gpt-5.4` (frontier flagship for tools/agentic)
+/// - `sonnet` → `gpt-5.5` (newest general-purpose default)
+/// - `haiku`  → `gpt-5.4-mini` (efficient/subagent variant)
+/// - `codex`  → `gpt-5.3-codex` (codex-specific software engineering)
+#[derive(Debug, Clone)]
+pub struct CodexAliasMap {
+    pub opus: String,
+    pub sonnet: String,
+    pub haiku: String,
+    pub codex: String,
+}
+
+impl Default for CodexAliasMap {
+    fn default() -> Self {
+        Self {
+            opus: "gpt-5.4".into(),
+            sonnet: "gpt-5.5".into(),
+            haiku: "gpt-5.4-mini".into(),
+            codex: "gpt-5.3-codex".into(),
+        }
+    }
+}
+
 pub struct CodexProvider {
     http: reqwest::Client,
     credentials_path: PathBuf,
@@ -52,6 +83,7 @@ pub struct CodexProvider {
     refresh_lock: Mutex<()>,
     preflight_url: String,
     retry_base_delay: Duration,
+    aliases: CodexAliasMap,
 }
 
 impl CodexProvider {
@@ -106,7 +138,14 @@ impl CodexProvider {
             refresh_lock: Mutex::new(()),
             preflight_url,
             retry_base_delay,
+            aliases: CodexAliasMap::default(),
         })
+    }
+
+    /// Builder: attach an alias map sourced from operator config.
+    pub fn with_alias_map(mut self, aliases: CodexAliasMap) -> Self {
+        self.aliases = aliases;
+        self
     }
 
     pub fn resolve_url(&self) -> String {
@@ -244,11 +283,42 @@ impl LlmProvider for CodexProvider {
     }
 
     fn models(&self) -> Vec<ModelInfo> {
-        vec![ModelInfo {
-            id: "gpt-5.4".into(),
-            display_name: "GPT-5.4".into(),
-            context_window: 200_000,
-        }]
+        vec![
+            ModelInfo {
+                id: "gpt-5.5".into(),
+                display_name: "GPT-5.5".into(),
+                context_window: 200_000,
+            },
+            ModelInfo {
+                id: "gpt-5.4".into(),
+                display_name: "GPT-5.4".into(),
+                context_window: 200_000,
+            },
+            ModelInfo {
+                id: "gpt-5.4-mini".into(),
+                display_name: "GPT-5.4 Mini".into(),
+                context_window: 200_000,
+            },
+            ModelInfo {
+                id: "gpt-5.3-codex".into(),
+                display_name: "GPT-5.3 Codex".into(),
+                context_window: 200_000,
+            },
+        ]
+    }
+
+    fn resolve_alias(&self, alias: &str) -> Option<String> {
+        // Map Anthropic-style tier aliases into Codex's namespace using the
+        // operator-configurable alias map. Values come from
+        // `[models.openai-codex]` in config.toml at provider construction
+        // time; defaults are in `CodexAliasMap::default()`.
+        match alias.trim().to_lowercase().as_str() {
+            "opus" => Some(self.aliases.opus.clone()),
+            "sonnet" | "default" => Some(self.aliases.sonnet.clone()),
+            "haiku" | "mini" => Some(self.aliases.haiku.clone()),
+            "codex" => Some(self.aliases.codex.clone()),
+            _ => None,
+        }
     }
 
     async fn stream(
@@ -376,7 +446,7 @@ pub fn clamp_reasoning_effort(model_id: &str, effort: &str) -> String {
     if id == "gpt-5.1" && effort == "xhigh" {
         return "high".into();
     }
-    if id == "gpt-5.1-codex-mini" {
+    if id == "gpt-5.3-codex-mini" {
         if effort == "high" || effort == "xhigh" {
             return "high".into();
         }

@@ -69,13 +69,13 @@ fn empty_toml_produces_valid_defaults() {
 fn partial_toml_merges_with_defaults() {
     let toml_str = r#"
 [api]
-default_model = "claude-opus-4-6"
+default_model = "claude-opus-4-7"
 max_retries = 5
 "#;
     let config: ArchonConfig = toml::from_str(toml_str).expect("partial TOML should parse");
 
     // Overridden values
-    assert_eq!(config.api.default_model, "claude-opus-4-6");
+    assert_eq!(config.api.default_model, "claude-opus-4-7");
     assert_eq!(config.api.max_retries, 5);
 
     // Non-overridden api values keep defaults
@@ -205,7 +205,7 @@ foo = "bar"
 fn full_valid_config_parses() {
     let toml_str = r#"
 [api]
-default_model = "claude-opus-4-6"
+default_model = "claude-opus-4-7"
 thinking_budget = 32768
 default_effort = "low"
 max_retries = 5
@@ -255,7 +255,7 @@ max_checkpoints = 5
 "#;
     let config: ArchonConfig = toml::from_str(toml_str).expect("full valid config should parse");
 
-    assert_eq!(config.api.default_model, "claude-opus-4-6");
+    assert_eq!(config.api.default_model, "claude-opus-4-7");
     assert_eq!(config.api.thinking_budget, 32768);
     assert_eq!(config.identity.mode, "clean");
     assert!(config.identity.anti_distillation);

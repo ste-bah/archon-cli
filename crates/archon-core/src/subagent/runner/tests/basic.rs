@@ -110,53 +110,7 @@ async fn empty_tool_definitions_still_works() {
     assert_eq!(result, "No tools needed");
 }
 
-#[test]
-fn snip_context_preserves_recent_turns() {
-    let mut messages = Vec::new();
-    // Original prompt
-    messages.push(serde_json::json!({"role": "user", "content": "do something"}));
-    // Generate many turn pairs to exceed threshold
-    for i in 0..20 {
-        messages.push(serde_json::json!({
-            "role": "assistant",
-            "content": [{"type": "tool_use", "id": format!("t{i}"), "name": "Bash", "input": {}}]
-        }));
-        messages.push(serde_json::json!({
-            "role": "user",
-            "content": [{"type": "tool_result", "tool_use_id": format!("t{i}"), "content": "x".repeat(40_000)}]
-        }));
-    }
-
-    // Should be over 600k chars
-    let total: usize = messages
-        .iter()
-        .map(|m| serde_json::to_string(m).unwrap().len())
-        .sum();
-    assert!(
-        total > 600_000,
-        "test setup: messages should exceed threshold"
-    );
-
-    SubagentRunner::snip_context_if_needed(&mut messages);
-
-    // First message preserved
-    assert_eq!(messages[0]["role"], "user");
-    assert_eq!(messages[0]["content"], "do something");
-
-    // Truncation notice at index 1
-    assert_eq!(messages[1]["role"], "user");
-    assert!(
-        messages[1]["content"]
-            .as_str()
-            .unwrap()
-            .contains("truncated")
-    );
-
-    // Remaining messages should be assistant/user pairs
-    for chunk in messages[2..].chunks(2) {
-        assert_eq!(chunk[0]["role"], "assistant");
-        if chunk.len() > 1 {
-            assert_eq!(chunk[1]["role"], "user");
-        }
-    }
-}
+// snip_context_preserves_recent_turns: removed. archon no longer performs
+// client-side context truncation in the subagent runner — context flows to
+// the configured LLM provider verbatim, which is the source of truth for
+// context limits.

@@ -27,7 +27,7 @@ fn diff_identical_configs_empty() {
 fn diff_model_change() {
     let a = ArchonConfig::default();
     let mut b = ArchonConfig::default();
-    b.api.default_model = "claude-opus-4-6".into();
+    b.api.default_model = "claude-opus-4-7".into();
 
     let changes = diff_configs(&a, &b);
     assert!(
@@ -53,7 +53,7 @@ fn diff_permission_mode() {
 fn diff_multiple_changes() {
     let a = ArchonConfig::default();
     let mut b = ArchonConfig::default();
-    b.api.default_model = "claude-opus-4-6".into();
+    b.api.default_model = "claude-opus-4-7".into();
     b.permissions.mode = "auto".into();
     b.cost.warn_threshold = 99.0;
 
@@ -141,7 +141,7 @@ fn watcher_detects_file_change() {
     thread::sleep(Duration::from_millis(200));
 
     // Modify the file
-    fs::write(&config_path, "[api]\ndefault_model = \"claude-opus-4-6\"\n")
+    fs::write(&config_path, "[api]\ndefault_model = \"claude-opus-4-7\"\n")
         .expect("write modified config");
 
     // Wait for filesystem event to propagate

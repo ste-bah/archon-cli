@@ -50,9 +50,10 @@ async fn build_provider(
 ) -> Result<Arc<dyn LlmProvider>> {
     match args.provider.as_str() {
         "anthropic" => {
-            let provider: Arc<dyn LlmProvider> = Arc::new(AnthropicProvider::new(
-                build_anthropic_client(config).await?,
-            ));
+            let provider: Arc<dyn LlmProvider> = Arc::new(
+                AnthropicProvider::new(build_anthropic_client(config).await?)
+                    .with_alias_map(config.models.anthropic.to_alias_map()),
+            );
             let profile_id =
                 crate::runtime::provider_auth_selection::selected_provider_auth_profile_id(
                     provider.name(),

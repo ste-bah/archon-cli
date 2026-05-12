@@ -136,14 +136,14 @@ fn load_auth_vars() {
 #[test]
 fn load_model_and_behavior_vars() {
     let map = env_map(&[
-        ("ARCHON_MODEL", "claude-opus-4-6"),
+        ("ARCHON_MODEL", "claude-opus-4-7"),
         ("ARCHON_EFFORT", "high"),
         ("ARCHON_PERMISSION_MODE", "auto"),
         ("ARCHON_IDENTITY_MODE", "clean"),
     ]);
     let vars = load_env_vars_from(&map);
 
-    assert_eq!(vars.model.as_deref(), Some("claude-opus-4-6"));
+    assert_eq!(vars.model.as_deref(), Some("claude-opus-4-7"));
     assert_eq!(vars.effort.as_deref(), Some("high"));
     assert_eq!(vars.permission_mode.as_deref(), Some("auto"));
     assert_eq!(vars.identity_mode.as_deref(), Some("clean"));
@@ -223,11 +223,11 @@ fn apply_model_override() {
     let mut config = ArchonConfig::default();
     assert_eq!(config.api.default_model, "claude-sonnet-4-6");
 
-    let map = env_map(&[("ARCHON_MODEL", "claude-opus-4-6")]);
+    let map = env_map(&[("ARCHON_MODEL", "claude-opus-4-7")]);
     let vars = load_env_vars_from(&map);
     apply_env_overrides(&mut config, &vars);
 
-    assert_eq!(config.api.default_model, "claude-opus-4-6");
+    assert_eq!(config.api.default_model, "claude-opus-4-7");
 }
 
 #[test]
@@ -426,12 +426,12 @@ fn doctor_masks_oauth_token() {
 
 #[test]
 fn doctor_shows_non_secret_values() {
-    let map = env_map(&[("ARCHON_MODEL", "claude-opus-4-6"), ("ARCHON_DEBUG", "1")]);
+    let map = env_map(&[("ARCHON_MODEL", "claude-opus-4-7"), ("ARCHON_DEBUG", "1")]);
     let vars = load_env_vars_from(&map);
     let output = format_doctor_env_vars(&vars);
 
     assert!(output.contains("ARCHON_MODEL"));
-    assert!(output.contains("claude-opus-4-6"));
+    assert!(output.contains("claude-opus-4-7"));
     assert!(output.contains("ARCHON_DEBUG"));
 }
 

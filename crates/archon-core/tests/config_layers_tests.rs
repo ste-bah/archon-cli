@@ -290,7 +290,7 @@ fn load_user_only() {
         &user_cfg,
         r#"
 [api]
-default_model = "claude-opus-4-6"
+default_model = "claude-opus-4-7"
 "#,
     )
     .unwrap();
@@ -300,7 +300,7 @@ default_model = "claude-opus-4-6"
 
     let config =
         load_layered_config(Some(&user_cfg), &work, None, None).expect("load should succeed");
-    assert_eq!(config.api.default_model, "claude-opus-4-6");
+    assert_eq!(config.api.default_model, "claude-opus-4-7");
     cleanup_temp_dir(&tmp);
 }
 
@@ -316,13 +316,13 @@ fn load_project_overrides_user() {
     fs::create_dir_all(&archon_dir).unwrap();
     fs::write(
         archon_dir.join("config.toml"),
-        "[api]\ndefault_model = \"claude-opus-4-6\"\n",
+        "[api]\ndefault_model = \"claude-opus-4-7\"\n",
     )
     .unwrap();
 
     let config =
         load_layered_config(Some(&user_cfg), &work, None, None).expect("load should succeed");
-    assert_eq!(config.api.default_model, "claude-opus-4-6");
+    assert_eq!(config.api.default_model, "claude-opus-4-7");
     cleanup_temp_dir(&tmp);
 }
 
@@ -338,7 +338,7 @@ fn load_local_overrides_project() {
     fs::create_dir_all(&archon_dir).unwrap();
     fs::write(
         archon_dir.join("config.toml"),
-        "[api]\ndefault_model = \"claude-opus-4-6\"\n",
+        "[api]\ndefault_model = \"claude-opus-4-7\"\n",
     )
     .unwrap();
     fs::write(
@@ -373,13 +373,13 @@ max_retries = 5
     fs::create_dir_all(&archon_dir).unwrap();
     fs::write(
         archon_dir.join("config.toml"),
-        "[api]\ndefault_model = \"claude-opus-4-6\"\n",
+        "[api]\ndefault_model = \"claude-opus-4-7\"\n",
     )
     .unwrap();
 
     let config =
         load_layered_config(Some(&user_cfg), &work, None, None).expect("load should succeed");
-    assert_eq!(config.api.default_model, "claude-opus-4-6");
+    assert_eq!(config.api.default_model, "claude-opus-4-7");
     assert_eq!(
         config.api.max_retries, 5,
         "max_retries should inherit from user layer"
@@ -433,7 +433,7 @@ fn load_settings_overlay() {
     let settings_file = tmp.join("override.toml");
     fs::write(
         &settings_file,
-        "[api]\ndefault_model = \"claude-opus-4-6\"\n",
+        "[api]\ndefault_model = \"claude-opus-4-7\"\n",
     )
     .unwrap();
 
@@ -442,7 +442,7 @@ fn load_settings_overlay() {
 
     let config = load_layered_config(Some(&user_cfg), &work, Some(&settings_file), None)
         .expect("load should succeed");
-    assert_eq!(config.api.default_model, "claude-opus-4-6");
+    assert_eq!(config.api.default_model, "claude-opus-4-7");
     cleanup_temp_dir(&tmp);
 }
 
@@ -451,7 +451,7 @@ fn load_missing_layers_silently_skipped() {
     let tmp = make_temp_dir("load-missing");
 
     let user_cfg = tmp.join("config.toml");
-    fs::write(&user_cfg, "[api]\ndefault_model = \"claude-opus-4-6\"\n").unwrap();
+    fs::write(&user_cfg, "[api]\ndefault_model = \"claude-opus-4-7\"\n").unwrap();
 
     let work = tmp.join("work");
     fs::create_dir_all(&work).unwrap();
@@ -459,7 +459,7 @@ fn load_missing_layers_silently_skipped() {
 
     let config = load_layered_config(Some(&user_cfg), &work, None, None)
         .expect("missing layers should be silently skipped");
-    assert_eq!(config.api.default_model, "claude-opus-4-6");
+    assert_eq!(config.api.default_model, "claude-opus-4-7");
     cleanup_temp_dir(&tmp);
 }
 
@@ -468,7 +468,7 @@ fn load_invalid_layer_warns_and_skips() {
     let tmp = make_temp_dir("load-invalid");
 
     let user_cfg = tmp.join("config.toml");
-    fs::write(&user_cfg, "[api]\ndefault_model = \"claude-opus-4-6\"\n").unwrap();
+    fs::write(&user_cfg, "[api]\ndefault_model = \"claude-opus-4-7\"\n").unwrap();
 
     let work = tmp.join("work");
     let archon_dir = work.join(".archon");
@@ -483,7 +483,7 @@ fn load_invalid_layer_warns_and_skips() {
     let config = load_layered_config(Some(&user_cfg), &work, None, None)
         .expect("invalid layer should be skipped, not crash");
     // User config should still be used
-    assert_eq!(config.api.default_model, "claude-opus-4-6");
+    assert_eq!(config.api.default_model, "claude-opus-4-7");
     cleanup_temp_dir(&tmp);
 }
 
@@ -500,7 +500,7 @@ fn source_tracks_user_origin() {
         &user_cfg,
         r#"
 [api]
-default_model = "claude-opus-4-6"
+default_model = "claude-opus-4-7"
 "#,
     )
     .unwrap();
@@ -531,7 +531,7 @@ fn source_tracks_override() {
     fs::create_dir_all(&archon_dir).unwrap();
     fs::write(
         archon_dir.join("config.toml"),
-        "[api]\ndefault_model = \"claude-opus-4-6\"\n",
+        "[api]\ndefault_model = \"claude-opus-4-7\"\n",
     )
     .unwrap();
 
@@ -566,7 +566,7 @@ max_retries = 5
     fs::create_dir_all(&archon_dir).unwrap();
     fs::write(
         archon_dir.join("config.toml"),
-        "[api]\ndefault_model = \"claude-opus-4-6\"\n",
+        "[api]\ndefault_model = \"claude-opus-4-7\"\n",
     )
     .unwrap();
 
@@ -606,7 +606,7 @@ max_retries = 5
     fs::create_dir_all(&archon_dir).unwrap();
     fs::write(
         archon_dir.join("config.toml"),
-        "[api]\ndefault_model = \"claude-opus-4-6\"\n",
+        "[api]\ndefault_model = \"claude-opus-4-7\"\n",
     )
     .unwrap();
 
@@ -650,7 +650,7 @@ fn filter_user_only() {
     fs::create_dir_all(&archon_dir).unwrap();
     fs::write(
         archon_dir.join("config.toml"),
-        "[api]\ndefault_model = \"claude-opus-4-6\"\n",
+        "[api]\ndefault_model = \"claude-opus-4-7\"\n",
     )
     .unwrap();
     fs::write(
@@ -681,7 +681,7 @@ fn filter_user_and_project() {
     fs::create_dir_all(&archon_dir).unwrap();
     fs::write(
         archon_dir.join("config.toml"),
-        "[api]\ndefault_model = \"claude-opus-4-6\"\n",
+        "[api]\ndefault_model = \"claude-opus-4-7\"\n",
     )
     .unwrap();
     fs::write(
@@ -694,7 +694,7 @@ fn filter_user_and_project() {
     let config = load_layered_config(Some(&user_cfg), &work, None, Some(&filter))
         .expect("filtered load should succeed");
     assert_eq!(
-        config.api.default_model, "claude-opus-4-6",
+        config.api.default_model, "claude-opus-4-7",
         "local layer should be skipped when filter=[User, Project]"
     );
     cleanup_temp_dir(&tmp);

@@ -3,7 +3,7 @@ use archon_llm::providers::codex::types::{ResponseOutputItem, ResponseStreamEven
 fn snapshot_event(event_type: &str) -> serde_json::Value {
     serde_json::json!({
         "type": event_type,
-        "response": {"id": "resp_1", "status": "completed", "model": "gpt-5.1-codex"}
+        "response": {"id": "resp_1", "status": "completed", "model": "gpt-5.3-codex"}
     })
 }
 

@@ -5,7 +5,7 @@ use archon_llm::providers::codex::types::{
 
 fn base_request() -> ResponsesRequest {
     ResponsesRequest {
-        model: "gpt-5.1-codex".into(),
+        model: "gpt-5.3-codex".into(),
         store: false,
         stream: true,
         instructions: None,
@@ -29,7 +29,7 @@ fn base_request() -> ResponsesRequest {
 fn minimal_request_omits_optional_fields() {
     let value = serde_json::to_value(base_request()).expect("serialize");
 
-    assert_eq!(value["model"], "gpt-5.1-codex");
+    assert_eq!(value["model"], "gpt-5.3-codex");
     assert_eq!(value["input"][0]["type"], "message");
     assert!(value.get("instructions").is_none());
     assert!(value.get("tools").is_none());

@@ -12,7 +12,7 @@ fn parser_ignores_comments_and_empty_frames() {
 fn parser_reads_json_data_frame() {
     let events = parse_codex_sse_frame(
         r#"event: response.created
-data: {"type":"response.created","response":{"id":"r1","status":"in_progress","model":"gpt-5.1-codex"}}"#,
+data: {"type":"response.created","response":{"id":"r1","status":"in_progress","model":"gpt-5.3-codex"}}"#,
     );
 
     assert_eq!(events.len(), 1);
