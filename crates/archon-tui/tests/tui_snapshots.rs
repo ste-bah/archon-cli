@@ -75,6 +75,7 @@ fn snapshot_statusbar_with_branch_and_agent() {
         verbose: true,
         agent_name: Some("code-reviewer".into()),
         agent_color: Some("#ff88aa".into()),
+        ..StatusBar::default()
     };
     insta::assert_snapshot!("statusbar_with_branch_and_agent", bar.format());
 }
