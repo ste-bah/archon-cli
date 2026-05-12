@@ -1,10 +1,10 @@
 use clap::Subcommand;
 
 use super::{
-    AgentAction, AuthArgs, BehaviourAction, ChatArgs, CompletionAction, ConstellationAction,
-    DocsAction, GametheoryAction, KbAction, LearningAction, MeaningAction, MemoryAction,
-    PermissionsAction, PipelineAction, PluginAction, ProvAction, ProvidersAction, RemoteAction,
-    SandboxAction, SelfAction, TeamAction, WorldAction,
+    AgentAction, AuthArgs, BehaviourAction, BriefingAction, ChatArgs, CompletionAction,
+    ConstellationAction, DocsAction, GametheoryAction, KbAction, LearningAction, MeaningAction,
+    MemoryAction, PermissionsAction, PipelineAction, PluginAction, ProvAction, ProvidersAction,
+    ReasoningAction, RemoteAction, SandboxAction, SelfAction, TeamAction, WorldAction,
 };
 
 #[derive(Subcommand, Debug)]
@@ -115,6 +115,16 @@ pub enum Commands {
     World {
         #[command(subcommand)]
         action: WorldAction,
+    },
+    /// Inspect first-class reasoning-quality claim/evidence events
+    Reasoning {
+        #[command(subcommand)]
+        action: ReasoningAction,
+    },
+    /// Preview proactive session-start briefing content
+    Briefing {
+        #[command(subcommand)]
+        action: BriefingAction,
     },
     /// Check status of an async task
     TaskStatus {

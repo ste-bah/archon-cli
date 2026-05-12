@@ -49,6 +49,15 @@ impl Agent {
         if context.is_empty() {
             return system;
         }
+        self.reasoning_evidence_refs
+            .push(ReasoningEvidenceEventPayload {
+                evidence_id: format!("chat_history:turn:{}", self.turn_number),
+                kind: "chat_history".to_string(),
+                entity_key: Some("recent_user_context".to_string()),
+                output_hash: None,
+                redacted_excerpt: Some(context.join("\n").chars().take(600).collect()),
+                created_at: chrono::Utc::now().to_rfc3339(),
+            });
 
         match self.memory_injector.inject(graph.as_ref(), &context, 500) {
             Ok(memories_text) if !memories_text.is_empty() => {
@@ -112,6 +121,15 @@ impl Agent {
                 AgentActivityStatus::Completed,
                 "injected first-turn memory garden briefing",
             );
+            self.reasoning_evidence_refs
+                .push(ReasoningEvidenceEventPayload {
+                    evidence_id: "memory_briefing:first_turn".to_string(),
+                    kind: "memory".to_string(),
+                    entity_key: Some("memory_briefing".to_string()),
+                    output_hash: None,
+                    redacted_excerpt: Some(briefing.chars().take(600).collect()),
+                    created_at: chrono::Utc::now().to_rfc3339(),
+                });
             system.push(serde_json::json!({
                 "type": "text",
                 "text": briefing,

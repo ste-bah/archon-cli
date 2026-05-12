@@ -123,6 +123,7 @@ async fn retrospective(
     let mut skipped = Vec::new();
     let memory = archon_memory::graph::MemoryGraph::open_default().ok();
     let learning_db = open_learning_db().ok();
+    let reasoning_quality_covered = reasoning_quality_rows_exist(session_id);
 
     for candidate in candidates.into_iter().take(3) {
         if previous.contains(&candidate.content) {
@@ -166,32 +167,38 @@ async fn retrospective(
                 .ok()
         });
 
-        let learning_event_id = learning_db.as_ref().and_then(|db| {
-            archon_learning::events::record_event(
-                db,
-                "default",
-                event_type_for(&candidate.category),
-                &format!("session:{session_id}"),
-                memory_id.as_deref(),
-                serde_json::json!({
-                    "category": candidate.category.clone(),
-                    "domain": candidate.domain.clone(),
-                    "content": candidate.content.clone(),
-                    "evidence_event_ids": candidate.evidence_event_ids.clone(),
-                }),
-                candidate.confidence,
-                &format!("activity:{}", read.source_hash),
-            )
-            .ok()
-            .map(|event| event.event_id)
-        });
+        let learning_event_id = if reasoning_quality_covered {
+            None
+        } else {
+            learning_db.as_ref().and_then(|db| {
+                archon_learning::events::record_event(
+                    db,
+                    "default",
+                    event_type_for(&candidate.category),
+                    &format!("session:{session_id}"),
+                    memory_id.as_deref(),
+                    serde_json::json!({
+                        "category": candidate.category.clone(),
+                        "domain": candidate.domain.clone(),
+                        "content": candidate.content.clone(),
+                        "evidence_event_ids": candidate.evidence_event_ids.clone(),
+                    }),
+                    candidate.confidence,
+                    &format!("activity:{}", read.source_hash),
+                )
+                .ok()
+                .map(|event| event.event_id)
+            })
+        };
 
-        update_trust(
-            &candidate.domain,
-            false,
-            &candidate.category,
-            &format!("retrospective:{session_id}"),
-        )?;
+        if !reasoning_quality_covered {
+            update_trust(
+                &candidate.domain,
+                false,
+                &candidate.category,
+                &format!("retrospective:{session_id}"),
+            )?;
+        }
         accepted.push(AcceptedLearning {
             candidate,
             memory_id,
@@ -221,6 +228,18 @@ async fn retrospective(
     }
     println!("Report: {}", report_path.display());
     Ok(())
+}
+
+fn reasoning_quality_rows_exist(session_id: &str) -> bool {
+    let Some(home) = dirs::home_dir() else {
+        return false;
+    };
+    archon_reasoning_quality::store::ReasoningQualityStore::open(
+        home.join(".archon").join("reasoning-quality"),
+    )
+    .and_then(|store| store.events_for_session(session_id))
+    .map(|events| !events.is_empty())
+    .unwrap_or(false)
 }
 
 fn trust_status() -> Result<()> {

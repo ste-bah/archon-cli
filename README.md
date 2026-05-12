@@ -6,7 +6,8 @@
 
 A strategic engineering CLI built in Rust. Self-learning agent platform with
 persistent memory, multi-agent pipelines, Evidence Engine provenance, document
-intelligence, governed learning, and identity-aware Anthropic/Codex provider
+intelligence, governed learning, local world-model advisory learning,
+reasoning-quality events, and identity-aware Anthropic/Codex provider
 integration.
 
 > **Documentation has moved.** This README is now a landing page. The full structured docs live in [`docs/`](docs/README.md) — start there.
@@ -54,7 +55,7 @@ Full installation guide: [`docs/getting-started/installation.md`](docs/getting-s
 | Documents | ad hoc file reads | OCR, image ingest, chunks, embeddings, hybrid retrieval, citations |
 | Pipelines | Single-agent loop | 50-agent coding + 46-agent research + 84-specialist game theory |
 | Reasoning | Direct LLM call | 12 reasoning modes (deductive, inductive, abductive, analogical, adversarial, counterfactual, temporal, constraint, decomposition, first-principles, causal, contextual) |
-| Learning | None | 8 subsystems plus local world-model advisory learning from Archon traces |
+| Learning | None | 8 subsystems plus local world-model advisory learning and first-class reasoning-quality events |
 | Verification | model self-report | completion evidence, false-completion incidents, trust scores, provenance traces |
 | Identity | Native | Claude Code spoof, Anthropic OAuth/API keys, or Codex OAuth |
 
@@ -106,6 +107,7 @@ The docs are organised by user goal:
 | **Providers** | [`docs/providers/`](docs/providers/) — provider runtime, Codex app-server, Claude Code spoofing, auth profiles, cloud/local providers |
 | **Agents & learning** | [`docs/agents/`](docs/agents/) and [`docs/learning/`](docs/learning/) — governed agent evolution, memory promotion, permission governance |
 | **World model** | [`docs/architecture/world-model.md`](docs/architecture/world-model.md) — local trace corpus, advisory predictions, training backends, retention |
+| **Reasoning quality** | [`docs/architecture/reasoning-quality.md`](docs/architecture/reasoning-quality.md) — visible claim/evidence events, correction links, critic policy, proactive briefing |
 | **Security** | [`docs/security/`](docs/security/) — tool preflight, sandboxing, Docker, SSH, OpenShell |
 | **Reference** | [`docs/reference/`](docs/reference/) — slash commands, tools, skills, permissions, config schema, CLI flags, env vars |
 | **Integrations** | [`docs/integrations/`](docs/integrations/) — MCP, plugins, hooks, identity spoofing, VLM image descriptions, LSP, IDE extensions |
@@ -139,6 +141,7 @@ archon-cli/
 │   ├── archon-meaning/        # labels, contrastive pairs, triplets
 │   ├── archon-constellation/  # centroids, scoring, drift
 │   ├── archon-world-model/    # local trace world model, advisor, counterfactual scoring
+│   ├── archon-reasoning-quality/ # visible claim/evidence event store
 │   ├── archon-policy/         # policy gates
 │   ├── archon-leann/          # semantic code search
 │   ├── archon-plugin/         # dynamic plugin loading
@@ -153,8 +156,8 @@ archon-cli/
 ## Status
 
 - Current version: **v1.2.0-beta** ([release notes](docs/release-notes/v1.2.0-beta.md))
-- Beta release for local world-model advisory learning, provider runtime governance, Cozo-backed agent evolution, permission preflight, and sandbox routing
-- v1.2.0-beta adds the local world-model corpus, fail-open advisor, dynamic training, counterfactual scoring, runtime outcome feedback, agent-evolution signals, and accelerator backend probes on top of the v1.1.0-beta.3 provider runtime and governed agent-evolution baseline.
+- Beta release for local world-model advisory learning, first-class reasoning-quality events, provider runtime governance, Cozo-backed agent evolution, permission preflight, and sandbox routing
+- v1.2.0-beta adds the local world-model corpus, fail-open advisor, dynamic training, counterfactual scoring, runtime outcome feedback, agent-evolution signals, accelerator backend probes, visible claim/evidence capture, optional policy-gated LLM critique, and proactive session briefing on top of the v1.1.0-beta.3 provider runtime and governed agent-evolution baseline.
 
 ## Contributing
 

@@ -81,6 +81,22 @@ allow_behavior_changes = false
 
 
 # ----------------------------------------------------------------------------
+# [policy.reasoning_quality] — Visible claim/evidence learning gates
+# ----------------------------------------------------------------------------
+# Deterministic reasoning-quality extraction is local and enabled by config.
+# LLM critic calls, raw text storage, and cloud data flow stay explicit opt-ins.
+[policy.reasoning_quality]
+allow_llm_critic = false
+allow_critic_cloud_data_flow = false
+allow_third_party_critic = false
+allow_raw_text_storage = false
+allow_behavior_proposal_generation = true
+allow_session_start_injection = true
+allow_trust_updates_during_shadow = false
+auto_migrate_reasoning_quality = false
+
+
+# ----------------------------------------------------------------------------
 # [policy.docs.vlm] — Document VLM (image description) gates
 # ----------------------------------------------------------------------------
 # Off by default. Flip enabled + mode to "local" once you have a local VLM,

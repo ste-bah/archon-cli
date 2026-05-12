@@ -6,7 +6,10 @@ use async_trait::async_trait;
 use std::time::Duration;
 use tokio::sync::mpsc::Receiver;
 
-use crate::provider::{LlmError, LlmProvider, LlmRequest, LlmResponse, ModelInfo, ProviderFeature};
+use crate::provider::{
+    DataFlowClassification, LlmError, LlmProvider, LlmRequest, LlmResponse, ModelInfo,
+    ProviderFeature, classify_data_flow_endpoint,
+};
 use crate::providers::openai::{build_openai_request_body, parse_openai_sse_chunk};
 use crate::streaming::StreamEvent;
 use crate::types::Usage;
@@ -289,5 +292,9 @@ impl LlmProvider for LocalProvider {
                 true
             }
         }
+    }
+
+    fn data_flow_classification(&self) -> DataFlowClassification {
+        classify_data_flow_endpoint(&self.base_url)
     }
 }

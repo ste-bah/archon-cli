@@ -14,6 +14,8 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 
 - [Overview](architecture/overview.md) — workspace crates, request lifecycle, data flow
 - [Learning systems](architecture/learning-systems.md) — SONA, ReasoningBank (12 modes), GNN, CausalMemory, Provenance, DESC, Reflexion, AutoCapture
+- [Learning systems index](architecture/learning-systems-index.md) — ownership map for memory, completion, world model, reasoning quality, and governed learning signals
+- [Reasoning quality](architecture/reasoning-quality.md) — first-class visible claim/evidence events, correction links, critic gates, and briefing warnings
 - [Local world model](architecture/world-model.md) — trace corpus, fail-open advisor, dynamic training, retention, backends
 - [Pipelines](architecture/pipelines.md) — `/archon-code` (50 agents), `/archon-research` (46 agents), audited bundles, resume verification, agent loop, subagent spawning
 - [Evidence Engine](evidence-engine.md) — documents, knowledge, provenance, game theory, completion integrity, governed learning, meaning, constellations
@@ -30,7 +32,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 
 ## Reference
 
-- [Slash commands](reference/slash-commands.md) — 78 primary commands grouped by purpose
+- [Slash commands](reference/slash-commands.md) — 80 primary commands grouped by purpose
 - [Tools](reference/tools.md) — 43 built-in tools available to agents
 - [Skills](reference/skills.md) — 68 built-in skills (composable command sequences)
 - [Permissions](reference/permissions.md) — 7 permission modes, rule lists, sandboxing
@@ -87,6 +89,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 - [Game-theory pipeline (`/gametheory`)](cookbook/gametheory-pipeline.md) — Tier 1 classify → route → specialists → report end-to-end inside the TUI
 - [Trading and asset analysis with `/gametheory`](cookbook/trading-with-gametheory.md) — applying the game-theory pipeline to pre-trade assessment, post-event decomposition, counterparty analysis, strategy-viability tests, and macro reaction-function modelling
 - [World-model dynamic training](cookbook/world-model-dynamic-training.md) — backfill, cold-start gates, idle-aware trainer, backend selection
+- [Proactive session briefing](cookbook/proactive-session-briefing.md) — preview and configure memory, reasoning-quality, proposal, and world-model briefing sections
 - [Custom agent workflows](cookbook/custom-agent-workflows.md) — `/create-agent`, `/run-agent`, `/evolve-agent`
 - [PRD-driven development](cookbook/prd-driven-development.md) — `/to-prd` → `/prd-to-spec` → `/spec-to-tasks` → `/archon-code`
 - [Sandbox real-world use cases](cookbook/sandbox-real-world-use-cases.md) — when to use Docker, OpenShell, SSH, `risky`, `all`, `scratch`, and writable paths
@@ -113,10 +116,11 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 - [Adding an agent](development/adding-an-agent.md) — flat-file YAML and TOML manifest agents
 - [Release process](development/release-process.md) — version bumps, changelog, tagging
 - [World-model handover](development/world-model-handover.md) — implementation notes, checks, continuation pointers
+- [Reasoning-quality implementation tasks](development/reasoning-quality-implementation-tasks.md) — milestone status for PRD006C
 
 ## Release notes
 
-- [v1.2.0-beta](release-notes/v1.2.0-beta.md) — Local trace world-model implementation branch
+- [v1.2.0-beta](release-notes/v1.2.0-beta.md) — Local trace world model plus reasoning-quality events and proactive briefing
 - [v1.1.0-beta.3](release-notes/v1.1.0-beta.3.md) — Provider runtime governance and governed agent evolution (supersedes unpublished v1.1.0-beta.1 and v1.1.0-beta.2)
 - [v1.0.1](release-notes/v1.0.1.md) — Provider-neutral hybrid retrospective analysis
 - [v1.0.0](release-notes/v1.0.0.md) — Audited pipeline runtime and self-calibration

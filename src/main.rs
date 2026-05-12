@@ -242,6 +242,12 @@ async fn main() -> Result<()> {
             return crate::command::world_model::handle_world_command(&action, &config, &env_vars)
                 .await;
         }
+        Some(Commands::Reasoning { action }) => {
+            return crate::command::reasoning::handle_reasoning_command(&action, &config).await;
+        }
+        Some(Commands::Briefing { action }) => {
+            return crate::command::reasoning::handle_briefing_command(&action, &config).await;
+        }
         Some(Commands::Pipeline { action }) => {
             use crate::command::pipeline::handle_pipeline_command;
             return handle_pipeline_command(&action, &config, &env_vars).await;

@@ -38,6 +38,8 @@ This page explains every section. Each table tells you **what** the field does, 
 - [`[learning.gnn.training]`](#learninggnntraining) — GNN training hyperparams
 - [`[learning.gnn.auto_trainer]`](#learninggnnauto_trainer) — background retraining
 - [`[learning.world_model]`](#learningworld_model) — local trace world model
+- [`[learning.reasoning_quality]`](#learningreasoning_quality) — visible claim/evidence events
+- [`[learning.session_briefing]`](#learningsession_briefing) — proactive session-start briefing
 - [`[learning.reflexion]`](#learningreflexion) — N-attempt retry
 - [`[cost]`](#cost) — spending guardrails
 - [`[logging]`](#logging) — log rotation
@@ -716,6 +718,89 @@ See [Local world model](../architecture/world-model.md), [world-model backends](
 
 ---
 
+## `[learning.reasoning_quality]`
+
+Visible assistant claim/evidence learning signal. This is the canonical store for "claimed before verified", "corrected by user", and "later contradicted by source" events.
+
+```toml
+[learning.reasoning_quality]
+enabled = true
+emit_inline_events = true
+post_turn_analysis = true
+post_session_analysis = true
+shadow_mode_days = 30
+apply_trust_updates_after_shadow = true
+max_claims_per_turn = 12
+max_excerpt_chars = 600
+store_raw_text = false
+link_user_corrections = true
+update_self_trust = true
+feed_world_model = true
+feed_retrospective = true
+
+[learning.reasoning_quality.critic]
+mode = "hybrid"
+allow_llm = false
+provider = "default"
+model = ""
+max_tokens = 1200
+temperature = 0.0
+max_turns_per_session = 50
+run_async = true
+fallback_to_heuristic = true
+
+[learning.reasoning_quality.critic.budget]
+per_session_token_cap = 200000
+daily_usd_cap = 10.00
+weekly_usd_cap = 50.00
+respect_provider_cooldowns = true
+emit_cost_events = true
+```
+
+| Field | Default | What / Why |
+|---|---|---|
+| `enabled` | `true` | Enables reasoning-quality storage and command surfaces. |
+| `emit_inline_events` | `true` | Emits rows from visible assistant turns as the session runs. |
+| `shadow_mode_days` | `30` | Logs trust deltas without applying them until extractor precision is validated. |
+| `store_raw_text` | `false` | Stores redacted excerpts and hashes by default; raw text requires policy approval. |
+| `feed_world_model` | `true` | Writes reasoning-quality rows into the world-model trace corpus. |
+| `critic.allow_llm` | `false` | Enables optional LLM critique through the active `LlmProvider`; policy must also allow it. |
+| `critic.provider` | `"default"` | Uses the active provider. Separate critic providers are treated as third-party and policy-gated. |
+| `critic.model` | `""` | Empty means use the active session model. |
+| `critic.budget.*` | see block | Caps critic token/cost exposure and records cost ledger rows. |
+
+See [Reasoning Quality](../architecture/reasoning-quality.md).
+
+---
+
+## `[learning.session_briefing]`
+
+Controls the proactive first-turn briefing that can combine memory, reasoning warnings, pending behavior proposals, and world-model status.
+
+```toml
+[learning.session_briefing]
+enabled = true
+include_memory = true
+include_reasoning_quality = true
+include_pending_behaviour_proposals = true
+include_world_model = true
+max_items = 8
+max_chars = 4000
+world_model_requires_ready = true
+```
+
+| Field | Default | What / Why |
+|---|---|---|
+| `enabled` | `true` | Allows proactive briefing assembly. |
+| `include_reasoning_quality` | `true` | Surfaces recent high-severity reasoning warnings. |
+| `include_pending_behaviour_proposals` | `true` | Reminds the operator about governed-learning proposals waiting for review. |
+| `include_world_model` | `true` | Includes world-model readiness or advisory status. |
+| `max_chars` | `4000` | Hard cap before injection into the first turn. |
+
+Preview with `archon briefing preview --task "..."` or `/briefing preview ...`.
+
+---
+
 ## `[learning.reflexion]`
 
 N-attempt retry loop with self-critique on failed agent dispatch.
@@ -1042,6 +1127,14 @@ World-model cloud embeddings require both config and policy:
 `policy.workers.embedding = "allow-cloud"`, and
 `policy.network.default = "allow"`. LLM-assisted world-model labeling requires
 `policy.world_model.allow_llm_labeler = true`.
+
+Reasoning-quality LLM critique requires both config and policy:
+`learning.reasoning_quality.critic.allow_llm = true`,
+`policy.reasoning_quality.allow_llm_critic = true`, and
+`policy.reasoning_quality.allow_critic_cloud_data_flow = true` when the active
+provider is classified as cloud-hosted. Raw text persistence requires
+`policy.reasoning_quality.allow_raw_text_storage = true`; otherwise Archon
+stores redacted excerpts, hashes, and entity keys only.
 
 PDF ingest uses `[policy.docs.pdf]` to decide whether to extract embedded
 images with `pdfimages`, the minimum size filter for icons/decorations, whether

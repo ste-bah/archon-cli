@@ -7,6 +7,7 @@ pub struct EffectivePolicy {
     pub gametheory: GameTheoryPolicy,
     pub learning: LearningPolicy,
     pub world_model: WorldModelPolicy,
+    pub reasoning_quality: ReasoningQualityPolicy,
     pub docs: DocsPolicy,
 }
 
@@ -99,6 +100,33 @@ impl Default for WorldModelPolicy {
             allow_third_party_embeddings: false,
             allow_llm_labeler: false,
             allow_behavior_changes: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReasoningQualityPolicy {
+    pub allow_llm_critic: bool,
+    pub allow_critic_cloud_data_flow: bool,
+    pub allow_third_party_critic: bool,
+    pub allow_raw_text_storage: bool,
+    pub allow_behavior_proposal_generation: bool,
+    pub allow_session_start_injection: bool,
+    pub allow_trust_updates_during_shadow: bool,
+    pub auto_migrate_reasoning_quality: bool,
+}
+
+impl Default for ReasoningQualityPolicy {
+    fn default() -> Self {
+        Self {
+            allow_llm_critic: false,
+            allow_critic_cloud_data_flow: false,
+            allow_third_party_critic: false,
+            allow_raw_text_storage: false,
+            allow_behavior_proposal_generation: true,
+            allow_session_start_injection: true,
+            allow_trust_updates_during_shadow: false,
+            auto_migrate_reasoning_quality: false,
         }
     }
 }

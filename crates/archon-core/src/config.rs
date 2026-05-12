@@ -628,11 +628,183 @@ pub struct LearningConfig {
     pub desc: ToggleConfig,
     pub gnn: GnnModelConfig,
     pub world_model: WorldModelConfig,
+    pub reasoning_quality: ReasoningQualityConfig,
+    pub session_briefing: SessionBriefingConfig,
     pub causal_memory: ToggleConfig,
     pub shadow_vector: ToggleConfig,
     pub reasoning_bank: ToggleConfig,
     pub reflexion: ReflexionConfig,
     pub agent_evolution: AgentEvolutionConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ReasoningQualityConfig {
+    pub enabled: bool,
+    pub emit_inline_events: bool,
+    pub post_turn_analysis: bool,
+    pub post_session_analysis: bool,
+    pub shadow_mode_days: u32,
+    pub apply_trust_updates_after_shadow: bool,
+    pub max_claims_per_turn: usize,
+    pub max_excerpt_chars: usize,
+    pub store_raw_text: bool,
+    pub link_user_corrections: bool,
+    pub update_self_trust: bool,
+    pub feed_world_model: bool,
+    pub feed_retrospective: bool,
+    pub critic: ReasoningQualityCriticConfig,
+    pub extractor_eval: ReasoningQualityExtractorEvalConfig,
+    pub patterns: ReasoningQualityPatternsConfig,
+}
+
+impl Default for ReasoningQualityConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            emit_inline_events: true,
+            post_turn_analysis: true,
+            post_session_analysis: true,
+            shadow_mode_days: 30,
+            apply_trust_updates_after_shadow: true,
+            max_claims_per_turn: 12,
+            max_excerpt_chars: 600,
+            store_raw_text: false,
+            link_user_corrections: true,
+            update_self_trust: true,
+            feed_world_model: true,
+            feed_retrospective: true,
+            critic: ReasoningQualityCriticConfig::default(),
+            extractor_eval: ReasoningQualityExtractorEvalConfig::default(),
+            patterns: ReasoningQualityPatternsConfig::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ReasoningQualityCriticConfig {
+    pub mode: String,
+    pub allow_llm: bool,
+    pub provider: String,
+    pub model: String,
+    pub max_tokens: u32,
+    pub temperature: f32,
+    pub max_turns_per_session: usize,
+    pub run_async: bool,
+    pub fallback_to_heuristic: bool,
+    pub budget: ReasoningQualityCriticBudgetConfig,
+}
+
+impl Default for ReasoningQualityCriticConfig {
+    fn default() -> Self {
+        Self {
+            mode: "hybrid".to_string(),
+            allow_llm: false,
+            provider: "default".to_string(),
+            model: String::new(),
+            max_tokens: 1200,
+            temperature: 0.0,
+            max_turns_per_session: 50,
+            run_async: true,
+            fallback_to_heuristic: true,
+            budget: ReasoningQualityCriticBudgetConfig::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ReasoningQualityCriticBudgetConfig {
+    pub per_session_token_cap: u64,
+    pub daily_usd_cap: f64,
+    pub weekly_usd_cap: f64,
+    pub respect_provider_cooldowns: bool,
+    pub emit_cost_events: bool,
+}
+
+impl Default for ReasoningQualityCriticBudgetConfig {
+    fn default() -> Self {
+        Self {
+            per_session_token_cap: 200_000,
+            daily_usd_cap: 10.0,
+            weekly_usd_cap: 50.0,
+            respect_provider_cooldowns: true,
+            emit_cost_events: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ReasoningQualityExtractorEvalConfig {
+    pub fixture_dir: String,
+    pub min_claim_precision: f32,
+    pub min_claim_recall: f32,
+    pub min_claim_before_source_precision: f32,
+    pub max_code_fence_false_positive_rate: f32,
+    pub max_quoted_user_false_positive_rate: f32,
+}
+
+impl Default for ReasoningQualityExtractorEvalConfig {
+    fn default() -> Self {
+        Self {
+            fixture_dir: "crates/archon-reasoning-quality/tests/fixtures/labeled_turns".to_string(),
+            min_claim_precision: 0.85,
+            min_claim_recall: 0.50,
+            min_claim_before_source_precision: 0.90,
+            max_code_fence_false_positive_rate: 0.05,
+            max_quoted_user_false_positive_rate: 0.05,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ReasoningQualityPatternsConfig {
+    pub window_days: u32,
+    pub min_events: usize,
+    pub min_distinct_sessions: usize,
+    pub repeated_pattern_trust_weight: f32,
+}
+
+impl Default for ReasoningQualityPatternsConfig {
+    fn default() -> Self {
+        Self {
+            window_days: 30,
+            min_events: 3,
+            min_distinct_sessions: 3,
+            repeated_pattern_trust_weight: 0.5,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SessionBriefingConfig {
+    pub enabled: bool,
+    pub include_memory: bool,
+    pub include_reasoning_quality: bool,
+    pub include_pending_behaviour_proposals: bool,
+    pub include_world_model: bool,
+    pub max_items: usize,
+    pub max_chars: usize,
+    pub world_model_requires_ready: bool,
+}
+
+impl Default for SessionBriefingConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            include_memory: true,
+            include_reasoning_quality: true,
+            include_pending_behaviour_proposals: true,
+            include_world_model: true,
+            max_items: 8,
+            max_chars: 4000,
+            world_model_requires_ready: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

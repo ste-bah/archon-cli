@@ -7,7 +7,10 @@ use tokio::sync::mpsc::Receiver;
 
 use reqwest::Url;
 
-use crate::provider::{LlmError, LlmProvider, LlmRequest, LlmResponse, ModelInfo, ProviderFeature};
+use crate::provider::{
+    DataFlowClassification, LlmError, LlmProvider, LlmRequest, LlmResponse, ModelInfo,
+    ProviderFeature,
+};
 use crate::providers::aws_auth::{resolve_credentials, signed_headers};
 use crate::streaming::StreamEvent;
 use crate::types::{ContentBlockType, Usage};
@@ -580,5 +583,9 @@ impl LlmProvider for BedrockProvider {
             | ProviderFeature::SystemPrompt => true,
             ProviderFeature::Vision => is_claude,
         }
+    }
+
+    fn data_flow_classification(&self) -> DataFlowClassification {
+        DataFlowClassification::Cloud
     }
 }

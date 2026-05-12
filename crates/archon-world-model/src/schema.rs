@@ -47,6 +47,7 @@ pub enum WorldTraceSource {
     Retrospective,
     Memory,
     AgentEvolution,
+    ReasoningQuality,
 }
 
 impl Default for WorldTraceSource {

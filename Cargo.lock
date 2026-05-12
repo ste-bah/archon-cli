@@ -331,6 +331,7 @@ dependencies = [
  "archon-plugin",
  "archon-policy",
  "archon-provenance",
+ "archon-reasoning-quality",
  "archon-sdk",
  "archon-session",
  "archon-tools",
@@ -342,6 +343,7 @@ dependencies = [
  "cozo-ce",
  "crossterm",
  "dirs",
+ "fd-lock",
  "futures-util",
  "globset",
  "hex",
@@ -813,6 +815,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "archon-reasoning-quality"
+version = "1.2.0-beta"
+dependencies = [
+ "anyhow",
+ "blake3",
+ "chrono",
+ "cozo-ce",
+ "hex",
+ "regex",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "archon-sdk"
 version = "1.2.0-beta"
 dependencies = [
@@ -1020,6 +1038,12 @@ dependencies = [
  "cpufeatures 0.2.17",
  "password-hash",
 ]
+
+[[package]]
+name = "arrayref"
+version = "0.3.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "76a2e8124351fda1ef8aaaa3bbd7ebbcb486bbcd4225aca0aa0d84bb2db8fecb"
 
 [[package]]
 name = "arrayvec"
@@ -1540,6 +1564,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "46502ad458c9a52b69d4d4d32775c788b7a1b85e8bc9d482d92250fc0e3f8efe"
 dependencies = [
  "digest 0.10.7",
+]
+
+[[package]]
+name = "blake3"
+version = "1.8.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0aa83c34e62843d924f905e0f5c866eb1dd6545fc4d719e803d9ba6030371fce"
+dependencies = [
+ "arrayref",
+ "arrayvec",
+ "cc",
+ "cfg-if",
+ "constant_time_eq",
+ "cpufeatures 0.3.0",
 ]
 
 [[package]]
@@ -2125,6 +2163,12 @@ name = "const-oid"
 version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a6ef517f0926dd24a1582492c791b6a4818a4d94e789a334894aa15b0d12f55c"
+
+[[package]]
+name = "constant_time_eq"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3d52eff69cd5e647efe296129160853a42795992097e8af39800e1060caeea9b"
 
 [[package]]
 name = "core-foundation"

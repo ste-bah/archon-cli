@@ -31,6 +31,7 @@ clap = { version = "4", features = ["derive"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream", "blocking"] }
 uuid = { version = "1", features = ["v4"] }
 sha2 = "0.10"
+blake3 = "1"
 hex = "0.4"
 oauth2 = "5"
 fd-lock = "4"
@@ -151,6 +152,7 @@ archon-tui = { path = "crates/archon-tui" }
 archon-learning = { path = "crates/archon-learning" }
 archon-observability = { path = "crates/archon-observability" }
 archon-world-model = { path = "crates/archon-world-model" }
+archon-reasoning-quality = { path = "crates/archon-reasoning-quality" }
 reqwest.workspace = true
 openssl.workspace = true
 chrono.workspace = true
@@ -160,6 +162,7 @@ serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 hex.workspace = true
+fd-lock.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 tokio-tungstenite.workspace = true

@@ -7,7 +7,10 @@ use async_trait::async_trait;
 use tokio::sync::mpsc::Receiver;
 
 use crate::anthropic::{AnthropicClient, ApiError};
-use crate::provider::{LlmError, LlmProvider, LlmRequest, LlmResponse, ModelInfo, ProviderFeature};
+use crate::provider::{
+    DataFlowClassification, LlmError, LlmProvider, LlmRequest, LlmResponse, ModelInfo,
+    ProviderFeature, classify_data_flow_endpoint,
+};
 use crate::streaming::StreamEvent;
 
 // ---------------------------------------------------------------------------
@@ -157,5 +160,9 @@ impl LlmProvider for AnthropicProvider {
 
     fn as_anthropic(&self) -> Option<&AnthropicClient> {
         Some(&self.client)
+    }
+
+    fn data_flow_classification(&self) -> DataFlowClassification {
+        classify_data_flow_endpoint(self.client.api_url())
     }
 }

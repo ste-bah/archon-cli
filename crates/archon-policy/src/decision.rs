@@ -123,6 +123,43 @@ impl EffectivePolicy {
             PolicyDecision::deny("world-model behavior-changing use is disabled by policy")
         }
     }
+
+    pub fn reasoning_quality_llm_critic_decision(
+        &self,
+        data_flow_class: &str,
+        third_party: bool,
+    ) -> PolicyDecision {
+        if !self.reasoning_quality.allow_llm_critic {
+            return PolicyDecision::deny("reasoning-quality LLM critic is disabled by policy");
+        }
+        if third_party && !self.reasoning_quality.allow_third_party_critic {
+            return PolicyDecision::deny(
+                "third-party reasoning-quality critic is disabled by policy",
+            );
+        }
+        if data_flow_class == "cloud" && !self.reasoning_quality.allow_critic_cloud_data_flow {
+            return PolicyDecision::deny(
+                "cloud critic data flow is disabled by policy.reasoning_quality",
+            );
+        }
+        PolicyDecision::allow("reasoning-quality LLM critic is enabled by policy")
+    }
+
+    pub fn reasoning_quality_raw_text_decision(&self) -> PolicyDecision {
+        if self.reasoning_quality.allow_raw_text_storage {
+            PolicyDecision::allow("reasoning-quality raw text storage is enabled by policy")
+        } else {
+            PolicyDecision::deny("reasoning-quality raw text storage is disabled by policy")
+        }
+    }
+
+    pub fn reasoning_quality_session_injection_decision(&self) -> PolicyDecision {
+        if self.reasoning_quality.allow_session_start_injection {
+            PolicyDecision::allow("reasoning-quality session briefing injection is enabled")
+        } else {
+            PolicyDecision::deny("reasoning-quality session briefing injection is disabled")
+        }
+    }
 }
 
 fn allow_provider_mode(
@@ -194,4 +231,28 @@ fn endpoint_looks_local(endpoint: &str) -> bool {
         || endpoint.starts_with("https://[::1]")
         || endpoint.starts_with("http://0.0.0.0")
         || endpoint.starts_with("https://0.0.0.0")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reasoning_quality_cloud_critic_is_denied_by_default() {
+        let policy = EffectivePolicy::default();
+        let decision = policy.reasoning_quality_llm_critic_decision("cloud", false);
+        assert!(!decision.allowed);
+    }
+
+    #[test]
+    fn reasoning_quality_cloud_critic_requires_cloud_flow_gate() {
+        let mut policy = EffectivePolicy::default();
+        policy.reasoning_quality.allow_llm_critic = true;
+        let denied = policy.reasoning_quality_llm_critic_decision("cloud", false);
+        assert!(!denied.allowed);
+
+        policy.reasoning_quality.allow_critic_cloud_data_flow = true;
+        let allowed = policy.reasoning_quality_llm_critic_decision("cloud", false);
+        assert!(allowed.allowed);
+    }
 }

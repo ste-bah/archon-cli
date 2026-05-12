@@ -5,7 +5,10 @@
 use async_trait::async_trait;
 use tokio::sync::mpsc::Receiver;
 
-use crate::provider::{LlmError, LlmProvider, LlmRequest, LlmResponse, ModelInfo, ProviderFeature};
+use crate::provider::{
+    DataFlowClassification, LlmError, LlmProvider, LlmRequest, LlmResponse, ModelInfo,
+    ProviderFeature, classify_data_flow_endpoint,
+};
 use crate::streaming::StreamEvent;
 use crate::types::{ContentBlockType, Usage};
 
@@ -481,5 +484,9 @@ impl LlmProvider for OpenAiProvider {
                 | ProviderFeature::SystemPrompt
                 | ProviderFeature::Vision
         )
+    }
+
+    fn data_flow_classification(&self) -> DataFlowClassification {
+        classify_data_flow_endpoint(&self.base_url)
     }
 }

@@ -71,6 +71,45 @@ pub enum ProviderFeature {
     Streaming,
 }
 
+/// Where request data leaves the machine when this provider is called.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DataFlowClassification {
+    Local,
+    UserOperated,
+    Cloud,
+}
+
+pub fn classify_data_flow_endpoint(endpoint: &str) -> DataFlowClassification {
+    let Ok(url) = url::Url::parse(endpoint) else {
+        return DataFlowClassification::UserOperated;
+    };
+    let Some(host) = url.host_str() else {
+        return DataFlowClassification::UserOperated;
+    };
+    if is_local_host(host) {
+        return DataFlowClassification::Local;
+    }
+    if matches!(url.scheme(), "http" | "https") {
+        DataFlowClassification::Cloud
+    } else {
+        DataFlowClassification::UserOperated
+    }
+}
+
+fn is_local_host(host: &str) -> bool {
+    let lower = host.to_ascii_lowercase();
+    if matches!(lower.as_str(), "localhost" | "127.0.0.1" | "::1") || lower.ends_with(".local") {
+        return true;
+    }
+    let Ok(addr) = lower.parse::<std::net::IpAddr>() else {
+        return false;
+    };
+    match addr {
+        std::net::IpAddr::V4(v4) => v4.is_private() || v4.is_loopback() || v4.is_link_local(),
+        std::net::IpAddr::V6(v6) => v6.is_loopback() || v6.is_unique_local(),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Request / response types
 // ---------------------------------------------------------------------------
@@ -199,12 +238,38 @@ pub trait LlmProvider: Send + Sync {
     /// Report whether this provider supports an optional capability.
     fn supports_feature(&self, feature: ProviderFeature) -> bool;
 
+    /// Classify outbound data flow for policy gates.
+    fn data_flow_classification(&self) -> DataFlowClassification {
+        DataFlowClassification::UserOperated
+    }
+
     /// Downcast to the underlying `AnthropicClient` if this provider wraps one.
     ///
     /// Returns `None` for all non-Anthropic providers. Used by code paths that
     /// need Anthropic-specific headers (auth, identity).
     fn as_anthropic(&self) -> Option<&AnthropicClient> {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn classifies_local_and_cloud_endpoints() {
+        assert_eq!(
+            classify_data_flow_endpoint("http://localhost:11434/v1"),
+            DataFlowClassification::Local
+        );
+        assert_eq!(
+            classify_data_flow_endpoint("http://192.168.1.10:8080/v1"),
+            DataFlowClassification::Local
+        );
+        assert_eq!(
+            classify_data_flow_endpoint("https://api.anthropic.com/v1"),
+            DataFlowClassification::Cloud
+        );
     }
 }
 

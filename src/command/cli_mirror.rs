@@ -142,6 +142,8 @@ mod tests {
             "completion",
             "behaviour",
             "pipeline",
+            "reasoning",
+            "briefing",
             "auth",
             "chat",
         ] {

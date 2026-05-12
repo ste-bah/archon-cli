@@ -59,6 +59,10 @@ impl AnthropicClient {
         &self.identity
     }
 
+    pub fn api_url(&self) -> &str {
+        &self.api_url
+    }
+
     /// Send a streaming messages request with automatic retry on 429/5xx.
     pub async fn stream_message(
         &self,
