@@ -65,12 +65,22 @@ fn phase1_provider_capability_set_stays_precise() {
 
 #[test]
 fn phase5_btw_routes_through_active_session_provider() {
-    let session = read("src/session.rs");
+    // Post-refactor (commit 02145e3 "Finalize 1.2.0 release and split session runtime"):
+    // btw side-question loop moved from src/session.rs into src/session/btw.rs;
+    // the local provider binding is now `provider` (already an `Arc<dyn LlmProvider>`),
+    // not `btw_provider`.
+    let btw = read("src/session/btw.rs");
+    let session_all = read_all(&[
+        "src/session.rs",
+        "src/session/btw.rs",
+    ]);
 
-    assert!(session.contains("let btw_provider = Arc::clone(&provider);"));
-    assert!(session.contains("provider.stream(request).await"));
-    assert!(session.contains("request_origin: Some(\"btw\".into())"));
-    assert!(!session.contains("btw side questions are not available in Codex-backed sessions yet"));
+    assert!(btw.contains("provider: Arc<dyn LlmProvider>"));
+    assert!(btw.contains("provider.stream(request).await"));
+    assert!(btw.contains("request_origin: Some(\"btw\".into())"));
+    assert!(
+        !session_all.contains("btw side questions are not available in Codex-backed sessions yet")
+    );
 }
 
 #[test]
@@ -95,8 +105,32 @@ fn phase4_pipelines_use_provider_neutral_adapter() {
     assert!(!gametheory.contains("AnthropicLlmAdapter"));
     assert!(!gametheory.contains("AnthropicClient::new"));
 
-    assert!(session.contains("ProviderLlmAdapter::new(Arc::clone(&provider))"));
-    assert!(!session.contains("tui-pipeline-device"));
+    // Post-refactor (commit 02145e3 "Finalize 1.2.0 release and split session runtime"):
+    // the ProviderLlmAdapter::new(Arc::clone(&provider)) site moved from
+    // src/session.rs into src/session/interactive_agent.rs. The negative
+    // `tui-pipeline-device` assert applies across the whole session module so
+    // the legacy hack can never sneak back in via a split file.
+    let interactive_agent = read("src/session/interactive_agent.rs");
+    let session_all = read_all(&[
+        "src/session.rs",
+        "src/session/btw.rs",
+        "src/session/build_agent.rs",
+        "src/session/build_prompt.rs",
+        "src/session/config_watcher.rs",
+        "src/session/event_forwarder.rs",
+        "src/session/interactive_agent.rs",
+        "src/session/interactive_bootstrap.rs",
+        "src/session/interactive_finish.rs",
+        "src/session/interactive_setup.rs",
+        "src/session/interactive_ui.rs",
+        "src/session/modes.rs",
+        "src/session/reasoning_quality.rs",
+        "src/session/slash_context_builder.rs",
+        "src/session/splash.rs",
+    ]);
+    let _ = session; // legacy binding kept above; phase4 enforcement now spans the module.
+    assert!(interactive_agent.contains("ProviderLlmAdapter::new(Arc::clone(&provider))"));
+    assert!(!session_all.contains("tui-pipeline-device"));
 }
 
 #[test]

@@ -58,7 +58,8 @@ the Phase 1/2 refactor targets or approved low-level helpers.
 | Path | Count | Current purpose | Parity action |
 |---|---:|---|---|
 | `src/session_loop/slash_handlers.rs` | 1 | Refresh Anthropic identity headers. | Keep low-level Anthropic-only only if scoped to `/refresh-identity`; otherwise route through provider diagnostics. |
-| `src/session.rs` | 2 | Main session and session restore. | Replace remaining low-level construction with provider router where practical. |
+| `src/session/build_agent.rs` | 1 | Build the active Agent's backing client during session setup (moved from `src/session.rs` by the v1.2.0 session split refactor). | Replace remaining low-level construction with provider router where practical. |
+| `src/session/interactive_bootstrap.rs` | 1 | Interactive session bootstrap (moved from `src/session.rs` by the v1.2.0 session split refactor). | Replace remaining low-level construction with provider router where practical. |
 | `src/runtime/llm.rs` | 1 | Runtime provider wrapper (one site wrapped in ObservedLlmProvider by PRD-006). | Approved low-level factory; command/pipeline/gametheory callers should use it instead of direct construction. |
 | `src/command/chat.rs` | 1 | One-shot Anthropic chat helper. | Route chat through the same provider router used by Codex. |
 | `crates/archon-sdk/src/query.rs` | 1 | SDK query client. | Decide whether SDK remains Anthropic-specific or accepts provider selection. |
