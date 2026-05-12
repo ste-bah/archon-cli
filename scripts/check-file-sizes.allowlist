@@ -227,3 +227,11 @@ src/command/providers.rs
 # harness from 82a33ca (event_channel + viewport-cached output). 538 lines
 # of fixture-rich tests; expected to grow as more render paths get coverage.
 crates/archon-tui/tests/render_coverage.rs
+
+# --- v1.2.0 provider-owned alias resolution (merge e304ef2) ---
+# Both files crossed 500 after adding CodexAliasMap + AnthropicAliasMap
+# resolution paths so providers own their tier->model mapping. Splitting
+# alias-map structs into separate modules is a follow-up; for now the
+# logic is tightly coupled to the provider client/adapter and lives here.
+crates/archon-llm/src/providers/codex/client.rs
+crates/archon-pipeline/src/llm_adapter.rs
