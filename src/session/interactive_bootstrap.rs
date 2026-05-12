@@ -184,7 +184,10 @@ pub(super) async fn prepare(
             config.checkpoint.max_checkpoints,
         ) {
             Ok(store) => {
-                tracing::info!("checkpoint store opened at {}", checkpoint_db_path.display());
+                tracing::info!(
+                    "checkpoint store opened at {}",
+                    checkpoint_db_path.display()
+                );
                 Some(store)
             }
             Err(e) => {
@@ -198,8 +201,7 @@ pub(super) async fn prepare(
     };
 
     let working_dir = std::env::current_dir().unwrap_or_default();
-    let hook_registry =
-        crate::runtime::hooks::load_runtime_hook_registry(&working_dir);
+    let hook_registry = crate::runtime::hooks::load_runtime_hook_registry(&working_dir);
     let mcp_configs = if resolved_flags.bare_mode {
         tracing::info!("bare mode: skipping MCP auto-discovery");
         Vec::new()

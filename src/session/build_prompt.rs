@@ -37,9 +37,7 @@ pub(super) fn build_system_prompt(
         identity_blocks
     };
 
-    if inject_output_style
-        && let Some(text) = output_style_prompt(cli, config)
-    {
+    if inject_output_style && let Some(text) = output_style_prompt(cli, config) {
         prompt.push(serde_json::json!({ "type": "text", "text": text }));
     }
     prompt
@@ -159,7 +157,10 @@ pub(super) fn build_interactive_system_prompt(
 fn agent_prompt_text(def: &archon_core::agents::definition::CustomAgentDefinition) -> String {
     let mut prompt = def.system_prompt.clone();
     if !def.tool_guidance.is_empty() {
-        prompt = format!("{prompt}\n\n<tool-guidance>\n{}\n</tool-guidance>", def.tool_guidance);
+        prompt = format!(
+            "{prompt}\n\n<tool-guidance>\n{}\n</tool-guidance>",
+            def.tool_guidance
+        );
     }
     if let Some(ref skills) = def.skills
         && !skills.is_empty()
@@ -184,10 +185,7 @@ fn agent_prompt_text(def: &archon_core::agents::definition::CustomAgentDefinitio
     prompt
 }
 
-fn output_style_prompt(
-    cli: &Cli,
-    config: &archon_core::config::ArchonConfig,
-) -> Option<String> {
+fn output_style_prompt(cli: &Cli, config: &archon_core::config::ArchonConfig) -> Option<String> {
     use archon_core::output_style::OutputStyleRegistry;
     use archon_core::output_style_loader::load_styles_from_dir;
 
@@ -212,7 +210,11 @@ fn output_style_prompt(
             }
         }
     }
-    if let Some(name) = cli.output_style.as_deref().or(config.output_style.as_deref()) {
+    if let Some(name) = cli
+        .output_style
+        .as_deref()
+        .or(config.output_style.as_deref())
+    {
         reg.get_or_default(name).prompt.clone()
     } else {
         reg.forced_plugin_style().and_then(|s| s.prompt.clone())

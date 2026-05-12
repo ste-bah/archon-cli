@@ -39,8 +39,7 @@ pub(super) struct Runtime {
     pub leann_init_cancel: Arc<AtomicBool>,
     pub learning_cozo_db: Option<Arc<cozo::DbInstance>>,
     pub governed_learning_db: Option<Arc<cozo::DbInstance>>,
-    pub auto_trainer:
-        Option<Arc<archon_pipeline::learning::gnn::auto_trainer::AutoTrainer>>,
+    pub auto_trainer: Option<Arc<archon_pipeline::learning::gnn::auto_trainer::AutoTrainer>>,
     pub metrics: Arc<archon_tui::observability::ChannelMetrics>,
     pub agent_event_tx_for_dispatcher: tokio::sync::mpsc::UnboundedSender<TimestampedEvent>,
 }
@@ -58,9 +57,7 @@ pub(super) async fn build(
     checkpoint_store: Option<archon_session::checkpoint::CheckpointStore>,
     mut agent_config: AgentConfig,
     registry: archon_core::dispatch::ToolRegistry,
-    voice_event_rx: Option<
-        tokio::sync::mpsc::UnboundedReceiver<archon_tui::app::TuiEvent>,
-    >,
+    voice_event_rx: Option<tokio::sync::mpsc::UnboundedReceiver<archon_tui::app::TuiEvent>>,
 ) -> Result<Runtime> {
     let (agent_event_tx, agent_event_rx) =
         tokio::sync::mpsc::unbounded_channel::<TimestampedEvent>();
@@ -109,11 +106,10 @@ pub(super) async fn build(
     }
     let agent_registry_for_skills = Arc::clone(&agent_registry);
 
-    let task_service: Arc<dyn TaskService> =
-        Arc::new(archon_core::tasks::DefaultTaskService::new(
-            Arc::new(archon_core::agents::AgentRegistry::load(&working_dir)),
-            10000,
-        ));
+    let task_service: Arc<dyn TaskService> = Arc::new(archon_core::tasks::DefaultTaskService::new(
+        Arc::new(archon_core::agents::AgentRegistry::load(&working_dir)),
+        10000,
+    ));
 
     let leann_init_cancel = Arc::new(AtomicBool::new(false));
     let leann: Option<Arc<archon_pipeline::runner::LeannIntegration>> = {
@@ -363,10 +359,9 @@ async fn resolve_provider(
 
     if !provider_was_prebuilt {
         let selected_provider = provider.name().to_string();
-        let profile_id =
-            crate::runtime::provider_auth_selection::selected_provider_auth_profile_id(
-                &selected_provider,
-            );
+        let profile_id = crate::runtime::provider_auth_selection::selected_provider_auth_profile_id(
+            &selected_provider,
+        );
         crate::runtime::hooks::fire_provider_resolve_hook(
             hook_registry,
             working_dir,

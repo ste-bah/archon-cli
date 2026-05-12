@@ -42,14 +42,15 @@ pub(super) struct SlashContextBuildInput {
     pub cancel_handle: Arc<std::sync::Mutex<Option<Arc<crate::agent_handle::AgentHandle>>>>,
     pub agent_dispatcher: Arc<std::sync::Mutex<archon_tui::AgentDispatcher>>,
     pub cozo_db: Option<Arc<cozo::DbInstance>>,
-    pub auto_trainer:
-        Option<Arc<archon_pipeline::learning::gnn::auto_trainer::AutoTrainer>>,
+    pub auto_trainer: Option<Arc<archon_pipeline::learning::gnn::auto_trainer::AutoTrainer>>,
 }
 
 pub(super) fn build(input: SlashContextBuildInput) -> SlashCommandContext {
     let registry: Arc<crate::command::registry::Registry> =
         Arc::new(crate::command::registry::default_registry());
-    let dispatcher = Arc::new(crate::command::dispatcher::Dispatcher::new(Arc::clone(&registry)));
+    let dispatcher = Arc::new(crate::command::dispatcher::Dispatcher::new(Arc::clone(
+        &registry,
+    )));
     SlashCommandContext {
         fast_mode_shared: input.fast_mode_shared,
         effort_level_shared: input.effort_level_shared,

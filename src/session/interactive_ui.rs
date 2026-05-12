@@ -86,12 +86,11 @@ pub(super) async fn run(
             Arc::new(crate::agent_handle::NoopAgentRouter),
             agent_event_tx_for_dispatcher,
         )));
-    let cancel_handle_slot: Arc<
-        std::sync::Mutex<Option<Arc<crate::agent_handle::AgentHandle>>>,
-    > = Arc::new(std::sync::Mutex::new(None));
+    let cancel_handle_slot: Arc<std::sync::Mutex<Option<Arc<crate::agent_handle::AgentHandle>>>> =
+        Arc::new(std::sync::Mutex::new(None));
 
-    let cmd_ctx = super::slash_context_builder::build(
-        super::slash_context_builder::SlashContextBuildInput {
+    let cmd_ctx =
+        super::slash_context_builder::build(super::slash_context_builder::SlashContextBuildInput {
             fast_mode_shared,
             effort_level_shared,
             model_override_shared,
@@ -129,8 +128,7 @@ pub(super) async fn run(
             agent_dispatcher: Arc::clone(&agent_dispatcher_shared),
             cozo_db: learning_cozo_db,
             auto_trainer: auto_trainer.clone(),
-        },
-    );
+        });
 
     let slash_commands_disabled = resolved_flags.disable_slash_commands;
     let session_store_for_input = Arc::clone(&session_store);
@@ -194,8 +192,12 @@ pub(super) async fn run(
         ),
     );
 
-    let splash_opt =
-        super::splash::splash_config(resolved_flags.bare_mode, &active_model, &working_dir, session_id);
+    let splash_opt = super::splash::splash_config(
+        resolved_flags.bare_mode,
+        &active_model,
+        &working_dir,
+        session_id,
+    );
 
     let (btw_tx, btw_rx) = tokio::sync::mpsc::channel::<String>(8);
     super::btw::spawn_btw_loop(

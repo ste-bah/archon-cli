@@ -36,7 +36,8 @@ pub(super) async fn prepare(
     sandbox_flag: Arc<std::sync::atomic::AtomicBool>,
 ) -> Result<Setup> {
     let leann_index = super::init_leann_index(&working_dir);
-    let mut registry = archon_core::dispatch::create_default_registry(working_dir.clone(), leann_index);
+    let mut registry =
+        archon_core::dispatch::create_default_registry(working_dir.clone(), leann_index);
     registry.register(Box::new(archon_tools::bash::BashTool {
         timeout_secs: config.tools.bash_timeout,
         max_output_bytes: config.tools.bash_max_output,

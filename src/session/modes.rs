@@ -3,8 +3,8 @@ use archon_core::env_vars::ArchonEnvVars;
 use archon_core::print_mode::{PrintModeConfig, run_print_mode};
 use archon_core::remote::protocol::AgentMessage;
 
-use super::{BuiltAgent, agent_ledger, open_governed_learning_db};
 use super::build_agent::build_session_agent;
+use super::{BuiltAgent, agent_ledger, open_governed_learning_db};
 use crate::cli_args::Cli;
 
 /// Run a print-mode session: set up auth/agent, process one query, return exit code.

@@ -1,9 +1,9 @@
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
+use super::build_prompt::build_system_prompt;
 use crate::cli_args::Cli;
 use crate::command::utils::{apply_tool_filters, fetch_account_uuid};
-use super::build_prompt::build_system_prompt;
 use crate::runtime::llm::{
     build_llm_provider_selection, provider_construction_error_reason,
     record_anthropic_fallback_denied,
@@ -22,7 +22,9 @@ use archon_core::env_vars::ArchonEnvVars;
 use archon_llm::anthropic::AnthropicClient;
 use archon_llm::auth::resolve_auth_with_keys;
 use archon_llm::effort::EffortLevel;
-use archon_llm::identity::{IdentityMode, IdentityProvider, get_or_create_device_id, resolve_identity_mode};
+use archon_llm::identity::{
+    IdentityMode, IdentityProvider, get_or_create_device_id, resolve_identity_mode,
+};
 use archon_observability::ChannelMetricSink;
 
 pub(super) async fn build_session_agent(
@@ -152,7 +154,13 @@ pub(super) async fn build_session_agent(
         }
     }
 
-    let mut agent = Agent::new(provider, registry, agent_config, agent_event_tx, agent_registry);
+    let mut agent = Agent::new(
+        provider,
+        registry,
+        agent_config,
+        agent_event_tx,
+        agent_registry,
+    );
     let metrics = Arc::new(archon_tui::observability::ChannelMetrics::default());
     let metrics_sink: Arc<dyn ChannelMetricSink> = metrics.clone();
     agent.set_channel_metrics(metrics_sink);
@@ -220,7 +228,8 @@ async fn resolve_identity_and_api_client(
             return Err(archon_core::print_mode::EXIT_ERROR);
         }
     };
-    let identity_mode = resolve_identity_mode(&auth, cli.identity_spoof, &config.identity.as_view());
+    let identity_mode =
+        resolve_identity_mode(&auth, cli.identity_spoof, &config.identity.as_view());
     let account_uuid = fetch_account_uuid(&auth).await;
     let identity = IdentityProvider::new(
         identity_mode,
@@ -267,15 +276,18 @@ async fn resolve_session_provider(
 
     let provider = if super::is_codex_session(config) {
         let (provider, runtime_mode) =
-            match crate::runtime::codex_provider::build_codex_provider(config, "session_agent").await {
+            match crate::runtime::codex_provider::build_codex_provider(config, "session_agent")
+                .await
+            {
                 Ok(provider) => provider,
                 Err(error) => {
                     eprintln!("Codex provider failed: {error}");
                     return Err(archon_core::print_mode::EXIT_ERROR);
                 }
             };
-        let profile_id =
-            crate::runtime::provider_auth_selection::selected_provider_auth_profile_id(provider.name());
+        let profile_id = crate::runtime::provider_auth_selection::selected_provider_auth_profile_id(
+            provider.name(),
+        );
         observe_llm_provider_with_profile(provider, runtime_mode, profile_id)
     } else {
         let provider = match api_client {
@@ -287,7 +299,9 @@ async fn resolve_session_provider(
                     &config.llm.provider,
                     &selected_provider,
                     runtime_mode,
-                    selection.fallback_reason.unwrap_or("provider_construction_fallback"),
+                    selection
+                        .fallback_reason
+                        .unwrap_or("provider_construction_fallback"),
                 );
                 selection.provider
             }
@@ -303,8 +317,9 @@ async fn resolve_session_provider(
         };
         let selected_provider = provider.name().to_string();
         let runtime_mode = runtime_mode_for_provider_name(&selected_provider);
-        let profile_id =
-            crate::runtime::provider_auth_selection::selected_provider_auth_profile_id(&selected_provider);
+        let profile_id = crate::runtime::provider_auth_selection::selected_provider_auth_profile_id(
+            &selected_provider,
+        );
         observe_llm_provider_with_profile(provider, runtime_mode, profile_id)
     };
 
@@ -438,7 +453,8 @@ pub(super) async fn apply_agent_execution_overrides(
     }
     if let Some(ref pm) = def.permission_mode {
         let parent_mode = agent_config.permission_mode.lock().await.clone();
-        let decision = resolve_permission_overlay(&parent_mode, Some(pm), cli.dangerously_skip_permissions);
+        let decision =
+            resolve_permission_overlay(&parent_mode, Some(pm), cli.dangerously_skip_permissions);
         match decision.reason {
             PermissionOverlayReason::Applied => {
                 *agent_config.permission_mode.lock().await =

@@ -37,8 +37,7 @@ pub(super) async fn finish(
     provider_name: String,
     resume_messages: Option<Vec<serde_json::Value>>,
 ) -> FinishState {
-    if archon_consciousness::inner_voice::InnerVoice::is_enabled(config.consciousness.inner_voice)
-    {
+    if archon_consciousness::inner_voice::InnerVoice::is_enabled(config.consciousness.inner_voice) {
         let iv = Arc::new(tokio::sync::Mutex::new(
             archon_consciousness::inner_voice::InnerVoice::with_decay_rate(
                 config.consciousness.energy_decay_rate,
@@ -205,28 +204,27 @@ pub(super) async fn finish(
         session_id.to_string(),
     );
 
-    let last_assistant_response_shared =
-        super::event_forwarder::spawn_agent_event_forwarder(
-            super::event_forwarder::AgentEventForwarderConfig {
-                event_rx: agent_event_rx,
-                metrics,
-                tui_tx: tui_event_tx,
-                session_stats: Arc::clone(&session_stats_shared),
-                cost_alert_state,
-                cost_config: config.cost.clone(),
-                session_id: session_id.to_string(),
-                session_store: Arc::clone(&session_store),
-                permission_mode: Arc::clone(&permission_mode_shared),
-                permission_events_db: governed_learning_db.clone(),
-                agent_ledger_db: governed_learning_db,
-                ledger_context: super::agent_ledger::context(
-                    session_id,
-                    agent_def,
-                    agent_model_for_ledger,
-                    provider_name,
-                ),
-            },
-        );
+    let last_assistant_response_shared = super::event_forwarder::spawn_agent_event_forwarder(
+        super::event_forwarder::AgentEventForwarderConfig {
+            event_rx: agent_event_rx,
+            metrics,
+            tui_tx: tui_event_tx,
+            session_stats: Arc::clone(&session_stats_shared),
+            cost_alert_state,
+            cost_config: config.cost.clone(),
+            session_id: session_id.to_string(),
+            session_store: Arc::clone(&session_store),
+            permission_mode: Arc::clone(&permission_mode_shared),
+            permission_events_db: governed_learning_db.clone(),
+            agent_ledger_db: governed_learning_db,
+            ledger_context: super::agent_ledger::context(
+                session_id,
+                agent_def,
+                agent_model_for_ledger,
+                provider_name,
+            ),
+        },
+    );
 
     FinishState {
         perm_prompt_tx,
