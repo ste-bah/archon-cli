@@ -70,10 +70,7 @@ fn phase5_btw_routes_through_active_session_provider() {
     // the local provider binding is now `provider` (already an `Arc<dyn LlmProvider>`),
     // not `btw_provider`.
     let btw = read("src/session/btw.rs");
-    let session_all = read_all(&[
-        "src/session.rs",
-        "src/session/btw.rs",
-    ]);
+    let session_all = read_all(&["src/session.rs", "src/session/btw.rs"]);
 
     assert!(btw.contains("provider: Arc<dyn LlmProvider>"));
     assert!(btw.contains("provider.stream(request).await"));
