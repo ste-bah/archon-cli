@@ -171,14 +171,43 @@ impl Tool for TaskCreateTool {
             ..ctx.clone()
         };
 
+        // Bug-fix 2026-05-12: previously TASK_MANAGER.create_task() created
+        // the task as Pending and the spawn paths below never called
+        // set_status. Tasks remained Pending forever. We now transition
+        // Pending → Running on dispatch, and Running → Completed/Failed/
+        // Stopped on outcome. AutoBackgrounded leaves the task Running
+        // because the inner runner continues in its own task.
+        use crate::task_manager::{TASK_MANAGER, TaskStatus};
+
+        fn map_outcome_to_status(outcome: &SubagentOutcome) -> Option<TaskStatus> {
+            match outcome {
+                SubagentOutcome::Completed(_) => Some(TaskStatus::Completed),
+                SubagentOutcome::Failed(_) => Some(TaskStatus::Failed),
+                SubagentOutcome::Cancelled => Some(TaskStatus::Stopped),
+                // Inner runner keeps executing in a detached task — final
+                // status will be set when on_inner_complete fires (not from
+                // this call site). Leave as Running.
+                SubagentOutcome::AutoBackgrounded => None,
+            }
+        }
+
         match exec.classify(&request) {
             SubagentClassification::ExplicitBackground => {
-                // Spawn detached and return task_id + spawn marker synchronously.
+                // Transition Pending → Running synchronously so the response
+                // we hand back reflects the dispatched state.
+                TASK_MANAGER.set_status(&task_id, TaskStatus::Running);
+
+                // Spawn detached. The closure owns task_id so it can update
+                // TASK_MANAGER when run_subagent returns.
                 let sid_spawn = subagent_id.clone();
                 let cancel = CancellationToken::new();
                 let ctx_spawn = nested_ctx.clone();
+                let task_id_spawn = task_id.clone();
                 archon_observability::spawn_named("task-create-subagent-background", async move {
-                    let _ = run_subagent(sid_spawn, request, cancel, ctx_spawn).await;
+                    let outcome = run_subagent(sid_spawn, request, cancel, ctx_spawn).await;
+                    if let Some(final_status) = map_outcome_to_status(&outcome) {
+                        TASK_MANAGER.set_status(&task_id_spawn, final_status);
+                    }
                 });
                 let response = json!({
                     "task_id": task_id,
@@ -191,8 +220,15 @@ impl Tool for TaskCreateTool {
                 }
             }
             SubagentClassification::Foreground => {
+                // Transition Pending → Running before awaiting the runner so
+                // any concurrent /tasks query sees Running, not Pending.
+                TASK_MANAGER.set_status(&task_id, TaskStatus::Running);
+
                 let cancel = CancellationToken::new();
                 let outcome = run_subagent(subagent_id.clone(), request, cancel, nested_ctx).await;
+                if let Some(final_status) = map_outcome_to_status(&outcome) {
+                    TASK_MANAGER.set_status(&task_id, final_status);
+                }
                 match outcome {
                     SubagentOutcome::Completed(text) => {
                         let response = json!({ "task_id": task_id, "result": text });

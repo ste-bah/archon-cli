@@ -4,6 +4,7 @@ use std::time::Duration;
 use serde_json::json;
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
+use tokio_util::sync::CancellationToken;
 
 use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
 
@@ -126,9 +127,27 @@ impl Tool for BashTool {
             Err(e) => return ToolResult::error(format!("Failed to spawn bash: {e}")),
         };
 
-        // Read output with timeout
-        let timeout = Duration::from_millis(timeout_ms);
-        let result = tokio::time::timeout(timeout, async {
+        // Read output with timeout AND respect parent cancellation token.
+        // Bug-fix 2026-05-12: previously this only enforced the timeout; the
+        // CancellationToken from `ctx.cancel_parent` was ignored, so Ctrl+C /
+        // double-Esc could not interrupt a long-running Bash command spawned
+        // by a subagent. We now race three signals — completion, timeout,
+        // cancel — and kill the process group on either non-completion path.
+        let timeout_dur = Duration::from_millis(timeout_ms);
+        // Fall back to a fresh (never-cancelled) token when there's no parent
+        // chain, so the `select!` arm shape stays uniform.
+        let cancel_token = ctx
+            .cancel_parent
+            .clone()
+            .unwrap_or_else(CancellationToken::new);
+
+        enum BashOutcome {
+            Done((Vec<u8>, Vec<u8>, std::io::Result<std::process::ExitStatus>)),
+            Timeout,
+            Cancelled,
+        }
+
+        let work = tokio::time::timeout(timeout_dur, async {
             let mut stdout_buf = Vec::new();
             let mut stderr_buf = Vec::new();
 
@@ -141,11 +160,19 @@ impl Tool for BashTool {
 
             let status = child.wait().await;
             (stdout_buf, stderr_buf, status)
-        })
-        .await;
+        });
 
-        match result {
-            Ok((stdout_buf, stderr_buf, status)) => {
+        let outcome = tokio::select! {
+            biased;
+            _ = cancel_token.cancelled() => BashOutcome::Cancelled,
+            res = work => match res {
+                Ok(triple) => BashOutcome::Done(triple),
+                Err(_) => BashOutcome::Timeout,
+            }
+        };
+
+        match outcome {
+            BashOutcome::Done((stdout_buf, stderr_buf, status)) => {
                 let exit_code = status.as_ref().ok().and_then(|s| s.code()).unwrap_or(-1);
 
                 let mut output = String::new();
@@ -177,10 +204,18 @@ impl Tool for BashTool {
                     ToolResult::success(output)
                 }
             }
-            Err(_) => {
+            BashOutcome::Timeout => {
                 // Timeout -- kill the process group
                 let _ = child.kill().await;
                 ToolResult::error(format!("Command timed out after {}ms", timeout_ms))
+            }
+            BashOutcome::Cancelled => {
+                // Parent cancelled (Ctrl+C / double-Esc / /cancel) — kill the
+                // process group and reap so the child doesn't become a zombie.
+                let _ = child.kill().await;
+                let _ = child.wait().await;
+                tracing::info!("bash: command cancelled by parent CancellationToken");
+                ToolResult::error("Command cancelled by user".to_string())
             }
         }
     }

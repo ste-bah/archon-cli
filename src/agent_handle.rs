@@ -48,7 +48,13 @@ use tokio_util::sync::CancellationToken;
 /// `TurnRunner` trait.
 pub struct AgentHandle {
     agent: Arc<Mutex<Agent>>,
-    cancel_slot: Arc<Mutex<Option<CancellationToken>>>,
+    /// Bug-fix 2026-05-12: switched from `tokio::sync::Mutex` to
+    /// `std::sync::Mutex` so `fire_cancel` can lock synchronously without
+    /// the previous `try_lock` silent-no-op on contention. Both critical
+    /// sections in `run_turn` (slot set / slot clear) hold the lock for
+    /// only a single synchronous mutation — never across an `.await` — so
+    /// using std::sync::Mutex from async code is sound here.
+    cancel_slot: Arc<std::sync::Mutex<Option<CancellationToken>>>,
     /// v0.1.23: AutoCapture instance for per-turn regex-based memory detection.
     auto_capture: Option<Arc<AutoCapture>>,
     /// GNN auto-trainer — when present, the auto-capture site below records each
@@ -64,21 +70,31 @@ impl AgentHandle {
     ) -> Self {
         Self {
             agent,
-            cancel_slot: Arc::new(Mutex::new(None)),
+            cancel_slot: Arc::new(std::sync::Mutex::new(None)),
             auto_capture,
             auto_trainer,
         }
     }
 
     /// Fire the CancellationToken associated with the in-flight turn, if
-    /// any. Synchronous / non-blocking; uses `try_lock` so Ctrl+C never
-    /// waits on a contended lock.
+    /// any. Synchronous; takes the std mutex briefly. Logs the outcome so
+    /// silent-no-op cancellation failures are visible in traces.
     pub fn fire_cancel(&self) {
-        if let Ok(guard) = self.cancel_slot.try_lock()
-            && let Some(ref token) = *guard
-        {
-            token.cancel();
-            tracing::info!("AgentHandle: fired CancellationToken on current turn");
+        let guard = match self.cancel_slot.lock() {
+            Ok(g) => g,
+            Err(poisoned) => {
+                tracing::warn!("AgentHandle: cancel_slot mutex poisoned; recovering inner state");
+                poisoned.into_inner()
+            }
+        };
+        match guard.as_ref() {
+            Some(token) => {
+                token.cancel();
+                tracing::info!("AgentHandle: fired CancellationToken on current turn");
+            }
+            None => {
+                tracing::debug!("AgentHandle: fire_cancel called but no in-flight turn");
+            }
         }
     }
 }
@@ -96,7 +112,7 @@ impl TurnRunner for AgentHandle {
             // child_token() chains for the duration of this turn.
             let cancel = CancellationToken::new();
             {
-                let mut slot = cancel_slot.lock().await;
+                let mut slot = cancel_slot.lock().unwrap_or_else(|p| p.into_inner());
                 *slot = Some(cancel.clone());
             }
             // v0.1.23: AutoCapture — regex-based memory detection at turn boundary.
@@ -143,7 +159,7 @@ impl TurnRunner for AgentHandle {
             guard.set_cancel_token(None);
             drop(guard);
             {
-                let mut slot = cancel_slot.lock().await;
+                let mut slot = cancel_slot.lock().unwrap_or_else(|p| p.into_inner());
                 *slot = None;
             }
             result

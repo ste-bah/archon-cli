@@ -43,6 +43,49 @@ fn ctrl_c_during_generation_returns_send_cancel() {
 }
 
 #[test]
+fn double_esc_during_generation_returns_send_cancel() {
+    // Regression: prior to 2026-05-12 the Esc handler flipped is_generating
+    // and printed "[interrupted]" but returned KeyResult::Nothing — the
+    // cancel chain never fired and the agent kept running. Double-Esc must
+    // emit SendCancel exactly like Ctrl+C.
+    let mut app = App::new();
+    app.is_generating = true;
+    let keymap = KeyMap::default();
+    let esc = make_key(KeyCode::Esc, KeyModifiers::NONE);
+
+    // First Esc: dismisses suggestions / records timestamp. No cancel yet.
+    let first = handle_key(&mut app, esc, &keymap);
+    assert!(matches!(first, KeyResult::Nothing));
+    assert!(app.is_generating, "single Esc must not flip is_generating");
+
+    // Second Esc within 500ms: real cancel.
+    let second = handle_key(&mut app, esc, &keymap);
+    assert!(
+        matches!(second, KeyResult::SendCancel),
+        "double-Esc during generation must return SendCancel"
+    );
+    assert!(!app.is_generating, "double-Esc must flip is_generating");
+}
+
+#[test]
+fn double_esc_when_not_generating_does_not_send_cancel() {
+    // Double-Esc when no turn is in flight must NOT emit a cancel signal —
+    // there's nothing to cancel, and an unsolicited "__cancel__" message
+    // would log a spurious "no in-flight turn to cancel" warning.
+    let mut app = App::new();
+    app.is_generating = false;
+    let keymap = KeyMap::default();
+    let esc = make_key(KeyCode::Esc, KeyModifiers::NONE);
+
+    let _ = handle_key(&mut app, esc, &keymap);
+    let second = handle_key(&mut app, esc, &keymap);
+    assert!(
+        matches!(second, KeyResult::Nothing),
+        "double-Esc with is_generating=false must return Nothing"
+    );
+}
+
+#[test]
 fn enter_submits_text() {
     let mut app = App::new();
     for c in "hello".chars() {

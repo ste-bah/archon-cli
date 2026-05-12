@@ -93,15 +93,23 @@ pub fn handle_key(app: &mut App, key: KeyEvent, keymap: &KeyMap) -> KeyResult {
                 .last_esc()
                 .map(|last| now.duration_since(last).as_millis() < 500)
                 .unwrap_or(false);
-            if double_esc {
+            app.set_last_esc(Some(now));
+            // Bug-fix 2026-05-12: double-Esc must emit SendCancel so the cancel
+            // chain (__cancel__ → AgentHandle::fire_cancel → JoinHandle::abort
+            // → CancellationToken cascade) actually fires. Previously this
+            // path only flipped display flags and printed "[interrupted]" —
+            // theater with no real effect on the in-flight turn.
+            if double_esc && app.is_generating {
                 app.is_generating = false;
                 app.active_tool = None;
                 app.output.append_line("[interrupted]");
+                KeyResult::SendCancel
             } else {
-                app.input.dismiss_suggestions();
+                if !double_esc {
+                    app.input.dismiss_suggestions();
+                }
+                KeyResult::Nothing
             }
-            app.set_last_esc(Some(now));
-            KeyResult::Nothing
         }
         Action::CyclePermissionMode => {
             let current = &app.status.permission_mode;
