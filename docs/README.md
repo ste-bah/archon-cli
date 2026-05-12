@@ -97,11 +97,12 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 ## Operations
 
 - [Session management](operations/session-management.md) — resume, fork, checkpoint, rewind
+- [Web workbench](operations/web-workbench.md) — browser interface tabs, data sources, action safety, and setup
 - [TUI customization](operations/tui-customization.md) — themes, vim mode, keybindings
 - [Cost, effort, fast mode](operations/cost-effort.md) — token tracking, model selection, latency tuning
 - [Context compaction](operations/context-compaction.md) — automatic and manual compression
 - [Cron & scheduling](operations/cron-scheduling.md) — recurring tasks, one-shot delays
-- [Remote control](operations/remote-control.md) — WebSocket server, headless mode, web UI
+- [Remote control](operations/remote-control.md) — WebSocket server, SSH, headless mode, and web launch
 - [Troubleshooting](operations/troubleshooting.md) — known issues, recovery procedures
 - [Data locations](operations/data-locations.md) — where logs, configs, memory, snapshots live
 - [Setup wizard](operations/setup-wizard.md) — `/setup-archon-skills` interactive configuration walkthrough
@@ -120,6 +121,9 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 
 ## Release notes
 
+- [v1.2.3](release-notes/v1.2.3.md) — Browser web workbench for local Archon inspection and operations
+- [v1.2.2](release-notes/v1.2.2.md) — Provider-aware auto-compaction
+- [v1.2.1](release-notes/v1.2.1.md) — TUI cancellation and TaskCreate lifecycle fixes
 - [v1.2.0](release-notes/v1.2.0.md) — Local trace world model plus reasoning-quality events and proactive briefing
 - [v1.1.0-beta.3](release-notes/v1.1.0-beta.3.md) — Provider runtime governance and governed agent evolution (supersedes unpublished v1.1.0-beta.1 and v1.1.0-beta.2)
 - [v1.0.1](release-notes/v1.0.1.md) — Provider-neutral hybrid retrospective analysis

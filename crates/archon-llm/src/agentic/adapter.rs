@@ -106,10 +106,10 @@ impl AgenticTurnState {
             }
             StreamEvent::ContentBlockStart {
                 index,
-                block_type,
+                block_type: ContentBlockType::ToolUse,
                 tool_use_id,
                 tool_name,
-            } if block_type == ContentBlockType::ToolUse => {
+            } => {
                 self.tool_start(index, tool_use_id, tool_name, sink).await?;
             }
             StreamEvent::TextDelta { text, .. } => {

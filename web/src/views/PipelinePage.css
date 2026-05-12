@@ -1,0 +1,144 @@
+.pipeline-layout {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.pipeline-metrics,
+.stage-lane {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.pipeline-metric,
+.stage-card,
+.output-card,
+.pipeline-event,
+.pipeline-empty {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+.pipeline-metric {
+  display: grid;
+  gap: 6px;
+  min-height: 118px;
+  padding: 14px;
+}
+
+.pipeline-metric__icon {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  color: var(--accent);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.stage-card {
+  display: grid;
+  gap: 9px;
+  min-height: 112px;
+  padding: 13px;
+}
+
+.stage-card header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.stage-card span,
+.stage-card small,
+.pipeline-row span,
+.pipeline-row small,
+.output-card span,
+.output-card small,
+.pipeline-empty {
+  color: var(--muted);
+}
+
+.pipeline-list {
+  display: grid;
+  gap: 8px;
+  max-height: 460px;
+  overflow: auto;
+}
+
+.pipeline-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 74px;
+  padding: 11px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+.pipeline-row div,
+.output-card {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.pipeline-row span,
+.output-card span {
+  overflow-wrap: anywhere;
+}
+
+.output-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.pipeline-event-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.output-card,
+.pipeline-event,
+.pipeline-empty {
+  min-height: 118px;
+  padding: 13px;
+}
+
+.output-card footer,
+.pipeline-event header,
+.pipeline-empty {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.output-card footer,
+.pipeline-event header {
+  justify-content: space-between;
+}
+
+.output-card p,
+.pipeline-event p,
+.pipeline-event small {
+  margin: 0;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 980px) {
+  .pipeline-layout,
+  .pipeline-metrics,
+  .stage-lane,
+  .pipeline-event-grid,
+  .output-grid {
+    grid-template-columns: 1fr;
+  }
+}

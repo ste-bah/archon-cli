@@ -23,23 +23,34 @@ cd archon-cli
 sudo scripts/install-system-deps.sh --check || sudo scripts/install-system-deps.sh
 # Optional sandbox deps: sudo scripts/install-system-deps.sh --with-sandbox
 cargo build --release --bin archon
+ARCHON_BIN="$(pwd)/target/release/archon"
 
 # Authenticate with Claude/Anthropic OAuth or API-key billing
-./target/release/archon auth login --provider anthropic
+"$ARCHON_BIN" auth login --provider anthropic
 # or: export ANTHROPIC_API_KEY="sk-ant-api..."
 
 # Optional: authenticate with a ChatGPT/Codex subscription
-./target/release/archon auth login --provider openai-codex
-./target/release/archon auth status
+"$ARCHON_BIN" auth login --provider openai-codex
+"$ARCHON_BIN" auth status
 
 # Optional: store a Google Gemini API key for cloud VLM image descriptions
-./target/release/archon auth login --provider google
+"$ARCHON_BIN" auth login --provider google
 
-# Run interactive TUI
-./target/release/archon
+# Initialise a blank project directory
+mkdir -p ~/projects/my-archon-project
+sh scripts/archon-init.sh \
+  --target ~/projects/my-archon-project \
+  --archon-cli-repo "$(pwd)"
+
+# Run interactive TUI from the project root
+cd ~/projects/my-archon-project
+"$ARCHON_BIN"
 
 # Non-interactive print mode
-./target/release/archon -p "summarize Cargo.toml" --output-format json
+"$ARCHON_BIN" -p "summarize this project layout" --output-format json
+
+# Browser workbench
+"$ARCHON_BIN" web --port 8421 --bind-address 127.0.0.1
 ```
 
 WSL2 builders: add `-j1` to avoid OOM during compilation.
@@ -112,7 +123,7 @@ The docs are organised by user goal:
 | **Reference** | [`docs/reference/`](docs/reference/) — slash commands, tools, skills, permissions, config schema, CLI flags, env vars |
 | **Integrations** | [`docs/integrations/`](docs/integrations/) — MCP, plugins, hooks, identity spoofing, VLM image descriptions, LSP, IDE extensions |
 | **Cookbook** | [`docs/cookbook/`](docs/cookbook/) — real-world evidence workflows, strategic engagement, memory-driven coding, god-code pipeline, custom agents |
-| **Operations** | [`docs/operations/`](docs/operations/) — sessions, TUI, cost, compaction, cron, remote control, troubleshooting, data locations |
+| **Operations** | [`docs/operations/`](docs/operations/) — sessions, web workbench, TUI, cost, compaction, cron, remote control, troubleshooting, data locations |
 | **Development** | [`docs/development/`](docs/development/) — contributing, dev flow gates, adding tools/skills/agents, release process |
 | **Release notes** | [`docs/release-notes/`](docs/release-notes/) — per-version changelogs |
 
@@ -155,9 +166,9 @@ archon-cli/
 
 ## Status
 
-- Current version: **v1.2.0** ([release notes](docs/release-notes/v1.2.0.md))
+- Current version: **v1.2.3** ([release notes](docs/release-notes/v1.2.3.md))
 - Stable release for local world-model advisory learning, first-class reasoning-quality events, provider runtime governance, Cozo-backed agent evolution, permission preflight, and sandbox routing
-- v1.2.0 adds the local world-model corpus, fail-open advisor, dynamic training, counterfactual scoring, runtime outcome feedback, agent-evolution signals, accelerator backend probes, visible claim/evidence capture, optional policy-gated LLM critique, and proactive session briefing on top of the v1.1.0-beta.3 provider runtime and governed agent-evolution baseline.
+- v1.2.3 adds the browser web workbench on top of the v1.2.2 provider-aware auto-compaction, v1.2.1 TUI cancellation, and v1.2.0 local world-model/reasoning-quality baseline.
 
 ## Contributing
 

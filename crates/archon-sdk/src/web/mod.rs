@@ -3,19 +3,35 @@
 ///
 /// The server binds to `127.0.0.1:8421` by default. Binding to a non-loopback
 /// address requires explicit configuration and activates bearer-token auth.
+pub mod actions;
+pub mod api;
 pub mod assets;
+pub mod auth;
+pub mod corpus;
+pub mod evidence;
+pub mod inspect;
+pub mod live;
+pub mod metrics;
+pub mod pipelines;
+pub mod settings;
+pub mod uploads;
+pub mod world;
 
 use std::net::SocketAddr;
 
+use api::{EffectivePolicySummary, WebApiState};
 use axum::http::HeaderValue;
 use axum::{
     Router,
     extract::{Path, State},
     http::{HeaderMap, StatusCode},
     response::{Html, IntoResponse, Response},
-    routing::get,
+    routing::{get, post},
 };
+use live::WebLiveManager;
 use tower_http::cors::{AllowOrigin, Any, CorsLayer};
+
+pub use api::{WebPolicySummary, WebSubsystemPolicySummary};
 
 // ---------------------------------------------------------------------------
 // WebConfig
@@ -60,9 +76,13 @@ impl WebConfig {
 
 /// Internal server state threaded through Axum handlers.
 #[derive(Clone)]
-struct AppState {
+pub(crate) struct AppState {
     /// Bearer token required for non-localhost access; `None` = no auth.
     token: Option<String>,
+    /// Read-only API state surfaced to the web workbench shell.
+    api: WebApiState,
+    /// Bounded live event buffer used by the web workbench.
+    live: WebLiveManager,
 }
 
 /// HTTP server that serves the embedded SPA.
@@ -74,6 +94,7 @@ struct AppState {
 pub struct WebServer {
     config: WebConfig,
     token: Option<String>,
+    policy: EffectivePolicySummary,
 }
 
 impl WebServer {
@@ -82,7 +103,19 @@ impl WebServer {
     /// `token` is the bearer token required when binding to a non-loopback
     /// address. Pass `None` for localhost-only deployments.
     pub fn new(config: WebConfig, token: Option<String>) -> Self {
-        Self { config, token }
+        Self::with_policy(config, token, EffectivePolicySummary::default_safe())
+    }
+
+    pub fn with_policy(
+        config: WebConfig,
+        token: Option<String>,
+        policy: EffectivePolicySummary,
+    ) -> Self {
+        Self {
+            config,
+            token,
+            policy,
+        }
     }
 
     /// Bind and serve. Blocks until the server is shut down.
@@ -99,8 +132,17 @@ impl WebServer {
             );
         }
 
+        let live = WebLiveManager::new(1024);
+        live.record("web.runtime.started", "Archon web workbench started");
+
         let state = AppState {
             token: self.token.clone(),
+            api: WebApiState::from_server_config(
+                &self.config,
+                self.token.is_some(),
+                self.policy.clone(),
+            ),
+            live,
         };
 
         let local_origins: Vec<HeaderValue> = [
@@ -119,6 +161,31 @@ impl WebServer {
         let app = Router::new()
             .route("/", get(index_handler))
             .route("/health", get(health_handler))
+            .route("/api/status", get(api::status_handler))
+            .route("/api/auth/session", get(auth::session_handler))
+            .route("/api/auth/logout", post(auth::logout_handler))
+            .route("/api/config/effective", get(api::config_handler))
+            .route("/api/policy/effective", get(api::policy_handler))
+            .route("/api/live/snapshot", get(live::snapshot_handler))
+            .route(
+                "/api/actions/evaluate",
+                post(actions::evaluate_action_handler),
+            )
+            .route("/api/uploads/policy", get(uploads::policy_handler))
+            .route("/api/uploads/intent", post(uploads::intent_handler))
+            .route("/api/corpus/summary", get(corpus::summary_handler))
+            .route("/api/corpus/search", get(corpus::search_handler))
+            .route("/api/corpus/source", get(corpus::preview_handler))
+            .route("/api/learning/summary", get(inspect::learning_handler))
+            .route("/api/world/summary", get(world::summary_handler))
+            .route("/api/pipelines/summary", get(pipelines::summary_handler))
+            .route("/api/metrics/summary", get(metrics::summary_handler))
+            .route("/api/evidence/graph", get(evidence::graph_handler))
+            .route("/api/settings/summary", get(inspect::settings_handler))
+            .route(
+                "/api/settings/theme-profile",
+                get(settings::theme_profile_handler).post(settings::save_theme_profile_handler),
+            )
             .route("/static/{*path}", get(static_handler))
             .layer(cors)
             .with_state(state);
@@ -189,7 +256,7 @@ async fn static_handler(
 // ---------------------------------------------------------------------------
 
 #[allow(clippy::result_large_err)]
-fn check_auth(state: &AppState, headers: &HeaderMap) -> Result<(), Response> {
+pub(crate) fn check_auth(state: &AppState, headers: &HeaderMap) -> Result<(), Response> {
     let Some(ref required) = state.token else {
         return Ok(());
     };

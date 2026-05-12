@@ -50,7 +50,17 @@ Launch a browser-based UI:
 archon web --port 8421 --bind-address 127.0.0.1
 ```
 
-Opens `http://localhost:8421` (with `--no-open` to skip auto-launch). The web UI surfaces a chat interface, session manager, agent picker, and tool inspector backed by the same JSON-RPC protocol as `archon ide-stdio`.
+Opens `http://localhost:8421` (with `--no-open` to skip auto-launch). Launch
+from the project root you want to inspect. For a blank project, run
+`archon-init.sh` first so `.archon/`, `prds/`, `tasks/`, policy defaults, and
+docs inboxes exist.
+
+The web workbench is embedded in the `archon` binary; normal users do not need
+Node.js, Vite, or a per-project frontend install. It surfaces chat, attachment
+metadata, corpus/docs state, memory and learning rows, world-model and
+reasoning-quality data, pipeline status, metrics, settings, and the evidence
+graph. See [Web workbench](web-workbench.md) for the full tab guide and safety
+model.
 
 Configure:
 ```toml
@@ -59,6 +69,10 @@ port = 8421
 bind_address = "127.0.0.1"
 open_browser = true
 ```
+
+For local use, keep `bind_address = "127.0.0.1"`. Binding to `0.0.0.0` makes
+the workbench network-accessible and causes Archon to create/use a bearer token.
+Use that only behind a trusted network boundary or reverse proxy.
 
 ## Headless mode
 
@@ -118,5 +132,6 @@ Configure the displayed URL via `--remote-url` or `[ws_remote]` settings.
 ## See also
 
 - [IDE extensions](../integrations/ide-extensions.md) — VS Code / JetBrains use `ide-stdio`
+- [Web workbench](web-workbench.md) — browser tabs, data sources, action safety, and troubleshooting
 - [CLI flags](../reference/cli-flags.md) — `serve`, `remote`, `web`, `--headless`
 - [Configuration](../reference/config.md) — `[ws_remote]`, `[web]`, `[remote.ssh]`

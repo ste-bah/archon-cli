@@ -141,6 +141,13 @@ require_approval_for_prompt_changes = true
 require_approval_for_blocking_gates = true
 require_approval_for_network_changes = true
 
+[policy.web]
+allow_mutating_actions = false
+allow_file_uploads = false
+allow_pipeline_controls = false
+allow_model_training_actions = false
+allow_corpus_open_paths = false
+
 [policy.docs.vlm]
 enabled = false
 mode = "disabled"

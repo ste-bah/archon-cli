@@ -1,23 +1,12 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProviderFallbackPolicy {
     pub enabled: bool,
     pub allow_codex_app_server_to_direct: bool,
     pub allow_identity_surface_change: bool,
     pub allow_cross_provider_family: bool,
-}
-
-impl Default for ProviderFallbackPolicy {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            allow_codex_app_server_to_direct: false,
-            allow_identity_surface_change: false,
-            allow_cross_provider_family: false,
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

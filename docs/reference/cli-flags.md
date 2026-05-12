@@ -24,7 +24,7 @@ subagents, coding/research pipelines, and gametheory through Codex.
 | `archon serve [--port PORT] [--token-path PATH]` | Start WebSocket server for remote agent access |
 | `archon remote ws <URL> [--token TOKEN]` | Connect to remote agent via WebSocket |
 | `archon remote ssh <TARGET>` | Connect to remote agent via SSH |
-| `archon web [--port PORT] [--bind-address ADDR] [--no-open]` | Start browser-based web UI |
+| `archon web [--port PORT] [--bind-address ADDR] [--no-open]` | Start browser-based web workbench |
 | `archon team run --team NAME <GOAL>` | Execute a multi-agent team on a goal using the configured provider |
 | `archon team list` | List configured teams |
 | `archon plugin list` | List discovered plugins |
@@ -134,6 +134,9 @@ subagents, coding/research pipelines, and gametheory through Codex.
 | Flag | Purpose |
 |---|---|
 | `--remote-url <URL>` | Remote URL for `/session` QR display |
+
+See [Web workbench](../operations/web-workbench.md) for the browser tab guide,
+data sources, and action safety model.
 
 ### MCP & directories
 

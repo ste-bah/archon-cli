@@ -1,0 +1,98 @@
+.metrics-layout {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.metrics-card,
+.metrics-row,
+.metrics-event,
+.metrics-empty {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+.metrics-card {
+  display: grid;
+  gap: 6px;
+  min-height: 118px;
+  padding: 14px;
+}
+
+.metrics-card__icon {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  color: var(--accent);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.metrics-list,
+.metrics-event-list {
+  display: grid;
+  gap: 8px;
+}
+
+.metrics-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 70px;
+  padding: 11px;
+}
+
+.metrics-row div,
+.metrics-event {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.metrics-row span,
+.metrics-row small,
+.metrics-event p,
+.metrics-event small,
+.metrics-empty {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.metrics-row--provider small {
+  display: block;
+}
+
+.metrics-event,
+.metrics-empty {
+  min-height: 110px;
+  padding: 13px;
+}
+
+.metrics-event header,
+.metrics-empty {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.metrics-event p {
+  margin: 0;
+  line-height: 1.45;
+}
+
+@media (max-width: 980px) {
+  .metrics-layout,
+  .metrics-grid {
+    grid-template-columns: 1fr;
+  }
+}

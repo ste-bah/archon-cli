@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # check-file-sizes.sh — FileSizeGuard for NFR-FOR-D4-MAINTAINABILITY.
 #
-# Walks the repo for *.rs files (excluding target/, .cargo/, tests/fixtures/)
+# Walks the repo for Rust and web source files (excluding generated/build
+# directories)
 # and fails if any file exceeds 500 lines, except those in
 # scripts/check-file-sizes.allowlist.
 #
@@ -35,7 +36,7 @@ ALLOWED=0
 OFFENDERS_OUT=""
 ALLOWED_OUT=""
 
-# Walk every *.rs in the repo, skipping build + fixture dirs.
+# Walk every checked source file in the repo, skipping build + fixture dirs.
 while IFS= read -r f; do
   # Strip leading ./
   rel="${f#./}"
@@ -50,9 +51,16 @@ while IFS= read -r f; do
       OFFENDERS_OUT+=$(printf '  %6d  %s\n' "$lines" "$rel")$'\n'
     fi
   fi
-done < <(find . -type f -name '*.rs' \
+done < <(find . -type f \( \
+    -name '*.rs' \
+    -o -name '*.ts' \
+    -o -name '*.tsx' \
+    -o -name '*.css' \
+  \) \
   -not -path '*/target/*' \
   -not -path '*/.cargo/*' \
+  -not -path '*/node_modules/*' \
+  -not -path '*/web/dist/*' \
   -not -path '*/tests/fixtures/*' \
   | LC_ALL=C sort)
 

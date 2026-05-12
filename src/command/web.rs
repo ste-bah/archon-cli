@@ -1,5 +1,7 @@
 use archon_core::config::ArchonConfig;
-use archon_sdk::web::{WebConfig, WebServer};
+use archon_sdk::web::{
+    WebConfig, WebPolicySummary, WebServer, WebSubsystemPolicySummary, api::EffectivePolicySummary,
+};
 
 pub(crate) async fn handle_web_command(
     port: Option<u16>,
@@ -30,10 +32,43 @@ pub(crate) async fn handle_web_command(
         open_browser: effective_open,
     };
 
-    let server = WebServer::new(web_cfg, token);
+    let policy = web_policy_summary();
+    let server = WebServer::with_policy(web_cfg, token, policy);
     if let Err(e) = server.run().await {
         eprintln!("web server error: {e}");
         std::process::exit(1);
     }
     Ok(())
+}
+
+fn web_policy_summary() -> EffectivePolicySummary {
+    let policy = std::env::current_dir()
+        .ok()
+        .and_then(|cwd| archon_policy::load_effective_policy(&cwd).ok())
+        .unwrap_or_default();
+    EffectivePolicySummary {
+        web: WebPolicySummary {
+            allow_mutating_actions: policy.web.allow_mutating_actions,
+            allow_file_uploads: policy.web.allow_file_uploads,
+            allow_pipeline_controls: policy.web.allow_pipeline_controls,
+            allow_model_training_actions: policy.web.allow_model_training_actions,
+            allow_corpus_open_paths: policy.web.allow_corpus_open_paths,
+        },
+        subsystem: WebSubsystemPolicySummary {
+            allow_behavior_proposal_actions: true,
+            allow_model_behavior_changes: policy.world_model.allow_behavior_changes,
+            allow_pipeline_controls: policy.web.allow_pipeline_controls,
+            allow_corpus_open_paths: policy.web.allow_corpus_open_paths,
+            allow_file_uploads: policy.web.allow_file_uploads,
+        },
+        action_gate: "global web mutation gate AND action-family gate AND subsystem gate"
+            .to_string(),
+        requires_confirmation: vec![
+            "pipeline control".to_string(),
+            "model promotion".to_string(),
+            "training action".to_string(),
+            "corpus filesystem open".to_string(),
+            "behaviour proposal approval".to_string(),
+        ],
+    }
 }

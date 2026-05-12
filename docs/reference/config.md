@@ -1027,7 +1027,8 @@ toggle_mode = false
 
 ## `[web]`
 
-Browser-based UI.
+Browser-based workbench. The frontend is embedded in the `archon` binary from
+`web/dist`; normal users do not need a separate Node/Vite install.
 
 ```toml
 [web]
@@ -1041,6 +1042,12 @@ open_browser = true
 | `port` | `8421` | TCP port for `archon web`. |
 | `bind_address` | `"127.0.0.1"` | Bind address. `"127.0.0.1"` = local only (safe default). `"0.0.0.0"` = network-accessible (only if you also configured TLS + auth). |
 | `open_browser` | `true` | Auto-open browser to the web UI URL on `archon web`. Disable for headless / CI deployments. |
+
+Run `archon web` from the project root you want to inspect. For a blank
+project, initialise the directory first with `scripts/archon-init.sh`; the web
+workbench does not create project scaffolding. See
+[Web workbench](../operations/web-workbench.md) for the tab guide and safety
+model.
 
 ---
 
@@ -1077,6 +1084,13 @@ require_approval_for_network_changes = true
 allow_third_party_embeddings = false
 allow_llm_labeler = false
 allow_behavior_changes = false
+
+[policy.web]
+allow_mutating_actions = false
+allow_file_uploads = false
+allow_pipeline_controls = false
+allow_model_training_actions = false
+allow_corpus_open_paths = false
 
 [policy.docs.vlm]
 enabled = false
@@ -1127,6 +1141,13 @@ World-model cloud embeddings require both config and policy:
 `policy.workers.embedding = "allow-cloud"`, and
 `policy.network.default = "allow"`. LLM-assisted world-model labeling requires
 `policy.world_model.allow_llm_labeler = true`.
+
+Browser workbench actions require `[policy.web]` gates. The global
+`policy.web.allow_mutating_actions` gate must be true, and the matching
+action-family gate must also be true. World-model training or promotion
+actions additionally require `policy.world_model.allow_behavior_changes =
+true`; otherwise the web action evaluator denies the request even if the web
+action-family gate is enabled.
 
 Reasoning-quality LLM critique requires both config and policy:
 `learning.reasoning_quality.critic.allow_llm = true`,
