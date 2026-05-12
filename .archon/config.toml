@@ -414,6 +414,64 @@ first_run_threshold = 100      # kickoff at startup if memory_count > this
 max_runtime_ms = 300000        # 5 minutes max per run
 tick_interval_ms = 60000       # background poll interval (1 minute)
 
+# --- Reasoning Quality (visible claim/evidence learning signal) ---
+[learning.reasoning_quality]
+enabled = true
+emit_inline_events = true
+post_turn_analysis = true
+post_session_analysis = true
+shadow_mode_days = 30
+apply_trust_updates_after_shadow = true
+max_claims_per_turn = 12
+max_excerpt_chars = 600
+store_raw_text = false
+link_user_corrections = true
+update_self_trust = true
+feed_world_model = true
+feed_retrospective = true
+
+[learning.reasoning_quality.critic]
+mode = "hybrid"
+allow_llm = false
+provider = "default"
+model = ""
+max_tokens = 1200
+temperature = 0.0
+max_turns_per_session = 50
+run_async = true
+fallback_to_heuristic = true
+
+[learning.reasoning_quality.critic.budget]
+per_session_token_cap = 200000
+daily_usd_cap = 10.00
+weekly_usd_cap = 50.00
+respect_provider_cooldowns = true
+emit_cost_events = true
+
+[learning.reasoning_quality.extractor_eval]
+fixture_dir = "crates/archon-reasoning-quality/tests/fixtures/labeled_turns"
+min_claim_precision = 0.85
+min_claim_recall = 0.50
+min_claim_before_source_precision = 0.90
+max_code_fence_false_positive_rate = 0.05
+max_quoted_user_false_positive_rate = 0.05
+
+[learning.reasoning_quality.patterns]
+window_days = 30
+min_events = 3
+min_distinct_sessions = 3
+repeated_pattern_trust_weight = 0.5
+
+[learning.session_briefing]
+enabled = true
+include_memory = true
+include_reasoning_quality = true
+include_pending_behaviour_proposals = true
+include_world_model = true
+max_items = 8
+max_chars = 4000
+world_model_requires_ready = true
+
 
 # ----------------------------------------------------------------------------
 # [cost] — Spending guardrails (USD)

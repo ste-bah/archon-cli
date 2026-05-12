@@ -112,6 +112,22 @@ pub(crate) const COMMAND_SURFACE_ROWS: &[CommandSurfaceRow] = &[
         notes: "Governed-learning events, proposals, approvals, rollback, and status are mirrored.",
     },
     CommandSurfaceRow {
+        cli: "archon reasoning ...",
+        slash_primary: Some("reasoning"),
+        tui_surface: "CLI mirror",
+        status: SurfaceStatus::Done,
+        source_of_truth: "src/command/reasoning.rs + crates/archon-reasoning-quality",
+        notes: "Reasoning-quality status, inspection, claims, patterns, backfill, fixture audit, shadow report, migrations, and dead-letter replay are mirrored.",
+    },
+    CommandSurfaceRow {
+        cli: "archon briefing ...",
+        slash_primary: Some("briefing"),
+        tui_surface: "CLI mirror",
+        status: SurfaceStatus::Done,
+        source_of_truth: "src/command/reasoning.rs + src/runtime/proactive_briefing.rs",
+        notes: "Proactive session briefing preview is mirrored for TUI validation.",
+    },
+    CommandSurfaceRow {
         cli: "archon meaning ...",
         slash_primary: Some("meaning"),
         tui_surface: "CLI mirror",

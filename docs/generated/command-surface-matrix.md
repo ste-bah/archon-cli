@@ -15,6 +15,8 @@ Rows marked `PARTIAL` or `SHELL_ONLY` must carry an approved exception with an o
 | `archon gametheory ...` | `/gametheory` | Direct slash handler | DONE | `src/command/gametheory_slash.rs` | Run, classify-only, status, inspect, replay, agents, and specimens are exposed. | - |
 | `archon completion ...` | `/completion` | CLI mirror | DONE | `src/command/registry.rs` | Completion integrity inspection and trust surfaces are mirrored. | - |
 | `archon behaviour ...` | `/behaviour` | CLI mirror | DONE | `src/command/registry.rs` | Governed-learning events, proposals, approvals, rollback, and status are mirrored. | - |
+| `archon reasoning ...` | `/reasoning` | CLI mirror | DONE | `src/command/reasoning.rs + crates/archon-reasoning-quality` | Reasoning-quality status, inspection, claims, patterns, backfill, fixture audit, shadow report, migrations, and dead-letter replay are mirrored. | - |
+| `archon briefing ...` | `/briefing` | CLI mirror | DONE | `src/command/reasoning.rs + src/runtime/proactive_briefing.rs` | Proactive session briefing preview is mirrored for TUI validation. | - |
 | `archon meaning ...` | `/meaning` | CLI mirror | DONE | `src/command/registry.rs` | Meaning samples, contrastive pairs, triplets, and export are mirrored. | - |
 | `archon constellation ...` | `/constellation` | CLI mirror | DONE | `src/command/registry.rs` | Centroid build, bootstrap, score, drift, and list commands are mirrored. | - |
 | `archon learning ...` | `/learning` | Direct slash handler | DONE | `src/command/evidence_view.rs` | Learning view plus GNN auto-trainer status diagnostics. | - |

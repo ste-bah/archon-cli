@@ -31,7 +31,10 @@ use async_trait::async_trait;
 use tokio::sync::mpsc::Receiver;
 
 use crate::anthropic::AnthropicClient;
-use crate::provider::{LlmError, LlmProvider, LlmRequest, LlmResponse, ModelInfo, ProviderFeature};
+use crate::provider::{
+    DataFlowClassification, LlmError, LlmProvider, LlmRequest, LlmResponse, ModelInfo,
+    ProviderFeature,
+};
 use crate::streaming::StreamEvent;
 
 /// Configuration for `RetryProvider`'s backoff loop.
@@ -153,6 +156,10 @@ impl<P: LlmProvider + ?Sized> LlmProvider for RetryProvider<P> {
 
     fn supports_feature(&self, feature: ProviderFeature) -> bool {
         self.inner.supports_feature(feature)
+    }
+
+    fn data_flow_classification(&self) -> DataFlowClassification {
+        self.inner.data_flow_classification()
     }
 
     fn as_anthropic(&self) -> Option<&AnthropicClient> {

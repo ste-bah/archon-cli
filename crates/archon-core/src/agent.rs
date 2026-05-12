@@ -137,6 +137,14 @@ pub struct Agent {
     /// archon-core cannot depend on archon-learning, so this is closure-wired.
     record_user_correction_event_callback:
         Option<Arc<dyn Fn(UserCorrectionEventPayload) + Send + Sync>>,
+    /// Reasoning-quality hook: invoked after each visible assistant text block
+    /// is committed to conversation state. The binary maps this plain payload
+    /// into archon-reasoning-quality so archon-core avoids a storage dependency.
+    record_reasoning_turn_callback: Option<Arc<dyn Fn(ReasoningTurnEventPayload) + Send + Sync>>,
+    /// Evidence refs collected from completed tool calls. Kept as plain data
+    /// so visible claim extraction can compare assistant text against prior
+    /// observable source reads and verification outputs.
+    reasoning_evidence_refs: Vec<ReasoningEvidenceEventPayload>,
     /// Personality-mirror hook: invoked with the post-mutation `&InnerVoice`
     /// after every write site (per-tool-call, per-turn-complete, user
     /// correction). Wired by the binary at startup so a sync-Mutex mirror
@@ -157,6 +165,26 @@ pub struct UserCorrectionEventPayload {
     pub top_rule_id: Option<String>,
     pub user_input_excerpt: String,
     pub session_context: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReasoningEvidenceEventPayload {
+    pub evidence_id: String,
+    pub kind: String,
+    pub entity_key: Option<String>,
+    pub output_hash: Option<String>,
+    pub redacted_excerpt: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReasoningTurnEventPayload {
+    pub session_id: String,
+    pub turn_number: u64,
+    pub assistant_text: String,
+    pub evidence_refs: Vec<ReasoningEvidenceEventPayload>,
+    pub cwd: Option<String>,
+    pub workspace_root: Option<String>,
 }
 
 impl Agent {
@@ -424,6 +452,7 @@ impl Agent {
             }
 
             self.state.add_assistant_message(assistant_content);
+            self.emit_reasoning_turn(&text_content);
 
             // If there are tool calls, dispatch them and loop
             if !pending_tools.is_empty() {

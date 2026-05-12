@@ -37,7 +37,10 @@ use tokio::sync::mpsc::Receiver;
 
 use crate::anthropic::AnthropicClient;
 use crate::config::LlmConfig;
-use crate::provider::{LlmError, LlmProvider, LlmRequest, LlmResponse, ModelInfo, ProviderFeature};
+use crate::provider::{
+    DataFlowClassification, LlmError, LlmProvider, LlmRequest, LlmResponse, ModelInfo,
+    ProviderFeature,
+};
 use crate::providers::{ProviderDescriptor, ProviderError, build_llm_provider_with_policy};
 use crate::retry::RetryPolicy;
 use crate::streaming::StreamEvent;
@@ -203,6 +206,10 @@ impl LlmProvider for ActiveProvider {
 
     fn supports_feature(&self, feature: ProviderFeature) -> bool {
         self.current().supports_feature(feature)
+    }
+
+    fn data_flow_classification(&self) -> DataFlowClassification {
+        self.current().data_flow_classification()
     }
 
     fn as_anthropic(&self) -> Option<&AnthropicClient> {

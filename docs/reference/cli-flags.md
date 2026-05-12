@@ -56,6 +56,15 @@ subagents, coding/research pipelines, and gametheory through Codex.
 | `archon world eval [CANDIDATE_ID]` | Evaluate a candidate manifest against mandatory promotion gates |
 | `archon world promote <MODEL_ID>` | Promote only a candidate with a passing eval report |
 | `archon world rollback <MODEL_ID>` | Restore a prior advisory model pointer |
+| `archon reasoning status` | Show reasoning-quality store, shadow, critic, and dead-letter status |
+| `archon reasoning inspect <SESSION_ID>` | Summarize reasoning-quality events for a session |
+| `archon reasoning claims <SESSION_ID>` | List captured claim/evidence rows for a session |
+| `archon reasoning patterns` | Show repeated reasoning-failure clusters |
+| `archon reasoning backfill [--sessions N] [--emit-world-rows]` | Deterministically extract reasoning-quality rows from stored sessions |
+| `archon reasoning fixture-audit` | Audit labeled extractor fixtures for secrets and quality gates |
+| `archon reasoning cost status` | Show optional LLM critic budget usage |
+| `archon reasoning replay-dead-letter [--bridge NAME]` | Replay recoverable reasoning-quality bridge failures |
+| `archon briefing preview [--task TEXT]` | Preview proactive session-start briefing content |
 | `archon run-agent-async <NAME> [--input FILE] [--version REQ] [--detach]` | Submit an async agent task |
 | `archon task-status <TASK_ID> [--watch]` | Check status of an async task |
 | `archon task-result <TASK_ID> [--stream]` | Get result of a completed async task |

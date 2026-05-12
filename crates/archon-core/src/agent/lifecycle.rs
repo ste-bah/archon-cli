@@ -55,6 +55,8 @@ impl Agent {
             record_memory_callback: None,
             record_correction_callback: None,
             record_user_correction_event_callback: None,
+            record_reasoning_turn_callback: None,
+            reasoning_evidence_refs: Vec::new(),
             // TASK #245: wired by the binary at startup; default None makes
             // tests and non-interactive paths no-op.
             inner_voice_change_callback: None,
@@ -266,6 +268,14 @@ impl Agent {
         cb: Arc<dyn Fn(UserCorrectionEventPayload) + Send + Sync>,
     ) {
         self.record_user_correction_event_callback = Some(cb);
+    }
+
+    /// Wire reasoning-quality visible-turn emission.
+    pub fn set_record_reasoning_turn_callback(
+        &mut self,
+        cb: Arc<dyn Fn(ReasoningTurnEventPayload) + Send + Sync>,
+    ) {
+        self.record_reasoning_turn_callback = Some(cb);
     }
 
     /// Wire the personality-mirror update hook (TASK #245).

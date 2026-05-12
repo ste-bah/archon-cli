@@ -293,7 +293,7 @@ dependencies = [
 
 [[package]]
 name = "archon-bench"
-version = "1.2.0-beta"
+version = "1.2.0"
 dependencies = [
  "archon-core",
  "archon-pipeline",
@@ -310,7 +310,7 @@ dependencies = [
 
 [[package]]
 name = "archon-cli-workspace"
-version = "1.2.0-beta"
+version = "1.2.0"
 dependencies = [
  "anyhow",
  "archon-completion",
@@ -331,6 +331,7 @@ dependencies = [
  "archon-plugin",
  "archon-policy",
  "archon-provenance",
+ "archon-reasoning-quality",
  "archon-sdk",
  "archon-session",
  "archon-tools",
@@ -342,6 +343,7 @@ dependencies = [
  "cozo-ce",
  "crossterm",
  "dirs",
+ "fd-lock",
  "futures-util",
  "globset",
  "hex",
@@ -367,7 +369,7 @@ dependencies = [
 
 [[package]]
 name = "archon-completion"
-version = "1.2.0-beta"
+version = "1.2.0"
 dependencies = [
  "anyhow",
  "archon-learning",
@@ -387,7 +389,7 @@ dependencies = [
 
 [[package]]
 name = "archon-consciousness"
-version = "1.2.0-beta"
+version = "1.2.0"
 dependencies = [
  "anyhow",
  "archon-memory",
@@ -402,7 +404,7 @@ dependencies = [
 
 [[package]]
 name = "archon-constellation"
-version = "1.2.0-beta"
+version = "1.2.0"
 dependencies = [
  "archon-meaning",
  "chrono",
@@ -420,7 +422,7 @@ dependencies = [
 
 [[package]]
 name = "archon-context"
-version = "1.2.0-beta"
+version = "1.2.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -432,7 +434,7 @@ dependencies = [
 
 [[package]]
 name = "archon-core"
-version = "1.2.0-beta"
+version = "1.2.0"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -494,7 +496,7 @@ dependencies = [
 
 [[package]]
 name = "archon-docs"
-version = "1.2.0-beta"
+version = "1.2.0"
 dependencies = [
  "anyhow",
  "archon-llm",
@@ -523,7 +525,7 @@ dependencies = [
 
 [[package]]
 name = "archon-knowledge"
-version = "1.2.0-beta"
+version = "1.2.0"
 dependencies = [
  "anyhow",
  "archon-docs",
@@ -542,7 +544,7 @@ dependencies = [
 
 [[package]]
 name = "archon-leann"
-version = "1.2.0-beta"
+version = "1.2.0"
 dependencies = [
  "anyhow",
  "archon-memory",
@@ -570,7 +572,7 @@ dependencies = [
 
 [[package]]
 name = "archon-learning"
-version = "1.2.0-beta"
+version = "1.2.0"
 dependencies = [
  "anyhow",
  "archon-policy",
@@ -586,7 +588,7 @@ dependencies = [
 
 [[package]]
 name = "archon-llm"
-version = "1.2.0-beta"
+version = "1.2.0"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -629,7 +631,7 @@ dependencies = [
 
 [[package]]
 name = "archon-mcp"
-version = "1.2.0-beta"
+version = "1.2.0"
 dependencies = [
  "anyhow",
  "archon-tools",
@@ -659,7 +661,7 @@ dependencies = [
 
 [[package]]
 name = "archon-meaning"
-version = "1.2.0-beta"
+version = "1.2.0"
 dependencies = [
  "chrono",
  "cozo-ce",
@@ -674,7 +676,7 @@ dependencies = [
 
 [[package]]
 name = "archon-memory"
-version = "1.2.0-beta"
+version = "1.2.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -695,7 +697,7 @@ dependencies = [
 
 [[package]]
 name = "archon-observability"
-version = "1.2.0-beta"
+version = "1.2.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -720,7 +722,7 @@ dependencies = [
 
 [[package]]
 name = "archon-permissions"
-version = "1.2.0-beta"
+version = "1.2.0"
 dependencies = [
  "anyhow",
  "glob",
@@ -733,7 +735,7 @@ dependencies = [
 
 [[package]]
 name = "archon-pipeline"
-version = "1.2.0-beta"
+version = "1.2.0"
 dependencies = [
  "anyhow",
  "archon-core",
@@ -770,7 +772,7 @@ dependencies = [
 
 [[package]]
 name = "archon-plugin"
-version = "1.2.0-beta"
+version = "1.2.0"
 dependencies = [
  "anyhow",
  "archon-core",
@@ -788,7 +790,7 @@ dependencies = [
 
 [[package]]
 name = "archon-policy"
-version = "1.2.0-beta"
+version = "1.2.0"
 dependencies = [
  "dirs",
  "serde",
@@ -799,7 +801,7 @@ dependencies = [
 
 [[package]]
 name = "archon-provenance"
-version = "1.2.0-beta"
+version = "1.2.0"
 dependencies = [
  "chrono",
  "cozo-ce",
@@ -813,8 +815,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "archon-reasoning-quality"
+version = "1.2.0"
+dependencies = [
+ "anyhow",
+ "blake3",
+ "chrono",
+ "cozo-ce",
+ "hex",
+ "regex",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "archon-sdk"
-version = "1.2.0-beta"
+version = "1.2.0"
 dependencies = [
  "anyhow",
  "archon-core",
@@ -837,7 +855,7 @@ dependencies = [
 
 [[package]]
 name = "archon-session"
-version = "1.2.0-beta"
+version = "1.2.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -854,7 +872,7 @@ dependencies = [
 
 [[package]]
 name = "archon-test-support"
-version = "1.2.0-beta"
+version = "1.2.0"
 dependencies = [
  "anyhow",
  "archon-memory",
@@ -868,7 +886,7 @@ dependencies = [
 
 [[package]]
 name = "archon-tools"
-version = "1.2.0-beta"
+version = "1.2.0"
 dependencies = [
  "anyhow",
  "archon-leann",
@@ -910,7 +928,7 @@ dependencies = [
 
 [[package]]
 name = "archon-tui"
-version = "1.2.0-beta"
+version = "1.2.0"
 dependencies = [
  "anyhow",
  "archon-core",
@@ -960,7 +978,7 @@ dependencies = [
 
 [[package]]
 name = "archon-tui-test-support"
-version = "1.2.0-beta"
+version = "1.2.0"
 dependencies = [
  "criterion",
  "dashmap 5.5.3",
@@ -976,7 +994,7 @@ dependencies = [
 
 [[package]]
 name = "archon-world-model"
-version = "1.2.0-beta"
+version = "1.2.0"
 dependencies = [
  "anyhow",
  "archon-llm",
@@ -1020,6 +1038,12 @@ dependencies = [
  "cpufeatures 0.2.17",
  "password-hash",
 ]
+
+[[package]]
+name = "arrayref"
+version = "0.3.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "76a2e8124351fda1ef8aaaa3bbd7ebbcb486bbcd4225aca0aa0d84bb2db8fecb"
 
 [[package]]
 name = "arrayvec"
@@ -1540,6 +1564,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "46502ad458c9a52b69d4d4d32775c788b7a1b85e8bc9d482d92250fc0e3f8efe"
 dependencies = [
  "digest 0.10.7",
+]
+
+[[package]]
+name = "blake3"
+version = "1.8.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0aa83c34e62843d924f905e0f5c866eb1dd6545fc4d719e803d9ba6030371fce"
+dependencies = [
+ "arrayref",
+ "arrayvec",
+ "cc",
+ "cfg-if",
+ "constant_time_eq",
+ "cpufeatures 0.3.0",
 ]
 
 [[package]]
@@ -2125,6 +2163,12 @@ name = "const-oid"
 version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a6ef517f0926dd24a1582492c791b6a4818a4d94e789a334894aa15b0d12f55c"
+
+[[package]]
+name = "constant_time_eq"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3d52eff69cd5e647efe296129160853a42795992097e8af39800e1060caeea9b"
 
 [[package]]
 name = "core-foundation"

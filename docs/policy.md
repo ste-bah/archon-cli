@@ -1,7 +1,8 @@
 # Archon Policy
 
 Archon policy is a TOML gate for features that can change behaviour, use
-networked providers, expose services, or auto-apply learned updates.
+networked providers, expose services, store raw text, or auto-apply learned
+updates.
 
 There is currently no `archon policy` CLI namespace. Policy is loaded by the
 feature gates that need it.
@@ -15,7 +16,8 @@ Policy is loaded in this order, with later files overriding earlier files:
 3. `<workspace>/.archon/policy.toml`
 
 If no policy file exists, Archon uses default-deny for network, VLM,
-game-theory Tier 11, MCP exposure, and governed-learning auto-apply.
+game-theory Tier 11, MCP exposure, cloud learning workers, and governed-learning
+auto-apply.
 
 ## Example
 
@@ -48,6 +50,16 @@ require_approval_for_network_changes = true
 allow_third_party_embeddings = false
 allow_llm_labeler = false
 allow_behavior_changes = false
+
+[policy.reasoning_quality]
+allow_llm_critic = false
+allow_critic_cloud_data_flow = false
+allow_third_party_critic = false
+allow_raw_text_storage = false
+allow_behavior_proposal_generation = true
+allow_session_start_injection = true
+allow_trust_updates_during_shadow = false
+auto_migrate_reasoning_quality = false
 
 [policy.docs.vlm]
 enabled = false
@@ -95,10 +107,14 @@ semantic_weight = 0.55
 `archon gametheory run --enable-tier11` only enables Tier 11 specialists when
 `policy.gametheory.enable_tier11 = true`.
 
-Document VLM descriptions are denied unless `[policy.docs.vlm]` enables a provider and the matching worker/network policy allows it. Local Ollama requires `policy.workers.vlm = "allow-local"`. Gemini and Anthropic require `policy.workers.vlm = "allow-cloud"`, `policy.docs.vlm.allow_cloud = true`, and `policy.network.allow_cloud_vlm = true`.
+Document VLM descriptions are denied unless `[policy.docs.vlm]` enables a
+provider and the matching worker/network policy allows it. Local Ollama requires
+`policy.workers.vlm = "allow-local"`. Gemini and Anthropic require
+`policy.workers.vlm = "allow-cloud"`, `policy.docs.vlm.allow_cloud = true`, and
+`policy.network.allow_cloud_vlm = true`.
 
-PDF image extraction is enabled by default through `[policy.docs.pdf]`, but
-VLM calls for those extracted images still require the normal VLM gates.
+PDF image extraction is enabled by default through `[policy.docs.pdf]`, but VLM
+calls for those extracted images still require the normal VLM gates.
 `render_text_pdf_pages = false` means full-page rendering is only used for
 scanned/image-only fallback unless explicitly enabled.
 
@@ -118,6 +134,14 @@ also require `policy.workers.embedding = "allow-cloud"` and
 change runtime behaviour requires `policy.world_model.allow_behavior_changes =
 true`; current runtime integrations remain advisory and fail open.
 
+Reasoning-quality extraction is local and deterministic by default. Optional
+LLM critique requires both `learning.reasoning_quality.critic.allow_llm = true`
+and `policy.reasoning_quality.allow_llm_critic = true`. If the active
+`LlmProvider` is cloud-hosted, `allow_critic_cloud_data_flow = true` must also
+be set. Raw visible-turn text persistence requires
+`allow_raw_text_storage = true`; otherwise Archon stores redacted excerpts,
+hashes, and redacted entity keys.
+
 ## Full State Verification
 
 Policy verification is feature-specific:
@@ -129,6 +153,7 @@ Policy verification is feature-specific:
 | Hybrid retrieval | `archon docs search <query> --mode hybrid --debug` | debug output shows exact and semantic score components |
 | Governed learning | `archon behaviour apply <proposal-id>` | proposal decision and manifest history reflect policy outcome |
 | World model | `archon world predict-next ...` | unavailable advisors fail open; behavior-changing use remains disabled unless policy allows it |
+| Reasoning quality | `archon reasoning status` | critic/cloud/raw-text gates and dead-letter state match policy |
 
 Keep policy files in source control for project-level gates when possible:
 

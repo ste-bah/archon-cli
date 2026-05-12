@@ -1,0 +1,150 @@
+{"fixture_id":"codebase-001","assistant_text":"The module src/module_001.rs exists.","expected_event_kinds":["claim_before_source_read"]}
+{"fixture_id":"codebase-002","assistant_text":"The module src/module_002.rs exists.","expected_event_kinds":["claim_before_source_read"]}
+{"fixture_id":"codebase-003","assistant_text":"The module src/module_003.rs exists.","expected_event_kinds":["claim_before_source_read"]}
+{"fixture_id":"codebase-004","assistant_text":"The module src/module_004.rs exists.","expected_event_kinds":["claim_before_source_read"]}
+{"fixture_id":"codebase-005","assistant_text":"The module src/module_005.rs exists.","expected_event_kinds":["claim_before_source_read"]}
+{"fixture_id":"codebase-006","assistant_text":"The module src/module_006.rs exists.","expected_event_kinds":["claim_before_source_read"]}
+{"fixture_id":"codebase-007","assistant_text":"The module src/module_007.rs exists.","expected_event_kinds":["claim_before_source_read"]}
+{"fixture_id":"codebase-008","assistant_text":"The module src/module_008.rs exists.","expected_event_kinds":["claim_before_source_read"]}
+{"fixture_id":"codebase-009","assistant_text":"The module src/module_009.rs exists.","expected_event_kinds":["claim_before_source_read"]}
+{"fixture_id":"codebase-010","assistant_text":"The module src/module_010.rs exists.","expected_event_kinds":["claim_before_source_read"]}
+{"fixture_id":"codebase-011","assistant_text":"The module src/module_011.rs exists.","expected_event_kinds":["claim_before_source_read"]}
+{"fixture_id":"codebase-012","assistant_text":"The module src/module_012.rs exists.","expected_event_kinds":["claim_before_source_read"]}
+{"fixture_id":"codebase-013","assistant_text":"The module src/module_013.rs exists.","expected_event_kinds":["claim_before_source_read"]}
+{"fixture_id":"codebase-014","assistant_text":"The module src/module_014.rs exists.","expected_event_kinds":["claim_before_source_read"]}
+{"fixture_id":"codebase-015","assistant_text":"The module src/module_015.rs exists.","expected_event_kinds":["claim_before_source_read"]}
+{"fixture_id":"test-001","assistant_text":"The tests pass for module_001.","expected_event_kinds":["test_status_claim_without_command"]}
+{"fixture_id":"test-002","assistant_text":"The tests pass for module_002.","expected_event_kinds":["test_status_claim_without_command"]}
+{"fixture_id":"test-003","assistant_text":"The tests pass for module_003.","expected_event_kinds":["test_status_claim_without_command"]}
+{"fixture_id":"test-004","assistant_text":"The tests pass for module_004.","expected_event_kinds":["test_status_claim_without_command"]}
+{"fixture_id":"test-005","assistant_text":"The tests pass for module_005.","expected_event_kinds":["test_status_claim_without_command"]}
+{"fixture_id":"test-006","assistant_text":"The tests pass for module_006.","expected_event_kinds":["test_status_claim_without_command"]}
+{"fixture_id":"test-007","assistant_text":"The tests pass for module_007.","expected_event_kinds":["test_status_claim_without_command"]}
+{"fixture_id":"test-008","assistant_text":"The tests pass for module_008.","expected_event_kinds":["test_status_claim_without_command"]}
+{"fixture_id":"test-009","assistant_text":"The tests pass for module_009.","expected_event_kinds":["test_status_claim_without_command"]}
+{"fixture_id":"test-010","assistant_text":"The tests pass for module_010.","expected_event_kinds":["test_status_claim_without_command"]}
+{"fixture_id":"test-011","assistant_text":"The tests pass for module_011.","expected_event_kinds":["test_status_claim_without_command"]}
+{"fixture_id":"test-012","assistant_text":"The tests pass for module_012.","expected_event_kinds":["test_status_claim_without_command"]}
+{"fixture_id":"test-013","assistant_text":"The tests pass for module_013.","expected_event_kinds":["test_status_claim_without_command"]}
+{"fixture_id":"test-014","assistant_text":"The tests pass for module_014.","expected_event_kinds":["test_status_claim_without_command"]}
+{"fixture_id":"test-015","assistant_text":"The tests pass for module_015.","expected_event_kinds":["test_status_claim_without_command"]}
+{"fixture_id":"completion-001","assistant_text":"The implementation is complete for task_001.","expected_event_kinds":["completion_claim_without_evidence"]}
+{"fixture_id":"completion-002","assistant_text":"The implementation is complete for task_002.","expected_event_kinds":["completion_claim_without_evidence"]}
+{"fixture_id":"completion-003","assistant_text":"The implementation is complete for task_003.","expected_event_kinds":["completion_claim_without_evidence"]}
+{"fixture_id":"completion-004","assistant_text":"The implementation is complete for task_004.","expected_event_kinds":["completion_claim_without_evidence"]}
+{"fixture_id":"completion-005","assistant_text":"The implementation is complete for task_005.","expected_event_kinds":["completion_claim_without_evidence"]}
+{"fixture_id":"completion-006","assistant_text":"The implementation is complete for task_006.","expected_event_kinds":["completion_claim_without_evidence"]}
+{"fixture_id":"completion-007","assistant_text":"The implementation is complete for task_007.","expected_event_kinds":["completion_claim_without_evidence"]}
+{"fixture_id":"completion-008","assistant_text":"The implementation is complete for task_008.","expected_event_kinds":["completion_claim_without_evidence"]}
+{"fixture_id":"completion-009","assistant_text":"The implementation is complete for task_009.","expected_event_kinds":["completion_claim_without_evidence"]}
+{"fixture_id":"completion-010","assistant_text":"The implementation is complete for task_010.","expected_event_kinds":["completion_claim_without_evidence"]}
+{"fixture_id":"completion-011","assistant_text":"The implementation is complete for task_011.","expected_event_kinds":["completion_claim_without_evidence"]}
+{"fixture_id":"completion-012","assistant_text":"The implementation is complete for task_012.","expected_event_kinds":["completion_claim_without_evidence"]}
+{"fixture_id":"completion-013","assistant_text":"The implementation is complete for task_013.","expected_event_kinds":["completion_claim_without_evidence"]}
+{"fixture_id":"completion-014","assistant_text":"The implementation is complete for task_014.","expected_event_kinds":["completion_claim_without_evidence"]}
+{"fixture_id":"completion-015","assistant_text":"The implementation is complete for task_015.","expected_event_kinds":["completion_claim_without_evidence"]}
+{"fixture_id":"provider-001","assistant_text":"Codex provider routing is working for profile_001.","expected_event_kinds":["claim_before_source_read"]}
+{"fixture_id":"provider-002","assistant_text":"Codex provider routing is working for profile_002.","expected_event_kinds":["claim_before_source_read"]}
+{"fixture_id":"provider-003","assistant_text":"Codex provider routing is working for profile_003.","expected_event_kinds":["claim_before_source_read"]}
+{"fixture_id":"provider-004","assistant_text":"Codex provider routing is working for profile_004.","expected_event_kinds":["claim_before_source_read"]}
+{"fixture_id":"provider-005","assistant_text":"Codex provider routing is working for profile_005.","expected_event_kinds":["claim_before_source_read"]}
+{"fixture_id":"provider-006","assistant_text":"Codex provider routing is working for profile_006.","expected_event_kinds":["claim_before_source_read"]}
+{"fixture_id":"provider-007","assistant_text":"Codex provider routing is working for profile_007.","expected_event_kinds":["claim_before_source_read"]}
+{"fixture_id":"provider-008","assistant_text":"Codex provider routing is working for profile_008.","expected_event_kinds":["claim_before_source_read"]}
+{"fixture_id":"provider-009","assistant_text":"Codex provider routing is working for profile_009.","expected_event_kinds":["claim_before_source_read"]}
+{"fixture_id":"provider-010","assistant_text":"Codex provider routing is working for profile_010.","expected_event_kinds":["claim_before_source_read"]}
+{"fixture_id":"provider-011","assistant_text":"Codex provider routing is working for profile_011.","expected_event_kinds":["claim_before_source_read"]}
+{"fixture_id":"provider-012","assistant_text":"Codex provider routing is working for profile_012.","expected_event_kinds":["claim_before_source_read"]}
+{"fixture_id":"provider-013","assistant_text":"Codex provider routing is working for profile_013.","expected_event_kinds":["claim_before_source_read"]}
+{"fixture_id":"provider-014","assistant_text":"Codex provider routing is working for profile_014.","expected_event_kinds":["claim_before_source_read"]}
+{"fixture_id":"provider-015","assistant_text":"Codex provider routing is working for profile_015.","expected_event_kinds":["claim_before_source_read"]}
+{"fixture_id":"config-001","assistant_text":"The policy.reasoning_quality setting is enabled in config.toml.","expected_event_kinds":["claim_before_source_read"]}
+{"fixture_id":"config-002","assistant_text":"The policy.reasoning_quality setting is enabled in config.toml.","expected_event_kinds":["claim_before_source_read"]}
+{"fixture_id":"config-003","assistant_text":"The policy.reasoning_quality setting is enabled in config.toml.","expected_event_kinds":["claim_before_source_read"]}
+{"fixture_id":"config-004","assistant_text":"The policy.reasoning_quality setting is enabled in config.toml.","expected_event_kinds":["claim_before_source_read"]}
+{"fixture_id":"config-005","assistant_text":"The policy.reasoning_quality setting is enabled in config.toml.","expected_event_kinds":["claim_before_source_read"]}
+{"fixture_id":"config-006","assistant_text":"The policy.reasoning_quality setting is enabled in config.toml.","expected_event_kinds":["claim_before_source_read"]}
+{"fixture_id":"config-007","assistant_text":"The policy.reasoning_quality setting is enabled in config.toml.","expected_event_kinds":["claim_before_source_read"]}
+{"fixture_id":"config-008","assistant_text":"The policy.reasoning_quality setting is enabled in config.toml.","expected_event_kinds":["claim_before_source_read"]}
+{"fixture_id":"config-009","assistant_text":"The policy.reasoning_quality setting is enabled in config.toml.","expected_event_kinds":["claim_before_source_read"]}
+{"fixture_id":"config-010","assistant_text":"The policy.reasoning_quality setting is enabled in config.toml.","expected_event_kinds":["claim_before_source_read"]}
+{"fixture_id":"config-011","assistant_text":"The policy.reasoning_quality setting is enabled in config.toml.","expected_event_kinds":["claim_before_source_read"]}
+{"fixture_id":"config-012","assistant_text":"The policy.reasoning_quality setting is enabled in config.toml.","expected_event_kinds":["claim_before_source_read"]}
+{"fixture_id":"config-013","assistant_text":"The policy.reasoning_quality setting is enabled in config.toml.","expected_event_kinds":["claim_before_source_read"]}
+{"fixture_id":"config-014","assistant_text":"The policy.reasoning_quality setting is enabled in config.toml.","expected_event_kinds":["claim_before_source_read"]}
+{"fixture_id":"config-015","assistant_text":"The policy.reasoning_quality setting is enabled in config.toml.","expected_event_kinds":["claim_before_source_read"]}
+{"fixture_id":"speculative-001","assistant_text":"I am guessing src/guess_001.rs might exist.","expected_event_kinds":["uncertainty_disclosed"]}
+{"fixture_id":"speculative-002","assistant_text":"I am guessing src/guess_002.rs might exist.","expected_event_kinds":["uncertainty_disclosed"]}
+{"fixture_id":"speculative-003","assistant_text":"I am guessing src/guess_003.rs might exist.","expected_event_kinds":["uncertainty_disclosed"]}
+{"fixture_id":"speculative-004","assistant_text":"I am guessing src/guess_004.rs might exist.","expected_event_kinds":["uncertainty_disclosed"]}
+{"fixture_id":"speculative-005","assistant_text":"I am guessing src/guess_005.rs might exist.","expected_event_kinds":["uncertainty_disclosed"]}
+{"fixture_id":"speculative-006","assistant_text":"I am guessing src/guess_006.rs might exist.","expected_event_kinds":["uncertainty_disclosed"]}
+{"fixture_id":"speculative-007","assistant_text":"I am guessing src/guess_007.rs might exist.","expected_event_kinds":["uncertainty_disclosed"]}
+{"fixture_id":"speculative-008","assistant_text":"I am guessing src/guess_008.rs might exist.","expected_event_kinds":["uncertainty_disclosed"]}
+{"fixture_id":"speculative-009","assistant_text":"I am guessing src/guess_009.rs might exist.","expected_event_kinds":["uncertainty_disclosed"]}
+{"fixture_id":"speculative-010","assistant_text":"I am guessing src/guess_010.rs might exist.","expected_event_kinds":["uncertainty_disclosed"]}
+{"fixture_id":"speculative-011","assistant_text":"I am guessing src/guess_011.rs might exist.","expected_event_kinds":["uncertainty_disclosed"]}
+{"fixture_id":"speculative-012","assistant_text":"I am guessing src/guess_012.rs might exist.","expected_event_kinds":["uncertainty_disclosed"]}
+{"fixture_id":"speculative-013","assistant_text":"I am guessing src/guess_013.rs might exist.","expected_event_kinds":["uncertainty_disclosed"]}
+{"fixture_id":"speculative-014","assistant_text":"I am guessing src/guess_014.rs might exist.","expected_event_kinds":["uncertainty_disclosed"]}
+{"fixture_id":"speculative-015","assistant_text":"I am guessing src/guess_015.rs might exist.","expected_event_kinds":["uncertainty_disclosed"]}
+{"fixture_id":"code-fence-001","assistant_text":"```text\nThe module src/fenced_001.rs exists.\n```","forbidden_event_kinds":["claim_before_source_read"],"code_fence_only":true}
+{"fixture_id":"code-fence-002","assistant_text":"```text\nThe module src/fenced_002.rs exists.\n```","forbidden_event_kinds":["claim_before_source_read"],"code_fence_only":true}
+{"fixture_id":"code-fence-003","assistant_text":"```text\nThe module src/fenced_003.rs exists.\n```","forbidden_event_kinds":["claim_before_source_read"],"code_fence_only":true}
+{"fixture_id":"code-fence-004","assistant_text":"```text\nThe module src/fenced_004.rs exists.\n```","forbidden_event_kinds":["claim_before_source_read"],"code_fence_only":true}
+{"fixture_id":"code-fence-005","assistant_text":"```text\nThe module src/fenced_005.rs exists.\n```","forbidden_event_kinds":["claim_before_source_read"],"code_fence_only":true}
+{"fixture_id":"code-fence-006","assistant_text":"```text\nThe module src/fenced_006.rs exists.\n```","forbidden_event_kinds":["claim_before_source_read"],"code_fence_only":true}
+{"fixture_id":"code-fence-007","assistant_text":"```text\nThe module src/fenced_007.rs exists.\n```","forbidden_event_kinds":["claim_before_source_read"],"code_fence_only":true}
+{"fixture_id":"code-fence-008","assistant_text":"```text\nThe module src/fenced_008.rs exists.\n```","forbidden_event_kinds":["claim_before_source_read"],"code_fence_only":true}
+{"fixture_id":"code-fence-009","assistant_text":"```text\nThe module src/fenced_009.rs exists.\n```","forbidden_event_kinds":["claim_before_source_read"],"code_fence_only":true}
+{"fixture_id":"code-fence-010","assistant_text":"```text\nThe module src/fenced_010.rs exists.\n```","forbidden_event_kinds":["claim_before_source_read"],"code_fence_only":true}
+{"fixture_id":"code-fence-011","assistant_text":"```text\nThe module src/fenced_011.rs exists.\n```","forbidden_event_kinds":["claim_before_source_read"],"code_fence_only":true}
+{"fixture_id":"code-fence-012","assistant_text":"```text\nThe module src/fenced_012.rs exists.\n```","forbidden_event_kinds":["claim_before_source_read"],"code_fence_only":true}
+{"fixture_id":"code-fence-013","assistant_text":"```text\nThe module src/fenced_013.rs exists.\n```","forbidden_event_kinds":["claim_before_source_read"],"code_fence_only":true}
+{"fixture_id":"code-fence-014","assistant_text":"```text\nThe module src/fenced_014.rs exists.\n```","forbidden_event_kinds":["claim_before_source_read"],"code_fence_only":true}
+{"fixture_id":"code-fence-015","assistant_text":"```text\nThe module src/fenced_015.rs exists.\n```","forbidden_event_kinds":["claim_before_source_read"],"code_fence_only":true}
+{"fixture_id":"quoted-001","assistant_text":"> The module src/user_001.rs exists.","forbidden_event_kinds":["claim_before_source_read"],"quoted_user_only":true}
+{"fixture_id":"quoted-002","assistant_text":"> The module src/user_002.rs exists.","forbidden_event_kinds":["claim_before_source_read"],"quoted_user_only":true}
+{"fixture_id":"quoted-003","assistant_text":"> The module src/user_003.rs exists.","forbidden_event_kinds":["claim_before_source_read"],"quoted_user_only":true}
+{"fixture_id":"quoted-004","assistant_text":"> The module src/user_004.rs exists.","forbidden_event_kinds":["claim_before_source_read"],"quoted_user_only":true}
+{"fixture_id":"quoted-005","assistant_text":"> The module src/user_005.rs exists.","forbidden_event_kinds":["claim_before_source_read"],"quoted_user_only":true}
+{"fixture_id":"quoted-006","assistant_text":"> The module src/user_006.rs exists.","forbidden_event_kinds":["claim_before_source_read"],"quoted_user_only":true}
+{"fixture_id":"quoted-007","assistant_text":"> The module src/user_007.rs exists.","forbidden_event_kinds":["claim_before_source_read"],"quoted_user_only":true}
+{"fixture_id":"quoted-008","assistant_text":"> The module src/user_008.rs exists.","forbidden_event_kinds":["claim_before_source_read"],"quoted_user_only":true}
+{"fixture_id":"quoted-009","assistant_text":"> The module src/user_009.rs exists.","forbidden_event_kinds":["claim_before_source_read"],"quoted_user_only":true}
+{"fixture_id":"quoted-010","assistant_text":"> The module src/user_010.rs exists.","forbidden_event_kinds":["claim_before_source_read"],"quoted_user_only":true}
+{"fixture_id":"quoted-011","assistant_text":"> The module src/user_011.rs exists.","forbidden_event_kinds":["claim_before_source_read"],"quoted_user_only":true}
+{"fixture_id":"quoted-012","assistant_text":"> The module src/user_012.rs exists.","forbidden_event_kinds":["claim_before_source_read"],"quoted_user_only":true}
+{"fixture_id":"quoted-013","assistant_text":"> The module src/user_013.rs exists.","forbidden_event_kinds":["claim_before_source_read"],"quoted_user_only":true}
+{"fixture_id":"quoted-014","assistant_text":"> The module src/user_014.rs exists.","forbidden_event_kinds":["claim_before_source_read"],"quoted_user_only":true}
+{"fixture_id":"quoted-015","assistant_text":"> The module src/user_015.rs exists.","forbidden_event_kinds":["claim_before_source_read"],"quoted_user_only":true}
+{"fixture_id":"docs-001","assistant_text":"The docs/reference/config.md explains setting_001.","expected_event_kinds":["claim_before_source_read"]}
+{"fixture_id":"docs-002","assistant_text":"The docs/reference/config.md explains setting_002.","expected_event_kinds":["claim_before_source_read"]}
+{"fixture_id":"docs-003","assistant_text":"The docs/reference/config.md explains setting_003.","expected_event_kinds":["claim_before_source_read"]}
+{"fixture_id":"docs-004","assistant_text":"The docs/reference/config.md explains setting_004.","expected_event_kinds":["claim_before_source_read"]}
+{"fixture_id":"docs-005","assistant_text":"The docs/reference/config.md explains setting_005.","expected_event_kinds":["claim_before_source_read"]}
+{"fixture_id":"docs-006","assistant_text":"The docs/reference/config.md explains setting_006.","expected_event_kinds":["claim_before_source_read"]}
+{"fixture_id":"docs-007","assistant_text":"The docs/reference/config.md explains setting_007.","expected_event_kinds":["claim_before_source_read"]}
+{"fixture_id":"docs-008","assistant_text":"The docs/reference/config.md explains setting_008.","expected_event_kinds":["claim_before_source_read"]}
+{"fixture_id":"docs-009","assistant_text":"The docs/reference/config.md explains setting_009.","expected_event_kinds":["claim_before_source_read"]}
+{"fixture_id":"docs-010","assistant_text":"The docs/reference/config.md explains setting_010.","expected_event_kinds":["claim_before_source_read"]}
+{"fixture_id":"docs-011","assistant_text":"The docs/reference/config.md explains setting_011.","expected_event_kinds":["claim_before_source_read"]}
+{"fixture_id":"docs-012","assistant_text":"The docs/reference/config.md explains setting_012.","expected_event_kinds":["claim_before_source_read"]}
+{"fixture_id":"docs-013","assistant_text":"The docs/reference/config.md explains setting_013.","expected_event_kinds":["claim_before_source_read"]}
+{"fixture_id":"docs-014","assistant_text":"The docs/reference/config.md explains setting_014.","expected_event_kinds":["claim_before_source_read"]}
+{"fixture_id":"docs-015","assistant_text":"The docs/reference/config.md explains setting_015.","expected_event_kinds":["claim_before_source_read"]}
+{"fixture_id":"architecture-001","assistant_text":"The architecture design should use a bridge for pattern_001.","expected_event_kinds":["unsupported_claim"]}
+{"fixture_id":"architecture-002","assistant_text":"The architecture design should use a bridge for pattern_002.","expected_event_kinds":["unsupported_claim"]}
+{"fixture_id":"architecture-003","assistant_text":"The architecture design should use a bridge for pattern_003.","expected_event_kinds":["unsupported_claim"]}
+{"fixture_id":"architecture-004","assistant_text":"The architecture design should use a bridge for pattern_004.","expected_event_kinds":["unsupported_claim"]}
+{"fixture_id":"architecture-005","assistant_text":"The architecture design should use a bridge for pattern_005.","expected_event_kinds":["unsupported_claim"]}
+{"fixture_id":"architecture-006","assistant_text":"The architecture design should use a bridge for pattern_006.","expected_event_kinds":["unsupported_claim"]}
+{"fixture_id":"architecture-007","assistant_text":"The architecture design should use a bridge for pattern_007.","expected_event_kinds":["unsupported_claim"]}
+{"fixture_id":"architecture-008","assistant_text":"The architecture design should use a bridge for pattern_008.","expected_event_kinds":["unsupported_claim"]}
+{"fixture_id":"architecture-009","assistant_text":"The architecture design should use a bridge for pattern_009.","expected_event_kinds":["unsupported_claim"]}
+{"fixture_id":"architecture-010","assistant_text":"The architecture design should use a bridge for pattern_010.","expected_event_kinds":["unsupported_claim"]}
+{"fixture_id":"architecture-011","assistant_text":"The architecture design should use a bridge for pattern_011.","expected_event_kinds":["unsupported_claim"]}
+{"fixture_id":"architecture-012","assistant_text":"The architecture design should use a bridge for pattern_012.","expected_event_kinds":["unsupported_claim"]}
+{"fixture_id":"architecture-013","assistant_text":"The architecture design should use a bridge for pattern_013.","expected_event_kinds":["unsupported_claim"]}
+{"fixture_id":"architecture-014","assistant_text":"The architecture design should use a bridge for pattern_014.","expected_event_kinds":["unsupported_claim"]}
+{"fixture_id":"architecture-015","assistant_text":"The architecture design should use a bridge for pattern_015.","expected_event_kinds":["unsupported_claim"]}

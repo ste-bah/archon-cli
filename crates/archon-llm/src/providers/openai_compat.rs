@@ -17,7 +17,10 @@ use std::sync::Arc;
 use serde_json::{Value, json};
 use tokio::sync::mpsc::Receiver;
 
-use crate::provider::{LlmError, LlmProvider, LlmRequest, LlmResponse, ModelInfo, ProviderFeature};
+use crate::provider::{
+    DataFlowClassification, LlmError, LlmProvider, LlmRequest, LlmResponse, ModelInfo,
+    ProviderFeature, classify_data_flow_endpoint,
+};
 use crate::secrets::ApiKey;
 use crate::streaming::StreamEvent;
 use crate::types::Usage;
@@ -524,5 +527,9 @@ impl LlmProvider for OpenAiCompatProvider {
             F::PromptCaching => false,
             F::Thinking => false,
         }
+    }
+
+    fn data_flow_classification(&self) -> DataFlowClassification {
+        classify_data_flow_endpoint(self.descriptor.base_url.as_str())
     }
 }

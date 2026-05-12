@@ -8,7 +8,7 @@ Starting commit: `4fb5884 feat: Provider Runtime Hardening & Governed Agent Evol
 
 Main merge: `406b31c chore(deps): close 19 Dependabot alerts (wasmtime/jsonwebtoken/serde_yml/openssl/git2) (#31)`
 
-Version target: `1.2.0-beta`
+Version target: `1.2.0`
 
 ## Implemented
 

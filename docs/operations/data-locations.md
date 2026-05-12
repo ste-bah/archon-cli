@@ -10,6 +10,7 @@ Where archon-cli writes everything.
 | `~/.archon/sessions/<id>/activity/events.jsonl` | `%USERPROFILE%\.archon\sessions\<id>\activity\events.jsonl` | Agent/tool activity stream used by retrospectives |
 | `~/.archon/self-calibration/` | `%USERPROFILE%\.archon\self-calibration\` | Retrospectives, self-trust records, plan-vs-outcome summaries |
 | `~/.archon/world-model/` | `%USERPROFILE%\.archon\world-model\` | Local world-model corpus, ledgers, checkpoints, embeddings, and active pointer |
+| `~/.archon/reasoning-quality/` | `%USERPROFILE%\.archon\reasoning-quality\` | Visible claim/evidence events, critic cost ledger, bridge dead letters, and shadow trust deltas |
 | `~/.config/archon/` | `%APPDATA%\archon\` | Configuration |
 | `~/.config/archon/config.toml` | `%APPDATA%\archon\config.toml` | User config |
 | `~/.config/archon/.mcp.json` | `%APPDATA%\archon\.mcp.json` | Global MCP server config |

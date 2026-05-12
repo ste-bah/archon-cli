@@ -81,7 +81,7 @@ context was actually shown to the agent.
 the same Laplace-smoothed shape as completion trust, and `archon self plans
 inspect <session-id>` compares stored plans with recorded step outcomes.
 
-v1.2.0-beta adds the local world model as a separate, consumer-friendly learning
+v1.2.0 adds the local world model as a separate, consumer-friendly learning
 layer. It reads redacted session, pipeline, memory, retrospective, provider,
 plan, transcript, and agent-output traces into `~/.archon/world-model`, learns a
 compact latent transition model, and predicts likely next state plus auxiliary
@@ -92,6 +92,14 @@ reindex, governed agent evolution, and observed provider-runtime starts append
 runtime advisory records through the same fail-open contract. Pipeline
 completion links outcomes and audited bundles back to persisted predictions
 when an active advisory model exists.
+
+v1.2.0 also adds Reasoning Quality as the text-level claim/evidence signal.
+It captures visible assistant claims, matching evidence chronology, user
+corrections, later source verification, and later source contradictions into
+`~/.archon/reasoning-quality`. Optional LLM critique runs through the active
+provider only when config and policy allow it. These events feed governed
+LearningEvents, world-model rows, self-trust deltas, and proactive session
+briefing without becoming a hidden or unreviewable behavior change.
 
 User corrections have a separate governed-learning edge. When
 `agent.handle_correction` detects a correction, the existing memory graph,

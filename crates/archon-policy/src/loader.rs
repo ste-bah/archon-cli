@@ -76,6 +76,7 @@ struct RawPolicy {
     gametheory: Option<RawGameTheoryPolicy>,
     learning: Option<RawLearningPolicy>,
     world_model: Option<RawWorldModelPolicy>,
+    reasoning_quality: Option<RawReasoningQualityPolicy>,
     docs: Option<RawDocsPolicy>,
 }
 
@@ -116,6 +117,18 @@ struct RawWorldModelPolicy {
     allow_third_party_embeddings: Option<bool>,
     allow_llm_labeler: Option<bool>,
     allow_behavior_changes: Option<bool>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct RawReasoningQualityPolicy {
+    allow_llm_critic: Option<bool>,
+    allow_critic_cloud_data_flow: Option<bool>,
+    allow_third_party_critic: Option<bool>,
+    allow_raw_text_storage: Option<bool>,
+    allow_behavior_proposal_generation: Option<bool>,
+    allow_session_start_injection: Option<bool>,
+    allow_trust_updates_during_shadow: Option<bool>,
+    auto_migrate_reasoning_quality: Option<bool>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -199,6 +212,9 @@ fn apply_raw(policy: &mut EffectivePolicy, root: RawPolicyRoot) {
         }
         if let Some(world_model) = raw.world_model {
             apply_world_model(&mut policy.world_model, world_model);
+        }
+        if let Some(reasoning_quality) = raw.reasoning_quality {
+            apply_reasoning_quality(&mut policy.reasoning_quality, reasoning_quality);
         }
         if let Some(docs) = raw.docs {
             if let Some(vlm) = docs.vlm {
@@ -286,6 +302,33 @@ fn apply_world_model(policy: &mut WorldModelPolicy, raw: RawWorldModelPolicy) {
     }
     if let Some(value) = raw.allow_behavior_changes {
         policy.allow_behavior_changes = value;
+    }
+}
+
+fn apply_reasoning_quality(policy: &mut ReasoningQualityPolicy, raw: RawReasoningQualityPolicy) {
+    if let Some(value) = raw.allow_llm_critic {
+        policy.allow_llm_critic = value;
+    }
+    if let Some(value) = raw.allow_critic_cloud_data_flow {
+        policy.allow_critic_cloud_data_flow = value;
+    }
+    if let Some(value) = raw.allow_third_party_critic {
+        policy.allow_third_party_critic = value;
+    }
+    if let Some(value) = raw.allow_raw_text_storage {
+        policy.allow_raw_text_storage = value;
+    }
+    if let Some(value) = raw.allow_behavior_proposal_generation {
+        policy.allow_behavior_proposal_generation = value;
+    }
+    if let Some(value) = raw.allow_session_start_injection {
+        policy.allow_session_start_injection = value;
+    }
+    if let Some(value) = raw.allow_trust_updates_during_shadow {
+        policy.allow_trust_updates_during_shadow = value;
+    }
+    if let Some(value) = raw.auto_migrate_reasoning_quality {
+        policy.auto_migrate_reasoning_quality = value;
     }
 }
 
@@ -388,6 +431,47 @@ fn apply_pdf(policy: &mut PdfPolicy, raw: RawPdfPolicy) {
     }
     if let Some(value) = raw.render_text_pdf_pages {
         policy.render_text_pdf_pages = value;
+    }
+}
+
+#[cfg(test)]
+mod reasoning_quality_tests {
+    use super::*;
+
+    #[test]
+    fn loads_reasoning_quality_policy_block() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("policy.toml");
+        std::fs::write(
+            &path,
+            r#"
+[policy.reasoning_quality]
+allow_llm_critic = true
+allow_critic_cloud_data_flow = true
+allow_third_party_critic = true
+allow_raw_text_storage = true
+allow_behavior_proposal_generation = false
+allow_session_start_injection = false
+allow_trust_updates_during_shadow = true
+auto_migrate_reasoning_quality = true
+"#,
+        )
+        .unwrap();
+
+        let loaded = load_policy_from_sources(&[PolicySource {
+            label: "test",
+            path,
+        }])
+        .unwrap();
+        let rq = loaded.policy.reasoning_quality;
+        assert!(rq.allow_llm_critic);
+        assert!(rq.allow_critic_cloud_data_flow);
+        assert!(rq.allow_third_party_critic);
+        assert!(rq.allow_raw_text_storage);
+        assert!(!rq.allow_behavior_proposal_generation);
+        assert!(!rq.allow_session_start_injection);
+        assert!(rq.allow_trust_updates_during_shadow);
+        assert!(rq.auto_migrate_reasoning_quality);
     }
 }
 

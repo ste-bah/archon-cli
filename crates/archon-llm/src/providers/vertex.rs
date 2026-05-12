@@ -5,7 +5,10 @@
 use async_trait::async_trait;
 use tokio::sync::mpsc::Receiver;
 
-use crate::provider::{LlmError, LlmProvider, LlmRequest, LlmResponse, ModelInfo, ProviderFeature};
+use crate::provider::{
+    DataFlowClassification, LlmError, LlmProvider, LlmRequest, LlmResponse, ModelInfo,
+    ProviderFeature,
+};
 use crate::providers::gcp_auth::{GcpAccessToken, get_access_token, resolve_credentials};
 use crate::streaming::StreamEvent;
 use crate::types::{ContentBlockType, Usage};
@@ -533,5 +536,9 @@ impl LlmProvider for VertexProvider {
             ProviderFeature::SystemPrompt => is_claude,
             ProviderFeature::Vision => true,
         }
+    }
+
+    fn data_flow_classification(&self) -> DataFlowClassification {
+        DataFlowClassification::Cloud
     }
 }

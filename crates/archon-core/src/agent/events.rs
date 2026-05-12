@@ -1,4 +1,5 @@
 use super::*;
+use sha2::{Digest, Sha256};
 
 #[derive(Debug)]
 struct ProviderModelActivitySink {
@@ -60,6 +61,52 @@ impl Agent {
         })
     }
 
+    pub(super) fn emit_reasoning_turn(&self, assistant_text: &str) {
+        if assistant_text.trim().is_empty() {
+            return;
+        }
+        if let Some(ref cb) = self.record_reasoning_turn_callback {
+            cb(ReasoningTurnEventPayload {
+                session_id: self.config.session_id.clone(),
+                turn_number: self.turn_number,
+                assistant_text: assistant_text.to_string(),
+                evidence_refs: self.reasoning_evidence_refs.clone(),
+                cwd: std::env::current_dir()
+                    .ok()
+                    .map(|path| path.display().to_string()),
+                workspace_root: Some(self.config.working_dir.display().to_string()),
+            });
+        }
+    }
+
+    pub(super) fn record_reasoning_tool_evidence(
+        &mut self,
+        tool_name: &str,
+        tool_id: &str,
+        input: &serde_json::Value,
+        result: &ToolResult,
+        file_path: Option<&str>,
+    ) {
+        if result.is_error {
+            return;
+        }
+        let kind = classify_tool_evidence_kind(tool_name, input);
+        let entity_key = file_path
+            .map(ToOwned::to_owned)
+            .or_else(|| input_entity_key(tool_name, input));
+        let excerpt: String = result.content.chars().take(600).collect();
+        let output_hash = Some(hash_text(&result.content));
+        self.reasoning_evidence_refs
+            .push(ReasoningEvidenceEventPayload {
+                evidence_id: format!("{}:{}", tool_name, tool_id),
+                kind,
+                entity_key,
+                output_hash,
+                redacted_excerpt: Some(excerpt),
+                created_at: chrono::Utc::now().to_rfc3339(),
+            });
+    }
+
     pub(super) async fn send_event(&self, event: AgentEvent) {
         // TASK-AGS-102: unbounded send — synchronous, fails only if rx dropped.
         // TASK-AGS-108 ERR-ARCH-02: WARN on closed channel, continue execution.
@@ -101,4 +148,62 @@ impl Agent {
     pub fn conversation_state(&self) -> &ConversationState {
         &self.state
     }
+}
+
+fn classify_tool_evidence_kind(tool_name: &str, input: &serde_json::Value) -> String {
+    let lower = tool_name.to_lowercase();
+    let command = input
+        .get("command")
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+        .to_lowercase();
+    if lower.contains("read") || lower.contains("view") || lower.contains("open") {
+        "file_read".to_string()
+    } else if lower.contains("grep") || lower.contains("search") || lower.contains("glob") {
+        "search".to_string()
+    } else if command.contains("cargo test")
+        || command.contains("cargo build")
+        || command.contains("npm test")
+        || command.contains("pytest")
+    {
+        "test_output".to_string()
+    } else if command.trim_start().starts_with("git ") {
+        "git".to_string()
+    } else if lower.contains("pipeline") || lower.contains("artifact") {
+        "pipeline_artifact".to_string()
+    } else if lower.contains("mcp") {
+        "mcp_result".to_string()
+    } else {
+        "plugin_result".to_string()
+    }
+}
+
+fn input_entity_key(tool_name: &str, input: &serde_json::Value) -> Option<String> {
+    for key in ["path", "file_path", "filename", "query", "pattern"] {
+        if let Some(value) = input.get(key).and_then(|value| value.as_str())
+            && !value.trim().is_empty()
+        {
+            return Some(value.to_string());
+        }
+    }
+    input
+        .get("command")
+        .and_then(|value| value.as_str())
+        .map(|command| {
+            if command.contains("cargo test") {
+                "test-status".to_string()
+            } else {
+                format!(
+                    "{}:{}",
+                    tool_name,
+                    command.chars().take(80).collect::<String>()
+                )
+            }
+        })
+}
+
+fn hash_text(text: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(text.as_bytes());
+    hex::encode(hasher.finalize())
 }

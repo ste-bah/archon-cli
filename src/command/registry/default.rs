@@ -193,6 +193,20 @@ pub(crate) fn default_registry() -> Registry {
             "Run chat CLI commands from inside the TUI",
         )),
     );
+    b.insert_primary(
+        "reasoning",
+        Arc::new(crate::command::cli_mirror::CliMirrorHandler::prefixed(
+            "reasoning",
+            "Run reasoning-quality CLI commands from inside the TUI",
+        )),
+    );
+    b.insert_primary(
+        "briefing",
+        Arc::new(crate::command::cli_mirror::CliMirrorHandler::prefixed(
+            "briefing",
+            "Preview proactive session briefing from inside the TUI",
+        )),
+    );
     b.insert_primary("fork", Arc::new(ForkHandler));
     b.insert_primary("checkpoint", Arc::new(CheckpointHandler::new()));
     b.insert_primary("add-dir", Arc::new(AddDirHandler));

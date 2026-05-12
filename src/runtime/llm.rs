@@ -240,6 +240,7 @@ fn has_text(value: &str) -> bool {
 /// provider is missing required credentials, is unrecognised, or fails to
 /// construct for any other reason. The return type is intentionally
 /// infallible so the three `main.rs` call sites remain untouched.
+#[cfg(test)]
 pub(crate) fn build_llm_provider(
     llm_cfg: &LlmConfig,
     api_client: AnthropicClient,

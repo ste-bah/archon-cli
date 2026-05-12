@@ -324,6 +324,13 @@ impl Agent {
 
             self.fire_after_tool_call_hook(&pre.tool_name, &pre.tool_id, &result)
                 .await;
+            self.record_reasoning_tool_evidence(
+                &pre.tool_name,
+                &pre.tool_id,
+                &pre.input,
+                &result,
+                pre.file_path.as_deref(),
+            );
 
             self.send_event(AgentEvent::ToolCallComplete {
                 name: pre.tool_name.clone(),
