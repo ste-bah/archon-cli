@@ -42,19 +42,13 @@ async fn handle_reindex(all: bool) -> Result<()> {
         "world_model.memory_advisory"
     );
 
-    let data_dir = std::env::var("ARCHON_DATA_DIR")
-        .ok()
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| {
-            dirs::data_dir()
-                .unwrap_or_else(|| std::path::PathBuf::from("."))
-                .join("archon")
-        });
+    let (memory_data_dir, memory_db_path) =
+        archon_memory::resolve_memory_paths(config.memory.db_path.as_deref());
 
     // Open the memory graph in Direct mode (we need set_embedding_provider
     // + reindex_all_embeddings, both of which require the concrete
     // MemoryGraph rather than the trait-object access wrapper).
-    let access = archon_memory::open_memory(&data_dir)
+    let access = archon_memory::open_memory_with_db_path(&memory_data_dir, &memory_db_path)
         .await
         .context("failed to open memory graph")?;
     let graph = access

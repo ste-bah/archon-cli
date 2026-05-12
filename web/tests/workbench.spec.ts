@@ -37,3 +37,19 @@ for (const theme of ["dark", "light"] as const) {
     }
   });
 }
+
+test("chat send and attach controls are interactive", async ({ page }) => {
+  await mockApi(page);
+  await page.goto("./#/chat");
+  await page.getByLabel("Message").fill("Can you inspect the active run?");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page.getByText("Can you inspect the active run?")).toBeVisible();
+  await expect(page.getByText(/webmsg_test/)).toBeVisible();
+
+  await page.locator('input[type="file"]').setInputFiles({
+    name: "notes.txt",
+    mimeType: "text/plain",
+    buffer: Buffer.from("hello"),
+  });
+  await expect(page.getByText("notes.txt")).toBeVisible();
+});

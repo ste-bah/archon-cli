@@ -15,7 +15,11 @@ import type {
   WebActionRequest,
   WebActionResponse,
   WebAuthSession,
+  WebChatSubmitRequest,
+  WebChatSubmitResponse,
   WebLiveSnapshot,
+  WebUploadIntent,
+  WebUploadIntentResponse,
   WebUploadPolicy,
   WorldInspectionSummary,
 } from "./generated/web";
@@ -62,6 +66,10 @@ export const apiClient = {
   liveSnapshot: () => getJson<WebLiveSnapshot>("/api/live/snapshot"),
   authSession: () => getJson<WebAuthSession>("/api/auth/session"),
   uploadPolicy: () => getJson<WebUploadPolicy>("/api/uploads/policy"),
+  uploadIntent: (request: WebUploadIntent) =>
+    postJson<WebUploadIntentResponse>("/api/uploads/intent", request),
+  submitChat: (request: WebChatSubmitRequest) =>
+    postJson<WebChatSubmitResponse>("/api/chat/submit", request),
   corpusSummary: () => getJson<CorpusSummary>("/api/corpus/summary"),
   corpusSearch: (query: string, kind: string) =>
     getJson<CorpusSearchResponse>(

@@ -7,7 +7,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use ts_rs::{Config as TsConfig, TS};
 
-use super::{AppState, WebConfig, check_auth};
+use super::{AppState, WebConfig, WebRuntimePaths, assets, check_auth};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -137,6 +137,7 @@ impl WebApiState {
         config: &WebConfig,
         auth_required: bool,
         policy: EffectivePolicySummary,
+        paths: WebRuntimePaths,
     ) -> Self {
         let dev_mode = std::env::var("ARCHON_WEB_DEV").ok().as_deref() == Some("1");
         let status = ApiStatus {
@@ -150,7 +151,7 @@ impl WebApiState {
                 asset_mode: if dev_mode { "vite-dev" } else { "embedded" }.to_string(),
             },
             features: WebFeatureSummary::foundation(&policy),
-            stores: WebStoreStatus::known_stores(),
+            stores: WebStoreStatus::known_stores(&paths),
         };
 
         let config_summary = EffectiveConfigSummary {
@@ -207,16 +208,14 @@ impl WebFeatureSummary {
 }
 
 impl WebStoreStatus {
-    fn known_stores() -> Vec<Self> {
-        let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-        let home = dirs::home_dir()
-            .unwrap_or_else(|| std::path::PathBuf::from("."))
-            .join(".archon");
+    fn known_stores(paths: &WebRuntimePaths) -> Vec<Self> {
         vec![
-            Self::from_path("memory", home.join("memory")),
-            Self::from_path("world-model", home.join("world-model")),
-            Self::from_path("corpus", cwd.join(".archon/docs")),
-            Self::from_path("pipelines", home.join("pipelines")),
+            Self::from_path("memory db", paths.memory_db.clone()),
+            Self::from_path("session activity", paths.session_activity_root.clone()),
+            Self::from_path("world-model", paths.world_model_root.clone()),
+            Self::from_path("corpus", paths.cwd.join(".archon/docs")),
+            Self::from_path("pipelines", paths.archon_home.join("pipelines")),
+            Self::embedded_assets(),
         ]
     }
 
@@ -226,6 +225,15 @@ impl WebStoreStatus {
             name: name.to_string(),
             status: if exists { "ready" } else { "missing" }.to_string(),
             detail: path.to_string_lossy().to_string(),
+        }
+    }
+
+    fn embedded_assets() -> Self {
+        let files = assets::list_assets().len();
+        Self {
+            name: "web assets".to_string(),
+            status: if files > 0 { "ready" } else { "missing" }.to_string(),
+            detail: format!("embedded web/dist assets ({files} files)"),
         }
     }
 }
@@ -311,6 +319,7 @@ pub fn generated_typescript() -> String {
         super::live::generated_typescript(),
         super::actions::generated_typescript(),
         super::auth::generated_typescript(),
+        super::chat::generated_typescript(),
         super::uploads::generated_typescript(),
         super::corpus::generated_typescript(),
         super::inspect::generated_typescript(),
@@ -349,8 +358,12 @@ mod tests {
             bind_address: "0.0.0.0".to_string(),
             open_browser: false,
         };
-        let state =
-            WebApiState::from_server_config(&cfg, true, EffectivePolicySummary::default_safe());
+        let state = WebApiState::from_server_config(
+            &cfg,
+            true,
+            EffectivePolicySummary::default_safe(),
+            WebRuntimePaths::default(),
+        );
         assert_eq!(state.status().web.port, 9001);
         assert!(state.config().web.non_loopback_bind);
         assert!(state.status().web.auth_required);

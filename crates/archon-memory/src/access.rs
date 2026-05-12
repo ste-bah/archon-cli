@@ -5,7 +5,7 @@
 //! server (subsequent sessions).
 
 use std::net::SocketAddr;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use tracing::{debug, info, warn};
@@ -327,11 +327,52 @@ impl MemoryTrait for MemoryAccess {
 /// methods call [`block_on_async`] internally — this will panic outside a
 /// tokio context.
 pub async fn open_memory(data_dir: &Path) -> Result<MemoryAccess, MemoryError> {
+    open_memory_with_db_path(data_dir, &data_dir.join("memory.db")).await
+}
+
+pub fn default_memory_data_dir() -> PathBuf {
+    std::env::var("ARCHON_DATA_DIR")
+        .ok()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            dirs::data_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join("archon")
+        })
+}
+
+pub fn resolve_memory_paths(configured: Option<&str>) -> (PathBuf, PathBuf) {
+    if let Some(value) = configured.filter(|value| !value.trim().is_empty()) {
+        let path = PathBuf::from(value);
+        if path.extension().is_some_and(|ext| ext == "db") {
+            let data_dir = path
+                .parent()
+                .map(Path::to_path_buf)
+                .unwrap_or_else(default_memory_data_dir);
+            return (data_dir, path);
+        }
+        return (path.clone(), path.join("memory.db"));
+    }
+    let data_dir = default_memory_data_dir();
+    let db_path = data_dir.join("memory.db");
+    (data_dir, db_path)
+}
+
+/// Open the singleton memory system with an explicit Cozo database path.
+///
+/// `data_dir` still owns the singleton coordination files (`memory.port` and
+/// `memory.lock`). `db_path` owns the actual Cozo memory graph.
+pub async fn open_memory_with_db_path(
+    data_dir: &Path,
+    db_path: &Path,
+) -> Result<MemoryAccess, MemoryError> {
     std::fs::create_dir_all(data_dir)?;
+    if let Some(parent) = db_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
 
     let port_file = data_dir.join("memory.port");
     let lock_file = data_dir.join("memory.lock");
-    let db_path = data_dir.join("memory.db");
 
     // Fast path: if port file exists, try to connect.
     if let Some(access) = try_connect_existing(&port_file).await {
@@ -358,7 +399,7 @@ pub async fn open_memory(data_dir: &Path) -> Result<MemoryAccess, MemoryError> {
 
     // We are the server. Open CozoDB and start listening.
     info!("starting memory server");
-    let graph = MemoryGraph::open(&db_path)?;
+    let graph = MemoryGraph::open(db_path)?;
     let graph = Arc::new(graph);
     let (port, handle) = MemoryServer::start(Arc::clone(&graph), port_file).await?;
     info!(port, "memory server started");

@@ -9,10 +9,11 @@ use axum::{
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
 };
+use cozo::ScriptMutability;
 use serde::{Deserialize, Serialize};
 use ts_rs::{Config as TsConfig, TS};
 
-use super::{AppState, check_auth};
+use super::{AppState, WebRuntimePaths, check_auth};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -76,7 +77,7 @@ pub(crate) async fn learning_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Response {
-    authed_json(&state, &headers, learning_summary())
+    authed_json(&state, &headers, learning_summary(&state.paths))
 }
 
 pub(crate) async fn settings_handler(
@@ -93,43 +94,65 @@ fn authed_json<T: Serialize>(state: &AppState, headers: &HeaderMap, value: T) ->
     (StatusCode::OK, Json(value)).into_response()
 }
 
-fn learning_summary() -> LearningSummary {
-    let home = home_archon();
-    let sessions = home.join("sessions");
+fn learning_summary(paths: &WebRuntimePaths) -> LearningSummary {
+    let sessions = paths.session_activity_root.clone();
     let recent_sessions = recent_dir_names(&sessions, 12);
     LearningSummary {
         stores: vec![
-            probe("local learning db", cwd().join(".archon/learning.db")),
-            probe("home sessions", sessions),
-            probe("reasoning quality", home.join("reasoning-quality")),
+            probe("local learning db", paths.cwd.join(".archon/learning.db")),
+            probe("session activity", sessions),
+            probe("memory database", paths.memory_db.clone()),
+            probe("reasoning quality", paths.reasoning_quality_root.clone()),
         ],
-        signals: learning_signals(&home),
-        memories: memory_rows(&home, 8),
-        learning_events: ledger_rows(&home.join("learning"), "learning_event", 8),
-        proposals: proposal_rows(&home, 8),
-        trust_deltas: trust_rows(&home, 8),
-        session_count: count_dirs(&home.join("sessions")),
+        signals: learning_signals(paths),
+        memories: memory_rows(&paths.memory_db, 8),
+        learning_events: ledger_rows(&paths.archon_home.join("learning"), "learning_event", 8),
+        proposals: proposal_rows(&paths.archon_home, 8),
+        trust_deltas: trust_rows(&paths.archon_home, 8),
+        session_count: count_dirs(&paths.session_activity_root),
         recent_sessions,
-        reasoning_store_present: home.join("reasoning-quality/reasoning-quality.db").exists(),
+        reasoning_store_present: paths
+            .reasoning_quality_root
+            .join("reasoning-quality.db")
+            .exists(),
     }
 }
 
-fn learning_signals(home: &Path) -> Vec<LearningSignalItem> {
+fn learning_signals(paths: &WebRuntimePaths) -> Vec<LearningSignalItem> {
     vec![
-        signal("session activity", "sessions", home.join("sessions")),
+        signal(
+            "session activity",
+            "sessions",
+            paths.session_activity_root.clone(),
+        ),
+        signal("memory database", "memory", paths.memory_db.clone()),
         signal(
             "reasoning quality",
             "reasoning",
-            home.join("reasoning-quality"),
+            paths.reasoning_quality_root.clone(),
         ),
         signal(
             "self trust",
             "calibration",
-            home.join("self-calibration/trust/self-trust.json"),
+            paths
+                .archon_home
+                .join("self-calibration/trust/self-trust.json"),
         ),
-        signal("learning events", "learning", home.join("learning")),
-        signal("behaviour proposals", "proposal", home.join("behaviour")),
-        signal("behavior proposals", "proposal", home.join("behavior")),
+        signal(
+            "learning events",
+            "learning",
+            paths.archon_home.join("learning"),
+        ),
+        signal(
+            "behaviour proposals",
+            "proposal",
+            paths.archon_home.join("behaviour"),
+        ),
+        signal(
+            "behavior proposals",
+            "proposal",
+            paths.archon_home.join("behavior"),
+        ),
     ]
 }
 
@@ -143,11 +166,34 @@ fn signal(label: &str, kind: &str, path: PathBuf) -> LearningSignalItem {
     }
 }
 
-fn memory_rows(home: &Path, limit: usize) -> Vec<LearningRowPreview> {
-    [home.join("memory"), home.join("memory/garden")]
-        .iter()
-        .flat_map(|root| recent_files(root, "memory", limit))
-        .take(limit)
+fn memory_rows(memory_db: &Path, limit: usize) -> Vec<LearningRowPreview> {
+    if !memory_db.exists() {
+        return Vec::new();
+    }
+    let path_str = memory_db.to_string_lossy().to_string();
+    let Ok(db) = cozo::DbInstance::new("sqlite", &path_str, "") else {
+        return Vec::new();
+    };
+    let query = format!(
+        "?[id, content, title, memory_type, importance] := \
+         *memories{{id, content, title, memory_type, importance}} :limit {limit}"
+    );
+    db.run_script(&query, Default::default(), ScriptMutability::Immutable)
+        .ok()
+        .into_iter()
+        .flat_map(|rows| rows.rows)
+        .map(|row| LearningRowPreview {
+            label: cozo_text(row.get(2))
+                .unwrap_or_else(|| cozo_text(row.first()).unwrap_or_default()),
+            kind: cozo_text(row.get(3)).unwrap_or_else(|| "memory".into()),
+            status: "recorded".into(),
+            detail: cozo_text(row.get(1))
+                .unwrap_or_default()
+                .chars()
+                .take(180)
+                .collect(),
+            path: display_path(memory_db),
+        })
         .collect()
 }
 
@@ -261,6 +307,10 @@ fn compact_json(value: &serde_json::Value) -> String {
         .collect()
 }
 
+fn cozo_text(value: Option<&cozo::DataValue>) -> Option<String> {
+    value?.get_str().map(str::to_string)
+}
+
 fn settings_summary() -> SettingsSummary {
     SettingsSummary {
         theme_modes: vec!["dark".into(), "light".into()],
@@ -339,16 +389,6 @@ fn dir_stats(path: &Path, depth: usize) -> (u64, u64) {
         let (child_files, child_bytes) = dir_stats(&entry.path(), depth + 1);
         (files + child_files, bytes + child_bytes)
     })
-}
-
-fn cwd() -> PathBuf {
-    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
-}
-
-fn home_archon() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".archon")
 }
 
 fn display_path(path: &Path) -> String {

@@ -1,6 +1,7 @@
 use archon_core::config::ArchonConfig;
 use archon_sdk::web::{
-    WebConfig, WebPolicySummary, WebServer, WebSubsystemPolicySummary, api::EffectivePolicySummary,
+    WebConfig, WebPolicySummary, WebRuntimePaths, WebServer, WebSubsystemPolicySummary,
+    api::EffectivePolicySummary,
 };
 
 pub(crate) async fn handle_web_command(
@@ -33,7 +34,11 @@ pub(crate) async fn handle_web_command(
     };
 
     let policy = web_policy_summary();
-    let server = WebServer::with_policy(web_cfg, token, policy);
+    let paths = WebRuntimePaths::from_overrides(
+        config.memory.db_path.as_deref(),
+        config.session.db_path.as_deref(),
+    );
+    let server = WebServer::with_policy_and_paths(web_cfg, token, policy, paths);
     if let Err(e) = server.run().await {
         eprintln!("web server error: {e}");
         std::process::exit(1);

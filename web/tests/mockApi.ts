@@ -87,6 +87,22 @@ export async function mockApi(page: Page) {
       acceptedMimeTypes: ["text/plain", "application/pdf"],
       policyReason: "allowed by local policy",
     },
+    "/api/uploads/intent": {
+      accepted: true,
+      decision: {
+        allowed: true,
+        requiresConfirmation: false,
+        policyReason: "upload intent accepted by web upload policy",
+        dryRunAvailable: true,
+      },
+    },
+    "/api/chat/submit": {
+      messageId: "webmsg_test",
+      accepted: true,
+      createdAtMs: 1770000000,
+      policyReason: "chat message accepted and recorded by the web workbench",
+      storedPath: "~/.archon/web/chat.messages.jsonl",
+    },
     "/api/corpus/summary": {
       roots: [probe("Repository docs", "/repo/docs", true, 42, 800000)],
       sources: [

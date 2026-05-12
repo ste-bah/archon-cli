@@ -296,7 +296,7 @@ archonmd_max_tokens = 8192
 # ----------------------------------------------------------------------------
 [memory]
 enabled = true
-# CozoDB file path. None → default: ~/.archon/memory.db
+# CozoDB file path. None → default: platform data dir/archon/memory.db
 # db_path = "/custom/path/memory.db"
 
 # Embedding provider: "auto" | "local" | "openai"

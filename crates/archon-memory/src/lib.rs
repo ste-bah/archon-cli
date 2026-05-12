@@ -12,7 +12,10 @@ pub mod server;
 pub mod types;
 pub mod vector_search;
 
-pub use access::{MemoryAccess, MemoryTrait, open_memory};
+pub use access::{
+    MemoryAccess, MemoryTrait, default_memory_data_dir, open_memory, open_memory_with_db_path,
+    resolve_memory_paths,
+};
 pub use graph::MemoryGraph;
 pub use injection::MemoryInjector;
 pub use types::{

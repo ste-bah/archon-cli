@@ -14,7 +14,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use ts_rs::{Config as TsConfig, TS};
 
-use super::{AppState, check_auth, inspect::PathProbe};
+use super::{AppState, WebRuntimePaths, assets, check_auth, inspect::PathProbe};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -94,50 +94,54 @@ pub(crate) async fn summary_handler(State(state): State<AppState>, headers: Head
     if let Err(resp) = check_auth(&state, &headers) {
         return resp;
     }
-    (StatusCode::OK, Json(metrics_summary())).into_response()
+    (StatusCode::OK, Json(metrics_summary(&state.paths))).into_response()
 }
 
-fn metrics_summary() -> MetricsSummary {
-    let cwd = cwd();
-    let home = home_archon();
-    let dist_probe = probe("web dist", cwd.join("web/dist"));
-    let provider_events = provider_runtime_records(&cwd);
+fn metrics_summary(paths: &WebRuntimePaths) -> MetricsSummary {
+    let dist_probe = embedded_asset_probe();
+    let provider_events = provider_runtime_records(&paths.cwd, paths);
     MetricsSummary {
-        logs: log_probes(&home),
-        budgets: vec![probe("budget records", home.join("budget"))],
+        logs: log_probes(paths),
+        budgets: vec![probe("budget records", paths.archon_data.join("budget"))],
         web_bundle_files: dist_probe.files,
         web_bundle_bytes: dist_probe.bytes,
-        stores: store_health(&home, &cwd),
+        stores: store_health(paths, &dist_probe),
         performance: performance_values(&dist_probe),
-        queues: queue_values(&home),
-        recent_events: recent_events(&home, 8),
+        queues: queue_values(&paths.archon_home),
+        recent_events: recent_events(&paths.archon_home, 8),
         provider_metrics: provider_metrics(&provider_events),
         provider_events: provider_event_previews(&provider_events, 8),
     }
 }
 
-fn log_probes(home: &Path) -> Vec<PathProbe> {
+fn log_probes(paths: &WebRuntimePaths) -> Vec<PathProbe> {
     vec![
-        probe("system logs", home.join("logs")),
-        probe("web action audit", home.join("web/actions.audit.jsonl")),
+        probe("system logs", paths.archon_data.join("logs")),
+        probe(
+            "web action audit",
+            paths.archon_home.join("web/actions.audit.jsonl"),
+        ),
         probe(
             "reasoning quality events",
-            home.join("reasoning-quality/events.jsonl"),
+            paths.reasoning_quality_root.join("events.jsonl"),
         ),
         probe(
             "world advisor events",
-            home.join("world-model/ledgers/world-advisor-events.jsonl"),
+            paths
+                .world_model_root
+                .join("ledgers/world-advisor-events.jsonl"),
         ),
     ]
 }
 
-fn store_health(home: &Path, cwd: &Path) -> Vec<MetricStoreHealth> {
+fn store_health(paths: &WebRuntimePaths, dist: &PathProbe) -> Vec<MetricStoreHealth> {
     [
-        probe("sessions", home.join("sessions")),
-        probe("memory", home.join("memory")),
-        probe("world model", home.join("world-model")),
-        probe("reasoning quality", home.join("reasoning-quality")),
-        probe("web dist", cwd.join("web/dist")),
+        probe("session database", paths.session_db.clone()),
+        probe("session activity", paths.session_activity_root.clone()),
+        probe("memory database", paths.memory_db.clone()),
+        probe("world model", paths.world_model_root.clone()),
+        probe("reasoning quality", paths.reasoning_quality_root.clone()),
+        dist.clone(),
     ]
     .into_iter()
     .map(|probe| MetricStoreHealth {
@@ -208,8 +212,11 @@ fn recent_events(home: &Path, limit: usize) -> Vec<MetricEventPreview> {
         .collect()
 }
 
-fn provider_runtime_records(cwd: &Path) -> Vec<ProviderRuntimeEventRecord> {
-    learning_db_candidates(cwd)
+fn provider_runtime_records(
+    cwd: &Path,
+    paths: &WebRuntimePaths,
+) -> Vec<ProviderRuntimeEventRecord> {
+    learning_db_candidates(cwd, paths)
         .into_iter()
         .find_map(|path| {
             if !path.exists() {
@@ -222,13 +229,13 @@ fn provider_runtime_records(cwd: &Path) -> Vec<ProviderRuntimeEventRecord> {
         .unwrap_or_default()
 }
 
-fn learning_db_candidates(cwd: &Path) -> Vec<PathBuf> {
-    let mut paths = vec![cwd.join(".archon/learning.db")];
+fn learning_db_candidates(cwd: &Path, paths: &WebRuntimePaths) -> Vec<PathBuf> {
+    let mut candidates = vec![cwd.join(".archon/learning.db")];
     if let Some(parent) = cwd.parent() {
-        paths.push(parent.join("learning.db"));
+        candidates.push(parent.join("learning.db"));
     }
-    paths.push(home_archon().join("learning.db"));
-    paths
+    candidates.push(paths.archon_home.join("learning.db"));
+    candidates
 }
 
 fn provider_metrics(records: &[ProviderRuntimeEventRecord]) -> Vec<ProviderRuntimeMetric> {
@@ -382,6 +389,22 @@ fn probe(label: impl Into<String>, path: PathBuf) -> PathProbe {
     }
 }
 
+fn embedded_asset_probe() -> PathProbe {
+    let asset_paths = assets::list_assets();
+    let bytes = asset_paths
+        .iter()
+        .filter_map(|path| assets::get_asset(path))
+        .map(|asset| asset.data.len() as u64)
+        .sum();
+    PathProbe {
+        label: "web assets".into(),
+        path: "embedded web/dist assets".into(),
+        exists: !asset_paths.is_empty(),
+        files: asset_paths.len() as u64,
+        bytes,
+    }
+}
+
 fn dir_stats(path: &Path, depth: usize) -> (u64, u64) {
     if depth > 3 {
         return (0, 0);
@@ -413,16 +436,6 @@ fn bytes_label(value: u64) -> String {
     }
 }
 
-fn cwd() -> PathBuf {
-    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
-}
-
-fn home_archon() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".archon")
-}
-
 fn display_path(path: &Path) -> String {
     path.to_string_lossy().to_string()
 }
@@ -446,51 +459,4 @@ fn exported(decl: String) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn missing_event_ledger_is_empty() {
-        let events = read_recent_lines("web", Path::new("/not/real/events.jsonl"), 4);
-        assert!(events.is_empty());
-    }
-
-    #[test]
-    fn provider_metrics_aggregate_usage_and_errors() {
-        let first = ProviderRuntimeEventRecord::new(
-            "event-1",
-            "anthropic",
-            "direct",
-            "request_succeeded",
-            "info",
-            "now",
-        )
-        .with_model("claude")
-        .with_redacted_json(serde_json::json!({
-            "usage": { "input_count": 100, "output_count": 40 },
-            "latency_ms": 250,
-            "cost_usd": 0.002
-        }));
-        let second = ProviderRuntimeEventRecord::new(
-            "event-2",
-            "anthropic",
-            "direct",
-            "request_failed",
-            "warn",
-            "later",
-        )
-        .with_retry_count(2)
-        .with_redacted_json(serde_json::json!({
-            "usage": { "input_count": 20, "output_count": 0 },
-            "latency_ms": 800
-        }));
-        let metrics = provider_metrics(&[first, second]);
-        assert_eq!(metrics.len(), 1);
-        assert_eq!(metrics[0].request_count, 2);
-        assert_eq!(metrics[0].error_count, 1);
-        assert_eq!(metrics[0].retry_count, 2);
-        assert_eq!(metrics[0].input_tokens, 120);
-        assert_eq!(metrics[0].output_tokens, 40);
-        assert_eq!(metrics[0].latency_ms_p95, 800);
-    }
-}
+mod tests;

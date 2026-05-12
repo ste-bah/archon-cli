@@ -97,20 +97,23 @@ right Archon process and project directory.
 
 ### Chat
 
-The chat tab is the browser entry point for agent interaction. It is intended to
-share the same provider configuration, permissions, session state, and tool
-surface as the CLI/TUI.
+The chat tab is the browser entry point for web-session interaction. The
+current foundation path records submitted messages locally under the Archon web
+ledger and validates attachment metadata through the upload policy API. The
+full TUI agent turn loop remains the richer provider/tool execution surface.
 
 Current foundation behaviour:
 
 | Area | Shows |
 |---|---|
-| Conversation shell | prompt area and response surface |
-| Attachments | upload/attachment policy posture |
+| Conversation shell | prompt area, submitted messages, and local web-session acknowledgements |
+| Attachments | file picker, upload-intent validation, and accepted attachment chips |
 | Auth state | whether the web session is loopback or token-protected |
 
 When uploads are enabled by policy, attachment metadata is checked before the
 file is accepted. Uploads do not bypass normal tool, file, or policy gates.
+Submitted web-chat messages are appended to
+`~/.archon/web/chat.messages.jsonl` for auditability.
 
 ### Corpus
 

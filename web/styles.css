@@ -401,6 +401,11 @@ textarea {
   border: 1px solid var(--line);
 }
 
+.message--user {
+  margin-left: auto;
+  border-color: color-mix(in srgb, var(--accent) 38%, var(--line) 62%);
+}
+
 .message p {
   margin-top: 8px;
   color: var(--muted);
@@ -428,6 +433,23 @@ textarea {
   justify-content: flex-end;
   gap: 10px;
 }
+
+.attachment-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.attachment-chip {
+  gap: 8px;
+  max-width: 280px;
+  min-height: 32px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-2) 82%, var(--accent) 18%);
+}
+
+.attachment-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .composer button {
   display: inline-flex;
