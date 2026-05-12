@@ -5,25 +5,22 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::cli_args::Cli;
+use crate::command::utils::{apply_tool_filters, fetch_account_uuid};
+pub(crate) use crate::command::utils::{handle_resume_list, load_resume_messages};
 use crate::slash_context::SlashCommandContext;
 use anyhow::Result;
 use archon_consciousness::assembler::{AssemblyInput, BudgetConfig, SystemPromptAssembler};
 use archon_consciousness::defaults::load_configured_defaults;
 use archon_consciousness::rules::RulesEngine;
-use archon_core::agent::{
-    Agent, AgentConfig, AgentEvent, ReasoningEvidenceEventPayload, ReasoningTurnEventPayload,
-    TimestampedEvent,
-};
+use archon_core::agent::{Agent, AgentConfig, AgentEvent, TimestampedEvent};
 use archon_core::agents::AgentRegistry;
 use archon_core::agents::permissions_overlay::{
     PermissionOverlayReason, resolve_permission_overlay,
 };
 use archon_core::config::default_config_path;
-use archon_core::config_layers::ConfigLayer;
 use archon_core::cost_alerts::{CostAlertAction, CostAlertState};
 use archon_core::dispatch::create_default_registry;
 use archon_core::env_vars::ArchonEnvVars;
-use archon_core::print_mode::{PrintModeConfig, run_print_mode};
 use archon_core::reasoning::build_environment_section;
 use archon_core::skills::builtin::register_builtins;
 use archon_core::skills::discovery::discover_user_skills;
@@ -41,7 +38,6 @@ use archon_memory::{MemoryAccess, MemoryGraph, MemoryTrait};
 use archon_permissions::auto::{AutoModeConfig, AutoModeEvaluator};
 use archon_tui::app::TuiEvent;
 use archon_tui::commands::CommandInfo;
-use archon_tui::event_channel::TuiEventSender;
 use archon_tui::observability;
 
 use crate::command::registry::default_registry;
@@ -55,47 +51,12 @@ use crate::runtime::provider_observer::{
 };
 use crate::setup::strip_cache_control_if_disabled;
 
-use archon_core::remote::protocol::AgentMessage;
-
-#[derive(Debug, Clone)]
-struct SessionActivitySink {
-    jsonl: archon_observability::JsonlActivitySink,
-    tui_tx: Option<TuiEventSender>,
-}
-
-impl archon_observability::AgentActivitySink for SessionActivitySink {
-    fn emit(&self, event: archon_observability::AgentActivityEvent) {
-        archon_observability::AgentActivitySink::emit(&self.jsonl, event.clone());
-        if let Some(tx) = &self.tui_tx {
-            let _ = tx.send(TuiEvent::AgentActivity(event.into()));
-        }
-    }
-}
-
-fn session_activity_sink(
-    session_id: &str,
-) -> Option<Arc<dyn archon_observability::AgentActivitySink>> {
-    session_activity_sink_inner(session_id, None)
-}
-
-fn session_activity_sink_with_tui(
-    session_id: &str,
-    tui_tx: TuiEventSender,
-) -> Option<Arc<dyn archon_observability::AgentActivitySink>> {
-    session_activity_sink_inner(session_id, Some(tui_tx))
-}
-
-fn session_activity_sink_inner(
-    session_id: &str,
-    tui_tx: Option<TuiEventSender>,
-) -> Option<Arc<dyn archon_observability::AgentActivitySink>> {
-    let base_dir = dirs::home_dir()?.join(".archon/sessions");
-    let path = archon_observability::activity_jsonl_path(base_dir, session_id);
-    Some(Arc::new(SessionActivitySink {
-        jsonl: archon_observability::JsonlActivitySink::new(path),
-        tui_tx,
-    }))
-}
+mod activity;
+mod agent_ledger;
+mod modes;
+mod reasoning_quality;
+use activity::{session_activity_sink, session_activity_sink_with_tui};
+pub(crate) use modes::{run_headless_session, run_print_mode_session};
 
 /// Result of [`build_session_agent`] — a fully constructed Agent plus
 /// the event receiver, resolved agent definition, and channel metrics.
@@ -183,335 +144,6 @@ fn open_governed_learning_db(working_dir: &std::path::Path) -> Option<Arc<cozo::
             None
         }
     }
-}
-
-fn reasoning_quality_root() -> Option<PathBuf> {
-    Some(dirs::home_dir()?.join(".archon").join("reasoning-quality"))
-}
-
-fn reasoning_world_model_root() -> Option<PathBuf> {
-    Some(dirs::home_dir()?.join(".archon").join("world-model"))
-}
-
-fn session_briefing_context(working_dir: &std::path::Path) -> String {
-    let mut parts = vec![format!("cwd={}", working_dir.display())];
-    let head_path = working_dir.join(".git").join("HEAD");
-    if let Ok(head) = std::fs::read_to_string(&head_path) {
-        let head = head.trim();
-        if let Some(branch) = head.strip_prefix("ref: refs/heads/") {
-            parts.push(format!("branch={branch}"));
-            if let Ok(sha) = std::fs::read_to_string(working_dir.join(".git").join(head)) {
-                parts.push(format!(
-                    "git_head={}",
-                    sha.trim().chars().take(12).collect::<String>()
-                ));
-            }
-        } else if !head.is_empty() {
-            parts.push(format!(
-                "git_head={}",
-                head.chars().take(12).collect::<String>()
-            ));
-        }
-    }
-    if let Some(home) = dirs::home_dir() {
-        let activity_dir = home.join(".archon").join("sessions");
-        if activity_dir.exists() {
-            parts.push("recent_activity=available".to_string());
-        }
-    }
-    parts.join(" ")
-}
-
-fn reasoning_shadow_active(root: &std::path::Path, shadow_mode_days: u32) -> bool {
-    if shadow_mode_days == 0 {
-        return false;
-    }
-    let path = root.join("shadow").join("started_at");
-    let now = chrono::Utc::now();
-    if let Ok(text) = std::fs::read_to_string(&path)
-        && let Ok(started) = chrono::DateTime::parse_from_rfc3339(text.trim())
-    {
-        return (now - started.with_timezone(&chrono::Utc)).num_days() < shadow_mode_days as i64;
-    }
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    let _ = std::fs::write(path, now.to_rfc3339());
-    true
-}
-
-fn map_reasoning_evidence(
-    payload: ReasoningEvidenceEventPayload,
-    redaction: &archon_reasoning_quality::RedactionConfig,
-) -> archon_reasoning_quality::EvidenceRef {
-    archon_reasoning_quality::EvidenceRef {
-        evidence_id: payload.evidence_id,
-        kind: match payload.kind.as_str() {
-            "file_read" => archon_reasoning_quality::EvidenceKind::FileRead,
-            "search" => archon_reasoning_quality::EvidenceKind::Search,
-            "git" => archon_reasoning_quality::EvidenceKind::Git,
-            "test_output" => archon_reasoning_quality::EvidenceKind::TestOutput,
-            "memory" => archon_reasoning_quality::EvidenceKind::Memory,
-            "mcp_result" => archon_reasoning_quality::EvidenceKind::McpResult,
-            "plugin_result" => archon_reasoning_quality::EvidenceKind::PluginResult,
-            "pipeline_artifact" => archon_reasoning_quality::EvidenceKind::PipelineArtifact,
-            _ => archon_reasoning_quality::EvidenceKind::ChatHistory,
-        },
-        entity_key: payload
-            .entity_key
-            .map(|key| archon_reasoning_quality::redact_entity_key(&key, redaction)),
-        output_hash: payload.output_hash,
-        redacted_excerpt: payload
-            .redacted_excerpt
-            .map(|text| archon_reasoning_quality::redact_text(&text, redaction)),
-        created_at: chrono::DateTime::parse_from_rfc3339(&payload.created_at)
-            .map(|dt| dt.with_timezone(&chrono::Utc))
-            .unwrap_or_else(|_| chrono::Utc::now()),
-    }
-}
-
-fn record_reasoning_turn(
-    payload: ReasoningTurnEventPayload,
-    root: &std::path::Path,
-    max_claims_per_turn: usize,
-    max_excerpt_chars: usize,
-    store_raw_text: bool,
-    learning_db: Option<&cozo::DbInstance>,
-    world_root: Option<&std::path::Path>,
-    feed_world_model: bool,
-    update_self_trust: bool,
-    shadow_active: bool,
-    critic_runtime: Option<crate::runtime::reasoning_critic::CriticRuntime>,
-) {
-    let redaction = archon_reasoning_quality::RedactionConfig {
-        allow_raw_text: store_raw_text,
-        workspace_root: payload.workspace_root.clone(),
-        max_excerpt_chars,
-        ..archon_reasoning_quality::RedactionConfig::default()
-    };
-    let mut input = archon_reasoning_quality::ReasoningTurnInput {
-        session_id: payload.session_id,
-        turn_number: payload.turn_number,
-        assistant_text: payload.assistant_text,
-        evidence_refs: payload
-            .evidence_refs
-            .into_iter()
-            .map(|evidence| map_reasoning_evidence(evidence, &redaction))
-            .collect(),
-        cwd: payload.cwd,
-        workspace_root: payload.workspace_root,
-        store_raw_text,
-    };
-    if let Ok(store) = archon_reasoning_quality::store::ReasoningQualityStore::open(root)
-        && let Ok(prior_events) = store.events_for_session(&input.session_id)
-    {
-        input.evidence_refs.extend(
-            prior_events
-                .into_iter()
-                .filter(|event| {
-                    event.event_kind
-                        == archon_reasoning_quality::ReasoningEventKind::SourceVerifiedClaim
-                })
-                .map(|event| archon_reasoning_quality::EvidenceRef {
-                    evidence_id: event.event_id,
-                    kind: archon_reasoning_quality::EvidenceKind::PriorVerifiedClaim,
-                    entity_key: Some(event.entity_key),
-                    output_hash: event.raw_text_hash,
-                    redacted_excerpt: event.redacted_excerpt,
-                    created_at: event.created_at,
-                }),
-        );
-    }
-    let extractor = archon_reasoning_quality::DeterministicExtractor::new(
-        archon_reasoning_quality::ExtractorConfig {
-            max_claims_per_turn,
-            max_excerpt_chars,
-            shadow: shadow_active,
-        },
-    );
-    let mut events = extractor.extract_turn(&input);
-    if input.turn_number == 1 {
-        let claim_id = archon_reasoning_quality::claim_id_for(
-            &input.session_id,
-            input.turn_number,
-            "briefing updated with task context",
-            archon_reasoning_quality::ReasoningSubject::GeneralReasoning,
-            "session_briefing",
-        );
-        events.push(archon_reasoning_quality::ReasoningQualityEvent {
-            event_id: archon_reasoning_quality::event_id_for(
-                &input.session_id,
-                input.turn_number,
-                &claim_id,
-                "briefing_updated_with_task_context",
-            ),
-            session_id: input.session_id.clone(),
-            turn_number: input.turn_number,
-            claim_id,
-            event_kind:
-                archon_reasoning_quality::ReasoningEventKind::BriefingUpdatedWithTaskContext,
-            subject: archon_reasoning_quality::ReasoningSubject::GeneralReasoning,
-            entity_key: "session_briefing".to_string(),
-            canonicalizer_version: archon_reasoning_quality::CANONICALIZER_VERSION.to_string(),
-            canonical_text: "briefing updated with task context".to_string(),
-            verification_state: archon_reasoning_quality::VerificationState::NotRequired,
-            source_system: "proactive_session_briefing".to_string(),
-            shadow: shadow_active,
-            created_at: chrono::Utc::now(),
-            ..archon_reasoning_quality::ReasoningQualityEvent::default()
-        });
-    }
-    if events.is_empty() && input.evidence_refs.is_empty() {
-        return;
-    }
-    match archon_reasoning_quality::store::ReasoningQualityStore::open(root) {
-        Ok(store) => {
-            if let Ok(prior) = store.events_for_session(&input.session_id) {
-                events.extend(archon_reasoning_quality::build_superseding_source_events(
-                    &prior,
-                    &input.evidence_refs,
-                ));
-            }
-            if events.is_empty() {
-                return;
-            }
-            if let Err(e) = store.append_events(&events) {
-                tracing::warn!(error = %e, "reasoning-quality event write failed");
-            }
-            crate::runtime::reasoning_quality::bridge_reasoning_events(
-                &events,
-                learning_db,
-                root,
-                world_root,
-                feed_world_model,
-                update_self_trust,
-            );
-            crate::runtime::reasoning_critic::spawn_critic_if_enabled(
-                critic_runtime,
-                events.clone(),
-            );
-        }
-        Err(e) => tracing::warn!(error = %e, "reasoning-quality store unavailable"),
-    }
-}
-
-fn record_reasoning_user_correction(
-    session_id: &str,
-    payload: archon_core::agent::UserCorrectionEventPayload,
-    root: &std::path::Path,
-    max_excerpt_chars: usize,
-    store_raw_text: bool,
-    learning_db: Option<&cozo::DbInstance>,
-    world_root: Option<&std::path::Path>,
-    feed_world_model: bool,
-    update_self_trust: bool,
-    shadow_active: bool,
-) {
-    let turn_number = payload
-        .session_context
-        .strip_prefix("turn:")
-        .and_then(|value| value.parse::<u64>().ok())
-        .unwrap_or(0);
-    let redaction = archon_reasoning_quality::RedactionConfig {
-        allow_raw_text: store_raw_text,
-        max_excerpt_chars,
-        ..archon_reasoning_quality::RedactionConfig::default()
-    };
-    match archon_reasoning_quality::store::ReasoningQualityStore::open(root) {
-        Ok(store) => {
-            let prior_events = match store.events_for_session(session_id) {
-                Ok(events) => events,
-                Err(e) => {
-                    tracing::warn!(error = %e, "reasoning-quality correction lookup failed");
-                    return;
-                }
-            };
-            let Some(event) = archon_reasoning_quality::build_user_correction_event(
-                session_id,
-                turn_number,
-                &payload.user_input_excerpt,
-                &prior_events,
-                &redaction,
-                shadow_active,
-            ) else {
-                return;
-            };
-            if let Err(e) = store.append_events(std::slice::from_ref(&event)) {
-                tracing::warn!(error = %e, "reasoning-quality correction write failed");
-                return;
-            }
-            crate::runtime::reasoning_quality::bridge_reasoning_events(
-                &[event],
-                learning_db,
-                root,
-                world_root,
-                feed_world_model,
-                update_self_trust,
-            );
-        }
-        Err(e) => tracing::warn!(error = %e, "reasoning-quality store unavailable for correction"),
-    }
-}
-
-fn agent_ledger_context(
-    session_id: &str,
-    agent_def: Option<&archon_core::agents::definition::CustomAgentDefinition>,
-    model: impl Into<String>,
-    provider: impl Into<String>,
-) -> crate::runtime::agent_ledger_events::AgentLedgerContext {
-    crate::runtime::agent_ledger_events::AgentLedgerContext::new(
-        agent_def
-            .map(|def| def.agent_type.clone())
-            .unwrap_or_else(|| "main".into()),
-        session_id.to_string(),
-        model,
-        provider,
-    )
-    .with_version(agent_def.map(|def| def.meta.version.clone()))
-}
-
-async fn record_agent_ledger_event(
-    db: Option<&Arc<cozo::DbInstance>>,
-    context: &crate::runtime::agent_ledger_events::AgentLedgerContext,
-    permission_mode: &Arc<tokio::sync::Mutex<String>>,
-    event: &AgentEvent,
-) {
-    let mode = permission_mode.lock().await.clone();
-    match event {
-        AgentEvent::TurnComplete {
-            input_tokens,
-            output_tokens,
-        } => crate::runtime::agent_ledger_events::record_agent_turn_completed(
-            db,
-            context,
-            &mode,
-            *input_tokens,
-            *output_tokens,
-        ),
-        AgentEvent::Error(_) => {
-            crate::runtime::agent_ledger_events::record_agent_runtime_error(db, context, &mode)
-        }
-        _ => {}
-    }
-}
-
-fn spawn_print_ledger_forwarder(
-    mut event_rx: tokio::sync::mpsc::UnboundedReceiver<TimestampedEvent>,
-    db: Option<Arc<cozo::DbInstance>>,
-    context: crate::runtime::agent_ledger_events::AgentLedgerContext,
-    permission_mode: Arc<tokio::sync::Mutex<String>>,
-) -> tokio::sync::mpsc::UnboundedReceiver<TimestampedEvent> {
-    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-    observability::spawn_named("print-agent-ledger-forwarder", async move {
-        while let Some(timestamped) = event_rx.recv().await {
-            record_agent_ledger_event(db.as_ref(), &context, &permission_mode, &timestamped.inner)
-                .await;
-            if tx.send(timestamped).is_err() {
-                break;
-            }
-        }
-    });
-    rx
 }
 
 fn configure_session_vlm_provider(working_dir: &std::path::Path) {
@@ -645,85 +277,6 @@ mod tests {
         let config = archon_core::config::ArchonConfig::default();
 
         assert_eq!(active_session_model(&config), config.api.default_model);
-    }
-}
-
-/// Parse `--setting-sources` names into [`ConfigLayer`] variants, warning on
-/// unrecognised values.
-pub(crate) fn parse_layer_filter(sources: &[String]) -> Vec<ConfigLayer> {
-    sources
-        .iter()
-        .filter_map(|s| match s.as_str() {
-            "user" => Some(ConfigLayer::User),
-            "project" => Some(ConfigLayer::Project),
-            "local" => Some(ConfigLayer::Local),
-            other => {
-                eprintln!("warning: unknown setting source: {other}");
-                None
-            }
-        })
-        .collect()
-}
-
-/// Apply `--tools` (whitelist) and `--disallowed-tools` (blacklist) from
-/// resolved CLI flags to the tool registry.
-pub(crate) fn apply_tool_filters(
-    registry: &mut archon_core::dispatch::ToolRegistry,
-    flags: &archon_core::cli_flags::ResolvedFlags,
-) {
-    if let Some(ref whitelist) = flags.tool_whitelist {
-        let names: Vec<&str> = whitelist.iter().map(|s| s.as_str()).collect();
-        registry.filter_whitelist(&names);
-        tracing::info!("tool whitelist applied: {} tools retained", names.len());
-    }
-    if let Some(ref blacklist) = flags.tool_blacklist {
-        let names: Vec<&str> = blacklist.iter().map(|s| s.as_str()).collect();
-        registry.filter_blacklist(&names);
-        tracing::info!("tool blacklist applied: removed {} patterns", names.len());
-    }
-}
-
-/// Fetch account UUID from Anthropic OAuth profile endpoint.
-pub(crate) async fn fetch_account_uuid(auth: &archon_llm::auth::AuthProvider) -> String {
-    let (header_name, header_value) = auth.header();
-
-    let client = reqwest::Client::builder()
-        .no_proxy()
-        .build()
-        .unwrap_or_else(|_| reqwest::Client::new());
-
-    let result = client
-        .get("https://api.anthropic.com/api/oauth/profile")
-        .header(&header_name, &header_value)
-        .send()
-        .await;
-
-    match result {
-        Ok(resp) if resp.status().is_success() => {
-            if let Ok(body) = resp.text().await
-                && let Ok(json) = serde_json::from_str::<serde_json::Value>(&body)
-            {
-                // Profile response: { "account": { "uuid": "..." }, "organization": { ... } }
-                if let Some(uuid) = json
-                    .get("account")
-                    .and_then(|a| a.get("uuid"))
-                    .and_then(|v| v.as_str())
-                {
-                    tracing::info!("fetched account_uuid: {}", &uuid[..8.min(uuid.len())]);
-                    return uuid.to_string();
-                }
-            }
-            tracing::warn!("profile response missing account_uuid");
-            String::new()
-        }
-        Ok(resp) => {
-            tracing::warn!("profile fetch failed: HTTP {}", resp.status());
-            String::new()
-        }
-        Err(e) => {
-            tracing::warn!("profile fetch error: {e}");
-            String::new()
-        }
     }
 }
 
@@ -1233,275 +786,6 @@ async fn build_session_agent(
     })
 }
 
-/// Run a print-mode session: set up auth/agent, process one query, return exit code.
-pub(crate) async fn run_print_mode_session(
-    config: &archon_core::config::ArchonConfig,
-    session_id: &str,
-    cli: &Cli,
-    env_vars: &ArchonEnvVars,
-    print_config: PrintModeConfig,
-    resolved_flags: &archon_core::cli_flags::ResolvedFlags,
-) -> i32 {
-    let BuiltAgent {
-        mut agent,
-        event_rx,
-        agent_def,
-        selected_provider,
-        selected_model,
-        permission_mode,
-        ..
-    } = match build_session_agent(config, session_id, cli, env_vars, resolved_flags, true).await {
-        Ok(b) => b,
-        Err(exit_code) => return exit_code,
-    };
-
-    // AGT-011: Prepend initial_prompt to the query in print mode
-    let mut print_config = print_config;
-    if let Some(ref def) = agent_def
-        && let Some(ref prefix) = def.initial_prompt
-    {
-        print_config.query = format!("{prefix}\n\n{}", print_config.query);
-    }
-
-    let working_dir = std::env::current_dir().unwrap_or_default();
-    let governed_learning_db = open_governed_learning_db(&working_dir);
-    let ledger_context = agent_ledger_context(
-        session_id,
-        agent_def.as_ref(),
-        selected_model,
-        selected_provider,
-    );
-    let event_rx = spawn_print_ledger_forwarder(
-        event_rx,
-        governed_learning_db,
-        ledger_context,
-        permission_mode,
-    );
-
-    run_print_mode(print_config, config, &mut agent, event_rx).await
-}
-
-/// Run a headless-mode session: build the Agent, then enter a JSON-lines
-/// I/O loop on stdin/stdout using the [`AgentMessage`] protocol.
-///
-/// Each `UserMessage` line triggers a full agent invocation
-/// (`process_message`). `TextDelta` events are collected into an
-/// `AssistantMessage` reply. `Ping` → `Pong`. The loop exits on EOF.
-#[allow(dead_code)]
-pub(crate) async fn run_headless_session(
-    config: &archon_core::config::ArchonConfig,
-    session_id: &str,
-    cli: &Cli,
-    env_vars: &ArchonEnvVars,
-    resolved_flags: &archon_core::cli_flags::ResolvedFlags,
-) -> i32 {
-    let BuiltAgent {
-        mut agent,
-        event_rx,
-        agent_def,
-        selected_provider,
-        selected_model,
-        permission_mode,
-        ..
-    } = match build_session_agent(config, session_id, cli, env_vars, resolved_flags, false).await {
-        Ok(b) => b,
-        Err(exit_code) => return exit_code,
-    };
-
-    let stdin = tokio::io::stdin();
-    let mut reader = tokio::io::BufReader::new(stdin);
-    let mut stdout = tokio::io::stdout();
-    let mut line = String::new();
-    let mut event_rx = event_rx;
-    let working_dir = std::env::current_dir().unwrap_or_default();
-    let governed_learning_db = open_governed_learning_db(&working_dir);
-    let ledger_context = agent_ledger_context(
-        session_id,
-        agent_def.as_ref(),
-        selected_model,
-        selected_provider,
-    );
-
-    tracing::info!(%session_id, "headless: agent loop started");
-
-    loop {
-        line.clear();
-        match tokio::io::AsyncBufReadExt::read_line(&mut reader, &mut line).await {
-            Ok(0) => {
-                tracing::info!("headless: stdin closed (EOF)");
-                break;
-            }
-            Ok(_) => {}
-            Err(e) => {
-                tracing::error!("headless: read error: {e}");
-                return 1;
-            }
-        }
-
-        match AgentMessage::from_json_line(&line) {
-            Ok(AgentMessage::Ping) => {
-                if let Ok(pong) = AgentMessage::Pong.to_json_line() {
-                    if tokio::io::AsyncWriteExt::write_all(&mut stdout, pong.as_bytes())
-                        .await
-                        .is_err()
-                    {
-                        tracing::error!("headless: stdout write failed, exiting");
-                        return 1;
-                    }
-                    if tokio::io::AsyncWriteExt::flush(&mut stdout).await.is_err() {
-                        tracing::error!("headless: stdout flush failed, exiting");
-                        return 1;
-                    }
-                }
-            }
-            Ok(AgentMessage::UserMessage { content }) => {
-                tracing::info!(len = content.len(), "headless: processing UserMessage");
-
-                if let Err(e) = agent.process_message(&content).await {
-                    tracing::error!(%e, "headless: agent error");
-                    crate::runtime::agent_ledger_events::record_agent_runtime_error(
-                        governed_learning_db.as_ref(),
-                        &ledger_context,
-                        &permission_mode.lock().await.clone(),
-                    );
-                    // Drain stale events from the failed processing before
-                    // sending the error response to avoid leaking fragments
-                    // into the next message's response.
-                    loop {
-                        match event_rx.try_recv() {
-                            Ok(_) => {} // discard
-                            Err(tokio::sync::mpsc::error::TryRecvError::Empty) => break,
-                            Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => break,
-                        }
-                    }
-                    let err = AgentMessage::Error {
-                        message: format!("agent error: {e}"),
-                    };
-                    if let Ok(line) = err.to_json_line() {
-                        if tokio::io::AsyncWriteExt::write_all(&mut stdout, line.as_bytes())
-                            .await
-                            .is_err()
-                        {
-                            return 1;
-                        }
-                        if tokio::io::AsyncWriteExt::flush(&mut stdout).await.is_err() {
-                            return 1;
-                        }
-                    }
-                    continue;
-                }
-
-                // Drain TextDelta events to build the response
-                let mut response_text = String::new();
-                loop {
-                    match event_rx.try_recv() {
-                        Ok(ts) => {
-                            record_agent_ledger_event(
-                                governed_learning_db.as_ref(),
-                                &ledger_context,
-                                &permission_mode,
-                                &ts.inner,
-                            )
-                            .await;
-                            if let AgentEvent::TextDelta(text) = ts.inner {
-                                response_text.push_str(&text);
-                            }
-                        }
-                        Err(tokio::sync::mpsc::error::TryRecvError::Empty) => break,
-                        Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
-                            tracing::warn!("headless: event channel disconnected");
-                            break;
-                        }
-                    }
-                }
-
-                let msg = AgentMessage::AssistantMessage {
-                    content: response_text,
-                };
-                if let Ok(line) = msg.to_json_line() {
-                    if tokio::io::AsyncWriteExt::write_all(&mut stdout, line.as_bytes())
-                        .await
-                        .is_err()
-                    {
-                        tracing::error!("headless: stdout write failed, exiting");
-                        return 1;
-                    }
-                    if tokio::io::AsyncWriteExt::flush(&mut stdout).await.is_err() {
-                        return 1;
-                    }
-                }
-            }
-            Ok(_) => {
-                tracing::debug!("headless: ignoring non-UserMessage/non-Ping");
-            }
-            Err(e) => {
-                tracing::warn!(%e, "headless: parse error");
-                let err = AgentMessage::Error {
-                    message: format!("parse error: {e}"),
-                };
-                if let Ok(line) = err.to_json_line() {
-                    if tokio::io::AsyncWriteExt::write_all(&mut stdout, line.as_bytes())
-                        .await
-                        .is_err()
-                    {
-                        return 1;
-                    }
-                    if tokio::io::AsyncWriteExt::flush(&mut stdout).await.is_err() {
-                        return 1;
-                    }
-                }
-            }
-        }
-    }
-
-    0
-}
-
-// ── Interactive session helpers ─────────────────────────────────────────────
-
-/// List recent sessions for `--resume` with no ID.
-pub(crate) async fn handle_resume_list() -> Result<()> {
-    let db_path = archon_session::storage::default_db_path();
-    let store = archon_session::storage::SessionStore::open(&db_path)
-        .map_err(|e| anyhow::anyhow!("failed to open session database: {e}"))?;
-
-    let sessions = store
-        .list_sessions(20)
-        .map_err(|e| anyhow::anyhow!("failed to list sessions: {e}"))?;
-
-    if sessions.is_empty() {
-        eprintln!("No previous sessions found.");
-    } else {
-        eprintln!("Recent sessions:");
-        for session in &sessions {
-            eprintln!("  {}", archon_session::resume::format_session_line(session));
-        }
-        eprintln!("\nUse: archon --resume <session-id>");
-    }
-    Ok(())
-}
-
-/// Load resume messages for `--resume <id>`.
-pub(crate) fn load_resume_messages(session_id: &str) -> Result<Vec<serde_json::Value>> {
-    let db_path = archon_session::storage::default_db_path();
-    let store = archon_session::storage::SessionStore::open(&db_path)
-        .map_err(|e| anyhow::anyhow!("failed to open session database: {e}"))?;
-    let (meta, raw_messages) = archon_session::resume::resume_session(&store, session_id)
-        .map_err(|e| anyhow::anyhow!("failed to resume session: {e}"))?;
-    eprintln!(
-        "Resumed session {} ({} messages, {} tokens)",
-        &meta.id[..8.min(meta.id.len())],
-        meta.message_count,
-        meta.total_tokens,
-    );
-    // Parse stored JSON strings back into Values
-    let messages: Vec<serde_json::Value> = raw_messages
-        .iter()
-        .filter_map(|s| serde_json::from_str(s).ok())
-        .collect();
-    Ok(messages)
-}
-
 pub(crate) async fn run_interactive_session(
     config: &archon_core::config::ArchonConfig,
     session_id: &str,
@@ -1518,8 +802,10 @@ pub(crate) async fn run_interactive_session(
         .map(|d| d.join("config.toml"))
         .unwrap_or_else(default_config_path);
 
-    let layer_filter: Option<Vec<ConfigLayer>> =
-        cli.setting_sources.as_ref().map(|s| parse_layer_filter(s));
+    let layer_filter: Option<Vec<archon_core::config_layers::ConfigLayer>> = cli
+        .setting_sources
+        .as_ref()
+        .map(|s| crate::setup::parse_layer_filter(s));
 
     // ── Open session store and register this session ────────────
     let session_db = config
@@ -2760,95 +2046,15 @@ pub(crate) async fn run_interactive_session(
             .with_event_store(Arc::clone(db)),
         )
     });
-    let reasoning_correction_root = if config.learning.reasoning_quality.enabled
-        && config.learning.reasoning_quality.emit_inline_events
-    {
-        reasoning_quality_root()
-    } else {
-        None
-    };
-    if correction_learning.is_some() || reasoning_correction_root.is_some() {
-        let correction_learning_cb = correction_learning.clone();
-        let session_id_for_correction = session_id.to_string();
-        let rq_cfg_for_correction = config.learning.reasoning_quality.clone();
-        let reasoning_learning_db = governed_learning_db.clone();
-        let correction_world_root = reasoning_world_model_root();
-        let allow_raw_text = archon_policy::load_effective_policy(&working_dir)
-            .map(|policy| policy.reasoning_quality.allow_raw_text_storage)
-            .unwrap_or(false);
-        let correction_cb: Arc<
-            dyn Fn(archon_core::agent::UserCorrectionEventPayload) + Send + Sync,
-        > = Arc::new(move |payload| {
-            if let Some(learning) = &correction_learning_cb {
-                learning.record_user_correction_event(payload.clone());
-            }
-            if let Some(root) = &reasoning_correction_root {
-                let shadow_active =
-                    reasoning_shadow_active(root, rq_cfg_for_correction.shadow_mode_days);
-                record_reasoning_user_correction(
-                    &session_id_for_correction,
-                    payload,
-                    root,
-                    rq_cfg_for_correction.max_excerpt_chars,
-                    rq_cfg_for_correction.store_raw_text && allow_raw_text,
-                    reasoning_learning_db.as_deref(),
-                    correction_world_root.as_deref(),
-                    rq_cfg_for_correction.feed_world_model,
-                    rq_cfg_for_correction.update_self_trust,
-                    shadow_active,
-                );
-            }
-        });
-        agent.set_record_user_correction_event_callback(correction_cb);
-    }
-
-    if config.learning.reasoning_quality.enabled
-        && config.learning.reasoning_quality.emit_inline_events
-        && let Some(root) = reasoning_quality_root()
-    {
-        let rq_cfg = config.learning.reasoning_quality.clone();
-        let learning_db = governed_learning_db.clone();
-        let world_root = reasoning_world_model_root();
-        let policy_for_reasoning = archon_policy::load_effective_policy(&working_dir).ok();
-        let allow_raw_text = policy_for_reasoning
-            .as_ref()
-            .map(|policy| policy.reasoning_quality.allow_raw_text_storage)
-            .unwrap_or(false);
-        let critic_provider = Arc::clone(&provider);
-        let critic_model_fallback = active_session_model(config);
-        let reasoning_cb: Arc<dyn Fn(ReasoningTurnEventPayload) + Send + Sync> =
-            Arc::new(move |payload| {
-                let critic_runtime = policy_for_reasoning.clone().map(|policy| {
-                    crate::runtime::reasoning_critic::CriticRuntime {
-                        enabled: rq_cfg.post_turn_analysis,
-                        config: rq_cfg.critic.clone(),
-                        policy,
-                        provider: Arc::clone(&critic_provider),
-                        model_fallback: critic_model_fallback.clone(),
-                        root: root.clone(),
-                        learning_db: learning_db.clone(),
-                        world_root: world_root.clone(),
-                        feed_world_model: rq_cfg.feed_world_model,
-                        update_self_trust: rq_cfg.update_self_trust,
-                    }
-                });
-                record_reasoning_turn(
-                    payload,
-                    &root,
-                    rq_cfg.max_claims_per_turn,
-                    rq_cfg.max_excerpt_chars,
-                    rq_cfg.store_raw_text && allow_raw_text,
-                    learning_db.as_deref(),
-                    world_root.as_deref(),
-                    rq_cfg.feed_world_model,
-                    rq_cfg.update_self_trust,
-                    reasoning_shadow_active(&root, rq_cfg.shadow_mode_days),
-                    critic_runtime,
-                )
-            });
-        agent.set_record_reasoning_turn_callback(reasoning_cb);
-        tracing::info!("reasoning-quality: visible turn event capture wired");
-    }
+    reasoning_quality::wire_callbacks(
+        &mut agent,
+        config,
+        session_id,
+        &working_dir,
+        governed_learning_db.clone(),
+        correction_learning,
+        Arc::clone(&provider),
+    );
 
     // Wire inner voice if enabled in config. The state is injected into
     // the system prompt before every turn and updated from tool outcomes.
@@ -2949,32 +2155,13 @@ pub(crate) async fn run_interactive_session(
         }
     }
 
-    match archon_policy::load_effective_policy(&working_dir) {
-        Ok(policy) => {
-            let reasoning_root = reasoning_quality_root();
-            let world_root = reasoning_world_model_root();
-            let briefing_context = session_briefing_context(&working_dir);
-            if let Some(briefing) = crate::runtime::proactive_briefing::build_session_briefing(
-                config,
-                &policy,
-                reasoning_root.as_deref(),
-                governed_learning_db.as_deref(),
-                world_root.as_deref(),
-                session_id,
-                Some(&briefing_context),
-            ) {
-                let combined = match agent.memory_briefing.take() {
-                    Some(existing) if !existing.trim().is_empty() => {
-                        format!("{existing}\n\n{briefing}")
-                    }
-                    _ => briefing,
-                };
-                agent.set_memory_briefing(combined);
-                tracing::info!("reasoning-quality: proactive session briefing generated");
-            }
-        }
-        Err(e) => tracing::debug!(error = %e, "proactive briefing policy load failed"),
-    }
+    reasoning_quality::maybe_inject_proactive_briefing(
+        &mut agent,
+        config,
+        &working_dir,
+        governed_learning_db.as_deref(),
+        session_id,
+    );
 
     agent.set_hook_registry(Arc::clone(&hook_registry_arc));
 
@@ -3122,17 +2309,12 @@ pub(crate) async fn run_interactive_session(
     let permission_mode_for_fwd = Arc::clone(&permission_mode_shared);
     let permission_events_db_for_fwd = governed_learning_db.clone();
     let agent_ledger_db_for_fwd = governed_learning_db.clone();
-    let agent_ledger_context_for_fwd =
-        crate::runtime::agent_ledger_events::AgentLedgerContext::new(
-            agent_def
-                .as_ref()
-                .map(|def| def.agent_type.clone())
-                .unwrap_or_else(|| "main".into()),
-            session_id.to_string(),
-            agent_model_for_ledger,
-            provider.name().to_string(),
-        )
-        .with_version(agent_def.as_ref().map(|def| def.meta.version.clone()));
+    let agent_ledger_context_for_fwd = agent_ledger::context(
+        session_id,
+        agent_def.as_ref(),
+        agent_model_for_ledger,
+        provider.name().to_string(),
+    );
     let last_assistant_response_shared: Arc<tokio::sync::Mutex<String>> =
         Arc::new(tokio::sync::Mutex::new(String::new()));
     let last_response_for_fwd = Arc::clone(&last_assistant_response_shared);

@@ -103,6 +103,7 @@ fn local_provider_statuses(
         .collect()
 }
 
+#[cfg(test)]
 fn render_provider_statuses(statuses: &[ProviderRuntimeStatus]) -> String {
     render_provider_statuses_with_live(statuses, None)
 }
