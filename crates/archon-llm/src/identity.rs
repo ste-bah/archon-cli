@@ -131,8 +131,26 @@ pub fn resolve_identity_mode(
 }
 
 fn spoof_identity_mode(config: &IdentityConfigView<'_>) -> IdentityMode {
+    // Spoof version priority (was inverted — fixed 2026-05-12):
+    //   1. Operator config (`identity.spoof_version` in config.toml) wins.
+    //      This makes tests deterministic and respects explicit operator
+    //      intent. archon trusts what the user configured.
+    //   2. Fall back to whatever `version_from_package_json()` finds (the
+    //      locally-installed claude-cli's package.json version) only when
+    //      the operator left `spoof_version` empty. This preserves the
+    //      auto-tracking defense for users who never touch the config but
+    //      have a local claude-cli install.
+    //   3. If both are absent, the empty string propagates and downstream
+    //      header construction will produce `claude-cli/ (external, cli)`
+    //      — visible enough to catch in testing, not a silent crash.
+    let configured = config.spoof_version.trim();
+    let version = if !configured.is_empty() {
+        configured.to_string()
+    } else {
+        version_from_package_json().unwrap_or_default()
+    };
     IdentityMode::Spoof {
-        version: version_from_package_json().unwrap_or_else(|| config.spoof_version.to_string()),
+        version,
         entrypoint: config.spoof_entrypoint.to_string(),
         betas: resolve_betas(config.spoof_betas),
         workload: config.workload.map(str::to_string),
