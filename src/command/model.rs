@@ -226,9 +226,9 @@ mod tests {
         h.execute(&mut ctx, &["opus".to_string()])
             .expect("valid arg must produce Ok(())");
 
-        // validate_model_name("opus") resolves to "claude-opus-4-6"
+        // validate_model_name("opus") resolves to "claude-opus-4-7"
         // (see crates/archon-tools/src/validation.rs KNOWN_SHORTCUTS).
-        let expected = "claude-opus-4-6".to_string();
+        let expected = "claude-opus-4-7".to_string();
         match ctx.pending_effect.as_ref() {
             Some(CommandEffect::SetModelOverride(s)) => {
                 assert_eq!(
@@ -261,7 +261,7 @@ mod tests {
                     saw_model_changed = true;
                 }
                 TuiEvent::TextDelta(msg) => {
-                    if msg.contains("Model switched to claude-opus-4-6") {
+                    if msg.contains("Model switched to claude-opus-4-7") {
                         saw_text_delta = true;
                     }
                 }

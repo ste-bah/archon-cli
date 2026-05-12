@@ -67,7 +67,7 @@ fn snapshot_statusbar_default() {
 #[test]
 fn snapshot_statusbar_with_branch_and_agent() {
     let bar = StatusBar {
-        model: "claude-opus-4-6".into(),
+        model: "claude-opus-4-7".into(),
         identity_mode: "spoof".into(),
         permission_mode: "ask".into(),
         cost: 1.2345,

@@ -147,7 +147,8 @@ async fn handle_code(
         Default::default(),
         None,
     );
-    let facade = archon_pipeline::coding::facade::CodingFacade::with_learning(learning);
+    let facade = archon_pipeline::coding::facade::CodingFacade::with_learning(learning)
+        .with_models(config.models.anthropic.clone());
     let leann = init_leann(cwd).await;
     println!("Starting coding pipeline...");
     println!("Task: {task}");
@@ -235,7 +236,8 @@ async fn handle_research(
         cwd.display().to_string(),
         None,
         phd_learning,
-    );
+    )
+    .with_models(config.models.anthropic.clone());
     println!("Starting research pipeline...");
     println!("Topic: {topic}");
     let result = archon_pipeline::runner::run_pipeline_audited(

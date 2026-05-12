@@ -5,13 +5,13 @@ fn response_snapshot_deserializes_core_fields() {
     let snapshot: ResponseSnapshot = serde_json::from_value(serde_json::json!({
         "id": "resp_1",
         "status": "completed",
-        "model": "gpt-5.1-codex",
+        "model": "gpt-5.3-codex",
         "usage": {"input_tokens": 1, "output_tokens": 2, "total_tokens": 3}
     }))
     .expect("snapshot");
 
     assert_eq!(snapshot.id, "resp_1");
-    assert_eq!(snapshot.model.as_deref(), Some("gpt-5.1-codex"));
+    assert_eq!(snapshot.model.as_deref(), Some("gpt-5.3-codex"));
     assert_eq!(snapshot.usage.expect("usage").total_tokens, 3);
 }
 

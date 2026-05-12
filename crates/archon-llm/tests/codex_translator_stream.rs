@@ -6,7 +6,7 @@ use archon_llm::streaming::StreamEvent;
 fn created_maps_to_message_start() {
     let event = serde_json::from_value::<ResponseStreamEvent>(serde_json::json!({
         "type": "response.created",
-        "response": {"id": "resp_1", "model": "gpt-5.1-codex"}
+        "response": {"id": "resp_1", "model": "gpt-5.3-codex"}
     }))
     .expect("created");
 

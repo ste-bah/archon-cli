@@ -89,15 +89,31 @@ impl ProviderLlmAdapter {
     }
 
     fn model_for_provider(&self, requested: &str) -> String {
-        if !requested.starts_with("claude") {
-            return requested.to_string();
+        // Tier aliases (`"sonnet"`, `"opus"`, `"haiku"`) get resolved by the
+        // active provider via `LlmProvider::resolve_alias(..)`. Anthropic maps
+        // them to its `claude-*` namespace; Codex maps to `gpt-*`; local /
+        // OpenAI-compat returns `None` for pass-through.
+        if let Some(resolved) = self.provider.resolve_alias(requested) {
+            return resolved;
         }
-        self.provider
-            .models()
-            .first()
-            .map(|model| model.id.clone())
-            .filter(|model| !model.starts_with("claude"))
-            .unwrap_or_else(|| requested.to_string())
+
+        // Legacy compatibility: an explicit `claude-*` literal coming through
+        // a non-Anthropic provider falls back to the provider's first model.
+        // This matches pre-resolver behavior for agent code that still emits
+        // concrete IDs instead of aliases.
+        if requested.starts_with("claude") {
+            return self
+                .provider
+                .models()
+                .first()
+                .map(|model| model.id.clone())
+                .filter(|model| !model.starts_with("claude"))
+                .unwrap_or_else(|| requested.to_string());
+        }
+
+        // Everything else (concrete IDs the provider recognises directly)
+        // passes through.
+        requested.to_string()
     }
 }
 

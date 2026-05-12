@@ -38,7 +38,7 @@ fn sonnet_gets_adaptive_thinking() {
 #[test]
 fn opus_gets_adaptive_thinking() {
     let config = AgentConfig::default();
-    let (_max_tokens, thinking, _speed) = config.build_base_request_fields("claude-opus-4-6");
+    let (_max_tokens, thinking, _speed) = config.build_base_request_fields("claude-opus-4-7");
     assert!(thinking.is_some());
     assert_eq!(thinking.unwrap()["type"], "adaptive");
 }
@@ -113,7 +113,7 @@ fn alignment_regression_all_models() {
 
     let models = &[
         "claude-sonnet-4-6",
-        "claude-opus-4-6",
+        "claude-opus-4-7",
         "claude-haiku-4-5-20251001",
     ];
 
@@ -137,7 +137,7 @@ fn comprehensive_structural_alignment() {
         ..AgentConfig::default()
     };
 
-    for model in &["claude-sonnet-4-6", "claude-opus-4-6"] {
+    for model in &["claude-sonnet-4-6", "claude-opus-4-7"] {
         let (max_tokens, thinking, speed) = config.build_base_request_fields(model);
         assert_eq!(max_tokens, 8192);
         assert!(thinking.is_some());

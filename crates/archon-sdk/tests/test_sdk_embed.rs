@@ -157,12 +157,12 @@ fn sdk_options_defaults() {
 fn sdk_options_explicit_key() {
     let opts = SdkOptions {
         auth: SdkAuth::ApiKey("sk-test".into()),
-        model: "claude-opus-4-6".into(),
+        model: "claude-opus-4-7".into(),
         max_tokens: 4096,
         system_prompt: Some("You are helpful.".into()),
         ..Default::default()
     };
-    assert_eq!(opts.model, "claude-opus-4-6");
+    assert_eq!(opts.model, "claude-opus-4-7");
     assert_eq!(opts.max_tokens, 4096);
 }
 

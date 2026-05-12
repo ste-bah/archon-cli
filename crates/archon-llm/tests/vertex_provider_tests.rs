@@ -14,7 +14,7 @@ fn vertex_provider_is_object_safe() {
     let provider = VertexProvider::new(
         "my-project".to_string(),
         "us-central1".to_string(),
-        "claude-sonnet-4-20250514@20250514".to_string(),
+        "claude-sonnet-4-6@20250514".to_string(),
         "anthropic".to_string(),
         None,
     );
@@ -30,7 +30,7 @@ fn vertex_endpoint_url_claude_format() {
     let provider = VertexProvider::new(
         "my-project".to_string(),
         "us-central1".to_string(),
-        "claude-sonnet-4-20250514@20250514".to_string(),
+        "claude-sonnet-4-6@20250514".to_string(),
         "anthropic".to_string(),
         None,
     );
@@ -48,7 +48,7 @@ fn vertex_endpoint_url_claude_format() {
         "URL should contain publisher: {url}"
     );
     assert!(
-        url.contains("claude-sonnet-4-20250514"),
+        url.contains("claude-sonnet-4-6"),
         "URL should contain model: {url}"
     );
     assert!(
@@ -172,7 +172,7 @@ fn vertex_claude_supports_thinking() {
     let provider = VertexProvider::new(
         "proj".to_string(),
         "us-central1".to_string(),
-        "claude-sonnet-4-20250514@20250514".to_string(),
+        "claude-sonnet-4-6@20250514".to_string(),
         "anthropic".to_string(),
         None,
     );

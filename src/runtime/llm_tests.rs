@@ -26,7 +26,7 @@ fn unknown_provider_falls_back_to_anthropic() {
         provider: "__ags699_unknown__".into(),
         ..Default::default()
     };
-    let provider = build_llm_provider(&cfg, make_test_client());
+    let provider = build_llm_provider(&cfg, &archon_core::config::ModelsConfig::default(), make_test_client());
     assert_eq!(provider.name(), "anthropic");
 }
 
@@ -45,7 +45,7 @@ fn openai_with_empty_key_falls_back_to_anthropic() {
         ..Default::default()
     };
     cfg.openai.api_key = None;
-    let provider = build_llm_provider(&cfg, make_test_client());
+    let provider = build_llm_provider(&cfg, &archon_core::config::ModelsConfig::default(), make_test_client());
     assert_eq!(provider.name(), "anthropic");
 
     if let Some(v) = prev {
@@ -70,7 +70,7 @@ fn openai_fallback_selection_reports_missing_key_reason() {
     };
     cfg.openai.api_key = None;
 
-    let selection = build_llm_provider_selection(&cfg, make_test_client());
+    let selection = build_llm_provider_selection(&cfg, &archon_core::config::ModelsConfig::default(), make_test_client());
 
     assert_eq!(selection.provider.name(), "anthropic");
     assert_eq!(selection.fallback_reason, Some("openai_missing_api_key"));
@@ -89,7 +89,7 @@ fn bedrock_with_missing_region_falls_back_to_anthropic() {
         ..Default::default()
     };
     cfg.bedrock.region = String::new();
-    let provider = build_llm_provider(&cfg, make_test_client());
+    let provider = build_llm_provider(&cfg, &archon_core::config::ModelsConfig::default(), make_test_client());
     assert_eq!(provider.name(), "anthropic");
 }
 
@@ -100,7 +100,7 @@ fn test_anthropic_provider_explicit_returns_anthropic() {
         provider: "anthropic".to_string(),
         ..Default::default()
     };
-    let provider = build_llm_provider(&cfg, make_test_client());
+    let provider = build_llm_provider(&cfg, &archon_core::config::ModelsConfig::default(), make_test_client());
     assert_eq!(provider.name(), "anthropic");
 }
 
@@ -111,7 +111,7 @@ fn test_local_provider_constructs_without_fallback() {
         provider: "local".to_string(),
         ..Default::default()
     };
-    let provider = build_llm_provider(&cfg, make_test_client());
+    let provider = build_llm_provider(&cfg, &archon_core::config::ModelsConfig::default(), make_test_client());
     assert_eq!(provider.name(), "local");
 }
 
@@ -188,7 +188,7 @@ fn test_groq_without_env_falls_back_to_anthropic() {
         provider: "groq".to_string(),
         ..Default::default()
     };
-    let provider = build_llm_provider(&cfg, make_test_client());
+    let provider = build_llm_provider(&cfg, &archon_core::config::ModelsConfig::default(), make_test_client());
     assert_eq!(
         provider.name(),
         "anthropic",
@@ -210,7 +210,7 @@ fn test_unknown_flat_provider_falls_back_to_anthropic() {
         provider: "definitely-not-a-real-provider-zzz".to_string(),
         ..Default::default()
     };
-    let provider = build_llm_provider(&cfg, make_test_client());
+    let provider = build_llm_provider(&cfg, &archon_core::config::ModelsConfig::default(), make_test_client());
     assert_eq!(provider.name(), "anthropic");
 }
 
@@ -222,7 +222,7 @@ fn unknown_flat_provider_selection_reports_reason() {
         ..Default::default()
     };
 
-    let selection = build_llm_provider_selection(&cfg, make_test_client());
+    let selection = build_llm_provider_selection(&cfg, &archon_core::config::ModelsConfig::default(), make_test_client());
 
     assert_eq!(selection.provider.name(), "anthropic");
     assert_eq!(

@@ -168,7 +168,7 @@ pub static AGENTS: &[CodingAgent] = &[
     CodingAgent {
         key: "contract-agent",
         phase: Phase::Understanding,
-        model: "claude-sonnet-4-20250514",
+        model: "sonnet",
         prompt_source_path: ".archon/agents/coding-pipeline/contract-agent.md",
         tool_access: ToolAccess::ReadOnly,
         algorithm: Algorithm::ToT,
@@ -188,7 +188,7 @@ pub static AGENTS: &[CodingAgent] = &[
     CodingAgent {
         key: "requirement-extractor",
         phase: Phase::Understanding,
-        model: "claude-sonnet-4-20250514",
+        model: "sonnet",
         prompt_source_path: ".archon/agents/coding-pipeline/requirement-extractor.md",
         tool_access: ToolAccess::ReadOnly,
         algorithm: Algorithm::ToT,
@@ -208,7 +208,7 @@ pub static AGENTS: &[CodingAgent] = &[
     CodingAgent {
         key: "requirement-prioritizer",
         phase: Phase::Understanding,
-        model: "claude-sonnet-4-20250514",
+        model: "sonnet",
         prompt_source_path: ".archon/agents/coding-pipeline/requirement-prioritizer.md",
         tool_access: ToolAccess::ReadOnly,
         algorithm: Algorithm::PoT,
@@ -225,7 +225,7 @@ pub static AGENTS: &[CodingAgent] = &[
     CodingAgent {
         key: "scope-definer",
         phase: Phase::Understanding,
-        model: "claude-sonnet-4-20250514",
+        model: "sonnet",
         prompt_source_path: ".archon/agents/coding-pipeline/scope-definer.md",
         tool_access: ToolAccess::ReadOnly,
         algorithm: Algorithm::ToT,
@@ -245,7 +245,7 @@ pub static AGENTS: &[CodingAgent] = &[
     CodingAgent {
         key: "context-gatherer",
         phase: Phase::Understanding,
-        model: "claude-sonnet-4-20250514",
+        model: "sonnet",
         prompt_source_path: ".archon/agents/coding-pipeline/context-gatherer.md",
         tool_access: ToolAccess::ReadOnly,
         algorithm: Algorithm::ReAct,
@@ -268,7 +268,7 @@ pub static AGENTS: &[CodingAgent] = &[
     CodingAgent {
         key: "feasibility-analyzer",
         phase: Phase::Design,
-        model: "claude-sonnet-4-20250514",
+        model: "sonnet",
         prompt_source_path: ".archon/agents/coding-pipeline/feasibility-analyzer.md",
         tool_access: ToolAccess::ReadOnly,
         algorithm: Algorithm::PoT,
@@ -292,7 +292,7 @@ pub static AGENTS: &[CodingAgent] = &[
     CodingAgent {
         key: "pattern-explorer",
         phase: Phase::Understanding,
-        model: "claude-sonnet-4-20250514",
+        model: "sonnet",
         prompt_source_path: ".archon/agents/coding-pipeline/pattern-explorer.md",
         tool_access: ToolAccess::ReadOnly,
         algorithm: Algorithm::LATS,
@@ -315,7 +315,7 @@ pub static AGENTS: &[CodingAgent] = &[
     CodingAgent {
         key: "technology-scout",
         phase: Phase::Understanding,
-        model: "claude-sonnet-4-20250514",
+        model: "sonnet",
         prompt_source_path: ".archon/agents/coding-pipeline/technology-scout.md",
         tool_access: ToolAccess::ReadOnly,
         algorithm: Algorithm::ReAct,
@@ -338,7 +338,7 @@ pub static AGENTS: &[CodingAgent] = &[
     CodingAgent {
         key: "research-planner",
         phase: Phase::Design,
-        model: "claude-sonnet-4-20250514",
+        model: "sonnet",
         prompt_source_path: ".archon/agents/coding-pipeline/research-planner.md",
         tool_access: ToolAccess::ReadOnly,
         algorithm: Algorithm::ToT,
@@ -358,7 +358,7 @@ pub static AGENTS: &[CodingAgent] = &[
     CodingAgent {
         key: "codebase-analyzer",
         phase: Phase::Understanding,
-        model: "claude-sonnet-4-20250514",
+        model: "sonnet",
         prompt_source_path: ".archon/agents/coding-pipeline/codebase-analyzer.md",
         tool_access: ToolAccess::ReadOnly,
         algorithm: Algorithm::ReAct,
@@ -385,7 +385,7 @@ pub static AGENTS: &[CodingAgent] = &[
     CodingAgent {
         key: "phase-1-reviewer",
         phase: Phase::Design,
-        model: "claude-sonnet-4-20250514",
+        model: "sonnet",
         prompt_source_path: ".archon/agents/coding-pipeline/phase-1-reviewer.md",
         tool_access: ToolAccess::ReadOnly,
         algorithm: Algorithm::Reflexion,
@@ -411,7 +411,7 @@ pub static AGENTS: &[CodingAgent] = &[
     CodingAgent {
         key: "phase-2-reviewer",
         phase: Phase::Design,
-        model: "claude-sonnet-4-20250514",
+        model: "sonnet",
         prompt_source_path: ".archon/agents/coding-pipeline/phase-2-reviewer.md",
         tool_access: ToolAccess::ReadOnly,
         algorithm: Algorithm::Reflexion,
@@ -440,7 +440,7 @@ pub static AGENTS: &[CodingAgent] = &[
     CodingAgent {
         key: "system-designer",
         phase: Phase::Design,
-        model: "claude-sonnet-4-20250514",
+        model: "sonnet",
         prompt_source_path: ".archon/agents/coding-pipeline/system-designer.md",
         tool_access: ToolAccess::ReadOnly,
         algorithm: Algorithm::ToT,
@@ -463,7 +463,7 @@ pub static AGENTS: &[CodingAgent] = &[
     CodingAgent {
         key: "component-designer",
         phase: Phase::Design,
-        model: "claude-sonnet-4-20250514",
+        model: "sonnet",
         prompt_source_path: ".archon/agents/coding-pipeline/component-designer.md",
         tool_access: ToolAccess::ReadOnly,
         algorithm: Algorithm::ToT,
@@ -483,7 +483,7 @@ pub static AGENTS: &[CodingAgent] = &[
     CodingAgent {
         key: "interface-designer",
         phase: Phase::Design,
-        model: "claude-sonnet-4-20250514",
+        model: "sonnet",
         prompt_source_path: ".archon/agents/coding-pipeline/interface-designer.md",
         tool_access: ToolAccess::ReadOnly,
         algorithm: Algorithm::ToT,
@@ -503,7 +503,7 @@ pub static AGENTS: &[CodingAgent] = &[
     CodingAgent {
         key: "data-architect",
         phase: Phase::Design,
-        model: "claude-sonnet-4-20250514",
+        model: "sonnet",
         prompt_source_path: ".archon/agents/coding-pipeline/data-architect.md",
         tool_access: ToolAccess::ReadOnly,
         algorithm: Algorithm::ReAct,
@@ -526,7 +526,7 @@ pub static AGENTS: &[CodingAgent] = &[
     CodingAgent {
         key: "integration-architect",
         phase: Phase::WiringPlan,
-        model: "claude-sonnet-4-20250514",
+        model: "sonnet",
         prompt_source_path: ".archon/agents/coding-pipeline/integration-architect.md",
         tool_access: ToolAccess::ReadOnly,
         algorithm: Algorithm::ToT,
@@ -549,7 +549,7 @@ pub static AGENTS: &[CodingAgent] = &[
     CodingAgent {
         key: "wiring-obligation-agent",
         phase: Phase::WiringPlan,
-        model: "claude-sonnet-4-20250514",
+        model: "sonnet",
         prompt_source_path: ".archon/agents/coding-pipeline/wiring-obligation-agent.md",
         tool_access: ToolAccess::ReadOnly,
         algorithm: Algorithm::ToT,
@@ -574,7 +574,7 @@ pub static AGENTS: &[CodingAgent] = &[
     CodingAgent {
         key: "phase-3-reviewer",
         phase: Phase::WiringPlan,
-        model: "claude-sonnet-4-20250514",
+        model: "sonnet",
         prompt_source_path: ".archon/agents/coding-pipeline/phase-3-reviewer.md",
         tool_access: ToolAccess::ReadOnly,
         algorithm: Algorithm::Reflexion,
@@ -605,7 +605,7 @@ pub static AGENTS: &[CodingAgent] = &[
     CodingAgent {
         key: "code-generator",
         phase: Phase::Implementation,
-        model: "claude-sonnet-4-20250514",
+        model: "sonnet",
         prompt_source_path: ".archon/agents/coding-pipeline/code-generator.md",
         tool_access: ToolAccess::Full,
         algorithm: Algorithm::SelfDebug,
@@ -628,7 +628,7 @@ pub static AGENTS: &[CodingAgent] = &[
     CodingAgent {
         key: "type-implementer",
         phase: Phase::Implementation,
-        model: "claude-sonnet-4-20250514",
+        model: "sonnet",
         prompt_source_path: ".archon/agents/coding-pipeline/type-implementer.md",
         tool_access: ToolAccess::Full,
         algorithm: Algorithm::SelfDebug,
@@ -651,7 +651,7 @@ pub static AGENTS: &[CodingAgent] = &[
     CodingAgent {
         key: "unit-implementer",
         phase: Phase::Implementation,
-        model: "claude-sonnet-4-20250514",
+        model: "sonnet",
         prompt_source_path: ".archon/agents/coding-pipeline/unit-implementer.md",
         tool_access: ToolAccess::Full,
         algorithm: Algorithm::SelfDebug,
@@ -674,7 +674,7 @@ pub static AGENTS: &[CodingAgent] = &[
     CodingAgent {
         key: "service-implementer",
         phase: Phase::Implementation,
-        model: "claude-sonnet-4-20250514",
+        model: "sonnet",
         prompt_source_path: ".archon/agents/coding-pipeline/service-implementer.md",
         tool_access: ToolAccess::Full,
         algorithm: Algorithm::LATS,
@@ -694,7 +694,7 @@ pub static AGENTS: &[CodingAgent] = &[
     CodingAgent {
         key: "data-layer-implementer",
         phase: Phase::Implementation,
-        model: "claude-sonnet-4-20250514",
+        model: "sonnet",
         prompt_source_path: ".archon/agents/coding-pipeline/data-layer-implementer.md",
         tool_access: ToolAccess::Full,
         algorithm: Algorithm::SelfDebug,
@@ -717,7 +717,7 @@ pub static AGENTS: &[CodingAgent] = &[
     CodingAgent {
         key: "api-implementer",
         phase: Phase::Implementation,
-        model: "claude-sonnet-4-20250514",
+        model: "sonnet",
         prompt_source_path: ".archon/agents/coding-pipeline/api-implementer.md",
         tool_access: ToolAccess::Full,
         algorithm: Algorithm::ReAct,
@@ -740,7 +740,7 @@ pub static AGENTS: &[CodingAgent] = &[
     CodingAgent {
         key: "frontend-implementer",
         phase: Phase::Implementation,
-        model: "claude-sonnet-4-20250514",
+        model: "sonnet",
         prompt_source_path: ".archon/agents/coding-pipeline/frontend-implementer.md",
         tool_access: ToolAccess::Full,
         algorithm: Algorithm::SelfDebug,
@@ -763,7 +763,7 @@ pub static AGENTS: &[CodingAgent] = &[
     CodingAgent {
         key: "error-handler-implementer",
         phase: Phase::Implementation,
-        model: "claude-sonnet-4-20250514",
+        model: "sonnet",
         prompt_source_path: ".archon/agents/coding-pipeline/error-handler-implementer.md",
         tool_access: ToolAccess::Full,
         algorithm: Algorithm::ReAct,
@@ -786,7 +786,7 @@ pub static AGENTS: &[CodingAgent] = &[
     CodingAgent {
         key: "config-implementer",
         phase: Phase::Implementation,
-        model: "claude-sonnet-4-20250514",
+        model: "sonnet",
         prompt_source_path: ".archon/agents/coding-pipeline/config-implementer.md",
         tool_access: ToolAccess::Full,
         algorithm: Algorithm::ReAct,
@@ -809,7 +809,7 @@ pub static AGENTS: &[CodingAgent] = &[
     CodingAgent {
         key: "logger-implementer",
         phase: Phase::Implementation,
-        model: "claude-sonnet-4-20250514",
+        model: "sonnet",
         prompt_source_path: ".archon/agents/coding-pipeline/logger-implementer.md",
         tool_access: ToolAccess::Full,
         algorithm: Algorithm::ReAct,
@@ -832,7 +832,7 @@ pub static AGENTS: &[CodingAgent] = &[
     CodingAgent {
         key: "integration-verification-agent",
         phase: Phase::Implementation,
-        model: "claude-sonnet-4-20250514",
+        model: "sonnet",
         prompt_source_path: ".archon/agents/coding-pipeline/integration-verification-agent.md",
         tool_access: ToolAccess::ReadOnly,
         algorithm: Algorithm::ReAct,
@@ -855,7 +855,7 @@ pub static AGENTS: &[CodingAgent] = &[
     CodingAgent {
         key: "dependency-manager",
         phase: Phase::Refinement,
-        model: "claude-sonnet-4-20250514",
+        model: "sonnet",
         prompt_source_path: ".archon/agents/coding-pipeline/dependency-manager.md",
         tool_access: ToolAccess::Full,
         algorithm: Algorithm::ReAct,
@@ -878,7 +878,7 @@ pub static AGENTS: &[CodingAgent] = &[
     CodingAgent {
         key: "implementation-coordinator",
         phase: Phase::Refinement,
-        model: "claude-sonnet-4-20250514",
+        model: "sonnet",
         prompt_source_path: ".archon/agents/coding-pipeline/implementation-coordinator.md",
         tool_access: ToolAccess::Full,
         algorithm: Algorithm::Reflexion,
@@ -906,7 +906,7 @@ pub static AGENTS: &[CodingAgent] = &[
     CodingAgent {
         key: "phase-4-reviewer",
         phase: Phase::Testing,
-        model: "claude-sonnet-4-20250514",
+        model: "sonnet",
         prompt_source_path: ".archon/agents/coding-pipeline/phase-4-reviewer.md",
         tool_access: ToolAccess::Full,
         algorithm: Algorithm::Reflexion,
@@ -936,7 +936,7 @@ pub static AGENTS: &[CodingAgent] = &[
     CodingAgent {
         key: "test-generator",
         phase: Phase::Testing,
-        model: "claude-sonnet-4-20250514",
+        model: "sonnet",
         prompt_source_path: ".archon/agents/coding-pipeline/test-generator.md",
         tool_access: ToolAccess::Full,
         algorithm: Algorithm::ToT,
@@ -959,7 +959,7 @@ pub static AGENTS: &[CodingAgent] = &[
     CodingAgent {
         key: "test-runner",
         phase: Phase::Testing,
-        model: "claude-sonnet-4-20250514",
+        model: "sonnet",
         prompt_source_path: ".archon/agents/coding-pipeline/test-runner.md",
         tool_access: ToolAccess::Full,
         algorithm: Algorithm::ReAct,
@@ -979,7 +979,7 @@ pub static AGENTS: &[CodingAgent] = &[
     CodingAgent {
         key: "integration-tester",
         phase: Phase::Testing,
-        model: "claude-sonnet-4-20250514",
+        model: "sonnet",
         prompt_source_path: ".archon/agents/coding-pipeline/integration-tester.md",
         tool_access: ToolAccess::Full,
         algorithm: Algorithm::SelfDebug,
@@ -999,7 +999,7 @@ pub static AGENTS: &[CodingAgent] = &[
     CodingAgent {
         key: "regression-tester",
         phase: Phase::Testing,
-        model: "claude-sonnet-4-20250514",
+        model: "sonnet",
         prompt_source_path: ".archon/agents/coding-pipeline/regression-tester.md",
         tool_access: ToolAccess::Full,
         algorithm: Algorithm::Reflexion,
@@ -1019,7 +1019,7 @@ pub static AGENTS: &[CodingAgent] = &[
     CodingAgent {
         key: "security-tester",
         phase: Phase::Testing,
-        model: "claude-sonnet-4-20250514",
+        model: "sonnet",
         prompt_source_path: ".archon/agents/coding-pipeline/security-tester.md",
         tool_access: ToolAccess::Full,
         algorithm: Algorithm::ReAct,
@@ -1042,7 +1042,7 @@ pub static AGENTS: &[CodingAgent] = &[
     CodingAgent {
         key: "coverage-analyzer",
         phase: Phase::Testing,
-        model: "claude-sonnet-4-20250514",
+        model: "sonnet",
         prompt_source_path: ".archon/agents/coding-pipeline/coverage-analyzer.md",
         tool_access: ToolAccess::Full,
         algorithm: Algorithm::PoT,
@@ -1065,7 +1065,7 @@ pub static AGENTS: &[CodingAgent] = &[
     CodingAgent {
         key: "quality-gate",
         phase: Phase::Refinement,
-        model: "claude-sonnet-4-20250514",
+        model: "sonnet",
         prompt_source_path: ".archon/agents/coding-pipeline/quality-gate.md",
         tool_access: ToolAccess::Full,
         algorithm: Algorithm::Reflexion,
@@ -1082,7 +1082,7 @@ pub static AGENTS: &[CodingAgent] = &[
     CodingAgent {
         key: "test-fixer",
         phase: Phase::Testing,
-        model: "claude-sonnet-4-20250514",
+        model: "sonnet",
         prompt_source_path: ".archon/agents/coding-pipeline/test-fixer.md",
         tool_access: ToolAccess::Full,
         algorithm: Algorithm::SelfDebug,
@@ -1107,7 +1107,7 @@ pub static AGENTS: &[CodingAgent] = &[
     CodingAgent {
         key: "phase-5-reviewer",
         phase: Phase::Testing,
-        model: "claude-sonnet-4-20250514",
+        model: "sonnet",
         prompt_source_path: ".archon/agents/coding-pipeline/phase-5-reviewer.md",
         tool_access: ToolAccess::Full,
         algorithm: Algorithm::Reflexion,
@@ -1136,7 +1136,7 @@ pub static AGENTS: &[CodingAgent] = &[
     CodingAgent {
         key: "performance-optimizer",
         phase: Phase::Refinement,
-        model: "claude-sonnet-4-20250514",
+        model: "sonnet",
         prompt_source_path: ".archon/agents/coding-pipeline/performance-optimizer.md",
         tool_access: ToolAccess::Full,
         algorithm: Algorithm::PoT,
@@ -1156,7 +1156,7 @@ pub static AGENTS: &[CodingAgent] = &[
     CodingAgent {
         key: "performance-architect",
         phase: Phase::Design,
-        model: "claude-sonnet-4-20250514",
+        model: "sonnet",
         prompt_source_path: ".archon/agents/coding-pipeline/performance-architect.md",
         tool_access: ToolAccess::ReadOnly,
         algorithm: Algorithm::ToT,
@@ -1179,7 +1179,7 @@ pub static AGENTS: &[CodingAgent] = &[
     CodingAgent {
         key: "code-quality-improver",
         phase: Phase::Refinement,
-        model: "claude-sonnet-4-20250514",
+        model: "sonnet",
         prompt_source_path: ".archon/agents/coding-pipeline/code-quality-improver.md",
         tool_access: ToolAccess::Full,
         algorithm: Algorithm::Reflexion,
@@ -1202,7 +1202,7 @@ pub static AGENTS: &[CodingAgent] = &[
     CodingAgent {
         key: "security-architect",
         phase: Phase::Design,
-        model: "claude-sonnet-4-20250514",
+        model: "sonnet",
         prompt_source_path: ".archon/agents/coding-pipeline/security-architect.md",
         tool_access: ToolAccess::ReadOnly,
         algorithm: Algorithm::ReAct,
@@ -1225,7 +1225,7 @@ pub static AGENTS: &[CodingAgent] = &[
     CodingAgent {
         key: "final-refactorer",
         phase: Phase::Refinement,
-        model: "claude-sonnet-4-20250514",
+        model: "sonnet",
         prompt_source_path: ".archon/agents/coding-pipeline/final-refactorer.md",
         tool_access: ToolAccess::Full,
         algorithm: Algorithm::Reflexion,
@@ -1252,7 +1252,7 @@ pub static AGENTS: &[CodingAgent] = &[
     CodingAgent {
         key: "sign-off-approver",
         phase: Phase::Refinement,
-        model: "claude-sonnet-4-20250514",
+        model: "sonnet",
         prompt_source_path: ".archon/agents/coding-pipeline/sign-off-approver.md",
         tool_access: ToolAccess::Full,
         algorithm: Algorithm::Reflexion,
@@ -1280,7 +1280,7 @@ pub static AGENTS: &[CodingAgent] = &[
     CodingAgent {
         key: "phase-6-reviewer",
         phase: Phase::Refinement,
-        model: "claude-sonnet-4-20250514",
+        model: "sonnet",
         prompt_source_path: ".archon/agents/coding-pipeline/phase-6-reviewer.md",
         tool_access: ToolAccess::Full,
         algorithm: Algorithm::Reflexion,
@@ -1305,7 +1305,7 @@ pub static AGENTS: &[CodingAgent] = &[
     CodingAgent {
         key: "recovery-agent",
         phase: Phase::Refinement,
-        model: "claude-sonnet-4-20250514",
+        model: "sonnet",
         prompt_source_path: ".archon/agents/coding-pipeline/recovery-agent.md",
         tool_access: ToolAccess::Full,
         algorithm: Algorithm::Reflexion,
