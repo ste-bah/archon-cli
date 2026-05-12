@@ -46,11 +46,12 @@ pub struct SubagentRequest {
 impl SubagentRequest {
     /// Default maximum turns when the caller does not specify one.
     ///
-    /// 10 covers a typical chat-style subagent (coder, reviewer); heavy
-    /// survey agents (architecture-mapper, system-mapper, codebase-
-    /// implementation-analyzer) override this in their frontmatter or
-    /// per-spawn `max_turns` argument. The hard ceiling is `MAX_TURNS_HARD_CAP`.
-    pub const DEFAULT_MAX_TURNS: u32 = 10;
+    /// Effectively unlimited. archon trusts the configured LLM provider to
+    /// return results and errors; runaway-loop protection is the USD budget
+    /// cap (`--max-budget-usd`), not an arbitrary turn count. The hard
+    /// ceiling exists only to bound the integer type and keep tests
+    /// deterministic — no realistic agent run hits it.
+    pub const DEFAULT_MAX_TURNS: u32 = Self::MAX_TURNS_HARD_CAP;
 
     /// Hard upper bound for `max_turns`. Effectively unlimited — set
     /// high enough that no realistic agent run will hit it. Runaway-loop

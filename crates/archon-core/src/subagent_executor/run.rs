@@ -110,13 +110,15 @@ impl AgentSubagentExecutor {
                     .unwrap_or_else(|| "You are a subagent. Complete the task described in the user message. Be thorough and precise.".into())
             });
 
-        // Fork parent-context inheritance (50 KB truncated).
+        // Fork parent-context inheritance. Pass parent context through verbatim
+        // and trust the configured LLM provider to handle context limits and
+        // return any errors. Client-side truncation breaks the provider's
+        // context coherence and is not our job.
         let is_fork = resolved_def
             .as_ref()
             .map(|d| d.agent_type == "fork")
             .unwrap_or(false);
         let system_prompt = if is_fork {
-            const MAX_PARENT_PROMPT_BYTES: usize = 50_000;
             let parent_text: String = self
                 .parent_system_prompt
                 .iter()
@@ -126,18 +128,7 @@ impl AgentSubagentExecutor {
             if parent_text.is_empty() {
                 base_system_prompt
             } else {
-                let truncated = if parent_text.len() > MAX_PARENT_PROMPT_BYTES {
-                    let cut = parent_text
-                        .char_indices()
-                        .map(|(i, _)| i)
-                        .take_while(|&i| i <= MAX_PARENT_PROMPT_BYTES)
-                        .last()
-                        .unwrap_or(0);
-                    format!("{}...[truncated]", &parent_text[..cut])
-                } else {
-                    parent_text
-                };
-                format!("<parent-context>\n{truncated}\n</parent-context>\n\n{base_system_prompt}")
+                format!("<parent-context>\n{parent_text}\n</parent-context>\n\n{base_system_prompt}")
             }
         } else {
             base_system_prompt
