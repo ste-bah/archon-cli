@@ -380,6 +380,11 @@ pub(crate) fn parse_openai_sse_chunk(chunk: &str) -> Vec<StreamEvent> {
 // ---------------------------------------------------------------------------
 
 fn map_http_error(status: u16, body: String) -> LlmError {
+    if let Some(err) =
+        crate::context_window::classify_context_window_body(status, &body, Some("openai"), None)
+    {
+        return err;
+    }
     match status {
         401 => LlmError::Auth(body),
         429 => LlmError::RateLimited {

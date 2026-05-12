@@ -127,6 +127,7 @@ pub(super) async fn build_session_agent(
                 .unwrap_or("main"),
         )),
         activity_sink: super::session_activity_sink(session_id),
+        context: config.context.clone(),
     };
     apply_agent_execution_overrides(&mut agent_config, agent_def.as_ref(), cli).await;
 

@@ -84,6 +84,7 @@ pub fn classify(err: &LlmError) -> RetryDecision {
         | LlmError::Aborted
         | LlmError::Serialize(_)
         | LlmError::Unsupported(_)
+        | LlmError::ContextWindowExceeded { .. }
         | LlmError::Server { .. }
         | LlmError::ProviderNotFound { .. } => RetryDecision::FailFast,
     }

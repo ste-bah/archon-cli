@@ -12,6 +12,8 @@ pub struct StatusBar {
     pub agent_name: Option<String>,
     /// Agent display color (hex or named color, used by TUI renderer).
     pub agent_color: Option<String>,
+    pub context_tokens_used: u64,
+    pub context_window: u64,
 }
 
 impl Default for StatusBar {
@@ -25,6 +27,8 @@ impl Default for StatusBar {
             verbose: true,
             agent_name: None,
             agent_color: None,
+            context_tokens_used: 0,
+            context_window: archon_llm::context_window::FALLBACK_CONTEXT_WINDOW,
         }
     }
 }
@@ -43,6 +47,15 @@ impl StatusBar {
         parts.push(self.identity_mode.clone());
         parts.push(self.permission_mode.clone());
         parts.push(format!("${:.2}", self.cost));
+        if self.context_tokens_used > 0 && self.context_window > 0 {
+            let pct =
+                (self.context_tokens_used as f64 / self.context_window as f64 * 100.0).min(100.0);
+            parts.push(format!(
+                "ctx {}k/{}k ({pct:.0}%)",
+                self.context_tokens_used / 1000,
+                self.context_window / 1000
+            ));
+        }
 
         if let Some(ref branch) = self.git_branch {
             parts.push(branch.clone());

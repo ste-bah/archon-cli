@@ -421,6 +421,8 @@ fn error_kind(error: &LlmError) -> &'static str {
         LlmError::ProviderNotFound { .. } => "provider_not_found",
         LlmError::QuotaExceeded(_) => "quota_exceeded",
         LlmError::Aborted => "aborted",
+        LlmError::ContextWindowExceeded { .. } => "context_window_exceeded",
+        _ => "unknown_error",
     }
 }
 
@@ -436,6 +438,8 @@ fn error_message(error: &LlmError) -> &'static str {
         LlmError::Http(_) => "provider HTTP request failed",
         LlmError::Overloaded => "provider reported overload",
         LlmError::Serialize(_) => "provider request or response serialization failed",
+        LlmError::ContextWindowExceeded { .. } => "provider context window was exceeded",
+        _ => "provider request failed",
     }
 }
 

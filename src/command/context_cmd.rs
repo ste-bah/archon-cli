@@ -40,7 +40,7 @@
 //! # Byte-for-byte output preservation
 //!
 //! Every emitted value mirrors the deleted slash.rs:267-331 body:
-//! - `context_limit` = 200_000.0 (200k token budget).
+//! - `context_limit` = shared fallback context-window budget.
 //! - `bar_width` = 40 chars, filled with `#` and padded with `-`.
 //! - Percent formatted as `{pct:.1}%`, clamped to 100.0.
 //! - `fmt_tok` helper: thousand-suffix `{:.1}k` or raw `{:.0}` digits.
@@ -70,6 +70,7 @@
 
 use crate::command::registry::{CommandContext, CommandHandler};
 use crate::slash_context::SlashCommandContext;
+use archon_llm::context_window::FALLBACK_CONTEXT_WINDOW;
 use archon_tui::app::TuiEvent;
 
 /// Owned snapshot of every value the /context body reads from shared
@@ -172,7 +173,7 @@ impl CommandHandler for ContextHandler {
         // Total estimated context = fixed overhead + conversation.
         let total_context = fixed_overhead + conversation_tokens;
 
-        let context_limit = 200_000.0_f64;
+        let context_limit = FALLBACK_CONTEXT_WINDOW as f64;
         let pct = (total_context / context_limit * 100.0).min(100.0);
         let bar_width = 40usize;
         let filled = (pct / 100.0 * bar_width as f64) as usize;

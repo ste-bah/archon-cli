@@ -1,6 +1,6 @@
 //! LLM client adapters for the pipeline's [`LlmClient`] trait.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -72,6 +72,7 @@ pub struct ProviderLlmAdapter {
     provider: Arc<dyn LlmProvider>,
     max_tokens: u32,
     request_origin: Option<String>,
+    compact_state: Mutex<archon_core::agent::AutoCompactState>,
 }
 
 impl ProviderLlmAdapter {
@@ -80,6 +81,7 @@ impl ProviderLlmAdapter {
             provider,
             max_tokens: 8192,
             request_origin: Some("pipeline".into()),
+            compact_state: Mutex::new(archon_core::agent::AutoCompactState::default()),
         }
     }
 
@@ -115,6 +117,72 @@ impl ProviderLlmAdapter {
         // passes through.
         requested.to_string()
     }
+
+    fn compact_for_request(
+        &self,
+        messages: Vec<serde_json::Value>,
+        model: &str,
+        force: bool,
+    ) -> Result<Vec<serde_json::Value>> {
+        let window =
+            archon_llm::context_window::resolve_context_window(model, None, Some(&*self.provider))
+                .context_window;
+        let tokens = archon_core::agent::autocompact::estimate_messages_tokens(&messages);
+        let action = if force {
+            Some(archon_core::agent::CompactAction::Full)
+        } else {
+            let state = self
+                .compact_state
+                .lock()
+                .map_err(|_| anyhow::anyhow!("pipeline compaction state lock poisoned"))?;
+            archon_core::agent::evaluate_compaction(tokens, window, &state, 0.80)
+        };
+        let Some(action) = action else {
+            return Ok(messages);
+        };
+
+        {
+            let mut state = self
+                .compact_state
+                .lock()
+                .map_err(|_| anyhow::anyhow!("pipeline compaction state lock poisoned"))?;
+            if !force && !state.should_attempt() {
+                return Ok(messages);
+            }
+            state.compact_in_flight = true;
+        }
+
+        match archon_core::agent::autocompact::compact_json_messages_apply(&messages, action) {
+            Ok(compacted) => {
+                let after = archon_core::agent::autocompact::estimate_messages_tokens(&compacted);
+                self.compact_state
+                    .lock()
+                    .map_err(|_| anyhow::anyhow!("pipeline compaction state lock poisoned"))?
+                    .on_success(after);
+                tracing::info!(
+                    before_tokens = tokens,
+                    after_tokens = after,
+                    force,
+                    "pipeline prompt compacted"
+                );
+                Ok(compacted)
+            }
+            Err(err) => {
+                self.compact_state
+                    .lock()
+                    .map_err(|_| anyhow::anyhow!("pipeline compaction state lock poisoned"))?
+                    .on_real_failure();
+                if force {
+                    Err(anyhow::anyhow!(
+                        "pipeline reactive compaction failed: {err}"
+                    ))
+                } else {
+                    tracing::warn!(error = %err, "pipeline prompt compaction skipped");
+                    Ok(messages)
+                }
+            }
+        }
+    }
 }
 
 #[async_trait]
@@ -126,21 +194,33 @@ impl LlmClient for ProviderLlmAdapter {
         tools: Vec<serde_json::Value>,
         model: &str,
     ) -> Result<LlmResponse> {
+        let effective_model = self.model_for_provider(model);
+        let compacted_messages = self.compact_for_request(messages, &effective_model, false)?;
         let request = LlmRequest {
-            model: self.model_for_provider(model),
+            model: effective_model.clone(),
             max_tokens: self.max_tokens,
             system,
-            messages,
+            messages: compacted_messages,
             tools,
             request_origin: self.request_origin.clone(),
             ..LlmRequest::default()
         };
 
-        let rx = self
-            .provider
-            .stream(request)
-            .await
-            .map_err(|e| anyhow::anyhow!("LLM API error: {e}"))?;
+        let rx = match self.provider.stream(request.clone()).await {
+            Ok(rx) => rx,
+            Err(e) if e.is_context_window_exceeded() => {
+                let retry_messages =
+                    self.compact_for_request(request.messages.clone(), &effective_model, true)?;
+                self.provider
+                    .stream(LlmRequest {
+                        messages: retry_messages,
+                        ..request
+                    })
+                    .await
+                    .map_err(anyhow::Error::new)?
+            }
+            Err(e) => return Err(anyhow::anyhow!("LLM API error: {e}")),
+        };
 
         collect_stream(rx).await
     }
@@ -149,19 +229,16 @@ impl LlmClient for ProviderLlmAdapter {
 async fn collect_stream(mut rx: Receiver<StreamEvent>) -> Result<LlmResponse> {
     let mut text_parts: Vec<String> = Vec::new();
     let mut tool_uses: Vec<ToolUseEntry> = Vec::new();
-    let mut tokens_in: u64 = 0;
-    let mut tokens_out: u64 = 0;
+    let mut usage = archon_llm::usage::UsageAccumulator::default();
 
     // Track in-progress tool_use blocks by content-block index.
     let mut active_tool_blocks: std::collections::HashMap<u32, (String, String, String)> =
         std::collections::HashMap::new();
 
     while let Some(event) = rx.recv().await {
+        usage.record_event(&event);
         match event {
-            StreamEvent::MessageStart { usage, .. } => {
-                tokens_in += usage.input_tokens;
-                tokens_out += usage.output_tokens;
-            }
+            StreamEvent::MessageStart { .. } => {}
             StreamEvent::ContentBlockStart {
                 index,
                 block_type,
@@ -201,12 +278,7 @@ async fn collect_stream(mut rx: Receiver<StreamEvent>) -> Result<LlmResponse> {
                     });
                 }
             }
-            StreamEvent::MessageDelta { usage, .. } => {
-                if let Some(u) = usage {
-                    tokens_in += u.input_tokens;
-                    tokens_out += u.output_tokens;
-                }
-            }
+            StreamEvent::MessageDelta { .. } => {}
             StreamEvent::ThinkingDelta { .. }
             | StreamEvent::SignatureDelta { .. }
             | StreamEvent::ReasoningEncrypted { .. }
@@ -223,6 +295,16 @@ async fn collect_stream(mut rx: Receiver<StreamEvent>) -> Result<LlmResponse> {
                     let digest = Sha256::digest(partial.as_bytes());
                     hex::encode(digest)
                 };
+                if let Some(err) = archon_llm::context_window::classify_context_window_error(
+                    None,
+                    Some(&error_type),
+                    None,
+                    &message,
+                    Some("pipeline"),
+                    None,
+                ) {
+                    return Err(anyhow::Error::new(err));
+                }
                 anyhow::bail!(
                     "LLM stream error ({error_type}): {message}; partial_output_hash={partial_hash}"
                 );
@@ -233,8 +315,8 @@ async fn collect_stream(mut rx: Receiver<StreamEvent>) -> Result<LlmResponse> {
     Ok(LlmResponse {
         content: text_parts.join(""),
         tool_uses,
-        tokens_in,
-        tokens_out,
+        tokens_in: usage.context_input_tokens,
+        tokens_out: usage.output_tokens,
     })
 }
 
@@ -248,175 +330,12 @@ mod tests {
     use archon_llm::provider::{LlmError, ModelInfo, ProviderFeature};
     use archon_llm::types::Usage;
 
-    /// Helper: create an LlmResponse from a vec of StreamEvents by simulating
-    /// the collection logic (without requiring an actual AnthropicClient).
-    fn collect_events(events: Vec<StreamEvent>) -> LlmResponse {
-        let mut text_parts: Vec<String> = Vec::new();
-        let mut tool_uses: Vec<ToolUseEntry> = Vec::new();
-        let mut tokens_in: u64 = 0;
-        let mut tokens_out: u64 = 0;
-        let mut active_tool_blocks: std::collections::HashMap<u32, (String, String, String)> =
-            std::collections::HashMap::new();
-
-        for event in events {
-            match event {
-                StreamEvent::MessageStart { usage, .. } => {
-                    tokens_in += usage.input_tokens;
-                    tokens_out += usage.output_tokens;
-                }
-                StreamEvent::ContentBlockStart {
-                    index,
-                    block_type,
-                    tool_use_id,
-                    tool_name,
-                } => {
-                    if block_type == archon_llm::types::ContentBlockType::ToolUse {
-                        active_tool_blocks.insert(
-                            index,
-                            (
-                                tool_use_id.unwrap_or_default(),
-                                tool_name.unwrap_or_default(),
-                                String::new(),
-                            ),
-                        );
-                    }
-                }
-                StreamEvent::TextDelta { text, .. } => {
-                    text_parts.push(text);
-                }
-                StreamEvent::InputJsonDelta {
-                    index,
-                    partial_json,
-                } => {
-                    if let Some(entry) = active_tool_blocks.get_mut(&index) {
-                        entry.2.push_str(&partial_json);
-                    }
-                }
-                StreamEvent::ContentBlockStop { index } => {
-                    if let Some((_id, name, json_str)) = active_tool_blocks.remove(&index) {
-                        let input: serde_json::Value =
-                            serde_json::from_str(&json_str).unwrap_or(serde_json::Value::Null);
-                        tool_uses.push(ToolUseEntry {
-                            tool_name: name,
-                            input,
-                            output: serde_json::Value::Null,
-                        });
-                    }
-                }
-                StreamEvent::MessageDelta { usage, .. } => {
-                    if let Some(u) = usage {
-                        tokens_in += u.input_tokens;
-                        tokens_out += u.output_tokens;
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        LlmResponse {
-            content: text_parts.join(""),
-            tool_uses,
-            tokens_in,
-            tokens_out,
-        }
-    }
-
-    #[test]
-    fn empty_stream_produces_empty_response() {
-        let response = collect_events(vec![]);
-        assert!(response.content.is_empty());
-        assert!(response.tool_uses.is_empty());
-        assert_eq!(response.tokens_in, 0);
-        assert_eq!(response.tokens_out, 0);
-    }
-
-    #[test]
-    fn text_content_blocks_concatenated() {
-        let events = vec![
-            StreamEvent::MessageStart {
-                id: "msg_1".into(),
-                model: "claude-sonnet-4-6".into(),
-                usage: archon_llm::types::Usage {
-                    input_tokens: 100,
-                    output_tokens: 0,
-                    ..Default::default()
-                },
-            },
-            StreamEvent::ContentBlockStart {
-                index: 0,
-                block_type: archon_llm::types::ContentBlockType::Text,
-                tool_use_id: None,
-                tool_name: None,
-            },
-            StreamEvent::TextDelta {
-                index: 0,
-                text: "Hello ".into(),
-            },
-            StreamEvent::TextDelta {
-                index: 0,
-                text: "world".into(),
-            },
-            StreamEvent::ContentBlockStop { index: 0 },
-            StreamEvent::MessageDelta {
-                stop_reason: Some("end_turn".into()),
-                usage: Some(archon_llm::types::Usage {
-                    input_tokens: 0,
-                    output_tokens: 20,
-                    ..Default::default()
-                }),
-            },
-            StreamEvent::MessageStop,
-        ];
-
-        let response = collect_events(events);
-        assert_eq!(response.content, "Hello world");
-        assert!(response.tool_uses.is_empty());
-        assert_eq!(response.tokens_in, 100);
-        assert_eq!(response.tokens_out, 20);
-    }
-
-    #[test]
-    fn tool_use_blocks_collected() {
-        let events = vec![
-            StreamEvent::MessageStart {
-                id: "msg_2".into(),
-                model: "claude-sonnet-4-6".into(),
-                usage: archon_llm::types::Usage {
-                    input_tokens: 50,
-                    output_tokens: 0,
-                    ..Default::default()
-                },
-            },
-            StreamEvent::ContentBlockStart {
-                index: 0,
-                block_type: archon_llm::types::ContentBlockType::ToolUse,
-                tool_use_id: Some("toolu_1".into()),
-                tool_name: Some("read_file".into()),
-            },
-            StreamEvent::InputJsonDelta {
-                index: 0,
-                partial_json: r#"{"path":""#.into(),
-            },
-            StreamEvent::InputJsonDelta {
-                index: 0,
-                partial_json: r#"src/main.rs"}"#.into(),
-            },
-            StreamEvent::ContentBlockStop { index: 0 },
-            StreamEvent::MessageStop,
-        ];
-
-        let response = collect_events(events);
-        assert!(response.content.is_empty());
-        assert_eq!(response.tool_uses.len(), 1);
-        assert_eq!(response.tool_uses[0].tool_name, "read_file");
-        assert_eq!(response.tool_uses[0].input["path"], "src/main.rs");
-        assert_eq!(response.tokens_in, 50);
-    }
-
     struct FakeProvider {
         name: &'static str,
         model: &'static str,
+        context_window: u32,
         seen_model: std::sync::Mutex<Option<String>>,
+        seen_messages: std::sync::Mutex<Vec<serde_json::Value>>,
     }
 
     #[async_trait]
@@ -429,7 +348,7 @@ mod tests {
             vec![ModelInfo {
                 id: self.model.into(),
                 display_name: self.model.into(),
-                context_window: 200_000,
+                context_window: self.context_window,
             }]
         }
 
@@ -438,6 +357,10 @@ mod tests {
                 .seen_model
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(request.model);
+            *self
+                .seen_messages
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = request.messages;
             let (tx, rx) = tokio::sync::mpsc::channel(8);
             tokio::spawn(async move {
                 let _ = tx
@@ -478,7 +401,9 @@ mod tests {
         let provider = Arc::new(FakeProvider {
             name: "openai-codex",
             model: "gpt-5.4",
+            context_window: 200_000,
             seen_model: std::sync::Mutex::new(None),
+            seen_messages: std::sync::Mutex::new(Vec::new()),
         });
         let adapter = ProviderLlmAdapter::new(provider);
 
@@ -496,7 +421,9 @@ mod tests {
         let provider = Arc::new(FakeProvider {
             name: "openai-codex",
             model: "gpt-5.4",
+            context_window: 200_000,
             seen_model: std::sync::Mutex::new(None),
+            seen_messages: std::sync::Mutex::new(Vec::new()),
         });
         let seen = Arc::clone(&provider);
         let adapter = ProviderLlmAdapter::new(provider);
@@ -512,5 +439,40 @@ mod tests {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .clone();
         assert_eq!(model.as_deref(), Some("gpt-5.4"));
+    }
+
+    #[tokio::test]
+    async fn provider_adapter_compacts_prompt_with_shared_lifecycle() {
+        let provider = Arc::new(FakeProvider {
+            name: "openai-codex",
+            model: "gpt-5.4",
+            context_window: 128,
+            seen_model: std::sync::Mutex::new(None),
+            seen_messages: std::sync::Mutex::new(Vec::new()),
+        });
+        let seen = Arc::clone(&provider);
+        let adapter = ProviderLlmAdapter::new(provider);
+        let messages: Vec<_> = (0..10)
+            .map(|i| serde_json::json!({"role": "user", "content": "x".repeat(100 + i)}))
+            .collect();
+
+        let _ = adapter
+            .send_message(messages, Vec::new(), Vec::new(), "gpt-5.4")
+            .await
+            .expect("fake provider response");
+
+        let sent = seen
+            .seen_messages
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        assert!(sent.len() < 10);
+        assert!(
+            sent.first()
+                .and_then(|msg| msg.get("content"))
+                .and_then(|content| content.as_str())
+                .unwrap_or_default()
+                .contains("Context Summary")
+        );
     }
 }

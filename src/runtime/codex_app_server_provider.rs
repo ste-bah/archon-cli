@@ -98,7 +98,20 @@ impl LlmProvider for CodexAppServerProvider {
                         stop_reason = delta_stop;
                     }
                 }
-                StreamEvent::Error { message, .. } => return Err(LlmError::Http(message)),
+                StreamEvent::Error {
+                    error_type,
+                    message,
+                } => {
+                    return Err(archon_llm::context_window::classify_context_window_error(
+                        None,
+                        Some(&error_type),
+                        None,
+                        &message,
+                        Some("codex-app-server"),
+                        None,
+                    )
+                    .unwrap_or(LlmError::Http(message)));
+                }
                 _ => {}
             }
         }
