@@ -359,7 +359,7 @@ pub(crate) fn build_llm_provider_selection(
                     );
                     selected(
                         AnthropicProvider::new(api_client)
-                        .with_alias_map(models_cfg.anthropic.to_alias_map()),
+                            .with_alias_map(models_cfg.anthropic.to_alias_map()),
                         Some(flat_provider_missing_credential_reason(&var)),
                     )
                 }
@@ -371,7 +371,7 @@ pub(crate) fn build_llm_provider_selection(
                     );
                     selected(
                         AnthropicProvider::new(api_client)
-                        .with_alias_map(models_cfg.anthropic.to_alias_map()),
+                            .with_alias_map(models_cfg.anthropic.to_alias_map()),
                         Some("openai_compatible_construction_failed"),
                     )
                 }

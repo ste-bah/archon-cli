@@ -292,7 +292,8 @@ async fn resolve_session_provider(
     } else {
         let provider = match api_client {
             Some(api_client) => {
-                let selection = build_llm_provider_selection(&config.llm, &config.models, api_client);
+                let selection =
+                    build_llm_provider_selection(&config.llm, &config.models, api_client);
                 let selected_provider = selection.provider.name().to_string();
                 let runtime_mode = runtime_mode_for_provider_name(&selected_provider);
                 record_provider_fallback(

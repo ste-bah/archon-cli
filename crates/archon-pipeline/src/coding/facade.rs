@@ -361,7 +361,10 @@ impl PipelineFacade for CodingFacade {
             return Ok(NextAgent::Done);
         }
         let coding_agent = &AGENTS[idx];
-        Ok(NextAgent::Continue(agent_to_info(coding_agent, &self.models)))
+        Ok(NextAgent::Continue(agent_to_info(
+            coding_agent,
+            &self.models,
+        )))
     }
 
     /// Build the (messages, system, tools) triple with 11-layer prompt

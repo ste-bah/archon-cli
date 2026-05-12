@@ -128,7 +128,9 @@ impl AgentSubagentExecutor {
             if parent_text.is_empty() {
                 base_system_prompt
             } else {
-                format!("<parent-context>\n{parent_text}\n</parent-context>\n\n{base_system_prompt}")
+                format!(
+                    "<parent-context>\n{parent_text}\n</parent-context>\n\n{base_system_prompt}"
+                )
             }
         } else {
             base_system_prompt
