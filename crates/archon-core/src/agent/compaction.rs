@@ -99,8 +99,15 @@ impl Agent {
             Some("micro") => Some(archon_context::boundary::CompactionStrategy::Micro),
             Some("snip") => Some(archon_context::boundary::CompactionStrategy::Snip),
             Some("auto") | None => {
-                // Estimate usage ratio against the model context window (default 200k).
-                let context_window = 200_000u64;
+                let active_model = {
+                    let override_model = self.config.model_override.lock().await;
+                    if override_model.is_empty() {
+                        self.config.model.clone()
+                    } else {
+                        override_model.clone()
+                    }
+                };
+                let context_window = self.context_window_for(&active_model);
                 let usage_ratio = before_tokens as f32 / context_window as f32;
                 select_strategy(usage_ratio)
             }

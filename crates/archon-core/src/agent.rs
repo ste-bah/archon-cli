@@ -29,11 +29,13 @@ use crate::auto_extraction::AutoExtractor;
 use crate::dispatch::ToolRegistry;
 use crate::subagent::SubagentManager;
 
+pub mod autocompact;
 mod compaction;
 mod events;
 mod lifecycle;
 mod memory_integration;
 mod message_delivery;
+mod payloads;
 mod permission_gate;
 mod runtime_hooks;
 mod support;
@@ -47,6 +49,10 @@ mod tool_types;
 mod turn_completion;
 mod types;
 
+pub use autocompact::{AutoCompactState, CompactAction, evaluate_compaction};
+pub use payloads::{
+    ReasoningEvidenceEventPayload, ReasoningTurnEventPayload, UserCorrectionEventPayload,
+};
 pub use support::AgentLoopError;
 use support::{parse_plan_from_text, user_correction_excerpt};
 pub use types::{AgentConfig, AgentEvent, ConversationState, SessionStats, TimestampedEvent};
@@ -123,68 +129,14 @@ pub struct Agent {
     pending_resume_messages: Arc<tokio::sync::Mutex<Option<Vec<serde_json::Value>>>>,
     /// Channel instrumentation sink for tracking sent/drained counts.
     metrics: Option<Arc<dyn ChannelMetricSink>>,
-    /// GNN auto-trainer hook: invoked with `n=count` after a successful memory
-    /// store (auto-extraction, inner-voice snapshot). archon-core cannot depend
-    /// on archon-pipeline (would create a cycle), so the AutoTrainer is injected
-    /// as a closure by the binary at startup. Reference:
-    /// `archon-pipeline/src/learning/gnn/auto_trainer_runtime.rs`.
     record_memory_callback: Option<Arc<dyn Fn(u64) + Send + Sync>>,
-    /// GNN auto-trainer hook: invoked after a successful correction record.
-    /// Same injection rationale as `record_memory_callback`.
     record_correction_callback: Option<Arc<dyn Fn() + Send + Sync>>,
-    /// Governed-learning hook: invoked after correction handling and rule
-    /// reinforcement so embedders can persist a UserCorrected LearningEvent.
-    /// archon-core cannot depend on archon-learning, so this is closure-wired.
     record_user_correction_event_callback:
         Option<Arc<dyn Fn(UserCorrectionEventPayload) + Send + Sync>>,
-    /// Reasoning-quality hook: invoked after each visible assistant text block
-    /// is committed to conversation state. The binary maps this plain payload
-    /// into archon-reasoning-quality so archon-core avoids a storage dependency.
     record_reasoning_turn_callback: Option<Arc<dyn Fn(ReasoningTurnEventPayload) + Send + Sync>>,
-    /// Evidence refs collected from completed tool calls. Kept as plain data
-    /// so visible claim extraction can compare assistant text against prior
-    /// observable source reads and verification outputs.
     reasoning_evidence_refs: Vec<ReasoningEvidenceEventPayload>,
-    /// Personality-mirror hook: invoked with the post-mutation `&InnerVoice`
-    /// after every write site (per-tool-call, per-turn-complete, user
-    /// correction). Wired by the binary at startup so a sync-Mutex mirror
-    /// stays in lock-step with the async-Mutex inner_voice. The mirror is
-    /// read by the panic hook (which has no tokio runtime to await on the
-    /// async Mutex). Reference: `src/panic_save.rs` and TASK #245.
     #[allow(clippy::type_complexity)]
     inner_voice_change_callback: Option<Arc<dyn Fn(&InnerVoice) + Send + Sync>>,
-}
-
-/// Payload emitted by the agent loop when a user correction is detected.
-///
-/// Kept in archon-core as plain data so the binary/pipeline layer can map it
-/// into archon-learning without introducing a crate cycle.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct UserCorrectionEventPayload {
-    pub correction_type: String,
-    pub top_rule_id: Option<String>,
-    pub user_input_excerpt: String,
-    pub session_context: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ReasoningEvidenceEventPayload {
-    pub evidence_id: String,
-    pub kind: String,
-    pub entity_key: Option<String>,
-    pub output_hash: Option<String>,
-    pub redacted_excerpt: Option<String>,
-    pub created_at: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ReasoningTurnEventPayload {
-    pub session_id: String,
-    pub turn_number: u64,
-    pub assistant_text: String,
-    pub evidence_refs: Vec<ReasoningEvidenceEventPayload>,
-    pub cwd: Option<String>,
-    pub workspace_root: Option<String>,
 }
 
 impl Agent {
@@ -269,6 +221,8 @@ impl Agent {
             let (max_tokens, thinking, speed) =
                 self.config.build_base_request_fields(&active_model);
 
+            self.maybe_auto_compact(&active_model).await?;
+
             // Build the API request
             let request = LlmRequest {
                 model: active_model.clone(),
@@ -292,8 +246,20 @@ impl Agent {
             .await;
 
             // Send request and get streaming events
-            let mut rx = match self.client.stream(request).await {
+            let mut rx = match self.client.stream(request.clone()).await {
                 Ok(rx) => rx,
+                Err(e) if e.is_context_window_exceeded() => {
+                    self.force_reactive_compact().await?;
+                    let retry_request = LlmRequest {
+                        messages: self.state.messages.clone(),
+                        ..request
+                    };
+                    self.client.stream(retry_request).await.map_err(|retry| {
+                        AgentLoopError::ApiError(format!(
+                            "reactive compaction retry failed: {retry}"
+                        ))
+                    })?
+                }
                 Err(e) => {
                     self.emit_activity(
                         AgentActivityKind::ParentTurnCompleted,
@@ -391,6 +357,14 @@ impl Agent {
                         error_type,
                         message,
                     } => {
+                        let classified = autocompact::classify_stream_error(
+                            self.client.name(),
+                            &error_type,
+                            &message,
+                        );
+                        if classified.is_context_window_exceeded() {
+                            self.force_reactive_compact().await?;
+                        }
                         // CRIT-06: Fire Notification hook on API errors
                         self.fire_hook(
                             crate::hooks::HookEvent::Notification,
@@ -419,7 +393,8 @@ impl Agent {
             }
 
             // Update token totals
-            self.state.total_input_tokens += turn_input_tokens;
+            self.state.total_input_tokens +=
+                turn_input_tokens + turn_cache_creation + turn_cache_read;
             self.state.total_output_tokens += turn_output_tokens;
 
             // Build the assistant message content blocks

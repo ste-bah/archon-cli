@@ -26,6 +26,8 @@ impl SubagentRunner {
 
         let started = Instant::now();
         let deadline = started + Duration::from_secs(self.timeout_secs);
+        let mut auto_compact = crate::agent::AutoCompactState::default();
+        let mut local_input_tokens = crate::agent::autocompact::estimate_messages_tokens(&messages);
 
         for turn in 0..self.max_turns {
             // Check timeout. The error message reports BOTH wall-clock
@@ -106,6 +108,43 @@ impl SubagentRunner {
             let (max_tokens, thinking, speed) =
                 self.agent_config.build_base_request_fields(&self.model);
 
+            let window = archon_llm::context_window::resolve_context_window(
+                &self.model,
+                self.agent_config.context.max_tokens.map(u64::from),
+                Some(self.provider.as_ref()),
+            )
+            .context_window;
+            if let Some(action) = crate::agent::evaluate_compaction(
+                local_input_tokens.max(crate::agent::autocompact::estimate_messages_tokens(
+                    &messages,
+                )),
+                window,
+                &auto_compact,
+                self.agent_config.context.compact_threshold,
+            ) {
+                auto_compact.compact_in_flight = true;
+                match crate::agent::autocompact::compact_json_messages(&messages, action, false) {
+                    Ok(crate::agent::autocompact::CompactionOutcome::Compacted {
+                        after_tokens,
+                        ..
+                    }) => {
+                        messages = crate::agent::autocompact::compact_json_messages_apply(
+                            &messages, action,
+                        )
+                        .map_err(|e| anyhow::anyhow!("subagent compaction failed: {e}"))?;
+                        local_input_tokens = after_tokens;
+                        auto_compact.on_success(after_tokens);
+                    }
+                    Ok(crate::agent::autocompact::CompactionOutcome::Skipped { .. }) => {
+                        auto_compact.on_cancel();
+                    }
+                    Err(e) => {
+                        auto_compact.on_real_failure();
+                        anyhow::bail!("subagent compaction failed: {e}");
+                    }
+                }
+            }
+
             let request = LlmRequest {
                 model: self.model.clone(),
                 max_tokens,
@@ -121,17 +160,36 @@ impl SubagentRunner {
             };
 
             // Stream the response
-            let mut rx = self
-                .provider
-                .stream(request)
-                .await
-                .map_err(|e| anyhow::anyhow!("LLM stream error: {e}"))?;
+            let mut rx = match self.provider.stream(request.clone()).await {
+                Ok(rx) => rx,
+                Err(e) if e.is_context_window_exceeded() => {
+                    messages = crate::agent::autocompact::compact_json_messages_apply(
+                        &messages,
+                        crate::agent::CompactAction::Full,
+                    )
+                    .map_err(|err| anyhow::anyhow!("reactive subagent compaction failed: {err}"))?;
+                    local_input_tokens =
+                        crate::agent::autocompact::estimate_messages_tokens(&messages);
+                    auto_compact.on_success(local_input_tokens);
+                    self.provider
+                        .stream(LlmRequest {
+                            messages: messages.clone(),
+                            ..request
+                        })
+                        .await
+                        .map_err(anyhow::Error::new)?
+                }
+                Err(e) => return Err(anyhow::Error::new(e)),
+            };
 
             let mut text_content = String::new();
             let mut pending_tools: Vec<PendingTool> = Vec::new();
             let mut current_tool_index: Option<u32> = None;
+            let mut usage_acc = archon_llm::usage::UsageAccumulator::default();
+            let mut retry_after_compact = false;
 
             while let Some(event) = rx.recv().await {
+                usage_acc.record_event(&event);
                 match event {
                     StreamEvent::ContentBlockStart {
                         index,
@@ -168,7 +226,26 @@ impl SubagentRunner {
                         error_type,
                         message,
                     } => {
-                        anyhow::bail!("LLM error: {error_type}: {message}");
+                        let err = crate::agent::autocompact::classify_stream_error(
+                            self.provider.name(),
+                            &error_type,
+                            &message,
+                        );
+                        if err.is_context_window_exceeded() {
+                            messages = crate::agent::autocompact::compact_json_messages_apply(
+                                &messages,
+                                crate::agent::CompactAction::Full,
+                            )
+                            .map_err(|e| {
+                                anyhow::anyhow!("reactive subagent compaction failed: {e}")
+                            })?;
+                            local_input_tokens =
+                                crate::agent::autocompact::estimate_messages_tokens(&messages);
+                            auto_compact.on_success(local_input_tokens);
+                            retry_after_compact = true;
+                            break;
+                        }
+                        return Err(anyhow::Error::new(err));
                     }
                     StreamEvent::MessageStart { ref usage, .. } => {
                         // TASK-T3 (G4): accumulate Usage from message_start.
@@ -186,19 +263,19 @@ impl SubagentRunner {
                     StreamEvent::MessageDelta {
                         usage: Some(ref u), ..
                     } => {
-                        // TASK-T3 (G4): accumulate Usage from message_delta.
                         if let Some(ref t) = self.progress
                             && let Ok(mut g) = t.lock()
                         {
-                            g.cumulative_input_tokens += u.input_tokens;
                             g.cumulative_output_tokens += u.output_tokens;
-                            g.cumulative_cache_creation_tokens += u.cache_creation_input_tokens;
-                            g.cumulative_cache_read_tokens += u.cache_read_input_tokens;
                             g.last_update = chrono::Utc::now();
                         }
                     }
                     _ => {} // ThinkingDelta, SignatureDelta, MessageDelta{usage:None}, MessageStop, Ping, etc.
                 }
+            }
+            local_input_tokens += usage_acc.context_input_tokens;
+            if retry_after_compact {
+                continue;
             }
 
             // If no tool calls, subagent is done — return accumulated text

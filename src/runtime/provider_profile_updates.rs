@@ -171,6 +171,8 @@ fn error_reason(error: &LlmError) -> &'static str {
         LlmError::Aborted => "aborted",
         LlmError::Http(_) => "http_error",
         LlmError::Serialize(_) => "serialization_error",
+        LlmError::ContextWindowExceeded { .. } => "context_window_exceeded",
+        _ => "unknown_error",
     }
 }
 

@@ -151,6 +151,8 @@ pub struct AgentConfig {
     /// Canonical activity event sink shared by parent, subagent, and tool
     /// execution paths.
     pub activity_sink: Option<Arc<dyn AgentActivitySink>>,
+    /// Context window and auto-compaction settings threaded from config.
+    pub context: crate::config::ContextConfig,
 }
 
 impl AgentConfig {
@@ -210,6 +212,7 @@ impl Default for AgentConfig {
             cancel_token: None,
             sandbox: None,
             activity_sink: None,
+            context: crate::config::ContextConfig::default(),
         }
     }
 }
@@ -224,6 +227,7 @@ pub struct ConversationState {
     pub mode: AgentMode,
     pub total_input_tokens: u64,
     pub total_output_tokens: u64,
+    pub auto_compact: crate::agent::AutoCompactState,
 }
 
 impl Default for ConversationState {
@@ -233,6 +237,7 @@ impl Default for ConversationState {
             mode: AgentMode::Normal,
             total_input_tokens: 0,
             total_output_tokens: 0,
+            auto_compact: crate::agent::AutoCompactState::default(),
         }
     }
 }

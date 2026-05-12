@@ -42,6 +42,8 @@ pub(super) async fn handle_tui_event(
             // Anthropic pricing: $3/MTok input, $15/MTok output
             app.status.cost +=
                 (input_tokens as f64 * 3.0 + output_tokens as f64 * 15.0) / 1_000_000.0;
+            app.status.context_tokens_used =
+                app.status.context_tokens_used.saturating_add(input_tokens);
             flush_pending_input_after_turn(app, input_tx);
         }
         TuiEvent::Error(msg) => app.on_error(&msg),

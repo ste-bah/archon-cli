@@ -308,7 +308,16 @@ async fn reply_unsupported_request(id: u64, writer: &Arc<Mutex<RpcWriter>>) {
 async fn reject_all(pending: PendingMap, message: &str) {
     let mut pending = pending.lock().await;
     for (_, tx) in pending.drain() {
-        let _ = tx.send(Err(LlmError::Http(message.to_string())));
+        let err = archon_llm::context_window::classify_context_window_error(
+            None,
+            None,
+            None,
+            message,
+            Some("codex-app-server"),
+            None,
+        )
+        .unwrap_or_else(|| LlmError::Http(message.to_string()));
+        let _ = tx.send(Err(err));
     }
 }
 

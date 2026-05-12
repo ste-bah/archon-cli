@@ -7,6 +7,7 @@ use async_trait::async_trait;
 use tokio::sync::mpsc::Receiver;
 
 use crate::anthropic::{AnthropicClient, ApiError};
+use crate::context_window::classify_context_window_error;
 use crate::provider::{
     DataFlowClassification, LlmError, LlmProvider, LlmRequest, LlmResponse, ModelInfo,
     ProviderFeature, classify_data_flow_endpoint,
@@ -20,13 +21,24 @@ use crate::streaming::StreamEvent;
 impl From<ApiError> for LlmError {
     fn from(e: ApiError) -> Self {
         match e {
-            ApiError::HttpError(msg) => LlmError::Http(msg),
+            ApiError::HttpError(msg) => {
+                classify_context_window_error(None, None, None, &msg, Some("anthropic"), None)
+                    .unwrap_or(LlmError::Http(msg))
+            }
             ApiError::AuthError(msg) => LlmError::Auth(msg),
             ApiError::RateLimited { retry_after_secs } => {
                 LlmError::RateLimited { retry_after_secs }
             }
             ApiError::Overloaded => LlmError::Overloaded,
-            ApiError::ServerError { status, message } => LlmError::Server { status, message },
+            ApiError::ServerError { status, message } => classify_context_window_error(
+                Some(status),
+                None,
+                None,
+                &message,
+                Some("anthropic"),
+                None,
+            )
+            .unwrap_or(LlmError::Server { status, message }),
             ApiError::SerializeError(msg) => LlmError::Serialize(msg),
         }
     }

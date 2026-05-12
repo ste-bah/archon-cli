@@ -5,6 +5,7 @@ pub mod anthropic;
 pub mod auth;
 // TASK-AGS-706: LlmConfig + resolve_descriptor — feeds build_llm_provider.
 pub mod config;
+pub mod context_window;
 pub(crate) mod debug_body;
 pub mod effort;
 pub mod fast_mode;
@@ -24,6 +25,7 @@ pub mod thinking;
 pub mod tokens;
 pub mod tokens_codex;
 pub mod types;
+pub mod usage;
 
 #[cfg(test)]
 mod identity_spoof_contract_tests;

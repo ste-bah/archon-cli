@@ -155,6 +155,14 @@ impl LocalProvider {
         let status = resp.status().as_u16();
         if status >= 400 {
             let msg = resp.text().await.unwrap_or_else(|_| "unknown".to_string());
+            if let Some(err) = crate::context_window::classify_context_window_body(
+                status,
+                &msg,
+                Some("local"),
+                Some(&effective_model),
+            ) {
+                return Err(err);
+            }
             return Err(LlmError::Server {
                 status,
                 message: msg,

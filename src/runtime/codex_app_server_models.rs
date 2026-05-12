@@ -3,6 +3,7 @@
 use std::sync::{Arc, RwLock};
 
 use archon_core::config::CodexProviderConfig;
+use archon_llm::context_window::FALLBACK_CONTEXT_WINDOW;
 use archon_llm::provider::ModelInfo;
 
 use super::codex_app_server_rpc::CodexAppServerRpcClient;
@@ -63,7 +64,7 @@ fn model_info(id: &str, display_name: &str) -> ModelInfo {
     ModelInfo {
         id: id.to_string(),
         display_name: display_name.to_string(),
-        context_window: 200_000,
+        context_window: FALLBACK_CONTEXT_WINDOW as u32,
     }
 }
 
