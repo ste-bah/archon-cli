@@ -15,10 +15,12 @@ sdk-minimal = []
 [dependencies]
 archon-core = { path = "../archon-core" }
 archon-llm = { path = "../archon-llm" }
+archon-learning = { path = "../archon-learning" }
 archon-tools = { path = "../archon-tools" }
 
 serde.workspace = true
 serde_json.workspace = true
+ts-rs.workspace = true
 tokio.workspace = true
 tokio-stream.workspace = true
 futures-util.workspace = true
@@ -28,6 +30,7 @@ uuid.workspace = true
 dirs.workspace = true
 tracing.workspace = true
 axum.workspace = true
+cozo.workspace = true
 tower-http.workspace = true
 open.workspace = true
 rust-embed = "8"

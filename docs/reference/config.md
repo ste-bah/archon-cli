@@ -1027,7 +1027,8 @@ toggle_mode = false
 
 ## `[web]`
 
-Browser-based UI.
+Browser-based workbench. The frontend is embedded in the `archon` binary from
+`web/dist`; normal users do not need a separate Node/Vite install.
 
 ```toml
 [web]
@@ -1041,6 +1042,12 @@ open_browser = true
 | `port` | `8421` | TCP port for `archon web`. |
 | `bind_address` | `"127.0.0.1"` | Bind address. `"127.0.0.1"` = local only (safe default). `"0.0.0.0"` = network-accessible (only if you also configured TLS + auth). |
 | `open_browser` | `true` | Auto-open browser to the web UI URL on `archon web`. Disable for headless / CI deployments. |
+
+Run `archon web` from the project root you want to inspect. For a blank
+project, initialise the directory first with `scripts/archon-init.sh`; the web
+workbench does not create project scaffolding. See
+[Web workbench](../operations/web-workbench.md) for the tab guide and safety
+model.
 
 ---
 

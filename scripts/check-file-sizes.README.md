@@ -1,14 +1,15 @@
 # FileSizeGuard
 
-Enforces NFR-FOR-D4-MAINTAINABILITY: no `*.rs` file under the archon-cli repo
-may exceed **500 lines**, except entries in `scripts/check-file-sizes.allowlist`.
+Enforces NFR-FOR-D4-MAINTAINABILITY: no Rust or web source file under the
+archon-cli repo may exceed **500 lines**, except entries in
+`scripts/check-file-sizes.allowlist`.
 
 Spec reference: `project-tasks/archon-fixes/agentshit/02-technical-spec.md`
 §1424 ("FileSizeGuard") and §955 ("Every file ≤ 500 lines").
 
 ## When to run
 
-- Locally before every commit that touches Rust source.
+- Locally before every commit that touches Rust, TypeScript, TSX, or CSS source.
 - In CI (wired by TASK-AGS-007 — not this task).
 - Manually after any refactor that moves code between files.
 

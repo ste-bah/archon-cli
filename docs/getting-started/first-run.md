@@ -45,6 +45,16 @@ In the TUI:
 /learning-status       # show which learning subsystems are enabled
 ```
 
+From the same project root, you can also launch the browser workbench:
+
+```bash
+archon web --port 8421 --bind-address 127.0.0.1
+```
+
+For a blank project, run `scripts/archon-init.sh` first so the web workbench
+has `.archon/`, docs inboxes, policy defaults, `prds/`, and `tasks/` to inspect.
+See [Web workbench](../operations/web-workbench.md) for the tab-by-tab guide.
+
 ## Common gotchas
 
 | Symptom | Cause | Fix |
@@ -94,4 +104,5 @@ If any step errors out, see [Troubleshooting](../operations/troubleshooting.md).
 
 - [Slash commands reference](../reference/slash-commands.md) — full 65-command catalogue
 - [Configuration](../reference/config.md) — every config section explained
+- [Web workbench](../operations/web-workbench.md) — browser UI setup, tabs, and safety model
 - [Cookbook](../cookbook/) — task-oriented walkthroughs (god-code pipeline, memory-driven coding, etc.)

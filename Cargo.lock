@@ -293,7 +293,7 @@ dependencies = [
 
 [[package]]
 name = "archon-bench"
-version = "1.2.2"
+version = "1.2.3"
 dependencies = [
  "archon-core",
  "archon-pipeline",
@@ -310,7 +310,7 @@ dependencies = [
 
 [[package]]
 name = "archon-cli-workspace"
-version = "1.2.2"
+version = "1.2.3"
 dependencies = [
  "anyhow",
  "archon-completion",
@@ -369,7 +369,7 @@ dependencies = [
 
 [[package]]
 name = "archon-completion"
-version = "1.2.2"
+version = "1.2.3"
 dependencies = [
  "anyhow",
  "archon-learning",
@@ -389,7 +389,7 @@ dependencies = [
 
 [[package]]
 name = "archon-consciousness"
-version = "1.2.2"
+version = "1.2.3"
 dependencies = [
  "anyhow",
  "archon-memory",
@@ -404,7 +404,7 @@ dependencies = [
 
 [[package]]
 name = "archon-constellation"
-version = "1.2.2"
+version = "1.2.3"
 dependencies = [
  "archon-meaning",
  "chrono",
@@ -422,7 +422,7 @@ dependencies = [
 
 [[package]]
 name = "archon-context"
-version = "1.2.2"
+version = "1.2.3"
 dependencies = [
  "anyhow",
  "chrono",
@@ -434,7 +434,7 @@ dependencies = [
 
 [[package]]
 name = "archon-core"
-version = "1.2.2"
+version = "1.2.3"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -496,7 +496,7 @@ dependencies = [
 
 [[package]]
 name = "archon-docs"
-version = "1.2.2"
+version = "1.2.3"
 dependencies = [
  "anyhow",
  "archon-llm",
@@ -525,7 +525,7 @@ dependencies = [
 
 [[package]]
 name = "archon-knowledge"
-version = "1.2.2"
+version = "1.2.3"
 dependencies = [
  "anyhow",
  "archon-docs",
@@ -544,7 +544,7 @@ dependencies = [
 
 [[package]]
 name = "archon-leann"
-version = "1.2.2"
+version = "1.2.3"
 dependencies = [
  "anyhow",
  "archon-memory",
@@ -572,7 +572,7 @@ dependencies = [
 
 [[package]]
 name = "archon-learning"
-version = "1.2.2"
+version = "1.2.3"
 dependencies = [
  "anyhow",
  "archon-policy",
@@ -588,7 +588,7 @@ dependencies = [
 
 [[package]]
 name = "archon-llm"
-version = "1.2.2"
+version = "1.2.3"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -631,7 +631,7 @@ dependencies = [
 
 [[package]]
 name = "archon-mcp"
-version = "1.2.2"
+version = "1.2.3"
 dependencies = [
  "anyhow",
  "archon-tools",
@@ -661,7 +661,7 @@ dependencies = [
 
 [[package]]
 name = "archon-meaning"
-version = "1.2.2"
+version = "1.2.3"
 dependencies = [
  "chrono",
  "cozo-ce",
@@ -676,7 +676,7 @@ dependencies = [
 
 [[package]]
 name = "archon-memory"
-version = "1.2.2"
+version = "1.2.3"
 dependencies = [
  "anyhow",
  "chrono",
@@ -697,7 +697,7 @@ dependencies = [
 
 [[package]]
 name = "archon-observability"
-version = "1.2.2"
+version = "1.2.3"
 dependencies = [
  "anyhow",
  "axum",
@@ -722,7 +722,7 @@ dependencies = [
 
 [[package]]
 name = "archon-permissions"
-version = "1.2.2"
+version = "1.2.3"
 dependencies = [
  "anyhow",
  "glob",
@@ -735,7 +735,7 @@ dependencies = [
 
 [[package]]
 name = "archon-pipeline"
-version = "1.2.2"
+version = "1.2.3"
 dependencies = [
  "anyhow",
  "archon-core",
@@ -772,7 +772,7 @@ dependencies = [
 
 [[package]]
 name = "archon-plugin"
-version = "1.2.2"
+version = "1.2.3"
 dependencies = [
  "anyhow",
  "archon-core",
@@ -790,7 +790,7 @@ dependencies = [
 
 [[package]]
 name = "archon-policy"
-version = "1.2.2"
+version = "1.2.3"
 dependencies = [
  "dirs",
  "serde",
@@ -801,7 +801,7 @@ dependencies = [
 
 [[package]]
 name = "archon-provenance"
-version = "1.2.2"
+version = "1.2.3"
 dependencies = [
  "chrono",
  "cozo-ce",
@@ -816,7 +816,7 @@ dependencies = [
 
 [[package]]
 name = "archon-reasoning-quality"
-version = "1.2.2"
+version = "1.2.3"
 dependencies = [
  "anyhow",
  "blake3",
@@ -832,13 +832,15 @@ dependencies = [
 
 [[package]]
 name = "archon-sdk"
-version = "1.2.2"
+version = "1.2.3"
 dependencies = [
  "anyhow",
  "archon-core",
+ "archon-learning",
  "archon-llm",
  "archon-tools",
  "axum",
+ "cozo-ce",
  "dirs",
  "futures-util",
  "open",
@@ -850,12 +852,13 @@ dependencies = [
  "tokio-stream",
  "tower-http",
  "tracing",
+ "ts-rs",
  "uuid",
 ]
 
 [[package]]
 name = "archon-session"
-version = "1.2.2"
+version = "1.2.3"
 dependencies = [
  "anyhow",
  "chrono",
@@ -872,7 +875,7 @@ dependencies = [
 
 [[package]]
 name = "archon-test-support"
-version = "1.2.2"
+version = "1.2.3"
 dependencies = [
  "anyhow",
  "archon-memory",
@@ -886,7 +889,7 @@ dependencies = [
 
 [[package]]
 name = "archon-tools"
-version = "1.2.2"
+version = "1.2.3"
 dependencies = [
  "anyhow",
  "archon-leann",
@@ -928,7 +931,7 @@ dependencies = [
 
 [[package]]
 name = "archon-tui"
-version = "1.2.2"
+version = "1.2.3"
 dependencies = [
  "anyhow",
  "archon-core",
@@ -978,7 +981,7 @@ dependencies = [
 
 [[package]]
 name = "archon-tui-test-support"
-version = "1.2.2"
+version = "1.2.3"
 dependencies = [
  "criterion",
  "dashmap 5.5.3",
@@ -994,7 +997,7 @@ dependencies = [
 
 [[package]]
 name = "archon-world-model"
-version = "1.2.2"
+version = "1.2.3"
 dependencies = [
  "anyhow",
  "archon-llm",
@@ -9369,6 +9372,28 @@ name = "try-lock"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
+
+[[package]]
+name = "ts-rs"
+version = "12.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "756050066659291d47a554a9f558125db17428b073c5ffce1daf5dcb0f7231d8"
+dependencies = [
+ "thiserror 2.0.18",
+ "ts-rs-macros",
+]
+
+[[package]]
+name = "ts-rs-macros"
+version = "12.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "38d90eea51bc7988ef9e674bf80a85ba6804739e535e9cab48e4bb34a8b652aa"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+ "termcolor",
+]
 
 [[package]]
 name = "tungstenite"

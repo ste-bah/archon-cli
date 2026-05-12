@@ -1,0 +1,160 @@
+.corpus-layout {
+  display: grid;
+  grid-template-columns: minmax(360px, 0.46fr) minmax(0, 0.54fr);
+  gap: 16px;
+}
+
+.corpus-list-panel,
+.corpus-preview-panel {
+  min-width: 0;
+}
+
+.corpus-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 130px;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.corpus-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+.corpus-search input,
+.corpus-controls select {
+  width: 100%;
+  color: var(--text);
+  background: transparent;
+  border: 0;
+  outline: 0;
+}
+
+.corpus-controls select {
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+.corpus-roots,
+.corpus-results,
+.corpus-chunks {
+  display: grid;
+  gap: 8px;
+}
+
+.corpus-ranking,
+.corpus-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+  color: var(--muted);
+}
+
+.corpus-roots {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-bottom: 14px;
+}
+
+.corpus-root,
+.corpus-result,
+.corpus-chunk,
+.corpus-meta {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+.corpus-root {
+  display: grid;
+  gap: 3px;
+  padding: 10px;
+}
+
+.corpus-root span,
+.corpus-result small,
+.corpus-result em,
+.corpus-chunk small,
+.corpus-chunk em,
+.corpus-meta,
+.corpus-preview {
+  color: var(--muted);
+}
+
+.corpus-result,
+.corpus-chunk {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 66px;
+  padding: 10px;
+  text-align: left;
+  color: var(--text);
+}
+
+.corpus-chunk {
+  width: 100%;
+}
+
+.corpus-chunk--empty {
+  justify-content: flex-start;
+}
+
+.corpus-result span,
+.corpus-chunk span {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.corpus-result small,
+.corpus-result em,
+.corpus-chunk small,
+.corpus-chunk em {
+  overflow-wrap: anywhere;
+}
+
+.corpus-result__meta {
+  justify-items: end;
+}
+
+.corpus-result--active {
+  border-color: var(--accent);
+}
+
+.corpus-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 10px;
+  margin-bottom: 12px;
+}
+
+.corpus-preview {
+  min-height: 520px;
+  max-height: 62vh;
+  overflow: auto;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--bg) 88%, var(--surface-2) 12%);
+  white-space: pre-wrap;
+}
+
+@media (max-width: 1080px) {
+  .corpus-layout,
+  .corpus-roots,
+  .corpus-controls {
+    grid-template-columns: 1fr;
+  }
+}

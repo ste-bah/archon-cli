@@ -1,0 +1,122 @@
+export type ApiStatus = { status: string, version: string, web: WebRuntimeStatus, features: WebFeatureSummary, stores: Array<WebStoreStatus>, };
+
+export type WebRuntimeStatus = { bindAddress: string, port: number, authRequired: boolean, devMode: boolean, assetMode: string, };
+
+export type WebFeatureSummary = { chat: boolean, uploads: boolean, memoryLearning: boolean, worldModel: boolean, reasoningQuality: boolean, corpus: boolean, pipelines: boolean, metrics: boolean, };
+
+export type WebStoreStatus = { name: string, status: string, detail: string, };
+
+export type EffectiveConfigSummary = { web: WebConfigSummary, frontendStack: FrontendStackSummary, };
+
+export type WebConfigSummary = { port: number, bindAddress: string, openBrowser: boolean, authRequired: boolean, nonLoopbackBind: boolean, };
+
+export type FrontendStackSummary = { framework: string, bundler: string, generatedTypes: boolean, assetDelivery: string, };
+
+export type EffectivePolicySummary = { web: WebPolicySummary, actionGate: string, requiresConfirmation: Array<string>, };
+
+export type WebPolicySummary = { allowMutatingActions: boolean, allowFileUploads: boolean, allowPipelineControls: boolean, allowModelTrainingActions: boolean, allowCorpusOpenPaths: boolean, };
+
+export type WebActionDecision = { allowed: boolean, requiresConfirmation: boolean, policyReason: string, dryRunAvailable: boolean, };
+
+export type WebLiveEvent = { cursor: number, eventType: string, summary: string, createdAtMs: number, };
+
+export type WebLiveSnapshot = { events: Array<WebLiveEvent>, nextCursor: number, compacted: boolean, };
+
+export type WebLiveCursorExpired = { cursorExpired: boolean, oldestAvailableCursor: number, recovery: string, };
+
+
+export type WebActionRequest = { actionId: string, actionKind: string, dryRun: boolean, payloadSummary: string, confirmationToken: string | null, };
+
+export type WebActionAuditRow = { actionId: string, actionKind: string, allowed: boolean, dryRun: boolean, policyReason: string, createdAtMs: number, };
+
+export type WebActionResponse = { decision: WebActionDecision, audit: WebActionAuditRow, };
+
+
+export type WebAuthSession = { authenticated: boolean, authRequired: boolean, transport: string, cookieMode: boolean, csrfRequired: boolean, };
+
+
+export type WebUploadPolicy = { enabled: boolean, maxFiles: number, maxBytesPerFile: number, acceptedMimeTypes: Array<string>, policyReason: string, };
+
+export type WebUploadIntent = { fileName: string, sizeBytes: number, mimeType: string, };
+
+export type WebUploadIntentResponse = { decision: WebActionDecision, accepted: boolean, };
+
+
+export type CorpusSource = { label: string, path: string, kind: string, bytes: number, excerpt: string | null, score: number, matchKind: string, };
+
+export type CorpusSummary = { roots: Array<PathProbe>, sources: Array<CorpusSource>, totalSources: number, degraded: boolean, };
+
+export type CorpusSearchQuery = { query: string | null, kind: string | null, limit: number | null, };
+
+export type CorpusSearchResponse = { query: string, kind: string, totalMatches: number, degraded: boolean, rankingMode: string, chunkMatches: Array<CorpusChunkHit>, results: Array<CorpusSource>, };
+
+export type CorpusChunkHit = { sourceLabel: string, sourcePath: string, chunkLabel: string, lineStart: number, score: number, excerpt: string, embeddingStatus: string, };
+
+export type CorpusPreviewQuery = { path: string, };
+
+export type CorpusSourcePreview = { source: CorpusSource, content: string, lineCount: number, truncated: boolean, previewAvailable: boolean, policyReason: string, };
+
+
+export type PathProbe = { label: string, path: string, exists: boolean, files: number, bytes: number, };
+
+export type LearningSummary = { stores: Array<PathProbe>, signals: Array<LearningSignalItem>, memories: Array<LearningRowPreview>, learningEvents: Array<LearningRowPreview>, proposals: Array<LearningRowPreview>, trustDeltas: Array<LearningRowPreview>, recentSessions: Array<string>, sessionCount: number, reasoningStorePresent: boolean, };
+
+export type LearningSignalItem = { label: string, kind: string, status: string, count: number, path: string, };
+
+export type LearningRowPreview = { label: string, kind: string, status: string, detail: string, path: string, };
+
+export type SettingsSummary = { themeModes: Array<string>, densityModes: Array<string>, policyEditingEnabled: boolean, directFilesystemOpenEnabled: boolean, };
+
+
+export type MetricsSummary = { logs: Array<PathProbe>, budgets: Array<PathProbe>, webBundleFiles: number, webBundleBytes: number, stores: Array<MetricStoreHealth>, performance: Array<MetricValue>, queues: Array<MetricValue>, recentEvents: Array<MetricEventPreview>, providerMetrics: Array<ProviderRuntimeMetric>, providerEvents: Array<ProviderRuntimeEventPreview>, };
+
+export type MetricStoreHealth = { label: string, status: string, path: string, files: number, bytes: number, };
+
+export type MetricValue = { label: string, value: string, unit: string, status: string, };
+
+export type MetricEventPreview = { source: string, summary: string, severity: string, createdAt: string, };
+
+export type ProviderRuntimeMetric = { providerId: string, requestCount: number, errorCount: number, retryCount: number, inputTokens: number, outputTokens: number, estimatedCostUsd: number, latencyMsP95: number, status: string, };
+
+export type ProviderRuntimeEventPreview = { providerId: string, modelId: string, eventType: string, severity: string, message: string, createdAt: string, };
+
+
+export type PipelineSummary = { definitions: Array<PathProbe>, sessionCount: number, recentSessions: Array<string>, artifactRoots: Array<PathProbe>, stages: Array<PipelineStageSummary>, agents: Array<PipelineAgentSummary>, runs: Array<PipelineRunSummary>, outputs: Array<PipelineOutputSummary>, liveEvents: Array<PipelineLiveEventPreview>, };
+
+export type PipelineStageSummary = { label: string, family: string, status: string, agentCount: number, };
+
+export type PipelineAgentSummary = { name: string, family: string, responsibility: string, path: string, status: string, };
+
+export type PipelineRunSummary = { runId: string, family: string, status: string, path: string, updatedAt: string, };
+
+export type PipelineOutputSummary = { label: string, kind: string, path: string, bytes: number, updatedAt: string, tail: string, };
+
+export type PipelineLiveEventPreview = { sessionId: string, eventType: string, status: string, summary: string, path: string, };
+
+
+export type WebThemeProfile = { themeMode: string, densityMode: string, accentId: string, accentHex: string, accentStrongHex: string, updatedAtMs: number, };
+
+export type WebThemeProfileEnvelope = { profile: WebThemeProfile, storagePath: string, persisted: boolean, exportJson: string, };
+
+export type WebThemeProfileSaveRequest = { profile: WebThemeProfile, };
+
+
+export type WorldInspectionSummary = { root: PathProbe, ledgers: Array<PathProbe>, dbPresent: boolean, candidateCount: number, reasoningRootPresent: boolean, artifacts: Array<WorldModelArtifact>, advisorEvents: Array<WorldAdvisorEventPreview>, signals: Array<WorldModelSignal>, candidates: Array<WorldModelRowPreview>, reasoningEvents: Array<WorldModelRowPreview>, shadowReports: Array<WorldModelRowPreview>, predictions: Array<WorldPredictionPreview>, };
+
+export type WorldModelArtifact = { label: string, kind: string, status: string, path: string, files: number, bytes: number, };
+
+export type WorldAdvisorEventPreview = { surface: string, reason: string, actionSummary: string, sessionId: string, createdAt: string, };
+
+export type WorldModelSignal = { label: string, status: string, detail: string, };
+
+export type WorldModelRowPreview = { label: string, kind: string, status: string, detail: string, path: string, };
+
+export type WorldPredictionPreview = { label: string, surface: string, status: string, detail: string, sessionId: string, };
+
+
+export type EvidenceGraphNode = { id: string, label: string, kind: string, detail: string, count: number, };
+
+export type EvidenceGraphEdge = { id: string, source: string, target: string, label: string, };
+
+export type EvidenceGraphSummary = { nodeBudget: number, edgeBudget: number, sourceCount: number, relationCount: number, degraded: boolean, nodes: Array<EvidenceGraphNode>, edges: Array<EvidenceGraphEdge>, };
+

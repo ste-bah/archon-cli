@@ -179,15 +179,40 @@ cargo install --path .
 # Installs to ~/.cargo/bin/archon — make sure ~/.cargo/bin is in PATH
 ```
 
-## Initialise a project
+## Initialise a blank project directory
+
+Archon is usually run from the project root you want it to inspect. For a
+blank project, create the directory first, initialise it, then launch Archon
+from inside that directory:
 
 ```bash
-sh scripts/archon-init.sh --target /path/to/your/project
-# Or with the curated assets from this clone:
-sh scripts/archon-init.sh --target /path/to/your/project --archon-cli-repo $(pwd)
+mkdir -p ~/projects/my-archon-project
+sh scripts/archon-init.sh \
+  --target ~/projects/my-archon-project \
+  --archon-cli-repo "$(pwd)"
+cd ~/projects/my-archon-project
+archon
 ```
 
 Creates `.archon/`, `prds/`, `tasks/` and wires `.gitignore`. Safe to re-run.
+
+The install scripts split responsibilities:
+
+| Script | What it does | What it does not do |
+|---|---|---|
+| `scripts/install-system-deps.sh` | Installs/checks OS packages needed for building, PDF ingest, OCR, and optional sandbox backends | Does not initialise a project, write config, install provider credentials, or set up the web UI |
+| `scripts/archon-init.sh` | Initialises an existing project directory with `.archon/`, `prds/`, `tasks/`, policy defaults, docs inboxes, and optional bundled assets | Does not create the target directory, install system packages, authenticate providers, or build the binary |
+
+If you already have a project directory, skip `mkdir -p` and point
+`--target` at that existing path. If you installed only a binary and do not
+have this repository clone, download the init script instead:
+
+```bash
+cd ~/projects/my-archon-project
+curl -L https://raw.githubusercontent.com/ste-bah/archon-cli/main/scripts/archon-init.sh -o archon-init.sh
+chmod +x archon-init.sh
+./archon-init.sh
+```
 
 Evidence Engine projects also get:
 
@@ -219,6 +244,55 @@ Inside the TUI:
 
 See [Project setup](project-setup.md) for full details — flags, scenarios, what's created vs not, exit codes, troubleshooting.
 
+## Set up the web workbench
+
+The browser workbench is embedded in the `archon` binary from `web/dist`.
+Normal users do not need Node.js, Vite, or a separate web install. Launch it
+from the project root after `archon-init.sh` so it can inspect that project's
+`.archon/` state:
+
+```bash
+cd ~/projects/my-archon-project
+archon web --port 8421 --bind-address 127.0.0.1
+```
+
+By default this opens `http://localhost:8421`. Use `--no-open` when running
+under WSL, SSH, or a headless environment and open the URL manually.
+
+The web workbench shows the same local state as the CLI/TUI: chat, uploads,
+corpus/doc ingestion results, memory and learning rows, reasoning-quality
+events, world-model data, pipelines, metrics, settings, and the evidence graph.
+It does not create project scaffolding itself; run `archon-init.sh` first for a
+blank project. See [Web workbench](../operations/web-workbench.md) for the tab
+guide, data sources, action safety model, and troubleshooting.
+
+Configure defaults in `~/.config/archon/config.toml` or
+`<project>/.archon/config.toml`:
+
+```toml
+[web]
+port = 8421
+bind_address = "127.0.0.1"
+open_browser = true
+```
+
+Binding to `127.0.0.1` is the safe default and does not require a token. Binding
+to a non-loopback address causes Archon to create/use a bearer token; only do
+that behind a trusted network boundary or reverse proxy. See
+[Remote control](../operations/remote-control.md#web-ui) for the security
+notes.
+
+If you are developing the web UI itself, install Node 22+ and rebuild the
+frontend before rebuilding the Rust binary:
+
+```bash
+cd web
+npm install
+npm run build
+cd ..
+cargo build --release --bin archon
+```
+
 For Windows native (PowerShell):
 ```powershell
 $env:PATH += ";$PWD\target\release"
@@ -229,7 +303,7 @@ $env:PATH += ";$PWD\target\release"
 
 ```bash
 archon --version
-# Expected: archon 1.2.0 (<short-sha>)
+# Expected: archon 1.2.3 (<short-sha>)
 
 archon --help                   # full subcommand listing
 archon --list-themes            # 23 themes available

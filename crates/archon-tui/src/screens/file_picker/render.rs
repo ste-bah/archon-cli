@@ -179,7 +179,7 @@ mod tests {
     }
 
     #[test]
-    fn render_single_file_shows_F_badge() {
+    fn render_single_file_shows_f_badge() {
         let picker = FilePicker::new(PathBuf::from("/proj"), vec![entry("Cargo.toml", false)]);
         let body = render_to_string(&picker, 100, 24);
         assert!(body.contains("Cargo.toml"));
@@ -190,7 +190,7 @@ mod tests {
     }
 
     #[test]
-    fn render_dir_entry_shows_D_badge() {
+    fn render_dir_entry_shows_d_badge() {
         let picker = FilePicker::new(PathBuf::from("/proj"), vec![entry("src", true)]);
         let body = render_to_string(&picker, 100, 24);
         assert!(body.contains("src"));

@@ -1,0 +1,107 @@
+import { lazy, Suspense } from "react";
+import { Route, Routes } from "react-router-dom";
+import { ChatPage } from "./ChatPage";
+import { CorpusPage } from "./CorpusPage";
+import { DashboardPage } from "./DashboardPage";
+import { InspectionPage } from "./InspectionPage";
+import { MemoryPage } from "./MemoryPage";
+import { MetricsPage } from "./MetricsPage";
+import { PipelinePage } from "./PipelinePage";
+import { SettingsPage } from "./SettingsPage";
+import { WorldPage } from "./WorldPage";
+import type {
+  ApiStatus,
+  CorpusSummary,
+  EvidenceGraphSummary,
+  EffectiveConfigSummary,
+  EffectivePolicySummary,
+  LearningSummary,
+  MetricsSummary,
+  PipelineSummary,
+  SettingsSummary,
+  WorldInspectionSummary,
+} from "../api/generated/web";
+
+const EvidenceGraphPage = lazy(() =>
+  import("./EvidenceGraphPage").then((module) => ({
+    default: module.EvidenceGraphPage,
+  })),
+);
+
+interface WorkbenchRoutesProps {
+  status?: ApiStatus;
+  config?: EffectiveConfigSummary;
+  policy?: EffectivePolicySummary;
+  liveCount?: number;
+  authRequired?: boolean;
+  uploadsEnabled?: boolean;
+  corpus?: CorpusSummary;
+  learning?: LearningSummary;
+  world?: WorldInspectionSummary;
+  pipelines?: PipelineSummary;
+  metrics?: MetricsSummary;
+  evidence?: EvidenceGraphSummary;
+  settings?: SettingsSummary;
+  theme: "dark" | "light";
+  onThemeToggle: () => void;
+}
+
+export function WorkbenchRoutes(props: WorkbenchRoutesProps) {
+  return (
+    <Routes>
+      <Route path="/" element={<DashboardPage {...props} />} />
+      <Route path="/chat" element={<ChatPage />} />
+      <Route path="/corpus" element={<CorpusPage corpus={props.corpus} />} />
+      <Route
+        path="/memory"
+        element={<MemoryPage learning={props.learning} />}
+      />
+      <Route
+        path="/world"
+        element={<WorldPage world={props.world} />}
+      />
+      <Route
+        path="/pipelines"
+        element={<PipelinePage pipelines={props.pipelines} />}
+      />
+      <Route
+        path="/metrics"
+        element={<MetricsPage metrics={props.metrics} liveCount={props.liveCount} />}
+      />
+      <Route
+        path="/settings"
+        element={
+          <SettingsPage
+            settings={props.settings}
+            authRequired={props.authRequired}
+            uploadsEnabled={props.uploadsEnabled}
+            theme={props.theme}
+            onThemeToggle={props.onThemeToggle}
+          />
+        }
+      />
+      <Route
+        path="/evidence"
+        element={
+          <Suspense
+            fallback={
+              <InspectionPage
+                eyebrow="Graph"
+                title="Evidence graph"
+                summary="Loading the graph renderer for the evidence relationship view."
+                facts={[fact("Renderer", "loading")]}
+                rows={[]}
+              />
+            }
+          >
+            <EvidenceGraphPage graph={props.evidence} />
+          </Suspense>
+        }
+      />
+    </Routes>
+  );
+}
+
+function fact(label: string, value?: string | number, tone?: "good" | "warn" | "muted") {
+  return { label, value: value === undefined ? "loading" : String(value), tone };
+}

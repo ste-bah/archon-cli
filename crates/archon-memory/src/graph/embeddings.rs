@@ -56,7 +56,7 @@ impl MemoryGraph {
                 skipped += 1;
                 continue;
             }
-            match provider.embed(&[raw.content.clone()]) {
+            match provider.embed(std::slice::from_ref(&raw.content)) {
                 Ok(vecs) if !vecs.is_empty() => {
                     match crate::vector_search::store_embedding(
                         &self.db,

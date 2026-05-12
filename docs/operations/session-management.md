@@ -144,5 +144,6 @@ secret-shaped content before they can update memory or self-trust.
 
 ## See also
 
+- [Web workbench](web-workbench.md) — inspect sessions, learning, pipelines, and evidence in the browser
 - [Remote control](remote-control.md) — share sessions via WebSocket / web UI
 - [CLI flags](../reference/cli-flags.md) — full session flag list
