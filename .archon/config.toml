@@ -72,6 +72,43 @@ provider = "anthropic"
 
 
 # ----------------------------------------------------------------------------
+# [models.*] — Per-provider model resolution (v1.2.0)
+# ----------------------------------------------------------------------------
+# Pipelines and the chat surface emit semantic *tier aliases* — `opus`,
+# `sonnet`, `haiku` — rather than literal model IDs. Each provider owns its
+# own alias-to-model mapping, populated from the sections below at boot.
+#
+# These sections are OPTIONAL. If omitted, the defaults shown here are used.
+# Override only when you need to pin a specific model (e.g. a snapshot ID,
+# a fallback because the frontier model isn't available to your account, or
+# to evaluate a new release).
+#
+# Literal model IDs (e.g. "claude-sonnet-4-6", "gpt-5.5") pass through any
+# resolver unchanged, so call-sites that already use literal IDs keep working.
+#
+# Tier mapping (cross-provider neutrality):
+#   opus   → smartest available  (Anthropic: opus, Codex: default)
+#   sonnet → smart general-purpose (Anthropic: sonnet, Codex: default)
+#   haiku  → fast/cheap        (Anthropic: haiku, Codex: mini)
+
+[models.anthropic]
+opus = "claude-opus-4-7"
+sonnet = "claude-sonnet-4-6"
+haiku = "claude-haiku-4-5-20251001"
+
+[models.openai-codex]
+# `default` is what Codex resolves `opus` and `sonnet` aliases to (the frontier
+# flagship). Per https://developers.openai.com/codex/models, gpt-5.5 is the
+# newest; gpt-5.4 is the documented fallback if 5.5 isn't reachable yet.
+default = "gpt-5.5"
+# `codex` is the Codex-specific software-engineering model, used when an
+# agent explicitly requests the "codex" alias.
+codex = "gpt-5.3-codex"
+# `mini` is the efficient/subagent variant — what `haiku` resolves to.
+mini = "gpt-5.4-mini"
+
+
+# ----------------------------------------------------------------------------
 # [providers.openai-codex] — Codex (ChatGPT subscription) provider
 # ----------------------------------------------------------------------------
 # Codex authentication uses ChatGPT subscription OAuth tokens against
