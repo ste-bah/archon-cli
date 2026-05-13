@@ -27,8 +27,10 @@ mod modes;
 mod reasoning_quality;
 mod slash_context_builder;
 mod splash;
+mod web_runtime;
 use activity::{session_activity_sink, session_activity_sink_with_tui};
 pub(crate) use modes::{run_headless_session, run_print_mode_session};
+pub(crate) use web_runtime::{WebSessionHandle, spawn_web_session};
 
 /// Result of [`build_session_agent`] — a fully constructed Agent plus
 /// the event receiver, resolved agent definition, and channel metrics.

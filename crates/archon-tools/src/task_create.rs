@@ -52,7 +52,7 @@ impl Tool for TaskCreateTool {
                 },
                 "max_turns": {
                     "type": "integer",
-                    "description": "Maximum conversation turns for the subagent (default 10, max 100000)"
+                    "description": "Omit to use the effectively unlimited default (100000 hard cap); set only if you want to bound a runaway subagent."
                 },
                 "subagent_type": {
                     "type": "string",
@@ -296,6 +296,12 @@ mod tests {
         assert!(props.contains_key("subagent_type"));
         assert!(props.contains_key("run_in_background"));
         assert!(props.contains_key("cwd"));
+        let description = props["max_turns"]["description"]
+            .as_str()
+            .expect("max_turns description");
+        assert!(description.contains("Omit to use"));
+        assert!(description.contains("100000 hard cap"));
+        assert!(!description.contains("default 10"));
     }
 
     // TASK-AGS-105 Section 8 test rewrite: the old tests asserted

@@ -158,15 +158,14 @@ impl AgentSubagentExecutor {
             .clone()
             .or_else(|| resolved_def.as_ref().and_then(|d| d.model.clone()))
             .unwrap_or_else(|| self.parent_model.clone());
+        let activity_agent_type = resolved_def
+            .as_ref()
+            .map(|d| d.agent_type.as_str())
+            .or(request.subagent_type.as_deref())
+            .unwrap_or("general-purpose")
+            .to_string();
 
-        let max_turns = if request.max_turns == 10 {
-            resolved_def
-                .as_ref()
-                .and_then(|d| d.max_turns)
-                .unwrap_or(10)
-        } else {
-            request.max_turns
-        };
+        let max_turns = request.max_turns;
 
         let def_effort = resolved_def.as_ref().and_then(|d| d.effort.clone());
 
@@ -411,7 +410,7 @@ impl AgentSubagentExecutor {
             tool_defs,
             Arc::new(tool_reg),
             tool_ctx,
-            model,
+            model.clone(),
             max_turns,
             request.timeout_secs,
             Arc::clone(&self.agent_config),
@@ -467,6 +466,8 @@ impl AgentSubagentExecutor {
             }
         }
 
+        self.emit_subagent_started(&cache_id, &activity_agent_type, &model);
+
         // --- RUN THE RUNNER ------------------------------------------
         let runner_result = runner.run(&request.prompt).await;
 
@@ -476,6 +477,7 @@ impl AgentSubagentExecutor {
             Ok(text) => Ok(text),
             Err(e) => Err(format!("Subagent failed: {e}")),
         };
+        self.emit_subagent_finished(&cache_id, &activity_agent_type, &model, &inner_result);
         self.on_inner_complete(cache_id.clone(), inner_result.clone())
             .await;
 

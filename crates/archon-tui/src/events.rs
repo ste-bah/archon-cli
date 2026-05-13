@@ -435,4 +435,22 @@ mod tests {
             "AgentActivity"
         );
     }
+
+    #[test]
+    fn agent_activity_update_uses_subagent_type_as_name() {
+        let update = AgentActivityUpdate::from(
+            archon_observability::AgentActivityEvent::new(
+                "session-1",
+                archon_observability::AgentActivityKind::AgentSpawned,
+                archon_observability::AgentActivityStatus::Running,
+                "running",
+            )
+            .with_subagent_id("subagent-1")
+            .with_subagent_type("sherlock-holmes"),
+        );
+
+        assert_eq!(update.id, "subagent-1");
+        assert_eq!(update.name, "sherlock-holmes");
+        assert_eq!(update.role, AgentActivityRole::Subagent);
+    }
 }

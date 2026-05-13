@@ -57,8 +57,29 @@ fn app_agent_tool_lifecycle_updates_subagent_activity_row() {
     let mut app = App::new();
     app.on_generation_started();
     app.on_tool_start("Agent", "agent-tool-1");
+    assert!(
+        !app.agent_activity
+            .iter()
+            .any(|row| row.role == AgentActivityRole::Subagent)
+    );
+
+    app.on_agent_activity(AgentActivityUpdate {
+        id: "subagent-1".into(),
+        name: "sherlock-holmes".into(),
+        role: AgentActivityRole::Subagent,
+        status: AgentActivityStatus::Running,
+        current_tool: None,
+        detail: Some("sherlock-holmes running".into()),
+        run_id: None,
+        parent_id: Some("parent".into()),
+        artifact_id: None,
+        provider: Some("anthropic".into()),
+        model: Some("claude-sonnet-4-6".into()),
+        cost_usd: None,
+    });
     assert!(app.agent_activity.iter().any(|row| {
-        row.id == "agent-tool-1"
+        row.id == "subagent-1"
+            && row.name == "sherlock-holmes"
             && row.role == AgentActivityRole::Subagent
             && row.status == AgentActivityStatus::Running
     }));
@@ -67,8 +88,43 @@ fn app_agent_tool_lifecycle_updates_subagent_activity_row() {
     assert!(
         app.agent_activity
             .iter()
-            .any(|row| { row.id == "agent-tool-1" && row.status == AgentActivityStatus::Complete })
+            .any(|row| { row.id == "subagent-1" && row.status == AgentActivityStatus::Running })
     );
+}
+
+#[test]
+fn app_removes_subagent_rows_on_terminal_activity() {
+    let mut app = App::new();
+    app.on_agent_activity(AgentActivityUpdate {
+        id: "subagent-1".into(),
+        name: "sherlock-holmes".into(),
+        role: AgentActivityRole::Subagent,
+        status: AgentActivityStatus::Running,
+        current_tool: None,
+        detail: Some("running".into()),
+        run_id: None,
+        parent_id: Some("parent".into()),
+        artifact_id: None,
+        provider: None,
+        model: None,
+        cost_usd: None,
+    });
+    app.on_agent_activity(AgentActivityUpdate {
+        id: "subagent-1".into(),
+        name: "sherlock-holmes".into(),
+        role: AgentActivityRole::Subagent,
+        status: AgentActivityStatus::Complete,
+        current_tool: None,
+        detail: Some("completed".into()),
+        run_id: None,
+        parent_id: Some("parent".into()),
+        artifact_id: None,
+        provider: None,
+        model: None,
+        cost_usd: None,
+    });
+
+    assert!(!app.agent_activity.iter().any(|row| row.id == "subagent-1"));
 }
 
 #[test]

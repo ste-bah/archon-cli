@@ -73,6 +73,11 @@ impl AgentActivityRow {
 }
 
 pub fn apply_update(rows: &mut Vec<AgentActivityRow>, update: AgentActivityUpdate) {
+    if is_terminal_non_parent(update.role, update.status) {
+        remove_row(rows, &update.id);
+        return;
+    }
+
     if let Some(row) = rows.iter_mut().find(|row| row.id == update.id) {
         row.name = update.name;
         row.role = update.role;
@@ -108,24 +113,16 @@ pub fn turn_failed(rows: &mut Vec<AgentActivityRow>) {
     upsert_parent(rows, AgentActivityStatus::Failed, None, "turn failed");
 }
 
-pub fn tool_started(rows: &mut Vec<AgentActivityRow>, name: &str, id: &str) {
+pub fn tool_started(rows: &mut Vec<AgentActivityRow>, name: &str, _id: &str) {
     upsert_parent(
         rows,
         AgentActivityStatus::WaitingForTool,
         Some(name.to_string()),
         "processing turn",
     );
-    if name.eq_ignore_ascii_case("agent") {
-        upsert_subagent(
-            rows,
-            id,
-            AgentActivityStatus::Running,
-            "spawned from parent turn",
-        );
-    }
 }
 
-pub fn tool_completed(rows: &mut Vec<AgentActivityRow>, name: &str, id: &str, success: bool) {
+pub fn tool_completed(rows: &mut Vec<AgentActivityRow>, name: &str, id: &str, _success: bool) {
     upsert_parent(
         rows,
         AgentActivityStatus::Running,
@@ -133,20 +130,7 @@ pub fn tool_completed(rows: &mut Vec<AgentActivityRow>, name: &str, id: &str, su
         "awaiting model response",
     );
     if name.eq_ignore_ascii_case("agent") {
-        upsert_subagent(
-            rows,
-            id,
-            if success {
-                AgentActivityStatus::Complete
-            } else {
-                AgentActivityStatus::Failed
-            },
-            if success {
-                "subagent completed"
-            } else {
-                "subagent failed"
-            },
-        );
+        remove_row(rows, id);
     }
 }
 
@@ -196,31 +180,6 @@ fn upsert_parent(
     );
 }
 
-fn upsert_subagent(
-    rows: &mut Vec<AgentActivityRow>,
-    id: &str,
-    status: AgentActivityStatus,
-    detail: impl Into<String>,
-) {
-    upsert_row(
-        rows,
-        AgentActivityRow {
-            id: id.into(),
-            name: short_subagent_name(id),
-            role: AgentActivityRole::Subagent,
-            status,
-            current_tool: None,
-            detail: Some(detail.into()),
-            run_id: None,
-            parent_id: Some("parent".into()),
-            artifact_id: None,
-            provider: None,
-            model: None,
-            cost_usd: None,
-        },
-    );
-}
-
 pub fn render(frame: &mut Frame, rows: &[AgentActivityRow], area: Rect, theme: &Theme) {
     if rows.is_empty() || area.height == 0 || area.width < 24 {
         return;
@@ -251,6 +210,20 @@ fn upsert_row(rows: &mut Vec<AgentActivityRow>, row: AgentActivityRow) {
         rows.push(row);
     }
     trim_rows(rows);
+}
+
+fn remove_row(rows: &mut Vec<AgentActivityRow>, id: &str) {
+    rows.retain(|row| row.id != id);
+}
+
+fn is_terminal_non_parent(role: AgentActivityRole, status: AgentActivityStatus) -> bool {
+    !matches!(role, AgentActivityRole::Parent)
+        && matches!(
+            status,
+            AgentActivityStatus::Complete
+                | AgentActivityStatus::Failed
+                | AgentActivityStatus::Cancelled
+        )
 }
 
 fn trim_rows(rows: &mut Vec<AgentActivityRow>) {
@@ -311,18 +284,6 @@ fn render_row<'a>(row: &AgentActivityRow, theme: &Theme, width: usize) -> Line<'
                 Modifier::empty()
             }),
     )])
-}
-
-fn short_subagent_name(id: &str) -> String {
-    let suffix: String = id
-        .chars()
-        .rev()
-        .take(6)
-        .collect::<String>()
-        .chars()
-        .rev()
-        .collect();
-    format!("Subagent {suffix}")
 }
 
 fn truncate(value: &str, max_chars: usize) -> String {

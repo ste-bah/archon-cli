@@ -9,7 +9,7 @@ interface ChatPageProps {
 
 type ChatMessage = {
   id: string;
-  role: "system" | "user";
+  role: "assistant" | "system" | "user";
   title: string;
   body: string;
   attachments?: WebChatAttachment[];
@@ -61,6 +61,8 @@ export function ChatPage({ uploadPolicy }: ChatPageProps) {
           mimeType,
           accepted: result.accepted,
           policyReason: result.decision.policyReason,
+          dataBase64: result.accepted ? await fileToBase64(file) : null,
+          storedPath: null,
         };
         if (result.accepted) {
           setAttachments((current) => [...current, item]);
@@ -87,14 +89,24 @@ export function ChatPage({ uploadPolicy }: ChatPageProps) {
     try {
       const response = await apiClient.submitChat({ message: text, attachments: outgoing });
       if (response.accepted) {
+        const displayedAttachments = outgoing.map(({ dataBase64: _dataBase64, ...attachment }) => ({
+          ...attachment,
+          dataBase64: null,
+        }));
         setMessages((current) => [
           ...current,
-          { id: response.messageId, role: "user", title: "You", body: text || "Attachments", attachments: outgoing },
           {
-            id: `${response.messageId}:ack`,
-            role: "system",
-            title: "Recorded",
-            body: `${response.policyReason} (${response.messageId})`,
+            id: response.messageId,
+            role: "user",
+            title: "You",
+            body: text || "Attachments",
+            attachments: displayedAttachments,
+          },
+          {
+            id: `${response.messageId}:assistant`,
+            role: "assistant",
+            title: "Archon",
+            body: response.reply || response.policyReason,
           },
         ]);
         setDraft("");
@@ -200,4 +212,15 @@ function formatBytes(value: number) {
     return `${Math.round(value / 1024)} KB`;
   }
   return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+async function fileToBase64(file: File) {
+  const buffer = await file.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+  }
+  return btoa(binary);
 }

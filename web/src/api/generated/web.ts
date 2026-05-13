@@ -37,11 +37,11 @@ export type WebActionResponse = { decision: WebActionDecision, audit: WebActionA
 export type WebAuthSession = { authenticated: boolean, authRequired: boolean, transport: string, cookieMode: boolean, csrfRequired: boolean, };
 
 
-export type WebChatAttachment = { fileName: string, sizeBytes: number, mimeType: string, accepted: boolean, policyReason: string, };
+export type WebChatAttachment = { fileName: string, sizeBytes: number, mimeType: string, accepted: boolean, policyReason: string, dataBase64: string | null, storedPath: string | null, };
 
 export type WebChatSubmitRequest = { message: string, attachments: Array<WebChatAttachment>, };
 
-export type WebChatSubmitResponse = { messageId: string, accepted: boolean, createdAtMs: number, policyReason: string, storedPath: string, };
+export type WebChatSubmitResponse = { messageId: string, accepted: boolean, createdAtMs: number, policyReason: string, storedPath: string, reply: string, };
 
 
 export type WebUploadPolicy = { enabled: boolean, maxFiles: number, maxBytesPerFile: number, acceptedMimeTypes: Array<string>, policyReason: string, };

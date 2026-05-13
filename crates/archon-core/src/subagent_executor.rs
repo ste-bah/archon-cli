@@ -59,6 +59,7 @@ use crate::dispatch::ToolRegistry;
 use crate::hooks::{HookEvent, HookRegistry};
 use crate::subagent::SubagentManager;
 
+mod activity;
 mod classification;
 mod completion;
 mod run;

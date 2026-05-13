@@ -306,7 +306,7 @@ impl Tool for AgentTool {
                 },
                 "max_turns": {
                     "type": "integer",
-                    "description": "Maximum conversation turns (default 10, max 100)"
+                    "description": "Omit to use the effectively unlimited default (100000 hard cap); set only if you want to bound a runaway subagent."
                 },
                 "subagent_type": {
                     "type": "string",
@@ -871,6 +871,19 @@ mod tests {
         let props = schema["properties"].as_object().unwrap();
         assert!(props.contains_key("subagent_type"));
         assert_eq!(props["subagent_type"]["type"], "string");
+    }
+
+    #[test]
+    fn schema_describes_unlimited_max_turns_default() {
+        let tool = AgentTool::new();
+        let schema = tool.input_schema();
+        let description = schema["properties"]["max_turns"]["description"]
+            .as_str()
+            .expect("max_turns description");
+        assert!(description.contains("Omit to use"));
+        assert!(description.contains("100000 hard cap"));
+        assert!(!description.contains("default 10"));
+        assert!(!description.contains("max 100"));
     }
 
     #[tokio::test]

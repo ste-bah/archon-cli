@@ -82,7 +82,7 @@ test("chat send and attach controls are interactive", async ({ page }) => {
   await page.getByLabel("Message").fill("Can you inspect the active run?");
   await page.getByRole("button", { name: "Send" }).click();
   await expect(page.getByText("Can you inspect the active run?")).toBeVisible();
-  await expect(page.getByText(/webmsg_test/)).toBeVisible();
+  await expect(page.getByText("Mock Archon reply from live session")).toBeVisible();
   await expect(page.getByText("context.txt")).toBeVisible();
   assertNoErrors();
 });

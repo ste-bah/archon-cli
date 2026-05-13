@@ -1,14 +1,21 @@
 use archon_core::config::ArchonConfig;
+use archon_core::env_vars::ArchonEnvVars;
 use archon_sdk::web::{
     WebConfig, WebPolicySummary, WebRuntimePaths, WebServer, WebSubsystemPolicySummary,
     api::EffectivePolicySummary,
 };
+use std::sync::Arc;
+
+use crate::cli_args::Cli;
 
 pub(crate) async fn handle_web_command(
     port: Option<u16>,
     bind_address: Option<String>,
     no_open: bool,
     config: &ArchonConfig,
+    cli: &Cli,
+    env_vars: &ArchonEnvVars,
+    resolved_flags: &archon_core::cli_flags::ResolvedFlags,
 ) -> anyhow::Result<()> {
     // CLI args override config-file values; config.web provides defaults.
     let effective_port = port.unwrap_or(config.web.port);
@@ -38,7 +45,10 @@ pub(crate) async fn handle_web_command(
         config.memory.db_path.as_deref(),
         config.session.db_path.as_deref(),
     );
-    let server = WebServer::with_policy_and_paths(web_cfg, token, policy, paths);
+    let chat_backend =
+        crate::command::web_chat::WebChatBridge::new(config, cli, env_vars, resolved_flags).await?;
+    let server = WebServer::with_policy_and_paths(web_cfg, token, policy, paths)
+        .with_chat_backend(Arc::new(chat_backend));
     if let Err(e) = server.run().await {
         eprintln!("web server error: {e}");
         std::process::exit(1);

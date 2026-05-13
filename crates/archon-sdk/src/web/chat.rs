@@ -1,3 +1,4 @@
+use async_trait::async_trait;
 use axum::{
     Json,
     extract::State,
@@ -12,6 +13,22 @@ use super::{AppState, check_auth};
 const MAX_MESSAGE_CHARS: usize = 32_768;
 const MAX_ATTACHMENTS: usize = 8;
 
+#[derive(Debug, Clone)]
+pub struct WebChatBackendOutput {
+    pub reply: String,
+    pub policy_reason: String,
+    pub attachments: Vec<WebChatAttachment>,
+}
+
+#[async_trait]
+pub trait WebChatBackend: Send + Sync {
+    async fn submit(
+        &self,
+        message_id: &str,
+        request: WebChatSubmitRequest,
+    ) -> anyhow::Result<WebChatBackendOutput>;
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(rename_all = "camelCase")]
@@ -21,6 +38,10 @@ pub struct WebChatAttachment {
     pub mime_type: String,
     pub accepted: bool,
     pub policy_reason: String,
+    #[serde(default)]
+    pub data_base64: Option<String>,
+    #[serde(default)]
+    pub stored_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
@@ -40,6 +61,7 @@ pub struct WebChatSubmitResponse {
     pub created_at_ms: u128,
     pub policy_reason: String,
     pub stored_path: String,
+    pub reply: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -48,6 +70,7 @@ struct WebChatLedgerRow {
     message_id: String,
     message: String,
     attachments: Vec<WebChatAttachment>,
+    assistant_reply: String,
     created_at_ms: u128,
 }
 
@@ -59,9 +82,29 @@ pub(crate) async fn submit_handler(
     if let Err(resp) = check_auth(&state, &headers) {
         return resp;
     }
-    let response = evaluate_chat_submit(&request);
+    let mut response = evaluate_chat_submit(&request);
+    let mut ledger_attachments: Vec<WebChatAttachment> =
+        request.attachments.iter().map(metadata_only).collect();
+    if response.accepted {
+        let Some(backend) = state.chat_backend.clone() else {
+            response.accepted = false;
+            response.policy_reason = "chat submit denied: web chat runtime unavailable".into();
+            return (StatusCode::OK, Json(response)).into_response();
+        };
+        match backend.submit(&response.message_id, request.clone()).await {
+            Ok(output) => {
+                response.reply = output.reply;
+                response.policy_reason = output.policy_reason;
+                ledger_attachments = output.attachments;
+            }
+            Err(err) => {
+                response.accepted = false;
+                response.policy_reason = format!("chat runtime failed: {err}");
+            }
+        }
+    }
     if response.accepted
-        && let Err(err) = append_chat_row(&request, &response)
+        && let Err(err) = append_chat_row(&request, &response, &ledger_attachments)
     {
         tracing::warn!("web chat submit append failed: {err}");
     }
@@ -107,13 +150,25 @@ pub fn evaluate_chat_submit(request: &WebChatSubmitRequest) -> WebChatSubmitResp
             stored_path,
         );
     }
+    if request
+        .attachments
+        .iter()
+        .any(|attachment| attachment.data_base64.is_none())
+    {
+        return response(
+            false,
+            "chat submit denied: attachment bytes were not provided",
+            stored_path,
+        );
+    }
 
     WebChatSubmitResponse {
         message_id: format!("webmsg_{}", uuid::Uuid::new_v4()),
         accepted: true,
         created_at_ms,
-        policy_reason: "chat message accepted and recorded by the web workbench".into(),
+        policy_reason: "chat message accepted by the web session runtime".into(),
         stored_path,
+        reply: String::new(),
     }
 }
 
@@ -124,12 +179,14 @@ fn response(accepted: bool, reason: &str, stored_path: String) -> WebChatSubmitR
         created_at_ms: now_ms(),
         policy_reason: reason.into(),
         stored_path,
+        reply: String::new(),
     }
 }
 
 fn append_chat_row(
     request: &WebChatSubmitRequest,
     response: &WebChatSubmitResponse,
+    attachments: &[WebChatAttachment],
 ) -> anyhow::Result<()> {
     let Some(path) = chat_ledger_path() else {
         anyhow::bail!("home directory unavailable");
@@ -140,7 +197,8 @@ fn append_chat_row(
     let row = WebChatLedgerRow {
         message_id: response.message_id.clone(),
         message: request.message.clone(),
-        attachments: request.attachments.clone(),
+        attachments: attachments.to_vec(),
+        assistant_reply: response.reply.clone(),
         created_at_ms: response.created_at_ms,
     };
     let mut line = serde_json::to_string(&row)?;
@@ -151,6 +209,18 @@ fn append_chat_row(
         .open(path)
         .and_then(|mut file| std::io::Write::write_all(&mut file, line.as_bytes()))?;
     Ok(())
+}
+
+fn metadata_only(attachment: &WebChatAttachment) -> WebChatAttachment {
+    WebChatAttachment {
+        file_name: attachment.file_name.clone(),
+        size_bytes: attachment.size_bytes,
+        mime_type: attachment.mime_type.clone(),
+        accepted: attachment.accepted,
+        policy_reason: attachment.policy_reason.clone(),
+        data_base64: None,
+        stored_path: attachment.stored_path.clone(),
+    }
 }
 
 fn chat_ledger_path() -> Option<std::path::PathBuf> {
@@ -217,6 +287,42 @@ mod tests {
                 mime_type: "application/octet-stream".into(),
                 accepted: false,
                 policy_reason: "denied".into(),
+                data_base64: None,
+                stored_path: None,
+            }],
+        });
+        assert!(!response.accepted);
+    }
+
+    #[test]
+    fn chat_submit_accepts_attachment_bytes() {
+        let response = evaluate_chat_submit(&WebChatSubmitRequest {
+            message: String::new(),
+            attachments: vec![WebChatAttachment {
+                file_name: "notes.md".into(),
+                size_bytes: 5,
+                mime_type: "text/markdown".into(),
+                accepted: true,
+                policy_reason: "ok".into(),
+                data_base64: Some("aGVsbG8=".into()),
+                stored_path: None,
+            }],
+        });
+        assert!(response.accepted);
+    }
+
+    #[test]
+    fn chat_submit_rejects_attachment_without_bytes() {
+        let response = evaluate_chat_submit(&WebChatSubmitRequest {
+            message: String::new(),
+            attachments: vec![WebChatAttachment {
+                file_name: "notes.txt".into(),
+                size_bytes: 5,
+                mime_type: "text/plain".into(),
+                accepted: true,
+                policy_reason: "ok".into(),
+                data_base64: None,
+                stored_path: None,
             }],
         });
         assert!(!response.accepted);

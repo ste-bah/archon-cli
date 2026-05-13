@@ -102,6 +102,7 @@ export async function mockApi(page: Page) {
       createdAtMs: 1770000000,
       policyReason: "chat message accepted and recorded by the web workbench",
       storedPath: "~/.archon/web/chat.messages.jsonl",
+      reply: "Mock Archon reply from live session",
     },
     "/api/corpus/summary": {
       roots: [probe("Repository docs", "/repo/docs", true, 42, 800000)],

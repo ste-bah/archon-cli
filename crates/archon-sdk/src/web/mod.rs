@@ -20,8 +20,10 @@ pub mod world;
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use api::{EffectivePolicySummary, WebApiState};
+use axum::extract::DefaultBodyLimit;
 use axum::http::HeaderValue;
 use axum::{
     Router,
@@ -149,6 +151,8 @@ pub(crate) struct AppState {
     live: WebLiveManager,
     /// Runtime storage locations resolved from the active config.
     paths: WebRuntimePaths,
+    /// Optional chat/session bridge supplied by the binary runtime.
+    chat_backend: Option<Arc<dyn chat::WebChatBackend>>,
 }
 
 /// HTTP server that serves the embedded SPA.
@@ -162,6 +166,7 @@ pub struct WebServer {
     token: Option<String>,
     policy: EffectivePolicySummary,
     paths: WebRuntimePaths,
+    chat_backend: Option<Arc<dyn chat::WebChatBackend>>,
 }
 
 impl WebServer {
@@ -183,6 +188,7 @@ impl WebServer {
             token,
             policy,
             paths: WebRuntimePaths::default(),
+            chat_backend: None,
         }
     }
 
@@ -197,7 +203,13 @@ impl WebServer {
             token,
             policy,
             paths,
+            chat_backend: None,
         }
+    }
+
+    pub fn with_chat_backend(mut self, backend: Arc<dyn chat::WebChatBackend>) -> Self {
+        self.chat_backend = Some(backend);
+        self
     }
 
     /// Bind and serve. Blocks until the server is shut down.
@@ -227,6 +239,7 @@ impl WebServer {
             ),
             live,
             paths: self.paths.clone(),
+            chat_backend: self.chat_backend.clone(),
         };
 
         let local_origins: Vec<HeaderValue> = [
@@ -248,7 +261,10 @@ impl WebServer {
             .route("/api/status", get(api::status_handler))
             .route("/api/auth/session", get(auth::session_handler))
             .route("/api/auth/logout", post(auth::logout_handler))
-            .route("/api/chat/submit", post(chat::submit_handler))
+            .route(
+                "/api/chat/submit",
+                post(chat::submit_handler).layer(DefaultBodyLimit::max(64 * 1024 * 1024)),
+            )
             .route("/api/config/effective", get(api::config_handler))
             .route("/api/policy/effective", get(api::policy_handler))
             .route("/api/live/snapshot", get(live::snapshot_handler))
