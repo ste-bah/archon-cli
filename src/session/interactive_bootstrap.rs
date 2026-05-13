@@ -72,17 +72,9 @@ pub(super) async fn prepare(
             .map_err(|e| anyhow::anyhow!("failed to open session store: {e}"))?,
     );
 
-    let data_dir = config
-        .memory
-        .db_path
-        .as_ref()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            dirs::data_dir()
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join("archon")
-        });
-    let memory_access = archon_memory::open_memory(&data_dir)
+    let (memory_data_dir, memory_db_path) =
+        archon_memory::resolve_memory_paths(config.memory.db_path.as_deref());
+    let memory_access = archon_memory::open_memory_with_db_path(&memory_data_dir, &memory_db_path)
         .await
         .unwrap_or_else(|e| {
             tracing::warn!("failed to open memory: {e}, using in-memory fallback");

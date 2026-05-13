@@ -7,6 +7,7 @@ pub mod actions;
 pub mod api;
 pub mod assets;
 pub mod auth;
+pub mod chat;
 pub mod corpus;
 pub mod evidence;
 pub mod inspect;
@@ -18,6 +19,7 @@ pub mod uploads;
 pub mod world;
 
 use std::net::SocketAddr;
+use std::path::PathBuf;
 
 use api::{EffectivePolicySummary, WebApiState};
 use axum::http::HeaderValue;
@@ -32,6 +34,68 @@ use live::WebLiveManager;
 use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 
 pub use api::{WebPolicySummary, WebSubsystemPolicySummary};
+
+#[derive(Debug, Clone)]
+pub struct WebRuntimePaths {
+    pub cwd: PathBuf,
+    pub archon_home: PathBuf,
+    pub archon_data: PathBuf,
+    pub memory_db: PathBuf,
+    pub session_db: PathBuf,
+    pub session_activity_root: PathBuf,
+    pub world_model_root: PathBuf,
+    pub reasoning_quality_root: PathBuf,
+}
+
+impl WebRuntimePaths {
+    pub fn from_overrides(memory_path: Option<&str>, session_db: Option<&str>) -> Self {
+        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let archon_home = dirs::home_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(".archon");
+        let archon_data = std::env::var("ARCHON_DATA_DIR")
+            .ok()
+            .map(PathBuf::from)
+            .unwrap_or_else(default_archon_data_dir);
+        let memory_db = memory_path
+            .map(resolve_memory_path)
+            .unwrap_or_else(|| archon_data.join("memory.db"));
+        let session_db = session_db
+            .map(PathBuf::from)
+            .unwrap_or_else(|| archon_data.join("sessions").join("sessions.db"));
+        Self {
+            cwd,
+            archon_home: archon_home.clone(),
+            archon_data,
+            memory_db,
+            session_db,
+            session_activity_root: archon_home.join("sessions"),
+            world_model_root: archon_home.join("world-model"),
+            reasoning_quality_root: archon_home.join("reasoning-quality"),
+        }
+    }
+}
+
+impl Default for WebRuntimePaths {
+    fn default() -> Self {
+        Self::from_overrides(None, None)
+    }
+}
+
+fn default_archon_data_dir() -> PathBuf {
+    dirs::data_dir()
+        .unwrap_or_else(|| PathBuf::from(".local/share"))
+        .join("archon")
+}
+
+fn resolve_memory_path(value: &str) -> PathBuf {
+    let path = PathBuf::from(value);
+    if path.extension().is_some_and(|ext| ext == "db") {
+        path
+    } else {
+        path.join("memory.db")
+    }
+}
 
 // ---------------------------------------------------------------------------
 // WebConfig
@@ -83,6 +147,8 @@ pub(crate) struct AppState {
     api: WebApiState,
     /// Bounded live event buffer used by the web workbench.
     live: WebLiveManager,
+    /// Runtime storage locations resolved from the active config.
+    paths: WebRuntimePaths,
 }
 
 /// HTTP server that serves the embedded SPA.
@@ -95,6 +161,7 @@ pub struct WebServer {
     config: WebConfig,
     token: Option<String>,
     policy: EffectivePolicySummary,
+    paths: WebRuntimePaths,
 }
 
 impl WebServer {
@@ -115,6 +182,21 @@ impl WebServer {
             config,
             token,
             policy,
+            paths: WebRuntimePaths::default(),
+        }
+    }
+
+    pub fn with_policy_and_paths(
+        config: WebConfig,
+        token: Option<String>,
+        policy: EffectivePolicySummary,
+        paths: WebRuntimePaths,
+    ) -> Self {
+        Self {
+            config,
+            token,
+            policy,
+            paths,
         }
     }
 
@@ -141,8 +223,10 @@ impl WebServer {
                 &self.config,
                 self.token.is_some(),
                 self.policy.clone(),
+                self.paths.clone(),
             ),
             live,
+            paths: self.paths.clone(),
         };
 
         let local_origins: Vec<HeaderValue> = [
@@ -164,6 +248,7 @@ impl WebServer {
             .route("/api/status", get(api::status_handler))
             .route("/api/auth/session", get(auth::session_handler))
             .route("/api/auth/logout", post(auth::logout_handler))
+            .route("/api/chat/submit", post(chat::submit_handler))
             .route("/api/config/effective", get(api::config_handler))
             .route("/api/policy/effective", get(api::policy_handler))
             .route("/api/live/snapshot", get(live::snapshot_handler))
@@ -273,5 +358,23 @@ pub(crate) fn check_auth(state: &AppState, headers: &HeaderMap) -> Result<(), Re
         Ok(())
     } else {
         Err((StatusCode::UNAUTHORIZED, "Unauthorized").into_response())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn runtime_paths_use_memory_database_file() {
+        let paths = WebRuntimePaths::from_overrides(None, None);
+        assert!(paths.memory_db.ends_with("memory.db"));
+        assert!(!paths.memory_db.ends_with(".archon/memory"));
+    }
+
+    #[test]
+    fn runtime_paths_honor_explicit_memory_file() {
+        let paths = WebRuntimePaths::from_overrides(Some("/tmp/custom-memory.db"), None);
+        assert_eq!(paths.memory_db, PathBuf::from("/tmp/custom-memory.db"));
     }
 }

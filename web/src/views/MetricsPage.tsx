@@ -62,8 +62,8 @@ export function MetricsPage({ metrics, liveCount = 0 }: MetricsPageProps) {
 
       <section className="panel">
         <div className="panel-heading">
-          <h3>Queue depth</h3>
-          <StatusPill>{queues.length} queues</StatusPill>
+          <h3>Ledger activity</h3>
+          <StatusPill>{queues.length} ledgers</StatusPill>
         </div>
         <div className="metrics-list">
           {queues.map((item) => (

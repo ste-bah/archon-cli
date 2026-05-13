@@ -19,6 +19,7 @@ import type {
   MetricsSummary,
   PipelineSummary,
   SettingsSummary,
+  WebUploadPolicy,
   WorldInspectionSummary,
 } from "../api/generated/web";
 
@@ -35,6 +36,7 @@ interface WorkbenchRoutesProps {
   liveCount?: number;
   authRequired?: boolean;
   uploadsEnabled?: boolean;
+  uploadPolicy?: WebUploadPolicy;
   corpus?: CorpusSummary;
   learning?: LearningSummary;
   world?: WorldInspectionSummary;
@@ -50,7 +52,7 @@ export function WorkbenchRoutes(props: WorkbenchRoutesProps) {
   return (
     <Routes>
       <Route path="/" element={<DashboardPage {...props} />} />
-      <Route path="/chat" element={<ChatPage />} />
+      <Route path="/chat" element={<ChatPage uploadPolicy={props.uploadPolicy} />} />
       <Route path="/corpus" element={<CorpusPage corpus={props.corpus} />} />
       <Route
         path="/memory"

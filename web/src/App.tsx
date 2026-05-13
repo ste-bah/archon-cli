@@ -49,6 +49,7 @@ export function App() {
           liveCount={live.data?.events.length}
           authRequired={auth.data?.authRequired}
           uploadsEnabled={uploads.data?.enabled}
+          uploadPolicy={uploads.data}
           corpus={corpus.data}
           learning={learning.data}
           world={world.data}

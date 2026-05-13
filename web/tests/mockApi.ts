@@ -1,11 +1,11 @@
-import type { Page } from "@playwright/test";
+import type { Page, Route } from "@playwright/test";
 import { graphEdges, graphNodes } from "./mockGraph";
 
 export async function mockApi(page: Page) {
   const responses: Record<string, unknown> = {
     "/api/status": {
       status: "ok",
-      version: "1.2.3",
+      version: "1.2.4",
       web: {
         bindAddress: "127.0.0.1",
         port: 8421,
@@ -86,6 +86,22 @@ export async function mockApi(page: Page) {
       maxBytesPerFile: 10485760,
       acceptedMimeTypes: ["text/plain", "application/pdf"],
       policyReason: "allowed by local policy",
+    },
+    "/api/uploads/intent": {
+      accepted: true,
+      decision: {
+        allowed: true,
+        requiresConfirmation: false,
+        policyReason: "upload intent accepted by web upload policy",
+        dryRunAvailable: true,
+      },
+    },
+    "/api/chat/submit": {
+      messageId: "webmsg_test",
+      accepted: true,
+      createdAtMs: 1770000000,
+      policyReason: "chat message accepted and recorded by the web workbench",
+      storedPath: "~/.archon/web/chat.messages.jsonl",
     },
     "/api/corpus/summary": {
       roots: [probe("Repository docs", "/repo/docs", true, 42, 800000)],
@@ -233,17 +249,65 @@ export async function mockApi(page: Page) {
       await route.continue();
       return;
     }
+    if (url.pathname === "/api/actions/evaluate") {
+      const request = route.request().postDataJSON();
+      await json(route, actionResponse(request));
+      return;
+    }
+    if (url.pathname === "/api/settings/theme-profile" && route.request().method() === "POST") {
+      const request = route.request().postDataJSON();
+      await json(route, themeProfile(request.profile));
+      return;
+    }
+    if (url.pathname === "/api/corpus/source") {
+      await json(route, corpusPreview(url.searchParams.get("path") ?? ""));
+      return;
+    }
     const body = responses[url.pathname];
-    await route.fulfill({
-      status: body === undefined ? 404 : 200,
-      contentType: "application/json",
-      body: JSON.stringify(body ?? {}),
-    });
+    await json(route, body ?? {}, body === undefined ? 404 : 200);
   });
 }
 
-function themeProfile() {
-  const profile = {
+async function json(route: Route, body: unknown, status = 200) {
+  await route.fulfill({
+    status,
+    contentType: "application/json",
+    body: JSON.stringify(body),
+  });
+}
+
+function actionResponse(request: { actionId: string; actionKind: string; dryRun: boolean }) {
+  const requiresConfirmation = !request.actionKind.startsWith("upload.");
+  const policyReason = request.dryRun
+    ? `dry-run evaluated for ${request.actionKind}`
+    : `action evaluated for ${request.actionKind}`;
+  return {
+    decision: {
+      allowed: request.dryRun,
+      requiresConfirmation,
+      policyReason,
+      dryRunAvailable: true,
+    },
+    audit: {
+      actionId: request.actionId,
+      actionKind: request.actionKind,
+      allowed: request.dryRun,
+      dryRun: request.dryRun,
+      policyReason,
+      createdAtMs: 1770000001,
+    },
+  };
+}
+
+function themeProfile(saved?: {
+  themeMode: string;
+  densityMode: string;
+  accentId: string;
+  accentHex: string;
+  accentStrongHex: string;
+  updatedAtMs: number;
+}) {
+  const profile = saved ?? {
     themeMode: "dark",
     densityMode: "comfortable",
     accentId: "mint",
@@ -256,6 +320,27 @@ function themeProfile() {
     storagePath: "~/.archon/web/theme-profile.json",
     persisted: true,
     exportJson: JSON.stringify(profile, null, 2),
+  };
+}
+
+function corpusPreview(path: string) {
+  if (path.includes("006A")) {
+    return {
+      source: corpusSource("World model PRD", "/repo/prds/006A.md", "md", 88000),
+      content: "# World Model PRD\n\nLatent next-state prediction, advisor posture, and evidence graph integration.",
+      lineCount: 3,
+      truncated: false,
+      previewAvailable: true,
+      policyReason: "read-only preview under configured corpus root",
+    };
+  }
+  return {
+    source: corpusSource("README.md", "/repo/README.md", "md", 32000),
+    content: "# Archon\n\nLocal-first agentic workbench with evidence, memory, pipelines, and governed learning.",
+    lineCount: 3,
+    truncated: false,
+    previewAvailable: true,
+    policyReason: "read-only preview under configured corpus root",
   };
 }
 
@@ -276,8 +361,9 @@ function metricsSummary() {
       metricValue("Live event target", "250", "ms", "tracked"),
     ],
     queues: [
-      metricValue("web action audit", "4", "rows", "active"),
-      metricValue("reasoning events", "0", "rows", "quiet"),
+      metricValue("web action audit ledger", "4", "rows", "active"),
+      metricValue("reasoning-quality event ledger", "0", "rows", "quiet"),
+      metricValue("world advisor event ledger", "2", "rows", "active"),
     ],
     recentEvents: [
       metricEvent("web", "pipeline.pause action evaluated in dry-run mode", "info", "ledger tail"),
