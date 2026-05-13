@@ -112,6 +112,11 @@ fn codex_stream_parser_emits_multiple_tool_calls_and_done_arguments_once() {
 #[test]
 fn codex_tool_result_continuation_serializes_function_output() {
     let mut turn = agentic_request();
+    // Pair-safety repair textifies orphan tool_results, so include the matching tool_use.
+    turn.messages.push(serde_json::json!({
+        "role": "assistant",
+        "content": [{"type": "tool_use", "id": "call_1", "name": "lookup", "input": {}}]
+    }));
     turn.tool_results = vec![AgenticToolResult {
         tool_call_id: "call_1".into(),
         content: serde_json::json!({"answer": 42}),
@@ -154,6 +159,11 @@ async fn agentic_adapter_passes_tool_results_to_underlying_provider() {
         ProviderCapabilitySet::new([ProviderCapability::Streaming, ProviderCapability::ToolUse]),
     );
     let mut request = agentic_request();
+    // Pair-safety repair textifies orphan tool_results, so include the matching tool_use.
+    request.messages.push(serde_json::json!({
+        "role": "assistant",
+        "content": [{"type": "tool_use", "id": "call_1", "name": "lookup", "input": {}}]
+    }));
     request.tool_results = vec![AgenticToolResult {
         tool_call_id: "call_1".into(),
         content: serde_json::json!("ok"),
