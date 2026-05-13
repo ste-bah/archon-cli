@@ -166,9 +166,9 @@ archon-cli/
 
 ## Status
 
-- Current version: **v1.2.5** ([release notes](docs/release-notes/v1.2.5.md))
+- Current version: **v1.2.6** ([release notes](docs/release-notes/v1.2.6.md))
 - Stable release for local world-model advisory learning, first-class reasoning-quality events, provider runtime governance, Cozo-backed agent evolution, permission preflight, and sandbox routing
-- v1.2.5 fixes provider-bound tier alias resolution (subagents using `model: opus|sonnet|haiku` no longer 404), adds an Anthropic request sanitizer that rejects orphan tool_result blocks and `role: "system"` messages, makes compaction pair-safe so `tool_use` never separates from its matching `tool_result`, and switches compaction boundary messages from `role: "system"` to `role: "user"`. Also hardens CI apt-get with retry + 30s timeout so Azure Ubuntu mirror hangs fail fast instead of consuming 50-minute job slots.
+- v1.2.6 makes message repair symmetric across Anthropic-shape and Codex Responses paths: orphan `tool_use` blocks demote safely, missing Codex `function_call_output` items become `"aborted"`, tool postprocessing fills missing tool results atomically after partial dispatch, and Anthropic, Bedrock, and Vertex share the same message-invariant sanitizer.
 
 ## Contributing
 

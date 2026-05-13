@@ -524,6 +524,7 @@ impl LlmProvider for BedrockProvider {
 
     async fn stream(&self, mut request: LlmRequest) -> Result<Receiver<StreamEvent>, LlmError> {
         self.resolve_request_model(&mut request);
+        request.messages = crate::message_invariants::sanitize_anthropic_shape(request.messages);
         self.do_stream(request).await
     }
 

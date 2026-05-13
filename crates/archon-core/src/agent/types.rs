@@ -243,6 +243,10 @@ impl Default for ConversationState {
 }
 
 impl ConversationState {
+    const INTERRUPTED_TOOL_RESULT: &'static str = "Tool dispatch interrupted before producing a result. \
+         The assistant called this tool but no result was recorded, likely due \
+         to mid-turn cancellation, dispatch panic, or session crash. Treat as failed.";
+
     pub fn add_user_message(&mut self, content: &str) {
         self.messages.push(serde_json::json!({
             "role": "user",
@@ -279,6 +283,42 @@ impl ConversationState {
             "role": "user",
             "content": [result],
         }));
+    }
+
+    pub(super) fn fill_missing_tool_results(&mut self, expected_ids: &[String]) -> Vec<String> {
+        if expected_ids.is_empty() {
+            return Vec::new();
+        }
+        let recorded_ids: std::collections::HashSet<String> = self
+            .messages
+            .last()
+            .and_then(|m| m.get("content"))
+            .and_then(|c| c.as_array())
+            .map(|blocks| {
+                blocks
+                    .iter()
+                    .filter(|block| {
+                        block.get("type").and_then(|v| v.as_str()) == Some("tool_result")
+                    })
+                    .filter_map(|block| {
+                        block
+                            .get("tool_use_id")
+                            .and_then(|v| v.as_str())
+                            .map(str::to_string)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let missing: Vec<String> = expected_ids
+            .iter()
+            .filter(|id| !recorded_ids.contains(*id))
+            .cloned()
+            .collect();
+        for id in &missing {
+            self.add_tool_result(id, Self::INTERRUPTED_TOOL_RESULT, true);
+        }
+        missing
     }
 
     pub fn first_user_message(&self) -> &str {

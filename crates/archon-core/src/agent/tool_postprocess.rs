@@ -384,6 +384,74 @@ impl Agent {
             self.state
                 .add_tool_result(&pre.tool_id, &result.content, result.is_error);
         }
+
+        // Atomicity safety net (v1.2.6): after dispatch + postprocess, every
+        // tool_use block in the last assistant message MUST have a matching
+        // tool_result in the immediately following user message. If
+        // `dispatch_results.len() < allowed.len()` (panic mid-dispatch,
+        // cancellation, length mismatch, etc.) some tool_uses never get a
+        // tool_result, leaving the persisted state.messages in a shape that
+        // Anthropic rejects on the next API call with `tool_use ids were
+        // found without tool_result blocks immediately after`. Fill the gap
+        // here with synthetic error tool_results so state.messages always
+        // round-trips through the Anthropic API.
+        self.fill_orphan_tool_results(allowed);
+
         prevent_continuation_reason
+    }
+
+    fn fill_orphan_tool_results(&mut self, allowed: &[PreflightResult]) {
+        let expected_ids: Vec<String> = allowed.iter().map(|p| p.tool_id.clone()).collect();
+        for id in self.state.fill_missing_tool_results(&expected_ids) {
+            tracing::warn!(
+                tool_use_id = %id,
+                "tool dispatch did not produce a result; filled with synthetic error"
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fill_orphan_tool_results_appends_synthetic_for_missing_ids() {
+        let mut state = ConversationState::default();
+        state.add_assistant_message(vec![
+            serde_json::json!({"type": "tool_use", "id": "tool-1", "name": "Read", "input": {}}),
+            serde_json::json!({"type": "tool_use", "id": "tool-2", "name": "Write", "input": {}}),
+        ]);
+        state.add_tool_result("tool-1", "ok", false);
+
+        let missing =
+            state.fill_missing_tool_results(&["tool-1".to_string(), "tool-2".to_string()]);
+
+        assert_eq!(missing, vec!["tool-2".to_string()]);
+        let blocks = state.messages[1]["content"].as_array().unwrap();
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(blocks[1]["tool_use_id"], "tool-2");
+        assert_eq!(blocks[1]["is_error"], true);
+    }
+
+    #[test]
+    fn fill_orphan_tool_results_idempotent_when_all_present() {
+        let mut state = ConversationState::default();
+        state.add_tool_result("tool-1", "ok", false);
+
+        let missing = state.fill_missing_tool_results(&["tool-1".to_string()]);
+
+        assert!(missing.is_empty());
+        assert_eq!(state.messages[0]["content"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn fill_orphan_tool_results_no_op_when_allowed_empty() {
+        let mut state = ConversationState::default();
+
+        let missing = state.fill_missing_tool_results(&[]);
+
+        assert!(missing.is_empty());
+        assert!(state.messages.is_empty());
     }
 }

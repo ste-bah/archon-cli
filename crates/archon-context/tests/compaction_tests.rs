@@ -298,7 +298,12 @@ fn boundary_to_message_format() {
     };
 
     let msg = boundary.to_message();
-    assert_eq!(msg.role, "system");
+    // v1.2.5: boundary message is `user`, not `system`. Anthropic rejects
+    // `role: "system"` in the messages array, so the boundary message
+    // (which lives inside `messages`) must carry a `user` or `assistant`
+    // role. The sanitizer at the Anthropic provider boundary normalizes
+    // any leaked non-user/assistant role to `user` as well.
+    assert_eq!(msg.role, "user");
     let content = msg.content.as_str().unwrap();
     assert!(!content.is_empty());
 }

@@ -10,6 +10,7 @@ pub(crate) mod debug_body;
 pub mod effort;
 pub mod fast_mode;
 pub mod identity;
+pub mod message_invariants;
 // TASK-P0-B.1a (#178): Multi-modal content helpers (image, future PDF/audio).
 pub mod multimodal;
 pub mod oauth;
