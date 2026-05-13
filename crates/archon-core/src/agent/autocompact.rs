@@ -240,7 +240,14 @@ fn from_context_messages(
 ) -> Vec<serde_json::Value> {
     messages
         .iter()
-        .map(|m| serde_json::json!({ "role": m.role, "content": m.content }))
+        .map(|m| {
+            let role = if m.role == "assistant" {
+                "assistant"
+            } else {
+                "user"
+            };
+            serde_json::json!({ "role": role, "content": m.content })
+        })
         .collect()
 }
 
@@ -255,4 +262,37 @@ fn synthetic_summary(messages: &[archon_context::messages::ContextMessage]) -> S
         first_user.chars().take(500).collect::<String>(),
         messages.len()
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn json_compaction_does_not_emit_system_role_or_orphan_tool_result() {
+        let mut messages: Vec<serde_json::Value> = (0..4)
+            .map(|i| serde_json::json!({"role": "user", "content": format!("old {i}")}))
+            .collect();
+        messages.push(serde_json::json!({
+            "role": "assistant",
+            "content": [
+                {"type": "text", "text": "calling"},
+                {"type": "tool_use", "id": "tool-1", "name": "Bash", "input": {}}
+            ]
+        }));
+        messages.push(serde_json::json!({
+            "role": "user",
+            "content": [
+                {"type": "tool_result", "tool_use_id": "tool-1", "content": "ok"}
+            ]
+        }));
+        messages.extend(
+            (0..5).map(|i| serde_json::json!({"role": "user", "content": format!("recent {i}")})),
+        );
+
+        let compacted = compact_json_messages_apply(&messages, CompactAction::Full).unwrap();
+        assert!(compacted.iter().all(|m| m["role"] != "system"));
+        assert_eq!(compacted[1]["content"][1]["id"], "tool-1");
+        assert_eq!(compacted[2]["content"][0]["tool_use_id"], "tool-1");
+    }
 }

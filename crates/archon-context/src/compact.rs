@@ -31,7 +31,13 @@ pub fn compact_messages(
         return messages.to_vec();
     }
 
-    let split_point = messages.len().saturating_sub(preserve_recent * 2);
+    let requested_split = messages.len().saturating_sub(preserve_recent * 2);
+    let Some(split_point) = safe_tail_start(messages, requested_split) else {
+        return messages.to_vec();
+    };
+    if split_point == 0 {
+        return messages.to_vec();
+    }
 
     let mut compacted = Vec::new();
 
@@ -43,6 +49,62 @@ pub fn compact_messages(
     compacted.extend_from_slice(&messages[split_point..]);
 
     compacted
+}
+
+/// Move a compaction split to a provider-safe message boundary.
+///
+/// Anthropic requires `tool_result` blocks to immediately follow the assistant
+/// message containing their matching `tool_use` blocks. If a split would start
+/// the retained tail with `tool_result`, keep the preceding assistant message
+/// too; if the result is already orphaned, compact it away instead.
+pub fn safe_tail_start(messages: &[ContextMessage], requested_split: usize) -> Option<usize> {
+    let mut split = requested_split.min(messages.len());
+    while split < messages.len() {
+        let result_ids = tool_result_ids(&messages[split]);
+        if result_ids.is_empty() {
+            return Some(split);
+        }
+        if split > 0 && assistant_has_tool_uses(&messages[split - 1], &result_ids) {
+            return Some(split - 1);
+        }
+        split += 1;
+    }
+    None
+}
+
+fn tool_result_ids(message: &ContextMessage) -> Vec<&str> {
+    if message.role != "user" {
+        return Vec::new();
+    }
+    message
+        .content
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|block| block.get("type").and_then(|v| v.as_str()) == Some("tool_result"))
+        .filter_map(|block| block.get("tool_use_id").and_then(|v| v.as_str()))
+        .collect()
+}
+
+fn assistant_has_tool_uses(message: &ContextMessage, result_ids: &[&str]) -> bool {
+    if message.role != "assistant" {
+        return false;
+    }
+    result_ids
+        .iter()
+        .all(|id| assistant_has_tool_use(message, id))
+}
+
+fn assistant_has_tool_use(message: &ContextMessage, id: &str) -> bool {
+    message
+        .content
+        .as_array()
+        .into_iter()
+        .flatten()
+        .any(|block| {
+            block.get("type").and_then(|v| v.as_str()) == Some("tool_use")
+                && block.get("id").and_then(|v| v.as_str()) == Some(id)
+        })
 }
 
 /// Compact with the default number of preserved turns ([`DEFAULT_PRESERVE_RECENT_TURNS`]).
@@ -223,6 +285,36 @@ mod tests {
         let compacted = compact_messages_default(&messages, "summary text");
         // 1 summary + 6 recent (3 pairs)
         assert_eq!(compacted.len(), 7);
+    }
+
+    #[test]
+    fn compact_keeps_tool_use_with_tool_result() {
+        let mut messages: Vec<ContextMessage> = (0..4)
+            .map(|i| ContextMessage::user(&format!("old msg {i}")))
+            .collect();
+        messages.push(ContextMessage {
+            role: "assistant".into(),
+            content: serde_json::json!([
+                {"type": "text", "text": "calling"},
+                {"type": "tool_use", "id": "tool-1", "name": "Bash", "input": {}}
+            ]),
+            estimated_tokens: 1,
+        });
+        messages.push(ContextMessage {
+            role: "user".into(),
+            content: serde_json::json!([
+                {"type": "tool_result", "tool_use_id": "tool-1", "content": "ok"}
+            ]),
+            estimated_tokens: 1,
+        });
+        messages.extend((0..5).map(|i| ContextMessage::user(&format!("recent {i}"))));
+
+        let compacted = compact_messages(&messages, "summary", 3);
+        assert_eq!(
+            compacted[1].content[1]["id"], "tool-1",
+            "matching tool_use must stay immediately before tool_result"
+        );
+        assert_eq!(compacted[2].content[0]["tool_use_id"], "tool-1");
     }
 
     #[test]

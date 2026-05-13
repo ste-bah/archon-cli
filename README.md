@@ -166,9 +166,9 @@ archon-cli/
 
 ## Status
 
-- Current version: **v1.2.4** ([release notes](docs/release-notes/v1.2.4.md))
+- Current version: **v1.2.5** ([release notes](docs/release-notes/v1.2.5.md))
 - Stable release for local world-model advisory learning, first-class reasoning-quality events, provider runtime governance, Cozo-backed agent evolution, permission preflight, and sandbox routing
-- v1.2.4 fixes the Metrics provider event tail (was blank because the web API missed the session-store learning DB) and renames the misleading "Queue depth" panel to "Ledger activity", on top of the v1.2.3 browser web workbench, v1.2.2 provider-aware auto-compaction, v1.2.1 TUI cancellation, and v1.2.0 local world-model/reasoning-quality baseline.
+- v1.2.5 fixes provider-bound tier alias resolution (subagents using `model: opus|sonnet|haiku` no longer 404), adds an Anthropic request sanitizer that rejects orphan tool_result blocks and `role: "system"` messages, makes compaction pair-safe so `tool_use` never separates from its matching `tool_result`, and switches compaction boundary messages from `role: "system"` to `role: "user"`. Also hardens CI apt-get with retry + 30s timeout so Azure Ubuntu mirror hangs fail fast instead of consuming 50-minute job slots.
 
 ## Contributing
 

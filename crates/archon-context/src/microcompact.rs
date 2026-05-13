@@ -31,18 +31,20 @@ pub fn microcompact_messages(
     // Calculate 30 % of messages from the start to summarize.
     let summarize_count = (messages.len() as f64 * 0.30).ceil() as usize;
     // Ensure we keep at least `preserve_recent * 2` messages verbatim.
-    let split = summarize_count.min(messages.len().saturating_sub(min_required));
-    if split == 0 {
-        let boundary = CompactBoundary {
-            summary: String::new(),
-            tokens_removed: 0,
-            tokens_remaining: total_estimated_tokens(messages),
-            strategy: CompactionStrategy::Micro,
-            timestamp: chrono::Utc::now(),
-        };
-        return (messages.to_vec(), boundary);
-    }
-
+    let requested_split = summarize_count.min(messages.len().saturating_sub(min_required));
+    let split = match crate::compact::safe_tail_start(messages, requested_split) {
+        Some(split) if split > 0 => split,
+        _ => {
+            let boundary = CompactBoundary {
+                summary: String::new(),
+                tokens_removed: 0,
+                tokens_remaining: total_estimated_tokens(messages),
+                strategy: CompactionStrategy::Micro,
+                timestamp: chrono::Utc::now(),
+            };
+            return (messages.to_vec(), boundary);
+        }
+    };
     let removed_tokens = total_estimated_tokens(&messages[..split]);
     let remaining_tokens = total_estimated_tokens(&messages[split..]);
 

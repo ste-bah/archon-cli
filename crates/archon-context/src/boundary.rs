@@ -31,17 +31,35 @@ impl std::fmt::Display for CompactionStrategy {
 }
 
 impl CompactBoundary {
-    /// Convert this boundary into a system-role [`ContextMessage`] for insertion
-    /// into the conversation history.
+    /// Convert this boundary into a user-role [`ContextMessage`] for insertion
+    /// into provider message history.
     pub fn to_message(&self) -> ContextMessage {
         let text = format!(
             "[Compaction Boundary — {} strategy] Removed {} tokens, {} tokens remaining. {}",
             self.strategy, self.tokens_removed, self.tokens_remaining, self.summary,
         );
         ContextMessage {
-            role: "system".into(),
+            role: "user".into(),
             content: serde_json::Value::String(text.clone()),
             estimated_tokens: (text.len() as f64 / 4.0).ceil() as u64,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn boundary_message_is_provider_safe_user_role() {
+        let boundary = CompactBoundary {
+            summary: "summary".into(),
+            tokens_removed: 10,
+            tokens_remaining: 20,
+            strategy: CompactionStrategy::Micro,
+            timestamp: chrono::Utc::now(),
+        };
+
+        assert_eq!(boundary.to_message().role, "user");
     }
 }

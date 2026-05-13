@@ -522,7 +522,8 @@ impl LlmProvider for BedrockProvider {
         }]
     }
 
-    async fn stream(&self, request: LlmRequest) -> Result<Receiver<StreamEvent>, LlmError> {
+    async fn stream(&self, mut request: LlmRequest) -> Result<Receiver<StreamEvent>, LlmError> {
+        self.resolve_request_model(&mut request);
         self.do_stream(request).await
     }
 

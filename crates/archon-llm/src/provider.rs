@@ -284,14 +284,29 @@ pub trait LlmProvider: Send + Sync {
     ///   `haiku` → `claude-haiku-4-5-20251001`
     /// - Codex: `sonnet` → `gpt-5.5`, `opus` → `gpt-5.4`, `haiku` →
     ///   `gpt-5.4-mini`
-    /// - Local / OpenAI-compat: return `None` to let callers pass the alias
-    ///   through to the local model (which usually ignores model strings)
+    /// - Other providers: return `None` and let
+    ///   [`LlmProvider::resolve_request_model`] use the first advertised model
     ///
-    /// Returning `None` means the caller should pass the alias through to the
-    /// underlying API unchanged. Returning `Some(id)` substitutes the alias
-    /// with the provider-specific model id.
+    /// Returning `None` means this provider has no bespoke substitution.
+    /// Call [`LlmProvider::resolve_request_model`] at provider boundaries so
+    /// common tier aliases still fall back to the provider's default model.
     fn resolve_alias(&self, _alias: &str) -> Option<String> {
         None
+    }
+
+    /// Resolve the request's model before it leaves the provider boundary.
+    fn resolve_request_model(&self, request: &mut LlmRequest) {
+        let requested = request.model.trim();
+        let resolved = self.resolve_alias(requested).or_else(|| {
+            if requested.is_empty() || is_tier_model_alias(requested) {
+                self.models().first().map(|model| model.id.clone())
+            } else {
+                None
+            }
+        });
+        if let Some(model) = resolved.filter(|model| !model.trim().is_empty()) {
+            request.model = model;
+        }
     }
 
     /// Downcast to the underlying `AnthropicClient` if this provider wraps one.
@@ -301,6 +316,13 @@ pub trait LlmProvider: Send + Sync {
     fn as_anthropic(&self) -> Option<&AnthropicClient> {
         None
     }
+}
+
+fn is_tier_model_alias(model: &str) -> bool {
+    matches!(
+        model.trim().to_lowercase().as_str(),
+        "opus" | "sonnet" | "haiku" | "default" | "mini" | "codex"
+    )
 }
 
 #[cfg(test)]
@@ -321,6 +343,47 @@ mod tests {
             classify_data_flow_endpoint("https://api.anthropic.com/v1"),
             DataFlowClassification::Cloud
         );
+    }
+
+    struct DefaultAliasProvider;
+
+    #[async_trait::async_trait]
+    impl LlmProvider for DefaultAliasProvider {
+        fn name(&self) -> &str {
+            "default-alias"
+        }
+
+        fn models(&self) -> Vec<ModelInfo> {
+            vec![ModelInfo {
+                id: "provider-default".into(),
+                display_name: "Provider Default".into(),
+                context_window: 128_000,
+            }]
+        }
+
+        async fn stream(&self, _: LlmRequest) -> Result<Receiver<StreamEvent>, LlmError> {
+            let (_tx, rx) = tokio::sync::mpsc::channel(1);
+            Ok(rx)
+        }
+
+        async fn complete(&self, _: LlmRequest) -> Result<LlmResponse, LlmError> {
+            Err(LlmError::Unsupported("test".into()))
+        }
+
+        fn supports_feature(&self, _: ProviderFeature) -> bool {
+            false
+        }
+    }
+
+    #[test]
+    fn request_model_resolution_falls_back_for_tier_aliases() {
+        let provider = DefaultAliasProvider;
+        let mut request = LlmRequest {
+            model: "opus".into(),
+            ..LlmRequest::default()
+        };
+        provider.resolve_request_model(&mut request);
+        assert_eq!(request.model, "provider-default");
     }
 }
 

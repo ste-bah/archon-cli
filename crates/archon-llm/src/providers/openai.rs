@@ -1,7 +1,3 @@
-/// OpenAI provider adapter implementing `LlmProvider`.
-///
-/// Translates between the provider-agnostic `LlmRequest`/`LlmResponse` types
-/// and the OpenAI Chat Completions API format.
 use async_trait::async_trait;
 use tokio::sync::mpsc::Receiver;
 
@@ -438,7 +434,8 @@ impl LlmProvider for OpenAiProvider {
         ]
     }
 
-    async fn stream(&self, request: LlmRequest) -> Result<Receiver<StreamEvent>, LlmError> {
+    async fn stream(&self, mut request: LlmRequest) -> Result<Receiver<StreamEvent>, LlmError> {
+        self.resolve_request_model(&mut request);
         self.do_stream(request).await
     }
 

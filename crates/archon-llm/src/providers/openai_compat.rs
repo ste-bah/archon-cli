@@ -354,7 +354,8 @@ impl LlmProvider for OpenAiCompatProvider {
         }]
     }
 
-    async fn complete(&self, request: LlmRequest) -> Result<LlmResponse, LlmError> {
+    async fn complete(&self, mut request: LlmRequest) -> Result<LlmResponse, LlmError> {
+        self.resolve_request_model(&mut request);
         let url = self.build_chat_url();
         let body = self.to_openai_wire(&request);
         let rb = self.http.post(&url).json(&body);
@@ -375,20 +376,18 @@ impl LlmProvider for OpenAiCompatProvider {
         Self::parse_chat_response(json)
     }
 
-    /// TASK-AGS-707: streaming chat for OpenAI-compatible providers.
-    ///
     /// Feature-gated on `descriptor.supports.streaming`. Delimiter dispatch
     /// uses `descriptor.quirks.stream_delimiter` — SSE vs NDJSON — so there
     /// is never a `match provider_id` inside the stream body (REQ-FOR-D6:
     /// adding a provider is a data-only change).
-    ///
     /// Spec deviation (documented in `tests/compat_stream_sse.rs`): the
     /// receiver carries `StreamEvent`, not `Result<StreamEvent, _>`, so
     /// mid-stream network errors are surfaced as `StreamEvent::Error`
     /// rather than as an `Err` on the channel. This matches the existing
     /// `OpenAiProvider::do_stream` pattern and the Anthropic-style
     /// `StreamEvent` enum the rest of the codebase consumes.
-    async fn stream(&self, request: LlmRequest) -> Result<Receiver<StreamEvent>, LlmError> {
+    async fn stream(&self, mut request: LlmRequest) -> Result<Receiver<StreamEvent>, LlmError> {
+        self.resolve_request_model(&mut request);
         // Feature gate FIRST — never touch the network if streaming is off.
         // Validation Criterion 6.
         if !self.descriptor.supports.streaming {

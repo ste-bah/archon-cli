@@ -258,14 +258,26 @@ impl ConversationState {
     }
 
     pub fn add_tool_result(&mut self, tool_use_id: &str, content: &str, is_error: bool) {
+        let result = serde_json::json!({
+            "type": "tool_result",
+            "tool_use_id": tool_use_id,
+            "content": content,
+            "is_error": is_error,
+        });
+        if let Some(last) = self.messages.last_mut()
+            && last.get("role").and_then(|v| v.as_str()) == Some("user")
+            && let Some(blocks) = last.get_mut("content").and_then(|v| v.as_array_mut())
+            && !blocks.is_empty()
+            && blocks
+                .iter()
+                .all(|block| block.get("type").and_then(|v| v.as_str()) == Some("tool_result"))
+        {
+            blocks.push(result);
+            return;
+        }
         self.messages.push(serde_json::json!({
             "role": "user",
-            "content": [{
-                "type": "tool_result",
-                "tool_use_id": tool_use_id,
-                "content": content,
-                "is_error": is_error,
-            }],
+            "content": [result],
         }));
     }
 
@@ -299,5 +311,25 @@ mod tests {
         assert_eq!(extra["archon_runtime"]["run_id"], "session-1");
         assert_eq!(extra["archon_runtime"]["agent_type"], "reviewer");
         assert_eq!(extra["archon_runtime"]["agent_version"], "1.0.0");
+    }
+
+    #[test]
+    fn conversation_state_batches_adjacent_tool_results() {
+        let mut state = ConversationState::default();
+        state.add_assistant_message(vec![serde_json::json!({
+            "type": "tool_use",
+            "id": "tool-1",
+            "name": "Read",
+            "input": {}
+        })]);
+
+        state.add_tool_result("tool-1", "one", false);
+        state.add_tool_result("tool-2", "two", false);
+
+        assert_eq!(state.messages.len(), 2);
+        let blocks = state.messages[1]["content"].as_array().unwrap();
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(blocks[0]["tool_use_id"], "tool-1");
+        assert_eq!(blocks[1]["tool_use_id"], "tool-2");
     }
 }
