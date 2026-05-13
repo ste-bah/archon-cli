@@ -101,12 +101,7 @@ pub async fn run(config: AppConfig) -> Result<(), io::Error> {
     result
 }
 
-/// Backend-injection seam for integration tests (TUI-327). Runs the shared
-/// event loop against a caller-owned `Terminal<B>` with **no terminal
-/// lifecycle setup** — the caller arranges raw mode / alternate screen /
-/// mouse capture as appropriate. Headless backends such as
-/// `ratatui::backend::TestBackend` use this entry point; production callers
-/// should use [`run`].
+/// Backend-injection seam for integration tests (TUI-327).
 pub async fn run_with_backend<B>(
     config: AppConfig,
     terminal: &mut ratatui::Terminal<B>,
@@ -126,17 +121,12 @@ pub struct App {
     pub theme: Theme,
     pub should_quit: bool,
     pub is_generating: bool,
-    /// Currently running tool name (shown in status bar, not output).
     pub active_tool: Option<String>,
-    /// Collapsible tool output blocks for the current turn.
     pub tool_outputs: Vec<ToolOutputState>,
-    /// Compact parent/subagent activity rows shown above the input.
     pub agent_activity: Vec<AgentActivityRow>,
-    /// Whether to display thinking text (toggle with /thinking).
+    pub activity_stream: crate::activity_stream::ActivityStreamState,
     pub show_thinking: bool,
-    /// Timestamp of last Esc press for double-Esc cancel detection.
     last_esc: Option<std::time::Instant>,
-    /// Show the splash screen until the first user input.
     pub show_splash: bool,
     /// Model name displayed on the splash screen.
     pub splash_model: String,
@@ -186,6 +176,7 @@ impl Default for App {
             active_tool: None,
             tool_outputs: Vec::new(),
             agent_activity: Vec::new(),
+            activity_stream: crate::activity_stream::ActivityStreamState::default(),
             show_thinking: false,
             last_esc: None,
             show_splash: true,
@@ -233,6 +224,7 @@ impl App {
             && self.search_results.is_none()
             && self.evidence_view.is_none()
             && self.vim_state.is_none()
+            && !self.activity_stream.is_foreground()
     }
 
     pub fn on_text_delta(&mut self, text: &str) {
@@ -240,6 +232,7 @@ impl App {
         if self.thinking.active {
             self.finish_thinking();
         }
+        self.push_parent_activity_text(text);
         self.output.append(text);
     }
 
@@ -311,6 +304,7 @@ impl App {
         if self.show_thinking {
             self.thinking.accumulated.push_str(text);
         }
+        self.push_parent_activity_thinking(text);
     }
 
     pub fn on_tool_start(&mut self, name: &str, id: &str) {
@@ -321,6 +315,7 @@ impl App {
         // is_generating is already set by GenerationStarted — not set here.
         self.active_tool = Some(name.to_string());
         self.tool_outputs.push(ToolOutputState::new(name, id));
+        self.push_parent_activity_tool_call(name);
         crate::agent_activity::tool_started(&mut self.agent_activity, name, id);
     }
 
@@ -333,6 +328,7 @@ impl App {
         if let Some(tool_state) = self.tool_outputs.iter_mut().rev().find(|t| t.tool_id == id) {
             tool_state.complete(output, !success);
         }
+        self.push_parent_activity_tool_result(name, output, !success);
         crate::agent_activity::tool_completed(&mut self.agent_activity, name, id, success);
         if !success {
             let truncated: String = output.chars().take(200).collect();
@@ -358,6 +354,7 @@ impl App {
         }
         self.is_generating = false;
         self.output.append_line("");
+        self.push_parent_activity_status("turn complete");
         crate::agent_activity::turn_completed(&mut self.agent_activity);
         // Reset thinking for the next turn.
         self.thinking.reset();
@@ -369,6 +366,7 @@ impl App {
         }
         self.output.append_line(&format!("[error] {message}"));
         self.is_generating = false;
+        self.push_parent_activity_error(message);
         crate::agent_activity::turn_failed(&mut self.agent_activity);
     }
 
@@ -385,6 +383,7 @@ impl App {
 
     pub fn on_generation_started(&mut self) {
         self.is_generating = true;
+        self.push_parent_activity_status("turn started");
         crate::agent_activity::turn_started(&mut self.agent_activity);
     }
 
@@ -393,6 +392,7 @@ impl App {
     }
 
     pub fn on_agent_activity(&mut self, update: AgentActivityUpdate) {
+        self.record_activity_update(&update);
         crate::agent_activity::apply_update(&mut self.agent_activity, update);
     }
 

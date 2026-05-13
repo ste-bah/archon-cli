@@ -82,4 +82,6 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
 
     // Overlays: Evidence Engine inspection views.
     evidence::draw_evidence_view(frame, app);
+
+    crate::activity_stream::draw_activity_overlay(frame, app);
 }

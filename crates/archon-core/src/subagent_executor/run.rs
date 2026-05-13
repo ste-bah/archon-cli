@@ -420,6 +420,7 @@ impl AgentSubagentExecutor {
         if let Some(effort) = def_effort {
             runner.set_effort(effort);
         }
+        runner.set_activity_actor(cache_id.clone(), activity_agent_type.clone());
 
         if let Some(ref def) = resolved_def
             && let Some(ref reminder) = def.critical_system_reminder

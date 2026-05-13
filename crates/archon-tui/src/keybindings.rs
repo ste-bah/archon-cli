@@ -40,6 +40,10 @@ pub enum Action {
     ToggleSplit,
     /// Ctrl+W = switch focus between panes.
     SwitchPane,
+    /// Ctrl+O = bring the live activity stream forward.
+    OpenActivity,
+    /// Ctrl+B = send the live activity stream back to the background.
+    BackgroundActivity,
     /// Shift+Tab = cycle permission mode.
     CyclePermissionMode,
     /// Tab = accept selected suggestion / autocomplete.
@@ -96,6 +100,14 @@ impl Default for KeyMap {
         bindings.insert(
             KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL),
             Action::SwitchPane,
+        );
+        bindings.insert(
+            KeyEvent::new(KeyCode::Char('o'), KeyModifiers::CONTROL),
+            Action::OpenActivity,
+        );
+        bindings.insert(
+            KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL),
+            Action::BackgroundActivity,
         );
 
         // Navigation / scroll
@@ -397,6 +409,20 @@ mod tests {
         let km = KeyMap::default();
         let key = KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL);
         assert_eq!(km.resolve(key), Some(&Action::SwitchPane));
+    }
+
+    #[test]
+    fn ctrl_o_opens_activity_stream() {
+        let km = KeyMap::default();
+        let key = KeyEvent::new(KeyCode::Char('o'), KeyModifiers::CONTROL);
+        assert_eq!(km.resolve(key), Some(&Action::OpenActivity));
+    }
+
+    #[test]
+    fn ctrl_b_backgrounds_activity_stream() {
+        let km = KeyMap::default();
+        let key = KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL);
+        assert_eq!(km.resolve(key), Some(&Action::BackgroundActivity));
     }
 
     #[test]

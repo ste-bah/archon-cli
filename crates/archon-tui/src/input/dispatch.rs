@@ -26,6 +26,10 @@ pub fn handle_key(app: &mut App, key: KeyEvent, keymap: &KeyMap) -> KeyResult {
         return KeyResult::Nothing;
     };
 
+    if app.activity_stream.is_foreground() {
+        return handle_activity_key(app, action);
+    }
+
     match action {
         Action::Quit => {
             // Ctrl+C and Ctrl+D both resolve to Quit. Distinguish by raw key.code.
@@ -52,6 +56,14 @@ pub fn handle_key(app: &mut App, key: KeyEvent, keymap: &KeyMap) -> KeyResult {
         }
         Action::SwitchPane => {
             app.panes.switch_focus();
+            KeyResult::Nothing
+        }
+        Action::OpenActivity => {
+            app.open_activity_stream();
+            KeyResult::Nothing
+        }
+        Action::BackgroundActivity => {
+            app.background_activity_stream();
             KeyResult::Nothing
         }
         Action::TabComplete => {
@@ -181,4 +193,19 @@ pub fn handle_key(app: &mut App, key: KeyEvent, keymap: &KeyMap) -> KeyResult {
             KeyResult::Nothing
         }
     }
+}
+
+fn handle_activity_key(app: &mut App, action: &Action) -> KeyResult {
+    match action {
+        Action::BackgroundActivity | Action::Escape => app.background_activity_stream(),
+        Action::OpenActivity => app.open_activity_stream(),
+        Action::ScrollUp => app.activity_stream.scroll_up(),
+        Action::ScrollDown => app.activity_stream.scroll_down(),
+        Action::ScrollTop => app.activity_stream.scroll_top(),
+        Action::ScrollBottom => app.activity_stream.scroll_bottom(),
+        Action::HistoryUp => app.activity_stream.select_prev(),
+        Action::HistoryDown => app.activity_stream.select_next(),
+        _ => {}
+    }
+    KeyResult::Nothing
 }

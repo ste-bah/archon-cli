@@ -143,6 +143,9 @@ pub(super) async fn handle_tui_event(
         TuiEvent::AgentActivity(update) => {
             app.on_agent_activity(update);
         }
+        TuiEvent::ActivityStream(update) => {
+            app.on_activity_stream_update(update);
+        }
         TuiEvent::SetVimMode(enabled) => {
             if enabled {
                 app.vim_state = Some(VimState::new());

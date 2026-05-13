@@ -13,7 +13,14 @@ impl archon_observability::AgentActivitySink for SessionActivitySink {
     fn emit(&self, event: archon_observability::AgentActivityEvent) {
         archon_observability::AgentActivitySink::emit(&self.jsonl, event.clone());
         if let Some(tx) = &self.tui_tx {
-            let _ = tx.send(TuiEvent::AgentActivity(event.into()));
+            let is_stream = archon_tui::events::is_activity_stream_payload(&event.message);
+            if is_stream {
+                let _ = tx.send(TuiEvent::ActivityStream(
+                    archon_tui::events::ActivityStreamUpdate::from_activity_event(event),
+                ));
+            } else {
+                let _ = tx.send(TuiEvent::AgentActivity(event.into()));
+            }
         }
     }
 }

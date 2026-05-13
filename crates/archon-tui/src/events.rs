@@ -1,16 +1,4 @@
-//! TuiEvent — the canonical event enum for archon-tui.
-//!
-//! All variants consumed by the TUI event loop are defined here so that
-//! downstream modules (`terminal.rs`, event loop handlers, etc.) do not
-//! need to depend on `app.rs` directly.
-//!
-//! TUI-330: `SessionPickerEntry` and `McpServerEntry` were moved here from
-//! `app.rs` to preserve the layer-0 direction invariant enforced by
-//! `scripts/check-tui-module-cycles.sh` (events.rs must not import from
-//! crate::app). `app.rs` re-exports these types with `pub use` so external
-//! consumers (e.g. `src/session.rs`, `src/command/slash.rs`, and the
-//! existing integration tests that reference `archon_tui::app::McpServerEntry`
-//! / `archon_tui::app::SessionPickerEntry`) keep compiling unchanged.
+//! Canonical TUI event enum and layer-0 payload types.
 
 /// A session entry for the /resume picker.
 ///
@@ -61,7 +49,6 @@ pub struct EvidenceRowPayload {
     pub detail: String,
 }
 
-/// Role badge for the compact activity rail at the bottom of the TUI.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AgentActivityRole {
     Parent,
@@ -69,7 +56,6 @@ pub enum AgentActivityRole {
     Background,
 }
 
-/// Lifecycle state for a parent agent, foreground subagent, or background task.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AgentActivityStatus {
     Queued,
@@ -82,9 +68,6 @@ pub enum AgentActivityStatus {
     Cancelled,
 }
 
-/// External activity update payload. The App also derives rows from
-/// ToolStart/ToolComplete so existing sessions get useful feedback without
-/// requiring a deeper core-runner bridge.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AgentActivityUpdate {
     pub id: String,
@@ -99,6 +82,111 @@ pub struct AgentActivityUpdate {
     pub provider: Option<String>,
     pub model: Option<String>,
     pub cost_usd: Option<f64>,
+}
+
+pub const ACTIVITY_STREAM_PREFIX: &str = "archon_activity_stream:";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActivityStreamLineKind {
+    Status,
+    Thinking,
+    Text,
+    ToolCall,
+    ToolResult,
+    FinalOutput,
+    Error,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ActivityStreamUpdate {
+    pub id: String,
+    pub name: String,
+    pub role: AgentActivityRole,
+    pub status: AgentActivityStatus,
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    pub kind: ActivityStreamLineKind,
+    pub text: String,
+    pub tool: Option<String>,
+    pub is_error: bool,
+}
+
+impl ActivityStreamUpdate {
+    pub fn from_activity_event(event: archon_observability::AgentActivityEvent) -> Self {
+        let base = AgentActivityUpdate::from(event.clone());
+        if let Some(payload) = activity_stream_payload(&event.message) {
+            return Self {
+                id: base.id,
+                name: base.name,
+                role: base.role,
+                status: base.status,
+                provider: base.provider,
+                model: base.model,
+                kind: payload.kind,
+                text: payload.text,
+                tool: payload.tool,
+                is_error: payload.is_error,
+            };
+        }
+        Self {
+            id: base.id,
+            name: base.name,
+            role: base.role,
+            status: base.status,
+            provider: base.provider,
+            model: base.model,
+            kind: ActivityStreamLineKind::Status,
+            text: base
+                .detail
+                .unwrap_or_else(|| format!("{:?}", base.status).to_lowercase()),
+            tool: base.current_tool,
+            is_error: matches!(
+                base.status,
+                AgentActivityStatus::Failed | AgentActivityStatus::Cancelled
+            ),
+        }
+    }
+}
+
+pub fn is_activity_stream_payload(message: &str) -> bool {
+    message.starts_with(ACTIVITY_STREAM_PREFIX)
+}
+
+struct ActivityPayload {
+    kind: ActivityStreamLineKind,
+    text: String,
+    tool: Option<String>,
+    is_error: bool,
+}
+
+fn activity_stream_payload(message: &str) -> Option<ActivityPayload> {
+    let raw = message.strip_prefix(ACTIVITY_STREAM_PREFIX)?;
+    let value: serde_json::Value = serde_json::from_str(raw).ok()?;
+    let kind = match value.get("kind")?.as_str()? {
+        "thinking" => ActivityStreamLineKind::Thinking,
+        "text" => ActivityStreamLineKind::Text,
+        "tool_call" => ActivityStreamLineKind::ToolCall,
+        "tool_result" => ActivityStreamLineKind::ToolResult,
+        "final" => ActivityStreamLineKind::FinalOutput,
+        "error" => ActivityStreamLineKind::Error,
+        _ => ActivityStreamLineKind::Status,
+    };
+    Some(ActivityPayload {
+        kind,
+        text: value
+            .get("text")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string(),
+        tool: value
+            .get("tool")
+            .and_then(|v| v.as_str())
+            .map(ToString::to_string),
+        is_error: value
+            .get("is_error")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+    })
 }
 
 impl From<archon_observability::AgentActivityEvent> for AgentActivityUpdate {
@@ -340,6 +428,8 @@ pub enum TuiEvent {
     },
     /// Update a visible parent/subagent/background activity row.
     AgentActivity(AgentActivityUpdate),
+    /// Append/update the foreground activity stream buffer.
+    ActivityStream(ActivityStreamUpdate),
     SetVimMode(bool),
     VimToggle,
     VoiceText(String),
@@ -388,6 +478,7 @@ impl TuiEvent {
             Self::OpenView(_) => "OpenView",
             Self::OpenViewRows { .. } => "OpenViewRows",
             Self::AgentActivity(_) => "AgentActivity",
+            Self::ActivityStream(_) => "ActivityStream",
             Self::SetVimMode(_) => "SetVimMode",
             Self::VimToggle => "VimToggle",
             Self::VoiceText(_) => "VoiceText",
@@ -403,54 +494,5 @@ impl TuiEvent {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn variant_name_labels_events_used_in_drain_forensics() {
-        assert_eq!(
-            TuiEvent::TextDelta("hello".into()).variant_name(),
-            "TextDelta"
-        );
-        assert_eq!(
-            TuiEvent::SessionRenamed("session".into()).variant_name(),
-            "SessionRenamed"
-        );
-        assert_eq!(
-            TuiEvent::AgentActivity(AgentActivityUpdate {
-                id: "agent-1".into(),
-                name: "Agent".into(),
-                role: AgentActivityRole::Subagent,
-                status: AgentActivityStatus::Running,
-                current_tool: None,
-                detail: None,
-                run_id: None,
-                parent_id: None,
-                artifact_id: None,
-                provider: Some("openai-codex".into()),
-                model: Some("gpt-5.4".into()),
-                cost_usd: Some(0.01),
-            })
-            .variant_name(),
-            "AgentActivity"
-        );
-    }
-
-    #[test]
-    fn agent_activity_update_uses_subagent_type_as_name() {
-        let update = AgentActivityUpdate::from(
-            archon_observability::AgentActivityEvent::new(
-                "session-1",
-                archon_observability::AgentActivityKind::AgentSpawned,
-                archon_observability::AgentActivityStatus::Running,
-                "running",
-            )
-            .with_subagent_id("subagent-1")
-            .with_subagent_type("sherlock-holmes"),
-        );
-
-        assert_eq!(update.id, "subagent-1");
-        assert_eq!(update.name, "sherlock-holmes");
-        assert_eq!(update.role, AgentActivityRole::Subagent);
-    }
-}
+#[path = "events_tests.rs"]
+mod tests;

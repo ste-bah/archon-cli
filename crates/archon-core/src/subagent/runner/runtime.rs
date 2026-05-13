@@ -200,15 +200,26 @@ impl SubagentRunner {
                     } => {
                         if block_type == ContentBlockType::ToolUse {
                             current_tool_index = Some(index);
+                            let name = tool_name.clone().unwrap_or_default();
+                            self.emit_activity_stream(
+                                "tool_call",
+                                format!("calling {name}"),
+                                Some(&name),
+                                false,
+                            );
                             pending_tools.push(PendingTool {
                                 id: tool_use_id.unwrap_or_default(),
-                                name: tool_name.unwrap_or_default(),
+                                name,
                                 input_json: String::new(),
                             });
                         }
                     }
                     StreamEvent::TextDelta { text, .. } => {
+                        self.emit_activity_stream("text", text.clone(), None, false);
                         text_content.push_str(&text);
+                    }
+                    StreamEvent::ThinkingDelta { thinking, .. } => {
+                        self.emit_activity_stream("thinking", thinking, None, false);
                     }
                     StreamEvent::InputJsonDelta {
                         index,
@@ -246,6 +257,7 @@ impl SubagentRunner {
                             retry_after_compact = true;
                             break;
                         }
+                        self.emit_activity_stream("error", message, None, true);
                         return Err(anyhow::Error::new(err));
                     }
                     StreamEvent::MessageStart { ref usage, .. } => {
@@ -288,6 +300,7 @@ impl SubagentRunner {
                         "content": text_content,
                     }));
                 }
+                self.emit_activity_stream("final", "subagent turn complete", None, false);
                 return Ok(text_content);
             }
 
@@ -384,6 +397,12 @@ impl SubagentRunner {
                     "content": result.content,
                     "is_error": result.is_error,
                 }));
+                self.emit_activity_stream(
+                    "tool_result",
+                    summarize_tool_output(&result.content),
+                    Some(&p.name),
+                    result.is_error,
+                );
             }
 
             // Add tool results as a user message
@@ -402,6 +421,22 @@ impl SubagentRunner {
             }
         }
 
+        self.emit_activity_stream(
+            "error",
+            format!("Subagent reached max turns ({})", self.max_turns),
+            None,
+            true,
+        );
         anyhow::bail!("Subagent reached max turns ({})", self.max_turns)
     }
+}
+
+fn summarize_tool_output(output: &str) -> String {
+    let trimmed = output.trim();
+    if trimmed.chars().count() <= 500 {
+        return trimmed.to_string();
+    }
+    let mut summary: String = trimmed.chars().take(500).collect();
+    summary.push_str("...");
+    summary
 }

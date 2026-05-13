@@ -15,6 +15,8 @@ mod runtime;
 #[cfg(test)]
 mod tests;
 
+const ACTIVITY_STREAM_PREFIX: &str = "archon_activity_stream:";
+
 /// A multi-turn subagent that streams LLM responses and dispatches tool calls.
 ///
 /// Unlike the one-shot approach, SubagentRunner loops:
@@ -43,6 +45,8 @@ pub struct SubagentRunner {
     subagent_manager: Option<Arc<tokio::sync::Mutex<super::SubagentManager>>>,
     /// AGT-026: This runner's agent ID (for draining its pending messages).
     runner_agent_id: Option<String>,
+    activity_actor_id: Option<String>,
+    activity_actor_name: Option<String>,
     /// Graceful shutdown flag (checked each turn).
     shutdown_flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// TASK-T3 (G4): per-agent progress tracker shared with SubagentManager.
@@ -93,6 +97,8 @@ impl SubagentRunner {
             initial_messages: None,
             subagent_manager: None,
             runner_agent_id: None,
+            activity_actor_id: None,
+            activity_actor_name: None,
             shutdown_flag: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             progress: None,
             agent_config,
@@ -117,6 +123,11 @@ impl SubagentRunner {
     ) {
         self.subagent_manager = Some(manager);
         self.runner_agent_id = Some(agent_id);
+    }
+
+    pub fn set_activity_actor(&mut self, actor_id: String, actor_name: String) {
+        self.activity_actor_id = Some(actor_id);
+        self.activity_actor_name = Some(actor_name);
     }
 
     /// Set the shutdown flag (shared with SubagentManager for graceful shutdown).
@@ -176,5 +187,40 @@ impl SubagentRunner {
         if let (Some(store), Some(aid)) = (&self.transcript_store, &self.transcript_agent_id) {
             store.record_message(aid, message);
         }
+    }
+
+    fn emit_activity_stream(
+        &self,
+        kind: &str,
+        text: impl Into<String>,
+        tool: Option<&str>,
+        is_error: bool,
+    ) {
+        let Some(sink) = &self.tool_context.activity_sink else {
+            return;
+        };
+        let Some(actor_id) = &self.activity_actor_id else {
+            return;
+        };
+        let payload = serde_json::json!({
+            "kind": kind,
+            "text": text.into(),
+            "tool": tool,
+            "is_error": is_error,
+        });
+        let event = archon_observability::AgentActivityEvent::new(
+            self.tool_context.session_id.clone(),
+            archon_observability::AgentActivityKind::AgentRunning,
+            archon_observability::AgentActivityStatus::Running,
+            format!("{ACTIVITY_STREAM_PREFIX}{payload}"),
+        )
+        .with_subagent_id(actor_id.clone())
+        .with_subagent_type(
+            self.activity_actor_name
+                .clone()
+                .unwrap_or_else(|| "subagent".into()),
+        )
+        .with_provider_model(self.provider.name(), self.model.clone());
+        sink.emit(event);
     }
 }
