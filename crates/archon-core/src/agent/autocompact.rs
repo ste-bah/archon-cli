@@ -43,11 +43,10 @@ impl AutoCompactState {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CompactionOutcome {
     Compacted {
         before_tokens: u64,
-        #[serde(alias = "after_tokens")]
         after_estimated_tokens: u64,
         messages_before: usize,
         messages_after: usize,
@@ -350,8 +349,29 @@ pub async fn generate_compaction_summary_structured(
 }
 
 fn is_cancelled_stream_error(error_type: &str, message: &str) -> bool {
-    let haystack = format!("{error_type} {message}").to_ascii_lowercase();
-    haystack.contains("cancel") || haystack.contains("abort")
+    let error_type = error_type.trim().to_ascii_lowercase();
+    if matches!(
+        error_type.as_str(),
+        "cancelled"
+            | "canceled"
+            | "user_cancelled"
+            | "user_canceled"
+            | "client_cancelled"
+            | "client_canceled"
+            | "operation_cancelled"
+            | "operation_canceled"
+            | "request_cancelled"
+            | "request_canceled"
+    ) {
+        return true;
+    }
+    let message = message.trim().to_ascii_lowercase();
+    message.contains("cancelled by user")
+        || message.contains("canceled by user")
+        || message.contains("user cancelled")
+        || message.contains("user canceled")
+        || message.contains("aborted by user")
+        || message.contains("user aborted")
 }
 
 pub fn compact_json_messages_apply_with_summary(
@@ -460,5 +480,15 @@ mod tests {
         state.on_real_failure();
         assert_eq!(state.consecutive_failures, 1);
         assert!(!state.disabled);
+    }
+
+    #[test]
+    fn cancelled_stream_classification_is_specific() {
+        assert!(is_cancelled_stream_error("request_cancelled", ""));
+        assert!(is_cancelled_stream_error("", "operation cancelled by user"));
+        assert!(!is_cancelled_stream_error(
+            "http_error",
+            "request aborted by upstream proxy"
+        ));
     }
 }

@@ -31,6 +31,7 @@ use crate::subagent::SubagentManager;
 
 pub mod autocompact;
 mod compaction;
+mod compaction_serde;
 mod events;
 mod lifecycle;
 mod memory_integration;

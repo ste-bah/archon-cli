@@ -106,7 +106,11 @@ impl PromptBudget {
         }
         let usable = context_window.saturating_sub(config.output_reserve_tokens as usize);
         let fraction = (config.compact_threshold - config.preflight_safety_margin).clamp(0.0, 1.0);
-        let retry_factor = if attempt > 1 { 4.0 / 5.0 } else { 1.0 };
+        let retry_factor = if attempt > 1 {
+            config.compact_threshold.clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
         Self {
             context_window,
             max_prompt_tokens: (usable as f32 * fraction * retry_factor) as usize,
@@ -144,7 +148,9 @@ pub fn truncate_prompt(
     layers: Vec<PromptLayer>,
     model_context_window: usize,
 ) -> Result<TruncatedPrompt> {
-    truncate_prompt_to_budget(layers, model_context_window * 4 / 5)
+    let config = archon_core::config::ContextConfig::default();
+    let budget = PromptBudget::from_context_config(model_context_window, &config, 1);
+    truncate_prompt_to_budget(layers, budget.max_prompt_tokens)
 }
 
 pub fn truncate_prompt_to_budget(

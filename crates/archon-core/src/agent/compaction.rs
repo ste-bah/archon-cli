@@ -99,14 +99,7 @@ impl Agent {
             Some("micro") => Some(archon_context::boundary::CompactionStrategy::Micro),
             Some("snip") => Some(archon_context::boundary::CompactionStrategy::Snip),
             Some("auto") | None => {
-                let active_model = {
-                    let override_model = self.config.model_override.lock().await;
-                    if override_model.is_empty() {
-                        self.config.model.clone()
-                    } else {
-                        override_model.clone()
-                    }
-                };
+                let active_model = self.active_model_for_compaction().await;
                 let context_window = self.context_window_for(&active_model);
                 let usage_ratio = before_tokens as f32 / context_window as f32;
                 select_strategy(usage_ratio)
@@ -170,7 +163,18 @@ impl Agent {
             archon_context::boundary::CompactionStrategy::Micro
             | archon_context::boundary::CompactionStrategy::Auto => {
                 // Both Micro and Auto need an LLM-generated summary.
-                let mut summary_text = self.generate_compaction_summary(&context_msgs).await;
+                let active_model = self.active_model_for_compaction().await;
+                let mut summary_text =
+                    match super::autocompact::generate_compaction_summary_structured(
+                        self.client.as_ref(),
+                        &active_model,
+                        &self.state.messages,
+                    )
+                    .await
+                    {
+                        Ok(summary) => summary,
+                        Err(err) => return format!("Compaction failed: {err}"),
+                    };
 
                 // Wire 4: Inject active plan context into compaction summary.
                 if let Some(ref plan_store) = self.plan_store
@@ -248,6 +252,13 @@ impl Agent {
         // Compute post-compaction token count
         let after_tokens: u64 = result_messages.iter().map(|m| m.estimated_tokens).sum();
         let tokens_removed = before_tokens.saturating_sub(after_tokens);
+        let outcome = super::autocompact::CompactionOutcome::Compacted {
+            before_tokens,
+            after_estimated_tokens: after_tokens,
+            messages_before: message_count,
+            messages_after: result_messages.len(),
+        };
+        let outcome_json = serde_json::to_value(&outcome).unwrap_or(serde_json::Value::Null);
 
         // Fire PostCompact hook
         if let Some(ref registry) = self.hook_registry {
@@ -256,6 +267,7 @@ impl Agent {
                 "strategy": strategy_label,
                 "tokens_removed": tokens_removed,
                 "tokens_remaining": after_tokens,
+                "outcome": outcome_json,
             });
             registry
                 .execute_hooks(
@@ -276,70 +288,73 @@ impl Agent {
         )
     }
 
-    /// Generate an LLM summary of the conversation for compaction.
-    ///
-    /// Builds the summary request via [`build_compact_summary_request`], sends it
-    /// to the LLM provider, and collects the response text. Falls back to the
-    /// first user message if the LLM call fails.
-    async fn generate_compaction_summary(
-        &self,
-        context_msgs: &[archon_context::messages::ContextMessage],
-    ) -> String {
-        use crate::commands::build_compact_summary_request;
+    async fn active_model_for_compaction(&self) -> String {
+        let override_model = self.config.model_override.lock().await;
+        if override_model.is_empty() {
+            self.config.model.clone()
+        } else {
+            override_model.clone()
+        }
+    }
+}
 
-        let summary_request_msgs = build_compact_summary_request(context_msgs);
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use archon_llm::provider::{LlmError, LlmResponse, ModelInfo, ProviderFeature};
 
-        // Convert ContextMessages to JSON messages for LlmRequest
-        let json_messages: Vec<serde_json::Value> = summary_request_msgs
-            .iter()
-            .map(|cm| {
-                serde_json::json!({
-                    "role": cm.role,
-                    "content": cm.content,
-                })
-            })
+    struct FailingSummaryProvider;
+
+    #[async_trait::async_trait]
+    impl LlmProvider for FailingSummaryProvider {
+        fn name(&self) -> &str {
+            "failing-summary"
+        }
+
+        fn models(&self) -> Vec<ModelInfo> {
+            vec![]
+        }
+
+        async fn stream(
+            &self,
+            _request: LlmRequest,
+        ) -> Result<tokio::sync::mpsc::Receiver<StreamEvent>, LlmError> {
+            Err(LlmError::Http("summary provider down".into()))
+        }
+
+        async fn complete(&self, _request: LlmRequest) -> Result<LlmResponse, LlmError> {
+            unreachable!("manual compaction uses streaming summaries")
+        }
+
+        fn supports_feature(&self, _feature: ProviderFeature) -> bool {
+            false
+        }
+    }
+
+    fn test_agent() -> Agent {
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        Agent::new(
+            Arc::new(FailingSummaryProvider),
+            ToolRegistry::new(),
+            AgentConfig::default(),
+            tx,
+            Arc::new(std::sync::RwLock::new(AgentRegistry::load(
+                &std::env::temp_dir(),
+            ))),
+        )
+    }
+
+    #[tokio::test]
+    async fn manual_compact_reports_summary_failure_without_synthetic_fallback() {
+        let mut agent = test_agent();
+        agent.state.messages = (0..6)
+            .map(|i| serde_json::json!({"role": "user", "content": format!("message {i}")}))
             .collect();
 
-        let request = LlmRequest {
-            model: self.config.model.clone(),
-            max_tokens: 2048,
-            system: vec![serde_json::json!({
-                "type": "text",
-                "text": archon_context::compact::SUMMARY_PROMPT,
-            })],
-            messages: json_messages,
-            tools: Vec::new(),
-            thinking: None,
-            speed: Some("fast".to_string()),
-            effort: Some("low".to_string()),
-            extra: serde_json::Value::Null,
-            request_origin: None,
-            reasoning_encrypted: None,
-        };
+        let status = agent.compact(Some("micro")).await;
 
-        match self.client.stream(request).await {
-            Ok(mut rx) => {
-                let mut response_text = String::new();
-                while let Some(event) = rx.recv().await {
-                    if let StreamEvent::TextDelta { text, .. } = event {
-                        response_text.push_str(&text);
-                    }
-                }
-                if response_text.is_empty() {
-                    tracing::warn!(
-                        "LLM returned empty summary; falling back to first user message"
-                    );
-                    self.state.first_user_message().to_string()
-                } else {
-                    response_text
-                }
-            }
-            Err(e) => {
-                tracing::warn!(
-                    "compaction summary LLM call failed: {e}; falling back to first user message"
-                );
-                self.state.first_user_message().to_string()
-            }
-        }
+        assert!(status.contains("Compaction failed: provider summary failed"));
+        assert!(!status.contains("Compacted conversation"));
+        assert_eq!(agent.state.messages.len(), 6);
     }
 }

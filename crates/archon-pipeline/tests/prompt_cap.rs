@@ -2,9 +2,12 @@
 //!
 //! These tests verify that `archon_pipeline::prompt_cap` correctly counts tokens,
 //! truncates prompt layers by priority, respects required-layer guarantees, and
-//! keeps the assembled prompt within 80 % of the model context window.
+//! keeps the assembled prompt within the configured default prompt budget.
 
-use archon_pipeline::prompt_cap::{PromptLayer, TruncationPriority, count_tokens, truncate_prompt};
+use archon_core::config::ContextConfig;
+use archon_pipeline::prompt_cap::{
+    PromptBudget, PromptLayer, TruncationPriority, count_tokens, truncate_prompt,
+};
 
 // ---------------------------------------------------------------------------
 // Helper
@@ -27,6 +30,10 @@ fn make_layer(
     }
 }
 
+fn default_budget(window: usize) -> usize {
+    PromptBudget::from_context_config(window, &ContextConfig::default(), 1).max_prompt_tokens
+}
+
 // ---------------------------------------------------------------------------
 // 1. count_tokens — basic
 // ---------------------------------------------------------------------------
@@ -47,12 +54,12 @@ fn test_count_tokens_empty() {
 }
 
 // ---------------------------------------------------------------------------
-// 3. No truncation when everything fits within 80 %
+// 3. No truncation when everything fits within the configured budget
 // ---------------------------------------------------------------------------
 
 #[test]
 fn test_no_truncation_when_under_limit() {
-    let window = 100_000; // 80 % = 80 000 tokens
+    let window = 100_000;
     let layers = vec![
         make_layer("base_prompt", 10_000, TruncationPriority::Required, true),
         make_layer("task_context", 10_000, TruncationPriority::Required, true),
@@ -69,14 +76,14 @@ fn test_no_truncation_when_under_limit() {
 
     assert!(
         result.removed_layers.is_empty(),
-        "no layers should be removed when total fits within 80 %"
+        "no layers should be removed when total fits within the configured budget"
     );
     assert!(
         result.truncated_layers.is_empty(),
-        "no layers should be truncated when total fits within 80 %"
+        "no layers should be truncated when total fits within the configured budget"
     );
     assert_eq!(result.layers.len(), 4);
-    assert!(result.total_tokens <= (window * 80) / 100);
+    assert!(result.total_tokens <= default_budget(window));
 }
 
 #[test]
@@ -105,7 +112,7 @@ fn test_unknown_context_window_preserves_prompt() {
 
 #[test]
 fn test_truncation_removes_lowest_priority_first() {
-    let window = 100_000; // budget = 80 000 tokens
+    let window = 100_000;
     let layers = vec![
         make_layer("base_prompt", 30_000, TruncationPriority::Required, true),
         make_layer("task_context", 30_000, TruncationPriority::Required, true),
@@ -126,7 +133,7 @@ fn test_truncation_removes_lowest_priority_first() {
         result.removed_layers.contains(&"leann_context".to_string()),
         "leann_context should be removed first (lowest priority)"
     );
-    assert!(result.total_tokens <= (window * 80) / 100);
+    assert!(result.total_tokens <= default_budget(window));
 }
 
 // ---------------------------------------------------------------------------
@@ -135,7 +142,7 @@ fn test_truncation_removes_lowest_priority_first() {
 
 #[test]
 fn test_required_layers_never_removed() {
-    let window = 100_000; // budget = 80 000
+    let window = 100_000;
     let layers = vec![
         make_layer("base_prompt", 50_000, TruncationPriority::Required, true),
         make_layer("task_context", 50_000, TruncationPriority::Required, true),
@@ -178,7 +185,7 @@ fn test_required_layers_never_removed() {
 
 #[test]
 fn test_ec_pipe_003_all_layers_exceed() {
-    let window = 100_000; // budget = 80 000
+    let window = 100_000;
     let layers = vec![
         make_layer("base_prompt", 20_000, TruncationPriority::Required, true),
         make_layer("task_context", 20_000, TruncationPriority::Required, true),
@@ -232,7 +239,7 @@ fn test_ec_pipe_003_all_layers_exceed() {
             false,
         ),
     ];
-    // Total = 130 000 tokens, budget = 80 000
+    // Total = 130 000 tokens, over the configured budget
 
     let result = truncate_prompt(layers, window).expect("truncate_prompt should succeed");
 
@@ -243,10 +250,10 @@ fn test_ec_pipe_003_all_layers_exceed() {
 
     // Total must be within budget
     assert!(
-        result.total_tokens <= (window * 80) / 100,
+        result.total_tokens <= default_budget(window),
         "total_tokens {} should be <= {}",
         result.total_tokens,
-        (window * 80) / 100
+        default_budget(window)
     );
 }
 
@@ -256,12 +263,12 @@ fn test_ec_pipe_003_all_layers_exceed() {
 
 #[test]
 fn test_ec_pipe_003_required_layers_exceed_limit() {
-    let window = 100_000; // budget = 80 000
+    let window = 100_000;
     let layers = vec![
         make_layer("base_prompt", 30_000, TruncationPriority::Required, true),
         make_layer("task_context", 60_000, TruncationPriority::Required, true),
     ];
-    // Total required = 90 000, budget = 80 000 → task_context must be truncated
+    // Total required exceeds the configured budget, so task_context must be truncated.
 
     let result = truncate_prompt(layers, window).expect("truncate_prompt should succeed");
 
@@ -287,10 +294,10 @@ fn test_ec_pipe_003_required_layers_exceed_limit() {
     );
 
     assert!(
-        result.total_tokens <= (window * 80) / 100,
+        result.total_tokens <= default_budget(window),
         "total_tokens {} should be <= {}",
         result.total_tokens,
-        (window * 80) / 100
+        default_budget(window)
     );
 }
 
@@ -300,11 +307,11 @@ fn test_ec_pipe_003_required_layers_exceed_limit() {
 
 #[test]
 fn test_partial_truncation_within_priority() {
-    let window = 100_000; // budget = 80 000
-    // Required layers take 70 000, leaving 10 000 for the optional layer of 15 000
+    let window = 100_000;
+    // Required layers leave room for the optional layer to be truncated, not removed.
     let layers = vec![
-        make_layer("base_prompt", 35_000, TruncationPriority::Required, true),
-        make_layer("task_context", 35_000, TruncationPriority::Required, true),
+        make_layer("base_prompt", 30_000, TruncationPriority::Required, true),
+        make_layer("task_context", 30_000, TruncationPriority::Required, true),
         make_layer(
             "leann_semantic",
             15_000,
@@ -343,7 +350,7 @@ fn test_partial_truncation_within_priority() {
         "partial truncation should leave some content"
     );
 
-    assert!(result.total_tokens <= (window * 80) / 100);
+    assert!(result.total_tokens <= default_budget(window));
 }
 
 // ---------------------------------------------------------------------------
@@ -352,10 +359,10 @@ fn test_partial_truncation_within_priority() {
 
 #[test]
 fn test_truncated_prompt_reports_removed_and_truncated() {
-    let window = 100_000; // budget = 80 000
+    let window = 100_000;
     let layers = vec![
-        make_layer("base_prompt", 35_000, TruncationPriority::Required, true),
-        make_layer("task_context", 35_000, TruncationPriority::Required, true),
+        make_layer("base_prompt", 32_000, TruncationPriority::Required, true),
+        make_layer("task_context", 33_000, TruncationPriority::Required, true),
         // This one will be fully removed (lowest priority = LeannSemanticContext, ordinal 1)
         make_layer(
             "leann_semantic",
@@ -383,7 +390,7 @@ fn test_truncated_prompt_reports_removed_and_truncated() {
         "at least one of removed_layers or truncated_layers should be populated"
     );
 
-    assert!(result.total_tokens <= (window * 80) / 100);
+    assert!(result.total_tokens <= default_budget(window));
 }
 
 // ---------------------------------------------------------------------------
@@ -405,15 +412,15 @@ fn test_empty_layers_handled_gracefully() {
     ];
 
     let result = truncate_prompt(layers, window).expect("empty layer must not cause a panic");
-    assert!(result.total_tokens <= (window * 80) / 100);
+    assert!(result.total_tokens <= default_budget(window));
 }
 
 // ---------------------------------------------------------------------------
-// 10. After truncation, total_tokens <= 80 % of model_context_window
+// 10. After truncation, total_tokens <= configured prompt budget
 // ---------------------------------------------------------------------------
 
 #[test]
-fn test_prompt_fits_80_percent() {
+fn test_prompt_fits_configured_budget() {
     let window = 100_000;
     // Deliberately overshoot
     let layers = vec![
@@ -433,14 +440,14 @@ fn test_prompt_fits_80_percent() {
             false,
         ),
     ];
-    // Total = 100 000, budget = 80 000
+    // Total = 100 000, over the configured budget
 
     let result = truncate_prompt(layers, window).expect("truncate_prompt should succeed");
 
-    let budget = (window * 80) / 100;
+    let budget = default_budget(window);
     assert!(
         result.total_tokens <= budget,
-        "total_tokens ({}) must be <= 80% of window ({})",
+        "total_tokens ({}) must be <= configured budget ({})",
         result.total_tokens,
         budget
     );
