@@ -5,7 +5,7 @@ export async function mockApi(page: Page) {
   const responses: Record<string, unknown> = {
     "/api/status": {
       status: "ok",
-      version: "1.2.6",
+      version: "1.2.7",
       web: {
         bindAddress: "127.0.0.1",
         port: 8421,

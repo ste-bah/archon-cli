@@ -24,6 +24,7 @@ pub(crate) struct SlashCommandContext {
     pub(crate) effort_level_shared: Arc<tokio::sync::Mutex<EffortLevel>>,
     pub(crate) model_override_shared: Arc<tokio::sync::Mutex<String>>,
     pub(crate) default_model: String,
+    pub(crate) context_window: u64,
     pub(crate) show_thinking: Arc<AtomicBool>,
     pub(crate) session_stats: Arc<tokio::sync::Mutex<SessionStats>>,
     pub(crate) permission_mode: Arc<tokio::sync::Mutex<String>>,

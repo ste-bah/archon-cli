@@ -472,7 +472,7 @@ impl LlmProvider for VertexProvider {
         vec![ModelInfo {
             id: self.model.clone(),
             display_name: self.model.clone(),
-            context_window: 200_000,
+            context_window: 0,
         }]
     }
 

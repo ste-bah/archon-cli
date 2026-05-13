@@ -13,12 +13,18 @@ pub fn sanitize_anthropic_shape(messages: Vec<Value>) -> Vec<Value> {
     let mut sanitized = Vec::with_capacity(messages.len());
     for mut message in messages {
         normalize_message_role(&mut message);
-        if has_tool_result(&message)
-            && !previous_assistant_has_tool_uses(sanitized.last(), &message)
-        {
-            message = orphan_tool_result_as_text(&message);
-        }
         sanitized.push(message);
+    }
+
+    sanitized = merge_consecutive_tool_result_messages(sanitized);
+
+    for i in 0..sanitized.len() {
+        let previous = i.checked_sub(1).and_then(|idx| sanitized.get(idx));
+        if has_tool_result(&sanitized[i])
+            && !previous_assistant_has_tool_uses(previous, &sanitized[i])
+        {
+            sanitized[i] = orphan_tool_result_as_text(&sanitized[i]);
+        }
     }
 
     for i in 0..sanitized.len() {
@@ -34,6 +40,25 @@ pub fn sanitize_anthropic_shape(messages: Vec<Value>) -> Vec<Value> {
     sanitized
 }
 
+fn merge_consecutive_tool_result_messages(messages: Vec<Value>) -> Vec<Value> {
+    let mut merged: Vec<Value> = Vec::with_capacity(messages.len());
+    for mut message in messages {
+        if message_content_is_all_tool_results(&message)
+            && let Some(previous) = merged.last_mut()
+            && message_content_is_all_tool_results(previous)
+        {
+            let blocks = take_content_blocks(&mut message);
+            if let Some(previous_blocks) = previous.get_mut("content").and_then(Value::as_array_mut)
+            {
+                previous_blocks.extend(blocks);
+            }
+        } else {
+            merged.push(message);
+        }
+    }
+    merged
+}
+
 fn normalize_message_role(message: &mut Value) {
     let role = message
         .get("role")
@@ -42,6 +67,27 @@ fn normalize_message_role(message: &mut Value) {
     if !matches!(role, "user" | "assistant") {
         message["role"] = Value::String("user".into());
     }
+}
+
+fn message_content_is_all_tool_results(message: &Value) -> bool {
+    if message.get("role").and_then(|v| v.as_str()) != Some("user") {
+        return false;
+    }
+    let Some(blocks) = message.get("content").and_then(Value::as_array) else {
+        return false;
+    };
+    !blocks.is_empty()
+        && blocks
+            .iter()
+            .all(|block| block.get("type").and_then(|v| v.as_str()) == Some("tool_result"))
+}
+
+fn take_content_blocks(message: &mut Value) -> Vec<Value> {
+    message
+        .get_mut("content")
+        .and_then(Value::as_array_mut)
+        .map(std::mem::take)
+        .unwrap_or_default()
 }
 
 fn has_tool_result(message: &Value) -> bool {
@@ -194,6 +240,23 @@ fn demote_orphan_tool_uses_to_text(message: &mut Value, next_result_ids: &[Strin
 mod tests {
     use super::*;
 
+    fn assistant_with_tool_uses(ids: &[&str]) -> Value {
+        let blocks = ids
+            .iter()
+            .map(
+                |id| serde_json::json!({"type": "tool_use", "id": id, "name": "Bash", "input": {}}),
+            )
+            .collect::<Vec<_>>();
+        serde_json::json!({"role": "assistant", "content": blocks})
+    }
+
+    fn user_tool_result(id: &str) -> Value {
+        serde_json::json!({
+            "role": "user",
+            "content": [{"type": "tool_result", "tool_use_id": id, "content": "ok"}]
+        })
+    }
+
     #[test]
     fn sanitizer_converts_system_messages_to_user() {
         let messages = sanitize_anthropic_shape(vec![serde_json::json!({
@@ -297,5 +360,104 @@ mod tests {
 
         assert_eq!(messages[0]["content"][0]["type"], "text");
         assert!(messages[2]["content"].as_str().unwrap().contains("tool-1"));
+    }
+
+    #[test]
+    fn merges_two_consecutive_tool_result_only_user_messages() {
+        let messages = sanitize_anthropic_shape(vec![
+            assistant_with_tool_uses(&["tool-1", "tool-2"]),
+            user_tool_result("tool-1"),
+            user_tool_result("tool-2"),
+        ]);
+
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0]["content"][0]["type"], "tool_use");
+        assert_eq!(messages[0]["content"][1]["type"], "tool_use");
+        assert_eq!(messages[1]["content"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn does_not_merge_when_intervening_assistant() {
+        let messages = sanitize_anthropic_shape(vec![
+            user_tool_result("tool-1"),
+            serde_json::json!({"role": "assistant", "content": "between"}),
+            user_tool_result("tool-2"),
+        ]);
+
+        assert_eq!(messages.len(), 3);
+    }
+
+    #[test]
+    fn does_not_merge_when_user_has_text_block() {
+        let messages = sanitize_anthropic_shape(vec![
+            serde_json::json!({
+                "role": "assistant",
+                "content": [{"type": "tool_use", "id": "tool-1", "name": "Read", "input": {}}]
+            }),
+            serde_json::json!({
+                "role": "user",
+                "content": [
+                    {"type": "tool_result", "tool_use_id": "tool-1", "content": "ok"},
+                    {"type": "text", "text": "keep adjacent"}
+                ]
+            }),
+            user_tool_result("tool-2"),
+        ]);
+
+        assert_eq!(messages.len(), 3);
+    }
+
+    #[test]
+    fn merges_three_consecutive_runs() {
+        let messages = sanitize_anthropic_shape(vec![
+            assistant_with_tool_uses(&["tool-1", "tool-2", "tool-3"]),
+            user_tool_result("tool-1"),
+            user_tool_result("tool-2"),
+            user_tool_result("tool-3"),
+        ]);
+
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[1]["content"].as_array().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn unaffected_when_no_runs() {
+        let messages = sanitize_anthropic_shape(vec![
+            assistant_with_tool_uses(&["tool-1"]),
+            user_tool_result("tool-1"),
+            serde_json::json!({"role": "assistant", "content": "done"}),
+        ]);
+
+        assert_eq!(messages.len(), 3);
+        assert_eq!(messages[1]["content"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn interacts_correctly_with_orphan_tool_use_pass() {
+        let messages = sanitize_anthropic_shape(vec![
+            serde_json::json!({"role": "user", "content": "initial prompt"}),
+            user_tool_result("tool-orphan"),
+            assistant_with_tool_uses(&["tool-agent"]),
+            user_tool_result("tool-agent"),
+            assistant_with_tool_uses(&["tool-bash-1", "tool-bash-2"]),
+            user_tool_result("tool-bash-1"),
+            user_tool_result("tool-bash-2"),
+            serde_json::json!({"role": "user", "content": "try again"}),
+            serde_json::json!({"role": "user", "content": "try using again"}),
+            serde_json::json!({"role": "user", "content": "why did you error"}),
+            serde_json::json!({"role": "user", "content": "retry"}),
+            serde_json::json!({"role": "user", "content": "continue"}),
+        ]);
+
+        assert_eq!(messages.len(), 11);
+        assert!(
+            messages[1]["content"]
+                .as_str()
+                .unwrap()
+                .contains("tool-orphan")
+        );
+        assert_eq!(messages[4]["content"][0]["type"], "tool_use");
+        assert_eq!(messages[4]["content"][1]["type"], "tool_use");
+        assert_eq!(messages[5]["content"].as_array().unwrap().len(), 2);
     }
 }

@@ -108,10 +108,11 @@ impl SubagentRunner {
             let (max_tokens, thinking, speed) =
                 self.agent_config.build_base_request_fields(&self.model);
 
-            let window = archon_llm::context_window::resolve_context_window(
+            let window = archon_llm::context_window::resolve_context_window_for_work_dir(
                 &self.model,
                 self.agent_config.context.max_tokens.map(u64::from),
                 Some(self.provider.as_ref()),
+                Some(&self.agent_config.working_dir),
             )
             .context_window;
             if let Some(action) = crate::agent::evaluate_compaction(

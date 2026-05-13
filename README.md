@@ -166,9 +166,9 @@ archon-cli/
 
 ## Status
 
-- Current version: **v1.2.6** ([release notes](docs/release-notes/v1.2.6.md))
+- Current version: **v1.2.7** ([release notes](docs/release-notes/v1.2.7.md))
 - Stable release for local world-model advisory learning, first-class reasoning-quality events, provider runtime governance, Cozo-backed agent evolution, permission preflight, and sandbox routing
-- v1.2.6 makes message repair symmetric across Anthropic-shape and Codex Responses paths: orphan `tool_use` blocks demote safely, missing Codex `function_call_output` items become `"aborted"`, tool postprocessing fills missing tool results atomically after partial dispatch, and Anthropic, Bedrock, and Vertex share the same message-invariant sanitizer.
+- v1.2.7 repairs older resumed sessions with split `tool_result` user messages, keeps new tool results batched atomically, and moves model context-window limits into an overridable `context.toml` catalog for Claude, Codex, third-party, and local models.
 
 ## Contributing
 

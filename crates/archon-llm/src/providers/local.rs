@@ -245,7 +245,7 @@ impl LlmProvider for LocalProvider {
         vec![ModelInfo {
             id: self.model.clone(),
             display_name: self.model.clone(),
-            context_window: 128_000,
+            context_window: 0,
         }]
     }
 

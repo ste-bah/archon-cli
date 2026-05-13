@@ -40,7 +40,7 @@
 //! # Byte-for-byte output preservation
 //!
 //! Every emitted value mirrors the deleted slash.rs:267-331 body:
-//! - `context_limit` = shared fallback context-window budget.
+//! - `context_limit` = resolved startup model context window when known.
 //! - `bar_width` = 40 chars, filled with `#` and padded with `-`.
 //! - Percent formatted as `{pct:.1}%`, clamped to 100.0.
 //! - `fmt_tok` helper: thousand-suffix `{:.1}k` or raw `{:.0}` digits.
@@ -70,7 +70,6 @@
 
 use crate::command::registry::{CommandContext, CommandHandler};
 use crate::slash_context::SlashCommandContext;
-use archon_llm::context_window::FALLBACK_CONTEXT_WINDOW;
 use archon_tui::app::TuiEvent;
 
 /// Owned snapshot of every value the /context body reads from shared
@@ -102,6 +101,8 @@ pub(crate) struct ContextSnapshot {
     /// copied from `SlashCommandContext::tool_defs_chars` (Copy usize —
     /// no lock required).
     pub(crate) tool_defs_chars: usize,
+    /// Resolved context window for the active startup model. Zero means unknown.
+    pub(crate) context_window: u64,
 }
 
 /// Build a [`ContextSnapshot`] by awaiting a single
@@ -127,6 +128,7 @@ pub(crate) async fn build_context_snapshot(slash_ctx: &SlashCommandContext) -> C
         // a single consistent view.
         system_prompt_chars: slash_ctx.system_prompt_chars,
         tool_defs_chars: slash_ctx.tool_defs_chars,
+        context_window: slash_ctx.context_window,
     }
 }
 
@@ -173,8 +175,12 @@ impl CommandHandler for ContextHandler {
         // Total estimated context = fixed overhead + conversation.
         let total_context = fixed_overhead + conversation_tokens;
 
-        let context_limit = FALLBACK_CONTEXT_WINDOW as f64;
-        let pct = (total_context / context_limit * 100.0).min(100.0);
+        let context_limit = snap.context_window as f64;
+        let pct = if context_limit > 0.0 {
+            (total_context / context_limit * 100.0).min(100.0)
+        } else {
+            0.0
+        };
         let bar_width = 40usize;
         let filled = (pct / 100.0 * bar_width as f64) as usize;
         let bar: String = format!(
@@ -195,6 +201,11 @@ impl CommandHandler for ContextHandler {
         let input_k = snap.input_tokens as f64 / 1000.0;
         let output_k = snap.output_tokens as f64 / 1000.0;
 
+        let limit_label = if snap.context_window > 0 {
+            format!("{}k", snap.context_window / 1000)
+        } else {
+            "unknown".to_string()
+        };
         let msg = format!(
             "\nContext window usage:\n\
              {bar}\n\
@@ -202,7 +213,7 @@ impl CommandHandler for ContextHandler {
              System prompt:    ~{sys} tokens\n\
              Tool definitions: ~{tools} tokens\n\
              Conversation:     ~{conv} tokens\n\
-             Total context:    ~{total} / {limit}k tokens\n\
+             Total context:    ~{total} / {limit} tokens\n\
              \n\
              API usage this session:\n\
              Input:  {input_k:.1}k tokens\n\
@@ -212,7 +223,7 @@ impl CommandHandler for ContextHandler {
             tools = fmt_tok(tool_def_tokens),
             conv = fmt_tok(conversation_tokens),
             total = fmt_tok(total_context),
-            limit = context_limit as u64 / 1000,
+            limit = limit_label,
             turns = snap.turn_count,
         );
 
@@ -290,6 +301,7 @@ mod tests {
             turn_count: 3,
             system_prompt_chars: 4_000,
             tool_defs_chars: 2_000,
+            context_window: 1_000_000,
         };
         let (mut ctx, mut rx) = make_ctx(Some(snap));
         ContextHandler
@@ -359,6 +371,7 @@ mod tests {
             turn_count: 1,
             system_prompt_chars: 100,
             tool_defs_chars: 50,
+            context_window: 500_000,
         };
         let cloned = snap.clone();
         assert_eq!(cloned.input_tokens, 100);
@@ -366,6 +379,7 @@ mod tests {
         assert_eq!(cloned.turn_count, 1);
         assert_eq!(cloned.system_prompt_chars, 100);
         assert_eq!(cloned.tool_defs_chars, 50);
+        assert_eq!(cloned.context_window, 500_000);
         // Debug impl must not panic.
         let _ = format!("{snap:?}");
     }

@@ -119,17 +119,17 @@ impl LlmProvider for AnthropicProvider {
             ModelInfo {
                 id: "claude-opus-4-7".into(),
                 display_name: "Claude Opus 4.7".into(),
-                context_window: 200_000,
+                context_window: 0,
             },
             ModelInfo {
                 id: "claude-sonnet-4-6".into(),
                 display_name: "Claude Sonnet 4.6".into(),
-                context_window: 200_000,
+                context_window: 0,
             },
             ModelInfo {
                 id: "claude-haiku-4-5-20251001".into(),
                 display_name: "Claude Haiku 4.5".into(),
-                context_window: 200_000,
+                context_window: 0,
             },
         ]
     }

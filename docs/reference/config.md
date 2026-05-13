@@ -379,6 +379,60 @@ prompt_cache = true
 | `preserve_recent_turns` | `3` | Always keep the last N turns verbatim across compaction. Keeps the immediate working context intact while older turns get summarized. |
 | `prompt_cache` | `true` | Set Anthropic's `cache_control` flag on static blocks (system prompt, tool catalog, memory briefing). Cache hits are billed at a fraction of input cost; reduces session cost dramatically over long conversations. Disable only if you're hitting cache-correctness bugs. |
 
+Model context-window limits live in a separate catalog, not in provider code.
+Archon ships a bundled `context.toml` for Claude, Codex auth, and common
+OpenAI defaults, then overlays these optional files in order. Later files win:
+
+```text
+~/.config/archon/context.toml
+~/.archon/context.toml
+<workspace>/.archon/context.toml
+<workspace>/.archon/context.local.toml
+```
+
+This file is intentionally separate from `config.toml` because model limits are
+provider/model facts, not session preferences. Use it for third-party routers,
+local models, private deployments, or temporary corrections while upstream
+model limits change.
+
+Each entry is grouped by provider and model id:
+
+```toml
+[providers.openai-codex.models."gpt-5.5"]
+context_window = 1_050_000
+max_output_tokens = 128_000
+source = "operator"
+```
+
+Example override for a local or third-party model:
+
+```toml
+[providers.local.models."qwen3-custom"]
+context_window = 131_072
+max_output_tokens = 16_384
+source = "operator"
+```
+
+Conditional variants can raise the limit only when a provider identity or beta
+header is active. The bundled catalog uses this for Claude Code's 1M-token
+Sonnet 4.6 and Opus 4.7 limits:
+
+```toml
+[providers.anthropic.models."claude-opus-4-7"]
+context_window = 500_000
+
+[providers.anthropic.models."claude-opus-4-7".variants.claude_code]
+context_window = 1_000_000
+requires_identity = "spoof"
+```
+
+Unknown models resolve to an unknown limit, shown in the TUI as `ctx used/?`.
+Archon skips proactive threshold compaction when the limit is unknown, but still
+reacts to provider context-window errors.
+
+Use `[context].max_tokens` only as an emergency per-session override; prefer
+`context.toml` when the limit belongs to a provider/model.
+
 ---
 
 ## `[memory]`

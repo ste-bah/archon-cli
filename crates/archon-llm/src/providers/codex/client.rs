@@ -287,22 +287,22 @@ impl LlmProvider for CodexProvider {
             ModelInfo {
                 id: "gpt-5.5".into(),
                 display_name: "GPT-5.5".into(),
-                context_window: 200_000,
+                context_window: 0,
             },
             ModelInfo {
                 id: "gpt-5.4".into(),
                 display_name: "GPT-5.4".into(),
-                context_window: 200_000,
+                context_window: 0,
             },
             ModelInfo {
                 id: "gpt-5.4-mini".into(),
                 display_name: "GPT-5.4 Mini".into(),
-                context_window: 200_000,
+                context_window: 0,
             },
             ModelInfo {
                 id: "gpt-5.3-codex".into(),
                 display_name: "GPT-5.3 Codex".into(),
-                context_window: 200_000,
+                context_window: 0,
             },
         ]
     }

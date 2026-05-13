@@ -107,10 +107,11 @@ pub fn classify_stream_error(
 
 impl Agent {
     pub(super) fn context_window_for(&self, active_model: &str) -> u64 {
-        archon_llm::context_window::resolve_context_window(
+        archon_llm::context_window::resolve_context_window_for_work_dir(
             active_model,
             self.config.context.max_tokens.map(u64::from),
             Some(self.client.as_ref()),
+            Some(&self.config.working_dir),
         )
         .context_window
     }

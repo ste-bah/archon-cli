@@ -197,12 +197,14 @@ where
         splash,
         btw_tx,
         permission_tx,
+        context_window,
         command_catalog,
     } = config;
 
     crate::commands::set_catalog(command_catalog);
 
     let mut app = App::new();
+    app.status.context_window = context_window;
     match splash {
         Some(cfg) => {
             app.splash_model = cfg.model;
