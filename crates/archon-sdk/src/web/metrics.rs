@@ -1,5 +1,5 @@
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fs,
     path::{Path, PathBuf},
 };
@@ -107,7 +107,7 @@ fn metrics_summary(paths: &WebRuntimePaths) -> MetricsSummary {
         web_bundle_bytes: dist_probe.bytes,
         stores: store_health(paths, &dist_probe),
         performance: performance_values(&dist_probe),
-        queues: queue_values(&paths.archon_home),
+        queues: ledger_values(paths),
         recent_events: recent_events(&paths.archon_home, 8),
         provider_metrics: provider_metrics(&provider_events),
         provider_events: provider_event_previews(&provider_events, 8),
@@ -172,27 +172,39 @@ fn performance_values(dist: &PathProbe) -> Vec<MetricValue> {
     ]
 }
 
-fn queue_values(home: &Path) -> Vec<MetricValue> {
+fn ledger_values(paths: &WebRuntimePaths) -> Vec<MetricValue> {
     vec![
-        queue("web action audit", home.join("web/actions.audit.jsonl")),
-        queue(
-            "reasoning events",
-            home.join("reasoning-quality/events.jsonl"),
+        ledger(
+            "web action audit ledger",
+            paths.archon_home.join("web/actions.audit.jsonl"),
         ),
-        queue(
-            "world advisor events",
-            home.join("world-model/ledgers/world-advisor-events.jsonl"),
+        ledger(
+            "reasoning-quality event ledger",
+            paths.reasoning_quality_root.join("events.jsonl"),
+        ),
+        ledger(
+            "world advisor event ledger",
+            paths
+                .world_model_root
+                .join("ledgers/world-advisor-events.jsonl"),
         ),
     ]
 }
 
-fn queue(label: &str, path: PathBuf) -> MetricValue {
+fn ledger(label: &str, path: PathBuf) -> MetricValue {
+    let exists = path.exists();
     let lines = count_lines(&path);
     metric(
         label,
         lines.to_string(),
         "rows",
-        if lines > 0 { "active" } else { "quiet" },
+        if !exists {
+            "missing"
+        } else if lines > 0 {
+            "active"
+        } else {
+            "quiet"
+        },
     )
 }
 
@@ -216,25 +228,47 @@ fn provider_runtime_records(
     cwd: &Path,
     paths: &WebRuntimePaths,
 ) -> Vec<ProviderRuntimeEventRecord> {
-    learning_db_candidates(cwd, paths)
-        .into_iter()
-        .find_map(|path| {
-            if !path.exists() {
-                return None;
+    let mut seen = BTreeSet::new();
+    let mut records = Vec::new();
+    for path in learning_db_candidates(cwd, paths) {
+        if !path.exists() {
+            continue;
+        }
+        let path_str = path.to_string_lossy().to_string();
+        let Ok(db) = cozo::DbInstance::new("sqlite", &path_str, "") else {
+            continue;
+        };
+        let Ok(events) = archon_learning::runtime_events::list_provider_runtime_events(&db, None)
+        else {
+            continue;
+        };
+        for event in events {
+            if seen.insert(event.event_id.clone()) {
+                records.push(event);
             }
-            let path_str = path.to_string_lossy().to_string();
-            let db = cozo::DbInstance::new("sqlite", &path_str, "").ok()?;
-            archon_learning::runtime_events::list_provider_runtime_events(&db, None).ok()
-        })
-        .unwrap_or_default()
+        }
+    }
+    records.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    records
 }
 
 fn learning_db_candidates(cwd: &Path, paths: &WebRuntimePaths) -> Vec<PathBuf> {
-    let mut candidates = vec![cwd.join(".archon/learning.db")];
+    let mut candidates = vec![
+        paths.archon_data.join("learning.db"),
+        cwd.join(".archon/learning.db"),
+    ];
     if let Some(parent) = cwd.parent() {
         candidates.push(parent.join("learning.db"));
     }
+    if let Some(parent) = paths.session_db.parent() {
+        candidates.push(parent.join("learning.db"));
+    }
+    if let Some(parent) = paths.session_db.parent().and_then(|dir| dir.parent()) {
+        candidates.push(parent.join("learning.db"));
+    }
     candidates.push(paths.archon_home.join("learning.db"));
+    candidates.sort();
+    candidates.dedup();
     candidates
 }
 

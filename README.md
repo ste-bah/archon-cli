@@ -166,9 +166,9 @@ archon-cli/
 
 ## Status
 
-- Current version: **v1.2.3** ([release notes](docs/release-notes/v1.2.3.md))
+- Current version: **v1.2.4** ([release notes](docs/release-notes/v1.2.4.md))
 - Stable release for local world-model advisory learning, first-class reasoning-quality events, provider runtime governance, Cozo-backed agent evolution, permission preflight, and sandbox routing
-- v1.2.3 adds the browser web workbench on top of the v1.2.2 provider-aware auto-compaction, v1.2.1 TUI cancellation, and v1.2.0 local world-model/reasoning-quality baseline.
+- v1.2.4 fixes the Metrics provider event tail (was blank because the web API missed the session-store learning DB) and renames the misleading "Queue depth" panel to "Ledger activity", on top of the v1.2.3 browser web workbench, v1.2.2 provider-aware auto-compaction, v1.2.1 TUI cancellation, and v1.2.0 local world-model/reasoning-quality baseline.
 
 ## Contributing
 
